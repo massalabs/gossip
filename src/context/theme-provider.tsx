@@ -61,17 +61,16 @@ export function ThemeProvider({
 
         // Update status bar background color to match app theme exactly
         // Use exact hex values from CSS variables to ensure perfect match
-        const statusBarColor = resolved === 'dark' ? '#18181b' : '#f8f9fa';
+        const backgroundColor = resolved === 'dark' ? '#18181b' : '#f8f9fa';
         void StatusBar.setBackgroundColor({
-          color: statusBarColor,
+          color: backgroundColor,
         });
 
         // Update EdgeToEdge background color for native platforms
         // Use exact hex values from CSS variables to ensure perfect match
         // Light mode: #f8f9fa (--background in :root)
         // Dark mode: #18181b (--background in .dark)
-        const edgeToEdgeColor = resolved === 'dark' ? '#18181b' : '#f8f9fa';
-        void EdgeToEdge.setBackgroundColor({ color: edgeToEdgeColor }).catch(
+        void EdgeToEdge.setBackgroundColor({ color: backgroundColor }).catch(
           err => {
             console.warn('Failed to set EdgeToEdge background color:', err);
           }
