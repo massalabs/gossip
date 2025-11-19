@@ -17,6 +17,27 @@ export interface Contact {
   createdAt: Date;
 }
 
+export enum PendingOutgoingMessageStatus {
+  PENDING = 'pending',
+  OK = 'ok',
+  FAILED = 'failed',
+}
+export interface SessionMessageInfo {
+  encryptedMessage: EncryptedMessage;
+  // status: PendingOutgoingMessageStatus;
+  lastRetryAt: Date;
+}
+
+export interface PendingOutgoingMessage {
+  numOrder: number;
+  contactUserId: string;
+  ownerUserId: string;
+  content: string;
+  type: 'text' | 'image' | 'file' | 'audio' | 'video';
+
+  sessionMessageInfo: SessionMessageInfo;
+}
+
 export interface Message {
   id?: number;
   ownerUserId: string; // The current user's userId owning this message
@@ -32,6 +53,7 @@ export interface Message {
     originalContent?: string;
     originalSeeker: Uint8Array; // Seeker of the original message (required for replies)
   };
+  sessionMessageInfo?: SessionMessageInfo;
 }
 
 export interface UserProfile {
@@ -173,6 +195,8 @@ export class GossipDatabase extends Dexie {
   }
 
   // Helper methods for common operations
+
+  /** CONTACTS */
   async getContactsByOwner(ownerUserId: string): Promise<Contact[]> {
     return await this.contacts
       .where('ownerUserId')
@@ -190,19 +214,19 @@ export class GossipDatabase extends Dexie {
       .first();
   }
 
-  async getMessagesForContactByOwner(
+  /** PENDING OUTGOING MESSAGES */
+
+  async getPendingOutgoingMessages(
     ownerUserId: string,
-    contactUserId: string,
-    limit = 50
-  ): Promise<Message[]> {
-    return await this.messages
+    contactUserId: string
+  ): Promise<PendingOutgoingMessage[]> {
+    return await this.pendingOutgoingMessages
       .where('[ownerUserId+contactUserId]')
       .equals([ownerUserId, contactUserId])
-      .reverse()
-      .limit(limit)
-      .toArray();
+      .sortBy('numOrder');
   }
 
+  /** DISCUSSIONS */
   async getDiscussionsByOwner(ownerUserId: string): Promise<Discussion[]> {
     const all = await this.discussions
       .where('ownerUserId')
@@ -238,6 +262,19 @@ export class GossipDatabase extends Dexie {
       .first();
   }
 
+  /**
+   * Get all active discussions with their sync status
+   * @returns Array of active discussions
+   */
+  async getActiveDiscussionsByOwner(
+    ownerUserId: string
+  ): Promise<Discussion[]> {
+    return await this.discussions
+      .where('[ownerUserId+status]')
+      .equals([ownerUserId, 'active'])
+      .toArray();
+  }
+
   async markMessagesAsRead(
     ownerUserId: string,
     contactUserId: string
@@ -251,6 +288,19 @@ export class GossipDatabase extends Dexie {
       .where('[ownerUserId+contactUserId]')
       .equals([ownerUserId, contactUserId])
       .modify({ unreadCount: 0 });
+  }
+
+  async getMessagesForContactByOwner(
+    ownerUserId: string,
+    contactUserId: string,
+    limit = 50
+  ): Promise<Message[]> {
+    return await this.messages
+      .where('[ownerUserId+contactUserId]')
+      .equals([ownerUserId, contactUserId])
+      .reverse()
+      .limit(limit)
+      .toArray();
   }
 
   async addMessage(message: Omit<Message, 'id'>): Promise<number> {
@@ -296,19 +346,6 @@ export class GossipDatabase extends Dexie {
     }
 
     return messageId;
-  }
-
-  /**
-   * Get all active discussions with their sync status
-   * @returns Array of active discussions
-   */
-  async getActiveDiscussionsByOwner(
-    ownerUserId: string
-  ): Promise<Discussion[]> {
-    return await this.discussions
-      .where('[ownerUserId+status]')
-      .equals([ownerUserId, 'active'])
-      .toArray();
   }
 
   /**

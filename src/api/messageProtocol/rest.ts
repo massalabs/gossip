@@ -26,6 +26,10 @@ export class RestMessageProtocol implements IMessageProtocol {
 
   // TODO: Implement a fetch with pagination to avoid fetching all messages at once
   async fetchMessages(seekers: Uint8Array[]): Promise<EncryptedMessage[]> {
+    // Simulate a network error 50% of the time for testing purposes
+    if (Math.random() < 0.5) {
+      throw new Error('NetworkError when attempting to fetch resource.');
+    }
     const url = `${this.baseUrl}${MESSAGES_ENDPOINT}/fetch`;
 
     const response = await this.makeRequest<FetchMessagesResponse[]>(url, {
@@ -51,6 +55,10 @@ export class RestMessageProtocol implements IMessageProtocol {
 
   async sendMessage(message: EncryptedMessage): Promise<void> {
     const url = `${this.baseUrl}${MESSAGES_ENDPOINT}/`;
+
+    if (Math.random() < 0.5) {
+      throw new Error('NetworkError when attempting to send message.');
+    }
 
     const response = await this.makeRequest<void>(url, {
       method: 'POST',

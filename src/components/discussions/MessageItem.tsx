@@ -329,13 +329,6 @@ const MessageItem: React.FC<MessageItemProps> = ({
                 <div className="flex items-center gap-1.5">
                   <XCircle className="w-3.5 h-3.5 text-accent-foreground/90" />
                   <span className="text-[10px] font-medium">Failed</span>
-                  <button
-                    onClick={() => onResend(message)}
-                    className="ml-1 px-1.5 py-0.5 text-[10px] font-medium bg-accent-foreground/20 hover:bg-accent-foreground/30 rounded transition-colors text-accent-foreground"
-                    title="Resend message"
-                  >
-                    Resend
-                  </button>
                 </div>
               )}
               {(message.status === 'delivered' ||

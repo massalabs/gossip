@@ -1,14 +1,23 @@
 import { create } from 'zustand';
-import { Message, db } from '../db';
+import { Message, db, SessionMessageInfo } from '../db';
 import { createSelectors } from './utils/createSelectors';
 import { useAccountStore } from './accountStore';
 import { messageService } from '../services/message';
 import { notificationService } from '../services/notifications';
 import { liveQuery, Subscription } from 'dexie';
 
+export interface RetryMessages {
+  id: number;
+  sessionMessageInfo?: SessionMessageInfo;
+  content: string;
+  type: 'text' | 'image' | 'file' | 'audio' | 'video';
+}
+
 interface MessageStoreState {
   // Messages keyed by contactUserId (Map for efficient lookups)
   messagesByContact: Map<string, Message[]>;
+  // Messages to retry keyed by contactUserId (Map for efficient lookups)
+  retryMessagesByContact: Map<string, RetryMessages[]>;
   // Current contact being viewed
   currentContactUserId: string | null;
   // Loading state (only one discussion can be viewed at a time)
@@ -17,6 +26,8 @@ interface MessageStoreState {
   isSending: boolean;
   // Syncing state (global)
   isSyncing: boolean;
+  // Resending state (global)
+  isResending: boolean;
   // Subscription for liveQuery
   subscription: Subscription | null;
 
@@ -30,7 +41,7 @@ interface MessageStoreState {
     content: string,
     replyToId?: number
   ) => Promise<void>;
-  resendMessage: (message: Message) => Promise<void>;
+  resendMessages: () => Promise<void>;
   syncMessages: (contactUserId?: string) => Promise<void>;
   addMessage: (contactUserId: string, message: Message) => void;
   updateMessage: (
@@ -45,6 +56,20 @@ interface MessageStoreState {
 
 // Empty array constant to avoid creating new arrays on each call
 const EMPTY_MESSAGES: Message[] = [];
+
+const sessionMessageInfoChanged = (
+  existing?: SessionMessageInfo,
+  newSessionMessageInfo?: SessionMessageInfo
+): boolean => {
+  if (!existing && !newSessionMessageInfo) return false;
+  if (!existing && newSessionMessageInfo) return true;
+  if (!newSessionMessageInfo && existing) return true;
+  return (
+    existing!.encryptedMessage.seeker !==
+      newSessionMessageInfo!.encryptedMessage.seeker ||
+    existing!.lastRetryAt !== newSessionMessageInfo!.lastRetryAt
+  );
+};
 
 // Helper to check if messages actually changed
 const messagesChanged = (
@@ -66,6 +91,28 @@ const messagesChanged = (
   );
 };
 
+const retryMessagesChanged = (
+  existing: RetryMessages[],
+  newMessages: RetryMessages[]
+): boolean => {
+  return (
+    existing.length !== newMessages.length ||
+    existing.some((existing, index) => {
+      const newMsg = newMessages[index];
+      if (!newMsg) return true; // New message added
+      return (
+        existing.id !== newMsg.id ||
+        existing.content !== newMsg.content ||
+        sessionMessageInfoChanged(
+          existing.sessionMessageInfo,
+          newMsg.sessionMessageInfo
+        )
+      );
+    }) ||
+    newMessages.length > existing.length // New messages at the end
+  );
+};
+
 // Helper to update messages map immutably
 const updateMessagesMap = (
   currentMap: Map<string, Message[]>,
@@ -81,10 +128,12 @@ const updateMessagesMap = (
 const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
   // Initial state
   messagesByContact: new Map(),
+  retryMessagesByContact: new Map(),
   currentContactUserId: null,
   isLoading: false,
   isSending: false,
   isSyncing: false,
+  isResending: false,
   subscription: null,
   isInitializing: false,
 
@@ -107,7 +156,7 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
     set({ isInitializing: true });
     // Set up a single liveQuery for all messages of the owner
     const query = liveQuery(() =>
-      db.messages.where('ownerUserId').equals(ownerUserId).sortBy('timestamp')
+      db.messages.where('ownerUserId').equals(ownerUserId).sortBy('id')
     );
 
     const subscriptionObj = query.subscribe({
@@ -123,19 +172,60 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
         // Check for changes before updating to avoid unnecessary sets
         let hasChanges = false;
         const currentMap = get().messagesByContact;
+
+        const newRetryMessagesMap = new Map<string, RetryMessages[]>();
+        const currentRetryMessagesMap = get().retryMessagesByContact;
+        let hasRetryChanges = false;
+
         newMap.forEach((msgs, contactId) => {
-          const existing = currentMap.get(contactId) || [];
-          if (messagesChanged(existing, msgs)) {
-            hasChanges = true;
+          if (!hasChanges) {
+            const existing = currentMap.get(contactId) || [];
+            if (messagesChanged(existing, msgs)) {
+              hasChanges = true;
+            }
+          }
+
+          // check for failed messages updates
+          const existingRetryMessages =
+            currentRetryMessagesMap.get(contactId) || [];
+          const retryMessages = msgs
+            .filter(msg => msg.status === 'failed')
+            .map(msg => ({
+              // map to RetryMessages
+              id: msg.id!,
+              sessionMessageInfo: msg.sessionMessageInfo,
+              content: msg.content,
+              type: msg.type,
+            }));
+
+          newRetryMessagesMap.set(contactId, retryMessages);
+          if (
+            !hasRetryChanges &&
+            retryMessagesChanged(existingRetryMessages, retryMessages)
+          ) {
+            hasRetryChanges = true;
           }
         });
+
         // Also check for removed contacts (unlikely, but complete)
-        currentMap.forEach((_, contactId) => {
-          if (!newMap.has(contactId)) hasChanges = true;
-        });
+        if (!hasChanges) {
+          currentMap.forEach((_, contactId) => {
+            if (!newMap.has(contactId)) hasChanges = true;
+          });
+        }
+
+        if (!hasRetryChanges) {
+          currentRetryMessagesMap.forEach((_, contactId) => {
+            if (!newRetryMessagesMap.has(contactId)) hasRetryChanges = true;
+          });
+        }
 
         if (hasChanges) {
           set({ messagesByContact: newMap });
+        }
+
+        if (hasRetryChanges) {
+          set({ retryMessagesByContact: newRetryMessagesMap });
         }
       },
       error: error => {
@@ -224,14 +314,27 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
   },
 
   // Resend a failed message
-  resendMessage: async (message: Message) => {
-    set({ isSending: true });
-    const result = await messageService.resendMessage(message);
-    if (result.error) {
-      // Update status to failed again
-      console.error('Failed to resend message:', result.error);
+  // resendMessage: async (message: Message) => {
+  //   set({ isSending: true });
+  //   const result = await messageService.resendMessage(message);
+  //   if (result.error) {
+  //     // Update status to failed again
+  //     console.error('Failed to resend message:', result.error);
+  //   }
+  //   set({ isSending: false });
+  // },
+
+  // Resend all failed messages
+  resendMessages: async () => {
+    if (get().isResending) return;
+    set({ isResending: true });
+    try {
+      await messageService.resendMessages(get().retryMessagesByContact);
+    } catch (error) {
+      console.error('Failed to resend messages:', error);
+    } finally {
+      set({ isResending: false });
     }
-    set({ isSending: false });
   },
 
   // Sync messages (fetch new ones from server)
