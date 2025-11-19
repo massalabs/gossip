@@ -53,8 +53,10 @@ export function ThemeProvider({
       // Update status bar and edge-to-edge for native platforms
       if (Capacitor.isNativePlatform()) {
         // Set status bar content color based on theme
+        // Style.Light = light content (white icons) for dark backgrounds
+        // Style.Dark = dark content (black icons) for light backgrounds
         void StatusBar.setStyle({
-          style: resolved === 'dark' ? Style.Dark : Style.Light,
+          style: resolved === 'dark' ? Style.Light : Style.Dark,
         });
 
         // Update status bar background color to match app theme exactly
