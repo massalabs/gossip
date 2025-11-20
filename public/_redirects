@@ -1,0 +1,4 @@
+# Netlify redirects for QR code deep links
+# Redirect /add/* to the app root (HashRouter will handle routing)
+/add/*    /    200
+

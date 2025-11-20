@@ -23,6 +23,7 @@ import { useMessageStore } from './stores/messageStore.tsx';
 import { useDiscussionStore } from './stores/discussionStore.tsx';
 import { useVersionCheck } from './hooks/useVersionCheck.ts';
 import VersionUpdateModal from './components/ui/VersionUpdateModal.tsx';
+import { DeepLinkHandler } from './components/DeepLinkHandler';
 
 const AppContent: React.FC = () => {
   const { isLoading, userProfile } = useAccountStore();
@@ -99,11 +100,10 @@ function App() {
   return (
     <HashRouter>
       <ErrorBoundary>
+        <DeepLinkHandler />
         <AppContent />
         <DebugOverlay />
-        <div className="hidden">
-          <PWABadge />
-        </div>
+        <PWABadge />
         <Toaster
           position="top-center"
           toastOptions={{

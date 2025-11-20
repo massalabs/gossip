@@ -1,5 +1,5 @@
-import React, { useCallback, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useCallback, useRef, useState, useEffect } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import BaseModal from '../components/ui/BaseModal';
 import Button from '../components/ui/Button';
 import { useContactForm } from '../hooks/useContactForm';
@@ -14,6 +14,7 @@ import PageHeader from '../components/ui/PageHeader';
 const NewContact: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [isDiscardModalOpen, setIsDiscardModalOpen] = useState(false);
 
   const {
@@ -31,6 +32,26 @@ const NewContact: React.FC = () => {
     handleMessageChange,
     handleSubmit,
   } = useContactForm();
+
+  // Pre-fill userId and name from URL params (from QR code scan)
+  useEffect(() => {
+    const userIdFromUrl = searchParams.get('userId');
+    const nameFromUrl = searchParams.get('name');
+
+    if (userIdFromUrl && !userId.value) {
+      handleUserIdChange(userIdFromUrl);
+    }
+
+    if (nameFromUrl && !name.value) {
+      handleNameChange(nameFromUrl);
+    }
+  }, [
+    searchParams,
+    userId.value,
+    name.value,
+    handleUserIdChange,
+    handleNameChange,
+  ]);
 
   const handleBack = useCallback(() => {
     if (hasUnsavedChanges) {

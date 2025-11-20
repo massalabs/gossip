@@ -36,6 +36,7 @@
     "@capacitor/android": "^7.4.4",
     "@capacitor/core": "^7.4.4",
     "@capacitor/ios": "^7.4.4",
+    "@capacitor/preferences": "^7.0.2",
     "@capacitor/status-bar": "^7.0.3",
     "@massalabs/massa-web3": "^5.3.1-dev.20250925215116",
     "@noble/hashes": "^1.8.0",
