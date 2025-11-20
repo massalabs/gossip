@@ -143,7 +143,9 @@ const Contact: React.FC = () => {
     );
   }
 
-  const canStart = discussion ? discussion.status === 'active' : true;
+  const canStart = discussion
+    ? discussion.status === DiscussionStatus.ACTIVE
+    : true;
 
   return (
     <div className="bg-card h-full overflow-auto app-max-w mx-auto">

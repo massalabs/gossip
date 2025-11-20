@@ -17,27 +17,6 @@ export interface Contact {
   createdAt: Date;
 }
 
-export enum PendingOutgoingMessageStatus {
-  PENDING = 'pending',
-  OK = 'ok',
-  FAILED = 'failed',
-}
-export interface SessionMessageInfo {
-  encryptedMessage: EncryptedMessage;
-  // status: PendingOutgoingMessageStatus;
-  lastRetryAt: Date;
-}
-
-export interface PendingOutgoingMessage {
-  numOrder: number;
-  contactUserId: string;
-  ownerUserId: string;
-  content: string;
-  type: 'text' | 'image' | 'file' | 'audio' | 'video';
-
-  sessionMessageInfo: SessionMessageInfo;
-}
-
 export interface Message {
   id?: number;
   ownerUserId: string; // The current user's userId owning this message
@@ -53,7 +32,7 @@ export interface Message {
     originalContent?: string;
     originalSeeker: Uint8Array; // Seeker of the original message (required for replies)
   };
-  sessionMessageInfo?: SessionMessageInfo;
+  encryptedMessage?: EncryptedMessage;
 }
 
 export interface UserProfile {
@@ -91,6 +70,14 @@ export interface UserProfile {
 }
 
 // Unified discussion interface combining protocol state and UI metadata
+
+export enum DiscussionStatus {
+  PENDING = 'pending',
+  ACTIVE = 'active',
+  CLOSED = 'closed', // closed by the user
+  BROKEN = 'broken', // The session is killed. Need to be reinitiated
+  SEND_FAILED = 'sendFailed', // The discussion was initiated by the session manager but could not be broadcasted on network
+}
 export interface Discussion {
   id?: number;
   ownerUserId: string; // The current user's userId owning this discussion
@@ -98,7 +85,7 @@ export interface Discussion {
 
   // Protocol/Encryption fields
   direction: 'initiated' | 'received'; // Whether this user initiated or received the discussion
-  status: 'pending' | 'active' | 'closed';
+  status: DiscussionStatus;
   nextSeeker?: Uint8Array; // The next seeker for sending messages (from SendMessageOutput)
   initiationAnnouncement?: Uint8Array; // Outgoing announcement bytes when we initiate
   announcementMessage?: string; // Optional message from incoming announcement (user_data)
@@ -214,18 +201,6 @@ export class GossipDatabase extends Dexie {
       .first();
   }
 
-  /** PENDING OUTGOING MESSAGES */
-
-  async getPendingOutgoingMessages(
-    ownerUserId: string,
-    contactUserId: string
-  ): Promise<PendingOutgoingMessage[]> {
-    return await this.pendingOutgoingMessages
-      .where('[ownerUserId+contactUserId]')
-      .equals([ownerUserId, contactUserId])
-      .sortBy('numOrder');
-  }
-
   /** DISCUSSIONS */
   async getDiscussionsByOwner(ownerUserId: string): Promise<Discussion[]> {
     const all = await this.discussions
@@ -271,7 +246,7 @@ export class GossipDatabase extends Dexie {
   ): Promise<Discussion[]> {
     return await this.discussions
       .where('[ownerUserId+status]')
-      .equals([ownerUserId, 'active'])
+      .equals([ownerUserId, DiscussionStatus.ACTIVE])
       .toArray();
   }
 
@@ -334,7 +309,7 @@ export class GossipDatabase extends Dexie {
         ownerUserId: message.ownerUserId,
         contactUserId: message.contactUserId,
         direction: message.direction === 'incoming' ? 'received' : 'initiated',
-        status: 'pending',
+        status: DiscussionStatus.PENDING,
         nextSeeker: undefined,
         lastMessageId: messageId,
         lastMessageContent: message.content,

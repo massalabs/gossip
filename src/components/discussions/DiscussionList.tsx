@@ -5,6 +5,7 @@ import { useDiscussionStore } from '../../stores/discussionStore';
 import EmptyDiscussions from './EmptyDiscussions';
 import DiscussionListItem from './DiscussionListItem';
 import { ROUTES } from '../../constants/routes';
+import { DiscussionStatus } from '../../db';
 
 interface DiscussionListProps {
   onSelect: (contactUserId: string) => void;
@@ -27,12 +28,13 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
 
   return (
     <>
-      {discussions.filter(d => d.status !== 'closed').length === 0 ? (
+      {discussions.filter(d => d.status !== DiscussionStatus.CLOSED).length ===
+      0 ? (
         <EmptyDiscussions />
       ) : (
         <>
           {discussions
-            .filter(d => d.status !== 'closed')
+            .filter(d => d.status !== DiscussionStatus.CLOSED)
             .map(discussion => {
               const contact = contacts.find(
                 c => c.userId === discussion.contactUserId

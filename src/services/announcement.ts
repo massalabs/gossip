@@ -4,15 +4,21 @@
  * Handles broadcasting and processing of session announcements.
  */
 
-import { db } from '../db';
-import { notificationService } from './notifications';
+import { db, Discussion, DiscussionStatus } from '../db';
 import { encodeUserId } from '../utils/userId';
-import { processIncomingAnnouncement } from '../crypto/discussionInit';
 import { useAccountStore } from '../stores/accountStore';
 import {
   createMessageProtocol,
   IMessageProtocol,
 } from '../api/messageProtocol';
+import { createUpdateDiscussion } from './discussion';
+import {
+  UserPublicKeys,
+  UserSecretKeys,
+} from '../assets/generated/wasm/gossip_wasm';
+import { SessionModule } from '../wasm/session';
+
+const ONE_HOUR_MS = 60 * 60 * 1000;
 
 export interface AnnouncementReceptionResult {
   success: boolean;
@@ -55,6 +61,34 @@ export class AnnouncementService {
         error: error instanceof Error ? error.message : 'Unknown error',
       };
     }
+  }
+
+  async establishSession(
+    contactPublicKeys: UserPublicKeys,
+    ourPk: UserPublicKeys,
+    ourSk: UserSecretKeys,
+    session: SessionModule
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    announcement: Uint8Array;
+  }> {
+    const announcement = session.establishOutgoingSession(
+      contactPublicKeys,
+      ourPk,
+      ourSk
+    );
+
+    const result = await this.sendAnnouncement(announcement);
+    if (!result.success) {
+      return {
+        success: false,
+        error: result.error,
+        announcement: announcement,
+      };
+    }
+
+    return { success: true, announcement };
   }
 
   async fetchAndProcessAnnouncements(): Promise<AnnouncementReceptionResult> {
@@ -128,6 +162,94 @@ export class AnnouncementService {
           errors.join('\n')
         );
       }
+    }
+  }
+
+  async simulateIncomingDiscussion(): Promise<{
+    success: boolean;
+    newMessagesCount: number;
+    error?: string;
+  }> {
+    const { userProfile } = useAccountStore.getState();
+    if (!userProfile?.userId) throw new Error('No authenticated user');
+
+    try {
+      console.log('Simulating incoming discussion announcement...');
+      const mockAnnouncement = new Uint8Array(64);
+      crypto.getRandomValues(mockAnnouncement);
+      const result = await this._processIncomingAnnouncement(mockAnnouncement);
+      return {
+        success: result.success,
+        newMessagesCount: result.discussionId ? 1 : 0,
+        error: result.error,
+      };
+    } catch (error) {
+      console.error('Failed to simulate incoming discussion:', error);
+      return {
+        success: false,
+        newMessagesCount: 0,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
+    }
+  }
+
+  async resendAnnouncements(failedDiscussions: Discussion[]): Promise<void> {
+    if (!failedDiscussions.length) return;
+
+    // Perform async network calls outside transaction
+    const sentDiscussions: number[] = [];
+    const brokenDiscussions: number[] = [];
+
+    for (const discussion of failedDiscussions) {
+      try {
+        const result = await this.sendAnnouncement(
+          discussion.initiationAnnouncement!
+        );
+
+        if (result.success) {
+          sentDiscussions.push(discussion.id!);
+          continue;
+        }
+
+        // Failed to send - check if should mark as broken
+        const lastUpdate = discussion.updatedAt.getTime() ?? 0;
+        if (Date.now() - lastUpdate > ONE_HOUR_MS) {
+          brokenDiscussions.push(discussion.id!);
+        }
+      } catch (error) {
+        console.error('Failed to resend announcement:', error);
+      }
+    }
+
+    // Perform all database updates in a single transaction
+    if (sentDiscussions.length > 0 || brokenDiscussions.length > 0) {
+      await db.transaction('rw', db.discussions, async () => {
+        const now = new Date();
+
+        // Update all successfully sent discussions to ACTIVE
+        if (sentDiscussions.length > 0) {
+          await Promise.all(
+            sentDiscussions.map(id =>
+              db.discussions.update(id, {
+                status: DiscussionStatus.ACTIVE,
+                updatedAt: now,
+              })
+            )
+          );
+        }
+
+        // Update all broken discussions to BROKEN
+        if (brokenDiscussions.length > 0) {
+          await Promise.all(
+            brokenDiscussions.map(id =>
+              db.discussions.update(id, {
+                status: DiscussionStatus.BROKEN,
+                updatedAt: now,
+              })
+            )
+          );
+        }
+      });
     }
   }
 
@@ -254,9 +376,10 @@ export class AnnouncementService {
         throw new Error('Could not find contact');
       }
 
-      const { discussionId } = await processIncomingAnnouncement(
-        contact,
-        announcementData,
+      const { discussionId } = await createUpdateDiscussion(
+        ownerUserId,
+        contactUserIdString,
+        contact.name,
         announcementMessage
       );
 

@@ -11,7 +11,7 @@ import './App.css';
 // Hooks
 import { useProfileLoader } from './hooks/useProfileLoader';
 import { useAppStateRefresh } from './hooks/useAppStateRefresh';
-import { useResendFailedMessages } from './hooks/useResendFailedMessages';
+import { useResendFailedBlobs } from './hooks/useResendFailedBlobs.ts';
 import { useAccountInfo } from './hooks/useAccountInfo';
 import { setupServiceWorker } from './services/serviceWorkerSetup';
 
@@ -34,7 +34,7 @@ const AppContent: React.FC = () => {
   const [loginError, setLoginError] = useState<string | null>(null);
   useProfileLoader();
   useAppStateRefresh();
-  useResendFailedMessages();
+  useResendFailedBlobs();
   const existingAccountInfo = useAccountInfo();
 
   const inviteMatch = useMatch(ROUTES.invite());

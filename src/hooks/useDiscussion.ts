@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { Contact, Discussion } from '../db';
+import { Contact, Discussion, DiscussionStatus } from '../db';
 import {
   initializeDiscussion,
   ensureDiscussionExists as ensureDiscussionExistsUtil,
@@ -35,7 +35,11 @@ export const useDiscussion = ({ contact }: UseDiscussionProps) => {
 
       // Get the most recent discussion (active or pending)
       const latestDiscussion = discussions
-        .filter(d => d.status === 'active' || d.status === 'pending')
+        .filter(
+          d =>
+            d.status === DiscussionStatus.ACTIVE ||
+            d.status === DiscussionStatus.PENDING
+        )
         .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
 
       if (latestDiscussion) {

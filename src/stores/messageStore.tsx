@@ -1,14 +1,15 @@
 import { create } from 'zustand';
-import { Message, db, SessionMessageInfo } from '../db';
+import { Message, db } from '../db';
 import { createSelectors } from './utils/createSelectors';
 import { useAccountStore } from './accountStore';
 import { messageService } from '../services/message';
 import { notificationService } from '../services/notifications';
 import { liveQuery, Subscription } from 'dexie';
+import { EncryptedMessage } from '../api/messageProtocol/types';
 
 export interface RetryMessages {
   id: number;
-  sessionMessageInfo?: SessionMessageInfo;
+  encryptedMessage?: EncryptedMessage;
   content: string;
   type: 'text' | 'image' | 'file' | 'audio' | 'video';
 }
@@ -57,17 +58,16 @@ interface MessageStoreState {
 // Empty array constant to avoid creating new arrays on each call
 const EMPTY_MESSAGES: Message[] = [];
 
-const sessionMessageInfoChanged = (
-  existing?: SessionMessageInfo,
-  newSessionMessageInfo?: SessionMessageInfo
+const encryptedMessageChanged = (
+  existing?: EncryptedMessage,
+  newEncryptedMessage?: EncryptedMessage
 ): boolean => {
-  if (!existing && !newSessionMessageInfo) return false;
-  if (!existing && newSessionMessageInfo) return true;
-  if (!newSessionMessageInfo && existing) return true;
+  if (!existing && !newEncryptedMessage) return false;
+  if (!existing && newEncryptedMessage) return true;
+  if (!newEncryptedMessage && existing) return true;
   return (
-    existing!.encryptedMessage.seeker !==
-      newSessionMessageInfo!.encryptedMessage.seeker ||
-    existing!.lastRetryAt !== newSessionMessageInfo!.lastRetryAt
+    existing!.seeker !== newEncryptedMessage!.seeker ||
+    existing!.ciphertext !== newEncryptedMessage!.ciphertext
   );
 };
 
@@ -103,9 +103,9 @@ const retryMessagesChanged = (
       return (
         existing.id !== newMsg.id ||
         existing.content !== newMsg.content ||
-        sessionMessageInfoChanged(
-          existing.sessionMessageInfo,
-          newMsg.sessionMessageInfo
+        encryptedMessageChanged(
+          existing.encryptedMessage,
+          newMsg.encryptedMessage
         )
       );
     }) ||
@@ -193,7 +193,7 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
             .map(msg => ({
               // map to RetryMessages
               id: msg.id!,
-              sessionMessageInfo: msg.sessionMessageInfo,
+              encryptedMessage: msg.encryptedMessage,
               content: msg.content,
               type: msg.type,
             }));
@@ -327,9 +327,15 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
   // Resend all failed messages
   resendMessages: async () => {
     if (get().isResending) return;
+    const session = useAccountStore.getState().session;
+    if (!session) throw new Error('Session not initialized');
+
     set({ isResending: true });
     try {
-      await messageService.resendMessages(get().retryMessagesByContact);
+      await messageService.resendMessages(
+        get().retryMessagesByContact,
+        session
+      );
     } catch (error) {
       console.error('Failed to resend messages:', error);
     } finally {
