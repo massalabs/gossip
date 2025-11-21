@@ -61,13 +61,6 @@ export interface UserProfile {
   updatedAt: Date;
 }
 
-export interface Settings {
-  id?: number;
-  key: string;
-  value: unknown;
-  updatedAt: Date;
-}
-
 // Unified discussion interface combining protocol state and UI metadata
 export interface Discussion {
   id?: number;
@@ -115,7 +108,6 @@ export class GossipDatabase extends Dexie {
   contacts!: Table<Contact>;
   messages!: Table<Message>;
   userProfile!: Table<UserProfile>;
-  settings!: Table<Settings>;
   discussions!: Table<Discussion>;
   pendingEncryptedMessages!: Table<PendingEncryptedMessage>;
   pendingAnnouncements!: Table<PendingAnnouncement>;
@@ -129,7 +121,6 @@ export class GossipDatabase extends Dexie {
       messages:
         '++id, ownerUserId, contactUserId, type, direction, status, timestamp, [ownerUserId+contactUserId], [ownerUserId+contactUserId+status]',
       userProfile: 'userId, username, status, lastSeen',
-      settings: '++id, key, updatedAt',
       discussions:
         '++id, ownerUserId, &[ownerUserId+contactUserId], status, [ownerUserId+status], lastSyncTimestamp, unreadCount, lastMessageTimestamp, createdAt, updatedAt',
       pendingEncryptedMessages: '++id, fetchedAt, seeker',
@@ -147,17 +138,6 @@ export class GossipDatabase extends Dexie {
     });
 
     this.userProfile.hook(
-      'updating',
-      function (modifications, _primKey, _obj, _trans) {
-        (modifications as Record<string, unknown>).updatedAt = new Date();
-      }
-    );
-
-    this.settings.hook('creating', function (_primKey, obj, _trans) {
-      obj.updatedAt = new Date();
-    });
-
-    this.settings.hook(
       'updating',
       function (modifications, _primKey, _obj, _trans) {
         (modifications as Record<string, unknown>).updatedAt = new Date();
@@ -301,19 +281,6 @@ export class GossipDatabase extends Dexie {
     }
 
     return messageId;
-  }
-
-  async getSetting(key: string): Promise<unknown> {
-    const setting = await this.settings.where('key').equals(key).first();
-    return setting?.value;
-  }
-
-  async setSetting(key: string, value: unknown): Promise<void> {
-    await this.settings.put({
-      key,
-      value,
-      updatedAt: new Date(),
-    });
   }
 
   /**
