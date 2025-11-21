@@ -104,7 +104,7 @@ export default defineConfig({
 
       injectManifest: {
         globPatterns: ['**/*.{js,css,html,svg,png,ico,wasm}'],
-        maximumFileSizeToCacheInBytes: 3 * 1024 * 1024, // 3MB (increased from default 2MB for crypto polyfills)
+        maximumFileSizeToCacheInBytes: 4 * 1024 * 1024, // 3MB (increased from default 2MB for crypto polyfills)
       },
 
       devOptions: {

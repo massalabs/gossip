@@ -192,6 +192,43 @@
   *::-webkit-scrollbar-corner {
     background: transparent;
   }
+  /* QR Scanner video styling for proper aspect ratio on all devices */
+  #qr-scanner-container {
+    position: relative;
+    overflow: hidden;
+    width: 100%;
+    height: 100%;
+  }
+
+  /* Target html5-qrcode's internal structure */
+  #qr-scanner-container > div {
+    width: 100% !important;
+    height: 100% !important;
+    position: relative !important;
+    display: block !important;
+  }
+
+  /* Style the video element - only one should be visible */
+  #qr-scanner-container video {
+    width: 100% !important;
+    height: 100% !important;
+    object-fit: contain !important;
+    display: block !important;
+    position: absolute !important;
+    top: 0 !important;
+    left: 0 !important;
+  }
+
+  /* Hide the canvas overlay from html5-qrcode (we use our own overlay) */
+  #qr-scanner-container canvas {
+    display: none !important;
+  }
+
+  /* Ensure no duplicate videos are shown */
+  #qr-scanner-container video:not(:first-of-type) {
+    display: none !important;
+  }
+
   *::-webkit-scrollbar-thumb {
     /* Fallback for browsers without color-mix support (light mode default) */
     background-color: rgba(26, 26, 29, 0.35);

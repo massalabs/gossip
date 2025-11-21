@@ -235,6 +235,9 @@ const Login: React.FC<LoginProps> = React.memo(
               src="/logo.svg"
               alt="Gossip"
               className="mx-auto my-10 w-11/12 h-auto dark:invert"
+              loading="eager"
+              fetchPriority="high"
+              decoding="async"
             />
             <h1 className="mt-4 text-[28px] font-semibold tracking-tight text-gray-900 dark:text-white">
               {displayUsername ? (
