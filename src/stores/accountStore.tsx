@@ -226,7 +226,6 @@ interface AccountState {
   logout: () => Promise<void>;
   resetAccount: () => Promise<void>;
   setLoading: (loading: boolean) => void;
-  checkPlatformAvailability: () => Promise<void>;
 
   // Mnemonic backup methods
   showBackup: (password?: string) => Promise<{
@@ -415,9 +414,17 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
 
         session.load(profile, encryptionKey);
 
+        // Update lastSeen timestamp for the logged-in user
+        const lastSeen = new Date();
+        const updatedProfile = {
+          ...profile,
+          lastSeen,
+        };
+        await db.userProfile.update(profile.userId, { lastSeen });
+
         useAppStore.getState().setIsInitialized(true);
         set({
-          userProfile: profile,
+          userProfile: updatedProfile,
           account,
           encryptionKey,
           ourPk,
@@ -483,17 +490,6 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
 
     setLoading: (loading: boolean) => {
       set({ isLoading: loading });
-    },
-
-    checkPlatformAvailability: async () => {
-      try {
-        // Use the unified biometric service to check availability
-        const availability = await biometricService.checkAvailability();
-        set({ platformAuthenticatorAvailable: availability.available });
-      } catch (error) {
-        console.error('Error checking platform availability:', error);
-        set({ platformAuthenticatorAvailable: false });
-      }
     },
 
     // Biometric-based account initialization
