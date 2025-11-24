@@ -26,6 +26,11 @@ export interface Message {
   status: 'sending' | 'sent' | 'delivered' | 'read' | 'failed';
   timestamp: Date;
   metadata?: Record<string, unknown>;
+  seeker?: Uint8Array; // Seeker for this message (stored when sending or receiving)
+  replyTo?: {
+    originalContent?: string;
+    originalSeeker: Uint8Array; // Seeker of the original message (required for replies)
+  };
 }
 
 export interface UserProfile {
@@ -119,7 +124,7 @@ export class GossipDatabase extends Dexie {
       contacts:
         '++id, ownerUserId, userId, name, isOnline, lastSeen, createdAt, [ownerUserId+userId] , [ownerUserId+name]',
       messages:
-        '++id, ownerUserId, contactUserId, type, direction, status, timestamp, [ownerUserId+contactUserId], [ownerUserId+contactUserId+status]',
+        '++id, ownerUserId, contactUserId, type, direction, status, timestamp, seeker, [ownerUserId+contactUserId], [ownerUserId+contactUserId+status], [ownerUserId+seeker]',
       userProfile: 'userId, username, status, lastSeen',
       discussions:
         '++id, ownerUserId, &[ownerUserId+contactUserId], status, [ownerUserId+status], lastSyncTimestamp, unreadCount, lastMessageTimestamp, createdAt, updatedAt',

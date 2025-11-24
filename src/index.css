@@ -466,6 +466,24 @@
     animation: blink-loading 2s ease-in-out infinite;
   }
 
+  /* Message highlight animation for scroll-to-message */
+  @keyframes highlight-message {
+    0% {
+      background-color: transparent;
+    }
+    50% {
+      background-color: color-mix(in oklch, var(--ring) 20%, transparent);
+    }
+    100% {
+      background-color: transparent;
+    }
+  }
+
+  .highlight-message {
+    animation: highlight-message 2s ease-out;
+    border-radius: var(--radius);
+  }
+
   @media (prefers-reduced-motion: reduce) {
     * {
       animation-duration: 0.01ms !important;

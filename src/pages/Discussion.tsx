@@ -1,7 +1,7 @@
 // TODO: use virtual list to render messages
-import React, { useEffect, useCallback, useRef } from 'react';
+import React, { useEffect, useCallback, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { db } from '../db';
+import { db, Message } from '../db';
 import { useDiscussion } from '../hooks/useDiscussion';
 import { useAccountStore } from '../stores/accountStore';
 import { useDiscussionStore } from '../stores/discussionStore';
@@ -51,6 +51,9 @@ const Discussion: React.FC = () => {
 
   const isMsgFailed = messages.some(m => m.status === 'failed');
 
+  // Reply state
+  const [replyingTo, setReplyingTo] = useState<Message | null>(null);
+
   // Set current contact when it changes (only if different)
   useEffect(() => {
     const contactUserId = contact?.userId || null;
@@ -75,17 +78,44 @@ const Discussion: React.FC = () => {
   }, [messages.length, isLoading, userProfile?.userId, contact?.userId]);
 
   const handleSendMessage = useCallback(
-    async (text: string) => {
+    async (text: string, replyToId?: number) => {
       if (!contact?.userId) return;
       try {
-        await sendMessage(contact.userId, text);
+        await sendMessage(contact.userId, text, replyToId);
+        setReplyingTo(null); // Clear reply state after sending
       } catch (error) {
         toast.error('Failed to send message');
         console.error('Failed to send message:', error);
       }
     },
-    [sendMessage, contact?.userId]
+    [sendMessage, contact?.userId, setReplyingTo]
   );
+
+  const handleReplyToMessage = useCallback((message: Message) => {
+    setReplyingTo(message);
+  }, []);
+
+  const handleCancelReply = useCallback(() => {
+    setReplyingTo(null);
+  }, []);
+
+  const handleScrollToMessage = useCallback((messageId: number) => {
+    // Use native scrollIntoView to scroll to the message
+    const element = document.getElementById(`message-${messageId}`);
+    if (element) {
+      element.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center',
+      });
+      // Add visual feedback for the scrolled-to message
+      element.classList.add('highlight-message');
+      setTimeout(() => {
+        element.classList.remove('highlight-message');
+      }, 2000);
+    } else {
+      console.warn(`Message element with id message-${messageId} not found`);
+    }
+  }, []);
 
   const handleInputClick = () => {
     if (isMsgFailed) {
@@ -111,12 +141,16 @@ const Discussion: React.FC = () => {
         discussion={discussion}
         isLoading={isLoading || isDiscussionLoading}
         onResend={resendMessage}
+        onReplyTo={handleReplyToMessage}
+        onScrollToMessage={handleScrollToMessage}
       />
 
       <MessageInput
         onSend={handleSendMessage}
         onClick={handleInputClick}
         disabled={isSending || isMsgFailed}
+        replyingTo={replyingTo}
+        onCancelReply={handleCancelReply}
       />
     </div>
   );

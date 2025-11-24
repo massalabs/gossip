@@ -12,6 +12,8 @@ interface MessageListProps {
   discussion?: Discussion | null;
   isLoading: boolean;
   onResend: (message: Message) => void;
+  onReplyTo?: (message: Message) => void;
+  onScrollToMessage?: (messageId: number) => void;
 }
 
 const MessageList: React.FC<MessageListProps> = ({
@@ -19,6 +21,8 @@ const MessageList: React.FC<MessageListProps> = ({
   discussion,
   isLoading,
   onResend,
+  onReplyTo,
+  onScrollToMessage,
 }) => {
   const prevLastMessageIdRef = useRef<number | null>(null);
   const hasInitiallyScrolledRef = useRef<boolean>(false);
@@ -27,10 +31,17 @@ const MessageList: React.FC<MessageListProps> = ({
   const messageItems = useMemo(() => {
     return messages.map(message => {
       return (
-        <MessageItem key={message.id} message={message} onResend={onResend} />
+        <MessageItem
+          key={message.id}
+          id={`message-${message.id}`}
+          message={message}
+          onResend={onResend}
+          onReplyTo={onReplyTo}
+          onScrollToMessage={onScrollToMessage}
+        />
       );
     });
-  }, [messages, onResend]);
+  }, [messages, onResend, onReplyTo, onScrollToMessage]);
 
   // Auto-scroll to bottom when new messages are added
   useEffect(() => {
