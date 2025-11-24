@@ -56,6 +56,7 @@ export default defineConfig({
       srcDir: 'src',
       filename: 'sw.ts',
       registerType: 'prompt',
+      injectRegister: false,
 
       pwaAssets: {
         disabled: false,
@@ -89,7 +90,7 @@ export default defineConfig({
             src: '/favicon/web-app-manifest-512x512.png',
             sizes: '512x512',
             type: 'image/png',
-            purpose: 'any',
+            purpose: 'any maskable',
           },
           {
             src: '/favicon/favicon-96x96.png',

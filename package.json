@@ -36,7 +36,6 @@
     "@capacitor/android": "^7.4.4",
     "@capacitor/barcode-scanner": "^2.2.0",
     "@capacitor/core": "^7.4.4",
-    "@capacitor/haptics": "^7.0.2",
     "@capacitor/ios": "^7.4.4",
     "@capacitor/preferences": "^7.0.2",
     "@capacitor/status-bar": "^7.0.3",

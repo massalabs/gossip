@@ -51,8 +51,8 @@ const Settings = (): React.ReactElement => {
   const { isVersionDifferent, handleForceUpdate } = useVersionCheck();
   const navigate = useNavigate();
   const pregeneratedQR = usePreloadShareContact(
-    userProfile?.userId,
-    userProfile?.username
+    userProfile?.userId || '',
+    userProfile?.username || ''
   );
 
   const mnemonicBackupInfo = getMnemonicBackupInfo();
