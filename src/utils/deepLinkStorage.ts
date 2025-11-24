@@ -8,6 +8,7 @@ export const setPendingDeepLink = async (url: string): Promise<void> => {
 
 export const getPendingDeepLink = async (): Promise<string | null> => {
   const { value } = await Preferences.get({ key: PENDING_DEEPLINK_KEY });
+  if (!value) return null;
   await Preferences.remove({ key: PENDING_DEEPLINK_KEY });
   return value;
 };

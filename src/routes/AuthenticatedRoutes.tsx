@@ -8,15 +8,18 @@ import NewDiscussion from '../pages/NewDiscussion';
 import NewContact from '../pages/NewContact';
 import Settings from '../pages/Settings';
 import Wallet from '../pages/Wallet';
-import { InviteRoute } from '../components/InviteRoute';
+import { usePendingDeepLink } from '../hooks/usePendingDeepLink';
+import { useAppStateRefresh } from '../hooks/useAppStateRefresh';
 
 /**
  * Routes accessible when user is authenticated
  */
 export const AuthenticatedRoutes: React.FC = () => {
+  useAppStateRefresh();
+  usePendingDeepLink();
+
   return (
     <Routes>
-      <Route path="/invite/:userId/:name" element={<InviteRoute />} />
       <Route path="/new-discussion" element={<NewDiscussion />} />
       <Route path="/new-contact" element={<NewContact />} />
       <Route path="/contact/:userId" element={<Contact />} />

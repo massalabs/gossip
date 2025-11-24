@@ -4,7 +4,6 @@ import { useAccountStore } from '../stores/accountStore';
 import { useAppStore } from '../stores/appStore';
 import Login from '../pages/Login';
 import AccountCreation from '../components/account/AccountCreation';
-import { InviteRoute } from '../components/InviteRoute';
 import { UserProfile } from '../db';
 
 interface UnauthenticatedRoutesProps {
@@ -70,7 +69,6 @@ export const UnauthenticatedRoutes: React.FC<UnauthenticatedRoutesProps> = ({
           />
         }
       />
-      <Route path="/invite/:userId/:name" element={<InviteRoute />} />
       <Route path="/" element={<Navigate to="/welcome" replace />} />
       <Route path="*" element={<Navigate to="/welcome" replace />} />
     </Routes>
