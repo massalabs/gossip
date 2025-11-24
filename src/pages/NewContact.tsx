@@ -78,12 +78,8 @@ const NewContact: React.FC = () => {
 
   const handleScanSuccess = useCallback(
     (scannedUserId: string, scannedName?: string) => {
-      console.log('handleScanSuccess called with:', {
-        scannedUserId,
-        scannedName,
-      });
       setShowScanner(false);
-      // Always update form with scanned data (don't check existing values)
+
       if (scannedUserId) {
         handleUserIdChange(scannedUserId);
       }

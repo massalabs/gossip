@@ -2,6 +2,7 @@ import React, { useState, useEffect, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import Button from './Button';
 import { useKeyDown } from '../../hooks/useKeyDown';
+import { CloseIcon } from './icons';
 
 interface BaseModalProps {
   isOpen: boolean;
@@ -59,19 +60,7 @@ const BaseModal: React.FC<BaseModalProps> = ({
             size="custom"
             className="w-8 h-8 flex items-center justify-center"
           >
-            <svg
-              className="w-5 h-5 text-gray-500"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M6 18L18 6M6 6l12 12"
-              />
-            </svg>
+            <CloseIcon className="w-5 h-5 text-gray-500" />
           </Button>
         </div>
 

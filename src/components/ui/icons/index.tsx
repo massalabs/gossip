@@ -271,3 +271,19 @@ export const CameraIcon: React.FC<IconProps> = ({ className = '' }) => (
     />
   </svg>
 );
+
+export const CloseIcon: React.FC<IconProps> = ({ className = '' }) => (
+  <svg
+    fill="none"
+    stroke="currentColor"
+    viewBox="0 0 24 24"
+    className={`w-6 h-6 ${className}`.trim()}
+  >
+    <path
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth={2}
+      d="M6 18L18 6M6 6l12 12"
+    />
+  </svg>
+);

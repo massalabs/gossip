@@ -101,6 +101,15 @@ const Settings = (): React.ReactElement => {
     }
   };
 
+  const handleScanSuccess = useCallback(
+    (userId: string, name: string) => {
+      navigate(
+        `/new-contact?userId=${encodeURIComponent(userId)}&name=${encodeURIComponent(name)}`
+      );
+    },
+    [navigate]
+  );
+
   switch (activeView) {
     case SettingsView.SHOW_ACCOUNT_BACKUP:
       return <AccountBackup onBack={() => setActiveView(null)} />;
@@ -115,12 +124,7 @@ const Settings = (): React.ReactElement => {
       return (
         <ScanQRCode
           onBack={() => setActiveView(null)}
-          onScanSuccess={(userId, name) => {
-            setActiveView(null);
-            navigate(
-              `/new-contact?userId=${encodeURIComponent(userId)}${name ? `&name=${encodeURIComponent(name)}` : ''}`
-            );
-          }}
+          onScanSuccess={handleScanSuccess}
         />
       );
     default:
