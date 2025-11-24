@@ -13,13 +13,19 @@ import {
   EncryptedMessage,
 } from '../api/messageProtocol';
 import { useAccountStore } from '../stores/accountStore';
-import { strToBytes } from '@massalabs/massa-web3';
+
 import {
   SessionStatus,
   UserSecretKeys,
   SendMessageOutput,
 } from '../assets/generated/wasm/gossip_wasm';
 import { SessionModule } from '../wasm';
+import {
+  serializeRegularMessage,
+  serializeReplyMessage,
+  deserializeMessage,
+} from '../utils/messageSerialization';
+import { encodeToBase64 } from '../utils/base64';
 
 export interface MessageResult {
   success: boolean;
@@ -37,6 +43,11 @@ interface Decrypted {
   content: string;
   sentAt: Date;
   senderId: string;
+  seeker: Uint8Array; // Seeker of the incoming message
+  replyTo?: {
+    originalContent: string;
+    originalSeeker: Uint8Array;
+  };
 }
 
 const LIMIT_FETCH_ITERATIONS = 30;
@@ -128,11 +139,33 @@ export class MessageService {
           ourSk
         );
         if (!out) continue;
-        decrypted.push({
-          content: new TextDecoder().decode(out.message),
-          sentAt: new Date(Number(out.timestamp)),
-          senderId: encodeUserId(out.user_id),
-        });
+
+        // Deserialize message (handles both regular and reply)
+        try {
+          const deserialized = deserializeMessage(out.message);
+
+          decrypted.push({
+            content: deserialized.content,
+            sentAt: new Date(Number(out.timestamp)),
+            senderId: encodeUserId(out.user_id),
+            seeker: msg.seeker,
+            replyTo: deserialized.replyTo
+              ? {
+                  originalContent: deserialized.replyTo.originalContent,
+                  originalSeeker: deserialized.replyTo.originalSeeker,
+                }
+              : undefined,
+          });
+        } catch (deserializationError) {
+          console.error(
+            'Message deserialization failed:',
+            deserializationError,
+            {
+              seeker: encodeToBase64(msg.seeker),
+              senderId: encodeUserId(out.user_id),
+            }
+          );
+        }
       } catch (e) {
         console.error('Decrypt failed:', e);
       }
@@ -160,6 +193,26 @@ export class MessageService {
           );
           return undefined;
         }
+
+        const isReply = !!message.replyTo?.originalContent;
+
+        // Find the original message by seeker if this is a reply
+        // This is used to determine whether to store originalContent as a fallback
+        let replyToMessageId: number | undefined;
+        if (isReply && message.replyTo?.originalSeeker) {
+          const originalMessage = await this.findMessageBySeeker(
+            message.replyTo.originalSeeker,
+            ownerUserId
+          );
+          if (!originalMessage) {
+            console.warn(
+              'Original message not found for reply',
+              Buffer.from(message.replyTo.originalSeeker).toString('base64')
+            );
+          }
+          replyToMessageId = originalMessage?.id;
+        }
+
         const id = await db.messages.add({
           ownerUserId,
           contactUserId: discussion.contactUserId,
@@ -169,6 +222,21 @@ export class MessageService {
           status: 'delivered' as const,
           timestamp: message.sentAt,
           metadata: {},
+          seeker: message.seeker, // Store the seeker of the incoming message
+          replyTo:
+            isReply && message.replyTo
+              ? {
+                  // Store the original content as a fallback only if we couldn't find
+                  // the original message in the database (replyToMessageId is undefined).
+                  // If the original message exists, we don't need to store the content
+                  // since we can fetch it using the originalSeeker.
+                  originalContent: replyToMessageId
+                    ? undefined
+                    : message.replyTo.originalContent,
+                  // Store the seeker (used to find the original message)
+                  originalSeeker: message.replyTo.originalSeeker,
+                }
+              : undefined,
         });
         const now = new Date();
         await db.discussions.update(discussion.id, {
@@ -184,6 +252,20 @@ export class MessageService {
     );
     // Filter out any undefined values (messages without a discussion)
     return ids.filter((id): id is number => typeof id === 'number');
+  }
+
+  /**
+   * Find message by seeker (for matching replies)
+   */
+  async findMessageBySeeker(
+    seeker: Uint8Array,
+    ownerUserId: string
+  ): Promise<Message | undefined> {
+    // Use indexed compound query
+    return await db.messages
+      .where('[ownerUserId+seeker]')
+      .equals([ownerUserId, seeker])
+      .first();
   }
 
   /**
@@ -207,8 +289,34 @@ export class MessageService {
 
       // Ensure DB reflects that this message is being (re)sent
       await db.messages.update(message.id, { status: 'sending' });
-      // add discussionId to the content prefix
-      const contentBytes = strToBytes(message.content);
+
+      // Serialize message content (handle replies)
+      let contentBytes: Uint8Array;
+      if (message.replyTo?.originalSeeker) {
+        // Find the original message by seeker
+        const originalMessage = await this.findMessageBySeeker(
+          message.replyTo.originalSeeker,
+          message.ownerUserId
+        );
+        if (!originalMessage) {
+          await db.messages.update(message.id, { status: 'failed' });
+          return {
+            success: false,
+            error: 'Original message not found for reply',
+            message: { ...message, status: 'failed' },
+          };
+        }
+
+        // Serialize reply with type tag and seeker
+        contentBytes = serializeReplyMessage(
+          message.content,
+          originalMessage.content,
+          message.replyTo.originalSeeker
+        );
+      } else {
+        // Regular message with type tag
+        contentBytes = serializeRegularMessage(message.content);
+      }
 
       // Validate peer ID length
       if (peerId.length !== 32) {
@@ -243,7 +351,11 @@ export class MessageService {
         ciphertext: sendOutput.data,
       });
 
-      await db.messages.update(message.id, { status: 'sent' });
+      // Store the seeker with the message
+      await db.messages.update(message.id, {
+        seeker: sendOutput.seeker,
+        status: 'sent',
+      });
 
       return {
         success: true,
