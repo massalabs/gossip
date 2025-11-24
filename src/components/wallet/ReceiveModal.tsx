@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useAccountStore } from '../../stores/accountStore';
 import Button from '../ui/Button';
 import BaseModal from '../ui/BaseModal';
-import QrCodePlaceholder from '../ui/QrCodePlaceholder';
+import QrCodePlaceholder from '../qr/QrCodePlaceholder';
 import { formatMassaAddress } from '../../utils/addressUtils';
 
 interface ReceiveModalProps {

@@ -6,68 +6,22 @@ import {
   getBackgroundColor,
 } from '../../utils/qrCodeColors';
 
-export interface QRCodeProps {
-  value: string;
-  size?: number;
-  level?: 'L' | 'M' | 'Q' | 'H';
-  type?: 'svg' | 'canvas';
-  className?: string;
-  // Styling options matching qrcode-styling API
-  dotsOptions?: {
-    type?:
-      | 'dots'
-      | 'rounded'
-      | 'classy'
-      | 'classy-rounded'
-      | 'square'
-      | 'extra-rounded';
-    color?: string;
-    gradient?: {
-      type: 'linear' | 'radial';
-      rotation?: number;
-      colorStops: { offset: number; color: string }[];
-    };
-  };
-  cornersSquareOptions?: {
-    type?:
-      | 'dot'
-      | 'square'
-      | 'extra-rounded'
-      | 'dots'
-      | 'rounded'
-      | 'classy'
-      | 'classy-rounded';
-    color?: string;
-    gradient?: {
-      type: 'linear' | 'radial';
-      rotation?: number;
-      colorStops: { offset: number; color: string }[];
-    };
-  };
-  cornersDotOptions?: {
-    type?: 'dot' | 'square' | 'dots' | 'rounded' | 'classy' | 'classy-rounded';
-    color?: string;
-    gradient?: {
-      type: 'linear' | 'radial';
-      rotation?: number;
-      colorStops: { offset: number; color: string }[];
-    };
-  };
-  backgroundOptions?: {
-    color?: string;
-    gradient?: {
-      type: 'linear' | 'radial';
-      rotation?: number;
-      colorStops: { offset: number; color: string }[];
-    };
-  };
-  image?: string;
-  imageOptions?: {
-    saveAsBlob?: boolean;
-    crossOrigin?: string;
-    margin?: number;
-    imageSize?: number;
-  };
+// Base QR code options from qr-code-styling, excluding data/width/height which we handle separately
+type QRCodeStylingOptions = Omit<
+  Options,
+  'data' | 'width' | 'height' | 'qrOptions'
+> & {
+  // Allow qrOptions to be passed but we'll override errorCorrectionLevel
+  qrOptions?: Omit<Options['qrOptions'], 'errorCorrectionLevel'>;
+};
+
+// React-friendly props interface that extends Options
+export interface QRCodeProps extends QRCodeStylingOptions {
+  // React-friendly aliases
+  value: string; // Maps to Options.data
+  size?: number; // Maps to Options.width/height
+  level?: 'L' | 'M' | 'Q' | 'H'; // Maps to Options.qrOptions.errorCorrectionLevel
+  className?: string; // React-specific, not part of Options
 }
 
 const QRCode: React.FC<QRCodeProps> = ({

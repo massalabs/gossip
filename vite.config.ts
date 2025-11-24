@@ -56,7 +56,6 @@ export default defineConfig({
       srcDir: 'src',
       filename: 'sw.ts',
       registerType: 'prompt',
-      injectRegister: 'auto',
 
       pwaAssets: {
         disabled: false,
@@ -84,13 +83,13 @@ export default defineConfig({
             src: '/favicon/web-app-manifest-192x192.png',
             sizes: '192x192',
             type: 'image/png',
-            purpose: 'any maskable',
+            purpose: 'any',
           },
           {
             src: '/favicon/web-app-manifest-512x512.png',
             sizes: '512x512',
             type: 'image/png',
-            purpose: 'any maskable',
+            purpose: 'any',
           },
           {
             src: '/favicon/favicon-96x96.png',
@@ -104,7 +103,7 @@ export default defineConfig({
 
       injectManifest: {
         globPatterns: ['**/*.{js,css,html,svg,png,ico,wasm}'],
-        maximumFileSizeToCacheInBytes: 4 * 1024 * 1024, // 3MB (increased from default 2MB for crypto polyfills)
+        maximumFileSizeToCacheInBytes: 4 * 1024 * 1024, // 4 MB
       },
 
       devOptions: {

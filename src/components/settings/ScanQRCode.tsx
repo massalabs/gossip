@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import QRScanner from '../ui/QRScanner';
+import QRScanner from '../qr/QRScanner';
 import PageHeader from '../ui/PageHeader';
 import { parseQRCode } from '../../utils/qrCodeParser';
 import { Capacitor } from '@capacitor/core';
@@ -13,6 +13,14 @@ interface ScanQRCodeProps {
 const ScanQRCode: React.FC<ScanQRCodeProps> = ({ onBack, onScanSuccess }) => {
   const navigate = useNavigate();
   const [isProcessing, setIsProcessing] = useState(false);
+
+  // Hide bottom navigation when scanning
+  useEffect(() => {
+    document.body.classList.add('qr-scanning');
+    return () => {
+      document.body.classList.remove('qr-scanning');
+    };
+  }, []);
 
   const handleScanSuccess = async (qrText: string) => {
     if (isProcessing) return;
@@ -70,20 +78,6 @@ const ScanQRCode: React.FC<ScanQRCodeProps> = ({ onBack, onScanSuccess }) => {
     // Error is already displayed in the QRScanner component
   };
 
-  // Responsive qrbox size - larger on desktop/laptop screens
-  const getQRBoxSize = () => {
-    if (typeof window !== 'undefined') {
-      const width = window.innerWidth;
-      // Mobile: 280px, Tablet: 400px, Desktop: 500px
-      if (width >= 1024) return { width: 500, height: 500 };
-      if (width >= 768) return { width: 400, height: 400 };
-      return { width: 280, height: 280 };
-    }
-    return { width: 280, height: 280 };
-  };
-
-  const qrboxSize = getQRBoxSize();
-
   return (
     <div className="bg-card h-full overflow-hidden flex flex-col max-w-md mx-auto">
       <PageHeader title="Scan QR Code" onBack={onBack} />
@@ -91,21 +85,10 @@ const ScanQRCode: React.FC<ScanQRCodeProps> = ({ onBack, onScanSuccess }) => {
       {/* Scanner Container - Full height minus header */}
       <div className="flex-1 relative min-h-0">
         <QRScanner
-          onScanSuccess={handleScanSuccess}
+          onScan={handleScanSuccess}
           onError={handleError}
-          fps={10}
-          qrbox={qrboxSize}
-          aspectRatio={1.0}
+          onClose={onBack}
         />
-      </div>
-
-      {/* Instructions */}
-      <div className="absolute bottom-20 left-4 right-4 pointer-events-none z-10">
-        <div className="bg-card/90 backdrop-blur-sm border border-border rounded-lg p-4 shadow-lg max-w-md mx-auto">
-          <p className="text-sm text-foreground text-center">
-            Position the QR code within the frame
-          </p>
-        </div>
       </div>
     </div>
   );

@@ -5,5 +5,17 @@ project(':capacitor-android').projectDir = new File('../node_modules/@capacitor/
 include ':aparajita-capacitor-biometric-auth'
 project(':aparajita-capacitor-biometric-auth').projectDir = new File('../node_modules/@aparajita/capacitor-biometric-auth/android')
 
+include ':aparajita-capacitor-secure-storage'
+project(':aparajita-capacitor-secure-storage').projectDir = new File('../node_modules/@aparajita/capacitor-secure-storage/android')
+
+include ':capacitor-barcode-scanner'
+project(':capacitor-barcode-scanner').projectDir = new File('../node_modules/@capacitor/barcode-scanner/android')
+
+include ':capacitor-haptics'
+project(':capacitor-haptics').projectDir = new File('../node_modules/@capacitor/haptics/android')
+
+include ':capacitor-preferences'
+project(':capacitor-preferences').projectDir = new File('../node_modules/@capacitor/preferences/android')
+
 include ':capacitor-status-bar'
 project(':capacitor-status-bar').projectDir = new File('../node_modules/@capacitor/status-bar/android')
