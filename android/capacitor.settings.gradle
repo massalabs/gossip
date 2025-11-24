@@ -11,9 +11,6 @@ project(':aparajita-capacitor-secure-storage').projectDir = new File('../node_mo
 include ':capacitor-barcode-scanner'
 project(':capacitor-barcode-scanner').projectDir = new File('../node_modules/@capacitor/barcode-scanner/android')
 
-include ':capacitor-haptics'
-project(':capacitor-haptics').projectDir = new File('../node_modules/@capacitor/haptics/android')
-
 include ':capacitor-preferences'
 project(':capacitor-preferences').projectDir = new File('../node_modules/@capacitor/preferences/android')
 
