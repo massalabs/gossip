@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useAccountStore } from '../../stores/accountStore';
 import Button from '../ui/Button';
 import BaseModal from '../ui/BaseModal';
-import QrCodePlaceholder from '../qr/QrCodePlaceholder';
+
 import { formatMassaAddress } from '../../utils/addressUtils';
 
 interface ReceiveModalProps {
@@ -34,9 +34,6 @@ const ReceiveModal: React.FC<ReceiveModalProps> = ({ isOpen, onClose }) => {
 
   return (
     <BaseModal isOpen={isOpen} onClose={onClose} title="Receive">
-      {/* QR Code Placeholder */}
-      <QrCodePlaceholder />
-
       {/* Address Section */}
       <div>
         <label className="block text-sm font-medium text-foreground mb-2">

@@ -27,8 +27,6 @@ export const usePendingDeepLink = () => {
         return;
       }
 
-      console.log('Processing pending deep link:', pendingLink);
-
       // Parse invite URLs: /invite/:userId/:name
       const inviteMatch = pendingLink.match(/^\/invite\/([^/]+)\/?(.*)$/);
       if (inviteMatch) {
@@ -38,7 +36,6 @@ export const usePendingDeepLink = () => {
         if (name) {
           queryParams.set('name', name);
         }
-        console.log('Navigating to new-contact with:', { userId, name });
         navigate(`/new-contact?${queryParams.toString()}`, { replace: true });
         return;
       }
