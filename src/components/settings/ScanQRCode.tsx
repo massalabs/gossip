@@ -18,14 +18,14 @@ const ScanQRCode: React.FC<ScanQRCodeProps> = ({ onBack, onScanSuccess }) => {
 
     try {
       const parsed = parseQRCode(qrText);
-      if (!parsed || !parsed.userId) {
+      if (!parsed?.userId) {
         setIsProcessing(false);
         return;
       }
       onScanSuccess(parsed.userId, parsed.name ?? '');
     } catch (error) {
-      console.error('Failed to parse QR code:', error);
-      toast.error('Failed to parse QR code');
+      // TODO: Add proper error message
+      toast.error(`Failed to parse QR code: ${error}`);
     } finally {
       setIsProcessing(false);
     }
@@ -33,8 +33,8 @@ const ScanQRCode: React.FC<ScanQRCodeProps> = ({ onBack, onScanSuccess }) => {
 
   const handleError = (err: unknown) => {
     const error = err instanceof Error ? err.message : String(err);
-    console.error('QR Scanner error:', error);
-    toast.error('Failed to scan QR code: ');
+    // TODO: Add proper error message
+    toast.error(`Failed to scan QR code: ${error}`);
     onBack();
   };
 
