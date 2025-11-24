@@ -35,28 +35,14 @@ const NewContact: React.FC = () => {
     handleSubmit,
   } = useContactForm();
 
-  // Pre-fill userId and name from URL params (from QR code scan)
-  // Use ref to track the last processed URL to prevent re-processing
-  const lastProcessedUrl = useRef<string>('');
-
   useEffect(() => {
     const userIdFromUrl = searchParams.get('userId');
     const nameFromUrl = searchParams.get('name');
 
-    // Create a unique key from the URL params
-    const urlKey = `${userIdFromUrl || ''}-${nameFromUrl || ''}`;
+    if (!userIdFromUrl || !nameFromUrl) return;
 
-    // Only process if URL params changed and we have values
-    if (urlKey === lastProcessedUrl.current) return;
-    if (!userIdFromUrl) return;
-
-    lastProcessedUrl.current = urlKey;
-
-    // Always update from URL params (they take precedence)
     handleUserIdChange(userIdFromUrl);
-    if (nameFromUrl) {
-      handleNameChange(nameFromUrl);
-    }
+    handleNameChange(nameFromUrl);
   }, [searchParams, handleUserIdChange, handleNameChange]);
 
   const handleBack = useCallback(() => {
@@ -93,7 +79,6 @@ const NewContact: React.FC = () => {
     [handleUserIdChange, handleNameChange]
   );
 
-  // Show scanner view if active
   if (showScanner) {
     return (
       <ScanQRCode

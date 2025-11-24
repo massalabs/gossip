@@ -101,7 +101,9 @@ function App() {
       <ErrorBoundary>
         <AppContent />
         <DebugOverlay />
-        <PWABadge />
+        <div className="hidden">
+          <PWABadge />
+        </div>
         <Toaster
           position="top-center"
           toastOptions={{

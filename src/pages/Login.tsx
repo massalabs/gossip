@@ -70,8 +70,6 @@ const Login: React.FC<LoginProps> = React.memo(
         }
 
         await loadAccount(undefined, currentAccount?.userId);
-
-        // Don't navigate here - let DeepLinkHandler process redirect after route switch
         onAccountSelected();
       } catch (error) {
         onErrorChange?.(
@@ -155,7 +153,6 @@ const Login: React.FC<LoginProps> = React.memo(
 
         const state = useAccountStore.getState();
         if (state.userProfile) {
-          // Don't navigate here - let DeepLinkHandler process redirect after route switch
           onAccountSelected();
         } else {
           throw new Error('Failed to load account');
@@ -194,7 +191,6 @@ const Login: React.FC<LoginProps> = React.memo(
 
     const handleImportComplete = () => {
       setShowAccountImport(false);
-      // Don't navigate here - let DeepLinkHandler process redirect after route switch
       onAccountSelected();
     };
 
@@ -235,9 +231,6 @@ const Login: React.FC<LoginProps> = React.memo(
               src="/logo.svg"
               alt="Gossip"
               className="mx-auto my-10 w-11/12 h-auto dark:invert"
-              loading="eager"
-              fetchPriority="high"
-              decoding="async"
             />
             <h1 className="mt-4 text-[28px] font-semibold tracking-tight text-gray-900 dark:text-white">
               {displayUsername ? (

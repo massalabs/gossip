@@ -192,12 +192,6 @@
   *::-webkit-scrollbar-corner {
     background: transparent;
   }
-  /* QR Scanner video styling */
-  video[autoplay][playsinline] {
-    width: 100% !important;
-    height: 100% !important;
-    object-fit: cover !important;
-  }
 
   *::-webkit-scrollbar-thumb {
     /* Fallback for browsers without color-mix support (light mode default) */
