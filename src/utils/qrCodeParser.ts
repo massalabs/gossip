@@ -1,16 +1,70 @@
-export interface ParsedQRCode {
+// Single regex – the source of truth
+const INVITE_REGEX = /^\/invite\/([^/#?\s]+)(?:\/([^/#?\s]*))?/i;
+
+export interface ParsedInvite {
   userId: string;
   name: string;
 }
 
-export function parseInviteQRCode(qrText: string): ParsedQRCode {
-  if (!qrText?.trim()) throw new Error('Invalid invite QR code');
+export function parseInvite(input: string): ParsedInvite {
+  const path = extractInvitePath(input);
 
-  const match = qrText.match(/\/invite\/([^/#?\s]+)\/([^/#?\s]+)/i);
-  if (!match) throw new Error('Invalid invite QR code format');
+  if (!path) {
+    throw new Error('Invalid or empty invite');
+  }
 
-  const userId = decodeURIComponent(match[1]);
-  const name = decodeURIComponent(match[2]);
+  const match = path.match(INVITE_REGEX);
+  if (!match) {
+    throw new Error('Invalid invite format');
+  }
 
-  return { userId, name };
+  const [, userId, rawName] = match;
+
+  const name = rawName?.trim() ? decodeURIComponent(rawName) : '';
+
+  return {
+    userId: decodeURIComponent(userId),
+    name,
+  };
+}
+
+/**
+ * Extract the clean invite path from any URL format
+ * Returns null only when nothing invite-related is found
+ */
+export function extractInvitePath(input: string): string | null {
+  if (!input?.trim()) return null;
+
+  const trimmed = input.trim();
+
+  // Fast path – already a clean path
+  if (trimmed.startsWith('/invite/')) {
+    return trimmed.split(/[?#]/)[0];
+  }
+
+  try {
+    const url = new URL(trimmed);
+
+    // 1. Check pathname first (invite might be in pathname even if hash exists)
+    const pathname = url.pathname.split(/[?#]/)[0];
+    if (pathname.startsWith('/invite/')) {
+      return pathname;
+    }
+
+    // 2. HashRouter → #/invite/…
+    if (url.hash) {
+      const hashPath = url.hash.slice(1).split(/[?#]/)[0];
+      console.log('Hash path:', hashPath);
+      return hashPath.startsWith('/invite/') ? hashPath : null;
+    }
+
+    return null;
+  } catch {
+    // Fallback for broken/malformed URLs or custom schemes
+    const hashMatch = trimmed.match(/#(\/invite\/[^?#\s]*)/i);
+    if (hashMatch) return hashMatch[1];
+
+    const pathMatch = trimmed.match(/(\/invite\/[^?#\s]*)/i);
+    return pathMatch ? pathMatch[1] : null;
+  }
 }

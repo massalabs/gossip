@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { parseInviteQRCode } from '../../utils/qrCodeParser';
+import { parseInvite } from '../../utils/qrCodeParser';
 import toast from 'react-hot-toast';
 import { Capacitor } from '@capacitor/core';
 import WebQRScanner from '../qr/WebQRScanner';
@@ -18,7 +18,7 @@ const ScanQRCode: React.FC<ScanQRCodeProps> = ({ onBack, onScanSuccess }) => {
     setIsProcessing(true);
 
     try {
-      const { userId, name } = parseInviteQRCode(qrText);
+      const { userId, name } = parseInvite(qrText);
       onScanSuccess(userId, name);
     } catch (error) {
       toast.error(`Failed to parse QR code: ${error}`);
