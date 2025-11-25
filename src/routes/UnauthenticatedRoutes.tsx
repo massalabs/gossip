@@ -26,17 +26,17 @@ export const UnauthenticatedRoutes: React.FC<UnauthenticatedRoutesProps> = ({
     onLoginErrorChange(null);
   };
 
-  const handleOnCreateNewAccount = () => {
+  const handleCreateNewAccount = () => {
     onLoginErrorChange(null);
     navigate('/setup');
   };
 
-  const handleOnComplete = () => {
+  const handleNewAccountComplete = () => {
     useAppStore.getState().setIsInitialized(true);
     navigate('/', { replace: true });
   };
 
-  const handleOnBackFromSetup = async () => {
+  const handleNewAccountBack = async () => {
     try {
       const hasAny = await useAccountStore.getState().hasExistingAccount();
       if (hasAny) {
@@ -57,7 +57,7 @@ export const UnauthenticatedRoutes: React.FC<UnauthenticatedRoutesProps> = ({
         element={
           <Login
             key="login-router"
-            onCreateNewAccount={handleOnCreateNewAccount}
+            onCreateNewAccount={handleCreateNewAccount}
             onAccountSelected={handleAccountSelected}
             accountInfo={existingAccountInfo}
             persistentError={loginError}
@@ -69,8 +69,8 @@ export const UnauthenticatedRoutes: React.FC<UnauthenticatedRoutesProps> = ({
         path="/setup"
         element={
           <AccountCreation
-            onComplete={handleOnComplete}
-            onBack={handleOnBackFromSetup}
+            onComplete={handleNewAccountComplete}
+            onBack={handleNewAccountBack}
           />
         }
       />

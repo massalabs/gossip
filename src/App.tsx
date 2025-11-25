@@ -6,7 +6,6 @@ import ErrorBoundary from './components/ui/ErrorBoundary.tsx';
 import PWABadge from './PWABadge.tsx';
 import DebugOverlay from './components/ui/DebugOverlay.tsx';
 import { Toaster } from 'react-hot-toast';
-import { PrivacyGraphic } from './components/ui/PrivacyGraphic';
 import './App.css';
 
 // Hooks
@@ -16,11 +15,12 @@ import { useAccountInfo } from './hooks/useAccountInfo';
 // Route components
 import { AuthenticatedRoutes } from './routes/AuthenticatedRoutes';
 import { UnauthenticatedRoutes } from './routes/UnauthenticatedRoutes';
-import { OnboardingRoutes } from './routes/OnboardingRoutes';
+import { Onboarding } from './pages/Onboarding.tsx';
 import { useVersionCheck } from './hooks/useVersionCheck.ts';
 import VersionUpdateModal from './components/ui/VersionUpdateModal.tsx';
 import { AppUrlListener } from './components/AppUrlListener';
 import { toastOptions } from './utils/toastOptions.ts';
+import LoadingScreen from './components/ui/LoadingScreen.tsx';
 
 const AppContent: React.FC = () => {
   const { isLoading, userProfile } = useAccountStore();
@@ -39,34 +39,20 @@ const AppContent: React.FC = () => {
   //   });
   // }, []); // Only run once on mount
 
-  // Show global loader only during initial boot, not during sign-in.
   if (isLoading && !isInitialized && !userProfile) {
+    return <LoadingScreen />;
+  }
+
+  if (!isInitialized) {
     return (
-      <div className="bg-background flex items-center justify-center h-full">
-        <div className="text-center">
-          <PrivacyGraphic size={120} loading={true} />
-          <p className="text-sm text-muted-foreground mt-4">Loading...</p>
-        </div>
-      </div>
+      <Onboarding showImport={showImport} onShowImportChange={setShowImport} />
     );
   }
 
-  // If authenticated, show main app routes
   if (userProfile) {
     return <AuthenticatedRoutes />;
   }
 
-  // If not initialized and no profile, show onboarding
-  if (!isInitialized) {
-    return (
-      <OnboardingRoutes
-        showImport={showImport}
-        onShowImportChange={setShowImport}
-      />
-    );
-  }
-
-  // Initialized but unauthenticated: route between Login and Setup
   return (
     <UnauthenticatedRoutes
       existingAccountInfo={existingAccountInfo}
