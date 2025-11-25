@@ -5,6 +5,7 @@
     "TITLE": "Gossip messenger dev",
     "DESCRIPTION": "Gossip messenger buildnet dev",
     "KEYWORD1": "privacy",
-    "KEYWORD2": "dev"
+    "KEYWORD2": "dev",
+    "http-header:Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"
   }
 }
