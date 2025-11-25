@@ -3,6 +3,7 @@ import QRCodeStyling from 'qr-code-styling';
 import { generateQRCodeUrl } from '../utils/qrCodeUrl';
 import { useTheme } from './useTheme';
 import { getForegroundColor, getBackgroundColor } from '../utils/qrCodeColors';
+import { useAccountStore } from '../stores/accountStore';
 
 /**
  * Hook to prefetch ShareContact component and pregenerate QR code
@@ -10,21 +11,20 @@ import { getForegroundColor, getBackgroundColor } from '../utils/qrCodeColors';
  * @param userName - Optional user name to include in QR code
  * @returns The pregenerated QR code as a data URL string, or null if not ready
  */
-export const usePreloadShareContact = (
-  userId: string,
-  userName: string
-): string | null => {
+export const usePreloadShareContact = (): string | null => {
   const [pregeneratedQR, setPregeneratedQR] = useState<string | null>(null);
   const { resolvedTheme } = useTheme();
+  const { userProfile } = useAccountStore();
 
   useEffect(() => {
-    // Prefetch the chunk
+    if (!userProfile) return;
     import(/* prefetch */ '../components/settings/ShareContact');
 
-    // Pre-generate the QR code in the background
     const generateQR = async () => {
-      // Use generateQRCodeUrl to include username in the QR code
-      const qrData = generateQRCodeUrl(userId, userName);
+      const qrData = generateQRCodeUrl(
+        userProfile.userId,
+        userProfile.username
+      );
 
       // Get theme-aware colors
       const foregroundColor = getForegroundColor(resolvedTheme);
@@ -52,7 +52,7 @@ export const usePreloadShareContact = (
     };
 
     generateQR();
-  }, [userName, userId, resolvedTheme]);
+  }, [userProfile, resolvedTheme]);
 
   return pregeneratedQR;
 };

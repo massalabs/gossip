@@ -50,10 +50,7 @@ const Settings = (): React.ReactElement => {
   const [isResetModalOpen, setIsResetModalOpen] = useState(false);
   const { isVersionDifferent, handleForceUpdate } = useVersionCheck();
   const navigate = useNavigate();
-  const pregeneratedQR = usePreloadShareContact(
-    userProfile?.userId || '',
-    userProfile?.username || ''
-  );
+  const pregeneratedQR = usePreloadShareContact();
 
   const mnemonicBackupInfo = getMnemonicBackupInfo();
 
