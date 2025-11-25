@@ -2,21 +2,26 @@ import { useCallback, useEffect } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { App } from '@capacitor/app';
 import { parseInvite } from '../utils/qrCodeParser';
-import { setPendingDeepLink } from '../utils/deepLinkStorage';
 import { INVITE_BASE_URL } from '../utils/qrCodeUrl';
+import { useAppStore } from '../stores/appStore';
 
 export const AppUrlListener = () => {
-  const processInvite = useCallback(async (invitePath: string) => {
-    if (!invitePath) return;
-    try {
-      const { userId, name } = parseInvite(invitePath);
-      const deepLink = `${INVITE_BASE_URL}/${userId}/${name}}`;
+  const setPendingDeepLink = useAppStore(s => s.setPendingDeepLink);
+  const processInvite = useCallback(
+    async (invitePath: string) => {
+      if (!invitePath) return;
+      try {
+        const { userId, name } = parseInvite(invitePath);
 
-      await setPendingDeepLink(deepLink);
-    } catch (error) {
-      console.error('Error parsing invite:', error);
-    }
-  }, []);
+        const deepLink = `${INVITE_BASE_URL}/${userId}/${name}`;
+
+        await setPendingDeepLink(deepLink);
+      } catch (error) {
+        console.error('Error parsing invite:', error);
+      }
+    },
+    [setPendingDeepLink]
+  );
 
   useEffect(() => {
     const handle = async () => {

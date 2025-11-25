@@ -83,7 +83,7 @@ function App() {
   return (
     <BrowserRouter>
       <ErrorBoundary>
-        <AppUrlListener />;
+        <AppUrlListener />
         <AppContent />
         <DebugOverlay />
         <div className="hidden">

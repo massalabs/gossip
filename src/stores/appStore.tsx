@@ -17,6 +17,9 @@ interface AppStoreState {
   // App initialization state (whether app has checked for existing accounts)
   isInitialized: boolean;
   setIsInitialized: (value: boolean) => void;
+  // Pending deep link
+  pendingDeepLink: string | null;
+  setPendingDeepLink: (value: string | null) => void;
 }
 
 const useAppStoreBase = create<AppStoreState>()(
@@ -42,6 +45,11 @@ const useAppStoreBase = create<AppStoreState>()(
       setIsInitialized: (value: boolean) => {
         set({ isInitialized: value });
       },
+      // Pending deep link
+      pendingDeepLink: null,
+      setPendingDeepLink: (value: string | null) => {
+        set({ pendingDeepLink: value });
+      },
     }),
     {
       name: STORAGE_KEYS.APP_STORE,
@@ -51,6 +59,7 @@ const useAppStoreBase = create<AppStoreState>()(
         debugOverlayVisible: state.debugOverlayVisible,
         isInitialized: state.isInitialized,
         networkName: state.networkName,
+        pendingDeepLink: state.pendingDeepLink,
       }),
     }
   )
