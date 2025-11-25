@@ -8,7 +8,6 @@ import { useAppStore } from '../stores/appStore';
  * Parses invite URLs and navigates to the appropriate route
  *
  * This hook should be called in AuthenticatedRoutes to handle deep links
- * when the user becomes authenticated
  */
 export const usePendingDeepLink = () => {
   const pendingDeepLink = useAppStore(s => s.pendingDeepLink);
