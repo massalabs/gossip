@@ -3,7 +3,7 @@ import { BrowserRouter } from 'react-router-dom';
 import { useAccountStore } from './stores/accountStore';
 import { useAppStore } from './stores/appStore';
 import ErrorBoundary from './components/ui/ErrorBoundary.tsx';
-import PWABadge from './PWABadge.tsx';
+// import PWABadge from './PWABadge.tsx';
 import DebugOverlay from './components/ui/DebugOverlay.tsx';
 import { Toaster } from 'react-hot-toast';
 import './App.css';
@@ -72,9 +72,9 @@ function App() {
         <AppUrlListener />
         <AppContent />
         <DebugOverlay />
-        <div className="hidden">
+        {/* <div className="hidden">
           <PWABadge />
-        </div>
+        </div> */}
         <Toaster position="top-center" toastOptions={toastOptions} />
         <VersionUpdateModal
           isOpen={showUpdatePrompt}

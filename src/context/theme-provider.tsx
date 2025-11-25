@@ -1,11 +1,12 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { Theme, ThemeContext } from './theme-context';
 import { Capacitor } from '@capacitor/core';
+import { EdgeToEdge } from '@capawesome/capacitor-android-edge-to-edge-support';
 import { StatusBar, Style } from '@capacitor/status-bar';
 import { STORAGE_KEYS, StorageKey } from '../utils/localStorage';
 import { useLocalStorage } from '../hooks/useLocalStorage';
+import { Theme, ThemeContext } from './theme-context';
 
 interface ThemeProviderProps {
   children: React.ReactNode;
@@ -49,19 +50,18 @@ export function ThemeProvider({
         root.classList.remove('dark');
       }
 
-      // Update status bar style for native platforms
+      // Update status bar and edge-to-edge for native platforms
       if (Capacitor.isNativePlatform()) {
-        // Set status bar content color based on theme
+        void StatusBar.hide();
         void StatusBar.setStyle({
           style: resolved === 'dark' ? Style.Dark : Style.Light,
         });
-
-        // Also update status bar background color to match app theme exactly
-        // Use exact hex values from CSS variables to ensure perfect match
-        const statusBarColor = resolved === 'dark' ? '#18181b' : '#f8f9fa';
-        void StatusBar.setBackgroundColor({
-          color: statusBarColor,
-        });
+        const backgroundColor = resolved === 'dark' ? '#18181b' : '#f8f9fa';
+        void EdgeToEdge.setBackgroundColor({ color: backgroundColor }).catch(
+          err => {
+            console.warn('Failed to set EdgeToEdge background color:', err);
+          }
+        );
       }
     };
 
