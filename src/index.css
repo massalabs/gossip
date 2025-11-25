@@ -192,6 +192,7 @@
   *::-webkit-scrollbar-corner {
     background: transparent;
   }
+
   *::-webkit-scrollbar-thumb {
     /* Fallback for browsers without color-mix support (light mode default) */
     background-color: rgba(26, 26, 29, 0.35);

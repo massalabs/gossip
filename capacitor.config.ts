@@ -11,7 +11,6 @@ const config: CapacitorConfig = {
     scrollEnabled: true,
     allowsLinkPreview: false,
   },
-
   plugins: {
     StatusBar: {
       style: 'dark',

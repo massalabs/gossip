@@ -24,16 +24,19 @@ import {
   RefreshIcon,
   LogoutIcon,
   DeleteIcon,
+  CameraIcon,
 } from '../components/ui/icons';
 import { APP_VERSION } from '../config/version';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { useNavigate } from 'react-router-dom';
 import ShareContact from '../components/settings/ShareContact';
+import ScanQRCode from '../components/settings/ScanQRCode';
 import { usePreloadShareContact } from '../hooks/usePreloadShareContact';
 
 enum SettingsView {
   SHOW_ACCOUNT_BACKUP = 'SHOW_ACCOUNT_BACKUP',
   SHARE_CONTACT = 'SHARE_CONTACT',
+  SCAN_QR_CODE = 'SCAN_QR_CODE',
 }
 
 const Settings = (): React.ReactElement => {
@@ -47,7 +50,7 @@ const Settings = (): React.ReactElement => {
   const [isResetModalOpen, setIsResetModalOpen] = useState(false);
   const { isVersionDifferent, handleForceUpdate } = useVersionCheck();
   const navigate = useNavigate();
-  const pregeneratedQR = usePreloadShareContact(userProfile?.userId);
+  const pregeneratedQR = usePreloadShareContact();
 
   const mnemonicBackupInfo = getMnemonicBackupInfo();
 
@@ -95,6 +98,15 @@ const Settings = (): React.ReactElement => {
     }
   };
 
+  const handleScanSuccess = useCallback(
+    (userId: string, name: string) => {
+      navigate(
+        `/new-contact?userId=${encodeURIComponent(userId)}&name=${encodeURIComponent(name)}`
+      );
+    },
+    [navigate]
+  );
+
   switch (activeView) {
     case SettingsView.SHOW_ACCOUNT_BACKUP:
       return <AccountBackup onBack={() => setActiveView(null)} />;
@@ -103,6 +115,13 @@ const Settings = (): React.ReactElement => {
         <ShareContact
           onBack={() => setActiveView(null)}
           pregeneratedQR={pregeneratedQR || ''}
+        />
+      );
+    case SettingsView.SCAN_QR_CODE:
+      return (
+        <ScanQRCode
+          onBack={() => setActiveView(null)}
+          onScanSuccess={handleScanSuccess}
         />
       );
     default:
@@ -184,6 +203,18 @@ const Settings = (): React.ReactElement => {
             <ShareContactIcon className="mr-4" />
             <span className="text-base font-semibold flex-1 text-left">
               Share Contact
+            </span>
+          </Button>
+          {/* Scan QR Code Button */}
+          <Button
+            variant="outline"
+            size="custom"
+            className="w-full h-[54px] flex items-center px-4 justify-start rounded-lg"
+            onClick={() => setActiveView(SettingsView.SCAN_QR_CODE)}
+          >
+            <CameraIcon className="mr-4" />
+            <span className="text-base font-semibold flex-1 text-left">
+              Scan QR Code
             </span>
           </Button>
           {/* Security Button */}

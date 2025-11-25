@@ -22,6 +22,34 @@ export const UnauthenticatedRoutes: React.FC<UnauthenticatedRoutesProps> = ({
 }) => {
   const navigate = useNavigate();
 
+  const handleAccountSelected = () => {
+    onLoginErrorChange(null);
+  };
+
+  const handleOnCreateNewAccount = () => {
+    onLoginErrorChange(null);
+    navigate('/setup');
+  };
+
+  const handleOnComplete = () => {
+    useAppStore.getState().setIsInitialized(true);
+    navigate('/', { replace: true });
+  };
+
+  const handleOnBackFromSetup = async () => {
+    try {
+      const hasAny = await useAccountStore.getState().hasExistingAccount();
+      if (hasAny) {
+        navigate('/welcome');
+      } else {
+        useAppStore.getState().setIsInitialized(false);
+      }
+    } catch (error) {
+      console.error('Failed to check existing accounts:', error);
+      useAppStore.getState().setIsInitialized(false);
+    }
+  };
+
   return (
     <Routes>
       <Route
@@ -29,15 +57,8 @@ export const UnauthenticatedRoutes: React.FC<UnauthenticatedRoutesProps> = ({
         element={
           <Login
             key="login-router"
-            onCreateNewAccount={() => {
-              onLoginErrorChange(null); // Clear error when navigating to setup
-              navigate('/setup');
-            }}
-            onAccountSelected={() => {
-              // Only navigate if userProfile is actually set (successful login)
-              // The route will automatically update when userProfile changes
-              onLoginErrorChange(null); // Clear error on successful login
-            }}
+            onCreateNewAccount={handleOnCreateNewAccount}
+            onAccountSelected={handleAccountSelected}
             accountInfo={existingAccountInfo}
             persistentError={loginError}
             onErrorChange={onLoginErrorChange}
@@ -48,28 +69,8 @@ export const UnauthenticatedRoutes: React.FC<UnauthenticatedRoutesProps> = ({
         path="/setup"
         element={
           <AccountCreation
-            onComplete={() => {
-              useAppStore.getState().setIsInitialized(true);
-              // After account creation, go to discussions
-              navigate('/', { replace: true });
-            }}
-            onBack={() => {
-              // If there is at least one account, go back to welcome; otherwise go to onboarding
-              useAccountStore
-                .getState()
-                .hasExistingAccount()
-                .then(hasAny => {
-                  if (hasAny) {
-                    navigate('/welcome');
-                  } else {
-                    useAppStore.getState().setIsInitialized(false);
-                  }
-                })
-                .catch(() => {
-                  // On error, fall back to onboarding
-                  useAppStore.getState().setIsInitialized(false);
-                });
-            }}
+            onComplete={handleOnComplete}
+            onBack={handleOnBackFromSetup}
           />
         }
       />

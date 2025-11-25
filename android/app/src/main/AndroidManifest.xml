@@ -38,6 +38,7 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
     <!-- For Android 9 (API 28) or lower -->
     <uses-permission android:name="android.permission.USE_FINGERPRINT" />

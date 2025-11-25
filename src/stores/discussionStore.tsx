@@ -92,10 +92,6 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
 
     const subscriptionContacts = contactsQuery.subscribe({
       next: contactsList => {
-        console.log(
-          'Global live query received contacts:',
-          contactsList.length
-        );
         set({ contacts: contactsList });
       },
       error: error => {
