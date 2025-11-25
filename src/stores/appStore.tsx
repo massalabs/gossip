@@ -3,6 +3,7 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import { NetworkName } from '@massalabs/massa-web3';
 import { createSelectors } from './utils/createSelectors';
 import { STORAGE_KEYS } from '../utils/localStorage';
+import { ParsedInvite } from '../utils/qrCodeParser';
 
 interface AppStoreState {
   // Network config (read by accountStore)
@@ -18,8 +19,8 @@ interface AppStoreState {
   isInitialized: boolean;
   setIsInitialized: (value: boolean) => void;
   // Pending deep link
-  pendingDeepLink: string | null;
-  setPendingDeepLink: (value: string | null) => void;
+  pendingDeepLinkInfo: ParsedInvite | null;
+  setPendingDeepLinkInfo: (value: ParsedInvite | null) => void;
 }
 
 const useAppStoreBase = create<AppStoreState>()(
@@ -46,9 +47,9 @@ const useAppStoreBase = create<AppStoreState>()(
         set({ isInitialized: value });
       },
       // Pending deep link
-      pendingDeepLink: null,
-      setPendingDeepLink: (value: string | null) => {
-        set({ pendingDeepLink: value });
+      pendingDeepLinkInfo: null,
+      setPendingDeepLinkInfo: (value: ParsedInvite | null) => {
+        set({ pendingDeepLinkInfo: value });
       },
     }),
     {
@@ -59,7 +60,7 @@ const useAppStoreBase = create<AppStoreState>()(
         debugOverlayVisible: state.debugOverlayVisible,
         isInitialized: state.isInitialized,
         networkName: state.networkName,
-        pendingDeepLink: state.pendingDeepLink,
+        setPendingDeepLinkInfo: state.setPendingDeepLinkInfo,
       }),
     }
   )

@@ -1,6 +1,5 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { parseInvite } from '../utils/qrCodeParser';
 import { useAppStore } from '../stores/appStore';
 
 /**
@@ -10,28 +9,26 @@ import { useAppStore } from '../stores/appStore';
  * This hook should be called in AuthenticatedRoutes to handle deep links
  */
 export const usePendingDeepLink = () => {
-  const pendingDeepLink = useAppStore(s => s.pendingDeepLink);
-  const setPendingDeepLink = useAppStore(s => s.setPendingDeepLink);
+  const pendingDeepLinkInfo = useAppStore(s => s.pendingDeepLinkInfo);
+  const setPendingDeepLinkInfo = useAppStore(s => s.setPendingDeepLinkInfo);
   const navigate = useNavigate();
 
   useEffect(() => {
     const handlePendingDeepLink = async () => {
-      if (!pendingDeepLink) return;
+      if (!pendingDeepLinkInfo) return;
 
       try {
-        const { userId, name } = parseInvite(pendingDeepLink);
-
         navigate(`/new-contact`, {
           replace: true,
-          state: { userId, name },
+          state: pendingDeepLinkInfo,
         });
       } catch (error) {
         console.error('Failed to retrieve pending deep link:', error);
       } finally {
-        setPendingDeepLink(null);
+        setPendingDeepLinkInfo(null);
       }
     };
 
     handlePendingDeepLink();
-  }, [navigate, pendingDeepLink, setPendingDeepLink]);
+  }, [navigate, pendingDeepLinkInfo, setPendingDeepLinkInfo]);
 };

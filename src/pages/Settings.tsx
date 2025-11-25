@@ -100,9 +100,10 @@ const Settings = (): React.ReactElement => {
 
   const handleScanSuccess = useCallback(
     (userId: string, name: string) => {
-      navigate(
-        `/new-contact?userId=${encodeURIComponent(userId)}&name=${encodeURIComponent(name)}`
-      );
+      navigate(`/new-contact`, {
+        state: { userId, name },
+        replace: true,
+      });
     },
     [navigate]
   );

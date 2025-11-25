@@ -4,6 +4,7 @@ import {
   CapacitorBarcodeScannerTypeHint,
 } from '@capacitor/barcode-scanner';
 import { QRScannerProps } from './types';
+import toast from 'react-hot-toast';
 
 const NativeQRScanner: React.FC<QRScannerProps> = ({ onScan, onError }) => {
   const startNativeScanner = useCallback(async () => {
@@ -15,10 +16,12 @@ const NativeQRScanner: React.FC<QRScannerProps> = ({ onScan, onError }) => {
       });
 
       // TODO: Improve Scan Result handling
+      toast.success(`QR code scanned successfully: ${result.ScanResult}`);
       onScan(result.ScanResult);
     } catch (err: unknown) {
       const error = err instanceof Error ? err.message : String(err);
-      console.error('Failed to scan barcode:', error);
+      // TODO: improve error handling
+      toast.error(`Failed to scan barcode: ${error}`);
       onError?.(error);
     }
   }, [onScan, onError]);

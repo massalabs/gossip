@@ -15,7 +15,7 @@ import { CameraIcon, UploadIcon } from '../components/ui/icons';
 const NewContact: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
-  const location = useLocation();
+  const { state } = useLocation();
   const [isDiscardModalOpen, setIsDiscardModalOpen] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
 
@@ -36,12 +36,11 @@ const NewContact: React.FC = () => {
   } = useContactForm();
 
   useEffect(() => {
-    const { userId, name } = location.state;
-    if (!userId || !name) return;
+    if (!state || !state.userId || !state.name) return;
 
-    handleUserIdChange(userId);
-    handleNameChange(name);
-  }, [location.state, handleUserIdChange, handleNameChange]);
+    handleUserIdChange(state.userId);
+    handleNameChange(state.name);
+  }, [state, handleUserIdChange, handleNameChange]);
 
   const handleBack = useCallback(() => {
     if (hasUnsavedChanges) {

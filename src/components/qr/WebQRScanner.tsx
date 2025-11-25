@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useState } from 'react';
 import { Scanner } from '@yudiel/react-qr-scanner';
 import type { IDetectedBarcode } from '@yudiel/react-qr-scanner';
 import { QRScannerProps } from './types';
@@ -9,12 +9,13 @@ const WebQRScanner: React.FC<QRScannerProps> = ({
   onError,
   onClose,
 }) => {
+  const [isScanning, setIsScanning] = useState(true);
+
   const handleScan = useCallback(
     (detectedCodes: IDetectedBarcode[]) => {
-      if (detectedCodes && detectedCodes.length > 0) {
-        const firstCode = detectedCodes[0];
-        onScan(firstCode.rawValue);
-      }
+      const firstCode = detectedCodes[0];
+      setIsScanning(false);
+      onScan(firstCode.rawValue);
     },
     [onScan]
   );
@@ -31,20 +32,22 @@ const WebQRScanner: React.FC<QRScannerProps> = ({
   return (
     <div className="relative max-w-md mx-auto h-full">
       {onClose && <ScannerBackButton onClose={onClose} />}
-      <Scanner
-        onScan={handleScan}
-        onError={handleError}
-        scanDelay={200}
-        formats={['qr_code']}
-        sound={false}
-        constraints={{
-          facingMode: 'environment',
-        }}
-        components={{
-          torch: true,
-          finder: true,
-        }}
-      />
+      {isScanning && (
+        <Scanner
+          onScan={handleScan}
+          onError={handleError}
+          scanDelay={200}
+          formats={['qr_code']}
+          sound={false}
+          constraints={{
+            facingMode: 'environment',
+          }}
+          components={{
+            torch: true,
+            finder: true,
+          }}
+        />
+      )}
     </div>
   );
 };
