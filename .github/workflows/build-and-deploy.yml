@@ -4,12 +4,17 @@ on:
   workflow_dispatch:
     inputs:
       deploy_android:
-        description: "Deploy Android"
+        description: "Build Android"
         required: false
         default: true
         type: boolean
+      upload_to_play_store:
+        description: "Upload Android to Google Play"
+        required: false
+        default: false
+        type: boolean
       deploy_ios:
-        description: "Deploy iOS"
+        description: "Build iOS"
         required: false
         default: true
         type: boolean
@@ -111,11 +116,17 @@ jobs:
       - name: Display deployment info
         run: |
           if [ "${{ github.event_name }}" == "push" ]; then
-            echo "🚀 Automatic Android deployment triggered by push to ${{ github.ref_name }}"
-            echo "📱 Target: Google Play Internal Testing"
+            echo "🚀 Automatic Android build triggered by push to ${{ github.ref_name }}"
+            echo "📱 Build: AAB will be created and available as artifact"
+            echo "📤 Upload: Automatic upload to Play Store (Internal Testing)"
           else
-            echo "🎯 Manual Android deployment triggered"
-            echo "📱 Target: Google Play ${{ github.event.inputs.android_track }} track"
+            echo "🎯 Manual Android build triggered"
+            echo "📱 Build: AAB will be created and available as artifact"
+            if [ "${{ github.event.inputs.upload_to_play_store }}" == "true" ]; then
+              echo "📤 Upload: Will upload to Google Play ${{ github.event.inputs.android_track }} track"
+            else
+              echo "📤 Upload: Disabled - AAB will only be available as artifact"
+            fi
           fi
 
       - name: Create keystore from secrets
@@ -123,7 +134,9 @@ jobs:
           echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > ${{ github.workspace }}/android/app/keystore.jks
           echo "ANDROID_KEYSTORE_FILE=${{ github.workspace }}/android/app/keystore.jks" >> $GITHUB_ENV
 
-      - name: Build and Upload to Google Play
+      - name: Build and optionally upload Android
+        continue-on-error: true
+        id: android_build_upload
         env:
           ANDROID_KEYSTORE_FILE: ${{ env.ANDROID_KEYSTORE_FILE }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -132,24 +145,69 @@ jobs:
           PLAY_STORE_JSON_KEY: ${{ secrets.PLAY_STORE_JSON_KEY }}
         working-directory: android
         run: |
+          # Determine if we should upload to Play Store
+          SHOULD_UPLOAD="false"
           if [ "${{ github.event_name }}" == "push" ]; then
-            bundle exec fastlane beta
-          elif [ "${{ github.event.inputs.android_track }}" == "internal" ]; then
-            bundle exec fastlane beta
-          elif [ "${{ github.event.inputs.android_track }}" == "beta" ]; then
-            bundle exec fastlane beta_public
-          elif [ "${{ github.event.inputs.android_track }}" == "production" ]; then
-            bundle exec fastlane production
+            SHOULD_UPLOAD="true"
+            TRACK="internal"
+          elif [ "${{ github.event.inputs.upload_to_play_store }}" == "true" ]; then
+            SHOULD_UPLOAD="true"
+            TRACK="${{ github.event.inputs.android_track }}"
           fi
 
-      - name: Upload AAB artifact
-        if: success()
+          # Build and optionally upload
+          if [ "$SHOULD_UPLOAD" == "true" ]; then
+            echo "📦 Building and uploading to Google Play ($TRACK track)..."
+            if [ "$TRACK" == "internal" ]; then
+              bundle exec fastlane beta
+            elif [ "$TRACK" == "beta" ]; then
+              bundle exec fastlane beta_public
+            elif [ "$TRACK" == "production" ]; then
+              bundle exec fastlane production
+            fi
+          else
+            echo "📦 Building Android AAB (no upload)..."
+            bundle exec fastlane build
+          fi
+
+      - name: Build and upload status
+        if: always()
+        run: |
+          if [ "${{ steps.android_build_upload.outcome }}" == "success" ]; then
+            echo "✅ Android build succeeded!"
+            if [ "${{ github.event_name }}" == "push" ] || [ "${{ github.event.inputs.upload_to_play_store }}" == "true" ]; then
+              echo "✅ Upload to Google Play Store succeeded!"
+            fi
+          elif [ "${{ steps.android_build_upload.outcome }}" == "failure" ]; then
+            echo "⚠️ Android build or upload failed"
+            echo "📦 Checking if AAB was created..."
+            if [ -f "android/app/build/outputs/bundle/release/app-release.aab" ]; then
+              echo "✅ AAB file exists and will be available as artifact"
+            else
+              echo "❌ AAB file was not created"
+            fi
+          fi
+          echo ""
+          echo "💾 AAB artifact will be available in GitHub Actions artifacts"
+
+      - name: Upload AAB artifact (Always available)
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: android-app-${{ github.event_name == 'push' && 'internal' || github.event.inputs.android_track }}-${{ github.run_number }}
+          name: android-app-${{ github.event_name == 'push' && 'auto' || github.event.inputs.android_track }}-${{ github.run_number }}
           path: android/app/build/outputs/bundle/release/*.aab
           if-no-files-found: error
           retention-days: 30
+
+      - name: Upload APK artifact (Debug - for testing)
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk-debug-${{ github.run_number }}
+          path: android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Cleanup keystore
         if: always()
