@@ -74,9 +74,7 @@ export class MessageService {
 
       while (true) {
         const seekers = session.getMessageBoardReadKeys();
-        const seekerStrings = seekers.map(s =>
-          Buffer.from(s).toString('base64')
-        );
+        const seekerStrings = seekers.map(s => encodeToBase64(s));
         const currentSeekers = new Set(seekerStrings);
 
         const allSame =
@@ -207,7 +205,7 @@ export class MessageService {
           if (!originalMessage) {
             console.warn(
               'Original message not found for reply',
-              Buffer.from(message.replyTo.originalSeeker).toString('base64')
+              encodeToBase64(message.replyTo.originalSeeker)
             );
           }
           replyToMessageId = originalMessage?.id;
