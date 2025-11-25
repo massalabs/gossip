@@ -20,6 +20,7 @@ import { OnboardingRoutes } from './routes/OnboardingRoutes';
 import { useVersionCheck } from './hooks/useVersionCheck.ts';
 import VersionUpdateModal from './components/ui/VersionUpdateModal.tsx';
 import { AppUrlListener } from './components/AppUrlListener';
+import { toastOptions } from './utils/toastOptions.ts';
 
 const AppContent: React.FC = () => {
   const { isLoading, userProfile } = useAccountStore();
@@ -78,39 +79,17 @@ const AppContent: React.FC = () => {
 function App() {
   const { showUpdatePrompt, handleForceUpdate, dismissUpdate } =
     useVersionCheck();
+
   return (
     <BrowserRouter>
       <ErrorBoundary>
-        <AppUrlListener />
+        <AppUrlListener />;
         <AppContent />
         <DebugOverlay />
         <div className="hidden">
           <PWABadge />
         </div>
-        <Toaster
-          position="top-center"
-          toastOptions={{
-            duration: 4000,
-            style: {
-              background: '#363636',
-              color: '#fff',
-            },
-            success: {
-              duration: 3000,
-              iconTheme: {
-                primary: '#4ade80',
-                secondary: '#fff',
-              },
-            },
-            error: {
-              duration: 5000,
-              iconTheme: {
-                primary: '#ef4444',
-                secondary: '#fff',
-              },
-            },
-          }}
-        />
+        <Toaster position="top-center" toastOptions={toastOptions} />
         <VersionUpdateModal
           isOpen={showUpdatePrompt}
           onClose={dismissUpdate}

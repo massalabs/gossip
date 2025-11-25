@@ -9,8 +9,8 @@ export const AppUrlListener = () => {
   const processInvite = useCallback(async (invitePath: string) => {
     if (!invitePath) return;
     try {
-      const invite = parseInvite(invitePath);
-      const deepLink = `${INVITE_BASE_URL}/${invite.userId}${invite.name ? `/${invite.name}` : ''}`;
+      const { userId, name } = parseInvite(invitePath);
+      const deepLink = `${INVITE_BASE_URL}/${userId}/${name}}`;
 
       await setPendingDeepLink(deepLink);
     } catch (error) {
@@ -18,28 +18,26 @@ export const AppUrlListener = () => {
     }
   }, []);
 
-  const handleWebUrl = useCallback(async () => {
-    const url = window.location.href;
-    if (url.includes('/invite/')) {
-      await processInvite(url);
-      window.history.replaceState(null, '', '/');
-    }
-  }, [processInvite]);
-
   useEffect(() => {
-    if (!Capacitor.isNativePlatform()) {
-      handleWebUrl();
-    } else {
-      const handler = async (event: { url: string }) => {
-        await processInvite(event.url);
-      };
-
-      App.addListener('appUrlOpen', handler);
-      return () => {
-        App.removeAllListeners();
-      };
-    }
-  }, [handleWebUrl, processInvite]);
+    const handle = async () => {
+      if (!Capacitor.isNativePlatform()) {
+        const url = window.location.href;
+        if (url.includes('/invite/')) {
+          await processInvite(url);
+          window.history.replaceState(null, '', '/');
+        }
+      } else {
+        App.addListener(
+          'appUrlOpen',
+          async event => await processInvite(event.url)
+        );
+        return () => {
+          App.removeAllListeners();
+        };
+      }
+    };
+    handle();
+  }, [processInvite]);
 
   return null;
 };
