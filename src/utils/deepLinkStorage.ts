@@ -12,5 +12,3 @@ export const getPendingDeepLink = async (): Promise<string | null> => {
   await Preferences.remove({ key: PENDING_DEEPLINK_KEY });
   return value;
 };
-
-export const clearPendingDeepLink = async (): Promise<void> => {};
