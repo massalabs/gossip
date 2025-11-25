@@ -1,3 +1,5 @@
+export const INVITE_BASE_URL = '/invite';
+
 /**
  * Returns the correct public base URL for deep links / QR codes
  *
@@ -36,5 +38,5 @@ export function generateQRCodeUrl(userId: string, userName: string): string {
   const safeId = encodeURIComponent(userId.trim());
   const safeName = encodeURIComponent(userName.trim());
 
-  return `${base}/invite/${safeId}/${safeName}`;
+  return `${base}${INVITE_BASE_URL}/${safeId}/${safeName}`;
 }

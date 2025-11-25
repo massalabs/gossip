@@ -21,7 +21,10 @@ const ScanQRCode: React.FC<ScanQRCodeProps> = ({ onBack, onScanSuccess }) => {
       const { userId, name } = parseInvite(qrText);
       onScanSuccess(userId, name);
     } catch (error) {
-      toast.error(`Failed to parse QR code: ${error}`);
+      const message =
+        error instanceof Error ? error.message : 'Invalid QR code format';
+
+      toast.error(`Failed to parse QR code: ${message}`);
     } finally {
       setIsProcessing(false);
     }

@@ -3,21 +3,27 @@ import { Capacitor } from '@capacitor/core';
 import { App } from '@capacitor/app';
 import { parseInvite } from '../utils/qrCodeParser';
 import { setPendingDeepLink } from '../utils/deepLinkStorage';
+import { INVITE_BASE_URL } from '../utils/qrCodeUrl';
 
 export const AppUrlListener = () => {
   const processInvite = useCallback(async (invitePath: string) => {
     if (!invitePath) return;
+    try {
+      const invite = parseInvite(invitePath);
+      const deepLink = `${INVITE_BASE_URL}/${invite.userId}${invite.name ? `/${invite.name}` : ''}`;
 
-    const invite = parseInvite(invitePath);
-    const deepLink = `/invite/${invite.userId}${invite.name ? `/${invite.name}` : ''}`;
-
-    await setPendingDeepLink(deepLink);
+      await setPendingDeepLink(deepLink);
+    } catch (error) {
+      console.error('Error parsing invite:', error);
+    }
   }, []);
 
   const handleWebUrl = useCallback(async () => {
     const url = window.location.href;
-    await processInvite(url);
-    window.history.replaceState(null, '', '/');
+    if (url.includes('/invite/')) {
+      await processInvite(url);
+      window.history.replaceState(null, '', '/');
+    }
   }, [processInvite]);
 
   useEffect(() => {

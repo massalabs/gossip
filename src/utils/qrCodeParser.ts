@@ -1,3 +1,5 @@
+import { INVITE_BASE_URL } from './qrCodeUrl';
+
 // Single regex – the source of truth
 const INVITE_REGEX = /^\/invite\/([^/#?\s]+)(?:\/([^/#?\s]*))?/i;
 
@@ -20,11 +22,9 @@ export function parseInvite(input: string): ParsedInvite {
 
   const [, userId, rawName] = match;
 
-  const name = rawName?.trim() ? decodeURIComponent(rawName) : '';
-
   return {
     userId: decodeURIComponent(userId),
-    name,
+    name: decodeURIComponent(rawName),
   };
 }
 
@@ -38,7 +38,7 @@ export function extractInvitePath(input: string): string | null {
   const trimmed = input.trim();
 
   // Fast path – already a clean path
-  if (trimmed.startsWith('/invite/')) {
+  if (trimmed.startsWith(`${INVITE_BASE_URL}/`)) {
     return trimmed.split(/[?#]/)[0];
   }
 
@@ -47,15 +47,14 @@ export function extractInvitePath(input: string): string | null {
 
     // 1. Check pathname first (invite might be in pathname even if hash exists)
     const pathname = url.pathname.split(/[?#]/)[0];
-    if (pathname.startsWith('/invite/')) {
+    if (pathname.startsWith(`${INVITE_BASE_URL}/`)) {
       return pathname;
     }
 
     // 2. HashRouter → #/invite/…
     if (url.hash) {
       const hashPath = url.hash.slice(1).split(/[?#]/)[0];
-      console.log('Hash path:', hashPath);
-      return hashPath.startsWith('/invite/') ? hashPath : null;
+      return hashPath.startsWith(`${INVITE_BASE_URL}/`) ? hashPath : null;
     }
 
     return null;
