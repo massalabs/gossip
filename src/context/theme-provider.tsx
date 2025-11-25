@@ -52,11 +52,12 @@ export function ThemeProvider({
 
       // Update status bar and edge-to-edge for native platforms
       if (Capacitor.isNativePlatform()) {
-        void StatusBar.hide();
+        const backgroundColor = resolved === 'dark' ? '#18181b' : '#f8f9fa';
         void StatusBar.setStyle({
           style: resolved === 'dark' ? Style.Dark : Style.Light,
         });
-        const backgroundColor = resolved === 'dark' ? '#18181b' : '#f8f9fa';
+
+        void StatusBar.setBackgroundColor({ color: backgroundColor });
         void EdgeToEdge.setBackgroundColor({ color: backgroundColor }).catch(
           err => {
             console.warn('Failed to set EdgeToEdge background color:', err);
