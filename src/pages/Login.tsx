@@ -162,8 +162,8 @@ const Login: React.FC<LoginProps> = React.memo(
         const errorMessage = 'Invalid password. Please try again.';
         onErrorChange?.(errorMessage);
         setPassword('');
-        if (window.location.hash !== '#/welcome') {
-          window.location.hash = '#/welcome';
+        if (window.location.pathname !== '/welcome') {
+          window.location.pathname = '/welcome';
         }
       } finally {
         setIsLoading(false);

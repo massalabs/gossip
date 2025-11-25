@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { HashRouter } from 'react-router-dom';
+import { BrowserRouter } from 'react-router-dom';
 import { useAccountStore } from './stores/accountStore';
 import { useAppStore } from './stores/appStore';
 import ErrorBoundary from './components/ui/ErrorBoundary.tsx';
@@ -79,7 +79,7 @@ function App() {
   const { showUpdatePrompt, handleForceUpdate, dismissUpdate } =
     useVersionCheck();
   return (
-    <HashRouter>
+    <BrowserRouter>
       <ErrorBoundary>
         <AppUrlListener />
         <AppContent />
@@ -117,7 +117,7 @@ function App() {
           onAccept={handleForceUpdate}
         />
       </ErrorBoundary>
-    </HashRouter>
+    </BrowserRouter>
   );
 }
 
