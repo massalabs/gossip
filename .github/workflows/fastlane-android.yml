@@ -1,7 +1,9 @@
-name: Fastlane Android Build
+name: Fastlane Android Build (Legacy - Use build-and-deploy.yml instead)
 
+# DEPRECATED: Use .github/workflows/build-and-deploy.yml for optimized builds
+# This workflow is kept for emergency manual Android-only builds
 on:
-    # Déclenchement manuel
+    # Déclenchement manuel uniquement (push automatique désactivé)
     workflow_dispatch:
         inputs:
             upload_to_play_store:
@@ -18,17 +20,6 @@ on:
                     - internal
                     - beta
                     - production
-    # Déclenchement automatique sur push (build + upload vers Internal Testing)
-    push:
-        branches:
-            - main
-            - fastlane
-        paths:
-            - "src/**"
-            - "android/**"
-            - "capacitor.config.ts"
-            - "package.json"
-            - ".github/workflows/fastlane-android.yml"
 
 jobs:
     build-android-fastlane:
