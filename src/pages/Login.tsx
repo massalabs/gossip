@@ -5,6 +5,7 @@ import { biometricService } from '../services/biometricService';
 import AccountSelection from '../components/account/AccountSelection';
 import AccountImport from '../components/account/AccountImport';
 import Button from '../components/ui/Button';
+import { useNavigate } from 'react-router-dom';
 
 interface LoginProps {
   onCreateNewAccount: () => void;
@@ -23,7 +24,7 @@ const Login: React.FC<LoginProps> = React.memo(
     onErrorChange,
   }) => {
     const loadAccount = useAccountStore(state => state.loadAccount);
-
+    const navigate = useNavigate();
     const [isLoading, setIsLoading] = useState(false);
     const [password, setPassword] = useState('');
     const [usePassword, setUsePassword] = useState(false);
@@ -163,7 +164,7 @@ const Login: React.FC<LoginProps> = React.memo(
         onErrorChange?.(errorMessage);
         setPassword('');
         if (window.location.pathname !== '/welcome') {
-          window.location.pathname = '/welcome';
+          navigate('/welcome');
         }
       } finally {
         setIsLoading(false);
