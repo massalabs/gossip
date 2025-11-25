@@ -34,8 +34,14 @@ export const Onboarding: React.FC<{
   return (
     <OnboardingFlow
       onComplete={() => {
-        useAppStore.getState().setIsInitialized(true);
+        // Navigate first, then set state to avoid race condition
+        // where component unmounts before navigation takes effect
         navigate('/setup');
+        // Use requestAnimationFrame to ensure navigation is processed
+        // before the state change causes Onboarding to unmount
+        requestAnimationFrame(() => {
+          useAppStore.getState().setIsInitialized(true);
+        });
       }}
       onImportMnemonic={() => onShowImportChange(true)}
     />
