@@ -29,9 +29,6 @@ export async function generateEncryptionKey(): Promise<EncryptionKey> {
 /**
  * Generate a deterministic encryption key (64 bytes) from a seed string.
  * This ensures WASM is initialized before calling.
- *
- * Note: Until the WASM bindings are rebuilt, the TS types may not reflect
- * the new parameter. We cast to `any` to call the updated binding safely.
  */
 export async function generateEncryptionKeyFromSeed(
   seed: string,

@@ -85,6 +85,26 @@ export enum SessionStatus {
   Saturated = 6,
 }
 /**
+ * Result from feeding an incoming announcement.
+ */
+export class AnnouncementResult {
+  private constructor();
+  free(): void;
+  [Symbol.dispose](): void;
+  /**
+   * Gets the announcer's public keys.
+   */
+  readonly announcer_public_keys: UserPublicKeys;
+  /**
+   * Gets the announcement timestamp in milliseconds since Unix epoch.
+   */
+  readonly timestamp: number;
+  /**
+   * Gets the user data embedded in the announcement.
+   */
+  readonly user_data: Uint8Array;
+}
+/**
  * Encryption key for AEAD operations (AES-256-SIV).
  *
  * AES-256-SIV uses a 64-byte (512-bit) key: two 256-bit keys for encryption and MAC.
@@ -221,12 +241,64 @@ export class SessionManagerWrapper {
   to_encrypted_blob(key: EncryptionKey): Uint8Array;
   /**
    * Establishes an outgoing session with a peer.
+   *
+   * # Parameters
+   *
+   * - `peer_pk`: The peer's public keys
+   * - `our_pk`: Our public keys
+   * - `our_sk`: Our secret keys
+   * - `user_data`: Arbitrary user data to include in the announcement (can be empty)
+   *
+   * # Security Warning
+   *
+   * **The user_data in announcements has reduced security compared to regular messages:**
+   * - ✅ **Plausible deniability preserved**: The user_data is not cryptographically signed,
+   *   so you can deny having sent specific user_data content (though you cannot deny the
+   *   announcement itself).
+   * - ❌ **No post-compromise secrecy**: If your long-term keys are compromised in the
+   *   future, past announcements (including their user_data) can be decrypted.
+   *
+   * **Recommendation**: Avoid including highly sensitive information in user_data. Use it for
+   * metadata like protocol version, public display names, or capability flags. Send truly
+   * sensitive data through regular messages after the session is established.
+   *
+   * # Returns
+   *
+   * The announcement bytes to publish to the blockchain.
    */
-  establish_outgoing_session(peer_pk: UserPublicKeys, our_pk: UserPublicKeys, our_sk: UserSecretKeys): Uint8Array;
+  establish_outgoing_session(peer_pk: UserPublicKeys, our_pk: UserPublicKeys, our_sk: UserSecretKeys, user_data: Uint8Array): Uint8Array;
   /**
    * Feeds an incoming announcement from the blockchain.
+   *
+   * # Parameters
+   *
+   * - `announcement_bytes`: The raw announcement bytes received from the blockchain
+   * - `our_pk`: Our public keys
+   * - `our_sk`: Our secret keys
+   *
+   * # Returns
+   *
+   * If the announcement is valid, returns an `AnnouncementResult` containing:
+   * - The announcer's public keys
+   * - The timestamp when the announcement was created (milliseconds since Unix epoch)
+   * - The user data embedded in the announcement
+   *
+   * Returns `None` if the announcement is invalid or too old.
+   *
+   * # Security Warning
+   *
+   * **The user_data in announcements has reduced security compared to regular messages:**
+   * - ✅ **Plausible deniability preserved**: The user_data is not cryptographically signed,
+   *   so the sender can deny having sent specific user_data content (though they cannot deny
+   *   the announcement itself).
+   * - ❌ **No post-compromise secrecy**: If the sender's long-term keys are compromised
+   *   in the future, all past announcements (including their user_data) can be decrypted.
+   *
+   * **Recommendation**: Treat user_data as having limited confidentiality. Use it for
+   * metadata that is not highly sensitive. Send truly sensitive information through regular
+   * messages after the session is established.
    */
-  feed_incoming_announcement(announcement_bytes: Uint8Array, our_pk: UserPublicKeys, our_sk: UserSecretKeys): UserPublicKeys | undefined;
+  feed_incoming_announcement(announcement_bytes: Uint8Array, our_pk: UserPublicKeys, our_sk: UserSecretKeys): AnnouncementResult | undefined;
   /**
    * Gets the list of message board seekers to monitor.
    */
@@ -372,6 +444,10 @@ export interface InitOutput {
   readonly sendmessageoutput_seeker: (a: number) => [number, number];
   readonly sendmessageoutput_data: (a: number) => [number, number];
   readonly __wbg_receivemessageoutput_free: (a: number, b: number) => void;
+  readonly __wbg_announcementresult_free: (a: number, b: number) => void;
+  readonly announcementresult_announcer_public_keys: (a: number) => number;
+  readonly announcementresult_timestamp: (a: number) => number;
+  readonly announcementresult_user_data: (a: number) => [number, number];
   readonly receivemessageoutput_message: (a: number) => [number, number];
   readonly receivemessageoutput_timestamp: (a: number) => number;
   readonly receivemessageoutput_acknowledged_seekers: (a: number) => any;
@@ -380,7 +456,7 @@ export interface InitOutput {
   readonly sessionmanagerwrapper_new: (a: number) => number;
   readonly sessionmanagerwrapper_from_encrypted_blob: (a: number, b: number, c: number) => [number, number, number];
   readonly sessionmanagerwrapper_to_encrypted_blob: (a: number, b: number) => [number, number, number, number];
-  readonly sessionmanagerwrapper_establish_outgoing_session: (a: number, b: number, c: number, d: number) => [number, number];
+  readonly sessionmanagerwrapper_establish_outgoing_session: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
   readonly sessionmanagerwrapper_feed_incoming_announcement: (a: number, b: number, c: number, d: number, e: number) => number;
   readonly sessionmanagerwrapper_get_message_board_read_keys: (a: number) => any;
   readonly sessionmanagerwrapper_send_message: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];

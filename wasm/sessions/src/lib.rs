@@ -116,10 +116,12 @@
 //!
 //! // Establish a session with a peer
 //! let peer_pk: UserPublicKeys = get_peer_public_keys();
+//! let user_data = b"contact_request"; // Optional user data for the announcement
 //! let _announcement = session_manager.establish_outgoing_session(
 //!     &peer_pk,
 //!     &our_pk,
 //!     &our_sk,
+//!     user_data.to_vec(),
 //! );
 //! // Publish `announcement` to the blockchain announcement board
 //!
@@ -132,11 +134,16 @@
 //! loop {
 //!     // 1. Process incoming announcements from the blockchain
 //!     for announcement_bytes in fetch_new_announcements_fn() {
-//!         session_manager.feed_incoming_announcement(
+//!         if let Some(result) = session_manager.feed_incoming_announcement(
 //!             &announcement_bytes,
 //!             &our_pk,
 //!             &our_sk
-//!         );
+//!         ) {
+//!             // Successfully processed announcement
+//!             println!("Received announcement from: {:?}", result.announcer_public_keys.derive_id());
+//!             println!("Timestamp: {}", result.timestamp_millis);
+//!             println!("User data: {:?}", String::from_utf8_lossy(&result.user_data));
+//!         }
 //!     }
 //!
 //!     // 2. Get seekers to monitor on the message board
@@ -185,10 +192,12 @@
 //!             SessionStatus::Saturated => { /* Too much lag, wait for acks */ },
 //!             SessionStatus::PeerRequested => {
 //!                 // Peer wants session, respond with our announcement
+//!                 let user_data = b""; // Can include additional data
 //!                 let _announcement = session_manager.establish_outgoing_session(
 //!                     &get_peer_pk_fn(&peer_id),
 //!                     &our_pk,
 //!                     &our_sk,
+//!                     user_data.to_vec(),
 //!                 );
 //!             },
 //!             _ => { /* Handle other states */ },
@@ -213,4 +222,6 @@ mod utils;
 
 pub use session::{FeedIncomingMessageOutput, SendOutgoingMessageOutput};
 pub use session::{IncomingInitiationRequest, OutgoingInitiationRequest, Session};
-pub use session_manager::{SessionManager, SessionManagerConfig, SessionStatus};
+pub use session_manager::{
+    AnnouncementResult, SessionManager, SessionManagerConfig, SessionStatus,
+};

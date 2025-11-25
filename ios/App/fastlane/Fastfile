@@ -1,0 +1,78 @@
+# Fastfile for Gossip iOS App
+
+default_platform(:ios)
+
+platform :ios do
+  # Private lane containing common build logic
+  private_lane :build_app_common do
+    # Setup code signing with match or manual certificate
+    setup_ci if ENV['CI']
+    
+    # Import certificate
+    import_certificate(
+      certificate_path: ENV["CERTIFICATE_PATH"] || "#{ENV['RUNNER_TEMP']}/certificate.p12",
+      certificate_password: ENV["APPLE_CERTIFICATE_P12_PASSWORD"],
+      keychain_name: "fastlane_tmp_keychain",
+      keychain_password: ""
+    )
+
+    # Build the app
+    build_app(
+      workspace: "App.xcworkspace",
+      scheme: "Gossip",
+      configuration: "Release",
+      export_method: "app-store",
+      output_directory: "./",
+      output_name: "Gossip.ipa",
+      clean: false,
+      export_options: {
+        method: "app-store",
+        provisioningProfiles: {},
+        signingStyle: "automatic",
+        teamID: ENV["APPLE_TEAM_ID"]
+      }
+    )
+
+    UI.success("✅ Build completed successfully!")
+  end
+
+  desc "Build the iOS app"
+  lane :build do
+    build_app_common
+  end
+
+  desc "Build and upload to TestFlight"
+  lane :beta do
+    # Build the app using common logic
+    build_app_common
+
+    # Upload to TestFlight
+    upload_to_testflight(
+      apple_id: ENV["APPLE_ID"],
+      skip_waiting_for_build_processing: ENV["FASTLANE_SKIP_WAITING_FOR_BUILD_PROCESSING"] == "true",
+      skip_submission: true,
+      distribute_external: false,
+      notify_external_testers: false,
+      ipa: "./Gossip.ipa"
+    )
+
+    UI.success("🚀 Successfully uploaded to TestFlight!")
+  end
+
+  desc "Download certificates and provisioning profiles"
+  lane :setup_signing do
+    # This lane helps you set up code signing locally
+    UI.message("Setting up code signing...")
+    
+    # You can use match for automated certificate management
+    # Or manually manage certificates
+    
+    UI.success("✅ Code signing setup completed!")
+  end
+
+  # Error handling
+  error do |lane, exception|
+    UI.error("❌ Error in lane '#{lane}': #{exception.message}")
+  end
+end
+

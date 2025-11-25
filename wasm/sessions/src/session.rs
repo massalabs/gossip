@@ -41,17 +41,17 @@
 //!
 //! // Alice creates an outgoing announcement
 //! let (alice_announcement_bytes, alice_outgoing) =
-//!     OutgoingInitiationRequest::new(&alice_pk, &alice_sk, &bob_pk);
+//!     OutgoingInitiationRequest::new(&alice_pk, &alice_sk, &bob_pk, vec![]);
 //!
 //! // Bob receives it and parses it
-//! let alice_incoming_at_bob =
+//! let (alice_incoming_at_bob, _user_data) =
 //!     IncomingInitiationRequest::try_from(&alice_announcement_bytes, &bob_pk, &bob_sk)
 //!         .expect("Failed to parse announcement");
 //!
 //! // Bob creates his own announcement and both establish sessions
 //! let (bob_announcement_bytes, bob_outgoing) =
-//!     OutgoingInitiationRequest::new(&bob_pk, &bob_sk, &alice_pk);
-//! let bob_incoming_at_alice =
+//!     OutgoingInitiationRequest::new(&bob_pk, &bob_sk, &alice_pk, vec![]);
+//! let (bob_incoming_at_alice, _user_data) =
 //!     IncomingInitiationRequest::try_from(&bob_announcement_bytes, &alice_pk, &alice_sk).unwrap();
 //!
 //! let mut alice_session =
@@ -82,13 +82,23 @@ const MESSAGE_SEEKER_DB_KEY: &[u8] = &[1u8];
 /// Session initialization payload embedded in announcements.
 ///
 /// This is serialized, encrypted in an auth blob, and included in the announcement.
-/// It contains the random seed used to derive the initial seeker keypair through KDF.
+/// It contains the random seed used to derive the initial seeker keypair through KDF,
+/// and the message timestamp.
 #[derive(Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
 pub(crate) struct SessionInitPayload {
     /// Random 32-byte seed used to derive the initial seeker keypair via KDF
     pub(crate) seeker_seed: [u8; 32],
     /// Unix timestamp in milliseconds when this payload was created
     pub(crate) unix_timestamp_millis: u128,
+}
+
+/// Auth payload embedded in announcements.
+#[derive(Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
+pub(crate) struct AuthPayload {
+    /// Auth blob
+    pub(crate) auth_blob: auth::AuthBlob,
+    /// Custom user data
+    pub(crate) user_data: Vec<u8>,
 }
 
 /// Internal message structure containing user data and metadata.
@@ -135,7 +145,6 @@ pub struct FeedIncomingMessageOutput {
     pub newly_acknowledged_self_seekers: Vec<Vec<u8>>,
     /// User Id of the peer that sent the message
     pub user_id: Vec<u8>,
-
 }
 
 /// Incoming session initiation request from a peer.
@@ -155,11 +164,23 @@ pub struct IncomingInitiationRequest {
 }
 
 impl IncomingInitiationRequest {
+    /// Tries to parse an incoming initiation request from bytes.
+    ///
+    /// # Arguments
+    ///
+    /// * `bytes` - The raw announcement bytes received from the peer
+    /// * `our_pk` - Our static public key
+    /// * `our_sk` - Our static secret key
+    ///
+    /// # Returns
+    ///
+    /// A tuple containing the incoming initiation request and the user data from the announcement.
+    /// If the parsing fails, the function returns `None`.
     pub fn try_from(
         bytes: &[u8],
         our_pk: &auth::UserPublicKeys,
         our_sk: &auth::UserSecretKeys,
-    ) -> Option<Self> {
+    ) -> Option<(Self, Vec<u8>)> {
         // parse announcement precursor
         let incoming_announcement_precursor =
             crypto_agraphon::IncomingAnnouncementPrecursor::try_from_incoming_announcement_bytes(
@@ -173,19 +194,19 @@ impl IncomingInitiationRequest {
         let auth_key = incoming_announcement_precursor.auth_key();
 
         // deserialize announcement contents
-        let auth_blob: auth::AuthBlob =
+        let auth_payload: AuthPayload =
             bincode::serde::decode_from_slice(auth_payload, bincode::config::standard())
                 .ok()?
                 .0;
 
         // verify auth blob
-        if !auth_blob.verify(auth_key) {
+        if !auth_payload.auth_blob.verify(auth_key) {
             return None;
         }
 
         // deserialize inner data
         let init_payload: SessionInitPayload = bincode::serde::decode_from_slice(
-            auth_blob.public_payload(),
+            auth_payload.auth_blob.public_payload(),
             bincode::config::standard(),
         )
         .ok()?
@@ -193,14 +214,17 @@ impl IncomingInitiationRequest {
 
         // finalize agraphon announcement
         let agraphon_announcement = incoming_announcement_precursor
-            .finalize(auth_blob.public_keys().kem_public_key.clone())?;
+            .finalize(auth_payload.auth_blob.public_keys().kem_public_key.clone())?;
 
-        Some(Self {
-            agraphon_announcement: agraphon_announcement.clone(),
-            origin_public_keys: auth_blob.public_keys().clone(),
-            timestamp_millis: init_payload.unix_timestamp_millis,
-            seeker_seed: init_payload.seeker_seed,
-        })
+        Some((
+            Self {
+                agraphon_announcement: agraphon_announcement.clone(),
+                origin_public_keys: auth_payload.auth_blob.public_keys().clone(),
+                timestamp_millis: init_payload.unix_timestamp_millis,
+                seeker_seed: init_payload.seeker_seed,
+            },
+            auth_payload.user_data.clone(),
+        ))
     }
 }
 
@@ -222,6 +246,7 @@ impl OutgoingInitiationRequest {
         our_pk: &auth::UserPublicKeys,
         our_sk: &auth::UserSecretKeys,
         peer_pk: &auth::UserPublicKeys,
+        user_data: Vec<u8>,
     ) -> (Vec<u8>, Self) {
         // get current timestamp
         let timestamp_millis = crate::utils::timestamp_millis();
@@ -250,11 +275,18 @@ impl OutgoingInitiationRequest {
             bincode::serde::encode_to_vec(&session_init_payload, bincode::config::standard())
                 .expect("Failed to serialize outgoing session initiation request");
 
-        // create auth blob
-        let auth_blob =
-            auth::AuthBlob::new(our_pk.clone(), our_sk, session_init_payload_bytes, auth_key);
+        // create auth payload
+        let auth_payload = AuthPayload {
+            auth_blob: auth::AuthBlob::new(
+                our_pk.clone(),
+                our_sk,
+                session_init_payload_bytes,
+                auth_key,
+            ),
+            user_data,
+        };
         let auth_payload_bytes = Zeroizing::new(
-            bincode::serde::encode_to_vec(&auth_blob, bincode::config::standard())
+            bincode::serde::encode_to_vec(&auth_payload, bincode::config::standard())
                 .expect("Failed to serialize auth blob"),
         );
 
@@ -262,11 +294,14 @@ impl OutgoingInitiationRequest {
         let (announcement_bytes, announcement) =
             agraphon_announcement_precursor.finalize(auth_payload_bytes.as_slice());
 
-        (announcement_bytes, Self {
-            agraphon_announcement: announcement,
-            timestamp_millis,
-            seeker_seed,
-        })
+        (
+            announcement_bytes,
+            Self {
+                agraphon_announcement: announcement,
+                timestamp_millis,
+                seeker_seed,
+            },
+        )
     }
 }
 
@@ -322,9 +357,9 @@ impl Session {
     /// # use sessions::*;
     /// # let (alice_pk, alice_sk) = derive_keys_from_static_root_secret(&StaticRootSecret::from_passphrase(b"alice"));
     /// # let (bob_pk, bob_sk) = derive_keys_from_static_root_secret(&StaticRootSecret::from_passphrase(b"bob"));
-    /// let (announcement_bytes, outgoing) = OutgoingInitiationRequest::new(&alice_pk, &alice_sk, &bob_pk);
-    /// # let (bob_announcement, _) = OutgoingInitiationRequest::new(&bob_pk, &bob_sk, &alice_pk);
-    /// # let incoming = IncomingInitiationRequest::try_from(&bob_announcement, &alice_pk, &alice_sk).unwrap();
+    /// let (announcement_bytes, outgoing) = OutgoingInitiationRequest::new(&alice_pk, &alice_sk, &bob_pk, vec![]);
+    /// # let (bob_announcement, _) = OutgoingInitiationRequest::new(&bob_pk, &bob_sk, &alice_pk, vec![]);
+    /// # let (incoming, _user_data) = IncomingInitiationRequest::try_from(&bob_announcement, &alice_pk, &alice_sk).unwrap();
     /// let session = Session::from_initiation_request_pair(&outgoing, &incoming);
     /// ```
     pub fn from_initiation_request_pair(
@@ -630,7 +665,7 @@ mod tests {
         let (peer_pk, _peer_sk) = generate_test_keypair();
 
         let (announcement_bytes, outgoing_req) =
-            OutgoingInitiationRequest::new(&our_pk, &our_sk, &peer_pk);
+            OutgoingInitiationRequest::new(&our_pk, &our_sk, &peer_pk, vec![]);
 
         assert!(!announcement_bytes.is_empty());
         assert!(outgoing_req.timestamp_millis > 0);
@@ -644,14 +679,16 @@ mod tests {
         let (peer_pk, peer_sk) = generate_test_keypair();
 
         // Create an outgoing request from peer's perspective
-        let (announcement_bytes, _) = OutgoingInitiationRequest::new(&peer_pk, &peer_sk, &our_pk);
+        let (announcement_bytes, _) =
+            OutgoingInitiationRequest::new(&peer_pk, &peer_sk, &our_pk, vec![]);
 
         // Parse it as incoming from our perspective
         let incoming_req =
             IncomingInitiationRequest::try_from(&announcement_bytes, &our_pk, &our_sk);
 
         assert!(incoming_req.is_some());
-        let incoming_req = incoming_req.unwrap();
+        let (incoming_req, user_data) = incoming_req.unwrap();
+        assert!(user_data.is_empty());
         assert!(incoming_req.timestamp_millis > 0);
         assert_eq!(
             incoming_req.origin_public_keys.derive_id(),
@@ -667,7 +704,8 @@ mod tests {
         let (wrong_pk, _wrong_sk) = generate_test_keypair();
 
         // Create an announcement for wrong_pk
-        let (announcement_bytes, _) = OutgoingInitiationRequest::new(&peer_pk, &peer_sk, &wrong_pk);
+        let (announcement_bytes, _) =
+            OutgoingInitiationRequest::new(&peer_pk, &peer_sk, &wrong_pk, vec![]);
 
         // Try to parse with our keys - should fail
         let incoming_req =
@@ -695,19 +733,19 @@ mod tests {
 
         // Alice creates outgoing request to Bob
         let (alice_announcement, alice_outgoing) =
-            OutgoingInitiationRequest::new(&alice_pk, &alice_sk, &bob_pk);
+            OutgoingInitiationRequest::new(&alice_pk, &alice_sk, &bob_pk, vec![]);
 
         // Bob creates outgoing request to Alice
         let (bob_announcement, bob_outgoing) =
-            OutgoingInitiationRequest::new(&bob_pk, &bob_sk, &alice_pk);
+            OutgoingInitiationRequest::new(&bob_pk, &bob_sk, &alice_pk, vec![]);
 
         // Alice receives Bob's announcement
-        let bob_incoming_at_alice =
+        let (bob_incoming_at_alice, _) =
             IncomingInitiationRequest::try_from(&bob_announcement, &alice_pk, &alice_sk)
                 .expect("Failed to parse Bob's announcement at Alice");
 
         // Bob receives Alice's announcement
-        let alice_incoming_at_bob =
+        let (alice_incoming_at_bob, _) =
             IncomingInitiationRequest::try_from(&alice_announcement, &bob_pk, &bob_sk)
                 .expect("Failed to parse Alice's announcement at Bob");
 
@@ -729,13 +767,13 @@ mod tests {
         // Establish sessions
         let _timestamp = crate::utils::timestamp_millis();
         let (alice_announcement, alice_outgoing) =
-            OutgoingInitiationRequest::new(&alice_pk, &alice_sk, &bob_pk);
+            OutgoingInitiationRequest::new(&alice_pk, &alice_sk, &bob_pk, vec![]);
         let (bob_announcement, bob_outgoing) =
-            OutgoingInitiationRequest::new(&bob_pk, &bob_sk, &alice_pk);
+            OutgoingInitiationRequest::new(&bob_pk, &bob_sk, &alice_pk, vec![]);
 
-        let bob_incoming_at_alice =
+        let (bob_incoming_at_alice, _) =
             IncomingInitiationRequest::try_from(&bob_announcement, &alice_pk, &alice_sk).unwrap();
-        let alice_incoming_at_bob =
+        let (alice_incoming_at_bob, _) =
             IncomingInitiationRequest::try_from(&alice_announcement, &bob_pk, &bob_sk).unwrap();
 
         let mut alice_session =
@@ -773,13 +811,13 @@ mod tests {
         // Establish sessions
         let _timestamp = crate::utils::timestamp_millis();
         let (alice_announcement, alice_outgoing) =
-            OutgoingInitiationRequest::new(&alice_pk, &alice_sk, &bob_pk);
+            OutgoingInitiationRequest::new(&alice_pk, &alice_sk, &bob_pk, vec![]);
         let (bob_announcement, bob_outgoing) =
-            OutgoingInitiationRequest::new(&bob_pk, &bob_sk, &alice_pk);
+            OutgoingInitiationRequest::new(&bob_pk, &bob_sk, &alice_pk, vec![]);
 
-        let bob_incoming_at_alice =
+        let (bob_incoming_at_alice, _) =
             IncomingInitiationRequest::try_from(&bob_announcement, &alice_pk, &alice_sk).unwrap();
-        let alice_incoming_at_bob =
+        let (alice_incoming_at_bob, _) =
             IncomingInitiationRequest::try_from(&alice_announcement, &bob_pk, &bob_sk).unwrap();
 
         let mut alice_session =
@@ -828,13 +866,13 @@ mod tests {
         // Establish session between Alice and Bob
         let _timestamp = crate::utils::timestamp_millis();
         let (alice_announcement, alice_outgoing) =
-            OutgoingInitiationRequest::new(&alice_pk, &alice_sk, &bob_pk);
+            OutgoingInitiationRequest::new(&alice_pk, &alice_sk, &bob_pk, vec![]);
         let (bob_announcement, _bob_outgoing) =
-            OutgoingInitiationRequest::new(&bob_pk, &bob_sk, &alice_pk);
+            OutgoingInitiationRequest::new(&bob_pk, &bob_sk, &alice_pk, vec![]);
 
-        let bob_incoming_at_alice =
+        let (bob_incoming_at_alice, _) =
             IncomingInitiationRequest::try_from(&bob_announcement, &alice_pk, &alice_sk).unwrap();
-        let _alice_incoming_at_bob =
+        let (_alice_incoming_at_bob, _) =
             IncomingInitiationRequest::try_from(&alice_announcement, &bob_pk, &bob_sk).unwrap();
 
         let mut alice_session =
@@ -842,12 +880,12 @@ mod tests {
 
         // Eve establishes her own session with Alice
         let (eve_announcement, eve_outgoing) =
-            OutgoingInitiationRequest::new(&eve_pk, &eve_sk, &alice_pk);
-        let eve_incoming_at_alice =
+            OutgoingInitiationRequest::new(&eve_pk, &eve_sk, &alice_pk, vec![]);
+        let (eve_incoming_at_alice, _) =
             IncomingInitiationRequest::try_from(&eve_announcement, &alice_pk, &alice_sk).unwrap();
         let (alice_to_eve_announcement, _alice_to_eve_outgoing) =
-            OutgoingInitiationRequest::new(&alice_pk, &alice_sk, &eve_pk);
-        let _alice_incoming_at_eve =
+            OutgoingInitiationRequest::new(&alice_pk, &alice_sk, &eve_pk, vec![]);
+        let (_alice_incoming_at_eve, _) =
             IncomingInitiationRequest::try_from(&alice_to_eve_announcement, &eve_pk, &eve_sk)
                 .unwrap();
         let mut eve_session =
@@ -870,13 +908,13 @@ mod tests {
         let (bob_pk, bob_sk) = generate_test_keypair();
 
         let (alice_announcement, alice_outgoing) =
-            OutgoingInitiationRequest::new(&alice_pk, &alice_sk, &bob_pk);
+            OutgoingInitiationRequest::new(&alice_pk, &alice_sk, &bob_pk, vec![]);
         let (bob_announcement, _bob_outgoing) =
-            OutgoingInitiationRequest::new(&bob_pk, &bob_sk, &alice_pk);
+            OutgoingInitiationRequest::new(&bob_pk, &bob_sk, &alice_pk, vec![]);
 
-        let bob_incoming_at_alice =
+        let (bob_incoming_at_alice, _) =
             IncomingInitiationRequest::try_from(&bob_announcement, &alice_pk, &alice_sk).unwrap();
-        let _alice_incoming_at_bob =
+        let (_alice_incoming_at_bob, _) =
             IncomingInitiationRequest::try_from(&alice_announcement, &bob_pk, &bob_sk).unwrap();
         let alice_session =
             Session::from_initiation_request_pair(&alice_outgoing, &bob_incoming_at_alice);
@@ -897,13 +935,13 @@ mod tests {
         let (bob_pk, bob_sk) = generate_test_keypair();
 
         let (alice_announcement, alice_outgoing) =
-            OutgoingInitiationRequest::new(&alice_pk, &alice_sk, &bob_pk);
+            OutgoingInitiationRequest::new(&alice_pk, &alice_sk, &bob_pk, vec![]);
         let (bob_announcement, _bob_outgoing) =
-            OutgoingInitiationRequest::new(&bob_pk, &bob_sk, &alice_pk);
+            OutgoingInitiationRequest::new(&bob_pk, &bob_sk, &alice_pk, vec![]);
 
-        let bob_incoming_at_alice =
+        let (bob_incoming_at_alice, _) =
             IncomingInitiationRequest::try_from(&bob_announcement, &alice_pk, &alice_sk).unwrap();
-        let _alice_incoming_at_bob =
+        let (_alice_incoming_at_bob, _) =
             IncomingInitiationRequest::try_from(&alice_announcement, &bob_pk, &bob_sk).unwrap();
         let mut alice_session =
             Session::from_initiation_request_pair(&alice_outgoing, &bob_incoming_at_alice);
@@ -930,13 +968,13 @@ mod tests {
         // Establish sessions
         let _timestamp = crate::utils::timestamp_millis();
         let (alice_announcement, alice_outgoing) =
-            OutgoingInitiationRequest::new(&alice_pk, &alice_sk, &bob_pk);
+            OutgoingInitiationRequest::new(&alice_pk, &alice_sk, &bob_pk, vec![]);
         let (bob_announcement, bob_outgoing) =
-            OutgoingInitiationRequest::new(&bob_pk, &bob_sk, &alice_pk);
+            OutgoingInitiationRequest::new(&bob_pk, &bob_sk, &alice_pk, vec![]);
 
-        let bob_incoming_at_alice =
+        let (bob_incoming_at_alice, _) =
             IncomingInitiationRequest::try_from(&bob_announcement, &alice_pk, &alice_sk).unwrap();
-        let alice_incoming_at_bob =
+        let (alice_incoming_at_bob, _) =
             IncomingInitiationRequest::try_from(&alice_announcement, &bob_pk, &bob_sk).unwrap();
 
         let mut alice_session =
@@ -983,13 +1021,13 @@ mod tests {
         // Establish sessions
         let _timestamp = crate::utils::timestamp_millis();
         let (alice_announcement, alice_outgoing) =
-            OutgoingInitiationRequest::new(&alice_pk, &alice_sk, &bob_pk);
+            OutgoingInitiationRequest::new(&alice_pk, &alice_sk, &bob_pk, vec![]);
         let (bob_announcement, bob_outgoing) =
-            OutgoingInitiationRequest::new(&bob_pk, &bob_sk, &alice_pk);
+            OutgoingInitiationRequest::new(&bob_pk, &bob_sk, &alice_pk, vec![]);
 
-        let bob_incoming_at_alice =
+        let (bob_incoming_at_alice, _) =
             IncomingInitiationRequest::try_from(&bob_announcement, &alice_pk, &alice_sk).unwrap();
-        let alice_incoming_at_bob =
+        let (alice_incoming_at_bob, _) =
             IncomingInitiationRequest::try_from(&alice_announcement, &bob_pk, &bob_sk).unwrap();
 
         let mut alice_session =
@@ -1019,13 +1057,13 @@ mod tests {
         // Establish sessions
         let _timestamp = crate::utils::timestamp_millis();
         let (alice_announcement, alice_outgoing) =
-            OutgoingInitiationRequest::new(&alice_pk, &alice_sk, &bob_pk);
+            OutgoingInitiationRequest::new(&alice_pk, &alice_sk, &bob_pk, vec![]);
         let (bob_announcement, bob_outgoing) =
-            OutgoingInitiationRequest::new(&bob_pk, &bob_sk, &alice_pk);
+            OutgoingInitiationRequest::new(&bob_pk, &bob_sk, &alice_pk, vec![]);
 
-        let bob_incoming_at_alice =
+        let (bob_incoming_at_alice, _) =
             IncomingInitiationRequest::try_from(&bob_announcement, &alice_pk, &alice_sk).unwrap();
-        let alice_incoming_at_bob =
+        let (alice_incoming_at_bob, _) =
             IncomingInitiationRequest::try_from(&alice_announcement, &bob_pk, &bob_sk).unwrap();
 
         let mut alice_session =

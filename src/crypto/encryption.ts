@@ -8,9 +8,10 @@ import {
 
 export async function encrypt(
   plaintext: string,
-  key: EncryptionKey
+  key: EncryptionKey,
+  salt?: Uint8Array
 ): Promise<{ encryptedData: Uint8Array; nonce: Uint8Array }> {
-  const nonce = await generateNonce();
+  const nonce = salt ? Nonce.from_bytes(salt) : await generateNonce();
   const encryptedData = await encryptAead(
     key,
     nonce,
@@ -22,12 +23,12 @@ export async function encrypt(
 
 export async function decrypt(
   encryptedData: Uint8Array,
-  nonce: Uint8Array,
+  salt: Uint8Array,
   key: EncryptionKey
 ): Promise<string> {
   const plain = await decryptAead(
     key,
-    Nonce.from_bytes(nonce),
+    Nonce.from_bytes(salt),
     encryptedData,
     new Uint8Array()
   );

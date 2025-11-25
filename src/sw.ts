@@ -4,6 +4,7 @@ import {
   createHandlerBoundToURL,
   precacheAndRoute,
 } from 'workbox-precaching';
+import { setCacheNameDetails } from 'workbox-core';
 import { NavigationRoute, registerRoute } from 'workbox-routing';
 import { protocolConfig } from './config/protocol';
 import { defaultSyncConfig } from './config/sync';
@@ -16,6 +17,14 @@ declare let self: ServiceWorkerGlobalScope;
 // Service Worker configuration constants
 // Import from centralized config for easy adjustment
 const FALLBACK_SYNC_INTERVAL_MS = defaultSyncConfig.fallbackSyncIntervalMs;
+const APP_BUILD_ID = import.meta.env.VITE_APP_BUILD_ID ?? 'dev-local';
+
+setCacheNameDetails({
+  prefix: 'gossip',
+  suffix: `-v${APP_BUILD_ID}`,
+  precache: 'precache',
+  runtime: 'runtime',
+});
 
 // Sync frequency tracking
 interface SyncStats {

@@ -1,0 +1,14 @@
+# Appfile for Gossip iOS App
+
+# Your Apple ID (email)
+apple_id(ENV["APPLE_ID"])
+
+# Your Apple Developer Team ID
+team_id(ENV["APPLE_TEAM_ID"])
+
+# App Bundle Identifier
+app_identifier("net.massa.gossip")
+
+# For more information about the Appfile, see:
+#     https://docs.fastlane.tools/advanced/#appfile
+

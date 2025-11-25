@@ -14,6 +14,7 @@ import {
   SessionStatus,
   EncryptionKey,
   SessionConfig,
+  AnnouncementResult,
 } from '../assets/generated/wasm/gossip_wasm';
 import { UserProfile } from '../db';
 
@@ -74,20 +75,28 @@ export class SessionModule {
 
   /**
    * Establish an outgoing session with a peer via the underlying WASM wrapper
+   * @param peerPk - The peer's public keys
+   * @param ourPk - Our public keys
+   * @param ourSk - Our secret keys
+   * @param userData - Optional user data to include in the announcement (defaults to empty array)
+   * @returns The announcement bytes to publish
    */
   establishOutgoingSession(
     peerPk: UserPublicKeys,
     ourPk: UserPublicKeys,
-    ourSk: UserSecretKeys
+    ourSk: UserSecretKeys,
+    userData?: Uint8Array
   ): Uint8Array {
     if (!this.sessionManager) {
       throw new Error('Session manager is not initialized');
     }
 
+    const userDataBytes = userData ?? new Uint8Array(0);
     const result = this.sessionManager.establish_outgoing_session(
       peerPk,
       ourPk,
-      ourSk
+      ourSk,
+      userDataBytes
     );
 
     this.persistIfNeeded();
@@ -96,12 +105,13 @@ export class SessionModule {
 
   /**
    * Feed an incoming announcement into the session manager
+   * @returns AnnouncementResult containing the announcer's public keys, timestamp, and user data, or undefined if invalid
    */
   feedIncomingAnnouncement(
     announcementBytes: Uint8Array,
     ourPk: UserPublicKeys,
     ourSk: UserSecretKeys
-  ): UserPublicKeys | undefined {
+  ): AnnouncementResult | undefined {
     if (!this.sessionManager) {
       throw new Error('Session manager is not initialized');
     }

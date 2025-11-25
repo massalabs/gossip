@@ -42,6 +42,8 @@
   --sidebar-border: #e5e6e8;
   --sidebar-ring: #0d9488;
   --tail-border: #e5e7eb; /* soft gray border for light mode tail */
+  /* Bottom navigation spacing */
+  --bottom-nav-height: 64px;
 }
 
 .dark {
@@ -83,6 +85,7 @@
   --sidebar-border: #2a2a2e;
   --sidebar-ring: #2dd4bf;
   --tail-border: transparent; /* transparent border for dark mode tail */
+  --bottom-nav-height: 64px;
 }
 
 @theme inline {
@@ -157,12 +160,11 @@
     @apply bg-background text-foreground;
     margin: 0;
     min-width: 20rem; /* min-w-80 */
-    min-height: 100dvh; /* Use dynamic viewport height for mobile browsers */
-    /* Fallback for browsers that don't support dvh */
-    min-height: 100vh;
     /* Disable pull-to-refresh on mobile */
     overscroll-behavior-y: contain;
     -webkit-overflow-scrolling: touch;
+
+    height: 100dvh;
   }
 
   /* Global scrollbar styling - thin, minimal, no track background */
@@ -190,6 +192,7 @@
   *::-webkit-scrollbar-corner {
     background: transparent;
   }
+
   *::-webkit-scrollbar-thumb {
     /* Fallback for browsers without color-mix support (light mode default) */
     background-color: rgba(26, 26, 29, 0.35);
@@ -229,10 +232,8 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
-
   #root {
-    min-height: 100vh;
-    min-height: 100dvh;
+    height: 100%;
   }
 
   /* Ensure pointer cursor on all buttons */
@@ -277,21 +278,6 @@
     animation: spin-reverse 1s linear infinite;
   }
 
-  /* Mobile viewport utilities */
-  .min-h-screen-mobile {
-    min-height: 100vh;
-    min-height: 100dvh; /* Dynamic viewport height for mobile browsers */
-    /* Fallback for Firefox mobile */
-    min-height: calc(100vh - env(keyboard-inset-height, 0px));
-  }
-
-  .h-screen-mobile {
-    height: 100vh;
-    height: 100dvh; /* Dynamic viewport height for mobile browsers */
-    /* Fallback for Firefox mobile */
-    height: calc(100vh - env(keyboard-inset-height, 0px));
-  }
-
   /* Safe area support for mobile browsers */
   .pb-safe {
     padding-bottom: env(safe-area-inset-bottom);
@@ -307,23 +293,6 @@
 
   .pr-safe {
     padding-right: env(safe-area-inset-right);
-  }
-
-  /* Bottom navigation offset utility */
-  /* Accounts for: safe-area-inset-bottom + nav height (64px) + margin (12px) + spacing (20px) = 96px + safe area */
-  .bottom-nav-offset {
-    bottom: calc(env(safe-area-inset-bottom, 0px) + 96px);
-  }
-
-  /* Firefox mobile specific fixes */
-  @-moz-document url-prefix() {
-    .min-h-screen-mobile {
-      min-height: 100vh;
-    }
-
-    .h-screen-mobile {
-      height: 100vh;
-    }
   }
 
   @keyframes fade-in {
@@ -495,6 +464,24 @@
 
   .animate-blink-loading {
     animation: blink-loading 2s ease-in-out infinite;
+  }
+
+  /* Message highlight animation for scroll-to-message */
+  @keyframes highlight-message {
+    0% {
+      background-color: transparent;
+    }
+    50% {
+      background-color: color-mix(in oklch, var(--ring) 20%, transparent);
+    }
+    100% {
+      background-color: transparent;
+    }
+  }
+
+  .highlight-message {
+    animation: highlight-message 2s ease-out;
+    border-radius: var(--radius);
   }
 
   @media (prefers-reduced-motion: reduce) {

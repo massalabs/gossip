@@ -1,27 +1,10 @@
 import { useCallback } from 'react';
 import { useAccountStore } from '../stores/accountStore';
-import { Discussion, Contact, db } from '../db';
-import {
-  acceptDiscussionRequest,
-  ensureDiscussionExists,
-} from '../crypto/discussionInit';
+import { Discussion, db } from '../db';
+import { acceptDiscussionRequest } from '../crypto/discussionInit';
 
 export const useDiscussionList = () => {
   const { userProfile } = useAccountStore();
-
-  const handleCreatedNewContact = useCallback(
-    async (contact: Contact): Promise<void> => {
-      try {
-        await ensureDiscussionExists(contact);
-      } catch (e) {
-        console.error(
-          'Failed to ensure discussion exists after contact creation:',
-          e
-        );
-      }
-    },
-    []
-  );
 
   const handleAcceptDiscussionRequest = useCallback(
     async (discussion: Discussion, newName?: string) => {
@@ -64,7 +47,6 @@ export const useDiscussionList = () => {
 
   // Only return handlers that are actually used - state and selectors should be accessed directly from stores
   return {
-    handleCreatedNewContact,
     handleAcceptDiscussionRequest,
     handleRefuseDiscussionRequest,
   };

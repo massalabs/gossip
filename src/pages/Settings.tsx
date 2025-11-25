@@ -1,28 +1,94 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import BaseModal from '../components/ui/BaseModal';
 import PageHeader from '../components/ui/PageHeader';
 import { useAccountStore } from '../stores/accountStore';
 import { useAppStore } from '../stores/appStore';
-import { useTheme } from '../components/ui/use-theme';
+import { useTheme } from '../hooks/useTheme';
 import { formatUserId } from '../utils/userId';
 import appLogo from '../assets/gossip_face.svg';
 import AccountBackup from '../components/account/AccountBackup';
-import ShareContact from '../components/settings/ShareContact';
 import Button from '../components/ui/Button';
+import Toggle from '../components/ui/Toggle';
+import InfoRow from '../components/ui/InfoRow';
 import CopyClipboard from '../components/ui/CopyClipboard';
+import { db } from '../db';
+import { useVersionCheck } from '../hooks/useVersionCheck';
+import { STORAGE_KEYS, clearAppStorage } from '../utils/localStorage';
+import {
+  DangerIcon,
+  AccountBackupIcon,
+  ShareContactIcon,
+  DarkModeIcon,
+  LightModeIcon,
+  DebugIcon,
+  RefreshIcon,
+  LogoutIcon,
+  DeleteIcon,
+  CameraIcon,
+} from '../components/ui/icons';
+import { APP_VERSION } from '../config/version';
+import { useLocalStorage } from '../hooks/useLocalStorage';
+import { useNavigate } from 'react-router-dom';
+import ShareContact from '../components/settings/ShareContact';
+import ScanQRCode from '../components/settings/ScanQRCode';
+import { usePreloadShareContact } from '../hooks/usePreloadShareContact';
 
 enum SettingsView {
   SHOW_ACCOUNT_BACKUP = 'SHOW_ACCOUNT_BACKUP',
   SHARE_CONTACT = 'SHARE_CONTACT',
+  SCAN_QR_CODE = 'SCAN_QR_CODE',
 }
 
 const Settings = (): React.ReactElement => {
   const { userProfile, getMnemonicBackupInfo, logout, resetAccount } =
     useAccountStore();
-  const { showDebugPanel, setShowDebugPanel } = useAppStore();
+  const [appBuildId] = useLocalStorage(STORAGE_KEYS.APP_BUILD_ID, null);
+  const showDebugOption = useAppStore(s => s.showDebugOption);
+  const setShowDebugOption = useAppStore(s => s.setShowDebugOption);
   const { setTheme, resolvedTheme } = useTheme();
   const [activeView, setActiveView] = useState<SettingsView | null>(null);
   const [isResetModalOpen, setIsResetModalOpen] = useState(false);
+  const { isVersionDifferent, handleForceUpdate } = useVersionCheck();
+  const navigate = useNavigate();
+  const pregeneratedQR = usePreloadShareContact();
+
+  const mnemonicBackupInfo = getMnemonicBackupInfo();
+
+  const handleResetAllDiscussionsAndMessages = useCallback(async () => {
+    try {
+      await db.transaction(
+        'rw',
+        [db.contacts, db.messages, db.discussions],
+        async () => {
+          await db.messages.clear();
+          await db.discussions.clear();
+          await db.contacts.clear();
+        }
+      );
+    } catch (error) {
+      console.error('Failed to reset discussions and messages:', error);
+    }
+  }, []);
+
+  const handleResetAccount = useCallback(async () => {
+    try {
+      await resetAccount();
+      navigate('/');
+    } catch (error) {
+      console.error('Failed to reset account:', error);
+    }
+  }, [resetAccount, navigate]);
+
+  const handleResetAllAccounts = useCallback(async () => {
+    try {
+      await resetAccount();
+      clearAppStorage();
+      await db.deleteDb();
+      window.location.reload();
+    } catch (error) {
+      console.error('Failed to reset all accounts:', error);
+    }
+  }, [resetAccount]);
 
   const handleLogout = async () => {
     try {
@@ -32,74 +98,87 @@ const Settings = (): React.ReactElement => {
     }
   };
 
-  const handleResetAccount = async () => {
-    setIsResetModalOpen(true);
-  };
+  const handleScanSuccess = useCallback(
+    (userId: string, name: string) => {
+      navigate(`/new-contact`, {
+        state: { userId, name },
+        replace: true,
+      });
+    },
+    [navigate]
+  );
 
-  const mnemonicBackupInfo = getMnemonicBackupInfo();
-
-  // Show sub-views based on activeView
   switch (activeView) {
     case SettingsView.SHOW_ACCOUNT_BACKUP:
       return <AccountBackup onBack={() => setActiveView(null)} />;
     case SettingsView.SHARE_CONTACT:
-      return <ShareContact onBack={() => setActiveView(null)} />;
+      return (
+        <ShareContact
+          onBack={() => setActiveView(null)}
+          pregeneratedQR={pregeneratedQR || ''}
+        />
+      );
+    case SettingsView.SCAN_QR_CODE:
+      return (
+        <ScanQRCode
+          onBack={() => setActiveView(null)}
+          onScanSuccess={handleScanSuccess}
+        />
+      );
     default:
       break;
   }
 
   return (
-    <div className="min-h-screen-mobile bg-[#efefef] dark:bg-gray-900">
-      <div className="max-w-sm mx-auto">
+    <div className="bg-card h-full overflow-auto">
+      <div className="h-full">
         {/* Header */}
-        <PageHeader title="Settings" showLogo />
-
+        <PageHeader title="Settings" />
         {/* Account Profile Section */}
-        <div className="px-4 mb-4">
-          <div className="bg-white dark:bg-gray-800 rounded-lg p-6">
-            <div className="flex items-start gap-4 mb-4">
-              <img
-                src={appLogo}
-                className="w-16 h-16 rounded-lg object-cover"
-                alt="Profile"
-              />
-              <div className="flex-1 min-w-0">
-                <h3 className="text-base font-semibold text-black dark:text-white mb-2">
-                  {userProfile?.username || 'Account name'}
-                </h3>
-                {userProfile?.userId && (
-                  <div className="mb-2 flex items-baseline gap-2">
-                    <p className="text-xs text-gray-500 dark:text-gray-400">
-                      User ID:
+
+        <div className="bg-white dark:bg-gray-800 rounded-lg p-6 mt-4">
+          <div className="flex items-start gap-4 mb-4">
+            <img
+              src={appLogo}
+              className="w-16 h-16 rounded-lg object-cover"
+              alt="Profile"
+            />
+            <div className="flex-1 min-w-0">
+              <h3 className="text-base font-semibold text-black dark:text-white mb-2">
+                {userProfile?.username || 'Account name'}
+              </h3>
+              {userProfile?.userId && (
+                <div className="mb-2 flex items-baseline gap-2">
+                  <p className="text-xs text-gray-500 dark:text-gray-400 shrink-0">
+                    User ID:
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-medium text-gray-600 dark:text-gray-400 truncate">
+                      {formatUserId(userProfile.userId, 5, 3)}
                     </p>
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm font-medium text-gray-600 dark:text-gray-400 truncate">
-                        {formatUserId(userProfile.userId, 5, 3)}
-                      </p>
-                      <CopyClipboard
-                        text={userProfile.userId}
-                        title="Copy user ID"
-                      />
-                    </div>
+                    <CopyClipboard
+                      text={userProfile.userId}
+                      title="Copy user ID"
+                    />
                   </div>
-                )}
-              </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
 
         {/* Settings Options */}
-        <div className="px-4 pb-20 space-y-2">
-          {/* App Version */}
-          <div className="bg-white dark:bg-gray-800 rounded-lg h-[54px] flex items-center px-4 justify-between">
-            <span className="text-base font-semibold text-black dark:text-white">
-              Version
-            </span>
-            <span className="text-sm text-gray-600 dark:text-gray-300">
-              0.0.1
-            </span>
+        <div className="px-4 space-y-2 pb-20">
+          <div className="py-2">
+            <InfoRow label="Version" value={APP_VERSION} />
+            {showDebugOption && (
+              <InfoRow
+                label="Build ID"
+                value={appBuildId || 'unknown'}
+                valueClassName="text-xs text-muted-foreground font-mono"
+              />
+            )}
           </div>
-
           {/* Account Backup Button */}
           <Button
             variant="outline"
@@ -107,19 +186,7 @@ const Settings = (): React.ReactElement => {
             className="w-full h-[54px] flex items-center px-4 justify-start rounded-lg"
             onClick={() => setActiveView(SettingsView.SHOW_ACCOUNT_BACKUP)}
           >
-            <svg
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-              className="w-5 h-5 mr-4"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
-              />
-            </svg>
+            <AccountBackupIcon className="mr-4" />
             <span className="text-base font-semibold flex-1 text-left">
               Account Backup
             </span>
@@ -127,7 +194,6 @@ const Settings = (): React.ReactElement => {
               <div className="w-2 h-2 bg-success rounded-full ml-auto"></div>
             )}
           </Button>
-
           {/* Share Contact Button */}
           <Button
             variant="outline"
@@ -135,191 +201,129 @@ const Settings = (): React.ReactElement => {
             className="w-full h-[54px] flex items-center px-4 justify-start rounded-lg"
             onClick={() => setActiveView(SettingsView.SHARE_CONTACT)}
           >
-            <svg
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-              className="w-5 h-5 mr-4"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M15 8a3 3 0 11-6 0 3 3 0 016 0zm-9 9a6 6 0 1112 0H6z"
-              />
-            </svg>
+            <ShareContactIcon className="mr-4" />
             <span className="text-base font-semibold flex-1 text-left">
               Share Contact
             </span>
           </Button>
-
-          {/* Security Button */}
+          {/* Scan QR Code Button */}
           <Button
+            variant="outline"
+            size="custom"
+            className="w-full h-[54px] flex items-center px-4 justify-start rounded-lg"
+            onClick={() => setActiveView(SettingsView.SCAN_QR_CODE)}
+          >
+            <CameraIcon className="mr-4" />
+            <span className="text-base font-semibold flex-1 text-left">
+              Scan QR Code
+            </span>
+          </Button>
+          {/* Security Button */}
+          {/* <Button
             variant="outline"
             size="custom"
             className="w-full h-[54px] flex items-center px-4 justify-start rounded-lg"
             onClick={() => {}}
             disabled
           >
-            <svg
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-              className="w-5 h-5 mr-4"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
-              />
-            </svg>
+            <SecurityIcon className="mr-4" />
             <span className="text-base font-semibold flex-1 text-left">
               Security
             </span>
-          </Button>
-
+          </Button> */}
           {/* Notifications Button */}
-          <Button
+          {/* <Button
             variant="outline"
             size="custom"
             className="w-full h-[54px] flex items-center px-4 justify-start rounded-lg"
             onClick={() => {}}
             disabled
           >
-            <svg
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-              className="w-5 h-5 mr-4"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
-              />
-            </svg>
+            <NotificationsIcon className="mr-4" />
             <span className="text-base font-semibold flex-1 text-left">
               Notifications
             </span>
-          </Button>
-
+          </Button> */}
           {/* Privacy Button */}
-          <Button
+          {/* <Button
             variant="outline"
             size="custom"
             className="w-full h-[54px] flex items-center px-4 justify-start rounded-lg"
             onClick={() => {}}
             disabled
           >
-            <svg
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-              className="w-5 h-5 mr-4"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
-              />
-            </svg>
+            <PrivacyIcon className="mr-4" />
             <span className="text-base font-semibold flex-1 text-left">
               Privacy
             </span>
-          </Button>
-
+          </Button> */}
           {/* Theme Toggle */}
-          <div className="bg-white dark:bg-gray-800 rounded-lg h-[54px] flex items-center px-4">
+          <div className="bg-card border border-border rounded-lg h-[54px] flex items-center px-4 justify-start w-full shadow-sm">
             {resolvedTheme === 'dark' ? (
-              <svg
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-                className="w-5 h-5 text-black dark:text-white mr-4"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"
-                />
-              </svg>
+              <DarkModeIcon className="text-foreground mr-4" />
             ) : (
-              <svg
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-                className="w-5 h-5 text-black dark:text-white mr-4"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"
-                />
-              </svg>
+              <LightModeIcon className="text-foreground mr-4" />
             )}
-            <span className="text-base font-semibold text-black dark:text-white flex-1 text-left">
+            <span className="text-base font-semibold text-foreground flex-1 text-left">
               {resolvedTheme === 'dark' ? 'Dark Mode' : 'Light Mode'}
             </span>
-            <button
-              onClick={() => {
-                setTheme(resolvedTheme === 'dark' ? 'light' : 'dark');
-              }}
-              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 ${
-                resolvedTheme === 'dark'
-                  ? 'bg-primary'
-                  : 'bg-gray-300 dark:bg-gray-600'
-              }`}
-              role="switch"
-              aria-checked={resolvedTheme === 'dark'}
-              aria-label="Toggle theme"
-            >
-              <span
-                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                  resolvedTheme === 'dark' ? 'translate-x-6' : 'translate-x-1'
-                }`}
-              />
-            </button>
+            <Toggle
+              checked={resolvedTheme === 'dark'}
+              onChange={checked => setTheme(checked ? 'dark' : 'light')}
+              ariaLabel="Toggle theme"
+            />
           </div>
-
-          {/* Debug Panel Toggle */}
-          <div className="bg-white dark:bg-gray-800 rounded-lg h-[54px] flex items-center px-4">
-            <svg
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-              className="w-5 h-5 text-black dark:text-white mr-4"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"
-              />
-            </svg>
-            <span className="text-base font-semibold text-black dark:text-white flex-1 text-left">
-              Show Debug Panel
+          {/* Debug Options Toggle */}
+          <div className="bg-card border border-border rounded-lg h-[54px] flex items-center px-4 justify-start w-full shadow-sm">
+            <DebugIcon className="text-foreground mr-4" />
+            <span className="text-base font-semibold text-foreground flex-1 text-left">
+              Show Debug Options
             </span>
-            <button
-              onClick={() => setShowDebugPanel(!showDebugPanel)}
-              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 ${
-                showDebugPanel ? 'bg-primary' : 'bg-gray-300 dark:bg-gray-600'
-              }`}
-              role="switch"
-              aria-checked={showDebugPanel}
-            >
-              <span
-                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                  showDebugPanel ? 'translate-x-6' : 'translate-x-1'
-                }`}
-              />
-            </button>
+            <Toggle
+              checked={showDebugOption}
+              onChange={setShowDebugOption}
+              ariaLabel="Show debug options"
+            />
           </div>
-
+          {/* Debug Options - Only show when showDebugOption is true */}
+          {showDebugOption && (
+            <div className="space-y-2 pl-10">
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={handleResetAllAccounts}
+              >
+                <DangerIcon className="mr-4" />
+                <span className="text-base font-semibold flex-1 text-left">
+                  Reset App
+                </span>
+              </Button>
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={handleResetAllDiscussionsAndMessages}
+              >
+                <DangerIcon className="mr-4" />
+                <span className="text-base font-semibold flex-1 text-left">
+                  Clear Messages & Contacts
+                </span>
+              </Button>
+            </div>
+          )}
+          {/* Clear Cache & Database Button - Only show when version differs */}
+          {isVersionDifferent && (
+            <Button
+              variant="outline"
+              size="custom"
+              className="w-full h-[54px] flex items-center px-4 justify-start rounded-lg text-destructive border-destructive hover:bg-destructive/10"
+              onClick={handleForceUpdate}
+            >
+              <RefreshIcon className="mr-4" />
+              <span className="text-base font-semibold flex-1 text-left">
+                Clear Cache & Database
+              </span>
+            </Button>
+          )}
           {/* Logout Button */}
           <Button
             variant="outline"
@@ -327,46 +331,21 @@ const Settings = (): React.ReactElement => {
             className="w-full h-[54px] flex items-center px-4 justify-start rounded-lg text-foreground border-border hover:bg-muted"
             onClick={handleLogout}
           >
-            <svg
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-              className="w-5 h-5 mr-4"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
-              />
-            </svg>
+            <LogoutIcon className="mr-4" />
             <span className="text-base font-semibold flex-1 text-left">
               Logout
             </span>
           </Button>
-
           {/* Reset Account Button */}
           <Button
             variant="outline"
             size="custom"
             className="w-full h-[54px] flex items-center px-4 justify-start rounded-lg text-red-500 dark:text-red-400 border-red-200 dark:border-red-800 hover:bg-red-50 dark:hover:bg-red-900/20"
-            onClick={handleResetAccount}
+            onClick={() => setIsResetModalOpen(true)}
           >
-            <svg
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-              className="w-5 h-5 mr-4"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-              />
-            </svg>
+            <DeleteIcon className="mr-4" />
             <span className="text-base font-semibold flex-1 text-left">
-              Reset Account
+              Delete Account
             </span>
           </Button>
         </div>
@@ -374,7 +353,7 @@ const Settings = (): React.ReactElement => {
       <BaseModal
         isOpen={isResetModalOpen}
         onClose={() => setIsResetModalOpen(false)}
-        title="Reset account?"
+        title="Delete account?"
       >
         <div className="space-y-4">
           <p className="text-sm text-gray-700 dark:text-gray-300">
@@ -384,17 +363,13 @@ const Settings = (): React.ReactElement => {
             <Button
               onClick={async () => {
                 setIsResetModalOpen(false);
-                try {
-                  await resetAccount();
-                } catch (error) {
-                  console.error('Failed to reset account:', error);
-                }
+                await handleResetAccount();
               }}
               variant="danger"
               size="custom"
               className="flex-1 h-11 rounded-lg font-semibold"
             >
-              Reset
+              Delete
             </Button>
             <Button
               onClick={() => setIsResetModalOpen(false)}

@@ -7,12 +7,14 @@ import {
   DebugLog,
 } from './debugLogs';
 import Button from './Button';
+
 import { useAppStore } from '../../stores/appStore';
 
 const DebugOverlay: React.FC = () => {
-  const showDebugPanel = useAppStore(s => s.showDebugPanel);
+  const showDebugOption = useAppStore(s => s.showDebugOption);
+  const debugOverlayVisible = useAppStore(s => s.debugOverlayVisible);
+  const setDebugOverlayVisible = useAppStore(s => s.setDebugOverlayVisible);
   const [logs, setLogs] = useState<DebugLog[]>([]);
-  const [isVisible, setIsVisible] = useState(false);
   const [showRawText, setShowRawText] = useState(false);
 
   useEffect(() => {
@@ -72,20 +74,21 @@ const DebugOverlay: React.FC = () => {
     }
   };
 
-  if (!showDebugPanel) {
+  if (!showDebugOption) {
     return null;
   }
 
-  if (!isVisible) {
+  if (!debugOverlayVisible) {
     return (
-      <Button
-        onClick={() => setIsVisible(true)}
-        variant="primary"
-        size="custom"
-        className="fixed top-2 right-2 z-40 bg-blue-600 text-white px-3 py-1 rounded text-xs font-medium shadow-lg dark:text-black"
-      >
-        Show Debug
-      </Button>
+      <div className="w-full flex justify-center items-center">
+        <Button
+          variant="outline"
+          onClick={() => setDebugOverlayVisible(true)}
+          className="fixed top-2 z-1000 bg-amber-50"
+        >
+          Show Debug
+        </Button>
+      </div>
     );
   }
 
@@ -123,7 +126,7 @@ const DebugOverlay: React.FC = () => {
               Clear
             </Button>
             <Button
-              onClick={() => setIsVisible(false)}
+              onClick={() => setDebugOverlayVisible(false)}
               variant="outline"
               size="custom"
               className="text-xs text-gray-600 hover:text-gray-800 px-2 py-1 border rounded"

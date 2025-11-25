@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 import { Contact, db } from '../db';
 import ContactAvatar from '../components/avatar/ContactAvatar';
 import { formatUserId } from '../utils';
+import PageHeader from '../components/ui/PageHeader';
 
 /* TODO: contact list is implemented using corresponding discussions.
 This is a temporary solution to avoid duplicating the contact list code.
@@ -57,36 +58,11 @@ const NewDiscussion: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen-mobile bg-[#efefef] dark:bg-gray-900 px-3 py-3">
-      <div className="max-w-sm mx-auto">
+    <div className="h-full px-3 py-3">
+      <div className="max-w-md mx-auto">
         <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-md overflow-hidden">
           {/* Card header */}
-          <div className="relative px-5 py-4 border-b border-gray-200 dark:border-gray-700">
-            <h2 className="text-center text-base font-semibold text-gray-900 dark:text-white">
-              New discussion
-            </h2>
-            <Button
-              onClick={handleClose}
-              aria-label="Close"
-              variant="circular"
-              size="custom"
-              className="absolute right-3 top-3 w-8 h-8 flex items-center justify-center"
-            >
-              <svg
-                className="w-5 h-5 text-gray-600 dark:text-gray-300"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M6 18L18 6M6 6l12 12"
-                />
-              </svg>
-            </Button>
-          </div>
+          <PageHeader title="New discussion" onBack={handleClose} />
 
           {/* Actions: New group / New contact */}
           <div className="px-4 pt-4">

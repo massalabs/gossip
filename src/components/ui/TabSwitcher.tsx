@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 
 export interface TabOption<T extends string> {
   value: T;
@@ -21,6 +21,12 @@ function TabSwitcher<T extends string>({
 }: TabSwitcherProps<T>) {
   const activeIndex = options.findIndex(opt => opt.value === value);
   const tabCount = options.length;
+  const [isMounted, setIsMounted] = useState(false);
+
+  useEffect(() => {
+    // Enable transitions after initial mount
+    setIsMounted(true);
+  }, []);
 
   // Calculate width and position for the active indicator
   // For 2 tabs: width is calc(50% - 0.75rem), position is either left-1.5 or left-[calc(50%+0.50rem)]
@@ -46,7 +52,7 @@ function TabSwitcher<T extends string>({
     >
       {/* Active indicator */}
       <div
-        className="absolute top-1.5 bottom-1.5 rounded-3xl bg-primary shadow-sm transition-all duration-300 ease-out"
+        className={`absolute top-1.5 bottom-1.5 rounded-3xl bg-primary shadow-sm transition-all duration-300 ease-out${!isMounted ? ' no-transition' : ''}`}
         style={getIndicatorStyle()}
         aria-hidden="true"
       />

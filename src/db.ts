@@ -1,6 +1,9 @@
 import Dexie, { Table } from 'dexie';
 import { EncryptedMessage } from './api/messageProtocol/types';
 
+// Define authentication method type
+export type AuthMethod = 'capacitor' | 'webauthn' | 'password';
+
 // Define interfaces for your data models
 export interface Contact {
   ownerUserId: string; // The current user's userId owning this contact
@@ -23,6 +26,11 @@ export interface Message {
   status: 'sending' | 'sent' | 'delivered' | 'read' | 'failed';
   timestamp: Date;
   metadata?: Record<string, unknown>;
+  seeker?: Uint8Array; // Seeker for this message (stored when sending or receiving)
+  replyTo?: {
+    originalContent?: string;
+    originalSeeker: Uint8Array; // Seeker of the original message (required for replies)
+  };
 }
 
 export interface UserProfile {
@@ -32,16 +40,20 @@ export interface UserProfile {
   security: {
     encKeySalt: Uint8Array;
 
+    // Authentication method used to create the account
+    authMethod: AuthMethod;
+
     // WebAuthn/FIDO2 (biometric) details when used
     webauthn?: {
-      credentialId: string;
-      publicKey: ArrayBuffer;
+      credentialId?: string;
     };
+
+    // iCloud Keychain sync preference (iOS only)
+    iCloudSync?: boolean;
 
     // Mnemonic backup details
     mnemonicBackup: {
       encryptedMnemonic: Uint8Array;
-      nonce: Uint8Array;
       createdAt: Date;
       backedUp: boolean;
     };
@@ -51,13 +63,6 @@ export interface UserProfile {
   status: 'online' | 'away' | 'busy' | 'offline';
   lastSeen: Date;
   createdAt: Date;
-  updatedAt: Date;
-}
-
-export interface Settings {
-  id?: number;
-  key: string;
-  value: unknown;
   updatedAt: Date;
 }
 
@@ -72,6 +77,7 @@ export interface Discussion {
   status: 'pending' | 'active' | 'closed';
   nextSeeker?: Uint8Array; // The next seeker for sending messages (from SendMessageOutput)
   initiationAnnouncement?: Uint8Array; // Outgoing announcement bytes when we initiate
+  announcementMessage?: string; // Optional message from incoming announcement (user_data)
   lastSyncTimestamp?: Date; // Last time messages were synced from protocol
 
   // UI/Display fields
@@ -107,7 +113,6 @@ export class GossipDatabase extends Dexie {
   contacts!: Table<Contact>;
   messages!: Table<Message>;
   userProfile!: Table<UserProfile>;
-  settings!: Table<Settings>;
   discussions!: Table<Discussion>;
   pendingEncryptedMessages!: Table<PendingEncryptedMessage>;
   pendingAnnouncements!: Table<PendingAnnouncement>;
@@ -119,9 +124,8 @@ export class GossipDatabase extends Dexie {
       contacts:
         '++id, ownerUserId, userId, name, isOnline, lastSeen, createdAt, [ownerUserId+userId] , [ownerUserId+name]',
       messages:
-        '++id, ownerUserId, contactUserId, type, direction, status, timestamp, [ownerUserId+contactUserId], [ownerUserId+contactUserId+status]',
+        '++id, ownerUserId, contactUserId, type, direction, status, timestamp, seeker, [ownerUserId+contactUserId], [ownerUserId+contactUserId+status], [ownerUserId+seeker]',
       userProfile: 'userId, username, status, lastSeen',
-      settings: '++id, key, updatedAt',
       discussions:
         '++id, ownerUserId, &[ownerUserId+contactUserId], status, [ownerUserId+status], lastSyncTimestamp, unreadCount, lastMessageTimestamp, createdAt, updatedAt',
       pendingEncryptedMessages: '++id, fetchedAt, seeker',
@@ -139,17 +143,6 @@ export class GossipDatabase extends Dexie {
     });
 
     this.userProfile.hook(
-      'updating',
-      function (modifications, _primKey, _obj, _trans) {
-        (modifications as Record<string, unknown>).updatedAt = new Date();
-      }
-    );
-
-    this.settings.hook('creating', function (_primKey, obj, _trans) {
-      obj.updatedAt = new Date();
-    });
-
-    this.settings.hook(
       'updating',
       function (modifications, _primKey, _obj, _trans) {
         (modifications as Record<string, unknown>).updatedAt = new Date();
@@ -251,7 +244,6 @@ export class GossipDatabase extends Dexie {
   }
 
   async addMessage(message: Omit<Message, 'id'>): Promise<number> {
-    console.log('Adding message for contact:', message.contactUserId);
     const messageId = await this.messages.add(message);
 
     // Get existing discussion
@@ -261,7 +253,6 @@ export class GossipDatabase extends Dexie {
       .first();
 
     if (discussion) {
-      console.log('Updating existing discussion:', discussion.id);
       await this.discussions.update(discussion.id!, {
         lastMessageId: messageId,
         lastMessageContent: message.content,
@@ -297,19 +288,6 @@ export class GossipDatabase extends Dexie {
     return messageId;
   }
 
-  async getSetting(key: string): Promise<unknown> {
-    const setting = await this.settings.where('key').equals(key).first();
-    return setting?.value;
-  }
-
-  async setSetting(key: string, value: unknown): Promise<void> {
-    await this.settings.put({
-      key,
-      value,
-      updatedAt: new Date(),
-    });
-  }
-
   /**
    * Get all active discussions with their sync status
    * @returns Array of active discussions
@@ -336,6 +314,11 @@ export class GossipDatabase extends Dexie {
       lastSyncTimestamp: timestamp,
       updatedAt: new Date(),
     });
+  }
+
+  async deleteDb(): Promise<void> {
+    await this.close();
+    await this.delete();
   }
 }
 

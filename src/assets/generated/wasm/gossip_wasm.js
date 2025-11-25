@@ -271,6 +271,62 @@ export const SessionStatus = Object.freeze({
     Saturated: 6, "6": "Saturated",
 });
 
+const AnnouncementResultFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_announcementresult_free(ptr >>> 0, 1));
+/**
+ * Result from feeding an incoming announcement.
+ */
+export class AnnouncementResult {
+
+    static __wrap(ptr) {
+        ptr = ptr >>> 0;
+        const obj = Object.create(AnnouncementResult.prototype);
+        obj.__wbg_ptr = ptr;
+        AnnouncementResultFinalization.register(obj, obj.__wbg_ptr, obj);
+        return obj;
+    }
+
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        AnnouncementResultFinalization.unregister(this);
+        return ptr;
+    }
+
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_announcementresult_free(ptr, 0);
+    }
+    /**
+     * Gets the announcer's public keys.
+     * @returns {UserPublicKeys}
+     */
+    get announcer_public_keys() {
+        const ret = wasm.announcementresult_announcer_public_keys(this.__wbg_ptr);
+        return UserPublicKeys.__wrap(ret);
+    }
+    /**
+     * Gets the announcement timestamp in milliseconds since Unix epoch.
+     * @returns {number}
+     */
+    get timestamp() {
+        const ret = wasm.announcementresult_timestamp(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * Gets the user data embedded in the announcement.
+     * @returns {Uint8Array}
+     */
+    get user_data() {
+        const ret = wasm.announcementresult_user_data(this.__wbg_ptr);
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+}
+if (Symbol.dispose) AnnouncementResult.prototype[Symbol.dispose] = AnnouncementResult.prototype.free;
+
 const EncryptionKeyFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_encryptionkey_free(ptr >>> 0, 1));
@@ -672,26 +728,81 @@ export class SessionManagerWrapper {
     }
     /**
      * Establishes an outgoing session with a peer.
+     *
+     * # Parameters
+     *
+     * - `peer_pk`: The peer's public keys
+     * - `our_pk`: Our public keys
+     * - `our_sk`: Our secret keys
+     * - `user_data`: Arbitrary user data to include in the announcement (can be empty)
+     *
+     * # Security Warning
+     *
+     * **The user_data in announcements has reduced security compared to regular messages:**
+     * - ✅ **Plausible deniability preserved**: The user_data is not cryptographically signed,
+     *   so you can deny having sent specific user_data content (though you cannot deny the
+     *   announcement itself).
+     * - ❌ **No post-compromise secrecy**: If your long-term keys are compromised in the
+     *   future, past announcements (including their user_data) can be decrypted.
+     *
+     * **Recommendation**: Avoid including highly sensitive information in user_data. Use it for
+     * metadata like protocol version, public display names, or capability flags. Send truly
+     * sensitive data through regular messages after the session is established.
+     *
+     * # Returns
+     *
+     * The announcement bytes to publish to the blockchain.
      * @param {UserPublicKeys} peer_pk
      * @param {UserPublicKeys} our_pk
      * @param {UserSecretKeys} our_sk
+     * @param {Uint8Array} user_data
      * @returns {Uint8Array}
      */
-    establish_outgoing_session(peer_pk, our_pk, our_sk) {
+    establish_outgoing_session(peer_pk, our_pk, our_sk, user_data) {
         _assertClass(peer_pk, UserPublicKeys);
         _assertClass(our_pk, UserPublicKeys);
         _assertClass(our_sk, UserSecretKeys);
-        const ret = wasm.sessionmanagerwrapper_establish_outgoing_session(this.__wbg_ptr, peer_pk.__wbg_ptr, our_pk.__wbg_ptr, our_sk.__wbg_ptr);
-        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        const ptr0 = passArray8ToWasm0(user_data, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.sessionmanagerwrapper_establish_outgoing_session(this.__wbg_ptr, peer_pk.__wbg_ptr, our_pk.__wbg_ptr, our_sk.__wbg_ptr, ptr0, len0);
+        var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
         wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
-        return v1;
+        return v2;
     }
     /**
      * Feeds an incoming announcement from the blockchain.
+     *
+     * # Parameters
+     *
+     * - `announcement_bytes`: The raw announcement bytes received from the blockchain
+     * - `our_pk`: Our public keys
+     * - `our_sk`: Our secret keys
+     *
+     * # Returns
+     *
+     * If the announcement is valid, returns an `AnnouncementResult` containing:
+     * - The announcer's public keys
+     * - The timestamp when the announcement was created (milliseconds since Unix epoch)
+     * - The user data embedded in the announcement
+     *
+     * Returns `None` if the announcement is invalid or too old.
+     *
+     * # Security Warning
+     *
+     * **The user_data in announcements has reduced security compared to regular messages:**
+     * - ✅ **Plausible deniability preserved**: The user_data is not cryptographically signed,
+     *   so the sender can deny having sent specific user_data content (though they cannot deny
+     *   the announcement itself).
+     * - ❌ **No post-compromise secrecy**: If the sender's long-term keys are compromised
+     *   in the future, all past announcements (including their user_data) can be decrypted.
+     *
+     * **Recommendation**: Treat user_data as having limited confidentiality. Use it for
+     * metadata that is not highly sensitive. Send truly sensitive information through regular
+     * messages after the session is established.
      * @param {Uint8Array} announcement_bytes
      * @param {UserPublicKeys} our_pk
      * @param {UserSecretKeys} our_sk
-     * @returns {UserPublicKeys | undefined}
+     * @returns {AnnouncementResult | undefined}
      */
     feed_incoming_announcement(announcement_bytes, our_pk, our_sk) {
         const ptr0 = passArray8ToWasm0(announcement_bytes, wasm.__wbindgen_malloc);
@@ -699,7 +810,7 @@ export class SessionManagerWrapper {
         _assertClass(our_pk, UserPublicKeys);
         _assertClass(our_sk, UserSecretKeys);
         const ret = wasm.sessionmanagerwrapper_feed_incoming_announcement(this.__wbg_ptr, ptr0, len0, our_pk.__wbg_ptr, our_sk.__wbg_ptr);
-        return ret === 0 ? undefined : UserPublicKeys.__wrap(ret);
+        return ret === 0 ? undefined : AnnouncementResult.__wrap(ret);
     }
     /**
      * Gets the list of message board seekers to monitor.

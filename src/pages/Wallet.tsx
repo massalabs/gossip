@@ -40,8 +40,8 @@ const Wallet: React.FC = () => {
   const displayAddress = formatMassaAddress(fullAddress);
 
   return (
-    <div className="min-h-screen-mobile bg-white dark:bg-gray-900">
-      <div className="max-w-sm mx-auto">
+    <div className="bg-background">
+      <div className="max-w-md mx-auto">
         {/* Header */}
         <div className="px-6 py-4 flex justify-between items-center">
           <h1 className="text-2xl font-semibold text-black dark:text-white">
@@ -140,7 +140,7 @@ const Wallet: React.FC = () => {
         </div>
 
         {/* Token List */}
-        <div className="px-6 pb-20">
+        <div className="px-6">
           <div className="space-y-0">
             {tokens.map((token, index) => (
               <div key={index}>

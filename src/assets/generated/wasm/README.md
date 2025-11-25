@@ -64,15 +64,26 @@ const manager = new SessionManagerWrapper(config);
 
 // Establish session with peer
 const peerKeys = generate_user_keys('peer passphrase');
+const userData = new TextEncoder().encode('contact_request'); // Optional user data
 const announcement = manager.establish_outgoing_session(
   peerKeys.public_keys(),
   publicKeys,
-  secretKeys
+  secretKeys,
+  userData
 );
 // Publish announcement to blockchain...
 
 // Feed incoming announcement from peer
-manager.feed_incoming_announcement(announcementBytes, publicKeys, secretKeys);
+const result = manager.feed_incoming_announcement(
+  announcementBytes,
+  publicKeys,
+  secretKeys
+);
+if (result) {
+  console.log('Announcer public keys:', result.announcer_public_keys);
+  console.log('Timestamp:', result.timestamp);
+  console.log('User data:', new TextDecoder().decode(result.user_data));
+}
 
 // Send a message (raw bytes)
 const messageBytes = new TextEncoder().encode('Hello!');
@@ -182,8 +193,8 @@ Main class for managing messaging sessions.
 - `new(config: SessionConfig)`: Create new session manager
 - `from_encrypted_blob(blob: Uint8Array, key: EncryptionKey)`: Restore from encrypted state
 - `to_encrypted_blob(key: EncryptionKey)`: Serialize to encrypted blob
-- `establish_outgoing_session(peer_pk, our_pk, our_sk)`: Initiate session with peer (returns announcement bytes)
-- `feed_incoming_announcement(bytes, our_pk, our_sk)`: Process incoming announcement
+- `establish_outgoing_session(peer_pk, our_pk, our_sk, user_data: Uint8Array)`: Initiate session with peer, including optional user data (returns announcement bytes)
+- `feed_incoming_announcement(bytes, our_pk, our_sk)`: Process incoming announcement (returns AnnouncementResult with announcer's public keys and user data, or undefined)
 - `send_message(peer_id: Uint8Array, message_contents: Uint8Array)`: Send raw message bytes to peer
 - `feed_incoming_message_board_read(seeker, data, our_sk)`: Process incoming messages
 - `get_message_board_read_keys()`: Get seekers to monitor for incoming messages
@@ -191,6 +202,31 @@ Main class for managing messaging sessions.
 - `peer_session_status(peer_id: Uint8Array)`: Get session status
 - `peer_discard(peer_id: Uint8Array)`: Remove peer
 - `refresh()`: Refresh sessions and get keep-alive announcement list
+
+### AnnouncementResult
+
+Result from processing an incoming announcement:
+
+- `announcer_public_keys(): UserPublicKeys`: The public keys of the peer who sent the announcement
+- `timestamp(): number`: Unix timestamp in milliseconds when the announcement was created
+- `user_data(): Uint8Array`: Arbitrary user data embedded in the announcement (can be empty)
+
+**Use Cases for User Data:**
+
+- Contact requests with metadata
+- Version information
+- Application-specific handshake data
+- Display names or profile information
+- Protocol negotiation parameters
+
+**⚠️ Security Warning:**
+
+The user_data in announcements has **reduced security compared to regular messages**:
+
+- ✅ **Plausible deniability preserved**: The user_data is not cryptographically signed, so the sender can deny specific content
+- ❌ **No post-compromise secrecy**: If long-term keys are compromised, past announcements can be decrypted
+
+**Recommendation**: Use user_data for non-highly-sensitive metadata. Send truly sensitive information through regular messages after the session is established.
 
 ### SendMessageOutput
 

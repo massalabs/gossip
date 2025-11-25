@@ -2,22 +2,11 @@ import { create } from 'zustand';
 import { db, UserProfile } from '../db';
 
 import { encrypt, deriveKey } from '../crypto/encryption';
-import {
-  createWebAuthnCredential,
-  isWebAuthnSupported,
-  isPlatformAuthenticatorAvailable,
-} from '../crypto/webauthn';
+import { isWebAuthnSupported } from '../crypto/webauthn';
+import { biometricService } from '../services/biometricService';
 import { generateMnemonic, validateMnemonic } from '../crypto/bip39';
-import {
-  JsonRpcProvider,
-  Provider,
-  PublicApiUrl,
-  Account,
-  PrivateKey,
-  NetworkName,
-} from '@massalabs/massa-web3';
+import { Provider, Account, PrivateKey } from '@massalabs/massa-web3';
 import { useAppStore } from './appStore';
-import { useWalletStore } from './walletStore';
 import { createSelectors } from './utils/createSelectors';
 import {
   generateUserKeys,
@@ -35,6 +24,7 @@ import { ensureWasmInitialized } from '../wasm/loader';
 import { auth } from './utils/auth';
 import { useDiscussionStore } from './discussionStore';
 import { useMessageStore } from './messageStore';
+import { authService } from '../services/auth';
 
 async function createProfileFromAccount(
   username: string,
@@ -86,7 +76,7 @@ async function provisionAccount(
   username: string,
   userId: Uint8Array,
   mnemonic: string | undefined,
-  opts: { useBiometrics: boolean; password?: string },
+  opts: { useBiometrics: boolean; password?: string; iCloudSync?: boolean },
   session: SessionModule
 ): Promise<{ profile: UserProfile; encryptionKey: EncryptionKey }> {
   let built:
@@ -94,7 +84,12 @@ async function provisionAccount(
     | undefined;
 
   if (opts.useBiometrics) {
-    built = await buildSecurityFromWebAuthn(mnemonic, username, userId);
+    built = await buildSecurityFromBiometrics(
+      mnemonic,
+      username,
+      userId,
+      opts.iCloudSync ?? false
+    );
   } else {
     const password = opts.password?.trim();
     if (!password) {
@@ -130,16 +125,19 @@ async function buildSecurityFromPassword(
     throw new Error('Mnemonic is required for account creation');
   }
 
-  const { encryptedData: encryptedMnemonic, nonce: nonceForBackup } =
-    await encrypt(mnemonic, key);
+  const { encryptedData: encryptedMnemonic } = await encrypt(
+    mnemonic,
+    key,
+    salt
+  );
   const mnemonicBackup: UserProfile['security']['mnemonicBackup'] = {
     encryptedMnemonic,
-    nonce: nonceForBackup,
     createdAt: new Date(),
     backedUp: false,
   };
 
   const security: UserProfile['security'] = {
+    authMethod: 'password',
     encKeySalt: salt,
     mnemonicBackup,
   };
@@ -147,55 +145,63 @@ async function buildSecurityFromPassword(
   return { security, encryptionKey: key };
 }
 
-async function buildSecurityFromWebAuthn(
+async function buildSecurityFromBiometrics(
   mnemonic: string | undefined,
   username: string,
-  userIdBytes: Uint8Array
+  userIdBytes: Uint8Array,
+  iCloudSync = false
 ): Promise<{
   security: UserProfile['security'];
   encryptionKey: EncryptionKey;
 }> {
-  const webauthnKey = await createWebAuthnCredential(
-    `Gossip:${username}`,
-    userIdBytes
-  );
-  const { credentialId, publicKey } = webauthnKey;
-
-  // Derive EncryptionKey deterministically from credentialId + publicKey
-  const seedHash = credentialId + Buffer.from(publicKey).toString('base64');
-  const salt = (await generateNonce()).to_bytes();
-  const derivedKey = await deriveKey(seedHash, salt);
-
-  // Encrypt mnemonic with derived key using AEAD (store nonce with ciphertext)
+  // Encrypt mnemonic with derived key using biometric credentials
   if (!mnemonic) {
     throw new Error('Mnemonic is required for account creation');
   }
 
-  const { encryptedData: encryptedMnemonic, nonce: nonceForBackup } =
-    await encrypt(mnemonic, derivedKey);
+  const salt = (await generateNonce()).to_bytes();
+  // Use the unified biometric service to create credentials
+  const credentialResult = await biometricService.createCredential(
+    `Gossip:${username}`,
+    userIdBytes,
+    salt,
+    iCloudSync
+  );
+
+  if (!credentialResult.success || !credentialResult.data) {
+    throw new Error(
+      credentialResult.error || 'Failed to create biometric credential'
+    );
+  }
+
+  const { credentialId, encryptionKey, authMethod } = credentialResult.data;
+
+  const { encryptedData } = await encrypt(mnemonic, encryptionKey, salt);
+
   const mnemonicBackup: UserProfile['security']['mnemonicBackup'] = {
-    encryptedMnemonic,
-    nonce: nonceForBackup,
+    encryptedMnemonic: encryptedData,
     createdAt: new Date(),
     backedUp: false,
   };
 
   const security: UserProfile['security'] = {
-    webauthn: {
-      credentialId,
-      publicKey: webauthnKey.publicKey,
-    },
+    authMethod,
+    webauthn: credentialId
+      ? {
+          credentialId,
+        }
+      : undefined,
+    iCloudSync,
     encKeySalt: salt,
     mnemonicBackup,
   };
 
-  return { security, encryptionKey: derivedKey };
+  return { security, encryptionKey };
 }
 
 interface AccountState {
   userProfile: UserProfile | null;
   encryptionKey: EncryptionKey | null;
-  isInitialized: boolean;
   isLoading: boolean;
   webauthnSupported: boolean;
   platformAuthenticatorAvailable: boolean;
@@ -206,7 +212,10 @@ interface AccountState {
   ourSk?: UserSecretKeys | null;
   // WASM session module
   session: SessionModule | null;
-  initializeAccountWithBiometrics: (username: string) => Promise<void>;
+  initializeAccountWithBiometrics: (
+    username: string,
+    iCloudSync?: boolean
+  ) => Promise<void>;
   initializeAccount: (username: string, password: string) => Promise<void>;
   loadAccount: (password?: string, userId?: string) => Promise<void>;
   restoreAccountFromMnemonic: (
@@ -217,7 +226,6 @@ interface AccountState {
   logout: () => Promise<void>;
   resetAccount: () => Promise<void>;
   setLoading: (loading: boolean) => void;
-  checkPlatformAvailability: () => Promise<void>;
 
   // Mnemonic backup methods
   showBackup: (password?: string) => Promise<{
@@ -246,22 +254,22 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
   };
 
   // Helper function to clear account state
-  const clearAccountState = (isInitialized: boolean) => ({
-    account: null,
-    userProfile: null,
-    encryptionKey: null,
-    ourPk: null,
-    ourSk: null,
-    session: null,
-    isLoading: false,
-    isInitialized,
-  });
+  const clearAccountState = () => {
+    return {
+      account: null,
+      userProfile: null,
+      encryptionKey: null,
+      ourPk: null,
+      ourSk: null,
+      session: null,
+      isLoading: false,
+    };
+  };
 
   return {
     // Initial state
     userProfile: null,
     encryptionKey: null,
-    isInitialized: false,
     isLoading: true,
     webauthnSupported: isWebAuthnSupported(),
     platformAuthenticatorAvailable: false,
@@ -302,6 +310,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           session
         );
 
+        useAppStore.getState().setIsInitialized(true);
         set({
           userProfile: profile,
           encryptionKey,
@@ -309,7 +318,6 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           ourPk: userPublicKeys,
           ourSk: userSecretKeys,
           session,
-          isInitialized: true,
           isLoading: false,
         });
       } catch (error) {
@@ -356,6 +364,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           session
         );
 
+        useAppStore.getState().setIsInitialized(true);
         set({
           account,
           userProfile: profile,
@@ -363,7 +372,6 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           ourPk: userPublicKeys,
           ourSk: userSecretKeys,
           session,
-          isInitialized: true,
           isLoading: false,
         });
       } catch (error) {
@@ -406,14 +414,22 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
 
         session.load(profile, encryptionKey);
 
+        // Update lastSeen timestamp for the logged-in user
+        const lastSeen = new Date();
+        const updatedProfile = {
+          ...profile,
+          lastSeen,
+        };
+        await db.userProfile.update(profile.userId, { lastSeen });
+
+        useAppStore.getState().setIsInitialized(true);
         set({
-          userProfile: profile,
+          userProfile: updatedProfile,
           account,
           encryptionKey,
           ourPk,
           ourSk,
           session,
-          isInitialized: true,
           isLoading: false,
         });
 
@@ -444,16 +460,9 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           await db.userProfile.delete(currentProfile.userId);
         }
 
-        // Determine if any accounts remain after deletion
-        let hasAnyAccount = false;
-        try {
-          const remaining = await db.userProfile.count();
-          hasAnyAccount = remaining > 0;
-        } catch (_countErr) {
-          hasAnyAccount = false;
-        }
-
-        set(clearAccountState(hasAnyAccount));
+        set(clearAccountState());
+        const nbAccounts = await db.userProfile.count();
+        useAppStore.getState().setIsInitialized(nbAccounts > 0);
       } catch (error) {
         console.error('Error resetting account:', error);
         set({ isLoading: false });
@@ -471,7 +480,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         useMessageStore.getState().cleanup();
         // Clear in-memory state but keep data in database
         // Keep isInitialized true so user goes to login screen
-        set(clearAccountState(true));
+        set(clearAccountState());
       } catch (error) {
         console.error('Error logging out:', error);
         set({ isLoading: false });
@@ -483,28 +492,17 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       set({ isLoading: loading });
     },
 
-    checkPlatformAvailability: async () => {
-      try {
-        const available = await isPlatformAuthenticatorAvailable();
-        set({ platformAuthenticatorAvailable: available });
-      } catch (error) {
-        console.error('Error checking platform availability:', error);
-        set({ platformAuthenticatorAvailable: false });
-      }
-    },
-
-    // WebAuthn-based account initialization
-    initializeAccountWithBiometrics: async (username: string) => {
+    // Biometric-based account initialization
+    initializeAccountWithBiometrics: async (
+      username: string,
+      iCloudSync = false
+    ) => {
       try {
         set({ isLoading: true });
 
-        // Check WebAuthn support
-        if (!isWebAuthnSupported()) {
-          throw new Error('WebAuthn is not supported in this browser');
-        }
-
-        const platformAvailable = await isPlatformAuthenticatorAvailable();
-        if (!platformAvailable) {
+        // Check biometric support using unified service
+        const availability = await biometricService.checkAvailability();
+        if (!availability.available) {
           throw new Error(
             'Biometric authentication is not available on this device'
           );
@@ -532,10 +530,12 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           mnemonic,
           {
             useBiometrics: true,
+            iCloudSync,
           },
           session
         );
 
+        useAppStore.getState().setIsInitialized(true);
         set({
           userProfile: profile,
           encryptionKey,
@@ -543,9 +543,8 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           ourPk: userPublicKeys,
           ourSk: keys.secret_keys(),
           session,
-          isInitialized: true,
           isLoading: false,
-          platformAuthenticatorAvailable: platformAvailable,
+          platformAuthenticatorAvailable: availability.available,
         });
       } catch (error) {
         console.error('Error creating user profile with biometrics:', error);
@@ -693,34 +692,18 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
   };
 });
 
-// TODO: Investigate potential race conditions when rapidly switching accounts
-// - Multiple async operations (provider creation, token initialization, balance refresh) may overlap
-// - Consider adding cancellation tokens or operation queuing to prevent state inconsistencies
-// - Test scenario: rapidly switch between accounts to identify any timing issues
 useAccountStoreBase.subscribe(async (state, prevState) => {
-  if (state.account === prevState.account) return;
+  const current = state.userProfile;
+  const previous = prevState.userProfile;
+
+  if (!current || !state.ourPk) return;
+  if (current === previous) return;
+  if (previous && current.userId === previous.userId) return;
 
   try {
-    const networkName = useAppStore.getState().networkName;
-    const publicApiUrl =
-      networkName === NetworkName.Buildnet
-        ? PublicApiUrl.Buildnet
-        : PublicApiUrl.Mainnet;
-
-    if (state.account) {
-      const provider = await JsonRpcProvider.fromRPCUrl(
-        publicApiUrl,
-        state.account
-      );
-
-      useAccountStoreBase.setState({ provider });
-      await useWalletStore.getState().initializeTokens();
-      await useWalletStore.getState().refreshBalances();
-    } else {
-      useAccountStoreBase.setState({ provider: null });
-    }
+    await authService.ensurePublicKeyPublished(state.ourPk, current.userId);
   } catch (error) {
-    console.error('Error initializing provider or refreshing balances:', error);
+    console.error('Error publishing public key:', error);
   }
 });
 

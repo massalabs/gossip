@@ -54,9 +54,7 @@ export class RestMessageProtocol implements IMessageProtocol {
 
     const response = await this.makeRequest<void>(url, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         key: encodeToBase64(message.seeker),
         value: encodeToBase64(message.ciphertext),
@@ -100,6 +98,40 @@ export class RestMessageProtocol implements IMessageProtocol {
     return response.data.map(row => decodeFromBase64(row));
   }
 
+  async fetchPublicKeyByUserId(userId: Uint8Array): Promise<string> {
+    const response = await this.makeRequest<{ value: string }>(
+      `${this.baseUrl}/auth/retrieve`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: encodeToBase64(userId) }),
+      }
+    );
+
+    if (!response.success || !response.data) {
+      throw new Error(response.error || 'Failed to fetch public key');
+    }
+
+    return response.data.value;
+  }
+
+  async postPublicKey(base64PublicKeys: string): Promise<string> {
+    const url = `${this.baseUrl}/auth`;
+
+    const response = await this.makeRequest<{ value: string }>(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ value: base64PublicKeys }),
+    });
+
+    if (!response.success || !response.data) {
+      const errorMessage = response.error || 'Failed to store public key';
+      throw new Error(errorMessage);
+    }
+
+    return response.data.value;
+  }
+
   private async makeRequest<T>(
     url: string,
     options: RequestInit
@@ -111,13 +143,8 @@ export class RestMessageProtocol implements IMessageProtocol {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), this.timeout);
 
-        // Merge headers with ngrok bypass header
-        const headers = new Headers(options.headers);
-        headers.set('ngrok-skip-browser-warning', '69420');
-
         const response = await fetch(url, {
           ...options,
-          headers,
           signal: controller.signal,
         });
 

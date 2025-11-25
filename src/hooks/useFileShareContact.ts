@@ -14,14 +14,22 @@ type ImportableYaml = {
   userName?: string;
 };
 
+type fileState = {
+  fileContact: FileContact | null;
+  isLoading: boolean;
+  error: string | null;
+};
+
 export function useFileShareContact() {
-  const [fileContact, setFileContact] = useState<FileContact | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
+  const [fileState, setFileState] = useState<fileState>({
+    fileContact: null,
+    isLoading: false,
+    error: null,
+  });
 
   const exportFileContact = useCallback(async (contact: FileContact) => {
     try {
-      setError(null);
+      setFileState(prev => ({ ...prev, error: null }));
       const doc = {
         // Export as base64 using Buffer (no btoa)
         userPubKeys: encodeToBase64(contact.userPubKeys),
@@ -88,62 +96,75 @@ export function useFileShareContact() {
         URL.revokeObjectURL(url);
       }
     } catch (e) {
-      setError(
-        e instanceof Error
-          ? `Failed to export file: ${e.message}`
-          : 'Failed to export file'
-      );
+      setFileState(prev => ({
+        ...prev,
+        error:
+          e instanceof Error
+            ? `Failed to export file: ${e.message}`
+            : 'Failed to export file',
+      }));
     }
   }, []);
 
-  const importFileContact = useCallback(async (file: File) => {
-    if (
-      !file.name.toLowerCase().endsWith('.yaml') &&
-      !file.name.toLowerCase().endsWith('.yml')
-    ) {
-      setError('Please select a .yaml or .yml file');
-      return;
-    }
-
-    try {
-      setIsLoading(true);
-      setError(null);
-      const text = await file.text();
-      const data = yaml.load(text) as ImportableYaml;
-
-      let bytes: Uint8Array;
-      if (typeof data.userPubKeys === 'string') {
-        try {
-          bytes = decodeFromBase64(data.userPubKeys);
-        } catch (e) {
-          setError('Invalid userPubKeys format. Expected base64 string: ' + e);
-          return;
-        }
-      } else if (Array.isArray(data.userPubKeys)) {
-        bytes = Uint8Array.from(data.userPubKeys);
-      } else {
-        setError('Invalid userPubKeys format.');
-        return;
+  const importFileContact = useCallback(
+    async (file: File): Promise<FileContact | null> => {
+      if (
+        !file.name.toLowerCase().endsWith('.yaml') &&
+        !file.name.toLowerCase().endsWith('.yml')
+      ) {
+        setFileState(prev => ({
+          ...prev,
+          error: 'Please select a .yaml or .yml file',
+        }));
+        return null;
       }
 
-      setFileContact({ userPubKeys: bytes, userName: data.userName });
-    } catch (e) {
-      setError(
-        e instanceof Error
-          ? `Failed to import file: ${e.message}`
-          : 'Failed to import file. Please check the file format.'
-      );
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
+      try {
+        setFileState(prev => ({ ...prev, isLoading: true, error: null }));
+        const text = await file.text();
+        const data = yaml.load(text) as ImportableYaml;
+
+        let bytes: Uint8Array;
+        if (typeof data.userPubKeys === 'string') {
+          try {
+            bytes = decodeFromBase64(data.userPubKeys);
+          } catch (e) {
+            setFileState(prev => ({
+              ...prev,
+              error: 'Invalid userPubKeys format. Expected base64 string: ' + e,
+            }));
+            return null;
+          }
+        } else if (Array.isArray(data.userPubKeys)) {
+          bytes = Uint8Array.from(data.userPubKeys);
+        } else {
+          setFileState(prev => ({
+            ...prev,
+            error: 'Invalid userPubKeys format.',
+          }));
+          return null;
+        }
+
+        const contact = { userPubKeys: bytes, userName: data.userName };
+        setFileState(prev => ({ ...prev, fileContact: contact }));
+        return contact;
+      } catch (e) {
+        setFileState(prev => ({
+          ...prev,
+          error: `Failed to import file: ${e instanceof Error ? e.message : 'Unknown error'}`,
+        }));
+        return null;
+      } finally {
+        setFileState(prev => ({ ...prev, isLoading: false }));
+      }
+    },
+    []
+  );
 
   return {
-    fileContact,
-    setFileContact,
+    fileState,
+    setFileState,
     exportFileContact,
     importFileContact,
-    isLoading,
-    error,
   };
 }

@@ -2,7 +2,7 @@ name: Wasm tests
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
 
 jobs:

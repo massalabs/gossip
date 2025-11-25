@@ -404,7 +404,36 @@ pub struct ReceiveMessageOutput {
     message: Vec<u8>,
     timestamp: f64,
     acknowledged_seekers: js_sys::Array,
-    user_id: Vec<u8>
+    user_id: Vec<u8>,
+}
+
+/// Result from feeding an incoming announcement.
+#[wasm_bindgen]
+pub struct AnnouncementResult {
+    inner: sessions::AnnouncementResult,
+}
+
+#[wasm_bindgen]
+impl AnnouncementResult {
+    /// Gets the announcer's public keys.
+    #[wasm_bindgen(getter)]
+    pub fn announcer_public_keys(&self) -> UserPublicKeys {
+        UserPublicKeys {
+            inner: self.inner.announcer_public_keys.clone(),
+        }
+    }
+
+    /// Gets the announcement timestamp in milliseconds since Unix epoch.
+    #[wasm_bindgen(getter)]
+    pub fn timestamp(&self) -> f64 {
+        self.inner.timestamp_millis as f64
+    }
+
+    /// Gets the user data embedded in the announcement.
+    #[wasm_bindgen(getter)]
+    pub fn user_data(&self) -> Vec<u8> {
+        self.inner.user_data.clone()
+    }
 }
 
 #[wasm_bindgen]
@@ -468,26 +497,83 @@ impl SessionManagerWrapper {
     }
 
     /// Establishes an outgoing session with a peer.
+    ///
+    /// # Parameters
+    ///
+    /// - `peer_pk`: The peer's public keys
+    /// - `our_pk`: Our public keys
+    /// - `our_sk`: Our secret keys
+    /// - `user_data`: Arbitrary user data to include in the announcement (can be empty)
+    ///
+    /// # Security Warning
+    ///
+    /// **The user_data in announcements has reduced security compared to regular messages:**
+    /// - ✅ **Plausible deniability preserved**: The user_data is not cryptographically signed,
+    ///   so you can deny having sent specific user_data content (though you cannot deny the
+    ///   announcement itself).
+    /// - ❌ **No post-compromise secrecy**: If your long-term keys are compromised in the
+    ///   future, past announcements (including their user_data) can be decrypted.
+    ///
+    /// **Recommendation**: Avoid including highly sensitive information in user_data. Use it for
+    /// metadata like protocol version, public display names, or capability flags. Send truly
+    /// sensitive data through regular messages after the session is established.
+    ///
+    /// # Returns
+    ///
+    /// The announcement bytes to publish to the blockchain.
     pub fn establish_outgoing_session(
         &mut self,
         peer_pk: &UserPublicKeys,
         our_pk: &UserPublicKeys,
         our_sk: &UserSecretKeys,
+        user_data: &[u8],
     ) -> Vec<u8> {
-        self.inner
-            .establish_outgoing_session(&peer_pk.inner, &our_pk.inner, &our_sk.inner)
+        self.inner.establish_outgoing_session(
+            &peer_pk.inner,
+            &our_pk.inner,
+            &our_sk.inner,
+            user_data.to_vec(),
+        )
     }
 
     /// Feeds an incoming announcement from the blockchain.
+    ///
+    /// # Parameters
+    ///
+    /// - `announcement_bytes`: The raw announcement bytes received from the blockchain
+    /// - `our_pk`: Our public keys
+    /// - `our_sk`: Our secret keys
+    ///
+    /// # Returns
+    ///
+    /// If the announcement is valid, returns an `AnnouncementResult` containing:
+    /// - The announcer's public keys
+    /// - The timestamp when the announcement was created (milliseconds since Unix epoch)
+    /// - The user data embedded in the announcement
+    ///
+    /// Returns `None` if the announcement is invalid or too old.
+    ///
+    /// # Security Warning
+    ///
+    /// **The user_data in announcements has reduced security compared to regular messages:**
+    /// - ✅ **Plausible deniability preserved**: The user_data is not cryptographically signed,
+    ///   so the sender can deny having sent specific user_data content (though they cannot deny
+    ///   the announcement itself).
+    /// - ❌ **No post-compromise secrecy**: If the sender's long-term keys are compromised
+    ///   in the future, all past announcements (including their user_data) can be decrypted.
+    ///
+    /// **Recommendation**: Treat user_data as having limited confidentiality. Use it for
+    /// metadata that is not highly sensitive. Send truly sensitive information through regular
+    /// messages after the session is established.
     pub fn feed_incoming_announcement(
         &mut self,
         announcement_bytes: &[u8],
         our_pk: &UserPublicKeys,
         our_sk: &UserSecretKeys,
-    ) -> Option<UserPublicKeys> {
+    ) -> Option<AnnouncementResult> {
         self.inner
             .feed_incoming_announcement(announcement_bytes, &our_pk.inner, &our_sk.inner)
-            .map(|pk| UserPublicKeys { inner: pk })
+            .map(|result| AnnouncementResult { inner: result })
     }
 
     /// Gets the list of message board seekers to monitor.
@@ -543,7 +629,7 @@ impl SessionManagerWrapper {
                     message: output.message.clone(),
                     timestamp: output.timestamp as f64,
                     acknowledged_seekers,
-                    user_id: output.user_id.clone()
+                    user_id: output.user_id.clone(),
                 }
             })
     }

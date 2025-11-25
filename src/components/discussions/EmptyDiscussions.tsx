@@ -3,7 +3,7 @@ import { PrivacyGraphic } from '../ui/PrivacyGraphic';
 
 const EmptyDiscussions: React.FC = () => {
   return (
-    <div className="py-8 text-center">
+    <div className="py-8 text-center h-full flex flex-col justify-center items-center">
       <div className="flex justify-center">
         <PrivacyGraphic size={60} />
       </div>

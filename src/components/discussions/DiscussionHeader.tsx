@@ -9,7 +9,6 @@ import BackButton from '../ui/BackButton';
 interface DiscussionHeaderProps {
   contact?: Contact | null | undefined;
   discussion?: Discussion | null;
-  isSyncing?: boolean;
   onBack?: () => void;
   onSync?: () => void;
   title?: string;
@@ -18,9 +17,7 @@ interface DiscussionHeaderProps {
 const DiscussionHeader: React.FC<DiscussionHeaderProps> = ({
   contact,
   discussion,
-  isSyncing = false,
   onBack,
-  onSync,
   title,
 }) => {
   const navigate = useNavigate();
@@ -79,7 +76,6 @@ const DiscussionHeader: React.FC<DiscussionHeaderProps> = ({
             </svg>
           </Button>
         )}
-
         <button
           onClick={() => navigate(`/contact/${contact.userId}`)}
           className="flex items-center flex-1 min-w-0 group hover:opacity-80 transition-opacity active:opacity-70"
@@ -127,47 +123,9 @@ const DiscussionHeader: React.FC<DiscussionHeaderProps> = ({
               <p className="text-[13px] text-gray-500 dark:text-gray-400 truncate font-medium">
                 {formatUserId(contact.userId)}
               </p>
-              {isSyncing && (
-                <div className="flex items-center gap-1.5 ml-1">
-                  <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse"></div>
-                  <span className="text-[11px] text-blue-600 dark:text-blue-400 font-medium">
-                    Syncing...
-                  </span>
-                </div>
-              )}
             </div>
           </div>
         </button>
-
-        {discussion && onSync && (
-          <div className="flex items-center gap-2 ml-2">
-            <Button
-              onClick={onSync}
-              disabled={isSyncing}
-              loading={isSyncing}
-              variant="circular"
-              size="custom"
-              className="w-9 h-9 flex items-center justify-center"
-              title="Sync messages"
-            >
-              {!isSyncing && (
-                <svg
-                  className="w-5 h-5 text-gray-600 dark:text-gray-400"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth={2}
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                  />
-                </svg>
-              )}
-            </Button>
-          </div>
-        )}
       </div>
     </div>
   );

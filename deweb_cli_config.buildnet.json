@@ -1,9 +1,0 @@
-{
-  "address": "AS12VRnDHRAN8u2ErqHogy85xmMZdBrM29rcFPL31JNGFdVRLLDTv",
-  "node_url": "https://buildnet.massa.net/api/v2",
-  "metadatas": {
-    "TITLE": "Gossip messenger",
-    "DESCRIPTION": "Gossip messenger buildnet",
-    "KEYWORD1": "privacy"
-  }
-}

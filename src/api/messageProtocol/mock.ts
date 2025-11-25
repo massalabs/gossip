@@ -70,6 +70,30 @@ export class MockMessageProtocol implements IMessageProtocol {
     return this.mockAnnouncements;
   }
 
+  async fetchPublicKeyByUserId(userId: Uint8Array): Promise<string> {
+    console.log(
+      'Mock: Fetching public key by userId:',
+      encodeToBase64(userId).substring(0, 20) + '...'
+    );
+
+    // Simulate network delay
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    // Mock implementation - return empty base64 string
+    // In a real mock, you might want to store and retrieve mock public keys
+    throw new Error('Public key not found for this user ID');
+  }
+
+  async postPublicKey(_base64PublicKeys: string): Promise<string> {
+    console.log('Mock: Posting public key');
+
+    // Simulate network delay
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    // Return a mock hex key (64 hex chars for 32 bytes)
+    return 'a'.repeat(64);
+  }
+
   // Helper methods for testing
   addMockMessage(seekerBase64Key: string, message: EncryptedMessage): void {
     if (!this.mockMessages.has(seekerBase64Key)) {

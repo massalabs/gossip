@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useAccountStore } from '../stores/accountStore';
 import { UserProfile } from '../db';
+import { biometricService } from '../services/biometricService';
 import AccountSelection from '../components/account/AccountSelection';
 import AccountImport from '../components/account/AccountImport';
 import Button from '../components/ui/Button';
+import { useNavigate } from 'react-router-dom';
 
 interface LoginProps {
   onCreateNewAccount: () => void;
@@ -22,14 +24,7 @@ const Login: React.FC<LoginProps> = React.memo(
     onErrorChange,
   }) => {
     const loadAccount = useAccountStore(state => state.loadAccount);
-    const webauthnSupported = useAccountStore(state => state.webauthnSupported);
-    const platformAuthenticatorAvailable = useAccountStore(
-      state => state.platformAuthenticatorAvailable
-    );
-    const checkPlatformAvailability = useAccountStore(
-      state => state.checkPlatformAvailability
-    );
-
+    const navigate = useNavigate();
     const [isLoading, setIsLoading] = useState(false);
     const [password, setPassword] = useState('');
     const [usePassword, setUsePassword] = useState(false);
@@ -38,67 +33,105 @@ const Login: React.FC<LoginProps> = React.memo(
     const [selectedAccountInfo, setSelectedAccountInfo] =
       useState<UserProfile | null>(null);
     const [autoAuthTriggered, setAutoAuthTriggered] = useState(false);
-    const [platformResolved, setPlatformResolved] = useState(false);
+    const [biometricMethodAvailable, setBiometricMethodAvailable] = useState<
+      ('capacitor' | 'webauthn' | 'none') | null
+    >(null);
     const lastAutoAuthCredentialIdRef = useRef<string | null>(null);
+    const autoAuthAttempted = useRef(false);
 
     const currentAccount = selectedAccountInfo || accountInfo;
 
     useEffect(() => {
       const shouldUsePassword =
-        !currentAccount?.security?.webauthn?.credentialId;
+        currentAccount?.security?.authMethod === 'password';
       if (usePassword !== shouldUsePassword) {
         setUsePassword(shouldUsePassword);
       }
     }, [currentAccount, usePassword]);
 
     useEffect(() => {
-      if (platformResolved) return;
       (async () => {
         try {
-          await checkPlatformAvailability();
+          const { method } = await biometricService.checkAvailability();
+          if (!method) return;
+          setBiometricMethodAvailable(method);
         } catch {
           // ignore
-        } finally {
-          setPlatformResolved(true);
         }
       })();
-    }, [checkPlatformAvailability, platformResolved]);
+    }, []);
 
     const handleBiometricAuth = useCallback(async () => {
       try {
         setIsLoading(true);
         onErrorChange?.(null);
 
+        if (!biometricMethodAvailable) {
+          throw new Error('Biometric authentication is not available');
+        }
+
         await loadAccount(undefined, currentAccount?.userId);
         onAccountSelected();
       } catch (error) {
-        console.error('Biometric authentication failed:', error);
         onErrorChange?.(
           error instanceof Error
             ? error.message
-            : 'Biometric authentication failed. Please try again.'
+            : 'Biometric authentication failed'
         );
       } finally {
         setIsLoading(false);
       }
-    }, [currentAccount, onErrorChange, loadAccount, onAccountSelected]);
+    }, [
+      currentAccount,
+      biometricMethodAvailable,
+      onErrorChange,
+      loadAccount,
+      onAccountSelected,
+    ]);
 
+    // Auto-trigger biometric auth when account is selected from account picker
     useEffect(() => {
       if (autoAuthTriggered || !selectedAccountInfo) return;
-      const credentialId =
-        selectedAccountInfo.security?.webauthn?.credentialId || null;
-      if (!credentialId) return;
-      if (lastAutoAuthCredentialIdRef.current === credentialId) return;
-      if (!webauthnSupported || !platformAuthenticatorAvailable) return;
-      lastAutoAuthCredentialIdRef.current = credentialId;
+      const authMethod = selectedAccountInfo.security?.authMethod;
+      if (authMethod === 'password') return;
+      if (lastAutoAuthCredentialIdRef.current === selectedAccountInfo.userId)
+        return;
+      if (!biometricMethodAvailable) return;
+
+      lastAutoAuthCredentialIdRef.current = selectedAccountInfo.userId;
       setAutoAuthTriggered(true);
       handleBiometricAuth();
     }, [
       autoAuthTriggered,
       selectedAccountInfo,
-      webauthnSupported,
-      platformAuthenticatorAvailable,
+      biometricMethodAvailable,
       handleBiometricAuth,
+    ]);
+
+    // Auto-trigger biometric auth on mount if account (from accountInfo) has biometric auth enabled
+    // Only triggers for accountInfo, not selectedAccountInfo (which is handled by the effect above)
+    useEffect(() => {
+      // Skip if already attempted, no accountInfo, or user has manually selected a different account
+      if (
+        autoAuthAttempted.current ||
+        !accountInfo ||
+        selectedAccountInfo ||
+        !biometricMethodAvailable
+      )
+        return;
+
+      const authMethod = accountInfo.security?.authMethod;
+
+      // Only auto-trigger for biometric auth methods (not password)
+      if (authMethod === 'capacitor' || authMethod === 'webauthn') {
+        autoAuthAttempted.current = true;
+        handleBiometricAuth();
+      }
+    }, [
+      accountInfo,
+      selectedAccountInfo,
+      handleBiometricAuth,
+      biometricMethodAvailable,
     ]);
 
     const handlePasswordAuth = async (
@@ -130,8 +163,8 @@ const Login: React.FC<LoginProps> = React.memo(
         const errorMessage = 'Invalid password. Please try again.';
         onErrorChange?.(errorMessage);
         setPassword('');
-        if (window.location.hash !== '#/welcome') {
-          window.location.hash = '#/welcome';
+        if (window.location.pathname !== '/welcome') {
+          navigate('/welcome');
         }
       } finally {
         setIsLoading(false);
@@ -162,8 +195,15 @@ const Login: React.FC<LoginProps> = React.memo(
       onAccountSelected();
     };
 
-    const accountSupportsBiometrics = !usePassword;
     const displayUsername = currentAccount?.username;
+
+    // Always try biometric first if available, regardless of account type
+    const shouldTryBiometricFirst = biometricMethodAvailable;
+
+    // For password accounts, we want to show biometric option as primary
+    const accountSupportsBiometrics = !usePassword;
+    const shouldShowBiometricOption =
+      shouldTryBiometricFirst || accountSupportsBiometrics;
 
     if (showAccountSelection) {
       return (
@@ -185,8 +225,8 @@ const Login: React.FC<LoginProps> = React.memo(
     }
 
     return (
-      <div className="min-h-screen-mobile bg-background flex flex-col items-center justify-center p-6">
-        <div className="w-full max-w-sm mx-auto">
+      <div className="bg-background flex flex-col items-center justify-center p-6 h-full">
+        <div className="w-full max-w-md mx-auto">
           <div className="text-center mb-8">
             <img
               src="/logo.svg"
@@ -211,7 +251,8 @@ const Login: React.FC<LoginProps> = React.memo(
           </div>
 
           <div className="space-y-5">
-            {accountSupportsBiometrics && (
+            {/* Biometric authentication - show if account supports it */}
+            {shouldShowBiometricOption && accountSupportsBiometrics && (
               <div className="rounded-2xl bg-white/80 dark:bg-gray-900/60 border border-gray-200/80 dark:border-gray-700/60 p-4 shadow-sm backdrop-blur">
                 <div className="space-y-3">
                   <Button
@@ -223,19 +264,19 @@ const Login: React.FC<LoginProps> = React.memo(
                     fullWidth
                     className="h-11 rounded-xl text-sm font-medium"
                   >
-                    {!isLoading && <span>Sign in with biometrics</span>}
+                    {!isLoading && <span>Login</span>}
                   </Button>
-                  {platformResolved &&
-                    (!webauthnSupported || !platformAuthenticatorAvailable) && (
-                      <p className="text-xs text-amber-700 dark:text-amber-400">
-                        Biometrics not detected. We will try anyway.
-                      </p>
-                    )}
+                  {!biometricMethodAvailable && (
+                    <p className="text-xs text-amber-700 dark:text-amber-400">
+                      Biometrics not detected. We will try anyway.
+                    </p>
+                  )}
                 </div>
               </div>
             )}
 
-            {usePassword && (
+            {/* Password authentication - show if biometrics not available OR for password accounts */}
+            {(!biometricMethodAvailable || usePassword) && (
               <div className="rounded-2xl bg-white/80 dark:bg-gray-900/60 border border-gray-200/80 dark:border-gray-700/60 p-4 shadow-sm backdrop-blur">
                 <div className="space-y-3">
                   <input
@@ -263,15 +304,15 @@ const Login: React.FC<LoginProps> = React.memo(
                   />
                   <Button
                     type="button"
-                    onClick={() => handlePasswordAuth()}
+                    onClick={handlePasswordAuth}
                     disabled={isLoading || !password.trim()}
                     loading={isLoading}
-                    variant="ghost"
+                    variant="outline"
                     size="custom"
                     fullWidth
                     className="h-11 rounded-xl text-sm font-medium"
                   >
-                    {!isLoading && <span>Sign in</span>}
+                    {!isLoading && <span>Login</span>}
                   </Button>
                 </div>
               </div>

@@ -38,4 +38,18 @@ export interface IMessageProtocol {
    * Returns raw announcement bytes as provided by the API.
    */
   fetchAnnouncements(): Promise<Uint8Array[]>;
+
+  /**
+   * Fetch public key by userId hash (base64 string)
+   * @param userId - Decoded userId bytes
+   * @returns Base64-encoded public keys
+   */
+  fetchPublicKeyByUserId(userId: Uint8Array): Promise<string>;
+
+  /**
+   * Store public key in the auth API
+   * @param base64PublicKeys - Base64-encoded public keys
+   * @returns The hash key (hex string) returned by the API
+   */
+  postPublicKey(base64PublicKeys: string): Promise<string>;
 }

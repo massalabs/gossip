@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { useAccountStore } from '../stores/accountStore';
+import { useAppStore } from '../stores/appStore';
 import { db } from '../db';
 
 const PROFILE_LOAD_DELAY_MS = 100;
@@ -20,21 +21,27 @@ export function useProfileLoader() {
           setTimeout(resolve, PROFILE_LOAD_DELAY_MS)
         );
 
+        // Ensure database is open before querying.
+        // NOTE: This may not be needed, but gives us the guarantee that it's open.
+        if (!db.isOpen()) {
+          await db.open();
+        }
+
         const state = useAccountStore.getState();
         const profile =
           state.userProfile || (await db.userProfile.toCollection().first());
 
         if (profile) {
           // Profile exists - let DiscussionList handle the welcome flow
-          useAccountStore.setState({ isInitialized: true });
+          useAppStore.getState().setIsInitialized(true);
         } else {
           // No profile exists - show onboarding
-          useAccountStore.setState({ isInitialized: false });
+          useAppStore.getState().setIsInitialized(false);
         }
       } catch (error) {
         console.error('Error loading user profile from Dexie:', error);
         // On error, assume no profile exists
-        useAccountStore.setState({ isInitialized: false });
+        useAppStore.getState().setIsInitialized(false);
       } finally {
         setLoading(false);
       }

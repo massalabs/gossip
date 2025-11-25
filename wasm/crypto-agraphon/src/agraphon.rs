@@ -11,12 +11,6 @@ use std::collections::VecDeque;
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 #[derive(Zeroize, ZeroizeOnDrop)]
-pub struct SendOutgoingMessageResult {
-    pub seeker: [u8; 32],
-    pub message_bytes: Vec<u8>,
-}
-
-#[derive(Zeroize, ZeroizeOnDrop)]
 pub struct FeedIncomingMessageResult {
     pub message_bytes: Vec<u8>,
     pub newly_acknowledged_self_seekers: Vec<Vec<u8>>,
@@ -320,9 +314,7 @@ impl Agraphon {
     ///
     /// # Returns
     ///
-    /// A `SendOutgoingMessageResult` containing:
-    /// - `seeker`: The seeker value - a unique lookup key for this message
-    /// - `message_bytes`: Encrypted message bytes to transmit to the peer
+    /// The encrypted message bytes to transmit to the peer.
     ///
     /// The seeker acts as a public identifier that allows the peer to efficiently
     /// retrieve this specific message from a public board without scanning all messages.
@@ -422,15 +414,13 @@ impl Agraphon {
         }));
 
         // assemble full message
-        let message_bytes = [
+        [
             msg_randomness.as_slice(),
             msg_ct.as_bytes().as_slice(),
             msg_ct_static.as_bytes().as_slice(),
             &ciphertext,
         ]
-        .concat();
-
-        message_bytes
+        .concat()
     }
 
     /// Returns the number of unacknowledged messages.

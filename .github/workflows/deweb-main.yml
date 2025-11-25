@@ -1,0 +1,44 @@
+name: CD - Deploy Main to DeWeb
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy-main:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        network: [buildnet]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Install
+        run: npm ci
+
+      - name: Get commit hash
+        id: vars
+        run: echo "commit_hash=$(git rev-parse --short=7 HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Build
+        env:
+          VITE_PROTOCOL_API_URL: ${{ secrets.VITE_PROTOCOL_API_URL }}
+          VITE_APP_BUILD_ID: ${{ steps.vars.outputs.commit_hash }}
+        run: npm run build
+
+      - name: Deploy Main → buildnet
+        id: deploy
+        uses: massalabs/deweb-gh-action@v0.1.0
+        with:
+          config_file: ./deweb_cli_config.main.${{ matrix.network }}.json
+          source_folder: ./dist
+        env:
+          MASSA_DEWEB_SECRET_KEY: ${{ matrix.network == 'buildnet' && secrets.PRIVATE_KEY || secrets.MASSA_DEWEB_MAINNET_PKEY }}
+
+      - name: URL
+        run: echo "Main deployed → ${{ steps.deploy.outputs.deployed-website }}"

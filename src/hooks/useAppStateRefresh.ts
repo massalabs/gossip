@@ -1,7 +1,9 @@
-import { useEffect } from 'react';
+import { useCallback, useEffect } from 'react';
 import { useAccountStore } from '../stores/accountStore';
 import { defaultSyncConfig } from '../config/sync';
 import { triggerManualSync } from '../services/messageSync';
+import { useMessageStore } from '../stores/messageStore.tsx';
+import { useDiscussionStore } from '../stores/discussionStore.tsx';
 
 /**
  * Hook to refresh app state periodically when user is logged in
@@ -10,22 +12,22 @@ import { triggerManualSync } from '../services/messageSync';
 export function useAppStateRefresh() {
   const { userProfile } = useAccountStore();
 
+  const initApp = useCallback(async () => {
+    useMessageStore.getState().init();
+    await useDiscussionStore.getState().init();
+    triggerManualSync().catch(error => {
+      console.error('Failed to sync messages on login:', error);
+    });
+  }, []);
+
   useEffect(() => {
     if (userProfile?.userId) {
-      console.log('User logged in, triggering message sync');
-      triggerManualSync().catch(error => {
-        console.error('Failed to sync messages on login:', error);
-      });
-
-      const REFRESH_INTERVAL_MS = defaultSyncConfig.activeSyncIntervalMs;
+      initApp();
       const refreshInterval = setInterval(() => {
-        console.log(
-          `Periodic app state refresh triggered (every ${REFRESH_INTERVAL_MS / 1000}s)`
-        );
         triggerManualSync().catch(error => {
           console.error('Failed to refresh app state periodically:', error);
         });
-      }, REFRESH_INTERVAL_MS);
+      }, defaultSyncConfig.activeSyncIntervalMs);
 
       // Cleanup interval when user logs out or component unmounts
       return () => {
@@ -33,5 +35,5 @@ export function useAppStateRefresh() {
         console.log('Periodic app state refresh interval cleared');
       };
     }
-  }, [userProfile?.userId]);
+  }, [userProfile?.userId, initApp]);
 }

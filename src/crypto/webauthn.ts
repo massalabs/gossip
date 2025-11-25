@@ -2,38 +2,26 @@
  * WebAuthn/FIDO2 utilities for biometric authentication and key generation
  */
 
-export interface WebAuthnCredential {
-  id: string;
-  publicKey: ArrayBuffer;
-  counter: number;
-  deviceType: 'platform' | 'cross-platform';
-  backedUp: boolean;
-  transports?: AuthenticatorTransport[];
-}
-
-export interface WebAuthnKeyMaterial {
-  credentialId: string;
-  publicKey: ArrayBuffer;
-  privateKey: CryptoKey;
-  counter: number;
-  deviceType: 'platform' | 'cross-platform';
-  backedUp: boolean;
-  transports?: AuthenticatorTransport[];
-}
-
+import {
+  BiometricCreationData,
+  BiometricCredentials,
+} from '../services/biometricService';
+import { decodeFromBase64Url, encodeToBase64 } from '../utils';
+import { generateEncryptionKeyFromSeed } from '../wasm';
 /**
  * Check if WebAuthn is supported in the current browser
  */
 export function isWebAuthnSupported(): boolean {
-  return (
+  const supported =
     typeof window !== 'undefined' &&
     typeof window.navigator !== 'undefined' &&
     typeof window.navigator.credentials !== 'undefined' &&
     typeof window.navigator.credentials.create !== 'undefined' &&
     typeof window.navigator.credentials.get !== 'undefined' &&
     typeof (window as unknown as { PublicKeyCredential?: unknown })
-      .PublicKeyCredential !== 'undefined'
-  );
+      .PublicKeyCredential !== 'undefined';
+
+  return supported;
 }
 
 /**
@@ -45,8 +33,8 @@ export async function isPlatformAuthenticatorAvailable(): Promise<boolean> {
   }
 
   try {
-    const pkc = window.PublicKeyCredential as unknown as {
-      isUserVerifyingPlatformAuthenticatorAvailable: () => Promise<boolean>;
+    const pkc = window.PublicKeyCredential as {
+      isUserVerifyingPlatformAuthenticatorAvailable?: () => Promise<boolean>;
     };
     if (
       !pkc ||
@@ -69,8 +57,9 @@ export async function isPlatformAuthenticatorAvailable(): Promise<boolean> {
  */
 export async function createWebAuthnCredential(
   username: string,
-  userId: Uint8Array
-): Promise<WebAuthnKeyMaterial> {
+  userId: Uint8Array,
+  salt: Uint8Array
+): Promise<BiometricCreationData> {
   if (!isWebAuthnSupported()) {
     throw new Error('WebAuthn is not supported in this browser');
   }
@@ -107,6 +96,13 @@ export async function createWebAuthnCredential(
       },
       timeout: 60000, // 60 seconds
       attestation: 'none', // We don't need attestation for our use case
+      extensions: {
+        prf: {
+          eval: {
+            first: salt as BufferSource,
+          },
+        },
+      },
     },
   };
 
@@ -119,37 +115,25 @@ export async function createWebAuthnCredential(
       throw new Error('Failed to create WebAuthn credential');
     }
 
-    const response = credential.response as AuthenticatorAttestationResponse;
-    const publicKey = response.getPublicKey();
+    // Extract PRF output from client extension results
+    const clientExt = credential.getClientExtensionResults?.() ?? {};
+    if (!clientExt.prf || !clientExt.prf.enabled) {
+      throw new Error('PRF extension not supported by this authenticator');
+    }
+    const prfOutput: ArrayBuffer | undefined = clientExt.prf.results
+      ?.first as ArrayBuffer;
 
-    if (!publicKey) {
-      throw new Error('No public key in credential response');
+    if (!prfOutput) {
+      throw new Error('PRF output not available in credential response');
     }
 
-    // Note: We don't need to import the public key for our use case
-    // since we're deriving our own encryption key from the credential
-
-    // For WebAuthn, we can't directly access the private key
-    // Instead, we'll use the credential for authentication and derive a separate encryption key
-    const encryptionKey = await deriveEncryptionKeyFromCredential(credential);
-
-    // Convert credentialId to base64url for storage
-    const credentialIdArray = new Uint8Array(credential.rawId);
-    const base64url = btoa(String.fromCharCode(...credentialIdArray))
-      .replace(/\+/g, '-')
-      .replace(/\//g, '_')
-      .replace(/=/g, '');
+    const seed = encodeToBase64(new Uint8Array(prfOutput));
+    const encryptionKey = await generateEncryptionKeyFromSeed(seed, salt);
 
     return {
-      credentialId: base64url, // Store as base64url string
-      publicKey: publicKey,
-      privateKey: encryptionKey, // This is actually our derived encryption key
-      counter: 0, // Will be updated on each use
-      deviceType: 'platform',
-      backedUp: false,
-      transports: (
-        credential.response as AuthenticatorAttestationResponse
-      ).getTransports?.() as AuthenticatorTransport[],
+      credentialId: credential.id,
+      encryptionKey,
+      authMethod: 'webauthn',
     };
   } catch (error) {
     console.error('Error creating WebAuthn credential:', error);
@@ -161,54 +145,45 @@ export async function createWebAuthnCredential(
 
 /**
  * Authenticate using existing WebAuthn credential
+ * @param credentialId - The credential ID to authenticate with
+ * @param salt - The same salt used during credential creation (for PRF extension)
+ * @param challenge - Optional challenge (random if not provided)
  */
 export async function authenticateWithWebAuthn(
   credentialId: string,
-  challenge?: Uint8Array
-): Promise<WebAuthnKeyMaterial> {
+  salt: Uint8Array
+): Promise<BiometricCredentials> {
   if (!isWebAuthnSupported()) {
     throw new Error('WebAuthn is not supported in this browser');
   }
 
-  const actualChallenge =
-    challenge || crypto.getRandomValues(new Uint8Array(32));
+  const actualChallenge = crypto.getRandomValues(new Uint8Array(32));
 
-  // Convert credentialId from base64url string back to ArrayBuffer
-  let credentialIdBuffer: ArrayBuffer;
-  try {
-    // First try to decode as base64url (standard WebAuthn format)
-    const base64url = credentialId.replace(/-/g, '+').replace(/_/g, '/');
-    const padded = base64url + '='.repeat((4 - (base64url.length % 4)) % 4);
-    const binaryString = atob(padded);
-    const bytes = new Uint8Array(binaryString.length);
-    for (let i = 0; i < binaryString.length; i++) {
-      bytes[i] = binaryString.charCodeAt(i);
-    }
-    credentialIdBuffer = bytes.buffer;
-  } catch (error) {
-    // If base64url decoding fails, try treating as raw string
-    console.warn(
-      'Failed to decode credentialId as base64url, trying as raw string:',
-      error
-    );
-    credentialIdBuffer = new TextEncoder().encode(credentialId).buffer;
-  }
+  // Convert credentialId from base64url string back to ArrayBuffer (if provided)
+  const allowCredentials = credentialId
+    ? [
+        {
+          id: decodeFromBase64Url(credentialId) as BufferSource,
+          type: 'public-key' as const,
+        },
+      ]
+    : undefined;
 
   const getOptions: CredentialRequestOptions = {
     publicKey: {
       challenge: actualChallenge as BufferSource,
-      allowCredentials: [
-        {
-          id: credentialIdBuffer,
-          type: 'public-key',
-          // Remove transports restriction to allow both internal and external authenticators
-          // transports: ['internal'], // This was too restrictive
-        },
-      ],
+      allowCredentials,
       userVerification: 'required',
       timeout: 60000,
       // Add rpId to match the one used during creation
       rpId: window.location.hostname,
+      extensions: {
+        prf: {
+          eval: {
+            first: salt as BufferSource,
+          },
+        },
+      },
     },
   };
 
@@ -221,119 +196,30 @@ export async function authenticateWithWebAuthn(
       throw new Error('Authentication failed - no credential returned');
     }
 
-    const response = credential.response as AuthenticatorAssertionResponse;
-    const publicKey = response.authenticatorData;
+    // Extract PRF output from client extension results
+    const clientExt = credential.getClientExtensionResults?.() ?? {};
+    if (!clientExt.prf) {
+      throw new Error('PRF extension not supported by this authenticator');
+    }
+    const prfOutput: ArrayBuffer | undefined = clientExt.prf.results
+      ?.first as ArrayBuffer;
 
-    if (!publicKey) {
-      throw new Error('No authenticator data in response');
+    if (!prfOutput) {
+      throw new Error(
+        "Your device's biometric authenticator doesn't support the required security feature. Please try using a different authentication method or device."
+      );
     }
 
-    // Derive encryption key from the credential
-    const encryptionKey = await deriveEncryptionKeyFromCredential(credential);
+    const seed = encodeToBase64(new Uint8Array(prfOutput));
+    const encryptionKey = await generateEncryptionKeyFromSeed(seed, salt);
 
     return {
-      credentialId: credential.id,
-      publicKey: publicKey,
-      privateKey: encryptionKey,
-      counter: 0, // This would need to be stored and updated
-      deviceType: 'platform',
-      backedUp: false,
+      encryptionKey,
     };
   } catch (error) {
     console.error('Error authenticating with WebAuthn:', error);
-    console.error('CredentialId used:', credentialId);
-    console.error('RP ID used:', window.location.hostname);
     throw new Error(
       `Biometric authentication failed: ${error instanceof Error ? error.message : 'Unknown error'}`
     );
   }
-}
-
-/**
- * Derive an encryption key from a WebAuthn credential
- * Since we can't access the private key directly, we'll use the credential ID
- * and some deterministic data to derive a consistent encryption key
- */
-async function deriveEncryptionKeyFromCredential(
-  credential: PublicKeyCredential
-): Promise<CryptoKey> {
-  // Create a deterministic seed from the credential ID and some app-specific data
-  const credentialIdBuffer = new TextEncoder().encode(credential.id);
-  const appSalt = new TextEncoder().encode('gossip-app-salt-2024');
-
-  // Combine credential ID with app salt
-  const combined = new Uint8Array(credentialIdBuffer.length + appSalt.length);
-  combined.set(credentialIdBuffer);
-  combined.set(appSalt, credentialIdBuffer.length);
-
-  // Derive key using PBKDF2
-  const keyMaterial = await crypto.subtle.importKey(
-    'raw',
-    combined,
-    'PBKDF2',
-    false,
-    ['deriveKey']
-  );
-
-  const salt = new Uint8Array(16); // Fixed salt for consistency
-  const iterations = 100000;
-
-  return await crypto.subtle.deriveKey(
-    {
-      name: 'PBKDF2',
-      salt: salt,
-      iterations: iterations,
-      hash: 'SHA-256',
-    },
-    keyMaterial,
-    {
-      name: 'AES-GCM',
-      length: 256,
-    },
-    false,
-    ['encrypt', 'decrypt']
-  );
-}
-
-/**
- * Encrypt private key using WebAuthn-derived encryption key
- */
-export async function encryptPrivateKeyWithWebAuthn(
-  privateKey: BufferSource,
-  webauthnKey: WebAuthnKeyMaterial
-): Promise<{
-  encryptedPrivateKey: ArrayBuffer;
-  iv: Uint8Array;
-  credentialId: string;
-}> {
-  // Generate IV for encryption
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-
-  // Encrypt the private key
-  const encryptedPrivateKey = await crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv },
-    webauthnKey.privateKey,
-    privateKey
-  );
-
-  return {
-    encryptedPrivateKey,
-    iv,
-    credentialId: webauthnKey.credentialId,
-  };
-}
-
-/**
- * Decrypt private key using WebAuthn-derived encryption key
- */
-export async function decryptPrivateKeyWithWebAuthn(
-  encryptedKey: ArrayBuffer,
-  iv: Uint8Array,
-  webauthnKey: WebAuthnKeyMaterial
-): Promise<ArrayBuffer> {
-  return await crypto.subtle.decrypt(
-    { name: 'AES-GCM', iv: iv as BufferSource },
-    webauthnKey.privateKey,
-    encryptedKey
-  );
 }

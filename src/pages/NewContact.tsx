@@ -1,405 +1,191 @@
-import React, {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
-import { useNavigate } from 'react-router-dom';
-import appLogo from '../assets/gossip_face.svg';
-import { Contact, db } from '../db';
-import { useAccountStore } from '../stores/accountStore';
-import { validateUsername, isValidUserId, encodeUserId } from '../utils';
-import { useFileShareContact } from '../hooks/useFileShareContact';
-import { UserPublicKeys } from '../assets/generated/wasm/gossip_wasm';
+import React, { useCallback, useRef, useState, useEffect } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import BaseModal from '../components/ui/BaseModal';
-import { useDiscussionList } from '../hooks/useDiscussionList';
 import Button from '../components/ui/Button';
+import { useContactForm } from '../hooks/useContactForm';
+import UserIdField from '../components/account/UserIdField';
+import NameField from '../components/account/NameField';
+import MessageField from '../components/account/MessageField';
+import PrivacyNotice from '../components/account/PrivacyNotice';
+import ErrorDisplay from '../components/account/ErrorDisplay';
+import PageHeader from '../components/ui/PageHeader';
+import ScanQRCode from '../components/settings/ScanQRCode';
+import { CameraIcon, UploadIcon } from '../components/ui/icons';
 
 const NewContact: React.FC = () => {
-  const navigate = useNavigate();
-  const { handleCreatedNewContact } = useDiscussionList();
-  const [name, setName] = useState('');
-  const [userId, setUserId] = useState('');
-  const [publicKeys, setPublicKeys] = useState<UserPublicKeys | null>(null);
-  const { userProfile } = useAccountStore();
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [nameError, setNameError] = useState<string | null>(null);
-  const [userIdError, setUserIdError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const {
-    fileContact,
-    importFileContact,
-    error: importFileContactError,
-    isLoading: isImportingFileContact,
-  } = useFileShareContact();
-
-  const isValid = useMemo(() => {
-    return validateUsername(name).valid && isValidUserId(userId);
-  }, [name, userId]);
-
-  const validateName = useCallback((value: string) => {
-    if (!value.trim()) {
-      setNameError(null);
-      return false;
-    }
-    const result = validateUsername(value);
-    if (!result.valid) {
-      setNameError(result.error || 'Invalid username');
-      return false;
-    }
-    setNameError(null);
-    return true;
-  }, []);
-
-  const validateUserId = useCallback((value: string) => {
-    if (!value.trim()) {
-      setUserIdError(null);
-      return false;
-    }
-    if (!isValidUserId(value)) {
-      setUserIdError('Please enter a valid gossip user ID (e.g. gossip1...)');
-      return false;
-    }
-    setUserIdError(null);
-    return true;
-  }, []);
-
+  const navigate = useNavigate();
+  const { state } = useLocation();
   const [isDiscardModalOpen, setIsDiscardModalOpen] = useState(false);
+  const [showScanner, setShowScanner] = useState(false);
+
+  const {
+    generalError,
+    name,
+    userId,
+    message,
+    isSubmitting,
+    canSubmit,
+    hasUnsavedChanges,
+    fileState,
+    handleFileImport,
+    handleNameChange,
+    handleUserIdChange,
+    handleMessageChange,
+    handleSubmit,
+  } = useContactForm();
+
+  useEffect(() => {
+    if (!state || !state.userId || !state.name) return;
+
+    handleUserIdChange(state.userId);
+    handleNameChange(state.name);
+  }, [state, handleUserIdChange, handleNameChange]);
+
   const handleBack = useCallback(() => {
-    if (name || userId) {
+    if (hasUnsavedChanges) {
       setIsDiscardModalOpen(true);
       return;
     }
     navigate('/');
-  }, [name, userId, navigate]);
+  }, [hasUnsavedChanges, navigate]);
 
-  const handleFileImport = useCallback(
-    async (event: React.ChangeEvent<HTMLInputElement>) => {
-      const file = event.target.files?.[0];
-      if (!file) return;
-      await importFileContact(file);
+  const handleDiscard = useCallback(() => {
+    setIsDiscardModalOpen(false);
+    navigate('/');
+  }, [navigate]);
+
+  const handleCancel = useCallback(() => {
+    setIsDiscardModalOpen(false);
+  }, []);
+
+  const handleScanSuccess = useCallback(
+    (scannedUserId: string, scannedName: string) => {
+      setShowScanner(false);
+
+      handleUserIdChange(scannedUserId);
+      handleNameChange(scannedName);
     },
-    [importFileContact]
+    [handleUserIdChange, handleNameChange]
   );
 
-  // When a file contact is imported, map it to the form fields
-  useEffect(() => {
-    if (!fileContact) return;
-    try {
-      const publicKeys = UserPublicKeys.from_bytes(fileContact.userPubKeys);
-      setPublicKeys(publicKeys);
-      const userIdString = encodeUserId(publicKeys.derive_id());
-      validateUserId(userIdString);
-      setUserId(userIdString);
-
-      if (fileContact.userName) {
-        setName(fileContact.userName);
-        validateName(fileContact.userName);
-      }
-      setError(null);
-    } catch (e) {
-      setError(
-        `Failed to process imported contact: ${e instanceof Error ? e.message : String(e)}`
-      );
-    }
-  }, [fileContact, validateName, validateUserId]);
-
-  // TODO: Remove, test purpose
-  // const handleGenerate = useCallback(async () => {
-  //   const nameIsValid = validateUsername(name).valid;
-  //   if (!nameIsValid || userId || isSubmitting) return;
-  //   try {
-  //     const newUserKeys = await generateUserKeys(`test_user_${name.trim()}`);
-  //     const pub = newUserKeys.public_keys();
-  //     setPublicKeys(pub);
-  //     setUserId(encodeUserId(pub.derive_id()));
-  //     setUserIdError(null);
-  //   } catch (e) {
-  //     console.error(e);
-  //     setUserIdError('Failed to generate user ID. Please try again.');
-  //   }
-  // }, [name, userId, isSubmitting]);
-
-  const handleSubmit = useCallback(async () => {
-    if (!isValid || !publicKeys) return;
-    setIsSubmitting(true);
-    setError(null);
-    try {
-      // Ensure unique contact name (case-insensitive)
-      if (!userProfile?.userId) throw new Error('No authenticated user');
-      const duplicateByName = await db
-        .getContactsByOwner(userProfile.userId)
-        .then(list =>
-          list.find(c => c.name.toLowerCase() === name.trim().toLowerCase())
-        );
-      if (duplicateByName) {
-        setNameError('This name is already used by another contact.');
-        setIsSubmitting(false);
-        return;
-      }
-
-      const contact: Omit<Contact, 'id'> = {
-        ownerUserId: userProfile.userId,
-        name: name.trim(),
-        userId: userId.trim(),
-        publicKeys: publicKeys.to_bytes(),
-        avatar: undefined,
-        isOnline: false,
-        lastSeen: new Date(),
-        createdAt: new Date(),
-      };
-
-      // Ensure unique user ID
-      const existing = await db.getContactByOwnerAndUserId(
-        userProfile.userId,
-        contact.userId
-      );
-
-      if (existing) {
-        setError('This user ID already exists in your contacts.');
-        setIsSubmitting(false);
-        return;
-      }
-
-      await db.contacts.add(contact);
-
-      await handleCreatedNewContact(contact);
-      navigate(`/`);
-    } catch (e) {
-      console.error(e);
-      setError('Failed to create contact. Please try again.');
-    } finally {
-      setIsSubmitting(false);
-    }
-  }, [
-    isValid,
-    publicKeys,
-    userProfile?.userId,
-    name,
-    userId,
-    handleCreatedNewContact,
-    navigate,
-  ]);
+  if (showScanner) {
+    return (
+      <ScanQRCode
+        onBack={() => setShowScanner(false)}
+        onScanSuccess={handleScanSuccess}
+      />
+    );
+  }
 
   return (
-    <div className="min-h-screen-mobile bg-background">
-      <div className="max-w-sm mx-auto">
-        {/* Header */}
-        <div className="px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <Button
-                onClick={handleBack}
-                variant="circular"
-                size="custom"
-                className="w-8 h-8 flex items-center justify-center"
-              >
-                <svg
-                  className="w-5 h-5 text-foreground/70"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M15 19l-7-7 7-7"
-                  />
-                </svg>
-              </Button>
-              <img
-                src={appLogo}
-                className="w-9 h-9 rounded object-cover"
-                alt="Gossip logo"
-              />
-              <h1 className="text-xl font-semibold text-black dark:text-white">
-                New contact
-              </h1>
-            </div>
-          </div>
-        </div>
+    <div className="bg-card h-full overflow-auto max-w-md mx-auto">
+      <PageHeader title="New contact" onBack={handleBack} />
 
-        {/* Form */}
-        <div className="px-4 pb-20">
-          <div className="bg-card rounded-lg p-6 space-y-5">
-            {/* Import Section */}
-            <div className="p-6">
-              <div className="text-center mb-6">
-                <div className="w-12 h-12 bg-primary/10 rounded-xl flex items-center justify-center mx-auto mb-3">
-                  <svg
-                    className="w-6 h-6 text-primary"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"
-                    />
-                  </svg>
-                </div>
-                <h3 className="text-lg font-semibold text-foreground mb-2">
-                  Import a contact from a file
-                </h3>
-              </div>
-              <div className="flex justify-center">
-                <label className="flex items-center justify-center gap-3 px-6 py-3 bg-primary text-primary-foreground rounded-xl transition-all duration-200 text-sm font-semibold cursor-pointer hover:bg-primary/90 shadow-sm hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed w-full max-w-xs">
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept=".yaml,.yml"
-                    className="hidden"
-                    onChange={handleFileImport}
-                    disabled={isImportingFileContact}
-                  />
-                  {isImportingFileContact ? (
-                    <>
-                      <div className="w-4 h-4 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin"></div>
-                      <span>Importing...</span>
-                    </>
-                  ) : (
-                    <>
-                      <svg
-                        className="w-5 h-5"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"
-                        />
-                      </svg>
-                      <span>Choose a file</span>
-                    </>
-                  )}
-                </label>
-              </div>
-            </div>
-
-            {/* Divider */}
-            <div className="h-px bg-border" />
-
-            <div>
-              <label className="block text-sm font-medium text-foreground mb-2">
-                Name
-              </label>
-              <input
-                type="text"
-                value={name}
-                onChange={e => {
-                  setName(e.target.value);
-                  validateName(e.target.value);
-                }}
-                onBlur={e => validateName(e.target.value)}
-                placeholder="Enter contact name"
-                className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent bg-input text-foreground placeholder-muted-foreground ${
-                  nameError ? 'border-destructive' : 'border-border'
-                }`}
-              />
-              {nameError && (
-                <p className="mt-1 text-sm text-red-600 dark:text-red-400">
-                  {nameError}
-                </p>
-              )}
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-foreground mb-2">
-                User ID
-              </label>
-              <div className="flex gap-2 flex-wrap sm:flex-nowrap">
-                <input
-                  type="text"
-                  value={userId}
-                  onChange={e => {
-                    setUserId(e.target.value);
-                    validateUserId(e.target.value);
-                  }}
-                  onBlur={e => validateUserId(e.target.value)}
-                  placeholder="Enter gossip Bech32 user ID"
-                  className={`flex-1 min-w-0 px-4 py-3 border rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent bg-input text-foreground placeholder-muted-foreground ${
-                    userIdError ? 'border-destructive' : 'border-border'
-                  }`}
-                />
-                {/* <Button
-                  type="button"
-                  onClick={async () => {
-                    await handleGenerate();
-                  }}
-                  disabled={
-                    !validateUsername(name).valid || !!userId || isSubmitting
-                  }
-                  variant="ghost"
-                  size="custom"
-                  className="px-4 py-3 rounded-xl text-sm font-medium whitespace-nowrap"
-                  title="Generate random user ID"
-                >
-                  Generate
-                </Button> */}
-              </div>
-              {userIdError && (
-                <p className="mt-1 text-sm text-red-600 dark:text-red-400">
-                  {userIdError}
-                </p>
-              )}
-              <p className="mt-1 text-xs text-muted-foreground">
-                User ID is a unique 32-byte identifier
+      {/* Main Form */}
+      <div className="px-6 pb-32">
+        <div className="bg-card rounded-xl p-6 space-y-5">
+          {/* Import Options - File and QR Code */}
+          <div className="py-6 border-b border-border">
+            <div className="text-center mb-4">
+              <p className="text-sm text-muted-foreground mb-4">
+                Import contact
               </p>
-            </div>
-
-            {(error || importFileContactError) && (
-              <div className="text-sm text-red-600 dark:text-red-400">
-                {error || importFileContactError}
+              <div className="flex gap-3 justify-center">
+                <Button
+                  onClick={() => fileInputRef.current?.click()}
+                  variant="primary"
+                  size="md"
+                  className="inline-flex items-center gap-2 flex-1 max-w-[140px]"
+                  disabled={fileState.isLoading}
+                >
+                  <UploadIcon className="w-5 h-5" />
+                  <span>By file</span>
+                </Button>
+                <Button
+                  onClick={() => setShowScanner(true)}
+                  variant="outline"
+                  size="md"
+                  className="inline-flex items-center gap-2 flex-1 max-w-[140px]"
+                >
+                  <CameraIcon className="w-5 h-5" />
+                  <span>Scan QR</span>
+                </Button>
               </div>
+            </div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".yaml,.yml"
+              className="hidden"
+              onChange={handleFileImport}
+              disabled={fileState.isLoading}
+              aria-label="Import contact from YAML file"
+            />
+            {fileState.error && (
+              <p
+                className="text-sm text-destructive mt-2 text-center"
+                role="alert"
+              >
+                {fileState.error}
+              </p>
             )}
-
-            <Button
-              onClick={handleSubmit}
-              disabled={!isValid || isSubmitting}
-              loading={isSubmitting}
-              variant="ghost"
-              size="custom"
-              fullWidth
-              className="py-3 px-4 rounded-xl text-sm font-medium"
-            >
-              {!isSubmitting && 'Save contact'}
-            </Button>
           </div>
+
+          <UserIdField
+            userId={userId.value}
+            onChange={handleUserIdChange}
+            error={userId.error}
+            isFetching={userId.loading}
+          />
+
+          <NameField
+            name={name.value}
+            onChange={handleNameChange}
+            error={name.error}
+          />
+
+          <MessageField
+            message={message.value}
+            onChange={handleMessageChange}
+          />
+
+          <PrivacyNotice />
+
+          <ErrorDisplay error={generalError} />
+
+          {/* Save Button */}
+          <Button
+            onClick={handleSubmit}
+            disabled={!canSubmit}
+            loading={isSubmitting}
+            fullWidth
+            size="md"
+            className="h-12 rounded-xl text-base"
+          >
+            Add contact
+          </Button>
         </div>
       </div>
-      {/* Discard confirm modal */}
+
+      {/* Discard Modal */}
       <BaseModal
         isOpen={isDiscardModalOpen}
-        onClose={() => setIsDiscardModalOpen(false)}
-        title="Discard new contact?"
+        onClose={handleCancel}
+        title="Discard changes?"
       >
         <div className="space-y-4">
-          <p className="text-sm text-foreground">Your changes will be lost.</p>
+          <p className="text-sm text-foreground">
+            Unsaved changes will be lost.
+          </p>
           <div className="flex gap-3">
-            <Button
-              onClick={() => {
-                setIsDiscardModalOpen(false);
-                navigate('/');
-              }}
-              variant="danger"
-              size="custom"
-              className="flex-1 h-11 rounded-lg font-semibold"
-            >
+            <Button onClick={handleDiscard} variant="danger" className="flex-1">
               Discard
             </Button>
             <Button
-              onClick={() => setIsDiscardModalOpen(false)}
+              onClick={handleCancel}
               variant="secondary"
-              size="custom"
-              className="flex-1 h-11 rounded-lg font-semibold"
+              className="flex-1"
             >
               Cancel
             </Button>

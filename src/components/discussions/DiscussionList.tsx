@@ -6,7 +6,6 @@ import EmptyDiscussions from './EmptyDiscussions';
 import DiscussionListItem from './DiscussionListItem';
 
 interface DiscussionListProps {
-  onRefresh: () => void;
   onSelect: (contactUserId: string) => void;
   activeUserId?: string;
   headerVariant?: 'button' | 'link';
@@ -26,12 +25,12 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
     useDiscussionList();
 
   return (
-    <div className="bg-card rounded-lg">
-      <div className="divide-y divide-border">
-        {discussions.filter(d => d.status !== 'closed').length === 0 ? (
-          <EmptyDiscussions />
-        ) : (
-          discussions
+    <>
+      {discussions.filter(d => d.status !== 'closed').length === 0 ? (
+        <EmptyDiscussions />
+      ) : (
+        <>
+          {discussions
             .filter(d => d.status !== 'closed')
             .map(discussion => {
               const contact = contacts.find(
@@ -61,10 +60,10 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
                   />
                 </div>
               );
-            })
-        )}
-      </div>
-    </div>
+            })}
+        </>
+      )}
+    </>
   );
 };
 

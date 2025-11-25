@@ -29,3 +29,42 @@ dev-dist
 *.sw?
 
 *.env*
+
+# Capacitor generated files
+# iOS - ignore generated/build artifacts only
+ios/App/Pods/
+ios/App/App/public/
+ios/App/App/capacitor.config.json
+ios/App/App.xcodeproj/xcuserdata/
+ios/App/App.xcworkspace/xcuserdata/
+ios/DerivedData/
+ios/App/build/
+ios/App/*.ipa
+ios/App/*.dSYM.zip
+ios/App/fastlane/report.xml
+ios/App/fastlane/Preview.html
+ios/App/fastlane/test_output/
+ios/App/Gemfile.lock
+
+# Android build artifacts
+android/.gradle/
+android/app/build/
+android/build/
+android/DerivedData/
+android/.idea/
+android/local.properties
+android/captured_assets/
+
+# PWA generated assets
+icons/
+public/manifest.webmanifest
+assets/
+
+# Android generated resources (night mode, additional density variants)
+android/app/src/main/res/drawable-night/
+android/app/src/main/res/drawable-*-night*/
+android/app/src/main/res/drawable-*-ldpi/
+android/app/src/main/res/drawable-land-ldpi/
+android/app/src/main/res/drawable-port-ldpi/
+android/app/src/main/res/mipmap-ldpi/
+android/app/src/main/res/mipmap-*/ic_launcher_background.png

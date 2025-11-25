@@ -1,7 +1,7 @@
 // TODO: use virtual list to render messages
 import React, { useEffect, useCallback, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { db } from '../db';
+import { db, Message } from '../db';
 import { useDiscussion } from '../hooks/useDiscussion';
 import { useAccountStore } from '../stores/accountStore';
 import { useDiscussionStore } from '../stores/discussionStore';
@@ -46,13 +46,13 @@ const Discussion: React.FC = () => {
   const isSending = useMessageStore(s => s.isSending);
   const sendMessage = useMessageStore(s => s.sendMessage);
   const resendMessage = useMessageStore(s => s.resendMessage);
-  const syncMessages = useMessageStore(s => s.syncMessages);
-
-  const [isManualSyncing, setIsManualSyncing] = useState(false);
   // Track previous contact userId to prevent unnecessary updates
   const prevContactUserIdRef = useRef<string | null>(null);
 
   const isMsgFailed = messages.some(m => m.status === 'failed');
+
+  // Reply state
+  const [replyingTo, setReplyingTo] = useState<Message | null>(null);
 
   // Set current contact when it changes (only if different)
   useEffect(() => {
@@ -78,24 +78,44 @@ const Discussion: React.FC = () => {
   }, [messages.length, isLoading, userProfile?.userId, contact?.userId]);
 
   const handleSendMessage = useCallback(
-    async (text: string) => {
+    async (text: string, replyToId?: number) => {
       if (!contact?.userId) return;
       try {
-        await sendMessage(contact.userId, text);
+        await sendMessage(contact.userId, text, replyToId);
+        setReplyingTo(null); // Clear reply state after sending
       } catch (error) {
         toast.error('Failed to send message');
         console.error('Failed to send message:', error);
       }
     },
-    [sendMessage, contact?.userId]
+    [sendMessage, contact?.userId, setReplyingTo]
   );
 
-  const handleManualSync = useCallback(async () => {
-    if (!contact?.userId) return;
-    setIsManualSyncing(true);
-    await syncMessages(contact.userId);
-    setIsManualSyncing(false);
-  }, [contact?.userId, syncMessages]);
+  const handleReplyToMessage = useCallback((message: Message) => {
+    setReplyingTo(message);
+  }, []);
+
+  const handleCancelReply = useCallback(() => {
+    setReplyingTo(null);
+  }, []);
+
+  const handleScrollToMessage = useCallback((messageId: number) => {
+    // Use native scrollIntoView to scroll to the message
+    const element = document.getElementById(`message-${messageId}`);
+    if (element) {
+      element.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center',
+      });
+      // Add visual feedback for the scrolled-to message
+      element.classList.add('highlight-message');
+      setTimeout(() => {
+        element.classList.remove('highlight-message');
+      }, 2000);
+    } else {
+      console.warn(`Message element with id message-${messageId} not found`);
+    }
+  }, []);
 
   const handleInputClick = () => {
     if (isMsgFailed) {
@@ -109,33 +129,29 @@ const Discussion: React.FC = () => {
 
   // Mobile-first: show only discussion page when selected
   return (
-    <div className="h-screen-mobile md:h-screen bg-background flex">
-      <div className="flex-1 flex flex-col min-w-0">
-        <div className="h-full flex flex-col w-full">
-          <div className="w-full md:max-w-lg lg:max-w-2xl xl:max-w-3xl mx-auto h-full flex flex-col">
-            <DiscussionHeader
-              contact={contact}
-              discussion={discussion}
-              isSyncing={isManualSyncing}
-              onBack={onBack}
-              onSync={handleManualSync}
-            />
+    <div className="h-full max-w-md mx-auto bg-background flex flex-col">
+      <DiscussionHeader
+        contact={contact}
+        discussion={discussion}
+        onBack={onBack}
+      />
 
-            <MessageList
-              messages={messages}
-              contact={contact}
-              isLoading={isLoading || isDiscussionLoading}
-              onResend={resendMessage}
-            />
+      <MessageList
+        messages={messages}
+        discussion={discussion}
+        isLoading={isLoading || isDiscussionLoading}
+        onResend={resendMessage}
+        onReplyTo={handleReplyToMessage}
+        onScrollToMessage={handleScrollToMessage}
+      />
 
-            <MessageInput
-              onSend={handleSendMessage}
-              onClick={handleInputClick}
-              disabled={isSending || isMsgFailed}
-            />
-          </div>
-        </div>
-      </div>
+      <MessageInput
+        onSend={handleSendMessage}
+        onClick={handleInputClick}
+        disabled={isSending || isMsgFailed}
+        replyingTo={replyingTo}
+        onCancelReply={handleCancelReply}
+      />
     </div>
   );
 };

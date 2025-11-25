@@ -25,7 +25,11 @@ interface MessageStoreState {
 
   // Actions
   setCurrentContact: (contactUserId: string | null) => void;
-  sendMessage: (contactUserId: string, content: string) => Promise<void>;
+  sendMessage: (
+    contactUserId: string,
+    content: string,
+    replyToId?: number
+  ) => Promise<void>;
   resendMessage: (message: Message) => Promise<void>;
   syncMessages: (contactUserId?: string) => Promise<void>;
   addMessage: (contactUserId: string, message: Message) => void;
@@ -147,7 +151,11 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
   },
 
   // Send a message
-  sendMessage: async (contactUserId: string, content: string) => {
+  sendMessage: async (
+    contactUserId: string,
+    content: string,
+    replyToId?: number
+  ) => {
     const { userProfile } = useAccountStore.getState();
     if (!userProfile?.userId || !content.trim() || get().isSending) return;
 
@@ -164,6 +172,23 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
       }
 
       // Create message with sending status
+      let replyTo: Message['replyTo'] = undefined;
+      if (replyToId) {
+        // Look up the original message to get its seeker
+        const originalMessage = await db.messages.get(replyToId);
+        if (!originalMessage) {
+          throw new Error('Original message not found');
+        }
+        if (!originalMessage.seeker) {
+          throw new Error(
+            'Cannot reply to a message that has not been sent yet'
+          );
+        }
+        replyTo = {
+          originalSeeker: originalMessage.seeker,
+        };
+      }
+
       const message: Omit<Message, 'id'> = {
         ownerUserId: userProfile.userId,
         contactUserId,
@@ -172,6 +197,7 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
         direction: 'outgoing',
         status: 'sending',
         timestamp: new Date(),
+        replyTo,
       };
 
       // Persist to DB

@@ -1,5 +1,12 @@
 import { create } from 'zustand';
-import { MRC20, Provider, formatUnits } from '@massalabs/massa-web3';
+import {
+  MRC20,
+  Provider,
+  PublicApiUrl,
+  NetworkName,
+  formatUnits,
+  JsonRpcProvider,
+} from '@massalabs/massa-web3';
 import { useAccountStore } from './accountStore';
 import { priceFetcher } from '../utils/fetchPrice';
 import { createSelectors } from './utils/createSelectors';
@@ -7,6 +14,7 @@ import { createSelectors } from './utils/createSelectors';
 import { FeeConfig } from '../components/wallet/FeeConfigModal';
 import { addDebugLog } from '../components/ui/debugLogs';
 import { initialTokens } from './utils/const';
+import { useAppStore } from './appStore';
 
 type WithNonNull<T, K extends keyof T> = Omit<T, K> & {
   [P in K]-?: NonNullable<T[P]>;
@@ -172,5 +180,33 @@ const useWalletStoreBase = create<WalletStoreState>((set, get) => ({
     return get().feeConfig;
   },
 }));
+
+useAccountStore.subscribe(async (state, prevState) => {
+  if (state.account === prevState.account) return;
+
+  try {
+    const networkName = useAppStore.getState().networkName;
+    const publicApiUrl =
+      networkName === NetworkName.Buildnet
+        ? PublicApiUrl.Buildnet
+        : PublicApiUrl.Mainnet;
+
+    if (state.account) {
+      const provider = await JsonRpcProvider.fromRPCUrl(
+        publicApiUrl,
+        state.account
+      );
+
+      useAccountStore.setState({ provider });
+
+      await useWalletStore.getState().initializeTokens();
+      await useWalletStore.getState().refreshBalances();
+    } else {
+      useAccountStore.setState({ provider: null });
+    }
+  } catch (error) {
+    console.error('Error initializing provider:', error);
+  }
+});
 
 export const useWalletStore = createSelectors(useWalletStoreBase);

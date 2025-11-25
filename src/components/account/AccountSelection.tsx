@@ -50,7 +50,8 @@ const AccountSelection: React.FC<AccountSelectionProps> = ({
   };
 
   const formatAccountType = (account: UserProfile) => {
-    if (account.security?.webauthn?.credentialId) {
+    const authMethod = account.security?.authMethod;
+    if (authMethod === 'capacitor' || authMethod === 'webauthn') {
       return 'Biometric';
     } else {
       return 'Password';
@@ -58,7 +59,8 @@ const AccountSelection: React.FC<AccountSelectionProps> = ({
   };
 
   const getAccountIcon = (account: UserProfile) => {
-    if (account.security?.webauthn?.credentialId) {
+    const authMethod = account.security?.authMethod;
+    if (authMethod === 'capacitor' || authMethod === 'webauthn') {
       return (
         <div className="w-10 h-10 bg-blue-100 dark:bg-blue-900/40 rounded-full flex items-center justify-center">
           <svg
@@ -99,7 +101,7 @@ const AccountSelection: React.FC<AccountSelectionProps> = ({
 
   if (isLoading) {
     return (
-      <div className="min-h-screen-mobile bg-white dark:bg-gray-900 flex items-center justify-center">
+      <div className="bg-background flex items-center justify-center">
         <div className="text-center">
           <div className="w-8 h-8 border-2 border-gray-300 dark:border-gray-700 border-t-blue-600 rounded-full animate-spin mx-auto mb-4"></div>
           <p className="text-gray-600 dark:text-gray-300">
@@ -111,8 +113,8 @@ const AccountSelection: React.FC<AccountSelectionProps> = ({
   }
 
   return (
-    <div className="min-h-screen-mobile bg-white dark:bg-gray-900">
-      <div className="max-w-sm mx-auto">
+    <div className="bg-background">
+      <div className="max-w-md mx-auto">
         {/* Header */}
         <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-800">
           <div className="flex items-center gap-4">

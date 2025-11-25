@@ -295,9 +295,8 @@ const AccountImport: React.FC<AccountImportProps> = ({
   );
 
   return (
-    <div className="min-h-screen-mobile bg-white dark:bg-gray-900">
-      <div className="max-w-sm mx-auto">
-        {/* Header */}
+    <div className="bg-background">
+      <div className="max-w-md mx-auto">
         <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-800">
           <div className="flex items-center gap-4">
             <Button

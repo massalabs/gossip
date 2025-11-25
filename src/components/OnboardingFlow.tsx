@@ -87,10 +87,11 @@ const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
   };
 
   return (
-    <div className="min-h-screen-mobile bg-background flex flex-col items-center justify-center p-4 md:p-8">
-      <div className="w-full max-w-md mx-auto">
+    <div className="h-full p-4 md:p-8 py-14 w-full mx-auto flex flex-col justify-center items-center">
+      {/* Content */}
+      <div className="flex-1 flex flex-col justify-around text-center ">
         {/* Progress indicator */}
-        <div className="flex justify-center mb-10">
+        <div className="flex justify-center shrink-0">
           <div className="flex space-x-2">
             {steps.map((_, index) => (
               <div
@@ -104,13 +105,9 @@ const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
             ))}
           </div>
         </div>
-
-        {/* Content */}
-        <div className="text-center mb-10">
-          <div className="relative mb-8">
-            <PrivacyGraphic size={200} />
-          </div>
-          <h1 className="text-3xl md:text-4xl font-bold text-gray-900 dark:text-white mb-4 leading-tight">
+        <PrivacyGraphic size={200} />
+        <div className="">
+          <h1 className="text-3xl md:text-4xl font-bold text-foreground mb-4 leading-tight">
             {currentStep === 0 ? (
               <>
                 Welcome to{' '}
@@ -120,60 +117,63 @@ const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
               steps[currentStep].title
             )}
           </h1>
-          <p className="text-base md:text-lg text-gray-600 dark:text-gray-300 leading-relaxed max-w-sm mx-auto px-2">
+          <p className="text-base md:text-lg text-muted-foreground leading-relaxed max-w-md mx-auto px-2">
             {steps[currentStep].description}
           </p>
         </div>
 
-        {/* Create Your Account CTAs */}
-        {currentStep === steps.length - 1 && (
-          <div className="space-y-4 mb-6">
-            <Button
-              onClick={onComplete}
-              variant="primary"
-              size="custom"
-              fullWidth
-              className="h-14 text-base font-semibold rounded-2xl gap-2"
-            >
-              <LightningIcon />
-              Create New Account
-            </Button>
-            {onImportMnemonic && (
+        {/* Actions: CTAs or Navigation */}
+        <div className="shrink-0">
+          {/* Create Your Account CTAs */}
+          {currentStep === steps.length - 1 && (
+            <div className="space-y-4">
               <Button
-                onClick={onImportMnemonic}
-                variant="outline"
+                onClick={onComplete}
+                variant="primary"
                 size="custom"
                 fullWidth
-                className="h-14 text-base font-medium rounded-2xl"
+                className="h-14 text-base font-semibold rounded-2xl gap-2"
               >
-                Import from Mnemonic
+                <LightningIcon />
+                Create New Account
               </Button>
-            )}
-          </div>
-        )}
+              {onImportMnemonic && (
+                <Button
+                  onClick={onImportMnemonic}
+                  variant="outline"
+                  size="custom"
+                  fullWidth
+                  className="h-14 text-base font-medium rounded-2xl"
+                >
+                  Import from Mnemonic
+                </Button>
+              )}
+            </div>
+          )}
 
-        {/* Navigation */}
-        {currentStep < steps.length - 1 && (
-          <div className="flex justify-between items-center">
-            {currentStep > 0 ? (
-              <Button onClick={prevStep} variant="ghost" size="sm">
-                Back
+          {/* Navigation */}
+          {currentStep < steps.length - 1 && (
+            <div className="flex justify-between items-center">
+              {currentStep > 0 ? (
+                <Button onClick={prevStep} variant="ghost" size="md">
+                  Back
+                </Button>
+              ) : (
+                <div /> // Spacer to keep Next button aligned
+              )}
+
+              <Button
+                onClick={nextStep}
+                variant="primary"
+                size="md"
+                className="px-8 gap-2"
+              >
+                {currentStep === steps.length - 2 ? 'Get Started' : 'Next'}
+                <ArrowRightIcon />
               </Button>
-            ) : (
-              <div /> // Spacer to keep Next button aligned
-            )}
-
-            <Button
-              onClick={nextStep}
-              variant="primary"
-              size="sm"
-              className="px-8 gap-2"
-            >
-              {currentStep === steps.length - 2 ? 'Get Started' : 'Next'}
-              <ArrowRightIcon />
-            </Button>
-          </div>
-        )}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
