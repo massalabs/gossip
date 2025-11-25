@@ -12,6 +12,7 @@ import { useAppStore } from '../stores/appStore';
  */
 export const usePendingDeepLink = () => {
   const pendingDeepLink = useAppStore(s => s.pendingDeepLink);
+  const setPendingDeepLink = useAppStore(s => s.setPendingDeepLink);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -19,22 +20,19 @@ export const usePendingDeepLink = () => {
       if (!pendingDeepLink) return;
 
       try {
-        try {
-          const { userId, name } = parseInvite(pendingDeepLink);
+        const { userId, name } = parseInvite(pendingDeepLink);
 
-          navigate(`/new-contact`, {
-            replace: true,
-            state: { userId, name },
-          });
-          return;
-        } catch (error) {
-          console.error('Failed to parse pending invite:', error);
-        }
+        navigate(`/new-contact`, {
+          replace: true,
+          state: { userId, name },
+        });
       } catch (error) {
         console.error('Failed to retrieve pending deep link:', error);
+      } finally {
+        setPendingDeepLink(null);
       }
     };
 
     handlePendingDeepLink();
-  }, [navigate, pendingDeepLink]);
+  }, [navigate, pendingDeepLink, setPendingDeepLink]);
 };
