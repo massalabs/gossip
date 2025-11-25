@@ -13,7 +13,7 @@ platform :android do
     gradle(
       task: "bundle",
       build_type: "Release",
-      project_dir: "../",
+      project_dir: ".",  # Le Fastfile est déjà dans android/, donc "." pointe vers android/
       print_command: true
     )
 
@@ -35,7 +35,7 @@ platform :android do
     # Le fichier sera automatiquement signé et uploadé
     upload_to_play_store(
       track: 'internal',
-      aab: '../app/build/outputs/bundle/release/app-release.aab',
+      aab: 'app/build/outputs/bundle/release/app-release.aab',
       json_key_data: ENV['PLAY_STORE_JSON_KEY'],
       skip_upload_apk: true,
       skip_upload_metadata: true,
@@ -53,7 +53,7 @@ platform :android do
     
     upload_to_play_store(
       track: 'beta',
-      aab: '../app/build/outputs/bundle/release/app-release.aab',
+      aab: 'app/build/outputs/bundle/release/app-release.aab',
       json_key_data: ENV['PLAY_STORE_JSON_KEY'],
       skip_upload_apk: true,
       skip_upload_metadata: true,
@@ -71,7 +71,7 @@ platform :android do
     
     upload_to_play_store(
       track: 'production',
-      aab: '../app/build/outputs/bundle/release/app-release.aab',
+      aab: 'app/build/outputs/bundle/release/app-release.aab',
       json_key_data: ENV['PLAY_STORE_JSON_KEY'],
       skip_upload_apk: true,
       skip_upload_metadata: true,
