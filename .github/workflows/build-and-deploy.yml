@@ -1,7 +1,6 @@
 name: Build and Deploy Mobile Apps
 
 on:
-  # Déclenchement manuel
   workflow_dispatch:
     inputs:
       deploy_android:
@@ -28,7 +27,7 @@ on:
         required: false
         default: true
         type: boolean
-  # Déclenchement automatique sur push
+
   push:
     branches:
       - main
@@ -42,7 +41,6 @@ on:
       - ".github/workflows/build-and-deploy.yml"
 
 jobs:
-  # Job 1 : Build du web app (une seule fois)
   build-web:
     runs-on: ubuntu-latest
     steps:
@@ -70,7 +68,6 @@ jobs:
           path: dist/
           retention-days: 1
 
-  # Job 2 : Build et deploy Android
   build-android:
     needs: build-web
     if: (github.event_name == 'push') || (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_android == 'true')
@@ -158,7 +155,6 @@ jobs:
         if: always()
         run: rm -f ${{ github.workspace }}/android/app/keystore.jks
 
-  # Job 3 : Build et deploy iOS
   build-ios:
     needs: build-web
     if: (github.event_name == 'push') || (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_ios == 'true')
