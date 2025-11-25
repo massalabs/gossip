@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAccountStore } from '../stores/accountStore';
 import { getPendingDeepLink } from '../utils/deepLinkStorage';
-import { INVITE_BASE_URL } from '../utils/qrCodeUrl';
+import { parseInvite } from '../utils/qrCodeParser';
 
 /**
  * Hook to handle pending deep links after authentication
@@ -22,29 +22,38 @@ export const usePendingDeepLink = () => {
     }
 
     const handlePendingDeepLink = async () => {
-      const pendingLink = await getPendingDeepLink();
+      try {
+        const pendingLink = await getPendingDeepLink();
 
-      if (!pendingLink) {
-        return;
-      }
-
-      // Parse invite URLs: /invite/:userId/:name
-      const inviteMatch = pendingLink.match(
-        new RegExp(`^\\/${INVITE_BASE_URL}\\/([^/]+)\\/?(.*)$`)
-      );
-      if (inviteMatch) {
-        const [, userId, name] = inviteMatch;
-        // Navigate directly to new contact page with query params
-        const queryParams = new URLSearchParams({ userId });
-        if (name) {
-          queryParams.set('name', name);
+        if (!pendingLink) {
+          return;
         }
-        navigate(`/new-contact?${queryParams.toString()}`, { replace: true });
-        return;
-      }
 
-      // For other deep links, navigate as-is
-      navigate(pendingLink, { replace: true });
+        // Parse invite URLs: /invite/:userId/:name
+        const invitePath = pendingLink.startsWith('/invite/')
+          ? pendingLink
+          : null;
+        if (invitePath) {
+          try {
+            const { userId, name } = parseInvite(invitePath);
+            const queryParams = new URLSearchParams({ userId });
+            if (name) {
+              queryParams.set('name', name);
+            }
+            navigate(`/new-contact?${queryParams.toString()}`, {
+              replace: true,
+            });
+            return;
+          } catch (error) {
+            console.error('Failed to parse pending invite:', error);
+          }
+        }
+
+        // For other deep links, navigate as-is
+        navigate(pendingLink, { replace: true });
+      } catch (error) {
+        console.error('Failed to retrieve pending deep link:', error);
+      }
     };
 
     handlePendingDeepLink();

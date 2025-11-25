@@ -63,17 +63,14 @@ const NewContact: React.FC = () => {
   }, []);
 
   const handleScanSuccess = useCallback(
-    (scannedUserId: string, scannedName?: string) => {
+    (scannedUserId: string, scannedName: string) => {
       setShowScanner(false);
 
       if (scannedUserId) {
         handleUserIdChange(scannedUserId);
       }
       if (scannedName) {
-        console.log('Setting name from scan:', scannedName);
         handleNameChange(scannedName);
-      } else {
-        console.warn('No name provided in scanned QR code');
       }
     },
     [handleUserIdChange, handleNameChange]

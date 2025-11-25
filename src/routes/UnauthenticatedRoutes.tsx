@@ -37,10 +37,15 @@ export const UnauthenticatedRoutes: React.FC<UnauthenticatedRoutesProps> = ({
   };
 
   const handleOnBackFromSetup = async () => {
-    const hasAny = await useAccountStore.getState().hasExistingAccount();
-    if (hasAny) {
-      navigate('/welcome');
-    } else {
+    try {
+      const hasAny = await useAccountStore.getState().hasExistingAccount();
+      if (hasAny) {
+        navigate('/welcome');
+      } else {
+        useAppStore.getState().setIsInitialized(false);
+      }
+    } catch (error) {
+      console.error('Failed to check existing accounts:', error);
       useAppStore.getState().setIsInitialized(false);
     }
   };
