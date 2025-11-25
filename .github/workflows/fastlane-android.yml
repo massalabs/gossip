@@ -1,0 +1,146 @@
+name: Fastlane Android Build
+
+on:
+    # Déclenchement manuel
+    workflow_dispatch:
+        inputs:
+            upload_to_play_store:
+                description: "Upload to Google Play"
+                required: false
+                default: true
+                type: boolean
+            play_store_track:
+                description: "Google Play Track (internal, beta, or production)"
+                required: false
+                default: "internal"
+                type: choice
+                options:
+                    - internal
+                    - beta
+                    - production
+    # Déclenchement automatique sur push (build + upload vers Internal Testing)
+    push:
+        branches:
+            - main
+            - fastlane
+        paths:
+            - "src/**"
+            - "android/**"
+            - "capacitor.config.ts"
+            - "package.json"
+            - ".github/workflows/fastlane-android.yml"
+
+jobs:
+    build-android-fastlane:
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+
+            - name: Setup Node.js
+              uses: actions/setup-node@v4
+              with:
+                  node-version: "24"
+                  cache: "npm"
+
+            - name: Install dependencies
+              run: npm ci
+
+            - name: Build web app
+              env:
+                  VITE_PROTOCOL_API_URL: https://api.usegossip.com/
+              run: npm run build
+
+            - name: Setup Java
+              uses: actions/setup-java@v4
+              with:
+                  distribution: "temurin"
+                  java-version: "17"
+                  cache: "gradle"
+
+            - name: Setup Ruby
+              uses: ruby/setup-ruby@v1
+              with:
+                  ruby-version: "3.3.10"
+                  bundler-cache: true
+                  working-directory: android
+
+            - name: Sync Capacitor
+              run: npm run cap:sync:android
+
+            - name: Display deployment info
+              run: |
+                  if [ "${{ github.event_name }}" == "push" ]; then
+                    echo "🚀 Automatic deployment triggered by push to ${{ github.ref_name }}"
+                    echo "📱 Target: Google Play Internal Testing"
+                    echo "✅ Build will be automatically signed and uploaded"
+                  else
+                    echo "🎯 Manual deployment triggered"
+                    echo "📱 Target: Google Play ${{ github.event.inputs.play_store_track }} track"
+                  fi
+
+            - name: Create keystore from secrets
+              if: (github.event_name == 'workflow_dispatch' && github.event.inputs.upload_to_play_store == 'true') || github.event_name == 'push'
+              run: |
+                  echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > ${{ github.workspace }}/android/app/keystore.jks
+                  echo "ANDROID_KEYSTORE_FILE=${{ github.workspace }}/android/app/keystore.jks" >> $GITHUB_ENV
+
+            - name: Verify Fastlane Setup
+              working-directory: android
+              run: |
+                  echo "Ruby version:"
+                  ruby -v
+                  echo "Bundler version:"
+                  bundle -v
+                  echo "Fastlane version:"
+                  bundle exec fastlane --version
+                  echo "Available lanes:"
+                  bundle exec fastlane lanes
+
+            - name: Build and Upload to Google Play Internal Track (Auto on Push)
+              if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.upload_to_play_store == 'true' && github.event.inputs.play_store_track == 'internal')
+              env:
+                  ANDROID_KEYSTORE_FILE: ${{ env.ANDROID_KEYSTORE_FILE }}
+                  ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+                  ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+                  ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+                  PLAY_STORE_JSON_KEY: ${{ secrets.PLAY_STORE_JSON_KEY }}
+              working-directory: android
+              run: bundle exec fastlane beta
+
+            - name: Build and Upload to Google Play Beta Track
+              if: github.event_name == 'workflow_dispatch' && github.event.inputs.upload_to_play_store == 'true' && github.event.inputs.play_store_track == 'beta'
+              env:
+                  ANDROID_KEYSTORE_FILE: ${{ env.ANDROID_KEYSTORE_FILE }}
+                  ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+                  ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+                  ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+                  PLAY_STORE_JSON_KEY: ${{ secrets.PLAY_STORE_JSON_KEY }}
+              working-directory: android
+              run: bundle exec fastlane beta_public
+
+            - name: Build and Upload to Google Play Production
+              if: github.event_name == 'workflow_dispatch' && github.event.inputs.upload_to_play_store == 'true' && github.event.inputs.play_store_track == 'production'
+              env:
+                  ANDROID_KEYSTORE_FILE: ${{ env.ANDROID_KEYSTORE_FILE }}
+                  ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+                  ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+                  ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+                  PLAY_STORE_JSON_KEY: ${{ secrets.PLAY_STORE_JSON_KEY }}
+              working-directory: android
+              run: bundle exec fastlane production
+
+            - name: Upload AAB artifact (Signed Release)
+              if: success()
+              uses: actions/upload-artifact@v4
+              with:
+                  name: android-app-${{ github.event_name == 'push' && 'internal' || github.event.inputs.play_store_track }}-${{ github.run_number }}
+                  path: android/app/build/outputs/bundle/release/*.aab
+                  if-no-files-found: error
+                  retention-days: 30
+
+            - name: Cleanup keystore
+              if: always()
+              run: |
+                  rm -f ${{ github.workspace }}/android/app/keystore.jks
