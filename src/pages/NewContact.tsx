@@ -1,5 +1,5 @@
 import React, { useCallback, useRef, useState, useEffect } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import BaseModal from '../components/ui/BaseModal';
 import Button from '../components/ui/Button';
 import { useContactForm } from '../hooks/useContactForm';
@@ -15,7 +15,7 @@ import { CameraIcon, UploadIcon } from '../components/ui/icons';
 const NewContact: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const location = useLocation();
   const [isDiscardModalOpen, setIsDiscardModalOpen] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
 
@@ -36,14 +36,12 @@ const NewContact: React.FC = () => {
   } = useContactForm();
 
   useEffect(() => {
-    const userIdFromUrl = searchParams.get('userId');
-    const nameFromUrl = searchParams.get('name');
+    const { userId, name } = location.state;
+    if (!userId || !name) return;
 
-    if (!userIdFromUrl || !nameFromUrl) return;
-
-    handleUserIdChange(userIdFromUrl);
-    handleNameChange(nameFromUrl);
-  }, [searchParams, handleUserIdChange, handleNameChange]);
+    handleUserIdChange(userId);
+    handleNameChange(name);
+  }, [location.state, handleUserIdChange, handleNameChange]);
 
   const handleBack = useCallback(() => {
     if (hasUnsavedChanges) {

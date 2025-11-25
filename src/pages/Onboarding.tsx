@@ -1,9 +1,8 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '../stores/appStore';
 import OnboardingFlow from '../components/OnboardingFlow';
 import AccountImport from '../components/account/AccountImport';
-import AccountCreation from '../components/account/AccountCreation';
 
 /**
  * Routes for onboarding flow (when no account exists)
@@ -15,12 +14,11 @@ import AccountCreation from '../components/account/AccountCreation';
  * The rest of the app uses React Router for proper browser navigation support.
  * This is acceptable for a one-time onboarding experience
  */
-export const OnboardingRoutes: React.FC<{
+export const Onboarding: React.FC<{
   showImport: boolean;
   onShowImportChange: (show: boolean) => void;
 }> = ({ showImport, onShowImportChange }) => {
   const navigate = useNavigate();
-  const [showSetup, setShowSetup] = useState(false);
 
   if (showImport) {
     return (
@@ -33,22 +31,11 @@ export const OnboardingRoutes: React.FC<{
     );
   }
 
-  if (showSetup) {
-    return (
-      <AccountCreation
-        onComplete={() => {
-          useAppStore.getState().setIsInitialized(true);
-          navigate('/', { replace: true });
-        }}
-        onBack={() => setShowSetup(false)}
-      />
-    );
-  }
-
   return (
     <OnboardingFlow
       onComplete={() => {
-        setShowSetup(true);
+        useAppStore.getState().setIsInitialized(true);
+        navigate('/setup');
       }}
       onImportMnemonic={() => onShowImportChange(true)}
     />
