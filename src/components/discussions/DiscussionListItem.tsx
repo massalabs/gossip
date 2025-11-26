@@ -125,7 +125,7 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
           <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-medium text-foreground truncate">
-                {contact.name}
+                {discussion.customName || contact.name}
               </h3>
               <div className="flex items-center gap-2">
                 {isPendingOutgoing && (
