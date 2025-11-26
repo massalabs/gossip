@@ -1,4 +1,10 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, {
+  useState,
+  useCallback,
+  useMemo,
+  useEffect,
+  useRef,
+} from 'react';
 import { useFileShareContact } from '../../hooks/useFileShareContact';
 import PageHeader from '../ui/PageHeader';
 import Button from '../ui/Button';
@@ -27,6 +33,8 @@ const ShareContact: React.FC<ShareContactProps> = ({
   const { exportFileContact, fileState } = useFileShareContact();
   const [copiedUserId, setCopiedUserId] = useState(false);
   const [copiedQRUrl, setCopiedQRUrl] = useState(false);
+  const userIdTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const qrUrlTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const deepLinkUrl = useMemo(() => generateDeepLinkUrl(userId), [userId]);
   const isExportDisabled = !publicKey || fileState.isLoading;
 
@@ -34,7 +42,13 @@ const ShareContact: React.FC<ShareContactProps> = ({
     try {
       await navigator.clipboard.writeText(userId);
       setCopiedUserId(true);
-      setTimeout(() => setCopiedUserId(false), 2000);
+      if (userIdTimeoutRef.current) {
+        clearTimeout(userIdTimeoutRef.current);
+      }
+      userIdTimeoutRef.current = setTimeout(() => {
+        setCopiedUserId(false);
+        userIdTimeoutRef.current = null;
+      }, 2000);
     } catch (err) {
       console.error('Failed to copy user ID:', err);
     }
@@ -44,11 +58,28 @@ const ShareContact: React.FC<ShareContactProps> = ({
     try {
       await navigator.clipboard.writeText(deepLinkUrl);
       setCopiedQRUrl(true);
-      setTimeout(() => setCopiedQRUrl(false), 2000);
+      if (qrUrlTimeoutRef.current) {
+        clearTimeout(qrUrlTimeoutRef.current);
+      }
+      qrUrlTimeoutRef.current = setTimeout(() => {
+        setCopiedQRUrl(false);
+        qrUrlTimeoutRef.current = null;
+      }, 2000);
     } catch (err) {
       console.error('Failed to copy QR code URL:', err);
     }
   }, [deepLinkUrl]);
+
+  useEffect(() => {
+    return () => {
+      if (userIdTimeoutRef.current) {
+        clearTimeout(userIdTimeoutRef.current);
+      }
+      if (qrUrlTimeoutRef.current) {
+        clearTimeout(qrUrlTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const handleExportFile = useCallback(() => {
     if (!publicKey || !userName) return;
@@ -105,10 +136,8 @@ const ShareContact: React.FC<ShareContactProps> = ({
                 fullWidth
                 className="h-11 rounded-xl text-sm font-medium"
               >
-                <>
-                  <DownloadIcon />
-                  <span>Download</span>
-                </>
+                <DownloadIcon />
+                <span>Download</span>
               </Button>
 
               {fileState.error && (
