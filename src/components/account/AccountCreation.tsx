@@ -8,6 +8,7 @@ import TabSwitcher from '../ui/TabSwitcher';
 import Button from '../ui/Button';
 import ICloudSyncModal from '../ui/ICloudSyncModal';
 import { biometricService } from '../../services/biometricService';
+import { db } from '../../db';
 
 interface AccountCreationProps {
   onComplete: () => void;
@@ -65,11 +66,44 @@ const AccountCreation: React.FC<AccountCreationProps> = ({
     return result.valid;
   };
 
+  const checkUsernameAvailability = async (value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return;
+    }
+
+    try {
+      await db.open();
+      const existingProfile = await db.userProfile
+        .where('username')
+        .equals(trimmed)
+        .first();
+
+      if (existingProfile) {
+        setUsernameError(
+          'This username is already in use. Please choose another.'
+        );
+        setIsValid(false);
+      }
+    } catch (checkError) {
+      console.error('Error checking for existing username:', checkError);
+      setError('Unable to verify username availability. Please try again.');
+    }
+  };
+
   const handleUsernameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
     setUsername(value);
     validateUsernameField(value);
     setError(null);
+  };
+
+  const handleUsernameBlur = async () => {
+    const isUsernameValid = validateUsernameField(username);
+    if (!isUsernameValid) {
+      return;
+    }
+    await checkUsernameAvailability(username);
   };
 
   const handlePasswordChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -112,6 +146,16 @@ const AccountCreation: React.FC<AccountCreationProps> = ({
     e.stopPropagation();
 
     if (!canSubmit) {
+      return;
+    }
+
+    // Re-validate username and ensure availability before submitting
+    const isUsernameValid = validateUsernameField(username);
+    if (!isUsernameValid) {
+      return;
+    }
+    await checkUsernameAvailability(username);
+    if (usernameError) {
       return;
     }
 
@@ -207,6 +251,7 @@ const AccountCreation: React.FC<AccountCreationProps> = ({
                 type="text"
                 value={username}
                 onChange={handleUsernameChange}
+                onBlur={handleUsernameBlur}
                 placeholder="Enter username"
                 className={`w-full h-12 px-4 rounded-lg border-2 text-sm focus:outline-none transition-colors text-black dark:text-white bg-white dark:bg-gray-700 placeholder-gray-500 dark:placeholder-gray-400 ${
                   usernameError
