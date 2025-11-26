@@ -15,8 +15,8 @@ import { useVersionCheck } from '../hooks/useVersionCheck';
 import { STORAGE_KEYS, clearAppStorage } from '../utils/localStorage';
 import {
   DangerIcon,
-  AccountBackupIcon,
   ShareContactIcon,
+  CopyIcon,
   DarkModeIcon,
   LightModeIcon,
   DebugIcon,
@@ -186,7 +186,7 @@ const Settings = (): React.ReactElement => {
             className="w-full h-[54px] flex items-center px-4 justify-start rounded-lg"
             onClick={() => setActiveView(SettingsView.SHOW_ACCOUNT_BACKUP)}
           >
-            <AccountBackupIcon className="mr-4" />
+            <CopyIcon className="mr-4" />
             <span className="text-base font-semibold flex-1 text-left">
               Account Backup
             </span>

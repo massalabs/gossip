@@ -11,6 +11,8 @@ const ShareContactQR: React.FC<ShareContactQRProps> = ({ deepLinkUrl }) => {
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
 
   useEffect(() => {
+    let isMounted = true;
+
     const generateQR = async () => {
       // Always use a dark QR code on a light background (ignore theme)
       const foregroundColor = '#1a1a1d'; // dark
@@ -37,14 +39,22 @@ const ShareContactQR: React.FC<ShareContactQRProps> = ({ deepLinkUrl }) => {
 
       // Generate the SVG directly as a data URL for better quality
       const svg = await qrCodeStyling.getRawData('svg');
-      if (svg) {
+      if (svg && isMounted) {
         const reader = new FileReader();
-        reader.onload = () => setQrDataUrl(reader.result as string);
+        reader.onload = () => {
+          if (isMounted) {
+            setQrDataUrl(reader.result as string);
+          }
+        };
         reader.readAsDataURL(svg as Blob);
       }
     };
 
     generateQR();
+
+    return () => {
+      isMounted = false;
+    };
   }, [deepLinkUrl]);
 
   return (
