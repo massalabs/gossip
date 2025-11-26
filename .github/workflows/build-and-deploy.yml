@@ -249,7 +249,6 @@ jobs:
           ls -lh android/app/build/outputs/bundle/release/
 
       - name: Upload to Google Play Store
-        continue-on-error: true
         id: play_store_upload
         env:
           PLAY_STORE_JSON_KEY: ${{ secrets.PLAY_STORE_JSON_KEY }}
