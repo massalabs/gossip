@@ -1,0 +1,334 @@
+name: Build and Deploy Mobile Apps
+
+on:
+  workflow_dispatch:
+    inputs:
+      deploy_android:
+        description: 'Build Android'
+        required: false
+        default: true
+        type: boolean
+      upload_to_play_store:
+        description: 'Upload Android to Google Play'
+        required: false
+        default: false
+        type: boolean
+      deploy_ios:
+        description: 'Build iOS'
+        required: false
+        default: true
+        type: boolean
+      android_track:
+        description: 'Android Track (internal, beta, or production)'
+        required: false
+        default: 'internal'
+        type: choice
+        options:
+          - internal
+          - beta
+          - production
+      ios_upload_testflight:
+        description: 'Upload iOS to TestFlight'
+        required: false
+        default: true
+        type: boolean
+
+  push:
+    branches:
+      - main
+      - fastlane
+    paths:
+      - 'src/**'
+      - 'android/**'
+      - 'ios/**'
+      - 'capacitor.config.ts'
+      - 'package.json'
+      - '.github/workflows/build-and-deploy.yml'
+
+jobs:
+  build-web:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build web app
+        env:
+          VITE_PROTOCOL_API_URL: https://api.usegossip.com/
+        run: npm run build
+
+      - name: Upload web build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-build-${{ github.sha }}
+          path: dist/
+          retention-days: 1
+
+  build-android:
+    needs: build-web
+    if: (github.event_name == 'push') || (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_android == 'true')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download web build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: web-build-${{ github.sha }}
+          path: dist/
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Install dependencies (for Capacitor CLI)
+        run: npm ci
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+          cache: 'gradle'
+
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3.10'
+          bundler-cache: true
+          working-directory: android
+
+      - name: Sync Capacitor Android
+        run: npm run cap:sync:android
+
+      - name: Display deployment info
+        run: |
+          if [ "${{ github.event_name }}" == "push" ]; then
+            echo "🚀 Automatic Android build triggered by push to ${{ github.ref_name }}"
+            echo "📱 Build: AAB will be created and available as artifact"
+            echo "📤 Upload: Automatic upload to Play Store (Internal Testing)"
+          else
+            echo "🎯 Manual Android build triggered"
+            echo "📱 Build: AAB will be created and available as artifact"
+            if [ "${{ github.event.inputs.upload_to_play_store }}" == "true" ]; then
+              echo "📤 Upload: Will upload to Google Play ${{ github.event.inputs.android_track }} track"
+            else
+              echo "📤 Upload: Disabled - AAB will only be available as artifact"
+            fi
+          fi
+
+      - name: Create keystore from secrets
+        run: |
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > ${{ github.workspace }}/android/app/keystore.jks
+          echo "ANDROID_KEYSTORE_FILE=${{ github.workspace }}/android/app/keystore.jks" >> $GITHUB_ENV
+
+      - name: Build and optionally upload Android
+        continue-on-error: true
+        id: android_build_upload
+        env:
+          ANDROID_KEYSTORE_FILE: ${{ env.ANDROID_KEYSTORE_FILE }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          PLAY_STORE_JSON_KEY: ${{ secrets.PLAY_STORE_JSON_KEY }}
+        working-directory: android
+        run: |
+          # Determine if we should upload to Play Store
+          SHOULD_UPLOAD="false"
+          if [ "${{ github.event_name }}" == "push" ]; then
+            SHOULD_UPLOAD="true"
+            TRACK="internal"
+          elif [ "${{ github.event.inputs.upload_to_play_store }}" == "true" ]; then
+            SHOULD_UPLOAD="true"
+            TRACK="${{ github.event.inputs.android_track }}"
+          fi
+
+          # Build and optionally upload
+          if [ "$SHOULD_UPLOAD" == "true" ]; then
+            echo "📦 Building and uploading to Google Play ($TRACK track)..."
+            if [ "$TRACK" == "internal" ]; then
+              bundle exec fastlane beta
+            elif [ "$TRACK" == "beta" ]; then
+              bundle exec fastlane beta_public
+            elif [ "$TRACK" == "production" ]; then
+              bundle exec fastlane production
+            fi
+          else
+            echo "📦 Building Android AAB (no upload)..."
+            bundle exec fastlane build
+          fi
+
+      - name: Build and upload status
+        if: always()
+        run: |
+          if [ "${{ steps.android_build_upload.outcome }}" == "success" ]; then
+            echo "✅ Android build succeeded!"
+            if [ "${{ github.event_name }}" == "push" ] || [ "${{ github.event.inputs.upload_to_play_store }}" == "true" ]; then
+              echo "✅ Upload to Google Play Store succeeded!"
+            fi
+          elif [ "${{ steps.android_build_upload.outcome }}" == "failure" ]; then
+            echo "⚠️ Android build or upload failed"
+            echo "📦 Checking if AAB was created..."
+            if [ -f "android/app/build/outputs/bundle/release/app-release.aab" ]; then
+              echo "✅ AAB file exists and will be available as artifact"
+            else
+              echo "❌ AAB file was not created"
+            fi
+          fi
+          echo ""
+          echo "💾 AAB artifact will be available in GitHub Actions artifacts"
+
+      - name: Upload AAB artifact (Always available)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-app-${{ github.event_name == 'push' && 'auto' || github.event.inputs.android_track }}-${{ github.run_number }}
+          path: android/app/build/outputs/bundle/release/*.aab
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload APK artifact (Debug - for testing)
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk-debug-${{ github.run_number }}
+          path: android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Cleanup keystore
+        if: always()
+        run: rm -f ${{ github.workspace }}/android/app/keystore.jks
+
+  build-ios:
+    needs: build-web
+    if: (github.event_name == 'push') || (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_ios == 'true')
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download web build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: web-build-${{ github.sha }}
+          path: dist/
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Install dependencies (for Capacitor CLI)
+        run: npm ci
+
+      - name: Setup Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Install iOS 26 SDK
+        run: |
+          # Select latest Xcode
+          sudo xcode-select --reset
+          # Install required components
+          sudo xcodebuild -runFirstLaunch
+          # Download and install iOS platform
+          sudo xcodebuild -downloadPlatform iOS || true
+          # Verify SDKs
+          echo "Available SDKs:"
+          xcodebuild -showsdks
+
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3.10'
+          bundler-cache: true
+          working-directory: ios/App
+
+      - name: Install CocoaPods dependencies
+        working-directory: ios/App
+        run: |
+          ruby -v
+          pod install
+
+      - name: Sync Capacitor iOS
+        run: npm run cap:sync:ios
+
+      - name: Configure Git for Match
+        run: |
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "GitHub Actions Bot"
+
+      - name: Verify Fastlane Setup
+        working-directory: ios/App
+        run: |
+          echo "Ruby version:"
+          ruby -v
+          echo "Bundler version:"
+          bundle -v
+          echo "Fastlane version:"
+          bundle exec fastlane --version
+          echo "Available lanes:"
+          bundle exec fastlane lanes
+
+      - name: Display deployment info
+        run: |
+          if [ "${{ github.event_name }}" == "push" ]; then
+            echo "🚀 Automatic iOS deployment triggered by push to ${{ github.ref_name }}"
+            echo "📱 Target: TestFlight"
+          else
+            echo "🎯 Manual iOS deployment triggered"
+            if [ "${{ github.event.inputs.ios_upload_testflight }}" == "true" ]; then
+              echo "📱 Target: TestFlight"
+            else
+              echo "📱 Build only (no upload)"
+            fi
+          fi
+
+      - name: Build and Upload to TestFlight
+        if: (github.event_name == 'push') || (github.event_name == 'workflow_dispatch' && github.event.inputs.ios_upload_testflight == 'true')
+        env:
+          APP_STORE_CONNECT_API_KEY_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_KEY_ID }}
+          APP_STORE_CONNECT_API_KEY_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ISSUER_ID }}
+          APP_STORE_CONNECT_API_KEY_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY_KEY }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+          MATCH_GIT_BASIC_AUTHORIZATION: ${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}
+          FASTLANE_SKIP_WAITING_FOR_BUILD_PROCESSING: 'true'
+        working-directory: ios/App
+        run: bundle exec fastlane beta
+
+      - name: Build Only (No Upload)
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.ios_upload_testflight != 'true'
+        env:
+          APP_STORE_CONNECT_API_KEY_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_KEY_ID }}
+          APP_STORE_CONNECT_API_KEY_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ISSUER_ID }}
+          APP_STORE_CONNECT_API_KEY_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY_KEY }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+          MATCH_GIT_BASIC_AUTHORIZATION: ${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}
+        working-directory: ios/App
+        run: bundle exec fastlane build
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-app-${{ github.run_number }}
+          path: ios/App/*.ipa
+          if-no-files-found: warn
+          retention-days: 7

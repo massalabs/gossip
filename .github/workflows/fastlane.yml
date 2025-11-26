@@ -1,6 +1,9 @@
-name: Fastlane Build
+name: Fastlane iOS Build (Legacy - Use build-and-deploy.yml instead)
 
+# DEPRECATED: Use .github/workflows/build-and-deploy.yml for optimized builds
+# This workflow is kept for emergency manual iOS-only builds
 on:
+  # Déclenchement manuel uniquement (push automatique désactivé)
   workflow_dispatch:
     inputs:
       upload_to_testflight:
@@ -41,59 +44,75 @@ jobs:
         with:
           xcode-version: latest-stable
 
+      - name: Install iOS 26 SDK
+        run: |
+          # Select latest Xcode
+          sudo xcode-select --reset
+          # Install required components
+          sudo xcodebuild -runFirstLaunch
+          # Download and install iOS platform
+          sudo xcodebuild -downloadPlatform iOS || true
+          # Verify SDKs
+          echo "Available SDKs:"
+          xcodebuild -showsdks
+
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3.10'
+          bundler-cache: true
+          working-directory: ios/App
+
       - name: Install CocoaPods dependencies
         working-directory: ios/App
-        run: pod install
+        run: |
+          ruby -v
+          pod install
 
       - name: Sync Capacitor
         run: npm run cap:sync:ios
 
-      # - name: Setup Ruby
-      #   uses: ruby/setup-ruby@v1
-      #   with:
-      #     ruby-version: '3.2'
-      #     bundler-cache: true
-      #     working-directory: ios/App
+      - name: Configure Git for Match
+        run: |
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "GitHub Actions Bot"
 
-      - name: Install Fastlane
+      - name: Verify Fastlane Setup
         working-directory: ios/App
         run: |
-          gem install bundler
-          gem install fastlane
-          fastlane --version
+          echo "Ruby version:"
+          ruby -v
+          echo "Bundler version:"
+          bundle -v
+          echo "Fastlane version:"
+          bundle exec fastlane --version
+          echo "Available lanes:"
+          bundle exec fastlane lanes
 
       - name: Build and Upload to TestFlight with Fastlane
-        if: github.event.inputs.upload_to_testflight == true
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.upload_to_testflight == 'true'
         env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APP_STORE_CONNECT_API_KEY_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_KEY_ID }}
+          APP_STORE_CONNECT_API_KEY_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ISSUER_ID }}
+          APP_STORE_CONNECT_API_KEY_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY_KEY }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_APP_CERTIFICATE_P12_BASE64 }}
-          APPLE_CERTIFICATE_P12_PASSWORD: ${{ secrets.APPLE_APP_CERTIFICATE_P12_PASSWORD }}
+          MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+          MATCH_GIT_BASIC_AUTHORIZATION: ${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}
           FASTLANE_SKIP_WAITING_FOR_BUILD_PROCESSING: ${{ github.event.inputs.skip_waiting_for_build_processing && 'true' || 'false' }}
         working-directory: ios/App
-        run: |
-          # Decode and install certificate
-          CERTIFICATE_PATH=$RUNNER_TEMP/certificate.p12
-          echo "$APPLE_CERTIFICATE_P12_BASE64" | base64 --decode > $CERTIFICATE_PATH
-
-          # Run Fastlane beta lane
-          bundle exec fastlane beta
+        run: bundle exec fastlane beta
 
       - name: Build Only (No Upload)
-        if: github.event.inputs.upload_to_testflight != true
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.upload_to_testflight != 'true')
         env:
+          APP_STORE_CONNECT_API_KEY_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_KEY_ID }}
+          APP_STORE_CONNECT_API_KEY_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ISSUER_ID }}
+          APP_STORE_CONNECT_API_KEY_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY_KEY }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_APP_CERTIFICATE_P12_BASE64 }}
-          APPLE_CERTIFICATE_P12_PASSWORD: ${{ secrets.APPLE_APP_CERTIFICATE_P12_PASSWORD }}
+          MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+          MATCH_GIT_BASIC_AUTHORIZATION: ${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}
         working-directory: ios/App
-        run: |
-          # Decode and install certificate
-          CERTIFICATE_PATH=$RUNNER_TEMP/certificate.p12
-          echo "$APPLE_CERTIFICATE_P12_BASE64" | base64 --decode > $CERTIFICATE_PATH
-
-          # Run Fastlane build lane
-          bundle exec fastlane build
+        run: bundle exec fastlane build
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4

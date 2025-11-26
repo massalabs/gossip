@@ -5,18 +5,40 @@ default_platform(:ios)
 platform :ios do
   # Private lane containing common build logic
   private_lane :build_app_common do
-    # Setup code signing with match or manual certificate
+    # Setup CI environment (creates temporary keychain)
     setup_ci if ENV['CI']
     
-    # Import certificate
-    import_certificate(
-      certificate_path: ENV["CERTIFICATE_PATH"] || "#{ENV['RUNNER_TEMP']}/certificate.p12",
-      certificate_password: ENV["APPLE_CERTIFICATE_P12_PASSWORD"],
-      keychain_name: "fastlane_tmp_keychain",
-      keychain_password: ""
+    # Create API Key for App Store Connect authentication (if available)
+    api_key = nil
+    if ENV['APP_STORE_CONNECT_API_KEY_KEY_ID'] && ENV['APP_STORE_CONNECT_API_KEY_ISSUER_ID'] && ENV['APP_STORE_CONNECT_API_KEY_KEY']
+      api_key = app_store_connect_api_key(
+        key_id: ENV['APP_STORE_CONNECT_API_KEY_KEY_ID'],
+        issuer_id: ENV['APP_STORE_CONNECT_API_KEY_ISSUER_ID'],
+        key_content: ENV['APP_STORE_CONNECT_API_KEY_KEY'],
+        is_key_content_base64: false
+      )
+    end
+    
+    # Use match for code signing
+    # In CI, create certificates if they don't exist
+    match(
+      type: "appstore",  # App Store type for TestFlight distribution
+      readonly: false,  # Create certificates if needed
+      app_identifier: "net.massa.gossip",
+      api_key: api_key  # Use API Key for authentication
     )
 
-    # Build the app
+    # Update project settings to use manual signing with Match profiles
+    update_code_signing_settings(
+      use_automatic_signing: false,
+      path: "App.xcodeproj",
+      team_id: ENV["APPLE_TEAM_ID"],
+      profile_name: "match AppStore net.massa.gossip",
+      code_sign_identity: "Apple Distribution",
+      bundle_identifier: "net.massa.gossip"
+    )
+    
+    # Build the app with manual signing using Match certificates
     build_app(
       workspace: "App.xcworkspace",
       scheme: "Gossip",
@@ -27,8 +49,9 @@ platform :ios do
       clean: false,
       export_options: {
         method: "app-store",
-        provisioningProfiles: {},
-        signingStyle: "automatic",
+        provisioningProfiles: {
+          "net.massa.gossip" => "match AppStore net.massa.gossip"
+        },
         teamID: ENV["APPLE_TEAM_ID"]
       }
     )
@@ -46,9 +69,20 @@ platform :ios do
     # Build the app using common logic
     build_app_common
 
+    # Create API Key for App Store Connect authentication (if available)
+    api_key = nil
+    if ENV['APP_STORE_CONNECT_API_KEY_KEY_ID'] && ENV['APP_STORE_CONNECT_API_KEY_ISSUER_ID'] && ENV['APP_STORE_CONNECT_API_KEY_KEY']
+      api_key = app_store_connect_api_key(
+        key_id: ENV['APP_STORE_CONNECT_API_KEY_KEY_ID'],
+        issuer_id: ENV['APP_STORE_CONNECT_API_KEY_ISSUER_ID'],
+        key_content: ENV['APP_STORE_CONNECT_API_KEY_KEY'],
+        is_key_content_base64: false
+      )
+    end
+
     # Upload to TestFlight
     upload_to_testflight(
-      apple_id: ENV["APPLE_ID"],
+      api_key: api_key,
       skip_waiting_for_build_processing: ENV["FASTLANE_SKIP_WAITING_FOR_BUILD_PROCESSING"] == "true",
       skip_submission: true,
       distribute_external: false,
@@ -59,15 +93,28 @@ platform :ios do
     UI.success("🚀 Successfully uploaded to TestFlight!")
   end
 
-  desc "Download certificates and provisioning profiles"
+  desc "Download certificates and provisioning profiles using match"
   lane :setup_signing do
-    # This lane helps you set up code signing locally
-    UI.message("Setting up code signing...")
+    UI.message("Setting up code signing with match...")
     
-    # You can use match for automated certificate management
-    # Or manually manage certificates
+    match(
+      type: "appstore",
+      app_identifier: "net.massa.gossip"
+    )
     
     UI.success("✅ Code signing setup completed!")
+  end
+  
+  desc "Create new certificates and provisioning profiles"
+  lane :match_init do
+    UI.message("Creating certificates with match...")
+    
+    match(
+      type: "appstore",
+      app_identifier: "net.massa.gossip"
+    )
+    
+    UI.success("✅ Certificates created and stored in git!")
   end
 
   # Error handling
