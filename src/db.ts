@@ -82,6 +82,7 @@ export interface Discussion {
   lastSyncTimestamp?: Date; // Last time messages were synced from protocol
 
   // UI/Display fields
+  customName?: string; // Optional custom name for the discussion (overrides contact name)
   lastMessageId?: number;
   lastMessageContent?: string;
   lastMessageTimestamp?: Date;
@@ -121,7 +122,7 @@ export class GossipDatabase extends Dexie {
   constructor() {
     super('GossipDatabase');
 
-    this.version(11).stores({
+    this.version(12).stores({
       contacts:
         '++id, ownerUserId, userId, name, isOnline, lastSeen, createdAt, [ownerUserId+userId] , [ownerUserId+name]',
       messages:

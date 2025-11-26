@@ -51,6 +51,18 @@ const DiscussionHeader: React.FC<DiscussionHeaderProps> = ({
     );
   }
 
+  // Display name: customName takes priority over contact name
+  const displayName = discussion?.customName || contact.name || 'Unknown';
+
+  // Navigate to discussion settings if discussion exists, otherwise contact page
+  const handleHeaderClick = () => {
+    if (discussion?.id) {
+      navigate(`/discussion/${discussion.id}/settings`);
+    } else {
+      navigate(`/contact/${contact.userId}`);
+    }
+  };
+
   return (
     <div className="h-[72px] flex items-center bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl border-b border-gray-100 dark:border-gray-800/50 shadow-sm">
       <div className="flex items-center w-full px-5">
@@ -77,9 +89,9 @@ const DiscussionHeader: React.FC<DiscussionHeaderProps> = ({
           </Button>
         )}
         <button
-          onClick={() => navigate(`/contact/${contact.userId}`)}
+          onClick={handleHeaderClick}
           className="flex items-center flex-1 min-w-0 group hover:opacity-80 transition-opacity active:opacity-70"
-          title="View contact details"
+          title="Discussion settings"
         >
           <div className="relative">
             <ContactAvatar contact={contact} size={12} />
@@ -90,7 +102,7 @@ const DiscussionHeader: React.FC<DiscussionHeaderProps> = ({
           <div className="ml-3.5 flex-1 min-w-0 text-left">
             <div className="flex items-center gap-2">
               <h1 className="text-[17px] font-semibold text-gray-900 dark:text-white truncate leading-tight group-hover:text-primary transition-colors">
-                {contact.name || 'Unknown'}
+                {displayName}
               </h1>
               {discussion && (
                 <svg
