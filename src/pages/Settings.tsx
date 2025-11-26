@@ -99,9 +99,9 @@ const Settings = (): React.ReactElement => {
   };
 
   const handleScanSuccess = useCallback(
-    (userId: string, name: string) => {
+    (userId: string) => {
       navigate(`/new-contact`, {
-        state: { userId, name },
+        state: { userId },
         replace: true,
       });
     },

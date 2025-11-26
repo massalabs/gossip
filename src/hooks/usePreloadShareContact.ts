@@ -21,10 +21,7 @@ export const usePreloadShareContact = (): string | null => {
     import(/* prefetch */ '../components/settings/ShareContact');
 
     const generateQR = async () => {
-      const qrData = generateQRCodeUrl(
-        userProfile.userId,
-        userProfile.username
-      );
+      const qrData = generateQRCodeUrl(userProfile.userId);
 
       // Get theme-aware colors
       const foregroundColor = getForegroundColor(resolvedTheme);
