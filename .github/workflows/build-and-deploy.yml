@@ -37,6 +37,7 @@ on:
     branches:
       - main
       - fastlane
+      - ci
     paths:
       - "src/**"
       - "android/**"
