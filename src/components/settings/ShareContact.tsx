@@ -59,14 +59,14 @@ const ShareContact: React.FC<ShareContactProps> = ({
             <ShareContactQR deepLinkUrl={deepLinkUrl} />
           </div>
 
-          {activeTab === 'files' && (
+          <div className={activeTab === 'files' ? 'block' : 'hidden'}>
             <ShareContactFileSection
               disabled={isExportDisabled}
               isLoading={fileState.isLoading}
               error={fileState.error}
               onExport={handleExportFile}
             />
-          )}
+          </div>
 
           {/* Copy buttons section */}
           <div className="mt-10">
