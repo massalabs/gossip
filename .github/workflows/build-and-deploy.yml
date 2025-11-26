@@ -4,31 +4,31 @@ on:
   workflow_dispatch:
     inputs:
       deploy_android:
-        description: "Build Android"
+        description: 'Build Android'
         required: false
         default: true
         type: boolean
       upload_to_play_store:
-        description: "Upload Android to Google Play"
+        description: 'Upload Android to Google Play'
         required: false
         default: false
         type: boolean
       deploy_ios:
-        description: "Build iOS"
+        description: 'Build iOS'
         required: false
         default: true
         type: boolean
       android_track:
-        description: "Android Track (internal, beta, or production)"
+        description: 'Android Track (internal, beta, or production)'
         required: false
-        default: "internal"
+        default: 'internal'
         type: choice
         options:
           - internal
           - beta
           - production
       ios_upload_testflight:
-        description: "Upload iOS to TestFlight"
+        description: 'Upload iOS to TestFlight'
         required: false
         default: true
         type: boolean
@@ -38,12 +38,12 @@ on:
       - main
       - fastlane
     paths:
-      - "src/**"
-      - "android/**"
-      - "ios/**"
-      - "capacitor.config.ts"
-      - "package.json"
-      - ".github/workflows/build-and-deploy.yml"
+      - 'src/**'
+      - 'android/**'
+      - 'ios/**'
+      - 'capacitor.config.ts'
+      - 'package.json'
+      - '.github/workflows/build-and-deploy.yml'
 
 jobs:
   build-web:
@@ -55,8 +55,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "24"
-          cache: "npm"
+          node-version: '24'
+          cache: 'npm'
 
       - name: Install dependencies
         run: npm ci
@@ -90,8 +90,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "24"
-          cache: "npm"
+          node-version: '24'
+          cache: 'npm'
 
       - name: Install dependencies (for Capacitor CLI)
         run: npm ci
@@ -99,14 +99,14 @@ jobs:
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
-          distribution: "temurin"
-          java-version: "21"
-          cache: "gradle"
+          distribution: 'temurin'
+          java-version: '21'
+          cache: 'gradle'
 
       - name: Setup Ruby
         uses: ruby/setup-ruby@v1
         with:
-          ruby-version: "3.3.10"
+          ruby-version: '3.3.10'
           bundler-cache: true
           working-directory: android
 
@@ -230,8 +230,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "24"
-          cache: "npm"
+          node-version: '24'
+          cache: 'npm'
 
       - name: Install dependencies (for Capacitor CLI)
         run: npm ci
@@ -256,7 +256,7 @@ jobs:
       - name: Setup Ruby
         uses: ruby/setup-ruby@v1
         with:
-          ruby-version: "3.3.10"
+          ruby-version: '3.3.10'
           bundler-cache: true
           working-directory: ios/App
 
@@ -309,7 +309,7 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
           MATCH_GIT_BASIC_AUTHORIZATION: ${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}
-          FASTLANE_SKIP_WAITING_FOR_BUILD_PROCESSING: "true"
+          FASTLANE_SKIP_WAITING_FOR_BUILD_PROCESSING: 'true'
         working-directory: ios/App
         run: bundle exec fastlane beta
 
