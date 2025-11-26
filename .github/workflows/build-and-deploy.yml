@@ -19,7 +19,7 @@ on:
       upload_to_play_store:
         description: 'Upload Android to Google Play'
         required: false
-        default: false
+        default: true
         type: boolean
       deploy_ios:
         description: 'Build iOS'
@@ -44,8 +44,6 @@ on:
   push:
     branches:
       - main
-      - fastlane
-      - ci
     paths:
       - 'src/**'
       - 'android/**'
@@ -208,18 +206,6 @@ jobs:
           name: android-apk-debug-${{ github.run_number }}
           path: android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
-          retention-days: 14
-
-      - name: Upload web sourcemaps (Debug only)
-        if: github.event_name == 'workflow_dispatch' && github.event.inputs.android_build_type == 'debug'
-        uses: actions/upload-artifact@v4
-        with:
-          name: web-sourcemaps-${{ github.run_number }}
-          path: |
-            dist/**/*.map
-            dist/**/*.js.map
-            dist/**/*.css.map
-          if-no-files-found: ignore
           retention-days: 14
 
       - name: Cleanup keystore
