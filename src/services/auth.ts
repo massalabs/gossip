@@ -76,7 +76,7 @@ export class AuthService {
 const ONE_WEEK_IN_MILLIS = 7 * 24 * 60 * 60 * 1000;
 
 function moreThanOneWeekAgo(date: Date): boolean {
-  return Date.now() > date.getTime() + ONE_WEEK_IN_MILLIS;
+  return Date.now() - date.getTime() >= ONE_WEEK_IN_MILLIS;
 }
 
 export const authService = new AuthService(createMessageProtocol());
