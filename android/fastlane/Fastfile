@@ -41,7 +41,7 @@ platform :android do
       skip_upload_metadata: true,
       skip_upload_images: true,
       skip_upload_screenshots: true,
-      release_status: 'completed'
+      release_status: 'draft'
     )
 
     UI.success("🚀 Successfully uploaded to Google Play Internal Track!")
@@ -59,7 +59,7 @@ platform :android do
       skip_upload_metadata: true,
       skip_upload_images: true,
       skip_upload_screenshots: true,
-      release_status: 'completed'
+      release_status: 'draft'
     )
 
     UI.success("🚀 Successfully uploaded to Google Play Beta Track!")
@@ -77,7 +77,7 @@ platform :android do
       skip_upload_metadata: true,
       skip_upload_images: true,
       skip_upload_screenshots: true,
-      release_status: 'completed'
+      release_status: 'draft'
     )
 
     UI.success("🚀 Successfully uploaded to Google Play Production!")

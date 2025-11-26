@@ -265,6 +265,7 @@ jobs:
           echo "🔍 Debug: TRACK variable is set to: '$TRACK'"
 
           # Upload only (no build)
+          # Use draft status for apps in draft mode, completed for published apps
           if [ "$TRACK" == "internal" ]; then
             bundle exec fastlane run upload_to_play_store \
               track:internal \
@@ -274,7 +275,7 @@ jobs:
               skip_upload_metadata:true \
               skip_upload_images:true \
               skip_upload_screenshots:true \
-              release_status:completed
+              release_status:draft
           elif [ "$TRACK" == "beta" ]; then
             bundle exec fastlane run upload_to_play_store \
               track:beta \
@@ -284,7 +285,7 @@ jobs:
               skip_upload_metadata:true \
               skip_upload_images:true \
               skip_upload_screenshots:true \
-              release_status:completed
+              release_status:draft
           elif [ "$TRACK" == "production" ]; then
             bundle exec fastlane run upload_to_play_store \
               track:production \
@@ -294,7 +295,7 @@ jobs:
               skip_upload_metadata:true \
               skip_upload_images:true \
               skip_upload_screenshots:true \
-              release_status:completed
+              release_status:draft
           fi
 
       - name: Upload status
