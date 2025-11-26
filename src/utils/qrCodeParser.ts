@@ -18,7 +18,7 @@ export function parseInvite(input: string): ParsedInvite {
     throw new Error('Invalid invite format');
   }
 
-  const userId = match[1];
+  const userId = decodeURIComponent(match[1]);
 
   if (!isValidUserId(userId)) {
     throw new Error(
