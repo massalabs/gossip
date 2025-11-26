@@ -1,18 +1,13 @@
-import React, {
-  useState,
-  useCallback,
-  useMemo,
-  useEffect,
-  useRef,
-} from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import { useFileShareContact } from '../../hooks/useFileShareContact';
 import PageHeader from '../ui/PageHeader';
 import Button from '../ui/Button';
 import TabSwitcher from '../ui/TabSwitcher';
 import { generateDeepLinkUrl } from '../../utils/qrCodeUrl';
-import { CopyIcon, CheckIcon, DownloadIcon } from '../ui/icons';
+import { DownloadIcon } from '../ui/icons';
 import { UserPublicKeys } from '../../assets/generated/wasm/gossip_wasm';
 import ShareContactQR from './ShareContactQR';
+import ShareContactCopySection from './ShareContactCopySection';
 
 interface ShareContactProps {
   onBack: () => void;
@@ -31,55 +26,8 @@ const ShareContact: React.FC<ShareContactProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<ShareTab>('qr');
   const { exportFileContact, fileState } = useFileShareContact();
-  const [copiedUserId, setCopiedUserId] = useState(false);
-  const [copiedQRUrl, setCopiedQRUrl] = useState(false);
-  const userIdTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const qrUrlTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const deepLinkUrl = useMemo(() => generateDeepLinkUrl(userId), [userId]);
   const isExportDisabled = !publicKey || fileState.isLoading;
-
-  const handleCopyUserId = useCallback(async () => {
-    try {
-      await navigator.clipboard.writeText(userId);
-      setCopiedUserId(true);
-      if (userIdTimeoutRef.current) {
-        clearTimeout(userIdTimeoutRef.current);
-      }
-      userIdTimeoutRef.current = setTimeout(() => {
-        setCopiedUserId(false);
-        userIdTimeoutRef.current = null;
-      }, 2000);
-    } catch (err) {
-      console.error('Failed to copy user ID:', err);
-    }
-  }, [userId]);
-
-  const handleCopyQRUrl = useCallback(async () => {
-    try {
-      await navigator.clipboard.writeText(deepLinkUrl);
-      setCopiedQRUrl(true);
-      if (qrUrlTimeoutRef.current) {
-        clearTimeout(qrUrlTimeoutRef.current);
-      }
-      qrUrlTimeoutRef.current = setTimeout(() => {
-        setCopiedQRUrl(false);
-        qrUrlTimeoutRef.current = null;
-      }, 2000);
-    } catch (err) {
-      console.error('Failed to copy QR code URL:', err);
-    }
-  }, [deepLinkUrl]);
-
-  useEffect(() => {
-    return () => {
-      if (userIdTimeoutRef.current) {
-        clearTimeout(userIdTimeoutRef.current);
-      }
-      if (qrUrlTimeoutRef.current) {
-        clearTimeout(qrUrlTimeoutRef.current);
-      }
-    };
-  }, []);
 
   const handleExportFile = useCallback(() => {
     if (!publicKey || !userName) return;
@@ -149,31 +97,11 @@ const ShareContact: React.FC<ShareContactProps> = ({
           )}
 
           {/* Copy buttons section */}
-          <div className="mt-10 flex flex-col gap-2">
-            <Button variant="outline" onClick={handleCopyUserId}>
-              {copiedUserId ? (
-                <CheckIcon className="w-5 h-5 mr-4 text-success" />
-              ) : (
-                <CopyIcon className="w-5 h-5 mr-4" />
-              )}
-              <span
-                className={`text-base font-semibold flex-1 text-left ${copiedUserId ? 'text-success' : ''}`}
-              >
-                {copiedUserId ? 'User ID Copied!' : 'Copy User ID'}
-              </span>
-            </Button>
-            <Button variant="outline" onClick={handleCopyQRUrl}>
-              {copiedQRUrl ? (
-                <CheckIcon className="w-5 h-5 mr-4 text-success" />
-              ) : (
-                <CopyIcon className="w-5 h-5 mr-4" />
-              )}
-              <span
-                className={`text-base font-semibold flex-1 text-left ${copiedQRUrl ? 'text-success' : ''}`}
-              >
-                {copiedQRUrl ? 'QR Code URL Copied!' : 'Copy QR Code Invite'}
-              </span>
-            </Button>
+          <div className="mt-10">
+            <ShareContactCopySection
+              userId={userId}
+              deepLinkUrl={deepLinkUrl}
+            />
           </div>
         </div>
       </div>
