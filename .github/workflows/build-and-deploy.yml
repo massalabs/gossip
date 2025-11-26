@@ -21,13 +21,8 @@ on:
         required: false
         default: true
         type: boolean
-      deploy_ios:
-        description: 'Build iOS'
-        required: false
-        default: true
-        type: boolean
-      android_track:
-        description: 'Android Track (internal, beta, or production)'
+      play_store_track:
+        description: 'Google Play Track (internal, beta, or production)'
         required: false
         default: 'internal'
         type: choice
@@ -35,6 +30,11 @@ on:
           - internal
           - beta
           - production
+      deploy_ios:
+        description: 'Build iOS'
+        required: false
+        default: true
+        type: boolean
       ios_upload_testflight:
         description: 'Upload iOS to TestFlight'
         required: false
