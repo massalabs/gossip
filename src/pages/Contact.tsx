@@ -33,6 +33,13 @@ const Contact: React.FC = () => {
   const [proposedName, setProposedName] = useState(contact?.name || '');
   const [displayName, setDisplayName] = useState(contact?.name || '');
   const [nameError, setNameError] = useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (contact) {
+      setProposedName(contact.name);
+      setDisplayName(contact.name);
+    }
+  }, [contact]);
   const [showSuccessCheck, setShowSuccessCheck] = useState(false);
   const [activeView, setActiveView] = useState<ContactView>(
     ContactView.DETAILS
