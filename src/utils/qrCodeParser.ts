@@ -1,8 +1,9 @@
-const INVITE_REGEX = /^\/invite\/([^/#?\s]+)(?:\/([^/#?\s]+))?$/i;
+import { isValidUserId } from './userId';
+
+const INVITE_REGEX = /^\/invite\/([^/#?\s]+)$/i;
 
 export interface ParsedInvite {
   userId: string;
-  name: string;
 }
 
 export function parseInvite(input: string): ParsedInvite {
@@ -17,11 +18,16 @@ export function parseInvite(input: string): ParsedInvite {
     throw new Error('Invalid invite format');
   }
 
-  const [, userId, name] = match;
+  const userId = match[1];
+
+  if (!isValidUserId(userId)) {
+    throw new Error(
+      'Invalid user ID format — must be a valid gossip1... address'
+    );
+  }
 
   return {
     userId,
-    name,
   };
 }
 
@@ -37,10 +43,14 @@ export function extractInvitePath(input: string): string | null {
     return url;
   }
 
-  const { pathname } = new URL(url);
-
-  if (pathname.startsWith('/invite/')) {
-    return pathname;
+  try {
+    const { pathname } = new URL(url);
+    if (pathname.startsWith('/invite/')) {
+      return pathname;
+    }
+  } catch {
+    // Invalid URL format, return null
+    return null;
   }
 
   return null;

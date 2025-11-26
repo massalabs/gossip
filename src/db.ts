@@ -64,6 +64,7 @@ export interface UserProfile {
   lastSeen: Date;
   createdAt: Date;
   updatedAt: Date;
+  lastPublicKeyPush?: Date;
 }
 
 // Unified discussion interface combining protocol state and UI metadata

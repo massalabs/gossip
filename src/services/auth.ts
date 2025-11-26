@@ -9,6 +9,7 @@ import { decodeUserId } from '../utils/userId';
 import { encodeToBase64, decodeFromBase64 } from '../utils/base64';
 import { IMessageProtocol } from '../api/messageProtocol/types';
 import { createMessageProtocol } from '../api/messageProtocol';
+import { db } from '../db';
 
 interface PublicKeyResult {
   success: boolean;
@@ -55,13 +56,27 @@ export class AuthService {
     publicKeys: UserPublicKeys,
     userId: string
   ): Promise<void> {
-    const result = await this.fetchPublicKeyByUserId(userId);
-    if (result.success) return;
+    const profile = await db.userProfile.get(userId);
+    if (!profile) throw new Error('User profile not found');
+
+    const lastPush = profile.lastPublicKeyPush;
+
+    if (lastPush && !moreThanOneWeekAgo(lastPush)) {
+      return;
+    }
 
     await this.messageProtocol.postPublicKey(
       encodeToBase64(publicKeys.to_bytes())
     );
+
+    await db.userProfile.update(userId, { lastPublicKeyPush: new Date() });
   }
+}
+
+const ONE_WEEK_IN_MILLIS = 7 * 24 * 60 * 60 * 1000;
+
+function moreThanOneWeekAgo(date: Date): boolean {
+  return Date.now() > date.getTime() + ONE_WEEK_IN_MILLIS;
 }
 
 export const authService = new AuthService(createMessageProtocol());

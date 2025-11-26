@@ -27,16 +27,15 @@ function getBaseUrl(): string {
 
 /**
  * Generate a clean, shareable QR code invite link
- * Format: https://gossip.app/invite/{userId}/{userName}
+ * Format: https://gossip.app/invite/{userId}
  */
-export function generateQRCodeUrl(userId: string, userName: string): string {
-  if (!userId?.trim() || !userName?.trim()) {
-    throw new Error('userId and userName are required');
+export function generateQRCodeUrl(userId: string): string {
+  if (!userId?.trim()) {
+    throw new Error('userId is required');
   }
 
   const base = getBaseUrl();
   const safeId = encodeURIComponent(userId.trim());
-  const safeName = encodeURIComponent(userName.trim());
 
-  return `${base}${INVITE_BASE_URL}/${safeId}/${safeName}`;
+  return `${base}${INVITE_BASE_URL}/${safeId}`;
 }
