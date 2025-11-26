@@ -243,7 +243,7 @@ jobs:
           if [ "${{ github.event_name }}" == "push" ]; then
             echo "📤 Uploading to Google Play Store: Internal Testing"
           else
-            echo "📤 Uploading to Google Play Store: ${{ github.event.inputs.android_track }} track"
+            echo "📤 Uploading to Google Play Store: ${{ github.event.inputs.play_store_track }} track"
           fi
           echo "📦 AAB file:"
           ls -lh android/app/build/outputs/bundle/release/
@@ -258,10 +258,11 @@ jobs:
           if [ "${{ github.event_name }}" == "push" ]; then
             TRACK="internal"
           else
-            TRACK="${{ github.event.inputs.android_track }}"
+            TRACK="${{ github.event.inputs.play_store_track }}"
           fi
 
           echo "📤 Uploading to $TRACK track..."
+          echo "🔍 Debug: TRACK variable is set to: '$TRACK'"
 
           # Upload only (no build)
           if [ "$TRACK" == "internal" ]; then
