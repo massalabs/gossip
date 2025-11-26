@@ -1,6 +1,5 @@
 import Dexie, { Table } from 'dexie';
 import { EncryptedMessage } from './api/messageProtocol/types';
-import { UserPublicKeys } from './assets/generated/wasm/gossip_wasm';
 
 // Define authentication method type
 export type AuthMethod = 'capacitor' | 'webauthn' | 'password';
@@ -321,14 +320,6 @@ export class GossipDatabase extends Dexie {
   async deleteDb(): Promise<void> {
     await this.close();
     await this.delete();
-  }
-
-  async getContactPublicKeyByUserId(
-    userId: string
-  ): Promise<UserPublicKeys | undefined> {
-    const contact = await this.contacts.get(userId);
-    if (!contact) return undefined;
-    return UserPublicKeys.from_bytes(contact.publicKeys);
   }
 }
 

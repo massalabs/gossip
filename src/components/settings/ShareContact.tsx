@@ -29,11 +29,8 @@ const ShareContact: React.FC<ShareContactProps> = ({
   const [copiedQRUrl, setCopiedQRUrl] = useState(false);
   const deepLinkUrl = useMemo(() => generateDeepLinkUrl(userId), [userId]);
   const isExportDisabled = !publicKey || fileState.isLoading;
-  const canShowExportContent =
-    !!publicKey && !!userName && !fileState.isLoading;
 
   const handleCopyUserId = useCallback(async () => {
-    if (!userId) return;
     try {
       await navigator.clipboard.writeText(userId);
       setCopiedUserId(true);
@@ -108,12 +105,10 @@ const ShareContact: React.FC<ShareContactProps> = ({
                 fullWidth
                 className="h-11 rounded-xl text-sm font-medium"
               >
-                {canShowExportContent && (
-                  <>
-                    <DownloadIcon />
-                    <span>Download</span>
-                  </>
-                )}
+                <>
+                  <DownloadIcon />
+                  <span>Download</span>
+                </>
               </Button>
 
               {fileState.error && (
@@ -125,7 +120,7 @@ const ShareContact: React.FC<ShareContactProps> = ({
           )}
 
           {/* Copy buttons section */}
-          <div className="space-y-2 mt-10 flex flex-col gap-2">
+          <div className="mt-10 flex flex-col gap-2">
             <Button variant="outline" onClick={handleCopyUserId}>
               {copiedUserId ? (
                 <CheckIcon className="w-5 h-5 mr-4 text-success" />
