@@ -1,13 +1,12 @@
 import React, { useState, useCallback, useMemo } from 'react';
 import { useFileShareContact } from '../../hooks/useFileShareContact';
 import PageHeader from '../ui/PageHeader';
-import Button from '../ui/Button';
 import TabSwitcher from '../ui/TabSwitcher';
 import { generateDeepLinkUrl } from '../../utils/qrCodeUrl';
-import { DownloadIcon } from '../ui/icons';
 import { UserPublicKeys } from '../../assets/generated/wasm/gossip_wasm';
 import ShareContactQR from './ShareContactQR';
 import ShareContactCopySection from './ShareContactCopySection';
+import ShareContactFileSection from './ShareContactFileSection';
 
 interface ShareContactProps {
   onBack: () => void;
@@ -61,39 +60,12 @@ const ShareContact: React.FC<ShareContactProps> = ({
           </div>
 
           {activeTab === 'files' && (
-            <div className="bg-card rounded-lg p-6">
-              <div className="text-center mb-6">
-                <div className="w-12 h-12 bg-primary/10 rounded-xl flex items-center justify-center mx-auto mb-4">
-                  <DownloadIcon className="w-6 h-6 text-primary" />
-                </div>
-                <h4 className="text-lg font-semibold text-foreground mb-2">
-                  Share with file
-                </h4>
-                <p className="text-sm text-muted-foreground mb-6">
-                  Download your profile file and share it with people you want
-                  to talk to.
-                </p>
-              </div>
-
-              <Button
-                onClick={handleExportFile}
-                disabled={isExportDisabled}
-                loading={fileState.isLoading}
-                variant="primary"
-                size="custom"
-                fullWidth
-                className="h-11 rounded-xl text-sm font-medium"
-              >
-                <DownloadIcon />
-                <span>Download</span>
-              </Button>
-
-              {fileState.error && (
-                <div className="mt-4 text-sm text-destructive text-center">
-                  {fileState.error}
-                </div>
-              )}
-            </div>
+            <ShareContactFileSection
+              disabled={isExportDisabled}
+              isLoading={fileState.isLoading}
+              error={fileState.error}
+              onExport={handleExportFile}
+            />
           )}
 
           {/* Copy buttons section */}
