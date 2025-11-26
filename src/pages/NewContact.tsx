@@ -36,11 +36,9 @@ const NewContact: React.FC = () => {
   } = useContactForm();
 
   useEffect(() => {
-    if (!state || !state.userId || !state.name) return;
-
+    if (!state?.userId) return;
     handleUserIdChange(state.userId);
-    handleNameChange(state.name);
-  }, [state, handleUserIdChange, handleNameChange]);
+  }, [state?.userId, handleUserIdChange]);
 
   const handleBack = useCallback(() => {
     if (hasUnsavedChanges) {
@@ -60,13 +58,12 @@ const NewContact: React.FC = () => {
   }, []);
 
   const handleScanSuccess = useCallback(
-    (scannedUserId: string, scannedName: string) => {
+    (scannedUserId: string) => {
       setShowScanner(false);
 
       handleUserIdChange(scannedUserId);
-      handleNameChange(scannedName);
     },
-    [handleUserIdChange, handleNameChange]
+    [handleUserIdChange]
   );
 
   if (showScanner) {

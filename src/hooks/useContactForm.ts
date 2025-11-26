@@ -56,7 +56,7 @@ export function useContactForm() {
 
     setUserId(prev => ({ ...prev, loading: true, error: null }));
 
-    const { success, publicKey } =
+    const { success, publicKey, error } =
       await authService.fetchPublicKeyByUserId(trimmed);
 
     if (!success || !publicKey) {
@@ -65,7 +65,7 @@ export function useContactForm() {
         loading: false,
         // TODO: Improve user feedback: Network, api, not found...
         // If can't fetch public key create discussion with announcement not sent, and retry regularly?
-        error: 'Associated public keys not found',
+        error: error || 'Associated public keys not found',
       }));
       setPublicKeys(null);
     } else {

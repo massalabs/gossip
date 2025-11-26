@@ -7,7 +7,7 @@ import NativeQRScanner from '../qr/NativeQRScanner';
 
 interface ScanQRCodeProps {
   onBack: () => void;
-  onScanSuccess: (userId: string, name: string) => void;
+  onScanSuccess: (userId: string) => void;
 }
 
 const ScanQRCode: React.FC<ScanQRCodeProps> = ({ onBack, onScanSuccess }) => {
@@ -18,8 +18,8 @@ const ScanQRCode: React.FC<ScanQRCodeProps> = ({ onBack, onScanSuccess }) => {
     setIsProcessing(true);
 
     try {
-      const { userId, name } = parseInvite(qrText);
-      onScanSuccess(userId, name);
+      const { userId } = parseInvite(qrText);
+      onScanSuccess(userId);
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Invalid QR code format';
