@@ -29,7 +29,7 @@ function getBaseUrl(): string {
  * Generate a clean, shareable QR code invite link
  * Format: https://gossip.app/invite/{userId}
  */
-export function generateQRCodeUrl(userId: string): string {
+export function generateDeepLinkUrl(userId: string): string {
   if (!userId?.trim()) {
     throw new Error('userId is required');
   }

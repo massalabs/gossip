@@ -11,7 +11,6 @@ import Button from '../components/ui/Button';
 import Toggle from '../components/ui/Toggle';
 import InfoRow from '../components/ui/InfoRow';
 import CopyClipboard from '../components/ui/CopyClipboard';
-import { db } from '../db';
 import { useVersionCheck } from '../hooks/useVersionCheck';
 import { STORAGE_KEYS, clearAppStorage } from '../utils/localStorage';
 import {
@@ -31,7 +30,7 @@ import { useLocalStorage } from '../hooks/useLocalStorage';
 import { useNavigate } from 'react-router-dom';
 import ShareContact from '../components/settings/ShareContact';
 import ScanQRCode from '../components/settings/ScanQRCode';
-import { usePreloadShareContact } from '../hooks/usePreloadShareContact';
+import { db } from '../db';
 
 enum SettingsView {
   SHOW_ACCOUNT_BACKUP = 'SHOW_ACCOUNT_BACKUP',
@@ -40,7 +39,7 @@ enum SettingsView {
 }
 
 const Settings = (): React.ReactElement => {
-  const { userProfile, getMnemonicBackupInfo, logout, resetAccount } =
+  const { userProfile, getMnemonicBackupInfo, logout, resetAccount, ourPk } =
     useAccountStore();
   const [appBuildId] = useLocalStorage(STORAGE_KEYS.APP_BUILD_ID, null);
   const showDebugOption = useAppStore(s => s.showDebugOption);
@@ -50,7 +49,6 @@ const Settings = (): React.ReactElement => {
   const [isResetModalOpen, setIsResetModalOpen] = useState(false);
   const { isVersionDifferent, handleForceUpdate } = useVersionCheck();
   const navigate = useNavigate();
-  const pregeneratedQR = usePreloadShareContact();
 
   const mnemonicBackupInfo = getMnemonicBackupInfo();
 
@@ -115,7 +113,9 @@ const Settings = (): React.ReactElement => {
       return (
         <ShareContact
           onBack={() => setActiveView(null)}
-          pregeneratedQR={pregeneratedQR || ''}
+          userId={userProfile!.userId}
+          userName={userProfile!.username}
+          publicKey={ourPk!}
         />
       );
     case SettingsView.SCAN_QR_CODE:

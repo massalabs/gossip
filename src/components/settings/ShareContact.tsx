@@ -1,53 +1,66 @@
-import React, { useState, useCallback } from 'react';
-import { useAccountStore } from '../../stores/accountStore';
+import React, { useState, useCallback, useMemo } from 'react';
 import { useFileShareContact } from '../../hooks/useFileShareContact';
 import PageHeader from '../ui/PageHeader';
 import Button from '../ui/Button';
 import TabSwitcher from '../ui/TabSwitcher';
-import { generateQRCodeUrl } from '../../utils/qrCodeUrl';
-import { CopyIcon, CheckIcon } from '../ui/icons';
+import { generateDeepLinkUrl } from '../../utils/qrCodeUrl';
+import { CopyIcon, CheckIcon, DownloadIcon } from '../ui/icons';
+import { UserPublicKeys } from '../../assets/generated/wasm/gossip_wasm';
+import ShareContactQR from './ShareContactQR';
 
 interface ShareContactProps {
   onBack: () => void;
-  pregeneratedQR: string;
+  userId: string;
+  userName: string;
+  publicKey: UserPublicKeys;
 }
 
 type ShareTab = 'qr' | 'files';
 
 const ShareContact: React.FC<ShareContactProps> = ({
   onBack,
-  pregeneratedQR,
+  userId,
+  userName,
+  publicKey,
 }) => {
   const [activeTab, setActiveTab] = useState<ShareTab>('qr');
-  const { ourPk, userProfile } = useAccountStore();
   const { exportFileContact, fileState } = useFileShareContact();
   const [copiedUserId, setCopiedUserId] = useState(false);
   const [copiedQRUrl, setCopiedQRUrl] = useState(false);
+  const deepLinkUrl = useMemo(() => generateDeepLinkUrl(userId), [userId]);
+  const isExportDisabled = !publicKey || fileState.isLoading;
+  const canShowExportContent =
+    !!publicKey && !!userName && !fileState.isLoading;
 
   const handleCopyUserId = useCallback(async () => {
-    if (!userProfile?.userId) return;
+    if (!userId) return;
     try {
-      await navigator.clipboard.writeText(userProfile.userId);
+      await navigator.clipboard.writeText(userId);
       setCopiedUserId(true);
       setTimeout(() => setCopiedUserId(false), 2000);
     } catch (err) {
       console.error('Failed to copy user ID:', err);
     }
-  }, [userProfile?.userId]);
+  }, [userId]);
 
   const handleCopyQRUrl = useCallback(async () => {
-    if (!userProfile?.userId) return;
     try {
-      const qrUrl = generateQRCodeUrl(userProfile.userId);
-      await navigator.clipboard.writeText(qrUrl);
+      await navigator.clipboard.writeText(deepLinkUrl);
       setCopiedQRUrl(true);
       setTimeout(() => setCopiedQRUrl(false), 2000);
     } catch (err) {
       console.error('Failed to copy QR code URL:', err);
     }
-  }, [userProfile?.userId]);
+  }, [deepLinkUrl]);
 
-  if (!userProfile) return null;
+  const handleExportFile = useCallback(() => {
+    if (!publicKey || !userName) return;
+
+    exportFileContact({
+      userPubKeys: publicKey.to_bytes(),
+      userName,
+    });
+  }, [exportFileContact, publicKey, userName]);
 
   return (
     <div className="bg-card h-full overflow-auto max-w-md mx-auto">
@@ -67,34 +80,15 @@ const ShareContact: React.FC<ShareContactProps> = ({
             />
           </div>
 
-          {/* Tab content */}
-          {activeTab === 'qr' && (
-            <div className="flex justify-center py-8">
-              <img
-                src={pregeneratedQR}
-                alt="Your contact QR code"
-                className="w-[300px] h-[300px]"
-              />
-            </div>
-          )}
+          <div className={activeTab === 'qr' ? 'block' : 'hidden'}>
+            <ShareContactQR deepLinkUrl={deepLinkUrl} />
+          </div>
 
           {activeTab === 'files' && (
             <div className="bg-card rounded-lg p-6">
               <div className="text-center mb-6">
                 <div className="w-12 h-12 bg-primary/10 rounded-xl flex items-center justify-center mx-auto mb-4">
-                  <svg
-                    className="w-6 h-6 text-primary"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
-                    />
-                  </svg>
+                  <DownloadIcon className="w-6 h-6 text-primary" />
                 </div>
                 <h4 className="text-lg font-semibold text-foreground mb-2">
                   Share with file
@@ -106,35 +100,17 @@ const ShareContact: React.FC<ShareContactProps> = ({
               </div>
 
               <Button
-                onClick={() => {
-                  if (!ourPk || !userProfile?.username) return;
-                  exportFileContact({
-                    userPubKeys: ourPk.to_bytes(),
-                    userName: userProfile.username,
-                  });
-                }}
-                disabled={!ourPk || fileState.isLoading}
+                onClick={handleExportFile}
+                disabled={isExportDisabled}
                 loading={fileState.isLoading}
                 variant="primary"
                 size="custom"
                 fullWidth
                 className="h-11 rounded-xl text-sm font-medium"
               >
-                {!fileState.isLoading && (
+                {canShowExportContent && (
                   <>
-                    <svg
-                      className="w-5 h-5"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
-                      />
-                    </svg>
+                    <DownloadIcon />
                     <span>Download</span>
                   </>
                 )}
@@ -149,13 +125,8 @@ const ShareContact: React.FC<ShareContactProps> = ({
           )}
 
           {/* Copy buttons section */}
-          <div className="space-y-2 mt-10">
-            <Button
-              variant="outline"
-              size="custom"
-              className="w-full h-[54px] flex items-center px-4 justify-start rounded-lg"
-              onClick={handleCopyUserId}
-            >
+          <div className="space-y-2 mt-10 flex flex-col gap-2">
+            <Button variant="outline" onClick={handleCopyUserId}>
               {copiedUserId ? (
                 <CheckIcon className="w-5 h-5 mr-4 text-success" />
               ) : (
@@ -167,12 +138,7 @@ const ShareContact: React.FC<ShareContactProps> = ({
                 {copiedUserId ? 'User ID Copied!' : 'Copy User ID'}
               </span>
             </Button>
-            <Button
-              variant="outline"
-              size="custom"
-              className="w-full h-[54px] flex items-center px-4 justify-start rounded-lg"
-              onClick={handleCopyQRUrl}
-            >
+            <Button variant="outline" onClick={handleCopyQRUrl}>
               {copiedQRUrl ? (
                 <CheckIcon className="w-5 h-5 mr-4 text-success" />
               ) : (
