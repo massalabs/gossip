@@ -44,7 +44,12 @@ export function extractInvitePath(input: string): string | undefined {
 
   // Handle gossip:// protocol
   if (trimmed.startsWith('gossip://')) {
-    return trimmed.replace('gossip://', '/');
+    const path = trimmed.replace('gossip://', '/');
+    if (path.startsWith('/invite/')) {
+      return path;
+    } else {
+      return undefined;
+    }
   }
 
   try {
