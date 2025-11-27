@@ -70,89 +70,14 @@ class ServiceWorkerMessageReception {
     );
   }
 
-  /**
-   * Request active seekers from the main app
-   * The main app will respond with all active seekers via postMessage
-   */
-  private async requestSeekersFromMainApp(): Promise<Uint8Array[]> {
-    return new Promise(resolve => {
-      // Try to get seekers from main app
-      const clients = self.clients.matchAll({ type: 'window' });
-      let resolved = false;
-
-      clients
-        .then(clientList => {
-          if (clientList.length === 0) {
-            // No clients available, return empty array
-            if (!resolved) {
-              resolved = true;
-              resolve([]);
-            }
-            return;
-          }
-
-          // Request seekers from the first available client
-          const client = Array.from(clientList)[0];
-          const messageChannel = new MessageChannel();
-
-          // Set timeout in case main app doesn't respond
-          const timeoutId = setTimeout(() => {
-            if (!resolved) {
-              resolved = true;
-              resolve([]);
-            }
-          }, 2000);
-
-          // Set up message listener BEFORE sending postMessage to avoid race condition
-          // If the main app responds very quickly, we need the listener to be ready
-          messageChannel.port1.onmessage = event => {
-            if (!resolved) {
-              resolved = true;
-              clearTimeout(timeoutId);
-              const seekers = event.data?.seekers || [];
-              // Convert array of arrays to Uint8Array[]
-              const typedSeekers = seekers.map(
-                (seeker: number[]) => new Uint8Array(seeker)
-              );
-              resolve(typedSeekers);
-            }
-          };
-
-          // Send request to main app with the message channel port
-          try {
-            client.postMessage(
-              {
-                type: 'REQUEST_SEEKERS',
-              },
-              [messageChannel.port2]
-            );
-          } catch (_error) {
-            // If postMessage fails, resolve with empty array
-            if (!resolved) {
-              resolved = true;
-              clearTimeout(timeoutId);
-              resolve([]);
-            }
-          }
-        })
-        .catch(() => {
-          // If matchAll fails, resolve with empty array
-          if (!resolved) {
-            resolved = true;
-            resolve([]);
-          }
-        });
-    });
-  }
-
   async fetchAllDiscussions(): Promise<{
     success: boolean;
     newMessagesCount: number;
   }> {
     try {
-      // Request all active seekers from the main app
-      // The main app has access to WASM session and can provide all seekers
-      const seekers = await this.requestSeekersFromMainApp();
+      // Get all active seekers from the database
+      // These are updated by the main app after each fetchMessages() call
+      const seekers = await db.getActiveSeekers();
       if (!seekers || seekers.length === 0) {
         return {
           success: true,
