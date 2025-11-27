@@ -2,7 +2,11 @@ import React, { useState, useEffect } from 'react';
 // Removed static logo in favor of animated PrivacyGraphic
 import { Capacitor } from '@capacitor/core';
 import { useAccountStore } from '../../stores/accountStore';
-import { validatePassword, validateUsername } from '../../utils/validation';
+import {
+  validatePassword,
+  validateUsernameFormat,
+  validateUsernameFormatAndAvailability,
+} from '../../utils/validation';
 import PageHeader from '../ui/PageHeader';
 import TabSwitcher from '../ui/TabSwitcher';
 import Button from '../ui/Button';
@@ -20,7 +24,7 @@ const AccountCreation: React.FC<AccountCreationProps> = ({
 }) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [isValid, setIsValid] = useState(false);
+  const [isUsernameValid, setIsUsernameValid] = useState(false);
   const [isPasswordValid, setIsPasswordValid] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -51,37 +55,27 @@ const AccountCreation: React.FC<AccountCreationProps> = ({
     checkBiometricMethods();
   }, []);
 
-  const validateUsernameField = (value: string) => {
-    const result = validateUsername(value);
-    setIsValid(result.valid);
-    setUsernameError(result.error || null);
-    return result.valid;
-  };
-
-  const validatePasswordField = (value: string) => {
-    const result = validatePassword(value);
-    setIsPasswordValid(result.valid);
-    setPasswordError(result.error || null);
-    return result.valid;
-  };
-
   const handleUsernameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
     setUsername(value);
-    validateUsernameField(value);
+    const result = validateUsernameFormat(value);
+    setIsUsernameValid(result.valid);
+    setUsernameError(result.error || null);
     setError(null);
   };
 
   const handlePasswordChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
     setPassword(value);
-    validatePasswordField(value);
+    const result = validatePassword(value);
+    setIsPasswordValid(result.valid);
+    setPasswordError(result.error || null);
     setError(null);
   };
 
   const canSubmit = usePassword
-    ? isValid && isPasswordValid && !isCreating
-    : isValid && !isCreating;
+    ? isUsernameValid && isPasswordValid && !isCreating
+    : isUsernameValid && !isCreating;
 
   // No re-authentication in create flow
 
@@ -111,6 +105,17 @@ const AccountCreation: React.FC<AccountCreationProps> = ({
     e.preventDefault();
     e.stopPropagation();
 
+    // Handle when user presses enter without triggering blur event
+    const usernameResult =
+      await validateUsernameFormatAndAvailability(username);
+
+    if (!usernameResult.valid) {
+      setIsUsernameValid(false);
+      setUsernameError(usernameResult.error);
+      return;
+    }
+
+    // Should not happen, because button is disabled if !canSubmit
     if (!canSubmit) {
       return;
     }

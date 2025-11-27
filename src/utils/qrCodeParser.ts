@@ -1,4 +1,4 @@
-import { isValidUserId } from './userId';
+import { validateUserIdFormat } from './validation';
 
 const INVITE_REGEX = /^\/invite\/([^/#?\s]+)$/i;
 
@@ -19,10 +19,9 @@ export function parseInvite(input: string): ParsedInvite {
 
   const userId = decodeURIComponent(match[1]);
 
-  if (!isValidUserId(userId)) {
-    throw new Error(
-      'Invalid user ID format — must be a valid gossip1... address'
-    );
+  const result = validateUserIdFormat(userId);
+  if (!result.valid) {
+    throw new Error(result.error || 'Invalid user ID format');
   }
 
   return {
