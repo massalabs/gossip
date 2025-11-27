@@ -39,7 +39,8 @@ function setupControllerChangeListener(): void {
   navigator.serviceWorker.addEventListener('controllerchange', () => {
     // Reload the page when a new service worker takes control
     // This ensures the page uses the new service worker code immediately
-    if (!refreshing) {
+    // Prevent duplicate reloads: check both local flag and if reload is already in progress
+    if (!refreshing && document.visibilityState !== 'hidden') {
       refreshing = true;
       window.location.reload();
     }
@@ -52,11 +53,9 @@ function setupControllerChangeListener(): void {
 function setupMessageListener(): void {
   navigator.serviceWorker.addEventListener('message', async event => {
     if (event.data && event.data.type === 'REQUEST_SEEKERS') {
-      console.log('REQUEST_SEEKERS');
       try {
         // Get all active seekers from the session
         const { session } = useAccountStore.getState();
-        console.log('session', session);
         if (!session) {
           // No session available, respond with empty array
           if (event.ports && event.ports[0]) {
@@ -66,7 +65,6 @@ function setupMessageListener(): void {
         }
 
         const seekers = session.getMessageBoardReadKeys();
-        console.log('seekers received', seekers.length);
         // Convert Uint8Array[] to number[][] for JSON serialization
         const seekersArray = seekers.map(seeker => Array.from(seeker));
 
@@ -131,13 +129,12 @@ async function registerServiceWorker(): Promise<void> {
   // In production: '/sw.js' with type: 'classic'
   const swUrl =
     import.meta.env.MODE === 'production' ? '/sw.js' : '/dev-sw.js?dev-sw';
-  const swType = import.meta.env.MODE === 'production' ? 'classic' : 'module';
+  const swType =
+    import.meta.env.MODE === 'production'
+      ? 'classic'
+      : ('module' as WorkerType);
 
   try {
-    console.log(
-      `Attempting to register service worker at: ${swUrl} (type: ${swType})`
-    );
-
     // In dev mode, VitePWA serves the service worker dynamically
     // Skip the HEAD check and register directly - the browser will handle errors
     // In production, we can optionally verify the file exists first
@@ -160,32 +157,29 @@ async function registerServiceWorker(): Promise<void> {
       }
     }
 
-    console.log(`Registering service worker at: ${swUrl}`);
     const registration = await navigator.serviceWorker.register(swUrl, {
       scope: '/',
       type: swType,
     });
 
-    console.log('Service worker registered successfully:', {
-      installing: !!registration.installing,
-      waiting: !!registration.waiting,
-      active: !!registration.active,
-      scope: registration.scope,
-    });
+    // Use a flag to prevent duplicate scheduler initialization
+    let schedulerStarted = false;
+    const startSchedulerOnce = () => {
+      if (!schedulerStarted) {
+        schedulerStarted = true;
+        startSyncScheduler(registration);
+      }
+    };
 
     // If there's a waiting service worker, it should activate automatically
     // due to skipWaiting() in the install event, but we'll handle it here too
     if (registration.waiting) {
-      console.log(
-        'Service worker is waiting - it should activate automatically'
-      );
       // The waiting service worker should activate automatically due to skipWaiting()
       // but we'll listen for activation just in case
       registration.waiting.addEventListener('statechange', event => {
         const sw = event.target as ServiceWorker;
-        console.log(`Service worker state changed to: ${sw.state}`);
         if (sw.state === 'activated') {
-          startSyncScheduler(registration);
+          startSchedulerOnce();
         }
       });
     }
@@ -194,21 +188,21 @@ async function registerServiceWorker(): Promise<void> {
     if (registration.installing) {
       registration.installing.addEventListener('statechange', event => {
         const sw = event.target as ServiceWorker;
-        console.log(`Service worker state changed to: ${sw.state}`);
         if (sw.state === 'activated') {
-          startSyncScheduler(registration);
+          startSchedulerOnce();
         }
       });
-    } else if (registration.active) {
-      console.log('Service worker is already active');
-      startSyncScheduler(registration);
     }
 
-    // Success! Exit the loop
+    // Check if service worker is already active (handles race condition where skipWaiting()
+    // activates it before listeners are attached)
+    if (registration.active) {
+      startSchedulerOnce();
+    }
+
     return;
   } catch (error) {
     console.error(`Failed to register service worker at ${swUrl}:`, error);
-    // Continue to next URL
   }
 
   // If we get here, all attempts failed
@@ -227,24 +221,44 @@ async function handleExistingRegistration(): Promise<void> {
       return;
     }
 
+    // Use a flag to prevent duplicate scheduler initialization
+    let schedulerStarted = false;
+    const startSchedulerOnce = () => {
+      if (!schedulerStarted) {
+        schedulerStarted = true;
+        startSyncScheduler(registration);
+      }
+    };
+
     // Check if there's a waiting service worker
     if (registration.waiting) {
-      console.log(
-        'Found waiting service worker - it should activate automatically'
-      );
       // The waiting service worker should activate automatically due to skipWaiting()
       // but we'll listen for activation
       registration.waiting.addEventListener('statechange', event => {
         const sw = event.target as ServiceWorker;
         if (sw.state === 'activated') {
-          startSyncScheduler(registration);
+          startSchedulerOnce();
         }
       });
+      // Check if waiting worker is already activated or activating (race condition:
+      // skipWaiting() may have activated it before listener was attached)
+      if (
+        registration.waiting.state === 'activated' ||
+        registration.waiting.state === 'activating'
+      ) {
+        startSchedulerOnce();
+      }
     }
 
-    // Wait for ready and send start message
-    const readyRegistration = await navigator.serviceWorker.ready;
-    startSyncScheduler(readyRegistration);
+    // Check if service worker is already active (handles race condition where skipWaiting()
+    // activates it before listeners are attached)
+    if (registration.active) {
+      startSchedulerOnce();
+    }
+
+    // Wait for ready and send start message (as fallback if not already active)
+    await navigator.serviceWorker.ready;
+    startSchedulerOnce();
   } catch (error) {
     console.error('App: Error waiting for service worker ready:', error);
   }
@@ -260,8 +274,6 @@ async function initializeBackgroundSync(): Promise<void> {
 
     // Register periodic background sync
     await registerPeriodicSync();
-
-    console.log('Background sync service initialized');
 
     // Auto-retry pending announcements when coming back online
     window.addEventListener('online', () => {

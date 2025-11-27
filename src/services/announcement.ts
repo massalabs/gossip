@@ -98,34 +98,6 @@ export class AnnouncementService {
     }
   }
 
-  async simulateIncomingDiscussion(): Promise<{
-    success: boolean;
-    newMessagesCount: number;
-    error?: string;
-  }> {
-    const { userProfile } = useAccountStore.getState();
-    if (!userProfile?.userId) throw new Error('No authenticated user');
-
-    try {
-      console.log('Simulating incoming discussion announcement...');
-      const mockAnnouncement = new Uint8Array(64);
-      crypto.getRandomValues(mockAnnouncement);
-      const result = await this._processIncomingAnnouncement(mockAnnouncement);
-      return {
-        success: result.success,
-        newMessagesCount: result.discussionId ? 1 : 0,
-        error: result.error,
-      };
-    } catch (error) {
-      console.error('Failed to simulate incoming discussion:', error);
-      return {
-        success: false,
-        newMessagesCount: 0,
-        error: error instanceof Error ? error.message : 'Unknown error',
-      };
-    }
-  }
-
   private async _fetchAnnouncements(): Promise<Uint8Array[]> {
     try {
       const announcements = await this.messageProtocol.fetchAnnouncements();
@@ -251,7 +223,7 @@ export class AnnouncementService {
 
       try {
         await notificationService.showNewDiscussionNotification(
-          contact?.name || `User ${contactUserIdString.substring(0, 8)}`
+          announcementMessage
         );
       } catch (notificationError) {
         console.error(

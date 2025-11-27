@@ -74,6 +74,47 @@ export class NotificationService {
   }
 
   /**
+   * Internal helper to show a notification with common logic
+   * @param title - Notification title
+   * @param body - Notification body
+   * @param tag - Notification tag for grouping
+   * @param autoCloseMs - Auto-close timeout in milliseconds
+   * @param onClick - Optional click handler
+   * @param requireInteraction - Whether notification requires user interaction (default: false)
+   */
+  private async showNotificationInternal(
+    title: string,
+    body: string,
+    tag: string,
+    autoCloseMs: number,
+    onClick?: () => void,
+    requireInteraction: boolean = false
+  ): Promise<void> {
+    const notification = new Notification(title, {
+      body,
+      icon: '/favicon/favicon-96x96.png',
+      badge: '/favicon/favicon-96x96.png',
+      tag,
+      requireInteraction,
+      silent: false,
+    });
+
+    // Handle notification click
+    notification.onclick = () => {
+      window.focus();
+      if (onClick) {
+        onClick();
+      }
+      notification.close();
+    };
+
+    // Auto-close after specified time
+    setTimeout(() => {
+      notification.close();
+    }, autoCloseMs);
+  }
+
+  /**
    * Request notification permission from the user
    * @returns Promise resolving to permission status
    */
@@ -90,45 +131,6 @@ export class NotificationService {
     } catch (error) {
       console.error('Failed to request notification permission:', error);
       return this.permission;
-    }
-  }
-
-  /**
-   * Show a generic notification for new messages
-   * @param messageCount - Number of new messages (optional)
-   */
-  async showNewMessagesNotification(messageCount?: number): Promise<void> {
-    if (!this.canShowNotification()) {
-      return;
-    }
-
-    try {
-      const title = 'Gossip Messenger';
-      const body = messageCount
-        ? `You have ${messageCount} new message${messageCount > 1 ? 's' : ''}`
-        : 'You have new messages';
-
-      const notification = new Notification(title, {
-        body,
-        icon: '/favicon/favicon-96x96.png',
-        badge: '/favicon/favicon-96x96.png',
-        tag: 'gossip-new-messages',
-        requireInteraction: false,
-        silent: false,
-      });
-
-      // Handle notification click
-      notification.onclick = () => {
-        window.focus();
-        notification.close();
-      };
-
-      // Auto-close after 5 seconds
-      setTimeout(() => {
-        notification.close();
-      }, 5000);
-    } catch (error) {
-      console.error('Failed to show notification:', error);
     }
   }
 
@@ -151,32 +153,17 @@ export class NotificationService {
       const title = `New message from ${contactName}`;
       const body = messagePreview || 'Tap to view';
 
-      const notification = new Notification(title, {
+      await this.showNotificationInternal(
+        title,
         body,
-        icon: '/favicon/favicon-96x96.png',
-        badge: '/favicon/favicon-96x96.png',
-        tag: `gossip-discussion-${contactName}`,
-        requireInteraction: false,
-        silent: false,
-        data: contactUserId
-          ? { contactUserId, url: `/discussion/${contactUserId}` }
-          : undefined,
-      });
-
-      // Handle notification click
-      notification.onclick = () => {
-        window.focus();
-        // Navigate to discussion if contactUserId is available
-        if (contactUserId) {
-          window.location.href = `/discussion/${contactUserId}`;
-        }
-        notification.close();
-      };
-
-      // Auto-close after 3 seconds
-      setTimeout(() => {
-        notification.close();
-      }, 3000);
+        `gossip-discussion-${contactName}`,
+        3000,
+        contactUserId
+          ? () => {
+              window.location.href = `/discussion/${contactUserId}`;
+            }
+          : undefined
+      );
     } catch (error) {
       console.error('Failed to show discussion notification:', error);
     }
@@ -184,38 +171,29 @@ export class NotificationService {
 
   /**
    * Show a notification for a new discussion
-   * @param contactName - Name of the contact who started the discussion
+   * @param announcementMessage - Optional message about the new discussion
    */
-  async showNewDiscussionNotification(contactName: string): Promise<void> {
+  async showNewDiscussionNotification(
+    announcementMessage?: string
+  ): Promise<void> {
     if (!this.canShowNotification()) {
       return;
     }
 
     try {
-      const title = 'New Discussion';
-      const body = `${contactName} wants to start a conversation`;
+      const title = 'New contact request';
+      const body = announcementMessage || 'User wants to start a conversation';
 
-      const notification = new Notification(title, {
+      await this.showNotificationInternal(
+        title,
         body,
-        icon: '/favicon/favicon-96x96.png',
-        badge: '/favicon/favicon-96x96.png',
-        tag: `gossip-new-discussion-${contactName}`,
-        requireInteraction: true,
-        silent: false,
-        data: { url: '/discussions' },
-      });
-
-      // Handle notification click
-      notification.onclick = () => {
-        window.focus();
-        window.location.href = '/discussions';
-        notification.close();
-      };
-
-      // Auto-close after 10 seconds (longer for new discussions)
-      setTimeout(() => {
-        notification.close();
-      }, 10000);
+        'gossip-new-contact-request',
+        10000,
+        () => {
+          window.location.href = '/discussions';
+        },
+        true // requireInteraction for new discussions
+      );
     } catch (error) {
       console.error('Failed to show new discussion notification:', error);
     }
@@ -316,7 +294,7 @@ export class NotificationService {
   }
 
   /**
-   * Clear all notifications with Echo tags
+   * Clear all notifications with Gossip tags
    */
   async clearAllNotifications(): Promise<void> {
     if ('serviceWorker' in navigator) {

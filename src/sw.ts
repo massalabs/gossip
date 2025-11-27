@@ -150,11 +150,9 @@ class ServiceWorkerMessageReception {
     newMessagesCount: number;
   }> {
     try {
-      console.log('SW fetchAllDiscussions');
       // Request all active seekers from the main app
       // The main app has access to WASM session and can provide all seekers
       const seekers = await this.requestSeekersFromMainApp();
-      console.log('SW seekers', seekers.length);
       if (!seekers || seekers.length === 0) {
         return {
           success: true,
@@ -244,64 +242,60 @@ class ServiceWorkerMessageReception {
     newAnnouncementsCount: number;
   }> {
     try {
+      // Fetch announcements from the API
+      const announcements = await this.protocol.fetchAnnouncements();
+
+      // Store announcements in IndexedDB for the main app to process
+      let actuallyAddedCount = 0;
+      if (announcements.length > 0) {
+        try {
+          const now = new Date();
+          await db.pendingAnnouncements.bulkAdd(
+            announcements.map(announcement => ({
+              announcement,
+              fetchedAt: now,
+            }))
+          );
+          // All announcements were added successfully
+          actuallyAddedCount = announcements.length;
+        } catch (error) {
+          // Handle BulkError: some items may have been added successfully
+          if (error instanceof Error && error.name === 'BulkError') {
+            // Dexie BulkError has failures array and we can calculate success count
+            const bulkError = error as unknown as {
+              failures: Array<{ index: number }>;
+              successCount?: number;
+            };
+            // Calculate how many were actually added
+            // If successCount is available, use it; otherwise calculate from failures
+            if (typeof bulkError.successCount === 'number') {
+              actuallyAddedCount = bulkError.successCount;
+            } else {
+              // Calculate: total - failures = successes
+              actuallyAddedCount =
+                announcements.length - bulkError.failures.length;
+            }
+          } else if (
+            error instanceof Error &&
+            error.message.includes('ConstraintError')
+          ) {
+            // Single ConstraintError means none were added
+            actuallyAddedCount = 0;
+          } else {
+            // Other errors - log them
+            console.error(
+              'Service Worker: Failed to store announcements:',
+              error
+            );
+            actuallyAddedCount = 0;
+          }
+        }
+      }
+
       return {
         success: true,
-        newAnnouncementsCount: 0,
+        newAnnouncementsCount: actuallyAddedCount,
       };
-      // // Fetch announcements from the API
-      // const announcements = await this.protocol.fetchAnnouncements();
-
-      // // Store announcements in IndexedDB for the main app to process
-      // let actuallyAddedCount = 0;
-      // if (announcements.length > 0) {
-      //   try {
-      //     const now = new Date();
-      //     await db.pendingAnnouncements.bulkAdd(
-      //       announcements.map(announcement => ({
-      //         announcement,
-      //         fetchedAt: now,
-      //       }))
-      //     );
-      //     // All announcements were added successfully
-      //     actuallyAddedCount = announcements.length;
-      //   } catch (error) {
-      //     // Handle BulkError: some items may have been added successfully
-      //     if (error instanceof Error && error.name === 'BulkError') {
-      //       // Dexie BulkError has failures array and we can calculate success count
-      //       const bulkError = error as unknown as {
-      //         failures: Array<{ index: number }>;
-      //         successCount?: number;
-      //       };
-      //       // Calculate how many were actually added
-      //       // If successCount is available, use it; otherwise calculate from failures
-      //       if (typeof bulkError.successCount === 'number') {
-      //         actuallyAddedCount = bulkError.successCount;
-      //       } else {
-      //         // Calculate: total - failures = successes
-      //         actuallyAddedCount =
-      //           announcements.length - bulkError.failures.length;
-      //       }
-      //     } else if (
-      //       error instanceof Error &&
-      //       error.message.includes('ConstraintError')
-      //     ) {
-      //       // Single ConstraintError means none were added
-      //       actuallyAddedCount = 0;
-      //     } else {
-      //       // Other errors - log them
-      //       console.error(
-      //         'Service Worker: Failed to store announcements:',
-      //         error
-      //       );
-      //       actuallyAddedCount = 0;
-      //     }
-      //   }
-      // }
-
-      // return {
-      //   success: true,
-      //   newAnnouncementsCount: actuallyAddedCount,
-      // };
     } catch (error) {
       console.error(
         'Service Worker: Failed to fetch announcements via protocol:',
@@ -352,39 +346,6 @@ function trackSync(syncType: 'periodic' | 'fallback'): void {
   }
 
   syncStats.lastSyncTime = now;
-
-  // Log sync statistics for monitoring and debugging
-  const avgInterval =
-    syncStats.syncIntervals.length > 0
-      ? Math.round(
-          syncStats.syncIntervals.reduce((a, b) => a + b, 0) /
-            syncStats.syncIntervals.length
-        )
-      : 0;
-  const minInterval =
-    syncStats.syncIntervals.length > 0
-      ? Math.min(...syncStats.syncIntervals)
-      : 0;
-  const maxInterval =
-    syncStats.syncIntervals.length > 0
-      ? Math.max(...syncStats.syncIntervals)
-      : 0;
-
-  console.log('Service Worker: Sync stats', {
-    syncType,
-    totalSyncCount: syncStats.syncCount,
-    timeSinceLastSync:
-      timeSinceLastSync > 0
-        ? `${Math.round(timeSinceLastSync / 1000)}s`
-        : 'N/A (first sync)',
-    lastSyncTime: new Date(syncStats.lastSyncTime).toISOString(),
-    intervalStats: {
-      count: syncStats.syncIntervals.length,
-      average: avgInterval > 0 ? `${Math.round(avgInterval / 1000)}s` : 'N/A',
-      min: minInterval > 0 ? `${Math.round(minInterval / 1000)}s` : 'N/A',
-      max: maxInterval > 0 ? `${Math.round(maxInterval / 1000)}s` : 'N/A',
-    },
-  });
 }
 
 // Register periodic background sync
@@ -416,19 +377,19 @@ function buildNewItemsBody(
   announcementCount: number
 ): string {
   if (messageCount > 0 && announcementCount > 0) {
-    return `You have ${messageCount} new message${messageCount > 1 ? 's' : ''} and ${announcementCount} new discussion${announcementCount > 1 ? 's' : ''}`;
+    return `You have ${messageCount} new message${messageCount > 1 ? 's' : ''} and ${announcementCount} new contact request${announcementCount > 1 ? 's' : ''}`;
   }
   if (messageCount > 0) {
     return `You have ${messageCount} new message${messageCount > 1 ? 's' : ''}`;
   }
   if (announcementCount > 0) {
-    return `You have ${announcementCount} new discussion${announcementCount > 1 ? 's' : ''}`;
+    return `You have ${announcementCount} new contact request${announcementCount > 1 ? 's' : ''}`;
   }
   return '';
 }
 
 /**
- * Show a unified \"new items\" notification for messages/announcements
+ * Show a unified notification for messages/announcements
  */
 async function showNewItemsNotification(
   messageCount: number,
@@ -437,11 +398,12 @@ async function showNewItemsNotification(
   const body = buildNewItemsBody(messageCount, announcementCount);
   if (!body) return;
 
-  await showNotificationIfAllowed('Gossip Messenger', {
+  const title = announcementCount > 0 ? 'New contact request' : 'New message';
+  await showNotificationIfAllowed(title, {
     body,
     icon: '/favicon/favicon-96x96.png',
     badge: '/favicon/favicon-96x96.png',
-    tag: 'gossip-new-messages',
+    tag: 'gossip-sw-notification',
     requireInteraction: false,
     data: {
       type: 'new-messages',
@@ -482,13 +444,9 @@ async function hasActiveClients(): Promise<boolean> {
     return clients.some(client => {
       const windowClient = client as WindowClient;
       // Prefer focused check - more reliable on mobile
-      // If focused is true, app is definitely active
-      // If visibilityState is 'visible' but not focused, app might be in background (mobile PWA)
-      return (
-        windowClient.focused === true ||
-        (windowClient.visibilityState === 'visible' &&
-          windowClient.focused !== false)
-      );
+      // If focused is explicitly true, app is definitely active
+      // We use strict equality to avoid treating undefined as active
+      return windowClient.focused === true;
     });
   } catch (error) {
     console.error('Service Worker: Error checking active clients', error);
@@ -531,8 +489,6 @@ async function performSync(): Promise<void> {
  */
 async function performSyncAndNotify(): Promise<void> {
   try {
-    console.log('Service Worker: Syncing messages...');
-
     const [messageResult, announcementResult] = await Promise.all([
       messageReception.fetchAllDiscussions(),
       messageReception.fetchAnnouncements(),
@@ -676,22 +632,16 @@ function startFallbackSync() {
     echoSyncStarting?: boolean;
   };
 
-  // Clear any stale timer or flag from previous runs
+  // Check if scheduler is already starting - skip to prevent race conditions
+  if (sw.echoSyncStarting) {
+    return;
+  }
+
+  // Clear any stale timer from previous runs
   const existingTimer = sw.echoSyncTimer;
   if (existingTimer) {
     clearTimeout(existingTimer);
     sw.echoSyncTimer = undefined;
-  }
-
-  // Reset the starting flag if it's stuck
-  if (sw.echoSyncStarting) {
-    sw.echoSyncStarting = false;
-  }
-
-  // Check if scheduler is already starting or active (after cleanup)
-  if (sw.echoSyncStarting) {
-    // Already starting, skip
-    return;
   }
 
   // Set flag synchronously before async operations
@@ -703,10 +653,10 @@ function startFallbackSync() {
 }
 
 // Skip waiting and activate immediately when new service worker is installed
-self.addEventListener('install', () => {
+self.addEventListener('install', event => {
   // Skip waiting to activate the new service worker immediately
   // This ensures updates are applied without requiring all pages to close
-  self.skipWaiting();
+  event.waitUntil(self.skipWaiting());
 });
 
 // Start fallback sync when service worker activates
@@ -765,11 +715,23 @@ self.addEventListener('notificationclick', (event: NotificationEvent) => {
         const swUrl = new URL(self.registration.scope);
         if (clientUrl.origin === swUrl.origin && 'focus' in client) {
           // Navigate to target URL and focus
-          const navigatedClient = await client.navigate(targetUrl);
-          if (navigatedClient) {
-            await navigatedClient.focus();
+          let navigatedClient: WindowClient | null = null;
+          try {
+            navigatedClient = await client.navigate(targetUrl);
+          } catch (_error) {
+            // Navigation failed (e.g., CORS or other restrictions)
+            // Try the next client instead
+            continue;
           }
-          return;
+
+          if (navigatedClient) {
+            try {
+              await navigatedClient.focus();
+            } catch (_error) {
+              // Focus failed, but navigation succeeded, so we're done
+            }
+            return;
+          }
         }
       }
       // No existing window found, open a new one
