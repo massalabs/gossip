@@ -274,13 +274,10 @@ self.addEventListener('message', event => {
   }
 });
 
-// Register periodic background sync
-self.addEventListener('sync', (event: Event) => {
-  const syncEvent = event as SyncEvent;
-
-  if (syncEvent.tag === 'gossip-message-sync') {
+async function handleSyncEvent(event: SyncEvent): Promise<void> {
+  if (event.tag === 'gossip-message-sync') {
     // Check if app is active - if so, skip sync (main app handles it)
-    syncEvent.waitUntil(
+    event.waitUntil(
       hasActiveClients().then(isActive => {
         if (isActive) {
           // App is active - main app handles sync, skip this one
@@ -295,6 +292,15 @@ self.addEventListener('sync', (event: Event) => {
       })
     );
   }
+}
+
+// Register periodic background sync
+self.addEventListener('sync', (event: Event) => {
+  handleSyncEvent(event as SyncEvent);
+});
+
+self.addEventListener('periodicsync', (event: Event) => {
+  handleSyncEvent(event as SyncEvent);
 });
 
 // Skip waiting and activate immediately when new service worker is installed
