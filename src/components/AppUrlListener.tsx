@@ -15,7 +15,7 @@ export const AppUrlListener: React.FC = () => {
   const openNativeApp = useCallback(
     async (invitePath: string): Promise<boolean> => {
       const anchor = document.createElement('a');
-      anchor.href = 'gossip:/' + invitePath; // Note: single slash because fullPath starts with /
+      anchor.href = 'gossip:/' + invitePath; // Note: single slash because invitePath starts with /
       anchor.style.display = 'none';
       document.body.appendChild(anchor);
       let hasProcessed = false;
