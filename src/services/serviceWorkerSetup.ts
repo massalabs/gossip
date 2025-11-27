@@ -62,15 +62,6 @@ async function registerAndStartSync(): Promise<void> {
 }
 
 /**
- * Send START_SYNC_SCHEDULER message to service worker
- */
-function startSyncScheduler(registration: ServiceWorkerRegistration): void {
-  if (registration.active) {
-    registration.active.postMessage({ type: 'START_SYNC_SCHEDULER' });
-  }
-}
-
-/**
  * Register a new service worker
  */
 async function registerServiceWorker(): Promise<void> {
@@ -104,48 +95,11 @@ async function registerServiceWorker(): Promise<void> {
       }
     }
 
-    const registration = await navigator.serviceWorker.register(swUrl, {
+    // Register service worker - it will automatically start sync scheduler on activate event
+    await navigator.serviceWorker.register(swUrl, {
       scope: '/',
       type: swType,
     });
-
-    // Use a flag to prevent duplicate scheduler initialization
-    let schedulerStarted = false;
-    const startSchedulerOnce = () => {
-      if (!schedulerStarted) {
-        schedulerStarted = true;
-        startSyncScheduler(registration);
-      }
-    };
-
-    // If there's a waiting service worker, it should activate automatically
-    // due to skipWaiting() in the install event, but we'll handle it here too
-    if (registration.waiting) {
-      // The waiting service worker should activate automatically due to skipWaiting()
-      // but we'll listen for activation just in case
-      registration.waiting.addEventListener('statechange', event => {
-        const sw = event.target as ServiceWorker;
-        if (sw.state === 'activated') {
-          startSchedulerOnce();
-        }
-      });
-    }
-
-    // Wait for service worker to be ready and start sync scheduler
-    if (registration.installing) {
-      registration.installing.addEventListener('statechange', event => {
-        const sw = event.target as ServiceWorker;
-        if (sw.state === 'activated') {
-          startSchedulerOnce();
-        }
-      });
-    }
-
-    // Check if service worker is already active (handles race condition where skipWaiting()
-    // activates it before listeners are attached)
-    if (registration.active) {
-      startSchedulerOnce();
-    }
 
     return;
   } catch (error) {
@@ -168,44 +122,10 @@ async function handleExistingRegistration(): Promise<void> {
       return;
     }
 
-    // Use a flag to prevent duplicate scheduler initialization
-    let schedulerStarted = false;
-    const startSchedulerOnce = () => {
-      if (!schedulerStarted) {
-        schedulerStarted = true;
-        startSyncScheduler(registration);
-      }
-    };
-
-    // Check if there's a waiting service worker
-    if (registration.waiting) {
-      // The waiting service worker should activate automatically due to skipWaiting()
-      // but we'll listen for activation
-      registration.waiting.addEventListener('statechange', event => {
-        const sw = event.target as ServiceWorker;
-        if (sw.state === 'activated') {
-          startSchedulerOnce();
-        }
-      });
-      // Check if waiting worker is already activated or activating (race condition:
-      // skipWaiting() may have activated it before listener was attached)
-      if (
-        registration.waiting.state === 'activated' ||
-        registration.waiting.state === 'activating'
-      ) {
-        startSchedulerOnce();
-      }
-    }
-
-    // Check if service worker is already active (handles race condition where skipWaiting()
-    // activates it before listeners are attached)
-    if (registration.active) {
-      startSchedulerOnce();
-    }
-
-    // Wait for ready and send start message (as fallback if not already active)
+    // Service worker will automatically start sync scheduler on activate event
+    // or when it loads if already activated (handled in sw.ts)
+    // No need to send message - it's handled automatically
     await navigator.serviceWorker.ready;
-    startSchedulerOnce();
   } catch (error) {
     console.error('App: Error waiting for service worker ready:', error);
   }
@@ -227,7 +147,7 @@ async function initializeBackgroundSync(): Promise<void> {
       void triggerManualSync();
     });
   } catch (error) {
-    console.error('Failed to initialize background sync service:', error);
+    console.error('[App] Failed to initialize background sync service:', error);
   }
 }
 
@@ -237,7 +157,9 @@ async function initializeBackgroundSync(): Promise<void> {
  * Requesting 5 minutes, but actual syncs may be much less frequent
  */
 async function registerPeriodicSync(): Promise<void> {
-  if (!('sync' in window.ServiceWorkerRegistration.prototype)) {
+  const hasSyncAPI = 'sync' in window.ServiceWorkerRegistration.prototype;
+
+  if (!hasSyncAPI) {
     return;
   }
 
@@ -267,17 +189,23 @@ async function registerPeriodicSync(): Promise<void> {
       });
     } else {
       // Fallback for browsers that don't support periodicSync but support sync
-      await (
+      const syncAPI = (
         registration as ServiceWorkerRegistration & {
-          sync: { register: (tag: string) => Promise<void> };
+          sync?: { register: (tag: string) => Promise<void> };
         }
-      ).sync.register('gossip-message-sync');
+      ).sync;
+
+      if (syncAPI) {
+        await syncAPI.register('gossip-message-sync');
+      }
     }
   } catch (error) {
-    // Silently handle permission errors (expected in many browsers)
-    // Only log unexpected errors
-    if (!(error instanceof DOMException && error.name === 'NotAllowedError')) {
-      console.error('Failed to register periodic background sync:', error);
+    // Handle permission errors gracefully (expected in development/localhost)
+    if (error instanceof DOMException && error.name === 'NotAllowedError') {
+      // Fallback timer-based sync will handle background syncing
+      return;
     }
+    // Log unexpected errors
+    console.error('[App] Error registering periodic sync:', error);
   }
 }
