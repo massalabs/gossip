@@ -35,24 +35,25 @@ export function parseInvite(input: string): ParsedInvite {
  * Returns null only when nothing invite-related is found
  */
 export function extractInvitePath(input: string): string | undefined {
-  const i = input.trim();
-  if (!i) return;
+  const trimmed = input.trim();
+  if (!trimmed) return undefined;
 
-  if (i.startsWith('/invite/')) {
-    return i;
+  if (trimmed.startsWith('/invite/')) {
+    return trimmed;
   }
 
   // Handle gossip:// protocol
-  if (i.startsWith('gossip://')) {
-    return i.replace('gossip://', '/');
+  if (trimmed.startsWith('gossip://')) {
+    return trimmed.replace('gossip://', '/');
   }
 
   try {
-    const { pathname } = new URL(i);
+    const { pathname } = new URL(trimmed);
     if (pathname.startsWith('/invite/')) {
       return pathname;
     }
   } catch {
-    return;
+    // Invalid URL format, return undefined
+    return undefined;
   }
 }

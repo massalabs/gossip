@@ -1,4 +1,3 @@
-// src/utils/deepLink.ts
 export const INVITE_BASE_URL = '/invite';
 
 /**
@@ -43,13 +42,4 @@ export function generateDeepLinkUrl(userId: string): string {
   const safeId = encodeURIComponent(userId.trim());
 
   return `${base}${INVITE_BASE_URL}/${safeId}`;
-}
-
-/**
- * Optional: helper to get the internal native scheme (only for debugging or rare cases)
- * Never share this publicly!
- */
-export function generateNativeSchemeUrl(userId: string): string {
-  const safeId = encodeURIComponent(userId.trim());
-  return `gossip://invite/${safeId}`;
 }
