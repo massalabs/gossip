@@ -23,31 +23,27 @@ export const useDiscussion = ({ contact }: UseDiscussionProps) => {
   }, []);
 
   const loadDiscussion = useCallback(async () => {
-    if (!contact.userId) return;
+    if (!contact.userId || !isMountedRef.current) return;
 
     try {
-      if (!isMountedRef.current) return;
       setIsLoading(true);
-
       const discussions = await getDiscussionsForContact(
         contact.ownerUserId,
         contact.userId
       );
-
-      if (!isMountedRef.current) return;
 
       // Get the most recent discussion (active or pending)
       const latestDiscussion = discussions
         .filter(d => d.status === 'active' || d.status === 'pending')
         .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
 
-      setDiscussion(latestDiscussion || null);
+      if (latestDiscussion) {
+        setDiscussion(latestDiscussion);
+      }
     } catch (error) {
       console.error('Failed to load discussion:', error);
     } finally {
-      if (isMountedRef.current) {
-        setIsLoading(false);
-      }
+      setIsLoading(false);
     }
   }, [contact.ownerUserId, contact.userId]);
 
