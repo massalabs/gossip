@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { Contact, Discussion } from '../db';
 import {
   initializeDiscussion,
@@ -14,9 +14,16 @@ export const useDiscussion = ({ contact }: UseDiscussionProps) => {
   const [discussion, setDiscussion] = useState<Discussion | null>(null);
   const [isInitializing, setIsInitializing] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   const loadDiscussion = useCallback(async () => {
-    if (!contact.userId) return;
+    if (!contact.userId || !isMountedRef.current) return;
 
     try {
       setIsLoading(true);
@@ -30,7 +37,9 @@ export const useDiscussion = ({ contact }: UseDiscussionProps) => {
         .filter(d => d.status === 'active' || d.status === 'pending')
         .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
 
-      setDiscussion(latestDiscussion || null);
+      if (latestDiscussion) {
+        setDiscussion(latestDiscussion);
+      }
     } catch (error) {
       console.error('Failed to load discussion:', error);
     } finally {
@@ -42,6 +51,7 @@ export const useDiscussion = ({ contact }: UseDiscussionProps) => {
     if (!contact.userId || isInitializing) return false;
 
     try {
+      if (!isMountedRef.current) return false;
       setIsInitializing(true);
 
       console.log('Initializing new discussion with contact:', contact.userId);
@@ -56,6 +66,8 @@ export const useDiscussion = ({ contact }: UseDiscussionProps) => {
       // Initialize discussion using Contact object (matches current API)
       const result = await initializeDiscussion(contact);
 
+      if (!isMountedRef.current) return false;
+
       // Reload discussions to get the new one
       await loadDiscussion();
 
@@ -65,7 +77,9 @@ export const useDiscussion = ({ contact }: UseDiscussionProps) => {
       console.error('Failed to initialize discussion:', error);
       return false;
     } finally {
-      setIsInitializing(false);
+      if (isMountedRef.current) {
+        setIsInitializing(false);
+      }
     }
   }, [contact, isInitializing, loadDiscussion]);
 
