@@ -109,6 +109,11 @@ export interface PendingAnnouncement {
   fetchedAt: Date;
 }
 
+export interface ActiveSeeker {
+  id?: number;
+  seeker: Uint8Array;
+}
+
 // Define the database class
 export class GossipDatabase extends Dexie {
   // Define tables
@@ -118,11 +123,12 @@ export class GossipDatabase extends Dexie {
   discussions!: Table<Discussion>;
   pendingEncryptedMessages!: Table<PendingEncryptedMessage>;
   pendingAnnouncements!: Table<PendingAnnouncement>;
+  activeSeekers!: Table<ActiveSeeker>;
 
   constructor() {
     super('GossipDatabase');
 
-    this.version(12).stores({
+    this.version(13).stores({
       contacts:
         '++id, ownerUserId, userId, name, isOnline, lastSeen, createdAt, [ownerUserId+userId] , [ownerUserId+name]',
       messages:
@@ -132,6 +138,7 @@ export class GossipDatabase extends Dexie {
         '++id, ownerUserId, &[ownerUserId+contactUserId], status, [ownerUserId+status], lastSyncTimestamp, unreadCount, lastMessageTimestamp, createdAt, updatedAt',
       pendingEncryptedMessages: '++id, fetchedAt, seeker',
       pendingAnnouncements: '++id, fetchedAt, &announcement',
+      activeSeekers: '++id, seeker',
     });
 
     // Add hooks for automatic timestamps
@@ -321,6 +328,35 @@ export class GossipDatabase extends Dexie {
   async deleteDb(): Promise<void> {
     await this.close();
     await this.delete();
+  }
+
+  /**
+   * Set all active seekers, replacing any existing ones
+   * @param seekers - Array of seeker Uint8Arrays to store
+   */
+  async setActiveSeekers(seekers: Uint8Array[]): Promise<void> {
+    await this.transaction('rw', this.activeSeekers, async () => {
+      // Clear all existing seekers
+      await this.activeSeekers.clear();
+
+      // Bulk add all new seekers
+      if (seekers.length > 0) {
+        await this.activeSeekers.bulkAdd(
+          seekers.map(seeker => ({
+            seeker,
+          }))
+        );
+      }
+    });
+  }
+
+  /**
+   * Get all active seekers from the database
+   * @returns Array of seeker Uint8Arrays
+   */
+  async getActiveSeekers(): Promise<Uint8Array[]> {
+    const activeSeekers = await this.activeSeekers.toArray();
+    return activeSeekers.map(item => item.seeker);
   }
 }
 

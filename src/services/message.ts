@@ -110,6 +110,16 @@ export class MessageService {
         await sleep(100);
       }
 
+      // Update active seekers table after sync completes
+      // This allows the service worker to fetch messages when the app is closed
+      try {
+        const currentSeekers = session.getMessageBoardReadKeys();
+        await db.setActiveSeekers(currentSeekers);
+      } catch (error) {
+        // Log error but don't fail the entire fetch operation
+        console.error('Failed to update active seekers:', error);
+      }
+
       return {
         success: true,
         newMessagesCount,

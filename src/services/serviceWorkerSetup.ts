@@ -4,7 +4,6 @@
  * Handles service worker registration, message listening, and sync scheduler initialization.
  */
 
-import { useAccountStore } from '../stores/accountStore';
 import { notificationService } from './notifications';
 import { triggerManualSync } from './messageSync';
 import { defaultSyncConfig } from '../config/sync';
@@ -52,35 +51,6 @@ function setupControllerChangeListener(): void {
  */
 function setupMessageListener(): void {
   navigator.serviceWorker.addEventListener('message', async event => {
-    if (event.data && event.data.type === 'REQUEST_SEEKERS') {
-      try {
-        // Get all active seekers from the session
-        const { session } = useAccountStore.getState();
-        if (!session) {
-          // No session available, respond with empty array
-          if (event.ports && event.ports[0]) {
-            event.ports[0].postMessage({ seekers: [] });
-          }
-          return;
-        }
-
-        const seekers = session.getMessageBoardReadKeys();
-        // Convert Uint8Array[] to number[][] for JSON serialization
-        const seekersArray = seekers.map(seeker => Array.from(seeker));
-
-        // Respond via the message channel port
-        if (event.ports && event.ports[0]) {
-          event.ports[0].postMessage({ seekers: seekersArray });
-        }
-      } catch (error) {
-        console.error('Failed to get seekers for service worker:', error);
-        // Respond with empty array on error
-        if (event.ports && event.ports[0]) {
-          event.ports[0].postMessage({ seekers: [] });
-        }
-      }
-    }
-
     // Handle notification from service worker when new messages are detected
     if (event.data && event.data.type === 'NEW_MESSAGES_DETECTED') {
       try {
