@@ -110,7 +110,7 @@ const AccountCreation: React.FC<AccountCreationProps> = ({
     e.preventDefault();
     e.stopPropagation();
 
-    // Handle when user press enter without triggering blur event
+    // Handle when user presses enter without triggering blur event
     const usernameResult =
       await validateUsernameFormatAndAvailability(username);
     setIsUsernameValid(usernameResult.valid);
