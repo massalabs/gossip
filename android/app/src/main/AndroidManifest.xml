@@ -17,9 +17,18 @@
             android:launchMode="singleTask"
             android:exported="true">
 
+            <!-- App launcher icon -->
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+
+            <intent-filter android:autoVerify="false">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />   <!-- REQUIRED -->
+                <data android:scheme="gossip" />
             </intent-filter>
 
         </activity>
@@ -36,10 +45,8 @@
     </application>
 
     <!-- Permissions -->
-
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
-    <!-- For Android 9 (API 28) or lower -->
     <uses-permission android:name="android.permission.USE_FINGERPRINT" />
 </manifest>

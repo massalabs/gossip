@@ -2,7 +2,7 @@ import React, { useState, useCallback, useMemo } from 'react';
 import { useFileShareContact } from '../../hooks/useFileShareContact';
 import PageHeader from '../ui/PageHeader';
 import TabSwitcher from '../ui/TabSwitcher';
-import { generateDeepLinkUrl } from '../../utils/qrCodeUrl';
+import { generateDeepLinkUrl } from '../../utils/inviteUrl';
 import { UserPublicKeys } from '../../assets/generated/wasm/gossip_wasm';
 import ShareContactQR from './ShareContactQR';
 import ShareContactCopySection from './ShareContactCopySection';

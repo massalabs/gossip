@@ -16,7 +16,6 @@ const NativeQRScanner: React.FC<QRScannerProps> = ({ onScan, onError }) => {
       });
 
       // TODO: Improve Scan Result handling
-      toast.success(`QR code scanned successfully: ${result.ScanResult}`);
       onScan(result.ScanResult);
     } catch (err: unknown) {
       const error = err instanceof Error ? err.message : String(err);
