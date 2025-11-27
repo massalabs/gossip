@@ -112,7 +112,6 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
 
     const subscriptionObj = query.subscribe({
       next: allMessages => {
-        console.log('Global live query received messages:', allMessages.length);
         // Group messages by contactUserId
         const newMap = new Map<string, Message[]>();
         allMessages.forEach(msg => {
