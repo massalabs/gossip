@@ -8,6 +8,7 @@ function PWABadge() {
   // check for updates every hour
   const period = 60 * 60 * 1000;
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const isMountedRef = useRef(true);
 
   const {
     offlineReady: [offlineReady, setOfflineReady],
@@ -21,7 +22,7 @@ function PWABadge() {
       } else if (r?.installing) {
         r.installing.addEventListener('statechange', e => {
           const sw = e.target as ServiceWorker;
-          if (sw.state === 'activated') {
+          if (sw.state === 'activated' && isMountedRef.current) {
             intervalRef.current = registerPeriodicSync(period, swUrl, r);
           }
         });
@@ -31,6 +32,7 @@ function PWABadge() {
 
   useEffect(() => {
     return () => {
+      isMountedRef.current = false;
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
       }
