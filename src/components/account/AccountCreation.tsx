@@ -64,18 +64,13 @@ const AccountCreation: React.FC<AccountCreationProps> = ({
     setError(null);
   };
 
-  const handleUsernameBlur = async () => {
-    const result = await validateUsernameFormatAndAvailability(username);
-    setIsUsernameValid(result.valid);
-    setUsernameError(result.error || null);
-  };
-
   const handlePasswordChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
     setPassword(value);
     const result = validatePassword(value);
     setIsPasswordValid(result.valid);
     setPasswordError(result.error || null);
+    setError(null);
   };
 
   const canSubmit = usePassword
@@ -113,10 +108,15 @@ const AccountCreation: React.FC<AccountCreationProps> = ({
     // Handle when user presses enter without triggering blur event
     const usernameResult =
       await validateUsernameFormatAndAvailability(username);
-    setIsUsernameValid(usernameResult.valid);
-    setUsernameError(usernameResult.error || null);
 
-    if (!canSubmit || !usernameResult.valid) {
+    if (!usernameResult.valid) {
+      setIsUsernameValid(false);
+      setUsernameError(usernameResult.error);
+      return;
+    }
+
+    // Should not happen, because button is disabled if !canSubmit
+    if (!canSubmit) {
       return;
     }
 
@@ -212,7 +212,6 @@ const AccountCreation: React.FC<AccountCreationProps> = ({
                 type="text"
                 value={username}
                 onChange={handleUsernameChange}
-                onBlur={handleUsernameBlur}
                 placeholder="Enter username"
                 className={`w-full h-12 px-4 rounded-lg border-2 text-sm focus:outline-none transition-colors text-black dark:text-white bg-white dark:bg-gray-700 placeholder-gray-500 dark:placeholder-gray-400 ${
                   usernameError

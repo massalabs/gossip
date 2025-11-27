@@ -1,10 +1,9 @@
 import { db } from '../db';
 import { isValidUserId } from './userId';
 
-export type ValidationResult = {
-  valid: boolean;
-  error?: string;
-};
+export type ValidationResult =
+  | { valid: true; error?: never }
+  | { valid: false; error: string };
 
 export function validatePassword(value: string): ValidationResult {
   if (!value || value.trim().length === 0) {
@@ -45,8 +44,9 @@ export async function validateUsernameAvailability(
     }
 
     const existingProfile = await db.userProfile
-      .where('username')
-      .equals(value.trim())
+      .filter(
+        profile => profile.username.toLowerCase() === value.trim().toLowerCase()
+      )
       .first();
 
     if (existingProfile) {
