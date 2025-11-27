@@ -73,8 +73,17 @@ export const AppUrlListener: React.FC = () => {
 
   const processInviteNative = useCallback(async () => {
     const listener = await App.addListener('appUrlOpen', async event => {
-      const parsed = parseInvite(event.url);
-      await setPendingDeepLinkInfo(parsed);
+      try {
+        const parsed = parseInvite(event.url);
+        await setPendingDeepLinkInfo(parsed);
+        window.history.replaceState(null, '', '/');
+      } catch (error) {
+        const errorMessage =
+          error instanceof Error
+            ? error.message
+            : 'Unknown error processing invite';
+        console.error('Failed to process invite:', errorMessage);
+      }
     });
 
     setCapacitorListener(prev => [...prev, listener]);
