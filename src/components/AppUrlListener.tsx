@@ -43,7 +43,6 @@ export const AppUrlListener: React.FC = () => {
         }, NATIVE_APP_OPEN_DELAY);
 
         setListeners(prev => [...prev, timeout]);
-        resolve(hasProcessed);
       });
     },
 
