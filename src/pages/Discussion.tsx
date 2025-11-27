@@ -54,6 +54,18 @@ const Discussion: React.FC = () => {
   // Reply state
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
 
+  // Track timeout for message highlight
+  const highlightTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (highlightTimeoutRef.current) {
+        clearTimeout(highlightTimeoutRef.current);
+      }
+    };
+  }, []);
+
   // Set current contact when it changes (only if different)
   useEffect(() => {
     const contactUserId = contact?.userId || null;
@@ -109,8 +121,17 @@ const Discussion: React.FC = () => {
       });
       // Add visual feedback for the scrolled-to message
       element.classList.add('highlight-message');
-      setTimeout(() => {
-        element.classList.remove('highlight-message');
+
+      // Clear any existing timeout
+      if (highlightTimeoutRef.current) {
+        clearTimeout(highlightTimeoutRef.current);
+      }
+
+      highlightTimeoutRef.current = setTimeout(() => {
+        const el = document.getElementById(`message-${messageId}`);
+        if (el) {
+          el.classList.remove('highlight-message');
+        }
       }, 2000);
     } else {
       console.warn(`Message element with id message-${messageId} not found`);

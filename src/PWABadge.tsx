@@ -1,11 +1,13 @@
 import './PWABadge.css';
 
+import { useEffect, useRef } from 'react';
 import { useRegisterSW } from 'virtual:pwa-register/react';
 import Button from './components/ui/Button';
 
 function PWABadge() {
   // check for updates every hour
   const period = 60 * 60 * 1000;
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const {
     offlineReady: [offlineReady, setOfflineReady],
@@ -15,15 +17,25 @@ function PWABadge() {
     onRegisteredSW(swUrl, r) {
       if (period <= 0) return;
       if (r?.active?.state === 'activated') {
-        registerPeriodicSync(period, swUrl, r);
+        intervalRef.current = registerPeriodicSync(period, swUrl, r);
       } else if (r?.installing) {
         r.installing.addEventListener('statechange', e => {
           const sw = e.target as ServiceWorker;
-          if (sw.state === 'activated') registerPeriodicSync(period, swUrl, r);
+          if (sw.state === 'activated') {
+            intervalRef.current = registerPeriodicSync(period, swUrl, r);
+          }
         });
       }
     },
   });
+
+  useEffect(() => {
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+    };
+  }, []);
 
   function close() {
     setOfflineReady(false);
@@ -73,15 +85,16 @@ export default PWABadge;
 
 /**
  * This function will register a periodic sync check every hour, you can modify the interval as needed.
+ * @returns The interval ID that can be used to clear the interval
  */
 function registerPeriodicSync(
   period: number,
   swUrl: string,
   r: ServiceWorkerRegistration
-) {
-  if (period <= 0) return;
+): NodeJS.Timeout | null {
+  if (period <= 0) return null;
 
-  setInterval(async () => {
+  const intervalId = setInterval(async () => {
     if ('onLine' in navigator && !navigator.onLine) return;
 
     const resp = await fetch(swUrl, {
@@ -94,4 +107,6 @@ function registerPeriodicSync(
 
     if (resp?.status === 200) await r.update();
   }, period);
+
+  return intervalId;
 }

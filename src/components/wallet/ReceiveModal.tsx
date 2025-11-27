@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAccountStore } from '../../stores/accountStore';
 import Button from '../ui/Button';
 import BaseModal from '../ui/BaseModal';
@@ -13,15 +13,28 @@ interface ReceiveModalProps {
 const ReceiveModal: React.FC<ReceiveModalProps> = ({ isOpen, onClose }) => {
   const { account } = useAccountStore();
   const [copied, setCopied] = useState(false);
+  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const fullAddress = account?.address?.toString() ?? '';
   const displayAddress = formatMassaAddress(fullAddress);
+
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+    };
+  }, []);
 
   const handleCopyAddress = async () => {
     try {
       await navigator.clipboard.writeText(fullAddress);
       setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+      timeoutRef.current = setTimeout(() => setCopied(false), 2000);
     } catch (err) {
       console.error('Failed to copy address:', err);
     }
