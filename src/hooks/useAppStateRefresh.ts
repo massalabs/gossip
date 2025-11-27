@@ -8,11 +8,11 @@ import { triggerManualSync } from '../services/messageSync';
  * Refreshes announcements, messages, discussions, and contacts
  */
 export function useAppStateRefresh() {
-  const { userProfile } = useAccountStore();
+  const { userProfile, ourPk, ourSk, session } = useAccountStore();
 
   useEffect(() => {
-    if (userProfile?.userId) {
-      triggerManualSync().catch(error => {
+    if (userProfile?.userId && ourPk && ourSk && session) {
+      triggerManualSync(ourPk, ourSk, session).catch(error => {
         console.error('Failed to sync messages on login:', error);
       });
 
@@ -20,7 +20,7 @@ export function useAppStateRefresh() {
         if (process.env.NODE_ENV === 'development') {
           console.log('Triggering periodic app state sync');
         }
-        triggerManualSync().catch(error => {
+        triggerManualSync(ourPk, ourSk, session).catch(error => {
           console.error('Failed to refresh app state periodically:', error);
         });
       }, defaultSyncConfig.activeSyncIntervalMs);
@@ -31,5 +31,5 @@ export function useAppStateRefresh() {
         console.log('Periodic app state refresh interval cleared');
       };
     }
-  }, [userProfile?.userId]);
+  }, [userProfile?.userId, ourPk, ourSk, session]);
 }

@@ -99,6 +99,12 @@ export class SessionModule {
       userDataBytes
     );
 
+    if (result.length === 0) {
+      throw new Error(
+        'Failed to establish outgoing session. Session manager returned empty announcement bytes.'
+      );
+    }
+
     this.persistIfNeeded();
     return result;
   }

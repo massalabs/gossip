@@ -1,5 +1,5 @@
 import React from 'react';
-import { Message } from '../../db';
+import { Message, MessageDirection, MessageStatus } from '../../db';
 import { formatTime } from '../../utils/timeUtils';
 
 interface MessageItemProps {
@@ -7,7 +7,7 @@ interface MessageItemProps {
 }
 
 const MessageItem: React.FC<MessageItemProps> = ({ message }) => {
-  const isOutgoing = message.direction === 'outgoing';
+  const isOutgoing = message.direction === MessageDirection.OUTGOING;
 
   return (
     <div
@@ -42,13 +42,13 @@ const MessageItem: React.FC<MessageItemProps> = ({ message }) => {
           </span>
           {isOutgoing && (
             <div className="flex items-center gap-1">
-              {message.status === 'sending' && (
+              {message.status === MessageStatus.SENDING && (
                 <div className="flex items-center gap-1">
                   <div className="w-2.5 h-2.5 border border-current border-t-transparent rounded-full animate-spin"></div>
                   <span className="text-[10px] font-medium">Sending</span>
                 </div>
               )}
-              {message.status === 'sent' && (
+              {message.status === MessageStatus.SENT && (
                 <svg
                   className="w-3.5 h-3.5"
                   fill="currentColor"
@@ -61,7 +61,7 @@ const MessageItem: React.FC<MessageItemProps> = ({ message }) => {
                   />
                 </svg>
               )}
-              {message.status === 'failed' && (
+              {message.status === MessageStatus.FAILED && (
                 <div className="flex items-center gap-1.5">
                   <svg
                     className="w-3.5 h-3.5 text-accent-foreground/90"
@@ -77,8 +77,8 @@ const MessageItem: React.FC<MessageItemProps> = ({ message }) => {
                   <span className="text-[10px] font-medium">Failed</span>
                 </div>
               )}
-              {(message.status === 'delivered' ||
-                message.status === 'read') && (
+              {(message.status === MessageStatus.DELIVERED ||
+                message.status === MessageStatus.READ) && (
                 <svg
                   className="w-3.5 h-3.5"
                   fill="currentColor"

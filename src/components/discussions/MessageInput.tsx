@@ -3,13 +3,11 @@ import Button from '../ui/Button';
 
 interface MessageInputProps {
   onSend: (message: string) => void;
-  onClick: () => void;
   disabled?: boolean;
 }
 
 const MessageInput: React.FC<MessageInputProps> = ({
   onSend,
-  onClick,
   disabled = false,
 }) => {
   const [newMessage, setNewMessage] = useState('');
@@ -40,18 +38,10 @@ const MessageInput: React.FC<MessageInputProps> = ({
     setInputHeight(newHeight);
   };
 
-  const handleContainerClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    e.stopPropagation();
-    onClick();
-  };
-
   return (
     <div className="bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl border-t border-gray-100 dark:border-gray-800/50 px-4 md:px-6 py-3 md:py-4">
       <div className="flex items-end gap-2 md:gap-3">
-        <div
-          onClick={onClick}
-          className="flex-1 flex items-center gap-2 bg-white/90 dark:bg-gray-800/70 border border-gray-200 dark:border-gray-700/60 rounded-2xl px-3 md:px-4 py-2 md:py-2.5 shadow-sm hover:shadow focus-within:ring-2 focus-within:ring-blue-500/40 focus-within:border-blue-400/60 dark:focus-within:border-blue-500/40 transition-all duration-200"
-        >
+        <div className="flex-1 flex items-center gap-2 bg-white/90 dark:bg-gray-800/70 border border-gray-200 dark:border-gray-700/60 rounded-2xl px-3 md:px-4 py-2 md:py-2.5 shadow-sm hover:shadow focus-within:ring-2 focus-within:ring-blue-500/40 focus-within:border-blue-400/60 dark:focus-within:border-blue-500/40 transition-all duration-200">
           <textarea
             ref={textareaRef}
             value={newMessage}
@@ -76,7 +66,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
             }
           />
           <div className="hidden md:block w-px h-6 bg-gray-200 dark:bg-gray-700/60 mx-1" />
-          <div onClick={handleContainerClick} className="shrink-0">
+          <div className="shrink-0">
             <Button
               onClick={handleSendMessage}
               variant="primary"

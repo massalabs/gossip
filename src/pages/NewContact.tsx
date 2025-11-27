@@ -14,7 +14,7 @@ import { useFileShareContact } from '../hooks/useFileShareContact';
 import { UserPublicKeys } from '../assets/generated/wasm/gossip_wasm';
 import BaseModal from '../components/ui/BaseModal';
 import Button from '../components/ui/Button';
-import { ensureDiscussionExists } from '../crypto/discussionInit';
+import { initializeDiscussion } from '../services/discussion';
 
 const NewContact: React.FC = () => {
   const navigate = useNavigate();
@@ -22,12 +22,14 @@ const NewContact: React.FC = () => {
   const [userId, setUserId] = useState('');
   const [publicKeys, setPublicKeys] = useState<UserPublicKeys | null>(null);
   const [message, setMessage] = useState('');
-  const { userProfile } = useAccountStore();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [nameError, setNameError] = useState<string | null>(null);
   const [userIdError, setUserIdError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const { userProfile, ourSk, session } = useAccountStore();
+
   const {
     fileContact,
     importFileContact,
@@ -107,7 +109,7 @@ const NewContact: React.FC = () => {
   }, [fileContact, validateName, validateUserId]);
 
   const handleSubmit = useCallback(async () => {
-    if (!isValid || !publicKeys) return;
+    if (!isValid || !publicKeys || !ourSk || !session) return;
     setIsSubmitting(true);
     setError(null);
     try {
@@ -152,7 +154,14 @@ const NewContact: React.FC = () => {
       // Pass the message (trimmed, or undefined if empty) to the announcement
       const announcementMessage = message.trim() || undefined;
       try {
-        await ensureDiscussionExists(contact, undefined, announcementMessage);
+        await initializeDiscussion(
+          contact,
+          publicKeys,
+          ourSk,
+          session,
+          userProfile.userId,
+          announcementMessage
+        );
       } catch (e) {
         console.error(
           'Failed to ensure discussion exists after contact creation:',
@@ -169,6 +178,8 @@ const NewContact: React.FC = () => {
   }, [
     isValid,
     publicKeys,
+    ourSk,
+    session,
     userProfile?.userId,
     name,
     userId,

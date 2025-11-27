@@ -8,8 +8,8 @@ import { triggerManualSync } from '../services/messageSync';
 
 const Discussions: React.FC = () => {
   const navigate = useNavigate();
-  const isLoading = useAccountStore(s => s.isLoading);
-  if (isLoading) {
+  const { ourPk, ourSk, session, isLoading } = useAccountStore();
+  if (isLoading || !ourPk || !ourSk || !session) {
     return (
       <div className="bg-background flex items-center justify-center h-full">
         <PrivacyGraphic size={120} loading={true} />
@@ -24,7 +24,7 @@ const Discussions: React.FC = () => {
         <div className="px-6 py-4 border-b border-border flex justify-between items-center">
           <h2 className="text-lg font-medium text-foreground">Discussions</h2>
           <button
-            onClick={() => triggerManualSync()}
+            onClick={() => triggerManualSync(ourPk, ourSk, session)}
             className="text-xs text-primary hover:text-primary/80 underline"
           >
             Refresh

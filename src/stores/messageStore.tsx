@@ -1,9 +1,14 @@
 import { create } from 'zustand';
-import { Message, db } from '../db';
+import {
+  Message,
+  db,
+  MessageDirection,
+  MessageStatus,
+  MessageType,
+} from '../db';
 import { createSelectors } from './utils/createSelectors';
 import { useAccountStore } from './accountStore';
 import { messageService } from '../services/message';
-import { notificationService } from '../services/notifications';
 import { liveQuery, Subscription } from 'dexie';
 import { EncryptedMessage } from '../api/messageProtocol/types';
 
@@ -11,24 +16,18 @@ export interface RetryMessages {
   id: number;
   encryptedMessage?: EncryptedMessage;
   content: string;
-  type: 'text' | 'image' | 'file' | 'audio' | 'video';
+  type: MessageType;
 }
 
 interface MessageStoreState {
   // Messages keyed by contactUserId (Map for efficient lookups)
   messagesByContact: Map<string, Message[]>;
-  // Messages to retry keyed by contactUserId (Map for efficient lookups)
-  retryMessagesByContact: Map<string, RetryMessages[]>;
   // Current contact being viewed
   currentContactUserId: string | null;
   // Loading state (only one discussion can be viewed at a time)
   isLoading: boolean;
   // Sending state (global, since you can only send to one contact at a time)
   isSending: boolean;
-  // Syncing state (global)
-  isSyncing: boolean;
-  // Resending state (global)
-  isResending: boolean;
   // Subscription for liveQuery
   subscription: Subscription | null;
 
@@ -38,8 +37,6 @@ interface MessageStoreState {
   // Actions
   setCurrentContact: (contactUserId: string | null) => void;
   sendMessage: (contactUserId: string, content: string) => Promise<void>;
-  resendMessages: () => Promise<void>;
-  syncMessages: (contactUserId?: string) => Promise<void>;
   addMessage: (contactUserId: string, message: Message) => void;
   updateMessage: (
     contactUserId: string,
@@ -53,19 +50,6 @@ interface MessageStoreState {
 
 // Empty array constant to avoid creating new arrays on each call
 const EMPTY_MESSAGES: Message[] = [];
-
-const encryptedMessageChanged = (
-  existing?: EncryptedMessage,
-  newEncryptedMessage?: EncryptedMessage
-): boolean => {
-  if (!existing && !newEncryptedMessage) return false;
-  if (!existing && newEncryptedMessage) return true;
-  if (!newEncryptedMessage && existing) return true;
-  return (
-    existing!.seeker !== newEncryptedMessage!.seeker ||
-    existing!.ciphertext !== newEncryptedMessage!.ciphertext
-  );
-};
 
 // Helper to check if messages actually changed
 const messagesChanged = (
@@ -87,28 +71,6 @@ const messagesChanged = (
   );
 };
 
-const retryMessagesChanged = (
-  existing: RetryMessages[],
-  newMessages: RetryMessages[]
-): boolean => {
-  return (
-    existing.length !== newMessages.length ||
-    existing.some((existing, index) => {
-      const newMsg = newMessages[index];
-      if (!newMsg) return true; // New message added
-      return (
-        existing.id !== newMsg.id ||
-        existing.content !== newMsg.content ||
-        encryptedMessageChanged(
-          existing.encryptedMessage,
-          newMsg.encryptedMessage
-        )
-      );
-    }) ||
-    newMessages.length > existing.length // New messages at the end
-  );
-};
-
 // Helper to update messages map immutably
 const updateMessagesMap = (
   currentMap: Map<string, Message[]>,
@@ -124,12 +86,9 @@ const updateMessagesMap = (
 const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
   // Initial state
   messagesByContact: new Map(),
-  retryMessagesByContact: new Map(),
   currentContactUserId: null,
   isLoading: false,
   isSending: false,
-  isSyncing: false,
-  isResending: false,
   subscription: null,
   isInitializing: false,
 
@@ -170,37 +129,12 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
         let hasChanges = false;
         const currentMap = get().messagesByContact;
 
-        const newRetryMessagesMap = new Map<string, RetryMessages[]>();
-        const currentRetryMessagesMap = get().retryMessagesByContact;
-        let hasRetryChanges = false;
-
         newMap.forEach((msgs, contactId) => {
           if (!hasChanges) {
             const existing = currentMap.get(contactId) || [];
             if (messagesChanged(existing, msgs)) {
               hasChanges = true;
             }
-          }
-
-          // check for failed messages updates
-          const existingRetryMessages =
-            currentRetryMessagesMap.get(contactId) || [];
-          const retryMessages = msgs
-            .filter(msg => msg.status === 'failed')
-            .map(msg => ({
-              // map to RetryMessages
-              id: msg.id!,
-              encryptedMessage: msg.encryptedMessage,
-              content: msg.content,
-              type: msg.type,
-            }));
-
-          newRetryMessagesMap.set(contactId, retryMessages);
-          if (
-            !hasRetryChanges &&
-            retryMessagesChanged(existingRetryMessages, retryMessages)
-          ) {
-            hasRetryChanges = true;
           }
         });
 
@@ -211,18 +145,8 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
           });
         }
 
-        if (!hasRetryChanges) {
-          currentRetryMessagesMap.forEach((_, contactId) => {
-            if (!newRetryMessagesMap.has(contactId)) hasRetryChanges = true;
-          });
-        }
-
         if (hasChanges) {
           set({ messagesByContact: newMap });
-        }
-
-        if (hasRetryChanges) {
-          set({ retryMessagesByContact: newRetryMessagesMap });
         }
       },
       error: error => {
@@ -238,8 +162,9 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
 
   // Send a message
   sendMessage: async (contactUserId: string, content: string) => {
-    const { userProfile } = useAccountStore.getState();
-    if (!userProfile?.userId || !content.trim() || get().isSending) return;
+    const { userProfile, session } = useAccountStore.getState();
+    if (!userProfile?.userId || !content.trim() || get().isSending || !session)
+      return;
 
     set({ isSending: true });
 
@@ -258,98 +183,27 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
         ownerUserId: userProfile.userId,
         contactUserId,
         content,
-        type: 'text',
-        direction: 'outgoing',
-        status: 'sending',
+        type: MessageType.TEXT,
+        direction: MessageDirection.OUTGOING,
+        status: MessageStatus.SENDING,
         timestamp: new Date(),
       };
 
-      // Persist to DB
-      const messageId = await db.addMessage(message);
-      const messageWithId = { ...message, id: messageId };
-
       // Send via service
-      const result = await messageService.sendMessage(messageWithId);
-
-      // Update status
-      if (result.message) {
-        get().updateMessage(contactUserId, messageId, {
-          status: result.message.status,
-        });
-      } else if (!result.success) {
-        get().updateMessage(contactUserId, messageId, { status: 'failed' });
-        throw new Error(result.error);
+      const result = await messageService.sendMessage(message, session);
+      if (!result.success) {
+        console.error(
+          'Failed to send message ',
+          content,
+          ', got error:',
+          result.error
+        );
       }
     } catch (error) {
       console.error('Failed to send message:', error);
       throw error;
     } finally {
       set({ isSending: false });
-    }
-  },
-
-  // Resend a failed message
-  // resendMessage: async (message: Message) => {
-  //   set({ isSending: true });
-  //   const result = await messageService.resendMessage(message);
-  //   if (result.error) {
-  //     // Update status to failed again
-  //     console.error('Failed to resend message:', result.error);
-  //   }
-  //   set({ isSending: false });
-  // },
-
-  // Resend all failed messages
-  resendMessages: async () => {
-    if (get().isResending) return;
-    const session = useAccountStore.getState().session;
-    if (!session) throw new Error('Session not initialized');
-
-    set({ isResending: true });
-    try {
-      await messageService.resendMessages(
-        get().retryMessagesByContact,
-        session
-      );
-    } catch (error) {
-      console.error('Failed to resend messages:', error);
-    } finally {
-      set({ isResending: false });
-    }
-  },
-
-  // Sync messages (fetch new ones from server)
-  syncMessages: async (contactUserId?: string) => {
-    const { userProfile } = useAccountStore.getState();
-    if (!userProfile?.userId) return;
-
-    if (get().isSyncing) return;
-    set({ isSyncing: true });
-
-    try {
-      const fetchResult = await messageService.fetchMessages();
-
-      if (fetchResult.success && fetchResult.newMessagesCount > 0) {
-        // Reload messages for the current contact if specified, or all contacts
-        if (contactUserId) {
-          // Show notification if app is in background
-          if (document.hidden) {
-            const contact = await db
-              .getContactByOwnerAndUserId(userProfile.userId, contactUserId)
-              .catch(() => null);
-            if (contact) {
-              await notificationService.showDiscussionNotification(
-                contact.name,
-                'New message received'
-              );
-            }
-          }
-        }
-      }
-    } catch (error) {
-      console.error('Failed to sync messages:', error);
-    } finally {
-      set({ isSyncing: false });
     }
   },
 
@@ -403,7 +257,6 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
       currentContactUserId: null,
       isLoading: false,
       isSending: false,
-      isSyncing: false,
     });
   },
 }));

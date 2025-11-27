@@ -1,5 +1,12 @@
-import { Discussion, DiscussionStatus, db } from '../db';
-import { notificationService } from './notifications';
+import {
+  DiscussionStatus,
+  Discussion,
+  Contact,
+  db,
+  MessageDirection,
+  MessageStatus,
+  DiscussionDirection,
+} from '../db';
 import {
   UserPublicKeys,
   UserSecretKeys,
@@ -8,65 +15,125 @@ import { announcementService } from './announcement';
 import { SessionModule } from '../wasm/session';
 
 /**
- * Create or update a discussion based on a contact user id.
- * If a discussion already exists, it will be updated accordingly.
- * Otherwise, a new discussion will be created.
+/**
+ * Initialize a discussion with a contact using SessionManager
+ * @param contact - The contact to start a discussion with
+ * @param ourPk - Our public keys
+ * @param ourSk - Our secret keys
+ * @param session - The SessionModule instance to use
+ * @param userId - The user ID of the current user (discussion owner)
+ * @param message - Optional message to include in the announcement
+ * @returns The discussion ID and the created announcement
  */
-export async function createUpdateDiscussion(
-  ownerUserId: string,
-  contactUserId: string,
-  contactName?: string,
-  announcementMessage?: string
-): Promise<{ discussionId: number }> {
-  const existing = await db.getDiscussionByOwnerAndContact(
-    ownerUserId,
-    contactUserId
-  );
-
-  if (existing) {
-    const updateData: Partial<Discussion> = {
-      updatedAt: new Date(),
-    };
-
-    if (announcementMessage) {
-      updateData.announcementMessage = announcementMessage;
-    }
-
-    if (
-      existing.status === DiscussionStatus.PENDING &&
-      existing.direction === 'initiated'
-    ) {
-      updateData.status = DiscussionStatus.ACTIVE;
-    }
-
-    await db.discussions.update(existing.id!, updateData);
-    return { discussionId: existing.id! };
-  }
-
-  const discussionId = await db.discussions.add({
-    ownerUserId: ownerUserId,
-    contactUserId: contactUserId,
-    direction: 'received',
-    status: DiscussionStatus.PENDING,
-    nextSeeker: undefined,
-    announcementMessage,
-    unreadCount: 0,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  });
-
+export async function initializeDiscussion(
+  contact: Contact,
+  ourPk: UserPublicKeys,
+  ourSk: UserSecretKeys,
+  session: SessionModule,
+  userId: string,
+  message?: string
+): Promise<{
+  discussionId: number;
+  announcement: Uint8Array;
+}> {
   try {
-    await notificationService.showNewDiscussionNotification(
-      contactName || `User ${contactUserId.substring(0, 8)}`
-    );
-  } catch (notificationError) {
-    console.error(
-      'Failed to show new discussion notification:',
-      notificationError
-    );
-  }
+    // Encode message as UTF-8 if provided
+    const userData = message
+      ? new TextEncoder().encode(message)
+      : new Uint8Array(0);
 
-  return { discussionId };
+    const result = await announcementService.establishSession(
+      UserPublicKeys.from_bytes(contact.publicKeys),
+      ourPk,
+      ourSk,
+      session,
+      userData
+    );
+
+    let status: DiscussionStatus = DiscussionStatus.PENDING;
+    if (!result.success) {
+      console.error(
+        'Failed to establish session with contact',
+        contact.name,
+        ', got error: ',
+        result.error
+      );
+      status = DiscussionStatus.SEND_FAILED;
+    }
+
+    // Persist discussion immediately with the announcement for reliable retry
+    const discussionId = await db.discussions.add({
+      ownerUserId: userId,
+      contactUserId: contact.userId,
+      direction: DiscussionDirection.INITIATED,
+      status: status,
+      nextSeeker: undefined,
+      initiationAnnouncement: result.announcement,
+      announcementMessage: message,
+      unreadCount: 0,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    return { discussionId, announcement: result.announcement };
+  } catch (error) {
+    console.error('Failed to initialize discussion:', error);
+    throw new Error('Discussion initialization failed');
+  }
+}
+
+/**
+ * Accept a discussion request from a contact using SessionManager
+ * @param discussion - The discussion to accept
+ * @param session - The SessionModule instance to use
+ * @param ourPk - Our public keys
+ * @param ourSk - Our secret keys
+ * @returns void
+ */
+export async function acceptDiscussionRequest(
+  discussion: Discussion,
+  session: SessionModule,
+  ourPk: UserPublicKeys,
+  ourSk: UserSecretKeys
+): Promise<void> {
+  try {
+    const contact = await db.getContactByOwnerAndUserId(
+      discussion.ownerUserId,
+      discussion.contactUserId
+    );
+
+    if (!contact) throw new Error('Contact not found');
+
+    const result = await announcementService.establishSession(
+      UserPublicKeys.from_bytes(contact.publicKeys),
+      ourPk,
+      ourSk,
+      session
+    );
+
+    let status: DiscussionStatus = DiscussionStatus.ACTIVE;
+    if (!result.success) {
+      console.error(
+        'Failed to establish session with contact',
+        contact.name,
+        ', got error: ',
+        result.error
+      );
+      status = DiscussionStatus.SEND_FAILED;
+    }
+
+    // update discussion status
+    await db.discussions.update(discussion.id, {
+      status: status,
+      initiationAnnouncement: result.announcement,
+      updatedAt: new Date(),
+    });
+
+    return;
+  } catch (error) {
+    console.error('Failed to accept pending discussion:', error);
+    throw new Error('Failed to accept pending discussion');
+  }
 }
 
 /**
@@ -106,24 +173,81 @@ export async function renewDiscussion(
     status = DiscussionStatus.SEND_FAILED;
   }
 
-  db.transaction('rw', db.discussions, async () => {
-    db.discussions.update(existingDiscussion.id, {
+  await db.transaction('rw', [db.discussions, db.messages], async () => {
+    await db.discussions.update(existingDiscussion.id, {
       status: status,
-      direction: 'initiated',
+      direction: DiscussionDirection.INITIATED,
       initiationAnnouncement: result.announcement,
       updatedAt: new Date(),
     });
 
     /* Mark all outgoing messages that are not delivered or read as failed and remove the encryptedMessage */
-    db.messages
+    await db.messages
       .where('[ownerUserId+contactUserId]')
       .equals([ownerUserId, contactUserId])
       .and(
         msg =>
-          msg.direction === 'outgoing' &&
-          msg.status !== 'delivered' &&
-          msg.status !== 'read'
+          msg.direction === MessageDirection.OUTGOING &&
+          msg.status !== MessageStatus.DELIVERED &&
+          msg.status !== MessageStatus.READ
       )
-      .modify({ status: 'failed', encryptedMessage: undefined });
+      .modify({ status: MessageStatus.FAILED, encryptedMessage: undefined });
+  });
+}
+
+/* Return true if new message can be sent to session manager for encryption. 
+If the discusison is Broken or if there is a failed message that has not been encrypted by the session manager, return false.
+To send new messages to discussion, the discussion must be non Broken and all failed messages must have a non null
+encryptedMessage field. If it's not the case, new messages can still be added in discussion but as failed and without encryptedMessage field.
+ */
+export async function isDiscussionStableState(
+  ownerUserId: string,
+  contactUserId: string
+): Promise<boolean> {
+  const discussion: Discussion | undefined =
+    await db.getDiscussionByOwnerAndContact(ownerUserId, contactUserId);
+
+  if (!discussion) throw new Error('Discussion not found');
+
+  if (discussion.status === DiscussionStatus.BROKEN) return false;
+
+  const messages = await db.messages
+    .where('[ownerUserId+contactUserId+direction]')
+    .equals([
+      discussion.ownerUserId,
+      discussion.contactUserId,
+      MessageDirection.OUTGOING,
+    ])
+    .sortBy('id');
+
+  /* If the discussion has been broken, all non delivered messages have been marked as failed and
+  their encryptedMessage field has been deleted. 
+  If there are some unencrypted unsent messages in the conversation, the discussion is not stable
+  i.e. we should not encrypt any new message via session manager before these messages are not resent */
+  if (
+    messages.length > 0 &&
+    !messages[messages.length - 1].encryptedMessage &&
+    messages[messages.length - 1].status === MessageStatus.FAILED
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+export async function getNonStableDiscussions(
+  ownerUserId: string
+): Promise<Discussion[]> {
+  const allDiscussions = await db.discussions
+    .where('ownerUserId')
+    .equals(ownerUserId)
+    .toArray();
+
+  return allDiscussions.filter(async d => {
+    const isStable = await isDiscussionStableState(
+      ownerUserId,
+      d.contactUserId
+    );
+    return !isStable;
   });
 }
