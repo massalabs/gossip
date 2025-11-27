@@ -30,11 +30,9 @@ export const AppUrlListener: React.FC = () => {
           if (!hasProcessed) {
             hasProcessed = true;
           }
+          anchor.remove();
         }, APP_SWITCH_DETECTION_DELAY);
       }, NATIVE_APP_OPEN_DELAY);
-
-      anchor.remove();
-
       return hasProcessed;
     },
     []
