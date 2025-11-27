@@ -5,7 +5,6 @@
  */
 
 import { notificationService } from './notifications';
-import { triggerManualSync } from './messageSync';
 import { defaultSyncConfig } from '../config/sync';
 
 /**
@@ -143,9 +142,9 @@ async function initializeBackgroundSync(): Promise<void> {
     await registerPeriodicSync();
 
     // Auto-retry pending announcements when coming back online
-    window.addEventListener('online', () => {
-      void triggerManualSync();
-    });
+    // window.addEventListener('online', () => {
+    //   void triggerManualSync();
+    // });
   } catch (error) {
     console.error('[App] Failed to initialize background sync service:', error);
   }
