@@ -29,15 +29,15 @@ afterEach(async () => {
   // Clean up all IndexedDB databases after each test
   const dbs = await indexedDB.databases();
   await Promise.all(
-    dbs.map(db => {
-      if (db.name) {
+    dbs
+      .filter(db => db.name)
+      .map(db => {
         return new Promise<void>((resolve, reject) => {
           const request = indexedDB.deleteDatabase(db.name!);
           request.onsuccess = () => resolve();
           request.onerror = () => reject(request.error);
         });
-      }
-    })
+      })
   );
 });
 
