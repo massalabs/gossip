@@ -95,8 +95,9 @@ export function useContactForm() {
   // Handlers
   // ──────────────────────────────────────────────────────────────
   const handleNameChange = useCallback((value: string) => {
-    const result = validateUsernameFormat(value);
-    setName(_ => ({ value, error: result.error || null, loading: false }));
+    const trimmed = value.trim();
+    const result = validateUsernameFormat(trimmed);
+    setName(_ => ({ value: trimmed, error: result.error || null, loading: false }));
   }, []);
 
   const handleUserIdChange = useCallback(
