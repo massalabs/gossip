@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import BaseModal from '../components/ui/BaseModal';
 import PageHeader from '../components/ui/PageHeader';
 import { useAccountStore } from '../stores/accountStore';
@@ -61,11 +61,6 @@ const Settings = (): React.ReactElement => {
       notificationService.getPreferences()
     );
   const [isRequestingPermission, setIsRequestingPermission] = useState(false);
-
-  // Update notification preferences when they change
-  useEffect(() => {
-    setNotificationPrefs(notificationService.getPreferences());
-  }, []);
 
   const handleNotificationToggle = useCallback((enabled: boolean) => {
     notificationService.setEnabled(enabled);
@@ -333,6 +328,26 @@ const Settings = (): React.ReactElement => {
           {/* Debug Options - Only show when showDebugOption is true */}
           {showDebugOption && (
             <div className="space-y-2 pl-10">
+              {notificationService.isSupported() &&
+                notificationPrefs.permission.granted &&
+                notificationPrefs.enabled && (
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    onClick={async () => {
+                      await notificationService.showDiscussionNotification(
+                        'Test User',
+                        'Test Message',
+                        'test-user-id'
+                      );
+                    }}
+                  >
+                    <NotificationsIcon className="mr-4" />
+                    <span className="text-base font-semibold flex-1 text-left">
+                      Test Notification
+                    </span>
+                  </Button>
+                )}
               <Button
                 variant="outline"
                 className="w-full"
