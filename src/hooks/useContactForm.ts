@@ -3,7 +3,11 @@ import { useCallback, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Contact, db } from '../db';
 import { useAccountStore } from '../stores/accountStore';
-import { validateUsername, isValidUserId, encodeUserId } from '../utils';
+import {
+  encodeUserId,
+  validateUsernameFormat,
+  validateUserIdFormat,
+} from '../utils';
 import { UserPublicKeys } from '../assets/generated/wasm/gossip_wasm';
 import { ensureDiscussionExists } from '../crypto/discussionInit';
 import { useFileShareContact } from './useFileShareContact';
@@ -77,7 +81,7 @@ export function useContactForm() {
 
   const canSubmit =
     name.error === null &&
-    name.value.trim().length > 0 &&
+    name.value.length > 0 &&
     userId.error === null &&
     userId.value.trim().length > 0 &&
     publicKeys !== null &&
@@ -91,14 +95,8 @@ export function useContactForm() {
   // Handlers
   // ──────────────────────────────────────────────────────────────
   const handleNameChange = useCallback((value: string) => {
-    const trimmed = value.trim();
-    const error = trimmed
-      ? validateUsername(trimmed).valid
-        ? null
-        : (validateUsername(trimmed).error ?? 'Invalid display name')
-      : 'Display name is required';
-
-    setName({ value: trimmed, error, loading: false });
+    const result = validateUsernameFormat(value);
+    setName(_ => ({ value, error: result.error || null, loading: false }));
   }, []);
 
   const handleUserIdChange = useCallback(
@@ -111,16 +109,19 @@ export function useContactForm() {
 
       if (!trimmed) return;
 
-      if (!isValidUserId(trimmed)) {
-        setUserId(prev => ({
-          ...prev,
-          error: 'Invalid format — must be a complete gossip1... address',
+      const result = validateUserIdFormat(trimmed);
+      if (result.error) {
+        setUserId(_ => ({
+          value: trimmed,
+          error: result.error || null,
+          loading: false,
         }));
-        return;
       }
 
-      // Valid format → check existence
-      fetchPublicKey(trimmed);
+      // TODO: We don't need to fetch public key now as it could be done later and added to request queue
+      if (result.valid) {
+        fetchPublicKey(trimmed);
+      }
     },
     [fetchPublicKey]
   );

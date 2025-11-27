@@ -2,13 +2,16 @@ import React, { useState, useEffect } from 'react';
 // Removed static logo in favor of animated PrivacyGraphic
 import { Capacitor } from '@capacitor/core';
 import { useAccountStore } from '../../stores/accountStore';
-import { validatePassword, validateUsername } from '../../utils/validation';
+import {
+  validatePassword,
+  validateUsernameFormat,
+  validateUsernameFormatAndAvailability,
+} from '../../utils/validation';
 import PageHeader from '../ui/PageHeader';
 import TabSwitcher from '../ui/TabSwitcher';
 import Button from '../ui/Button';
 import ICloudSyncModal from '../ui/ICloudSyncModal';
 import { biometricService } from '../../services/biometricService';
-import { db } from '../../db';
 
 interface AccountCreationProps {
   onComplete: () => void;
@@ -21,7 +24,7 @@ const AccountCreation: React.FC<AccountCreationProps> = ({
 }) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [isValid, setIsValid] = useState(false);
+  const [isUsernameValid, setIsUsernameValid] = useState(false);
   const [isPasswordValid, setIsPasswordValid] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -52,70 +55,32 @@ const AccountCreation: React.FC<AccountCreationProps> = ({
     checkBiometricMethods();
   }, []);
 
-  const validateUsernameField = (value: string) => {
-    const result = validateUsername(value);
-    setIsValid(result.valid);
-    setUsernameError(result.error || null);
-    return result.valid;
-  };
-
-  const validatePasswordField = (value: string) => {
-    const result = validatePassword(value);
-    setIsPasswordValid(result.valid);
-    setPasswordError(result.error || null);
-    return result.valid;
-  };
-
-  const checkUsernameAvailability = async (value: string) => {
-    const trimmed = value.trim();
-    if (!trimmed) {
-      return;
-    }
-
-    try {
-      await db.open();
-      const existingProfile = await db.userProfile
-        .where('username')
-        .equals(trimmed)
-        .first();
-
-      if (existingProfile) {
-        setUsernameError(
-          'This username is already in use. Please choose another.'
-        );
-        setIsValid(false);
-      }
-    } catch (checkError) {
-      console.error('Error checking for existing username:', checkError);
-      setError('Unable to verify username availability. Please try again.');
-    }
-  };
-
   const handleUsernameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
     setUsername(value);
-    validateUsernameField(value);
+    const result = validateUsernameFormat(value);
+    setIsUsernameValid(result.valid);
+    setUsernameError(result.error || null);
     setError(null);
   };
 
   const handleUsernameBlur = async () => {
-    const isUsernameValid = validateUsernameField(username);
-    if (!isUsernameValid) {
-      return;
-    }
-    await checkUsernameAvailability(username);
+    const result = await validateUsernameFormatAndAvailability(username);
+    setIsUsernameValid(result.valid);
+    setUsernameError(result.error || null);
   };
 
   const handlePasswordChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
     setPassword(value);
-    validatePasswordField(value);
-    setError(null);
+    const result = validatePassword(value);
+    setIsPasswordValid(result.valid);
+    setPasswordError(result.error || null);
   };
 
   const canSubmit = usePassword
-    ? isValid && isPasswordValid && !isCreating
-    : isValid && !isCreating;
+    ? isUsernameValid && isPasswordValid && !isCreating
+    : isUsernameValid && !isCreating;
 
   // No re-authentication in create flow
 
@@ -145,17 +110,13 @@ const AccountCreation: React.FC<AccountCreationProps> = ({
     e.preventDefault();
     e.stopPropagation();
 
-    if (!canSubmit) {
-      return;
-    }
+    // Handle when user press enter without triggering blur event
+    const usernameResult =
+      await validateUsernameFormatAndAvailability(username);
+    setIsUsernameValid(usernameResult.valid);
+    setUsernameError(usernameResult.error || null);
 
-    // Re-validate username and ensure availability before submitting
-    const isUsernameValid = validateUsernameField(username);
-    if (!isUsernameValid) {
-      return;
-    }
-    await checkUsernameAvailability(username);
-    if (usernameError) {
+    if (!canSubmit || !usernameResult.valid) {
       return;
     }
 
