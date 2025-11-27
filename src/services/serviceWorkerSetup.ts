@@ -176,7 +176,11 @@ async function registerPeriodicSync(): Promise<void> {
       }
     ).periodicSync;
 
-    if (periodicSync) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const status = await (navigator as any).permissions.query({
+      name: 'periodic-background-sync',
+    });
+    if (periodicSync && status.state === 'granted') {
       await periodicSync.register('gossip-message-sync', {
         minInterval: PERIODIC_SYNC_MIN_INTERVAL_MS,
       });
