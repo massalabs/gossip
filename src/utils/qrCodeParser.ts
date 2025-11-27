@@ -34,9 +34,9 @@ export function parseInvite(input: string): ParsedInvite {
  * Extract the clean invite path from any URL format
  * Returns null only when nothing invite-related is found
  */
-export function extractInvitePath(input: string): string | undefined {
+export function extractInvitePath(input: string): string | null {
   const trimmed = input.trim();
-  if (!trimmed) return undefined;
+  if (!trimmed) return null;
 
   if (trimmed.startsWith('/invite/')) {
     return trimmed;
@@ -47,9 +47,8 @@ export function extractInvitePath(input: string): string | undefined {
     const path = trimmed.replace('gossip://', '/');
     if (path.startsWith('/invite/')) {
       return path;
-    } else {
-      return undefined;
     }
+    return null;
   }
 
   try {
@@ -58,7 +57,9 @@ export function extractInvitePath(input: string): string | undefined {
       return pathname;
     }
   } catch {
-    // Invalid URL format, return undefined
-    return undefined;
+    // Invalid URL format, return null
+    return null;
   }
+
+  return null;
 }
