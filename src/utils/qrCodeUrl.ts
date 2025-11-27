@@ -1,41 +1,55 @@
+// src/utils/deepLink.ts
 export const INVITE_BASE_URL = '/invite';
 
 /**
- * Returns the correct public base URL for deep links / QR codes
- *
- * Priority:
- * 1. VITE_APP_BASE_URL (set in .env → perfect for staging/prod native builds)
- * 2. Current window.location.origin (web dev + production)
- * 3. Hardcoded fallback (never fails)
+ * Returns the public HTTPS URL that should be shared everywhere.
+ * This is the UNIVERSAL link that works on:
+ *   • Native apps (via gossip:// fallback page)
+ *   • PWA (opens directly)
+ *   • Web (opens web version)
+ *   • QR codes, SMS, email, social sharing
  */
-function getBaseUrl(): string {
-  // 1. Environment variable — highest priority (used in Capacitor builds, staging, etc.)
+function getPublicBaseUrl(): string {
+  // 1. Explicit env var → highest priority (staging, prod, native builds)
   const envUrl = import.meta.env.VITE_APP_BASE_URL?.trim();
   if (envUrl) {
-    // Ensure no trailing slash
     return envUrl.endsWith('/') ? envUrl.slice(0, -1) : envUrl;
   }
 
-  // 2. Web runtime — use current origin (works perfectly in browser)
+  // 2. In browser → use current origin (dev, preview, production web)
   if (typeof window !== 'undefined' && window.location?.origin) {
     return window.location.origin;
   }
 
-  // 3. Final fallback — your production domain
+  // 3. Hardcoded fallback → your main public domain
   return 'https://gossip.app';
 }
 
 /**
- * Generate a clean, shareable invite deep link that can be used in QR codes or direct sharing.
- * Format: https://gossip.app/invite/{userId}
+ * Generate the single, universal invite link you should share.
+ * Example: https://gossip.app/invite/abc123xyz
+ *
+ * This link will:
+ *   • Open the native app if installed (via gossip:// fallback)
+ *   • Open the PWA if installed
+ *   • Open the web app otherwise
  */
 export function generateDeepLinkUrl(userId: string): string {
   if (!userId?.trim()) {
     throw new Error('userId is required');
   }
 
-  const base = getBaseUrl();
+  const base = getPublicBaseUrl();
   const safeId = encodeURIComponent(userId.trim());
 
   return `${base}${INVITE_BASE_URL}/${safeId}`;
+}
+
+/**
+ * Optional: helper to get the internal native scheme (only for debugging or rare cases)
+ * Never share this publicly!
+ */
+export function generateNativeSchemeUrl(userId: string): string {
+  const safeId = encodeURIComponent(userId.trim());
+  return `gossip://invite/${safeId}`;
 }

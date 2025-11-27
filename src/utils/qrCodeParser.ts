@@ -8,9 +8,8 @@ export interface ParsedInvite {
 
 export function parseInvite(input: string): ParsedInvite {
   const path = extractInvitePath(input);
-
   if (!path) {
-    throw new Error('Invalid or empty invite');
+    throw new Error('Invalid invite format');
   }
 
   const match = path.match(INVITE_REGEX);
@@ -35,23 +34,25 @@ export function parseInvite(input: string): ParsedInvite {
  * Extract the clean invite path from any URL format
  * Returns null only when nothing invite-related is found
  */
-export function extractInvitePath(input: string): string | null {
-  const url = input.trim();
-  if (!url) return null;
+export function extractInvitePath(input: string): string | undefined {
+  const i = input.trim();
+  if (!i) return;
 
-  if (url.startsWith('/invite/')) {
-    return url;
+  if (i.startsWith('/invite/')) {
+    return i;
+  }
+
+  // Handle gossip:// protocol
+  if (i.startsWith('gossip://')) {
+    return i.replace('gossip://', '/');
   }
 
   try {
-    const { pathname } = new URL(url);
+    const { pathname } = new URL(i);
     if (pathname.startsWith('/invite/')) {
       return pathname;
     }
   } catch {
-    // Invalid URL format, return null
-    return null;
+    return;
   }
-
-  return null;
 }
