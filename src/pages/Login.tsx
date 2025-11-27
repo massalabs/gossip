@@ -6,6 +6,7 @@ import AccountSelection from '../components/account/AccountSelection';
 import AccountImport from '../components/account/AccountImport';
 import Button from '../components/ui/Button';
 import { useNavigate } from 'react-router-dom';
+import { useVersionCheck } from '../hooks/useVersionCheck';
 
 interface LoginProps {
   onCreateNewAccount: () => void;
@@ -25,6 +26,7 @@ const Login: React.FC<LoginProps> = React.memo(
   }) => {
     const loadAccount = useAccountStore(state => state.loadAccount);
     const navigate = useNavigate();
+    const { isVersionDifferent } = useVersionCheck();
     const [isLoading, setIsLoading] = useState(false);
     const [password, setPassword] = useState('');
     const [usePassword, setUsePassword] = useState(false);
@@ -91,6 +93,8 @@ const Login: React.FC<LoginProps> = React.memo(
 
     // Auto-trigger biometric auth when account is selected from account picker
     useEffect(() => {
+      // Skip biometric auth if app update is required
+      if (isVersionDifferent) return;
       if (autoAuthTriggered || !selectedAccountInfo) return;
       const authMethod = selectedAccountInfo.security?.authMethod;
       if (authMethod === 'password') return;
@@ -102,6 +106,7 @@ const Login: React.FC<LoginProps> = React.memo(
       setAutoAuthTriggered(true);
       handleBiometricAuth();
     }, [
+      isVersionDifferent,
       autoAuthTriggered,
       selectedAccountInfo,
       biometricMethodAvailable,
@@ -111,6 +116,8 @@ const Login: React.FC<LoginProps> = React.memo(
     // Auto-trigger biometric auth on mount if account (from accountInfo) has biometric auth enabled
     // Only triggers for accountInfo, not selectedAccountInfo (which is handled by the effect above)
     useEffect(() => {
+      // Skip biometric auth if app update is required
+      if (isVersionDifferent) return;
       // Skip if already attempted, no accountInfo, or user has manually selected a different account
       if (
         autoAuthAttempted.current ||
@@ -128,6 +135,7 @@ const Login: React.FC<LoginProps> = React.memo(
         handleBiometricAuth();
       }
     }, [
+      isVersionDifferent,
       accountInfo,
       selectedAccountInfo,
       handleBiometricAuth,
