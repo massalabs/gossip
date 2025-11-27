@@ -239,12 +239,6 @@ const messageReception = new ServiceWorkerMessageReception();
 
 // Handle messages from the main app
 self.addEventListener('message', event => {
-  // Handle request to start/restart sync scheduler
-  if (event.data && event.data.type === 'START_SYNC_SCHEDULER') {
-    startFallbackSync();
-    return;
-  }
-
   // Handle SKIP_WAITING message for prompt update behavior
   // This allows the main app to trigger service worker activation
   if (event.data && event.data.type === 'SKIP_WAITING') {
@@ -255,9 +249,11 @@ self.addEventListener('message', event => {
 
 // Register periodic background sync
 self.addEventListener('sync', (event: Event) => {
-  if ((event as SyncEvent).tag === 'gossip-message-sync') {
+  const syncEvent = event as SyncEvent;
+
+  if (syncEvent.tag === 'gossip-message-sync') {
     // Check if app is active - if so, skip sync (main app handles it)
-    (event as SyncEvent).waitUntil(
+    syncEvent.waitUntil(
       hasActiveClients().then(isActive => {
         if (isActive) {
           // App is active - main app handles sync, skip this one
