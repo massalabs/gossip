@@ -5,7 +5,7 @@ import {
   AlertTriangle,
   XCircle,
 } from 'react-feather';
-import { Message } from '../../db';
+import { Message, MessageDirection, MessageStatus } from '../../db';
 import { formatTime } from '../../utils/timeUtils';
 import { messageService } from '../../services/message';
 
@@ -31,8 +31,8 @@ const MessageItem: React.FC<MessageItemProps> = ({
   onScrollToMessage,
   id,
 }) => {
-  const isOutgoing = message.direction === 'outgoing';
   const canReply = !!onReplyTo;
+  const isOutgoing = message.direction === MessageDirection.OUTGOING;
   const [originalMessage, setOriginalMessage] = useState<Message | null>(null);
   const [isLoadingOriginal, setIsLoadingOriginal] = useState(false);
   const [originalNotFound, setOriginalNotFound] = useState(false);
@@ -316,23 +316,23 @@ const MessageItem: React.FC<MessageItemProps> = ({
           </span>
           {isOutgoing && (
             <div className="flex items-center gap-1">
-              {message.status === 'sending' && (
+              {message.status === MessageStatus.SENDING && (
                 <div className="flex items-center gap-1">
                   <div className="w-2.5 h-2.5 border border-current border-t-transparent rounded-full animate-spin"></div>
                   <span className="text-[10px] font-medium">Sending</span>
                 </div>
               )}
-              {message.status === 'sent' && (
+              {message.status === MessageStatus.SENT && (
                 <CheckIcon className="w-3.5 h-3.5" />
               )}
-              {message.status === 'failed' && (
+              {message.status === MessageStatus.FAILED && (
                 <div className="flex items-center gap-1.5">
                   <XCircle className="w-3.5 h-3.5 text-accent-foreground/90" />
                   <span className="text-[10px] font-medium">Failed</span>
                 </div>
               )}
-              {(message.status === 'delivered' ||
-                message.status === 'read') && (
+              {(message.status === MessageStatus.DELIVERED ||
+                message.status === MessageStatus.READ) && (
                 <CheckIcon className="w-3.5 h-3.5" />
               )}
             </div>

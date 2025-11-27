@@ -5,14 +5,20 @@
  * This service works both in the main app context and Service Worker context.
  */
 
-import { db, DiscussionStatus, Message } from '../db';
+import {
+  db,
+  DiscussionStatus,
+  Message,
+  MessageDirection,
+  MessageStatus,
+  MessageType,
+} from '../db';
 import { decodeUserId, encodeUserId } from '../utils/userId';
 import {
   IMessageProtocol,
   createMessageProtocol,
   EncryptedMessage,
 } from '../api/messageProtocol';
-import { useAccountStore } from '../stores/accountStore';
 import { strToBytes } from '@massalabs/massa-web3';
 import { RetryMessages } from '../stores/messageStore';
 import {
@@ -28,6 +34,7 @@ import {
 } from '../utils/messageSerialization';
 import { encodeToBase64 } from '../utils/base64';
 import { isAppInForeground } from '../utils/appState';
+import { isDiscussionStableState } from './discussion';
 
 export interface MessageResult {
   success: boolean;
@@ -63,12 +70,15 @@ export class MessageService {
    * Fetch new encrypted messages for a specific discussion
    * @returns Result with count of new messages fetched
    */
-  async fetchMessages(): Promise<MessageResult> {
+  async fetchMessages(
+    userId: string,
+    ourSk: UserSecretKeys,
+    session: SessionModule
+  ): Promise<MessageResult> {
     try {
-      const { session, ourSk, userProfile } = useAccountStore.getState();
       if (!session) throw new Error('Session module not initialized');
       if (!ourSk) throw new Error('WASM secret keys unavailable');
-      if (!userProfile?.userId) throw new Error('No authenticated user');
+      if (!userId) throw new Error('No authenticated user');
 
       let previousSeekers: Set<string> = new Set();
       let iterations = 0;
@@ -102,11 +112,11 @@ export class MessageService {
 
         const storedMessagesIds = await this.storeDecryptedMessages(
           decryptedMessages,
-          userProfile.userId
+          userId
         );
 
         console.log('acknowledged seekers:', acknowledgedSeekers);
-        await this.acknowledgeMessages(acknowledgedSeekers);
+        await this.acknowledgeMessages(acknowledgedSeekers, userId);
 
         newMessagesCount += storedMessagesIds.length;
         iterations += 1;
@@ -190,7 +200,10 @@ export class MessageService {
             ':',
             Buffer.from(msg.seeker).toString('base64')
           );
-          acknowledgedSeekers.add(Buffer.from(msg.seeker).toString('base64')); // to base64 for efficient comparison
+          
+          out.acknowledged_seekers.forEach(seeker => {
+            acknowledgedSeekers.add(Buffer.from(seeker).toString('base64')); // to base64 for efficient comparison
+          });        
         } catch (deserializationError) {
           console.error(
             'Message deserialization failed:',
@@ -252,9 +265,9 @@ export class MessageService {
           ownerUserId,
           contactUserId: discussion.contactUserId,
           content: message.content,
-          type: 'text' as const,
-          direction: 'incoming' as const,
-          status: 'delivered' as const,
+          type: MessageType.TEXT,
+          direction: MessageDirection.INCOMING,
+          status: MessageStatus.DELIVERED,
           timestamp: message.sentAt,
           metadata: {},
           seeker: message.seeker, // Store the seeker of the incoming message
@@ -309,65 +322,87 @@ export class MessageService {
   /*
    * Acknowledge messages by updating their status to 'delivered' based on seekers.
    * Updates all messages that have a encryptedMessage.seeker matching
-   * any seeker in the provided array. Uses a single transaction for performance.
-   * Excludes messages from discussions with BROKEN status.
+   * any seeker in the provided array.
    * @param seekers Array of Uint8Array seekers to match against
    */
-  private async acknowledgeMessages(seekers: Set<string>): Promise<void> {
+  private async acknowledgeMessages(
+    seekers: Set<string>,
+    userId: string
+  ): Promise<void> {
     if (seekers.size === 0) return;
 
     // Get all messages that have encryptedMessage
     // We need to filter in memory since Dexie doesn't support nested field queries
-    const { userProfile } = useAccountStore.getState();
-    if (!userProfile?.userId) return;
+    if (!userId) return;
 
     // Fetch all discussions to check for BROKEN status
-    const brokenDiscussionContactIds = new Set(
-      (
-        await db.discussions
-          .where('ownerUserId')
-          .equals(userProfile.userId)
-          .filter(d => d.status === DiscussionStatus.BROKEN)
-          .toArray()
-      ).map(d => d.contactUserId)
-    );
+    // const nonStableDiscussions = await getNonStableDiscussions(
+    //   userProfile.userId
+    // );
+    // const nonStableDiscussionContactIds = new Set(
+    //   nonStableDiscussions.map(d => d.contactUserId)
+    // );
+
+    // For each seeker in the seekers set
+    // for (const seekerBase64 of seekers) {
+    //   // Find the message whose encryptedMessage.seeker matches this seeker
+    //   const msg = await db.messages
+    //     .where({
+    //       'ownerUserId': userProfile.userId,
+    //       'direction': 'outgoing',
+    //       'status': 'sent'
+    //     })
+    //     .filter(m => {
+    //       if (!m.encryptedMessage?.seeker) return false;
+    //       return Buffer.from(m.encryptedMessage.seeker).toString('base64') === seekerBase64;
+    //     })
+    //     .first();
+
+    //   if (msg) {
+    //     // For all messages with the same owner, contact, outgoing direction,
+    //     // 'id' less than or equal to the found message, and status 'sent', mark as delivered
+    //     await db.messages
+    //       .where({
+    //         'ownerUserId': msg.ownerUserId,
+    //         'contactUserId': msg.contactUserId,
+    //         'direction': 'outgoing',
+    //         'status': 'sent'
+    //       })
+    //       .and(m => m.id !== undefined && m.id <= msg.id!)
+    //       .modify({ status: 'delivered' });
+    //   }
+    // }
 
     /* Set all messages with encryptedMessage.seeker matching any seeker in the provided array to 'delivered' */
     await db.messages
-      .where('ownerUserId')
-      .equals(userProfile.userId)
+      .where('[ownerUserId+direction+status]')
+      .equals([userId, MessageDirection.OUTGOING, MessageStatus.SENT])
       .filter(msg => {
         // Only process messages that have encryptedMessage
         if (!msg.encryptedMessage?.seeker) {
           return false;
         }
         // Exclude messages from BROKEN discussions
-        if (brokenDiscussionContactIds.has(msg.contactUserId)) {
-          return false;
-        }
+        // if (nonStableDiscussionContactIds.has(msg.contactUserId)) {
+        //   return false;
+        // }
         // Check if the seeker matches any in the seekers array
         const msgSeekerBase64 = Buffer.from(
           msg.encryptedMessage.seeker
         ).toString('base64');
         return seekers.has(msgSeekerBase64);
       })
-      .modify({ status: 'delivered' });
+      .modify({ status: MessageStatus.DELIVERED });
   }
 
   /**
    * Create a text message, persist it as sending, send via protocol, and update status.
    * Returns the created message (with final status) on success/failure.
    */
-  async sendMessage(message: Message): Promise<SendMessageResult> {
-    if (!message.id) {
-      return {
-        success: false,
-        error: 'Message must have an id before sending',
-      };
-    }
-
-    const session = useAccountStore.getState().session;
-    if (!session) throw new Error('Session module not initialized');
+  async sendMessage(
+    message: Message,
+    session: SessionModule
+  ): Promise<SendMessageResult> {
     const peerId = decodeUserId(message.contactUserId);
 
     const discussion = await db.getDiscussionByOwnerAndContact(
@@ -382,27 +417,40 @@ export class MessageService {
     }
 
     /* If the discussion is broken, add message to db but in failed state in order
-    fot it to be resent later when the discussion is reinitiated*/
-    if (discussion.status === DiscussionStatus.BROKEN) {
-      db.messages.update(message.id, { status: 'failed' });
+    fot it to be resent later when the discussion is reinitialized*/
+    if (
+      !(await isDiscussionStableState(
+        message.ownerUserId,
+        message.contactUserId
+      ))
+    ) {
+      // Persist to DB
+      const messageId = await db.addMessage({
+        ...message,
+        status: MessageStatus.FAILED,
+      });
       return {
-        success: true,
-        message: { ...message, status: 'failed' },
+        success: false,
+        error: 'Discussion is broken',
+        message: { ...message, id: messageId, status: MessageStatus.FAILED },
       };
     }
 
-    // Ensure DB reflects that this message is being (re)sent
-    await db.messages.update(message.id, { status: 'sending' });
+    // persist to DB
+    const messageId = await db.addMessage({
+      ...message,
+      status: MessageStatus.SENDING,
+    });
     // add discussionId to the content prefix
     const contentBytes = strToBytes(message.content);
 
     // Validate peer ID length
     if (peerId.length !== 32) {
-      await db.messages.update(message.id, { status: 'failed' });
+      await db.messages.update(messageId, { status: MessageStatus.FAILED });
       return {
         success: false,
         error: 'Invalid contact userId (must decode to 32 bytes)',
-        message: { ...message, status: 'failed' },
+        message: { ...message, id: messageId, status: MessageStatus.FAILED },
       };
     }
 
@@ -413,7 +461,10 @@ export class MessageService {
       // Ensure session is active before sending
       const status = session.peerSessionStatus(peerId);
 
-      if (status !== SessionStatus.Active) {
+      if (
+        status !== SessionStatus.Active &&
+        status !== SessionStatus.SelfRequested
+      ) {
         const statusName =
           SessionStatus[status as unknown as number] ?? String(status);
         throw new Error(`Session not active: ${statusName}`);
@@ -428,7 +479,7 @@ export class MessageService {
       in order to be resent later when the discussion is reinitiated
       */
       await db.transaction('rw', db.messages, db.discussions, () => {
-        db.messages.update(message.id, { status: 'failed' });
+        db.messages.update(messageId, { status: MessageStatus.FAILED });
         db.discussions.update(discussion.id, {
           status: DiscussionStatus.BROKEN,
         });
@@ -437,7 +488,7 @@ export class MessageService {
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Session manager error',
-        message: { ...message, status: 'failed' },
+        message: { ...message, id: messageId, status: MessageStatus.FAILED },
       };
     }
 
@@ -511,8 +562,8 @@ export class MessageService {
         ciphertext: sendOutput.data,
       });
 
-      await db.messages.update(message.id, {
-        status: 'sent',
+      await db.messages.update(messageId, {
+        status: MessageStatus.SENT,
         encryptedMessage: {
           seeker: sendOutput.seeker,
           ciphertext: sendOutput.data,
@@ -521,94 +572,25 @@ export class MessageService {
 
       return {
         success: true,
-        message: { ...message, id: message.id, status: 'sent' },
+        message: { ...message, id: messageId, status: MessageStatus.SENT },
       };
     } catch (error) {
       /* If there is an error here, it means the message has been encrypted and acknowledged by session manager but 
       could not be broadcasted on the network.
       Update the message as failed and store the encrypted message returned by session manager in order to resend it later.
       */
-      await db.messages.update(message.id, {
-        status: 'failed',
+      await db.messages.update(messageId, {
+        status: MessageStatus.FAILED,
         encryptedMessage: {
           seeker: sendOutput.seeker,
           ciphertext: sendOutput.data,
         },
       });
-      // if (sendOutput) {
-      //   const discussion = await db.getDiscussionByOwnerAndContact(
-      //     message.ownerUserId,
-      //     message.contactUserId
-      //   );
-      //   if (!discussion)
-      //     throw new Error(
-      //       'Could not send message after session manager and could not save failed encrypted message because discussion not found'
-      //     );
-      //   await db.discussions.update(discussion.id, {
-      //     failedEncryptedMessage: {
-      //       seeker: sendOutput.seeker,
-      //       ciphertext: sendOutput.data,
-      //     },
-      //   });
-      // }
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Send failed',
-        message: { ...message, status: 'failed' },
+        message: { ...message, id: messageId, status: MessageStatus.FAILED },
       };
-    }
-  }
-
-  async resendMessage(message: Message): Promise<SendMessageResult> {
-    const discussion = await db.getDiscussionByOwnerAndContact(
-      message.ownerUserId,
-      message.contactUserId
-    );
-    if (!discussion)
-      return {
-        success: false,
-        error: 'Discussion not found',
-        message: { ...message, status: 'failed' },
-      };
-
-    if (discussion.failedEncryptedMessage) {
-      // If the message has already been encrypted by sessionManager, resend it
-      try {
-        // Optimistically update status. Ensure DB reflects that this message is being (re)sent
-        await db.messages.update(message.id, { status: 'sending' });
-
-        // Send the message
-        await this.messageProtocol.sendMessage({
-          seeker: discussion.failedEncryptedMessage.seeker,
-          ciphertext: discussion.failedEncryptedMessage.ciphertext,
-        });
-
-        await db.messages.update(message.id, { status: 'sent' });
-
-        // Update the discussion to remove the failed encrypted message
-        await db.discussions.update(discussion.id, {
-          failedEncryptedMessage: undefined,
-        });
-
-        return {
-          success: true,
-          message: { ...message, id: message.id, status: 'sent' },
-        };
-      } catch (error) {
-        await db.messages.update(message.id, { status: 'failed' });
-
-        return {
-          success: false,
-          error:
-            error instanceof Error
-              ? error.message
-              : 'Failed to resend message: ' + error,
-          message: { ...message, status: 'failed' },
-        };
-      }
-    } else {
-      // If the message has not been encrypted by sessionManager, send it as if it were new
-      return await this.sendMessage(message);
     }
   }
 
@@ -652,7 +634,10 @@ export class MessageService {
             break;
           }
           const status = session.peerSessionStatus(peerId);
-          if (status !== SessionStatus.Active) {
+          if (
+            status !== SessionStatus.Active &&
+            status !== SessionStatus.SelfRequested
+          ) {
             console.error(
               `Session with peer ${peerId.toString()} not active, got status: ${status}`
             );
@@ -697,7 +682,9 @@ export class MessageService {
     if (messageSent.length > 0) {
       await db.transaction('rw', db.messages, async () => {
         await Promise.all(
-          messageSent.map(id => db.messages.update(id, { status: 'sent' }))
+          messageSent.map(id =>
+            db.messages.update(id, { status: MessageStatus.SENT })
+          )
         );
       });
     }

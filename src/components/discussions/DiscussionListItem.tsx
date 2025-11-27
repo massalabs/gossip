@@ -1,6 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { ChevronRight } from 'react-feather';
-import { Discussion, DiscussionStatus, Contact } from '../../db';
+import {
+  Discussion,
+  DiscussionStatus,
+  Contact,
+  DiscussionDirection,
+} from '../../db';
 import ContactAvatar from '../avatar/ContactAvatar';
 import { formatRelativeTime } from '../../utils/timeUtils';
 import { formatUserId } from '../../utils/userId';
@@ -56,7 +61,7 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
   useEffect(() => {
     const isPendingIncomingCheck =
       discussion.status === DiscussionStatus.PENDING &&
-      discussion.direction === 'received';
+      discussion.direction === DiscussionDirection.RECEIVED;
 
     if (!isPendingIncomingCheck) {
       // Use functional update to avoid dependency on isNameModalOpen
@@ -76,7 +81,7 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
   useEffect(() => {
     const isPendingIncomingCheck =
       discussion.status === DiscussionStatus.PENDING &&
-      discussion.direction === 'received';
+      discussion.direction === DiscussionDirection.RECEIVED;
 
     if (!isPendingIncomingCheck) {
       return;
@@ -104,10 +109,10 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
 
   const isPendingIncoming =
     discussion.status === DiscussionStatus.PENDING &&
-    discussion.direction === 'received';
+    discussion.direction === DiscussionDirection.RECEIVED;
   const isPendingOutgoing =
     discussion.status === DiscussionStatus.PENDING &&
-    discussion.direction === 'initiated';
+    discussion.direction === DiscussionDirection.INITIATED;
 
   return (
     <div key={discussion.id} className="w-full px-2 py-1 text-left">

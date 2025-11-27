@@ -1,16 +1,12 @@
 import { create } from 'zustand';
 import { Subscription } from 'dexie';
 import { liveQuery } from 'dexie';
-import { Discussion, Contact, db, DiscussionStatus } from '../db';
+import { Discussion, Contact, db } from '../db';
 import { createSelectors } from './utils/createSelectors';
 import { useAccountStore } from './accountStore';
-import { announcementService } from '../services/announcement';
-import { renewDiscussion } from '../services/discussion';
 
 interface DiscussionStoreState {
   discussions: Discussion[];
-  brokenDiscussions: Discussion[];
-  sendFailedDiscussions: Discussion[];
   contacts: Contact[];
   lastMessages: Map<string, { content: string; timestamp: Date }>;
   openNameModals: Set<number>;
@@ -21,9 +17,6 @@ interface DiscussionStoreState {
   init: () => void;
   getDiscussionsForContact: (contactUserId: string) => Discussion[];
 
-  resendFailedDiscussions: () => Promise<void>;
-  reInitiateDiscussion: () => Promise<void>;
-
   cleanup: () => void;
   setModalOpen: (discussionId: number, isOpen: boolean) => void;
   isModalOpen: (discussionId: number) => boolean;
@@ -31,8 +24,6 @@ interface DiscussionStoreState {
 
 const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
   discussions: [],
-  brokenDiscussions: [],
-  sendFailedDiscussions: [],
   contacts: [],
   lastMessages: new Map(),
   openNameModals: new Set<number>(),
@@ -89,20 +80,7 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
           }
         });
 
-        // Populate broken and sendFailed discussions
-        const brokenDiscussions = discussionsList.filter(
-          d => d.status === DiscussionStatus.BROKEN
-        );
-        const sendFailedDiscussions = discussionsList.filter(
-          d => d.status === DiscussionStatus.SEND_FAILED
-        );
-
-        set({
-          discussions: sortedDiscussions,
-          lastMessages: messagesMap,
-          brokenDiscussions,
-          sendFailedDiscussions,
-        });
+        set({ discussions: sortedDiscussions, lastMessages: messagesMap });
       },
       error: error => {
         console.error('Discussions live query error:', error);
@@ -138,44 +116,6 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
     );
   },
 
-  resendFailedDiscussions: async () => {
-    const sentFailedDiscussions = get().sendFailedDiscussions;
-    if (sentFailedDiscussions.length) {
-      await announcementService.resendAnnouncements(sentFailedDiscussions);
-    }
-  },
-
-  reInitiateDiscussion: async () => {
-    const brokenDiscussions = get().brokenDiscussions;
-    if (!brokenDiscussions.length) return;
-
-    const { ourPk, ourSk, session, userProfile } = useAccountStore.getState();
-    if (!ourPk || !ourSk || !session || !userProfile?.userId) {
-      console.warn(
-        'Cannot reinitiate discussions: WASM keys or session unavailable'
-      );
-      return;
-    }
-
-    // Renew each broken discussion
-    for (const discussion of brokenDiscussions) {
-      try {
-        await renewDiscussion(
-          userProfile.userId,
-          discussion.contactUserId,
-          session,
-          ourPk,
-          ourSk
-        );
-      } catch (error) {
-        console.error(
-          `Failed to reinitiate discussion with ${discussion.contactUserId}:`,
-          error
-        );
-      }
-    }
-  },
-
   cleanup: () => {
     const subDisc = get().subscriptionDiscussions;
     if (subDisc) subDisc.unsubscribe();
@@ -185,8 +125,6 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
       subscriptionDiscussions: null,
       subscriptionContacts: null,
       discussions: [],
-      brokenDiscussions: [],
-      sendFailedDiscussions: [],
       contacts: [],
       lastMessages: new Map(),
     });

@@ -10,8 +10,8 @@ import { ROUTES } from '../constants/routes';
 
 const Discussions: React.FC = () => {
   const navigate = useNavigate();
-  const isLoading = useAccountStore(s => s.isLoading);
-  if (isLoading) {
+  const { ourPk, ourSk, session, isLoading } = useAccountStore();
+  if (isLoading || !ourPk || !ourSk || !session) {
     return (
       <div className="bg-background flex items-center justify-center h-full">
         <PrivacyGraphic size={120} loading={true} />

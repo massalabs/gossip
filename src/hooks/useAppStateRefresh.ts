@@ -10,21 +10,21 @@ import { useDiscussionStore } from '../stores/discussionStore.tsx';
  * Refreshes announcements, messages, discussions, and contacts
  */
 export function useAppStateRefresh() {
-  const { userProfile } = useAccountStore();
+  const { userProfile, ourPk, ourSk, session } = useAccountStore();
 
   const initApp = useCallback(async () => {
     useMessageStore.getState().init();
     await useDiscussionStore.getState().init();
-    triggerManualSync().catch(error => {
+    triggerManualSync(ourPk, ourSk, session).catch(error => {
       console.error('Failed to sync messages on login:', error);
     });
-  }, []);
+  }, [ourPk, ourSk, session]);
 
   useEffect(() => {
-    if (userProfile?.userId) {
+    if (userProfile?.userId && ourPk && ourSk && session) {
       initApp();
       const refreshInterval = setInterval(() => {
-        triggerManualSync().catch(error => {
+        triggerManualSync(ourPk, ourSk, session).catch(error => {
           console.error('Failed to refresh app state periodically:', error);
         });
       }, defaultSyncConfig.activeSyncIntervalMs);
@@ -34,5 +34,5 @@ export function useAppStateRefresh() {
         clearInterval(refreshInterval);
       };
     }
-  }, [userProfile?.userId, initApp]);
+  }, [userProfile?.userId, ourPk, ourSk, session, initApp]);
 }

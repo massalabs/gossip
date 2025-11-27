@@ -49,8 +49,6 @@ const Discussion: React.FC = () => {
   // Track previous contact userId to prevent unnecessary updates
   const prevContactUserIdRef = useRef<string | null>(null);
 
-  const isMsgFailed = messages.some(m => m.status === 'failed');
-
   // Reply state
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
 
@@ -153,14 +151,13 @@ const Discussion: React.FC = () => {
         messages={messages}
         discussion={discussion}
         isLoading={isLoading || isDiscussionLoading}
-        onResend={resendMessage}
         onReplyTo={handleReplyToMessage}
         onScrollToMessage={handleScrollToMessage}
       />
 
       <MessageInput
         onSend={handleSendMessage}
-        disabled={isSending || isMsgFailed}
+        disabled={isSending}
         replyingTo={replyingTo}
         onCancelReply={handleCancelReply}
       />

@@ -1,9 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { Contact, Discussion, DiscussionStatus } from '../db';
-import {
-  initializeDiscussion,
-  ensureDiscussionExists as ensureDiscussionExistsUtil,
-} from '../crypto/discussionInit';
 import { useDiscussionStore } from '../stores/discussionStore';
 
 interface UseDiscussionProps {
@@ -12,7 +8,6 @@ interface UseDiscussionProps {
 
 export const useDiscussion = ({ contact }: UseDiscussionProps) => {
   const [discussion, setDiscussion] = useState<Discussion | null>(null);
-  const [isInitializing, setIsInitializing] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const isMountedRef = useRef(true);
 
@@ -38,7 +33,8 @@ export const useDiscussion = ({ contact }: UseDiscussionProps) => {
         .filter(
           d =>
             d.status === DiscussionStatus.ACTIVE ||
-            d.status === DiscussionStatus.PENDING
+            d.status === DiscussionStatus.PENDING ||
+            d.status === DiscussionStatus.SEND_FAILED
         )
         .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
 
@@ -103,10 +99,7 @@ export const useDiscussion = ({ contact }: UseDiscussionProps) => {
 
   return {
     discussion,
-    isInitializing,
     isLoading,
     loadDiscussion,
-    initializeNewDiscussion,
-    ensureDiscussionExists,
   };
 };

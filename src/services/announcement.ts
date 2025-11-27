@@ -4,19 +4,18 @@
  * Handles broadcasting and processing of session announcements.
  */
 
-import { db, Discussion, DiscussionStatus } from '../db';
+import { db, Discussion, DiscussionStatus, DiscussionDirection } from '../db';
 import { encodeUserId } from '../utils/userId';
-import { useAccountStore } from '../stores/accountStore';
 import {
   createMessageProtocol,
   IMessageProtocol,
 } from '../api/messageProtocol';
-import { createUpdateDiscussion } from './discussion';
 import {
   UserPublicKeys,
   UserSecretKeys,
 } from '../assets/generated/wasm/gossip_wasm';
 import { SessionModule } from '../wasm/session';
+import { notificationService } from './notifications';
 
 const ONE_HOUR_MS = 60 * 60 * 1000;
 
@@ -63,11 +62,23 @@ export class AnnouncementService {
     }
   }
 
+  /**fails
+   * Establish a session with a contact via session manager and send the created announcement on the network.
+   * Return type contains info about the success of the broadcast of the announcement.
+   * If the session manager fails to create an announcement, let the error bubble up.
+   * @param contactPublicKeys - The public keys of the contact to establish a session with.
+   * @param ourPk - Our public keys.
+   * @param ourSk - Our secret keys.
+   * @param session - The session module to use.
+   * @param userData - Optional user data to include in the announcement.
+   * @returns Return a type containing the created announcement (if any) and information about the success of the broadcast of the announcement.
+   */
   async establishSession(
     contactPublicKeys: UserPublicKeys,
     ourPk: UserPublicKeys,
     ourSk: UserSecretKeys,
-    session: SessionModule
+    session: SessionModule,
+    userData?: Uint8Array
   ): Promise<{
     success: boolean;
     error?: string;
@@ -76,7 +87,8 @@ export class AnnouncementService {
     const announcement = session.establishOutgoingSession(
       contactPublicKeys,
       ourPk,
-      ourSk
+      ourSk,
+      userData
     );
 
     const result = await this.sendAnnouncement(announcement);
@@ -91,19 +103,12 @@ export class AnnouncementService {
     return { success: true, announcement };
   }
 
-  async fetchAndProcessAnnouncements(): Promise<AnnouncementReceptionResult> {
-    const errors: string[] = [];
+  async fetchAndProcessAnnouncements(
+    ourPk: UserPublicKeys,
+    ourSk: UserSecretKeys,
+    session: SessionModule
+  ): Promise<AnnouncementReceptionResult> {
     try {
-      const { userProfile } = useAccountStore.getState();
-
-      if (!userProfile?.userId) {
-        return {
-          success: false,
-          newAnnouncementsCount: 0,
-          error: 'No authenticated user',
-        };
-      }
-
       // First, check if service worker has already fetched announcements
       let announcements: Uint8Array[];
       const pendingAnnouncements = await db.pendingAnnouncements.toArray();
@@ -128,7 +133,12 @@ export class AnnouncementService {
 
       for (const announcement of announcements) {
         try {
-          const result = await this._processIncomingAnnouncement(announcement);
+          const result = await this._processIncomingAnnouncement(
+            announcement,
+            ourPk,
+            ourSk,
+            session
+          );
           if (result.success) {
             newAnnouncementsCount++;
           } else if (result.error) {
@@ -162,34 +172,6 @@ export class AnnouncementService {
           errors.join('\n')
         );
       }
-    }
-  }
-
-  async simulateIncomingDiscussion(): Promise<{
-    success: boolean;
-    newMessagesCount: number;
-    error?: string;
-  }> {
-    const { userProfile } = useAccountStore.getState();
-    if (!userProfile?.userId) throw new Error('No authenticated user');
-
-    try {
-      console.log('Simulating incoming discussion announcement...');
-      const mockAnnouncement = new Uint8Array(64);
-      crypto.getRandomValues(mockAnnouncement);
-      const result = await this._processIncomingAnnouncement(mockAnnouncement);
-      return {
-        success: result.success,
-        newMessagesCount: result.discussionId ? 1 : 0,
-        error: result.error,
-      };
-    } catch (error) {
-      console.error('Failed to simulate incoming discussion:', error);
-      return {
-        success: false,
-        newMessagesCount: 0,
-        error: error instanceof Error ? error.message : 'Unknown error',
-      };
     }
   }
 
@@ -244,6 +226,7 @@ export class AnnouncementService {
             brokenDiscussions.map(id =>
               db.discussions.update(id, {
                 status: DiscussionStatus.BROKEN,
+                initiationAnnouncement: undefined,
                 updatedAt: now,
               })
             )
@@ -293,18 +276,16 @@ export class AnnouncementService {
   }
 
   private async _processIncomingAnnouncement(
-    announcementData: Uint8Array
+    announcementData: Uint8Array,
+    ourPk: UserPublicKeys,
+    ourSk: UserSecretKeys,
+    session: SessionModule
   ): Promise<{
     success: boolean;
     discussionId?: number;
     contactUserId?: string;
     error?: string;
   }> {
-    const { ourPk, ourSk, session, userProfile } = useAccountStore.getState();
-    if (!userProfile?.userId) throw new Error('No authenticated user');
-
-    const ownerUserId = userProfile.userId;
-
     if (!ourPk || !ourSk) throw new Error('WASM keys unavailable');
     if (!session) throw new Error('Session module not initialized');
     try {
@@ -342,6 +323,7 @@ export class AnnouncementService {
       const announcerPkeys = announcementResult.announcer_public_keys;
       const contactUserId = announcerPkeys.derive_id();
       const contactUserIdString = encodeUserId(contactUserId);
+      const ownerUserId = encodeUserId(ourPk.derive_id());
 
       let contact = await db.getContactByOwnerAndUserId(
         ownerUserId,
@@ -376,7 +358,7 @@ export class AnnouncementService {
         throw new Error('Could not find contact');
       }
 
-      const { discussionId } = await createUpdateDiscussion(
+      const { discussionId } = await handleReceivedDiscussion(
         ownerUserId,
         contactUserIdString,
         contact.name,
@@ -414,6 +396,76 @@ export class AnnouncementService {
       };
     }
   }
+}
+
+/**
+ * When someone sent us an announcement, this function handles whether we should
+ * Create or update a discussion based on the sending contact user id.
+ * If discussion with the sending contact already exists, it will be updated accordingly.
+ * Otherwise, a new discussion will be created.
+ */
+export async function handleReceivedDiscussion(
+  ownerUserId: string,
+  contactUserId: string,
+  contactName?: string,
+  announcementMessage?: string
+): Promise<{ discussionId: number }> {
+  const discussionId = await db.transaction(
+    'rw',
+    db.discussions,
+    async (): Promise<number> => {
+      const existing = await db.getDiscussionByOwnerAndContact(
+        ownerUserId,
+        contactUserId
+      );
+
+      if (existing) {
+        const updateData: Partial<Discussion> = {
+          updatedAt: new Date(),
+        };
+
+        if (announcementMessage) {
+          updateData.announcementMessage = announcementMessage;
+        }
+
+        if (
+          existing.status === DiscussionStatus.PENDING &&
+          existing.direction === DiscussionDirection.INITIATED
+        ) {
+          updateData.status = DiscussionStatus.ACTIVE;
+        }
+
+        await db.discussions.update(existing.id!, updateData);
+        return existing.id!;
+      }
+
+      const discussionId = await db.discussions.add({
+        ownerUserId: ownerUserId,
+        contactUserId: contactUserId,
+        direction: DiscussionDirection.RECEIVED,
+        status: DiscussionStatus.PENDING,
+        nextSeeker: undefined,
+        announcementMessage,
+        unreadCount: 0,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      return discussionId;
+    }
+  );
+
+  try {
+    await notificationService.showNewDiscussionNotification(
+      contactName || `User ${contactUserId.substring(0, 8)}`
+    );
+  } catch (notificationError) {
+    console.error(
+      'Failed to show new discussion notification:',
+      notificationError
+    );
+  }
+
+  return { discussionId };
 }
 
 export const announcementService = new AnnouncementService(
