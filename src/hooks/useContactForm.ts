@@ -97,7 +97,11 @@ export function useContactForm() {
   const handleNameChange = useCallback((value: string) => {
     const trimmed = value.trim();
     const result = validateUsernameFormat(trimmed);
-    setName(_ => ({ value: trimmed, error: result.error || null, loading: false }));
+    setName(_ => ({
+      value: trimmed,
+      error: result.error || null,
+      loading: false,
+    }));
   }, []);
 
   const handleUserIdChange = useCallback(
@@ -117,12 +121,10 @@ export function useContactForm() {
           error: result.error || null,
           loading: false,
         }));
+        return;
       }
 
-      // TODO: We don't need to fetch public key now as it could be done later and added to request queue
-      if (result.valid) {
-        fetchPublicKey(trimmed);
-      }
+      fetchPublicKey(trimmed);
     },
     [fetchPublicKey]
   );

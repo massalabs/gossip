@@ -46,7 +46,7 @@ export async function validateUsernameAvailability(
 
     const existingProfile = await db.userProfile
       .where('username')
-      .equals(value.trim().toLowerCase())
+      .equals(value.trim())
       .first();
 
     if (existingProfile) {
