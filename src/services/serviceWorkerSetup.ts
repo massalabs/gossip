@@ -6,7 +6,6 @@
 
 import { notificationService } from './notifications';
 import { defaultSyncConfig } from '../config/sync';
-
 /**
  * Setup service worker: register, listen for messages, and start sync scheduler
  * Also initializes background sync (notifications, periodic sync, online listener)
@@ -140,11 +139,6 @@ async function initializeBackgroundSync(): Promise<void> {
 
     // Register periodic background sync
     await registerPeriodicSync();
-
-    // Auto-retry pending announcements when coming back online
-    // window.addEventListener('online', () => {
-    //   void triggerManualSync();
-    // });
   } catch (error) {
     console.error('[App] Failed to initialize background sync service:', error);
   }

@@ -74,6 +74,75 @@ export class NotificationService {
   }
 
   /**
+   * Check if service worker is available and ready
+   * @returns Promise resolving to service worker controller if available
+   */
+  private async getServiceWorkerController(): Promise<ServiceWorker | null> {
+    if (!('serviceWorker' in navigator)) {
+      return null;
+    }
+
+    try {
+      // Wait for service worker to be ready
+      await navigator.serviceWorker.ready;
+      return navigator.serviceWorker.controller;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Send notification via service worker if available, otherwise show directly
+   * @param title - Notification title
+   * @param body - Notification body
+   * @param tag - Notification tag for grouping
+   * @param autoCloseMs - Auto-close timeout in milliseconds
+   * @param onClick - Optional click handler (only used in fallback mode)
+   * @param requireInteraction - Whether notification requires user interaction
+   * @param data - Additional notification data (must include url for navigation)
+   */
+  private async sendNotificationViaServiceWorker(
+    title: string,
+    body: string,
+    tag: string,
+    autoCloseMs: number,
+    onClick?: () => void,
+    requireInteraction: boolean = false,
+    data?: Record<string, unknown>
+  ): Promise<void> {
+    const controller = await this.getServiceWorkerController();
+
+    if (controller) {
+      // Send notification request to service worker
+      // Service worker handles navigation via data.url in notificationclick event
+      controller.postMessage({
+        type: 'SEND_NOTIFICATION',
+        payload: {
+          title,
+          body,
+          tag,
+          requireInteraction,
+          autoCloseMs,
+          data: {
+            ...data,
+            url: (data?.url as string) || '/discussions',
+          },
+        },
+      });
+    } else {
+      // Fallback to direct notification if service worker not available
+      await this.showNotificationInternal(
+        title,
+        body,
+        tag,
+        autoCloseMs,
+        onClick,
+        requireInteraction
+      );
+    }
+  }
+
+  /**
    * Internal helper to show a notification with common logic
    * @param title - Notification title
    * @param body - Notification body
@@ -153,7 +222,7 @@ export class NotificationService {
       const title = `New message from ${contactName}`;
       const body = messagePreview || 'Tap to view';
 
-      await this.showNotificationInternal(
+      await this.sendNotificationViaServiceWorker(
         title,
         body,
         `gossip-discussion-${contactName}`,
@@ -162,7 +231,13 @@ export class NotificationService {
           ? () => {
               window.location.href = `/discussion/${contactUserId}`;
             }
-          : undefined
+          : undefined,
+        false,
+        {
+          type: 'discussion',
+          url: contactUserId ? `/discussion/${contactUserId}` : '/discussions',
+          contactUserId,
+        }
       );
     } catch (error) {
       console.error('Failed to show discussion notification:', error);
@@ -184,7 +259,7 @@ export class NotificationService {
       const title = 'New contact request';
       const body = announcementMessage || 'User wants to start a conversation';
 
-      await this.showNotificationInternal(
+      await this.sendNotificationViaServiceWorker(
         title,
         body,
         'gossip-new-contact-request',
@@ -192,7 +267,11 @@ export class NotificationService {
         () => {
           window.location.href = '/discussions';
         },
-        true // requireInteraction for new discussions
+        true, // requireInteraction for new discussions
+        {
+          type: 'new-contact-request',
+          url: '/discussions',
+        }
       );
     } catch (error) {
       console.error('Failed to show new discussion notification:', error);
