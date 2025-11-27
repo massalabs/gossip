@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import BaseModal from '../components/ui/BaseModal';
 import PageHeader from '../components/ui/PageHeader';
 import { useAccountStore } from '../stores/accountStore';
@@ -24,6 +24,7 @@ import {
   LogoutIcon,
   DeleteIcon,
   CameraIcon,
+  NotificationsIcon,
 } from '../components/ui/icons';
 import { APP_VERSION } from '../config/version';
 import { useLocalStorage } from '../hooks/useLocalStorage';
@@ -31,6 +32,10 @@ import { useNavigate } from 'react-router-dom';
 import ShareContact from '../components/settings/ShareContact';
 import ScanQRCode from '../components/settings/ScanQRCode';
 import { db } from '../db';
+import {
+  notificationService,
+  type NotificationPreferences,
+} from '../services/notifications';
 
 enum SettingsView {
   SHOW_ACCOUNT_BACKUP = 'SHOW_ACCOUNT_BACKUP',
@@ -49,6 +54,33 @@ const Settings = (): React.ReactElement => {
   const [isResetModalOpen, setIsResetModalOpen] = useState(false);
   const { isVersionDifferent, handleForceUpdate } = useVersionCheck();
   const navigate = useNavigate();
+
+  // Notification preferences state
+  const [notificationPrefs, setNotificationPrefs] =
+    useState<NotificationPreferences>(() =>
+      notificationService.getPreferences()
+    );
+  const [isRequestingPermission, setIsRequestingPermission] = useState(false);
+
+  // Update notification preferences when they change
+  useEffect(() => {
+    setNotificationPrefs(notificationService.getPreferences());
+  }, []);
+
+  const handleNotificationToggle = useCallback((enabled: boolean) => {
+    notificationService.setEnabled(enabled);
+    setNotificationPrefs(notificationService.getPreferences());
+  }, []);
+
+  const handleRequestNotificationPermission = useCallback(async () => {
+    setIsRequestingPermission(true);
+    try {
+      await notificationService.requestPermission();
+      setNotificationPrefs(notificationService.getPreferences());
+    } finally {
+      setIsRequestingPermission(false);
+    }
+  }, []);
 
   const mnemonicBackupInfo = getMnemonicBackupInfo();
 
@@ -218,32 +250,45 @@ const Settings = (): React.ReactElement => {
               Scan QR Code
             </span>
           </Button>
-          {/* Security Button */}
-          {/* <Button
-            variant="outline"
-            size="custom"
-            className="w-full h-[54px] flex items-center px-4 justify-start rounded-lg"
-            onClick={() => {}}
-            disabled
-          >
-            <SecurityIcon className="mr-4" />
-            <span className="text-base font-semibold flex-1 text-left">
-              Security
-            </span>
-          </Button> */}
-          {/* Notifications Button */}
-          {/* <Button
-            variant="outline"
-            size="custom"
-            className="w-full h-[54px] flex items-center px-4 justify-start rounded-lg"
-            onClick={() => {}}
-            disabled
-          >
-            <NotificationsIcon className="mr-4" />
-            <span className="text-base font-semibold flex-1 text-left">
-              Notifications
-            </span>
-          </Button> */}
+          {/* Notifications Section */}
+          {notificationService.isSupported() && (
+            <div className="bg-card border border-border rounded-lg overflow-hidden shadow-sm">
+              {/* Notification Toggle */}
+              <div className="h-[54px] flex items-center px-4 justify-start w-full">
+                <NotificationsIcon className="text-foreground mr-4" />
+                <span className="text-base font-semibold text-foreground flex-1 text-left">
+                  Notifications
+                </span>
+                {notificationPrefs.permission.granted ? (
+                  <Toggle
+                    checked={notificationPrefs.enabled}
+                    onChange={handleNotificationToggle}
+                    ariaLabel="Toggle notifications"
+                  />
+                ) : notificationPrefs.permission.denied ? (
+                  <span className="text-xs text-muted-foreground">Blocked</span>
+                ) : (
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={handleRequestNotificationPermission}
+                    disabled={isRequestingPermission}
+                  >
+                    {isRequestingPermission ? 'Requesting...' : 'Enable'}
+                  </Button>
+                )}
+              </div>
+              {/* Permission Status Info */}
+              {notificationPrefs.permission.denied && (
+                <div className="px-4 pb-3 pt-0">
+                  <p className="text-xs text-muted-foreground">
+                    Notifications are blocked. Please enable them in your
+                    browser settings.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
           {/* Privacy Button */}
           {/* <Button
             variant="outline"

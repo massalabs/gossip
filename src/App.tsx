@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { BrowserRouter } from 'react-router-dom';
 import { useAccountStore } from './stores/accountStore';
 import { useAppStore } from './stores/appStore';
@@ -11,6 +11,7 @@ import './App.css';
 // Hooks
 import { useProfileLoader } from './hooks/useProfileLoader';
 import { useAccountInfo } from './hooks/useAccountInfo';
+import { setupServiceWorker } from './services/serviceWorkerSetup';
 
 // Route components
 import { AuthenticatedRoutes } from './routes/AuthenticatedRoutes';
@@ -33,11 +34,11 @@ const AppContent: React.FC = () => {
   const existingAccountInfo = useAccountInfo();
 
   // Setup service worker: register, listen for messages, start sync scheduler, and initialize background sync
-  // useEffect(() => {
-  //   setupServiceWorker().catch(error => {
-  //     console.error('Failed to setup service worker:', error);
-  //   });
-  // }, []); // Only run once on mount
+  useEffect(() => {
+    setupServiceWorker().catch(error => {
+      console.error('Failed to setup service worker:', error);
+    });
+  }, []); // Only run once on mount
 
   if (isLoading && !isInitialized && !userProfile) {
     return <LoadingScreen />;
