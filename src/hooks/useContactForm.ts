@@ -115,7 +115,7 @@ export function useContactForm() {
       if (!trimmed) return;
 
       const result = validateUserIdFormat(trimmed);
-      if (result.error) {
+      if (!result.valid) {
         setUserId(_ => ({
           value: trimmed,
           error: result.error || null,
