@@ -4,7 +4,7 @@ import {
   createHandlerBoundToURL,
   precacheAndRoute,
 } from 'workbox-precaching';
-import { setCacheNameDetails } from 'workbox-core';
+import { clientsClaim, setCacheNameDetails } from 'workbox-core';
 import { NavigationRoute, registerRoute } from 'workbox-routing';
 import { protocolConfig } from './config/protocol';
 import { defaultSyncConfig } from './config/sync';
@@ -150,10 +150,11 @@ class ServiceWorkerMessageReception {
     newMessagesCount: number;
   }> {
     try {
+      console.log('SW fetchAllDiscussions');
       // Request all active seekers from the main app
       // The main app has access to WASM session and can provide all seekers
       const seekers = await this.requestSeekersFromMainApp();
-
+      console.log('SW seekers', seekers.length);
       if (!seekers || seekers.length === 0) {
         return {
           success: true,
@@ -243,60 +244,64 @@ class ServiceWorkerMessageReception {
     newAnnouncementsCount: number;
   }> {
     try {
-      // Fetch announcements from the API
-      const announcements = await this.protocol.fetchAnnouncements();
-
-      // Store announcements in IndexedDB for the main app to process
-      let actuallyAddedCount = 0;
-      if (announcements.length > 0) {
-        try {
-          const now = new Date();
-          await db.pendingAnnouncements.bulkAdd(
-            announcements.map(announcement => ({
-              announcement,
-              fetchedAt: now,
-            }))
-          );
-          // All announcements were added successfully
-          actuallyAddedCount = announcements.length;
-        } catch (error) {
-          // Handle BulkError: some items may have been added successfully
-          if (error instanceof Error && error.name === 'BulkError') {
-            // Dexie BulkError has failures array and we can calculate success count
-            const bulkError = error as unknown as {
-              failures: Array<{ index: number }>;
-              successCount?: number;
-            };
-            // Calculate how many were actually added
-            // If successCount is available, use it; otherwise calculate from failures
-            if (typeof bulkError.successCount === 'number') {
-              actuallyAddedCount = bulkError.successCount;
-            } else {
-              // Calculate: total - failures = successes
-              actuallyAddedCount =
-                announcements.length - bulkError.failures.length;
-            }
-          } else if (
-            error instanceof Error &&
-            error.message.includes('ConstraintError')
-          ) {
-            // Single ConstraintError means none were added
-            actuallyAddedCount = 0;
-          } else {
-            // Other errors - log them
-            console.error(
-              'Service Worker: Failed to store announcements:',
-              error
-            );
-            actuallyAddedCount = 0;
-          }
-        }
-      }
-
       return {
         success: true,
-        newAnnouncementsCount: actuallyAddedCount,
+        newAnnouncementsCount: 0,
       };
+      // // Fetch announcements from the API
+      // const announcements = await this.protocol.fetchAnnouncements();
+
+      // // Store announcements in IndexedDB for the main app to process
+      // let actuallyAddedCount = 0;
+      // if (announcements.length > 0) {
+      //   try {
+      //     const now = new Date();
+      //     await db.pendingAnnouncements.bulkAdd(
+      //       announcements.map(announcement => ({
+      //         announcement,
+      //         fetchedAt: now,
+      //       }))
+      //     );
+      //     // All announcements were added successfully
+      //     actuallyAddedCount = announcements.length;
+      //   } catch (error) {
+      //     // Handle BulkError: some items may have been added successfully
+      //     if (error instanceof Error && error.name === 'BulkError') {
+      //       // Dexie BulkError has failures array and we can calculate success count
+      //       const bulkError = error as unknown as {
+      //         failures: Array<{ index: number }>;
+      //         successCount?: number;
+      //       };
+      //       // Calculate how many were actually added
+      //       // If successCount is available, use it; otherwise calculate from failures
+      //       if (typeof bulkError.successCount === 'number') {
+      //         actuallyAddedCount = bulkError.successCount;
+      //       } else {
+      //         // Calculate: total - failures = successes
+      //         actuallyAddedCount =
+      //           announcements.length - bulkError.failures.length;
+      //       }
+      //     } else if (
+      //       error instanceof Error &&
+      //       error.message.includes('ConstraintError')
+      //     ) {
+      //       // Single ConstraintError means none were added
+      //       actuallyAddedCount = 0;
+      //     } else {
+      //       // Other errors - log them
+      //       console.error(
+      //         'Service Worker: Failed to store announcements:',
+      //         error
+      //       );
+      //       actuallyAddedCount = 0;
+      //     }
+      //   }
+      // }
+
+      // return {
+      //   success: true,
+      //   newAnnouncementsCount: actuallyAddedCount,
+      // };
     } catch (error) {
       console.error(
         'Service Worker: Failed to fetch announcements via protocol:',
@@ -313,11 +318,16 @@ class ServiceWorkerMessageReception {
 const messageReception = new ServiceWorkerMessageReception();
 
 self.addEventListener('message', event => {
-  if (event.data && event.data.type === 'SKIP_WAITING') self.skipWaiting();
-
   // Handle request to start/restart sync scheduler
   if (event.data && event.data.type === 'START_SYNC_SCHEDULER') {
     startFallbackSync();
+    return;
+  }
+
+  // Handle SKIP_WAITING message for prompt update behavior
+  // This allows the main app to trigger service worker activation
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
     return;
   }
 });
@@ -342,6 +352,39 @@ function trackSync(syncType: 'periodic' | 'fallback'): void {
   }
 
   syncStats.lastSyncTime = now;
+
+  // Log sync statistics for monitoring and debugging
+  const avgInterval =
+    syncStats.syncIntervals.length > 0
+      ? Math.round(
+          syncStats.syncIntervals.reduce((a, b) => a + b, 0) /
+            syncStats.syncIntervals.length
+        )
+      : 0;
+  const minInterval =
+    syncStats.syncIntervals.length > 0
+      ? Math.min(...syncStats.syncIntervals)
+      : 0;
+  const maxInterval =
+    syncStats.syncIntervals.length > 0
+      ? Math.max(...syncStats.syncIntervals)
+      : 0;
+
+  console.log('Service Worker: Sync stats', {
+    syncType,
+    totalSyncCount: syncStats.syncCount,
+    timeSinceLastSync:
+      timeSinceLastSync > 0
+        ? `${Math.round(timeSinceLastSync / 1000)}s`
+        : 'N/A (first sync)',
+    lastSyncTime: new Date(syncStats.lastSyncTime).toISOString(),
+    intervalStats: {
+      count: syncStats.syncIntervals.length,
+      average: avgInterval > 0 ? `${Math.round(avgInterval / 1000)}s` : 'N/A',
+      min: minInterval > 0 ? `${Math.round(minInterval / 1000)}s` : 'N/A',
+      max: maxInterval > 0 ? `${Math.round(maxInterval / 1000)}s` : 'N/A',
+    },
+  });
 }
 
 // Register periodic background sync
@@ -352,53 +395,66 @@ self.addEventListener('sync', (event: Event) => {
       hasActiveClients().then(isActive => {
         if (isActive) {
           // App is active - main app handles sync, skip this one
-          console.log('Service Worker: Skipping periodic sync - app is active');
           return;
         }
 
         // App is in background - perform sync
         trackSync('periodic');
-        return Promise.all([
-          messageReception.fetchAllDiscussions(),
-          messageReception.fetchAnnouncements(),
-        ])
-          .then(([messageResult, announcementResult]) => {
-            const hasNewMessages =
-              messageResult.success && messageResult.newMessagesCount > 0;
-            const hasNewAnnouncements =
-              announcementResult.success &&
-              announcementResult.newAnnouncementsCount > 0;
-
-            if (hasNewMessages || hasNewAnnouncements) {
-              let body = '';
-              if (hasNewMessages && hasNewAnnouncements) {
-                body = `You have ${messageResult.newMessagesCount} new message${messageResult.newMessagesCount > 1 ? 's' : ''} and ${announcementResult.newAnnouncementsCount} new discussion${announcementResult.newAnnouncementsCount > 1 ? 's' : ''}`;
-              } else if (hasNewMessages) {
-                body = `You have ${messageResult.newMessagesCount} new message${messageResult.newMessagesCount > 1 ? 's' : ''}`;
-              } else if (hasNewAnnouncements) {
-                body = `You have ${announcementResult.newAnnouncementsCount} new discussion${announcementResult.newAnnouncementsCount > 1 ? 's' : ''}`;
-              }
-
-              // Show notification for new messages/announcements
-              self.registration.showNotification('Gossip Messenger', {
-                body,
-                icon: '/favicon/favicon-96x96.png',
-                badge: '/favicon/favicon-96x96.png',
-                tag: 'gossip-new-messages',
-                requireInteraction: false,
-              });
-            }
-          })
-          .catch(error => {
-            console.error('Service Worker: Periodic sync failed', error);
-          });
+        return performSyncAndNotify().catch(error => {
+          console.error('Service Worker: Periodic sync failed', error);
+        });
       })
     );
   }
 });
 
 /**
+ * Build notification body text for new messages/announcements
+ */
+function buildNewItemsBody(
+  messageCount: number,
+  announcementCount: number
+): string {
+  if (messageCount > 0 && announcementCount > 0) {
+    return `You have ${messageCount} new message${messageCount > 1 ? 's' : ''} and ${announcementCount} new discussion${announcementCount > 1 ? 's' : ''}`;
+  }
+  if (messageCount > 0) {
+    return `You have ${messageCount} new message${messageCount > 1 ? 's' : ''}`;
+  }
+  if (announcementCount > 0) {
+    return `You have ${announcementCount} new discussion${announcementCount > 1 ? 's' : ''}`;
+  }
+  return '';
+}
+
+/**
+ * Show a unified \"new items\" notification for messages/announcements
+ */
+async function showNewItemsNotification(
+  messageCount: number,
+  announcementCount: number
+): Promise<void> {
+  const body = buildNewItemsBody(messageCount, announcementCount);
+  if (!body) return;
+
+  await showNotificationIfAllowed('Gossip Messenger', {
+    body,
+    icon: '/favicon/favicon-96x96.png',
+    badge: '/favicon/favicon-96x96.png',
+    tag: 'gossip-new-messages',
+    requireInteraction: false,
+    data: {
+      type: 'new-messages',
+      url: '/discussions',
+    },
+  });
+}
+
+/**
  * Check if the app has active window clients (app is open)
+ *
+ * Note: On mobile PWAs, the app may be considered "visible" even when in the background
+ * if it's installed as a standalone app. This function checks for focused/visible state.
  */
 async function hasActiveClients(): Promise<boolean> {
   try {
@@ -421,11 +477,17 @@ async function hasActiveClients(): Promise<boolean> {
     }
 
     // Check if any client is focused or visible
+    // On mobile PWAs, visibilityState may be 'visible' even when app is backgrounded,
+    // but focused should be false when truly in background
     return clients.some(client => {
       const windowClient = client as WindowClient;
+      // Prefer focused check - more reliable on mobile
+      // If focused is true, app is definitely active
+      // If visibilityState is 'visible' but not focused, app might be in background (mobile PWA)
       return (
         windowClient.focused === true ||
-        windowClient.visibilityState === 'visible'
+        (windowClient.visibilityState === 'visible' &&
+          windowClient.focused !== false)
       );
     });
   } catch (error) {
@@ -461,6 +523,13 @@ async function showNotificationIfAllowed(
  * Perform sync operation
  */
 async function performSync(): Promise<void> {
+  await performSyncAndNotify();
+}
+
+/**
+ * Perform sync and, if needed, show a notification or notify clients
+ */
+async function performSyncAndNotify(): Promise<void> {
   try {
     console.log('Service Worker: Syncing messages...');
 
@@ -476,26 +545,14 @@ async function performSync(): Promise<void> {
       announcementResult.newAnnouncementsCount > 0;
 
     if (hasNewMessages || hasNewAnnouncements) {
-      let body = '';
-      if (hasNewMessages && hasNewAnnouncements) {
-        body = `You have ${messageResult.newMessagesCount} new message${messageResult.newMessagesCount > 1 ? 's' : ''} and ${announcementResult.newAnnouncementsCount} new discussion${announcementResult.newAnnouncementsCount > 1 ? 's' : ''}`;
-      } else if (hasNewMessages) {
-        body = `You have ${messageResult.newMessagesCount} new message${messageResult.newMessagesCount > 1 ? 's' : ''}`;
-      } else if (hasNewAnnouncements) {
-        body = `You have ${announcementResult.newAnnouncementsCount} new discussion${announcementResult.newAnnouncementsCount > 1 ? 's' : ''}`;
-      }
-
       // Show notification for new messages/discussions
       const isActive = await hasActiveClients();
       if (!isActive) {
         // App is in background - show notification
-        await showNotificationIfAllowed('Echo Messenger', {
-          body,
-          icon: '/favicon/favicon-96x96.png',
-          badge: '/favicon/favicon-96x96.png',
-          tag: 'echo-new-messages',
-          requireInteraction: false,
-        });
+        await showNewItemsNotification(
+          messageResult.newMessagesCount,
+          announcementResult.newAnnouncementsCount
+        );
       } else {
         // App is active - notify main app to refresh immediately
         const clients = await self.clients.matchAll({
@@ -619,15 +676,21 @@ function startFallbackSync() {
     echoSyncStarting?: boolean;
   };
 
-  // Check if scheduler is already starting or active
-  if (sw.echoSyncStarting) {
-    // Already starting, skip
-    return;
-  }
-
+  // Clear any stale timer or flag from previous runs
   const existingTimer = sw.echoSyncTimer;
   if (existingTimer) {
-    // Timer already active, skip starting a new one
+    clearTimeout(existingTimer);
+    sw.echoSyncTimer = undefined;
+  }
+
+  // Reset the starting flag if it's stuck
+  if (sw.echoSyncStarting) {
+    sw.echoSyncStarting = false;
+  }
+
+  // Check if scheduler is already starting or active (after cleanup)
+  if (sw.echoSyncStarting) {
+    // Already starting, skip
     return;
   }
 
@@ -639,10 +702,23 @@ function startFallbackSync() {
   scheduleNextSync();
 }
 
+// Skip waiting and activate immediately when new service worker is installed
+self.addEventListener('install', () => {
+  // Skip waiting to activate the new service worker immediately
+  // This ensures updates are applied without requiring all pages to close
+  self.skipWaiting();
+});
+
 // Start fallback sync when service worker activates
 self.addEventListener('activate', event => {
   event.waitUntil(
     Promise.resolve().then(() => {
+      // Use Workbox's clientsClaim to take control of all clients immediately
+      // This is more reliable than manual self.clients.claim()
+      clientsClaim();
+
+      // On mobile, service workers may be terminated, so we rely more on
+      // Periodic Background Sync API. The fallback timer is less reliable.
       startFallbackSync();
     })
   );
@@ -651,6 +727,7 @@ self.addEventListener('activate', event => {
 // Start sync immediately when service worker loads (if already activated)
 // This handles the case where the service worker is already active when the page loads
 // Use a small delay to ensure registration is ready
+// Note: This may run in addition to the activate event, but startFallbackSync() will handle duplicates
 setTimeout(() => {
   if (self.registration.active) {
     startFallbackSync();
@@ -661,22 +738,45 @@ setTimeout(() => {
 self.addEventListener('notificationclick', (event: NotificationEvent) => {
   event.notification.close();
 
+  // Get the target URL from notification data, default to discussions
+  const notificationData = event.notification.data as
+    | { type?: string; url?: string; contactUserId?: string }
+    | undefined;
+  let targetUrl = '/discussions';
+
+  if (notificationData?.url) {
+    targetUrl = notificationData.url;
+  } else if (notificationData?.contactUserId) {
+    // Navigate to specific discussion if contactUserId is provided
+    targetUrl = `/discussion/${notificationData.contactUserId}`;
+  }
+
   event.waitUntil(
-    self.clients
-      .matchAll({ type: 'window' })
-      .then((clientList: readonly WindowClient[]) => {
-        // If app is already open, focus it
-        for (const client of clientList) {
-          if (client.url === '/' && 'focus' in client) {
-            client.focus();
-            return;
+    (async (): Promise<void> => {
+      const clientList = await self.clients.matchAll({
+        type: 'window',
+        includeUncontrolled: true,
+      });
+
+      // Try to find an existing window and navigate it
+      for (const client of clientList as WindowClient[]) {
+        // Check if this is our app (same origin)
+        const clientUrl = new URL(client.url);
+        const swUrl = new URL(self.registration.scope);
+        if (clientUrl.origin === swUrl.origin && 'focus' in client) {
+          // Navigate to target URL and focus
+          const navigatedClient = await client.navigate(targetUrl);
+          if (navigatedClient) {
+            await navigatedClient.focus();
           }
+          return;
         }
-        // Otherwise, open a new window
-        if (self.clients.openWindow) {
-          self.clients.openWindow('/');
-        }
-      })
+      }
+      // No existing window found, open a new one
+      if (self.clients.openWindow) {
+        await self.clients.openWindow(targetUrl);
+      }
+    })()
   );
 });
 

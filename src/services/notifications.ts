@@ -3,12 +3,20 @@
  *
  * Handles browser notifications for new messages.
  * Shows generic notifications without revealing message content.
+ * Supports user preference management for enabling/disabling notifications.
  */
+
+const NOTIFICATION_ENABLED_KEY = 'gossip-notifications-enabled';
 
 export interface NotificationPermission {
   granted: boolean;
   denied: boolean;
   default: boolean;
+}
+
+export interface NotificationPreferences {
+  enabled: boolean;
+  permission: NotificationPermission;
 }
 
 export class NotificationService {
@@ -18,9 +26,11 @@ export class NotificationService {
     denied: false,
     default: true,
   };
+  private enabled: boolean = true;
 
   private constructor() {
     this.updatePermissionStatus();
+    this.loadPreferences();
   }
 
   static getInstance(): NotificationService {
@@ -28,6 +38,39 @@ export class NotificationService {
       NotificationService.instance = new NotificationService();
     }
     return NotificationService.instance;
+  }
+
+  /**
+   * Load notification preferences from localStorage
+   */
+  private loadPreferences(): void {
+    try {
+      const stored = localStorage.getItem(NOTIFICATION_ENABLED_KEY);
+      if (stored !== null) {
+        this.enabled = stored === 'true';
+      }
+    } catch {
+      // localStorage not available, use default
+      this.enabled = true;
+    }
+  }
+
+  /**
+   * Save notification preferences to localStorage
+   */
+  private savePreferences(): void {
+    try {
+      localStorage.setItem(NOTIFICATION_ENABLED_KEY, String(this.enabled));
+    } catch {
+      // localStorage not available, ignore
+    }
+  }
+
+  /**
+   * Check if notifications are allowed (permission granted AND user enabled)
+   */
+  private canShowNotification(): boolean {
+    return this.permission.granted && this.enabled;
   }
 
   /**
@@ -55,8 +98,7 @@ export class NotificationService {
    * @param messageCount - Number of new messages (optional)
    */
   async showNewMessagesNotification(messageCount?: number): Promise<void> {
-    if (!this.permission.granted) {
-      console.log('Notification permission not granted');
+    if (!this.canShowNotification()) {
       return;
     }
 
@@ -70,7 +112,7 @@ export class NotificationService {
         body,
         icon: '/favicon/favicon-96x96.png',
         badge: '/favicon/favicon-96x96.png',
-        tag: 'gossip-new-messages', // Replace previous notifications with same tag
+        tag: 'gossip-new-messages',
         requireInteraction: false,
         silent: false,
       });
@@ -94,13 +136,14 @@ export class NotificationService {
    * Show a notification for a specific discussion (when app is open)
    * @param contactName - Name of the contact
    * @param messagePreview - Preview of the message (optional)
+   * @param contactUserId - User ID of the contact (optional, for navigation)
    */
   async showDiscussionNotification(
     contactName: string,
-    messagePreview?: string
+    messagePreview?: string,
+    contactUserId?: string
   ): Promise<void> {
-    if (!this.permission.granted) {
-      console.log('Notification permission not granted');
+    if (!this.canShowNotification()) {
       return;
     }
 
@@ -115,11 +158,18 @@ export class NotificationService {
         tag: `gossip-discussion-${contactName}`,
         requireInteraction: false,
         silent: false,
+        data: contactUserId
+          ? { contactUserId, url: `/discussion/${contactUserId}` }
+          : undefined,
       });
 
       // Handle notification click
       notification.onclick = () => {
         window.focus();
+        // Navigate to discussion if contactUserId is available
+        if (contactUserId) {
+          window.location.href = `/discussion/${contactUserId}`;
+        }
         notification.close();
       };
 
@@ -137,8 +187,7 @@ export class NotificationService {
    * @param contactName - Name of the contact who started the discussion
    */
   async showNewDiscussionNotification(contactName: string): Promise<void> {
-    if (!this.permission.granted) {
-      console.log('Notification permission not granted');
+    if (!this.canShowNotification()) {
       return;
     }
 
@@ -151,13 +200,15 @@ export class NotificationService {
         icon: '/favicon/favicon-96x96.png',
         badge: '/favicon/favicon-96x96.png',
         tag: `gossip-new-discussion-${contactName}`,
-        requireInteraction: true, // Require interaction for new discussions
+        requireInteraction: true,
         silent: false,
+        data: { url: '/discussions' },
       });
 
       // Handle notification click
       notification.onclick = () => {
         window.focus();
+        window.location.href = '/discussions';
         notification.close();
       };
 
@@ -183,7 +234,47 @@ export class NotificationService {
    * @returns Current permission status
    */
   getPermissionStatus(): NotificationPermission {
+    this.updatePermissionStatus();
     return { ...this.permission };
+  }
+
+  /**
+   * Get full notification preferences
+   * @returns Notification preferences including enabled state and permission
+   */
+  getPreferences(): NotificationPreferences {
+    this.updatePermissionStatus();
+    return {
+      enabled: this.enabled,
+      permission: { ...this.permission },
+    };
+  }
+
+  /**
+   * Check if notifications are enabled by the user
+   * @returns True if user has enabled notifications
+   */
+  isEnabled(): boolean {
+    return this.enabled;
+  }
+
+  /**
+   * Enable or disable notifications
+   * @param enabled - Whether to enable notifications
+   */
+  setEnabled(enabled: boolean): void {
+    this.enabled = enabled;
+    this.savePreferences();
+  }
+
+  /**
+   * Toggle notification enabled state
+   * @returns The new enabled state
+   */
+  toggleEnabled(): boolean {
+    this.enabled = !this.enabled;
+    this.savePreferences();
+    return this.enabled;
   }
 
   /**
@@ -225,20 +316,19 @@ export class NotificationService {
   }
 
   /**
-   * Clear all notifications with Gossip tags
+   * Clear all notifications with Echo tags
    */
-  clearAllNotifications(): void {
-    if (
-      'serviceWorker' in navigator &&
-      'getRegistrations' in navigator.serviceWorker
-    ) {
-      navigator.serviceWorker.getRegistrations().then(registrations => {
-        registrations.forEach(() => {
-          // This would be handled by the service worker
-          // For now, we just log that we would clear notifications
-          console.log('Would clear all Gossip notifications');
+  async clearAllNotifications(): Promise<void> {
+    if ('serviceWorker' in navigator) {
+      try {
+        const registration = await navigator.serviceWorker.ready;
+        const notifications = await registration.getNotifications();
+        notifications.forEach(notification => {
+          notification.close();
         });
-      });
+      } catch (error) {
+        console.error('Failed to clear notifications:', error);
+      }
     }
   }
 }

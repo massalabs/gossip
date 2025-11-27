@@ -32,7 +32,6 @@ export function useAppStateRefresh() {
       // Cleanup interval when user logs out or component unmounts
       return () => {
         clearInterval(refreshInterval);
-        console.log('Periodic app state refresh interval cleared');
       };
     }
   }, [userProfile?.userId, initApp]);
