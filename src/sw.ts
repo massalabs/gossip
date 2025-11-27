@@ -245,6 +245,33 @@ self.addEventListener('message', event => {
     self.skipWaiting();
     return;
   }
+
+  // Handle SEND_NOTIFICATION message for showing notifications from service worker
+  // This is required for Android PWA and preferred for all platforms
+  // see: https://developer.mozilla.org/en-US/docs/Web/API/Notifications_API#browser_compatibility
+  if (event.data && event.data.type === 'SEND_NOTIFICATION') {
+    const { title, body, tag, requireInteraction, data } =
+      event.data.payload || {};
+
+    if (!title) {
+      console.error('Service Worker: SEND_NOTIFICATION missing title');
+      return;
+    }
+
+    event.waitUntil(
+      (async () => {
+        await showNotificationIfAllowed(title, {
+          body: body || '',
+          icon: '/favicon/favicon-96x96.png',
+          badge: '/favicon/favicon-96x96.png',
+          tag: tag || 'gossip-notification',
+          requireInteraction: requireInteraction || false,
+          data: data || {},
+        });
+      })()
+    );
+    return;
+  }
 });
 
 // Register periodic background sync
