@@ -17,9 +17,6 @@ export async function setupServiceWorker(): Promise<void> {
     return;
   }
 
-  // Setup message listener for service worker messages (e.g., REQUEST_SEEKERS from service worker)
-  setupMessageListener();
-
   // Setup controller change listener to reload page when new service worker takes control
   setupControllerChangeListener();
 
@@ -38,26 +35,9 @@ function setupControllerChangeListener(): void {
   navigator.serviceWorker.addEventListener('controllerchange', () => {
     // Reload the page when a new service worker takes control
     // This ensures the page uses the new service worker code immediately
-    // Prevent duplicate reloads: check both local flag and if reload is already in progress
-    if (!refreshing && document.visibilityState !== 'hidden') {
+    if (!refreshing) {
       refreshing = true;
       window.location.reload();
-    }
-  });
-}
-
-/**
- * Setup message listener for service worker messages
- */
-function setupMessageListener(): void {
-  navigator.serviceWorker.addEventListener('message', async event => {
-    // Handle notification from service worker when new messages are detected
-    if (event.data && event.data.type === 'NEW_MESSAGES_DETECTED') {
-      try {
-        await triggerManualSync();
-      } catch (error) {
-        console.error('Failed to refresh app state on new messages:', error);
-      }
     }
   });
 }
@@ -99,10 +79,7 @@ async function registerServiceWorker(): Promise<void> {
   // In production: '/sw.js' with type: 'classic'
   const swUrl =
     import.meta.env.MODE === 'production' ? '/sw.js' : '/dev-sw.js?dev-sw';
-  const swType =
-    import.meta.env.MODE === 'production'
-      ? 'classic'
-      : ('module' as WorkerType);
+  const swType = import.meta.env.MODE === 'production' ? 'classic' : 'module';
 
   try {
     // In dev mode, VitePWA serves the service worker dynamically

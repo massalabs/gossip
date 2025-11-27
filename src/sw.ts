@@ -53,10 +53,6 @@ interface NotificationEvent extends Event {
   waitUntil(promise: Promise<void>): void;
 }
 
-// Import message reception service (will be available in Service Worker context)
-// Note: In a real implementation, you'd need to ensure WASM modules work in SW context
-// For now, we'll use a simplified version that only fetches encrypted messages
-
 // Service Worker message reception logic
 class ServiceWorkerMessageReception {
   private protocol: RestMessageProtocol;
@@ -236,6 +232,12 @@ class ServiceWorkerMessageReception {
 
 const messageReception = new ServiceWorkerMessageReception();
 
+// ============================================================================
+// EVENT LISTENER REGISTRATIONS
+// All event listeners must be registered during initial script evaluation
+// ============================================================================
+
+// Handle messages from the main app
 self.addEventListener('message', event => {
   // Handle request to start/restart sync scheduler
   if (event.data && event.data.type === 'START_SYNC_SCHEDULER') {
@@ -250,6 +252,111 @@ self.addEventListener('message', event => {
     return;
   }
 });
+
+// Register periodic background sync
+self.addEventListener('sync', (event: Event) => {
+  if ((event as SyncEvent).tag === 'gossip-message-sync') {
+    // Check if app is active - if so, skip sync (main app handles it)
+    (event as SyncEvent).waitUntil(
+      hasActiveClients().then(isActive => {
+        if (isActive) {
+          // App is active - main app handles sync, skip this one
+          return;
+        }
+
+        // App is in background - perform sync
+        trackSync('periodic');
+        return performSyncAndNotify().catch(error => {
+          console.error('Service Worker: Periodic sync failed', error);
+        });
+      })
+    );
+  }
+});
+
+// Skip waiting and activate immediately when new service worker is installed
+self.addEventListener('install', event => {
+  // Skip waiting to activate the new service worker immediately
+  // This ensures updates are applied without requiring all pages to close
+  event.waitUntil(self.skipWaiting());
+});
+
+// Start fallback sync when service worker activates
+self.addEventListener('activate', event => {
+  event.waitUntil(
+    Promise.resolve().then(() => {
+      // Use Workbox's clientsClaim to take control of all clients immediately
+      // This is more reliable than manual self.clients.claim()
+      clientsClaim();
+
+      // On mobile, service workers may be terminated, so we rely more on
+      // Periodic Background Sync API. The fallback timer is less reliable.
+      startFallbackSync();
+    })
+  );
+});
+
+// Handle notification clicks
+self.addEventListener('notificationclick', (event: NotificationEvent) => {
+  event.notification.close();
+
+  // Get the target URL from notification data, default to discussions
+  const notificationData = event.notification.data as
+    | { type?: string; url?: string; contactUserId?: string }
+    | undefined;
+  let targetUrl = '/discussions';
+
+  if (notificationData?.url) {
+    targetUrl = notificationData.url;
+  } else if (notificationData?.contactUserId) {
+    // Navigate to specific discussion if contactUserId is provided
+    targetUrl = `/discussion/${notificationData.contactUserId}`;
+  }
+
+  event.waitUntil(
+    (async (): Promise<void> => {
+      const clientList = await self.clients.matchAll({
+        type: 'window',
+        includeUncontrolled: true,
+      });
+
+      // Try to find an existing window and navigate it
+      for (const client of clientList as WindowClient[]) {
+        // Check if this is our app (same origin)
+        const clientUrl = new URL(client.url);
+        const swUrl = new URL(self.registration.scope);
+        if (clientUrl.origin === swUrl.origin && 'focus' in client) {
+          // Navigate to target URL and focus
+          let navigatedClient: WindowClient | null = null;
+          try {
+            navigatedClient = await client.navigate(targetUrl);
+          } catch (_error) {
+            // Navigation failed (e.g., CORS or other restrictions)
+            // Try the next client instead
+            continue;
+          }
+
+          if (navigatedClient) {
+            try {
+              await navigatedClient.focus();
+            } catch (_error) {
+              // Focus failed, but navigation succeeded, so we're done
+            }
+            return;
+          }
+        }
+      }
+      // No existing window found, open a new one
+      if (self.clients.openWindow) {
+        await self.clients.openWindow(targetUrl);
+      }
+    })()
+  );
+});
+
+// ============================================================================
+// FUNCTION DEFINITIONS
+// ============================================================================
 
 /**
  * Track sync frequency for monitoring and debugging
@@ -272,27 +379,6 @@ function trackSync(syncType: 'periodic' | 'fallback'): void {
 
   syncStats.lastSyncTime = now;
 }
-
-// Register periodic background sync
-self.addEventListener('sync', (event: Event) => {
-  if ((event as SyncEvent).tag === 'gossip-message-sync') {
-    // Check if app is active - if so, skip sync (main app handles it)
-    (event as SyncEvent).waitUntil(
-      hasActiveClients().then(isActive => {
-        if (isActive) {
-          // App is active - main app handles sync, skip this one
-          return;
-        }
-
-        // App is in background - perform sync
-        trackSync('periodic');
-        return performSyncAndNotify().catch(error => {
-          console.error('Service Worker: Periodic sync failed', error);
-        });
-      })
-    );
-  }
-});
 
 /**
  * Build notification body text for new messages/announcements
@@ -403,21 +489,21 @@ async function showNotificationIfAllowed(
 }
 
 /**
- * Perform sync operation
- */
-async function performSync(): Promise<void> {
-  await performSyncAndNotify();
-}
-
-/**
  * Perform sync and, if needed, show a notification or notify clients
  */
 async function performSyncAndNotify(): Promise<void> {
   try {
-    const [messageResult, announcementResult] = await Promise.all([
-      messageReception.fetchAllDiscussions(),
-      messageReception.fetchAnnouncements(),
-    ]);
+    // const [messageResult, announcementResult] = await Promise.all([
+    //   messageReception.fetchAllDiscussions(),
+    //   messageReception.fetchAnnouncements(),
+    // ]);
+
+    // Disable announcements sync for now
+    const messageResult = await messageReception.fetchAllDiscussions();
+    const announcementResult = {
+      success: true,
+      newAnnouncementsCount: 0,
+    };
 
     const hasNewMessages =
       messageResult.success && messageResult.newMessagesCount > 0;
@@ -434,19 +520,6 @@ async function performSyncAndNotify(): Promise<void> {
           messageResult.newMessagesCount,
           announcementResult.newAnnouncementsCount
         );
-      } else {
-        // App is active - notify main app to refresh immediately
-        const clients = await self.clients.matchAll({
-          type: 'window',
-          includeUncontrolled: false,
-        });
-        for (const client of clients) {
-          client.postMessage({
-            type: 'NEW_MESSAGES_DETECTED',
-            messageCount: messageResult.newMessagesCount,
-            announcementCount: announcementResult.newAnnouncementsCount,
-          });
-        }
       }
     }
   } catch (error) {
@@ -487,7 +560,7 @@ function scheduleBackgroundSync(): void {
   const sw = getServiceWorkerScope();
   const timeoutId = setTimeout(async () => {
     trackSync('fallback');
-    await performSync();
+    await performSyncAndNotify();
     // Schedule next sync (will re-check app state)
     scheduleNextSync();
   }, FALLBACK_SYNC_INTERVAL_MS);
@@ -510,33 +583,21 @@ function scheduleNextSync(): void {
   }
 
   hasActiveClients()
-    .then(isActive => {
+    .then((isActive: boolean) => {
       if (isActive) {
         // App is active - main app handles sync via useAppStateRefresh
         // Just reschedule to check again later (in case app goes to background)
         rescheduleNextCheck();
-        return;
+      } else {
+        // App is in background - perform sync
+        scheduleBackgroundSync();
       }
-
-      // App is in background - perform sync
-      scheduleBackgroundSync();
     })
     .catch(error => {
+      // hasActiveClients() should never reject (it catches errors internally),
+      // but if the Promise chain fails for any reason, assume app is not active and sync
       console.error('Service Worker: Error scheduling sync', error);
-      // Fallback to default interval on error (only sync if app is not active)
-      hasActiveClients()
-        .then(isActive => {
-          if (!isActive) {
-            scheduleBackgroundSync();
-          } else {
-            // App is active, just reschedule check
-            rescheduleNextCheck();
-          }
-        })
-        .catch(() => {
-          // If we can't check, assume app is not active and sync
-          scheduleBackgroundSync();
-        });
+      scheduleBackgroundSync();
     });
 }
 
@@ -577,27 +638,10 @@ function startFallbackSync() {
   scheduleNextSync();
 }
 
-// Skip waiting and activate immediately when new service worker is installed
-self.addEventListener('install', event => {
-  // Skip waiting to activate the new service worker immediately
-  // This ensures updates are applied without requiring all pages to close
-  event.waitUntil(self.skipWaiting());
-});
-
-// Start fallback sync when service worker activates
-self.addEventListener('activate', event => {
-  event.waitUntil(
-    Promise.resolve().then(() => {
-      // Use Workbox's clientsClaim to take control of all clients immediately
-      // This is more reliable than manual self.clients.claim()
-      clientsClaim();
-
-      // On mobile, service workers may be terminated, so we rely more on
-      // Periodic Background Sync API. The fallback timer is less reliable.
-      startFallbackSync();
-    })
-  );
-});
+// ============================================================================
+// INITIALIZATION CODE
+// Code that runs after all event listeners are registered
+// ============================================================================
 
 // Start sync immediately when service worker loads (if already activated)
 // This handles the case where the service worker is already active when the page loads
@@ -609,66 +653,28 @@ setTimeout(() => {
   }
 }, 100);
 
-// Handle notification clicks
-self.addEventListener('notificationclick', (event: NotificationEvent) => {
-  event.notification.close();
+// self.__WB_MANIFEST is the default injection point
+// Add revision info to index.html to avoid Workbox warning
+const manifest = self.__WB_MANIFEST.map(entry => {
+  // If entry is a string, convert to object format
+  const url = typeof entry === 'string' ? entry : entry.url;
 
-  // Get the target URL from notification data, default to discussions
-  const notificationData = event.notification.data as
-    | { type?: string; url?: string; contactUserId?: string }
-    | undefined;
-  let targetUrl = '/discussions';
-
-  if (notificationData?.url) {
-    targetUrl = notificationData.url;
-  } else if (notificationData?.contactUserId) {
-    // Navigate to specific discussion if contactUserId is provided
-    targetUrl = `/discussion/${notificationData.contactUserId}`;
+  // Add revision to index.html if it doesn't have one
+  if (url === 'index.html' || url === '/index.html') {
+    return {
+      url,
+      revision:
+        typeof entry === 'object' && entry.revision
+          ? entry.revision
+          : APP_BUILD_ID, // Use build ID as revision
+    };
   }
 
-  event.waitUntil(
-    (async (): Promise<void> => {
-      const clientList = await self.clients.matchAll({
-        type: 'window',
-        includeUncontrolled: true,
-      });
-
-      // Try to find an existing window and navigate it
-      for (const client of clientList as WindowClient[]) {
-        // Check if this is our app (same origin)
-        const clientUrl = new URL(client.url);
-        const swUrl = new URL(self.registration.scope);
-        if (clientUrl.origin === swUrl.origin && 'focus' in client) {
-          // Navigate to target URL and focus
-          let navigatedClient: WindowClient | null = null;
-          try {
-            navigatedClient = await client.navigate(targetUrl);
-          } catch (_error) {
-            // Navigation failed (e.g., CORS or other restrictions)
-            // Try the next client instead
-            continue;
-          }
-
-          if (navigatedClient) {
-            try {
-              await navigatedClient.focus();
-            } catch (_error) {
-              // Focus failed, but navigation succeeded, so we're done
-            }
-            return;
-          }
-        }
-      }
-      // No existing window found, open a new one
-      if (self.clients.openWindow) {
-        await self.clients.openWindow(targetUrl);
-      }
-    })()
-  );
+  // Return entry as-is (already has revision or doesn't need one)
+  return entry;
 });
 
-// self.__WB_MANIFEST is the default injection point
-precacheAndRoute(self.__WB_MANIFEST);
+precacheAndRoute(manifest);
 
 // clean old assets
 cleanupOutdatedCaches();
