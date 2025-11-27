@@ -81,7 +81,7 @@ export function useContactForm() {
 
   const canSubmit =
     name.error === null &&
-    name.value.length > 0 &&
+    name.value.trim().length > 0 &&
     userId.error === null &&
     userId.value.trim().length > 0 &&
     publicKeys !== null &&
