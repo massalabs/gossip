@@ -10,8 +10,6 @@ describe('node environment example', () => {
   });
 
   it('runs in node environment without DOM', () => {
-    // In node environment, window/document are undefined
-    // This test verifies we're actually in node mode, not browser
     expect(typeof window === 'undefined' || window === null).toBe(true);
     expect(typeof document === 'undefined' || document === null).toBe(true);
   });
@@ -22,9 +20,7 @@ describe('node environment example', () => {
   });
 
   it('can test crypto utilities', () => {
-    // Example: Testing pure crypto logic without DOM
     const hash = (str: string) => {
-      // Simplified example
       return str.split('').reduce((acc, char) => {
         return acc + char.charCodeAt(0);
       }, 0);

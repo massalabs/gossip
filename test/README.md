@@ -2,16 +2,47 @@
 
 Vitest is configured to run tests in **3 different environments** based on file naming patterns.
 
-## 📁 File Naming Conventions
+## 📁 File Naming & Organization
 
-Tests are automatically routed to the correct environment based on their filename:
+Tests are routed to the correct environment using **two patterns**: suffix OR folder
 
-| Pattern                 | Environment            | Use Case                                | Example                   |
-| ----------------------- | ---------------------- | --------------------------------------- | ------------------------- |
-| `*.browser.spec.tsx`    | **Browser** (Chromium) | Component tests, real browser APIs      | `button.browser.spec.tsx` |
-| `*.jsdom.spec.ts`       | **jsdom**              | Unit tests with DOM simulation (faster) | `utils.jsdom.spec.ts`     |
-| `*.node.spec.ts`        | **Node**               | Pure logic, no DOM                      | `crypto.node.spec.ts`     |
-| `*.spec.ts` (no suffix) | **jsdom** (default)    | Regular unit tests (default catch-all)  | `myFunction.spec.ts`      |
+### Pattern 1: File Suffix (Anywhere)
+
+| Pattern                 | Environment            | Example                        |
+| ----------------------- | ---------------------- | ------------------------------ |
+| `*.browser.spec.tsx`    | **Browser** (Chromium) | `test/Button.browser.spec.tsx` |
+| `*.jsdom.spec.ts`       | **jsdom**              | `test/utils.jsdom.spec.ts`     |
+| `*.node.spec.ts`        | **Node**               | `test/crypto.node.spec.ts`     |
+| `*.spec.ts` (no suffix) | **jsdom** (default)    | `test/helpers.spec.ts`         |
+
+### Pattern 2: Folder Organization
+
+| Folder              | Environment            | Example                        |
+| ------------------- | ---------------------- | ------------------------------ |
+| `test/browser/**/*` | **Browser** (Chromium) | `test/browser/Button.spec.tsx` |
+| `test/jsdom/**/*`   | **jsdom**              | `test/jsdom/utils.spec.ts`     |
+| `test/node/**/*`    | **Node**               | `test/node/crypto.spec.ts`     |
+| Anywhere else       | **jsdom** (default)    | `test/helpers.spec.ts`         |
+
+### Mix & Match!
+
+You can use **both patterns** in the same project:
+
+```
+test/
+├── browser/
+│   └── components/
+│       └── Button.spec.tsx          ← Runs in browser
+├── node/
+│   └── utils/
+│       └── encryption.spec.ts       ← Runs in node
+├── components/
+│   └── Avatar.browser.spec.tsx      ← Runs in browser (suffix)
+├── utils/
+│   ├── dom.jsdom.spec.ts            ← Runs in jsdom (suffix)
+│   └── helpers.spec.ts              ← Runs in jsdom (default)
+└── examples/                         ← Example tests
+```
 
 ## 🎯 Which Environment Should I Use?
 
@@ -106,21 +137,32 @@ npm test
 
 ## 📊 Current Test Status
 
-- ✅ **Browser tests**: 8 tests in `examples/button.browser.spec.tsx`
-- ✅ **jsdom tests**: 3 tests in `examples/utils.jsdom.spec.ts`
-- ✅ **Node tests**: 4 tests in `examples/crypto.node.spec.ts`
-- ✅ **Unit tests** (default): 3 tests in `example.spec.ts` (no suffix)
+### Suffix Pattern (examples/)
 
-**Total**: 18 tests passing across 4 environment projects
+- ✅ **Browser**: 8 tests in `examples/button.browser.spec.tsx`
+- ✅ **jsdom**: 3 tests in `examples/utils.jsdom.spec.ts`
+- ✅ **Node**: 4 tests in `examples/crypto.node.spec.ts`
+- ✅ **Unit**: 3 tests in `examples/example.spec.ts`
+
+### Folder Pattern (browser/, jsdom/, node/)
+
+- ✅ **Browser**: 1 test in `browser/SimpleButton.spec.tsx`
+- ✅ **jsdom**: 2 tests in `jsdom/domUtils.spec.ts`
+- ✅ **Node**: 3 tests in `node/pureLogic.spec.ts`
+
+**Total**: 24 tests passing across 4 environment projects
 
 ```
+✓ |browser (chromium)| test/browser/SimpleButton.spec.tsx (1 test)
 ✓ |browser (chromium)| test/examples/button.browser.spec.tsx (8 tests)
+✓ |jsdom| test/jsdom/domUtils.spec.ts (2 tests)
 ✓ |jsdom| test/examples/utils.jsdom.spec.ts (3 tests)
+✓ |node| test/node/pureLogic.spec.ts (3 tests)
 ✓ |node| test/examples/crypto.node.spec.ts (4 tests)
-✓ |unit| test/example.spec.ts (3 tests)
+✓ |unit| test/examples/example.spec.ts (3 tests)
 
-Test Files  4 passed (4)
-Tests  18 passed (18)
+Test Files  7 passed (7)
+Tests  24 passed (24)
 ```
 
 ## 🔧 Configuration

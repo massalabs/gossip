@@ -10,7 +10,6 @@ describe('Button Component', () => {
   it('renders with children text', async () => {
     await render(<Button>Click me</Button>);
 
-    // Use page API for querying and expect.element for assertions
     const button = page.getByRole('button', { name: /click me/i });
     await expect.element(button).toBeInTheDocument();
     await expect.element(button).toHaveTextContent('Click me');
@@ -24,11 +23,9 @@ describe('Button Component', () => {
 
     await render(<Button onClick={handleClick}>Click me</Button>);
 
-    // Use page API for interactions
     const button = page.getByRole('button', { name: /click me/i });
     await button.click();
 
-    // Verify the click handler was called
     expect(clicked).toBe(true);
   });
 
@@ -42,7 +39,6 @@ describe('Button Component', () => {
   it('shows loading spinner when loading prop is true', async () => {
     await render(<Button loading>Loading Button</Button>);
 
-    // Check for loading spinner (div with animate-spin class)
     const spinner = page
       .getByRole('button')
       .element()
@@ -58,7 +54,6 @@ describe('Button Component', () => {
     const primaryButton = page.getByRole('button', { name: /primary/i });
     await expect.element(primaryButton).toHaveClass('bg-primary');
 
-    // Test secondary variant
     unmount();
     await render(<Button variant="secondary">Secondary</Button>);
 

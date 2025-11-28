@@ -140,8 +140,13 @@ export default defineConfig({
             headless: true,
             instances: [{ browser: 'chromium' }],
           },
-          // Only run files with .browser. in the name
-          include: ['test/**/*.browser.{test,spec}.{ts,tsx}'],
+          // Support both patterns anywhere:
+          // - test/**/*.browser.{test,spec}.{ts,tsx} (suffix pattern - anywhere)
+          // - test/**/browser/**/*.{test,spec}.{ts,tsx} (folder pattern - anywhere)
+          include: [
+            'test/**/*.browser.{test,spec}.{ts,tsx}',
+            'test/**/browser/**/*.{test,spec}.{ts,tsx}',
+          ],
         },
       },
 
@@ -151,8 +156,13 @@ export default defineConfig({
           name: 'jsdom',
           environment: 'jsdom',
           setupFiles: ['./test/setup.ts'],
-          // Only run files with .jsdom. in the name
-          include: ['test/**/*.jsdom.{test,spec}.{ts,tsx}'],
+          // Support both patterns anywhere:
+          // - test/**/*.jsdom.{test,spec}.{ts,tsx} (suffix pattern - anywhere)
+          // - test/**/jsdom/**/*.{test,spec}.{ts,tsx} (folder pattern - anywhere)
+          include: [
+            'test/**/*.jsdom.{test,spec}.{ts,tsx}',
+            'test/**/jsdom/**/*.{test,spec}.{ts,tsx}',
+          ],
         },
       },
 
@@ -161,8 +171,13 @@ export default defineConfig({
         test: {
           name: 'node',
           environment: 'node',
-          // Only run files with .node. in the name
-          include: ['test/**/*.node.{test,spec}.{ts,tsx}'],
+          // Support both patterns anywhere:
+          // - test/**/*.node.{test,spec}.{ts,tsx} (suffix pattern - anywhere)
+          // - test/**/node/**/*.{test,spec}.{ts,tsx} (folder pattern - anywhere)
+          include: [
+            'test/**/*.node.{test,spec}.{ts,tsx}',
+            'test/**/node/**/*.{test,spec}.{ts,tsx}',
+          ],
         },
       },
 
@@ -172,15 +187,17 @@ export default defineConfig({
           name: 'unit',
           environment: 'jsdom',
           setupFiles: ['./test/setup.ts'],
-          // Catch all test files that don't have .browser, .jsdom, or .node suffix
-          include: [
-            'test/**/*.{test,spec}.{ts,tsx}',
-            'src/**/*.{test,spec}.{ts,tsx}',
-          ],
+          // Catch all test files that don't match specific patterns
+          include: ['test/**/*.{test,spec}.{ts,tsx}'],
           exclude: [
+            // Exclude suffix patterns
             'test/**/*.browser.*',
             'test/**/*.jsdom.*',
             'test/**/*.node.*',
+            // Exclude folder patterns (anywhere in path)
+            'test/**/browser/**',
+            'test/**/jsdom/**',
+            'test/**/node/**',
           ],
         },
       },

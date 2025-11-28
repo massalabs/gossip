@@ -1,11 +1,7 @@
-// This file has NO suffix (.browser, .jsdom, .node)
-// It will run in the DEFAULT "unit" project (jsdom environment)
-
 import { describe, it, expect } from 'vitest';
 
 describe('Default unit test example', () => {
   it('runs in jsdom by default', () => {
-    // This has access to DOM APIs because default is jsdom
     expect(typeof document).toBe('object');
     expect(typeof window).toBe('object');
   });

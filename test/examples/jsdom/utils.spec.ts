@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 
 describe('jsdom environment example', () => {
   it('can access DOM APIs via jsdom', () => {
+    // jsdom provides a simulated DOM
     const div = document.createElement('div');
     div.textContent = 'Hello jsdom';
 
