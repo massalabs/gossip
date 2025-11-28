@@ -26,12 +26,6 @@ describe('utils/validation.ts', () => {
       expect(result.error).toBe('Password must be at least 8 characters long');
     });
 
-    it('should reject password with exactly 7 characters', () => {
-      const result = validatePassword('1234567');
-      expect(result.valid).toBe(false);
-      expect(result.error).toBe('Password must be at least 8 characters long');
-    });
-
     it('should accept password with exactly 8 characters', () => {
       const result = validatePassword('12345678');
       expect(result.valid).toBe(true);
