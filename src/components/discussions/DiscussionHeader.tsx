@@ -5,6 +5,7 @@ import { formatUserId } from '../../utils/userId';
 import ContactAvatar from '../avatar/ContactAvatar';
 import Button from '../ui/Button';
 import BackButton from '../ui/BackButton';
+import { ROUTES } from '../../constants/routes';
 
 interface DiscussionHeaderProps {
   contact?: Contact | null | undefined;
@@ -57,9 +58,11 @@ const DiscussionHeader: React.FC<DiscussionHeaderProps> = ({
   // Navigate to discussion settings if discussion exists, otherwise contact page
   const handleHeaderClick = () => {
     if (discussion?.id) {
-      navigate(`/discussion/${discussion.id}/settings`);
+      navigate(
+        ROUTES.discussionSettings({ discussionId: discussion.id.toString() })
+      );
     } else {
-      navigate(`/contact/${contact.userId}`);
+      navigate(ROUTES.contact({ userId: contact.userId }));
     }
   };
 

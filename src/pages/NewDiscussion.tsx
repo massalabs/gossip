@@ -7,6 +7,7 @@ import { Contact, db } from '../db';
 import ContactAvatar from '../components/avatar/ContactAvatar';
 import { formatUserId } from '../utils';
 import PageHeader from '../components/ui/PageHeader';
+import { ROUTES } from '../constants/routes';
 
 /* TODO: contact list is implemented using corresponding discussions.
 This is a temporary solution to avoid duplicating the contact list code.
@@ -43,8 +44,8 @@ const NewDiscussion: React.FC = () => {
     };
   }, [userProfile?.userId]);
 
-  const handleClose = () => navigate('/');
-  const onNewContact = () => navigate('/new-contact');
+  const handleClose = () => navigate(ROUTES.default());
+  const onNewContact = () => navigate(ROUTES.newContact());
 
   const onSelectContact = async (contact: Contact) => {
     if (!userProfile?.userId) return;
@@ -53,7 +54,7 @@ const NewDiscussion: React.FC = () => {
       contact.userId
     );
     if (discussion && discussion.status === 'active') {
-      navigate(`/discussion/${contact.userId}`);
+      navigate(ROUTES.discussion({ userId: contact.userId }));
     }
   };
 
@@ -171,7 +172,9 @@ const NewDiscussion: React.FC = () => {
                         </div>
                       </Button>
                       <button
-                        onClick={() => navigate(`/contact/${contact.userId}`)}
+                        onClick={() =>
+                          navigate(ROUTES.contact({ userId: contact.userId }))
+                        }
                         className="shrink-0 p-3 hover:bg-accent/50 transition-colors h-auto flex items-center justify-center"
                         title="Edit contact"
                         aria-label="Edit contact"

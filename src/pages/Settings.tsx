@@ -13,6 +13,7 @@ import InfoRow from '../components/ui/InfoRow';
 import CopyClipboard from '../components/ui/CopyClipboard';
 import { useVersionCheck } from '../hooks/useVersionCheck';
 import { STORAGE_KEYS, clearAppStorage } from '../utils/localStorage';
+import { ROUTES } from '../constants/routes';
 import {
   DangerIcon,
   ShareContactIcon,
@@ -98,7 +99,7 @@ const Settings = (): React.ReactElement => {
   const handleResetAccount = useCallback(async () => {
     try {
       await resetAccount();
-      navigate('/');
+      navigate(ROUTES.default());
     } catch (error) {
       console.error('Failed to reset account:', error);
     }
@@ -125,7 +126,7 @@ const Settings = (): React.ReactElement => {
 
   const handleScanSuccess = useCallback(
     (userId: string) => {
-      navigate(`/new-contact`, {
+      navigate(ROUTES.newContact(), {
         state: { userId },
         replace: true,
       });

@@ -7,6 +7,7 @@ import AccountImport from '../components/account/AccountImport';
 import Button from '../components/ui/Button';
 import { useNavigate } from 'react-router-dom';
 import { useVersionCheck } from '../hooks/useVersionCheck';
+import { ROUTES } from '../constants/routes';
 
 interface LoginProps {
   onCreateNewAccount: () => void;
@@ -171,8 +172,8 @@ const Login: React.FC<LoginProps> = React.memo(
         const errorMessage = 'Invalid password. Please try again.';
         onErrorChange?.(errorMessage);
         setPassword('');
-        if (window.location.pathname !== '/welcome') {
-          navigate('/welcome');
+        if (window.location.pathname !== ROUTES.welcome()) {
+          navigate(ROUTES.welcome());
         }
       } finally {
         setIsLoading(false);
