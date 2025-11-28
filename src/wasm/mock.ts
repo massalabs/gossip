@@ -5,14 +5,7 @@
  */
 
 import { vi } from 'vitest';
-import Hasher from 'blake3-js';
-
-// Helper function to match Rust's blake3::hash API
-function hash(input: Uint8Array): Uint8Array {
-  const result = Hasher.newRegular().update(input).finalize(32, 'bytes');
-  // finalize returns number[] when format is 'bytes', convert to Uint8Array
-  return new Uint8Array(result as number[]);
-}
+import { blake3 } from '@noble/hashes/blake3';
 
 /**
  * Mock UserPublicKeys class
@@ -47,7 +40,7 @@ export class MockUserPublicKeys {
   derive_id = vi.fn(() => {
     // Derive user_id by hashing to_bytes() with Blake3 (matching Rust implementation)
     const serialized = this.to_bytes();
-    const hashResult = hash(serialized);
+    const hashResult = blake3(serialized);
     return new Uint8Array(hashResult);
   });
 
