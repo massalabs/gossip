@@ -5,27 +5,10 @@ import tailwindcss from '@tailwindcss/vite';
 import { ViteImageOptimizer } from 'vite-plugin-image-optimizer';
 import { nodePolyfills } from 'vite-plugin-node-polyfills';
 import mkcert from 'vite-plugin-mkcert';
+import { playwright } from '@vitest/browser-playwright';
 
 // https://vitejs.dev/config/
 export default defineConfig({
-  test: {
-    globals: true,
-    environment: 'node', // Use 'node' for pure logic tests (faster). Change to 'jsdom' if testing React components
-    setupFiles: ['./src/test/setup.ts'],
-    include: ['src/**/*.{test,spec}.{js,ts,jsx,tsx}'],
-    coverage: {
-      provider: 'v8',
-      reporter: ['text', 'json', 'html'],
-      exclude: [
-        'node_modules/',
-        'src/test/',
-        '**/*.d.ts',
-        '**/*.config.*',
-        '**/mockData',
-        'src/assets/generated/wasm/**',
-      ],
-    },
-  },
   plugins: [
     react(),
     tailwindcss(),
@@ -141,5 +124,80 @@ export default defineConfig({
   },
   build: {
     target: 'esnext',
+  },
+  test: {
+    globals: true,
+
+    // Use "projects" for multiple test environments (replaces deprecated workspace)
+    projects: [
+      // Project 1: Browser mode for component tests
+      {
+        test: {
+          name: 'browser',
+          browser: {
+            enabled: true,
+            provider: playwright(),
+            headless: true,
+            instances: [{ browser: 'chromium' }],
+          },
+          // Only run files with .browser. in the name
+          include: ['test/**/*.browser.{test,spec}.{ts,tsx}'],
+        },
+      },
+
+      // Project 2: jsdom for unit tests (DOM simulation - faster)
+      {
+        test: {
+          name: 'jsdom',
+          environment: 'jsdom',
+          setupFiles: ['./test/setup.ts'],
+          // Only run files with .jsdom. in the name
+          include: ['test/**/*.jsdom.{test,spec}.{ts,tsx}'],
+        },
+      },
+
+      // Project 3: Node environment for pure logic tests (no DOM)
+      {
+        test: {
+          name: 'node',
+          environment: 'node',
+          // Only run files with .node. in the name
+          include: ['test/**/*.node.{test,spec}.{ts,tsx}'],
+        },
+      },
+
+      // Project 4: Default jsdom for tests without suffix (catch-all)
+      {
+        test: {
+          name: 'unit',
+          environment: 'jsdom',
+          setupFiles: ['./test/setup.ts'],
+          // Catch all test files that don't have .browser, .jsdom, or .node suffix
+          include: [
+            'test/**/*.{test,spec}.{ts,tsx}',
+            'src/**/*.{test,spec}.{ts,tsx}',
+          ],
+          exclude: [
+            'test/**/*.browser.*',
+            'test/**/*.jsdom.*',
+            'test/**/*.node.*',
+          ],
+        },
+      },
+    ],
+
+    // Global coverage settings (shared by all projects)
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'json', 'html'],
+      exclude: [
+        'node_modules/',
+        'test/',
+        '**/*.d.ts',
+        '**/*.config.*',
+        '**/mockData',
+        'src/assets/generated/wasm/**',
+      ],
+    },
   },
 });
