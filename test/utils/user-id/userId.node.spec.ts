@@ -4,7 +4,7 @@ import {
   decodeUserId,
   isValidUserId,
   formatUserId,
-} from '../../src/utils/userId';
+} from '../../../src/utils/userId';
 
 describe('utils/userId.ts', () => {
   describe('encodeUserId()', () => {
@@ -267,13 +267,9 @@ describe('utils/userId.ts', () => {
     });
 
     it('should keep full string if exactly at boundary', () => {
-      // Create a string that's exactly at the boundary
-      const shortId = 'gossip1' + 'a'.repeat(14); // 8 + 6 = 14
+      const shortId = 'gossip1' + 'a'.repeat(14);
       const formatted = formatUserId(shortId, 8, 6);
       expect(formatted).toBe(shortId);
     });
   });
-
-  // Note: generate() tests are in userId-generate.jsdom.spec.ts
-  // because they require WASM loading which needs a browser/jsdom environment
 });

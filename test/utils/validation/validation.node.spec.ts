@@ -3,8 +3,8 @@ import {
   validatePassword,
   validateUsernameFormat,
   validateUserIdFormat,
-} from '../../src/utils/validation';
-import { encodeUserId } from '../../src/utils/userId';
+} from '../../../src/utils/validation';
+import { encodeUserId } from '../../../src/utils/userId';
 
 describe('utils/validation.ts', () => {
   describe('validatePassword()', () => {
