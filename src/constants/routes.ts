@@ -1,5 +1,3 @@
-// src/constants/routes.ts
-
 /**
  * Pure route builder — only one job: turn pattern + params → string
  *
@@ -7,16 +5,16 @@
  *   ROUTES.discussions()        → "/"                    (for <Route path> or NavLink to)
  *   ROUTES.discussion({ userId: '123' }) → "/discussion/123"
  *   ROUTES.discussion()         → "/discussion/:userId"  (perfect for React Router path)
- *
- * Zero dependencies. Zero side effects. SSR-safe. Tree-shakable.
+
  */
 
-type RouteBuilder = (params?: Record<string, string | number>) => string;
+type RouteParams = Record<string, string | number>;
+type RouteBuilder = (params?: RouteParams) => string;
 
 const route = (pattern: string): RouteBuilder => {
   const paramNames = (pattern.match(/:[^/]+/g) || []).map(p => p.slice(1));
 
-  const build = (params?: Record<string, string | number>): string => {
+  const build = (params?: RouteParams): string => {
     // No params passed → return the raw pattern (with :param placeholders)
     if (params === undefined || paramNames.length === 0) {
       return pattern;

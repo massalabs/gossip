@@ -75,8 +75,8 @@ export const UnauthenticatedRoutes: React.FC<UnauthenticatedRoutesProps> = ({
           />
         }
       />
-      <Route path="/" element={<Navigate to={ROUTES.default()} replace />} />
-      <Route path="*" element={<Navigate to={ROUTES.default()} replace />} />
+      <Route path="/" element={<Navigate to={ROUTES.welcome()} replace />} />
+      <Route path="*" element={<Navigate to={ROUTES.welcome()} replace />} />
     </Routes>
   );
 };

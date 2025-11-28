@@ -1,11 +1,7 @@
 import React from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate, matchPath } from 'react-router-dom';
 import NavButton from './NavButton';
-import {
-  // WalletIcon,
-  DiscussionsIcon,
-  SettingsIcon,
-} from './icons';
+import { DiscussionsIcon, SettingsIcon } from './icons';
 import { ROUTES } from '../../constants/routes';
 
 type BottomNavigationTab = 'discussions' | 'settings';
@@ -14,9 +10,9 @@ const BottomNavigation: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
 
-  // Use route.isActive() for cleaner active state detection
-  const activeTab: BottomNavigationTab = ROUTES.settings.isActive(
-    location.pathname
+  const activeTab: BottomNavigationTab = matchPath(
+    location.pathname,
+    ROUTES.settings()
   )
     ? 'settings'
     : 'discussions';
