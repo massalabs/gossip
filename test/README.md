@@ -135,30 +135,6 @@ npm run test:coverage
 npm test
 ```
 
-## 📊 Current Test Status
-
-### Suffix Pattern (examples/)
-
-- ✅ **Browser**: 8 tests in `examples/button.browser.spec.tsx`
-- ✅ **jsdom**: 3 tests in `examples/utils.jsdom.spec.ts`
-- ✅ **Node**: 4 tests in `examples/crypto.node.spec.ts`
-- ✅ **Unit**: 3 tests in `examples/example.spec.ts`
-
-### Folder Pattern (browser/, jsdom/, node/)
-
-- ✅ **Browser**: 1 test in `examples/browser/nested.spec.tsx`
-- ✅ **jsdom**: 2 tests in `examples/jsdom/utils.spec.ts`
-- ✅ **Node**: 3 tests in `examples/node/nested.spec.ts`
-
-**Total**: 24 tests passing across 4 environment projects
-
-✓ |node| test/examples/crypto.node.spec.ts (4 tests)
-✓ |unit| test/examples/example.spec.ts (3 tests)
-
-Test Files  7 passed (7)
-Tests  24 passed (24)
-```
-
 ## 🔧 Configuration
 
 Tests are configured in `vite.config.ts` using the modern **`projects`** approach (replaces deprecated `workspace`):
