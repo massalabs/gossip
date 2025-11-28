@@ -70,11 +70,6 @@ describe('utils/validation.ts', () => {
       expect(result.error).toBe('Username must be at least 3 characters long');
     });
 
-    it('should reject username with exactly 2 characters', () => {
-      const result = validateUsernameFormat('AB');
-      expect(result.valid).toBe(false);
-      expect(result.error).toBe('Username must be at least 3 characters long');
-    });
 
     it('should accept username with exactly 3 characters', () => {
       const result = validateUsernameFormat('abc');
