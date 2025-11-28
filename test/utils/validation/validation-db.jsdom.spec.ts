@@ -1,9 +1,11 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   validateUsernameAvailability,
   validateUsernameFormatAndAvailability,
-} from '../../src/utils/validation';
-import { db } from '../../src/db';
+} from '../../../src/utils/validation';
+import { db } from '../../../src/db';
+import { userProfile } from '../../helpers';
+import { Dexie, PromiseExtended } from 'dexie';
 
 describe('utils/validation.ts - Database tests (requires IndexedDB)', () => {
   describe('validateUsernameAvailability()', () => {
@@ -30,12 +32,12 @@ describe('utils/validation.ts - Database tests (requires IndexedDB)', () => {
 
     it('should reject username that already exists', async () => {
       // Create a user profile
-      await db.userProfile.add({
-        id: 1,
-        username: 'existinguser',
-        userId: 'gossip1qpzry9x8gf2tvdw0s3jn54khce6mua7l',
-        createdAt: new Date(),
-      });
+      await db.userProfile.add(
+        userProfile()
+          .username('existinguser')
+          .userId('gossip1qpzry9x8gf2tvdw0s3jn54khce6mua7l')
+          .build()
+      );
 
       const result = await validateUsernameAvailability('existinguser');
       expect(result.valid).toBe(false);
@@ -46,12 +48,12 @@ describe('utils/validation.ts - Database tests (requires IndexedDB)', () => {
 
     it('should reject username case-insensitively', async () => {
       // Create a user profile with lowercase username
-      await db.userProfile.add({
-        id: 1,
-        username: 'testuser',
-        userId: 'gossip1qpzry9x8gf2tvdw0s3jn54khce6mua7l',
-        createdAt: new Date(),
-      });
+      await db.userProfile.add(
+        userProfile()
+          .username('testuser')
+          .userId('gossip1qpzry9x8gf2tvdw0s3jn54khce6mua7l')
+          .build()
+      );
 
       // Try with uppercase
       const result = await validateUsernameAvailability('TestUser');
@@ -63,12 +65,12 @@ describe('utils/validation.ts - Database tests (requires IndexedDB)', () => {
 
     it('should handle username with whitespace', async () => {
       // Create a user profile
-      await db.userProfile.add({
-        id: 1,
-        username: 'testuser',
-        userId: 'gossip1qpzry9x8gf2tvdw0s3jn54khce6mua7l',
-        createdAt: new Date(),
-      });
+      await db.userProfile.add(
+        userProfile()
+          .username('testuser')
+          .userId('gossip1qpzry9x8gf2tvdw0s3jn54khce6mua7l')
+          .build()
+      );
 
       // Try with whitespace
       const result = await validateUsernameAvailability('  testuser  ');
@@ -86,9 +88,9 @@ describe('utils/validation.ts - Database tests (requires IndexedDB)', () => {
 
       // Mock the db to throw an error
       const originalOpen = db.open.bind(db);
-      db.open = async () => {
+      db.open = vi.fn(async () => {
         throw new Error('Database connection failed');
-      };
+      }) as unknown as () => PromiseExtended<Dexie>;
 
       const result = await validateUsernameAvailability('testuser');
       expect(result.valid).toBe(false);
@@ -120,12 +122,12 @@ describe('utils/validation.ts - Database tests (requires IndexedDB)', () => {
     });
 
     it('should reject if format is valid but username exists', async () => {
-      await db.userProfile.add({
-        id: 1,
-        username: 'existinguser',
-        userId: 'gossip1qpzry9x8gf2tvdw0s3jn54khce6mua7l',
-        createdAt: new Date(),
-      });
+      await db.userProfile.add(
+        userProfile()
+          .username('existinguser')
+          .userId('gossip1qpzry9x8gf2tvdw0s3jn54khce6mua7l')
+          .build()
+      );
 
       const result =
         await validateUsernameFormatAndAvailability('existinguser');

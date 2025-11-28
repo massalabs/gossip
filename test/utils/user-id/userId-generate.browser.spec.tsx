@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { generate, isValidUserId, decodeUserId } from '../../src/utils/userId';
+import {
+  generate,
+  isValidUserId,
+  decodeUserId,
+} from '../../../src/utils/userId';
 
 describe('utils/userId.ts - generate() (requires WASM)', () => {
   describe('generate()', () => {
