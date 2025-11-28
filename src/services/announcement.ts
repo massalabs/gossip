@@ -190,7 +190,10 @@ export class AnnouncementService {
         contactUserIdString
       );
 
-      if (!contact) {
+      const isIncomingAnnouncement = !contact;
+
+      // If the announcement is incoming, we need to create a new contact
+      if (isIncomingAnnouncement) {
         const contactName =
           await this._generateTemporaryContactName(ownerUserId);
 
@@ -221,15 +224,19 @@ export class AnnouncementService {
         announcementMessage
       );
 
-      try {
-        await notificationService.showNewDiscussionNotification(
-          announcementMessage
-        );
-      } catch (notificationError) {
-        console.error(
-          'Failed to show new discussion notification:',
-          notificationError
-        );
+      // Only show notification if app is not active (in background, minimized, or in another tab)
+      const isAppActive = typeof document !== 'undefined' && !document.hidden;
+      if (isIncomingAnnouncement && !isAppActive) {
+        try {
+          await notificationService.showNewDiscussionNotification(
+            announcementMessage
+          );
+        } catch (notificationError) {
+          console.error(
+            'Failed to show new discussion notification:',
+            notificationError
+          );
+        }
       }
 
       return {
