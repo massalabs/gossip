@@ -146,18 +146,12 @@ npm test
 
 ### Folder Pattern (browser/, jsdom/, node/)
 
-- ✅ **Browser**: 1 test in `browser/SimpleButton.spec.tsx`
-- ✅ **jsdom**: 2 tests in `jsdom/domUtils.spec.ts`
-- ✅ **Node**: 3 tests in `node/pureLogic.spec.ts`
+- ✅ **Browser**: 1 test in `examples/browser/nested.spec.tsx`
+- ✅ **jsdom**: 2 tests in `examples/jsdom/utils.spec.ts`
+- ✅ **Node**: 3 tests in `examples/node/nested.spec.ts`
 
 **Total**: 24 tests passing across 4 environment projects
 
-```
-✓ |browser (chromium)| test/browser/SimpleButton.spec.tsx (1 test)
-✓ |browser (chromium)| test/examples/button.browser.spec.tsx (8 tests)
-✓ |jsdom| test/jsdom/domUtils.spec.ts (2 tests)
-✓ |jsdom| test/examples/utils.jsdom.spec.ts (3 tests)
-✓ |node| test/node/pureLogic.spec.ts (3 tests)
 ✓ |node| test/examples/crypto.node.spec.ts (4 tests)
 ✓ |unit| test/examples/example.spec.ts (3 tests)
 
