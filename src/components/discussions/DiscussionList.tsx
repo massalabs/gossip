@@ -4,6 +4,7 @@ import { useDiscussionList } from '../../hooks/useDiscussionList';
 import { useDiscussionStore } from '../../stores/discussionStore';
 import EmptyDiscussions from './EmptyDiscussions';
 import DiscussionListItem from './DiscussionListItem';
+import { ROUTES } from '../../constants/routes';
 
 interface DiscussionListProps {
   onSelect: (contactUserId: string) => void;
@@ -54,7 +55,7 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
                     onSelect={d => onSelect(d.contactUserId)}
                     onAccept={async (d, newName) => {
                       await handleAcceptDiscussionRequest(d, newName);
-                      navigate(`/discussion/${d.contactUserId}`);
+                      navigate(ROUTES.discussion({ userId: d.contactUserId }));
                     }}
                     onRefuse={() => handleRefuseDiscussionRequest(discussion)}
                   />

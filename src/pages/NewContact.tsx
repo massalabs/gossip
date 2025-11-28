@@ -11,6 +11,7 @@ import ErrorDisplay from '../components/account/ErrorDisplay';
 import PageHeader from '../components/ui/PageHeader';
 import ScanQRCode from '../components/settings/ScanQRCode';
 import { CameraIcon, UploadIcon } from '../components/ui/icons';
+import { ROUTES } from '../constants/routes';
 
 const NewContact: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -45,12 +46,12 @@ const NewContact: React.FC = () => {
       setIsDiscardModalOpen(true);
       return;
     }
-    navigate('/');
+    navigate(ROUTES.default());
   }, [hasUnsavedChanges, navigate]);
 
   const handleDiscard = useCallback(() => {
     setIsDiscardModalOpen(false);
-    navigate('/');
+    navigate(ROUTES.default());
   }, [navigate]);
 
   const handleCancel = useCallback(() => {

@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import Button from '../components/ui/Button';
 import { PrivacyGraphic } from '../components/ui/PrivacyGraphic';
 import PageHeader from '../components/ui/PageHeader';
+import { ROUTES } from '../constants/routes';
 
 const Discussions: React.FC = () => {
   const navigate = useNavigate();
@@ -25,14 +26,14 @@ const Discussions: React.FC = () => {
       <div className="flex-1 overflow-y-auto pt-4 px-2 pb-20">
         <DiscussionListPanel
           onSelect={id => {
-            navigate(`/discussion/${id}`);
+            navigate(ROUTES.discussion({ userId: id }));
           }}
           headerVariant="link"
         />
       </div>
       {/* Floating button positioned above bottom nav */}
       <Button
-        onClick={() => navigate('/new-discussion')}
+        onClick={() => navigate(ROUTES.newDiscussion())}
         variant="primary"
         size="custom"
         className="absolute bottom-3 right-4 px-5 h-14 rounded-full flex items-center gap-2 shadow-lg hover:shadow-xl transition-shadow z-50"

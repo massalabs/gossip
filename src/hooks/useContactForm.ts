@@ -13,6 +13,7 @@ import { ensureDiscussionExists } from '../crypto/discussionInit';
 import { useFileShareContact } from './useFileShareContact';
 import { authService } from '../services/auth';
 import toast from 'react-hot-toast';
+import { ROUTES } from '../constants/routes';
 
 type FieldState = {
   value: string;
@@ -223,7 +224,7 @@ export function useContactForm() {
         console.error
       );
 
-      navigate('/');
+      navigate(ROUTES.default());
     } catch (err) {
       console.error(err);
       setGeneralError('Failed to add contact. Please try again.');

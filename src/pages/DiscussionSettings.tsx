@@ -9,6 +9,7 @@ import PageHeader from '../components/ui/PageHeader';
 import { CheckIcon, EditIcon } from '../components/ui/icons';
 import { formatUserId } from '../utils/userId';
 import { Contact } from '../db';
+import { ROUTES } from '../constants/routes';
 
 const DiscussionSettings: React.FC = () => {
   const { discussionId } = useParams();
@@ -85,7 +86,7 @@ const DiscussionSettings: React.FC = () => {
 
   const handleNavigateToContact = useCallback(
     (contact: Contact) => {
-      navigate(`/contact/${contact.userId}`);
+      navigate(ROUTES.contact({ userId: contact.userId }));
     },
     [navigate]
   );

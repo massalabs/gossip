@@ -6,35 +6,31 @@ import {
   DiscussionsIcon,
   SettingsIcon,
 } from './icons';
+import { ROUTES } from '../../constants/routes';
+
+type BottomNavigationTab = 'discussions' | 'settings';
 
 const BottomNavigation: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const path = location.pathname || '/';
-  const activeTab: 'wallet' | 'discussions' | 'settings' = path.startsWith(
-    '/wallet'
+
+  // Use route.isActive() for cleaner active state detection
+  const activeTab: BottomNavigationTab = ROUTES.settings.isActive(
+    location.pathname
   )
-    ? 'wallet'
-    : path.startsWith('/settings')
-      ? 'settings'
-      : 'discussions';
+    ? 'settings'
+    : 'discussions';
 
   const navItems = [
-    // {
-    //   id: 'wallet' as const,
-    //   path: '/wallet',
-    //   title: 'Wallet',
-    //   icon: <WalletIcon />,
-    // },
     {
       id: 'discussions' as const,
-      path: '/',
+      path: ROUTES.discussions(),
       title: 'Discussions',
       icon: <DiscussionsIcon />,
     },
     {
       id: 'settings' as const,
-      path: '/settings',
+      path: ROUTES.settings(),
       title: 'Settings',
       icon: <SettingsIcon />,
     },

@@ -11,6 +11,7 @@ import Settings from '../pages/Settings';
 import Wallet from '../pages/Wallet';
 import { usePendingDeepLink } from '../hooks/usePendingDeepLink';
 import { useAppStateRefresh } from '../hooks/useAppStateRefresh';
+import { ROUTES } from '../constants/routes';
 
 /**
  * Routes accessible when user is authenticated
@@ -21,16 +22,16 @@ export const AuthenticatedRoutes: React.FC = () => {
 
   return (
     <Routes>
-      <Route path="/new-discussion" element={<NewDiscussion />} />
-      <Route path="/new-contact" element={<NewContact />} />
-      <Route path="/contact/:userId" element={<Contact />} />
-      <Route path="/discussion/:userId" element={<Discussion />} />
+      <Route path={ROUTES.newDiscussion()} element={<NewDiscussion />} />
+      <Route path={ROUTES.newContact()} element={<NewContact />} />
+      <Route path={ROUTES.contact()} element={<Contact />} />
+      <Route path={ROUTES.discussion()} element={<Discussion />} />
       <Route
-        path="/discussion/:discussionId/settings"
+        path={ROUTES.discussionSettings()}
         element={<DiscussionSettings />}
       />
       <Route
-        path="/wallet"
+        path={ROUTES.wallet()}
         element={
           <MainLayout>
             <Wallet />
@@ -38,7 +39,7 @@ export const AuthenticatedRoutes: React.FC = () => {
         }
       />
       <Route
-        path="/settings"
+        path={ROUTES.settings()}
         element={
           <MainLayout>
             <Settings />
@@ -46,14 +47,14 @@ export const AuthenticatedRoutes: React.FC = () => {
         }
       />
       <Route
-        path="/"
+        path={ROUTES.discussions()}
         element={
           <MainLayout>
             <Discussions />
           </MainLayout>
         }
       />
-      <Route path="*" element={<Navigate to="/" replace />} />
+      <Route path="*" element={<Navigate to={ROUTES.default()} replace />} />
     </Routes>
   );
 };

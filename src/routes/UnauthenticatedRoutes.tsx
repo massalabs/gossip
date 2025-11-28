@@ -5,6 +5,7 @@ import { useAppStore } from '../stores/appStore';
 import Login from '../pages/Login';
 import AccountCreation from '../components/account/AccountCreation';
 import { UserProfile } from '../db';
+import { ROUTES } from '../constants/routes';
 
 interface UnauthenticatedRoutesProps {
   existingAccountInfo: UserProfile | null;
@@ -28,19 +29,19 @@ export const UnauthenticatedRoutes: React.FC<UnauthenticatedRoutesProps> = ({
 
   const handleCreateNewAccount = () => {
     onLoginErrorChange(null);
-    navigate('/setup');
+    navigate(ROUTES.setup());
   };
 
   const handleNewAccountComplete = () => {
     useAppStore.getState().setIsInitialized(true);
-    navigate('/', { replace: true });
+    navigate(ROUTES.default(), { replace: true });
   };
 
   const handleNewAccountBack = async () => {
     try {
       const hasAny = await useAccountStore.getState().hasExistingAccount();
       if (hasAny) {
-        navigate('/welcome');
+        navigate(ROUTES.welcome());
       } else {
         useAppStore.getState().setIsInitialized(false);
       }
@@ -53,7 +54,7 @@ export const UnauthenticatedRoutes: React.FC<UnauthenticatedRoutesProps> = ({
   return (
     <Routes>
       <Route
-        path="/welcome"
+        path={ROUTES.welcome()}
         element={
           <Login
             key="login-router"
@@ -66,7 +67,7 @@ export const UnauthenticatedRoutes: React.FC<UnauthenticatedRoutesProps> = ({
         }
       />
       <Route
-        path="/setup"
+        path={ROUTES.setup()}
         element={
           <AccountCreation
             onComplete={handleNewAccountComplete}
@@ -74,8 +75,8 @@ export const UnauthenticatedRoutes: React.FC<UnauthenticatedRoutesProps> = ({
           />
         }
       />
-      <Route path="/" element={<Navigate to="/welcome" replace />} />
-      <Route path="*" element={<Navigate to="/welcome" replace />} />
+      <Route path="/" element={<Navigate to={ROUTES.default()} replace />} />
+      <Route path="*" element={<Navigate to={ROUTES.default()} replace />} />
     </Routes>
   );
 };

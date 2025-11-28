@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '../stores/appStore';
+import { ROUTES } from '../constants/routes';
 
 /**
  * Hook to handle pending deep links after authentication
@@ -18,7 +19,7 @@ export const usePendingDeepLink = () => {
       if (!pendingDeepLinkInfo) return;
 
       try {
-        navigate(`/new-contact`, {
+        navigate(ROUTES.newContact(), {
           replace: true,
           state: pendingDeepLinkInfo,
         });
