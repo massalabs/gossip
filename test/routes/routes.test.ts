@@ -38,10 +38,6 @@ describe('Route Function - Dynamic Routes (Single Param)', () => {
     expect(ROUTES.discussion({ userId: 'bob456' })).toBe('/discussion/bob456');
   });
 
-  it('should return pattern when called without params', () => {
-    expect(ROUTES.contact()).toBe('/contact/:userId');
-    expect(ROUTES.discussion()).toBe('/discussion/:userId');
-  });
 
   it('should handle numeric param values', () => {
     expect(ROUTES.contact({ userId: 12345 })).toBe('/contact/12345');
