@@ -56,7 +56,14 @@ export const AuthenticatedRoutes: React.FC = () => {
           </MainLayout>
         }
       />
-      <Route path="*" element={<Navigate to={ROUTES.default()} replace />} />
+      <Route
+        path={ROUTES.default()}
+        element={<Navigate to={ROUTES.discussions()} replace />}
+      />
+      <Route
+        path="*"
+        element={<Navigate to={ROUTES.discussions()} replace />}
+      />
     </Routes>
   );
 };

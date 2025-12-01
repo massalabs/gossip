@@ -44,26 +44,42 @@ const route = (pattern: string): RouteBuilder => {
   return build;
 };
 
+export enum AppRoute {
+  default = '/',
+  welcome = '/welcome',
+  setup = '/setup',
+  invite = '/invite',
+  wallet = '/wallet',
+  settings = '/settings',
+  newContact = '/new-contact',
+  newDiscussion = '/new-discussion',
+  contact = '/contact',
+  discussion = '/discussion',
+  discussions = '/discussions',
+}
+
 export const ROUTES = {
   // Public
-  welcome: route('/welcome'),
-  setup: route('/setup'),
-  invite: route('/invite/:userId'),
+  welcome: route(AppRoute.welcome),
+  setup: route(AppRoute.setup),
+  invite: route(`${AppRoute.invite}/:userId`),
 
   // Main tabs
-  discussions: route('/'),
-  wallet: route('/wallet'),
-  settings: route('/settings'),
+  discussions: route(AppRoute.discussions),
+  wallet: route(AppRoute.wallet),
+  settings: route(AppRoute.settings),
 
   // Actions
-  newContact: route('/new-contact'),
-  newDiscussion: route('/new-discussion'),
+  newContact: route(AppRoute.newContact),
+  newDiscussion: route(AppRoute.newDiscussion),
 
   // Dynamic routes
-  contact: route('/contact/:userId'),
-  discussion: route('/discussion/:userId'),
-  discussionSettings: route('/discussion/:discussionId/settings'),
+  contact: route(`${AppRoute.contact}/:userId`),
+  discussion: route(`${AppRoute.discussion}/:userId`),
+  discussionSettings: route(
+    `${AppRoute.discussion}/:discussionId${AppRoute.settings}`
+  ),
 
   // Default
-  default: route('/'),
+  default: route(AppRoute.default),
 } as const;

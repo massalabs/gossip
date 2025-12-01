@@ -3,7 +3,7 @@ import { ROUTES } from '../../src/constants/routes';
 
 describe('Route Function - Static Routes', () => {
   it('should return pattern when called without params', () => {
-    expect(ROUTES.discussions()).toBe('/');
+    expect(ROUTES.discussions()).toBe('/discussions');
     expect(ROUTES.settings()).toBe('/settings');
     expect(ROUTES.newContact()).toBe('/new-contact');
     expect(ROUTES.welcome()).toBe('/welcome');
@@ -17,7 +17,7 @@ describe('Route Function - Static Routes', () => {
   });
 
   it('should ignore params object for static routes', () => {
-    expect(ROUTES.discussions({ foo: 'bar' })).toBe('/');
+    expect(ROUTES.discussions({ foo: 'bar' })).toBe('/discussions');
     expect(ROUTES.settings({ id: '123' })).toBe('/settings');
   });
 });
