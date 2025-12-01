@@ -35,7 +35,7 @@ const defaultUserProfile: UserProfile = {
  *
  * @example
  * const user = userProfile()
- *   .userId('AU12alice123456789')
+ *   .userId('gossip1...')
  *   .username('Alice')
  *   .status('online')
  *   .build();
@@ -44,7 +44,18 @@ class UserProfileBuilder {
   private profile: UserProfile;
 
   constructor() {
-    this.profile = { ...defaultUserProfile };
+    this.profile = {
+      ...defaultUserProfile,
+      security: {
+        ...defaultUserProfile.security,
+        mnemonicBackup: {
+          ...defaultUserProfile.security.mnemonicBackup,
+        },
+      },
+      lastSeen: new Date(defaultUserProfile.lastSeen),
+      createdAt: new Date(defaultUserProfile.createdAt),
+      updatedAt: new Date(defaultUserProfile.updatedAt),
+    };
   }
 
   userId(value: string): this {
