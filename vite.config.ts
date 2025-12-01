@@ -128,10 +128,10 @@ export default defineConfig({
   test: {
     globals: true,
 
-    exclude: [
-      'test/**/*.examples.{test,spec}.{ts,tsx}',
-      'test/**/examples/**/*.{test,spec}.{ts,tsx}',
-    ],
+    // exclude: [
+    //   'test/**/*.examples.{test,spec}.{ts,tsx}',
+    //   'test/**/examples/**/*.{test,spec}.{ts,tsx}',
+    // ],
 
     // Use "projects" for multiple test environments (replaces deprecated workspace)
     projects: [

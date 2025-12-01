@@ -1,31 +1,38 @@
 // Runs in NODE mode (no DOM, pure logic testing)
+// Example: testing real app crypto utilities (userId encoding/decoding)
 
 import { describe, it, expect } from 'vitest';
-import { Buffer } from 'buffer';
+import {
+  encodeUserId,
+  decodeUserId,
+  isValidUserId,
+} from '../../src/utils/userId';
 
-describe('node environment example', () => {
-  it('can use Node.js APIs', () => {
-    const buf = Buffer.from('hello', 'utf-8');
-    expect(buf.toString()).toBe('hello');
+describe('userId crypto utilities (node environment)', () => {
+  it('encodes and decodes a 32-byte userId round-trip', () => {
+    const bytes = new Uint8Array(32).map((_, i) => i);
+
+    const encoded = encodeUserId(bytes);
+    const decoded = decodeUserId(encoded);
+
+    expect(encoded.startsWith('gossip1')).toBe(true);
+    expect(Array.from(decoded)).toEqual(Array.from(bytes));
   });
 
-  it('runs in node environment without DOM', () => {
-    expect(typeof window === 'undefined' || window === null).toBe(true);
-    expect(typeof document === 'undefined' || document === null).toBe(true);
+  it('rejects invalid encoded userIds', () => {
+    expect(isValidUserId('not-a-gossip-id')).toBe(false);
+    expect(isValidUserId('gossip1')).toBe(false);
   });
 
-  it('can test pure functions', () => {
-    const add = (a: number, b: number) => a + b;
-    expect(add(2, 3)).toBe(5);
-  });
+  it('throws for wrong-length byte arrays', () => {
+    const tooShort = new Uint8Array(16);
+    const tooLong = new Uint8Array(64);
 
-  it('can test crypto utilities', () => {
-    const hash = (str: string) => {
-      return str.split('').reduce((acc, char) => {
-        return acc + char.charCodeAt(0);
-      }, 0);
-    };
-
-    expect(hash('hello')).toBe(532);
+    expect(() => encodeUserId(tooShort)).toThrowError(
+      /User ID must be exactly 32 bytes/
+    );
+    expect(() => encodeUserId(tooLong)).toThrowError(
+      /User ID must be exactly 32 bytes/
+    );
   });
 });
