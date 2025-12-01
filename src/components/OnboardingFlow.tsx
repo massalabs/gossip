@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import appLogo from '../assets/gossip_face.svg';
 import { PrivacyGraphic } from './ui/PrivacyGraphic';
 import Button from './ui/Button';
 
@@ -56,19 +55,16 @@ const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
       title: 'Welcome to Gossip!',
       description:
         'Your private messenger designed for secure, end-to-end encrypted conversations. Connect with confidence.',
-      image: appLogo,
     },
     {
       title: 'Privacy by Design 🔒',
       description:
         'All your messages are encrypted and stored locally on your device. Your conversations stay private, always.',
-      image: appLogo,
     },
     {
       title: "Let's Get Started! 🚀",
       description:
         'Create your account in seconds and start connecting with people securely.',
-      image: appLogo,
     },
   ];
 
@@ -117,7 +113,7 @@ const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
               steps[currentStep].title
             )}
           </h1>
-          <p className="text-base md:text-lg text-muted-foreground leading-relaxed max-w-md mx-auto px-2">
+          <p className="text-base md:text-lg text-muted-foreground leading-relaxed app-max-width px-2">
             {steps[currentStep].description}
           </p>
         </div>

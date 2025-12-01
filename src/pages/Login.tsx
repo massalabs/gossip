@@ -235,7 +235,7 @@ const Login: React.FC<LoginProps> = React.memo(
 
     return (
       <div className="bg-background flex flex-col items-center justify-center p-6 h-full">
-        <div className="w-full max-w-md mx-auto">
+        <div className="w-full app-max-width">
           <div className="text-center mb-8">
             <img
               src="/logo.svg"

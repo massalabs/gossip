@@ -136,6 +136,18 @@ export class RestMessageProtocol implements IMessageProtocol {
     url: string,
     options: RequestInit
   ): Promise<MessageProtocolResponse<T>> {
+    // If running in a browser and offline, fail fast without attempting a network request
+    if (
+      typeof navigator !== 'undefined' &&
+      typeof navigator.onLine === 'boolean' &&
+      !navigator.onLine
+    ) {
+      return {
+        success: false,
+        error: 'Network unavailable: device is offline',
+      };
+    }
+
     let lastError: Error | null = null;
 
     for (let attempt = 1; attempt <= this.retryAttempts; attempt++) {

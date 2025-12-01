@@ -136,11 +136,8 @@ const AccountCreation: React.FC<AccountCreationProps> = ({
   };
 
   return (
-    <div className="h-full w-full max-w-md mx-auto bg-card">
-      {/* Header */}
-
-      <PageHeader title="Create Account" onBack={onBack} showLogo={true} />
-
+    <div className="h-full w-full app-max-width bg-card">
+      <PageHeader title="Create Account" onBack={onBack} />
       <div className="p-4">
         {/* Authentication Method Toggle */}
         {biometricAvailable && (

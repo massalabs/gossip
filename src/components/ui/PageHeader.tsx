@@ -1,18 +1,15 @@
 import React from 'react';
-import appLogo from '../../assets/gossip_face.svg';
 import Button from './Button';
 
 interface PageHeaderProps {
   title: string;
   onBack?: () => void;
-  showLogo?: boolean;
   className?: string;
 }
 
 const PageHeader: React.FC<PageHeaderProps> = ({
   title,
   onBack,
-  showLogo = false,
   className = '',
 }) => {
   return (
@@ -42,13 +39,7 @@ const PageHeader: React.FC<PageHeaderProps> = ({
               </svg>
             </Button>
           )}
-          {showLogo && (
-            <img
-              src={appLogo}
-              className="w-9 h-9 rounded object-cover"
-              alt="Gossip logo"
-            />
-          )}
+
           <h1 className="text-xl font-semibold text-black dark:text-white">
             {title}
           </h1>

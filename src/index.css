@@ -295,6 +295,11 @@
     padding-right: env(safe-area-inset-right);
   }
 
+  /* Global app width container: centers content and constrains to mobile app width */
+  .app-max-width {
+    @apply max-w-md w-full mx-auto;
+  }
+
   @keyframes fade-in {
     from {
       opacity: 0;

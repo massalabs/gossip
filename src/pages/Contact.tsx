@@ -113,7 +113,7 @@ const Contact: React.FC = () => {
   const canStart = discussion ? discussion.status === 'active' : true;
 
   return (
-    <div className="bg-card h-full overflow-auto max-w-md mx-auto">
+    <div className="bg-card h-full overflow-auto app-max-width">
       <PageHeader title="Contact" onBack={() => navigate(-1)} />
       <div className="flex-1 pt-4 px-6 pb-6">
         <div className="flex items-center gap-4">

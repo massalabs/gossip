@@ -41,7 +41,7 @@ const Wallet: React.FC = () => {
 
   return (
     <div className="bg-background">
-      <div className="max-w-md mx-auto">
+      <div className="app-max-width">
         {/* Header */}
         <div className="px-6 py-4 flex justify-between items-center">
           <h1 className="text-2xl font-semibold text-black dark:text-white">
