@@ -39,7 +39,8 @@ export const InvitePage: React.FC = () => {
 
   /**
    * Attempts to open the native app via button click.
-   * Returns true if native app likely opened, false if we should fall back to web flow.
+   * Returns a Promise that resolves to true if the native app successfully opened
+   * (detected via visibility change), or false if the app failed to open within the detection timeout.
    */
   const tryOpenNativeApp = useCallback(
     (invitePath: string): Promise<boolean> => {
