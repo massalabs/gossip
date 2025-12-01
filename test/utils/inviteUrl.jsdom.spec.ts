@@ -3,6 +3,13 @@ import { DEFAULT_PUBLIC_BASE_URL } from '../../src/constants/links';
 import { AppRoute } from '../../src/constants/routes';
 import { generateDeepLinkUrl } from '../../src/utils/inviteUrl';
 
+function defineWindowLocation(value: Location) {
+  Object.defineProperty(window, 'location', {
+    value,
+    writable: true,
+  });
+}
+
 // Helper to safely override window.location.origin in jsdom
 const setWindowOrigin = (origin: string | null) => {
   const location = window.location;
@@ -14,37 +21,21 @@ const setWindowOrigin = (origin: string | null) => {
     return;
   }
 
-  Object.defineProperty(window, 'location', {
-    value: {
-      ...location,
-      origin,
-    },
-    writable: true,
-  });
+  defineWindowLocation({ ...location, origin });
 };
 
 describe('inviteUrl - generateDeepLinkUrl', () => {
   const originalLocation = window.location;
 
-  beforeEach(() => {
-    // Reset just the VITE_APP_BASE_URL and location before each test
+  const resetEnvAndLocation = () => {
+    // Ensure VITE_APP_BASE_URL does not leak between tests
     // @ts-expect-error - readonly env in tests
     delete import.meta.env.VITE_APP_BASE_URL;
-    Object.defineProperty(window, 'location', {
-      value: originalLocation,
-      writable: true,
-    });
-  });
+    defineWindowLocation(originalLocation);
+  };
 
-  afterEach(() => {
-    // Clean up VITE_APP_BASE_URL and restore location after each test
-    // @ts-expect-error - readonly env in tests
-    delete import.meta.env.VITE_APP_BASE_URL;
-    Object.defineProperty(window, 'location', {
-      value: originalLocation,
-      writable: true,
-    });
-  });
+  beforeEach(resetEnvAndLocation);
+  afterEach(resetEnvAndLocation);
 
   it('throws when userId is empty or whitespace', () => {
     expect(() => generateDeepLinkUrl('')).toThrowError('userId is required');

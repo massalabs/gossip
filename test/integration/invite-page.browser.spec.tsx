@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import React from 'react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { render } from 'vitest-browser-react';
@@ -10,7 +10,6 @@ import { useAccountStore } from '../../src/stores/accountStore';
 import { AppRoute, ROUTES } from '../../src/constants/routes';
 import { testUsers } from '../helpers/factories/userProfile';
 import { UserProfile } from '../../src/db';
-import { consoleMock, consoleClearMock } from '../helpers/mock/console';
 import {
   GOOGLE_PLAY_STORE_URL,
   APPLE_APP_STORE_URL,
@@ -29,11 +28,6 @@ describe('InvitePage - Deep Link Invite Flow', () => {
     aliceProfile = testUsers.alice();
     // Reset store state before each test
     useAppStore.getState().setPendingDeepLinkInfo(null);
-    consoleMock('error');
-  });
-
-  afterEach(() => {
-    consoleClearMock('error');
   });
 
   const renderInviteRoute = async (
@@ -254,44 +248,27 @@ describe('InvitePage - Deep Link Invite Flow', () => {
     // Create a simple home component for navigation
     const HomePage = () => <div>Home</div>;
 
-    // Silence expected "No authenticated user" errors from background
-    // announcement processing during this test to keep the output clean.
-    const originalConsoleError = console.error;
-    const consoleErrorSpy = vi
-      .spyOn(console, 'error')
-      .mockImplementation((...args: unknown[]) => {
-        const message = String(args[0] ?? '');
-        if (message.includes('Failed to process incoming announcement')) {
-          return;
-        }
-        originalConsoleError(...args);
-      });
+    await render(
+      <MemoryRouter
+        initialEntries={[ROUTES.invite({ userId: bobProfile.userId })]}
+      >
+        <Routes>
+          <Route path={AppRoute.default} element={<HomePage />} />
+          <Route path={ROUTES.invite()} element={<InvitePage />} />
+        </Routes>
+      </MemoryRouter>
+    );
 
-    try {
-      await render(
-        <MemoryRouter
-          initialEntries={[ROUTES.invite({ userId: bobProfile.userId })]}
-        >
-          <Routes>
-            <Route path={AppRoute.default} element={<HomePage />} />
-            <Route path={ROUTES.invite()} element={<InvitePage />} />
-          </Routes>
-        </MemoryRouter>
-      );
+    // Click Continue in Web App button
+    const continueButton = page.getByRole('button', {
+      name: /continue in web app/i,
+    });
+    await continueButton.click();
 
-      // Click Continue in Web App button
-      const continueButton = page.getByRole('button', {
-        name: /continue in web app/i,
-      });
-      await continueButton.click();
-
-      // Check that invite data was stored
-      const pendingInvite = useAppStore.getState().pendingDeepLinkInfo;
-      expect(pendingInvite).toBeTruthy();
-      expect(pendingInvite?.userId).toBe(bobProfile.userId);
-    } finally {
-      consoleErrorSpy.mockRestore();
-    }
+    // Check that invite data was stored
+    const pendingInvite = useAppStore.getState().pendingDeepLinkInfo;
+    expect(pendingInvite).toBeTruthy();
+    expect(pendingInvite?.userId).toBe(bobProfile.userId);
   });
 
   it('handles Install for iOS button click - opens App Store', async () => {

@@ -101,7 +101,18 @@ export class AnnouncementService {
             hasErrors = true;
           }
         } catch (error) {
-          console.error('Failed to process incoming announcement:', error);
+          if (
+            error instanceof Error &&
+            error.message.includes('No authenticated user')
+          ) {
+            // This is expected if announcement is not for the authenticated user
+            continue;
+          }
+
+          logAnnouncementError(
+            `Failed to process incoming announcement for user ${userProfile?.userId}:`,
+            error
+          );
           hasErrors = true;
         }
       }
