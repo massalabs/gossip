@@ -47,9 +47,11 @@ const AppContent: React.FC = () => {
     return <LoadingScreen />;
   }
 
-  // When the app is not initialized and we're NOT on an invite link,
-  // show the onboarding flow (no account exists yet).
   // For invite links, we bypass onboarding so the user lands on the invite page.
+  //
+  // Design note: If a user manually navigates to an invite URL before initialization completes,
+  // the onboarding flow is skipped and the invite page is shown directly. This is to handle the
+  // case where a user has the phone app and doesn't necessarily need to create an account on web or pwa.
   if (!isInitialized && !inviteMatch) {
     return (
       <Onboarding showImport={showImport} onShowImportChange={setShowImport} />

@@ -96,7 +96,7 @@ export function validateUserIdFormat(value: string): ValidationResult {
   if (!isValidUserId(userId)) {
     return {
       valid: false,
-      error: 'Invalid format — must be a complete gossip1... address',
+      error: 'Invalid format — must be a valid user ID',
     };
   }
 

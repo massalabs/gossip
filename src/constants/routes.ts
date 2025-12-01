@@ -62,6 +62,7 @@ export const ROUTES = {
   // Public
   welcome: route(AppRoute.welcome),
   setup: route(AppRoute.setup),
+  // `userId` is expected to be a gossip1... encoded user ID
   invite: route(`${AppRoute.invite}/:userId`),
 
   // Main tabs

@@ -117,20 +117,17 @@ describe('utils/validation.ts', () => {
   // tests are in validation-db.jsdom.spec.ts because they require IndexedDB
 
   describe('validateUserIdFormat()', () => {
+    const invalidUserIdmessage = 'Invalid format — must be a valid user ID';
     it('should reject empty userId', () => {
       const result = validateUserIdFormat('');
       expect(result.valid).toBe(false);
-      expect(result.error).toBe(
-        'Invalid format — must be a complete gossip1... address'
-      );
+      expect(result.error).toBe(invalidUserIdmessage);
     });
 
     it('should reject userId with invalid format', () => {
       const result = validateUserIdFormat('invalid');
       expect(result.valid).toBe(false);
-      expect(result.error).toBe(
-        'Invalid format — must be a complete gossip1... address'
-      );
+      expect(result.error).toBe(invalidUserIdmessage);
     });
 
     it('should reject userId with wrong prefix', () => {
@@ -138,17 +135,13 @@ describe('utils/validation.ts', () => {
         'bitcoin1qpzry9x8gf2tvdw0s3jn54khce6mua7l'
       );
       expect(result.valid).toBe(false);
-      expect(result.error).toBe(
-        'Invalid format — must be a complete gossip1... address'
-      );
+      expect(result.error).toBe(invalidUserIdmessage);
     });
 
     it('should reject userId with invalid checksum', () => {
       const result = validateUserIdFormat('gossip1invalid');
       expect(result.valid).toBe(false);
-      expect(result.error).toBe(
-        'Invalid format — must be a complete gossip1... address'
-      );
+      expect(result.error).toBe(invalidUserIdmessage);
     });
 
     it('should accept valid userId', () => {

@@ -7,6 +7,11 @@ import Button from '../components/ui/Button';
 import PageHeader from '../components/ui/PageHeader';
 import { PrivacyGraphic } from '../components/ui/PrivacyGraphic';
 import {
+  GOOGLE_PLAY_STORE_URL,
+  APPLE_APP_STORE_URL,
+  LAST_APK_GITHUB_URL,
+} from '../constants/links';
+import {
   CloseIcon,
   CheckIcon,
   IOSIcon,
@@ -14,12 +19,6 @@ import {
   GitHubIcon,
   ChevronRightIcon,
 } from '../components/ui/icons';
-
-const GOOGLE_PLAY_STORE_URL =
-  'https://play.google.com/store/apps/details?id=app.gossip';
-const APPLE_APP_STORE_URL = 'https://apps.apple.com/app/gossip';
-const LAST_APK_GITHUB_URL =
-  'https://github.com/massa-network/gossip-android/releases/download/v1.0.0/gossip-android-1.0.0.apk';
 
 // Timing constants
 const NATIVE_APP_OPEN_DELAY = 150; // Wait for DOM ready + layout
@@ -70,6 +69,19 @@ export const InvitePage: React.FC = () => {
           resolved = true;
           anchor.remove();
           resolve(false);
+
+          // Run and clear any registered cleanup functions so that
+          // visibility listeners and timers are removed even when the
+          // fallback timeout fires (no visibilitychange event).
+          const cleanups = cleanupFunctionsRef.current;
+          cleanups.forEach(fn => {
+            try {
+              fn();
+            } catch (err) {
+              console.warn('Cleanup error after native open attempt:', err);
+            }
+          });
+          cleanups.clear();
         };
 
         const openTimer = setTimeout(() => {
