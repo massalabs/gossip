@@ -1,3 +1,7 @@
+import { Capacitor } from '@capacitor/core';
+import { DEFAULT_PUBLIC_BASE_URL } from '../constants/links';
+import { AppRoute } from '../constants/routes';
+
 export const INVITE_BASE_URL = '/invite';
 
 /**
@@ -10,18 +14,20 @@ export const INVITE_BASE_URL = '/invite';
  */
 function getPublicBaseUrl(): string {
   // 1. Explicit env var → highest priority (staging, prod, native builds)
-  const envUrl = import.meta.env.VITE_APP_BASE_URL?.trim();
-  if (envUrl) {
-    return envUrl.endsWith('/') ? envUrl.slice(0, -1) : envUrl;
+  const envUrl = import.meta.env.VITE_APP_BASE_URL;
+
+  const defaultBaseUrl = envUrl ?? DEFAULT_PUBLIC_BASE_URL;
+
+  if (Capacitor.isNativePlatform()) {
+    return defaultBaseUrl;
   }
 
-  // 2. In browser → use current origin (dev, preview, production web)
-  if (typeof window !== 'undefined' && window.location?.origin) {
-    return window.location.origin;
+  const currentOrigin = window.location?.origin;
+  if (currentOrigin && !currentOrigin.includes('localhost')) {
+    return currentOrigin;
   }
 
-  // 3. Hardcoded fallback → your main public domain
-  return 'https://gossip.app';
+  return defaultBaseUrl;
 }
 
 /**
@@ -41,5 +47,5 @@ export function generateDeepLinkUrl(userId: string): string {
   const base = getPublicBaseUrl();
   const safeId = encodeURIComponent(userId.trim());
 
-  return `${base}${INVITE_BASE_URL}/${safeId}`;
+  return `${base}${AppRoute.invite}/${safeId}`;
 }

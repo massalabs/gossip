@@ -1,3 +1,4 @@
+import { AppRoute } from '../constants/routes';
 import { validateUserIdFormat } from './validation';
 
 const INVITE_REGEX = /^\/invite\/([^/#?\s]+)$/i;
@@ -37,14 +38,15 @@ export function extractInvitePath(input: string): string | null {
   const trimmed = input.trim();
   if (!trimmed) return null;
 
-  if (trimmed.startsWith('/invite/')) {
+  if (trimmed.startsWith(`${AppRoute.invite}`)) {
     return trimmed;
   }
 
   // Handle gossip:// protocol
   if (trimmed.startsWith('gossip://')) {
-    const path = trimmed.replace('gossip://', '/');
-    if (path.startsWith('/invite/')) {
+    // Remove protocol and normalize path (handle both gossip:///invite and gossip://invite)
+    const path = trimmed.replace(/^gossip:\/\/+/, '/');
+    if (path.startsWith(`${AppRoute.invite}`)) {
       return path;
     }
     return null;
@@ -52,7 +54,7 @@ export function extractInvitePath(input: string): string | null {
 
   try {
     const { pathname } = new URL(trimmed);
-    if (pathname.startsWith('/invite/')) {
+    if (pathname.startsWith(`${AppRoute.invite}`)) {
       return pathname;
     }
   } catch {

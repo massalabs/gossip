@@ -20,6 +20,22 @@ export interface AnnouncementReceptionResult {
   error?: string;
 }
 
+/**
+ * Centralized error logger for announcement-related operations.
+ * In test environment we suppress the very noisy "No authenticated user"
+ * errors that can legitimately occur during setup and in isolated tests.
+ */
+function logAnnouncementError(prefix: string, error: unknown): void {
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === 'string'
+        ? error
+        : '';
+
+  console.error(prefix, message);
+}
+
 export class AnnouncementService {
   constructor(public readonly messageProtocol: IMessageProtocol) {}
 
@@ -33,7 +49,7 @@ export class AnnouncementService {
 
       return { success: true, counter };
     } catch (error) {
-      console.error('Failed to broadcast outgoing session:', error);
+      logAnnouncementError('Failed to broadcast outgoing session:', error);
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error',
@@ -44,7 +60,14 @@ export class AnnouncementService {
   async fetchAndProcessAnnouncements(): Promise<AnnouncementReceptionResult> {
     try {
       const { userProfile } = useAccountStore.getState();
-      if (!userProfile?.userId) throw new Error('No authenticated user');
+
+      if (!userProfile?.userId) {
+        return {
+          success: false,
+          newAnnouncementsCount: 0,
+          error: 'No authenticated user',
+        };
+      }
 
       // First, check if service worker has already fetched announcements
       let announcements: Uint8Array[];
@@ -89,7 +112,10 @@ export class AnnouncementService {
         error: hasErrors ? 'Some announcements failed to process' : undefined,
       };
     } catch (error) {
-      console.error('Failed to fetch/process incoming announcements:', error);
+      logAnnouncementError(
+        'Failed to fetch/process incoming announcements:',
+        error
+      );
       return {
         success: false,
         newAnnouncementsCount: 0,
@@ -103,7 +129,7 @@ export class AnnouncementService {
       const announcements = await this.messageProtocol.fetchAnnouncements();
       return announcements;
     } catch (error) {
-      console.error('Failed to fetch incoming announcements:', error);
+      logAnnouncementError('Failed to fetch incoming announcements:', error);
       return [];
     }
   }
@@ -177,7 +203,10 @@ export class AnnouncementService {
             announcementMessage
           );
         } catch (error) {
-          console.error('Failed to decode announcement user data:', error);
+          logAnnouncementError(
+            'Failed to decode announcement user data:',
+            error
+          );
         }
       }
 
@@ -232,7 +261,7 @@ export class AnnouncementService {
             announcementMessage
           );
         } catch (notificationError) {
-          console.error(
+          logAnnouncementError(
             'Failed to show new discussion notification:',
             notificationError
           );
@@ -245,10 +274,13 @@ export class AnnouncementService {
         contactUserId: contactUserIdString,
       };
     } catch (error) {
-      console.error('Failed to process incoming announcement:', error);
+      logAnnouncementError('Failed to process incoming announcement:', error);
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
+        error:
+          error instanceof Error
+            ? error.message
+            : 'Failed to process incoming announcement',
       };
     }
   }

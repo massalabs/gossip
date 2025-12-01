@@ -5,6 +5,7 @@ import App from './App.tsx';
 import { ThemeProvider } from './context/theme-provider.tsx';
 import { Capacitor } from '@capacitor/core';
 import { StatusBar } from '@capacitor/status-bar';
+import { enableConsoleDebugForwarding } from './components/ui/debugLogs';
 
 // Polyfill for Buffer
 import { Buffer } from 'buffer';
@@ -90,6 +91,9 @@ if (Capacitor.isNativePlatform()) {
 
 // Start WASM initialization in the background (non-blocking)
 startWasmInitialization();
+
+// Forward console logs into in-app debug log buffer
+enableConsoleDebugForwarding();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
