@@ -2,6 +2,8 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { Capacitor, PluginListenerHandle } from '@capacitor/core';
 import { App } from '@capacitor/app';
+import { LocalNotifications } from '@capacitor/local-notifications';
+import { useNavigate } from 'react-router-dom';
 import { extractInvitePath, parseInvite } from '../utils/qrCodeParser';
 import { useAppStore } from '../stores/appStore';
 
@@ -11,6 +13,7 @@ const APP_SWITCH_DETECTION_DELAY = 300; // Time to detect if native app took ove
 
 export const AppUrlListener: React.FC = () => {
   const setPendingDeepLinkInfo = useAppStore(s => s.setPendingDeepLinkInfo);
+  const navigate = useNavigate();
 
   const cleanupFunctionsRef = useRef<Set<() => void>>(new Set());
 
@@ -105,7 +108,7 @@ export const AppUrlListener: React.FC = () => {
   );
 
   /**
-   * Set up native deep link listener (Capacitor)
+   * Set up native deep link listener (Capacitor appUrlOpen)
    */
   const setupNativeListener = useCallback(async () => {
     try {
@@ -130,13 +133,54 @@ export const AppUrlListener: React.FC = () => {
     }
   }, [setPendingDeepLinkInfo, addCleanup]);
 
+  /**
+   * Set up native notification action listener (Capacitor LocalNotifications)
+   * Handles taps on native notifications and navigates to the appropriate view.
+   */
+  const setupNativeNotificationListener = useCallback(async () => {
+    try {
+      const handle = await LocalNotifications.addListener(
+        'localNotificationActionPerformed',
+        event => {
+          try {
+            const extra = event.notification.extra as
+              | { url?: string; contactUserId?: string }
+              | undefined;
+
+            let targetUrl = '/discussions';
+
+            if (extra?.url) {
+              targetUrl = extra.url;
+            } else if (extra?.contactUserId) {
+              targetUrl = `/discussion/${extra.contactUserId}`;
+            }
+
+            navigate(targetUrl, { replace: true });
+          } catch (err) {
+            console.error('Failed to handle native notification action:', err);
+          }
+        }
+      );
+
+      addCleanup(() => {
+        void handle.remove();
+      });
+    } catch (err) {
+      console.error(
+        'Failed to setup native notification action listener:',
+        err
+      );
+    }
+  }, [addCleanup, navigate]);
+
   useEffect(() => {
     if (Capacitor.isNativePlatform()) {
       void setupNativeListener();
+      void setupNativeNotificationListener();
     } else {
       void handleWebInvite(window.location.href);
     }
-  }, [setupNativeListener, handleWebInvite]);
+  }, [setupNativeListener, setupNativeNotificationListener, handleWebInvite]);
 
   useEffect(() => {
     return () => {

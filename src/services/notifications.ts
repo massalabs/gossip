@@ -1,10 +1,18 @@
 /**
  * Notification Service
  *
- * Handles browser notifications for new messages.
+ * Handles notifications for new messages.
+ * - Uses native notifications via Capacitor LocalNotifications when running in a native shell.
+ * - Falls back to browser / PWA notifications (service worker + Notification API) on web.
  * Shows generic notifications without revealing message content.
  * Supports user preference management for enabling/disabling notifications.
  */
+
+import { Capacitor } from '@capacitor/core';
+import {
+  LocalNotifications,
+  type PermissionStatus as LocalNotificationPermissionStatus,
+} from '@capacitor/local-notifications';
 
 const NOTIFICATION_ENABLED_KEY = 'gossip-notifications-enabled';
 
@@ -27,9 +35,17 @@ export class NotificationService {
     default: true,
   };
   private enabled: boolean = true;
+  private nativePermissionInitialized = false;
+  private notificationIdCounter = 0;
 
   private constructor() {
-    this.updatePermissionStatus();
+    // Initialize permission state based on platform
+    if (this.isNativePlatform()) {
+      // Fire-and-forget async initialization for native platforms
+      void this.initNativePermissionStatus();
+    } else {
+      this.updatePermissionStatus();
+    }
     this.loadPreferences();
   }
 
@@ -38,6 +54,43 @@ export class NotificationService {
       NotificationService.instance = new NotificationService();
     }
     return NotificationService.instance;
+  }
+
+  /**
+   * Detect if we are running inside a Capacitor native shell (iOS / Android).
+   */
+  private isNativePlatform(): boolean {
+    return Capacitor.isNativePlatform();
+  }
+
+  /**
+   * Initialize native notification permission status using LocalNotifications.
+   * This is async and is best-effort; errors are logged and the default state is kept.
+   */
+  private async initNativePermissionStatus(): Promise<void> {
+    if (!this.isNativePlatform() || this.nativePermissionInitialized) {
+      return;
+    }
+
+    try {
+      const status: LocalNotificationPermissionStatus =
+        await LocalNotifications.checkPermissions();
+
+      this.permission = {
+        granted: status.display === 'granted',
+        denied: status.display === 'denied',
+        default:
+          status.display === 'prompt' ||
+          status.display === 'prompt-with-rationale',
+      };
+
+      this.nativePermissionInitialized = true;
+    } catch (error) {
+      console.error(
+        'Failed to initialize native notification permission status:',
+        error
+      );
+    }
   }
 
   /**
@@ -101,7 +154,7 @@ export class NotificationService {
    * @param requireInteraction - Whether notification requires user interaction
    * @param data - Additional notification data (must include url for navigation)
    */
-  private async sendNotificationViaServiceWorker(
+  private async sendNotification(
     title: string,
     body: string,
     tag: string,
@@ -110,6 +163,21 @@ export class NotificationService {
     requireInteraction: boolean = false,
     data?: Record<string, unknown>
   ): Promise<void> {
+    // On native platforms, prefer using Capacitor LocalNotifications.
+    // Service workers are not available in native WebViews, so this path would be a no-op.
+    if (this.isNativePlatform()) {
+      await this.showNativeNotification(
+        title,
+        body,
+        tag,
+        autoCloseMs,
+        onClick,
+        data,
+        requireInteraction
+      );
+      return;
+    }
+
     const controller = await this.getServiceWorkerController();
 
     if (controller) {
@@ -131,6 +199,80 @@ export class NotificationService {
       });
     } else {
       // Fallback to direct notification if service worker not available
+      await this.showNotificationInternal(
+        title,
+        body,
+        tag,
+        autoCloseMs,
+        onClick,
+        requireInteraction
+      );
+    }
+  }
+
+  /**
+   * Show a native notification using Capacitor LocalNotifications.
+   * Falls back to the browser Notification flow if anything fails.
+   */
+  private async showNativeNotification(
+    title: string,
+    body: string,
+    tag: string,
+    autoCloseMs: number,
+    onClick: (() => void) | undefined,
+    data?: Record<string, unknown>,
+    requireInteraction: boolean = false
+  ): Promise<void> {
+    // Extra safety: only attempt on native platforms
+    if (!this.isNativePlatform()) {
+      return;
+    }
+
+    try {
+      // Ensure we have permission for native notifications
+      let status: LocalNotificationPermissionStatus =
+        await LocalNotifications.checkPermissions();
+
+      if (
+        status.display === 'prompt' ||
+        status.display === 'prompt-with-rationale'
+      ) {
+        status = await LocalNotifications.requestPermissions();
+      }
+
+      if (status.display !== 'granted') {
+        // Permission not granted, do not attempt to show native notification
+        return;
+      }
+
+      // Use a robust numeric ID to ensure uniqueness even for rapid successive notifications
+      const id = Date.now() * 1000 + (this.notificationIdCounter++ % 1000);
+
+      await LocalNotifications.schedule({
+        notifications: [
+          {
+            id,
+            title,
+            body,
+            // Use extra to pass metadata for potential future handling
+            extra: {
+              ...data,
+              tag,
+              requireInteraction,
+            },
+            // schedule: {
+            //   allowWhileIdle: true,
+            // },
+          },
+        ],
+      });
+    } catch (error) {
+      // If anything goes wrong, log and fall back to browser-based notification
+      console.error(
+        'Failed to show native notification, falling back to web notification:',
+        error
+      );
+
       await this.showNotificationInternal(
         title,
         body,
@@ -188,6 +330,38 @@ export class NotificationService {
    * @returns Promise resolving to permission status
    */
   async requestPermission(): Promise<NotificationPermission> {
+    // Native (Capacitor) path: use LocalNotifications permission model
+    if (this.isNativePlatform()) {
+      try {
+        let status: LocalNotificationPermissionStatus =
+          await LocalNotifications.checkPermissions();
+
+        if (
+          status.display === 'prompt' ||
+          status.display === 'prompt-with-rationale'
+        ) {
+          status = await LocalNotifications.requestPermissions();
+        }
+
+        this.permission = {
+          granted: status.display === 'granted',
+          denied: status.display === 'denied',
+          default:
+            status.display === 'prompt' ||
+            status.display === 'prompt-with-rationale',
+        };
+
+        return this.permission;
+      } catch (error) {
+        console.error(
+          'Failed to request native notification permission:',
+          error
+        );
+        return this.permission;
+      }
+    }
+
+    // Web / PWA path: use browser Notification API
     if (!('Notification' in window)) {
       console.warn('This browser does not support notifications');
       return this.permission;
@@ -222,7 +396,7 @@ export class NotificationService {
       const title = `New message from ${contactName}`;
       const body = messagePreview || 'Tap to view';
 
-      await this.sendNotificationViaServiceWorker(
+      await this.sendNotification(
         title,
         body,
         `gossip-discussion-${contactName}`,
@@ -259,7 +433,7 @@ export class NotificationService {
       const title = 'New contact request';
       const body = announcementMessage || 'User wants to start a conversation';
 
-      await this.sendNotificationViaServiceWorker(
+      await this.sendNotification(
         title,
         body,
         'gossip-new-contact-request',
@@ -283,7 +457,8 @@ export class NotificationService {
    * @returns True if notifications are supported
    */
   isSupported(): boolean {
-    return 'Notification' in window;
+    // Support notifications on web (Notification API) and native (Capacitor)
+    return this.isNativePlatform() || 'Notification' in window;
   }
 
   /**
@@ -291,7 +466,12 @@ export class NotificationService {
    * @returns Current permission status
    */
   getPermissionStatus(): NotificationPermission {
-    this.updatePermissionStatus();
+    if (this.isNativePlatform()) {
+      // Kick off async sync with native permission state; return last known state.
+      void this.initNativePermissionStatus();
+    } else {
+      this.updatePermissionStatus();
+    }
     return { ...this.permission };
   }
 
@@ -300,7 +480,12 @@ export class NotificationService {
    * @returns Notification preferences including enabled state and permission
    */
   getPreferences(): NotificationPreferences {
-    this.updatePermissionStatus();
+    if (this.isNativePlatform()) {
+      // Kick off async sync with native permission state; return last known state.
+      void this.initNativePermissionStatus();
+    } else {
+      this.updatePermissionStatus();
+    }
     return {
       enabled: this.enabled,
       permission: { ...this.permission },
@@ -338,6 +523,12 @@ export class NotificationService {
    * Update internal permission status based on browser state
    */
   private updatePermissionStatus(): void {
+    // On native platforms, permission is tracked via LocalNotifications
+    // and updated in requestPermission(). Avoid overwriting it here.
+    if (this.isNativePlatform()) {
+      return;
+    }
+
     if (!('Notification' in window)) {
       this.permission = {
         granted: false,
