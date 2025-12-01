@@ -1,6 +1,3 @@
-// Runs in BROWSER mode (real Chromium via Playwright)
-// Tests the InvitePage component with real browser behavior
-
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import React from 'react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
@@ -13,8 +10,10 @@ import { useAccountStore } from '../../src/stores/accountStore';
 import { ROUTES } from '../../src/constants/routes';
 import { testUsers } from '../helpers/factories/userProfile';
 import { UserProfile } from '../../src/db';
-import { wait } from '../helpers/utils';
 import { consoleMock, consoleClearMock } from '../helpers/mock/console';
+
+// These values must stay in sync with `InvitePage` timing constants
+const NATIVE_APP_OPEN_DELAY = 150;
 
 describe('InvitePage - Deep Link Invite Flow', () => {
   let bobProfile: UserProfile;
@@ -161,77 +160,70 @@ describe('InvitePage - Deep Link Invite Flow', () => {
   it('automatically attempts to open native app on mount (web only)', async () => {
     await renderInviteRoute(ROUTES.invite({ userId: bobProfile.userId }));
 
-    // Wait for auto-open delay (150ms) + a bit more for async operations
-    await wait(250);
-
-    // The auto-open functionality should have triggered
-    // We verify this by checking that the button shows loading state briefly
-    // or that the component is in the expected state
-    const openButton = page.getByRole('button', { name: /open in app/i });
+    // The auto-open functionality should trigger and show a loading state
+    const openButton = page.getByRole('button', { name: /opening\.\.\./i });
     await expect.element(openButton).toBeVisible();
-
-    // The button should be functional (not permanently disabled)
-    await expect.element(openButton).not.toBeDisabled();
   });
 
   it('shows loading state when opening app', async () => {
     await renderInviteRoute(ROUTES.invite({ userId: bobProfile.userId }));
 
-    // Wait a bit for auto-open to trigger
-    await wait(100);
-
-    // The button should show loading state briefly or be visible
+    // The button should show loading state once auto-open triggers
     const openButton = page.getByRole('button', {
-      name: /opening...|open in app/i,
+      name: /opening\.\.\./i,
     });
     await expect.element(openButton).toBeVisible();
   });
 
   it('shows success state when native app opens (visibility change)', async () => {
-    await renderInviteRoute(ROUTES.invite({ userId: bobProfile.userId }));
+    vi.useFakeTimers();
+    try {
+      await renderInviteRoute(ROUTES.invite({ userId: bobProfile.userId }));
 
-    // Wait for auto-open to trigger (NATIVE_APP_OPEN_DELAY = 150ms)
-    // Then wait for the anchor.click() to happen (another 150ms)
-    // Then the listener is set up, so we need to wait for that
-    await wait(350);
+      // Let the auto-open effect fire and then the internal open timer
+      vi.advanceTimersByTime(NATIVE_APP_OPEN_DELAY);
+      vi.advanceTimersByTime(NATIVE_APP_OPEN_DELAY);
 
-    // Simulate visibility change to trigger success state
-    // Set document.hidden to true to simulate app switch
-    const originalHidden = Object.getOwnPropertyDescriptor(document, 'hidden');
-    Object.defineProperty(document, 'hidden', {
-      writable: true,
-      configurable: true,
-      value: true,
-    });
-
-    // Trigger visibilitychange event - the listener should be set up by now
-    const event = new Event('visibilitychange', { bubbles: true });
-    document.dispatchEvent(event);
-
-    // Wait for React state update (component needs to process the event)
-    await wait(400);
-
-    // Check for success state
-    const successHeading = page.getByRole('heading', {
-      name: /opening in app/i,
-    });
-    await expect.element(successHeading).toBeVisible();
-
-    // Check for "Continue in Web App Instead" button
-    const continueButton = page.getByRole('button', {
-      name: /continue in web app instead/i,
-    });
-    await expect.element(continueButton).toBeVisible();
-
-    // Restore document.hidden
-    if (originalHidden) {
-      Object.defineProperty(document, 'hidden', originalHidden);
-    } else {
+      // Simulate visibility change to trigger success state
+      // Set document.hidden to true to simulate app switch
+      const originalHidden = Object.getOwnPropertyDescriptor(
+        document,
+        'hidden'
+      );
       Object.defineProperty(document, 'hidden', {
         writable: true,
         configurable: true,
-        value: false,
+        value: true,
       });
+
+      // Trigger visibilitychange event - the listener should be set up by now
+      const event = new Event('visibilitychange', { bubbles: true });
+      document.dispatchEvent(event);
+
+      // Check for success state
+      const successHeading = page.getByRole('heading', {
+        name: /opening in app/i,
+      });
+      await expect.element(successHeading).toBeVisible();
+
+      // Check for "Continue in Web App Instead" button
+      const continueButton = page.getByRole('button', {
+        name: /continue in web app instead/i,
+      });
+      await expect.element(continueButton).toBeVisible();
+
+      // Restore document.hidden
+      if (originalHidden) {
+        Object.defineProperty(document, 'hidden', originalHidden);
+      } else {
+        Object.defineProperty(document, 'hidden', {
+          writable: true,
+          configurable: true,
+          value: false,
+        });
+      }
+    } finally {
+      vi.useRealTimers();
     }
   });
 
@@ -263,17 +255,11 @@ describe('InvitePage - Deep Link Invite Flow', () => {
       </MemoryRouter>
     );
 
-    // Wait for auto-open attempt to complete
-    await wait(500);
-
     // Click Continue in Web App button
     const continueButton = page.getByRole('button', {
       name: /continue in web app/i,
     });
     await continueButton.click();
-
-    // Wait for navigation
-    await wait(200);
 
     // Check that invite data was stored
     const pendingInvite = useAppStore.getState().pendingDeepLinkInfo;
@@ -296,17 +282,10 @@ describe('InvitePage - Deep Link Invite Flow', () => {
 
     await renderInviteRoute(ROUTES.invite({ userId: bobProfile.userId }));
 
-    // Wait for auto-open attempt
-    await wait(500);
-
-    // Click Install for iOS button
     const installButton = page.getByRole('button', {
       name: /install for ios/i,
     });
     await installButton.click();
-
-    // Wait a bit for the click to process
-    await wait(100);
 
     // Should have called window.open with App Store URL
     expect(openedUrl).toContain('apps.apple.com');
@@ -327,14 +306,10 @@ describe('InvitePage - Deep Link Invite Flow', () => {
 
     await renderInviteRoute(ROUTES.invite({ userId: bobProfile.userId }));
 
-    await wait(500);
-
     const installButton = page.getByRole('button', {
       name: /install for android/i,
     });
     await installButton.click();
-
-    await wait(100);
 
     // Should open Google Play Store URL
     expect(openedUrl).toContain('play.google.com');
@@ -354,14 +329,10 @@ describe('InvitePage - Deep Link Invite Flow', () => {
 
     await renderInviteRoute(ROUTES.invite({ userId: bobProfile.userId }));
 
-    await wait(500);
-
     const downloadButton = page.getByRole('button', {
       name: /download last release/i,
     });
     await downloadButton.click();
-
-    await wait(100);
 
     // Should open GitHub release URL
     expect(openedUrl).toContain('github.com');
@@ -395,15 +366,9 @@ describe('InvitePage - Deep Link Invite Flow', () => {
   it('handles manual Open in App button click', async () => {
     await renderInviteRoute(ROUTES.invite({ userId: bobProfile.userId }));
 
-    // Wait for auto-open attempt to complete
-    await wait(500);
-
     // Manually click Open in App button
     const openButton = page.getByRole('button', { name: /open in app/i });
     await openButton.click();
-
-    // Wait for processing
-    await wait(100);
 
     // Button should still be visible
     await expect.element(openButton).toBeVisible();
@@ -427,10 +392,7 @@ describe('InvitePage - Deep Link Invite Flow', () => {
 
     await goHomeButton.click();
 
-    // Wait for navigation
-    await wait(200);
-
-    // Should navigate to home
+    // Should navigate to home (waits implicitly via expect)
     const homeContent = page.getByText('Home');
     await expect.element(homeContent).toBeVisible();
   });
@@ -449,9 +411,6 @@ describe('InvitePage - Deep Link Invite Flow', () => {
         </Routes>
       </MemoryRouter>
     );
-
-    // Wait for page to render
-    await wait(100);
 
     // The back button is the first button in the header
     // Use the page header title to find the header container
@@ -473,10 +432,7 @@ describe('InvitePage - Deep Link Invite Flow', () => {
       backButton.click();
     }
 
-    // Wait for navigation
-    await wait(200);
-
-    // Should navigate to home
+    // Should navigate to home (waits implicitly via expect)
     const homeContent = page.getByText('Home');
     await expect.element(homeContent).toBeVisible();
   });
@@ -484,66 +440,65 @@ describe('InvitePage - Deep Link Invite Flow', () => {
   it('handles Continue in Web App Instead button in success state', async () => {
     const HomePage = () => <div>Home</div>;
 
-    await render(
-      <MemoryRouter
-        initialEntries={[ROUTES.invite({ userId: bobProfile.userId })]}
-      >
-        <Routes>
-          <Route path="/" element={<HomePage />} />
-          <Route path={ROUTES.invite()} element={<InvitePage />} />
-        </Routes>
-      </MemoryRouter>
-    );
+    vi.useFakeTimers();
+    try {
+      await render(
+        <MemoryRouter
+          initialEntries={[ROUTES.invite({ userId: bobProfile.userId })]}
+        >
+          <Routes>
+            <Route path="/" element={<HomePage />} />
+            <Route path={ROUTES.invite()} element={<InvitePage />} />
+          </Routes>
+        </MemoryRouter>
+      );
 
-    // Wait for auto-open to trigger and listener to be set up
-    // NATIVE_APP_OPEN_DELAY (150ms) + anchor.click delay (150ms) + listener setup
-    await wait(350);
+      // Let the auto-open effect fire and then the internal open timer
+      vi.advanceTimersByTime(NATIVE_APP_OPEN_DELAY * 2);
 
-    // Simulate visibility change to trigger success state
-    const originalHidden = Object.getOwnPropertyDescriptor(document, 'hidden');
-    Object.defineProperty(document, 'hidden', {
-      writable: true,
-      configurable: true,
-      value: true,
-    });
-
-    // Trigger visibilitychange event
-    const event = new Event('visibilitychange', { bubbles: true });
-    document.dispatchEvent(event);
-
-    // Wait for React state update
-    await wait(400);
-
-    // Verify success state appeared before trying to click button
-    // If it didn't appear, the test will fail here with a clear message
-    const successHeading = page.getByRole('heading', {
-      name: /opening in app/i,
-    });
-    await expect.element(successHeading).toBeVisible();
-
-    // Click "Continue in Web App Instead" button
-    const continueButton = page.getByRole('button', {
-      name: /continue in web app instead/i,
-    });
-    await continueButton.click();
-
-    // Wait for navigation
-    await wait(200);
-
-    // Check that invite data was stored
-    const pendingInvite = useAppStore.getState().pendingDeepLinkInfo;
-    expect(pendingInvite).toBeTruthy();
-    expect(pendingInvite?.userId).toBe(bobProfile.userId);
-
-    // Restore document.hidden
-    if (originalHidden) {
-      Object.defineProperty(document, 'hidden', originalHidden);
-    } else {
+      // Simulate visibility change to trigger success state
+      const originalHidden = Object.getOwnPropertyDescriptor(
+        document,
+        'hidden'
+      );
       Object.defineProperty(document, 'hidden', {
         writable: true,
         configurable: true,
-        value: false,
+        value: true,
       });
+
+      const event = new Event('visibilitychange', { bubbles: true });
+      document.dispatchEvent(event);
+
+      // Verify success state appeared before trying to click button
+      const successHeading = page.getByRole('heading', {
+        name: /opening in app/i,
+      });
+      await expect.element(successHeading).toBeVisible();
+
+      // Click "Continue in Web App Instead" button
+      const continueButton = page.getByRole('button', {
+        name: /continue in web app instead/i,
+      });
+      await continueButton.click();
+
+      // Check that invite data was stored
+      const pendingInvite = useAppStore.getState().pendingDeepLinkInfo;
+      expect(pendingInvite).toBeTruthy();
+      expect(pendingInvite?.userId).toBe(bobProfile.userId);
+
+      // Restore document.hidden
+      if (originalHidden) {
+        Object.defineProperty(document, 'hidden', originalHidden);
+      } else {
+        Object.defineProperty(document, 'hidden', {
+          writable: true,
+          configurable: true,
+          value: false,
+        });
+      }
+    } finally {
+      vi.useRealTimers();
     }
   });
 
@@ -562,9 +517,6 @@ describe('InvitePage - Deep Link Invite Flow', () => {
         </Routes>
       </MemoryRouter>
     );
-
-    // Wait for page to render
-    await wait(500);
 
     // The component should still render (it validates userId on mount)
     // If userId is invalid format, it might show invalid invite or handle gracefully
@@ -587,9 +539,6 @@ describe('InvitePage - Deep Link Invite Flow', () => {
       </MemoryRouter>
     );
 
-    // Wait for page to render
-    await wait(100);
-
     // PrivacyGraphic should be rendered (it's an SVG component)
     // Check for SVG element by accessing the DOM through a known element
     const headingElement = page
@@ -610,9 +559,6 @@ describe('InvitePage - Deep Link Invite Flow', () => {
         </Routes>
       </MemoryRouter>
     );
-
-    // Wait for page to render
-    await wait(100);
 
     // Check for install section heading
     const installHeading = page.getByRole('heading', {

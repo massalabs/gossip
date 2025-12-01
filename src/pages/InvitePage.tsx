@@ -45,6 +45,18 @@ export const InvitePage: React.FC = () => {
   const tryOpenNativeApp = useCallback(
     (invitePath: string): Promise<boolean> => {
       return new Promise<boolean>(resolve => {
+        // Cancel any pending timers/listeners from previous attempts to
+        // avoid accumulating cleanup functions and duplicated side effects.
+        const existingCleanups = cleanupFunctionsRef.current;
+        existingCleanups.forEach(fn => {
+          try {
+            fn();
+          } catch (err) {
+            console.warn('Cleanup error before new native open attempt:', err);
+          }
+        });
+        existingCleanups.clear();
+
         const anchor = document.createElement('a');
         anchor.href = `gossip://${invitePath.slice(1)}`;
         anchor.style.display = 'none';

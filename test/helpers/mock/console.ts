@@ -8,5 +8,5 @@ export const consoleMock = (method: ConsoleMethod) =>
 
 // clear
 export const consoleClearMock = (method: ConsoleMethod) => {
-  vi.spyOn(console, method).mockClear();
+  vi.spyOn(console, method).mockClear().mockRestore();
 };

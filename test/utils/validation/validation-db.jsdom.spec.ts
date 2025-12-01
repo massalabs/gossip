@@ -80,7 +80,7 @@ describe('utils/validation.ts - Database tests (requires IndexedDB)', () => {
       );
     });
 
-    it('should handle database errors gracefully', async () => {
+    it('should return error when database connection fails', async () => {
       // Close the database to simulate an error
       if (db.isOpen()) {
         db.close();
