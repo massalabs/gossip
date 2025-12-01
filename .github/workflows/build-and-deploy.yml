@@ -275,7 +275,7 @@ jobs:
               skip_upload_metadata:true \
               skip_upload_images:true \
               skip_upload_screenshots:true \
-              release_status:draft
+              release_status:completed
           elif [ "$TRACK" == "beta" ]; then
             bundle exec fastlane run upload_to_play_store \
               track:beta \
@@ -285,7 +285,7 @@ jobs:
               skip_upload_metadata:true \
               skip_upload_images:true \
               skip_upload_screenshots:true \
-              release_status:draft
+              release_status:completed
           elif [ "$TRACK" == "production" ]; then
             bundle exec fastlane run upload_to_play_store \
               track:production \
