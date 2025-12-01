@@ -24,6 +24,12 @@ const config: CapacitorConfig = {
       // Actual color updates happen in theme-provider.tsx when theme changes
       backgroundColor: '#f8f9fa', // Light mode: #f8f9fa, Dark mode: #18181b
     },
+    LocalNotifications: {
+      // Use the app launcher icon for status bar notifications on Android.
+      // The value is the drawable/mipmap resource name without extension.
+      smallIcon: 'ic_launcher',
+      iconColor: '#488AFF',
+    },
   },
 };
 
