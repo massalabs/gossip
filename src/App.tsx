@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { BrowserRouter } from 'react-router-dom';
+import { BrowserRouter, useLocation } from 'react-router-dom';
 import { useAccountStore } from './stores/accountStore';
 import { useAppStore } from './stores/appStore';
 import ErrorBoundary from './components/ui/ErrorBoundary.tsx';
@@ -22,16 +22,23 @@ import VersionUpdateModal from './components/ui/VersionUpdateModal.tsx';
 import { AppUrlListener } from './components/AppUrlListener';
 import { toastOptions } from './utils/toastOptions.ts';
 import LoadingScreen from './components/ui/LoadingScreen.tsx';
+import { ROUTES } from './constants/routes';
 
 const AppContent: React.FC = () => {
   const { isLoading, userProfile } = useAccountStore();
   const { isInitialized } = useAppStore();
   const [showImport, setShowImport] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
+  const location = useLocation();
 
   useProfileLoader();
 
   const existingAccountInfo = useAccountInfo();
+
+  // If the current URL is an invite link, we should respect it even when
+  // there is no account yet, instead of forcing the onboarding flow.
+  const inviteBasePath = ROUTES.invite().split('/:')[0]; // "/invite"
+  const isInviteRoute = location.pathname.startsWith(inviteBasePath);
 
   // Setup service worker: register, listen for messages, start sync scheduler, and initialize background sync
   useEffect(() => {
@@ -44,7 +51,10 @@ const AppContent: React.FC = () => {
     return <LoadingScreen />;
   }
 
-  if (!isInitialized) {
+  // When the app is not initialized and we're NOT on an invite link,
+  // show the onboarding flow (no account exists yet).
+  // For invite links, we bypass onboarding so the user lands on the invite page.
+  if (!isInitialized && !isInviteRoute) {
     return (
       <Onboarding showImport={showImport} onShowImportChange={setShowImport} />
     );

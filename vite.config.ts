@@ -128,6 +128,11 @@ export default defineConfig({
   test: {
     globals: true,
 
+    exclude: [
+      'test/**/*.examples.{test,spec}.{ts,tsx}',
+      'test/**/examples/**/*.{test,spec}.{ts,tsx}',
+    ],
+
     // Use "projects" for multiple test environments (replaces deprecated workspace)
     projects: [
       // Project 1: Browser mode for component tests
@@ -138,7 +143,11 @@ export default defineConfig({
             enabled: true,
             provider: playwright(),
             headless: true,
-            instances: [{ browser: 'chromium' }],
+            instances: [
+              { browser: 'chromium' },
+              // { browser: 'webkit' },
+              // { browser: 'firefox' },
+            ],
           },
           // Support both patterns anywhere:
           // - test/**/*.browser.{test,spec}.{ts,tsx} (suffix pattern - anywhere)

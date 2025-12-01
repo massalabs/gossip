@@ -48,6 +48,7 @@ export const ROUTES = {
   // Public
   welcome: route('/welcome'),
   setup: route('/setup'),
+  invite: route('/invite/:userId'),
 
   // Main tabs
   discussions: route('/'),
