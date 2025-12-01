@@ -24,6 +24,7 @@ const PageHeader: React.FC<PageHeaderProps> = ({
               onClick={onBack}
               variant="circular"
               size="custom"
+              ariaLabel="Back"
               className="w-8 h-8 flex items-center justify-center"
             >
               <svg

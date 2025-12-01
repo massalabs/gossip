@@ -138,7 +138,11 @@ export default defineConfig({
             enabled: true,
             provider: playwright(),
             headless: true,
-            instances: [{ browser: 'chromium' }],
+            instances: [
+              { browser: 'chromium' },
+              // { browser: 'webkit' },
+              // { browser: 'firefox' },
+            ],
           },
           // Support both patterns anywhere:
           // - test/**/*.browser.{test,spec}.{ts,tsx} (suffix pattern - anywhere)

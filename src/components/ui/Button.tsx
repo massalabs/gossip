@@ -21,6 +21,7 @@ interface ButtonProps {
   type?: 'button' | 'submit' | 'reset';
   fullWidth?: boolean;
   title?: string;
+  ariaLabel?: string;
 }
 
 const Button: React.FC<ButtonProps> = ({
@@ -34,6 +35,7 @@ const Button: React.FC<ButtonProps> = ({
   type = 'button',
   fullWidth = false,
   title,
+  ariaLabel,
 }) => {
   const baseClasses =
     'inline-flex items-center justify-center font-medium transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-transparent disabled:cursor-not-allowed';
@@ -80,6 +82,7 @@ const Button: React.FC<ButtonProps> = ({
       disabled={disabled || loading}
       className={combinedClasses}
       title={title}
+      aria-label={ariaLabel}
     >
       {loading && (
         <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin mr-2" />
