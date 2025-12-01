@@ -21,11 +21,21 @@ export function validatePassword(value: string): ValidationResult {
 }
 
 export function validateUsernameFormat(value: string): ValidationResult {
-  if (!value || value.trim().length === 0) {
+  const trimmed = value.trim();
+
+  if (!trimmed) {
     return { valid: false, error: 'Username is required' };
   }
 
-  if (value.length < 3) {
+  // Disallow any whitespace inside the username (single token only)
+  if (/\s/.test(trimmed)) {
+    return {
+      valid: false,
+      error: 'Username cannot contain spaces',
+    };
+  }
+
+  if (trimmed.length < 3) {
     return {
       valid: false,
       error: 'Username must be at least 3 characters long',

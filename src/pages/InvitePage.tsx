@@ -94,7 +94,6 @@ export const InvitePage: React.FC = () => {
             anchor.remove();
           }
         });
-        addCleanup(performCleanup);
       });
     },
     [addCleanup]

@@ -70,6 +70,12 @@ describe('utils/validation.ts', () => {
       expect(result.error).toBe('Username must be at least 3 characters long');
     });
 
+    it('should reject username shorter than 3 characters after trimming', () => {
+      const result = validateUsernameFormat('  ab  ');
+      expect(result.valid).toBe(false);
+      expect(result.error).toBe('Username must be at least 3 characters long');
+    });
+
     it('should accept username with exactly 3 characters', () => {
       const result = validateUsernameFormat('abc');
       expect(result.valid).toBe(true);
@@ -95,10 +101,15 @@ describe('utils/validation.ts', () => {
     });
 
     it('should handle username with leading/trailing whitespace', () => {
-      // The function checks trim().length, so whitespace is handled
       const result = validateUsernameFormat('  user  ');
       expect(result.valid).toBe(true);
       expect(result.error).toBeUndefined();
+    });
+
+    it('should reject username with internal spaces', () => {
+      const result = validateUsernameFormat('user name');
+      expect(result.valid).toBe(false);
+      expect(result.error).toBe('Username cannot contain spaces');
     });
   });
 
