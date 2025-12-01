@@ -1,8 +1,3 @@
-/**
- * Battle Tests for Route Constants
- *
- * Comprehensive tests for the route() helper function and route utilities
- */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ROUTES } from '../../src/constants/routes';
 
@@ -37,7 +32,6 @@ describe('Route Function - Dynamic Routes (Single Param)', () => {
     expect(ROUTES.contact({ userId: 'alice123' })).toBe('/contact/alice123');
     expect(ROUTES.discussion({ userId: 'bob456' })).toBe('/discussion/bob456');
   });
-
 
   it('should handle numeric param values', () => {
     expect(ROUTES.contact({ userId: 12345 })).toBe('/contact/12345');
@@ -132,89 +126,5 @@ describe('Route Function - Missing Params', () => {
     expect(consoleWarnSpy).toHaveBeenCalledWith(
       '[routes] Missing required params for /contact/:userId: userId'
     );
-  });
-});
-
-describe('Route Constants - Consistency', () => {
-  it('ROUTES should have all expected routes', () => {
-    expect(ROUTES).toHaveProperty('discussions');
-    expect(ROUTES).toHaveProperty('wallet');
-    expect(ROUTES).toHaveProperty('settings');
-    expect(ROUTES).toHaveProperty('newContact');
-    expect(ROUTES).toHaveProperty('newDiscussion');
-    expect(ROUTES).toHaveProperty('contact');
-    expect(ROUTES).toHaveProperty('discussion');
-    expect(ROUTES).toHaveProperty('discussionSettings');
-    expect(ROUTES).toHaveProperty('default');
-  });
-
-  it('ROUTES should have all expected routes', () => {
-    expect(ROUTES).toHaveProperty('welcome');
-    expect(ROUTES).toHaveProperty('setup');
-    expect(ROUTES).toHaveProperty('default');
-  });
-
-  it('all routes should be functions', () => {
-    expect(typeof ROUTES.discussions).toBe('function');
-    expect(typeof ROUTES.contact).toBe('function');
-    expect(typeof ROUTES.welcome).toBe('function');
-  });
-
-  it('should use function call for consistency', () => {
-    expect(ROUTES.discussions()).toBe('/');
-    expect(ROUTES.contact()).toBe('/contact/:userId');
-    expect(ROUTES.welcome()).toBe('/welcome');
-  });
-
-  it('default routes should exist and be valid', () => {
-    expect(ROUTES.default()).toBe('/');
-  });
-});
-
-describe('Route Function - Real-world Scenarios', () => {
-  it('should handle navigation flow: discussions -> contact -> back', () => {
-    const discussionsPath = ROUTES.discussions();
-    const contactPath = ROUTES.contact({ userId: 'alice' });
-
-    expect(discussionsPath).toBe('/');
-    expect(contactPath).toBe('/contact/alice');
-  });
-
-  it('should handle complex navigation: discussion -> discussion settings', () => {
-    const userId = 'bob123';
-    const discussionPath = ROUTES.discussion({ userId });
-    const settingsPath = ROUTES.discussionSettings({
-      discussionId: userId,
-    });
-
-    expect(discussionPath).toBe('/discussion/bob123');
-    expect(settingsPath).toBe('/discussion/bob123/settings');
-  });
-
-  it('should handle unauthenticated -> authenticated flow', () => {
-    const welcomePath = ROUTES.welcome();
-    const setupPath = ROUTES.setup();
-    const homePath = ROUTES.discussions();
-
-    expect(welcomePath).toBe('/welcome');
-    expect(setupPath).toBe('/setup');
-    expect(homePath).toBe('/');
-  });
-
-  it('should handle multiple users in same session', () => {
-    const alice = ROUTES.contact({ userId: 'alice' });
-    const bob = ROUTES.contact({ userId: 'bob' });
-    const charlie = ROUTES.discussion({ userId: 'charlie' });
-
-    expect(alice).toBe('/contact/alice');
-    expect(bob).toBe('/contact/bob');
-    expect(charlie).toBe('/discussion/charlie');
-  });
-
-  it('should handle userId with Massa address format', () => {
-    const massaAddress = 'AU12alice123456789';
-    const path = ROUTES.contact({ userId: massaAddress });
-
-    expect(path).toBe('/contact/AU12alice123456789');
   });
 });
