@@ -1,16 +1,13 @@
 // src/components/AppUrlListener.tsx
 import { useCallback, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { Capacitor, PluginListenerHandle } from '@capacitor/core';
-import { App } from '@capacitor/app';
+import { App, URLOpenListenerEvent } from '@capacitor/app';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import { useNavigate } from 'react-router-dom';
 import { extractInvitePath, parseInvite } from '../utils/qrCodeParser';
 import { useAppStore } from '../stores/appStore';
-import { ROUTES } from '../constants/routes';
 
 export const AppUrlListener: React.FC = () => {
-  const navigate = useNavigate();
   const setPendingDeepLinkInfo = useAppStore(s => s.setPendingDeepLinkInfo);
   const navigate = useNavigate();
 
@@ -20,24 +17,19 @@ export const AppUrlListener: React.FC = () => {
     cleanupFunctionsRef.current.add(cleanup);
   }, []);
 
-  /**
-   * Process invite in web context - navigate to invite page
-   */
-  const handleWebInvite = useCallback(
-    async (url: string) => {
-      const invitePath = extractInvitePath(url);
-      if (!invitePath) return;
-
-      // Extract userId from invite path
-      const match = invitePath.match(/^\/invite\/([^/#?\s]+)$/i);
-      if (!match) return;
-
-      const userId = decodeURIComponent(match[1]);
-
-      // Navigate to invite page - it will handle the auto-open logic
-      navigate(ROUTES.invite({ userId }), { replace: true });
+  const handleAppUrlOpen = useCallback(
+    async (event: URLOpenListenerEvent) => {
+      try {
+        const invitePath = extractInvitePath(event.url);
+        if (invitePath) {
+          await setPendingDeepLinkInfo(parseInvite(invitePath));
+          window.history.replaceState(null, '', '/');
+        }
+      } catch (err) {
+        console.error('Failed to handle appUrlOpen:', err);
+      }
     },
-    [navigate]
+    [setPendingDeepLinkInfo]
   );
 
   /**
@@ -47,24 +39,14 @@ export const AppUrlListener: React.FC = () => {
     try {
       const listener: PluginListenerHandle = await App.addListener(
         'appUrlOpen',
-        async event => {
-          try {
-            const inviteData = parseInvite(event.url);
-            if (inviteData) {
-              await setPendingDeepLinkInfo(inviteData);
-              window.history.replaceState(null, '', '/');
-            }
-          } catch (err) {
-            console.error('Failed to handle native appUrlOpen:', err);
-          }
-        }
+        handleAppUrlOpen
       );
 
       addCleanup(() => listener.remove());
     } catch (err) {
       console.error('Failed to setup native listener:', err);
     }
-  }, [setPendingDeepLinkInfo, addCleanup]);
+  }, [handleAppUrlOpen, addCleanup]);
 
   /**
    * Set up native notification action listener (Capacitor LocalNotifications)
@@ -109,15 +91,16 @@ export const AppUrlListener: React.FC = () => {
   useEffect(() => {
     if (Capacitor.isNativePlatform()) {
       void setupNativeListener();
+
       void setupNativeNotificationListener();
-    } else {
-      void handleWebInvite(window.location.href);
     }
-  }, [setupNativeListener, setupNativeNotificationListener, handleWebInvite]);
+  }, [setupNativeListener, setupNativeNotificationListener]);
 
   useEffect(() => {
+    const cleanupFunctions = cleanupFunctionsRef.current;
+
     return () => {
-      cleanupFunctionsRef.current.forEach(fn => {
+      cleanupFunctions.forEach(fn => {
         try {
           fn();
         } catch (err) {
@@ -126,8 +109,7 @@ export const AppUrlListener: React.FC = () => {
         }
       });
 
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-      cleanupFunctionsRef.current.clear();
+      cleanupFunctions.clear();
     };
   }, []);
 

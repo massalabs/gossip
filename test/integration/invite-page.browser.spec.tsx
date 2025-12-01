@@ -12,6 +12,7 @@ import { useAppStore } from '../../src/stores/appStore';
 import { useAccountStore } from '../../src/stores/accountStore';
 import { ROUTES } from '../../src/constants/routes';
 import { encodeUserId } from '../../src/utils/userId';
+import type { UserProfile } from '../../src/db';
 
 // Helper to wait for async operations
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -29,6 +30,58 @@ describe('InvitePage - Deep Link Invite Flow', () => {
   beforeEach(() => {
     // Reset store state before each test
     useAppStore.getState().setPendingDeepLinkInfo(null);
+  });
+
+  it('redirects authenticated user with pending invite to New Contact with userId prefilled', async () => {
+    const inviteUserId = createTestUserId(99);
+    const now = new Date();
+
+    const fakeProfile: UserProfile = {
+      userId: inviteUserId,
+      username: 'Test User',
+      avatar: undefined,
+      security: {
+        encKeySalt: new Uint8Array(0),
+        authMethod: 'password',
+        mnemonicBackup: {
+          encryptedMnemonic: new Uint8Array(0),
+          createdAt: now,
+          backedUp: true,
+        },
+      },
+      session: new Uint8Array(0),
+      bio: '',
+      status: 'online',
+      lastSeen: now,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    // Simulate an authenticated user
+    useAccountStore.setState({
+      ...useAccountStore.getState(),
+      userProfile: fakeProfile,
+      isLoading: false,
+    });
+
+    // App has completed initialization
+    useAppStore.getState().setIsInitialized(true);
+
+    // Simulate a pending invite deep link stored in the app store
+    useAppStore.getState().setPendingDeepLinkInfo({ userId: inviteUserId });
+
+    // Start from the default discussions route
+    window.history.pushState({}, '', ROUTES.discussions());
+
+    await render(<App />);
+
+    // The user should be redirected to the New Contact page
+    const heading = page.getByRole('heading', { name: /new contact/i });
+    await expect.element(heading).toBeVisible();
+
+    // And the User ID field should be prefilled with the invite userId
+    const userIdInput = page.getByLabelText('User ID');
+    await expect.element(userIdInput).toHaveValue(inviteUserId);
   });
 
   it('bypasses onboarding and shows InvitePage when app is not initialized and URL is an invite', async () => {
@@ -225,6 +278,19 @@ describe('InvitePage - Deep Link Invite Flow', () => {
     // Create a simple home component for navigation
     const HomePage = () => <div>Home</div>;
 
+    // Silence expected "No authenticated user" errors from background
+    // announcement processing during this test to keep the output clean.
+    const originalConsoleError = console.error;
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation((...args: unknown[]) => {
+        const message = String(args[0] ?? '');
+        if (message.includes('Failed to process incoming announcement')) {
+          return;
+        }
+        originalConsoleError(...args);
+      });
+
     await render(
       <MemoryRouter initialEntries={[ROUTES.invite({ userId: testUserId })]}>
         <Routes>
@@ -251,6 +317,8 @@ describe('InvitePage - Deep Link Invite Flow', () => {
     const pendingInvite = useAppStore.getState().pendingDeepLinkInfo;
     expect(pendingInvite).toBeTruthy();
     expect(pendingInvite?.userId).toBe(testUserId);
+
+    consoleErrorSpy.mockRestore();
   });
 
   it('handles Install for iOS button click - opens App Store', async () => {
