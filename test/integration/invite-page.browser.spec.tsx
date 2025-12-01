@@ -1,7 +1,7 @@
 // Runs in BROWSER mode (real Chromium via Playwright)
 // Tests the InvitePage component with real browser behavior
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import React from 'react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { render } from 'vitest-browser-react';
@@ -11,56 +11,44 @@ import App from '../../src/App';
 import { useAppStore } from '../../src/stores/appStore';
 import { useAccountStore } from '../../src/stores/accountStore';
 import { ROUTES } from '../../src/constants/routes';
-import { encodeUserId } from '../../src/utils/userId';
-import type { UserProfile } from '../../src/db';
-
-// Helper to wait for async operations
-const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-
-// Helper to generate valid test user IDs
-const createTestUserId = (seed: number): string => {
-  const bytes = new Uint8Array(32);
-  // Fill with seed value to create deterministic test IDs
-  bytes.fill(seed % 256);
-
-  return encodeUserId(bytes);
-};
+import { testUsers } from '../helpers/factories/userProfile';
+import { UserProfile } from '../../src/db';
+import { wait } from '../helpers/utils';
+import { consoleMock, consoleClearMock } from '../helpers/mock/console';
 
 describe('InvitePage - Deep Link Invite Flow', () => {
+  let bobProfile: UserProfile;
+  let aliceProfile: UserProfile;
+
   beforeEach(() => {
+    bobProfile = testUsers.bob();
+    aliceProfile = testUsers.alice();
     // Reset store state before each test
     useAppStore.getState().setPendingDeepLinkInfo(null);
+    consoleMock('error');
   });
 
+  afterEach(() => {
+    consoleClearMock('error');
+  });
+
+  const renderInviteRoute = async (
+    initialEntry: string
+  ): Promise<ReturnType<typeof render>> => {
+    return render(
+      <MemoryRouter initialEntries={[initialEntry]}>
+        <Routes>
+          <Route path={ROUTES.invite()} element={<InvitePage />} />
+        </Routes>
+      </MemoryRouter>
+    );
+  };
+
   it('redirects authenticated user with pending invite to New Contact with userId prefilled', async () => {
-    const inviteUserId = createTestUserId(99);
-    const now = new Date();
-
-    const fakeProfile: UserProfile = {
-      userId: inviteUserId,
-      username: 'Test User',
-      avatar: undefined,
-      security: {
-        encKeySalt: new Uint8Array(0),
-        authMethod: 'password',
-        mnemonicBackup: {
-          encryptedMnemonic: new Uint8Array(0),
-          createdAt: now,
-          backedUp: true,
-        },
-      },
-      session: new Uint8Array(0),
-      bio: '',
-      status: 'online',
-      lastSeen: now,
-      createdAt: now,
-      updatedAt: now,
-    };
-
     // Simulate an authenticated user
     useAccountStore.setState({
       ...useAccountStore.getState(),
-      userProfile: fakeProfile,
+      userProfile: aliceProfile,
       isLoading: false,
     });
 
@@ -68,7 +56,9 @@ describe('InvitePage - Deep Link Invite Flow', () => {
     useAppStore.getState().setIsInitialized(true);
 
     // Simulate a pending invite deep link stored in the app store
-    useAppStore.getState().setPendingDeepLinkInfo({ userId: inviteUserId });
+    useAppStore
+      .getState()
+      .setPendingDeepLinkInfo({ userId: bobProfile.userId });
 
     // Start from the default discussions route
     window.history.pushState({}, '', ROUTES.discussions());
@@ -81,14 +71,16 @@ describe('InvitePage - Deep Link Invite Flow', () => {
 
     // And the User ID field should be prefilled with the invite userId
     const userIdInput = page.getByLabelText('User ID');
-    await expect.element(userIdInput).toHaveValue(inviteUserId);
+    await expect.element(userIdInput).toHaveValue(bobProfile.userId);
   });
 
   it('bypasses onboarding and shows InvitePage when app is not initialized and URL is an invite', async () => {
-    const testUserId = createTestUserId(0);
-
     // Simulate navigating directly to an invite URL (cold start)
-    window.history.pushState({}, '', ROUTES.invite({ userId: testUserId }));
+    window.history.pushState(
+      {},
+      '',
+      ROUTES.invite({ userId: bobProfile.userId })
+    );
 
     // Ensure app is in "not initialized, no account" state
     useAppStore.getState().setIsInitialized(false);
@@ -108,15 +100,7 @@ describe('InvitePage - Deep Link Invite Flow', () => {
   });
 
   it('renders invite page with valid userId', async () => {
-    const testUserId = createTestUserId(1);
-    await render(
-      <MemoryRouter initialEntries={[ROUTES.invite({ userId: testUserId })]}>
-        <Routes>
-          <Route path="/invite" element={<InvitePage />} />
-          <Route path={ROUTES.invite()} element={<InvitePage />} />
-        </Routes>
-      </MemoryRouter>
-    );
+    await renderInviteRoute(ROUTES.invite({ userId: bobProfile.userId }));
 
     // Check that the invite message is displayed
     const heading = page.getByRole('heading', {
@@ -150,10 +134,12 @@ describe('InvitePage - Deep Link Invite Flow', () => {
 
   it('shows invalid invite message when userId is missing', async () => {
     await render(
-      <MemoryRouter initialEntries={['/invite']}>
+      // Render InvitePage without a userId route param to hit the
+      // "invalid invite" branch. We don't need a real '/invite' route
+      // from the app here, just a router context.
+      <MemoryRouter initialEntries={['/']}>
         <Routes>
-          <Route path="/invite" element={<InvitePage />} />
-          <Route path={ROUTES.invite()} element={<InvitePage />} />
+          <Route path="/" element={<InvitePage />} />
         </Routes>
       </MemoryRouter>
     );
@@ -173,15 +159,7 @@ describe('InvitePage - Deep Link Invite Flow', () => {
   });
 
   it('automatically attempts to open native app on mount (web only)', async () => {
-    const testUserId = createTestUserId(2);
-    await render(
-      <MemoryRouter initialEntries={[ROUTES.invite({ userId: testUserId })]}>
-        <Routes>
-          <Route path="/invite" element={<InvitePage />} />
-          <Route path={ROUTES.invite()} element={<InvitePage />} />
-        </Routes>
-      </MemoryRouter>
-    );
+    await renderInviteRoute(ROUTES.invite({ userId: bobProfile.userId }));
 
     // Wait for auto-open delay (150ms) + a bit more for async operations
     await wait(250);
@@ -197,15 +175,7 @@ describe('InvitePage - Deep Link Invite Flow', () => {
   });
 
   it('shows loading state when opening app', async () => {
-    const testUserId = createTestUserId(3);
-    await render(
-      <MemoryRouter initialEntries={[ROUTES.invite({ userId: testUserId })]}>
-        <Routes>
-          <Route path="/invite" element={<InvitePage />} />
-          <Route path={ROUTES.invite()} element={<InvitePage />} />
-        </Routes>
-      </MemoryRouter>
-    );
+    await renderInviteRoute(ROUTES.invite({ userId: bobProfile.userId }));
 
     // Wait a bit for auto-open to trigger
     await wait(100);
@@ -218,15 +188,7 @@ describe('InvitePage - Deep Link Invite Flow', () => {
   });
 
   it('shows success state when native app opens (visibility change)', async () => {
-    const testUserId = createTestUserId(4);
-    await render(
-      <MemoryRouter initialEntries={[ROUTES.invite({ userId: testUserId })]}>
-        <Routes>
-          <Route path="/invite" element={<InvitePage />} />
-          <Route path={ROUTES.invite()} element={<InvitePage />} />
-        </Routes>
-      </MemoryRouter>
-    );
+    await renderInviteRoute(ROUTES.invite({ userId: bobProfile.userId }));
 
     // Wait for auto-open to trigger (NATIVE_APP_OPEN_DELAY = 150ms)
     // Then wait for the anchor.click() to happen (another 150ms)
@@ -274,7 +236,6 @@ describe('InvitePage - Deep Link Invite Flow', () => {
   });
 
   it('handles Continue in Web App button click', async () => {
-    const testUserId = createTestUserId(5);
     // Create a simple home component for navigation
     const HomePage = () => <div>Home</div>;
 
@@ -292,10 +253,11 @@ describe('InvitePage - Deep Link Invite Flow', () => {
       });
 
     await render(
-      <MemoryRouter initialEntries={[ROUTES.invite({ userId: testUserId })]}>
+      <MemoryRouter
+        initialEntries={[ROUTES.invite({ userId: bobProfile.userId })]}
+      >
         <Routes>
           <Route path="/" element={<HomePage />} />
-          <Route path="/invite" element={<InvitePage />} />
           <Route path={ROUTES.invite()} element={<InvitePage />} />
         </Routes>
       </MemoryRouter>
@@ -316,7 +278,7 @@ describe('InvitePage - Deep Link Invite Flow', () => {
     // Check that invite data was stored
     const pendingInvite = useAppStore.getState().pendingDeepLinkInfo;
     expect(pendingInvite).toBeTruthy();
-    expect(pendingInvite?.userId).toBe(testUserId);
+    expect(pendingInvite?.userId).toBe(bobProfile.userId);
 
     consoleErrorSpy.mockRestore();
   });
@@ -332,15 +294,7 @@ describe('InvitePage - Deep Link Invite Flow', () => {
       return null;
     });
 
-    const testUserId = createTestUserId(6);
-    await render(
-      <MemoryRouter initialEntries={[ROUTES.invite({ userId: testUserId })]}>
-        <Routes>
-          <Route path="/invite" element={<InvitePage />} />
-          <Route path={ROUTES.invite()} element={<InvitePage />} />
-        </Routes>
-      </MemoryRouter>
-    );
+    await renderInviteRoute(ROUTES.invite({ userId: bobProfile.userId }));
 
     // Wait for auto-open attempt
     await wait(500);
@@ -371,15 +325,7 @@ describe('InvitePage - Deep Link Invite Flow', () => {
       return null;
     });
 
-    const testUserId = createTestUserId(7);
-    await render(
-      <MemoryRouter initialEntries={[ROUTES.invite({ userId: testUserId })]}>
-        <Routes>
-          <Route path="/invite" element={<InvitePage />} />
-          <Route path={ROUTES.invite()} element={<InvitePage />} />
-        </Routes>
-      </MemoryRouter>
-    );
+    await renderInviteRoute(ROUTES.invite({ userId: bobProfile.userId }));
 
     await wait(500);
 
@@ -406,15 +352,7 @@ describe('InvitePage - Deep Link Invite Flow', () => {
       return null;
     });
 
-    const testUserId = createTestUserId(8);
-    await render(
-      <MemoryRouter initialEntries={[ROUTES.invite({ userId: testUserId })]}>
-        <Routes>
-          <Route path="/invite" element={<InvitePage />} />
-          <Route path={ROUTES.invite()} element={<InvitePage />} />
-        </Routes>
-      </MemoryRouter>
-    );
+    await renderInviteRoute(ROUTES.invite({ userId: bobProfile.userId }));
 
     await wait(500);
 
@@ -436,13 +374,7 @@ describe('InvitePage - Deep Link Invite Flow', () => {
     // For this test, we verify the component renders correctly
     // In a real native app, Capacitor.isNativePlatform() would return true
     // and the auto-open effect wouldn't run.
-    await render(
-      <MemoryRouter initialEntries={['/invite/nativeuser123']}>
-        <Routes>
-          <Route path={ROUTES.invite()} element={<InvitePage />} />
-        </Routes>
-      </MemoryRouter>
-    );
+    await renderInviteRoute('/invite/nativeuser123');
 
     // Component should still render normally
     const heading = page.getByRole('heading', {
@@ -452,15 +384,7 @@ describe('InvitePage - Deep Link Invite Flow', () => {
   });
 
   it('shows back button in page header', async () => {
-    const testUserId = createTestUserId(10);
-    await render(
-      <MemoryRouter initialEntries={[ROUTES.invite({ userId: testUserId })]}>
-        <Routes>
-          <Route path="/invite" element={<InvitePage />} />
-          <Route path={ROUTES.invite()} element={<InvitePage />} />
-        </Routes>
-      </MemoryRouter>
-    );
+    await renderInviteRoute(ROUTES.invite({ userId: bobProfile.userId }));
 
     // PageHeader should have buttons visible
     // At least one button should be visible (the back button or action buttons)
@@ -469,15 +393,7 @@ describe('InvitePage - Deep Link Invite Flow', () => {
   });
 
   it('handles manual Open in App button click', async () => {
-    const testUserId = createTestUserId(11);
-    await render(
-      <MemoryRouter initialEntries={[ROUTES.invite({ userId: testUserId })]}>
-        <Routes>
-          <Route path="/invite" element={<InvitePage />} />
-          <Route path={ROUTES.invite()} element={<InvitePage />} />
-        </Routes>
-      </MemoryRouter>
-    );
+    await renderInviteRoute(ROUTES.invite({ userId: bobProfile.userId }));
 
     // Wait for auto-open attempt to complete
     await wait(500);
@@ -521,10 +437,11 @@ describe('InvitePage - Deep Link Invite Flow', () => {
 
   it('handles back button click in page header', async () => {
     const HomePage = () => <div>Home</div>;
-    const testUserId = createTestUserId(12);
 
     await render(
-      <MemoryRouter initialEntries={[ROUTES.invite({ userId: testUserId })]}>
+      <MemoryRouter
+        initialEntries={[ROUTES.invite({ userId: bobProfile.userId })]}
+      >
         <Routes>
           <Route path="/" element={<HomePage />} />
           <Route path="/invite" element={<InvitePage />} />
@@ -565,14 +482,14 @@ describe('InvitePage - Deep Link Invite Flow', () => {
   });
 
   it('handles Continue in Web App Instead button in success state', async () => {
-    const testUserId = createTestUserId(13);
     const HomePage = () => <div>Home</div>;
 
     await render(
-      <MemoryRouter initialEntries={[ROUTES.invite({ userId: testUserId })]}>
+      <MemoryRouter
+        initialEntries={[ROUTES.invite({ userId: bobProfile.userId })]}
+      >
         <Routes>
           <Route path="/" element={<HomePage />} />
-          <Route path="/invite" element={<InvitePage />} />
           <Route path={ROUTES.invite()} element={<InvitePage />} />
         </Routes>
       </MemoryRouter>
@@ -616,7 +533,7 @@ describe('InvitePage - Deep Link Invite Flow', () => {
     // Check that invite data was stored
     const pendingInvite = useAppStore.getState().pendingDeepLinkInfo;
     expect(pendingInvite).toBeTruthy();
-    expect(pendingInvite?.userId).toBe(testUserId);
+    expect(pendingInvite?.userId).toBe(bobProfile.userId);
 
     // Restore document.hidden
     if (originalHidden) {
@@ -641,7 +558,6 @@ describe('InvitePage - Deep Link Invite Flow', () => {
       <MemoryRouter initialEntries={[`/invite/${invalidUserId}`]}>
         <Routes>
           <Route path="/" element={<HomePage />} />
-          <Route path="/invite" element={<InvitePage />} />
           <Route path={ROUTES.invite()} element={<InvitePage />} />
         </Routes>
       </MemoryRouter>
@@ -660,9 +576,10 @@ describe('InvitePage - Deep Link Invite Flow', () => {
   });
 
   it('displays PrivacyGraphic component', async () => {
-    const testUserId = createTestUserId(15);
     await render(
-      <MemoryRouter initialEntries={[ROUTES.invite({ userId: testUserId })]}>
+      <MemoryRouter
+        initialEntries={[ROUTES.invite({ userId: bobProfile.userId })]}
+      >
         <Routes>
           <Route path="/invite" element={<InvitePage />} />
           <Route path={ROUTES.invite()} element={<InvitePage />} />
@@ -684,11 +601,11 @@ describe('InvitePage - Deep Link Invite Flow', () => {
   });
 
   it('shows install section with correct heading and description', async () => {
-    const testUserId = createTestUserId(16);
     await render(
-      <MemoryRouter initialEntries={[ROUTES.invite({ userId: testUserId })]}>
+      <MemoryRouter
+        initialEntries={[ROUTES.invite({ userId: bobProfile.userId })]}
+      >
         <Routes>
-          <Route path="/invite" element={<InvitePage />} />
           <Route path={ROUTES.invite()} element={<InvitePage />} />
         </Routes>
       </MemoryRouter>

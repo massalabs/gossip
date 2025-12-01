@@ -5,12 +5,13 @@
  * This ensures mocks stay in sync with the actual database schema.
  */
 import { UserProfile, AuthMethod } from '../../../src/db';
+import { encodeUserId } from '../../../src/utils';
 
 /**
  * Default values for creating test user profiles
  */
 const defaultUserProfile: UserProfile = {
-  userId: 'AU12testuser123456',
+  userId: 'gossip1gcqd2ssurzah4w2uxag2mlhpgpppv8aghl9vsu9x4ru9u5pg7ssq6g7jn2',
   username: 'Test User',
   security: {
     encKeySalt: new Uint8Array(32).fill(1),
@@ -156,7 +157,9 @@ export const userProfile = (): UserProfileBuilder => new UserProfileBuilder();
 export const testUsers = {
   alice: (): UserProfile =>
     userProfile()
-      .userId('AU12alice123456789')
+      .userId(
+        'gossip1yk45a3klcq2f0t0qgpcwg5v7xtvkxfwz4pncn0xcalkf9dsz60lqdfzpeh'
+      )
       .username('Alice')
       .status('online')
       .bio('Test user Alice')
@@ -164,7 +167,9 @@ export const testUsers = {
 
   bob: (): UserProfile =>
     userProfile()
-      .userId('AU12bob987654321')
+      .userId(
+        'gossip1uw8msn2f5v28peqc2zuam90am0xhs7fak2j6whjckfx54ynn36gs8ugayy'
+      )
       .username('Bob')
       .authMethod('webauthn')
       .webauthn('mock-credential-id')
@@ -179,7 +184,9 @@ export const testUsers = {
 
   charlie: (): UserProfile =>
     userProfile()
-      .userId('AU12charlie111222')
+      .userId(
+        'gossip1wackhrryxewr3x9246ke0esj29wfu9tdqxkx90rkgq73xuaarcuqczx2y3'
+      )
       .username('Charlie')
       .authMethod('capacitor')
       .iCloudSync(true)
@@ -194,13 +201,22 @@ export const testUsers = {
       .build(),
 };
 
+// Helper to generate valid test user IDs (gossip1... format)
+const createTestUserId = (seed: number): string => {
+  const bytes = new Uint8Array(32);
+  // Fill with seed value to create deterministic test IDs
+  bytes.fill(seed % 256);
+
+  return encodeUserId(bytes);
+};
+
 /**
  * Create multiple test users at once
  */
 export const createTestUsers = (count: number): UserProfile[] => {
   return Array.from({ length: count }, (_, i) =>
     userProfile()
-      .userId(`AU12testuser${i.toString().padStart(9, '0')}`)
+      .userId(createTestUserId(i))
       .username(`Test User ${i + 1}`)
       .build()
   );
