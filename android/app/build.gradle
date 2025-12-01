@@ -7,7 +7,25 @@ android {
         applicationId "net.massa.gossip"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 2
+        // Use an auto-generated numeric versionCode so each build is unique without manual bumping.
+        // We must stay within the 32-bit signed int limit required by Google Play (max 2147483647).
+        //
+        // If set, ANDROID_VERSION_CODE must be a numeric string (e.g. '1700000000') that is
+        // <= Integer.MAX_VALUE. If not set or invalid, we fall back to the current Unix time
+        // in seconds (System.currentTimeMillis() / 1000), which will be safely < 2147483647
+        // until year 2038.
+        def envVersionCode = System.getenv("ANDROID_VERSION_CODE")
+        def resolvedVersionCode
+        if (envVersionCode != null && envVersionCode ==~ /^\d+$/) {
+            resolvedVersionCode = envVersionCode.toLong()
+        } else {
+            resolvedVersionCode = (System.currentTimeMillis() / 1000L)
+        }
+        if (resolvedVersionCode > Integer.MAX_VALUE) {
+            throw new IllegalArgumentException("Resolved ANDROID_VERSION_CODE (" + resolvedVersionCode +
+                    ") exceeds 32-bit int max value (" + Integer.MAX_VALUE + ").")
+        }
+        versionCode resolvedVersionCode.toInteger()
         versionName "0.0.2"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
