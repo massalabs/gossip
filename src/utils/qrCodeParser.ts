@@ -46,7 +46,7 @@ export function extractInvitePath(input: string): string | null {
   // Handle gossip:// protocol
   if (trimmed.startsWith('gossip://')) {
     // Remove protocol and normalize path (handle both gossip:///invite and gossip://invite)
-    const path = trimmed.replace(/^gossip:\/\/+/, '/');
+    const path = trimmed.replace(/^gossip:\/\/+/, '/').split(/[?#]/)[0];
     if (path.startsWith(`/${AppRoute.invite}`)) {
       return path;
     }
