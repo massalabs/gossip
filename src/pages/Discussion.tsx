@@ -150,7 +150,7 @@ const Discussion: React.FC = () => {
 
   // Mobile-first: show only discussion page when selected
   return (
-    <div className="h-full max-w-md mx-auto bg-background flex flex-col">
+    <div className="h-full app-max-w mx-auto bg-background flex flex-col">
       <DiscussionHeader
         contact={contact}
         discussion={discussion}

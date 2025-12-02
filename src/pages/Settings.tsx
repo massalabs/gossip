@@ -5,7 +5,6 @@ import { useAccountStore } from '../stores/accountStore';
 import { useAppStore } from '../stores/appStore';
 import { useTheme } from '../hooks/useTheme';
 import { formatUserId } from '../utils/userId';
-import appLogo from '../assets/gossip_face.svg';
 import AccountBackup from '../components/account/AccountBackup';
 import Button from '../components/ui/Button';
 import Toggle from '../components/ui/Toggle';
@@ -79,6 +78,9 @@ const Settings = (): React.ReactElement => {
   }, []);
 
   const mnemonicBackupInfo = getMnemonicBackupInfo();
+
+  // Use public logo asset so it is precached by the PWA service worker and available offline
+  const appLogo = '/gossip_face.svg';
 
   const handleResetAllDiscussionsAndMessages = useCallback(async () => {
     try {

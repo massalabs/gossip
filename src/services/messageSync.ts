@@ -6,17 +6,20 @@
 
 import { messageService } from './message';
 import { announcementService } from './announcement';
+import { useOnlineStore } from '../stores/useOnlineStore';
 
 /**
  * Trigger manual message sync
  */
 export async function triggerManualSync(): Promise<void> {
-  try {
-    await Promise.all([
-      announcementService.fetchAndProcessAnnouncements(),
-      messageService.fetchMessages(),
-    ]);
-  } catch (error) {
-    console.error('Failed to trigger manual sync:', error);
+  const isOnline = useOnlineStore.use.isOnline();
+
+  if (!isOnline) {
+    return;
   }
+
+  await Promise.all([
+    announcementService.fetchAndProcessAnnouncements(),
+    messageService.fetchMessages(),
+  ]);
 }

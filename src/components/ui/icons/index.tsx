@@ -353,6 +353,22 @@ export const EditIcon: React.FC<IconProps> = ({ className = '' }) => (
   </svg>
 );
 
+export const PlusIcon: React.FC<IconProps> = ({ className = '' }) => (
+  <svg
+    fill="none"
+    stroke="currentColor"
+    viewBox="0 0 24 24"
+    className={`w-5 h-5 ${className}`.trim()}
+  >
+    <path
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth={2}
+      d="M12 4v16m8-8H4"
+    />
+  </svg>
+);
+
 export const IOSIcon: React.FC<IconProps> = ({ className = '' }) => (
   <svg
     fill="currentColor"

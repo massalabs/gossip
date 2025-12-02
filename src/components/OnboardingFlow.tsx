@@ -117,7 +117,7 @@ const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
               steps[currentStep].title
             )}
           </h1>
-          <p className="text-base md:text-lg text-muted-foreground leading-relaxed max-w-md mx-auto px-2">
+          <p className="text-base md:text-lg text-muted-foreground leading-relaxed app-max-w mx-auto px-2">
             {steps[currentStep].description}
           </p>
         </div>

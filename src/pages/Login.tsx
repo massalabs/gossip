@@ -234,96 +234,96 @@ const Login: React.FC<LoginProps> = React.memo(
     }
 
     return (
-      <div className="bg-background flex flex-col items-center justify-center p-6 h-full">
-        <div className="w-full max-w-md mx-auto">
-          <div className="text-center mb-8">
-            <img
-              src="/logo.svg"
-              alt="Gossip"
-              className="mx-auto my-10 w-11/12 h-auto dark:invert"
-            />
-            <h1 className="mt-4 text-[28px] font-semibold tracking-tight text-gray-900 dark:text-white">
-              {displayUsername ? (
-                <>
-                  Welcome back,{' '}
-                  <span className="text-blue-700 dark:text-blue-400  text-4xl">
-                    {displayUsername}
-                  </span>
-                </>
-              ) : (
-                'Welcome to Gossip'
-              )}
-            </h1>
-            <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
-              Sign in quickly and securely.
-            </p>
+      <div className="bg-background flex h-full app-max-w px-4 py-8 md:py-0 flex-col items-center justify-center">
+        <div className="flex flex-col items-center justify-center w-full gap-10">
+          {/* Left column: logo + hero copy */}
+          <div className="w-full max-w-md text-center space-y-4">
+            <div className="space-y-2">
+              <img
+                src="/logo.svg"
+                alt="Gossip"
+                className="mx-auto dark:invert my-10"
+              />
+              <h1 className="text-[28px] md:text-[32px] font-semibold tracking-tight text-gray-900 dark:text-white">
+                {displayUsername ? (
+                  <>
+                    Welcome back,{' '}
+                    <span className="text-blue-700 dark:text-blue-400 text-4xl">
+                      {displayUsername}
+                    </span>
+                  </>
+                ) : (
+                  'Welcome to Gossip'
+                )}
+              </h1>
+              <p className="text-sm text-gray-600 dark:text-gray-400">
+                Sign in quickly and securely.
+              </p>
+            </div>
           </div>
 
-          <div className="space-y-5">
+          {/* Right column: unified auth card */}
+          <div className="w-full max-w-md rounded-2xl bg-white/80 dark:bg-gray-900/60 border border-gray-200/80 dark:border-gray-700/60 p-5 shadow-sm backdrop-blur space-y-5">
             {/* Biometric authentication - show if account supports it */}
             {shouldShowBiometricOption && accountSupportsBiometrics && (
-              <div className="rounded-2xl bg-white/80 dark:bg-gray-900/60 border border-gray-200/80 dark:border-gray-700/60 p-4 shadow-sm backdrop-blur">
-                <div className="space-y-3">
-                  <Button
-                    onClick={handleBiometricAuth}
-                    disabled={isLoading}
-                    loading={isLoading}
-                    variant="primary"
-                    size="custom"
-                    fullWidth
-                    className="h-11 rounded-xl text-sm font-medium"
-                  >
-                    {!isLoading && <span>Login</span>}
-                  </Button>
-                  {!biometricMethodAvailable && (
-                    <p className="text-xs text-amber-700 dark:text-amber-400">
-                      Biometrics not detected. We will try anyway.
-                    </p>
-                  )}
-                </div>
+              <div className="space-y-3">
+                <Button
+                  onClick={handleBiometricAuth}
+                  disabled={isLoading}
+                  loading={isLoading}
+                  variant="primary"
+                  size="custom"
+                  fullWidth
+                  className="h-11 rounded-xl text-sm font-medium"
+                >
+                  {!isLoading && <span>Login with biometrics</span>}
+                </Button>
+                {!biometricMethodAvailable && (
+                  <p className="text-xs text-amber-700 dark:text-amber-400">
+                    Biometrics not detected. We will try anyway.
+                  </p>
+                )}
               </div>
             )}
 
             {/* Password authentication - show if biometrics not available OR for password accounts */}
             {(!biometricMethodAvailable || usePassword) && (
-              <div className="rounded-2xl bg-white/80 dark:bg-gray-900/60 border border-gray-200/80 dark:border-gray-700/60 p-4 shadow-sm backdrop-blur">
-                <div className="space-y-3">
-                  <input
-                    type="password"
-                    value={password}
-                    onChange={e => {
-                      setPassword(e.target.value);
-                      if (persistentError && onErrorChange) {
-                        onErrorChange(null);
-                      }
-                    }}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter' && password.trim() && !isLoading) {
-                        e.preventDefault();
-                        handlePasswordAuth(e);
-                      }
-                    }}
-                    placeholder="Password"
-                    className={`w-full h-12 px-4 rounded-xl border text-sm focus:outline-none focus:ring-2 transition text-gray-900 dark:text-white bg-white dark:bg-gray-800 ${
-                      persistentError
-                        ? 'border-red-300 dark:border-red-600 focus:ring-red-200 dark:focus:ring-red-900/40'
-                        : 'border-gray-200 dark:border-gray-700 focus:ring-blue-200 dark:focus:ring-blue-900/40'
-                    }`}
-                    disabled={isLoading}
-                  />
-                  <Button
-                    type="button"
-                    onClick={handlePasswordAuth}
-                    disabled={isLoading || !password.trim()}
-                    loading={isLoading}
-                    variant="outline"
-                    size="custom"
-                    fullWidth
-                    className="h-11 rounded-xl text-sm font-medium"
-                  >
-                    {!isLoading && <span>Login</span>}
-                  </Button>
-                </div>
+              <div className="space-y-3">
+                <input
+                  type="password"
+                  value={password}
+                  onChange={e => {
+                    setPassword(e.target.value);
+                    if (persistentError && onErrorChange) {
+                      onErrorChange(null);
+                    }
+                  }}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && password.trim() && !isLoading) {
+                      e.preventDefault();
+                      handlePasswordAuth(e);
+                    }
+                  }}
+                  placeholder="Password"
+                  className={`w-full h-12 px-4 rounded-xl border text-sm focus:outline-none focus:ring-2 transition text-gray-900 dark:text-white bg-white dark:bg-gray-800 ${
+                    persistentError
+                      ? 'border-red-300 dark:border-red-600 focus:ring-red-200 dark:focus:ring-red-900/40'
+                      : 'border-gray-200 dark:border-gray-700 focus:ring-blue-200 dark:focus:ring-blue-900/40'
+                  }`}
+                  disabled={isLoading}
+                />
+                <Button
+                  type="button"
+                  onClick={handlePasswordAuth}
+                  disabled={isLoading || !password.trim()}
+                  loading={isLoading}
+                  variant="outline"
+                  size="custom"
+                  fullWidth
+                  className="h-11 rounded-xl text-sm font-medium"
+                >
+                  {!isLoading && <span>Login</span>}
+                </Button>
               </div>
             )}
 
@@ -335,7 +335,7 @@ const Login: React.FC<LoginProps> = React.memo(
               </div>
             )}
 
-            <div className="space-y-2 pt-1">
+            <div className="border-t border-gray-200/80 dark:border-gray-700/60 pt-4 space-y-2">
               <Button
                 onClick={handleChangeAccount}
                 variant="outline"

@@ -8,7 +8,6 @@ import DiscussionSettings from '../pages/DiscussionSettings';
 import NewDiscussion from '../pages/NewDiscussion';
 import NewContact from '../pages/NewContact';
 import Settings from '../pages/Settings';
-import Wallet from '../pages/Wallet';
 import { InvitePage } from '../pages/InvitePage';
 import { usePendingDeepLink } from '../hooks/usePendingDeepLink';
 import { useAppStateRefresh } from '../hooks/useAppStateRefresh';
@@ -31,14 +30,6 @@ export const AuthenticatedRoutes: React.FC = () => {
       <Route
         path={ROUTES.discussionSettings()}
         element={<DiscussionSettings />}
-      />
-      <Route
-        path={ROUTES.wallet()}
-        element={
-          <MainLayout>
-            <Wallet />
-          </MainLayout>
-        }
       />
       <Route
         path={ROUTES.settings()}

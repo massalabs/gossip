@@ -295,6 +295,11 @@
     padding-right: env(safe-area-inset-right);
   }
 
+  /* Global app max-width container */
+  .app-max-w {
+    @apply w-full mx-auto md:max-w-2xl lg:max-w-3xl xl:max-w-3xl 2xl:max-w-3xl;
+  }
+
   @keyframes fade-in {
     from {
       opacity: 0;

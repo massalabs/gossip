@@ -136,7 +136,7 @@ const AccountCreation: React.FC<AccountCreationProps> = ({
   };
 
   return (
-    <div className="h-full w-full max-w-md mx-auto bg-card">
+    <div className="h-full w-full app-max-w mx-auto bg-card">
       {/* Header */}
 
       <PageHeader title="Create Account" onBack={onBack} showLogo={true} />

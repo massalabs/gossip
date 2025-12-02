@@ -30,7 +30,7 @@ const WebQRScanner: React.FC<QRScannerProps> = ({
   );
 
   return (
-    <div className="relative max-w-md mx-auto h-full">
+    <div className="relative app-max-w mx-auto h-full">
       {onClose && <ScannerBackButton onClose={onClose} />}
       {isScanning && (
         <Scanner
