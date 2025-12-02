@@ -1,5 +1,7 @@
 import Dexie, { Table } from 'dexie';
 import { EncryptedMessage } from './api/messageProtocol/types';
+import { Preferences } from '@capacitor/preferences';
+import { encodeToBase64 } from './utils/base64';
 
 // Define authentication method type
 export type AuthMethod = 'capacitor' | 'webauthn' | 'password';
@@ -112,6 +114,27 @@ export interface PendingAnnouncement {
 export interface ActiveSeeker {
   id?: number;
   seeker: Uint8Array;
+}
+
+const ACTIVE_SEEKERS_PREFERENCES_KEY = 'gossip-active-seekers';
+const API_BASE_URL_PREFERENCES_KEY = 'gossip-api-base-url';
+
+/**
+ * Store the API base URL in Preferences for background runner access.
+ * This should be called during app initialization.
+ * @param baseUrl - The API base URL to store
+ */
+export async function setApiBaseUrlForBackgroundSync(
+  baseUrl: string
+): Promise<void> {
+  try {
+    await Preferences.set({
+      key: API_BASE_URL_PREFERENCES_KEY,
+      value: baseUrl,
+    });
+  } catch {
+    // Silently ignore; this is best-effort for background sync support
+  }
 }
 
 // Define the database class
@@ -348,6 +371,21 @@ export class GossipDatabase extends Dexie {
         );
       }
     });
+
+    // Best-effort persistence using Capacitor Preferences API (if available).
+    // This allows environments like the Background Runner to read the latest
+    // seekers list without needing IndexedDB.
+    try {
+      const serializedSeekers = seekers.map(seeker => encodeToBase64(seeker));
+
+      await Preferences.set({
+        key: ACTIVE_SEEKERS_PREFERENCES_KEY,
+        value: JSON.stringify(serializedSeekers),
+      });
+    } catch {
+      // Silently ignore; failure to persist to Preferences should not break DB updates.
+      // This can happen in test environments or if Preferences is not available.
+    }
   }
 
   /**
