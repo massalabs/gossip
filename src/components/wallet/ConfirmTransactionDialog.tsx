@@ -48,7 +48,7 @@ const ConfirmTransactionDialog: React.FC<ConfirmTransactionDialogProps> = ({
 
       {/* Dialog */}
       <div
-        className={`relative w-full max-w-md md:max-w-md mx-4 bg-card rounded-2xl shadow-2xl transform transition-all duration-300 ease-out ${mounted ? 'translate-y-0 opacity-100' : 'translate-y-4 opacity-0'}`}
+        className={`relative w-full app-max-w md:app-max-w mx-4 bg-card rounded-2xl shadow-2xl transform transition-all duration-300 ease-out ${mounted ? 'translate-y-0 opacity-100' : 'translate-y-4 opacity-0'}`}
       >
         {/* Header */}
         <div className="p-6 border-b border-gray-200 dark:border-gray-700">

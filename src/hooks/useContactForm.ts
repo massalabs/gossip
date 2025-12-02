@@ -48,36 +48,37 @@ export function useContactForm() {
   const [generalError, setGeneralError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const fetchPublicKey = useCallback(async (uid: string) => {
-    const trimmed = uid.trim();
-    const cached = publicKeysCache.current.get(trimmed);
+  const getPublicKey = useCallback(
+    async (
+      uid: string
+    ): Promise<{
+      publicKey: UserPublicKeys | null;
+      error: string | null;
+    }> => {
+      const cached = publicKeysCache.current.get(uid);
 
-    if (cached) {
-      setPublicKeys(cached);
-      setUserId(prev => ({ ...prev, error: null }));
-      return;
-    }
+      if (cached) {
+        return { publicKey: cached, error: null };
+      }
 
-    setUserId(prev => ({ ...prev, loading: true, error: null }));
+      setUserId(prev => ({ ...prev, loading: true, error: null }));
 
-    const { success, publicKey, error } =
-      await authService.fetchPublicKeyByUserId(trimmed);
+      const { success, publicKey, error } =
+        await authService.fetchPublicKeyByUserId(uid);
 
-    if (!success || !publicKey) {
-      setUserId(prev => ({
-        ...prev,
-        loading: false,
-        // TODO: Improve user feedback: Network, api, not found...
-        // If can't fetch public key create discussion with announcement not sent, and retry regularly?
-        error: error || 'Associated public keys not found',
-      }));
-      setPublicKeys(null);
-    } else {
-      publicKeysCache.current.set(trimmed, publicKey);
-      setPublicKeys(publicKey);
-      setUserId(prev => ({ ...prev, loading: false, error: null }));
-    }
-  }, []);
+      if (!success || !publicKey) {
+        return {
+          publicKey: null,
+          error: `Unable to fetch associated public key: ${error}`,
+        };
+      }
+
+      publicKeysCache.current.set(uid, publicKey);
+
+      return { publicKey, error: null };
+    },
+    []
+  );
 
   const canSubmit =
     name.error === null &&
@@ -105,16 +106,21 @@ export function useContactForm() {
   }, []);
 
   const handleUserIdChange = useCallback(
-    (value: string) => {
+    async (value: string) => {
       const trimmed = value.trim();
-
-      // Reset everything
       setPublicKeys(null);
-      setUserId({ value: trimmed, error: null, loading: false });
+      setUserId(prev => ({ ...prev, value: trimmed }));
 
       if (!trimmed) return;
 
+      setUserId(prev => ({
+        ...prev,
+        error: null,
+        loading: true,
+      }));
+
       const result = validateUserIdFormat(trimmed);
+
       if (!result.valid) {
         setUserId(_ => ({
           value: trimmed,
@@ -124,9 +130,17 @@ export function useContactForm() {
         return;
       }
 
-      fetchPublicKey(trimmed);
+      const { publicKey, error } = await getPublicKey(trimmed);
+
+      if (error) {
+        setUserId(prev => ({ ...prev, error, loading: false }));
+        return;
+      }
+
+      setPublicKeys(publicKey);
+      setUserId(prev => ({ ...prev, loading: false }));
     },
-    [fetchPublicKey]
+    [getPublicKey]
   );
 
   const handleMessageChange = useCallback((value: string) => {

@@ -5,7 +5,6 @@ import { useAccountStore } from '../stores/accountStore';
 import { useAppStore } from '../stores/appStore';
 import { useTheme } from '../hooks/useTheme';
 import { formatUserId } from '../utils/userId';
-import appLogo from '../assets/gossip_face.svg';
 import AccountBackup from '../components/account/AccountBackup';
 import Button from '../components/ui/Button';
 import Toggle from '../components/ui/Toggle';
@@ -37,6 +36,8 @@ import {
   notificationService,
   type NotificationPreferences,
 } from '../services/notifications';
+
+import ProfilePicture from '../assets/gossip_face.svg';
 
 enum SettingsView {
   SHOW_ACCOUNT_BACKUP = 'SHOW_ACCOUNT_BACKUP',
@@ -167,7 +168,7 @@ const Settings = (): React.ReactElement => {
         <div className="bg-white dark:bg-gray-800 rounded-lg p-6 mt-4">
           <div className="flex items-start gap-4 mb-4">
             <img
-              src={appLogo}
+              src={ProfilePicture}
               className="w-16 h-16 rounded-lg object-cover"
               alt="Profile"
             />

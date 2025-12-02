@@ -6,6 +6,7 @@ import Button from '../components/ui/Button';
 import { PrivacyGraphic } from '../components/ui/PrivacyGraphic';
 import PageHeader from '../components/ui/PageHeader';
 import { ROUTES } from '../constants/routes';
+import { PlusIcon } from '../components/ui/icons';
 
 const Discussions: React.FC = () => {
   const navigate = useNavigate();
@@ -36,22 +37,10 @@ const Discussions: React.FC = () => {
         onClick={() => navigate(ROUTES.newDiscussion())}
         variant="primary"
         size="custom"
-        className="absolute bottom-3 right-4 px-5 h-14 rounded-full flex items-center gap-2 shadow-lg hover:shadow-xl transition-shadow z-50"
+        className="absolute bottom-3 right-4 h-14 w-14 rounded-full flex items-center gap-2 shadow-lg hover:shadow-xl transition-shadow z-50"
         title="Start new discussion"
       >
-        <svg
-          className="w-5 h-5 text-primary-foreground shrink-0"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M12 4v16m8-8H4"
-          />
-        </svg>
+        <PlusIcon className="text-primary-foreground shrink-0" />
       </Button>
     </div>
   );

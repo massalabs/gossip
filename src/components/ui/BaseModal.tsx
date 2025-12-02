@@ -46,7 +46,7 @@ const BaseModal: React.FC<BaseModalProps> = ({
 
       {/* Modal */}
       <div
-        className={`relative w-full max-w-md md:max-w-md bg-card md:rounded-2xl rounded-t-3xl shadow-2xl transform transition-all duration-300 ease-out 
+        className={`relative w-full app-max-w md:app-max-w bg-card md:rounded-2xl rounded-t-3xl shadow-2xl transform transition-all duration-300 ease-out 
         ${mounted ? 'translate-y-0 md:translate-y-0 md:opacity-100' : 'translate-y-full md:translate-y-4 md:opacity-0'}`}
       >
         {/* Header */}

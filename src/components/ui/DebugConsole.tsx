@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useDebugLogs, LogEntry, LogLevel } from '../../stores/useDebugLogs';
 import { useAppStore } from '../../stores/appStore';
 import Button from './Button';
+import { DebugIcon } from './icons';
 import toast from 'react-hot-toast';
 
 const levelColor: Record<LogLevel, string> = {
@@ -88,11 +89,14 @@ export const DebugConsole: React.FC = () => {
     // button to open the console
     return (
       <Button
-        className="absolute bottom-2 left-4 z-9999"
+        className="absolute top-2 right-2 z-9999"
         onClick={() => setShowDebugConsole(true)}
         variant="secondary"
       >
-        Console
+        <span className="flex items-center gap-1">
+          <DebugIcon className="w-4 h-4" />
+          <span>Console</span>
+        </span>
       </Button>
     );
   }

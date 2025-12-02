@@ -60,7 +60,7 @@ const NewDiscussion: React.FC = () => {
 
   return (
     <div className="h-full px-3 py-3">
-      <div className="max-w-md mx-auto">
+      <div className="app-max-w mx-auto">
         <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-md overflow-hidden">
           {/* Card header */}
           <PageHeader title="New discussion" onBack={handleClose} />
