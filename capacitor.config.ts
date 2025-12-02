@@ -30,6 +30,14 @@ const config: CapacitorConfig = {
       smallIcon: 'ic_launcher',
       iconColor: '#488AFF',
     },
+    BackgroundRunner: {
+      label: 'net.massa.gossip.background.sync',
+      src: 'runners/background-sync.js',
+      event: 'backgroundSync',
+      repeat: true,
+      interval: 15,
+      autoStart: true,
+    },
   },
 };
 

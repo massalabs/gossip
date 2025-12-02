@@ -6,6 +6,8 @@
 
 import { notificationService } from './notifications';
 import { defaultSyncConfig } from '../config/sync';
+import { setApiBaseUrlForBackgroundSync } from '../db';
+import { protocolConfig } from '../config/protocol';
 /**
  * Setup service worker: register, listen for messages, and start sync scheduler
  * Also initializes background sync (notifications, periodic sync, online listener)
@@ -134,6 +136,10 @@ async function handleExistingRegistration(): Promise<void> {
  */
 async function initializeBackgroundSync(): Promise<void> {
   try {
+    // Store API base URL for native background runner access
+    // The background runner can't access import.meta.env, so we persist it via Preferences
+    await setApiBaseUrlForBackgroundSync(protocolConfig.baseUrl);
+
     // Request notification permission
     await notificationService.requestPermission();
 
