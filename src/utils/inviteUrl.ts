@@ -47,5 +47,5 @@ export function generateDeepLinkUrl(userId: string): string {
   const base = getPublicBaseUrl();
   const safeId = encodeURIComponent(userId.trim());
 
-  return `${base}${AppRoute.invite}/${safeId}`;
+  return `${base}/${AppRoute.invite}/${safeId}`;
 }

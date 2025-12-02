@@ -5,24 +5,40 @@ import * as validationModule from '../../src/utils/validation';
 
 describe('qrCodeParser - extractInvitePath', () => {
   it('returns path when given a bare invite path', () => {
-    const path = `${AppRoute.invite}/gossip1abc`;
+    const path = `/${AppRoute.invite}/gossip1abc`;
     expect(extractInvitePath(path)).toBe(path);
   });
 
   it('handles full HTTPS URL', () => {
-    const url = `https://example.com${AppRoute.invite}/gossip1abc`;
-    expect(extractInvitePath(url)).toBe(`${AppRoute.invite}/gossip1abc`);
+    const url = `https://example.com/${AppRoute.invite}/gossip1abc`;
+    expect(extractInvitePath(url)).toBe(`/${AppRoute.invite}/gossip1abc`);
   });
 
   it('handles HTTP URL', () => {
-    const url = `http://example.com${AppRoute.invite}/gossip1abc`;
-    expect(extractInvitePath(url)).toBe(`${AppRoute.invite}/gossip1abc`);
+    const url = `http://example.com/${AppRoute.invite}/gossip1abc`;
+    expect(extractInvitePath(url)).toBe(`/${AppRoute.invite}/gossip1abc`);
   });
 
   it('handles gossip protocol URL', () => {
     const url = `gossip://${AppRoute.invite}/gossip1abc`;
-    const expectedPath = `${AppRoute.invite}/gossip1abc`;
+    const expectedPath = `/${AppRoute.invite}/gossip1abc`;
     expect(extractInvitePath(url)).toBe(expectedPath);
+  });
+
+  it('handles gossip protocol URL with multiple slashes', () => {
+    const url = `gossip:///${AppRoute.invite}/gossip1abc`;
+    const expectedPath = `/${AppRoute.invite}/gossip1abc`;
+    expect(extractInvitePath(url)).toBe(expectedPath);
+  });
+
+  it('handles URLs with query parameters', () => {
+    const url = `https://example.com/${AppRoute.invite}/gossip1abc?param=value`;
+    expect(extractInvitePath(url)).toBe(`/${AppRoute.invite}/gossip1abc`);
+  });
+
+  it('handles URLs with fragments', () => {
+    const url = `https://example.com/${AppRoute.invite}/gossip1abc#fragment`;
+    expect(extractInvitePath(url)).toBe(`/${AppRoute.invite}/gossip1abc`);
   });
 
   it('returns null for non-invite paths', () => {
@@ -56,8 +72,43 @@ describe('qrCodeParser - parseInvite', () => {
     const userId = 'gossip1validuser';
 
     const result = parseInvite(
-      `${AppRoute.invite}/${encodeURIComponent(userId)}`
+      `/${AppRoute.invite}/${encodeURIComponent(userId)}`
     );
+
+    expect(validateUserIdFormatSpy).toHaveBeenCalledWith(userId);
+    expect(result).toEqual({ userId });
+  });
+
+  it('parses a valid invite from full HTTPS URL', () => {
+    validateUserIdFormatSpy.mockReturnValue({ valid: true });
+    const userId = 'gossip1validuser';
+
+    const result = parseInvite(
+      `https://example.com/${AppRoute.invite}/${encodeURIComponent(userId)}`
+    );
+
+    expect(validateUserIdFormatSpy).toHaveBeenCalledWith(userId);
+    expect(result).toEqual({ userId });
+  });
+
+  it('parses a valid invite from gossip protocol URL', () => {
+    validateUserIdFormatSpy.mockReturnValue({ valid: true });
+    const userId = 'gossip1validuser';
+
+    const result = parseInvite(
+      `gossip://${AppRoute.invite}/${encodeURIComponent(userId)}`
+    );
+
+    expect(validateUserIdFormatSpy).toHaveBeenCalledWith(userId);
+    expect(result).toEqual({ userId });
+  });
+
+  it('handles URL-encoded userId correctly', () => {
+    validateUserIdFormatSpy.mockReturnValue({ valid: true });
+    const userId = 'gossip1user@example.com';
+    const encoded = encodeURIComponent(userId);
+
+    const result = parseInvite(`/${AppRoute.invite}/${encoded}`);
 
     expect(validateUserIdFormatSpy).toHaveBeenCalledWith(userId);
     expect(result).toEqual({ userId });
@@ -79,7 +130,7 @@ describe('qrCodeParser - parseInvite', () => {
 
     const userId = 'gossip1invalid';
     expect(() =>
-      parseInvite(`${AppRoute.invite}/${encodeURIComponent(userId)}`)
+      parseInvite(`/${AppRoute.invite}/${encodeURIComponent(userId)}`)
     ).toThrowError('Invalid format — must be a valid user ID');
   });
 });

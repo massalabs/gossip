@@ -2,27 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { DEFAULT_PUBLIC_BASE_URL } from '../../src/constants/links';
 import { AppRoute } from '../../src/constants/routes';
 import { generateDeepLinkUrl } from '../../src/utils/inviteUrl';
-
-function defineWindowLocation(value: Location) {
-  Object.defineProperty(window, 'location', {
-    value,
-    writable: true,
-  });
-}
-
-// Helper to safely override window.location.origin in jsdom
-const setWindowOrigin = (origin: string | null) => {
-  const location = window.location;
-  if (origin === null) {
-    // @ts-expect-error - jsdom types
-    delete window.location;
-    // @ts-expect-error - jsdom types
-    window.location = location;
-    return;
-  }
-
-  defineWindowLocation({ ...location, origin });
-};
+import { defineWindowLocation, setWindowOrigin } from '../helpers/window';
 
 describe('inviteUrl - generateDeepLinkUrl', () => {
   const originalLocation = window.location;
@@ -43,11 +23,13 @@ describe('inviteUrl - generateDeepLinkUrl', () => {
   });
 
   it('uses VITE_APP_BASE_URL when defined', () => {
+    const base = 'https://custom.example.com';
+    const userId = 'user123';
     // @ts-expect-error - readonly env in tests
-    import.meta.env.VITE_APP_BASE_URL = 'https://custom.example.com';
+    import.meta.env.VITE_APP_BASE_URL = base;
 
-    const url = generateDeepLinkUrl('user123');
-    expect(url).toBe(`https://custom.example.com${AppRoute.invite}/user123`);
+    const url = generateDeepLinkUrl(userId);
+    expect(url).toBe(`${base}/${AppRoute.invite}/${userId}`);
   });
 
   it('uses window.location.origin when not localhost and env is not set', () => {
@@ -58,7 +40,7 @@ describe('inviteUrl - generateDeepLinkUrl', () => {
     setWindowOrigin('https://app.example.com');
 
     const url = generateDeepLinkUrl('user123');
-    expect(url).toBe(`https://app.example.com${AppRoute.invite}/user123`);
+    expect(url).toBe(`https://app.example.com/${AppRoute.invite}/user123`);
   });
 
   it('falls back to DEFAULT_PUBLIC_BASE_URL when origin is localhost', () => {
@@ -69,7 +51,7 @@ describe('inviteUrl - generateDeepLinkUrl', () => {
     setWindowOrigin('http://localhost:5173');
 
     const url = generateDeepLinkUrl('user123');
-    expect(url).toBe(`${DEFAULT_PUBLIC_BASE_URL}${AppRoute.invite}/user123`);
+    expect(url).toBe(`${DEFAULT_PUBLIC_BASE_URL}/${AppRoute.invite}/user123`);
   });
 
   it('encodes userId safely in URL', () => {
@@ -82,7 +64,7 @@ describe('inviteUrl - generateDeepLinkUrl', () => {
     const encodedId = encodeURIComponent('user with spaces@example.com');
 
     expect(url).toBe(
-      `${DEFAULT_PUBLIC_BASE_URL}${AppRoute.invite}/${encodedId}`
+      `${DEFAULT_PUBLIC_BASE_URL}/${AppRoute.invite}/${encodedId}`
     );
   });
 });
