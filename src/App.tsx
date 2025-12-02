@@ -4,7 +4,7 @@ import { useAccountStore } from './stores/accountStore';
 import { useAppStore } from './stores/appStore';
 import ErrorBoundary from './components/ui/ErrorBoundary.tsx';
 // import PWABadge from './PWABadge.tsx';
-import DebugOverlay from './components/ui/DebugOverlay.tsx';
+import { DebugConsole } from './components/ui/DebugConsole.tsx';
 import { Toaster } from 'react-hot-toast';
 import './App.css';
 
@@ -23,13 +23,13 @@ import { AppUrlListener } from './components/AppUrlListener';
 import { toastOptions } from './utils/toastOptions.ts';
 import LoadingScreen from './components/ui/LoadingScreen.tsx';
 import { ROUTES } from './constants/routes';
+import { enableDebugLogger } from './utils/logger.ts';
 
 const AppContent: React.FC = () => {
   const { isLoading, userProfile } = useAccountStore();
   const { isInitialized } = useAppStore();
   const [showImport, setShowImport] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
-
   useProfileLoader();
 
   const existingAccountInfo = useAccountInfo();
@@ -75,12 +75,15 @@ function App() {
   const { showUpdatePrompt, handleForceUpdate, dismissUpdate } =
     useVersionCheck();
 
+  // TODO: Enable only in dev OR if user activated debug mode in settings (not implemented yet)
+  enableDebugLogger();
+
   return (
     <BrowserRouter>
       <ErrorBoundary>
         <AppUrlListener />
         <AppContent />
-        <DebugOverlay />
+        <DebugConsole />
         {/* <div className="hidden">
           <PWABadge />
         </div> */}

@@ -2,8 +2,6 @@ import { Capacitor } from '@capacitor/core';
 import { DEFAULT_PUBLIC_BASE_URL } from '../constants/links';
 import { AppRoute } from '../constants/routes';
 
-export const INVITE_BASE_URL = '/invite';
-
 /**
  * Returns the public HTTPS URL that should be shared everywhere.
  * This is the UNIVERSAL link that works on:

@@ -1,7 +1,7 @@
 import { AppRoute } from '../constants/routes';
 import { validateUserIdFormat } from './validation';
 
-const INVITE_REGEX = /^\/invite\/([^/#?\s]+)$/i;
+const INVITE_REGEX = new RegExp(`^${AppRoute.invite}/([^/#?\\s]+)$`, 'i');
 
 export interface ParsedInvite {
   userId: string;

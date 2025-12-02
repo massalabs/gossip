@@ -48,6 +48,3 @@ if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
     configurable: true,
   });
 }
-
-// Log setup completion
-console.log('✓ Browser test setup complete: service worker mocked');

@@ -58,6 +58,7 @@ export class AnnouncementService {
   }
 
   async fetchAndProcessAnnouncements(): Promise<AnnouncementReceptionResult> {
+    const errors: string[] = [];
     try {
       const { userProfile } = useAccountStore.getState();
 
@@ -90,7 +91,6 @@ export class AnnouncementService {
       }
 
       let newAnnouncementsCount = 0;
-      let hasErrors = false;
 
       for (const announcement of announcements) {
         try {
@@ -98,40 +98,36 @@ export class AnnouncementService {
           if (result.success) {
             newAnnouncementsCount++;
           } else if (result.error) {
-            hasErrors = true;
+            errors.push(`${result.error}`);
           }
         } catch (error) {
-          if (
-            error instanceof Error &&
-            error.message.includes('No authenticated user')
-          ) {
-            // This is expected if announcement is not for the authenticated user
-            continue;
-          }
-
-          logAnnouncementError(
-            `Failed to process incoming announcement for user ${userProfile?.userId}:`,
-            error
+          errors.push(
+            `${error instanceof Error ? error.message : 'Unknown error'}`
           );
-          hasErrors = true;
         }
       }
 
       return {
-        success: !hasErrors || newAnnouncementsCount > 0,
+        success: errors.length === 0 || newAnnouncementsCount > 0,
         newAnnouncementsCount,
-        error: hasErrors ? 'Some announcements failed to process' : undefined,
+        error: errors.length > 0 ? errors.join(', ') : undefined,
       };
     } catch (error) {
-      logAnnouncementError(
-        'Failed to fetch/process incoming announcements:',
-        error
+      errors.push(
+        `${error instanceof Error ? error.message : 'Unknown error'}`
       );
       return {
         success: false,
         newAnnouncementsCount: 0,
         error: error instanceof Error ? error.message : 'Unknown error',
       };
+    } finally {
+      if (errors.length > 0) {
+        logAnnouncementError(
+          'Failed to fetch/process incoming announcements:',
+          errors.join('\n')
+        );
+      }
     }
   }
 

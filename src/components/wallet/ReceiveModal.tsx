@@ -4,6 +4,7 @@ import Button from '../ui/Button';
 import BaseModal from '../ui/BaseModal';
 
 import { formatMassaAddress } from '../../utils/addressUtils';
+import toast from 'react-hot-toast';
 
 interface ReceiveModalProps {
   isOpen: boolean;
@@ -43,7 +44,10 @@ const ReceiveModal: React.FC<ReceiveModalProps> = ({ isOpen, onClose }) => {
 
   const handleShare = () => {
     // Placeholder for share functionality
-    alert('Share functionality will be implemented soon!');
+    toast.success('Share functionality will be implemented soon!', {
+      className: 'bg-card text-foreground',
+      duration: 1000,
+    });
   };
 
   return (
