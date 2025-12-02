@@ -113,6 +113,9 @@ export const useDebugLogs = create<DebugStore>()(
           await Preferences.remove({ key: name });
         },
       })),
+      partialize: state => ({
+        logs: state.logs,
+      }),
     }
   )
 );

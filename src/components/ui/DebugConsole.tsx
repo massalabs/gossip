@@ -44,7 +44,7 @@ export const DebugConsole: React.FC = () => {
     if (autoScroll && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [logs, autoScroll]);
+  }, [logs, autoScroll, showDebugConsole]);
 
   const formatTime = (iso: string): string => {
     const d = new Date(iso);
