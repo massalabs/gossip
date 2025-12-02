@@ -32,7 +32,7 @@ const ScanQRCode: React.FC<ScanQRCodeProps> = ({ onBack, onScanSuccess }) => {
 
   const handleError = (err: unknown) => {
     const error = err instanceof Error ? err.message : String(err);
-    // TODO: Add proper error message
+    // TODO: improve error message
     toast.error(`Failed to scan QR code: ${error}`);
     onBack();
   };
