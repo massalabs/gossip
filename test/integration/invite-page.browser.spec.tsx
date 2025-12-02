@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import React from 'react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { render } from 'vitest-browser-react';
@@ -7,10 +7,9 @@ import { InvitePage } from '../../src/pages/InvitePage';
 import App from '../../src/App';
 import { useAppStore } from '../../src/stores/appStore';
 import { useAccountStore } from '../../src/stores/accountStore';
-import { AppRoute, ROUTES } from '../../src/constants/routes';
+import { ROUTES } from '../../src/constants/routes';
 import { testUsers } from '../helpers/factories/userProfile';
 import { UserProfile } from '../../src/db';
-import { consoleMock, consoleClearMock } from '../helpers/mock/console';
 import {
   GOOGLE_PLAY_STORE_URL,
   APPLE_APP_STORE_URL,
@@ -29,11 +28,6 @@ describe('InvitePage - Deep Link Invite Flow', () => {
     aliceProfile = testUsers.alice();
     // Reset store state before each test
     useAppStore.getState().setPendingDeepLinkInfo(null);
-    consoleMock('error');
-  });
-
-  afterEach(() => {
-    consoleClearMock('error');
   });
 
   const renderInviteRoute = async (
@@ -154,32 +148,6 @@ describe('InvitePage - Deep Link Invite Flow', () => {
       .toBeVisible();
   });
 
-  it('InvitePage shows invalid invite UI when userId is missing', async () => {
-    await render(
-      // Render InvitePage without a userId route param to hit the
-      // "invalid invite" branch. We don't need a real '/invite' route
-      // from the app here, just a router context.
-      <MemoryRouter initialEntries={['/']}>
-        <Routes>
-          <Route path={AppRoute.default} element={<InvitePage />} />
-        </Routes>
-      </MemoryRouter>
-    );
-
-    const invalidHeading = page.getByRole('heading', {
-      name: /invalid invite/i,
-    });
-    await expect.element(invalidHeading).toBeVisible();
-
-    const invalidMessage = page.getByText(
-      /this invite link is invalid or has expired/i
-    );
-    await expect.element(invalidMessage).toBeVisible();
-
-    const goHomeButton = page.getByRole('button', { name: /go home/i });
-    await expect.element(goHomeButton).toBeVisible();
-  });
-
   it('automatically attempts to open native app on mount (web only)', async () => {
     await renderInviteRoute(ROUTES.invite({ userId: bobProfile.userId }));
 
@@ -254,44 +222,27 @@ describe('InvitePage - Deep Link Invite Flow', () => {
     // Create a simple home component for navigation
     const HomePage = () => <div>Home</div>;
 
-    // Silence expected "No authenticated user" errors from background
-    // announcement processing during this test to keep the output clean.
-    const originalConsoleError = console.error;
-    const consoleErrorSpy = vi
-      .spyOn(console, 'error')
-      .mockImplementation((...args: unknown[]) => {
-        const message = String(args[0] ?? '');
-        if (message.includes('Failed to process incoming announcement')) {
-          return;
-        }
-        originalConsoleError(...args);
-      });
+    await render(
+      <MemoryRouter
+        initialEntries={[ROUTES.invite({ userId: bobProfile.userId })]}
+      >
+        <Routes>
+          <Route path={ROUTES.default()} element={<HomePage />} />
+          <Route path={ROUTES.invite()} element={<InvitePage />} />
+        </Routes>
+      </MemoryRouter>
+    );
 
-    try {
-      await render(
-        <MemoryRouter
-          initialEntries={[ROUTES.invite({ userId: bobProfile.userId })]}
-        >
-          <Routes>
-            <Route path={AppRoute.default} element={<HomePage />} />
-            <Route path={ROUTES.invite()} element={<InvitePage />} />
-          </Routes>
-        </MemoryRouter>
-      );
+    // Click Continue in Web App button
+    const continueButton = page.getByRole('button', {
+      name: /continue in web app/i,
+    });
+    await continueButton.click();
 
-      // Click Continue in Web App button
-      const continueButton = page.getByRole('button', {
-        name: /continue in web app/i,
-      });
-      await continueButton.click();
-
-      // Check that invite data was stored
-      const pendingInvite = useAppStore.getState().pendingDeepLinkInfo;
-      expect(pendingInvite).toBeTruthy();
-      expect(pendingInvite?.userId).toBe(bobProfile.userId);
-    } finally {
-      consoleErrorSpy.mockRestore();
-    }
+    // Check that invite data was stored
+    const pendingInvite = useAppStore.getState().pendingDeepLinkInfo;
+    expect(pendingInvite).toBeTruthy();
+    expect(pendingInvite?.userId).toBe(bobProfile.userId);
   });
 
   it('handles Install for iOS button click - opens App Store', async () => {
@@ -385,27 +336,27 @@ describe('InvitePage - Deep Link Invite Flow', () => {
     await expect.element(openButton).toBeVisible();
   });
 
-  it('handles Go Home button click in invalid invite state', async () => {
-    const HomePage = () => <div>Home</div>;
+  it('handles redirect to / in invalid invite state (missing userId)', async () => {
+    // Simulate navigating directly to /invite (no userId param)
+    window.history.pushState({}, '', '/invite');
 
-    await render(
-      <MemoryRouter initialEntries={['/invite']}>
-        <Routes>
-          <Route path={AppRoute.default} element={<HomePage />} />
-          <Route path={AppRoute.invite} element={<InvitePage />} />
-          <Route path={ROUTES.invite()} element={<InvitePage />} />
-        </Routes>
-      </MemoryRouter>
-    );
+    // Ensure app is initialized but no user profile (so UnauthenticatedRoutes handles it)
+    useAppStore.getState().setIsInitialized(true);
+    useAccountStore.setState({
+      ...useAccountStore.getState(),
+      userProfile: null,
+      isLoading: false,
+    });
 
-    const goHomeButton = page.getByRole('button', { name: /go home/i });
-    await expect.element(goHomeButton).toBeVisible();
+    await render(<App />);
 
-    await goHomeButton.click();
-
-    // Should navigate to home (waits implicitly via expect)
-    const homeContent = page.getByText('Home');
-    await expect.element(homeContent).toBeVisible();
+    // The InvitePage should detect missing userId and redirect to /,
+    // which then redirects to /welcome (Login page) for unauthenticated users
+    // Wait for the redirect and check for Login page content
+    const heading = page.getByRole('heading', {
+      name: /welcome to gossip/i,
+    });
+    await expect.element(heading).toBeVisible();
   });
 
   it('handles back button click in page header', async () => {
@@ -416,8 +367,7 @@ describe('InvitePage - Deep Link Invite Flow', () => {
         initialEntries={[ROUTES.invite({ userId: bobProfile.userId })]}
       >
         <Routes>
-          <Route path={AppRoute.default} element={<HomePage />} />
-          <Route path={AppRoute.invite} element={<InvitePage />} />
+          <Route path={ROUTES.default()} element={<HomePage />} />
           <Route path={ROUTES.invite()} element={<InvitePage />} />
         </Routes>
       </MemoryRouter>
@@ -443,7 +393,7 @@ describe('InvitePage - Deep Link Invite Flow', () => {
           initialEntries={[ROUTES.invite({ userId: bobProfile.userId })]}
         >
           <Routes>
-            <Route path={AppRoute.default} element={<HomePage />} />
+            <Route path={ROUTES.default()} element={<HomePage />} />
             <Route path={ROUTES.invite()} element={<InvitePage />} />
           </Routes>
         </MemoryRouter>
@@ -508,7 +458,7 @@ describe('InvitePage - Deep Link Invite Flow', () => {
     await render(
       <MemoryRouter initialEntries={[`/invite/${invalidUserId}`]}>
         <Routes>
-          <Route path={AppRoute.default} element={<HomePage />} />
+          <Route path={ROUTES.default()} element={<HomePage />} />
           <Route path={ROUTES.invite()} element={<InvitePage />} />
         </Routes>
       </MemoryRouter>
@@ -529,7 +479,6 @@ describe('InvitePage - Deep Link Invite Flow', () => {
         initialEntries={[ROUTES.invite({ userId: bobProfile.userId })]}
       >
         <Routes>
-          <Route path={AppRoute.invite} element={<InvitePage />} />
           <Route path={ROUTES.invite()} element={<InvitePage />} />
         </Routes>
       </MemoryRouter>

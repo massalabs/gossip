@@ -12,7 +12,6 @@ import { priceFetcher } from '../utils/fetchPrice';
 import { createSelectors } from './utils/createSelectors';
 
 import { FeeConfig } from '../components/wallet/FeeConfigModal';
-import { addDebugLog } from '../components/ui/debugLogs';
 import { initialTokens } from './utils/const';
 import { useAppStore } from './appStore';
 
@@ -85,9 +84,7 @@ const useWalletStoreBase = create<WalletStoreState>((set, get) => ({
           }
         } catch (error) {
           // TODO: Display error for User ?
-          addDebugLog(
-            `Error getting balance for ${token.name}: ${error instanceof Error ? error.message : 'Unknown error'}`
-          );
+          console.error(`Error getting balance for ${token.name}: ${error}`);
         }
         return { ...token, balance };
       })
@@ -153,7 +150,7 @@ const useWalletStoreBase = create<WalletStoreState>((set, get) => ({
           balance = await tokenWrapper.balanceOf(provider.address);
         }
       } catch (e) {
-        addDebugLog(`Error getting balance for ${token.name}: ${e}`);
+        console.error(`Error getting balance for ${token.name}: ${e}`);
       }
 
       // Fetch only this token price

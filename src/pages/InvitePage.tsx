@@ -12,13 +12,13 @@ import {
   LAST_APK_GITHUB_URL,
 } from '../constants/links';
 import {
-  CloseIcon,
   CheckIcon,
   IOSIcon,
   AndroidIcon,
   GitHubIcon,
   ChevronRightIcon,
 } from '../components/ui/icons';
+import toast from 'react-hot-toast';
 
 // Timing constants
 const NATIVE_APP_OPEN_DELAY = 150; // Wait for DOM ready + layout
@@ -35,6 +35,13 @@ export const InvitePage: React.FC = () => {
   const addCleanup = useCallback((cleanup: () => void) => {
     cleanupFunctionsRef.current.add(cleanup);
   }, []);
+
+  useEffect(() => {
+    if (!userId) {
+      toast.error('Invalid invite');
+      navigate('/');
+    }
+  }, [userId, navigate]);
 
   /**
    * Attempts to open the native app via button click.
@@ -202,27 +209,6 @@ export const InvitePage: React.FC = () => {
       cleanupFunctions.clear();
     };
   }, []);
-
-  if (!userId) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center p-6">
-        <div className="bg-card border border-border rounded-2xl p-8 max-w-md w-full text-center shadow-sm">
-          <div className="w-20 h-20 mx-auto mb-6 bg-muted rounded-full flex items-center justify-center">
-            <CloseIcon className="w-10 h-10 text-muted-foreground" />
-          </div>
-          <h1 className="text-2xl font-semibold text-foreground mb-3">
-            Invalid Invite
-          </h1>
-          <p className="text-muted-foreground mb-8">
-            This invite link is invalid or has expired.
-          </p>
-          <Button onClick={() => navigate('/')} variant="primary" fullWidth>
-            Go Home
-          </Button>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="min-h-screen bg-background">

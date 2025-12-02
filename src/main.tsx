@@ -5,6 +5,7 @@ import App from './App.tsx';
 import { ThemeProvider } from './context/theme-provider.tsx';
 import { Capacitor } from '@capacitor/core';
 import { StatusBar } from '@capacitor/status-bar';
+import { enableDebugLogger } from './utils/logger.ts';
 
 // Polyfill for Buffer
 import { Buffer } from 'buffer';
@@ -90,6 +91,14 @@ if (Capacitor.isNativePlatform()) {
 
 // Start WASM initialization in the background (non-blocking)
 startWasmInitialization();
+
+// Only enable the debug logger in development to avoid persisting
+// potentially sensitive console output in production builds.
+// if (import.meta.env.DEV) {
+// We keep it during development phase
+// TODO - Remove this once we have a proper debug mode in settings
+enableDebugLogger();
+// }
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

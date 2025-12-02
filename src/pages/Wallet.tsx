@@ -10,6 +10,7 @@ import { formatMassaAddress } from '../utils/addressUtils';
 import { formatAmount } from '../utils/parseAmount';
 import Button from '../components/ui/Button';
 import CopyClipboard from '../components/ui/CopyClipboard';
+import toast from 'react-hot-toast';
 // no-op
 
 const Wallet: React.FC = () => {
@@ -125,7 +126,10 @@ const Wallet: React.FC = () => {
             {/* Swap Button */}
             <button
               onClick={() =>
-                alert('Swap functionality will be implemented soon!')
+                toast.success('Swap functionality will be implemented soon!', {
+                  className: 'bg-card text-foreground',
+                  duration: 1000,
+                })
               }
               className="flex flex-col items-center group bg-transparent hover:bg-transparent active:bg-transparent focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-blue-500"
             >

@@ -144,9 +144,8 @@ export default defineConfig({
               // { browser: 'firefox' },
             ],
           },
-          // Support both patterns anywhere:
-          // - test/**/*.browser.{test,spec}.{ts,tsx} (suffix pattern - anywhere)
-          // - test/**/browser/**/*.{test,spec}.{ts,tsx} (folder pattern - anywhere)
+          setupFiles: ['./test/setup.browser.ts'],
+
           include: [
             'test/**/*.browser.{test,spec}.{ts,tsx}',
             'test/**/browser/**/*.{test,spec}.{ts,tsx}',
@@ -160,9 +159,6 @@ export default defineConfig({
           name: 'jsdom',
           environment: 'jsdom',
           setupFiles: ['./test/setup.ts'],
-          // Support both patterns anywhere:
-          // - test/**/*.jsdom.{test,spec}.{ts,tsx} (suffix pattern - anywhere)
-          // - test/**/jsdom/**/*.{test,spec}.{ts,tsx} (folder pattern - anywhere)
           include: [
             'test/**/*.jsdom.{test,spec}.{ts,tsx}',
             'test/**/jsdom/**/*.{test,spec}.{ts,tsx}',

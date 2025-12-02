@@ -45,42 +45,41 @@ const route = (pattern: string): RouteBuilder => {
 };
 
 export enum AppRoute {
-  default = '/',
-  welcome = '/welcome',
-  setup = '/setup',
-  invite = '/invite',
-  wallet = '/wallet',
-  settings = '/settings',
-  newContact = '/new-contact',
-  newDiscussion = '/new-discussion',
-  contact = '/contact',
-  discussion = '/discussion',
-  discussions = '/discussions',
+  welcome = 'welcome',
+  setup = 'setup',
+  invite = 'invite',
+  wallet = 'wallet',
+  settings = 'settings',
+  newContact = 'new-contact',
+  newDiscussion = 'new-discussion',
+  contact = 'contact',
+  discussion = 'discussion',
+  discussions = 'discussions',
 }
 
 export const ROUTES = {
   // Public
-  welcome: route(AppRoute.welcome),
-  setup: route(AppRoute.setup),
+  welcome: route(`/${AppRoute.welcome}`),
+  setup: route(`/${AppRoute.setup}`),
   // `userId` is expected to be a gossip1... encoded user ID
-  invite: route(`${AppRoute.invite}/:userId`),
+  invite: route(`/${AppRoute.invite}/:userId`),
 
   // Main tabs
-  discussions: route(AppRoute.discussions),
-  wallet: route(AppRoute.wallet),
-  settings: route(AppRoute.settings),
+  discussions: route(`/${AppRoute.discussions}`),
+  wallet: route(`/${AppRoute.wallet}`),
+  settings: route(`/${AppRoute.settings}`),
 
   // Actions
-  newContact: route(AppRoute.newContact),
-  newDiscussion: route(AppRoute.newDiscussion),
+  newContact: route(`/${AppRoute.newContact}`),
+  newDiscussion: route(`/${AppRoute.newDiscussion}`),
 
   // Dynamic routes
-  contact: route(`${AppRoute.contact}/:userId`),
-  discussion: route(`${AppRoute.discussion}/:userId`),
+  contact: route(`/${AppRoute.contact}/:userId`),
+  discussion: route(`/${AppRoute.discussion}/:userId`),
   discussionSettings: route(
-    `${AppRoute.discussion}/:discussionId${AppRoute.settings}`
+    `/${AppRoute.discussion}/:discussionId/${AppRoute.settings}`
   ),
 
   // Default
-  default: route(AppRoute.default),
+  default: route(`/`),
 } as const;
