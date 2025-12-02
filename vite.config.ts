@@ -159,7 +159,6 @@ export default defineConfig({
           name: 'jsdom',
           environment: 'jsdom',
           setupFiles: ['./test/setup.ts'],
-          disableConsoleIntercept: true,
           include: [
             'test/**/*.jsdom.{test,spec}.{ts,tsx}',
             'test/**/jsdom/**/*.{test,spec}.{ts,tsx}',

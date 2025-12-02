@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import React from 'react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { render } from 'vitest-browser-react';
@@ -22,17 +22,6 @@ const NATIVE_APP_OPEN_DELAY = 150;
 describe('InvitePage - Deep Link Invite Flow', () => {
   let bobProfile: UserProfile;
   let aliceProfile: UserProfile;
-
-  beforeAll(() => {
-    // modify the console log to not log error
-    const originalConsoleLog = console.log;
-    console.log = (...args) => {
-      if (args[0]?.includes('No authenticated user')) {
-        return;
-      }
-      originalConsoleLog(...args);
-    };
-  });
 
   beforeEach(() => {
     bobProfile = testUsers.bob();
