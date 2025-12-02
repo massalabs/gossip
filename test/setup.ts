@@ -1,10 +1,14 @@
 /**
- * Test Setup File
+ * Test Setup File (Node/jsdom environments)
  *
- * This file runs before all tests and sets up:
+ * This file runs before all Node/jsdom tests and sets up:
  * - fake-indexeddb for Dexie/IndexedDB testing in Node
  * - Global test utilities and mocks
+ * - Shared setup from setup.shared.ts
  */
+
+// Import shared setup (service worker mocks, etc.)
+import './setup.shared';
 
 // Import fake-indexeddb to polyfill IndexedDB in Node environment
 import 'fake-indexeddb/auto';

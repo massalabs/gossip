@@ -144,6 +144,7 @@ export default defineConfig({
               // { browser: 'firefox' },
             ],
           },
+          setupFiles: ['./test/setup.browser.ts'],
           // Support both patterns anywhere:
           // - test/**/*.browser.{test,spec}.{ts,tsx} (suffix pattern - anywhere)
           // - test/**/browser/**/*.{test,spec}.{ts,tsx} (folder pattern - anywhere)
