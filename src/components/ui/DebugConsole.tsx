@@ -191,26 +191,30 @@ export const DebugConsole: React.FC = () => {
               onClick={() => copyLine(log.msg)}
               className={`px-4 py-2 border-b border-border/60 hover:bg-accent/10 cursor-pointer transition-colors ${levelBg[log.level]}`}
             >
-              <div className="flex gap-4 items-start">
-                <span className="text-muted-foreground select-none tabular-nums">
-                  {formatTime(log.ts)}
-                </span>
-                <span
-                  style={{ color: levelColor[log.level] }}
-                  className="select-none font-medium"
-                >
-                  [{log.level.toUpperCase()}]
-                </span>
-                <span className="flex-1 text-foreground break-all">
-                  {typeof log.msg === 'string'
-                    ? log.msg
-                    : JSON.stringify(log.msg, null, 2)}
-                  {log.data !== undefined && (
-                    <pre className="mt-2 text-xs bg-card p-3 rounded-lg overflow-x-auto border border-border text-foreground">
-                      {JSON.stringify(log.data, null, 2)}
-                    </pre>
-                  )}
-                </span>
+              <div className="gap-4 items-start flex-col">
+                <div>
+                  <span className="text-muted-foreground select-none tabular-nums">
+                    {formatTime(log.ts)}
+                  </span>
+                  <span
+                    style={{ color: levelColor[log.level] }}
+                    className="select-none font-medium"
+                  >
+                    [{log.level.toUpperCase()}]
+                  </span>
+                </div>
+                <div>
+                  <span className="flex-1 text-foreground break-all">
+                    {typeof log.msg === 'string'
+                      ? log.msg
+                      : JSON.stringify(log.msg, null, 2)}
+                    {log.data !== undefined && (
+                      <pre className="mt-2 max-w-full whitespace-pre-wrap break-all text-xs bg-card p-3 rounded-lg overflow-x-auto border border-border text-foreground">
+                        {JSON.stringify(log.data, null, 2)}
+                      </pre>
+                    )}
+                  </span>
+                </div>
               </div>
             </div>
           ))
