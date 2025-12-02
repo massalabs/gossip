@@ -1,4 +1,3 @@
-// stores/useOnlineStore.ts
 import { create } from 'zustand';
 import { Network } from '@capacitor/network';
 import { createSelectors } from './utils/createSelectors';
@@ -9,12 +8,18 @@ type OnlineStore = {
   init: () => Promise<void>;
 };
 
+// Ensure listeners are only registered once, even if init is called multiple times
+let listenersRegistered = false;
+
 export const useOnlineStoreBase = create<OnlineStore>(set => ({
   isOnline: true,
 
   setOnline: value => set({ isOnline: value }),
 
   init: async () => {
+    if (listenersRegistered) return;
+    listenersRegistered = true;
+
     const updateFromNative = async () => {
       try {
         const status = await Network.getStatus();

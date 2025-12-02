@@ -37,6 +37,8 @@ import {
   type NotificationPreferences,
 } from '../services/notifications';
 
+import ProfilePicture from '../assets/gossip_face.svg';
+
 enum SettingsView {
   SHOW_ACCOUNT_BACKUP = 'SHOW_ACCOUNT_BACKUP',
   SHARE_CONTACT = 'SHARE_CONTACT',
@@ -78,9 +80,6 @@ const Settings = (): React.ReactElement => {
   }, []);
 
   const mnemonicBackupInfo = getMnemonicBackupInfo();
-
-  // Use public logo asset so it is precached by the PWA service worker and available offline
-  const appLogo = '/gossip_face.svg';
 
   const handleResetAllDiscussionsAndMessages = useCallback(async () => {
     try {
@@ -169,7 +168,7 @@ const Settings = (): React.ReactElement => {
         <div className="bg-white dark:bg-gray-800 rounded-lg p-6 mt-4">
           <div className="flex items-start gap-4 mb-4">
             <img
-              src={appLogo}
+              src={ProfilePicture}
               className="w-16 h-16 rounded-lg object-cover"
               alt="Profile"
             />

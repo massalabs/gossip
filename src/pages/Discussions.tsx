@@ -37,7 +37,7 @@ const Discussions: React.FC = () => {
         onClick={() => navigate(ROUTES.newDiscussion())}
         variant="primary"
         size="custom"
-        className="absolute bottom-3 right-4 px-5 h-14 w-14 rounded-full flex items-center gap-2 shadow-lg hover:shadow-xl transition-shadow z-50"
+        className="absolute bottom-3 right-4 h-14 w-14 rounded-full flex items-center gap-2 shadow-lg hover:shadow-xl transition-shadow z-50"
         title="Start new discussion"
       >
         <PlusIcon className="text-primary-foreground shrink-0" />

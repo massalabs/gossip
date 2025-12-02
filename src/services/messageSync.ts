@@ -6,13 +6,13 @@
 
 import { messageService } from './message';
 import { announcementService } from './announcement';
-import { useOnlineStore } from '../stores/useOnlineStore';
+import { useOnlineStoreBase } from '../stores/useOnlineStore';
 
 /**
  * Trigger manual message sync
  */
 export async function triggerManualSync(): Promise<void> {
-  const isOnline = useOnlineStore.use.isOnline();
+  const isOnline = useOnlineStoreBase.getState().isOnline;
 
   if (!isOnline) {
     return;
