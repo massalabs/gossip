@@ -11,7 +11,6 @@ interface MessageListProps {
   messages: Message[];
   discussion?: Discussion | null;
   isLoading: boolean;
-  onResend: (message: Message) => void;
   onReplyTo?: (message: Message) => void;
   onScrollToMessage?: (messageId: number) => void;
 }
@@ -20,7 +19,6 @@ const MessageList: React.FC<MessageListProps> = ({
   messages,
   discussion,
   isLoading,
-  onResend,
   onReplyTo,
   onScrollToMessage,
 }) => {
@@ -35,13 +33,12 @@ const MessageList: React.FC<MessageListProps> = ({
           key={message.id}
           id={`message-${message.id}`}
           message={message}
-          onResend={onResend}
           onReplyTo={onReplyTo}
           onScrollToMessage={onScrollToMessage}
         />
       );
     });
-  }, [messages, onResend, onReplyTo, onScrollToMessage]);
+  }, [messages, onReplyTo, onScrollToMessage]);
 
   // Auto-scroll to bottom when new messages are added
   useEffect(() => {

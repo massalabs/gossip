@@ -140,6 +140,7 @@ export function useResendFailedBlobs() {
           const retryEntry: RetryMessages = {
             id: message.id,
             encryptedMessage: message.encryptedMessage,
+            seeker: message.seeker,
             content: message.content,
             type: message.type,
           };

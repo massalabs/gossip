@@ -200,10 +200,10 @@ export class MessageService {
             ':',
             Buffer.from(msg.seeker).toString('base64')
           );
-          
+
           out.acknowledged_seekers.forEach(seeker => {
             acknowledgedSeekers.add(Buffer.from(seeker).toString('base64')); // to base64 for efficient comparison
-          });        
+          });
         } catch (deserializationError) {
           console.error(
             'Message deserialization failed:',
@@ -379,7 +379,7 @@ export class MessageService {
       .equals([userId, MessageDirection.OUTGOING, MessageStatus.SENT])
       .filter(msg => {
         // Only process messages that have encryptedMessage
-        if (!msg.encryptedMessage?.seeker) {
+        if (!msg.encryptedMessage || !msg.seeker) {
           return false;
         }
         // Exclude messages from BROKEN discussions
@@ -387,9 +387,7 @@ export class MessageService {
         //   return false;
         // }
         // Check if the seeker matches any in the seekers array
-        const msgSeekerBase64 = Buffer.from(
-          msg.encryptedMessage.seeker
-        ).toString('base64');
+        const msgSeekerBase64 = Buffer.from(msg.seeker).toString('base64');
         return seekers.has(msgSeekerBase64);
       })
       .modify({ status: MessageStatus.DELIVERED });
@@ -441,8 +439,34 @@ export class MessageService {
       ...message,
       status: MessageStatus.SENDING,
     });
-    // add discussionId to the content prefix
-    const contentBytes = strToBytes(message.content);
+
+    // Serialize message content (handle replies)
+    let contentBytes: Uint8Array;
+    if (message.replyTo?.originalSeeker) {
+      // Find the original message by seeker
+      const originalMessage = await this.findMessageBySeeker(
+        message.replyTo.originalSeeker,
+        message.ownerUserId
+      );
+      if (!originalMessage) {
+        await db.messages.update(message.id, { status: MessageStatus.FAILED });
+        return {
+          success: false,
+          error: 'Original message not found for reply',
+          message: { ...message, status: MessageStatus.FAILED },
+        };
+      }
+
+      // Serialize reply with type tag and seeker
+      contentBytes = serializeReplyMessage(
+        message.content,
+        originalMessage.content,
+        message.replyTo.originalSeeker
+      );
+    } else {
+      // Regular message with type tag
+      contentBytes = serializeRegularMessage(message.content);
+    }
 
     // Validate peer ID length
     if (peerId.length !== 32) {
@@ -494,69 +518,6 @@ export class MessageService {
 
     /* Broadcast message to the network */
     try {
-      const session = useAccountStore.getState().session;
-      if (!session) throw new Error('Session module not initialized');
-      const peerId = decodeUserId(message.contactUserId);
-
-      // Ensure DB reflects that this message is being (re)sent
-      await db.messages.update(message.id, { status: 'sending' });
-
-      // Serialize message content (handle replies)
-      let contentBytes: Uint8Array;
-      if (message.replyTo?.originalSeeker) {
-        // Find the original message by seeker
-        const originalMessage = await this.findMessageBySeeker(
-          message.replyTo.originalSeeker,
-          message.ownerUserId
-        );
-        if (!originalMessage) {
-          await db.messages.update(message.id, { status: 'failed' });
-          return {
-            success: false,
-            error: 'Original message not found for reply',
-            message: { ...message, status: 'failed' },
-          };
-        }
-
-        // Serialize reply with type tag and seeker
-        contentBytes = serializeReplyMessage(
-          message.content,
-          originalMessage.content,
-          message.replyTo.originalSeeker
-        );
-      } else {
-        // Regular message with type tag
-        contentBytes = serializeRegularMessage(message.content);
-      }
-
-      // Validate peer ID length
-      if (peerId.length !== 32) {
-        await db.messages.update(message.id, { status: 'failed' });
-        return {
-          success: false,
-          error: 'Invalid contact userId (must decode to 32 bytes)',
-          message: { ...message, status: 'failed' },
-        };
-      }
-
-      // Ensure session is active before sending
-      const status = session.peerSessionStatus(peerId);
-
-      if (status !== SessionStatus.Active) {
-        const statusName =
-          SessionStatus[status as unknown as number] ?? String(status);
-        await db.messages.update(message.id, { status: 'failed' });
-        return {
-          success: false,
-          error: `Session not ready: ${statusName}`,
-          message: { ...message, status: 'failed' },
-        };
-      }
-
-      sendOutput = session.sendMessage(peerId, contentBytes);
-
-      if (!sendOutput) throw new Error('WASM sendMessage returned null');
-
       await this.messageProtocol.sendMessage({
         seeker: sendOutput.seeker,
         ciphertext: sendOutput.data,
@@ -564,10 +525,8 @@ export class MessageService {
 
       await db.messages.update(messageId, {
         status: MessageStatus.SENT,
-        encryptedMessage: {
-          seeker: sendOutput.seeker,
-          ciphertext: sendOutput.data,
-        },
+        seeker: sendOutput.seeker,
+        encryptedMessage: sendOutput.data,
       });
 
       return {
@@ -581,10 +540,8 @@ export class MessageService {
       */
       await db.messages.update(messageId, {
         status: MessageStatus.FAILED,
-        encryptedMessage: {
-          seeker: sendOutput.seeker,
-          ciphertext: sendOutput.data,
-        },
+        seeker: sendOutput.seeker,
+        encryptedMessage: sendOutput.data,
       });
       return {
         success: false,
@@ -609,12 +566,13 @@ export class MessageService {
           ':',
           retryMessage.encryptedMessage
         );
-        if (retryMessage.encryptedMessage) {
+        if (retryMessage.encryptedMessage && retryMessage.seeker) {
           // if the message has already been encrypted by sessionManager, resend it
           try {
-            await this.messageProtocol.sendMessage(
-              retryMessage.encryptedMessage
-            );
+            await this.messageProtocol.sendMessage({
+              seeker: retryMessage.seeker,
+              ciphertext: retryMessage.encryptedMessage,
+            });
             messageSent.push(retryMessage.id);
           } catch (error) {
             console.error(
@@ -666,10 +624,8 @@ export class MessageService {
               `Failed to send message ${retryMessage.id}: ${error instanceof Error ? error.message : error}`
             );
             await db.messages.update(retryMessage.id, {
-              encryptedMessage: {
-                seeker: sendOutput.seeker,
-                ciphertext: sendOutput.data,
-              },
+              seeker: sendOutput.seeker,
+              encryptedMessage: sendOutput.data,
             });
             break;
           }

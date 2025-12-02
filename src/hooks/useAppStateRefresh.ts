@@ -4,6 +4,11 @@ import { defaultSyncConfig } from '../config/sync';
 import { triggerManualSync } from '../services/messageSync';
 import { useMessageStore } from '../stores/messageStore.tsx';
 import { useDiscussionStore } from '../stores/discussionStore.tsx';
+import {
+  UserPublicKeys,
+  UserSecretKeys,
+} from '../assets/generated/wasm/gossip_wasm';
+import { SessionModule } from '../wasm/session.ts';
 
 /**
  * Hook to refresh app state periodically when user is logged in
@@ -12,17 +17,24 @@ import { useDiscussionStore } from '../stores/discussionStore.tsx';
 export function useAppStateRefresh() {
   const { userProfile, ourPk, ourSk, session } = useAccountStore();
 
-  const initApp = useCallback(async () => {
-    useMessageStore.getState().init();
-    await useDiscussionStore.getState().init();
-    triggerManualSync(ourPk, ourSk, session).catch(error => {
-      console.error('Failed to sync messages on login:', error);
-    });
-  }, [ourPk, ourSk, session]);
+  const initApp = useCallback(
+    async (
+      ourPk: UserPublicKeys,
+      ourSk: UserSecretKeys,
+      session: SessionModule
+    ) => {
+      useMessageStore.getState().init();
+      await useDiscussionStore.getState().init();
+      triggerManualSync(ourPk, ourSk, session).catch(error => {
+        console.error('Failed to sync messages on login:', error);
+      });
+    },
+    []
+  );
 
   useEffect(() => {
     if (userProfile?.userId && ourPk && ourSk && session) {
-      initApp();
+      initApp(ourPk, ourSk, session);
       const refreshInterval = setInterval(() => {
         triggerManualSync(ourPk, ourSk, session).catch(error => {
           console.error('Failed to refresh app state periodically:', error);

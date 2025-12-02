@@ -10,11 +10,11 @@ import { createSelectors } from './utils/createSelectors';
 import { useAccountStore } from './accountStore';
 import { messageService } from '../services/message';
 import { liveQuery, Subscription } from 'dexie';
-import { EncryptedMessage } from '../api/messageProtocol/types';
 
 export interface RetryMessages {
   id: number;
-  encryptedMessage?: EncryptedMessage;
+  encryptedMessage?: Uint8Array;
+  seeker?: Uint8Array;
   content: string;
   type: MessageType;
 }
@@ -41,7 +41,6 @@ interface MessageStoreState {
     content: string,
     replyToId?: number
   ) => Promise<void>;
-  resendMessages: () => Promise<void>;
   addMessage: (contactUserId: string, message: Message) => void;
   updateMessage: (
     contactUserId: string,
@@ -165,19 +164,14 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
   },
 
   // Send a message
-sendMessage: async (
-  contactUserId: string,
-  content: string,
-  replyToId?: number
-) => {
-  const { userProfile, session } = useAccountStore.getState();
-  if (
-    !userProfile?.userId ||
-    !content.trim() ||
-    get().isSending ||
-    !session
-  )
-    return;
+  sendMessage: async (
+    contactUserId: string,
+    content: string,
+    replyToId?: number
+  ) => {
+    const { userProfile, session } = useAccountStore.getState();
+    if (!userProfile?.userId || !content.trim() || get().isSending || !session)
+      return;
 
     set({ isSending: true });
 

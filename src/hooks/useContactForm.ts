@@ -8,7 +8,6 @@ import {
   validateUserIdFormat,
 } from '../utils';
 import { UserPublicKeys } from '../assets/generated/wasm/gossip_wasm';
-import { ensureDiscussionExists } from '../crypto/discussionInit';
 import { useFileShareContact } from './useFileShareContact';
 import { authService, PublicKeyResult } from '../services/auth';
 import toast from 'react-hot-toast';
@@ -168,7 +167,8 @@ export function useContactForm() {
   );
 
   const handleSubmit = useCallback(async () => {
-    if (!canSubmit || !userProfile?.userId || !publicKeys || !ourSk || !session) return;
+    if (!canSubmit || !userProfile?.userId || !publicKeys || !ourSk || !session)
+      return;
 
     setIsSubmitting(true);
     setGeneralError(null);

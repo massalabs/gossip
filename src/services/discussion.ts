@@ -13,6 +13,8 @@ import {
 } from '../assets/generated/wasm/gossip_wasm';
 import { announcementService } from './announcement';
 import { SessionModule } from '../wasm/session';
+import { decodeUserId } from '../utils';
+import { SessionStatus } from '../assets/generated/wasm/gossip_wasm';
 
 /**
 /**
@@ -168,10 +170,13 @@ export async function renewDiscussion(
     session
   );
 
-  let status: DiscussionStatus = DiscussionStatus.PENDING;
-  if (!result.success) {
-    status = DiscussionStatus.SEND_FAILED;
-  }
+  const sessionStatus = session.peerSessionStatus(decodeUserId(contactUserId));
+
+  const status: DiscussionStatus = !result.success
+    ? DiscussionStatus.SEND_FAILED
+    : sessionStatus === SessionStatus.Active
+      ? DiscussionStatus.ACTIVE
+      : DiscussionStatus.PENDING;
 
   await db.transaction('rw', [db.discussions, db.messages], async () => {
     await db.discussions.update(existingDiscussion.id, {

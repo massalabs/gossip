@@ -5,7 +5,7 @@
  */
 
 import { db, Discussion, DiscussionStatus, DiscussionDirection } from '../db';
-import { encodeUserId } from '../utils/userId';
+import { decodeUserId, encodeUserId } from '../utils/userId';
 import {
   createMessageProtocol,
   IMessageProtocol,
@@ -13,6 +13,7 @@ import {
 import {
   UserPublicKeys,
   UserSecretKeys,
+  SessionStatus,
 } from '../assets/generated/wasm/gossip_wasm';
 import { SessionModule } from '../wasm/session';
 import { notificationService } from './notifications';
@@ -175,11 +176,14 @@ export class AnnouncementService {
     }
   }
 
-  async resendAnnouncements(failedDiscussions: Discussion[]): Promise<void> {
+  async resendAnnouncements(
+    failedDiscussions: Discussion[],
+    session: SessionModule
+  ): Promise<void> {
     if (!failedDiscussions.length) return;
 
     // Perform async network calls outside transaction
-    const sentDiscussions: number[] = [];
+    const sentDiscussions: Discussion[] = [];
     const brokenDiscussions: number[] = [];
 
     for (const discussion of failedDiscussions) {
@@ -189,7 +193,7 @@ export class AnnouncementService {
         );
 
         if (result.success) {
-          sentDiscussions.push(discussion.id!);
+          sentDiscussions.push(discussion);
           continue;
         }
 
@@ -208,15 +212,21 @@ export class AnnouncementService {
       await db.transaction('rw', db.discussions, async () => {
         const now = new Date();
 
-        // Update all successfully sent discussions to ACTIVE
+        // Update all successfully sent discussions to PENDING
         if (sentDiscussions.length > 0) {
           await Promise.all(
-            sentDiscussions.map(id =>
-              db.discussions.update(id, {
-                status: DiscussionStatus.ACTIVE,
+            sentDiscussions.map(discussion => {
+              const status = session.peerSessionStatus(
+                decodeUserId(discussion.contactUserId)
+              );
+              return db.discussions.update(discussion.id!, {
+                status:
+                  status === SessionStatus.SelfRequested
+                    ? DiscussionStatus.PENDING
+                    : DiscussionStatus.ACTIVE,
                 updatedAt: now,
-              })
-            )
+              });
+            })
           );
         }
 
@@ -302,7 +312,7 @@ export class AnnouncementService {
         };
       }
 
-      // Extract user data from the announcement (optional message)
+      // Extract announcement's optional message
       const userData = announcementResult.user_data;
       let announcementMessage: string | undefined;
       if (userData && userData.length > 0) {
@@ -320,6 +330,7 @@ export class AnnouncementService {
         }
       }
 
+      // Extract announcement's public keys
       const announcerPkeys = announcementResult.announcer_public_keys;
       const contactUserId = announcerPkeys.derive_id();
       const contactUserIdString = encodeUserId(contactUserId);
@@ -361,8 +372,8 @@ export class AnnouncementService {
       const { discussionId } = await handleReceivedDiscussion(
         ownerUserId,
         contactUserIdString,
-        contact.name,
-        announcementMessage
+        announcementMessage,
+        contact.name
       );
 
       // Only show notification if app is not active (in background, minimized, or in another tab)
@@ -404,11 +415,11 @@ export class AnnouncementService {
  * If discussion with the sending contact already exists, it will be updated accordingly.
  * Otherwise, a new discussion will be created.
  */
-export async function handleReceivedDiscussion(
+async function handleReceivedDiscussion(
   ownerUserId: string,
   contactUserId: string,
-  contactName?: string,
-  announcementMessage?: string
+  announcementMessage?: string,
+  contactName?: string
 ): Promise<{ discussionId: number }> {
   const discussionId = await db.transaction(
     'rw',

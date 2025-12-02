@@ -18,7 +18,6 @@ const SWIPE_INDICATOR_MAX_WIDTH = 60; // Maximum width (in pixels) for the reply
 
 interface MessageItemProps {
   message: Message;
-  onResend: (message: Message) => void;
   onReplyTo?: (message: Message) => void;
   onScrollToMessage?: (messageId: number) => void;
   id?: string;
@@ -26,7 +25,6 @@ interface MessageItemProps {
 
 const MessageItem: React.FC<MessageItemProps> = ({
   message,
-  onResend,
   onReplyTo,
   onScrollToMessage,
   id,

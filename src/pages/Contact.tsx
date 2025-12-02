@@ -13,6 +13,7 @@ import BaseModal from '../components/ui/BaseModal';
 import { Check, Edit2, Trash2 } from 'react-feather';
 import ShareContact from '../components/settings/ShareContact';
 import { UserPublicKeys } from '../assets/generated/wasm/gossip_wasm';
+import { DiscussionStatus } from '../db';
 
 enum ContactView {
   DETAILS = 'DETAILS',

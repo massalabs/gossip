@@ -22,27 +22,85 @@ if (typeof globalThis.IDBKeyRange === 'undefined') {
     IDBKeyRange;
 }
 
+// Mock the notification service to prevent window access
+vi.mock('../src/services/notifications', () => ({
+  notificationService: {
+    scheduleNotification: vi.fn(),
+    cancelNotification: vi.fn(),
+    requestPermission: vi.fn(),
+    showNewDiscussionNotification: vi.fn(),
+    showNewMessageNotification: vi.fn(),
+  },
+}));
+
+// Mock the WASM module - must be inline, not imported, due to hoisting
+vi.mock('../src/assets/generated/wasm/gossip_wasm', async importOriginal => {
+  const actual =
+    await importOriginal<
+      typeof import('../src/assets/generated/wasm/gossip_wasm')
+    >();
+  const { MockUserPublicKeys, MockUserSecretKeys } = await import(
+    '../src/wasm/mock'
+  );
+  return {
+    ...actual,
+    UserPublicKeys: MockUserPublicKeys,
+    UserSecretKeys: MockUserSecretKeys,
+  };
+});
+
+// Mock the message protocol factory to always return mock protocol
+vi.mock('../src/api/messageProtocol', async importOriginal => {
+  const actual =
+    await importOriginal<typeof import('../src/api/messageProtocol')>();
+  return {
+    ...actual,
+    createMessageProtocol: vi.fn(() => actual.createMessageProtocol('mock')),
+  };
+});
+
 // Optional: Add custom matchers or global test utilities here
 // Example: expect.extend({ ... })
 
 // Clean up between tests to avoid state leakage
-import { afterEach } from 'vitest';
-import { indexedDB } from 'fake-indexeddb';
+import { afterEach, vi } from 'vitest';
+import { db } from '../src/db';
 
 afterEach(async () => {
-  // Clean up all IndexedDB databases after each test
-  const dbs = await indexedDB.databases();
-  await Promise.all(
-    dbs
-      .filter(db => db.name)
-      .map(db => {
-        return new Promise<void>((resolve, reject) => {
-          const request = indexedDB.deleteDatabase(db.name!);
-          request.onsuccess = () => resolve();
-          request.onerror = () => reject(request.error);
-        });
-      })
-  );
+  // Clean up database using Dexie's delete method which properly handles closing
+  // This avoids "Another connection wants to delete" warnings
+  try {
+    // Dexie's delete() method automatically closes the connection if open
+    // and handles all cleanup properly
+    await db.delete();
+  } catch (_) {
+    // Ignore errors - database might already be deleted or closed
+  }
+
+  // Clean up any other IndexedDB databases that might exist
+  // try {
+  //   const dbs = await indexedDB.databases();
+  //   await Promise.all(
+  //     dbs
+  //       .filter(db => db.name)
+  //       .map(db => {
+  //         return new Promise<void>((resolve) => {
+  //           const request = indexedDB.deleteDatabase(db.name!);
+  //           request.onsuccess = () => resolve();
+  //           request.onerror = () => {
+  //             // Ignore errors - database might already be deleted
+  //             resolve();
+  //           };
+  //           request.onblocked = () => {
+  //             // If blocked, wait a bit and try to resolve anyway
+  //             setTimeout(() => resolve(), 100);
+  //           };
+  //         });
+  //       })
+  //   );
+  // } catch (error) {
+  //   // Ignore cleanup errors - they're not critical for test isolation
+  // }
 });
 
 // Log setup completion
