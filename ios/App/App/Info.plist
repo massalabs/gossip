@@ -37,6 +37,10 @@
 	</dict>
 	<key>NSCameraUsageDescription</key>
 	<string>This app may use the camera for profile pictures and media sharing.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>This app does not use your location. This permission may be requested by included libraries.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>This app does not use your location. This permission may be requested by included libraries.</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>This app uses Face ID for secure biometric authentication.</string>
 	<key>NSMicrophoneUsageDescription</key>
