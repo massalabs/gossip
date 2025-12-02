@@ -23,7 +23,6 @@ import { AppUrlListener } from './components/AppUrlListener';
 import { toastOptions } from './utils/toastOptions.ts';
 import LoadingScreen from './components/ui/LoadingScreen.tsx';
 import { ROUTES } from './constants/routes';
-import { enableDebugLogger } from './utils/logger.ts';
 
 const AppContent: React.FC = () => {
   const { isLoading, userProfile } = useAccountStore();
@@ -74,9 +73,6 @@ const AppContent: React.FC = () => {
 function App() {
   const { showUpdatePrompt, handleForceUpdate, dismissUpdate } =
     useVersionCheck();
-
-  // TODO: Enable only in dev OR if user activated debug mode in settings (not implemented yet)
-  enableDebugLogger();
 
   return (
     <BrowserRouter>

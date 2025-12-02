@@ -1,8 +1,7 @@
-// src/utils/logger.ts
-
 import { useDebugLogs } from '../stores/useDebugLogs';
 
 let patched = false;
+let isLogging = false;
 
 export const enableDebugLogger = () => {
   if (patched) return;
@@ -18,26 +17,56 @@ export const enableDebugLogger = () => {
 
   console.log = (...args) => {
     originalLog(...args);
-    add('info', args[0], args);
+    if (isLogging) return;
+    try {
+      isLogging = true;
+      add('info', args[0], args);
+    } finally {
+      isLogging = false;
+    }
   };
 
   console.info = (...args) => {
     originalInfo(...args);
-    add('info', args[0], args);
+    if (isLogging) return;
+    try {
+      isLogging = true;
+      add('info', args[0], args);
+    } finally {
+      isLogging = false;
+    }
   };
 
   console.warn = (...args) => {
     originalWarn(...args);
-    add('warn', args[0], args);
+    if (isLogging) return;
+    try {
+      isLogging = true;
+      add('warn', args[0], args);
+    } finally {
+      isLogging = false;
+    }
   };
 
   console.error = (...args) => {
     originalError(...args);
-    add('error', args[0], args);
+    if (isLogging) return;
+    try {
+      isLogging = true;
+      add('error', args[0], args);
+    } finally {
+      isLogging = false;
+    }
   };
 
   console.debug = (...args) => {
     originalDebug(...args);
-    add('debug', args[0], args);
+    if (isLogging) return;
+    try {
+      isLogging = true;
+      add('debug', args[0], args);
+    } finally {
+      isLogging = false;
+    }
   };
 };

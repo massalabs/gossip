@@ -1,4 +1,3 @@
-// src/components/AppUrlListener.tsx
 import { useCallback, useEffect, useRef } from 'react';
 import { Capacitor, PluginListenerHandle } from '@capacitor/core';
 import { App, URLOpenListenerEvent } from '@capacitor/app';

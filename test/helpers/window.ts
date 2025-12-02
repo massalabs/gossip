@@ -7,13 +7,8 @@ export const defineWindowLocation = (value: Location) => {
 
 export const setWindowOrigin = (origin: string | null) => {
   const location = window.location;
-  if (origin === null) {
-    // @ts-expect-error - jsdom types
-    delete window.location;
-    // @ts-expect-error - jsdom types
-    window.location = location;
-    return;
-  }
-
-  defineWindowLocation({ ...location, origin });
+  const nextOrigin = origin === null ? '' : origin;
+  // Redefine the entire location object instead of the origin property only,
+  // to avoid "Cannot redefine property: origin" errors in jsdom.
+  defineWindowLocation({ ...location, origin: nextOrigin });
 };

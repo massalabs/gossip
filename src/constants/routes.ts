@@ -45,7 +45,6 @@ const route = (pattern: string): RouteBuilder => {
 };
 
 export enum AppRoute {
-  default = '',
   welcome = 'welcome',
   setup = 'setup',
   invite = 'invite',
@@ -82,5 +81,5 @@ export const ROUTES = {
   ),
 
   // Default
-  default: route(`/${AppRoute.default}`),
+  default: route(`/`),
 } as const;

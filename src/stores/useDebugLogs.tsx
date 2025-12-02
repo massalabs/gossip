@@ -1,4 +1,3 @@
-// src/stores/useDebugLogs.ts
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { Preferences } from '@capacitor/preferences';
@@ -73,9 +72,13 @@ export const useDebugLogs = create<DebugStore>()(
                 (message instanceof Error ? message.stack : undefined)),
         };
 
-        set(state => ({
-          logs: [...state.logs.slice(-LOG_STORAGE_LIMIT), entry],
-        }));
+        set(state => {
+          const newLogs =
+            state.logs.length >= LOG_STORAGE_LIMIT
+              ? [...state.logs.slice(-LOG_STORAGE_LIMIT + 1), entry]
+              : [...state.logs, entry];
+          return { logs: newLogs };
+        });
       },
 
       clear: () => set({ logs: [] }),
@@ -89,11 +92,27 @@ export const useDebugLogs = create<DebugStore>()(
           )
           .join('\n');
 
-        if (navigator.share) {
-          await navigator.share({ title: 'Debug Logs', text });
-        } else {
+        const copyToClipboard = async () => {
+          if (!navigator.clipboard) {
+            throw new Error('Clipboard API not available');
+          }
           await navigator.clipboard.writeText(text);
           toast.success('Logs copied to clipboard!');
+        };
+
+        try {
+          if (navigator.share) {
+            await navigator.share({ title: 'Debug Logs', text });
+            toast.success('Logs shared!');
+          } else {
+            await copyToClipboard();
+          }
+        } catch {
+          try {
+            await copyToClipboard();
+          } catch {
+            toast.error('Failed to share logs');
+          }
         }
       },
       showDebugConsole: false,

@@ -1,4 +1,3 @@
-// src/components/DebugConsole.tsx
 import React, { useState, useRef, useEffect } from 'react';
 import { useDebugLogs, LogEntry, LogLevel } from '../../stores/useDebugLogs';
 import { useAppStore } from '../../stores/appStore';

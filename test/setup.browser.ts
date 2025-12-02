@@ -16,7 +16,9 @@ import './setup.shared';
 // This provides a fallback in case the module mock doesn't catch everything
 import { vi } from 'vitest';
 
-if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+// In jsdom/browser tests, navigator may exist without a serviceWorker property.
+// We still want to install our mock in that case so code under test can use it.
+if (typeof navigator !== 'undefined') {
   const mockRegistration = {
     active: null,
     installing: null,

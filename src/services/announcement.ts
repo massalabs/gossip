@@ -123,7 +123,7 @@ export class AnnouncementService {
       };
     } finally {
       if (errors.length > 0) {
-        logAnnouncementError(
+        console.error(
           'Failed to fetch/process incoming announcements:',
           errors.join('\n')
         );
