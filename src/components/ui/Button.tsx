@@ -3,6 +3,8 @@ import React from 'react';
 interface ButtonProps {
   children: React.ReactNode;
   onClick?: () => void;
+  onMouseDown?: (e: React.MouseEvent<HTMLButtonElement>) => void;
+  onTouchStart?: (e: React.TouchEvent<HTMLButtonElement>) => void;
   disabled?: boolean;
   loading?: boolean;
   variant?:
@@ -27,6 +29,8 @@ interface ButtonProps {
 const Button: React.FC<ButtonProps> = ({
   children,
   onClick,
+  onMouseDown,
+  onTouchStart,
   disabled = false,
   loading = false,
   variant = 'primary',
@@ -79,6 +83,8 @@ const Button: React.FC<ButtonProps> = ({
     <button
       type={type}
       onClick={onClick}
+      onMouseDown={onMouseDown}
+      onTouchStart={onTouchStart}
       disabled={disabled || loading}
       className={combinedClasses}
       title={title}

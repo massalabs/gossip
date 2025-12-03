@@ -5,6 +5,7 @@ import { formatUserId } from '../../utils/userId';
 import ContactAvatar from '../avatar/ContactAvatar';
 import Button from '../ui/Button';
 import BackButton from '../ui/BackButton';
+import { ChevronLeftIcon } from '../ui/icons';
 import { ROUTES } from '../../constants/routes';
 
 interface DiscussionHeaderProps {
@@ -76,19 +77,7 @@ const DiscussionHeader: React.FC<DiscussionHeaderProps> = ({
             size="custom"
             className="w-11 h-11 flex items-center justify-center mr-2 group hover:bg-muted/50 active:bg-muted/70"
           >
-            <svg
-              className="w-6 h-6 text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-white transition-colors"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={2.5}
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M15 19l-7-7 7-7"
-              />
-            </svg>
+            <ChevronLeftIcon className="w-6 h-6 text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-white transition-colors" />
           </Button>
         )}
         <button
@@ -107,32 +96,6 @@ const DiscussionHeader: React.FC<DiscussionHeaderProps> = ({
               <h1 className="text-[17px] font-semibold text-gray-900 dark:text-white truncate leading-tight group-hover:text-primary transition-colors">
                 {displayName}
               </h1>
-              {discussion && (
-                <svg
-                  className="w-4 h-4 text-emerald-500 shrink-0"
-                  fill="currentColor"
-                  viewBox="0 0 20 20"
-                >
-                  <path
-                    fillRule="evenodd"
-                    d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z"
-                    clipRule="evenodd"
-                  />
-                </svg>
-              )}
-              <svg
-                className="w-4 h-4 text-muted-foreground shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M9 5l7 7-7 7"
-                />
-              </svg>
             </div>
             <div className="flex items-center gap-2 mt-0.5">
               <p className="text-[13px] text-gray-500 dark:text-gray-400 truncate font-medium">

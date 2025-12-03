@@ -196,10 +196,10 @@ const MessageItem: React.FC<MessageItemProps> = ({
         )} */}
       <div
         ref={messageRef}
-        className={`relative max-w-[78%] sm:max-w-[70%] md:max-w-[65%] lg:max-w-[60%] px-4 py-3 rounded-2xl font-medium text-[15px] leading-tight animate-bubble-in transition-transform ${
+        className={`relative max-w-[78%] sm:max-w-[70%] md:max-w-[65%] lg:max-w-[60%] px-4 py-4 rounded-3xl font-medium text-[15px] leading-tight animate-bubble-in transition-transform ${
           isOutgoing
-            ? 'ml-auto mr-3 bg-accent text-accent-foreground rounded-br-[6px]'
-            : 'ml-3 mr-auto bg-card text-card-foreground rounded-bl-[6px] shadow-sm'
+            ? 'ml-auto mr-3 bg-accent text-accent-foreground rounded-br-[4px]'
+            : 'ml-3 mr-auto bg-card text-card-foreground rounded-bl-[4px] shadow-sm'
         } ${onReplyTo ? 'cursor-pointer hover:opacity-90 transition-opacity focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2' : ''}`}
         onMouseDown={handleMouseDown}
         onClick={handleClick}
@@ -271,7 +271,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
                   title="Original message not found in database"
                 >
                   <svg
-                    className="w-3.5 h-3.5 text-orange-500 dark:text-orange-400 shrink-0"
+                    className="w-3.5 h-3.5 text-destructive shrink-0"
                     fill="none"
                     stroke="currentColor"
                     viewBox="0 0 24 24"
@@ -285,7 +285,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
                     />
                   </svg>
                   {/* Show text on mobile, tooltip on desktop */}
-                  <span className="text-xs text-orange-500 dark:text-orange-400 md:hidden">
+                  <span className="text-xs text-destructive md:hidden">
                     (Original message not found)
                   </span>
                 </span>
@@ -392,58 +392,6 @@ const MessageItem: React.FC<MessageItemProps> = ({
             </div>
           )}
         </div>
-
-        {/* Tail - Sent (right side) */}
-        {isOutgoing && (
-          <>
-            {/* Border layer (slightly larger, behind) */}
-            <div
-              className="absolute bottom-0 right-2 w-0 h-0"
-              style={{
-                borderLeft: '13px solid transparent',
-                borderTop: '13px solid var(--tail-border)',
-                marginBottom: '-13px',
-                zIndex: 0,
-              }}
-            />
-            {/* Fill layer (slightly smaller, in front) */}
-            <div
-              className="absolute bottom-0 right-2 w-0 h-0"
-              style={{
-                borderLeft: '12px solid transparent',
-                borderTop: '12px solid var(--accent)',
-                marginBottom: '-12px',
-                zIndex: 1,
-              }}
-            />
-          </>
-        )}
-
-        {/* Tail - Received (left side) */}
-        {!isOutgoing && (
-          <>
-            {/* Border layer (slightly larger, behind) */}
-            <div
-              className="absolute bottom-0 left-2 w-0 h-0"
-              style={{
-                borderRight: '13px solid transparent',
-                borderTop: '13px solid var(--tail-border)',
-                marginBottom: '-13px',
-                zIndex: 0,
-              }}
-            />
-            {/* Fill layer (slightly smaller, in front) */}
-            <div
-              className="absolute bottom-0 left-2 w-0 h-0"
-              style={{
-                borderRight: '12px solid transparent',
-                borderTop: '12px solid var(--card)',
-                marginBottom: '-12px',
-                zIndex: 1,
-              }}
-            />
-          </>
-        )}
       </div>
     </div>
   );
