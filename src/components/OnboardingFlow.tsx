@@ -1,44 +1,8 @@
 import React, { useState } from 'react';
+import { ArrowRight, Zap } from 'react-feather';
 import appLogo from '../assets/gossip_face.svg';
 import { PrivacyGraphic } from './ui/PrivacyGraphic';
 import Button from './ui/Button';
-
-// Icon components
-const LightningIcon: React.FC<{ className?: string }> = ({
-  className = 'w-5 h-5',
-}) => (
-  <svg
-    className={className}
-    fill="none"
-    stroke="currentColor"
-    viewBox="0 0 24 24"
-  >
-    <path
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth={2}
-      d="M13 10V3L4 14h7v7l9-11h-7z"
-    />
-  </svg>
-);
-
-const ArrowRightIcon: React.FC<{ className?: string }> = ({
-  className = 'w-4 h-4',
-}) => (
-  <svg
-    className={className}
-    fill="none"
-    stroke="currentColor"
-    viewBox="0 0 24 24"
-  >
-    <path
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth={2}
-      d="M9 5l7 7-7 7"
-    />
-  </svg>
-);
 
 interface OnboardingFlowProps {
   onComplete: () => void;
@@ -134,7 +98,7 @@ const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
                 fullWidth
                 className="h-14 text-base font-semibold rounded-2xl gap-2"
               >
-                <LightningIcon />
+                <Zap />
                 Create New Account
               </Button>
               {onImportMnemonic && (
@@ -169,7 +133,7 @@ const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
                 className="px-8 gap-2"
               >
                 {currentStep === steps.length - 2 ? 'Get Started' : 'Next'}
-                <ArrowRightIcon />
+                <ArrowRight />
               </Button>
             </div>
           )}

@@ -1,7 +1,7 @@
 import React from 'react';
 import { useLocation, useNavigate, matchPath } from 'react-router-dom';
+import { MessageCircle, Settings as SettingsFeather } from 'react-feather';
 import NavButton from './NavButton';
-import { DiscussionsIcon, SettingsIcon } from './icons';
 import { ROUTES } from '../../constants/routes';
 
 type BottomNavigationTab = 'discussions' | 'settings';
@@ -22,13 +22,13 @@ const BottomNavigation: React.FC = () => {
       id: 'discussions' as const,
       path: ROUTES.discussions(),
       title: 'Discussions',
-      icon: <DiscussionsIcon />,
+      icon: <MessageCircle />,
     },
     {
       id: 'settings' as const,
       path: ROUTES.settings(),
       title: 'Settings',
-      icon: <SettingsIcon />,
+      icon: <SettingsFeather />,
     },
   ];
 

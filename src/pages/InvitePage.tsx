@@ -11,13 +11,7 @@ import {
   APPLE_APP_STORE_URL,
   LAST_APK_GITHUB_URL,
 } from '../constants/links';
-import {
-  CheckIcon,
-  IOSIcon,
-  AndroidIcon,
-  GitHubIcon,
-  ChevronRightIcon,
-} from '../components/ui/icons';
+import { Check, ChevronRight, GitHub, Smartphone } from 'react-feather';
 import toast from 'react-hot-toast';
 
 // Timing constants
@@ -219,7 +213,7 @@ export const InvitePage: React.FC = () => {
           {nativeAppOpened ? (
             <div className="bg-card border border-border rounded-2xl p-8 sm:p-10 text-center shadow-sm">
               <div className="w-24 h-24 mx-auto mb-6 bg-success rounded-full flex items-center justify-center animate-pulse-slow shadow-lg shadow-success/20">
-                <CheckIcon className="w-12 h-12 text-success-foreground" />
+                <Check className="w-12 h-12 text-success-foreground" />
               </div>
               <h2 className="text-2xl sm:text-3xl font-semibold text-foreground mb-3">
                 Opening in App
@@ -298,9 +292,9 @@ export const InvitePage: React.FC = () => {
                     size="lg"
                     className="justify-start gap-3 hover:bg-accent/50"
                   >
-                    <IOSIcon className="w-6 h-6" />
+                    <Smartphone className="w-6 h-6" />
                     <span className="flex-1 text-left">Install for iOS</span>
-                    <ChevronRightIcon className="w-5 h-5 text-muted-foreground" />
+                    <ChevronRight className="w-5 h-5 text-muted-foreground" />
                   </Button>
 
                   <Button
@@ -310,11 +304,11 @@ export const InvitePage: React.FC = () => {
                     size="lg"
                     className="justify-start gap-3 hover:bg-accent/50"
                   >
-                    <AndroidIcon className="w-6 h-6" />
+                    <Smartphone className="w-6 h-6" />
                     <span className="flex-1 text-left">
                       Install for Android
                     </span>
-                    <ChevronRightIcon className="w-5 h-5 text-muted-foreground" />
+                    <ChevronRight className="w-5 h-5 text-muted-foreground" />
                   </Button>
 
                   <Button
@@ -324,11 +318,11 @@ export const InvitePage: React.FC = () => {
                     size="lg"
                     className="justify-start gap-3 hover:bg-accent/50"
                   >
-                    <GitHubIcon className="w-6 h-6" />
+                    <GitHub className="w-6 h-6" />
                     <span className="flex-1 text-left">
                       Download Last Release
                     </span>
-                    <ChevronRightIcon className="w-5 h-5 text-muted-foreground" />
+                    <ChevronRight className="w-5 h-5 text-muted-foreground" />
                   </Button>
                 </div>
               </div>

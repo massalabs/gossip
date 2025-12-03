@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
+import { ChevronDown } from 'react-feather';
 
 // Generic Select Item Component
 const SelectItem = <T,>({
@@ -164,21 +165,11 @@ function Select<T>({
             {placeholder}
           </span>
         )}
-        <svg
+        <ChevronDown
           className={`w-5 h-5 text-gray-500 transition-transform ml-auto ${
             isOpen ? 'rotate-180' : ''
           }`}
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M19 9l-7 7-7-7"
-          />
-        </svg>
+        />
       </button>
 
       {/* Dropdown */}

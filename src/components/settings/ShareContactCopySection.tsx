@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-
+import { Check, Copy } from 'react-feather';
 import Button from '../ui/Button';
-import { CheckIcon, CopyIcon } from '../ui/icons';
 
 interface ShareContactCopySectionProps {
   userId: string;
@@ -64,9 +63,9 @@ const ShareContactCopySection: React.FC<ShareContactCopySectionProps> = ({
     <div className="flex flex-col gap-2">
       <Button variant="outline" onClick={handleCopyUserId}>
         {copiedUserId ? (
-          <CheckIcon className="w-5 h-5 mr-4 text-success" />
+          <Check className="w-5 h-5 mr-4 text-success" />
         ) : (
-          <CopyIcon className="w-5 h-5 mr-4" />
+          <Copy className="w-5 h-5 mr-4" />
         )}
         <span
           className={`text-base font-semibold flex-1 text-left ${copiedUserId ? 'text-success' : ''}`}
@@ -76,9 +75,9 @@ const ShareContactCopySection: React.FC<ShareContactCopySectionProps> = ({
       </Button>
       <Button variant="outline" onClick={handleCopyQRUrl}>
         {copiedQRUrl ? (
-          <CheckIcon className="w-5 h-5 mr-4 text-success" />
+          <Check className="w-5 h-5 mr-4 text-success" />
         ) : (
-          <CopyIcon className="w-5 h-5 mr-4" />
+          <Copy className="w-5 h-5 mr-4" />
         )}
         <span
           className={`text-base font-semibold flex-1 text-left ${copiedQRUrl ? 'text-success' : ''}`}

@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useDebugLogs, LogEntry, LogLevel } from '../../stores/useDebugLogs';
 import { useAppStore } from '../../stores/appStore';
 import Button from './Button';
-import { DebugIcon } from './icons';
+import { Terminal } from 'react-feather';
 import toast from 'react-hot-toast';
 
 const levelColor: Record<LogLevel, string> = {
@@ -94,7 +94,7 @@ export const DebugConsole: React.FC = () => {
         variant="secondary"
       >
         <span className="flex items-center gap-1">
-          <DebugIcon className="w-4 h-4" />
+          <Terminal className="w-4 h-4" />
           <span>Console</span>
         </span>
       </Button>

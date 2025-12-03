@@ -10,7 +10,7 @@ import PrivacyNotice from '../components/account/PrivacyNotice';
 import ErrorDisplay from '../components/account/ErrorDisplay';
 import PageHeader from '../components/ui/PageHeader';
 import ScanQRCode from '../components/settings/ScanQRCode';
-import { CameraIcon, UploadIcon } from '../components/ui/icons';
+import { Camera, Upload } from 'react-feather';
 import { ROUTES } from '../constants/routes';
 
 const NewContact: React.FC = () => {
@@ -97,7 +97,7 @@ const NewContact: React.FC = () => {
                   className="inline-flex items-center gap-2 flex-1 max-w-[140px]"
                   disabled={fileState.isLoading}
                 >
-                  <UploadIcon className="w-5 h-5" />
+                  <Upload className="w-5 h-5" />
                   <span>By file</span>
                 </Button>
                 <Button
@@ -106,7 +106,7 @@ const NewContact: React.FC = () => {
                   size="md"
                   className="inline-flex items-center gap-2 flex-1 max-w-[140px]"
                 >
-                  <CameraIcon className="w-5 h-5" />
+                  <Camera className="w-5 h-5" />
                   <span>Scan QR</span>
                 </Button>
               </div>

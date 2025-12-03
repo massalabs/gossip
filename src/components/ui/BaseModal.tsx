@@ -2,7 +2,7 @@ import React, { useState, useEffect, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import Button from './Button';
 import { useKeyDown } from '../../hooks/useKeyDown';
-import { CloseIcon } from './icons';
+import { X } from 'react-feather';
 
 interface BaseModalProps {
   isOpen: boolean;
@@ -60,7 +60,7 @@ const BaseModal: React.FC<BaseModalProps> = ({
             size="custom"
             className="w-8 h-8 flex items-center justify-center"
           >
-            <CloseIcon className="w-5 h-5 text-gray-500" />
+            <X className="w-5 h-5 text-gray-500" />
           </Button>
         </div>
 

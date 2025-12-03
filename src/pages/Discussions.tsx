@@ -2,11 +2,11 @@ import React from 'react';
 import DiscussionListPanel from '../components/discussions/DiscussionList';
 import { useAccountStore } from '../stores/accountStore';
 import { useNavigate } from 'react-router-dom';
+import { Plus } from 'react-feather';
 import Button from '../components/ui/Button';
 import { PrivacyGraphic } from '../components/ui/PrivacyGraphic';
 import PageHeader from '../components/ui/PageHeader';
 import { ROUTES } from '../constants/routes';
-import { PlusIcon } from '../components/ui/icons';
 
 const Discussions: React.FC = () => {
   const navigate = useNavigate();
@@ -40,7 +40,7 @@ const Discussions: React.FC = () => {
         className="absolute bottom-3 right-4 h-14 w-14 rounded-full flex items-center gap-2 shadow-lg hover:shadow-xl transition-shadow z-50"
         title="Start new discussion"
       >
-        <PlusIcon className="text-primary-foreground shrink-0" />
+        <Plus className="text-primary-foreground shrink-0" />
       </Button>
     </div>
   );

@@ -1,4 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
+import {
+  ArrowRightCircle,
+  Check as CheckIcon,
+  AlertTriangle,
+  XCircle,
+} from 'react-feather';
 import { Message } from '../../db';
 import { formatTime } from '../../utils/timeUtils';
 import { messageService } from '../../services/message';
@@ -226,20 +232,10 @@ const MessageItem: React.FC<MessageItemProps> = ({
             }}
             aria-label="Swipe to reply indicator"
           >
-            <svg
+            <ArrowRightCircle
               className="w-5 h-5 text-muted-foreground"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
               aria-hidden="true"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"
-              />
-            </svg>
+            />
           </div>
         )}
         {/* Reply Context */}
@@ -270,20 +266,10 @@ const MessageItem: React.FC<MessageItemProps> = ({
                   className="inline-flex items-center gap-1"
                   title="Original message not found in database"
                 >
-                  <svg
+                  <AlertTriangle
                     className="w-3.5 h-3.5 text-destructive shrink-0"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
                     aria-hidden="true"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-                    />
-                  </svg>
+                  />
                   {/* Show text on mobile, tooltip on desktop */}
                   <span className="text-xs text-destructive md:hidden">
                     (Original message not found)
@@ -340,31 +326,11 @@ const MessageItem: React.FC<MessageItemProps> = ({
                 </div>
               )}
               {message.status === 'sent' && (
-                <svg
-                  className="w-3.5 h-3.5"
-                  fill="currentColor"
-                  viewBox="0 0 20 20"
-                >
-                  <path
-                    fillRule="evenodd"
-                    d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                    clipRule="evenodd"
-                  />
-                </svg>
+                <CheckIcon className="w-3.5 h-3.5" />
               )}
               {message.status === 'failed' && (
                 <div className="flex items-center gap-1.5">
-                  <svg
-                    className="w-3.5 h-3.5 text-accent-foreground/90"
-                    fill="currentColor"
-                    viewBox="0 0 20 20"
-                  >
-                    <path
-                      fillRule="evenodd"
-                      d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
-                      clipRule="evenodd"
-                    />
-                  </svg>
+                  <XCircle className="w-3.5 h-3.5 text-accent-foreground/90" />
                   <span className="text-[10px] font-medium">Failed</span>
                   <button
                     onClick={() => onResend(message)}
@@ -377,17 +343,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
               )}
               {(message.status === 'delivered' ||
                 message.status === 'read') && (
-                <svg
-                  className="w-3.5 h-3.5"
-                  fill="currentColor"
-                  viewBox="0 0 20 20"
-                >
-                  <path
-                    fillRule="evenodd"
-                    d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                    clipRule="evenodd"
-                  />
-                </svg>
+                <CheckIcon className="w-3.5 h-3.5" />
               )}
             </div>
           )}

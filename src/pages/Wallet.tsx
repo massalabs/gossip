@@ -1,11 +1,14 @@
 import React, { useCallback, useState } from 'react';
+import {
+  ArrowDownCircle,
+  Repeat,
+  ArrowUpCircle,
+  RefreshCcw,
+} from 'react-feather';
 import { useAccountStore } from '../stores/accountStore';
 import { useWalletStore } from '../stores/walletStore';
 import SendModal from '../components/wallet/SendModal';
 import ReceiveModal from '../components/wallet/ReceiveModal';
-import sendIcon from '../assets/icons/send.svg';
-import receiveIcon from '../assets/icons/receive.svg';
-import swapIcon from '../assets/icons/swap.svg';
 import { formatMassaAddress } from '../utils/addressUtils';
 import { formatAmount } from '../utils/parseAmount';
 import Button from '../components/ui/Button';
@@ -56,19 +59,9 @@ const Wallet: React.FC = () => {
             title="Refresh balance and prices"
             className="p-2"
           >
-            <svg
+            <RefreshCcw
               className={`w-5 h-5 text-gray-600 dark:text-gray-300 ${isRefreshing ? '-animate-spin' : ''}`}
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-              />
-            </svg>
+            />
           </Button>
         </div>
 
@@ -103,7 +96,7 @@ const Wallet: React.FC = () => {
               className="flex flex-col items-center group bg-transparent hover:bg-transparent active:bg-transparent focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-blue-500"
             >
               <div className="w-10 h-10 bg-gray-200 dark:bg-gray-700 group-hover:bg-gray-300 dark:group-hover:bg-gray-600 rounded-full flex items-center justify-center mb-2 transition-colors">
-                <img src={sendIcon} alt="Send" />
+                <ArrowUpCircle className="w-5 h-5 text-gray-800 dark:text-gray-100" />
               </div>
               <span className="text-xs font-medium text-black dark:text-white">
                 send
@@ -116,7 +109,7 @@ const Wallet: React.FC = () => {
               className="flex flex-col items-center group bg-transparent hover:bg-transparent active:bg-transparent focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-blue-500"
             >
               <div className="w-10 h-10 bg-gray-200 dark:bg-gray-700 group-hover:bg-gray-300 dark:group-hover:bg-gray-600 rounded-full flex items-center justify-center mb-2 transition-colors">
-                <img src={receiveIcon} alt="Receive" />
+                <ArrowDownCircle className="w-5 h-5 text-gray-800 dark:text-gray-100" />
               </div>
               <span className="text-xs font-medium text-black dark:text-white">
                 receive
@@ -134,7 +127,7 @@ const Wallet: React.FC = () => {
               className="flex flex-col items-center group bg-transparent hover:bg-transparent active:bg-transparent focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-blue-500"
             >
               <div className="w-10 h-10 bg-gray-200 dark:bg-gray-700 group-hover:bg-gray-300 dark:group-hover:bg-gray-600 rounded-full flex items-center justify-center mb-2 transition-colors">
-                <img src={swapIcon} alt="Swap" />
+                <Repeat className="w-5 h-5 text-gray-800 dark:text-gray-100" />
               </div>
               <span className="text-xs font-medium text-black dark:text-white">
                 swap

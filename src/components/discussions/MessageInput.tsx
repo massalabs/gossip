@@ -1,4 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
+import { Send, X } from 'react-feather';
 import Button from '../ui/Button';
 import { Message } from '../../db';
 
@@ -172,19 +173,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
                   onTouchStart={preventFocusLoss}
                   className="shrink-0 p-1 hover:bg-muted rounded transition-colors"
                 >
-                  <svg
-                    className="w-4 h-4 text-muted-foreground"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth={2}
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M6 18L18 6M6 6l12 12"
-                    />
-                  </svg>
+                  <X className="w-4 h-4 text-muted-foreground" />
                 </button>
               )}
             </div>
@@ -228,19 +217,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
               className="w-8 h-8 md:w-9 md:h-9 shrink-0 rounded-full flex items-center justify-center shadow-md hover:shadow-lg transition-all"
               title="Send message"
             >
-              <svg
-                className="w-4 h-4 md:w-5 md:h-5"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={2.5}
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5"
-                />
-              </svg>
+              <Send className="w-4 h-4 md:w-5 md:h-5" />
             </Button>
           </div>
         </div>

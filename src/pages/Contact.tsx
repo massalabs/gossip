@@ -8,7 +8,7 @@ import ContactNameModal from '../components/ui/ContactNameModal';
 import Button from '../components/ui/Button';
 import CopyClipboard from '../components/ui/CopyClipboard';
 import PageHeader from '../components/ui/PageHeader';
-import { CheckIcon, EditIcon } from '../components/ui/icons';
+import { Check, Edit2 } from 'react-feather';
 import ShareContact from '../components/settings/ShareContact';
 import { UserPublicKeys } from '../assets/generated/wasm/gossip_wasm';
 
@@ -130,11 +130,11 @@ const Contact: React.FC = () => {
                 className="shrink-0 p-1 hover:bg-muted rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 title="Edit contact name"
               >
-                <EditIcon className="w-4 h-4 text-muted-foreground" />
+                <Edit2 className="w-4 h-4 text-muted-foreground" />
               </button>
               <div className="flex items-center gap-1">
                 {showSuccessCheck && (
-                  <CheckIcon className="w-4 h-4 text-success transition-opacity duration-200" />
+                  <Check className="w-4 h-4 text-success transition-opacity duration-200" />
                 )}
               </div>
             </div>

@@ -1,4 +1,5 @@
 import React from 'react';
+import { Check, Info } from 'react-feather';
 import BaseModal from './BaseModal';
 import Button from './Button';
 
@@ -34,20 +35,7 @@ const ICloudSyncModal: React.FC<ICloudSyncModalProps> = ({
 
           <div className="bg-muted rounded-lg p-4 space-y-2">
             <h4 className="text-sm font-semibold text-foreground flex items-center gap-2">
-              <svg
-                className="w-4 h-4 text-success"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-                aria-hidden="true"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M5 13l4 4L19 7"
-                />
-              </svg>
+              <Check className="w-4 h-4 text-success" aria-hidden="true" />
               Benefits
             </h4>
             <ul className="text-xs text-muted-foreground space-y-1 ml-6">
@@ -59,20 +47,7 @@ const ICloudSyncModal: React.FC<ICloudSyncModalProps> = ({
 
           <div className="bg-muted rounded-lg p-4 space-y-2">
             <h4 className="text-sm font-semibold text-foreground flex items-center gap-2">
-              <svg
-                className="w-4 h-4 text-primary"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-                aria-hidden="true"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                />
-              </svg>
+              <Info className="w-4 h-4 text-primary" aria-hidden="true" />
               Note
             </h4>
             <p className="text-xs text-muted-foreground">

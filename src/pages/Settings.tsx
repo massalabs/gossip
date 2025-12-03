@@ -14,18 +14,17 @@ import { useVersionCheck } from '../hooks/useVersionCheck';
 import { STORAGE_KEYS, clearAppStorage } from '../utils/localStorage';
 import { ROUTES } from '../constants/routes';
 import {
-  DangerIcon,
-  ShareContactIcon,
-  CopyIcon,
-  DarkModeIcon,
-  LightModeIcon,
-  DebugIcon,
-  RefreshIcon,
-  LogoutIcon,
-  DeleteIcon,
-  CameraIcon,
-  NotificationsIcon,
-} from '../components/ui/icons';
+  AlertTriangle,
+  Camera,
+  Copy,
+  LogOut,
+  Moon,
+  RefreshCcw,
+  Settings as SettingsIconFeather,
+  Sun,
+  Trash2,
+  Bell,
+} from 'react-feather';
 import { APP_VERSION } from '../config/version';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import { useNavigate } from 'react-router-dom';
@@ -215,7 +214,7 @@ const Settings = (): React.ReactElement => {
             className="w-full h-[54px] flex items-center px-4 justify-start rounded-lg"
             onClick={() => setActiveView(SettingsView.SHOW_ACCOUNT_BACKUP)}
           >
-            <CopyIcon className="mr-4" />
+            <Copy className="mr-4" />
             <span className="text-base font-semibold flex-1 text-left">
               Account Backup
             </span>
@@ -230,7 +229,7 @@ const Settings = (): React.ReactElement => {
             className="w-full h-[54px] flex items-center px-4 justify-start rounded-lg"
             onClick={() => setActiveView(SettingsView.SHARE_CONTACT)}
           >
-            <ShareContactIcon className="mr-4" />
+            <SettingsIconFeather className="mr-4" />
             <span className="text-base font-semibold flex-1 text-left">
               Share Contact
             </span>
@@ -242,7 +241,7 @@ const Settings = (): React.ReactElement => {
             className="w-full h-[54px] flex items-center px-4 justify-start rounded-lg"
             onClick={() => setActiveView(SettingsView.SCAN_QR_CODE)}
           >
-            <CameraIcon className="mr-4" />
+            <Camera className="mr-4" />
             <span className="text-base font-semibold flex-1 text-left">
               Scan QR Code
             </span>
@@ -252,7 +251,7 @@ const Settings = (): React.ReactElement => {
             <div className="bg-card border border-border rounded-lg overflow-hidden shadow-sm">
               {/* Notification Toggle */}
               <div className="h-[54px] flex items-center px-4 justify-start w-full">
-                <NotificationsIcon className="text-foreground mr-4" />
+                <Bell className="text-foreground mr-4" />
                 <span className="text-base font-semibold text-foreground flex-1 text-left">
                   Notifications
                 </span>
@@ -302,9 +301,9 @@ const Settings = (): React.ReactElement => {
           {/* Theme Toggle */}
           <div className="bg-card border border-border rounded-lg h-[54px] flex items-center px-4 justify-start w-full shadow-sm">
             {resolvedTheme === 'dark' ? (
-              <DarkModeIcon className="text-foreground mr-4" />
+              <Moon className="text-foreground mr-4" />
             ) : (
-              <LightModeIcon className="text-foreground mr-4" />
+              <Sun className="text-foreground mr-4" />
             )}
             <span className="text-base font-semibold text-foreground flex-1 text-left">
               {resolvedTheme === 'dark' ? 'Dark Mode' : 'Light Mode'}
@@ -317,7 +316,7 @@ const Settings = (): React.ReactElement => {
           </div>
           {/* Debug Options Toggle */}
           <div className="bg-card border border-border rounded-lg h-[54px] flex items-center px-4 justify-start w-full shadow-sm">
-            <DebugIcon className="text-foreground mr-4" />
+            <SettingsIconFeather className="text-foreground mr-4" />
             <span className="text-base font-semibold text-foreground flex-1 text-left">
               Show Debug Options
             </span>
@@ -344,7 +343,7 @@ const Settings = (): React.ReactElement => {
                       );
                     }}
                   >
-                    <NotificationsIcon className="mr-4" />
+                    <Bell className="mr-4" />
                     <span className="text-base font-semibold flex-1 text-left">
                       Test Notification
                     </span>
@@ -355,7 +354,7 @@ const Settings = (): React.ReactElement => {
                 className="w-full"
                 onClick={handleResetAllAccounts}
               >
-                <DangerIcon className="mr-4" />
+                <AlertTriangle className="mr-4" />
                 <span className="text-base font-semibold flex-1 text-left">
                   Reset App
                 </span>
@@ -365,7 +364,7 @@ const Settings = (): React.ReactElement => {
                 className="w-full"
                 onClick={handleResetAllDiscussionsAndMessages}
               >
-                <DangerIcon className="mr-4" />
+                <AlertTriangle className="mr-4" />
                 <span className="text-base font-semibold flex-1 text-left">
                   Clear Messages & Contacts
                 </span>
@@ -380,7 +379,7 @@ const Settings = (): React.ReactElement => {
               className="w-full h-[54px] flex items-center px-4 justify-start rounded-lg text-destructive border-destructive hover:bg-destructive/10"
               onClick={handleForceUpdate}
             >
-              <RefreshIcon className="mr-4" />
+              <RefreshCcw className="mr-4" />
               <span className="text-base font-semibold flex-1 text-left">
                 Clear Cache & Database
               </span>
@@ -393,7 +392,7 @@ const Settings = (): React.ReactElement => {
             className="w-full h-[54px] flex items-center px-4 justify-start rounded-lg text-foreground border-border hover:bg-muted"
             onClick={handleLogout}
           >
-            <LogoutIcon className="mr-4" />
+            <LogOut className="mr-4" />
             <span className="text-base font-semibold flex-1 text-left">
               Logout
             </span>
@@ -405,7 +404,7 @@ const Settings = (): React.ReactElement => {
             className="w-full h-[54px] flex items-center px-4 justify-start rounded-lg text-red-500 dark:text-red-400 border-red-200 dark:border-red-800 hover:bg-red-50 dark:hover:bg-red-900/20"
             onClick={() => setIsResetModalOpen(true)}
           >
-            <DeleteIcon className="mr-4" />
+            <Trash2 className="mr-4" />
             <span className="text-base font-semibold flex-1 text-left">
               Delete Account
             </span>

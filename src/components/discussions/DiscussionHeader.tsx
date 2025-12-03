@@ -1,11 +1,11 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
+import { ChevronLeft } from 'react-feather';
 import { Contact, Discussion } from '../../db';
 import { formatUserId } from '../../utils/userId';
 import ContactAvatar from '../avatar/ContactAvatar';
 import Button from '../ui/Button';
 import BackButton from '../ui/BackButton';
-import { ChevronLeftIcon } from '../ui/icons';
 import { ROUTES } from '../../constants/routes';
 
 interface DiscussionHeaderProps {
@@ -77,7 +77,7 @@ const DiscussionHeader: React.FC<DiscussionHeaderProps> = ({
             size="custom"
             className="w-11 h-11 flex items-center justify-center mr-2 group hover:bg-muted/50 active:bg-muted/70"
           >
-            <ChevronLeftIcon className="w-6 h-6 text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-white transition-colors" />
+            <ChevronLeft className="w-6 h-6 text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-white transition-colors" />
           </Button>
         )}
         <button

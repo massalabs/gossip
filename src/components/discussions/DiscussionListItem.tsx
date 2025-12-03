@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { ChevronRight } from 'react-feather';
 import { Discussion, Contact } from '../../db';
 import ContactAvatar from '../avatar/ContactAvatar';
 import { formatRelativeTime } from '../../utils/timeUtils';
@@ -139,19 +140,7 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
                   </p>
                 )}
                 {!isPendingIncoming && !isPendingOutgoing && (
-                  <svg
-                    className="w-4 h-4 text-muted-foreground"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M9 5l7 7-7 7"
-                    />
-                  </svg>
+                  <ChevronRight className="w-4 h-4 text-muted-foreground" />
                 )}
               </div>
             </div>

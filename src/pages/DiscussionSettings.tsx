@@ -6,7 +6,7 @@ import ContactAvatar from '../components/avatar/ContactAvatar';
 import ContactNameModal from '../components/ui/ContactNameModal';
 import Button from '../components/ui/Button';
 import PageHeader from '../components/ui/PageHeader';
-import { CheckIcon, EditIcon } from '../components/ui/icons';
+import { Check, Edit2, ChevronRight } from 'react-feather';
 import { formatUserId } from '../utils/userId';
 import { Contact } from '../db';
 import { ROUTES } from '../constants/routes';
@@ -121,7 +121,7 @@ const DiscussionSettings: React.FC = () => {
               </div>
               <div className="flex items-center gap-2 ml-3">
                 {showSuccessCheck && (
-                  <CheckIcon className="w-4 h-4 text-success transition-opacity duration-200" />
+                  <Check className="w-4 h-4 text-success transition-opacity duration-200" />
                 )}
                 <Button
                   onClick={handleOpenEditName}
@@ -130,7 +130,7 @@ const DiscussionSettings: React.FC = () => {
                   className="p-2 hover:bg-muted rounded-lg transition-colors"
                   title="Edit discussion name"
                 >
-                  <EditIcon className="w-4 h-4 text-muted-foreground" />
+                  <Edit2 className="w-4 h-4 text-muted-foreground" />
                 </Button>
               </div>
             </div>
@@ -158,19 +158,7 @@ const DiscussionSettings: React.FC = () => {
                     {formatUserId(contact.userId)}
                   </p>
                 </div>
-                <svg
-                  className="w-4 h-4 text-muted-foreground shrink-0"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M9 5l7 7-7 7"
-                  />
-                </svg>
+                <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
               </button>
             ))}
             {participants.length === 0 && (

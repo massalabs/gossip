@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-
+import { Edit2, Plus, Users, User } from 'react-feather';
 import { useAccountStore } from '../stores/accountStore';
 import Button from '../components/ui/Button';
 import { useEffect, useState } from 'react';
@@ -77,19 +77,7 @@ const NewDiscussion: React.FC = () => {
                 className="w-full flex items-center gap-3 rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-3 text-left opacity-50 cursor-not-allowed"
               >
                 <span className="inline-flex w-6 h-6 items-center justify-center">
-                  <svg
-                    className="w-5 h-5 text-gray-700 dark:text-gray-200"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
-                    />
-                  </svg>
+                  <Users className="w-5 h-5 text-gray-700 dark:text-gray-200" />
                 </span>
                 <span className="text-sm font-medium text-gray-900 dark:text-white">
                   New group
@@ -103,19 +91,7 @@ const NewDiscussion: React.FC = () => {
                 className="w-full flex items-center gap-3 rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-3 hover:bg-gray-50 dark:hover:bg-gray-700/50 text-left"
               >
                 <span className="inline-flex w-6 h-6 items-center justify-center">
-                  <svg
-                    className="w-5 h-5 text-gray-700 dark:text-gray-200"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M12 6v6m0 0v6m0-6h6m-6 0H6"
-                    />
-                  </svg>
+                  <Plus className="w-5 h-5 text-gray-700 dark:text-gray-200" />
                 </span>
                 <span className="text-sm font-medium text-gray-900 dark:text-white">
                   New contact
@@ -133,19 +109,7 @@ const NewDiscussion: React.FC = () => {
             ) : contacts.length === 0 ? (
               <div className="p-8 text-center text-gray-500 dark:text-gray-400">
                 <div className="mx-auto mb-3 w-10 h-10 rounded-full bg-gray-100 dark:bg-gray-700 flex items-center justify-center">
-                  <svg
-                    className="w-5 h-5 text-gray-400"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
-                    />
-                  </svg>
+                  <User className="w-5 h-5 text-gray-400" />
                 </div>
                 <p className="text-sm">No contacts yet</p>
                 <p className="text-xs mt-1">Tap "New contact" to add one</p>
@@ -179,19 +143,7 @@ const NewDiscussion: React.FC = () => {
                         title="Edit contact"
                         aria-label="Edit contact"
                       >
-                        <svg
-                          className="w-5 h-5 text-gray-500 dark:text-gray-400"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
-                          />
-                        </svg>
+                        <Edit2 className="w-5 h-5 text-gray-500 dark:text-gray-400" />
                       </button>
                     </li>
                   );

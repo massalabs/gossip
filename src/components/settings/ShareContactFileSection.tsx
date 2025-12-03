@@ -1,7 +1,6 @@
 import React from 'react';
-
+import { Download } from 'react-feather';
 import Button from '../ui/Button';
-import { DownloadIcon } from '../ui/icons';
 
 interface ShareContactFileSectionProps {
   disabled: boolean;
@@ -20,7 +19,7 @@ const ShareContactFileSection: React.FC<ShareContactFileSectionProps> = ({
     <div className="bg-card rounded-lg p-6">
       <div className="text-center mb-6">
         <div className="w-12 h-12 bg-primary/10 rounded-xl flex items-center justify-center mx-auto mb-4">
-          <DownloadIcon className="w-6 h-6 text-primary" />
+          <Download className="w-6 h-6 text-primary" />
         </div>
         <h4 className="text-lg font-semibold text-foreground mb-2">
           Share with file
@@ -40,7 +39,7 @@ const ShareContactFileSection: React.FC<ShareContactFileSectionProps> = ({
         fullWidth
         className="h-11 rounded-xl text-sm font-medium"
       >
-        <DownloadIcon />
+        <Download />
         <span>Download</span>
       </Button>
 
