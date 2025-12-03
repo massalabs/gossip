@@ -2,7 +2,6 @@ import React, { useState, useRef, useCallback, useEffect } from 'react';
 import Button from '../ui/Button';
 import { Message } from '../../db';
 
-// Textarea height constants
 const TEXTAREA_MIN_HEIGHT_DESKTOP = 40;
 const TEXTAREA_MIN_HEIGHT_MOBILE = 36;
 const TEXTAREA_MAX_HEIGHT = 120;
@@ -10,7 +9,7 @@ const DESKTOP_BREAKPOINT = 768;
 
 interface MessageInputProps {
   onSend: (message: string, replyToId?: number) => void;
-  onClick: () => void;
+  onClick?: () => void;
   disabled?: boolean;
   replyingTo?: Message | null;
   onCancelReply?: () => void;
@@ -25,54 +24,89 @@ const MessageInput: React.FC<MessageInputProps> = ({
 }) => {
   const [newMessage, setNewMessage] = useState('');
   const [inputHeight, setInputHeight] = useState(TEXTAREA_MIN_HEIGHT_DESKTOP);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Helper function to get the minimum height based on screen size
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const hiddenInputRef = useRef<HTMLInputElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
   const getMinHeight = useCallback(() => {
     return window.innerWidth >= DESKTOP_BREAKPOINT
       ? TEXTAREA_MIN_HEIGHT_DESKTOP
       : TEXTAREA_MIN_HEIGHT_MOBILE;
   }, []);
 
-  // Handle window resize to adjust textarea height
-  useEffect(() => {
-    const handleResize = () => {
-      if (!textareaRef.current) return;
+  const adjustHeight = useCallback(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
 
-      const minHeight = getMinHeight();
+    textarea.style.height = 'auto';
+    const scrollHeight = textarea.scrollHeight;
+    const minHeight = getMinHeight();
+    const newHeight = Math.min(
+      Math.max(scrollHeight, minHeight),
+      TEXTAREA_MAX_HEIGHT
+    );
 
-      // Recalculate height based on current content
-      textareaRef.current.style.height = 'auto';
-      const scrollHeight = textareaRef.current.scrollHeight;
-      const newHeight = Math.min(
-        Math.max(scrollHeight, minHeight),
-        TEXTAREA_MAX_HEIGHT
-      );
-
-      textareaRef.current.style.height = `${newHeight}px`;
-      setInputHeight(newHeight);
-    };
-
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+    textarea.style.height = `${newHeight}px`;
+    setInputHeight(newHeight);
   }, [getMinHeight]);
 
-  const handleSendMessage = useCallback(() => {
-    if (!newMessage.trim() || disabled) return;
-    const text = newMessage;
-    setNewMessage('');
+  const focusTextarea = useCallback(() => {
+    textareaRef.current?.focus();
+    const len = textareaRef.current?.value.length || 0;
+    textareaRef.current?.setSelectionRange(len, len);
+  }, []);
 
-    // Reset textarea height after sending
-    const minHeight = getMinHeight();
-    if (textareaRef.current) {
-      textareaRef.current.style.height = `${minHeight}px`;
+  // visualViewport fix for iOS keyboard
+  useEffect(() => {
+    if (window.innerWidth >= DESKTOP_BREAKPOINT) return;
+
+    const handleVV = () => requestAnimationFrame(focusTextarea);
+    const vv = window.visualViewport;
+    if (vv) {
+      vv.addEventListener('resize', handleVV);
+      vv.addEventListener('scroll', handleVV);
+      return () => {
+        vv.removeEventListener('resize', handleVV);
+        vv.removeEventListener('scroll', handleVV);
+      };
     }
-    setInputHeight(minHeight);
+  }, [focusTextarea]);
 
-    onSend(text, replyingTo?.id);
-  }, [newMessage, disabled, onSend, replyingTo, getMinHeight]);
+  // Window resize
+  useEffect(() => {
+    const handleResize = () => adjustHeight();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [adjustHeight]);
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
+  const handleSendMessage = useCallback(() => {
+    const trimmed = newMessage.trim();
+    if (!trimmed || disabled) return;
+
+    const isMobile = window.innerWidth < DESKTOP_BREAKPOINT;
+
+    // 1. Hold keyboard with hidden input (iOS/Android)
+    if (isMobile && hiddenInputRef.current) {
+      hiddenInputRef.current.focus();
+    }
+
+    // 2. Clear
+    setNewMessage('');
+    if (textareaRef.current) {
+      textareaRef.current.value = '';
+      textareaRef.current.style.height = `${getMinHeight()}px`;
+    }
+    setInputHeight(getMinHeight());
+
+    // 3. Send
+    onSend(trimmed, replyingTo?.id);
+
+    // 4. Refocus
+    setTimeout(focusTextarea, 10);
+  }, [newMessage, disabled, onSend, replyingTo, getMinHeight, focusTextarea]);
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSendMessage();
@@ -81,95 +115,117 @@ const MessageInput: React.FC<MessageInputProps> = ({
 
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setNewMessage(e.target.value);
-    const textarea = e.target;
-    textarea.style.height = 'auto';
-    const minHeight = getMinHeight();
-    const newHeight = Math.min(
-      Math.max(textarea.scrollHeight, minHeight),
-      TEXTAREA_MAX_HEIGHT
-    );
-    textarea.style.height = `${newHeight}px`;
-    setInputHeight(newHeight);
+    adjustHeight();
   };
 
-  const handleContainerClick = (e: React.MouseEvent<HTMLDivElement>) => {
+  const preventFocusLoss = (e: React.MouseEvent | React.TouchEvent) => {
+    e.preventDefault();
+  };
+
+  const handleBlur = useCallback(() => {
+    requestAnimationFrame(() => {
+      const active = document.activeElement;
+      if (
+        active === textareaRef.current ||
+        (containerRef.current && containerRef.current.contains(active as Node))
+      ) {
+        // Focus is still inside our component → pull it back
+        focusTextarea();
+      }
+      // Else: user tapped outside → allow blur (keyboard hides)
+    });
+  }, [focusTextarea]);
+
+  // Cancel reply → refocus textarea
+  const handleCancelReply = (e: React.MouseEvent) => {
     e.stopPropagation();
-    onClick();
+    onCancelReply?.();
+    setTimeout(focusTextarea, 0);
+  };
+
+  // Optional: tap container background to focus (nice UX)
+  const handleContainerTap = () => {
+    onClick?.();
+    focusTextarea();
   };
 
   return (
-    <div className="bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl border-t border-gray-100 dark:border-gray-800/50 px-4 md:px-6 py-3 md:py-4">
-      {/* Reply Preview */}
-      {replyingTo && (
-        <div className="mb-2 px-3 py-2 bg-muted/50 border-l-2 border-primary rounded-r-lg">
-          <div className="flex items-start justify-between gap-2">
-            <div className="flex-1 min-w-0">
-              <p className="text-xs text-foreground/80 truncate">
-                {replyingTo.content}
-              </p>
-            </div>
-            {onCancelReply && (
-              <button
-                onClick={onCancelReply}
-                className="shrink-0 p-1 hover:bg-muted rounded transition-colors"
-                title="Cancel reply"
-                aria-label="Cancel reply"
-              >
-                <svg
-                  className="w-4 h-4 text-muted-foreground"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth={2}
-                  viewBox="0 0 24 24"
+    <>
+      <div
+        ref={containerRef}
+        className="bg-card/60 dark:bg-card/80 backdrop-blur-xl border-t border-border px-6 md:px-10 py-3 md:py-4"
+        onClick={handleContainerTap}
+      >
+        {/* Reply Preview */}
+        {replyingTo && (
+          <div className="mb-2 px-3 py-2 bg-muted/50 border-l-2 border-primary rounded-r-lg">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex-1 min-w-0">
+                <p className="text-xs text-foreground/80 truncate">
+                  {replyingTo.content}
+                </p>
+              </div>
+              {onCancelReply && (
+                <button
+                  onClick={handleCancelReply}
+                  onMouseDown={preventFocusLoss}
+                  onTouchStart={preventFocusLoss}
+                  className="shrink-0 p-1 hover:bg-muted rounded transition-colors"
                 >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M6 18L18 6M6 6l12 12"
-                  />
-                </svg>
-              </button>
-            )}
+                  <svg
+                    className="w-4 h-4 text-muted-foreground"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M6 18L18 6M6 6l12 12"
+                    />
+                  </svg>
+                </button>
+              )}
+            </div>
           </div>
-        </div>
-      )}
-      <div className="flex items-end gap-2 md:gap-3">
-        <div
-          onClick={onClick}
-          className="flex-1 flex items-center gap-2 bg-white/90 dark:bg-gray-800/70 border border-gray-200 dark:border-gray-700/60 rounded-2xl px-3 md:px-4 py-2 md:py-2.5 shadow-sm hover:shadow focus-within:ring-2 focus-within:ring-blue-500/40 focus-within:border-blue-400/60 dark:focus-within:border-blue-500/40 transition-all duration-200"
-        >
-          <textarea
-            ref={textareaRef}
-            value={newMessage}
-            onChange={handleInputChange}
-            onKeyDown={handleKeyDown}
-            placeholder="Type a message..."
-            rows={1}
-            inputMode="text"
-            autoComplete="off"
-            autoCorrect="on"
-            autoCapitalize="sentences"
-            spellCheck="true"
-            className="flex-1 min-h-[36px] md:min-h-[40px] max-h-[120px] bg-transparent dark:text-white placeholder-gray-400 dark:placeholder-gray-500 resize-none transition-all duration-200 overflow-y-auto text-[15px] leading-relaxed focus:outline-none"
-            style={
-              {
-                height: `${Math.max(inputHeight, TEXTAREA_MIN_HEIGHT_MOBILE)}px`,
-                scrollbarWidth: 'thin',
-                scrollbarColor: 'rgba(156, 163, 175, 0.5) transparent',
-                // When disabled, let clicks pass through to parent container
-                pointerEvents: disabled ? 'none' : 'auto',
-              } as React.CSSProperties
-            }
-          />
-          <div className="hidden md:block w-px h-6 bg-gray-200 dark:bg-gray-700/60 mx-1" />
-          <div onClick={handleContainerClick} className="shrink-0">
+        )}
+
+        <div className="flex items-end gap-2 md:gap-3">
+          <div className="flex-1 flex items-center gap-2 bg-card dark:bg-card/70 border border-border rounded-xl px-3 md:px-4 py-2 md:py-2.5 focus-within:ring-2 focus-within:ring-ring focus-within:border-ring transition-all duration-200">
+            <textarea
+              ref={textareaRef}
+              value={newMessage}
+              onChange={handleInputChange}
+              onKeyDown={handleKeyDown}
+              onBlur={handleBlur}
+              placeholder="Type a message..."
+              rows={1}
+              inputMode="text"
+              autoComplete="off"
+              autoCorrect="on"
+              autoCapitalize="sentences"
+              spellCheck={true}
+              className="flex-1 min-h-[36px] md:min-h-[40px] max-h-[120px] bg-transparent text-foreground placeholder:text-muted-foreground resize-none overflow-y-auto text-[15px] leading-relaxed focus:outline-none"
+              style={
+                {
+                  height: `${Math.max(inputHeight, TEXTAREA_MIN_HEIGHT_MOBILE)}px`,
+                  pointerEvents: disabled ? 'none' : 'auto',
+                } as React.CSSProperties
+              }
+            />
+
+            <div className="hidden md:block w-px h-6 bg-border/80 mx-1" />
+
+            {/* Send Button */}
             <Button
               onClick={handleSendMessage}
+              onMouseDown={preventFocusLoss}
+              onTouchStart={preventFocusLoss}
               variant="primary"
               size="custom"
-              className={`w-8 h-8 md:w-9 md:h-9 shrink-0 rounded-full flex items-center justify-center shadow-md shadow-blue-500/20 hover:shadow-lg hover:shadow-blue-500/30 transition-all ${
-                disabled ? 'opacity-60 cursor-not-allowed' : ''
-              } ${!newMessage.trim() || disabled ? 'pointer-events-none' : ''}`}
+              disabled={disabled || !newMessage.trim()}
+              className="w-8 h-8 md:w-9 md:h-9 shrink-0 rounded-full flex items-center justify-center shadow-md hover:shadow-lg transition-all"
               title="Send message"
             >
               <svg
@@ -189,7 +245,25 @@ const MessageInput: React.FC<MessageInputProps> = ({
           </div>
         </div>
       </div>
-    </div>
+
+      {/* Hidden input — prevents keyboard close on send */}
+      <input
+        ref={hiddenInputRef}
+        type="text"
+        inputMode="text"
+        style={{
+          position: 'fixed',
+          bottom: 0,
+          left: '-100px',
+          opacity: 0,
+          pointerEvents: 'none',
+          height: '1px',
+          width: '1px',
+          zIndex: -1,
+        }}
+        tabIndex={-1}
+      />
+    </>
   );
 };
 
