@@ -17,9 +17,14 @@
 // Keys used for Capacitor Preferences (CapacitorKV in Background Runner)
 const ACTIVE_SEEKERS_KEY = 'gossip-active-seekers';
 const API_BASE_URL_KEY = 'gossip-api-base-url';
+const LAST_SYNC_TIMESTAMP_KEY = 'gossip-last-sync-timestamp';
 
 // Fallback API URL if not stored in preferences
 const DEFAULT_API_BASE_URL = 'https://gossip.massa.net/api';
+
+// Minimum interval between syncs to avoid redundant work
+// If a sync was performed within this window, skip the current sync
+const MIN_SYNC_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
 
 /**
  * Retrieve active seekers from CapacitorKV (Preferences).
@@ -69,6 +74,72 @@ async function getApiBaseUrl() {
     );
   }
   return DEFAULT_API_BASE_URL;
+}
+
+/**
+ * Retrieve the last sync timestamp from CapacitorKV.
+ * Returns 0 if not found or on error.
+ */
+async function getLastSyncTimestamp() {
+  try {
+    if (typeof CapacitorKV !== 'undefined' && CapacitorKV?.get) {
+      const value = await CapacitorKV.get(LAST_SYNC_TIMESTAMP_KEY);
+      if (value) {
+        const timestamp = parseInt(value, 10);
+        if (!isNaN(timestamp)) {
+          return timestamp;
+        }
+      }
+    }
+  } catch (err) {
+    console.log(
+      '[BackgroundSync] Failed to get last sync timestamp',
+      String(err)
+    );
+  }
+  return 0;
+}
+
+/**
+ * Store the current timestamp as the last sync time.
+ */
+async function setLastSyncTimestamp() {
+  try {
+    if (typeof CapacitorKV !== 'undefined' && CapacitorKV?.set) {
+      await CapacitorKV.set(LAST_SYNC_TIMESTAMP_KEY, String(Date.now()));
+    }
+  } catch (err) {
+    console.log(
+      '[BackgroundSync] Failed to set last sync timestamp',
+      String(err)
+    );
+  }
+}
+
+/**
+ * Check if enough time has passed since the last sync.
+ * Returns true if sync should proceed, false if it should be skipped.
+ */
+async function shouldPerformSync() {
+  const lastSyncTimestamp = await getLastSyncTimestamp();
+  if (lastSyncTimestamp === 0) {
+    // No previous sync recorded, proceed
+    return true;
+  }
+
+  const timeSinceLastSync = Date.now() - lastSyncTimestamp;
+  if (timeSinceLastSync < MIN_SYNC_INTERVAL_MS) {
+    console.log(
+      '[BackgroundSync] Skipping sync - too soon since last sync (' +
+        Math.round(timeSinceLastSync / 1000) +
+        's ago, minimum is ' +
+        Math.round(MIN_SYNC_INTERVAL_MS / 1000) +
+        's)'
+    );
+    return false;
+  }
+
+  return true;
 }
 
 /**
@@ -135,6 +206,14 @@ addEventListener('backgroundSync', async (resolve, reject, args) => {
   try {
     console.log('[BackgroundSync] Task started', JSON.stringify(args || {}));
 
+    // Check if we should perform sync (timestamp check to avoid redundant work)
+    const shouldSync = await shouldPerformSync();
+    if (!shouldSync) {
+      console.log('[BackgroundSync] Sync skipped due to timestamp check');
+      resolve();
+      return;
+    }
+
     // Retrieve active seekers from Preferences storage
     const activeSeekers = await getActiveSeekers();
 
@@ -159,6 +238,9 @@ addEventListener('backgroundSync', async (resolve, reject, args) => {
       resolve();
       return;
     }
+
+    // Update last sync timestamp after successful fetch
+    await setLastSyncTimestamp();
 
     // If new messages were found, show a notification
     if (messages.length > 0) {

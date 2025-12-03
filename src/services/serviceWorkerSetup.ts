@@ -6,7 +6,7 @@
 
 import { notificationService } from './notifications';
 import { defaultSyncConfig } from '../config/sync';
-import { setApiBaseUrlForBackgroundSync } from '../db';
+import { setApiBaseUrlForBackgroundSync } from '../utils/preferences';
 import { protocolConfig } from '../config/protocol';
 /**
  * Setup service worker: register, listen for messages, and start sync scheduler
