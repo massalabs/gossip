@@ -11,13 +11,21 @@ import { defaultSyncConfig } from './config/sync';
 import { RestMessageProtocol } from './api/messageProtocol/rest';
 import type { EncryptedMessage } from './api/messageProtocol/types';
 import { db } from './db';
+import {
+  getLastSyncTimestamp,
+  setLastSyncTimestamp,
+} from './utils/preferences';
+import { APP_BUILD_ID } from './config/version';
 
 declare let self: ServiceWorkerGlobalScope;
 
 // Service Worker configuration constants
 // Import from centralized config for easy adjustment
 const FALLBACK_SYNC_INTERVAL_MS = defaultSyncConfig.fallbackSyncIntervalMs;
-const APP_BUILD_ID = import.meta.env.VITE_APP_BUILD_ID ?? 'dev-local';
+
+// Minimum interval between syncs to avoid redundant work (in milliseconds)
+// If a sync was performed within this window, skip the current sync
+const MIN_SYNC_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
 
 setCacheNameDetails({
   prefix: 'gossip',
@@ -25,22 +33,6 @@ setCacheNameDetails({
   precache: 'precache',
   runtime: 'runtime',
 });
-
-// Sync frequency tracking
-interface SyncStats {
-  lastSyncTime: number;
-  syncCount: number;
-  syncType: 'periodic' | 'fallback';
-  syncIntervals: number[]; // Time between syncs in ms
-}
-
-const MAX_SYNC_INTERVALS_TO_TRACK = 10;
-const syncStats: SyncStats = {
-  lastSyncTime: 0,
-  syncCount: 0,
-  syncType: 'fallback',
-  syncIntervals: [],
-};
 
 // Service Worker event types
 interface SyncEvent extends Event {
@@ -278,18 +270,27 @@ async function handleSyncEvent(event: SyncEvent): Promise<void> {
   if (event.tag === 'gossip-message-sync') {
     // Check if app is active - if so, skip sync (main app handles it)
     event.waitUntil(
-      hasActiveClients().then(isActive => {
+      (async () => {
+        const isActive = await hasActiveClients();
         if (isActive) {
           // App is active - main app handles sync, skip this one
           return;
         }
 
+        // Check timestamp to avoid redundant sync
+        if (!(await shouldPerformSync())) {
+          return;
+        }
+
         // App is in background - perform sync
-        trackSync('periodic');
-        return performSyncAndNotify().catch(error => {
+        try {
+          await performSyncAndNotify();
+          // Update last sync timestamp after successful sync
+          await setLastSyncTimestamp();
+        } catch (error) {
           console.error('Service Worker: Periodic sync failed', error);
-        });
-      })
+        }
+      })()
     );
   }
 }
@@ -388,25 +389,27 @@ self.addEventListener('notificationclick', (event: NotificationEvent) => {
 // ============================================================================
 
 /**
- * Track sync frequency for monitoring and debugging
+ * Check if enough time has passed since the last sync.
+ * Returns true if sync should proceed, false if it should be skipped.
+ * Uses timestamp stored in Capacitor Preferences (accessible by service worker and background runner).
+ * Also checks if the device is online.
  */
-function trackSync(syncType: 'periodic' | 'fallback'): void {
-  const now = Date.now();
-  const timeSinceLastSync =
-    syncStats.lastSyncTime > 0 ? now - syncStats.lastSyncTime : 0;
-
-  syncStats.syncCount++;
-  syncStats.syncType = syncType;
-
-  if (timeSinceLastSync > 0) {
-    syncStats.syncIntervals.push(timeSinceLastSync);
-    // Keep only the last N intervals
-    if (syncStats.syncIntervals.length > MAX_SYNC_INTERVALS_TO_TRACK) {
-      syncStats.syncIntervals.shift();
-    }
+async function shouldPerformSync(): Promise<boolean> {
+  const lastSyncTime = await getLastSyncTimestamp();
+  if (lastSyncTime === 0) {
+    // No previous sync recorded, proceed
+    return true;
   }
 
-  syncStats.lastSyncTime = now;
+  const timeSinceLastSync = Date.now() - lastSyncTime;
+  if (timeSinceLastSync < MIN_SYNC_INTERVAL_MS) {
+    console.log(
+      `Service Worker: Skipping sync - too soon since last sync (${Math.round(timeSinceLastSync / 1000)}s ago, minimum is ${Math.round(MIN_SYNC_INTERVAL_MS / 1000)}s)`
+    );
+    return false;
+  }
+
+  return true;
 }
 
 /**
@@ -588,8 +591,16 @@ function rescheduleNextCheck(): void {
 function scheduleBackgroundSync(): void {
   const sw = getServiceWorkerScope();
   const timeoutId = setTimeout(async () => {
-    trackSync('fallback');
+    // Check timestamp to avoid redundant sync
+    if (!(await shouldPerformSync())) {
+      // Still schedule next sync check
+      scheduleNextSync();
+      return;
+    }
+
     await performSyncAndNotify();
+    // Update last sync timestamp after successful sync
+    await setLastSyncTimestamp();
     // Schedule next sync (will re-check app state)
     scheduleNextSync();
   }, FALLBACK_SYNC_INTERVAL_MS);
