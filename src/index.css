@@ -24,6 +24,8 @@
   --destructive-foreground: #ffffff;
   --success: #16a34a; /* green-600 - online status, success states */
   --success-foreground: #ffffff; /* white text on green */
+  --warning: #92400e; /* amber-800 - warning states (6.1:1 contrast with white, WCAG AA compliant) */
+  --warning-foreground: #ffffff; /* white text on amber */
   --border: #e5e6e8; /* subtle border */
   --input: #ffffff; /* input background */
   --ring: #0d9488; /* focus ring using teal */
@@ -68,6 +70,8 @@
   --destructive-foreground: #18181b;
   --success: #22c55e; /* green-500 - online status, success states */
   --success-foreground: #18181b; /* dark text on green for good contrast */
+  --warning: #fbbf24; /* amber-400 - warning states, needs attention */
+  --warning-foreground: #18181b; /* dark text on amber for good contrast */
   --border: #2a2a2e; /* subtle border */
   --input: #1e1e22; /* input background */
   --ring: #2dd4bf; /* focus ring using teal */
@@ -108,6 +112,8 @@
   --color-destructive-foreground: var(--destructive-foreground);
   --color-success: var(--success);
   --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);

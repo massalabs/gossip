@@ -202,9 +202,30 @@ async function showNewMessageNotification(messageCount) {
   }
 }
 
+/**
+ * Check network connectivity before attempting sync.
+ * Uses the navigator.onLine property if available.
+ * @returns {boolean} - True if online or unknown, false if definitely offline
+ */
+function isNetworkAvailable() {
+  // navigator.onLine may not be available in all background contexts
+  if (typeof navigator !== 'undefined' && 'onLine' in navigator) {
+    return navigator.onLine;
+  }
+  // If we can't determine, assume online and let fetch fail if not
+  return true;
+}
+
 addEventListener('backgroundSync', async (resolve, reject, args) => {
   try {
     console.log('[BackgroundSync] Task started', JSON.stringify(args || {}));
+
+    // Check network connectivity first
+    if (!isNetworkAvailable()) {
+      console.log('[BackgroundSync] Network unavailable, skipping sync');
+      resolve();
+      return;
+    }
 
     // Check if we should perform sync (timestamp check to avoid redundant work)
     const shouldSync = await shouldPerformSync();

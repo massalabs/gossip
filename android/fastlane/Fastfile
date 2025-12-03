@@ -21,6 +21,22 @@ platform :android do
     UI.message("📦 AAB file: app/build/outputs/bundle/release/app-release.aab")
   end
 
+  desc "Build debug APK for local testing"
+  lane :build_debug do
+    setup_ci if ENV['CI']
+    
+    # Build debug APK
+    gradle(
+      task: "assembleDebug",
+      project_dir: ".",
+      print_command: true
+    )
+    
+    UI.success("✅ Debug APK built successfully!")
+    UI.message("📦 APK file: app/build/outputs/apk/debug/app-debug.apk")
+    UI.message("💡 Install with: adb install app/build/outputs/apk/debug/app-debug.apk")
+  end
+
   desc "Build the Android app (AAB)"
   lane :build do
     build_app_common
