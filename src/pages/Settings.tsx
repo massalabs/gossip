@@ -35,6 +35,7 @@ import {
   notificationService,
   type NotificationPreferences,
 } from '../services/notifications';
+import BackgroundSyncSettings from '../components/settings/BackgroundSyncSettings';
 
 import ProfilePicture from '../assets/gossip_face.svg';
 
@@ -285,6 +286,8 @@ const Settings = (): React.ReactElement => {
               )}
             </div>
           )}
+          {/* Background Sync Settings (Android only) */}
+          <BackgroundSyncSettings showDebugInfo={showDebugOption} />
           {/* Privacy Button */}
           {/* <Button
             variant="outline"

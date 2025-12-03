@@ -46,6 +46,35 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths"></meta-data>
         </provider>
+
+        <!-- Boot Receiver: Restart background sync after device boot -->
+        <receiver
+            android:name=".BootReceiver"
+            android:enabled="true"
+            android:exported="false"
+            android:directBootAware="true">
+            <intent-filter>
+                <!-- Standard boot completed -->
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <!-- Quick boot on some devices -->
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <!-- HTC quick boot -->
+                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON" />
+                <!-- Direct boot for encrypted devices (Android 7+) -->
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- App Update Receiver: Restart background sync after app update -->
+        <receiver
+            android:name=".AppUpdateReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
     </application>
 
     <!-- Permissions -->
@@ -55,5 +84,10 @@
     <uses-permission android:name="android.permission.USE_FINGERPRINT" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    
+    <!-- Background sync permissions -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
 </manifest>
