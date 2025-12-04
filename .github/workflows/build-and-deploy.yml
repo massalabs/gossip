@@ -11,9 +11,10 @@ on:
       android_build_type:
         description: 'Android Build Type'
         required: false
-        default: 'release'
+        default: 'both'
         type: choice
         options:
+          - both
           - release
           - debug
       upload_to_play_store:
@@ -73,7 +74,7 @@ jobs:
           VITE_PROTOCOL_API_URL: https://api.usegossip.com/
         run: |
           # Check if debug build is requested (manual trigger only)
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ] && [ "${{ github.event.inputs.android_build_type }}" == "debug" ]; then
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ] && ( [ "${{ github.event.inputs.android_build_type }}" == "debug" ] || [ "${{ github.event.inputs.android_build_type }}" == "both" ] ); then
             echo "🔍 Building with sourcemaps for debug..."
             npm run build -- --sourcemap
           else
@@ -141,19 +142,21 @@ jobs:
             echo "🎯 Manual build triggered"
             if [ "$BUILD_TYPE" == "debug" ]; then
               echo "📦 Building: APK Debug (with sourcemaps)"
+            elif [ "$BUILD_TYPE" == "both" ]; then
+              echo "📦 Building: Both APK Debug (with sourcemaps) and AAB Release (for Play Store)"
             else
               echo "📦 Building: AAB Release (for Play Store)"
             fi
           fi
 
       - name: Create keystore from secrets (Release only)
-        if: (github.event_name == 'push') || (github.event_name == 'workflow_dispatch' && github.event.inputs.android_build_type == 'release')
+        if: (github.event_name == 'push') || (github.event_name == 'workflow_dispatch' && (github.event.inputs.android_build_type == 'release' || github.event.inputs.android_build_type == 'both'))
         run: |
           echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > ${{ github.workspace }}/android/app/keystore.jks
           echo "ANDROID_KEYSTORE_FILE=${{ github.workspace }}/android/app/keystore.jks" >> $GITHUB_ENV
 
       - name: Build Android Release (AAB)
-        if: (github.event_name == 'push') || (github.event_name == 'workflow_dispatch' && github.event.inputs.android_build_type == 'release')
+        if: (github.event_name == 'push') || (github.event_name == 'workflow_dispatch' && (github.event.inputs.android_build_type == 'release' || github.event.inputs.android_build_type == 'both'))
         env:
           ANDROID_KEYSTORE_FILE: ${{ env.ANDROID_KEYSTORE_FILE }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -165,7 +168,7 @@ jobs:
           bundle exec fastlane build
 
       - name: Build Android Debug (APK)
-        if: github.event_name == 'workflow_dispatch' && github.event.inputs.android_build_type == 'debug'
+        if: github.event_name == 'workflow_dispatch' && (github.event.inputs.android_build_type == 'debug' || github.event.inputs.android_build_type == 'both')
         working-directory: android
         run: |
           echo "📦 Building Android APK (Debug with sourcemaps)..."
@@ -174,24 +177,59 @@ jobs:
       - name: Build status
         if: always()
         run: |
+          AAB_EXISTS=false
+          APK_EXISTS=false
+
           # Check for Release AAB
           if [ -f "android/app/build/outputs/bundle/release/app-release.aab" ]; then
+            AAB_EXISTS=true
             echo "✅ Android AAB (Release) built successfully!"
             echo "📦 File: android/app/build/outputs/bundle/release/app-release.aab"
             ls -lh android/app/build/outputs/bundle/release/app-release.aab
+          fi
+
           # Check for Debug APK
-          elif [ -f "android/app/build/outputs/apk/debug/app-debug.apk" ]; then
+          if [ -f "android/app/build/outputs/apk/debug/app-debug.apk" ]; then
+            APK_EXISTS=true
             echo "✅ Android APK (Debug) built successfully!"
             echo "📦 File: android/app/build/outputs/apk/debug/app-debug.apk"
             ls -lh android/app/build/outputs/apk/debug/app-debug.apk
             echo "🔍 Sourcemaps included in web build"
+          fi
+
+          # Determine expected outputs based on build type
+          if [ "${{ github.event_name }}" == "push" ]; then
+            EXPECTED_AAB=true
+            EXPECTED_APK=false
+          elif [ "${{ github.event.inputs.android_build_type }}" == "both" ]; then
+            EXPECTED_AAB=true
+            EXPECTED_APK=true
+          elif [ "${{ github.event.inputs.android_build_type }}" == "debug" ]; then
+            EXPECTED_AAB=false
+            EXPECTED_APK=true
           else
+            EXPECTED_AAB=true
+            EXPECTED_APK=false
+          fi
+
+          # Verify expected outputs exist
+          if [ "$EXPECTED_AAB" == "true" ] && [ "$AAB_EXISTS" == "false" ]; then
+            echo "❌ Expected AAB not found"
+            exit 1
+          fi
+
+          if [ "$EXPECTED_APK" == "true" ] && [ "$APK_EXISTS" == "false" ]; then
+            echo "❌ Expected APK not found"
+            exit 1
+          fi
+
+          if [ "$AAB_EXISTS" == "false" ] && [ "$APK_EXISTS" == "false" ]; then
             echo "❌ No build output found"
             exit 1
           fi
 
       - name: Upload AAB artifact (Release)
-        if: (github.event_name == 'push') || (github.event_name == 'workflow_dispatch' && github.event.inputs.android_build_type == 'release')
+        if: (github.event_name == 'push') || (github.event_name == 'workflow_dispatch' && (github.event.inputs.android_build_type == 'release' || github.event.inputs.android_build_type == 'both'))
         uses: actions/upload-artifact@v4
         with:
           name: android-aab-release-${{ github.run_number }}
@@ -200,7 +238,7 @@ jobs:
           retention-days: 30
 
       - name: Upload APK artifact (Debug)
-        if: github.event_name == 'workflow_dispatch' && github.event.inputs.android_build_type == 'debug'
+        if: github.event_name == 'workflow_dispatch' && (github.event.inputs.android_build_type == 'debug' || github.event.inputs.android_build_type == 'both')
         uses: actions/upload-artifact@v4
         with:
           name: android-apk-debug-${{ github.run_number }}
@@ -219,7 +257,7 @@ jobs:
       (github.event_name == 'push') || 
       (github.event_name == 'workflow_dispatch' && 
        github.event.inputs.upload_to_play_store == 'true' && 
-       github.event.inputs.android_build_type == 'release')
+       (github.event.inputs.android_build_type == 'release' || github.event.inputs.android_build_type == 'both'))
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
