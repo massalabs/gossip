@@ -25,9 +25,9 @@ const config: CapacitorConfig = {
       backgroundColor: '#f8f9fa', // Light mode: #f8f9fa, Dark mode: #18181b
     },
     LocalNotifications: {
-      // Use the app launcher icon for status bar notifications on Android.
-      // The value is the drawable/mipmap resource name without extension.
-      smallIcon: 'ic_launcher',
+      // Use custom notification icon (white silhouette on transparent) for Android status bar.
+      // The value is the drawable resource name without extension.
+      smallIcon: 'ic_notification',
       iconColor: '#488AFF',
     },
     BackgroundRunner: {
