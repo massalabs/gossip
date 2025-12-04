@@ -36,7 +36,6 @@ export class NotificationService {
   };
   private enabled: boolean = true;
   private nativePermissionInitialized = false;
-  private notificationIdCounter = 0;
 
   private constructor() {
     // Initialize permission state based on platform
@@ -245,8 +244,8 @@ export class NotificationService {
         return;
       }
 
-      // Use a robust numeric ID to ensure uniqueness even for rapid successive notifications
-      const id = Date.now() * 1000 + (this.notificationIdCounter++ % 1000);
+      // Keep ID within Java int bounds (max 2,147,483,647)
+      const id = Date.now() % 2147483647;
 
       await LocalNotifications.schedule({
         notifications: [
