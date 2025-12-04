@@ -1,16 +1,10 @@
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import { Send, X } from 'react-feather';
-import Button from '../ui/Button';
 import { Message } from '../../db';
-
-const TEXTAREA_MIN_HEIGHT_DESKTOP = 40;
-const TEXTAREA_MIN_HEIGHT_MOBILE = 36;
-const TEXTAREA_MAX_HEIGHT = 120;
-const DESKTOP_BREAKPOINT = 768;
+import Button from '../ui/Button';
 
 interface MessageInputProps {
-  onSend: (message: string, replyToId?: number) => void;
-  onClick?: () => void;
+  onSend: (message: string, replyToId?: number) => Promise<void>;
   disabled?: boolean;
   replyingTo?: Message | null;
   onCancelReply?: () => void;
@@ -18,144 +12,85 @@ interface MessageInputProps {
 
 const MessageInput: React.FC<MessageInputProps> = ({
   onSend,
-  onClick,
   disabled = false,
   replyingTo,
   onCancelReply,
 }) => {
   const [newMessage, setNewMessage] = useState('');
-  const [inputHeight, setInputHeight] = useState(TEXTAREA_MIN_HEIGHT_DESKTOP);
-
+  const [isTextareaMultiline, setIsTextareaMultiline] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const hiddenInputRef = useRef<HTMLInputElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const sendButtonDisabled = disabled || !newMessage.trim();
 
-  const getMinHeight = useCallback(() => {
-    return window.innerWidth >= DESKTOP_BREAKPOINT
-      ? TEXTAREA_MIN_HEIGHT_DESKTOP
-      : TEXTAREA_MIN_HEIGHT_MOBILE;
+  const autoResizeTextarea = useCallback(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+
+    // Reset height to auto so scrollHeight is accurate
+    el.style.height = 'auto';
+    const maxHeight = 128; // ~ max-h-32
+    const newHeight = Math.min(el.scrollHeight, maxHeight);
+    el.style.height = `${newHeight}px`;
+
+    const lineHeight = parseFloat(getComputedStyle(el).lineHeight || '20');
+    const isVisuallyMultiline = el.scrollHeight > lineHeight * 1.2;
+    setIsTextareaMultiline(isVisuallyMultiline);
   }, []);
 
-  const adjustHeight = useCallback(() => {
-    const textarea = textareaRef.current;
-    if (!textarea) return;
+  const handleTextareaChange = useCallback(
+    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+      setNewMessage(e.target.value);
+      autoResizeTextarea();
+    },
+    [autoResizeTextarea]
+  );
 
-    textarea.style.height = 'auto';
-    const scrollHeight = textarea.scrollHeight;
-    const minHeight = getMinHeight();
-    const newHeight = Math.min(
-      Math.max(scrollHeight, minHeight),
-      TEXTAREA_MAX_HEIGHT
-    );
-
-    textarea.style.height = `${newHeight}px`;
-    setInputHeight(newHeight);
-  }, [getMinHeight]);
-
-  const focusTextarea = useCallback(() => {
-    textareaRef.current?.focus();
-    const len = textareaRef.current?.value.length || 0;
-    textareaRef.current?.setSelectionRange(len, len);
-  }, []);
-
-  // visualViewport fix for iOS keyboard
-  useEffect(() => {
-    if (window.innerWidth >= DESKTOP_BREAKPOINT) return;
-
-    const handleVV = () => requestAnimationFrame(focusTextarea);
-    const vv = window.visualViewport;
-    if (vv) {
-      vv.addEventListener('resize', handleVV);
-      vv.addEventListener('scroll', handleVV);
-      return () => {
-        vv.removeEventListener('resize', handleVV);
-        vv.removeEventListener('scroll', handleVV);
-      };
-    }
-  }, [focusTextarea]);
-
-  // Window resize
-  useEffect(() => {
-    const handleResize = () => adjustHeight();
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, [adjustHeight]);
-
-  const handleSendMessage = useCallback(() => {
-    const trimmed = newMessage.trim();
-    if (!trimmed || disabled) return;
-
-    const isMobile = window.innerWidth < DESKTOP_BREAKPOINT;
-
-    // 1. Hold keyboard with hidden input (iOS/Android)
-    if (isMobile && hiddenInputRef.current) {
-      hiddenInputRef.current.focus();
-    }
-
-    // 2. Clear
-    setNewMessage('');
+  const resetTextarea = useCallback(() => {
     if (textareaRef.current) {
       textareaRef.current.value = '';
-      textareaRef.current.style.height = `${getMinHeight()}px`;
+      textareaRef.current.style.height = 'auto';
     }
-    setInputHeight(getMinHeight());
+    setIsTextareaMultiline(false);
+    setNewMessage('');
+  }, []);
 
-    // 3. Send
-    onSend(trimmed, replyingTo?.id);
+  const handleSendMessage = useCallback(async () => {
+    const cleanedMessage = newMessage.replace(/^\s+|\s+$/g, '');
+    if (cleanedMessage.length === 0) return;
 
-    // 4. Refocus
-    setTimeout(focusTextarea, 10);
-  }, [newMessage, disabled, onSend, replyingTo, getMinHeight, focusTextarea]);
+    onSend(cleanedMessage, replyingTo?.id);
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSendMessage();
-    }
-  };
+    resetTextarea();
+  }, [newMessage, onSend, replyingTo, resetTextarea]);
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setNewMessage(e.target.value);
-    adjustHeight();
-  };
+  const handleCancelReply = useCallback(
+    (e: React.MouseEvent | React.TouchEvent) => {
+      if (!onCancelReply) return;
+      e.stopPropagation();
+      onCancelReply();
+    },
+    [onCancelReply]
+  );
 
-  const preventFocusLoss = (e: React.MouseEvent | React.TouchEvent) => {
+  const preventDefaultWrapper = (
+    fn: (e: React.MouseEvent | React.TouchEvent) => void,
+    e: React.MouseEvent | React.TouchEvent
+  ) => {
     e.preventDefault();
-  };
-
-  const handleBlur = useCallback(() => {
-    requestAnimationFrame(() => {
-      const active = document.activeElement;
-      if (
-        active === textareaRef.current ||
-        (containerRef.current && containerRef.current.contains(active as Node))
-      ) {
-        // Focus is still inside our component → pull it back
-        focusTextarea();
-      }
-      // Else: user tapped outside → allow blur (keyboard hides)
-    });
-  }, [focusTextarea]);
-
-  // Cancel reply → refocus textarea
-  const handleCancelReply = (e: React.MouseEvent) => {
     e.stopPropagation();
-    onCancelReply?.();
-    setTimeout(focusTextarea, 0);
+    fn(e);
   };
 
-  // Optional: tap container background to focus (nice UX)
-  const handleContainerTap = () => {
-    onClick?.();
-    focusTextarea();
-  };
+  const focusTextarea = useCallback(() => {
+    if (textareaRef.current) {
+      textareaRef.current.focus();
+    }
+  }, []);
 
   return (
     <>
       <div
-        ref={containerRef}
-        className="bg-card/60 dark:bg-card/80 backdrop-blur-xl border-t border-border px-6 md:px-10 py-3 md:py-4"
-        onClick={handleContainerTap}
+        className="bg-card/60 dark:bg-card/80 backdrop-blur-xl border-t border-border px-4 md:px-8 py-3 md:py-4"
+        onMouseDown={e => preventDefaultWrapper(focusTextarea, e)}
       >
         {/* Reply Preview */}
         {replyingTo && (
@@ -168,9 +103,8 @@ const MessageInput: React.FC<MessageInputProps> = ({
               </div>
               {onCancelReply && (
                 <button
-                  onClick={handleCancelReply}
-                  onMouseDown={preventFocusLoss}
-                  onTouchStart={preventFocusLoss}
+                  onClick={e => preventDefaultWrapper(handleCancelReply, e)}
+                  onMouseDown={e => preventDefaultWrapper(handleCancelReply, e)}
                   className="shrink-0 p-1 hover:bg-muted rounded transition-colors"
                 >
                   <X className="w-4 h-4 text-muted-foreground" />
@@ -180,66 +114,39 @@ const MessageInput: React.FC<MessageInputProps> = ({
           </div>
         )}
 
-        <div className="flex items-end gap-2 md:gap-3">
-          <div className="flex-1 flex items-center gap-2 bg-card dark:bg-card/70 border border-border rounded-xl px-3 md:px-4 py-2 md:py-2.5 focus-within:ring-2 focus-within:ring-ring focus-within:border-ring transition-all duration-200">
+        <div className="flex items-center gap-2 md:gap-3">
+          <div
+            className={`flex-1 min-w-0 flex items-center bg-muted border border-gray-300 px-4 md:px-5 py-2 md:py-2.5 ${
+              isTextareaMultiline ? 'rounded-2xl' : 'rounded-full'
+            }`}
+            tabIndex={-1}
+          >
             <textarea
               ref={textareaRef}
               value={newMessage}
-              onChange={handleInputChange}
-              onKeyDown={handleKeyDown}
-              onBlur={handleBlur}
-              placeholder="Type a message..."
+              onChange={handleTextareaChange}
+              placeholder="Type a message"
               rows={1}
-              inputMode="text"
-              autoComplete="off"
-              autoCorrect="on"
-              autoCapitalize="sentences"
-              spellCheck={true}
-              className="flex-1 min-h-[36px] md:min-h-[40px] max-h-[120px] bg-transparent text-foreground placeholder:text-muted-foreground resize-none overflow-y-auto text-[15px] leading-relaxed focus:outline-none"
-              style={
-                {
-                  height: `${Math.max(inputHeight, TEXTAREA_MIN_HEIGHT_MOBILE)}px`,
-                  pointerEvents: disabled ? 'none' : 'auto',
-                } as React.CSSProperties
-              }
+              className={`pointer-events-auto touch-auto flex-1 bg-transparent text-foreground placeholder:text-muted-foreground
+                         text-[15px] leading-relaxed resize-none p-0 m-0 focus:outline-none outline-none
+                         scrollbar-transparent ${isTextareaMultiline ? 'overflow-y-auto' : 'overflow-y-hidden'}`}
             />
-
-            <div className="hidden md:block w-px h-6 bg-border/80 mx-1" />
-
-            {/* Send Button */}
-            <Button
-              onClick={handleSendMessage}
-              onMouseDown={preventFocusLoss}
-              onTouchStart={preventFocusLoss}
-              variant="primary"
-              size="custom"
-              disabled={disabled || !newMessage.trim()}
-              className="w-8 h-8 md:w-9 md:h-9 shrink-0 rounded-full flex items-center justify-center shadow-md hover:shadow-lg transition-all"
-              title="Send message"
-            >
-              <Send className="w-4 h-4 md:w-5 md:h-5" />
-            </Button>
           </div>
+          <Button
+            tabIndex={-1}
+            onMouseDown={e => preventDefaultWrapper(handleSendMessage, e)}
+            variant="primary"
+            size="custom"
+            disabled={sendButtonDisabled}
+            className={`w-9 h-9 md:w-10 md:h-10 shrink-0 
+                rounded-full flex items-center justify-center 
+                shadow-md hover:shadow-lg transition-all `}
+            title="Send message"
+          >
+            <Send className="w-4 h-4 md:w-5 md:h-5 pointer-events-none touch-none" />
+          </Button>
         </div>
       </div>
-
-      {/* Hidden input — prevents keyboard close on send */}
-      <input
-        ref={hiddenInputRef}
-        type="text"
-        inputMode="text"
-        style={{
-          position: 'fixed',
-          bottom: 0,
-          left: '-100px',
-          opacity: 0,
-          pointerEvents: 'none',
-          height: '1px',
-          width: '1px',
-          zIndex: -1,
-        }}
-        tabIndex={-1}
-      />
     </>
   );
 };

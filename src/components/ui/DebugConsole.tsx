@@ -1,5 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { useDebugLogs, LogEntry, LogLevel } from '../../stores/useDebugLogs';
+import {
+  useDebugLogs,
+  LogEntry,
+  LogLevel,
+  LOG_LIMIT_OPTIONS,
+  LogLimit,
+} from '../../stores/useDebugLogs';
 import { useAppStore } from '../../stores/appStore';
 import Button from './Button';
 import { Terminal } from 'react-feather';
@@ -26,6 +32,8 @@ export const DebugConsole: React.FC = () => {
   const { clear, share } = useDebugLogs.getState();
   const showDebugConsole = useDebugLogs(s => s.showDebugConsole);
   const setShowDebugConsole = useDebugLogs(s => s.setShowDebugConsole);
+  const logLimit = useDebugLogs(s => s.logLimit);
+  const setLogLimit = useDebugLogs(s => s.setLogLimit);
   const showDebugOption = useAppStore(s => s.showDebugOption);
   const [filter, setFilter] = useState<LogLevelFilter>('all');
   const [search, setSearch] = useState('');
@@ -168,12 +176,32 @@ export const DebugConsole: React.FC = () => {
           <option value="error">Error</option>
         </select>
 
+        {/* Log limit */}
+        <label className="flex items-center gap-2 text-xs text-muted-foreground">
+          <span className="whitespace-nowrap">Log limit</span>
+          <select
+            value={logLimit}
+            onChange={e => {
+              const value = parseInt(e.target.value, 10) as LogLimit;
+              if (Number.isNaN(value)) return;
+              setLogLimit(value);
+            }}
+            className="w-24 bg-muted text-foreground px-2 py-1 rounded border border-border outline-none"
+          >
+            {LOG_LIMIT_OPTIONS.map(option => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        </label>
+
         <label className="flex items-center gap-2 cursor-pointer select-none whitespace-nowrap text-muted-foreground">
           <input
             type="checkbox"
             checked={autoScroll}
             onChange={e => setAutoScroll(e.target.checked)}
-            className="w-4 h-4 rounded accent-blue-500"
+            className="w-4 h-4 rounded accent-(--color-primary)"
           />
           <span>Auto-scroll</span>
         </label>

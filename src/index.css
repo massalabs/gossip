@@ -300,6 +300,31 @@
     @apply w-full mx-auto md:max-w-2xl lg:max-w-3xl xl:max-w-3xl 2xl:max-w-3xl;
   }
 
+  /* Transparent scrollbar utility for elements where we want scrolling
+     without a visible thumb, while preserving scroll behavior */
+  .scrollbar-transparent {
+    scrollbar-width: none; /* Firefox - hide thumb */
+    -ms-overflow-style: none; /* IE/Edge legacy */
+  }
+
+  .scrollbar-transparent::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+    background: transparent;
+  }
+
+  .scrollbar-transparent::-webkit-scrollbar-thumb {
+    background-color: transparent;
+    border-color: transparent;
+  }
+
+  /* Messenger-style contentEditable placeholder */
+  [contenteditable][data-placeholder]:empty::before {
+    content: attr(data-placeholder);
+    color: var(--muted-foreground);
+    pointer-events: none;
+  }
+
   @keyframes fade-in {
     from {
       opacity: 0;

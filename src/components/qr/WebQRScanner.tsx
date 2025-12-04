@@ -29,6 +29,27 @@ const WebQRScanner: React.FC<QRScannerProps> = ({
     [onError]
   );
 
+  // // on web mode if camera is not allowed ask for permission
+  // useEffect(() => {
+  //   if (isScanning) {
+  //     const checkCameraPermission = async () => {
+  //       try {
+  //         const stream = await navigator.mediaDevices.getUserMedia({
+  //           video: true,
+  //         });
+  //         console.log('stream', stream);
+  //       } catch (error) {
+  //         const errorMessage =
+  //           error instanceof Error ? error.message : String(error);
+  //         // error NotAllowedError: Permission denied
+  //         // error NotFoundError: Requested device not found
+  //         onError?.(errorMessage);
+  //       }
+  //     };
+  //     checkCameraPermission();
+  //   }
+  // }, [isScanning, onError]);
+
   return (
     <div className="relative app-max-w mx-auto h-full">
       {onClose && <ScannerBackButton onClose={onClose} />}

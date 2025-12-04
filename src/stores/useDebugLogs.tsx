@@ -6,7 +6,9 @@ import { toast } from 'react-hot-toast';
 const LOG_STORAGE_KEY = 'debug-logs';
 const LOG_STORAGE_VERSION = 1;
 const LOG_STORAGE_KEY_PREFIX = `${LOG_STORAGE_KEY}-v${LOG_STORAGE_VERSION}`;
-const LOG_STORAGE_LIMIT = 200;
+export const LOG_LIMIT_OPTIONS = [20, 50, 100, 200, 500] as const;
+export type LogLimit = (typeof LOG_LIMIT_OPTIONS)[number];
+const DEFAULT_LOG_STORAGE_LIMIT: LogLimit = 200;
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 export interface LogEntry {
@@ -19,11 +21,13 @@ export interface LogEntry {
 
 interface DebugStore {
   logs: LogEntry[];
+  logLimit: LogLimit;
   add: (level: LogLevel, message: unknown, data?: unknown) => void;
   clear: () => void;
   share: () => Promise<void>;
   showDebugConsole: boolean;
   setShowDebugConsole: (show: boolean) => void;
+  setLogLimit: (limit: LogLimit) => void;
 }
 
 let idCounter = Date.now();
@@ -32,6 +36,7 @@ export const useDebugLogs = create<DebugStore>()(
   persist(
     (set, get) => ({
       logs: [],
+      logLimit: DEFAULT_LOG_STORAGE_LIMIT,
 
       add: (level, message, data) => {
         // Normalize all arguments so we can extract meaningful error info.
@@ -72,10 +77,12 @@ export const useDebugLogs = create<DebugStore>()(
                 (message instanceof Error ? message.stack : undefined)),
         };
 
+        const currentLimit = get().logLimit || DEFAULT_LOG_STORAGE_LIMIT;
+
         set(state => {
           const newLogs =
-            state.logs.length >= LOG_STORAGE_LIMIT
-              ? [...state.logs.slice(-LOG_STORAGE_LIMIT + 1), entry]
+            state.logs.length >= currentLimit
+              ? [...state.logs.slice(-currentLimit + 1), entry]
               : [...state.logs, entry];
           return { logs: newLogs };
         });
@@ -117,6 +124,21 @@ export const useDebugLogs = create<DebugStore>()(
       },
       showDebugConsole: false,
       setShowDebugConsole: (show: boolean) => set({ showDebugConsole: show }),
+      setLogLimit: (limit: LogLimit) =>
+        set(state => {
+          const normalized: LogLimit = LOG_LIMIT_OPTIONS.includes(limit)
+            ? limit
+            : DEFAULT_LOG_STORAGE_LIMIT;
+          const trimmedLogs =
+            state.logs.length > normalized
+              ? state.logs.slice(-normalized)
+              : state.logs;
+
+          return {
+            logLimit: normalized,
+            logs: trimmedLogs,
+          };
+        }),
     }),
     {
       name: LOG_STORAGE_KEY_PREFIX,
@@ -134,6 +156,7 @@ export const useDebugLogs = create<DebugStore>()(
       })),
       partialize: state => ({
         logs: state.logs,
+        logLimit: state.logLimit,
       }),
     }
   )

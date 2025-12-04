@@ -5,7 +5,11 @@ import {
 } from '@capacitor/barcode-scanner';
 import { QRScannerProps } from './types';
 
-const NativeQRScanner: React.FC<QRScannerProps> = ({ onScan, onError }) => {
+const NativeQRScanner: React.FC<QRScannerProps> = ({
+  onScan,
+  onError,
+  onClose,
+}) => {
   const startNativeScanner = useCallback(async () => {
     try {
       const result = await CapacitorBarcodeScanner.scanBarcode({
@@ -14,14 +18,19 @@ const NativeQRScanner: React.FC<QRScannerProps> = ({ onScan, onError }) => {
         scanButton: false,
       });
 
+      console.log('NativeQRScanner result', result);
+
       // TODO: Improve Scan Result handling
       onScan(result.ScanResult);
     } catch (err: unknown) {
+      console.error('NativeQRScanner error', err);
       const error = err instanceof Error ? err.message : String(err);
-      // TODO: improve error message
+      if (error.includes('the process was cancelled')) {
+        onClose();
+      }
       onError?.(error);
     }
-  }, [onScan, onError]);
+  }, [onScan, onError, onClose]);
 
   useEffect(() => {
     startNativeScanner();
