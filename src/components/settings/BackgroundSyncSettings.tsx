@@ -1,8 +1,10 @@
 /**
  * Background Sync Settings Component
  *
- * Displays background sync status and device-specific warnings for Android devices.
- * Provides actions to fix battery optimization issues.
+ * Displays background sync status and device-specific warnings for Android and iOS devices.
+ * - Android: Battery optimization, background restriction, manufacturer-specific issues
+ * - iOS: Background App Refresh status, Low Power Mode
+ * Provides actions to fix configuration issues.
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -13,6 +15,7 @@ import {
   Shield,
   AlertTriangle,
   RefreshCcw,
+  Zap,
 } from 'react-feather';
 import Button from '../ui/Button';
 import {
@@ -20,6 +23,10 @@ import {
   type BackgroundSyncStatus,
 } from '../../services/batteryOptimization';
 import { type DeviceReliabilityInfo } from '../../utils/deviceInfo';
+import {
+  backgroundRefreshService,
+  type IOSBackgroundSyncStatus,
+} from '../../services/backgroundRefreshiOS';
 
 interface BackgroundSyncSettingsProps {
   showDebugInfo?: boolean;
@@ -28,20 +35,31 @@ interface BackgroundSyncSettingsProps {
 const BackgroundSyncSettings: React.FC<BackgroundSyncSettingsProps> = ({
   showDebugInfo = false,
 }) => {
-  const [status, setStatus] = useState<BackgroundSyncStatus | null>(null);
+  // Android state
+  const [androidStatus, setAndroidStatus] =
+    useState<BackgroundSyncStatus | null>(null);
   const [deviceInfo, setDeviceInfo] = useState<DeviceReliabilityInfo | null>(
     null
   );
-  const [isLoading, setIsLoading] = useState(true);
   const [isXiaomi, setIsXiaomi] = useState(false);
 
-  // Check if we're on Android native platform
-  const isAndroidNative =
-    Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android';
+  // iOS state
+  const [iosStatus, setIosStatus] = useState<IOSBackgroundSyncStatus | null>(
+    null
+  );
+
+  // Common state
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Platform detection
+  const platform = Capacitor.getPlatform();
+  const isNative = Capacitor.isNativePlatform();
+  const isAndroidNative = isNative && platform === 'android';
+  const isIOSNative = isNative && platform === 'ios';
 
   // Load status on mount
   useEffect(() => {
-    if (!isAndroidNative) {
+    if (!isNative) {
       setIsLoading(false);
       return;
     }
@@ -49,16 +67,21 @@ const BackgroundSyncSettings: React.FC<BackgroundSyncSettingsProps> = ({
     const loadStatus = async () => {
       setIsLoading(true);
       try {
-        const [syncStatus, deviceReliabilityInfo, xiaomiCheck] =
-          await Promise.all([
-            batteryOptimizationService.getStatus(),
-            batteryOptimizationService.getDeviceReliabilityInfo(),
-            batteryOptimizationService.isXiaomiDevice(),
-          ]);
+        if (isAndroidNative) {
+          const [syncStatus, deviceReliabilityInfo, xiaomiCheck] =
+            await Promise.all([
+              batteryOptimizationService.getStatus(),
+              batteryOptimizationService.getDeviceReliabilityInfo(),
+              batteryOptimizationService.isXiaomiDevice(),
+            ]);
 
-        setStatus(syncStatus);
-        setDeviceInfo(deviceReliabilityInfo);
-        setIsXiaomi(xiaomiCheck);
+          setAndroidStatus(syncStatus);
+          setDeviceInfo(deviceReliabilityInfo);
+          setIsXiaomi(xiaomiCheck);
+        } else if (isIOSNative) {
+          const status = await backgroundRefreshService.getFullStatus();
+          setIosStatus(status);
+        }
       } catch (error) {
         console.error('Failed to load background sync status:', error);
       } finally {
@@ -67,35 +90,39 @@ const BackgroundSyncSettings: React.FC<BackgroundSyncSettingsProps> = ({
     };
 
     void loadStatus();
-  }, [isAndroidNative]);
+  }, [isNative, isAndroidNative, isIOSNative]);
 
   // Refresh status
   const handleRefresh = useCallback(async () => {
-    if (!isAndroidNative) return;
+    if (!isNative) return;
 
     setIsLoading(true);
     try {
-      // Refresh all data to match initial load behavior
-      const [syncStatus, deviceReliabilityInfo, xiaomiCheck] =
-        await Promise.all([
-          batteryOptimizationService.refreshStatus(),
-          batteryOptimizationService.getDeviceReliabilityInfo(),
-          batteryOptimizationService.isXiaomiDevice(),
-        ]);
+      if (isAndroidNative) {
+        const [syncStatus, deviceReliabilityInfo, xiaomiCheck] =
+          await Promise.all([
+            batteryOptimizationService.refreshStatus(),
+            batteryOptimizationService.getDeviceReliabilityInfo(),
+            batteryOptimizationService.isXiaomiDevice(),
+          ]);
 
-      setStatus(syncStatus);
-      setDeviceInfo(deviceReliabilityInfo);
-      setIsXiaomi(xiaomiCheck);
+        setAndroidStatus(syncStatus);
+        setDeviceInfo(deviceReliabilityInfo);
+        setIsXiaomi(xiaomiCheck);
+      } else if (isIOSNative) {
+        const status = await backgroundRefreshService.refreshStatus();
+        setIosStatus(status);
+      }
     } catch (error) {
       console.error('Failed to refresh status:', error);
     } finally {
       setIsLoading(false);
     }
-  }, [isAndroidNative]);
+  }, [isNative, isAndroidNative, isIOSNative]);
 
   // Refresh status when app becomes visible (e.g., returning from settings)
   useEffect(() => {
-    if (!isAndroidNative) return;
+    if (!isNative) return;
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
@@ -108,23 +135,25 @@ const BackgroundSyncSettings: React.FC<BackgroundSyncSettingsProps> = ({
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [isAndroidNative, handleRefresh]);
+  }, [isNative, handleRefresh]);
 
-  // Open battery optimization settings
+  // Android: Open battery optimization settings
   const handleOpenBatterySettings = useCallback(async () => {
     await batteryOptimizationService.openBatteryOptimizationSettings();
-    // Status will be refreshed automatically when user returns (via visibilitychange)
   }, []);
 
-  // Open Xiaomi AutoStart settings
+  // Android: Open Xiaomi AutoStart settings
   const handleOpenAutoStartSettings = useCallback(async () => {
     const success =
       await batteryOptimizationService.openXiaomiAutoStartSettings();
     if (!success) {
-      // Fallback to app settings if AutoStart not available
       await batteryOptimizationService.openAppSettings();
     }
-    // Status will be refreshed automatically when user returns (via visibilitychange)
+  }, []);
+
+  // iOS: Open settings
+  const handleOpenIOSSettings = useCallback(async () => {
+    await backgroundRefreshService.openSettings();
   }, []);
 
   // Open help URL in browser
@@ -134,16 +163,33 @@ const BackgroundSyncSettings: React.FC<BackgroundSyncSettingsProps> = ({
     }
   }, [deviceInfo?.helpUrl]);
 
-  // Don't show anything on non-Android platforms
-  if (!isAndroidNative) {
+  // Don't show anything on non-native platforms
+  if (!isNative) {
     return null;
   }
 
-  // Determine if there are issues
-  const hasIssues =
-    status !== null &&
-    (!status.isIgnoringBatteryOptimization || status.isBackgroundRestricted);
-  const isReliable = status?.isBackgroundSyncReliable;
+  // Determine if there are issues and reliability status
+  const androidHasIssues =
+    isAndroidNative &&
+    androidStatus !== null &&
+    (!androidStatus.isIgnoringBatteryOptimization ||
+      androidStatus.isBackgroundRestricted);
+
+  const iosHasIssues =
+    isIOSNative && iosStatus !== null && !iosStatus.isBackgroundSyncReliable;
+
+  const hasIssues = androidHasIssues || iosHasIssues;
+
+  const isReliable = isAndroidNative
+    ? androidStatus?.isBackgroundSyncReliable
+    : isIOSNative
+      ? iosStatus?.isBackgroundSyncReliable
+      : true;
+
+  // Get iOS warning message
+  const iosWarningMessage = iosStatus
+    ? backgroundRefreshService.getStatusMessage(iosStatus)
+    : null;
 
   return (
     <div className="bg-card border border-border rounded-lg overflow-hidden shadow-sm">
@@ -173,106 +219,215 @@ const BackgroundSyncSettings: React.FC<BackgroundSyncSettingsProps> = ({
 
       {/* Content */}
       <div className="px-4 py-3 space-y-3">
-        {/* Device-specific warning */}
-        {deviceInfo?.isProblematic && deviceInfo.warningMessage && (
-          <div className="bg-warning/10 border border-warning/20 rounded-lg p-3">
-            <p className="text-sm text-foreground leading-relaxed">
-              {deviceInfo.warningMessage}
-            </p>
-            {deviceInfo.helpUrl && (
-              <Button
-                variant="link"
-                onClick={handleOpenHelp}
-                className="mt-2 flex items-center gap-1.5 text-sm text-accent p-0 h-auto"
-                ariaLabel="Learn more about battery optimization for your device"
-              >
-                <ExternalLink className="w-4 h-4" aria-hidden="true" />
-                Learn more
-              </Button>
+        {/* ==================== iOS SECTION ==================== */}
+        {isIOSNative && iosStatus && (
+          <>
+            {/* iOS Warning message */}
+            {iosWarningMessage && (
+              <div className="bg-warning/10 border border-warning/20 rounded-lg p-3">
+                <p className="text-sm text-foreground leading-relaxed">
+                  {iosWarningMessage}
+                </p>
+              </div>
             )}
-          </div>
-        )}
 
-        {/* Status indicators */}
-        {status && (
-          <div className="space-y-2">
-            {/* Battery optimization status */}
-            <div className="flex items-center justify-between py-1">
-              <span className="text-sm text-muted-foreground">
-                Battery optimization disabled
-              </span>
-              {status.isIgnoringBatteryOptimization ? (
-                <span className="text-xs font-medium text-success">Yes</span>
-              ) : (
-                <span className="text-xs font-medium text-destructive">No</span>
-              )}
+            {/* iOS Status indicators */}
+            <div className="space-y-2">
+              {/* Background App Refresh status */}
+              <div className="flex items-center justify-between py-1">
+                <span className="text-sm text-muted-foreground">
+                  Background App Refresh
+                </span>
+                {iosStatus.isBackgroundRefreshEnabled ? (
+                  <span className="text-xs font-medium text-success">
+                    Enabled
+                  </span>
+                ) : iosStatus.backgroundRefreshStatus === 'denied' ? (
+                  <span className="text-xs font-medium text-destructive">
+                    Disabled
+                  </span>
+                ) : iosStatus.backgroundRefreshStatus === 'restricted' ? (
+                  <span className="text-xs font-medium text-warning">
+                    Restricted
+                  </span>
+                ) : (
+                  <span className="text-xs font-medium text-muted-foreground">
+                    Unknown
+                  </span>
+                )}
+              </div>
+
+              {/* Low Power Mode status */}
+              <div className="flex items-center justify-between py-1">
+                <span className="text-sm text-muted-foreground flex items-center gap-1.5">
+                  <Zap className="w-3.5 h-3.5" aria-hidden="true" />
+                  Low Power Mode
+                </span>
+                {iosStatus.isLowPowerModeEnabled ? (
+                  <span className="text-xs font-medium text-warning">On</span>
+                ) : (
+                  <span className="text-xs font-medium text-success">Off</span>
+                )}
+              </div>
             </div>
 
-            {/* Background restriction status */}
-            <div className="flex items-center justify-between py-1">
-              <span className="text-sm text-muted-foreground">
-                Background allowed
-              </span>
-              {!status.isBackgroundRestricted ? (
-                <span className="text-xs font-medium text-success">Yes</span>
-              ) : (
-                <span className="text-xs font-medium text-destructive">No</span>
-              )}
-            </div>
-          </div>
+            {/* iOS Action buttons */}
+            {iosHasIssues && iosStatus.userCanEnableBackgroundRefresh && (
+              <div className="space-y-2 pt-1">
+                <Button
+                  variant="primary"
+                  size="sm"
+                  className="w-full"
+                  onClick={handleOpenIOSSettings}
+                >
+                  Open Settings
+                </Button>
+              </div>
+            )}
+          </>
         )}
 
-        {/* Action buttons */}
-        {hasIssues && (
-          <div className="space-y-2 pt-1">
-            {/* Battery optimization button */}
-            {!status?.isIgnoringBatteryOptimization && (
-              <Button
-                variant="primary"
-                size="sm"
-                className="w-full"
-                onClick={handleOpenBatterySettings}
-              >
-                Disable Battery Optimization
-              </Button>
+        {/* ==================== ANDROID SECTION ==================== */}
+        {isAndroidNative && (
+          <>
+            {/* Android Device-specific warning */}
+            {deviceInfo?.isProblematic && deviceInfo.warningMessage && (
+              <div className="bg-warning/10 border border-warning/20 rounded-lg p-3">
+                <p className="text-sm text-foreground leading-relaxed">
+                  {deviceInfo.warningMessage}
+                </p>
+                {deviceInfo.helpUrl && (
+                  <Button
+                    variant="link"
+                    onClick={handleOpenHelp}
+                    className="mt-2 flex items-center gap-1.5 text-sm text-accent p-0 h-auto"
+                    ariaLabel="Learn more about battery optimization for your device"
+                  >
+                    <ExternalLink className="w-4 h-4" aria-hidden="true" />
+                    Learn more
+                  </Button>
+                )}
+              </div>
             )}
 
-            {/* Xiaomi-specific AutoStart button */}
-            {isXiaomi && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="w-full"
-                onClick={handleOpenAutoStartSettings}
-                ariaLabel="Open MIUI AutoStart settings for Gossip"
-              >
-                Enable AutoStart (MIUI)
-              </Button>
+            {/* Android Status indicators */}
+            {androidStatus && (
+              <div className="space-y-2">
+                {/* Battery optimization status */}
+                <div className="flex items-center justify-between py-1">
+                  <span className="text-sm text-muted-foreground">
+                    Battery optimization disabled
+                  </span>
+                  {androidStatus.isIgnoringBatteryOptimization ? (
+                    <span className="text-xs font-medium text-success">
+                      Yes
+                    </span>
+                  ) : (
+                    <span className="text-xs font-medium text-destructive">
+                      No
+                    </span>
+                  )}
+                </div>
+
+                {/* Background restriction status */}
+                <div className="flex items-center justify-between py-1">
+                  <span className="text-sm text-muted-foreground">
+                    Background allowed
+                  </span>
+                  {!androidStatus.isBackgroundRestricted ? (
+                    <span className="text-xs font-medium text-success">
+                      Yes
+                    </span>
+                  ) : (
+                    <span className="text-xs font-medium text-destructive">
+                      No
+                    </span>
+                  )}
+                </div>
+              </div>
             )}
-          </div>
+
+            {/* Android Action buttons */}
+            {androidHasIssues && (
+              <div className="space-y-2 pt-1">
+                {/* Battery optimization button */}
+                {!androidStatus?.isIgnoringBatteryOptimization && (
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    className="w-full"
+                    onClick={handleOpenBatterySettings}
+                  >
+                    Disable Battery Optimization
+                  </Button>
+                )}
+
+                {/* Xiaomi-specific AutoStart button */}
+                {isXiaomi && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-full"
+                    onClick={handleOpenAutoStartSettings}
+                    ariaLabel="Open MIUI AutoStart settings for Gossip"
+                  >
+                    Enable AutoStart (MIUI)
+                  </Button>
+                )}
+              </div>
+            )}
+          </>
         )}
 
-        {/* Debug info */}
-        {showDebugInfo && status && (
+        {/* Debug info (both platforms) */}
+        {showDebugInfo && (
           <div className="mt-3 pt-3 border-t border-border space-y-1">
             <p className="text-xs font-medium text-muted-foreground mb-2">
               Debug Info
             </p>
             <p className="text-xs text-muted-foreground font-mono">
-              Manufacturer: {status.manufacturer || 'unknown'}
+              Platform: {platform}
             </p>
-            <p className="text-xs text-muted-foreground font-mono">
-              Brand: {status.brand || 'unknown'}
-            </p>
-            <p className="text-xs text-muted-foreground font-mono">
-              Model: {status.model || 'unknown'}
-            </p>
-            <p className="text-xs text-muted-foreground font-mono">
-              SDK: {status.sdkVersion || 'unknown'}
-            </p>
-            <p className="text-xs text-muted-foreground font-mono">
-              Problematic Device: {status.isProblematicDevice ? 'Yes' : 'No'}
-            </p>
+
+            {/* Android debug info */}
+            {isAndroidNative && androidStatus && (
+              <>
+                <p className="text-xs text-muted-foreground font-mono">
+                  Manufacturer: {androidStatus.manufacturer || 'unknown'}
+                </p>
+                <p className="text-xs text-muted-foreground font-mono">
+                  Brand: {androidStatus.brand || 'unknown'}
+                </p>
+                <p className="text-xs text-muted-foreground font-mono">
+                  Model: {androidStatus.model || 'unknown'}
+                </p>
+                <p className="text-xs text-muted-foreground font-mono">
+                  SDK: {androidStatus.sdkVersion || 'unknown'}
+                </p>
+                <p className="text-xs text-muted-foreground font-mono">
+                  Problematic Device:{' '}
+                  {androidStatus.isProblematicDevice ? 'Yes' : 'No'}
+                </p>
+              </>
+            )}
+
+            {/* iOS debug info */}
+            {isIOSNative && iosStatus && (
+              <>
+                <p className="text-xs text-muted-foreground font-mono">
+                  Background Refresh: {iosStatus.backgroundRefreshStatus}
+                </p>
+                <p className="text-xs text-muted-foreground font-mono">
+                  Low Power Mode:{' '}
+                  {iosStatus.isLowPowerModeEnabled ? 'Yes' : 'No'}
+                </p>
+                <p className="text-xs text-muted-foreground font-mono">
+                  User Can Enable:{' '}
+                  {iosStatus.userCanEnableBackgroundRefresh ? 'Yes' : 'No'}
+                </p>
+              </>
+            )}
+
             <div className="pt-2">
               <Button
                 variant="ghost"
