@@ -36,7 +36,8 @@
     "cap:run:android": "npm run build && cap sync android && cap run android",
     "cap:copy": "cap copy",
     "cap:copy:ios": "cap copy ios",
-    "cap:copy:android": "cap copy android"
+    "cap:copy:android": "cap copy android",
+    "build:apk": "cd android && bundle exec fastlane build_debug"
   },
   "dependencies": {
     "@aparajita/capacitor-biometric-auth": "^9.1.2",

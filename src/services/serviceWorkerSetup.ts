@@ -8,6 +8,7 @@ import { notificationService } from './notifications';
 import { defaultSyncConfig } from '../config/sync';
 import { setApiBaseUrlForBackgroundSync } from '../utils/preferences';
 import { protocolConfig } from '../config/protocol';
+import { Capacitor } from '@capacitor/core';
 /**
  * Setup service worker: register, listen for messages, and start sync scheduler
  * Also initializes background sync (notifications, periodic sync, online listener)
@@ -143,19 +144,34 @@ async function initializeBackgroundSync(): Promise<void> {
     // Request notification permission
     await notificationService.requestPermission();
 
-    // Register periodic background sync
+    // Register periodic background sync (Web API - optional, expected to fail on mobile)
+    // This is wrapped in its own try-catch because failures are expected and non-critical
     await registerPeriodicSync();
   } catch (error) {
+    // Only log truly unexpected errors (not periodic sync failures)
     console.error('[App] Failed to initialize background sync service:', error);
   }
 }
 
 /**
- * Register periodic background sync
- * Note: On mobile devices, browsers may throttle or delay syncs significantly
- * Requesting 5 minutes, but actual syncs may be much less frequent
+ * Register periodic background sync (Web API - optional fallback for PWA)
+ *
+ * NOTE: This is the WEB Periodic Background Sync API, NOT the native Capacitor BackgroundRunner.
+ * This API has very limited support and is expected to fail on:
+ * - Most mobile devices (especially Xiaomi, Samsung, Huawei)
+ * - Mobile WebViews (Capacitor apps)
+ * - Browsers that don't support the experimental API
+ *
+ * The native Capacitor BackgroundRunner handles actual background sync on mobile.
+ * This is just an optional enhancement for desktop PWA users.
  */
 async function registerPeriodicSync(): Promise<void> {
+  // Skip on native platforms - BackgroundRunner handles this
+  if (Capacitor.isNativePlatform()) {
+    // Native apps use Capacitor BackgroundRunner, not web APIs
+    return;
+  }
+
   const hasSyncAPI = 'sync' in window.ServiceWorkerRegistration.prototype;
 
   if (!hasSyncAPI) {
@@ -182,15 +198,24 @@ async function registerPeriodicSync(): Promise<void> {
       }
     ).periodicSync;
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const status = await (navigator as any).permissions.query({
-      name: 'periodic-background-sync',
-    });
-    if (periodicSync && status.state === 'granted') {
+    // Check permission status
+
+    let permissionStatus: PermissionStatus | null = null;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      permissionStatus = await (navigator as any).permissions.query({
+        name: 'periodic-background-sync',
+      });
+    } catch {
+      // Permission query not supported - expected on most browsers
+      return;
+    }
+
+    if (periodicSync && permissionStatus?.state === 'granted') {
       await periodicSync.register('gossip-message-sync', {
         minInterval: PERIODIC_SYNC_MIN_INTERVAL_MS,
       });
-    } else {
+    } else if (permissionStatus?.state === 'prompt') {
       // Fallback for browsers that don't support periodicSync but support sync
       const syncAPI = (
         registration as ServiceWorkerRegistration & {
@@ -199,16 +224,16 @@ async function registerPeriodicSync(): Promise<void> {
       ).sync;
 
       if (syncAPI) {
-        await syncAPI.register('gossip-message-sync');
+        try {
+          await syncAPI.register('gossip-message-sync');
+        } catch {
+          // Background Sync registration failed - expected on mobile
+        }
       }
     }
-  } catch (error) {
-    // Handle permission errors gracefully (expected in development/localhost)
-    if (error instanceof DOMException && error.name === 'NotAllowedError') {
-      // Fallback timer-based sync will handle background syncing
-      return;
-    }
-    // Log unexpected errors
-    console.error('[App] Error registering periodic sync:', error);
+    // If permission is 'denied', silently skip - user doesn't want this
+  } catch {
+    // Silently handle errors - this API is optional and expected to fail on most mobile devices
+    // The native Capacitor BackgroundRunner handles actual background sync
   }
 }
