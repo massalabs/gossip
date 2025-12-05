@@ -75,6 +75,16 @@
             </intent-filter>
         </receiver>
 
+        <!-- User Unlock Receiver: Trigger sync when user unlocks device -->
+        <receiver
+            android:name=".UserUnlockReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.USER_PRESENT" />
+            </intent-filter>
+        </receiver>
+
     </application>
 
     <!-- Permissions -->
