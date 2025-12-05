@@ -9,8 +9,6 @@ import android.os.PowerManager;
 import android.util.Log;
 
 import androidx.annotation.NonNull;
-import androidx.work.OneTimeWorkRequest;
-import androidx.work.WorkManager;
 
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
@@ -18,7 +16,8 @@ import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
-import io.ionic.backgroundrunner.plugin.RunnerWorker;
+// Use BackgroundSyncWorker instead of RunnerWorker directly
+// BackgroundSyncWorker properly sets up the input data that RunnerWorker needs
 
 /**
  * Capacitor plugin for monitoring network state changes and triggering background sync.
@@ -49,8 +48,7 @@ public class NetworkObserverPlugin extends Plugin {
     private static final String NETWORK_TYPE_OTHER = "other";
     private static final String NETWORK_TYPE_NONE = "none";
     
-    // WorkManager and wake lock identifiers
-    private static final String WORK_TAG_NETWORK_SYNC = "network-triggered-sync";
+    // Wake lock identifier
     private static final String WAKE_LOCK_TAG = "Gossip::NetworkSyncWakeLock";
     
     private ConnectivityManager connectivityManager;
@@ -242,18 +240,15 @@ public class NetworkObserverPlugin extends Plugin {
 
     /**
      * Schedule the BackgroundRunner to execute immediately.
-     * This uses WorkManager to trigger the background-sync.js script.
+     * Uses BackgroundSyncWorker which properly sets up the input data for RunnerWorker.
      */
     private void scheduleBackgroundSync() {
         try {
-            // Create a one-time work request to run the background sync immediately
-            OneTimeWorkRequest syncWork = new OneTimeWorkRequest.Builder(RunnerWorker.class)
-                    .addTag(WORK_TAG_NETWORK_SYNC)
-                    .build();
+            // Use BackgroundSyncWorker which properly configures the RunnerWorker
+            // with the required input data (label, src, event)
+            BackgroundSyncWorker.scheduleBackgroundRunnerSync(getContext());
             
-            WorkManager.getInstance(getContext()).enqueue(syncWork);
-            
-            Log.d(TAG, "Background sync scheduled via WorkManager");
+            Log.d(TAG, "Background sync scheduled via BackgroundSyncWorker");
         } catch (Exception e) {
             Log.e(TAG, "Failed to schedule background sync", e);
         }

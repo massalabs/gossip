@@ -9,6 +9,7 @@ public class MainActivity extends BridgeActivity {
         // Register custom plugins before calling super.onCreate()
         registerPlugin(BatteryOptimizationPlugin.class);
         registerPlugin(NetworkObserverPlugin.class);
+        registerPlugin(BackgroundRunnerStoragePlugin.class);
         
         super.onCreate(savedInstanceState);
     }

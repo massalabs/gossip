@@ -26,6 +26,7 @@ import {
   deserializeMessage,
 } from '../utils/messageSerialization';
 import { encodeToBase64 } from '../utils/base64';
+import { isAppInForeground } from '../utils/appState';
 
 export interface MessageResult {
   success: boolean;
@@ -72,8 +73,10 @@ export class MessageService {
       let iterations = 0;
       let newMessagesCount = 0;
 
+      let seekers: Uint8Array[] = [];
+
       while (true) {
-        const seekers = session.getMessageBoardReadKeys();
+        seekers = session.getMessageBoardReadKeys();
         const seekerStrings = seekers.map(s => encodeToBase64(s));
         const currentSeekers = new Set(seekerStrings);
 
@@ -110,11 +113,25 @@ export class MessageService {
         await sleep(100);
       }
 
-      // Update active seekers table after sync completes
-      // This allows the service worker to fetch messages when the app is closed
+      // Update active seekers table after sync completes.
+      // Store the final seekers after the fetch loop completes.
+      // These seekers are written to BackgroundRunner storage
+      // so the background runner can use them for background sync.
+      //
+      // IMPORTANT: Only update seekers when app is in foreground.
+      // When app is in background, the background runner is using the stored seekers,
+      // and we shouldn't overwrite them until the app comes back to foreground.
       try {
-        const currentSeekers = session.getMessageBoardReadKeys();
-        await db.setActiveSeekers(currentSeekers);
+        // Check if app is in foreground before updating seekers.
+        const foreground = await isAppInForeground();
+
+        if (foreground) {
+          await db.setActiveSeekers(seekers);
+        } else {
+          console.log(
+            '[MessageService] App is in background, skipping seeker update to avoid overwriting background runner seekers'
+          );
+        }
       } catch (error) {
         // Log error but don't fail the entire fetch operation
         console.error('Failed to update active seekers:', error);
