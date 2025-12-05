@@ -32,7 +32,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
   id,
 }) => {
   const isOutgoing = message.direction === 'outgoing';
-  const canReply = !!onReplyTo && !isOutgoing;
+  const canReply = !!onReplyTo;
   const [originalMessage, setOriginalMessage] = useState<Message | null>(null);
   const [isLoadingOriginal, setIsLoadingOriginal] = useState(false);
   const [originalNotFound, setOriginalNotFound] = useState(false);
@@ -208,7 +208,6 @@ const MessageItem: React.FC<MessageItemProps> = ({
         }`}
         onDoubleClick={handleDoubleClick}
         onMouseDown={handleClick}
-        onClick={handleClick}
         onKeyDown={handleKeyDown}
         tabIndex={canReply ? 0 : undefined}
         role={canReply ? 'button' : undefined}
