@@ -23,17 +23,16 @@ const ScanQRCode: React.FC<ScanQRCodeProps> = ({ onBack, onScanSuccess }) => {
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Invalid QR code format';
-
       toast.error(`Failed to parse QR code: ${message}`);
     } finally {
       setIsProcessing(false);
     }
   };
 
-  const handleError = (err: unknown) => {
-    const error = err instanceof Error ? err.message : String(err);
-    // TODO: improve error message
-    toast.error(`Failed to scan QR code: ${error}`);
+  const handleError = (err: string) => {
+    if (!err.includes('process was cancelled')) {
+      toast.error(`Failed to scan QR code: ${err}`);
+    }
     onBack();
   };
 

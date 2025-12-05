@@ -94,7 +94,7 @@ const Discussion: React.FC = () => {
       if (!contact?.userId) return;
       try {
         await sendMessage(contact.userId, text, replyToId);
-        setReplyingTo(null); // Clear reply state after sending
+        setReplyingTo(null);
       } catch (error) {
         toast.error('Failed to send message');
         console.error('Failed to send message:', error);
@@ -138,14 +138,6 @@ const Discussion: React.FC = () => {
     }
   }, []);
 
-  const handleInputClick = () => {
-    if (isMsgFailed) {
-      toast.error(
-        "You can't send new messages until your last failed message is resent. Please tap 'Resend' to try again."
-      );
-    }
-  };
-
   if (!contact) return null;
 
   // Mobile-first: show only discussion page when selected
@@ -168,7 +160,6 @@ const Discussion: React.FC = () => {
 
       <MessageInput
         onSend={handleSendMessage}
-        onClick={handleInputClick}
         disabled={isSending || isMsgFailed}
         replyingTo={replyingTo}
         onCancelReply={handleCancelReply}

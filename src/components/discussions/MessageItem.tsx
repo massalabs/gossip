@@ -32,6 +32,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
   id,
 }) => {
   const isOutgoing = message.direction === 'outgoing';
+  const canReply = !!onReplyTo;
   const [originalMessage, setOriginalMessage] = useState<Message | null>(null);
   const [isLoadingOriginal, setIsLoadingOriginal] = useState(false);
   const [originalNotFound, setOriginalNotFound] = useState(false);
@@ -42,8 +43,6 @@ const MessageItem: React.FC<MessageItemProps> = ({
   const touchStartY = useRef<number | null>(null);
   const isSwiping = useRef(false);
   const swipeCompleted = useRef(false); // Track if a swipe was just completed to prevent click
-  const isFocused = useRef(false); // Track if the element is currently focused
-  const wasFocusedBeforeClick = useRef(false); // Track if element was focused before click
   const messageRef = useRef<HTMLDivElement | null>(null);
 
   // Load original message if this is a reply
@@ -89,39 +88,23 @@ const MessageItem: React.FC<MessageItemProps> = ({
     }
   }, [message.replyTo, message.ownerUserId]);
 
-  const handleMouseDown = () => {
-    // Capture focus state before click event fires
-    wasFocusedBeforeClick.current = isFocused.current;
-  };
-
-  const handleClick = () => {
-    // Only trigger on click if:
-    // 1. A swipe was not just completed
-    // 2. The element was already focused before the click (to allow focusing without triggering reply)
-    if (!swipeCompleted.current && wasFocusedBeforeClick.current && onReplyTo) {
+  const handleDoubleClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    if (canReply && onReplyTo) {
       onReplyTo(message);
     }
-    // Reset swipe completed flag after checking
-    swipeCompleted.current = false;
-  };
-
-  const handleFocus = () => {
-    isFocused.current = true;
-  };
-
-  const handleBlur = () => {
-    isFocused.current = false;
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     // Support Enter and Space keys for keyboard accessibility
-    if ((e.key === 'Enter' || e.key === ' ') && onReplyTo) {
+    if ((e.key === 'Enter' || e.key === ' ') && canReply && onReplyTo) {
       e.preventDefault(); // Prevent page scroll on Space
       onReplyTo(message);
     }
   };
 
   const handleTouchStart = (e: React.TouchEvent) => {
+    if (!canReply) return;
     const touch = e.touches[0];
     touchStartX.current = touch.clientX;
     touchStartY.current = touch.clientY;
@@ -130,6 +113,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
   };
 
   const handleTouchMove = (e: React.TouchEvent) => {
+    if (!canReply) return;
     if (touchStartX.current === null || touchStartY.current === null) return;
 
     const touch = e.touches[0];
@@ -150,6 +134,13 @@ const MessageItem: React.FC<MessageItemProps> = ({
   };
 
   const handleTouchEnd = () => {
+    if (!canReply) {
+      setSwipeOffset(0);
+      touchStartX.current = null;
+      touchStartY.current = null;
+      isSwiping.current = false;
+      return;
+    }
     // Track if a swipe was completed to prevent click handler from triggering
     const wasSwipeCompleted = swipeOffset >= SWIPE_THRESHOLD;
 
@@ -186,13 +177,17 @@ const MessageItem: React.FC<MessageItemProps> = ({
     }
   };
 
+  const handleClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+  };
+
   return (
     <div
       id={id}
       className={`flex items-end gap-2 ${isOutgoing ? 'justify-end' : 'justify-start'} group relative`}
-      onTouchStart={handleTouchStart}
-      onTouchMove={handleTouchMove}
-      onTouchEnd={handleTouchEnd}
+      onTouchStart={canReply ? handleTouchStart : undefined}
+      onTouchMove={canReply ? handleTouchMove : undefined}
+      onTouchEnd={canReply ? handleTouchEnd : undefined}
     >
       {/* TODO: Add on group chat */}
       {/* {!isOutgoing && (
@@ -206,15 +201,17 @@ const MessageItem: React.FC<MessageItemProps> = ({
           isOutgoing
             ? 'ml-auto mr-3 bg-accent text-accent-foreground rounded-br-[4px]'
             : 'ml-3 mr-auto bg-card text-card-foreground rounded-bl-[4px] shadow-sm'
-        } ${onReplyTo ? 'cursor-pointer hover:opacity-90 transition-opacity focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2' : ''}`}
-        onMouseDown={handleMouseDown}
-        onClick={handleClick}
+        } ${
+          canReply
+            ? 'cursor-pointer hover:opacity-90 transition-opacity focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2'
+            : ''
+        }`}
+        onDoubleClick={handleDoubleClick}
+        onMouseDown={handleClick}
         onKeyDown={handleKeyDown}
-        onFocus={handleFocus}
-        onBlur={handleBlur}
-        tabIndex={onReplyTo ? 0 : undefined}
-        role={onReplyTo ? 'button' : undefined}
-        aria-label={onReplyTo ? 'Reply to message' : undefined}
+        tabIndex={canReply ? 0 : undefined}
+        role={canReply ? 'button' : undefined}
+        aria-label={canReply ? 'Reply to message' : undefined}
         style={{
           transform:
             swipeOffset > 0 ? `translateX(${swipeOffset}px)` : 'translateX(0)',

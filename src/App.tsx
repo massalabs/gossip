@@ -4,7 +4,7 @@ import { useAccountStore } from './stores/accountStore';
 import { useAppStore } from './stores/appStore';
 import ErrorBoundary from './components/ui/ErrorBoundary.tsx';
 // import PWABadge from './PWABadge.tsx';
-import { DebugConsole } from './components/ui/DebugConsole.tsx';
+import { DebugConsole } from './components/ui/DebugConsole';
 import { Toaster } from 'react-hot-toast';
 import './App.css';
 

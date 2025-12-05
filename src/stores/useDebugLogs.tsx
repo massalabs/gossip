@@ -6,32 +6,131 @@ import { toast } from 'react-hot-toast';
 const LOG_STORAGE_KEY = 'debug-logs';
 const LOG_STORAGE_VERSION = 1;
 const LOG_STORAGE_KEY_PREFIX = `${LOG_STORAGE_KEY}-v${LOG_STORAGE_VERSION}`;
-const LOG_STORAGE_LIMIT = 200;
+export const LOG_LIMIT_OPTIONS = [20, 50, 100, 200, 500] as const;
+export type LogLimit = (typeof LOG_LIMIT_OPTIONS)[number];
+const DEFAULT_LOG_STORAGE_LIMIT: LogLimit = 200;
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
+
+export interface ErrorLogData {
+  name: string;
+  message: string;
+  stack?: string;
+  args: unknown[];
+}
+
+export type LogData =
+  | ErrorLogData
+  | string
+  | undefined
+  | Record<string, unknown>
+  | unknown[];
 
 export interface LogEntry {
   id: number;
   ts: string;
   level: LogLevel;
   msg: string;
-  data?: unknown;
+  data?: LogData;
+  repeatCount?: number; // Number of times this log was repeated consecutively
 }
 
 interface DebugStore {
   logs: LogEntry[];
-  add: (level: LogLevel, message: unknown, data?: unknown) => void;
+  logLimit: LogLimit;
+  add: (level: LogLevel, message: unknown, data?: LogData) => void;
   clear: () => void;
   share: () => Promise<void>;
   showDebugConsole: boolean;
   setShowDebugConsole: (show: boolean) => void;
+  setLogLimit: (limit: LogLimit) => void;
 }
 
 let idCounter = Date.now();
+
+/**
+ * Deep equality comparison for LogData.
+ */
+function isLogDataEqual(
+  a: LogData | undefined,
+  b: LogData | undefined
+): boolean {
+  // Both undefined/null
+  if (a === undefined && b === undefined) return true;
+  if (a === undefined || b === undefined) return false;
+
+  // Both strings
+  if (typeof a === 'string' && typeof b === 'string') return a === b;
+
+  // Both arrays
+  if (Array.isArray(a) && Array.isArray(b)) {
+    if (a.length !== b.length) return false;
+    return a.every((item, index) => {
+      const bItem = b[index];
+      // For arrays, do a simple comparison (can be extended if needed)
+      if (
+        typeof item === 'object' &&
+        item !== null &&
+        typeof bItem === 'object' &&
+        bItem !== null
+      ) {
+        return JSON.stringify(item) === JSON.stringify(bItem);
+      }
+      return item === bItem;
+    });
+  }
+
+  // Both objects (including ErrorLogData)
+  if (
+    typeof a === 'object' &&
+    a !== null &&
+    typeof b === 'object' &&
+    b !== null
+  ) {
+    // Check if both are ErrorLogData
+    const aIsError = 'name' in a && 'message' in a && 'args' in a;
+    const bIsError = 'name' in b && 'message' in b && 'args' in b;
+
+    if (aIsError && bIsError) {
+      const aError = a as ErrorLogData;
+      const bError = b as ErrorLogData;
+      return (
+        aError.name === bError.name &&
+        aError.message === bError.message &&
+        aError.stack === bError.stack &&
+        JSON.stringify(aError.args) === JSON.stringify(bError.args)
+      );
+    }
+
+    // Generic object comparison
+    const aKeys = Object.keys(a);
+    const bKeys = Object.keys(b);
+    if (aKeys.length !== bKeys.length) return false;
+
+    return aKeys.every(key => {
+      const aVal = (a as Record<string, unknown>)[key];
+      const bVal = (b as Record<string, unknown>)[key];
+      // Recursive comparison for nested objects
+      if (
+        typeof aVal === 'object' &&
+        aVal !== null &&
+        typeof bVal === 'object' &&
+        bVal !== null
+      ) {
+        return JSON.stringify(aVal) === JSON.stringify(bVal);
+      }
+      return aVal === bVal;
+    });
+  }
+
+  // Type mismatch
+  return false;
+}
 
 export const useDebugLogs = create<DebugStore>()(
   persist(
     (set, get) => ({
       logs: [],
+      logLimit: DEFAULT_LOG_STORAGE_LIMIT,
 
       add: (level, message, data) => {
         // Normalize all arguments so we can extract meaningful error info.
@@ -54,28 +153,55 @@ export const useDebugLogs = create<DebugStore>()(
               ? `${message.name}: ${message.message}`
               : String(message);
 
+        // For errors, capture a structured payload including stack + original args.
+        const errorData: ErrorLogData | undefined =
+          firstError != null
+            ? {
+                name: firstError.name,
+                message: firstError.message,
+                stack: firstError.stack,
+                args: argArray,
+              }
+            : undefined;
+
         const entry: LogEntry = {
           id: ++idCounter,
           ts: new Date().toISOString(),
           level,
           msg,
-          // For errors, capture a structured payload including stack + original args.
           data:
-            firstError != null
-              ? {
-                  name: firstError.name,
-                  message: firstError.message,
-                  stack: firstError.stack,
-                  args: argArray,
-                }
-              : (data ??
-                (message instanceof Error ? message.stack : undefined)),
+            errorData ??
+            data ??
+            (message instanceof Error ? message.stack : undefined),
+          repeatCount: 1,
         };
 
+        const currentLimit = get().logLimit || DEFAULT_LOG_STORAGE_LIMIT;
+
         set(state => {
+          // Check if the last log is identical to this one
+          const lastLog = state.logs[state.logs.length - 1];
+          const isDuplicate =
+            lastLog &&
+            lastLog.level === entry.level &&
+            lastLog.msg === entry.msg &&
+            isLogDataEqual(lastLog.data, entry.data);
+
+          if (isDuplicate) {
+            // Increment the counter of the last log instead of adding a new one
+            const updatedLogs = [...state.logs];
+            const lastIndex = updatedLogs.length - 1;
+            updatedLogs[lastIndex] = {
+              ...updatedLogs[lastIndex],
+              repeatCount: (updatedLogs[lastIndex].repeatCount || 1) + 1,
+            };
+            return { logs: updatedLogs };
+          }
+
+          // Add new log entry
           const newLogs =
-            state.logs.length >= LOG_STORAGE_LIMIT
-              ? [...state.logs.slice(-LOG_STORAGE_LIMIT + 1), entry]
+            state.logs.length >= currentLimit
+              ? [...state.logs.slice(-currentLimit + 1), entry]
               : [...state.logs, entry];
           return { logs: newLogs };
         });
@@ -86,10 +212,11 @@ export const useDebugLogs = create<DebugStore>()(
       share: async () => {
         const logs = get().logs;
         const text = logs
-          .map(
-            l =>
-              `${l.ts.split('T')[1].slice(0, 12)} [${l.level.toUpperCase()}] ${l.msg}`
-          )
+          .map(l => {
+            const baseLine = `${l.ts.split('T')[1].slice(0, 12)} [${l.level.toUpperCase()}] ${l.msg}`;
+            const repeatCount = l.repeatCount || 1;
+            return repeatCount > 1 ? `${baseLine} (×${repeatCount})` : baseLine;
+          })
           .join('\n');
 
         const copyToClipboard = async () => {
@@ -117,6 +244,21 @@ export const useDebugLogs = create<DebugStore>()(
       },
       showDebugConsole: false,
       setShowDebugConsole: (show: boolean) => set({ showDebugConsole: show }),
+      setLogLimit: (limit: LogLimit) =>
+        set(state => {
+          const normalized: LogLimit = LOG_LIMIT_OPTIONS.includes(limit)
+            ? limit
+            : DEFAULT_LOG_STORAGE_LIMIT;
+          const trimmedLogs =
+            state.logs.length > normalized
+              ? state.logs.slice(-normalized)
+              : state.logs;
+
+          return {
+            logLimit: normalized,
+            logs: trimmedLogs,
+          };
+        }),
     }),
     {
       name: LOG_STORAGE_KEY_PREFIX,
@@ -134,6 +276,7 @@ export const useDebugLogs = create<DebugStore>()(
       })),
       partialize: state => ({
         logs: state.logs,
+        logLimit: state.logLimit,
       }),
     }
   )
