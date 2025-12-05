@@ -9,9 +9,11 @@ import { defaultSyncConfig } from '../config/sync';
 import { setApiBaseUrlForBackgroundSync } from '../utils/preferences';
 import { protocolConfig } from '../config/protocol';
 import { Capacitor } from '@capacitor/core';
+import { networkObserverService } from './networkObserver';
+
 /**
  * Setup service worker: register, listen for messages, and start sync scheduler
- * Also initializes background sync (notifications, periodic sync, online listener)
+ * Also initializes background sync (notifications, periodic sync)
  */
 export async function setupServiceWorker(): Promise<void> {
   if (!('serviceWorker' in navigator)) {
@@ -24,7 +26,7 @@ export async function setupServiceWorker(): Promise<void> {
   // Register service worker and setup sync scheduler
   await registerAndStartSync();
 
-  // Initialize background sync: request notification permission, register periodic sync, setup online listener
+  // Initialize background sync: request notification permission, register periodic sync
   await initializeBackgroundSync();
 }
 
@@ -133,7 +135,7 @@ async function handleExistingRegistration(): Promise<void> {
 }
 
 /**
- * Initialize background sync: notifications, periodic sync, and online listener
+ * Initialize background sync: notifications, periodic sync, and network observer.
  */
 async function initializeBackgroundSync(): Promise<void> {
   try {
@@ -147,9 +149,39 @@ async function initializeBackgroundSync(): Promise<void> {
     // Register periodic background sync (Web API - optional, expected to fail on mobile)
     // This is wrapped in its own try-catch because failures are expected and non-critical
     await registerPeriodicSync();
+
+    // Start network observer for immediate sync on connectivity changes
+    // This triggers background-runner when network becomes available (even in background)
+    await initializeNetworkObserver();
   } catch (error) {
     // Only log truly unexpected errors (not periodic sync failures)
     console.error('[App] Failed to initialize background sync service:', error);
+  }
+}
+
+/**
+ * Initialize network observer for immediate sync on network state changes.
+ *
+ * On native platforms (iOS/Android), this:
+ * 1. Monitors network state changes at the native level (works in background)
+ * 2. Acquires a wake lock (Android) or background task (iOS) when network becomes available
+ * 3. Triggers the BackgroundRunner to execute the sync script
+ *
+ * This ensures messages are fetched immediately when connectivity is restored,
+ * even if the app is in background or the device was in deep sleep.
+ */
+async function initializeNetworkObserver(): Promise<void> {
+  if (!networkObserverService.isAvailable()) {
+    console.log('[App] Network observer not available on this platform');
+    return;
+  }
+
+  try {
+    await networkObserverService.startObserving();
+    console.log('[App] Network observer initialized');
+  } catch (error) {
+    // Non-critical - log and continue
+    console.error('[App] Failed to initialize network observer:', error);
   }
 }
 
