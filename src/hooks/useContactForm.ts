@@ -99,6 +99,7 @@ export function useContactForm() {
 
       setUserId(prev => ({
         ...prev,
+        error: undefined,
         loading: true,
       }));
 
