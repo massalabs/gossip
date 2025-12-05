@@ -14,7 +14,7 @@
 
 /* global addEventListener, console, CapacitorNotifications, CapacitorKV, fetch */
 
-// Keys used for Capacitor Preferences (CapacitorKV in Background Runner)
+// Keys used for BackgroundRunner storage (via CapacitorKV)
 const ACTIVE_SEEKERS_KEY = 'gossip-active-seekers';
 const API_BASE_URL_KEY = 'gossip-api-base-url';
 const LAST_SYNC_TIMESTAMP_KEY = 'gossip-last-sync-timestamp';
@@ -24,52 +24,63 @@ const DEFAULT_API_BASE_URL = 'https://gossip.massa.net/api';
 
 // Minimum interval between syncs to avoid redundant work
 // If a sync was performed within this window, skip the current sync
-const MIN_SYNC_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
+const MIN_SYNC_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
 
 /**
- * Retrieve active seekers from CapacitorKV (Preferences).
+ * Retrieve active seekers from BackgroundRunner storage.
+ * Reads from BackgroundRunner's storage (net.massa.gossip.background.sync)
+ * which is written to by the main app via BackgroundRunnerStorage plugin.
+ *
  * Returns an array of base64-encoded seeker strings, or an empty array if none found.
  */
 async function getActiveSeekers() {
   try {
     if (typeof CapacitorKV === 'undefined' || !CapacitorKV?.get) {
-      console.log('[BackgroundSync] CapacitorKV not available');
       return [];
     }
 
-    const value = await CapacitorKV.get(ACTIVE_SEEKERS_KEY);
+    const rawValue = await CapacitorKV.get(ACTIVE_SEEKERS_KEY);
+    const value = extractKVValue(rawValue);
+
     if (!value) {
-      console.log('[BackgroundSync] No active seekers stored');
       return [];
     }
 
     const seekers = JSON.parse(value);
-    console.log(
-      '[BackgroundSync] Retrieved',
-      seekers.length,
-      'active seekers from storage'
-    );
     return seekers;
   } catch (err) {
-    console.log('[BackgroundSync] Failed to get active seekers', String(err));
+    console.log('[BackgroundSync] Failed to get active seekers:', String(err));
     return [];
   }
 }
 
 /**
- * Retrieve the API base URL from CapacitorKV or use default.
+ * Extract value from CapacitorKV result.
+ * Handles both iOS format ({ value: "..." }) and Android format ("...")
+ */
+function extractKVValue(rawValue) {
+  if (!rawValue) return null;
+  if (typeof rawValue === 'object' && 'value' in rawValue) {
+    return rawValue.value;
+  }
+  return rawValue;
+}
+
+/**
+ * Retrieve the API base URL from BackgroundRunner storage or use default.
  */
 async function getApiBaseUrl() {
   try {
     if (typeof CapacitorKV !== 'undefined' && CapacitorKV?.get) {
-      const storedUrl = await CapacitorKV.get(API_BASE_URL_KEY);
+      const rawValue = await CapacitorKV.get(API_BASE_URL_KEY);
+      const storedUrl = extractKVValue(rawValue);
       if (storedUrl) {
         return storedUrl;
       }
     }
   } catch (err) {
     console.log(
-      '[BackgroundSync] Failed to get API URL from storage',
+      '[BackgroundSync] Failed to get API URL from storage:',
       String(err)
     );
   }
@@ -77,13 +88,14 @@ async function getApiBaseUrl() {
 }
 
 /**
- * Retrieve the last sync timestamp from CapacitorKV.
+ * Retrieve the last sync timestamp from BackgroundRunner storage.
  * Returns 0 if not found or on error.
  */
 async function getLastSyncTimestamp() {
   try {
     if (typeof CapacitorKV !== 'undefined' && CapacitorKV?.get) {
-      const value = await CapacitorKV.get(LAST_SYNC_TIMESTAMP_KEY);
+      const rawValue = await CapacitorKV.get(LAST_SYNC_TIMESTAMP_KEY);
+      const value = extractKVValue(rawValue);
       if (value) {
         const timestamp = parseInt(value, 10);
         if (!isNaN(timestamp)) {
@@ -92,10 +104,7 @@ async function getLastSyncTimestamp() {
       }
     }
   } catch (err) {
-    console.log(
-      '[BackgroundSync] Failed to get last sync timestamp',
-      String(err)
-    );
+    // Silently ignore
   }
   return 0;
 }
@@ -109,10 +118,7 @@ async function setLastSyncTimestamp() {
       await CapacitorKV.set(LAST_SYNC_TIMESTAMP_KEY, String(Date.now()));
     }
   } catch (err) {
-    console.log(
-      '[BackgroundSync] Failed to set last sync timestamp',
-      String(err)
-    );
+    // Silently ignore
   }
 }
 
@@ -129,13 +135,6 @@ async function shouldPerformSync() {
 
   const timeSinceLastSync = Date.now() - lastSyncTimestamp;
   if (timeSinceLastSync < MIN_SYNC_INTERVAL_MS) {
-    console.log(
-      '[BackgroundSync] Skipping sync - too soon since last sync (' +
-        Math.round(timeSinceLastSync / 1000) +
-        's ago, minimum is ' +
-        Math.round(MIN_SYNC_INTERVAL_MS / 1000) +
-        's)'
-    );
     return false;
   }
 
@@ -149,19 +148,44 @@ async function shouldPerformSync() {
  * @returns {Promise<Array<{key: string, value: string}>>} - Array of messages
  */
 async function fetchMessages(baseUrl, seekers) {
-  const url = `${baseUrl}/messages/fetch`;
+  // Normalize baseUrl: remove trailing slashes to avoid double slashes
+  const normalizedBaseUrl = baseUrl.replace(/\/+$/, '');
+  const url = `${normalizedBaseUrl}/messages/fetch`;
+  const requestBody = JSON.stringify({ seekers });
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ seekers }),
-  });
+  let response;
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: requestBody,
+    });
+  } catch (fetchErr) {
+    console.log('[BackgroundSync] Fetch error:', String(fetchErr));
+    throw fetchErr;
+  }
 
   if (!response.ok) {
+    const errorText = await response
+      .text()
+      .catch(() => 'Unable to read error body');
+    console.log(
+      '[BackgroundSync] HTTP error:',
+      response.status,
+      errorText.substring(0, 100)
+    );
     throw new Error(`HTTP ${response.status}: ${response.statusText}`);
   }
 
-  const data = await response.json();
+  let data;
+  try {
+    const responseText = await response.text();
+    data = JSON.parse(responseText);
+  } catch (parseErr) {
+    console.log('[BackgroundSync] Parse error:', String(parseErr));
+    throw parseErr;
+  }
+
   return data || [];
 }
 
@@ -175,7 +199,6 @@ async function showNewMessageNotification(messageCount) {
       typeof CapacitorNotifications === 'undefined' ||
       !CapacitorNotifications?.schedule
     ) {
-      console.log('[BackgroundSync] CapacitorNotifications not available');
       return;
     }
 
@@ -192,11 +215,9 @@ async function showNewMessageNotification(messageCount) {
         body,
       },
     ]);
-
-    console.log('[BackgroundSync] New message notification scheduled');
   } catch (err) {
     console.log(
-      '[BackgroundSync] Failed to schedule notification',
+      '[BackgroundSync] Failed to schedule notification:',
       String(err)
     );
   }
@@ -218,8 +239,6 @@ function isNetworkAvailable() {
 
 addEventListener('backgroundSync', async (resolve, reject, args) => {
   try {
-    console.log('[BackgroundSync] Task started', JSON.stringify(args || {}));
-
     // Check network connectivity first
     if (!isNetworkAvailable()) {
       console.log('[BackgroundSync] Network unavailable, skipping sync');
@@ -230,12 +249,11 @@ addEventListener('backgroundSync', async (resolve, reject, args) => {
     // Check if we should perform sync (timestamp check to avoid redundant work)
     const shouldSync = await shouldPerformSync();
     if (!shouldSync) {
-      console.log('[BackgroundSync] Sync skipped due to timestamp check');
       resolve();
       return;
     }
 
-    // Retrieve active seekers from Preferences storage
+    // Retrieve active seekers from BackgroundRunner storage
     const activeSeekers = await getActiveSeekers();
 
     if (activeSeekers.length === 0) {
@@ -246,16 +264,13 @@ addEventListener('backgroundSync', async (resolve, reject, args) => {
 
     // Get API base URL
     const apiBaseUrl = await getApiBaseUrl();
-    console.log('[BackgroundSync] Using API URL:', apiBaseUrl);
 
     // Fetch messages from the protocol API
     let messages = [];
     try {
       messages = await fetchMessages(apiBaseUrl, activeSeekers);
-      console.log('[BackgroundSync] Fetched', messages.length, 'messages');
     } catch (err) {
-      console.log('[BackgroundSync] Failed to fetch messages:', String(err));
-      // Don't reject - just log and continue
+      console.log('[BackgroundSync] Fetch failed:', String(err));
       resolve();
       return;
     }
@@ -266,17 +281,12 @@ addEventListener('backgroundSync', async (resolve, reject, args) => {
     // If new messages were found, show a notification
     if (messages.length > 0) {
       await showNewMessageNotification(messages.length);
-    } else {
-      console.log('[BackgroundSync] No new messages');
+      console.log('[BackgroundSync] Found', messages.length, 'new message(s)');
     }
 
-    console.log('[BackgroundSync] Task completed successfully');
     resolve();
   } catch (error) {
-    console.log(
-      '[BackgroundSync] Task failed',
-      typeof error === 'string' ? error : JSON.stringify(error || {})
-    );
+    console.log('[BackgroundSync] Task failed:', String(error));
     reject(error);
   }
 });
