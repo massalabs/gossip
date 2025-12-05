@@ -15,22 +15,6 @@ export type PublicKeyResult =
   | { publicKey: UserPublicKeys; error?: never }
   | { publicKey?: never; error: string };
 
-export function getPublicKeyErrorMessage(error: unknown): string {
-  const errorMessage = error instanceof Error ? error.message : String(error);
-  if (errorMessage.includes('Public key not found')) {
-    return 'Contact public key not found. It may not be published yet.';
-  }
-
-  if (errorMessage.includes('Failed to fetch')) {
-    return 'Failed to retrieve contact public key. Check your internet connection or try again later.';
-  }
-
-  return (
-    'Failed to retrieve contact public key. Please try again later. ' +
-    errorMessage
-  );
-}
-
 export class AuthService {
   constructor(public readonly messageProtocol: IMessageProtocol) {}
 
@@ -87,3 +71,25 @@ function moreThanOneWeekAgo(date: Date): boolean {
 }
 
 export const authService = new AuthService(createMessageProtocol());
+
+export const PUBLIC_KEY_NOT_FOUND_ERROR = 'Public key not found';
+export const PUBLIC_KEY_NOT_FOUND_MESSAGE =
+  'Contact public key not found. It may not be published yet.';
+export const FAILED_TO_FETCH_ERROR = 'Failed to fetch';
+export const FAILED_TO_FETCH_MESSAGE =
+  'Failed to retrieve contact public key. Check your internet connection or try again later.';
+export const FAILED_TO_RETRIEVE_CONTACT_PUBLIC_KEY_ERROR =
+  'Failed to retrieve contact public key';
+
+export function getPublicKeyErrorMessage(error: unknown): string {
+  const errorMessage = error instanceof Error ? error.message : String(error);
+  if (errorMessage.includes(PUBLIC_KEY_NOT_FOUND_ERROR)) {
+    return PUBLIC_KEY_NOT_FOUND_MESSAGE;
+  }
+
+  if (errorMessage.includes(FAILED_TO_FETCH_ERROR)) {
+    return FAILED_TO_FETCH_MESSAGE;
+  }
+
+  return `${FAILED_TO_RETRIEVE_CONTACT_PUBLIC_KEY_ERROR}. ${errorMessage}`;
+}
