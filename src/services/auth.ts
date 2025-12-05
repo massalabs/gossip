@@ -11,10 +11,24 @@ import { IMessageProtocol } from '../api/messageProtocol/types';
 import { createMessageProtocol } from '../api/messageProtocol';
 import { db } from '../db';
 
-interface PublicKeyResult {
-  success: boolean;
-  publicKey?: UserPublicKeys;
-  error?: string;
+export type PublicKeyResult =
+  | { publicKey: UserPublicKeys; error?: never }
+  | { publicKey?: never; error: string };
+
+export function getPublicKeyErrorMessage(error: unknown): string {
+  const errorMessage = error instanceof Error ? error.message : String(error);
+  if (errorMessage.includes('Public key not found')) {
+    return 'Contact public key not found. It may not be published yet.';
+  }
+
+  if (errorMessage.includes('Failed to fetch')) {
+    return 'Failed to retrieve contact public key. Check your internet connection or try again later.';
+  }
+
+  return (
+    'Failed to retrieve contact public key. Please try again later. ' +
+    errorMessage
+  );
 }
 
 export class AuthService {
@@ -30,19 +44,12 @@ export class AuthService {
         decodeUserId(userId)
       );
 
-      if (!base64PublicKey) {
-        return { success: false, error: 'Public key not found' };
-      }
-
       return {
-        success: true,
         publicKey: UserPublicKeys.from_bytes(decodeFromBase64(base64PublicKey)),
       };
-    } catch (error) {
+    } catch (err) {
       return {
-        success: false,
-        error:
-          error instanceof Error ? error.message : 'Failed to fetch public key',
+        error: getPublicKeyErrorMessage(err),
       };
     }
   }

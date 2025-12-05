@@ -4,7 +4,7 @@ import FormInput from '../ui/FormInput';
 interface UserIdFieldProps {
   userId: string;
   onChange: (value: string) => void;
-  error: string | null;
+  error?: string;
   isFetching: boolean;
 }
 
