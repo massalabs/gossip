@@ -15,7 +15,6 @@ type MessageInputEvent =
   | React.TouchEvent
   | React.KeyboardEvent;
 
-type KeyboardEvent = React.KeyboardEvent;
 type CancelReplyEvent = React.MouseEvent | React.TouchEvent;
 
 const MessageInput: React.FC<MessageInputProps> = ({
@@ -86,13 +85,6 @@ const MessageInput: React.FC<MessageInputProps> = ({
     textareaRef.current.focus();
   };
 
-  const handleKeyDown = (e: KeyboardEvent) => {
-    e.preventDefault();
-    if (e.key === 'Enter' && !e.shiftKey) {
-      handleSendMessage(e);
-    }
-  };
-
   return (
     <>
       <div
@@ -110,7 +102,6 @@ const MessageInput: React.FC<MessageInputProps> = ({
               </div>
               {onCancelReply && (
                 <button
-                  // onClick={handleCancelReply}
                   onMouseDown={handleCancelReply}
                   className="shrink-0 p-1 hover:bg-muted rounded transition-colors"
                 >
@@ -126,7 +117,6 @@ const MessageInput: React.FC<MessageInputProps> = ({
             className={`flex-1 min-w-0 flex items-center bg-muted border border-gray-300 px-4 md:px-5 py-2 md:py-2.5 ${
               isTextareaMultiline ? 'rounded-2xl' : 'rounded-full'
             }`}
-            tabIndex={-1}
           >
             <textarea
               ref={textareaRef}
@@ -138,14 +128,12 @@ const MessageInput: React.FC<MessageInputProps> = ({
               autoComplete="off"
               autoCapitalize="sentences"
               spellCheck={true}
-              className={`pointer-events-auto touch-auto flex-1 bg-transparent text-foreground placeholder:text-muted-foreground
+              className={`flex-1 bg-transparent text-foreground placeholder:text-muted-foreground
                          text-[15px] leading-relaxed resize-none p-0 m-0 focus:outline-none outline-none
                          scrollbar-transparent ${isTextareaMultiline ? 'overflow-y-auto' : 'overflow-y-hidden'}`}
             />
           </div>
           <Button
-            tabIndex={-1}
-            onKeyDown={handleKeyDown}
             onMouseDown={handleSendMessage}
             variant="primary"
             size="custom"
@@ -155,7 +143,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
                 shadow-md hover:shadow-lg transition-all `}
             title="Send message"
           >
-            <Send className="w-4 h-4 md:w-5 md:h-5 pointer-events-none touch-none" />
+            <Send className="w-4 h-4 md:w-5 md:h-5" />
           </Button>
         </div>
       </div>

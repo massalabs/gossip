@@ -47,6 +47,85 @@ interface DebugStore {
 
 let idCounter = Date.now();
 
+/**
+ * Deep equality comparison for LogData.
+ */
+function isLogDataEqual(
+  a: LogData | undefined,
+  b: LogData | undefined
+): boolean {
+  // Both undefined/null
+  if (a === undefined && b === undefined) return true;
+  if (a === undefined || b === undefined) return false;
+
+  // Both strings
+  if (typeof a === 'string' && typeof b === 'string') return a === b;
+
+  // Both arrays
+  if (Array.isArray(a) && Array.isArray(b)) {
+    if (a.length !== b.length) return false;
+    return a.every((item, index) => {
+      const bItem = b[index];
+      // For arrays, do a simple comparison (can be extended if needed)
+      if (
+        typeof item === 'object' &&
+        item !== null &&
+        typeof bItem === 'object' &&
+        bItem !== null
+      ) {
+        return JSON.stringify(item) === JSON.stringify(bItem);
+      }
+      return item === bItem;
+    });
+  }
+
+  // Both objects (including ErrorLogData)
+  if (
+    typeof a === 'object' &&
+    a !== null &&
+    typeof b === 'object' &&
+    b !== null
+  ) {
+    // Check if both are ErrorLogData
+    const aIsError = 'name' in a && 'message' in a && 'args' in a;
+    const bIsError = 'name' in b && 'message' in b && 'args' in b;
+
+    if (aIsError && bIsError) {
+      const aError = a as ErrorLogData;
+      const bError = b as ErrorLogData;
+      return (
+        aError.name === bError.name &&
+        aError.message === bError.message &&
+        aError.stack === bError.stack &&
+        JSON.stringify(aError.args) === JSON.stringify(bError.args)
+      );
+    }
+
+    // Generic object comparison
+    const aKeys = Object.keys(a);
+    const bKeys = Object.keys(b);
+    if (aKeys.length !== bKeys.length) return false;
+
+    return aKeys.every(key => {
+      const aVal = (a as Record<string, unknown>)[key];
+      const bVal = (b as Record<string, unknown>)[key];
+      // Recursive comparison for nested objects
+      if (
+        typeof aVal === 'object' &&
+        aVal !== null &&
+        typeof bVal === 'object' &&
+        bVal !== null
+      ) {
+        return JSON.stringify(aVal) === JSON.stringify(bVal);
+      }
+      return aVal === bVal;
+    });
+  }
+
+  // Type mismatch
+  return false;
+}
+
 export const useDebugLogs = create<DebugStore>()(
   persist(
     (set, get) => ({
@@ -106,7 +185,7 @@ export const useDebugLogs = create<DebugStore>()(
             lastLog &&
             lastLog.level === entry.level &&
             lastLog.msg === entry.msg &&
-            JSON.stringify(lastLog.data) === JSON.stringify(entry.data);
+            isLogDataEqual(lastLog.data, entry.data);
 
           if (isDuplicate) {
             // Increment the counter of the last log instead of adding a new one

@@ -46,7 +46,7 @@ const Button: React.FC<ButtonProps> = ({
   const baseClasses = `inline-flex items-center justify-center font-medium transition-all 
     focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 
     focus-visible:ring-offset-transparent disabled:cursor-not-allowed 
-    disabled:pointer-events-none touch-none`;
+    disabled:pointer-events-none disabled:touch-none`;
 
   const variantClasses = {
     primary:

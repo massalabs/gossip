@@ -102,7 +102,7 @@ export const ConsoleToolbar: React.FC<ConsoleToolbarProps> = ({
           type="checkbox"
           checked={autoScroll}
           onChange={e => onAutoScrollChange(e.target.checked)}
-          className="w-4 h-4 rounded accent-(--color-primary)"
+          className="w-4 h-4 rounded accent-primary"
         />
         <span>Auto-scroll</span>
       </label>
