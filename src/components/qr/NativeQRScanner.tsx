@@ -18,8 +18,6 @@ const NativeQRScanner: React.FC<QRScannerProps> = ({
         scanButton: false,
       });
 
-      console.log('NativeQRScanner result', result);
-
       // TODO: Improve Scan Result handling
       onScan(result.ScanResult);
     } catch (err: unknown) {
@@ -28,7 +26,7 @@ const NativeQRScanner: React.FC<QRScannerProps> = ({
       if (error.includes('the process was cancelled')) {
         onClose();
       }
-      onError?.(error);
+      onError(error);
     }
   }, [onScan, onError, onClose]);
 

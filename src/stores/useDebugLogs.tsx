@@ -11,18 +11,33 @@ export type LogLimit = (typeof LOG_LIMIT_OPTIONS)[number];
 const DEFAULT_LOG_STORAGE_LIMIT: LogLimit = 200;
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
+export interface ErrorLogData {
+  name: string;
+  message: string;
+  stack?: string;
+  args: unknown[];
+}
+
+export type LogData =
+  | ErrorLogData
+  | string
+  | undefined
+  | Record<string, unknown>
+  | unknown[];
+
 export interface LogEntry {
   id: number;
   ts: string;
   level: LogLevel;
   msg: string;
-  data?: unknown;
+  data?: LogData;
+  repeatCount?: number; // Number of times this log was repeated consecutively
 }
 
 interface DebugStore {
   logs: LogEntry[];
   logLimit: LogLimit;
-  add: (level: LogLevel, message: unknown, data?: unknown) => void;
+  add: (level: LogLevel, message: unknown, data?: LogData) => void;
   clear: () => void;
   share: () => Promise<void>;
   showDebugConsole: boolean;
@@ -59,27 +74,52 @@ export const useDebugLogs = create<DebugStore>()(
               ? `${message.name}: ${message.message}`
               : String(message);
 
+        // For errors, capture a structured payload including stack + original args.
+        const errorData: ErrorLogData | undefined =
+          firstError != null
+            ? {
+                name: firstError.name,
+                message: firstError.message,
+                stack: firstError.stack,
+                args: argArray,
+              }
+            : undefined;
+
         const entry: LogEntry = {
           id: ++idCounter,
           ts: new Date().toISOString(),
           level,
           msg,
-          // For errors, capture a structured payload including stack + original args.
           data:
-            firstError != null
-              ? {
-                  name: firstError.name,
-                  message: firstError.message,
-                  stack: firstError.stack,
-                  args: argArray,
-                }
-              : (data ??
-                (message instanceof Error ? message.stack : undefined)),
+            errorData ??
+            data ??
+            (message instanceof Error ? message.stack : undefined),
+          repeatCount: 1,
         };
 
         const currentLimit = get().logLimit || DEFAULT_LOG_STORAGE_LIMIT;
 
         set(state => {
+          // Check if the last log is identical to this one
+          const lastLog = state.logs[state.logs.length - 1];
+          const isDuplicate =
+            lastLog &&
+            lastLog.level === entry.level &&
+            lastLog.msg === entry.msg &&
+            JSON.stringify(lastLog.data) === JSON.stringify(entry.data);
+
+          if (isDuplicate) {
+            // Increment the counter of the last log instead of adding a new one
+            const updatedLogs = [...state.logs];
+            const lastIndex = updatedLogs.length - 1;
+            updatedLogs[lastIndex] = {
+              ...updatedLogs[lastIndex],
+              repeatCount: (updatedLogs[lastIndex].repeatCount || 1) + 1,
+            };
+            return { logs: updatedLogs };
+          }
+
+          // Add new log entry
           const newLogs =
             state.logs.length >= currentLimit
               ? [...state.logs.slice(-currentLimit + 1), entry]
@@ -93,10 +133,11 @@ export const useDebugLogs = create<DebugStore>()(
       share: async () => {
         const logs = get().logs;
         const text = logs
-          .map(
-            l =>
-              `${l.ts.split('T')[1].slice(0, 12)} [${l.level.toUpperCase()}] ${l.msg}`
-          )
+          .map(l => {
+            const baseLine = `${l.ts.split('T')[1].slice(0, 12)} [${l.level.toUpperCase()}] ${l.msg}`;
+            const repeatCount = l.repeatCount || 1;
+            return repeatCount > 1 ? `${baseLine} (×${repeatCount})` : baseLine;
+          })
           .join('\n');
 
         const copyToClipboard = async () => {

@@ -4,11 +4,19 @@ import { Message } from '../../db';
 import Button from '../ui/Button';
 
 interface MessageInputProps {
-  onSend: (message: string, replyToId?: number) => Promise<void>;
+  onSend: (message: string, replyToId?: number) => void;
   disabled?: boolean;
   replyingTo?: Message | null;
   onCancelReply?: () => void;
 }
+
+type MessageInputEvent =
+  | React.MouseEvent
+  | React.TouchEvent
+  | React.KeyboardEvent;
+
+type KeyboardEvent = React.KeyboardEvent;
+type CancelReplyEvent = React.MouseEvent | React.TouchEvent;
 
 const MessageInput: React.FC<MessageInputProps> = ({
   onSend,
@@ -44,53 +52,52 @@ const MessageInput: React.FC<MessageInputProps> = ({
     [autoResizeTextarea]
   );
 
-  const resetTextarea = useCallback(() => {
+  const resetTextarea = () => {
     if (textareaRef.current) {
       textareaRef.current.value = '';
       textareaRef.current.style.height = 'auto';
     }
     setIsTextareaMultiline(false);
     setNewMessage('');
-  }, []);
+  };
 
-  const handleSendMessage = useCallback(async () => {
-    const cleanedMessage = newMessage.replace(/^\s+|\s+$/g, '');
+  const handleSendMessage = (e: MessageInputEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const cleanedMessage = newMessage.trim();
     if (cleanedMessage.length === 0) return;
 
     onSend(cleanedMessage, replyingTo?.id);
 
     resetTextarea();
-  }, [newMessage, onSend, replyingTo, resetTextarea]);
-
-  const handleCancelReply = useCallback(
-    (e: React.MouseEvent | React.TouchEvent) => {
-      if (!onCancelReply) return;
-      e.stopPropagation();
-      onCancelReply();
-    },
-    [onCancelReply]
-  );
-
-  const preventDefaultWrapper = (
-    fn: (e: React.MouseEvent | React.TouchEvent) => void,
-    e: React.MouseEvent | React.TouchEvent
-  ) => {
-    e.preventDefault();
-    e.stopPropagation();
-    fn(e);
   };
 
-  const focusTextarea = useCallback(() => {
-    if (textareaRef.current) {
-      textareaRef.current.focus();
+  const handleCancelReply = (e: CancelReplyEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!onCancelReply) return;
+    onCancelReply();
+  };
+
+  const focusTextarea = (e: MessageInputEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!textareaRef.current) return;
+    textareaRef.current.focus();
+  };
+
+  const handleKeyDown = (e: KeyboardEvent) => {
+    e.preventDefault();
+    if (e.key === 'Enter' && !e.shiftKey) {
+      handleSendMessage(e);
     }
-  }, []);
+  };
 
   return (
     <>
       <div
         className="bg-card/60 dark:bg-card/80 backdrop-blur-xl border-t border-border px-4 md:px-8 py-3 md:py-4"
-        onMouseDown={e => preventDefaultWrapper(focusTextarea, e)}
+        onMouseDown={focusTextarea}
       >
         {/* Reply Preview */}
         {replyingTo && (
@@ -103,8 +110,8 @@ const MessageInput: React.FC<MessageInputProps> = ({
               </div>
               {onCancelReply && (
                 <button
-                  onClick={e => preventDefaultWrapper(handleCancelReply, e)}
-                  onMouseDown={e => preventDefaultWrapper(handleCancelReply, e)}
+                  // onClick={handleCancelReply}
+                  onMouseDown={handleCancelReply}
                   className="shrink-0 p-1 hover:bg-muted rounded transition-colors"
                 >
                   <X className="w-4 h-4 text-muted-foreground" />
@@ -127,6 +134,10 @@ const MessageInput: React.FC<MessageInputProps> = ({
               onChange={handleTextareaChange}
               placeholder="Type a message"
               rows={1}
+              inputMode="text"
+              autoComplete="off"
+              autoCapitalize="sentences"
+              spellCheck={true}
               className={`pointer-events-auto touch-auto flex-1 bg-transparent text-foreground placeholder:text-muted-foreground
                          text-[15px] leading-relaxed resize-none p-0 m-0 focus:outline-none outline-none
                          scrollbar-transparent ${isTextareaMultiline ? 'overflow-y-auto' : 'overflow-y-hidden'}`}
@@ -134,7 +145,8 @@ const MessageInput: React.FC<MessageInputProps> = ({
           </div>
           <Button
             tabIndex={-1}
-            onMouseDown={e => preventDefaultWrapper(handleSendMessage, e)}
+            onKeyDown={handleKeyDown}
+            onMouseDown={handleSendMessage}
             variant="primary"
             size="custom"
             disabled={sendButtonDisabled}

@@ -2,5 +2,5 @@
 export interface QRScannerProps {
   onScan: (result: string) => void;
   onClose: () => void;
-  onError?: (error: string) => void;
+  onError: (error: string) => void;
 }

@@ -30,8 +30,9 @@ const ScanQRCode: React.FC<ScanQRCodeProps> = ({ onBack, onScanSuccess }) => {
   };
 
   const handleError = (err: string) => {
-    console.error('ScanQRCode error', err);
-    // toast.error(`Failed to scan QR code: ${err}`);
+    if (!err.includes('process was cancelled')) {
+      toast.error(`Failed to scan QR code: ${err}`);
+    }
     onBack();
   };
 

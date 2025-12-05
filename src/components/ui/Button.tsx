@@ -24,13 +24,14 @@ interface ButtonProps {
   title?: string;
   ariaLabel?: string;
   tabIndex?: number;
+  onKeyDown?: (e: React.KeyboardEvent<HTMLButtonElement>) => void;
 }
 
 const Button: React.FC<ButtonProps> = ({
   children,
   onClick,
   onMouseDown,
-
+  onKeyDown,
   disabled = false,
   loading = false,
   variant = 'primary',
@@ -87,6 +88,7 @@ const Button: React.FC<ButtonProps> = ({
       type={type}
       onClick={onClick}
       onMouseDown={onMouseDown}
+      onKeyDown={onKeyDown}
       disabled={disabled || loading}
       className={combinedClasses}
       title={title}
