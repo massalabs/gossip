@@ -123,6 +123,56 @@ async function setLastSyncTimestamp() {
 }
 
 /**
+ * Update active seekers by removing seekers that returned messages.
+ * This prevents duplicate notifications for the same messages on subsequent syncs.
+ * @param {string[]} currentSeekers - Current list of active seekers (base64-encoded)
+ * @param {Array<{key: string, value: string}>} messages - Messages returned from API
+ * @returns {Promise<void>}
+ */
+async function removeSeekersWithMessages(currentSeekers, messages) {
+  try {
+    if (typeof CapacitorKV === 'undefined' || !CapacitorKV?.set) {
+      return;
+    }
+
+    // Extract unique seekers from messages (each message has a 'key' field with the seeker)
+    const seekersWithMessages = new Set();
+    for (const message of messages) {
+      if (message && message.key) {
+        seekersWithMessages.add(message.key);
+      }
+    }
+
+    // If no messages, nothing to remove
+    if (seekersWithMessages.size === 0) {
+      return;
+    }
+
+    // Filter out seekers that returned messages
+    const remainingSeekers = currentSeekers.filter(
+      seeker => !seekersWithMessages.has(seeker)
+    );
+
+    // Update stored active seekers
+    const updatedValue = JSON.stringify(remainingSeekers);
+    await CapacitorKV.set(ACTIVE_SEEKERS_KEY, updatedValue);
+
+    console.log(
+      '[BackgroundSync] Removed',
+      seekersWithMessages.size,
+      'seeker(s) that returned messages. Remaining:',
+      remainingSeekers.length
+    );
+  } catch (err) {
+    console.log(
+      '[BackgroundSync] Failed to update active seekers:',
+      String(err)
+    );
+    // Silently ignore - don't fail the sync if we can't update seekers
+  }
+}
+
+/**
  * Check if enough time has passed since the last sync.
  * Returns true if sync should proceed, false if it should be skipped.
  */
@@ -275,14 +325,17 @@ addEventListener('backgroundSync', async (resolve, reject, args) => {
       return;
     }
 
-    // Update last sync timestamp after successful fetch
-    await setLastSyncTimestamp();
-
-    // If new messages were found, show a notification
+    // If new messages were found, show a notification and remove seekers
     if (messages.length > 0) {
       await showNewMessageNotification(messages.length);
       console.log('[BackgroundSync] Found', messages.length, 'new message(s)');
+
+      // Remove seekers that returned messages to avoid duplicate notifications
+      await removeSeekersWithMessages(activeSeekers, messages);
     }
+
+    // Update last sync timestamp after successful fetch
+    await setLastSyncTimestamp();
 
     resolve();
   } catch (error) {
