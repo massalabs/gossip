@@ -86,14 +86,12 @@ public class NetworkObserverPlugin extends Plugin {
             networkCallback = new ConnectivityManager.NetworkCallback() {
                 @Override
                 public void onAvailable(@NonNull Network network) {
-                    Log.d(TAG, "Network available");
                     String networkType = getNetworkType(network);
                     handleNetworkChange(true, networkType, "connected");
                 }
 
                 @Override
                 public void onLost(@NonNull Network network) {
-                    Log.d(TAG, "Network lost");
                     handleNetworkChange(false, NETWORK_TYPE_NONE, "disconnected");
                 }
 
@@ -106,10 +104,6 @@ public class NetworkObserverPlugin extends Plugin {
                                     NetworkCapabilities.NET_CAPABILITY_VALIDATED);
                     
                     String networkType = getNetworkTypeFromCapabilities(capabilities);
-                    
-                    Log.d(TAG, "Network capabilities changed: online=" + isOnline + 
-                            ", type=" + networkType + ", previousType=" + previousNetworkType);
-                    
                     handleNetworkChange(isOnline, networkType, "changed");
                 }
             };
@@ -156,7 +150,7 @@ public class NetworkObserverPlugin extends Plugin {
     /**
      * Manually trigger background sync with wake lock.
      * Useful for testing or forcing an immediate sync.
-     */
+     * The lock will be checked by the JavaScript code executed by BackgroundRunner.     */
     @PluginMethod
     public void triggerBackgroundSync(PluginCall call) {
         try {
@@ -207,23 +201,27 @@ public class NetworkObserverPlugin extends Plugin {
                 !previousNetworkType.equals(NETWORK_TYPE_NONE);
         
         if (becameOnline) {
-            Log.d(TAG, "Network became available (" + networkType + "), triggering sync");
             triggerSyncWithWakeLock("connected", networkType);
         } else if (networkTypeChanged) {
-            Log.d(TAG, "Network type changed (" + previousNetworkType + " → " + networkType + "), triggering sync");
             triggerSyncWithWakeLock("type_changed", networkType);
         } else if (!isOnline && wasOnline) {
-            Log.d(TAG, "Network became unavailable");
             notifyListeners("networkLost", new JSObject());
         }
         
-        wasOnline = isOnline;
-        previousNetworkType = networkType;
+        
+        // Update online state carefully:
+        // - Always update to true when online (network is validated)
+        // - Only update to false when we're actually going offline (wasOnline was true)
+        // - Don't update to false if we're in the middle of connecting (onCapabilitiesChanged can fire with false before true)
+        if (isOnline || (!isOnline && wasOnline)) {
+            wasOnline = isOnline;
+            previousNetworkType = networkType;
+        }
     }
 
     /**
      * Trigger sync with wake lock and notify listeners.
-     */
+     * The shared lock is checked by the JavaScript code executed by BackgroundRunner.     */
     private void triggerSyncWithWakeLock(String reason, String networkType) {
         // Acquire wake lock to keep device awake during sync
         acquireWakeLock();
@@ -246,9 +244,10 @@ public class NetworkObserverPlugin extends Plugin {
         try {
             // Use BackgroundSyncWorker which properly configures the RunnerWorker
             // with the required input data (label, src, event)
-            BackgroundSyncWorker.scheduleBackgroundRunnerSync(getContext());
-            
-            Log.d(TAG, "Background sync scheduled via BackgroundSyncWorker");
+            boolean scheduled = BackgroundSyncWorker.scheduleBackgroundRunnerSync(getContext());
+            if (!scheduled) {
+                Log.w(TAG, "Background sync could not be scheduled (lock may be held)");
+            }
         } catch (Exception e) {
             Log.e(TAG, "Failed to schedule background sync", e);
         }
@@ -271,7 +270,6 @@ public class NetworkObserverPlugin extends Plugin {
                 previousNetworkType = getNetworkTypeFromCapabilities(capabilities);
             }
         }
-        Log.d(TAG, "Initial network state: online=" + wasOnline + ", type=" + previousNetworkType);
     }
 
     /**
@@ -316,7 +314,6 @@ public class NetworkObserverPlugin extends Plugin {
                         WAKE_LOCK_TAG
                 );
                 wakeLock.acquire(WAKE_LOCK_TIMEOUT_MS);
-                Log.d(TAG, "Wake lock acquired for " + WAKE_LOCK_TIMEOUT_MS + "ms");
             }
         } catch (Exception e) {
             Log.e(TAG, "Failed to acquire wake lock", e);
@@ -330,13 +327,13 @@ public class NetworkObserverPlugin extends Plugin {
         try {
             if (wakeLock != null && wakeLock.isHeld()) {
                 wakeLock.release();
-                Log.d(TAG, "Wake lock released");
             }
             wakeLock = null;
         } catch (Exception e) {
             Log.e(TAG, "Failed to release wake lock", e);
         }
     }
+
 
     @Override
     protected void handleOnDestroy() {

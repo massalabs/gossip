@@ -45,13 +45,10 @@ public class BackgroundSyncWorker extends Worker {
     @NonNull
     @Override
     public Result doWork() {
-        Log.d(TAG, "BackgroundSyncWorker started - triggering BackgroundRunner");
-        
         try {
             // Schedule the BackgroundRunner's worker to execute the sync
+            // The lock will be acquired/released by the BackgroundRunner JavaScript code
             scheduleBackgroundRunnerSync(getApplicationContext());
-            
-            Log.d(TAG, "BackgroundRunner sync scheduled successfully");
             return Result.success();
         } catch (Exception e) {
             Log.e(TAG, "BackgroundSyncWorker failed", e);
@@ -65,8 +62,13 @@ public class BackgroundSyncWorker extends Worker {
      * 
      * This uses the same mechanism that BackgroundRunner uses internally,
      * ensuring compatibility with the plugin's execution model.
+     * 
+     * The lock will be acquired/released by the BackgroundRunner JavaScript code.
+     * 
+     * @param context The application context
+     * @return true if sync was scheduled, false if error occurred
      */
-    public static void scheduleBackgroundRunnerSync(Context context) {
+    public static boolean scheduleBackgroundRunnerSync(Context context) {
         try {
             // Build the input data that BackgroundRunner's RunnerWorker expects
             Data inputData = new Data.Builder()
@@ -87,14 +89,13 @@ public class BackgroundSyncWorker extends Worker {
                 runnerWorkerClass = Class.forName(BACKGROUND_RUNNER_WORKER);
             } catch (ClassNotFoundException e) {
                 Log.e(TAG, "BackgroundRunner worker class not found, skipping sync scheduling");
-                // If BackgroundRunner is not available, just log and return
-                return;
+                return false;
             }
 
             // Runtime type check to ensure the class is compatible with ListenableWorker
             if (!ListenableWorker.class.isAssignableFrom(runnerWorkerClass)) {
                 Log.e(TAG, "BackgroundRunner worker class is not a ListenableWorker: " + runnerWorkerClass.getName());
-                return;
+                return false;
             }
 
             @SuppressWarnings("unchecked")
@@ -112,15 +113,20 @@ public class BackgroundSyncWorker extends Worker {
                 workRequest
             );
 
-            Log.d(TAG, "Scheduled BackgroundRunner sync with label: " + RUNNER_LABEL);
+            return true;
         } catch (Exception e) {
             Log.e(TAG, "Failed to schedule BackgroundRunner sync", e);
+            return false;
         }
     }
 
     /**
      * Schedule a delayed background sync.
      * This is useful for scheduling syncs after a short delay (e.g., after boot).
+     * 
+     * Note: For delayed syncs, we schedule the work but the lock will be checked
+     * when the sync actually executes. Since delayed syncs go directly to RunnerWorker,
+     * they will execute the JS script which should handle duplicate prevention.
      * 
      * @param context The application context
      * @param delayMinutes The delay in minutes before the sync runs
@@ -166,7 +172,6 @@ public class BackgroundSyncWorker extends Worker {
                 workRequest
             );
 
-            Log.d(TAG, "Scheduled delayed BackgroundRunner sync in " + delayMinutes + " minutes");
         } catch (Exception e) {
             Log.e(TAG, "Failed to schedule delayed sync", e);
         }
