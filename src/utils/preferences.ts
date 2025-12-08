@@ -71,10 +71,6 @@ export async function setLastSyncTimestamp(): Promise<void> {
           LAST_SYNC_TIMESTAMP_KEY,
           value
         );
-      } else {
-        console.log(
-          '[Preferences] App is in background, skipping BackgroundRunner timestamp update to avoid overwriting background runner state'
-        );
       }
     } catch {
       // Silently ignore

@@ -23,7 +23,6 @@ public class AppUpdateReceiver extends BroadcastReceiver {
         }
 
         String action = intent.getAction();
-        Log.d(TAG, "Received broadcast: " + action);
 
         if (Intent.ACTION_MY_PACKAGE_REPLACED.equals(action)) {
             handleAppUpdate(context);
@@ -34,13 +33,12 @@ public class AppUpdateReceiver extends BroadcastReceiver {
      * Handle app update by immediately scheduling background sync.
      */
     private void handleAppUpdate(Context context) {
-        Log.d(TAG, "App updated - scheduling immediate background sync");
-        
         try {
             // Schedule an immediate sync after app update
-            BackgroundSyncWorker.scheduleBackgroundRunnerSync(context);
-            
-            Log.d(TAG, "Background sync scheduled after app update");
+            boolean scheduled = BackgroundSyncWorker.scheduleBackgroundRunnerSync(context);
+            if (!scheduled) {
+                Log.w(TAG, "Background sync could not be scheduled after update (lock may be held)");
+            }
         } catch (Exception e) {
             Log.e(TAG, "Failed to schedule background sync after update", e);
         }

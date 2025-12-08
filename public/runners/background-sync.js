@@ -12,7 +12,7 @@
 // IMPORTANT: Always call resolve() or reject() to let the OS know when
 // the background work is finished.
 
-/* global addEventListener, console, CapacitorNotifications, CapacitorKV, fetch */
+/* global addEventListener, console, CapacitorNotifications, CapacitorKV, fetch, CapacitorPlugins */
 
 // Keys used for BackgroundRunner storage (via CapacitorKV)
 const ACTIVE_SEEKERS_KEY = 'gossip-active-seekers';
@@ -24,7 +24,7 @@ const DEFAULT_API_BASE_URL = 'https://gossip.massa.net/api';
 
 // Minimum interval between syncs to avoid redundant work
 // If a sync was performed within this window, skip the current sync
-const MIN_SYNC_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
+const MIN_SYNC_INTERVAL_MS = 1 * 60 * 1000; // 1 minute
 
 /**
  * Retrieve active seekers from BackgroundRunner storage.
@@ -156,13 +156,6 @@ async function removeSeekersWithMessages(currentSeekers, messages) {
     // Update stored active seekers
     const updatedValue = JSON.stringify(remainingSeekers);
     await CapacitorKV.set(ACTIVE_SEEKERS_KEY, updatedValue);
-
-    console.log(
-      '[BackgroundSync] Removed',
-      seekersWithMessages.size,
-      'seeker(s) that returned messages. Remaining:',
-      remainingSeekers.length
-    );
   } catch (err) {
     console.log(
       '[BackgroundSync] Failed to update active seekers:',
@@ -287,9 +280,59 @@ function isNetworkAvailable() {
   return true;
 }
 
-addEventListener('backgroundSync', async (resolve, reject, args) => {
+/**
+ * Acquire the sync lock.
+ * Returns true if the lock was acquired, false if another sync is running.
+ */
+async function acquireSyncLock() {
   try {
-    // Check network connectivity first
+    if (
+      typeof CapacitorPlugins !== 'undefined' &&
+      CapacitorPlugins.SyncManager
+    ) {
+      const result = await CapacitorPlugins.SyncManager.acquireLock();
+      return result?.acquired === true;
+    }
+    // If plugin not available, assume lock acquired (allow sync to proceed)
+    return true;
+  } catch (err) {
+    console.log('[BackgroundSync] Could not acquire sync lock:', String(err));
+    // If check fails, allow sync to proceed (better to sync than skip)
+    return true;
+  }
+}
+
+/**
+ * Release the sync lock.
+ */
+async function releaseSyncLock() {
+  try {
+    if (
+      typeof CapacitorPlugins !== 'undefined' &&
+      CapacitorPlugins.SyncManager
+    ) {
+      await CapacitorPlugins.SyncManager.releaseLock();
+    }
+  } catch (err) {
+    console.log('[BackgroundSync] Could not release sync lock:', String(err));
+  }
+}
+
+addEventListener('backgroundSync', async (resolve, reject, args) => {
+  let lockAcquired = false;
+
+  try {
+    // Acquire sync lock first to prevent concurrent executions
+    lockAcquired = await acquireSyncLock();
+    if (!lockAcquired) {
+      console.log(
+        '[BackgroundSync] Sync lock is held, skipping sync (another sync is running)'
+      );
+      resolve();
+      return;
+    }
+
+    // Check network connectivity
     if (!isNetworkAvailable()) {
       console.log('[BackgroundSync] Network unavailable, skipping sync');
       resolve();
@@ -328,7 +371,7 @@ addEventListener('backgroundSync', async (resolve, reject, args) => {
     // If new messages were found, show a notification and remove seekers
     if (messages.length > 0) {
       await showNewMessageNotification(messages.length);
-      console.log('[BackgroundSync] Found', messages.length, 'new message(s)');
+      console.log(`[BackgroundSync] Found ${messages.length} new message(s)`);
 
       // Remove seekers that returned messages to avoid duplicate notifications
       await removeSeekersWithMessages(activeSeekers, messages);
@@ -341,5 +384,10 @@ addEventListener('backgroundSync', async (resolve, reject, args) => {
   } catch (error) {
     console.log('[BackgroundSync] Task failed:', String(error));
     reject(error);
+  } finally {
+    // Always release the lock when sync completes (success or failure)
+    if (lockAcquired) {
+      await releaseSyncLock();
+    }
   }
 });
