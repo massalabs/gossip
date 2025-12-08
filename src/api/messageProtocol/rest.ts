@@ -112,6 +112,10 @@ export class RestMessageProtocol implements IMessageProtocol {
       throw new Error(response.error || 'Failed to fetch public key');
     }
 
+    if (!response.data.value) {
+      throw new Error('Public key not found');
+    }
+
     return response.data.value;
   }
 

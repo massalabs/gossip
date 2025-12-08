@@ -4,7 +4,7 @@ import FormInput from '../ui/FormInput';
 interface NameFieldProps {
   name: string;
   onChange: (value: string) => void;
-  error: string | null;
+  error?: string;
 }
 
 const NameField: React.FC<NameFieldProps> = ({ name, onChange, error }) => {

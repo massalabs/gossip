@@ -10,13 +10,13 @@ import {
 import { UserPublicKeys } from '../assets/generated/wasm/gossip_wasm';
 import { ensureDiscussionExists } from '../crypto/discussionInit';
 import { useFileShareContact } from './useFileShareContact';
-import { authService } from '../services/auth';
+import { authService, PublicKeyResult } from '../services/auth';
 import toast from 'react-hot-toast';
 import { ROUTES } from '../constants/routes';
 
 type FieldState = {
   value: string;
-  error: string | null;
+  error?: string;
   loading: boolean;
 };
 
@@ -29,17 +29,14 @@ export function useContactForm() {
 
   const [name, setName] = useState<FieldState>({
     value: '',
-    error: null,
     loading: false,
   });
   const [userId, setUserId] = useState<FieldState>({
     value: '',
-    error: null,
     loading: false,
   });
   const [message, setMessage] = useState<FieldState>({
     value: '',
-    error: null,
     loading: false,
   });
 
@@ -49,41 +46,28 @@ export function useContactForm() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const getPublicKey = useCallback(
-    async (
-      uid: string
-    ): Promise<{
-      publicKey: UserPublicKeys | null;
-      error: string | null;
-    }> => {
+    async (uid: string): Promise<PublicKeyResult> => {
       const cached = publicKeysCache.current.get(uid);
 
       if (cached) {
-        return { publicKey: cached, error: null };
+        return { publicKey: cached };
       }
 
-      setUserId(prev => ({ ...prev, loading: true, error: null }));
+      const result = await authService.fetchPublicKeyByUserId(uid);
 
-      const { success, publicKey, error } =
-        await authService.fetchPublicKeyByUserId(uid);
-
-      if (!success || !publicKey) {
-        return {
-          publicKey: null,
-          error: `Unable to fetch associated public key: ${error}`,
-        };
+      if (result.publicKey) {
+        publicKeysCache.current.set(uid, result.publicKey);
       }
 
-      publicKeysCache.current.set(uid, publicKey);
-
-      return { publicKey, error: null };
+      return result;
     },
     []
   );
 
   const canSubmit =
-    name.error === null &&
+    !name.error &&
     name.value.trim().length > 0 &&
-    userId.error === null &&
+    !userId.error &&
     userId.value.trim().length > 0 &&
     publicKeys !== null &&
     !isSubmitting &&
@@ -100,7 +84,7 @@ export function useContactForm() {
     const result = validateUsernameFormat(trimmed);
     setName(_ => ({
       value: trimmed,
-      error: result.error || null,
+      error: result.error,
       loading: false,
     }));
   }, []);
@@ -115,7 +99,7 @@ export function useContactForm() {
 
       setUserId(prev => ({
         ...prev,
-        error: null,
+        error: undefined,
         loading: true,
       }));
 
@@ -124,7 +108,7 @@ export function useContactForm() {
       if (!result.valid) {
         setUserId(_ => ({
           value: trimmed,
-          error: result.error || null,
+          error: result.error,
           loading: false,
         }));
         return;
@@ -132,7 +116,7 @@ export function useContactForm() {
 
       const { publicKey, error } = await getPublicKey(trimmed);
 
-      if (error) {
+      if (!publicKey) {
         setUserId(prev => ({ ...prev, error, loading: false }));
         return;
       }
@@ -144,7 +128,7 @@ export function useContactForm() {
   );
 
   const handleMessageChange = useCallback((value: string) => {
-    setMessage({ value, error: null, loading: false });
+    setMessage({ value, loading: false });
   }, []);
 
   const handleFileImport = useCallback(
@@ -177,7 +161,7 @@ export function useContactForm() {
         handleNameChange(fileContact.userName);
       }
 
-      setUserId({ value: derivedUserId, error: null, loading: false });
+      setUserId({ value: derivedUserId, loading: false });
     },
     [importFileContact, handleNameChange, userProfile]
   );
