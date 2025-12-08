@@ -58,11 +58,14 @@ export function ThemeProvider({
         });
 
         void StatusBar.setBackgroundColor({ color: backgroundColor });
-        void EdgeToEdge.setBackgroundColor({ color: backgroundColor }).catch(
-          err => {
-            console.warn('Failed to set EdgeToEdge background color:', err);
-          }
-        );
+        // EdgeToEdge is Android-only
+        if (Capacitor.getPlatform() === 'android') {
+          void EdgeToEdge.setBackgroundColor({ color: backgroundColor }).catch(
+            err => {
+              console.warn('Failed to set EdgeToEdge background color:', err);
+            }
+          );
+        }
       }
     };
 
