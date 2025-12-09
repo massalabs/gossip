@@ -19,7 +19,6 @@
 		FAA8F0912EE6E27F00CE65AE /* BackgroundRefreshPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAA8F0902EE6E27F00CE65AE /* BackgroundRefreshPlugin.swift */; };
 		FAA8F09D2EE6EA6400CE65AE /* MyViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAA8F09C2EE6EA6400CE65AE /* MyViewController.swift */; };
 		FAA8F0A02EE6F1C000CE65AE /* NetworkObserverPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAA8F09F2EE6F1C000CE65AE /* NetworkObserverPlugin.swift */; };
-		FAA8F0A82EE8321A00CE65AE /* SyncManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAA8F0A72EE8321A00CE65AE /* SyncManager.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -38,7 +37,6 @@
 		FAA8F0902EE6E27F00CE65AE /* BackgroundRefreshPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundRefreshPlugin.swift; sourceTree = "<group>"; };
 		FAA8F09C2EE6EA6400CE65AE /* MyViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MyViewController.swift; sourceTree = "<group>"; };
 		FAA8F09F2EE6F1C000CE65AE /* NetworkObserverPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkObserverPlugin.swift; sourceTree = "<group>"; };
-		FAA8F0A72EE8321A00CE65AE /* SyncManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncManager.swift; sourceTree = "<group>"; };
 		FC68EB0AF532CFC21C3344DD /* Pods-Gossip.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Gossip.debug.xcconfig"; path = "Pods/Target Support Files/Pods-Gossip/Pods-Gossip.debug.xcconfig"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -109,7 +107,6 @@
 		FAA8F0862EE6DCD100CE65AE /* plugins */ = {
 			isa = PBXGroup;
 			children = (
-				FAA8F0A42EE831D600CE65AE /* syncManager */,
 				FAA8F09E2EE6F17300CE65AE /* networkObserver */,
 				FAA8F08F2EE6E25E00CE65AE /* backgroundRefresh */,
 				FAA8F0872EE6DCFE00CE65AE /* backgroundStorage */,
@@ -139,14 +136,6 @@
 				FAA8F09F2EE6F1C000CE65AE /* NetworkObserverPlugin.swift */,
 			);
 			path = networkObserver;
-			sourceTree = "<group>";
-		};
-		FAA8F0A42EE831D600CE65AE /* syncManager */ = {
-			isa = PBXGroup;
-			children = (
-				FAA8F0A72EE8321A00CE65AE /* SyncManager.swift */,
-			);
-			path = syncManager;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -264,7 +253,6 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				FAA8F0A82EE8321A00CE65AE /* SyncManager.swift in Sources */,
 				FAA8F08A2EE6DD3800CE65AE /* BackgroundRunnerStoragePlugin.swift in Sources */,
 				FAA8F0912EE6E27F00CE65AE /* BackgroundRefreshPlugin.swift in Sources */,
 				FAA8F0A02EE6F1C000CE65AE /* NetworkObserverPlugin.swift in Sources */,

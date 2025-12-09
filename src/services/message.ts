@@ -127,10 +127,6 @@ export class MessageService {
 
         if (foreground) {
           await db.setActiveSeekers(seekers);
-        } else {
-          console.log(
-            '[MessageService] App is in background, skipping seeker update to avoid overwriting background runner seekers'
-          );
         }
       } catch (error) {
         // Log error but don't fail the entire fetch operation
