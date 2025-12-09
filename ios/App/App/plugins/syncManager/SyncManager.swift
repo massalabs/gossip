@@ -65,7 +65,7 @@ public class SyncManager: CAPPlugin, CAPBridgedPlugin {
      * Release the sync lock.
      */
     @objc func releaseLock(_ call: CAPPluginCall) {
-        lockQueue.async {
+        lockQueue.sync {
             self.releaseLockInternal()
             call.resolve()
         }

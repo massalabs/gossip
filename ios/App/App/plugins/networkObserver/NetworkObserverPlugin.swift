@@ -87,6 +87,7 @@ public class NetworkObserverPlugin: CAPPlugin, CAPBridgedPlugin {
     
     /**
      * Manually trigger background sync.
+     * The lock will be acquired/released by the BackgroundRunner JavaScript code.
      */
     @objc func triggerBackgroundSync(_ call: CAPPluginCall) {
         DispatchQueue.main.async { [weak self] in
@@ -154,6 +155,7 @@ public class NetworkObserverPlugin: CAPPlugin, CAPBridgedPlugin {
     
     /**
      * Trigger sync with background task and notify listeners.
+     * The lock will be acquired/released by the BackgroundRunner JavaScript code.
      */
     private func triggerSyncWithBackgroundTask(reason: String, networkType: String) {
         DispatchQueue.main.async { [weak self] in
@@ -198,7 +200,6 @@ public class NetworkObserverPlugin: CAPPlugin, CAPBridgedPlugin {
                 let request = BGAppRefreshTaskRequest(identifier: Self.backgroundTaskIdentifier)
                 request.earliestBeginDate = Date() // As soon as possible
                 try BGTaskScheduler.shared.submit(request)
-                logger.info("Scheduled immediate BGAppRefreshTask")
             } catch {
                 logger.error("Failed to schedule BGAppRefreshTask: \(error.localizedDescription)")
             }

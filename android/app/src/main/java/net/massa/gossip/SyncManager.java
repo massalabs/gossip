@@ -126,4 +126,3 @@ public class SyncManager extends Plugin {
         prefs.edit().remove(KEY_LOCK_TIME).commit();
     }
 }
-

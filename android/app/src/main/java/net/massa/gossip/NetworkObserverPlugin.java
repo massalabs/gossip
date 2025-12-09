@@ -208,7 +208,6 @@ public class NetworkObserverPlugin extends Plugin {
             notifyListeners("networkLost", new JSObject());
         }
         
-        
         // Update online state carefully:
         // - Always update to true when online (network is validated)
         // - Only update to false when we're actually going offline (wasOnline was true)
@@ -221,7 +220,8 @@ public class NetworkObserverPlugin extends Plugin {
 
     /**
      * Trigger sync with wake lock and notify listeners.
-     * The shared lock is checked by the JavaScript code executed by BackgroundRunner.     */
+     * The shared lock is checked by the JavaScript code executed by BackgroundRunner.
+     */
     private void triggerSyncWithWakeLock(String reason, String networkType) {
         // Acquire wake lock to keep device awake during sync
         acquireWakeLock();
@@ -333,7 +333,6 @@ public class NetworkObserverPlugin extends Plugin {
             Log.e(TAG, "Failed to release wake lock", e);
         }
     }
-
 
     @Override
     protected void handleOnDestroy() {
