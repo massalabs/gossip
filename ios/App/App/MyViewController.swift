@@ -6,6 +6,7 @@ class MyViewController: CAPBridgeViewController {
         bridge?.registerPluginInstance(BackgroundRunnerStoragePlugin())
         bridge?.registerPluginInstance(BackgroundRefreshPlugin())
         bridge?.registerPluginInstance(NetworkObserverPlugin())
+        bridge?.registerPluginInstance(SyncManager())
     }
 }
 
