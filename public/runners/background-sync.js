@@ -12,12 +12,13 @@
 // IMPORTANT: Always call resolve() or reject() to let the OS know when
 // the background work is finished.
 
-/* global addEventListener, console, CapacitorNotifications, CapacitorKV, fetch, CapacitorPlugins */
+/* global addEventListener, console, CapacitorNotifications, CapacitorKV, fetch */
 
 // Keys used for BackgroundRunner storage (via CapacitorKV)
 const ACTIVE_SEEKERS_KEY = 'gossip-active-seekers';
 const API_BASE_URL_KEY = 'gossip-api-base-url';
 const LAST_SYNC_TIMESTAMP_KEY = 'gossip-last-sync-timestamp';
+const SYNC_LOCK_KEY = 'gossip-sync-lock-time';
 
 // Fallback API URL if not stored in preferences
 const DEFAULT_API_BASE_URL = 'https://gossip.massa.net/api';
@@ -256,6 +257,11 @@ async function showNewMessageNotification(messageCount) {
         id: Date.now() % 100000, // Unique ID based on timestamp
         title,
         body,
+        autoCancel: true,
+        schedule: {
+          allowWhileIdle: true,
+          at: Date.now(),
+        },
       },
     ]);
   } catch (err) {
@@ -280,20 +286,52 @@ function isNetworkAvailable() {
   return true;
 }
 
+// Maximum time to wait before releasing sync lock (90 seconds)
+// This acts as a safety timeout in case the sync doesn't complete.
+// Normal syncs should complete in seconds, so 90 seconds is generous.
+const SYNC_LOCK_TIMEOUT_MS = 90 * 1000;
+
 /**
- * Acquire the sync lock.
+ * Acquire the sync lock using CapacitorKV.
  * Returns true if the lock was acquired, false if another sync is running.
+ *
+ * Uses a timestamp-based lock with automatic expiration to handle cases
+ * where the sync process crashes or doesn't complete properly.
  */
 async function acquireSyncLock() {
   try {
     if (
-      typeof CapacitorPlugins !== 'undefined' &&
-      CapacitorPlugins.SyncManager
+      typeof CapacitorKV === 'undefined' ||
+      !CapacitorKV?.get ||
+      !CapacitorKV?.set
     ) {
-      const result = await CapacitorPlugins.SyncManager.acquireLock();
-      return result?.acquired === true;
+      console.log(
+        '[BackgroundSync] CapacitorKV not available, assuming lock acquired'
+      );
+      // If CapacitorKV not available, assume lock acquired (allow sync to proceed)
+      return true;
     }
-    // If plugin not available, assume lock acquired (allow sync to proceed)
+
+    const currentTime = Date.now();
+
+    // Check if lock exists
+    const rawLockValue = await CapacitorKV.get(SYNC_LOCK_KEY);
+    const lockValue = extractKVValue(rawLockValue);
+
+    if (lockValue) {
+      const lockTime = parseInt(lockValue, 10);
+      if (!isNaN(lockTime)) {
+        const lockAge = currentTime - lockTime;
+
+        // Check if lock is still valid (not expired)
+        if (lockAge < SYNC_LOCK_TIMEOUT_MS) {
+          return false;
+        }
+      }
+    }
+
+    // Acquire the lock by storing current timestamp
+    await CapacitorKV.set(SYNC_LOCK_KEY, String(currentTime));
     return true;
   } catch (err) {
     console.log('[BackgroundSync] Could not acquire sync lock:', String(err));
@@ -303,16 +341,15 @@ async function acquireSyncLock() {
 }
 
 /**
- * Release the sync lock.
+ * Release the sync lock using CapacitorKV.
  */
 async function releaseSyncLock() {
   try {
-    if (
-      typeof CapacitorPlugins !== 'undefined' &&
-      CapacitorPlugins.SyncManager
-    ) {
-      await CapacitorPlugins.SyncManager.releaseLock();
+    if (typeof CapacitorKV === 'undefined' || !CapacitorKV?.remove) {
+      return;
     }
+
+    await CapacitorKV.remove(SYNC_LOCK_KEY);
   } catch (err) {
     console.log('[BackgroundSync] Could not release sync lock:', String(err));
   }
