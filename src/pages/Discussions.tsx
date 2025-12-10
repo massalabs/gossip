@@ -21,7 +21,7 @@ const Discussions: React.FC = () => {
   }
 
   return (
-    <div className="h-full flex flex-col bg-background relative">
+    <div className="h-full flex flex-col bg-card relative">
       <PageHeader title="Discussions" />
       {/* Scrollable content with bottom padding to prevent content from being hidden behind the button/nav */}
       <div className="flex-1 overflow-y-auto pt-2 px-2 pb-20">

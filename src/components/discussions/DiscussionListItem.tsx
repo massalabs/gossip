@@ -112,7 +112,7 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
           isPendingIncoming || isPendingOutgoing
             ? 'cursor-not-allowed opacity-95'
             : 'cursor-pointer hover:ring-1 hover:ring-border'
-        } bg-card border border-badge-border rounded-xl p-4 transition-colors mb-1`}
+        } p-4 transition-colors mb-1`}
         {...(!(isPendingIncoming || isPendingOutgoing)
           ? {
               onClick: () => onSelect(discussion),
