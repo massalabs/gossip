@@ -129,10 +129,10 @@
   /* Muted colors */
   --muted: #252529; /* muted background */
   --muted-foreground: #a0a0a8; /* dove gray - subtle text */
-  /* Header scrolled background - same as card in dark mode */
+  /* Header scrolled background - use muted in dark mode for contrast */
   --header-scrolled: var(
-    --card
-  ); /* use card color for scrolled header in dark mode */
+    --muted
+  ); /* muted grey for scrolled header in dark mode */
 
   /* Status colors */
   --success: #22c55e; /* green-500 - online status, success states */
