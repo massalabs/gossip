@@ -97,6 +97,7 @@ const NewContact: React.FC = () => {
           <button
             onClick={handleSubmit}
             disabled={!canSubmit || isSubmitting}
+            tabIndex={!canSubmit || isSubmitting ? -1 : 0}
             className="text-foreground hover:text-primary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             aria-label="Add contact"
           >
