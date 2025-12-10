@@ -159,7 +159,7 @@ const Settings = (): React.ReactElement => {
   }
 
   return (
-    <div className="bg-card h-full overflow-auto">
+    <div className="bg-background h-full overflow-auto">
       <div className="h-full">
         {/* Header */}
         <PageHeader title="Settings" />
@@ -199,12 +199,17 @@ const Settings = (): React.ReactElement => {
         {/* Settings Options */}
         <div className="px-4 space-y-2 pb-20">
           <div className="py-2">
-            <InfoRow label="Version" value={APP_VERSION} />
+            <InfoRow
+              label="Version"
+              value={APP_VERSION}
+              containerClassName="bg-transparent"
+            />
             {showDebugOption && (
               <InfoRow
                 label="Build ID"
                 value={appBuildId || 'unknown'}
                 valueClassName="text-xs text-muted-foreground font-mono"
+                containerClassName="bg-transparent"
               />
             )}
           </div>

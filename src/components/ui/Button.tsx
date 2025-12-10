@@ -12,8 +12,6 @@ interface ButtonProps {
     | 'danger'
     | 'ghost'
     | 'outline'
-    | 'gradient-emerald'
-    | 'gradient-blue'
     | 'circular'
     | 'link'
     | 'icon';
@@ -46,21 +44,21 @@ const Button: React.FC<ButtonProps> = ({
   const baseClasses = `inline-flex items-center justify-center font-medium transition-all 
     focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 
     focus-visible:ring-offset-transparent disabled:cursor-not-allowed 
-    disabled:pointer-events-none disabled:touch-none rounded-full`;
+    disabled:pointer-events-none disabled:touch-none `;
 
   const variantClasses = {
     primary:
-      'bg-primary hover:bg-primary/90 disabled:bg-muted text-primary-foreground disabled:text-muted-foreground focus:ring-ring',
+      'bg-primary hover:bg-primary/90 disabled:bg-muted text-primary-foreground disabled:text-muted-foreground focus:ring-ring rounded-full',
     secondary:
       'bg-secondary hover:bg-secondary/80 disabled:bg-muted text-secondary-foreground disabled:text-muted-foreground focus:ring-ring',
     danger:
       'bg-destructive hover:bg-destructive/90 disabled:bg-destructive/50 text-destructive-foreground focus:ring-ring',
     ghost: 'bg-transparent hover:bg-accent text-foreground focus:ring-ring',
-    outline:
-      'bg-card border border-border text-foreground hover:bg-accent/50 hover:border-accent shadow-sm hover:shadow-md disabled:bg-muted disabled:text-muted-foreground disabled:border-border/50 disabled:opacity-60 disabled:hover:bg-muted disabled:hover:border-border/50 disabled:hover:shadow-sm',
-    'gradient-emerald':
-      'bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm',
-    'gradient-blue': 'bg-blue-600 hover:bg-blue-700 text-white shadow-sm',
+    outline: `bg-card border border-border text-foreground hover:bg-accent/50 
+    hover:border-accent shadow-sm hover:shadow-md disabled:bg-muted 
+    disabled:text-muted-foreground disabled:border-border/50 
+    disabled:opacity-60 disabled:hover:bg-muted disabled:hover:border-border/50 
+    disabled:hover:shadow-sm`,
     circular: 'rounded-full hover:bg-accent/50 active:scale-95',
     link: 'bg-transparent text-primary hover:text-primary/80 underline p-0 shadow-none',
     icon: 'bg-transparent hover:bg-accent/50 rounded-full p-2',

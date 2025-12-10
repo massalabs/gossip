@@ -38,7 +38,7 @@ const ShareContact: React.FC<ShareContactProps> = ({
   }, [exportFileContact, publicKey, userName]);
 
   return (
-    <div className="bg-card h-full overflow-auto app-max-w mx-auto">
+    <div className="bg-background h-full overflow-auto app-max-w mx-auto">
       <div className="app-max-w mx-auto">
         <PageHeader title="Share Contact" onBack={onBack} />
 

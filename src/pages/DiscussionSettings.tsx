@@ -102,7 +102,7 @@ const DiscussionSettings: React.FC = () => {
   }
 
   return (
-    <div className="bg-card h-full overflow-auto app-max-w mx-auto">
+    <div className="bg-background h-full overflow-auto app-max-w mx-auto">
       <PageHeader title="Discussion Settings" onBack={() => navigate(-1)} />
 
       <div className="flex-1 pt-4 px-6 pb-6">

@@ -26,9 +26,9 @@ const DiscussionHeader: React.FC<DiscussionHeaderProps> = ({
   // Header with title (for list view with custom title)
   if (title && !contact) {
     return (
-      <div className="h-[72px] flex items-center bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl border-b border-gray-100 dark:border-gray-800/50 shadow-sm">
-        <div className="flex items-center w-full px-5">
-          <h1 className="text-xl font-semibold text-gray-900 dark:text-white">
+      <div className="px-6 py-4 border-b border-border bg-card">
+        <div className="flex items-center w-full">
+          <h1 className="text-xl font-semibold text-black dark:text-white">
             {title}
           </h1>
         </div>
@@ -39,13 +39,11 @@ const DiscussionHeader: React.FC<DiscussionHeaderProps> = ({
   // Guard against undefined/null contact when contact is expected
   if (!contact) {
     return (
-      <div className="h-[72px] flex items-center bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl border-b border-gray-100 dark:border-gray-800/50 shadow-sm">
-        <div className="flex items-center w-full px-5">
+      <div className="px-6 py-4 border-b border-border bg-card">
+        <div className="flex items-center w-full">
           <BackButton />
           <div className="flex-1">
-            <p className="text-gray-500 dark:text-gray-400">
-              Contact not found
-            </p>
+            <p className="text-muted-foreground">Contact not found</p>
           </div>
         </div>
       </div>
@@ -67,35 +65,34 @@ const DiscussionHeader: React.FC<DiscussionHeaderProps> = ({
   };
 
   return (
-    <div className="h-[72px] flex items-center bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl border-b border-gray-100 dark:border-gray-800/50 shadow-sm">
-      <div className="flex items-center w-full px-5">
+    <div className="px-6 py-4 border-b border-border bg-card">
+      <div className="flex items-center w-full gap-3">
         {onBack && (
           <Button
             onClick={onBack}
             variant="circular"
             size="custom"
-            className="w-11 h-11 flex items-center justify-center mr-2 group hover:bg-muted/50 active:bg-muted/70"
+            ariaLabel="Back"
+            className="w-8 h-8 flex items-center justify-center"
           >
-            <ChevronLeft className="w-6 h-6 text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-white transition-colors" />
+            <ChevronLeft className="w-5 h-5 text-gray-600 dark:text-gray-300" />
           </Button>
         )}
         <button
           onClick={handleHeaderClick}
-          className="flex items-center flex-1 min-w-0 group hover:opacity-80 transition-opacity active:opacity-70"
+          className="flex items-center flex-1 min-w-0 gap-3 group hover:opacity-80 transition-opacity active:opacity-70"
           title="Discussion settings"
         >
           <div className="relative">
             <ContactAvatar contact={contact} size={12} />
             {contact?.isOnline && (
-              <span className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-success border-2 border-white dark:border-gray-900 rounded-full shadow-sm"></span>
+              <span className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-success border-2 border-card rounded-full shadow-sm"></span>
             )}
           </div>
-          <div className="ml-3.5 flex-1 min-w-0 text-left">
-            <div className="flex items-center gap-2">
-              <h1 className="text-[17px] font-semibold text-gray-900 dark:text-white truncate leading-tight group-hover:text-primary transition-colors">
-                {displayName}
-              </h1>
-            </div>
+          <div className="flex-1 min-w-0 text-left">
+            <h1 className="text-xl font-semibold text-black dark:text-white truncate leading-tight">
+              {displayName}
+            </h1>
           </div>
         </button>
       </div>

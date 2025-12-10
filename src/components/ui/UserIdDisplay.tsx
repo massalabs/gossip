@@ -77,6 +77,8 @@ const UserIdDisplay: React.FC<UserIdDisplayProps> = ({
           onClick={handleToggleClick}
           className="shrink-0 p-1 hover:bg-muted rounded transition-colors"
           title={visible ? 'Hide User ID' : 'Show User ID'}
+          aria-pressed={visible}
+          aria-label={visible ? 'Hide User ID' : 'Show User ID'}
         >
           {visible ? (
             <Eye

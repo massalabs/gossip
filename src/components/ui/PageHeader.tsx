@@ -17,7 +17,7 @@ const PageHeader: React.FC<PageHeaderProps> = ({
   className = '',
 }) => {
   return (
-    <div className={`px-6 py-4 border-b border-border ${className}`}>
+    <div className={`px-6 py-4 border-b border-border bg-card ${className}`}>
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           {onBack && (

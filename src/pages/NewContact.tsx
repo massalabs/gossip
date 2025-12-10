@@ -77,7 +77,7 @@ const NewContact: React.FC = () => {
   }
 
   return (
-    <div className="bg-card h-full overflow-auto app-max-w mx-auto">
+    <div className="bg-background h-full overflow-auto app-max-w mx-auto">
       <PageHeader title="New contact" onBack={handleBack} />
 
       {/* Main Form */}

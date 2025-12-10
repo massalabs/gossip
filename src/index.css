@@ -29,8 +29,10 @@
   --destructive-foreground: var(--secondary-foreground);
 
   /* Accent colors */
-  --accent: #5eead4; /* lighter teal - green/cyan accent adapted for light mode */
-  --accent-foreground: #ffffff; /* white text on accent */
+  --accent: #7dd3c0; /* muted teal - softer, less flashy for light mode */
+  --accent-foreground: var(
+    --foreground
+  ); /* dark text on accent for light mode */
 
   /* Muted colors */
   --muted: #f0f1f3; /* muted background */
@@ -78,7 +80,7 @@
   /* Teal primary - distinct from Phantom's purple */
 
   /* Base colors */
-  --background: #151518; /* dark background from Figma */
+  --background: #18181b; /* dark background from Figma */
   --foreground: #e8e8ea; /* creamy off-white - primary text */
   --card: #1e1e22; /* surface/cards from Figma */
   --card-foreground: var(--foreground);
