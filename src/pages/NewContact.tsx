@@ -81,89 +81,82 @@ const NewContact: React.FC = () => {
       <PageHeader title="New contact" onBack={handleBack} />
 
       {/* Main Form */}
-      <div className="px-6 pb-32">
-        <div className="bg-card rounded-xl p-6 space-y-5">
-          {/* Import Options - File and QR Code */}
-          <div className="py-6 border-b border-border">
-            <div className="text-center mb-4">
-              <p className="text-sm text-muted-foreground mb-4">
-                Import contact
-              </p>
-              <div className="flex gap-3 justify-center">
-                <Button
-                  onClick={() => fileInputRef.current?.click()}
-                  variant="primary"
-                  size="md"
-                  className="inline-flex items-center gap-2 flex-1 max-w-[140px]"
-                  disabled={fileState.isLoading}
-                >
-                  <Upload className="w-5 h-5" />
-                  <span>By file</span>
-                </Button>
-                <Button
-                  onClick={() => setShowScanner(true)}
-                  variant="outline"
-                  size="md"
-                  className="inline-flex items-center gap-2 flex-1 max-w-[140px]"
-                >
-                  <Camera className="w-5 h-5" />
-                  <span>Scan QR</span>
-                </Button>
-              </div>
-            </div>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".yaml,.yml"
-              className="hidden"
-              onChange={handleFileImport}
-              disabled={fileState.isLoading}
-              aria-label="Import contact from YAML file"
-            />
-            {fileState.error && (
-              <p
-                className="text-sm text-destructive mt-2 text-center"
-                role="alert"
+      <div className="bg-card rounded-xl p-6 px- space-y-5 ">
+        {/* Import Options - File and QR Code */}
+        <div className="py-6 border-b border-border">
+          <div className="text-center mb-4">
+            <p className="text-sm text-muted-foreground mb-4">Import contact</p>
+            <div className="flex gap-3 justify-center">
+              <Button
+                onClick={() => setShowScanner(true)}
+                variant="primary"
+                size="md"
+                className="inline-flex items-center gap-2 flex-1 max-w-[140px]"
               >
-                {fileState.error}
-              </p>
-            )}
+                <Camera className="w-5 h-5" />
+                <span>Scan QR</span>
+              </Button>
+              <Button
+                onClick={() => fileInputRef.current?.click()}
+                variant="outline"
+                size="md"
+                className="inline-flex items-center gap-2 flex-1 max-w-[140px]"
+                disabled={fileState.isLoading}
+              >
+                <Upload className="w-5 h-5" />
+                <span>By file</span>
+              </Button>
+            </div>
           </div>
-
-          <UserIdField
-            userId={userId.value}
-            onChange={handleUserIdChange}
-            error={userId.error}
-            isFetching={userId.loading}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".yaml,.yml"
+            className="hidden"
+            onChange={handleFileImport}
+            disabled={fileState.isLoading}
+            aria-label="Import contact from YAML file"
           />
-
-          <NameField
-            name={name.value}
-            onChange={handleNameChange}
-            error={name.error}
-          />
-
-          <MessageField
-            message={message.value}
-            onChange={handleMessageChange}
-          />
-
-          <PrivacyNotice />
-
-          <ErrorDisplay error={generalError} />
-
-          {/* Save Button */}
-          <Button
-            onClick={handleSubmit}
-            disabled={!canSubmit}
-            loading={isSubmitting}
-            fullWidth
-            size="md"
-            className="h-12 rounded-xl text-base"
-          >
-            Add contact
-          </Button>
+          {fileState.error && (
+            <p
+              className="text-sm text-destructive mt-2 text-center"
+              role="alert"
+            >
+              {fileState.error}
+            </p>
+          )}
         </div>
+
+        <UserIdField
+          userId={userId.value}
+          onChange={handleUserIdChange}
+          error={userId.error}
+          isFetching={userId.loading}
+        />
+
+        <NameField
+          name={name.value}
+          onChange={handleNameChange}
+          error={name.error}
+        />
+
+        <MessageField message={message.value} onChange={handleMessageChange} />
+
+        <PrivacyNotice />
+
+        <ErrorDisplay error={generalError} />
+
+        {/* Save Button */}
+        <Button
+          onClick={handleSubmit}
+          disabled={!canSubmit}
+          loading={isSubmitting}
+          fullWidth
+          size="md"
+          className="h-12 rounded-xl text-base"
+        >
+          Add contact
+        </Button>
       </div>
 
       {/* Discard Modal */}

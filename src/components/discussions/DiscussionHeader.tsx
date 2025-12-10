@@ -28,9 +28,7 @@ const DiscussionHeader: React.FC<DiscussionHeaderProps> = ({
     return (
       <div className="px-6 py-4 border-b border-border bg-card">
         <div className="flex items-center w-full">
-          <h1 className="text-xl font-semibold text-black dark:text-white">
-            {title}
-          </h1>
+          <h1 className="text-xl font-semibold text-foreground">{title}</h1>
         </div>
       </div>
     );
@@ -75,7 +73,7 @@ const DiscussionHeader: React.FC<DiscussionHeaderProps> = ({
             ariaLabel="Back"
             className="w-8 h-8 flex items-center justify-center"
           >
-            <ChevronLeft className="w-5 h-5 text-gray-600 dark:text-gray-300" />
+            <ChevronLeft className="w-5 h-5 text-muted-foreground" />
           </Button>
         )}
         <button
@@ -90,7 +88,7 @@ const DiscussionHeader: React.FC<DiscussionHeaderProps> = ({
             )}
           </div>
           <div className="flex-1 min-w-0 text-left">
-            <h1 className="text-xl font-semibold text-black dark:text-white truncate leading-tight">
+            <h1 className="text-xl font-semibold text-foreground truncate leading-tight">
               {displayName}
             </h1>
           </div>

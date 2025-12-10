@@ -29,7 +29,7 @@
   --destructive-foreground: var(--secondary-foreground);
 
   /* Accent colors */
-  --accent: #7dd3c0; /* muted teal - softer, less flashy for light mode */
+  --accent: #6ab3a3; /* muted teal - softer, less flashy for light mode */
   --accent-foreground: var(
     --foreground
   ); /* dark text on accent for light mode */
@@ -84,7 +84,9 @@
   --foreground: #e8e8ea; /* creamy off-white - primary text */
   --card: #1e1e22; /* surface/cards from Figma */
   --card-foreground: var(--foreground);
-  --popover: var(--card);
+  --popover: var(
+    --message-incoming
+  ); /* use incoming message color for popups */
   --popover-foreground: var(--foreground);
 
   /* Primary colors */
@@ -113,6 +115,9 @@
   /* Muted colors */
   --muted: #252529; /* muted background */
   --muted-foreground: #a0a0a8; /* dove gray - subtle text */
+
+  /* Message colors */
+  --message-incoming: #243032; /* incoming message background */
 
   /* Status colors */
   --success: #22c55e; /* green-500 - online status, success states */
@@ -167,6 +172,7 @@
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
+  --color-message-incoming: var(--message-incoming);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);

@@ -50,15 +50,16 @@ const Button: React.FC<ButtonProps> = ({
     primary:
       'bg-primary hover:bg-primary/90 disabled:bg-muted text-primary-foreground disabled:text-muted-foreground focus:ring-ring rounded-full',
     secondary:
-      'bg-secondary hover:bg-secondary/80 disabled:bg-muted text-secondary-foreground disabled:text-muted-foreground focus:ring-ring',
+      'bg-secondary hover:bg-secondary/80 disabled:bg-muted text-secondary-foreground disabled:text-muted-foreground focus:ring-ring rounded-md',
     danger:
-      'bg-destructive hover:bg-destructive/90 disabled:bg-destructive/50 text-destructive-foreground focus:ring-ring',
-    ghost: 'bg-transparent hover:bg-accent text-foreground focus:ring-ring',
+      'bg-destructive hover:bg-destructive/90 disabled:bg-destructive/50 text-destructive-foreground focus:ring-ring rounded-md',
+    ghost:
+      'bg-transparent hover:bg-accent text-foreground focus:ring-ring rounded-md',
     outline: `bg-card border border-border text-foreground hover:bg-accent/50 
     hover:border-accent shadow-sm hover:shadow-md disabled:bg-muted 
     disabled:text-muted-foreground disabled:border-border/50 
     disabled:opacity-60 disabled:hover:bg-muted disabled:hover:border-border/50 
-    disabled:hover:shadow-sm`,
+    disabled:hover:shadow-sm rounded-md`,
     circular: 'rounded-full hover:bg-accent/50 active:scale-95',
     link: 'bg-transparent text-primary hover:text-primary/80 underline p-0 shadow-none',
     icon: 'bg-transparent hover:bg-accent/50 rounded-full p-2',
@@ -77,7 +78,15 @@ const Button: React.FC<ButtonProps> = ({
   const shouldApplySize =
     variant !== 'circular' && variant !== 'icon' && size !== 'custom';
 
-  const combinedClasses = `${baseClasses} ${variantClasses[variant]} ${
+  // Check if className contains a rounded-* class to override default border-radius
+  const hasCustomRounded = /rounded-/.test(className);
+  let variantClass = variantClasses[variant];
+  if (hasCustomRounded) {
+    // Remove default rounded classes from variant when custom rounded is provided
+    variantClass = variantClass.replace(/\s*rounded-\w+/g, '');
+  }
+
+  const combinedClasses = `${baseClasses} ${variantClass} ${
     shouldApplySize ? sizeClasses[size] : ''
   } ${widthClasses} ${className}`.trim();
 
