@@ -5,7 +5,7 @@ import Button from '../components/ui/Button';
 import { useEffect, useState } from 'react';
 import { Contact, db } from '../db';
 import ContactAvatar from '../components/avatar/ContactAvatar';
-import { formatUserId } from '../utils';
+import UserIdDisplay from '../components/ui/UserIdDisplay';
 import PageHeader from '../components/ui/PageHeader';
 import { ROUTES } from '../constants/routes';
 
@@ -130,9 +130,10 @@ const NewDiscussion: React.FC = () => {
                           <p className="text-sm font-semibold text-gray-900 dark:text-white truncate">
                             {contact.name}
                           </p>
-                          <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                            {formatUserId(contact.userId)}
-                          </p>
+                          <UserIdDisplay
+                            userId={contact.userId}
+                            textClassName="text-gray-500 dark:text-gray-400"
+                          />
                         </div>
                       </Button>
                       <button

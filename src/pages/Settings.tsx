@@ -4,12 +4,11 @@ import PageHeader from '../components/ui/PageHeader';
 import { useAccountStore } from '../stores/accountStore';
 import { useAppStore } from '../stores/appStore';
 import { useTheme } from '../hooks/useTheme';
-import { formatUserId } from '../utils/userId';
 import AccountBackup from '../components/account/AccountBackup';
 import Button from '../components/ui/Button';
 import Toggle from '../components/ui/Toggle';
 import InfoRow from '../components/ui/InfoRow';
-import CopyClipboard from '../components/ui/CopyClipboard';
+import UserIdDisplay from '../components/ui/UserIdDisplay';
 import { useVersionCheck } from '../hooks/useVersionCheck';
 import { STORAGE_KEYS, clearAppStorage } from '../utils/localStorage';
 import { ROUTES } from '../constants/routes';
@@ -51,6 +50,8 @@ const Settings = (): React.ReactElement => {
   const [appBuildId] = useLocalStorage(STORAGE_KEYS.APP_BUILD_ID, null);
   const showDebugOption = useAppStore(s => s.showDebugOption);
   const setShowDebugOption = useAppStore(s => s.setShowDebugOption);
+  const showUserId = useAppStore(s => s.showUserId);
+  const setShowUserId = useAppStore(s => s.setShowUserId);
   const { setTheme, resolvedTheme } = useTheme();
   const [activeView, setActiveView] = useState<SettingsView | null>(null);
   const [isResetModalOpen, setIsResetModalOpen] = useState(false);
@@ -181,15 +182,15 @@ const Settings = (): React.ReactElement => {
                   <p className="text-xs text-gray-500 dark:text-gray-400 shrink-0">
                     User ID:
                   </p>
-                  <div className="flex items-center gap-2">
-                    <p className="text-sm font-medium text-gray-600 dark:text-gray-400 truncate">
-                      {formatUserId(userProfile.userId, 5, 3)}
-                    </p>
-                    <CopyClipboard
-                      text={userProfile.userId}
-                      title="Copy user ID"
-                    />
-                  </div>
+                  <UserIdDisplay
+                    userId={userProfile.userId}
+                    value={showUserId}
+                    onChange={setShowUserId}
+                    textSize="sm"
+                    textClassName="text-gray-600 dark:text-gray-400"
+                    showCopy
+                    showHideToggle
+                  />
                 </div>
               )}
             </div>
