@@ -252,15 +252,17 @@ async function showNewMessageNotification(messageCount) {
         ? 'You have a new message'
         : `You have ${messageCount} new messages`;
 
+    const notificationId = Date.now() % 100000; // Unique ID based on timestamp
+
     await CapacitorNotifications.schedule([
       {
-        id: Date.now() % 100000, // Unique ID based on timestamp
+        id: notificationId,
         title,
         body,
         autoCancel: true,
         schedule: {
           allowWhileIdle: true,
-          at: Date.now(),
+          at: new Date(),
         },
       },
     ]);
