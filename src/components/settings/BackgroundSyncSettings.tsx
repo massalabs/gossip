@@ -353,15 +353,22 @@ const BackgroundSyncSettings: React.FC<BackgroundSyncSettingsProps> = ({
                 {/* Background restriction status */}
                 <div className="flex items-center justify-between py-1">
                   <span className="text-sm text-muted-foreground">
-                    Background allowed
+                    Android background restriction
                   </span>
                   {!androidStatus.isBackgroundRestricted ? (
-                    <span className="text-xs font-medium text-success">
-                      Yes
-                    </span>
+                    <div className="flex flex-col items-end gap-0.5">
+                      <span className="text-xs font-medium text-success">
+                        Not restricted
+                      </span>
+                      {isXiaomi && (
+                        <span className="text-xs text-muted-foreground italic">
+                          (MIUI may still restrict)
+                        </span>
+                      )}
+                    </div>
                   ) : (
                     <span className="text-xs font-medium text-destructive">
-                      No
+                      Restricted
                     </span>
                   )}
                 </div>
@@ -369,7 +376,7 @@ const BackgroundSyncSettings: React.FC<BackgroundSyncSettingsProps> = ({
             )}
 
             {/* Android Action buttons */}
-            {androidHasIssues && (
+            {(androidHasIssues || isXiaomi) && (
               <div className="space-y-2 pt-1">
                 {/* Battery optimization button */}
                 {!androidStatus?.isIgnoringBatteryOptimization && (
