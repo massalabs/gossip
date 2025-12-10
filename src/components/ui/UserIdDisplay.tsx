@@ -18,6 +18,8 @@ interface UserIdDisplayProps {
   copyTitle?: string;
 }
 
+const ADDITIONAL_DOTS = 3;
+
 const UserIdDisplay: React.FC<UserIdDisplayProps> = ({
   userId,
   visible = true, // Default to visible
@@ -33,7 +35,7 @@ const UserIdDisplay: React.FC<UserIdDisplayProps> = ({
   copyTitle = 'Copy user ID',
 }) => {
   const userIdFormatted = formatUserId(userId, prefixChars, suffixChars);
-  const userIdHidden = '•'.repeat(userIdFormatted.length + 3);
+  const userIdHidden = '•'.repeat(userIdFormatted.length + ADDITIONAL_DOTS);
 
   const handleToggleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
     if (onToggleClick) {
