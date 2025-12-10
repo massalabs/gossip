@@ -44,7 +44,7 @@ const ShareContact: React.FC<ShareContactProps> = ({
 
         <div className="px-4 pb-20 pt-4">
           {/* Tab switcher */}
-          <div className="bg-card rounded-lg p-6 mb-8">
+          <div className="p-6 mb-8">
             <TabSwitcher
               options={[
                 { value: 'qr', label: 'Scan QR code' },

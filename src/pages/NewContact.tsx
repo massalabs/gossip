@@ -100,7 +100,7 @@ const NewContact: React.FC = () => {
                 onClick={() => fileInputRef.current?.click()}
                 variant="outline"
                 size="md"
-                className="inline-flex items-center gap-2 flex-1 max-w-[140px]"
+                className="inline-flex items-center gap-2 flex-1 max-w-[140px] rounded-xl"
                 disabled={fileState.isLoading}
               >
                 <Upload className="w-5 h-5" />

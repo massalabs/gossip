@@ -112,7 +112,7 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
           isPendingIncoming || isPendingOutgoing
             ? 'cursor-not-allowed opacity-95'
             : 'cursor-pointer hover:ring-1 hover:ring-border'
-        } bg-card border border-badge-border rounded-xl p-4 transition-colors`}
+        } bg-card border border-badge-border rounded-xl p-4 transition-colors mb-1`}
         {...(!(isPendingIncoming || isPendingOutgoing)
           ? {
               onClick: () => onSelect(discussion),
@@ -130,7 +130,7 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
               </h3>
               <div className="flex items-center gap-2">
                 {isPendingOutgoing && (
-                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-badge text-badge-foreground border border-badge-border">
+                  <span className="inline-flex items-center px-2 rounded-full text-[10px] font-medium bg-badge text-badge-foreground border border-badge-border">
                     Waiting approval
                   </span>
                 )}
