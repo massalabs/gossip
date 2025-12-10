@@ -50,8 +50,7 @@ const Settings = (): React.ReactElement => {
   const [appBuildId] = useLocalStorage(STORAGE_KEYS.APP_BUILD_ID, null);
   const showDebugOption = useAppStore(s => s.showDebugOption);
   const setShowDebugOption = useAppStore(s => s.setShowDebugOption);
-  const showUserId = useAppStore(s => s.showUserId);
-  const setShowUserId = useAppStore(s => s.setShowUserId);
+  const [showUserId, setShowUserId] = useState(false);
   const { setTheme, resolvedTheme } = useTheme();
   const [activeView, setActiveView] = useState<SettingsView | null>(null);
   const [isResetModalOpen, setIsResetModalOpen] = useState(false);

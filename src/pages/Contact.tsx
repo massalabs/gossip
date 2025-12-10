@@ -19,6 +19,7 @@ enum ContactView {
 
 const Contact: React.FC = () => {
   const { userId } = useParams();
+  const [showUserId, setShowUserId] = useState(false);
   const navigate = useNavigate();
   const contact = useDiscussionStore(s =>
     s.contacts.find(c => c.userId === userId)
@@ -138,7 +139,13 @@ const Contact: React.FC = () => {
                 )}
               </div>
             </div>
-            <UserIdDisplay userId={contact.userId} />
+            <UserIdDisplay
+              userId={contact.userId}
+              showCopy
+              showHideToggle
+              value={showUserId}
+              onChange={setShowUserId}
+            />
           </div>
         </div>
 

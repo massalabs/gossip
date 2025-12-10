@@ -12,12 +12,6 @@ interface AppStoreState {
   // Debug options visibility
   showDebugOption: boolean;
   setShowDebugOption: (show: boolean) => void;
-  // Own UserID visibility
-  showUserId: boolean;
-  setShowUserId: (show: boolean) => void;
-  // Contact UserID visibility
-  showContactUserId: boolean;
-  setShowContactUserId: (show: boolean) => void;
   // Debug overlay visibility
   debugOverlayVisible: boolean;
   setDebugOverlayVisible: (visible: boolean) => void;
@@ -42,16 +36,7 @@ const useAppStoreBase = create<AppStoreState>()(
       setShowDebugOption: (show: boolean) => {
         set({ showDebugOption: show });
       },
-      // Own UserID visibility
-      showUserId: true,
-      setShowUserId: (show: boolean) => {
-        set({ showUserId: show });
-      },
-      // Contact UserID visibility
-      showContactUserId: true,
-      setShowContactUserId: (show: boolean) => {
-        set({ showContactUserId: show });
-      },
+
       // Debug overlay visibility
       debugOverlayVisible: false,
       setDebugOverlayVisible: (visible: boolean) => {
@@ -73,8 +58,6 @@ const useAppStoreBase = create<AppStoreState>()(
       storage: createJSONStorage(() => localStorage),
       partialize: state => ({
         showDebugOption: state.showDebugOption,
-        showUserId: state.showUserId,
-        showContactUserId: state.showContactUserId,
         debugOverlayVisible: state.debugOverlayVisible,
         isInitialized: state.isInitialized,
         networkName: state.networkName,
