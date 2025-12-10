@@ -200,7 +200,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
         className={`relative max-w-[78%] sm:max-w-[70%] md:max-w-[65%] lg:max-w-[60%] px-4 py-4 rounded-3xl font-medium text-[15px] leading-tight animate-bubble-in transition-transform ${
           isOutgoing
             ? 'ml-auto mr-3 bg-accent dark:text-accent-foreground text-white rounded-br-[4px]'
-            : 'ml-3 mr-auto bg-card dark:bg-message-incoming text-card-foreground rounded-bl-[4px] shadow-sm'
+            : 'ml-3 mr-auto bg-card dark:bg-surface-secondary text-card-foreground rounded-bl-[4px] shadow-sm'
         } ${
           canReply
             ? 'cursor-pointer hover:opacity-90 transition-opacity focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2'

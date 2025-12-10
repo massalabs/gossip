@@ -48,6 +48,14 @@
   --border: #e5e7eb; /* subtle border from Figma */
   --input: var(--card); /* input background */
   --tail-border: var(--border); /* border for light mode tail */
+  --badge: #f5f5f5; /* badge background */
+  --badge-foreground: var(--foreground); /* badge text */
+  --badge-border: #f4f4f4; /* badge border color */
+
+  /* Surface colors */
+  --surface-secondary: var(
+    --card
+  ); /* secondary surface background (light mode uses card) */
 
   /* Chart colors */
   --chart-1: var(--accent); /* deeper sea-foam */
@@ -85,8 +93,8 @@
   --card: #1e1e22; /* surface/cards from Figma */
   --card-foreground: var(--foreground);
   --popover: var(
-    --message-incoming
-  ); /* use incoming message color for popups */
+    --surface-secondary
+  ); /* use secondary surface color for popups */
   --popover-foreground: var(--foreground);
 
   /* Primary colors */
@@ -116,8 +124,8 @@
   --muted: #252529; /* muted background */
   --muted-foreground: #a0a0a8; /* dove gray - subtle text */
 
-  /* Message colors */
-  --message-incoming: #243032; /* incoming message background */
+  /* Surface colors */
+  --surface-secondary: #243032; /* secondary surface background (incoming messages, discussion items, popups) */
 
   /* Status colors */
   --success: #22c55e; /* green-500 - online status, success states */
@@ -133,6 +141,13 @@
   --border: #2a2a2e; /* subtle border */
   --input: var(--card); /* input background */
   --tail-border: transparent; /* transparent border for dark mode tail */
+  --badge: var(
+    --surface-secondary
+  ); /* badge background - uses secondary surface */
+  --badge-foreground: var(--foreground); /* badge text */
+  --badge-border: var(
+    --surface-secondary
+  ); /* badge border color - uses secondary surface */
 
   /* Chart colors */
   --chart-1: var(--accent); /* sea-foam proof */
@@ -172,7 +187,7 @@
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
-  --color-message-incoming: var(--message-incoming);
+  --color-surface-secondary: var(--surface-secondary);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
@@ -184,6 +199,9 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-badge: var(--badge);
+  --color-badge-foreground: var(--badge-foreground);
+  --color-badge-border: var(--badge-border);
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);
   --color-chart-3: var(--chart-3);
@@ -275,6 +293,54 @@
     background-color: rgba(var(--scrollbar-thumb-rgb), 0.5);
     /* Progressive enhancement: override with color-mix if supported */
     background-color: color-mix(in oklch, var(--foreground) 50%, transparent);
+  }
+
+  /* Completely hide scrollbars on mobile/touch devices */
+  @media (hover: none) and (pointer: coarse) {
+    *,
+    *::before,
+    *::after {
+      scrollbar-width: none !important; /* Firefox - hide scrollbar */
+      -ms-overflow-style: none !important; /* IE/Edge - hide scrollbar */
+    }
+
+    *::-webkit-scrollbar,
+    *::-webkit-scrollbar-track,
+    *::-webkit-scrollbar-thumb,
+    *::-webkit-scrollbar-track-piece,
+    *::-webkit-scrollbar-corner,
+    *::-webkit-scrollbar-button {
+      width: 0 !important;
+      height: 0 !important;
+      display: none !important;
+      background: transparent !important;
+      -webkit-appearance: none !important;
+      appearance: none !important;
+    }
+  }
+
+  /* Additional fallback for mobile devices using max-width */
+  @media (max-width: 768px) {
+    *,
+    *::before,
+    *::after {
+      scrollbar-width: none !important;
+      -ms-overflow-style: none !important;
+    }
+
+    *::-webkit-scrollbar,
+    *::-webkit-scrollbar-track,
+    *::-webkit-scrollbar-thumb,
+    *::-webkit-scrollbar-track-piece,
+    *::-webkit-scrollbar-corner,
+    *::-webkit-scrollbar-button {
+      width: 0 !important;
+      height: 0 !important;
+      display: none !important;
+      background: transparent !important;
+      -webkit-appearance: none !important;
+      appearance: none !important;
+    }
   }
 
   /* Disable pull-to-refresh for the entire app */

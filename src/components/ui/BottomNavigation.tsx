@@ -34,7 +34,7 @@ const BottomNavigation: React.FC = () => {
   ];
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 bg-card mx-auto h-(--bottom-nav-height) app-max-w flex items-center justify-center shadow-2xl z-50 border-t border-border rounded-t-lg">
+    <div className="fixed bottom-0 left-0 right-0 bg-card mx-auto h-(--bottom-nav-height) app-max-w flex items-center justify-center shadow-2xl z-50 border-t border-border">
       <div className="flex items-center justify-center gap-8">
         {navItems.map(item => (
           <NavButton
