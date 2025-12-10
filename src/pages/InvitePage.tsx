@@ -5,6 +5,7 @@ import { parseInvite } from '../utils/qrCodeParser';
 import { useAppStore } from '../stores/appStore';
 import Button from '../components/ui/Button';
 import PageHeader from '../components/ui/PageHeader';
+import HeaderWrapper from '../components/ui/HeaderWrapper';
 import { PrivacyGraphic } from '../components/ui/PrivacyGraphic';
 import {
   GOOGLE_PLAY_STORE_URL,
@@ -210,7 +211,9 @@ export const InvitePage: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-background">
-      <PageHeader title="Invite" onBack={() => navigate('/')} />
+      <HeaderWrapper>
+        <PageHeader title="Invite" onBack={() => navigate('/')} />
+      </HeaderWrapper>
       <div className="flex flex-col items-center justify-center px-6 py-8 sm:py-12 max-w-lg mx-auto">
         <div className="w-full space-y-6 animate-fade-in">
           {/* Hero Section */}

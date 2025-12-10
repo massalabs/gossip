@@ -37,6 +37,8 @@
   /* Muted colors */
   --muted: #f0f1f3; /* muted background */
   --muted-foreground: #6b6b73; /* warm mid-gray - subtle text */
+  /* Header scrolled background - lighter grey for light mode */
+  --header-scrolled: #f5f6f7; /* lighter grey for scrolled header in light mode */
 
   /* Status colors */
   --success: #16a34a; /* green-600 - online status, success states */
@@ -127,6 +129,10 @@
   /* Muted colors */
   --muted: #252529; /* muted background */
   --muted-foreground: #a0a0a8; /* dove gray - subtle text */
+  /* Header scrolled background - same as card in dark mode */
+  --header-scrolled: var(
+    --card
+  ); /* use card color for scrolled header in dark mode */
 
   /* Status colors */
   --success: #22c55e; /* green-500 - online status, success states */
@@ -465,6 +471,11 @@
 
   .nav-button-click-alt:active {
     animation: nav-button-bounce-alt 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+  }
+
+  /* Smooth header background transition */
+  .header-bg-transition {
+    transition: background-color 600ms cubic-bezier(0.4, 0, 0.2, 1);
   }
 
   @media (prefers-reduced-motion: reduce) {

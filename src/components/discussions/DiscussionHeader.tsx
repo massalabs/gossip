@@ -5,6 +5,7 @@ import { Contact, Discussion } from '../../db';
 import ContactAvatar from '../avatar/ContactAvatar';
 import Button from '../ui/Button';
 import BackButton from '../ui/BackButton';
+import HeaderWrapper from '../ui/HeaderWrapper';
 import { ROUTES } from '../../constants/routes';
 
 interface DiscussionHeaderProps {
@@ -26,25 +27,25 @@ const DiscussionHeader: React.FC<DiscussionHeaderProps> = ({
   // Header with title (for list view with custom title)
   if (title && !contact) {
     return (
-      <div className="px-6 py-4 border-b border-border bg-card">
+      <HeaderWrapper>
         <div className="flex items-center w-full">
           <h1 className="text-xl font-semibold text-foreground">{title}</h1>
         </div>
-      </div>
+      </HeaderWrapper>
     );
   }
 
   // Guard against undefined/null contact when contact is expected
   if (!contact) {
     return (
-      <div className="px-6 py-4 border-b border-border bg-card">
+      <HeaderWrapper>
         <div className="flex items-center w-full">
           <BackButton />
           <div className="flex-1">
             <p className="text-muted-foreground">Contact not found</p>
           </div>
         </div>
-      </div>
+      </HeaderWrapper>
     );
   }
 
@@ -63,7 +64,7 @@ const DiscussionHeader: React.FC<DiscussionHeaderProps> = ({
   };
 
   return (
-    <div className="px-6 py-4 border-b border-border bg-card">
+    <HeaderWrapper>
       <div className="flex items-center w-full gap-3">
         {onBack && (
           <Button
@@ -94,7 +95,7 @@ const DiscussionHeader: React.FC<DiscussionHeaderProps> = ({
           </div>
         </button>
       </div>
-    </div>
+    </HeaderWrapper>
   );
 };
 

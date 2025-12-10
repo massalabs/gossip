@@ -1,6 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import BaseModal from '../components/ui/BaseModal';
 import PageHeader from '../components/ui/PageHeader';
+import HeaderWrapper from '../components/ui/HeaderWrapper';
 import { useAccountStore } from '../stores/accountStore';
 import { useAppStore } from '../stores/appStore';
 import { useTheme } from '../hooks/useTheme';
@@ -162,7 +163,9 @@ const Settings = (): React.ReactElement => {
     <div className="bg-background h-full overflow-auto">
       <div className="h-full">
         {/* Header */}
-        <PageHeader title="Settings" />
+        <HeaderWrapper>
+          <PageHeader title="Settings" />
+        </HeaderWrapper>
         {/* Account Profile Section */}
 
         <div className="bg-white dark:bg-gray-800 rounded-lg p-6 mt-4">

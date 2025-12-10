@@ -2,7 +2,6 @@
 
 import React, { useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
-import { EdgeToEdge } from '@capawesome/capacitor-android-edge-to-edge-support';
 import { StatusBar, Style } from '@capacitor/status-bar';
 import { STORAGE_KEYS, StorageKey } from '../utils/localStorage';
 import { useLocalStorage } from '../hooks/useLocalStorage';
@@ -50,22 +49,12 @@ export function ThemeProvider({
         root.classList.remove('dark');
       }
 
-      // Update status bar and edge-to-edge for native platforms
+      // Initial status bar setup (will be updated by useCapacitorBarColors hook)
+      // This just sets the initial style, colors are managed by useCapacitorBarColors
       if (Capacitor.isNativePlatform()) {
-        const backgroundColor = resolved === 'dark' ? '#18181b' : '#f8f9fa';
         void StatusBar.setStyle({
           style: resolved === 'dark' ? Style.Dark : Style.Light,
         });
-
-        void StatusBar.setBackgroundColor({ color: backgroundColor });
-        // EdgeToEdge is Android-only
-        if (Capacitor.getPlatform() === 'android') {
-          void EdgeToEdge.setBackgroundColor({ color: backgroundColor }).catch(
-            err => {
-              console.warn('Failed to set EdgeToEdge background color:', err);
-            }
-          );
-        }
       }
     };
 

@@ -7,6 +7,7 @@ import { Contact, db } from '../db';
 import ContactAvatar from '../components/avatar/ContactAvatar';
 import UserIdDisplay from '../components/ui/UserIdDisplay';
 import PageHeader from '../components/ui/PageHeader';
+import HeaderWrapper from '../components/ui/HeaderWrapper';
 import { ROUTES } from '../constants/routes';
 
 /* TODO: contact list is implemented using corresponding discussions.
@@ -63,7 +64,9 @@ const NewDiscussion: React.FC = () => {
       <div className="app-max-w mx-auto">
         <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-md overflow-hidden">
           {/* Card header */}
-          <PageHeader title="New discussion" onBack={handleClose} />
+          <HeaderWrapper>
+            <PageHeader title="New discussion" onBack={handleClose} />
+          </HeaderWrapper>
 
           {/* Actions: New group / New contact */}
           <div className="px-4 pt-4">

@@ -10,6 +10,7 @@ import toast from 'react-hot-toast';
 import DiscussionHeader from '../components/discussions/DiscussionHeader';
 import MessageList from '../components/discussions/MessageList';
 import MessageInput from '../components/discussions/MessageInput';
+import ScrollableContent from '../components/ui/ScrollableContent';
 
 const Discussion: React.FC = () => {
   const { userId } = useParams();
@@ -149,14 +150,16 @@ const Discussion: React.FC = () => {
         onBack={onBack}
       />
 
-      <MessageList
-        messages={messages}
-        discussion={discussion}
-        isLoading={isLoading || isDiscussionLoading}
-        onResend={resendMessage}
-        onReplyTo={handleReplyToMessage}
-        onScrollToMessage={handleScrollToMessage}
-      />
+      <ScrollableContent className="flex-1 overflow-y-auto">
+        <MessageList
+          messages={messages}
+          discussion={discussion}
+          isLoading={isLoading || isDiscussionLoading}
+          onResend={resendMessage}
+          onReplyTo={handleReplyToMessage}
+          onScrollToMessage={handleScrollToMessage}
+        />
+      </ScrollableContent>
 
       <MessageInput
         onSend={handleSendMessage}

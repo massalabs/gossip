@@ -21,6 +21,9 @@ interface AppStoreState {
   // Pending deep link
   pendingDeepLinkInfo: ParsedInvite | null;
   setPendingDeepLinkInfo: (value: ParsedInvite | null) => void;
+  // Header background state (true = scrolled/grey, false = at top/white)
+  headerIsScrolled: boolean;
+  setHeaderIsScrolled: (isScrolled: boolean) => void;
 }
 
 const useAppStoreBase = create<AppStoreState>()(
@@ -51,6 +54,11 @@ const useAppStoreBase = create<AppStoreState>()(
       pendingDeepLinkInfo: null,
       setPendingDeepLinkInfo: (value: ParsedInvite | null) => {
         set({ pendingDeepLinkInfo: value });
+      },
+      // Header background state
+      headerIsScrolled: false,
+      setHeaderIsScrolled: (isScrolled: boolean) => {
+        set({ headerIsScrolled: isScrolled });
       },
     }),
     {
