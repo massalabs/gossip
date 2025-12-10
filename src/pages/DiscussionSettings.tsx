@@ -7,7 +7,6 @@ import ContactNameModal from '../components/ui/ContactNameModal';
 import Button from '../components/ui/Button';
 import PageHeader from '../components/ui/PageHeader';
 import { Check, Edit2, ChevronRight } from 'react-feather';
-import { formatUserId } from '../utils/userId';
 import { Contact } from '../db';
 import { ROUTES } from '../constants/routes';
 
@@ -153,9 +152,6 @@ const DiscussionSettings: React.FC = () => {
                 <div className="flex-1 min-w-0 text-left">
                   <p className="text-sm font-medium text-foreground truncate">
                     {contact.name}
-                  </p>
-                  <p className="text-xs text-muted-foreground truncate">
-                    {formatUserId(contact.userId)}
                   </p>
                 </div>
                 <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />

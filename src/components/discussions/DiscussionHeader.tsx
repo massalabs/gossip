@@ -2,7 +2,6 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ChevronLeft } from 'react-feather';
 import { Contact, Discussion } from '../../db';
-import { formatUserId } from '../../utils/userId';
 import ContactAvatar from '../avatar/ContactAvatar';
 import Button from '../ui/Button';
 import BackButton from '../ui/BackButton';
@@ -96,11 +95,6 @@ const DiscussionHeader: React.FC<DiscussionHeaderProps> = ({
               <h1 className="text-[17px] font-semibold text-gray-900 dark:text-white truncate leading-tight group-hover:text-primary transition-colors">
                 {displayName}
               </h1>
-            </div>
-            <div className="flex items-center gap-2 mt-0.5">
-              <p className="text-[13px] text-gray-500 dark:text-gray-400 truncate font-medium">
-                {formatUserId(contact.userId)}
-              </p>
             </div>
           </div>
         </button>

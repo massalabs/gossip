@@ -1,13 +1,13 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { updateContactName, formatUserId } from '../utils';
+import { updateContactName } from '../utils';
 import { useDiscussionStore } from '../stores/discussionStore';
 import ContactAvatar from '../components/avatar/ContactAvatar';
 import { useAccountStore } from '../stores/accountStore';
 import ContactNameModal from '../components/ui/ContactNameModal';
 import Button from '../components/ui/Button';
-import CopyClipboard from '../components/ui/CopyClipboard';
 import PageHeader from '../components/ui/PageHeader';
+import UserIdDisplay from '../components/ui/UserIdDisplay';
 import { Check, Edit2 } from 'react-feather';
 import ShareContact from '../components/settings/ShareContact';
 import { UserPublicKeys } from '../assets/generated/wasm/gossip_wasm';
@@ -19,6 +19,7 @@ enum ContactView {
 
 const Contact: React.FC = () => {
   const { userId } = useParams();
+  const [showUserId, setShowUserId] = useState(false);
   const navigate = useNavigate();
   const contact = useDiscussionStore(s =>
     s.contacts.find(c => c.userId === userId)
@@ -138,12 +139,13 @@ const Contact: React.FC = () => {
                 )}
               </div>
             </div>
-            <div className="flex items-center gap-2">
-              <p className="text-xs text-muted-foreground truncate">
-                {formatUserId(contact.userId)}
-              </p>
-              <CopyClipboard text={contact.userId} title="Copy user ID" />
-            </div>
+            <UserIdDisplay
+              userId={contact.userId}
+              showCopy
+              showHideToggle
+              visible={showUserId}
+              onChange={setShowUserId}
+            />
           </div>
         </div>
 

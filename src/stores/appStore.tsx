@@ -36,6 +36,7 @@ const useAppStoreBase = create<AppStoreState>()(
       setShowDebugOption: (show: boolean) => {
         set({ showDebugOption: show });
       },
+
       // Debug overlay visibility
       debugOverlayVisible: false,
       setDebugOverlayVisible: (visible: boolean) => {

@@ -46,7 +46,7 @@ const Button: React.FC<ButtonProps> = ({
   const baseClasses = `inline-flex items-center justify-center font-medium transition-all 
     focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 
     focus-visible:ring-offset-transparent disabled:cursor-not-allowed 
-    disabled:pointer-events-none disabled:touch-none`;
+    disabled:pointer-events-none disabled:touch-none rounded-full`;
 
   const variantClasses = {
     primary:
@@ -67,9 +67,9 @@ const Button: React.FC<ButtonProps> = ({
   };
 
   const sizeClasses = {
-    sm: 'px-3 py-2 text-sm rounded-lg',
-    md: 'px-4 py-3 text-base rounded-xl',
-    lg: 'px-6 py-4 text-lg rounded-xl',
+    sm: 'px-3 py-2 text-sm',
+    md: 'px-3 py-4 h-[51px] text-base gap-2.5',
+    lg: 'px-6 py-4 text-lg',
     custom: '', // Allow full customization via className
   };
 

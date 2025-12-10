@@ -317,10 +317,8 @@ const Login: React.FC<LoginProps> = React.memo(
                   onClick={handlePasswordAuth}
                   disabled={isLoading || !password.trim()}
                   loading={isLoading}
-                  variant="outline"
-                  size="custom"
+                  variant="primary"
                   fullWidth
-                  className="h-11 rounded-xl text-sm font-medium"
                 >
                   {!isLoading && <span>Login</span>}
                 </Button>
