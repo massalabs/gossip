@@ -44,7 +44,7 @@
     "@aparajita/capacitor-secure-storage": "^7.1.6",
     "@capacitor/android": "^7.4.4",
     "@capacitor/app": "^7.1.0",
-    "@capacitor/background-runner": "^2.2.0",
+    "@capacitor/background-runner": "^2.3.0",
     "@capacitor/barcode-scanner": "^2.2.0",
     "@capacitor/core": "^7.4.4",
     "@capacitor/device": "^7.0.3",
