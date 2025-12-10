@@ -6,10 +6,7 @@
 
 import { db, Discussion, DiscussionStatus, DiscussionDirection } from '../db';
 import { decodeUserId, encodeUserId } from '../utils/userId';
-import {
-  createMessageProtocol,
-  IMessageProtocol,
-} from '../api/messageProtocol';
+import { IMessageProtocol, restMessageProtocol } from '../api/messageProtocol';
 import {
   UserPublicKeys,
   UserSecretKeys,
@@ -17,6 +14,7 @@ import {
 } from '../assets/generated/wasm/gossip_wasm';
 import { SessionModule } from '../wasm/session';
 import { notificationService } from './notifications';
+import { encodeToBase64 } from '../utils/base64';
 
 const ONE_HOUR_MS = 60 * 60 * 1000;
 
@@ -25,6 +23,9 @@ export interface AnnouncementReceptionResult {
   newAnnouncementsCount: number;
   error?: string;
 }
+
+export const EstablishSessionError =
+  'Session manager failed to establish outgoing session';
 
 /**
  * Centralized error logger for announcement-related operations.
@@ -43,7 +44,14 @@ function logAnnouncementError(prefix: string, error: unknown): void {
 }
 
 export class AnnouncementService {
-  constructor(public readonly messageProtocol: IMessageProtocol) {}
+  private messageProtocol: IMessageProtocol;
+  constructor(messageProtocol: IMessageProtocol) {
+    this.messageProtocol = messageProtocol;
+  }
+
+  setMessageProtocol(messageProtocol: IMessageProtocol): void {
+    this.messageProtocol = messageProtocol;
+  }
 
   async sendAnnouncement(announcement: Uint8Array): Promise<{
     success: boolean;
@@ -92,6 +100,14 @@ export class AnnouncementService {
       userData
     );
 
+    if (announcement.length === 0) {
+      return {
+        success: false,
+        error: EstablishSessionError,
+        announcement: announcement,
+      };
+    }
+
     const result = await this.sendAnnouncement(announcement);
     if (!result.success) {
       return {
@@ -109,6 +125,7 @@ export class AnnouncementService {
     ourSk: UserSecretKeys,
     session: SessionModule
   ): Promise<AnnouncementReceptionResult> {
+    const errors: string[] = [];
     try {
       // First, check if service worker has already fetched announcements
       let announcements: Uint8Array[];
@@ -140,8 +157,12 @@ export class AnnouncementService {
             ourSk,
             session
           );
-          if (result.success) {
+          // if success but no contactUserId, it means the announcement is not for us. So we don't count it as a new announcement.
+          if (result.success && result.contactUserId) {
             newAnnouncementsCount++;
+            console.log(
+              `fetchAndProcessAnnouncements: new announcement received from contact ${result.contactUserId}: ${encodeToBase64(announcement)}. New announcements count: ${newAnnouncementsCount}`
+            );
           } else if (result.error) {
             errors.push(`${result.error}`);
           }
@@ -212,18 +233,27 @@ export class AnnouncementService {
       await db.transaction('rw', db.discussions, async () => {
         const now = new Date();
 
-        // Update all successfully sent discussions to PENDING
+        // Update all successfully sent discussions to PENDING or ACTIVE based on the session status
         if (sentDiscussions.length > 0) {
           await Promise.all(
             sentDiscussions.map(discussion => {
               const status = session.peerSessionStatus(
                 decodeUserId(discussion.contactUserId)
               );
+
+              // If discussion has been broken, don't update it
+              if (
+                status !== SessionStatus.Active &&
+                status !== SessionStatus.SelfRequested
+              ) {
+                return;
+              }
+
               return db.discussions.update(discussion.id!, {
                 status:
-                  status === SessionStatus.SelfRequested
-                    ? DiscussionStatus.PENDING
-                    : DiscussionStatus.ACTIVE,
+                  status === SessionStatus.Active
+                    ? DiscussionStatus.ACTIVE
+                    : DiscussionStatus.PENDING,
                 updatedAt: now,
               });
             })
@@ -307,6 +337,10 @@ export class AnnouncementService {
 
       // if we can't decrypt the announcement, it means we are not the intended recipient. It's not an error.
       if (!announcementResult) {
+        console.log(
+          `_processIncomingAnnouncement: failed to decrypt, announcement ${announcementData} not for us`
+        );
+
         return {
           success: true,
         };
@@ -479,6 +513,4 @@ async function handleReceivedDiscussion(
   return { discussionId };
 }
 
-export const announcementService = new AnnouncementService(
-  createMessageProtocol()
-);
+export const announcementService = new AnnouncementService(restMessageProtocol);

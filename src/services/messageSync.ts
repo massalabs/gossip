@@ -25,8 +25,7 @@ export async function triggerManualSync(
 ): Promise<void> {
   const isOnline = useOnlineStoreBase.getState().isOnline;
 
-  if (!isOnline) {
-    return;
+  if (!isOnline) return;
   try {
     await Promise.all([
       announcementService.fetchAndProcessAnnouncements(ourPk, ourSk, session),
@@ -39,11 +38,6 @@ export async function triggerManualSync(
   } catch (error) {
     console.error('Failed to trigger manual sync:', error);
   }
-
-  await Promise.all([
-    announcementService.fetchAndProcessAnnouncements(),
-    messageService.fetchMessages(),
-  ]);
 
   // Update last sync timestamp after successful sync
   await setLastSyncTimestamp();

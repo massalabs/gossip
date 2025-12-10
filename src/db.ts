@@ -1,6 +1,8 @@
 import Dexie, { Table } from 'dexie';
 import { EncryptedMessage } from './api/messageProtocol/types';
 import { setActiveSeekersInPreferences } from './utils/preferences';
+import { Preferences } from '@capacitor/preferences';
+import { encodeToBase64 } from './utils/base64';
 
 // Define authentication method type
 export type AuthMethod = 'capacitor' | 'webauthn' | 'password';
@@ -22,6 +24,7 @@ export interface Message {
   ownerUserId: string; // The current user's userId owning this message
   contactUserId: string; // Reference to Contact.userId
   content: string;
+  serializedContent?: Uint8Array; // Serialized message content
   type: MessageType;
   direction: MessageDirection;
   status: MessageStatus;
@@ -128,9 +131,6 @@ export interface Discussion {
   // Timestamps
   createdAt: Date;
   updatedAt: Date;
-
-  // Failed encrypted message. The last msg has failed and must be sent before sending another msg.
-  failedEncryptedMessage?: EncryptedMessage;
 }
 
 export interface PendingEncryptedMessage {

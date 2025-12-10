@@ -230,3 +230,24 @@ export class SessionModule {
     return result;
   }
 }
+
+export function sessionStatusToString(status: SessionStatus): string {
+  switch (status) {
+    case SessionStatus.Active:
+      return 'Active';
+    case SessionStatus.UnknownPeer:
+      return 'UnknownPeer';
+    case SessionStatus.NoSession:
+      return 'NoSession';
+    case SessionStatus.PeerRequested:
+      return 'PeerRequested';
+    case SessionStatus.SelfRequested:
+      return 'SelfRequested';
+    case SessionStatus.Killed:
+      return 'Killed';
+    case SessionStatus.Saturated:
+      return 'Saturated';
+    default:
+      throw new Error(`Unknown session status: ${status}`);
+  }
+}

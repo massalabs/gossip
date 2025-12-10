@@ -110,7 +110,6 @@ export const mockGenerateUserKeys = vi.fn(() => {
  */
 export class MockSessionModule {
   // Add minimal fields/methods to match SessionModule's public shape
-  private sessionManager: unknown = null;
   persistIfNeeded = vi.fn();
 
   setOnPersist = vi.fn();

@@ -8,7 +8,7 @@ import { UserPublicKeys } from '../assets/generated/wasm/gossip_wasm';
 import { decodeUserId } from '../utils/userId';
 import { encodeToBase64, decodeFromBase64 } from '../utils/base64';
 import { IMessageProtocol } from '../api/messageProtocol/types';
-import { createMessageProtocol } from '../api/messageProtocol';
+import { restMessageProtocol } from '../api/messageProtocol';
 import { db } from '../db';
 
 export type PublicKeyResult =
@@ -70,7 +70,7 @@ function moreThanOneWeekAgo(date: Date): boolean {
   return Date.now() - date.getTime() >= ONE_WEEK_IN_MILLIS;
 }
 
-export const authService = new AuthService(createMessageProtocol());
+export const authService = new AuthService(restMessageProtocol);
 
 export const PUBLIC_KEY_NOT_FOUND_ERROR = 'Public key not found';
 export const PUBLIC_KEY_NOT_FOUND_MESSAGE =

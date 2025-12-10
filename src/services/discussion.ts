@@ -11,7 +11,7 @@ import {
   UserPublicKeys,
   UserSecretKeys,
 } from '../assets/generated/wasm/gossip_wasm';
-import { announcementService } from './announcement';
+import { announcementService, EstablishSessionError } from './announcement';
 import { SessionModule } from '../wasm/session';
 import { decodeUserId } from '../utils';
 import { SessionStatus } from '../assets/generated/wasm/gossip_wasm';
@@ -44,6 +44,9 @@ export async function initializeDiscussion(
       ? new TextEncoder().encode(message)
       : new Uint8Array(0);
 
+    console.log(
+      `initializeDiscussion: ${userId} is establishing session with contact ${contact.name}`
+    );
     const result = await announcementService.establishSession(
       UserPublicKeys.from_bytes(contact.publicKeys),
       ourPk,
@@ -61,6 +64,10 @@ export async function initializeDiscussion(
         result.error
       );
       status = DiscussionStatus.SEND_FAILED;
+    } else {
+      console.log(
+        `initializeDiscussion: session established with contact and announcement sent: ${result.announcement}`
+      );
     }
 
     // Persist discussion immediately with the announcement for reliable retry
@@ -76,6 +83,10 @@ export async function initializeDiscussion(
       createdAt: new Date(),
       updatedAt: new Date(),
     });
+
+    console.log(
+      `initializeDiscussion: discussion created with id: ${discussionId}`
+    );
 
     return { discussionId, announcement: result.announcement };
   } catch (error) {
@@ -104,7 +115,10 @@ export async function acceptDiscussionRequest(
       discussion.contactUserId
     );
 
-    if (!contact) throw new Error('Contact not found');
+    if (!contact)
+      throw new Error(
+        `Contact ${discussion.contactUserId} not found for ownerUserId ${discussion.ownerUserId}`
+      );
 
     const result = await announcementService.establishSession(
       UserPublicKeys.from_bytes(contact.publicKeys),
@@ -122,6 +136,10 @@ export async function acceptDiscussionRequest(
         result.error
       );
       status = DiscussionStatus.SEND_FAILED;
+    } else {
+      console.log(
+        `acceptDiscussionRequest: session established with contact and announcement sent: ${result.announcement}`
+      );
     }
 
     // update discussion status
@@ -130,6 +148,9 @@ export async function acceptDiscussionRequest(
       initiationAnnouncement: result.announcement,
       updatedAt: new Date(),
     });
+    console.log(
+      `acceptDiscussionRequest: discussion updated with status: ${status}`
+    );
 
     return;
   } catch (error) {
@@ -170,7 +191,12 @@ export async function renewDiscussion(
     session
   );
 
+  // if the error is due to the session manager failed to establish outgoing session, throw the error
+  if (result.error && result.error.includes(EstablishSessionError))
+    throw new Error(EstablishSessionError);
+
   const sessionStatus = session.peerSessionStatus(decodeUserId(contactUserId));
+  console.log('sessionStatus:', sessionStatus);
 
   const status: DiscussionStatus = !result.success
     ? DiscussionStatus.SEND_FAILED
@@ -196,7 +222,11 @@ export async function renewDiscussion(
           msg.status !== MessageStatus.DELIVERED &&
           msg.status !== MessageStatus.READ
       )
-      .modify({ status: MessageStatus.FAILED, encryptedMessage: undefined });
+      .modify({
+        status: MessageStatus.FAILED,
+        encryptedMessage: undefined,
+        seeker: undefined,
+      });
   });
 }
 
@@ -214,7 +244,12 @@ export async function isDiscussionStableState(
 
   if (!discussion) throw new Error('Discussion not found');
 
-  if (discussion.status === DiscussionStatus.BROKEN) return false;
+  if (discussion.status === DiscussionStatus.BROKEN) {
+    console.log(
+      `isDiscussionStableState: Discussion with ownerUserId ${ownerUserId} and contactUserId ${contactUserId} is broken`
+    );
+    return false;
+  }
 
   const messages = await db.messages
     .where('[ownerUserId+contactUserId+direction]')
@@ -234,25 +269,11 @@ export async function isDiscussionStableState(
     !messages[messages.length - 1].encryptedMessage &&
     messages[messages.length - 1].status === MessageStatus.FAILED
   ) {
+    console.log(
+      `isDiscussionStableState: Discussion with ownerUserId ${ownerUserId} and contactUserId ${contactUserId} has no encryptedMessage failed messages`
+    );
     return false;
   }
 
   return true;
-}
-
-export async function getNonStableDiscussions(
-  ownerUserId: string
-): Promise<Discussion[]> {
-  const allDiscussions = await db.discussions
-    .where('ownerUserId')
-    .equals(ownerUserId)
-    .toArray();
-
-  return allDiscussions.filter(async d => {
-    const isStable = await isDiscussionStableState(
-      ownerUserId,
-      d.contactUserId
-    );
-    return !isStable;
-  });
 }

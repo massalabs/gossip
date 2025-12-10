@@ -185,4 +185,14 @@ export class RestMessageProtocol implements IMessageProtocol {
       error: lastError?.message || 'Request failed after all retry attempts',
     };
   }
+
+  async changeNode(nodeUrl?: string): Promise<MessageProtocolResponse> {
+    return {
+      success: true,
+      data:
+        'This message protocol provider use a single node, so changing the node to ' +
+        nodeUrl +
+        ' is not supported',
+    };
+  }
 }

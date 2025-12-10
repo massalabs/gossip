@@ -11,14 +11,6 @@ import { useAccountStore } from './accountStore';
 import { messageService } from '../services/message';
 import { liveQuery, Subscription } from 'dexie';
 
-export interface RetryMessages {
-  id: number;
-  encryptedMessage?: Uint8Array;
-  seeker?: Uint8Array;
-  content: string;
-  type: MessageType;
-}
-
 interface MessageStoreState {
   // Messages keyed by contactUserId (Map for efficient lookups)
   messagesByContact: Map<string, Message[]>;
@@ -217,12 +209,18 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
       // Send via service
       const result = await messageService.sendMessage(message, session);
       if (!result.success) {
-        console.error(
-          'Failed to send message ',
-          content,
-          ', got error:',
-          result.error
-        );
+        if (result.message) {
+          console.warn(
+            `Message "${result.message.content}" has been added to pending queue waiting to be resent. Cause: ${result.error}`
+          );
+        } else {
+          console.error(
+            'Failed to send message ',
+            content,
+            ', got error:',
+            result.error
+          );
+        }
       }
     } catch (error) {
       console.error('Failed to send message:', error);
