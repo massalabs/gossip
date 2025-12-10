@@ -88,7 +88,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
   return (
     <>
       <div
-        className="bg-card/60 dark:bg-card/80 backdrop-blur-xl border-t border-border px-4 md:px-8 py-3 md:py-4"
+        className="bg-card border-t border-border px-4 md:px-8 py-3 md:py-4"
         onMouseDown={focusTextarea}
       >
         {/* Reply Preview */}
@@ -114,7 +114,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
 
         <div className="flex items-center gap-2 md:gap-3">
           <div
-            className={`flex-1 min-w-0 flex items-center bg-muted border border-gray-300 px-4 md:px-5 py-2 md:py-2.5 ${
+            className={`flex-1 min-w-0 flex items-center bg-muted px-4 md:px-5 py-2 md:py-2.5 ${
               isTextareaMultiline ? 'rounded-2xl' : 'rounded-full'
             }`}
           >
@@ -129,7 +129,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
               autoCapitalize="sentences"
               spellCheck={true}
               className={`flex-1 bg-transparent text-foreground placeholder:text-muted-foreground
-                         text-[15px] leading-relaxed resize-none p-0 m-0 focus:outline-none outline-none
+                         text-[18px] leading-relaxed resize-none p-0 m-0 focus:outline-none outline-none
                          scrollbar-transparent ${isTextareaMultiline ? 'overflow-y-auto' : 'overflow-y-hidden'}`}
             />
           </div>

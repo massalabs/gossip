@@ -143,14 +143,17 @@ const Discussion: React.FC = () => {
 
   // Mobile-first: show only discussion page when selected
   return (
-    <div className="h-full app-max-w mx-auto bg-background flex flex-col">
+    <div className="h-full app-max-w mx-auto bg-card flex flex-col">
       <DiscussionHeader
         contact={contact}
         discussion={discussion}
         onBack={onBack}
       />
 
-      <ScrollableContent className="flex-1 overflow-y-auto">
+      <ScrollableContent
+        className="flex-1 overflow-y-auto"
+        id="messagesContainer"
+      >
         <MessageList
           messages={messages}
           discussion={discussion}
