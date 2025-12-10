@@ -6,94 +6,153 @@
   /* Quantum Dawn Light Mode - "Bert Light Mode" */
   /* Airy, warm, privacy-first – the daytime twin of "Quantum Velvet" */
   /* Teal primary - distinct from Phantom's purple */
-  --background: #f8f9fa; /* creamy cloud (never pure white) */
+
+  /* Base colors */
+  --background: #fafbfc; /* light background from Figma */
   --foreground: #1a1a1d; /* deep charcoal - primary text */
   --card: #ffffff; /* true white cards */
-  --card-foreground: #1a1a1d;
-  --popover: #ffffff;
-  --popover-foreground: #1a1a1d;
-  --primary: #0d9488; /* teal - encrypted/Button/CTA */
+  --card-foreground: var(--foreground);
+  --popover: var(--card);
+  --popover-foreground: var(--foreground);
+
+  /* Primary colors */
+  --primary: #14b8a6; /* teal-600 - green/cyan adapted for light mode */
   --primary-foreground: #ffffff; /* white text on teal */
+  --ring: var(--primary); /* focus ring using teal */
+
+  /* Secondary colors */
   --secondary: #ff8c8c; /* coral timer - self-destruct/Secondary */
   --secondary-foreground: #ffffff; /* white text on coral */
+  --destructive: var(
+    --secondary
+  ); /* coral timer - also works for destructive */
+  --destructive-foreground: var(--secondary-foreground);
+
+  /* Accent colors */
+  --accent: #5eead4; /* lighter teal - green/cyan accent adapted for light mode */
+  --accent-foreground: #ffffff; /* white text on accent */
+
+  /* Muted colors */
   --muted: #f0f1f3; /* muted background */
   --muted-foreground: #6b6b73; /* warm mid-gray - subtle text */
-  --accent: #6db8a2; /* deeper sea-foam - verified/Accent */
-  --accent-foreground: #ffffff; /* white text on sea-foam */
-  --destructive: #ff8c8c; /* coral timer - also works for destructive */
-  --destructive-foreground: #ffffff;
+
+  /* Status colors */
   --success: #16a34a; /* green-600 - online status, success states */
   --success-foreground: #ffffff; /* white text on green */
   --warning: #92400e; /* amber-800 - warning states (6.1:1 contrast with white, WCAG AA compliant) */
   --warning-foreground: #ffffff; /* white text on amber */
-  --border: #e5e6e8; /* subtle border */
-  --input: #ffffff; /* input background */
-  --ring: #0d9488; /* focus ring using teal */
-  --chart-1: #6db8a2; /* deeper sea-foam */
-  --chart-2: #0d9488; /* teal */
-  --chart-3: #ff8c8c; /* coral timer */
+
+  /* UI elements */
+  --border: #e5e7eb; /* subtle border from Figma */
+  --input: var(--card); /* input background */
+  --tail-border: var(--border); /* border for light mode tail */
+
+  /* Chart colors */
+  --chart-1: var(--accent); /* deeper sea-foam */
+  --chart-2: var(--primary); /* teal */
+  --chart-3: var(--secondary); /* coral timer */
   --chart-4: #c17bc9; /* rich orchid - offline key */
-  --chart-5: #6db8a2; /* sea-foam variant */
+  --chart-5: var(--chart-1); /* sea-foam variant */
+
+  /* Sidebar colors */
+  --sidebar: var(--background);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-primary: var(--card);
+  --sidebar-primary-foreground: var(--foreground);
+  --sidebar-accent: var(--accent);
+  --sidebar-accent-foreground: var(--accent-foreground);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--ring);
+
+  /* Layout */
   --radius: 0.25rem;
-  --sidebar: #f8f9fa;
-  --sidebar-foreground: #1a1a1d;
-  --sidebar-primary: #ffffff;
-  --sidebar-primary-foreground: #1a1a1d;
-  --sidebar-accent: #6db8a2;
-  --sidebar-accent-foreground: #ffffff;
-  --sidebar-border: #e5e6e8;
-  --sidebar-ring: #0d9488;
-  --tail-border: #e5e7eb; /* soft gray border for light mode tail */
-  /* Bottom navigation spacing */
   --bottom-nav-height: 64px;
+
+  /* Scrollbar colors (light mode) */
+  --scrollbar-thumb-rgb: 26, 26, 29;
 }
 
 .dark {
   /* Quantum Velvet Dark Mode - "Bert Dark Mode" */
   /* Warm charcoal base, zero pure black, privacy-coded accents */
   /* Teal primary - distinct from Phantom's purple */
-  --background: #18181b; /* warm charcoal (never #000) */
+
+  /* Base colors */
+  --background: #151518; /* dark background from Figma */
   --foreground: #e8e8ea; /* creamy off-white - primary text */
-  --card: #1e1e22; /* surface/cards - +1 step lighter */
-  --card-foreground: #e8e8ea;
-  --popover: #1e1e22;
-  --popover-foreground: #e8e8ea;
-  --primary: #2dd4bf; /* teal - encrypted/Button/CTA */
-  --primary-foreground: #18181b; /* dark text on teal for good contrast */
+  --card: #1e1e22; /* surface/cards from Figma */
+  --card-foreground: var(--foreground);
+  --popover: var(--card);
+  --popover-foreground: var(--foreground);
+
+  /* Primary colors */
+  --primary: #3af3d1; /* bright cyan - primary from Figma */
+  --primary-foreground: var(
+    --background
+  ); /* dark text on cyan for good contrast */
+  --ring: var(--primary); /* focus ring using cyan */
+
+  /* Secondary colors */
   --secondary: #ffb3b3; /* peach timer - self-destruct/Secondary */
-  --secondary-foreground: #18181b; /* dark text on peach for good contrast */
+  --secondary-foreground: var(
+    --background
+  ); /* dark text on peach for good contrast */
+  --destructive: var(
+    --secondary
+  ); /* peach timer - also works for destructive */
+  --destructive-foreground: var(--secondary-foreground);
+
+  /* Accent colors */
+  --accent: #b8f2e7; /* lighter cyan - accent from Figma */
+  --accent-foreground: var(
+    --background
+  ); /* dark text on accent for good contrast */
+
+  /* Muted colors */
   --muted: #252529; /* muted background */
   --muted-foreground: #a0a0a8; /* dove gray - subtle text */
-  --accent: #a8e0d2; /* sea-foam proof - verified/Accent */
-  --accent-foreground: #18181b; /* dark text on sea-foam for good contrast */
-  --destructive: #ffb3b3; /* peach timer - also works for destructive */
-  --destructive-foreground: #18181b;
+
+  /* Status colors */
   --success: #22c55e; /* green-500 - online status, success states */
-  --success-foreground: #18181b; /* dark text on green for good contrast */
+  --success-foreground: var(
+    --background
+  ); /* dark text on green for good contrast */
   --warning: #fbbf24; /* amber-400 - warning states, needs attention */
-  --warning-foreground: #18181b; /* dark text on amber for good contrast */
+  --warning-foreground: var(
+    --background
+  ); /* dark text on amber for good contrast */
+
+  /* UI elements */
   --border: #2a2a2e; /* subtle border */
-  --input: #1e1e22; /* input background */
-  --ring: #2dd4bf; /* focus ring using teal */
-  --chart-1: #a8e0d2; /* sea-foam proof */
-  --chart-2: #2dd4bf; /* teal */
-  --chart-3: #ffb3b3; /* peach timer */
-  --chart-4: #d6a8dc; /* muted orchid - offline key */
-  --chart-5: #a8e0d2; /* sea-foam variant */
-  --sidebar: #18181b;
-  --sidebar-foreground: #e8e8ea;
-  --sidebar-primary: #1e1e22;
-  --sidebar-primary-foreground: #e8e8ea;
-  --sidebar-accent: #a8e0d2;
-  --sidebar-accent-foreground: #18181b;
-  --sidebar-border: #2a2a2e;
-  --sidebar-ring: #2dd4bf;
+  --input: var(--card); /* input background */
   --tail-border: transparent; /* transparent border for dark mode tail */
+
+  /* Chart colors */
+  --chart-1: var(--accent); /* sea-foam proof */
+  --chart-2: var(--primary); /* teal */
+  --chart-3: var(--secondary); /* peach timer */
+  --chart-4: #d6a8dc; /* muted orchid - offline key */
+  --chart-5: var(--chart-1); /* sea-foam variant */
+
+  /* Sidebar colors */
+  --sidebar: var(--background);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-primary: var(--card);
+  --sidebar-primary-foreground: var(--foreground);
+  --sidebar-accent: var(--accent);
+  --sidebar-accent-foreground: var(--accent-foreground);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--ring);
+
+  /* Layout */
   --bottom-nav-height: 64px;
+
+  /* Scrollbar colors (dark mode) */
+  --scrollbar-thumb-rgb: 232, 232, 234;
 }
 
 @theme inline {
-  --font-sans: 'Inter', 'Inter Fallback';
+  /* Map CSS variables to Tailwind theme values */
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -176,8 +235,8 @@
   /* Global scrollbar styling - thin, minimal, no track background */
   * {
     scrollbar-width: thin; /* Firefox */
-    /* Fallback for browsers without color-mix support (light mode default) */
-    scrollbar-color: rgba(26, 26, 29, 0.35) transparent;
+    /* Fallback for browsers without color-mix support */
+    scrollbar-color: rgba(var(--scrollbar-thumb-rgb), 0.35) transparent;
     /* Progressive enhancement: override with color-mix if supported */
     scrollbar-color: color-mix(in oklch, var(--foreground) 35%, transparent)
       transparent;
@@ -188,20 +247,15 @@
     width: 8px;
     height: 8px;
   }
-  *::-webkit-scrollbar-track {
-    background: transparent;
-  }
-  /* Ensure no background shows behind the scrollbar in all cases */
-  *::-webkit-scrollbar-track-piece {
-    background: transparent;
-  }
+  *::-webkit-scrollbar-track,
+  *::-webkit-scrollbar-track-piece,
   *::-webkit-scrollbar-corner {
     background: transparent;
   }
 
   *::-webkit-scrollbar-thumb {
-    /* Fallback for browsers without color-mix support (light mode default) */
-    background-color: rgba(26, 26, 29, 0.35);
+    /* Fallback for browsers without color-mix support */
+    background-color: rgba(var(--scrollbar-thumb-rgb), 0.35);
     /* Progressive enhancement: override with color-mix if supported */
     background-color: color-mix(in oklch, var(--foreground) 35%, transparent);
     border-radius: 9999px;
@@ -209,24 +263,10 @@
     background-clip: padding-box;
   }
   *::-webkit-scrollbar-thumb:hover {
-    /* Fallback for browsers without color-mix support (light mode default) */
-    background-color: rgba(26, 26, 29, 0.5);
+    /* Fallback for browsers without color-mix support */
+    background-color: rgba(var(--scrollbar-thumb-rgb), 0.5);
     /* Progressive enhancement: override with color-mix if supported */
     background-color: color-mix(in oklch, var(--foreground) 50%, transparent);
-  }
-
-  /* Dark mode fallbacks for browsers without color-mix support */
-  /* These only apply when color-mix is not supported */
-  @supports not (color: color-mix(in oklch, red, blue)) {
-    .dark * {
-      scrollbar-color: rgba(232, 232, 234, 0.35) transparent;
-    }
-    .dark *::-webkit-scrollbar-thumb {
-      background-color: rgba(232, 232, 234, 0.35);
-    }
-    .dark *::-webkit-scrollbar-thumb:hover {
-      background-color: rgba(232, 232, 234, 0.5);
-    }
   }
 
   /* Disable pull-to-refresh for the entire app */
@@ -271,37 +311,8 @@
 }
 
 @layer utilities {
-  @keyframes spin-reverse {
-    from {
-      transform: rotate(0deg);
-    }
-    to {
-      transform: rotate(-360deg);
-    }
-  }
-
-  .-animate-spin {
-    animation: spin-reverse 1s linear infinite;
-  }
-
-  /* Safe area support for mobile browsers */
-  .pb-safe {
-    padding-bottom: env(safe-area-inset-bottom);
-  }
-
-  .pt-safe {
-    padding-top: env(safe-area-inset-top);
-  }
-
-  .pl-safe {
-    padding-left: env(safe-area-inset-left);
-  }
-
-  .pr-safe {
-    padding-right: env(safe-area-inset-right);
-  }
-
   /* Global app max-width container */
+  /* Note: Using @apply here as it's cleaner for responsive utilities */
   .app-max-w {
     @apply w-full mx-auto md:max-w-2xl lg:max-w-3xl xl:max-w-3xl 2xl:max-w-3xl;
   }
@@ -331,190 +342,7 @@
     pointer-events: none;
   }
 
-  @keyframes fade-in {
-    from {
-      opacity: 0;
-      transform: translateY(-10px);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
-  }
-
-  @keyframes spin-slow {
-    from {
-      transform: rotate(0deg);
-    }
-    to {
-      transform: rotate(360deg);
-    }
-  }
-
-  @keyframes pulse-slow {
-    0%,
-    100% {
-      opacity: 1;
-    }
-    50% {
-      opacity: 0.5;
-    }
-  }
-
-  /* Ghost animation keyframes */
-  @keyframes float {
-    0%,
-    100% {
-      transform: translateY(0px);
-    }
-    50% {
-      transform: translateY(-20px);
-    }
-  }
-
-  @keyframes tilt {
-    0%,
-    100% {
-      transform: rotate(-3deg);
-    }
-    50% {
-      transform: rotate(3deg);
-    }
-  }
-
-  @keyframes blink {
-    0%,
-    90%,
-    100% {
-      transform: scaleY(1);
-    }
-    95% {
-      transform: scaleY(0.1);
-    }
-  }
-
-  /* Loading-specific animations - faster and more active */
-  @keyframes float-loading {
-    0%,
-    100% {
-      transform: translateY(0px);
-    }
-    50% {
-      transform: translateY(-15px);
-    }
-  }
-
-  @keyframes tilt-loading {
-    0%,
-    100% {
-      transform: rotate(-5deg);
-    }
-    50% {
-      transform: rotate(5deg);
-    }
-  }
-
-  @keyframes blink-loading {
-    0%,
-    85%,
-    100% {
-      transform: scaleY(1);
-    }
-    92.5% {
-      transform: scaleY(0.1);
-    }
-  }
-
-  @keyframes pulse-loading {
-    0%,
-    100% {
-      opacity: 0.6;
-      transform: scale(1);
-    }
-    50% {
-      opacity: 1;
-      transform: scale(1.05);
-    }
-  }
-
-  /* Chat bubble animations */
-  @keyframes bubbleIn {
-    from {
-      opacity: 0;
-      transform: translateY(8px) scale(0.96);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0) scale(1);
-    }
-  }
-
-  @keyframes fadeOut {
-    from {
-      opacity: 1;
-    }
-    to {
-      opacity: 0;
-    }
-  }
-
-  .animate-bubble-in {
-    animation: bubbleIn 0.22s ease-out;
-  }
-
-  .animate-fade-in {
-    animation: fade-in 0.6s ease-out;
-  }
-
-  .animate-spin-slow {
-    animation: spin-slow 20s linear infinite;
-  }
-
-  .animate-pulse-slow {
-    animation: pulse-slow 3s ease-in-out infinite;
-  }
-
-  .animate-pulse-loading {
-    animation: pulse-loading 2s ease-in-out infinite;
-  }
-
-  .animate-float {
-    animation: float 4s ease-in-out infinite;
-  }
-
-  .animate-float-loading {
-    animation: float-loading 2.5s ease-in-out infinite;
-  }
-
-  .animate-tilt {
-    animation: tilt 6s ease-in-out infinite;
-  }
-
-  .animate-tilt-loading {
-    animation: tilt-loading 3s ease-in-out infinite;
-  }
-
-  .animate-blink {
-    animation: blink 4s ease-in-out infinite;
-  }
-
-  .animate-blink-loading {
-    animation: blink-loading 2s ease-in-out infinite;
-  }
-
   /* Message highlight animation for scroll-to-message */
-  @keyframes highlight-message {
-    0% {
-      background-color: transparent;
-    }
-    50% {
-      background-color: color-mix(in oklch, var(--ring) 20%, transparent);
-    }
-    100% {
-      background-color: transparent;
-    }
-  }
-
   .highlight-message {
     animation: highlight-message 2s ease-out;
     border-radius: var(--radius);
