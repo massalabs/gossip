@@ -1,14 +1,16 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { updateContactName } from '../utils';
+import { updateContactName, deleteContact } from '../utils';
 import { useDiscussionStore } from '../stores/discussionStore';
+import { useMessageStore } from '../stores/messageStore';
 import ContactAvatar from '../components/avatar/ContactAvatar';
 import { useAccountStore } from '../stores/accountStore';
 import ContactNameModal from '../components/ui/ContactNameModal';
 import Button from '../components/ui/Button';
 import PageHeader from '../components/ui/PageHeader';
 import UserIdDisplay from '../components/ui/UserIdDisplay';
-import { Check, Edit2 } from 'react-feather';
+import BaseModal from '../components/ui/BaseModal';
+import { Check, Edit2, Trash2 } from 'react-feather';
 import ShareContact from '../components/settings/ShareContact';
 import { UserPublicKeys } from '../assets/generated/wasm/gossip_wasm';
 
@@ -30,7 +32,11 @@ const Contact: React.FC = () => {
 
   // All hooks must be called before early return
   const ownerUserId = useAccountStore(s => s.userProfile?.userId);
+  const clearMessages = useMessageStore(s => s.clearMessages);
   const [isNameModalOpen, setIsNameModalOpen] = useState(false);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [proposedName, setProposedName] = useState(contact?.name || '');
   const [displayName, setDisplayName] = useState(contact?.name || '');
   const [nameError, setNameError] = useState<string | null>(null);
@@ -88,6 +94,32 @@ const Contact: React.FC = () => {
       return () => clearTimeout(timer);
     }
   }, [showSuccessCheck]);
+
+  const handleDeleteContact = useCallback(async () => {
+    if (!ownerUserId || !contact) return;
+
+    setIsDeleting(true);
+    setDeleteError(null);
+
+    try {
+      const result = await deleteContact(ownerUserId, contact.userId);
+      if (!result.ok) {
+        setDeleteError(result.message);
+        setIsDeleting(false);
+        return;
+      }
+
+      // Clear messages from message store
+      clearMessages(contact.userId);
+
+      // Navigate back to discussions
+      navigate('/discussions');
+    } catch (error) {
+      console.error('Error deleting contact:', error);
+      setDeleteError('Failed to delete contact. Please try again.');
+      setIsDeleting(false);
+    }
+  }, [ownerUserId, contact, clearMessages, navigate]);
 
   if (!contact) {
     return (
@@ -167,6 +199,16 @@ const Contact: React.FC = () => {
               {discussion?.status === 'closed' && 'This discussion is closed.'}
             </p>
           )}
+          <Button
+            onClick={() => setIsDeleteModalOpen(true)}
+            variant="danger"
+            size="custom"
+            fullWidth
+            className="h-[46px] rounded-lg font-semibold mt-4"
+          >
+            <Trash2 className="w-4 h-4 mr-2" />
+            Remove contact
+          </Button>
         </div>
       </div>
       <ContactNameModal
@@ -184,6 +226,51 @@ const Contact: React.FC = () => {
           await handleSaveName(name);
         }}
       />
+      <BaseModal
+        isOpen={isDeleteModalOpen}
+        onClose={() => {
+          if (!isDeleting) {
+            setIsDeleteModalOpen(false);
+            setDeleteError(null);
+          }
+        }}
+        title="Remove contact?"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-foreground">
+            Are you sure you want to remove <strong>{displayName}</strong> from
+            your contacts? This will also delete all messages and discussions
+            with this contact. This action cannot be undone.
+          </p>
+          {deleteError && (
+            <p className="text-sm text-destructive">{deleteError}</p>
+          )}
+          <div className="flex gap-3">
+            <Button
+              onClick={handleDeleteContact}
+              disabled={isDeleting}
+              loading={isDeleting}
+              variant="danger"
+              size="custom"
+              className="flex-1 h-11 rounded-lg font-semibold"
+            >
+              {isDeleting ? 'Removing...' : 'Remove'}
+            </Button>
+            <Button
+              onClick={() => {
+                setIsDeleteModalOpen(false);
+                setDeleteError(null);
+              }}
+              disabled={isDeleting}
+              variant="secondary"
+              size="custom"
+              className="flex-1 h-11 rounded-lg font-semibold"
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      </BaseModal>
     </div>
   );
 };
