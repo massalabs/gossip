@@ -2,7 +2,7 @@ import React from 'react';
 import { useLocation, useNavigate, matchPath } from 'react-router-dom';
 import { Settings as SettingsFeather } from 'react-feather';
 import NavButton from './NavButton';
-import Head2Icon from './icons/Head2Icon';
+import GossipIcon from './customIcons/gossip-icon';
 import { ROUTES } from '../../constants/routes';
 
 type BottomNavigationTab = 'discussions' | 'settings';
@@ -23,7 +23,7 @@ const BottomNavigation: React.FC = () => {
       id: 'discussions' as const,
       path: ROUTES.discussions(),
       title: 'Discussions',
-      icon: <Head2Icon size={24} />,
+      icon: <GossipIcon size={24} />,
     },
     {
       id: 'settings' as const,
