@@ -183,7 +183,7 @@ const Settings = (): React.ReactElement => {
                   </p>
                   <UserIdDisplay
                     userId={userProfile.userId}
-                    value={showUserId}
+                    visible={showUserId}
                     onChange={setShowUserId}
                     textSize="sm"
                     textClassName="text-gray-600 dark:text-gray-400"

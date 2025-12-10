@@ -143,7 +143,7 @@ const Contact: React.FC = () => {
               userId={contact.userId}
               showCopy
               showHideToggle
-              value={showUserId}
+              visible={showUserId}
               onChange={setShowUserId}
             />
           </div>

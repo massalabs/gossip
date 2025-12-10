@@ -5,7 +5,7 @@ import CopyClipboard from './CopyClipboard';
 
 interface UserIdDisplayProps {
   userId: string;
-  value?: boolean; // Visibility state (true = visible, false = hidden)
+  visible?: boolean; // Visibility state (true = visible, false = hidden)
   onChange?: (visible: boolean) => void; // Callback when visibility changes
   showCopy?: boolean;
   showHideToggle?: boolean;
@@ -20,7 +20,7 @@ interface UserIdDisplayProps {
 
 const UserIdDisplay: React.FC<UserIdDisplayProps> = ({
   userId,
-  value = true, // Default to visible
+  visible = true, // Default to visible
   onChange,
   showCopy = false,
   showHideToggle = false,
@@ -40,7 +40,7 @@ const UserIdDisplay: React.FC<UserIdDisplayProps> = ({
       onToggleClick(e);
     }
     if (onChange) {
-      onChange(!value);
+      onChange(!visible);
     }
   };
 
@@ -67,16 +67,16 @@ const UserIdDisplay: React.FC<UserIdDisplayProps> = ({
   return (
     <div className={`flex items-center gap-2 ${className}`.trim()}>
       <p className={combinedTextClasses}>
-        {value ? userIdFormatted : userIdHidden}
+        {visible ? userIdFormatted : userIdHidden}
       </p>
       {showCopy && <CopyClipboard text={userId} title={copyTitle} />}
       {showHideToggle && onChange && (
         <button
           onClick={handleToggleClick}
           className="shrink-0 p-1 hover:bg-muted rounded transition-colors"
-          title={value ? 'Hide User ID' : 'Show User ID'}
+          title={visible ? 'Hide User ID' : 'Show User ID'}
         >
-          {value ? (
+          {visible ? (
             <Eye
               className={`${textSize === 'base' ? 'w-4 h-4' : 'w-3 h-3'} text-muted-foreground`}
             />
