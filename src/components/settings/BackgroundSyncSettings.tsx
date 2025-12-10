@@ -7,8 +7,9 @@
  * Provides actions to fix configuration issues.
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
-import { Capacitor } from '@capacitor/core';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { Capacitor, PluginListenerHandle } from '@capacitor/core';
+import { App } from '@capacitor/app';
 import {
   Battery,
   ExternalLink,
@@ -120,20 +121,40 @@ const BackgroundSyncSettings: React.FC<BackgroundSyncSettingsProps> = ({
     }
   }, [isNative, isAndroidNative, isIOSNative]);
 
+  // Store listener handle in a ref to avoid cleanup issues with async setup
+  const appStateListenerRef = useRef<PluginListenerHandle | null>(null);
+
   // Refresh status when app becomes visible (e.g., returning from settings)
   useEffect(() => {
     if (!isNative) return;
 
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        // User returned to the app, refresh status
+    const refreshWithDelay = () => {
+      // Delay to ensure native state is updated after returning from system settings
+      setTimeout(() => {
         void handleRefresh();
+      }, 1000);
+    };
+
+    const setupAppStateListener = async () => {
+      try {
+        const listener = await App.addListener('appStateChange', state => {
+          if (state.isActive) {
+            refreshWithDelay();
+          }
+        });
+        appStateListenerRef.current = listener;
+      } catch (error) {
+        console.error('Failed to setup app state listener:', error);
       }
     };
 
-    document.addEventListener('visibilitychange', handleVisibilityChange);
+    void setupAppStateListener();
+
     return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      if (appStateListenerRef.current) {
+        void appStateListenerRef.current.remove();
+        appStateListenerRef.current = null;
+      }
     };
   }, [isNative, handleRefresh]);
 

@@ -131,8 +131,7 @@ class BatteryOptimizationService {
       return null;
     }
 
-    // If a refresh is already in progress, return the existing promise
-    // This prevents race conditions where multiple callers trigger parallel API calls
+    // If a refresh is already in progress, wait for it to complete
     if (this.refreshPromise) {
       return this.refreshPromise;
     }
