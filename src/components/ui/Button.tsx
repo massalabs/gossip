@@ -79,11 +79,16 @@ const Button: React.FC<ButtonProps> = ({
     variant !== 'circular' && variant !== 'icon' && size !== 'custom';
 
   // Check if className contains a rounded-* class to override default border-radius
-  const hasCustomRounded = /rounded-/.test(className);
+  // This regex matches all Tailwind rounded classes including:
+  // - Standard: rounded-full, rounded-md, rounded-lg, etc.
+  // - Arbitrary values: rounded-[10px]
+  // - Corner-specific: rounded-t-3xl, rounded-br-[4px], etc.
+  const hasCustomRounded = /rounded[-\w[\]]+/.test(className);
   let variantClass = variantClasses[variant];
   if (hasCustomRounded) {
     // Remove default rounded classes from variant when custom rounded is provided
-    variantClass = variantClass.replace(/\s*rounded-\w+/g, '');
+    // Matches any rounded class (standard, arbitrary, or corner-specific)
+    variantClass = variantClass.replace(/\s*rounded[-\w[\]]+/g, '');
   }
 
   const combinedClasses = `${baseClasses} ${variantClass} ${

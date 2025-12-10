@@ -92,6 +92,10 @@
   --foreground: #e8e8ea; /* creamy off-white - primary text */
   --card: #1e1e22; /* surface/cards from Figma */
   --card-foreground: var(--foreground);
+
+  /* Surface colors */
+  --surface-secondary: #243032; /* secondary surface background (incoming messages, discussion items, popups) */
+
   --popover: var(
     --surface-secondary
   ); /* use secondary surface color for popups */
@@ -123,9 +127,6 @@
   /* Muted colors */
   --muted: #252529; /* muted background */
   --muted-foreground: #a0a0a8; /* dove gray - subtle text */
-
-  /* Surface colors */
-  --surface-secondary: #243032; /* secondary surface background (incoming messages, discussion items, popups) */
 
   /* Status colors */
   --success: #22c55e; /* green-500 - online status, success states */

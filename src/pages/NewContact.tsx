@@ -81,7 +81,7 @@ const NewContact: React.FC = () => {
       <PageHeader title="New contact" onBack={handleBack} />
 
       {/* Main Form */}
-      <div className="bg-card rounded-xl p-6 px- space-y-5 ">
+      <div className="bg-card rounded-xl p-6 space-y-5">
         {/* Import Options - File and QR Code */}
         <div className="py-6 border-b border-border">
           <div className="text-center mb-4">
