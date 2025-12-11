@@ -192,7 +192,7 @@ const BackgroundSyncSettings: React.FC<BackgroundSyncSettingsProps> = ({
     : null;
 
   return (
-    <div className="bg-card border border-border rounded-lg overflow-hidden shadow-sm">
+    <div className="bg-card border border-border rounded-xl overflow-hidden">
       {/* Header */}
       <div className="h-[54px] flex items-center px-4 justify-start w-full border-b border-border">
         <Battery className="text-foreground mr-4" aria-hidden="true" />
