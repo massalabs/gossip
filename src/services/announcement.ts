@@ -14,7 +14,6 @@ import {
 } from '../assets/generated/wasm/gossip_wasm';
 import { SessionModule } from '../wasm/session';
 import { notificationService } from './notifications';
-import { encodeToBase64 } from '../utils/base64';
 
 const ONE_HOUR_MS = 60 * 60 * 1000;
 
@@ -159,9 +158,6 @@ export class AnnouncementService {
           // if success but no contactUserId, it means the announcement is not for us. So we don't count it as a new announcement.
           if (result.success && result.contactUserId) {
             newAnnouncementsCount++;
-            console.log(
-              `fetchAndProcessAnnouncements: new announcement received from contact ${result.contactUserId}: ${encodeToBase64(announcement)}. New announcements count: ${newAnnouncementsCount}`
-            );
           } else if (result.error) {
             errors.push(`${result.error}`);
           }
@@ -219,9 +215,6 @@ export class AnnouncementService {
     failedDiscussions: Discussion[],
     session: SessionModule
   ): Promise<void> {
-    console.log(
-      `resendAnnouncements: resending ${failedDiscussions.length} failed discussions`
-    );
     if (!failedDiscussions.length) return;
 
     // Perform async network calls outside transaction
@@ -236,23 +229,14 @@ export class AnnouncementService {
 
         if (result.success) {
           sentDiscussions.push(discussion);
-          console.log(
-            `resendAnnouncements: successfully resent discussion between ${discussion.ownerUserId} and ${discussion.contactUserId}`
-          );
+
           continue;
         }
-
-        console.error(
-          `resendAnnouncements: failed to resend discussion between ${discussion.ownerUserId} and ${discussion.contactUserId}, got error: ${result.error}`
-        );
 
         // Failed to send - check if should mark as broken
         const lastUpdate = discussion.updatedAt.getTime() ?? 0;
         if (Date.now() - lastUpdate > ONE_HOUR_MS) {
           brokenDiscussions.push(discussion.id!);
-          console.log(
-            `resendAnnouncements: discussion between ${discussion.ownerUserId} and ${discussion.contactUserId} should be marked as broken because it could not be resent for long time`
-          );
         }
       } catch (error) {
         console.error('Failed to resend announcement:', error);
@@ -271,18 +255,12 @@ export class AnnouncementService {
               const status = session.peerSessionStatus(
                 decodeUserId(discussion.contactUserId)
               );
-              console.log(
-                `resendAnnouncements: session status for discussion between ${discussion.ownerUserId} and ${discussion.contactUserId} is ${status}`
-              );
 
               // If discussion has been broken, don't update it
               if (
                 status !== SessionStatus.Active &&
                 status !== SessionStatus.SelfRequested
               ) {
-                console.log(
-                  `resendAnnouncements: discussion between ${discussion.ownerUserId} and ${discussion.contactUserId} has been broken, so it will not be updated`
-                );
                 return;
               }
 
@@ -294,9 +272,6 @@ export class AnnouncementService {
                 updatedAt: now,
               });
             })
-          );
-          console.log(
-            'resendAnnouncements: reactivated discussions have been updated to active or pending'
           );
         }
 
@@ -310,9 +285,6 @@ export class AnnouncementService {
                 updatedAt: now,
               })
             )
-          );
-          console.log(
-            `resendAnnouncements: following discussions have been marked as broken: ${brokenDiscussions.join(', ')}`
           );
         }
       });
@@ -380,10 +352,6 @@ export class AnnouncementService {
 
       // if we can't decrypt the announcement, it means we are not the intended recipient. It's not an error.
       if (!announcementResult) {
-        console.log(
-          `_processIncomingAnnouncement: failed to decrypt, announcement ${encodeToBase64(announcementData)} not for us`
-        );
-
         return {
           success: true,
         };
@@ -395,10 +363,6 @@ export class AnnouncementService {
       if (userData && userData.length > 0) {
         try {
           announcementMessage = new TextDecoder().decode(userData);
-          console.log(
-            'Received announcement with user data:',
-            announcementMessage
-          );
         } catch (error) {
           logAnnouncementError(
             'Failed to decode announcement user data:',
