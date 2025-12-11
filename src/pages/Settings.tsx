@@ -1,5 +1,8 @@
 import React, { useState, useCallback } from 'react';
 import BaseModal from '../components/ui/BaseModal';
+import HeaderWrapper from '../components/ui/HeaderWrapper';
+import PageHeader from '../components/ui/PageHeader';
+import ScrollableContent from '../components/ui/ScrollableContent';
 import { useAccountStore } from '../stores/accountStore';
 import { useAppStore } from '../stores/appStore';
 import { useTheme } from '../hooks/useTheme';
@@ -157,39 +160,47 @@ const Settings = (): React.ReactElement => {
   }
 
   return (
-    <div className="bg-background h-full overflow-auto app-max-w mx-auto">
+    <div className="h-full flex flex-col bg-background app-max-w mx-auto">
       {/* Header */}
-      <div className="px-6 py-4 border-b border-border bg-card">
-        <h1 className="text-xl font-semibold text-foreground">Settings</h1>
-      </div>
+      <HeaderWrapper>
+        <PageHeader title="Settings" />
+      </HeaderWrapper>
       {/* Main Content */}
-      <div className="px-6 py-6">
+      <ScrollableContent className="flex-1 overflow-y-auto px-6 py-6">
         {/* Account Profile Section */}
         <div className="bg-card rounded-xl border border-border p-6 mb-6">
           <div className="flex items-start gap-4">
             <img
               src={ProfilePicture}
-              className="w-16 h-16 rounded-xl object-cover"
+              className="w-16 h-16 rounded-full object-cover"
               alt="Profile"
             />
             <div className="flex-1 min-w-0">
-              <h3 className="text-base font-semibold text-foreground mb-2">
-                {userProfile?.username || 'Account name'}
-              </h3>
+              <div className="mb-2 flex items-baseline gap-2">
+                <p className="text-xs text-muted-foreground shrink-0">Name:</p>
+                <h3 className="text-base font-semibold text-foreground truncate">
+                  {userProfile?.username || 'Account name'}
+                </h3>
+              </div>
               {userProfile?.userId && (
-                <div className="mb-2 flex items-baseline gap-2">
+                <div className="flex items-center gap-2 min-w-0">
                   <p className="text-xs text-muted-foreground shrink-0">
                     User ID:
                   </p>
-                  <UserIdDisplay
-                    userId={userProfile.userId}
-                    visible={showUserId}
-                    onChange={setShowUserId}
-                    textSize="sm"
-                    textClassName="text-muted-foreground"
-                    showCopy
-                    showHideToggle
-                  />
+                  <div className="flex-1 min-w-0">
+                    <UserIdDisplay
+                      userId={userProfile.userId}
+                      visible={showUserId}
+                      onChange={setShowUserId}
+                      textSize="sm"
+                      textClassName="text-muted-foreground"
+                      showCopy
+                      showHideToggle
+                      className="w-full"
+                      prefixChars={3}
+                      suffixChars={3}
+                    />
+                  </div>
                 </div>
               )}
             </div>
@@ -404,7 +415,7 @@ const Settings = (): React.ReactElement => {
             </Button>
           </div>
         </div>
-      </div>
+      </ScrollableContent>
       <BaseModal
         isOpen={isResetModalOpen}
         onClose={() => setIsResetModalOpen(false)}
