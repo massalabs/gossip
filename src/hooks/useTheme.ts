@@ -2,6 +2,7 @@ import { useUiStore } from '../stores/uiStore';
 import { initStatusBar } from './useCapacitorBarColors';
 import { Theme } from '../stores/uiStore';
 import { resolveTheme } from '../utils/themeUtils';
+import { Capacitor } from '@capacitor/core';
 
 // const handleChange = () => {
 //   const theme = useUiStore.getState().theme;
@@ -59,7 +60,10 @@ export function useTheme() {
         void updateTheme(state.theme);
       }
     });
-    await initStatusBar();
+
+    if (Capacitor.isNativePlatform()) {
+      await initStatusBar();
+    }
   };
 
   return {

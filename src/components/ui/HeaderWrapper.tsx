@@ -21,7 +21,7 @@ const HeaderWrapper: React.FC<HeaderWrapperProps> = ({
     };
   }, [setHeaderVisible]);
 
-  const bgClass = headerIsScrolled ? 'bg-[var(--header-scrolled)]' : 'bg-card';
+  const bgClass = headerIsScrolled ? 'bg-muted' : 'bg-card';
 
   return (
     <div className={`px-6 py-4 header-bg-transition ${bgClass} ${className}`}>

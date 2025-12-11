@@ -1,6 +1,5 @@
 import { Capacitor } from '@capacitor/core';
-import { StatusBar, Style } from '@capacitor/status-bar';
-import { NavigationBar } from '@capgo/capacitor-navigation-bar';
+import { Style } from '@capacitor/status-bar';
 import { EdgeToEdge } from '@capawesome/capacitor-android-edge-to-edge-support';
 import { useUiStore } from '../stores/uiStore';
 
@@ -81,10 +80,10 @@ interface BarColors {
 export const getBarsColors = (
   headerVisible: boolean,
   headerIsScrolled: boolean,
-  bottomNavVisible: boolean,
   resolvedTheme: 'light' | 'dark'
 ): BarColors => {
   let topBarBgColor: string;
+  let navBarBgColor: string;
 
   if (headerVisible) {
     topBarBgColor = headerIsScrolled
@@ -94,15 +93,9 @@ export const getBarsColors = (
     topBarBgColor = getCSSVariableValue('--background');
   }
 
-  // Determine navigation bar background color:
-  // - If bottom nav visible: use muted color (same as bottom nav)
-  // - If bottom nav not visible: use background color
-  let navBarBgColor: string;
-  if (bottomNavVisible) {
-    navBarBgColor = getCSSVariableValue('--muted');
-  } else {
-    navBarBgColor = getCSSVariableValue('--background');
-  }
+  // Navigation bar background color always uses muted color to match bottom navigation
+  // The bottom navigation uses bg-muted class, so nav bar should match this color
+  navBarBgColor = getCSSVariableValue('--muted');
 
   // Normalize colors to hex format with theme-based fallbacks
   const darkBgFallback = '#18181b';
@@ -125,112 +118,42 @@ export const getBarsColors = (
 };
 
 /**
- * Update status bar and navigation bar colors
- * Applies the provided colors to the native status and navigation bars
+ * Update top bar (status bar) colors
+ * Applies the provided colors to the native status bar
  */
-export const updateBarColors = async ({
-  topBarBgColor,
-  topBarTextColor,
-  navBarBgColor,
-  navBarTextColor,
-}: BarColors) => {
+export const updateBarsColors = async (barsColors: BarColors) => {
   if (!Capacitor.isNativePlatform()) return;
 
-  // Use requestAnimationFrame to ensure DOM is fully updated
   await new Promise(resolve => requestAnimationFrame(resolve));
-
-  // Convert text color to StatusBar Style
-  const statusBarStyle =
-    topBarTextColor === Style.Dark ? Style.Dark : Style.Light;
-
-  // Convert text color to NavigationBar darkButtons
-  const navBarDarkButtons = navBarTextColor === Style.Dark;
-
-  const isAndroid = Capacitor.getPlatform() === 'android';
-
-  // Edge-to-edge approach: Status bar color is simulated by header background
-  // We only need to set icon style (light/dark) based on background luminance
-  await StatusBar.setStyle({ style: statusBarStyle });
-
-  // Optional: Set background color as fallback for older Android versions
-  // On Android 15+, this is no-op but doesn't hurt
-  // The actual visual color comes from header/nav background extending behind bars
-  if (isAndroid) {
-    // Use EdgeToEdge plugin for Android (supports Android 15+)
-    // This is optional since header background simulates the color
-    await EdgeToEdge.setBackgroundColor({ color: topBarBgColor }).catch(err => {
-      console.warn('Failed to set EdgeToEdge background color:', err);
-    });
-  } else {
-    // iOS: StatusBar.setBackgroundColor still works
-    await StatusBar.setBackgroundColor({ color: topBarBgColor });
-  }
-
-  // Update navigation bar using NavigationBar plugin (Android only)
-  if (isAndroid) {
-    await NavigationBar.setNavigationBarColor({
-      color: navBarBgColor,
-      darkButtons: navBarDarkButtons,
-    }).catch(err => {
-      console.warn('Failed to set NavigationBar color:', err);
-    });
-  }
+  await EdgeToEdge.setBackgroundColor({ color: barsColors.navBarBgColor });
 };
+// Store the unsubscribe function to prevent multiple subscriptions
+let unsubscribeBarColors: (() => void) | null = null;
 
 export const initStatusBar = async () => {
   if (!Capacitor.isNativePlatform()) return;
 
-  const isAndroid = Capacitor.getPlatform() === 'android';
-
-  // Enable edge-to-edge mode on Android (required for Android 15+ support)
-  if (isAndroid) {
-    await EdgeToEdge.enable().catch(err => {
-      console.warn('Failed to enable EdgeToEdge mode:', err);
-    });
-
-    // Inject safe area insets as CSS variables for Android
-    // This allows us to use --safe-area-inset-* in CSS
-    try {
-      const insets = await EdgeToEdge.getInsets();
-      const root = document.documentElement;
-      root.style.setProperty('--safe-area-inset-top', `${insets.top}px`);
-      root.style.setProperty('--safe-area-inset-bottom', `${insets.bottom}px`);
-      root.style.setProperty('--safe-area-inset-left', `${insets.left}px`);
-      root.style.setProperty('--safe-area-inset-right', `${insets.right}px`);
-    } catch (err) {
-      console.warn('Failed to get EdgeToEdge insets:', err);
-    }
+  // Clean up existing subscription if it exists to prevent multiple subscriptions
+  if (unsubscribeBarColors) {
+    unsubscribeBarColors();
+    unsubscribeBarColors = null;
   }
 
-  const uiStore = useUiStore.getState();
-
-  await updateBarColors(
-    getBarsColors(
-      uiStore.headerVisible,
-      uiStore.headerIsScrolled,
-      uiStore.bottomNavVisible,
-      uiStore.resolvedTheme
-    )
-  );
-
-  // Subscribe to UI store changes
-  useUiStore.subscribe((state, prevState) => {
-    const headerChanged =
-      state.headerVisible !== prevState.headerVisible ||
-      state.headerIsScrolled !== prevState.headerIsScrolled;
+  unsubscribeBarColors = useUiStore.subscribe((state, prevState) => {
+    const headerChanged = state.headerVisible !== prevState.headerVisible;
     const bottomNavChanged =
       state.bottomNavVisible !== prevState.bottomNavVisible;
+
     const themeChanged = state.resolvedTheme !== prevState.resolvedTheme;
 
     if (headerChanged || bottomNavChanged || themeChanged) {
-      void updateBarColors(
-        getBarsColors(
-          state.headerVisible,
-          state.headerIsScrolled,
-          state.bottomNavVisible,
-          state.resolvedTheme
-        )
+      const barColors = getBarsColors(
+        state.headerVisible,
+        state.headerIsScrolled,
+        state.resolvedTheme
       );
+
+      updateBarsColors(barColors);
     }
   });
 };

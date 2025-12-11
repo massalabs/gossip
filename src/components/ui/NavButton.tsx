@@ -32,7 +32,7 @@ const NavButton: React.FC<NavButtonProps> = ({
     >
       <div
         className={`w-6 h-6 transition-colors ${
-          isActive ? 'text-primary' : 'text-muted-foreground'
+          isActive ? 'text-primary' : 'text-foreground/80'
         }`}
       >
         {icon}
