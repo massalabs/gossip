@@ -1,4 +1,4 @@
-import React, { useMemo, useEffect, useRef } from 'react';
+import React, { useMemo, useEffect, useRef, useLayoutEffect } from 'react';
 import { Element } from 'react-scroll';
 import { Message, Discussion } from '../../db';
 import MessageItem from './MessageItem';
@@ -34,6 +34,18 @@ const MessageList: React.FC<MessageListProps> = ({
     }
   }, [discussion?.id]);
 
+  // Set initial scroll position to bottom before first paint (prevents visible scroll)
+  useLayoutEffect(() => {
+    if (isLoading || hasInitiallyScrolledRef.current) return;
+
+    const container = document.getElementById('messagesContainer');
+    if (container && messages.length > 0) {
+      // Set scroll position synchronously before paint
+      container.scrollTop = container.scrollHeight;
+      hasInitiallyScrolledRef.current = true;
+    }
+  }, [isLoading, messages.length]);
+
   // Memoize the message items to prevent re-rendering all messages when one is added
   const messageItems = useMemo(() => {
     return messages.map(message => {
@@ -49,46 +61,28 @@ const MessageList: React.FC<MessageListProps> = ({
     });
   }, [messages, onReplyTo, onScrollToMessage]);
 
-  // Auto-scroll to bottom when new messages are added
+  // Auto-scroll to bottom when new messages are added (after initial render)
   useEffect(() => {
-    if (isLoading) return;
+    if (isLoading || !hasInitiallyScrolledRef.current) return;
 
     const lastMessage = messages[messages.length - 1];
     const currentLastMessageId = lastMessage?.id || null;
     const prevLastMessageId = prevLastMessageIdRef.current;
 
-    // Scroll on initial load or when the last message changes (new message added)
-    const shouldScroll =
-      !hasInitiallyScrolledRef.current ||
-      (currentLastMessageId !== null &&
-        currentLastMessageId !== prevLastMessageId);
-
-    if (shouldScroll) {
-      // Use requestAnimationFrame to ensure DOM is updated
+    // Only scroll when a new message is added (not on initial load)
+    if (
+      currentLastMessageId !== null &&
+      currentLastMessageId !== prevLastMessageId
+    ) {
+      // Use requestAnimationFrame to ensure DOM is updated, then scroll instantly
       requestAnimationFrame(() => {
         const container = document.getElementById('messagesContainer');
-        const maxRetries = 5;
-        const retryDelay = 100; // ms
-        let attempt = 0;
-
-        function tryScroll() {
-          if (container) {
-            const messagesEnd = container.querySelector('[name="messagesEnd"]');
-            if (messagesEnd) {
-              messagesEnd.scrollIntoView({ behavior: 'smooth', block: 'end' });
-            } else if (attempt < maxRetries) {
-              attempt++;
-              setTimeout(tryScroll, retryDelay);
-            } else {
-              // Fallback: scroll to bottom
-              container.scrollTop = container.scrollHeight;
-            }
-          }
+        if (container) {
+          // Use instant scroll (no smooth behavior) for better performance
+          // This prevents lag when new messages arrive
+          container.scrollTop = container.scrollHeight;
         }
-
-        tryScroll();
       });
-      hasInitiallyScrolledRef.current = true;
     }
 
     prevLastMessageIdRef.current = currentLastMessageId;
