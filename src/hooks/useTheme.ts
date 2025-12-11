@@ -1,3 +1,4 @@
+import { useCallback } from 'react';
 import { useUiStore } from '../stores/uiStore';
 import { initStatusBar } from './useCapacitorBarColors';
 import { Theme } from '../stores/uiStore';
@@ -13,7 +14,7 @@ let unsubscribeTheme: (() => void) | null = null;
 /**
  * Update theme and apply it to the DOM
  */
-const updateTheme = async (theme: Theme) => {
+const updateTheme = (theme: Theme) => {
   const root = document.documentElement;
   const resolved = resolveTheme(theme);
 
@@ -33,7 +34,7 @@ const updateTheme = async (theme: Theme) => {
 const handleSystemThemeChange = () => {
   const theme = useUiStore.getState().theme;
   if (theme === 'system') {
-    void updateTheme(theme);
+    updateTheme(theme);
   }
 };
 
@@ -65,7 +66,7 @@ export function useTheme() {
   const resolvedTheme = useUiStore(s => s.resolvedTheme);
   const setTheme = useUiStore(s => s.setTheme);
 
-  const initTheme = async () => {
+  const initTheme = useCallback(async () => {
     // Clean up existing subscription if it exists
     if (unsubscribeTheme) {
       unsubscribeTheme();
@@ -82,13 +83,15 @@ export function useTheme() {
     // Initialize system theme listener
     initSystemThemeListener();
 
+    // Get current theme from store (not from closure) to ensure we use the latest value
+    const currentTheme = useUiStore.getState().theme;
     // Apply initial theme
-    await updateTheme(theme);
+    updateTheme(currentTheme);
 
     // Subscribe to theme changes from store
     unsubscribeTheme = useUiStore.subscribe((state, prevState) => {
       if (state.theme !== prevState.theme) {
-        void updateTheme(state.theme);
+        updateTheme(state.theme);
         // Re-initialize listener when theme changes to/from system
         if (state.theme === 'system' || prevState.theme === 'system') {
           initSystemThemeListener();
@@ -112,7 +115,7 @@ export function useTheme() {
         mediaQuery = null;
       }
     };
-  };
+  }, []); // Empty deps - function reads theme from store, not closure
 
   return {
     theme,
