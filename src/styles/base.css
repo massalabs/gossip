@@ -9,11 +9,6 @@
     display: none;
   }
 
-  html {
-    height: 100%;
-    height: 100dvh;
-  }
-
   :root {
     font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
     line-height: 1.5;
@@ -25,8 +20,23 @@
     -moz-osx-font-smoothing: grayscale;
   }
 
+  body {
+    @apply bg-background text-foreground;
+    margin: 0;
+    min-width: 20rem; /* min-w-80 */
+    /* Disable pull-to-refresh on mobile */
+    overscroll-behavior-y: contain;
+    -webkit-overflow-scrolling: touch;
+
+    height: 100dvh;
+  }
+
   * {
     @apply border-border outline-ring/50;
+  }
+
+  #root {
+    height: 100%;
   }
 
   /* Utility class for content that comes after fixed HeaderWrapper */
@@ -42,17 +52,6 @@
   /* Utility class for content with safe area padding (header + more spacing) */
   .pt-safe-header-lg {
     padding-top: calc(var(--header-height) + 1rem);
-  }
-
-  body {
-    @apply bg-background text-foreground;
-    margin: 0;
-    min-width: 20rem; /* min-w-80 */
-    /* Disable pull-to-refresh on mobile */
-    overscroll-behavior-y: contain;
-    -webkit-overflow-scrolling: touch;
-
-    height: 100dvh;
   }
 
   /* Fix browser autofill background color - match card background */
@@ -149,19 +148,6 @@
       -webkit-appearance: none !important;
       appearance: none !important;
     }
-  }
-
-  /* Disable pull-to-refresh for the entire app */
-  html,
-  body {
-    overscroll-behavior: none;
-    -webkit-overflow-scrolling: touch;
-    overflow-x: hidden;
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
-  }
-  #root {
-    height: 100%;
   }
 
   /* Ensure pointer cursor on all buttons */
