@@ -34,7 +34,7 @@ Gossip is a privacy-first, secure messaging application built with React, TypeSc
 
 ```bash
 git clone <repository-url>
-cd Gossip
+cd gossip
 ```
 
 2. Install dependencies:
