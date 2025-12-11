@@ -1,11 +1,9 @@
 import React, { useMemo, useEffect, useRef } from 'react';
-import * as ReactScroll from 'react-scroll';
+import { Element } from 'react-scroll';
 import { Message, Discussion } from '../../db';
 import MessageItem from './MessageItem';
 import LoadingState from './LoadingState';
 import EmptyState from './EmptyState';
-
-const { Element } = ReactScroll;
 
 interface MessageListProps {
   messages: Message[];
@@ -68,17 +66,27 @@ const MessageList: React.FC<MessageListProps> = ({
     if (shouldScroll) {
       // Use requestAnimationFrame to ensure DOM is updated
       requestAnimationFrame(() => {
-        // Try react-scroll first, fallback to native scroll
         const container = document.getElementById('messagesContainer');
-        if (container) {
-          const messagesEnd = container.querySelector('[name="messagesEnd"]');
-          if (messagesEnd) {
-            messagesEnd.scrollIntoView({ behavior: 'smooth', block: 'end' });
-          } else {
-            // Fallback: scroll to bottom
-            container.scrollTop = container.scrollHeight;
+        const maxRetries = 5;
+        const retryDelay = 100; // ms
+        let attempt = 0;
+
+        function tryScroll() {
+          if (container) {
+            const messagesEnd = container.querySelector('[name="messagesEnd"]');
+            if (messagesEnd) {
+              messagesEnd.scrollIntoView({ behavior: 'smooth', block: 'end' });
+            } else if (attempt < maxRetries) {
+              attempt++;
+              setTimeout(tryScroll, retryDelay);
+            } else {
+              // Fallback: scroll to bottom
+              container.scrollTop = container.scrollHeight;
+            }
           }
         }
+
+        tryScroll();
       });
       hasInitiallyScrolledRef.current = true;
     }

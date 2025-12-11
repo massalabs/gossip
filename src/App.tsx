@@ -85,7 +85,8 @@ function App() {
   useEffect(() => {
     void initTheme();
     void initOnlineStore();
-  }, [initTheme, initOnlineStore]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Only run once on mount - initTheme and initOnlineStore are stable initialization functions
 
   return (
     <BrowserRouter>

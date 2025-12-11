@@ -48,7 +48,7 @@ function TabSwitcher<T extends string>({
 
   return (
     <div
-      className={`relative w-full bg-muted rounded-4xl p-1.5 flex items-center gap-1.5 ${className} bg-amber-700`}
+      className={`relative w-full bg-muted rounded-4xl p-1.5 flex items-center gap-1.5 ${className}`}
     >
       {/* Active indicator */}
       <div

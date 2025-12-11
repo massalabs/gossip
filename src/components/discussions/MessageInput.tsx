@@ -129,7 +129,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
               autoCapitalize="sentences"
               spellCheck={true}
               className={`flex-1 bg-transparent text-foreground placeholder:text-muted-foreground
-                         text-[18px] leading-relaxed resize-none p-0 m-0 focus:outline-none outline-none
+                         text-[15px] md:text-[18px] leading-relaxed resize-none p-0 m-0 focus:outline-none outline-none
                          scrollbar-transparent ${isTextareaMultiline ? 'overflow-y-auto' : 'overflow-y-hidden'}`}
             />
           </div>

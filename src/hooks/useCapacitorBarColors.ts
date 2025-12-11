@@ -56,7 +56,6 @@ const normalizeColor = (color: string, fallback: string): string => {
 
   // Ensure we have a valid hex color, use fallback if not
   if (!color || color === '' || !color.startsWith('#')) {
-    console.log('fallback', fallback);
     return fallback;
   }
 

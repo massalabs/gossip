@@ -334,8 +334,15 @@ const MessageItem: React.FC<MessageItemProps> = ({
                   {onResend && (
                     <button
                       onClick={() => onResend(message)}
-                      className="ml-1 px-1.5 py-0.5 text-[10px] font-medium bg-accent-foreground/20 hover:bg-accent-foreground/30 rounded transition-colors dark:text-accent-foreground text-white"
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          onResend(message);
+                        }
+                      }}
+                      className="ml-1 px-1.5 py-0.5 text-[10px] font-medium bg-accent-foreground/20 hover:bg-accent-foreground/30 rounded transition-colors dark:text-accent-foreground text-white focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1"
                       title="Resend message"
+                      aria-label="Resend message"
                     >
                       Resend
                     </button>

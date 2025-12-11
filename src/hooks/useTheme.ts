@@ -7,6 +7,8 @@ import { Capacitor } from '@capacitor/core';
 // Store the media query listener cleanup function
 let mediaQueryListener: ((event: MediaQueryListEvent) => void) | null = null;
 let mediaQuery: MediaQueryList | null = null;
+// Store the theme subscription cleanup function
+let unsubscribeTheme: (() => void) | null = null;
 
 /**
  * Update theme and apply it to the DOM
@@ -64,6 +66,12 @@ export function useTheme() {
   const setTheme = useUiStore(s => s.setTheme);
 
   const initTheme = async () => {
+    // Clean up existing subscription if it exists
+    if (unsubscribeTheme) {
+      unsubscribeTheme();
+      unsubscribeTheme = null;
+    }
+
     // Initialize system theme listener
     initSystemThemeListener();
 
@@ -71,7 +79,7 @@ export function useTheme() {
     await updateTheme(theme);
 
     // Subscribe to theme changes from store
-    useUiStore.subscribe((state, prevState) => {
+    unsubscribeTheme = useUiStore.subscribe((state, prevState) => {
       if (state.theme !== prevState.theme) {
         void updateTheme(state.theme);
         // Re-initialize listener when theme changes to/from system

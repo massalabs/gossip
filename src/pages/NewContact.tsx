@@ -119,9 +119,14 @@ const NewContact: React.FC = () => {
               onChange={e => handleNameChange(e.target.value)}
               placeholder="Username"
               className="w-full bg-transparent text-foreground placeholder-muted-foreground focus:outline-none"
+              aria-describedby={name.error ? 'contact-name-error' : undefined}
             />
             {name.error && (
-              <p className="mt-1.5 text-sm text-destructive" role="alert">
+              <p
+                id="contact-name-error"
+                className="mt-1.5 text-sm text-destructive"
+                role="alert"
+              >
                 {name.error}
               </p>
             )}
@@ -137,6 +142,11 @@ const NewContact: React.FC = () => {
                 onChange={e => handleUserIdChange(e.target.value)}
                 placeholder="Gossip address"
                 className="w-full bg-transparent text-foreground placeholder-muted-foreground focus:outline-none pr-10"
+                aria-describedby={
+                  userId.error
+                    ? 'contact-user-id-error'
+                    : 'contact-user-id-helper'
+                }
               />
               {userId.loading && (
                 <div className="absolute right-0 top-1/2 -translate-y-1/2">
@@ -147,8 +157,20 @@ const NewContact: React.FC = () => {
                 </div>
               )}
             </div>
+            {!userId.error && !userId.loading && (
+              <p
+                id="contact-user-id-helper"
+                className="mt-1.5 text-xs text-muted-foreground"
+              >
+                User ID is a unique 32-byte identifier
+              </p>
+            )}
             {userId.error && (
-              <p className="mt-1.5 text-sm text-destructive" role="alert">
+              <p
+                id="contact-user-id-error"
+                className="mt-1.5 text-sm text-destructive"
+                role="alert"
+              >
                 {userId.error}
               </p>
             )}
@@ -165,6 +187,7 @@ const NewContact: React.FC = () => {
             rows={3}
             maxLength={500}
             className="w-full bg-transparent text-foreground placeholder-muted-foreground focus:outline-none resize-none"
+            aria-label="Contact request message (optional)"
           />
           {message.value && (
             <div className="flex items-center justify-between mt-2">
