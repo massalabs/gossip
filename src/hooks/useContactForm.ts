@@ -8,11 +8,11 @@ import {
   validateUserIdFormat,
 } from '../utils';
 import { UserPublicKeys } from '../assets/generated/wasm/gossip_wasm';
-import { ensureDiscussionExists } from '../crypto/discussionInit';
 import { useFileShareContact } from './useFileShareContact';
 import { authService, PublicKeyResult } from '../services/auth';
 import toast from 'react-hot-toast';
 import { ROUTES } from '../constants/routes';
+import { initializeDiscussion } from '../services/discussion';
 
 type FieldState = {
   value: string;
@@ -22,7 +22,7 @@ type FieldState = {
 
 export function useContactForm() {
   const navigate = useNavigate();
-  const { userProfile } = useAccountStore();
+  const { userProfile, ourSk, ourPk, session } = useAccountStore();
   const { importFileContact, fileState } = useFileShareContact();
 
   const publicKeysCache = useRef<Map<string, UserPublicKeys>>(new Map());
@@ -167,7 +167,15 @@ export function useContactForm() {
   );
 
   const handleSubmit = useCallback(async () => {
-    if (!canSubmit || !userProfile?.userId || !publicKeys) return;
+    if (
+      !canSubmit ||
+      !userProfile?.userId ||
+      !publicKeys ||
+      !ourSk ||
+      !ourPk ||
+      !session
+    )
+      return;
 
     setIsSubmitting(true);
     setGeneralError(null);
@@ -216,10 +224,22 @@ export function useContactForm() {
 
       await db.contacts.add(contact);
 
-      const announcement = message.value.trim() || undefined;
-      await ensureDiscussionExists(contact, undefined, announcement).catch(
-        console.error
-      );
+      const announcementMessage = message.value.trim() || undefined;
+      try {
+        await initializeDiscussion(
+          contact,
+          ourPk,
+          ourSk,
+          session,
+          userProfile.userId,
+          announcementMessage
+        );
+      } catch (e) {
+        console.error(
+          'Failed to initialize discussion after contact creation:',
+          e
+        );
+      }
 
       navigate(ROUTES.default());
     } catch (err) {
@@ -236,6 +256,9 @@ export function useContactForm() {
     userId.value,
     message.value,
     navigate,
+    ourSk,
+    ourPk,
+    session,
   ]);
 
   return {

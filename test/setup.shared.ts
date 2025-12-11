@@ -13,3 +13,29 @@ import { vi } from 'vitest';
 vi.mock('../src/services/serviceWorkerSetup', () => ({
   setupServiceWorker: vi.fn().mockResolvedValue(undefined),
 }));
+
+// Mock capacitor biometric auth which is not available in test environments
+vi.mock('@aparajita/capacitor-biometric-auth', () => {
+  const mockFn = vi.fn();
+  class BiometryError extends Error {}
+  const BiometryType = {
+    NONE: 'none',
+    TOUCH_ID: 'touchId',
+    FACE_ID: 'faceId',
+    FINGERPRINT: 'fingerprint',
+  };
+  // Some consumers expect BiometryErrorType; mirror BiometryType for compatibility
+  const BiometryErrorType = BiometryType;
+
+  return {
+    BiometricAuth: {
+      isAvailable: mockFn,
+      verify: mockFn,
+      getAvailableMethods: mockFn,
+      getEnrolledLevel: mockFn,
+    },
+    BiometryError,
+    BiometryType,
+    BiometryErrorType,
+  };
+});

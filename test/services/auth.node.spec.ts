@@ -77,6 +77,11 @@ describe('AuthService', () => {
   let mockPublicKeys: UserPublicKeys;
 
   beforeEach(async () => {
+    // Ensure database is open (it gets deleted by global afterEach in setup.ts)
+    if (!db.isOpen()) {
+      await db.open();
+    }
+
     // Create test userId
     testUserIdBytes = new Uint8Array(32).fill(42);
     testUserId = encodeUserId(testUserIdBytes);
@@ -94,6 +99,7 @@ describe('AuthService', () => {
       fetchAnnouncements: vi.fn(),
       fetchPublicKeyByUserId: vi.fn(),
       postPublicKey: vi.fn(),
+      changeNode: vi.fn(),
     };
 
     authService = new AuthService(mockMessageProtocol);

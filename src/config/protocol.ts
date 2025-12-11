@@ -19,6 +19,10 @@ export const protocolConfig: ProtocolConfig = {
   retryAttempts: 3,
 };
 
-export type MessageProtocolType = 'rest' | 'mock';
+export enum MessageProtocolType {
+  REST = 'rest',
+  MOCK = 'mock',
+}
 
-export const defaultMessageProtocol: MessageProtocolType = 'rest';
+export const defaultMessageProtocol: MessageProtocolType =
+  MessageProtocolType.REST;

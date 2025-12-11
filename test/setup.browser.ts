@@ -4,6 +4,7 @@
  * This file runs before all browser tests and sets up:
  * - All shared setup from setup.shared.ts (mocks, utilities, etc.)
  * - Browser-specific service worker mocks
+ * - React availability for hooks
  *
  * Note: Browser tests use real IndexedDB (no fake-indexeddb needed),
  * so we import setup.shared.ts instead of setup.ts to avoid Node-specific polyfills.
@@ -11,6 +12,16 @@
 
 // Import shared setup first (includes service worker mock and other utilities)
 import './setup.shared';
+
+// Ensure React is properly available for hooks in browser tests
+// React 19 requires React to be properly resolved when hooks are called
+// This ensures React is available in the browser test environment
+import React from 'react';
+// Expose React globally so hooks can resolve it in the browser test runtime
+if (typeof globalThis !== 'undefined') {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (globalThis as any).React = React;
+}
 
 // Add browser-specific service worker API mocks
 // This provides a fallback in case the module mock doesn't catch everything

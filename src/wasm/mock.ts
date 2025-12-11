@@ -109,6 +109,9 @@ export const mockGenerateUserKeys = vi.fn(() => {
  * Mock SessionModule class
  */
 export class MockSessionModule {
+  // Add minimal fields/methods to match SessionModule's public shape
+  persistIfNeeded = vi.fn();
+
   setOnPersist = vi.fn();
   load = vi.fn();
   toEncryptedBlob = vi.fn(() => new Uint8Array(100));
@@ -116,9 +119,17 @@ export class MockSessionModule {
 
   establishOutgoingSession = vi.fn(() => new Uint8Array(200));
   feedIncomingAnnouncement = vi.fn(() => undefined);
-  getMessageBoardReadKeys = vi.fn(() => []);
+  getMessageBoardReadKeys = vi.fn((): Uint8Array[] => []);
   feedIncomingMessageBoardRead = vi.fn(() => undefined);
-  sendMessage = vi.fn(() => undefined);
+  sendMessage = vi.fn(() => {
+    // Default mock returns a SendMessageOutput-like object
+    const seeker = new Uint8Array(32);
+    const data = new Uint8Array(100);
+    crypto.getRandomValues(seeker);
+    crypto.getRandomValues(data);
+    return { seeker, data };
+  });
+  receiveMessage = vi.fn(() => undefined);
   peerList = vi.fn(() => []);
   peerSessionStatus = vi.fn(() => 2); // NoSession
   peerDiscard = vi.fn();

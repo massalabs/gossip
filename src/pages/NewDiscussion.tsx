@@ -3,7 +3,7 @@ import { Edit2, Plus, Users, User } from 'react-feather';
 import { useAccountStore } from '../stores/accountStore';
 import Button from '../components/ui/Button';
 import { useEffect, useState } from 'react';
-import { Contact, db } from '../db';
+import { Contact, DiscussionStatus, db } from '../db';
 import ContactAvatar from '../components/avatar/ContactAvatar';
 import UserIdDisplay from '../components/ui/UserIdDisplay';
 import PageHeader from '../components/ui/PageHeader';
@@ -53,7 +53,7 @@ const NewDiscussion: React.FC = () => {
       userProfile.userId,
       contact.userId
     );
-    if (discussion && discussion.status === 'active') {
+    if (discussion && discussion.status === DiscussionStatus.ACTIVE) {
       navigate(ROUTES.discussion({ userId: contact.userId }));
     }
   };

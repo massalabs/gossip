@@ -5,7 +5,7 @@ import {
   AlertTriangle,
   XCircle,
 } from 'react-feather';
-import { Message } from '../../db';
+import { Message, MessageDirection, MessageStatus } from '../../db';
 import { formatTime } from '../../utils/timeUtils';
 import { messageService } from '../../services/message';
 
@@ -18,7 +18,6 @@ const SWIPE_INDICATOR_MAX_WIDTH = 60; // Maximum width (in pixels) for the reply
 
 interface MessageItemProps {
   message: Message;
-  onResend: (message: Message) => void;
   onReplyTo?: (message: Message) => void;
   onScrollToMessage?: (messageId: number) => void;
   id?: string;
@@ -26,13 +25,12 @@ interface MessageItemProps {
 
 const MessageItem: React.FC<MessageItemProps> = ({
   message,
-  onResend,
   onReplyTo,
   onScrollToMessage,
   id,
 }) => {
-  const isOutgoing = message.direction === 'outgoing';
   const canReply = !!onReplyTo;
+  const isOutgoing = message.direction === MessageDirection.OUTGOING;
   const [originalMessage, setOriginalMessage] = useState<Message | null>(null);
   const [isLoadingOriginal, setIsLoadingOriginal] = useState(false);
   const [originalNotFound, setOriginalNotFound] = useState(false);
@@ -316,30 +314,23 @@ const MessageItem: React.FC<MessageItemProps> = ({
           </span>
           {isOutgoing && (
             <div className="flex items-center gap-1">
-              {message.status === 'sending' && (
+              {message.status === MessageStatus.SENDING && (
                 <div className="flex items-center gap-1">
                   <div className="w-2.5 h-2.5 border border-current border-t-transparent rounded-full animate-spin"></div>
                   <span className="text-[10px] font-medium">Sending</span>
                 </div>
               )}
-              {message.status === 'sent' && (
+              {message.status === MessageStatus.SENT && (
                 <CheckIcon className="w-3.5 h-3.5" />
               )}
-              {message.status === 'failed' && (
+              {message.status === MessageStatus.FAILED && (
                 <div className="flex items-center gap-1.5">
                   <XCircle className="w-3.5 h-3.5 text-accent-foreground/90" />
                   <span className="text-[10px] font-medium">Failed</span>
-                  <button
-                    onClick={() => onResend(message)}
-                    className="ml-1 px-1.5 py-0.5 text-[10px] font-medium bg-accent-foreground/20 hover:bg-accent-foreground/30 rounded transition-colors text-accent-foreground"
-                    title="Resend message"
-                  >
-                    Resend
-                  </button>
                 </div>
               )}
-              {(message.status === 'delivered' ||
-                message.status === 'read') && (
+              {(message.status === MessageStatus.DELIVERED ||
+                message.status === MessageStatus.READ) && (
                 <CheckIcon className="w-3.5 h-3.5" />
               )}
             </div>

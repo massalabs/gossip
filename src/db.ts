@@ -1,5 +1,4 @@
 import Dexie, { Table } from 'dexie';
-import { EncryptedMessage } from './api/messageProtocol/types';
 import { setActiveSeekersInPreferences } from './utils/preferences';
 
 // Define authentication method type
@@ -22,9 +21,10 @@ export interface Message {
   ownerUserId: string; // The current user's userId owning this message
   contactUserId: string; // Reference to Contact.userId
   content: string;
-  type: 'text' | 'image' | 'file' | 'audio' | 'video';
-  direction: 'incoming' | 'outgoing';
-  status: 'sending' | 'sent' | 'delivered' | 'read' | 'failed';
+  serializedContent?: Uint8Array; // Serialized message content
+  type: MessageType;
+  direction: MessageDirection;
+  status: MessageStatus;
   timestamp: Date;
   metadata?: Record<string, unknown>;
   seeker?: Uint8Array; // Seeker for this message (stored when sending or receiving)
@@ -32,6 +32,7 @@ export interface Message {
     originalContent?: string;
     originalSeeker: Uint8Array; // Seeker of the original message (required for replies)
   };
+  encryptedMessage?: Uint8Array; // Ciphertext of the message
 }
 
 export interface UserProfile {
@@ -69,14 +70,49 @@ export interface UserProfile {
 }
 
 // Unified discussion interface combining protocol state and UI metadata
+
+export enum DiscussionStatus {
+  PENDING = 'pending',
+  ACTIVE = 'active',
+  CLOSED = 'closed', // closed by the user
+  BROKEN = 'broken', // The session is killed. Need to be reinitiated
+  SEND_FAILED = 'sendFailed', // The discussion was initiated by the session manager but could not be broadcasted on network
+}
+
+export enum MessageDirection {
+  INCOMING = 'incoming',
+  OUTGOING = 'outgoing',
+}
+
+export enum MessageStatus {
+  SENDING = 'sending',
+  SENT = 'sent',
+  DELIVERED = 'delivered',
+  READ = 'read',
+  FAILED = 'failed',
+}
+
+export enum DiscussionDirection {
+  INITIATED = 'initiated',
+  RECEIVED = 'received',
+}
+
+export enum MessageType {
+  TEXT = 'text',
+  IMAGE = 'image',
+  FILE = 'file',
+  AUDIO = 'audio',
+  VIDEO = 'video',
+}
+
 export interface Discussion {
   id?: number;
   ownerUserId: string; // The current user's userId owning this discussion
   contactUserId: string; // Reference to Contact.userId - unique per contact
 
   // Protocol/Encryption fields
-  direction: 'initiated' | 'received'; // Whether this user initiated or received the discussion
-  status: 'pending' | 'active' | 'closed';
+  direction: DiscussionDirection; // Whether this user initiated or received the discussion
+  status: DiscussionStatus;
   nextSeeker?: Uint8Array; // The next seeker for sending messages (from SendMessageOutput)
   initiationAnnouncement?: Uint8Array; // Outgoing announcement bytes when we initiate
   announcementMessage?: string; // Optional message from incoming announcement (user_data)
@@ -92,9 +128,6 @@ export interface Discussion {
   // Timestamps
   createdAt: Date;
   updatedAt: Date;
-
-  // Failed encrypted message. The last msg has failed and must be sent before sending another msg.
-  failedEncryptedMessage?: EncryptedMessage;
 }
 
 export interface PendingEncryptedMessage {
@@ -133,7 +166,7 @@ export class GossipDatabase extends Dexie {
       contacts:
         '++id, ownerUserId, userId, name, isOnline, lastSeen, createdAt, [ownerUserId+userId] , [ownerUserId+name]',
       messages:
-        '++id, ownerUserId, contactUserId, type, direction, status, timestamp, seeker, [ownerUserId+contactUserId], [ownerUserId+contactUserId+status], [ownerUserId+seeker]',
+        '++id, ownerUserId, contactUserId, type, direction, status, timestamp, seeker, [ownerUserId+contactUserId], [ownerUserId+status], [ownerUserId+contactUserId+status], [ownerUserId+seeker], [ownerUserId+contactUserId+direction], [ownerUserId+direction+status]',
       userProfile: 'userId, username, status, lastSeen',
       discussions:
         '++id, ownerUserId, &[ownerUserId+contactUserId], status, [ownerUserId+status], lastSyncTimestamp, unreadCount, lastMessageTimestamp, createdAt, updatedAt',
@@ -173,6 +206,8 @@ export class GossipDatabase extends Dexie {
   }
 
   // Helper methods for common operations
+
+  /** CONTACTS */
   async getContactsByOwner(ownerUserId: string): Promise<Contact[]> {
     return await this.contacts
       .where('ownerUserId')
@@ -190,19 +225,7 @@ export class GossipDatabase extends Dexie {
       .first();
   }
 
-  async getMessagesForContactByOwner(
-    ownerUserId: string,
-    contactUserId: string,
-    limit = 50
-  ): Promise<Message[]> {
-    return await this.messages
-      .where('[ownerUserId+contactUserId]')
-      .equals([ownerUserId, contactUserId])
-      .reverse()
-      .limit(limit)
-      .toArray();
-  }
-
+  /** DISCUSSIONS */
   async getDiscussionsByOwner(ownerUserId: string): Promise<Discussion[]> {
     const all = await this.discussions
       .where('ownerUserId')
@@ -238,19 +261,45 @@ export class GossipDatabase extends Dexie {
       .first();
   }
 
+  /**
+   * Get all active discussions with their sync status
+   * @returns Array of active discussions
+   */
+  async getActiveDiscussionsByOwner(
+    ownerUserId: string
+  ): Promise<Discussion[]> {
+    return await this.discussions
+      .where('[ownerUserId+status]')
+      .equals([ownerUserId, DiscussionStatus.ACTIVE])
+      .toArray();
+  }
+
   async markMessagesAsRead(
     ownerUserId: string,
     contactUserId: string
   ): Promise<void> {
     await this.messages
       .where('[ownerUserId+contactUserId+status]')
-      .equals([ownerUserId, contactUserId, 'delivered'])
-      .modify({ status: 'read' });
+      .equals([ownerUserId, contactUserId, MessageStatus.DELIVERED])
+      .modify({ status: MessageStatus.READ });
 
     await this.discussions
       .where('[ownerUserId+contactUserId]')
       .equals([ownerUserId, contactUserId])
       .modify({ unreadCount: 0 });
+  }
+
+  async getMessagesForContactByOwner(
+    ownerUserId: string,
+    contactUserId: string,
+    limit = 50
+  ): Promise<Message[]> {
+    return await this.messages
+      .where('[ownerUserId+contactUserId]')
+      .equals([ownerUserId, contactUserId])
+      .reverse()
+      .limit(limit)
+      .toArray();
   }
 
   async addMessage(message: Omit<Message, 'id'>): Promise<number> {
@@ -268,7 +317,7 @@ export class GossipDatabase extends Dexie {
         lastMessageContent: message.content,
         lastMessageTimestamp: message.timestamp,
         unreadCount:
-          message.direction === 'incoming'
+          message.direction === MessageDirection.INCOMING
             ? discussion.unreadCount + 1
             : discussion.unreadCount,
         updatedAt: new Date(),
@@ -283,32 +332,22 @@ export class GossipDatabase extends Dexie {
       await this.discussions.put({
         ownerUserId: message.ownerUserId,
         contactUserId: message.contactUserId,
-        direction: message.direction === 'incoming' ? 'received' : 'initiated',
-        status: 'pending',
+        direction:
+          message.direction === MessageDirection.INCOMING
+            ? DiscussionDirection.RECEIVED
+            : DiscussionDirection.INITIATED,
+        status: DiscussionStatus.PENDING,
         nextSeeker: undefined,
         lastMessageId: messageId,
         lastMessageContent: message.content,
         lastMessageTimestamp: message.timestamp,
-        unreadCount: message.direction === 'incoming' ? 1 : 0,
+        unreadCount: message.direction === MessageDirection.INCOMING ? 1 : 0,
         createdAt: new Date(),
         updatedAt: new Date(),
       });
     }
 
     return messageId;
-  }
-
-  /**
-   * Get all active discussions with their sync status
-   * @returns Array of active discussions
-   */
-  async getActiveDiscussionsByOwner(
-    ownerUserId: string
-  ): Promise<Discussion[]> {
-    return await this.discussions
-      .where('[ownerUserId+status]')
-      .equals([ownerUserId, 'active'])
-      .toArray();
   }
 
   /**
