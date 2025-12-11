@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { Send, X } from 'react-feather';
 import { Message } from '../../db';
 import Button from '../ui/Button';
@@ -8,6 +8,7 @@ interface MessageInputProps {
   disabled?: boolean;
   replyingTo?: Message | null;
   onCancelReply?: () => void;
+  initialValue?: string;
 }
 
 type MessageInputEvent =
@@ -22,10 +23,13 @@ const MessageInput: React.FC<MessageInputProps> = ({
   disabled = false,
   replyingTo,
   onCancelReply,
+  initialValue,
 }) => {
-  const [newMessage, setNewMessage] = useState('');
+  const [newMessage, setNewMessage] = useState(initialValue || '');
   const [isTextareaMultiline, setIsTextareaMultiline] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const prevInitialValueRef = useRef(initialValue);
+  const hasInitialFocusRef = useRef(false);
   const sendButtonDisabled = disabled || !newMessage.trim();
 
   const autoResizeTextarea = useCallback(() => {
@@ -51,9 +55,50 @@ const MessageInput: React.FC<MessageInputProps> = ({
     [autoResizeTextarea]
   );
 
+  // Update state when initialValue prop changes (for shared content)
+  // Only update when initialValue actually changes to avoid overwriting user input
+  useEffect(() => {
+    if (initialValue !== prevInitialValueRef.current) {
+      prevInitialValueRef.current = initialValue;
+      if (initialValue !== undefined) {
+        setNewMessage(initialValue);
+        // Reset focus flag when initialValue changes
+        hasInitialFocusRef.current = false;
+      }
+    }
+  }, [initialValue]);
+
+  // Handle focus and cursor positioning when initialValue is first set
+  // Only runs once per initialValue to prevent cursor jumping while user types
+  useEffect(() => {
+    if (
+      initialValue &&
+      !hasInitialFocusRef.current &&
+      textareaRef.current &&
+      newMessage === initialValue
+    ) {
+      // Mark that we've done the initial focus
+      hasInitialFocusRef.current = true;
+
+      // Use a small delay to ensure textarea is rendered and value is set
+      const timeoutId = setTimeout(() => {
+        if (textareaRef.current) {
+          autoResizeTextarea();
+          textareaRef.current.focus();
+          // Move cursor to end
+          textareaRef.current.setSelectionRange(
+            initialValue.length,
+            initialValue.length
+          );
+        }
+      }, 100);
+
+      return () => clearTimeout(timeoutId);
+    }
+  }, [initialValue, newMessage, autoResizeTextarea]);
+
   const resetTextarea = () => {
     if (textareaRef.current) {
-      textareaRef.current.value = '';
       textareaRef.current.style.height = 'auto';
     }
     setIsTextareaMultiline(false);

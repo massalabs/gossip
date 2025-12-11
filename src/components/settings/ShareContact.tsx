@@ -49,7 +49,7 @@ const ShareContact: React.FC<ShareContactProps> = ({
       {/* Main Content */}
       <ScrollableContent className="flex-1 overflow-y-auto px-6 py-6">
         {/* Tab switcher */}
-        <div className="mb-6">
+        <div className="bg-card rounded-lg p-6 mb-6">
           <TabSwitcher
             options={[
               { value: 'qr', label: 'Scan QR code' },

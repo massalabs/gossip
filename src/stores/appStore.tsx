@@ -21,6 +21,9 @@ interface AppStoreState {
   // Pending deep link
   pendingDeepLinkInfo: ParsedInvite | null;
   setPendingDeepLinkInfo: (value: ParsedInvite | null) => void;
+  // Pending shared content from other apps
+  pendingSharedContent: string | null;
+  setPendingSharedContent: (content: string | null) => void;
 }
 
 const useAppStoreBase = create<AppStoreState>()(
@@ -51,6 +54,11 @@ const useAppStoreBase = create<AppStoreState>()(
       pendingDeepLinkInfo: null,
       setPendingDeepLinkInfo: (value: ParsedInvite | null) => {
         set({ pendingDeepLinkInfo: value });
+      },
+      // Pending shared content
+      pendingSharedContent: null,
+      setPendingSharedContent: (content: string | null) => {
+        set({ pendingSharedContent: content });
       },
     }),
     {

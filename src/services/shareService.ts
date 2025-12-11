@@ -74,7 +74,6 @@ export async function shareInvitation(
   try {
     await navigator.clipboard.writeText(deepLinkUrl);
     // Note: We don't throw here since copying succeeded, but we could
-    // show a toast notification that it was copied instead of shared
   } catch (clipboardError) {
     throw new Error(
       `Failed to share invitation: ${clipboardError instanceof Error ? clipboardError.message : 'Unknown error'}`
