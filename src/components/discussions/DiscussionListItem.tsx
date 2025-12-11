@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { ChevronRight } from 'react-feather';
 import {
   Discussion,
   DiscussionStatus,
@@ -115,13 +114,14 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
     discussion.direction === DiscussionDirection.INITIATED;
 
   return (
-    <div key={discussion.id} className="w-full px-2 py-0.5 text-left">
+    <div
+      key={discussion.id}
+      className="w-full px-2 py-0.5 text-left bg-background/20 border border-border rounded-xl mb-1 hover:bg-accent/10"
+    >
       <div
         className={`${
-          isPendingIncoming
-            ? 'cursor-not-allowed opacity-95'
-            : 'cursor-pointer hover:ring-1 hover:ring-border'
-        } p-4 transition-colors mb-1`}
+          isPendingIncoming ? 'cursor-not-allowed opacity-95' : 'cursor-pointer'
+        } p-4 transition-colors mb-1 `}
         {...(!(isPendingIncoming || isPendingOutgoing)
           ? {
               onClick: () => onSelect(discussion),
@@ -147,9 +147,6 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
                   <p className="text-xs text-muted-foreground">
                     {formatRelativeTime(lastMessage.timestamp)}
                   </p>
-                )}
-                {!isPendingIncoming && !isPendingOutgoing && (
-                  <ChevronRight className="w-4 h-4 text-muted-foreground" />
                 )}
               </div>
             </div>
