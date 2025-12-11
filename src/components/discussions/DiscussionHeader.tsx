@@ -7,7 +7,6 @@ import {
   DiscussionStatus,
   DiscussionDirection,
 } from '../../db';
-import { formatUserId } from '../../utils/userId';
 import ContactAvatar from '../avatar/ContactAvatar';
 import Button from '../ui/Button';
 import BackButton from '../ui/BackButton';
