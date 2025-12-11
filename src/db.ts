@@ -1,8 +1,5 @@
 import Dexie, { Table } from 'dexie';
-import { EncryptedMessage } from './api/messageProtocol/types';
 import { setActiveSeekersInPreferences } from './utils/preferences';
-import { Preferences } from '@capacitor/preferences';
-import { encodeToBase64 } from './utils/base64';
 
 // Define authentication method type
 export type AuthMethod = 'capacitor' | 'webauthn' | 'password';

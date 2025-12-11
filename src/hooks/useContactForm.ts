@@ -22,7 +22,7 @@ type FieldState = {
 
 export function useContactForm() {
   const navigate = useNavigate();
-  const { userProfile, ourSk, session } = useAccountStore();
+  const { userProfile, ourSk, ourPk, session } = useAccountStore();
   const { importFileContact, fileState } = useFileShareContact();
 
   const publicKeysCache = useRef<Map<string, UserPublicKeys>>(new Map());
@@ -167,7 +167,14 @@ export function useContactForm() {
   );
 
   const handleSubmit = useCallback(async () => {
-    if (!canSubmit || !userProfile?.userId || !publicKeys || !ourSk || !session)
+    if (
+      !canSubmit ||
+      !userProfile?.userId ||
+      !publicKeys ||
+      !ourSk ||
+      !ourPk ||
+      !session
+    )
       return;
 
     setIsSubmitting(true);
@@ -221,7 +228,7 @@ export function useContactForm() {
       try {
         await initializeDiscussion(
           contact,
-          publicKeys,
+          ourPk,
           ourSk,
           session,
           userProfile.userId,
@@ -250,6 +257,7 @@ export function useContactForm() {
     message.value,
     navigate,
     ourSk,
+    ourPk,
     session,
   ]);
 

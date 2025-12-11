@@ -118,11 +118,11 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
     <div key={discussion.id} className="w-full px-2 py-1 text-left">
       <div
         className={`${
-          isPendingIncoming || isPendingOutgoing
+          isPendingIncoming
             ? 'cursor-not-allowed opacity-95'
             : 'cursor-pointer hover:ring-1 hover:ring-border'
         } bg-card border border-border rounded-xl px-4 py-3 transition-colors`}
-        {...(!(isPendingIncoming || isPendingOutgoing)
+        {...(!isPendingIncoming
           ? {
               onClick: () => onSelect(discussion),
               role: 'button',

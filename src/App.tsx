@@ -11,7 +11,7 @@ import './App.css';
 // Hooks
 import { useProfileLoader } from './hooks/useProfileLoader';
 import { useAppStateRefresh } from './hooks/useAppStateRefresh';
-import { useResendFailedBlobs } from './hooks/useResendFailedBlobs.ts';
+import { useResendFailedBlobs } from './hooks/useResendFailedBlobs';
 import { useAccountInfo } from './hooks/useAccountInfo';
 import { setupServiceWorker } from './services/serviceWorkerSetup';
 

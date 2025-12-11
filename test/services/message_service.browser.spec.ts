@@ -14,35 +14,35 @@ import {
   MessageType,
   Message,
   Contact,
-} from '../src/db';
-import { initializeWasm } from '../src/wasm/loader';
-import { generateUserKeys } from '../src/wasm/userKeys';
-import { SessionModule } from '../src/wasm/session';
+} from '../../src/db';
+import { initializeWasm } from '../../src/wasm/loader';
+import { generateUserKeys } from '../../src/wasm/userKeys';
+import { SessionModule } from '../../src/wasm/session';
 import {
   UserPublicKeys,
   UserSecretKeys,
   UserKeys,
   SessionStatus,
-} from '../src/assets/generated/wasm/gossip_wasm';
-import { encodeUserId } from '../src/utils/userId';
-import { MockMessageProtocol } from '../src/api/messageProtocol/mock';
+} from '../../src/assets/generated/wasm/gossip_wasm';
+import { encodeUserId } from '../../src/utils/userId';
+import { MockMessageProtocol } from '../../src/api/messageProtocol/mock';
 import {
   acceptDiscussionRequest,
   initializeDiscussion,
   renewDiscussion,
-} from '../src/services/discussion';
+} from '../../src/services/discussion';
 import {
   announcementService,
   EstablishSessionError,
-} from '../src/services/announcement';
-import { messageService } from '../src/services/message';
-import { createMessageProtocol } from '../src/api/messageProtocol';
-import { MessageProtocolType } from '../src/config/protocol';
+} from '../../src/services/announcement';
+import { messageService } from '../../src/services/message';
+import { createMessageProtocol } from '../../src/api/messageProtocol';
+import { MessageProtocolType } from '../../src/config/protocol';
 
 // Mock the message protocol factory to always return mock protocol
 vi.mock('../src/api/messageProtocol', async importOriginal => {
   const actual =
-    await importOriginal<typeof import('../src/api/messageProtocol')>();
+    await importOriginal<typeof import('../../src/api/messageProtocol')>();
   return {
     ...actual,
     createMessageProtocol: vi.fn(() =>

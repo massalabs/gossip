@@ -44,7 +44,8 @@ const useSyncStoreBase = create<SyncStoreState>((set, get) => ({
     [SyncKey.FETCH_ANNOUNCEMENT]: false,
   },
 
-  areRunning: (syncKeys: SyncKey[]) => {
+  areRunning: (syncKeys: SyncKey[]): boolean => {
+    if (syncKeys.length === 0) return false;
     const { isRunning } = get();
     return syncKeys.every(key => isRunning[key]);
   },
@@ -54,10 +55,10 @@ const useSyncStoreBase = create<SyncStoreState>((set, get) => ({
     notRunningSyncKeys: SyncKey[],
     fn: () => Promise<T>
   ): Promise<Result<T, Error>> => {
-    const { areRunning } = get();
+    const { isRunning } = get();
 
     // Check if any of the keys are not running
-    if (areRunning(notRunningSyncKeys)) {
+    if (notRunningSyncKeys.some(key => isRunning[key])) {
       return {
         success: false,
         error: new SyncKeyNotFreeError(notRunningSyncKeys),

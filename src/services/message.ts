@@ -616,6 +616,24 @@ export class MessageService {
     }
   }
 
+  /**
+   * Attempts to resend failed messages (with status FAILED) for multiple contacts, typically after network or session errors.
+   *
+   * For each contact/user:
+   *   - Iterates through all retryable messages associated with that contact, in order.
+   *   - If a message has already been encrypted (has `encryptedMessage` and `seeker`), tries to re-send it over the network.
+   *   - If a message has NOT been encrypted, attempts to encrypt and send it using the session manager.
+   *     - If encryption (not broadcasting on the network) for a message fails, stops further resending for that contact to preserve message order.
+   *     - If sending succeeds, updates the message status in the DB.
+   *
+   * Notes:
+   * - Ensures strict message ordering for each discussion: if an earlier message encryption via session manager fails, no later messages are encrypted and sent for that contact.
+   * - Designed for use by hooks such as `useResendFailedBlobs` for automatic retry of failed messages.
+   *
+   * @param messages - A Map from contactUserId to an array of messages to be retried for that contact.
+   * @param session - The cryptographic session module to use for encryption and retransmission.
+   * @returns Promise<void>
+   */
   async resendMessages(
     messages: Map<string, Message[]>,
     session: SessionModule
@@ -651,12 +669,7 @@ export class MessageService {
           }
         } else {
           // if the message has not been encrypted by sessionManager, encrypt it and resend it
-          /* 
-          If session manager encryption fails for a message N, we can't send next N+1, N+2, ... messages in the discussion.
-          If the message N+1 is passed with success in session.sendMessage() before passing the message N,
-          message N would be considered as posterior to message N+1, which is not correct.
-          So if a message fails in session.sendMessage(), we should break the loop and not send any other message in the discussion.
-          */
+
           console.log(
             `MessageService.resendMessages: message "${retryMessage.content}" has not been encrypted by sessionManager`
           );
@@ -672,6 +685,12 @@ export class MessageService {
           because we don't have the peer's next seeker yet*/
           if (status === SessionStatus.SelfRequested) break;
 
+          /* 
+          If session manager encryption fails for a message N, we can't send next N+1, N+2, ... messages in the discussion.
+          If the message N+1 is passed with success in session.sendMessage() before passing the message N,
+          message N would be considered as posterior to message N+1, which is not correct.
+          So if a message fails in session.sendMessage(), we should break the loop and not send any other message in the discussion.
+          */
           if (
             status === SessionStatus.Killed ||
             status === SessionStatus.Saturated

@@ -184,6 +184,10 @@ export async function renewDiscussion(
   if (!existingDiscussion)
     throw new Error('Discussion with contact ' + contact.name + ' not found');
 
+  console.log(
+    `renewDiscussion: renewing discussion between ${ownerUserId} and ${contactUserId}`
+  );
+
   const result = await announcementService.establishSession(
     UserPublicKeys.from_bytes(contact.publicKeys),
     ourPk,
@@ -196,7 +200,9 @@ export async function renewDiscussion(
     throw new Error(EstablishSessionError);
 
   const sessionStatus = session.peerSessionStatus(decodeUserId(contactUserId));
-  console.log('sessionStatus:', sessionStatus);
+  console.log(
+    `renewDiscussion: session status for discussion between ${ownerUserId} and ${contactUserId} after reinitiationis ${sessionStatus}`
+  );
 
   const status: DiscussionStatus = !result.success
     ? DiscussionStatus.SEND_FAILED
@@ -211,6 +217,8 @@ export async function renewDiscussion(
       initiationAnnouncement: result.announcement,
       updatedAt: new Date(),
     });
+
+    console.log(`renewDiscussion: discussion updated with status: ${status}`);
 
     /* Mark all outgoing messages that are not delivered or read as failed and remove the encryptedMessage */
     await db.messages
@@ -227,6 +235,9 @@ export async function renewDiscussion(
         encryptedMessage: undefined,
         seeker: undefined,
       });
+    console.log(
+      `renewDiscussion: all outgoing messages that are not delivered or read have been marked as failed`
+    );
   });
 }
 

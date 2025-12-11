@@ -1,31 +1,13 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { db, Contact, DiscussionStatus } from '../src/db';
+import { describe, it, expect, beforeEach, vi, beforeAll } from 'vitest';
+import { db, Contact, DiscussionStatus } from '../../src/db';
 import {
   initializeDiscussion,
   acceptDiscussionRequest,
   renewDiscussion,
-} from '../src/services/discussion';
-import { announcementService } from '../src/services/announcement';
-import { encodeUserId } from '../src/utils/userId';
-
-// Mock the SessionModule to use our mock implementation
-// vi.mock('../wasm/session', async () => {
-//   const { MockSessionModule } = await import('../wasm/session_mock');
-//   return {
-//     SessionModule: MockSessionModule,
-//   };
-// });
-
-// Mock the userKeys module
-// vi.mock('../wasm/userKeys', async () => {
-//   const { mockGenerateUserKeys, MockUserPublicKeys, MockUserSecretKeys } = await import('../wasm/session_mock');
-//   return {
-//     generateUserKeys: mockGenerateUserKeys,
-//     UserPublicKeys: MockUserPublicKeys,
-//     UserSecretKeys: MockUserSecretKeys,
-//   };
-// });
+} from '../../src/services/discussion';
+import { announcementService } from '../../src/services/announcement';
+import { encodeUserId } from '../../src/utils/userId';
 
 // Import mock classes after vi.mock calls (due to hoisting)
 import {
@@ -33,12 +15,16 @@ import {
   MockUserPublicKeys,
   MockUserSecretKeys,
   mockGenerateUserKeys,
-} from '../src/wasm/mock';
-import { SessionModule } from '../src/wasm/session';
-import { SessionStatus } from '../src/assets/generated/wasm/gossip_wasm';
-import { initSession } from './utils';
+} from '../../src/wasm/mock';
+import { SessionModule } from '../../src/wasm/session';
+import { SessionStatus } from '../../src/assets/generated/wasm/gossip_wasm';
+import { initSession } from '../utils';
+import { MockMessageProtocol } from '../../src/api/messageProtocol/mock';
+import { createMessageProtocol } from '../../src/api/messageProtocol';
+import { MessageProtocolType } from '../../src/config/protocol';
 
 describe('Discussion Service', () => {
+  let mockProtocol: MockMessageProtocol;
   // Alice's test data
   let aliceUserId: string;
   let aliceSession: MockSessionModule;
@@ -51,6 +37,14 @@ describe('Discussion Service', () => {
   let bobPk: MockUserPublicKeys;
   let bobSk: MockUserSecretKeys;
 
+  // Initialize WASM before all tests
+  beforeAll(async () => {
+    mockProtocol = createMessageProtocol(
+      MessageProtocolType.MOCK
+    ) as MockMessageProtocol;
+    announcementService.setMessageProtocol(mockProtocol);
+  });
+
   beforeEach(async () => {
     // Database is already cleaned up by setup.ts afterEach hook
     // Just ensure it's open
@@ -60,31 +54,6 @@ describe('Discussion Service', () => {
 
     // Reset all mocks
     vi.clearAllMocks();
-
-    // Clear mock protocol data to ensure clean state between tests
-    const mockProtocol = announcementService.messageProtocol as any;
-    if (typeof mockProtocol.clearMockData === 'function') {
-      mockProtocol.clearMockData();
-    }
-
-    // Suppress expected console.error messages that are part of test scenarios
-    // These are expected errors (network failures, session manager errors) that are intentionally tested
-    const originalConsoleError = console.error;
-    vi.spyOn(console, 'error').mockImplementation((...args) => {
-      const message = args.join(' ');
-      // Only suppress expected error messages that are part of test scenarios
-      if (
-        message.includes('Failed to broadcast outgoing session') ||
-        message.includes('Failed to establish session with contact') ||
-        message.includes('Failed to initialize discussion') ||
-        message.includes('Failed to accept pending discussion')
-      ) {
-        // Suppress these expected errors - they're part of the test scenarios
-        return;
-      }
-      // Let other errors through
-      originalConsoleError(...args);
-    });
 
     // Generate Alice's keys
     const aliceKeys = mockGenerateUserKeys();
@@ -373,7 +342,6 @@ describe('Discussion Service', () => {
       aliceSession.establishOutgoingSession.mockReturnValue(aliceAnnouncement);
 
       // Mock network failure on first attempt
-      const mockProtocol = announcementService.messageProtocol;
       vi.spyOn(mockProtocol, 'sendAnnouncement')
         .mockRejectedValueOnce(new Error('Network error'))
         .mockResolvedValue('counter-123');
@@ -511,7 +479,7 @@ describe('Discussion Service', () => {
       aliceSession.establishOutgoingSession.mockReturnValue(aliceAnnouncement);
 
       // Mock network failure 4 times, then success
-      const mockProtocol = announcementService.messageProtocol;
+      // const mockProtocol = announcementService.messageProtocol;
       vi.spyOn(mockProtocol, 'sendAnnouncement')
         .mockRejectedValueOnce(new Error('Network error 1'))
         .mockRejectedValueOnce(new Error('Network error 2'))
@@ -618,7 +586,7 @@ describe('Discussion Service', () => {
       aliceSession.establishOutgoingSession.mockReturnValue(aliceAnnouncement);
 
       // Mock persistent network failure
-      const mockProtocol = announcementService.messageProtocol;
+      // const mockProtocol = announcementService.messageProtocol;
       const sendAnnouncementSpy = vi
         .spyOn(mockProtocol, 'sendAnnouncement')
         .mockRejectedValue(new Error('Network error'));
@@ -758,7 +726,7 @@ describe('Discussion Service', () => {
       crypto.getRandomValues(aliceAnnouncement);
       aliceSession.establishOutgoingSession.mockReturnValue(aliceAnnouncement);
 
-      const mockProtocol = announcementService.messageProtocol;
+      // const mockProtocol = announcementService.messageProtocol;
       vi.spyOn(mockProtocol, 'sendAnnouncement').mockResolvedValue(
         'counter-123'
       );
@@ -922,7 +890,7 @@ describe('Discussion Service', () => {
       crypto.getRandomValues(bobAnnouncement);
       bobSession.establishOutgoingSession.mockReturnValue(bobAnnouncement);
 
-      const mockProtocol = announcementService.messageProtocol;
+      // const mockProtocol = announcementService.messageProtocol;
       vi.spyOn(mockProtocol, 'sendAnnouncement')
         .mockRejectedValueOnce(new Error('Network error'))
         .mockRejectedValueOnce(new Error('Network error'))
@@ -1052,7 +1020,7 @@ describe('Discussion Service', () => {
       crypto.getRandomValues(bobAnnouncement);
       bobSession.establishOutgoingSession.mockReturnValue(bobAnnouncement);
 
-      const mockProtocol = announcementService.messageProtocol;
+      // const mockProtocol = announcementService.messageProtocol;
       vi.spyOn(mockProtocol, 'sendAnnouncement')
         .mockResolvedValueOnce('counter-123') // Alice succeeds
         .mockRejectedValue(new Error('Network error')); // Bob fails
@@ -1165,7 +1133,7 @@ describe('Discussion Service', () => {
       expect(aliceDiscussion?.status).toBe(DiscussionStatus.BROKEN); // Still broken
 
       // Step 4: Second attempt - network failure, goes to SEND_FAILED
-      const mockProtocol = announcementService.messageProtocol;
+      // const mockProtocol = announcementService.messageProtocol;
       vi.spyOn(mockProtocol, 'sendAnnouncement').mockRejectedValueOnce(
         new Error('Network down')
       );

@@ -53,7 +53,7 @@ const messagesChanged = (
   newMessages: Message[]
 ): boolean => {
   return (
-    existing.length !== newMessages.length ||
+    newMessages.length > existing.length || // New messages at the end
     existing.some((existing, index) => {
       const newMsg = newMessages[index];
       if (!newMsg) return true; // New message added
@@ -62,8 +62,7 @@ const messagesChanged = (
         existing.content !== newMsg.content ||
         existing.status !== newMsg.status
       );
-    }) ||
-    newMessages.length > existing.length // New messages at the end
+    })
   );
 };
 

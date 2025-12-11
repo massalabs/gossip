@@ -55,7 +55,9 @@ vi.mock('../src/api/messageProtocol', async importOriginal => {
     await importOriginal<typeof import('../src/api/messageProtocol')>();
   return {
     ...actual,
-    createMessageProtocol: vi.fn(() => actual.createMessageProtocol('mock')),
+    createMessageProtocol: vi.fn(() =>
+      actual.createMessageProtocol(MessageProtocolType.MOCK)
+    ),
   };
 });
 
@@ -65,6 +67,7 @@ vi.mock('../src/api/messageProtocol', async importOriginal => {
 // Clean up between tests to avoid state leakage
 import { afterEach, vi } from 'vitest';
 import { db } from '../src/db';
+import { MessageProtocolType } from '../src/config/protocol';
 
 afterEach(async () => {
   // Clean up database using Dexie's delete method which properly handles closing
@@ -76,31 +79,6 @@ afterEach(async () => {
   } catch (_) {
     // Ignore errors - database might already be deleted or closed
   }
-
-  // Clean up any other IndexedDB databases that might exist
-  // try {
-  //   const dbs = await indexedDB.databases();
-  //   await Promise.all(
-  //     dbs
-  //       .filter(db => db.name)
-  //       .map(db => {
-  //         return new Promise<void>((resolve) => {
-  //           const request = indexedDB.deleteDatabase(db.name!);
-  //           request.onsuccess = () => resolve();
-  //           request.onerror = () => {
-  //             // Ignore errors - database might already be deleted
-  //             resolve();
-  //           };
-  //           request.onblocked = () => {
-  //             // If blocked, wait a bit and try to resolve anyway
-  //             setTimeout(() => resolve(), 100);
-  //           };
-  //         });
-  //       })
-  //   );
-  // } catch (error) {
-  //   // Ignore cleanup errors - they're not critical for test isolation
-  // }
 });
 
 // Log setup completion

@@ -73,14 +73,13 @@ export class AnnouncementService {
 
   /**fails
    * Establish a session with a contact via session manager and send the created announcement on the network.
-   * Return type contains info about the success of the broadcast of the announcement.
-   * If the session manager fails to create an announcement, let the error bubble up.
+   * Return type contains info about the success or failure of the encryption and broadcast of the announcement.
    * @param contactPublicKeys - The public keys of the contact to establish a session with.
    * @param ourPk - Our public keys.
    * @param ourSk - Our secret keys.
    * @param session - The session module to use.
    * @param userData - Optional user data to include in the announcement.
-   * @returns Return a type containing the created announcement (if any) and information about the success of the broadcast of the announcement.
+   * @returns Return a type containing the created announcement (if any) and information about the success of the failure of the encryption and broadcast of the announcement.
    */
   async establishSession(
     contactPublicKeys: UserPublicKeys,
@@ -197,10 +196,32 @@ export class AnnouncementService {
     }
   }
 
+  /**
+   * Attempts to resend failed outgoing announcements for a list of discussions.
+   *
+   * For each failed discussion:
+   * - Attempts to re-send the outgoing announcement.
+   * - Successfully re-sent announcements are collected for DB updates.
+   * - If resending fails, checks if the discussion's last update is older than 1 hour.
+   *   If so, the discussion is marked as broken.
+   *
+   * After processing all discussions, updates the database in a single transaction:
+   * - Sets the discussion status to PENDING or ACTIVE if successfully resent,
+   *   or marks as BROKEN if too much time has passed without success.
+   *
+   * No action is taken if the input array is empty.
+   *
+   * @param {Discussion[]} failedDiscussions - Array of discussions whose announcements failed previously.
+   * @param {SessionModule} session - The cryptographic session module used for re-encryption.
+   * @returns {Promise<void>}
+   */
   async resendAnnouncements(
     failedDiscussions: Discussion[],
     session: SessionModule
   ): Promise<void> {
+    console.log(
+      `resendAnnouncements: resending ${failedDiscussions.length} failed discussions`
+    );
     if (!failedDiscussions.length) return;
 
     // Perform async network calls outside transaction
@@ -210,18 +231,28 @@ export class AnnouncementService {
     for (const discussion of failedDiscussions) {
       try {
         const result = await this.sendAnnouncement(
-          discussion.initiationAnnouncement!
+          discussion.initiationAnnouncement! // if a discussion is failed, it means the announcement has been encrypted by session manager, so we can resend it
         );
 
         if (result.success) {
           sentDiscussions.push(discussion);
+          console.log(
+            `resendAnnouncements: successfully resent discussion between ${discussion.ownerUserId} and ${discussion.contactUserId}`
+          );
           continue;
         }
+
+        console.error(
+          `resendAnnouncements: failed to resend discussion between ${discussion.ownerUserId} and ${discussion.contactUserId}, got error: ${result.error}`
+        );
 
         // Failed to send - check if should mark as broken
         const lastUpdate = discussion.updatedAt.getTime() ?? 0;
         if (Date.now() - lastUpdate > ONE_HOUR_MS) {
           brokenDiscussions.push(discussion.id!);
+          console.log(
+            `resendAnnouncements: discussion between ${discussion.ownerUserId} and ${discussion.contactUserId} should be marked as broken because it could not be resent for long time`
+          );
         }
       } catch (error) {
         console.error('Failed to resend announcement:', error);
@@ -240,12 +271,18 @@ export class AnnouncementService {
               const status = session.peerSessionStatus(
                 decodeUserId(discussion.contactUserId)
               );
+              console.log(
+                `resendAnnouncements: session status for discussion between ${discussion.ownerUserId} and ${discussion.contactUserId} is ${status}`
+              );
 
               // If discussion has been broken, don't update it
               if (
                 status !== SessionStatus.Active &&
                 status !== SessionStatus.SelfRequested
               ) {
+                console.log(
+                  `resendAnnouncements: discussion between ${discussion.ownerUserId} and ${discussion.contactUserId} has been broken, so it will not be updated`
+                );
                 return;
               }
 
@@ -257,6 +294,9 @@ export class AnnouncementService {
                 updatedAt: now,
               });
             })
+          );
+          console.log(
+            'resendAnnouncements: reactivated discussions have been updated to active or pending'
           );
         }
 
@@ -270,6 +310,9 @@ export class AnnouncementService {
                 updatedAt: now,
               })
             )
+          );
+          console.log(
+            `resendAnnouncements: following discussions have been marked as broken: ${brokenDiscussions.join(', ')}`
           );
         }
       });
@@ -338,7 +381,7 @@ export class AnnouncementService {
       // if we can't decrypt the announcement, it means we are not the intended recipient. It's not an error.
       if (!announcementResult) {
         console.log(
-          `_processIncomingAnnouncement: failed to decrypt, announcement ${announcementData} not for us`
+          `_processIncomingAnnouncement: failed to decrypt, announcement ${encodeToBase64(announcementData)} not for us`
         );
 
         return {

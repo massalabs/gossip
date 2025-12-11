@@ -149,8 +149,6 @@ export function useResendFailedBlobs(activatePeriodicResend: boolean = true) {
               .equals([userProfile.userId, DiscussionStatus.BROKEN])
               .toArray(),
           ]);
-          console.log('failedMessages', failedMessages);
-          console.log('brokenDiscussions', brokenDiscussions);
           return { failedMessages, brokenDiscussions };
         }
       );
