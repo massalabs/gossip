@@ -61,7 +61,6 @@ const useAppStoreBase = create<AppStoreState>()(
         debugOverlayVisible: state.debugOverlayVisible,
         isInitialized: state.isInitialized,
         networkName: state.networkName,
-        setPendingDeepLinkInfo: state.setPendingDeepLinkInfo,
       }),
     }
   )

@@ -58,16 +58,19 @@ const ShareContactQR: React.FC<ShareContactQRProps> = ({ deepLinkUrl }) => {
   }, [deepLinkUrl]);
 
   return (
-    <div className="flex justify-center p-6 bg-[#ffffff] rounded-4xl min-h-[300px] items-center w-fit mx-auto">
-      {qrDataUrl ? (
-        <img
-          src={qrDataUrl}
-          alt="Your contact QR code"
-          className="w-[300px] h-[300px]"
-        />
-      ) : (
-        <PrivacyGraphic size={120} loading={true} />
-      )}
+    <div className="bg-card rounded-xl border border-border p-6 mb-6">
+      {/* Always use a white background for the QR code container to ensure high contrast and reliable scanning, regardless of theme */}
+      <div className="flex justify-center p-6 bg-white rounded-xl min-h-[300px] items-center w-full">
+        {qrDataUrl ? (
+          <img
+            src={qrDataUrl}
+            alt="Your contact QR code"
+            className="w-[300px] h-[300px]"
+          />
+        ) : (
+          <PrivacyGraphic size={120} loading={true} />
+        )}
+      </div>
     </div>
   );
 };

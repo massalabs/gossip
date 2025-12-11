@@ -260,7 +260,7 @@ const AccountCreation: React.FC<AccountCreationProps> = ({
               variant="primary"
               size="custom"
               fullWidth
-              className="h-11 rounded-xl text-sm font-medium flex items-center justify-center gap-2"
+              className="h-11 text-sm font-medium flex items-center justify-center gap-2"
             >
               {!(isCreating || accountCreationStarted) && (
                 <>

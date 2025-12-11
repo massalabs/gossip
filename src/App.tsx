@@ -26,6 +26,7 @@ import { toastOptions } from './utils/toastOptions.ts';
 import LoadingScreen from './components/ui/LoadingScreen.tsx';
 import { ROUTES } from './constants/routes';
 import { useOnlineStore } from './stores/useOnlineStore.tsx';
+import { useTheme } from './hooks/useTheme.ts';
 
 const AppContent: React.FC = () => {
   const { isLoading, userProfile } = useAccountStore();
@@ -77,11 +78,31 @@ const AppContent: React.FC = () => {
 function App() {
   const { showUpdatePrompt, handleForceUpdate, dismissUpdate } =
     useVersionCheck();
-  const init = useOnlineStore(s => s.init);
+
+  const { initTheme } = useTheme();
+  const { initOnlineStore } = useOnlineStore();
 
   useEffect(() => {
-    void init();
-  }, [init]);
+    let cleanup: (() => void) | undefined;
+
+    const initialize = async () => {
+      const cleanupFn = await initTheme();
+      cleanup = cleanupFn;
+      await initOnlineStore();
+    };
+
+    void initialize();
+
+    return () => {
+      if (cleanup) {
+        cleanup();
+      }
+    };
+    // Note: initTheme and initOnlineStore are intentionally excluded from dependencies
+    // as they are initialization functions that should only run once on mount.
+    // Including them could cause unnecessary re-initialization.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <BrowserRouter>

@@ -3,14 +3,11 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import BaseModal from '../components/ui/BaseModal';
 import Button from '../components/ui/Button';
 import { useContactForm } from '../hooks/useContactForm';
-import UserIdField from '../components/account/UserIdField';
-import NameField from '../components/account/NameField';
-import MessageField from '../components/account/MessageField';
-import PrivacyNotice from '../components/account/PrivacyNotice';
 import ErrorDisplay from '../components/account/ErrorDisplay';
-import PageHeader from '../components/ui/PageHeader';
 import ScanQRCode from '../components/settings/ScanQRCode';
-import { Camera, Upload } from 'react-feather';
+import { useAccountStore } from '../stores/accountStore';
+import { Info, Upload } from 'react-feather';
+import QrCodeIcon from '../components/ui/customIcons/QrCodeIcon';
 import { ROUTES } from '../constants/routes';
 
 const NewContact: React.FC = () => {
@@ -19,6 +16,7 @@ const NewContact: React.FC = () => {
   const { state } = useLocation();
   const [isDiscardModalOpen, setIsDiscardModalOpen] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
+  const { userProfile } = useAccountStore();
 
   const {
     generalError,
@@ -35,6 +33,13 @@ const NewContact: React.FC = () => {
     handleMessageChange,
     handleSubmit,
   } = useContactForm();
+
+  const getDefaultMessage = useCallback((): string => {
+    if (userProfile?.username) {
+      return `Hi! I'm ${userProfile.username} and I'd like to connect with you.`;
+    }
+    return "Hi! I'd like to connect with you.";
+  }, [userProfile?.username]);
 
   useEffect(() => {
     if (!state?.userId) return;
@@ -77,93 +82,201 @@ const NewContact: React.FC = () => {
   }
 
   return (
-    <div className="bg-card h-full overflow-auto app-max-w mx-auto">
-      <PageHeader title="New contact" onBack={handleBack} />
+    <div className="bg-background h-full overflow-auto app-max-w mx-auto">
+      {/* Custom Header */}
+      <div className="px-6 py-4 border-b border-border bg-card">
+        <div className="flex items-center justify-between">
+          <button
+            onClick={handleBack}
+            className="text-foreground hover:text-primary transition-colors"
+            aria-label="Cancel"
+          >
+            Cancel
+          </button>
+          <h1 className="text-xl font-semibold text-foreground">New contact</h1>
+          <button
+            onClick={handleSubmit}
+            disabled={!canSubmit || isSubmitting}
+            tabIndex={!canSubmit || isSubmitting ? -1 : 0}
+            className="text-foreground hover:text-primary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            aria-label="Add contact"
+          >
+            {isSubmitting ? 'Adding...' : 'Add'}
+          </button>
+        </div>
+      </div>
 
       {/* Main Form */}
-      <div className="px-6 pb-32">
-        <div className="bg-card rounded-xl p-6 space-y-5">
-          {/* Import Options - File and QR Code */}
-          <div className="py-6 border-b border-border">
-            <div className="text-center mb-4">
-              <p className="text-sm text-muted-foreground mb-4">
-                Import contact
-              </p>
-              <div className="flex gap-3 justify-center">
-                <Button
-                  onClick={() => fileInputRef.current?.click()}
-                  variant="primary"
-                  size="md"
-                  className="inline-flex items-center gap-2 flex-1 max-w-[140px]"
-                  disabled={fileState.isLoading}
-                >
-                  <Upload className="w-5 h-5" />
-                  <span>By file</span>
-                </Button>
-                <Button
-                  onClick={() => setShowScanner(true)}
-                  variant="outline"
-                  size="md"
-                  className="inline-flex items-center gap-2 flex-1 max-w-[140px]"
-                >
-                  <Camera className="w-5 h-5" />
-                  <span>Scan QR</span>
-                </Button>
-              </div>
-            </div>
+      <div className="px-6 py-6">
+        {/* Input Fields Container */}
+        <div className="bg-card rounded-xl border border-border overflow-hidden mb-6">
+          {/* Username Field */}
+          <div className="px-4 py-4 border-b border-border">
             <input
-              ref={fileInputRef}
-              type="file"
-              accept=".yaml,.yml"
-              className="hidden"
-              onChange={handleFileImport}
-              disabled={fileState.isLoading}
-              aria-label="Import contact from YAML file"
+              id="contact-name"
+              type="text"
+              value={name.value}
+              onChange={e => handleNameChange(e.target.value)}
+              placeholder="Username"
+              className="w-full bg-transparent text-foreground placeholder-muted-foreground focus:outline-none"
+              aria-describedby={name.error ? 'contact-name-error' : undefined}
             />
-            {fileState.error && (
+            {name.error && (
               <p
-                className="text-sm text-destructive mt-2 text-center"
+                id="contact-name-error"
+                className="mt-1.5 text-sm text-destructive"
                 role="alert"
               >
-                {fileState.error}
+                {name.error}
               </p>
             )}
           </div>
 
-          <UserIdField
-            userId={userId.value}
-            onChange={handleUserIdChange}
-            error={userId.error}
-            isFetching={userId.loading}
-          />
-
-          <NameField
-            name={name.value}
-            onChange={handleNameChange}
-            error={name.error}
-          />
-
-          <MessageField
-            message={message.value}
-            onChange={handleMessageChange}
-          />
-
-          <PrivacyNotice />
-
-          <ErrorDisplay error={generalError} />
-
-          {/* Save Button */}
-          <Button
-            onClick={handleSubmit}
-            disabled={!canSubmit}
-            loading={isSubmitting}
-            fullWidth
-            size="md"
-            className="h-12 rounded-xl text-base"
-          >
-            Add contact
-          </Button>
+          {/* Gossip Address Field */}
+          <div className="px-4 py-4">
+            <div className="relative">
+              <input
+                id="contact-user-id"
+                type="text"
+                value={userId.value}
+                onChange={e => handleUserIdChange(e.target.value)}
+                placeholder="Gossip address"
+                className="w-full bg-transparent text-foreground placeholder-muted-foreground focus:outline-none pr-10"
+                aria-describedby={
+                  userId.error
+                    ? 'contact-user-id-error'
+                    : 'contact-user-id-helper'
+                }
+              />
+              {userId.loading && (
+                <div className="absolute right-0 top-1/2 -translate-y-1/2">
+                  <div
+                    className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin"
+                    aria-label="Loading public key"
+                  />
+                </div>
+              )}
+            </div>
+            {!userId.error && !userId.loading && (
+              <p
+                id="contact-user-id-helper"
+                className="mt-1.5 text-xs text-muted-foreground"
+              >
+                User ID is a unique 32-byte identifier
+              </p>
+            )}
+            {userId.error && (
+              <p
+                id="contact-user-id-error"
+                className="mt-1.5 text-sm text-destructive"
+                role="alert"
+              >
+                {userId.error}
+              </p>
+            )}
+          </div>
         </div>
+
+        {/* Message Field */}
+        <div className="bg-card rounded-xl border border-border p-4 mb-6">
+          <textarea
+            id="contact-message"
+            value={message.value}
+            onChange={e => handleMessageChange(e.target.value)}
+            placeholder="Contact request message (optional)"
+            rows={3}
+            maxLength={500}
+            className="w-full bg-transparent text-foreground placeholder-muted-foreground focus:outline-none resize-none"
+            aria-label="Contact request message (optional)"
+          />
+          {message.value && (
+            <div className="flex items-center justify-between mt-2">
+              <button
+                type="button"
+                onClick={() => handleMessageChange(getDefaultMessage())}
+                className="text-xs text-muted-foreground hover:text-primary underline underline-offset-2 transition-colors"
+              >
+                Use default message
+              </button>
+              <span className="text-xs text-muted-foreground">
+                {message.value.length}/500
+              </span>
+            </div>
+          )}
+          {!message.value && (
+            <button
+              type="button"
+              onClick={() => handleMessageChange(getDefaultMessage())}
+              className="text-xs text-muted-foreground hover:text-primary underline underline-offset-2 mt-2 transition-colors"
+            >
+              Use default message
+            </button>
+          )}
+        </div>
+
+        {/* Privacy Notice */}
+        <div className="bg-muted/30 border border-border rounded-xl p-4 mb-6">
+          <div className="flex items-start gap-2">
+            <Info className="w-4 h-4 text-muted-foreground mt-0.5 shrink-0" />
+            <div className="flex-1">
+              <p className="text-xs font-medium text-foreground mb-1">
+                Privacy notice
+              </p>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                This message is sent with your contact request announcement and
+                has{' '}
+                <span className="font-medium text-foreground">
+                  reduced privacy
+                </span>{' '}
+                compared to regular Gossip messages. Unlike regular messages, if
+                your keys are compromised in the future, this message could be
+                decrypted. Use it for introductions or context, but avoid
+                sharing sensitive information. Send private details through
+                regular messages after the contact accepts your request.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Scan QR Code and File Options */}
+        <div className="flex gap-3 mb-6">
+          <button
+            onClick={() => setShowScanner(true)}
+            className="flex-1 flex items-center justify-center gap-2 text-primary hover:text-primary/80 transition-colors py-3"
+            aria-label="Scan QR code"
+          >
+            <QrCodeIcon className="w-5 h-5" />
+            <span className="text-base font-medium">Scan QR code</span>
+          </button>
+
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={fileState.isLoading}
+            className="flex-1 flex items-center justify-center gap-2 text-muted-foreground hover:text-foreground transition-colors py-3 disabled:opacity-50 disabled:cursor-not-allowed"
+            aria-label="Import from file"
+          >
+            <Upload className="w-5 h-5" />
+            <span className="text-base font-medium">Import from file</span>
+          </button>
+        </div>
+
+        {/* Hidden file input for file import */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".yaml,.yml"
+          className="hidden"
+          onChange={handleFileImport}
+          disabled={fileState.isLoading}
+          aria-label="Import contact from YAML file"
+        />
+        {fileState.error && (
+          <p className="text-sm text-destructive mt-2 text-center" role="alert">
+            {fileState.error}
+          </p>
+        )}
+
+        <ErrorDisplay error={generalError} />
       </div>
 
       {/* Discard Modal */}

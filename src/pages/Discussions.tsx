@@ -5,12 +5,15 @@ import { useNavigate } from 'react-router-dom';
 import { Plus } from 'react-feather';
 import Button from '../components/ui/Button';
 import { PrivacyGraphic } from '../components/ui/PrivacyGraphic';
-import PageHeader from '../components/ui/PageHeader';
+import HeaderWrapper from '../components/ui/HeaderWrapper';
+import UserProfileAvatar from '../components/avatar/UserProfileAvatar';
+import ScrollableContent from '../components/ui/ScrollableContent';
 import { ROUTES } from '../constants/routes';
 
 const Discussions: React.FC = () => {
   const navigate = useNavigate();
   const { ourPk, ourSk, session, isLoading } = useAccountStore();
+
   if (isLoading || !ourPk || !ourSk || !session) {
     return (
       <div className="bg-background flex items-center justify-center h-full">
@@ -22,16 +25,24 @@ const Discussions: React.FC = () => {
 
   return (
     <div className="h-full flex flex-col bg-card relative">
-      <PageHeader title="Discussions" />
-      {/* Scrollable content with bottom padding to prevent content from being hidden behind the button/nav */}
-      <div className="flex-1 overflow-y-auto pt-4 px-2 pb-20">
+      <HeaderWrapper>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <UserProfileAvatar size={10} />
+            <h1 className="text-xl font-semibold text-black dark:text-white">
+              Gossip
+            </h1>
+          </div>
+        </div>
+      </HeaderWrapper>
+      <ScrollableContent className="flex-1 overflow-y-auto pt-2 px-2 pb-20">
         <DiscussionListPanel
           onSelect={id => {
             navigate(ROUTES.discussion({ userId: id }));
           }}
           headerVariant="link"
         />
-      </div>
+      </ScrollableContent>
       {/* Floating button positioned above bottom nav */}
       <Button
         onClick={() => navigate(ROUTES.newDiscussion())}

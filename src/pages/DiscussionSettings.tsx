@@ -6,6 +6,7 @@ import ContactAvatar from '../components/avatar/ContactAvatar';
 import ContactNameModal from '../components/ui/ContactNameModal';
 import Button from '../components/ui/Button';
 import PageHeader from '../components/ui/PageHeader';
+import HeaderWrapper from '../components/ui/HeaderWrapper';
 import { Check, Edit2, ChevronRight } from 'react-feather';
 import { Contact } from '../db';
 import { ROUTES } from '../constants/routes';
@@ -102,8 +103,10 @@ const DiscussionSettings: React.FC = () => {
   }
 
   return (
-    <div className="bg-card h-full overflow-auto app-max-w mx-auto">
-      <PageHeader title="Discussion Settings" onBack={() => navigate(-1)} />
+    <div className="bg-background h-full overflow-auto app-max-w mx-auto">
+      <HeaderWrapper>
+        <PageHeader title="Discussion Settings" onBack={() => navigate(-1)} />
+      </HeaderWrapper>
 
       <div className="flex-1 pt-4 px-6 pb-6">
         {/* Discussion Name Section */}

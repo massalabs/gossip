@@ -1,6 +1,8 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import BaseModal from '../components/ui/BaseModal';
+import HeaderWrapper from '../components/ui/HeaderWrapper';
 import PageHeader from '../components/ui/PageHeader';
+import ScrollableContent from '../components/ui/ScrollableContent';
 import { useAccountStore } from '../stores/accountStore';
 import { useAppStore } from '../stores/appStore';
 import { useTheme } from '../hooks/useTheme';
@@ -17,10 +19,8 @@ import {
   Camera,
   Copy,
   LogOut,
-  Moon,
   RefreshCcw,
   Settings as SettingsIconFeather,
-  Sun,
   Trash2,
   Bell,
 } from 'react-feather';
@@ -35,6 +35,7 @@ import {
   type NotificationPreferences,
 } from '../services/notifications';
 import BackgroundSyncSettings from '../components/settings/BackgroundSyncSettings';
+import ThemeSelect from '../components/settings/ThemeSelect';
 
 import ProfilePicture from '../assets/gossip_face.svg';
 
@@ -55,7 +56,7 @@ const Settings = (): React.ReactElement => {
   const showDebugOption = useAppStore(s => s.showDebugOption);
   const setShowDebugOption = useAppStore(s => s.setShowDebugOption);
   const [showUserId, setShowUserId] = useState(false);
-  const { setTheme, resolvedTheme } = useTheme();
+  const { theme, setTheme, resolvedTheme } = useTheme();
   const [activeView, setActiveView] = useState<SettingsView | null>(null);
   const [isResetModalOpen, setIsResetModalOpen] = useState(false);
   const { isVersionDifferent, handleForceUpdate } = useVersionCheck();
@@ -209,43 +210,53 @@ const Settings = (): React.ReactElement => {
   }
 
   return (
-    <div className="bg-card h-full overflow-auto">
-      <div className="h-full">
-        {/* Header */}
+    <div className="h-full flex flex-col bg-background app-max-w mx-auto">
+      {/* Header */}
+      <HeaderWrapper>
         <PageHeader title="Settings" />
+      </HeaderWrapper>
+      {/* Main Content */}
+      <ScrollableContent className="flex-1 overflow-y-auto px-6 py-6">
         {/* Account Profile Section */}
-
-        <div className="bg-white dark:bg-gray-800 rounded-lg p-6 mt-4">
-          <div className="flex items-start gap-4 mb-4">
+        <div className="bg-card rounded-xl border border-border p-6 mb-6">
+          <div className="flex items-start gap-4">
             <button
               onClick={handleProfileImageTap}
-              className="cursor-pointer focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 rounded-lg transition-opacity active:opacity-70"
+              className="cursor-pointer focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 rounded-full transition-opacity active:opacity-70"
               aria-label="Profile"
             >
               <img
                 src={ProfilePicture}
-                className="w-16 h-16 rounded-lg object-cover"
+                className="w-16 h-16 rounded-full object-cover"
                 alt="Profile"
               />
             </button>
             <div className="flex-1 min-w-0">
-              <h3 className="text-base font-semibold text-black dark:text-white mb-2">
-                {userProfile?.username || 'Account name'}
-              </h3>
+              <div className="mb-2 flex items-baseline gap-2">
+                <p className="text-xs text-muted-foreground shrink-0">Name:</p>
+                <h3 className="text-base font-semibold text-foreground truncate">
+                  {userProfile?.username || 'Account name'}
+                </h3>
+              </div>
               {userProfile?.userId && (
-                <div className="mb-2 flex items-baseline gap-2">
-                  <p className="text-xs text-gray-500 dark:text-gray-400 shrink-0">
+                <div className="flex items-center gap-2 min-w-0">
+                  <p className="text-xs text-muted-foreground shrink-0">
                     User ID:
                   </p>
-                  <UserIdDisplay
-                    userId={userProfile.userId}
-                    visible={showUserId}
-                    onChange={setShowUserId}
-                    textSize="sm"
-                    textClassName="text-gray-600 dark:text-gray-400"
-                    showCopy
-                    showHideToggle
-                  />
+                  <div className="flex-1 min-w-0">
+                    <UserIdDisplay
+                      userId={userProfile.userId}
+                      visible={showUserId}
+                      onChange={setShowUserId}
+                      textSize="sm"
+                      textClassName="text-muted-foreground"
+                      showCopy
+                      showHideToggle
+                      className="w-full"
+                      prefixChars={3}
+                      suffixChars={3}
+                    />
+                  </div>
                 </div>
               )}
             </div>
@@ -253,61 +264,68 @@ const Settings = (): React.ReactElement => {
         </div>
 
         {/* Settings Options */}
-        <div className="px-4 space-y-2 pb-20">
-          <div className="py-2">
-            <InfoRow label="Version" value={APP_VERSION} />
+        <div className="space-y-6">
+          {/* Version Info */}
+          <div className="bg-card rounded-xl border border-border p-4">
+            <InfoRow
+              label="Version"
+              value={APP_VERSION}
+              containerClassName="bg-transparent"
+            />
             {showDebugOption && (
               <InfoRow
                 label="Build ID"
                 value={appBuildId || 'unknown'}
                 valueClassName="text-xs text-muted-foreground font-mono"
+                containerClassName="bg-transparent mt-2"
               />
             )}
           </div>
-          {/* Account Backup Button */}
-          <Button
-            variant="outline"
-            size="custom"
-            className="w-full h-[54px] flex items-center px-4 justify-start rounded-lg"
-            onClick={() => setActiveView(SettingsView.SHOW_ACCOUNT_BACKUP)}
-          >
-            <Copy className="mr-4" />
-            <span className="text-base font-semibold flex-1 text-left">
-              Account Backup
-            </span>
-            {mnemonicBackupInfo?.backedUp && (
-              <div className="w-2 h-2 bg-success rounded-full ml-auto"></div>
-            )}
-          </Button>
-          {/* Share Contact Button */}
-          <Button
-            variant="outline"
-            size="custom"
-            className="w-full h-[54px] flex items-center px-4 justify-start rounded-lg"
-            onClick={() => setActiveView(SettingsView.SHARE_CONTACT)}
-          >
-            <SettingsIconFeather className="mr-4" />
-            <span className="text-base font-semibold flex-1 text-left">
-              Share Contact
-            </span>
-          </Button>
-          {/* Scan QR Code Button */}
-          <Button
-            variant="outline"
-            size="custom"
-            className="w-full h-[54px] flex items-center px-4 justify-start rounded-lg"
-            onClick={() => setActiveView(SettingsView.SCAN_QR_CODE)}
-          >
-            <Camera className="mr-4" />
-            <span className="text-base font-semibold flex-1 text-left">
-              Scan QR Code
-            </span>
-          </Button>
+
+          {/* Account Actions */}
+          <div className="bg-card rounded-xl border border-border overflow-hidden">
+            <Button
+              variant="outline"
+              size="custom"
+              className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0 border-b border-border last:border-b-0"
+              onClick={() => setActiveView(SettingsView.SHOW_ACCOUNT_BACKUP)}
+            >
+              <Copy className="mr-4" />
+              <span className="text-base font-semibold flex-1 text-left">
+                Account Backup
+              </span>
+              {mnemonicBackupInfo?.backedUp && (
+                <div className="w-2 h-2 bg-success rounded-full ml-auto"></div>
+              )}
+            </Button>
+            <Button
+              variant="outline"
+              size="custom"
+              className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0 border-b border-border last:border-b-0"
+              onClick={() => setActiveView(SettingsView.SHARE_CONTACT)}
+            >
+              <SettingsIconFeather className="mr-4" />
+              <span className="text-base font-semibold flex-1 text-left">
+                Share Contact
+              </span>
+            </Button>
+            <Button
+              variant="outline"
+              size="custom"
+              className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0"
+              onClick={() => setActiveView(SettingsView.SCAN_QR_CODE)}
+            >
+              <Camera className="mr-4" />
+              <span className="text-base font-semibold flex-1 text-left">
+                Scan QR Code
+              </span>
+            </Button>
+          </div>
           {/* Notifications Section */}
           {notificationService.isSupported() && (
-            <div className="bg-card border border-border rounded-lg overflow-hidden shadow-sm">
+            <div className="bg-card border border-border rounded-xl overflow-hidden">
               {/* Notification Toggle */}
-              <div className="h-[54px] flex items-center px-4 justify-start w-full">
+              <div className="h-[54px] flex items-center px-4 justify-start w-full border-b border-border">
                 <Bell className="text-foreground mr-4" />
                 <span className="text-base font-semibold text-foreground flex-1 text-left">
                   Notifications
@@ -333,7 +351,7 @@ const Settings = (): React.ReactElement => {
               </div>
               {/* Permission Status Info */}
               {notificationPrefs.permission.denied && (
-                <div className="px-4 pb-3 pt-0">
+                <div className="px-4 py-4">
                   <p className="text-xs text-muted-foreground">
                     Notifications are blocked. Please enable them in your
                     browser settings.
@@ -344,99 +362,81 @@ const Settings = (): React.ReactElement => {
           )}
           {/* Background Sync Settings (Android only) */}
           <BackgroundSyncSettings showDebugInfo={showDebugOption} />
-          {/* Privacy Button */}
-          {/* <Button
-            variant="outline"
-            size="custom"
-            className="w-full h-[54px] flex items-center px-4 justify-start rounded-lg"
-            onClick={() => {}}
-            disabled
-          >
-            <PrivacyIcon className="mr-4" />
-            <span className="text-base font-semibold flex-1 text-left">
-              Privacy
-            </span>
-          </Button> */}
-          {/* Theme Toggle */}
-          <div className="bg-card border border-border rounded-lg h-[54px] flex items-center px-4 justify-start w-full shadow-sm">
-            {resolvedTheme === 'dark' ? (
-              <Moon className="text-foreground mr-4" />
-            ) : (
-              <Sun className="text-foreground mr-4" />
-            )}
-            <span className="text-base font-semibold text-foreground flex-1 text-left">
-              {resolvedTheme === 'dark' ? 'Dark Mode' : 'Light Mode'}
-            </span>
-            <Toggle
-              checked={resolvedTheme === 'dark'}
-              onChange={checked => setTheme(checked ? 'dark' : 'light')}
-              ariaLabel="Toggle theme"
-            />
-          </div>
-          {/* Debug Options - Only show when showDebugOption is true (unlocked via 7-tap gesture on profile image) */}
+          {/* Theme Select */}
+          <ThemeSelect
+            theme={theme}
+            resolvedTheme={resolvedTheme}
+            onThemeChange={setTheme}
+          />
+          {/* Debug Options */}
+
           {showDebugOption && (
-            <div className="bg-card border border-border rounded-lg overflow-hidden shadow-sm">
-              {/* Debug Options Header */}
-              <div className="h-[54px] flex items-center px-4 justify-start w-full border-b border-border">
-                <SettingsIconFeather
-                  className="text-foreground mr-4"
-                  aria-hidden="true"
+            <div className="bg-card rounded-xl border border-border overflow-hidden">
+              <div className="h-[54px] flex items-center px-4 justify-between border-b border-border">
+                <div className="flex items-center flex-1">
+                  <SettingsIconFeather className="text-foreground mr-4" />
+                  <span className="text-base font-semibold text-foreground flex-1 text-left">
+                    Show Debug Options
+                  </span>
+                </div>
+                <Toggle
+                  checked={showDebugOption}
+                  onChange={setShowDebugOption}
+                  ariaLabel="Show debug options"
                 />
-                <span className="text-base font-semibold text-foreground flex-1 text-left">
-                  Debug Options
+              </div>
+              {notificationService.isSupported() &&
+                notificationPrefs.permission.granted &&
+                notificationPrefs.enabled && (
+                  <Button
+                    variant="outline"
+                    size="custom"
+                    className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0 border-b border-border"
+                    onClick={async () => {
+                      await notificationService.showDiscussionNotification(
+                        'Test User',
+                        'Test Message',
+                        'test-user-id'
+                      );
+                    }}
+                  >
+                    <Bell className="mr-4" />
+                    <span className="text-base font-semibold flex-1 text-left">
+                      Test Notification
+                    </span>
+                  </Button>
+                )}
+              <Button
+                variant="outline"
+                size="custom"
+                className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0 border-b border-border"
+                onClick={handleResetAllAccounts}
+              >
+                <AlertTriangle className="mr-4" />
+                <span className="text-base font-semibold flex-1 text-left">
+                  Reset App
                 </span>
-              </div>
-              {/* Debug Options Content */}
-              <div className="px-4 py-3 space-y-2">
-                {notificationService.isSupported() &&
-                  notificationPrefs.permission.granted &&
-                  notificationPrefs.enabled && (
-                    <Button
-                      variant="outline"
-                      className="w-full"
-                      onClick={async () => {
-                        await notificationService.showDiscussionNotification(
-                          'Test User',
-                          'Test Message',
-                          'test-user-id'
-                        );
-                      }}
-                    >
-                      <Bell className="mr-4" />
-                      <span className="text-base font-semibold flex-1 text-left">
-                        Test Notification
-                      </span>
-                    </Button>
-                  )}
-                <Button
-                  variant="outline"
-                  className="w-full"
-                  onClick={handleResetAllAccounts}
-                >
-                  <AlertTriangle className="mr-4" />
-                  <span className="text-base font-semibold flex-1 text-left">
-                    Reset App
-                  </span>
-                </Button>
-                <Button
-                  variant="outline"
-                  className="w-full"
-                  onClick={handleResetAllDiscussionsAndMessages}
-                >
-                  <AlertTriangle className="mr-4" />
-                  <span className="text-base font-semibold flex-1 text-left">
-                    Clear Messages & Contacts
-                  </span>
-                </Button>
-              </div>
+              </Button>
+              <Button
+                variant="outline"
+                size="custom"
+                className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0"
+                onClick={handleResetAllDiscussionsAndMessages}
+              >
+                <AlertTriangle className="mr-4" />
+                <span className="text-base font-semibold flex-1 text-left">
+                  Clear Messages & Contacts
+                </span>
+              </Button>
             </div>
           )}
+
           {/* Clear Cache & Database Button - Only show when version differs */}
           {isVersionDifferent && (
             <Button
               variant="outline"
               size="custom"
-              className="w-full h-[54px] flex items-center px-4 justify-start rounded-lg text-destructive border-destructive hover:bg-destructive/10"
+              className="w-full h-[54px] flex items-center px-4 justify-start rounded-xl text-destructive border-destructive hover:bg-destructive/10"
               onClick={handleForceUpdate}
             >
               <RefreshCcw className="mr-4" />
@@ -445,39 +445,40 @@ const Settings = (): React.ReactElement => {
               </span>
             </Button>
           )}
-          {/* Logout Button */}
-          <Button
-            variant="outline"
-            size="custom"
-            className="w-full h-[54px] flex items-center px-4 justify-start rounded-lg text-foreground border-border hover:bg-muted"
-            onClick={handleLogout}
-          >
-            <LogOut className="mr-4" />
-            <span className="text-base font-semibold flex-1 text-left">
-              Logout
-            </span>
-          </Button>
-          {/* Reset Account Button */}
-          <Button
-            variant="outline"
-            size="custom"
-            className="w-full h-[54px] flex items-center px-4 justify-start rounded-lg text-red-500 dark:text-red-400 border-red-200 dark:border-red-800 hover:bg-red-50 dark:hover:bg-red-900/20"
-            onClick={() => setIsResetModalOpen(true)}
-          >
-            <Trash2 className="mr-4" />
-            <span className="text-base font-semibold flex-1 text-left">
-              Delete Account
-            </span>
-          </Button>
+          {/* Account Actions */}
+          <div className="bg-card rounded-xl border border-border overflow-hidden">
+            <Button
+              variant="outline"
+              size="custom"
+              className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0 border-b border-border text-foreground"
+              onClick={handleLogout}
+            >
+              <LogOut className="mr-4" />
+              <span className="text-base font-semibold flex-1 text-left">
+                Logout
+              </span>
+            </Button>
+            <Button
+              variant="outline"
+              size="custom"
+              className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0 text-destructive border-destructive hover:bg-destructive/10"
+              onClick={() => setIsResetModalOpen(true)}
+            >
+              <Trash2 className="mr-4" />
+              <span className="text-base font-semibold flex-1 text-left">
+                Delete Account
+              </span>
+            </Button>
+          </div>
         </div>
-      </div>
+      </ScrollableContent>
       <BaseModal
         isOpen={isResetModalOpen}
         onClose={() => setIsResetModalOpen(false)}
         title="Delete account?"
       >
         <div className="space-y-4">
-          <p className="text-sm text-gray-700 dark:text-gray-300">
+          <p className="text-sm text-foreground">
             This will delete all your data and cannot be undone.
           </p>
           <div className="flex gap-3">
@@ -488,7 +489,7 @@ const Settings = (): React.ReactElement => {
               }}
               variant="danger"
               size="custom"
-              className="flex-1 h-11 rounded-lg font-semibold"
+              className="flex-1 h-11 rounded-xl font-semibold"
             >
               Delete
             </Button>
@@ -496,7 +497,7 @@ const Settings = (): React.ReactElement => {
               onClick={() => setIsResetModalOpen(false)}
               variant="secondary"
               size="custom"
-              className="flex-1 h-11 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white font-semibold"
+              className="flex-1 h-11 rounded-xl font-semibold"
             >
               Cancel
             </Button>

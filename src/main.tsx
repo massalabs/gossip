@@ -2,9 +2,6 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import './index.css';
 import App from './App.tsx';
-import { ThemeProvider } from './context/theme-provider.tsx';
-import { Capacitor } from '@capacitor/core';
-import { StatusBar } from '@capacitor/status-bar';
 import { enableDebugLogger } from './utils/logger.ts';
 
 // Polyfill for Buffer
@@ -84,11 +81,6 @@ window.addEventListener('load', () => {
   }
 });
 
-// Configure status bar overlay for native platforms (style will be set by theme provider)
-if (Capacitor.isNativePlatform()) {
-  StatusBar.setOverlaysWebView({ overlay: false });
-}
-
 // Start WASM initialization in the background (non-blocking)
 startWasmInitialization();
 
@@ -102,8 +94,6 @@ enableDebugLogger();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <ThemeProvider defaultTheme="system" storageKey="gossip-theme">
-      <App />
-    </ThemeProvider>
+    <App />
   </StrictMode>
 );
