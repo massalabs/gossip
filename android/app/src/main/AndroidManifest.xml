@@ -36,6 +36,13 @@
                 <data android:scheme="gossip" />
             </intent-filter>
 
+            <!-- Share target: Accept text and URLs shared from other apps -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+
             <!-- BackgroundRunner notification click intent filter -->
             <!-- BackgroundRunner uses .NOTIFICATION_CLICKED as the action for notification taps -->
             <intent-filter>

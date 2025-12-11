@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useCallback } from 'react';
 import DiscussionListPanel from '../components/discussions/DiscussionList';
 import { useAccountStore } from '../stores/accountStore';
+import { useAppStore } from '../stores/appStore';
 import { useNavigate } from 'react-router-dom';
-import { Plus } from 'react-feather';
+import { Plus, X } from 'react-feather';
 import Button from '../components/ui/Button';
 import SearchBar from '../components/ui/SearchBar';
 import { useSearch } from '../hooks/useSearch';
@@ -15,6 +16,29 @@ import { ROUTES } from '../constants/routes';
 const Discussions: React.FC = () => {
   const navigate = useNavigate();
   const { ourPk, ourSk, session, isLoading } = useAccountStore();
+  const pendingSharedContent = useAppStore(s => s.pendingSharedContent);
+  const setPendingSharedContent = useAppStore(s => s.setPendingSharedContent);
+
+  const handleSelectDiscussion = useCallback(
+    (contactUserId: string) => {
+      // If there's pending shared content, pass it as prefilled message
+      if (pendingSharedContent) {
+        navigate(ROUTES.discussion({ userId: contactUserId }), {
+          state: { prefilledMessage: pendingSharedContent },
+          replace: false,
+        });
+        // Clear pending shared content after navigation
+        setPendingSharedContent(null);
+      } else {
+        navigate(ROUTES.discussion({ userId: contactUserId }));
+      }
+    },
+    [navigate, pendingSharedContent, setPendingSharedContent]
+  );
+
+  const handleCancelShare = useCallback(() => {
+    setPendingSharedContent(null);
+  }, [setPendingSharedContent]);
 
   // Use debounced search for filtering discussions
   const {
@@ -47,6 +71,28 @@ const Discussions: React.FC = () => {
         </div>
       </HeaderWrapper>
       <ScrollableContent className="flex-1 overflow-y-auto pt-2 px-2 pb-20">
+        {/* Show banner when there's pending shared content */}
+        {pendingSharedContent && (
+          <div className="mx-2 mb-4 p-4 bg-accent/50 border border-border rounded-lg">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-foreground mb-1">
+                  Share content to discussion
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Select a discussion below to share the content.
+                </p>
+              </div>
+              <button
+                onClick={handleCancelShare}
+                className="shrink-0 p-1 hover:bg-accent rounded transition-colors"
+                aria-label="Cancel sharing"
+              >
+                <X className="w-4 h-4 text-muted-foreground" />
+              </button>
+            </div>
+          </div>
+        )}
         <div className="px-2 mb-3">
           <SearchBar
             value={searchQuery}
@@ -56,9 +102,7 @@ const Discussions: React.FC = () => {
           />
         </div>
         <DiscussionListPanel
-          onSelect={id => {
-            navigate(ROUTES.discussion({ userId: id }));
-          }}
+          onSelect={handleSelectDiscussion}
           headerVariant="link"
           searchQuery={debouncedSearchQuery}
         />

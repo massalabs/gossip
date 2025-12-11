@@ -46,7 +46,7 @@ const ShareContactCopySection: React.FC<ShareContactCopySectionProps> = ({
         qrUrlTimeoutRef.current = null;
       }, 2000);
     } catch (err) {
-      console.error('Failed to copy QR code URL:', err);
+      console.error('Failed to invitation link:', err);
     }
   }, [deepLinkUrl]);
 
@@ -120,7 +120,7 @@ const ShareContactCopySection: React.FC<ShareContactCopySectionProps> = ({
         <span
           className={`text-base font-medium flex-1 text-left ${copiedQRUrl ? 'text-success' : ''}`}
         >
-          {copiedQRUrl ? 'QR Code URL Copied!' : 'Copy QR Code Invite'}
+          {copiedQRUrl ? 'Invitation Link Copied!' : 'Copy Invitation Link'}
         </span>
       </Button>
     </div>

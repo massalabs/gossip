@@ -18,6 +18,7 @@ import ShareContactPage from '../pages/settings/ShareContactPage';
 import ContactSharePage from '../pages/ContactSharePage';
 import { InvitePage } from '../pages/InvitePage';
 import { usePendingDeepLink } from '../hooks/usePendingDeepLink';
+import { usePendingSharedContent } from '../hooks/usePendingSharedContent';
 import { useAppStateRefresh } from '../hooks/useAppStateRefresh';
 import { ROUTES } from '../constants/routes';
 
@@ -27,6 +28,7 @@ import { ROUTES } from '../constants/routes';
 export const AuthenticatedRoutes: React.FC = () => {
   useAppStateRefresh();
   usePendingDeepLink();
+  usePendingSharedContent();
 
   return (
     <Routes>

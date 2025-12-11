@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react';
-import { Capacitor, PluginListenerHandle } from '@capacitor/core';
+import { Capacitor } from '@capacitor/core';
 import { App, URLOpenListenerEvent } from '@capacitor/app';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import { useNavigate } from 'react-router-dom';
@@ -7,8 +7,8 @@ import { extractInvitePath, parseInvite } from '../utils/qrCodeParser';
 import { useAppStore } from '../stores/appStore';
 
 export const AppUrlListener: React.FC = () => {
-  const setPendingDeepLinkInfo = useAppStore(s => s.setPendingDeepLinkInfo);
   const navigate = useNavigate();
+  const setPendingDeepLinkInfo = useAppStore(s => s.setPendingDeepLinkInfo);
 
   const cleanupFunctionsRef = useRef<Set<() => void>>(new Set());
 
@@ -16,36 +16,27 @@ export const AppUrlListener: React.FC = () => {
     cleanupFunctionsRef.current.add(cleanup);
   }, []);
 
+  /**
+   * Handle OS-level deep links delivered via Capacitor appUrlOpen
+   * Only processes invite URLs; actual navigation is handled by usePendingDeepLink.
+   */
   const handleAppUrlOpen = useCallback(
     async (event: URLOpenListenerEvent) => {
       try {
         const invitePath = extractInvitePath(event.url);
-        if (invitePath) {
-          await setPendingDeepLinkInfo(parseInvite(invitePath));
-          window.history.replaceState(null, '', '/');
-        }
+        if (!invitePath) return;
+
+        const parsed = parseInvite(invitePath);
+        await setPendingDeepLinkInfo(parsed);
+
+        // Reset browser history URL so React Router can control navigation
+        window.history.replaceState(null, '', '/');
       } catch (err) {
-        console.error('Failed to handle appUrlOpen:', err);
+        console.error('Failed to handle appUrlOpen deep link:', err);
       }
     },
     [setPendingDeepLinkInfo]
   );
-
-  /**
-   * Set up native deep link listener (Capacitor appUrlOpen)
-   */
-  const setupNativeListener = useCallback(async () => {
-    try {
-      const listener: PluginListenerHandle = await App.addListener(
-        'appUrlOpen',
-        handleAppUrlOpen
-      );
-
-      addCleanup(() => listener.remove());
-    } catch (err) {
-      console.error('Failed to setup native listener:', err);
-    }
-  }, [handleAppUrlOpen, addCleanup]);
 
   /**
    * Set up native notification action listener (Capacitor LocalNotifications)
@@ -88,12 +79,20 @@ export const AppUrlListener: React.FC = () => {
   }, [addCleanup, navigate]);
 
   useEffect(() => {
-    if (Capacitor.isNativePlatform()) {
-      void setupNativeListener();
-
-      void setupNativeNotificationListener();
+    if (!Capacitor.isNativePlatform()) {
+      return;
     }
-  }, [setupNativeListener, setupNativeNotificationListener]);
+
+    void setupNativeNotificationListener();
+
+    // Restore OS deep link handling via appUrlOpen
+    const sub = App.addListener('appUrlOpen', handleAppUrlOpen);
+    addCleanup(() => {
+      void sub.then(listener => listener.remove());
+    });
+
+    // Empty dependency array - set up once on mount only
+  }, [handleAppUrlOpen, setupNativeNotificationListener, addCleanup]);
 
   useEffect(() => {
     const cleanupFunctions = cleanupFunctionsRef.current;
