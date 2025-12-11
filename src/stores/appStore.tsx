@@ -21,9 +21,6 @@ interface AppStoreState {
   // Pending deep link
   pendingDeepLinkInfo: ParsedInvite | null;
   setPendingDeepLinkInfo: (value: ParsedInvite | null) => void;
-  // Header background state (true = scrolled/grey, false = at top/white)
-  headerIsScrolled: boolean;
-  setHeaderIsScrolled: (isScrolled: boolean) => void;
 }
 
 const useAppStoreBase = create<AppStoreState>()(
@@ -55,11 +52,6 @@ const useAppStoreBase = create<AppStoreState>()(
       setPendingDeepLinkInfo: (value: ParsedInvite | null) => {
         set({ pendingDeepLinkInfo: value });
       },
-      // Header background state
-      headerIsScrolled: false,
-      setHeaderIsScrolled: (isScrolled: boolean) => {
-        set({ headerIsScrolled: isScrolled });
-      },
     }),
     {
       name: STORAGE_KEYS.APP_STORE,
@@ -69,7 +61,6 @@ const useAppStoreBase = create<AppStoreState>()(
         debugOverlayVisible: state.debugOverlayVisible,
         isInitialized: state.isInitialized,
         networkName: state.networkName,
-        setPendingDeepLinkInfo: state.setPendingDeepLinkInfo,
       }),
     }
   )

@@ -2,6 +2,7 @@ import React, { useState, useCallback } from 'react';
 import BaseModal from '../components/ui/BaseModal';
 import PageHeader from '../components/ui/PageHeader';
 import HeaderWrapper from '../components/ui/HeaderWrapper';
+import ScrollableContent from '../components/ui/ScrollableContent';
 import { useAccountStore } from '../stores/accountStore';
 import { useAppStore } from '../stores/appStore';
 import { useTheme } from '../hooks/useTheme';
@@ -160,14 +161,14 @@ const Settings = (): React.ReactElement => {
   }
 
   return (
-    <div className="bg-background h-full overflow-auto">
-      <div className="h-full">
-        {/* Header */}
-        <HeaderWrapper>
-          <PageHeader title="Settings" />
-        </HeaderWrapper>
+    <div className="h-full flex flex-col bg-card">
+      {/* Header */}
+      <HeaderWrapper>
+        <PageHeader title="Settings" />
+      </HeaderWrapper>
+      {/* Scrollable content */}
+      <ScrollableContent className="flex-1 overflow-y-auto pt-4 px-4 pb-20">
         {/* Account Profile Section */}
-
         <div className="bg-white dark:bg-gray-800 rounded-lg p-6 mt-4">
           <div className="flex items-start gap-4 mb-4">
             <img
@@ -200,7 +201,7 @@ const Settings = (): React.ReactElement => {
         </div>
 
         {/* Settings Options */}
-        <div className="px-4 space-y-2 pb-20">
+        <div className="space-y-2">
           <div className="py-2">
             <InfoRow
               label="Version"
@@ -421,7 +422,7 @@ const Settings = (): React.ReactElement => {
             </span>
           </Button>
         </div>
-      </div>
+      </ScrollableContent>
       <BaseModal
         isOpen={isResetModalOpen}
         onClose={() => setIsResetModalOpen(false)}

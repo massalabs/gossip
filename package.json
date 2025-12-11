@@ -54,6 +54,7 @@
     "@capacitor/preferences": "^7.0.3",
     "@capacitor/status-bar": "^7.0.3",
     "@capawesome/capacitor-android-edge-to-edge-support": "^7.2.3",
+    "@capgo/capacitor-navigation-bar": "^7.3.18",
     "@massalabs/massa-web3": "^5.3.1-dev.20250925215116",
     "@noble/hashes": "^1.8.0",
     "@scure/base": "^2.0.0",

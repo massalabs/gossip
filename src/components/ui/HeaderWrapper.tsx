@@ -1,5 +1,5 @@
-import React from 'react';
-import { useAppStore } from '../../stores/appStore';
+import React, { useEffect } from 'react';
+import { useUiStore } from '../../stores/uiStore';
 
 interface HeaderWrapperProps {
   children: React.ReactNode;
@@ -10,7 +10,16 @@ const HeaderWrapper: React.FC<HeaderWrapperProps> = ({
   children,
   className = '',
 }) => {
-  const headerIsScrolled = useAppStore(s => s.headerIsScrolled);
+  const headerIsScrolled = useUiStore(s => s.headerIsScrolled);
+  const setHeaderVisible = useUiStore(s => s.setHeaderVisible);
+
+  // Declare header presence
+  useEffect(() => {
+    setHeaderVisible(true);
+    return () => {
+      setHeaderVisible(false);
+    };
+  }, [setHeaderVisible]);
 
   // Background colors:
   // - At top (scrollY === 0): bg-card (white in light, card in dark)

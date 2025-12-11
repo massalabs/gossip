@@ -239,6 +239,11 @@
     display: none;
   }
 
+  html {
+    height: 100%;
+    height: 100dvh;
+  }
+
   :root {
     font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
     line-height: 1.5;

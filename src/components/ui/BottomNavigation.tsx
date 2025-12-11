@@ -1,15 +1,25 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { useLocation, useNavigate, matchPath } from 'react-router-dom';
 import { Settings as SettingsFeather } from 'react-feather';
 import NavButton from './NavButton';
 import GossipIcon from './customIcons/gossip-icon';
 import { ROUTES } from '../../constants/routes';
+import { useUiStore } from '../../stores/uiStore';
 
 type BottomNavigationTab = 'discussions' | 'settings';
 
 const BottomNavigation: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
+  const setBottomNavVisible = useUiStore(s => s.setBottomNavVisible);
+
+  // Declare bottom navigation presence
+  useEffect(() => {
+    setBottomNavVisible(true);
+    return () => {
+      setBottomNavVisible(false);
+    };
+  }, [setBottomNavVisible]);
 
   const activeTab: BottomNavigationTab = matchPath(
     location.pathname,

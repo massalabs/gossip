@@ -1,114 +1,196 @@
-import { useEffect } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { StatusBar, Style } from '@capacitor/status-bar';
-import { EdgeToEdge } from '@capawesome/capacitor-android-edge-to-edge-support';
-import { useAppStore } from '../stores/appStore';
+import { NavigationBar } from '@capgo/capacitor-navigation-bar';
+import { useUiStore } from '../stores/uiStore';
 
 /**
- * Hook to sync Capacitor status bar and navigation bar colors with app theme and scroll state
- * - Status bar matches header color (changes based on scroll)
- * - Navigation bar (Android) matches bottom navigation color
+ * Get CSS variable value (handles var(--variable-name) syntax)
+ * Returns the computed value, ensuring the DOM is ready
  */
-export const useCapacitorBarColors = () => {
-  const headerIsScrolled = useAppStore(s => s.headerIsScrolled);
+const getCSSVariableValue = (varName: string): string => {
+  const root = document.documentElement;
+  const cleanVarName = varName.replace(/var\(|\)/g, '').trim();
+  const value = getComputedStyle(root).getPropertyValue(cleanVarName).trim();
 
-  useEffect(() => {
-    if (!Capacitor.isNativePlatform()) return;
+  // If value is empty, try to get it from the root element's style
+  if (!value) {
+    const fallback = root.style.getPropertyValue(cleanVarName).trim();
+    if (fallback) return fallback;
+  }
 
-    // Listen for theme changes by observing class changes on documentElement
-    const updateColors = () => {
-      // Get CSS variable value (handles var(--variable-name) syntax)
-      const getCSSVariableValue = (varName: string): string => {
-        const root = document.documentElement;
-        // Remove 'var(' and ')' if present, extract variable name
-        const cleanVarName = varName.replace(/var\(|\)/g, '').trim();
-        const value = getComputedStyle(root)
-          .getPropertyValue(cleanVarName)
-          .trim();
-        return value || '#ffffff';
-      };
+  return value;
+};
 
-      // Try to get the actual computed background color from the header element
-      // This ensures we match exactly what's rendered
-      const getHeaderBackgroundColor = (): string => {
-        // Find the header element (HeaderWrapper)
-        const header = document.querySelector(
-          '[class*="header-bg-transition"]'
-        ) as HTMLElement;
-        if (header) {
-          const computedStyle = window.getComputedStyle(header);
-          const bgColor = computedStyle.backgroundColor;
-          // Convert rgb/rgba to hex if needed
-          if (
-            bgColor &&
-            bgColor !== 'rgba(0, 0, 0, 0)' &&
-            bgColor !== 'transparent'
-          ) {
-            return rgbToHex(bgColor);
-          }
-        }
-        // Fallback to CSS variable
-        return headerIsScrolled
-          ? getCSSVariableValue('var(--header-scrolled)')
-          : getCSSVariableValue('var(--card)');
-      };
+/**
+ * Convert RGB/RGBA to hex color
+ */
+const rgbToHex = (rgb: string): string => {
+  const match = rgb.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*[\d.]+)?\)/);
+  if (!match) return rgb;
 
-      // Convert rgb/rgba to hex
-      const rgbToHex = (rgb: string): string => {
-        // Handle rgb(r, g, b) or rgba(r, g, b, a)
-        const match = rgb.match(/\d+/g);
-        if (match && match.length >= 3) {
-          const r = parseInt(match[0], 10);
-          const g = parseInt(match[1], 10);
-          const b = parseInt(match[2], 10);
-          return `#${[r, g, b].map(x => x.toString(16).padStart(2, '0')).join('')}`;
-        }
-        return rgb;
-      };
+  const r = parseInt(match[1], 10).toString(16).padStart(2, '0');
+  const g = parseInt(match[2], 10).toString(16).padStart(2, '0');
+  const b = parseInt(match[3], 10).toString(16).padStart(2, '0');
+  return `#${r}${g}${b}`;
+};
 
-      // Determine if dark mode is active
-      const isDark = document.documentElement.classList.contains('dark');
+/**
+ * Normalize color to hex format
+ * Handles RGB, CSS variables, and ensures valid hex output
+ */
+const normalizeColor = (color: string, fallback: string): string => {
+  // Convert RGB to hex if needed
+  if (color.startsWith('rgb')) {
+    return rgbToHex(color);
+  }
 
-      // Status bar color: get actual computed color from header element
-      const statusBarColor = getHeaderBackgroundColor();
+  // If it's not hex and not rgb, try to resolve it as CSS variable
+  if (!color.startsWith('#')) {
+    const resolved = getComputedStyle(document.documentElement)
+      .getPropertyValue(color.replace('var(', '').replace(')', '').trim())
+      .trim();
+    if (resolved) {
+      return resolved.startsWith('rgb') ? rgbToHex(resolved) : resolved;
+    }
+  }
 
-      // Navigation bar color: always matches bottom navigation (muted in light, card in dark)
-      const navBarColor = isDark
-        ? getCSSVariableValue('var(--card)') // Less dark in dark mode
-        : getCSSVariableValue('var(--muted)'); // Grey in light mode
+  // Ensure we have a valid hex color, use fallback if not
+  if (!color || color === '' || !color.startsWith('#')) {
+    return fallback;
+  }
 
-      // Set status bar style (light icons on dark bg, dark icons on light bg)
-      const statusBarStyle = isDark ? Style.Dark : Style.Light;
+  return color;
+};
 
-      // Update status bar
-      void StatusBar.setStyle({ style: statusBarStyle });
-      void StatusBar.setBackgroundColor({ color: statusBarColor });
+/**
+ * Interface for bar colors
+ */
+interface BarColors {
+  topBarBgColor: string;
+  topBarTextColor: Style;
+  navBarBgColor: string;
+  navBarTextColor: Style;
+}
 
-      // Update navigation bar (Android only via EdgeToEdge)
-      if (Capacitor.getPlatform() === 'android') {
-        void EdgeToEdge.setBackgroundColor({ color: navBarColor }).catch(
-          err => {
-            console.warn('Failed to set EdgeToEdge background color:', err);
-          }
-        );
-      }
-    };
+/**
+ * Get bar colors based on UI state
+ * Determines colors for status bar and navigation bar based on current UI conditions
+ */
+export const getBarsColors = (
+  headerVisible: boolean,
+  headerIsScrolled: boolean,
+  bottomNavVisible: boolean,
+  resolvedTheme: 'light' | 'dark'
+): BarColors => {
+  let topBarBgColor: string;
+  if (headerVisible) {
+    topBarBgColor = headerIsScrolled
+      ? getCSSVariableValue('--header-scrolled')
+      : getCSSVariableValue('--card');
+  } else {
+    topBarBgColor = getCSSVariableValue('--background');
+  }
 
-    // Initial update
-    updateColors();
+  // Determine navigation bar background color:
+  // - If bottom nav visible: use muted color (same as bottom nav)
+  // - If bottom nav not visible: use background color
+  let navBarBgColor: string;
+  if (bottomNavVisible) {
+    navBarBgColor = getCSSVariableValue('--muted');
+  } else {
+    navBarBgColor = getCSSVariableValue('--background');
+  }
 
-    // Listen for theme class changes
-    const observer = new MutationObserver(() => {
-      updateColors();
+  // Normalize colors to hex format with theme-based fallbacks
+  const darkBgFallback = '#18181b';
+  const lightBgFallback = '#fafbfc';
+  const bgFallback =
+    resolvedTheme === 'dark' ? darkBgFallback : lightBgFallback;
+
+  topBarBgColor = normalizeColor(topBarBgColor, bgFallback);
+  navBarBgColor = normalizeColor(navBarBgColor, bgFallback);
+
+  const topBarTextColor = resolvedTheme === 'dark' ? Style.Dark : Style.Light;
+  const navBarTextColor = resolvedTheme === 'dark' ? Style.Dark : Style.Light;
+
+  return {
+    topBarBgColor,
+    topBarTextColor,
+    navBarBgColor,
+    navBarTextColor,
+  };
+};
+
+/**
+ * Update status bar and navigation bar colors
+ * Applies the provided colors to the native status and navigation bars
+ */
+export const updateBarColors = async ({
+  topBarBgColor,
+  topBarTextColor,
+  navBarBgColor,
+  navBarTextColor,
+}: BarColors) => {
+  if (!Capacitor.isNativePlatform()) return;
+
+  // Use requestAnimationFrame to ensure DOM is fully updated
+  await new Promise(resolve => requestAnimationFrame(resolve));
+
+  // Convert text color to StatusBar Style
+  const statusBarStyle =
+    topBarTextColor === Style.Dark ? Style.Dark : Style.Light;
+
+  // Convert text color to NavigationBar darkButtons
+  const navBarDarkButtons = navBarTextColor === Style.Dark;
+
+  // Update status bar
+  await StatusBar.setOverlaysWebView({ overlay: false });
+  await StatusBar.setStyle({ style: statusBarStyle });
+  await StatusBar.setBackgroundColor({ color: topBarBgColor });
+
+  // Update navigation bar using NavigationBar plugin (Android only)
+  if (Capacitor.getPlatform() === 'android') {
+    await NavigationBar.setNavigationBarColor({
+      color: navBarBgColor,
+      darkButtons: navBarDarkButtons,
+    }).catch(err => {
+      console.warn('Failed to set NavigationBar color:', err);
     });
+  }
+};
 
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ['class'],
-    });
+export const initStatusBar = async () => {
+  if (!Capacitor.isNativePlatform()) return;
 
-    return () => {
-      observer.disconnect();
-    };
-  }, [headerIsScrolled]);
+  const uiStore = useUiStore.getState();
+
+  await updateBarColors(
+    getBarsColors(
+      uiStore.headerVisible,
+      uiStore.headerIsScrolled,
+      uiStore.bottomNavVisible,
+      uiStore.resolvedTheme
+    )
+  );
+
+  // Subscribe to UI store changes
+  useUiStore.subscribe((state, prevState) => {
+    const headerChanged =
+      state.headerVisible !== prevState.headerVisible ||
+      state.headerIsScrolled !== prevState.headerIsScrolled;
+    const bottomNavChanged =
+      state.bottomNavVisible !== prevState.bottomNavVisible;
+    const themeChanged = state.resolvedTheme !== prevState.resolvedTheme;
+
+    if (headerChanged || bottomNavChanged || themeChanged) {
+      void updateBarColors(
+        getBarsColors(
+          state.headerVisible,
+          state.headerIsScrolled,
+          state.bottomNavVisible,
+          state.resolvedTheme
+        )
+      );
+    }
+  });
 };

@@ -5,7 +5,7 @@ import { createSelectors } from './utils/createSelectors';
 type OnlineStore = {
   isOnline: boolean;
   setOnline: (value: boolean) => void;
-  init: () => Promise<void>;
+  initOnlineStore: () => Promise<void>;
 };
 
 // Ensure listeners are only registered once, even if init is called multiple times
@@ -16,7 +16,7 @@ export const useOnlineStoreBase = create<OnlineStore>(set => ({
 
   setOnline: value => set({ isOnline: value }),
 
-  init: async () => {
+  initOnlineStore: async () => {
     if (listenersRegistered) return;
     listenersRegistered = true;
 

@@ -1,5 +1,5 @@
 import { useEffect, RefObject } from 'react';
-import { useAppStore } from '../stores/appStore';
+import { useUiStore } from '../stores/uiStore';
 
 interface UseHeaderScrollOptions {
   scrollContainerRef?: RefObject<HTMLElement | null>;
@@ -11,7 +11,7 @@ interface UseHeaderScrollOptions {
  * Pass a ref to the scrollable content container
  */
 export const useHeaderScroll = (options?: UseHeaderScrollOptions) => {
-  const setHeaderIsScrolled = useAppStore(s => s.setHeaderIsScrolled);
+  const setHeaderIsScrolled = useUiStore(s => s.setHeaderIsScrolled);
 
   useEffect(() => {
     // Find the scrollable container

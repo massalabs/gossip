@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useMemo } from 'react';
 import { useFileShareContact } from '../../hooks/useFileShareContact';
 import PageHeader from '../ui/PageHeader';
+import HeaderWrapper from '../ui/HeaderWrapper';
 import TabSwitcher from '../ui/TabSwitcher';
 import { generateDeepLinkUrl } from '../../utils/inviteUrl';
 import { UserPublicKeys } from '../../assets/generated/wasm/gossip_wasm';
@@ -38,9 +39,11 @@ const ShareContact: React.FC<ShareContactProps> = ({
   }, [exportFileContact, publicKey, userName]);
 
   return (
-    <div className="bg-background h-full overflow-auto app-max-w mx-auto">
+    <div className="bg-card h-full overflow-auto app-max-w mx-auto">
       <div className="app-max-w mx-auto">
-        <PageHeader title="Share Contact" onBack={onBack} />
+        <HeaderWrapper>
+          <PageHeader title="Share Contact" onBack={onBack} />
+        </HeaderWrapper>
 
         <div className="px-4 pb-20 pt-4">
           {/* Tab switcher */}

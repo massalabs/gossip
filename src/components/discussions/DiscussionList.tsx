@@ -25,12 +25,7 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
   const { handleAcceptDiscussionRequest, handleRefuseDiscussionRequest } =
     useDiscussionList();
 
-  // Duplicate discussions 10 times for scroll testing
   const filteredDiscussions = discussions.filter(d => d.status !== 'closed');
-  const duplicatedDiscussions = Array.from(
-    { length: 10 },
-    () => filteredDiscussions
-  ).flat();
 
   return (
     <>
@@ -38,7 +33,7 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
         <EmptyDiscussions />
       ) : (
         <>
-          {duplicatedDiscussions.map((discussion, index) => {
+          {filteredDiscussions.map(discussion => {
             const contact = contacts.find(
               c => c.userId === discussion.contactUserId
             );
@@ -48,10 +43,9 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
 
             const isSelected = discussion.contactUserId === activeUserId;
 
-            // Use index to create unique keys for duplicated items
             return (
               <div
-                key={`${discussion.id}-${index}`}
+                key={discussion.id}
                 className={isSelected ? 'bg-blue-50 dark:bg-blue-950/20' : ''}
               >
                 <DiscussionListItem
