@@ -71,7 +71,7 @@ export class AnnouncementService {
     }
   }
 
-  /**fails
+  /**
    * Establish a session with a contact via session manager and send the created announcement on the network.
    * Return type contains info about the success or failure of the encryption and broadcast of the announcement.
    * @param contactPublicKeys - The public keys of the contact to establish a session with.

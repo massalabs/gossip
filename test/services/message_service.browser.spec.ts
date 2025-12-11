@@ -1017,7 +1017,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       // Bob 2nd resend
       await resendFailedMessagesForContact(bobUserId, aliceUserId, bobSession);
 
-      // Alice received all messages in ordeencodeToBase64r
+      // Alice received all messages in order
       aliceMsg = await fetchMessagesFromContact(
         aliceUserId,
         bobUserId,

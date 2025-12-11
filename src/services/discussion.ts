@@ -201,7 +201,7 @@ export async function renewDiscussion(
 
   const sessionStatus = session.peerSessionStatus(decodeUserId(contactUserId));
   console.log(
-    `renewDiscussion: session status for discussion between ${ownerUserId} and ${contactUserId} after reinitiationis ${sessionStatus}`
+    `renewDiscussion: session status for discussion between ${ownerUserId} and ${contactUserId} after reinitiation is ${sessionStatus}`
   );
 
   const status: DiscussionStatus = !result.success

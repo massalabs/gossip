@@ -38,7 +38,7 @@ export function useResendFailedBlobs(activatePeriodicResend: boolean = true) {
   /* Discussions that are in BROKEN status */
   const [brokenDiscussions, setBrokenDiscussions] = useState<Discussion[]>([]);
 
-  /* Discussions that are in SEND_FAILED status. The announcement has been created but could not be broadcastedon network */
+  /* Discussions that are in SEND_FAILED status. The announcement has been created but could not be broadcasted on network */
   const [sendFailedDiscussions, setSendFailedDiscussions] = useState<
     Discussion[]
   >([]);

@@ -15,6 +15,9 @@ import 'fake-indexeddb/auto';
 
 // Import IDBKeyRange polyfill if needed
 import { IDBKeyRange } from 'fake-indexeddb';
+import { afterEach, vi } from 'vitest';
+import { db } from '../src/db';
+import { MessageProtocolType } from '../src/config/protocol';
 
 // Make IDBKeyRange available globally
 if (typeof globalThis.IDBKeyRange === 'undefined') {
@@ -65,9 +68,6 @@ vi.mock('../src/api/messageProtocol', async importOriginal => {
 // Example: expect.extend({ ... })
 
 // Clean up between tests to avoid state leakage
-import { afterEach, vi } from 'vitest';
-import { db } from '../src/db';
-import { MessageProtocolType } from '../src/config/protocol';
 
 afterEach(async () => {
   // Clean up database using Dexie's delete method which properly handles closing

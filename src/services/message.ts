@@ -757,7 +757,7 @@ export class MessageService {
             console.error(
               `Failed to send message ${retryMessage.id}: ${error instanceof Error ? error.message : error}`
             );
-            continue; // when netwrok error, don't need to break, we can continue to send next message in the discussion.
+            continue; // when network error, don't need to break, we can continue to send next message in the discussion.
           }
           // push the message id to the messageSent array. Do it here so that even if messageProtocol.sendMessage fails, the message will be considered as sent.
           messageSent.push(retryMessage.id!);
