@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { Copy } from 'react-feather';
 import { useAccountStore } from '../../stores/accountStore';
 import PageHeader from '../ui/PageHeader';
+import HeaderWrapper from '../ui/HeaderWrapper';
+import ScrollableContent from '../ui/ScrollableContent';
 import TabSwitcher from '../ui/TabSwitcher';
 import Button from '../ui/Button';
 import { Account } from '@massalabs/massa-web3';
@@ -60,10 +62,13 @@ const AccountBackup: React.FC<AccountBackupProps> = ({ onBack }) => {
   };
 
   return (
-    <div className="bg-card h-full overflow-auto">
-      <PageHeader title="Account Backup" onBack={onBack} />
-
-      <div className="px-4 pb-20 ">
+    <div className="h-full flex flex-col bg-card">
+      {/* Header */}
+      <HeaderWrapper>
+        <PageHeader title="Account Backup" onBack={onBack} />
+      </HeaderWrapper>
+      {/* Scrollable content with top padding to account for fixed header */}
+      <ScrollableContent className="flex-1 overflow-y-auto pt-4 px-4 pb-20">
         {/* Tabs */}
         {backupInfo && (
           <div className="bg-white dark:bg-gray-800 rounded-lg p-6">
@@ -197,7 +202,7 @@ const AccountBackup: React.FC<AccountBackupProps> = ({ onBack }) => {
             </p>
           </div>
         )}
-      </div>
+      </ScrollableContent>
     </div>
   );
 };

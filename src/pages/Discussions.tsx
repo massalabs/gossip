@@ -35,7 +35,6 @@ const Discussions: React.FC = () => {
           </div>
         </div>
       </HeaderWrapper>
-      {/* Scrollable content with bottom padding to prevent content from being hidden behind the button/nav */}
       <ScrollableContent className="flex-1 overflow-y-auto pt-2 px-2 pb-20">
         <DiscussionListPanel
           onSelect={id => {

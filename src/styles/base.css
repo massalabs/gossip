@@ -1,0 +1,193 @@
+@layer base {
+  /* Hide scrollbars for webkit browsers */
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
+  html {
+    height: 100%;
+    height: 100dvh;
+  }
+
+  :root {
+    font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+    line-height: 1.5;
+    font-weight: 400;
+    color-scheme: light dark;
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  /* Utility class for content that comes after fixed HeaderWrapper */
+  .content-after-header {
+    padding-top: var(--header-height);
+  }
+
+  /* Utility class for content with safe area padding (header + spacing) */
+  .pt-safe-header {
+    padding-top: calc(var(--header-height) + 0.5rem);
+  }
+
+  /* Utility class for content with safe area padding (header + more spacing) */
+  .pt-safe-header-lg {
+    padding-top: calc(var(--header-height) + 1rem);
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    margin: 0;
+    min-width: 20rem; /* min-w-80 */
+    /* Disable pull-to-refresh on mobile */
+    overscroll-behavior-y: contain;
+    -webkit-overflow-scrolling: touch;
+
+    height: 100dvh;
+  }
+
+  /* Fix browser autofill background color - match card background */
+  input:-webkit-autofill,
+  input:-webkit-autofill:hover,
+  input:-webkit-autofill:focus,
+  input:-webkit-autofill:active {
+    -webkit-box-shadow: 0 0 0 30px var(--card) inset !important;
+    -webkit-text-fill-color: var(--foreground) !important;
+    box-shadow: 0 0 0 30px var(--card) inset !important;
+    transition: background-color 5000s ease-in-out 0s;
+  }
+
+  /* Global scrollbar styling - thin, minimal, no track background */
+  * {
+    scrollbar-width: thin; /* Firefox */
+    /* Fallback for browsers without color-mix support */
+    scrollbar-color: rgba(var(--scrollbar-thumb-rgb), 0.35) transparent;
+    /* Progressive enhancement: override with color-mix if supported */
+    scrollbar-color: color-mix(in oklch, var(--foreground) 35%, transparent)
+      transparent;
+  }
+
+  /* WebKit (Chrome, Edge, Safari) */
+  *::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  *::-webkit-scrollbar-track,
+  *::-webkit-scrollbar-track-piece,
+  *::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    /* Fallback for browsers without color-mix support */
+    background-color: rgba(var(--scrollbar-thumb-rgb), 0.35);
+    /* Progressive enhancement: override with color-mix if supported */
+    background-color: color-mix(in oklch, var(--foreground) 35%, transparent);
+    border-radius: 9999px;
+    border: 2px solid transparent; /* create inset look with transparent track */
+    background-clip: padding-box;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    /* Fallback for browsers without color-mix support */
+    background-color: rgba(var(--scrollbar-thumb-rgb), 0.5);
+    /* Progressive enhancement: override with color-mix if supported */
+    background-color: color-mix(in oklch, var(--foreground) 50%, transparent);
+  }
+
+  /* Completely hide scrollbars on mobile/touch devices */
+  @media (hover: none) and (pointer: coarse) {
+    *,
+    *::before,
+    *::after {
+      scrollbar-width: none !important; /* Firefox - hide scrollbar */
+      -ms-overflow-style: none !important; /* IE/Edge - hide scrollbar */
+    }
+
+    *::-webkit-scrollbar,
+    *::-webkit-scrollbar-track,
+    *::-webkit-scrollbar-thumb,
+    *::-webkit-scrollbar-track-piece,
+    *::-webkit-scrollbar-corner,
+    *::-webkit-scrollbar-button {
+      width: 0 !important;
+      height: 0 !important;
+      display: none !important;
+      background: transparent !important;
+      -webkit-appearance: none !important;
+      appearance: none !important;
+    }
+  }
+
+  /* Additional fallback for mobile devices using max-width */
+  @media (max-width: 768px) {
+    *,
+    *::before,
+    *::after {
+      scrollbar-width: none !important;
+      -ms-overflow-style: none !important;
+    }
+
+    *::-webkit-scrollbar,
+    *::-webkit-scrollbar-track,
+    *::-webkit-scrollbar-thumb,
+    *::-webkit-scrollbar-track-piece,
+    *::-webkit-scrollbar-corner,
+    *::-webkit-scrollbar-button {
+      width: 0 !important;
+      height: 0 !important;
+      display: none !important;
+      background: transparent !important;
+      -webkit-appearance: none !important;
+      appearance: none !important;
+    }
+  }
+
+  /* Disable pull-to-refresh for the entire app */
+  html,
+  body {
+    overscroll-behavior: none;
+    -webkit-overflow-scrolling: touch;
+    overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  #root {
+    height: 100%;
+  }
+
+  /* Ensure pointer cursor on all buttons */
+  button,
+  [type='button'],
+  [type='submit'],
+  [type='reset'],
+  .btn {
+    cursor: pointer;
+  }
+
+  /* Better touch targets on mobile */
+  @media (hover: none) and (pointer: coarse) {
+    /* Prevent hover states on mobile - they cause sticky tooltips */
+    button:active,
+    a:active,
+    [role='button']:active {
+      transform: scale(0.98);
+    }
+
+    /* Improve touch interaction */
+    button,
+    a,
+    [role='button'] {
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+    }
+  }
+}

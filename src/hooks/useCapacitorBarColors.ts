@@ -1,6 +1,7 @@
 import { Capacitor } from '@capacitor/core';
 import { StatusBar, Style } from '@capacitor/status-bar';
 import { NavigationBar } from '@capgo/capacitor-navigation-bar';
+import { EdgeToEdge } from '@capawesome/capacitor-android-edge-to-edge-support';
 import { useUiStore } from '../stores/uiStore';
 
 /**
@@ -56,6 +57,7 @@ const normalizeColor = (color: string, fallback: string): string => {
 
   // Ensure we have a valid hex color, use fallback if not
   if (!color || color === '' || !color.startsWith('#')) {
+    console.log('fallback', fallback);
     return fallback;
   }
 
@@ -83,6 +85,7 @@ export const getBarsColors = (
   resolvedTheme: 'light' | 'dark'
 ): BarColors => {
   let topBarBgColor: string;
+
   if (headerVisible) {
     topBarBgColor = headerIsScrolled
       ? getCSSVariableValue('--header-scrolled')
@@ -143,13 +146,28 @@ export const updateBarColors = async ({
   // Convert text color to NavigationBar darkButtons
   const navBarDarkButtons = navBarTextColor === Style.Dark;
 
-  // Update status bar
-  await StatusBar.setOverlaysWebView({ overlay: false });
+  const isAndroid = Capacitor.getPlatform() === 'android';
+
+  // Edge-to-edge approach: Status bar color is simulated by header background
+  // We only need to set icon style (light/dark) based on background luminance
   await StatusBar.setStyle({ style: statusBarStyle });
-  await StatusBar.setBackgroundColor({ color: topBarBgColor });
+
+  // Optional: Set background color as fallback for older Android versions
+  // On Android 15+, this is no-op but doesn't hurt
+  // The actual visual color comes from header/nav background extending behind bars
+  if (isAndroid) {
+    // Use EdgeToEdge plugin for Android (supports Android 15+)
+    // This is optional since header background simulates the color
+    await EdgeToEdge.setBackgroundColor({ color: topBarBgColor }).catch(err => {
+      console.warn('Failed to set EdgeToEdge background color:', err);
+    });
+  } else {
+    // iOS: StatusBar.setBackgroundColor still works
+    await StatusBar.setBackgroundColor({ color: topBarBgColor });
+  }
 
   // Update navigation bar using NavigationBar plugin (Android only)
-  if (Capacitor.getPlatform() === 'android') {
+  if (isAndroid) {
     await NavigationBar.setNavigationBarColor({
       color: navBarBgColor,
       darkButtons: navBarDarkButtons,
@@ -161,6 +179,28 @@ export const updateBarColors = async ({
 
 export const initStatusBar = async () => {
   if (!Capacitor.isNativePlatform()) return;
+
+  const isAndroid = Capacitor.getPlatform() === 'android';
+
+  // Enable edge-to-edge mode on Android (required for Android 15+ support)
+  if (isAndroid) {
+    await EdgeToEdge.enable().catch(err => {
+      console.warn('Failed to enable EdgeToEdge mode:', err);
+    });
+
+    // Inject safe area insets as CSS variables for Android
+    // This allows us to use --safe-area-inset-* in CSS
+    try {
+      const insets = await EdgeToEdge.getInsets();
+      const root = document.documentElement;
+      root.style.setProperty('--safe-area-inset-top', `${insets.top}px`);
+      root.style.setProperty('--safe-area-inset-bottom', `${insets.bottom}px`);
+      root.style.setProperty('--safe-area-inset-left', `${insets.left}px`);
+      root.style.setProperty('--safe-area-inset-right', `${insets.right}px`);
+    } catch (err) {
+      console.warn('Failed to get EdgeToEdge insets:', err);
+    }
+  }
 
   const uiStore = useUiStore.getState();
 

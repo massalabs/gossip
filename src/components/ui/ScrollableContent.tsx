@@ -5,6 +5,7 @@ interface ScrollableContentProps {
   children: React.ReactNode;
   className?: string;
   id?: string;
+  style?: React.CSSProperties;
 }
 
 /**
@@ -16,12 +17,13 @@ const ScrollableContent: React.FC<ScrollableContentProps> = ({
   children,
   className = '',
   id,
+  style,
 }) => {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   useHeaderScroll({ scrollContainerRef });
 
   return (
-    <div ref={scrollContainerRef} id={id} className={className}>
+    <div ref={scrollContainerRef} id={id} className={className} style={style}>
       {children}
     </div>
   );

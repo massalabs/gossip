@@ -166,7 +166,7 @@ const Settings = (): React.ReactElement => {
       <HeaderWrapper>
         <PageHeader title="Settings" />
       </HeaderWrapper>
-      {/* Scrollable content */}
+      {/* Scrollable content with top padding to account for fixed header */}
       <ScrollableContent className="flex-1 overflow-y-auto pt-4 px-4 pb-20">
         {/* Account Profile Section */}
         <div className="bg-white dark:bg-gray-800 rounded-lg p-6 mt-4">
