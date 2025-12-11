@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Check, Copy } from 'react-feather';
+import { Check, Copy, Share2 } from 'react-feather';
 import Button from '../ui/Button';
+import { shareInvitation } from '../../services/shareService';
 
 interface ShareContactCopySectionProps {
   userId: string;
@@ -13,6 +14,7 @@ const ShareContactCopySection: React.FC<ShareContactCopySectionProps> = ({
 }) => {
   const [copiedUserId, setCopiedUserId] = useState(false);
   const [copiedQRUrl, setCopiedQRUrl] = useState(false);
+  const [isSharing, setIsSharing] = useState(false);
   const userIdTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const qrUrlTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -48,6 +50,19 @@ const ShareContactCopySection: React.FC<ShareContactCopySectionProps> = ({
     }
   }, [deepLinkUrl]);
 
+  const handleShareInvitation = useCallback(async () => {
+    try {
+      setIsSharing(true);
+      await shareInvitation({
+        deepLinkUrl,
+      });
+    } catch (err) {
+      console.error('Failed to share invitation:', err);
+    } finally {
+      setIsSharing(false);
+    }
+  }, [deepLinkUrl]);
+
   useEffect(() => {
     return () => {
       if (userIdTimeoutRef.current) {
@@ -61,6 +76,19 @@ const ShareContactCopySection: React.FC<ShareContactCopySectionProps> = ({
 
   return (
     <div className="bg-card rounded-xl border border-border overflow-hidden">
+      <Button
+        variant="outline"
+        size="custom"
+        className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0 border-b border-border"
+        onClick={handleShareInvitation}
+        disabled={isSharing}
+        loading={isSharing}
+      >
+        <Share2 className="w-5 h-5 mr-4" />
+        <span className="text-base font-semibold flex-1 text-left">
+          Share Invitation
+        </span>
+      </Button>
       <Button
         variant="outline"
         size="custom"
