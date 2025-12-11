@@ -5,7 +5,7 @@ import MessageItem from './MessageItem';
 import LoadingState from './LoadingState';
 import EmptyState from './EmptyState';
 
-const { scroller, Element } = ReactScroll;
+const { Element } = ReactScroll;
 
 interface MessageListProps {
   messages: Message[];
@@ -24,6 +24,17 @@ const MessageList: React.FC<MessageListProps> = ({
 }) => {
   const prevLastMessageIdRef = useRef<number | null>(null);
   const hasInitiallyScrolledRef = useRef<boolean>(false);
+  const prevDiscussionIdRef = useRef<number | null>(null);
+
+  // Reset scroll state when discussion changes
+  useEffect(() => {
+    const currentDiscussionId = discussion?.id || null;
+    if (prevDiscussionIdRef.current !== currentDiscussionId) {
+      hasInitiallyScrolledRef.current = false;
+      prevLastMessageIdRef.current = null;
+      prevDiscussionIdRef.current = currentDiscussionId;
+    }
+  }, [discussion?.id]);
 
   // Memoize the message items to prevent re-rendering all messages when one is added
   const messageItems = useMemo(() => {
@@ -57,12 +68,17 @@ const MessageList: React.FC<MessageListProps> = ({
     if (shouldScroll) {
       // Use requestAnimationFrame to ensure DOM is updated
       requestAnimationFrame(() => {
-        scroller.scrollTo('messagesEnd', {
-          duration: 300,
-          delay: 0,
-          smooth: true,
-          containerId: 'messagesContainer',
-        });
+        // Try react-scroll first, fallback to native scroll
+        const container = document.getElementById('messagesContainer');
+        if (container) {
+          const messagesEnd = container.querySelector('[name="messagesEnd"]');
+          if (messagesEnd) {
+            messagesEnd.scrollIntoView({ behavior: 'smooth', block: 'end' });
+          } else {
+            // Fallback: scroll to bottom
+            container.scrollTop = container.scrollHeight;
+          }
+        }
       });
       hasInitiallyScrolledRef.current = true;
     }
@@ -75,10 +91,7 @@ const MessageList: React.FC<MessageListProps> = ({
   }
 
   return (
-    <div
-      id="messagesContainer"
-      className="flex-1 overflow-y-auto px-4 md:px-6 lg:px-8 py-6 space-y-4"
-    >
+    <div className="px-4 md:px-6 lg:px-8 py-6 space-y-4">
       {/* Display announcement message if it exists */}
       {discussion?.announcementMessage && (
         <div className="flex justify-center mb-4">

@@ -8,7 +8,7 @@ PODS:
     - CapacitorCordova
   - CapacitorApp (7.1.0):
     - Capacitor
-  - CapacitorBackgroundRunner (2.2.0):
+  - CapacitorBackgroundRunner (2.3.0):
     - Capacitor
   - CapacitorBarcodeScanner (2.2.0):
     - Capacitor
@@ -23,6 +23,8 @@ PODS:
   - CapacitorPreferences (7.0.3):
     - Capacitor
   - CapacitorStatusBar (7.0.3):
+    - Capacitor
+  - CapgoCapacitorNavigationBar (7.3.18):
     - Capacitor
   - KeychainSwift (21.0.0)
   - OSBarcodeLib (2.0.1)
@@ -40,6 +42,7 @@ DEPENDENCIES:
   - "CapacitorNetwork (from `../../node_modules/@capacitor/network`)"
   - "CapacitorPreferences (from `../../node_modules/@capacitor/preferences`)"
   - "CapacitorStatusBar (from `../../node_modules/@capacitor/status-bar`)"
+  - "CapgoCapacitorNavigationBar (from `../../node_modules/@capgo/capacitor-navigation-bar`)"
 
 SPEC REPOS:
   trunk:
@@ -71,13 +74,15 @@ EXTERNAL SOURCES:
     :path: "../../node_modules/@capacitor/preferences"
   CapacitorStatusBar:
     :path: "../../node_modules/@capacitor/status-bar"
+  CapgoCapacitorNavigationBar:
+    :path: "../../node_modules/@capgo/capacitor-navigation-bar"
 
 SPEC CHECKSUMS:
   AparajitaCapacitorBiometricAuth: c7edb43d80486150b81224d3ff7e950b37a3c2f1
   AparajitaCapacitorSecureStorage: 502bff73187cf9d0164459458ccf47ec65d5895a
   Capacitor: 358dd1c3fdd71d969547b17e159fd8a7736cb45f
   CapacitorApp: 26587c2ce485d88ddb39adb21cac64f8e481afe3
-  CapacitorBackgroundRunner: 5e1c8dbb7d2ebb36f6ca2e24c80fb774488ceb06
+  CapacitorBackgroundRunner: 22c4aa45c3555b1e2adeac1dbcbaf20fc6ecc169
   CapacitorBarcodeScanner: 4b6d4ecfff4133af982d09acd423610c14ac0c3f
   CapacitorCordova: bf648a636f3c153f652d312ae145fb508b6ffced
   CapacitorDevice: b64654eb4d404373e733c01d835055ba59286e5c
@@ -85,9 +90,10 @@ SPEC CHECKSUMS:
   CapacitorNetwork: 1a22460c6f900686f12ffa52f3074ee313821b08
   CapacitorPreferences: 913eef88272c13eb6445b21e51fe8ef6635412cc
   CapacitorStatusBar: 0659ddc7b1713764a05831463d215b177a15d054
+  CapgoCapacitorNavigationBar: 3c59704af4b6774bebb36beaab82643c141dfa83
   KeychainSwift: 4a71a45c802fd9e73906457c2dcbdbdc06c9419d
   OSBarcodeLib: 57987d2eb1f916f701f4554e20e349b3cb83f023
 
-PODFILE CHECKSUM: b4b721203bff5075256e9c2d702ab5a44ea526b7
+PODFILE CHECKSUM: 1330f98cc65a80b0fafbc39338f8faea151384a7
 
 COCOAPODS: 1.16.2

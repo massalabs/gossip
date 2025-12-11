@@ -10,6 +10,7 @@ import toast from 'react-hot-toast';
 import DiscussionHeader from '../components/discussions/DiscussionHeader';
 import MessageList from '../components/discussions/MessageList';
 import MessageInput from '../components/discussions/MessageInput';
+import ScrollableContent from '../components/ui/ScrollableContent';
 
 const Discussion: React.FC = () => {
   const { userId } = useParams();
@@ -140,20 +141,25 @@ const Discussion: React.FC = () => {
 
   // Mobile-first: show only discussion page when selected
   return (
-    <div className="h-full app-max-w mx-auto bg-background flex flex-col">
+    <div className="h-full app-max-w mx-auto bg-card flex flex-col">
       <DiscussionHeader
         contact={contact}
         discussion={discussion}
         onBack={onBack}
       />
 
-      <MessageList
-        messages={messages}
-        discussion={discussion}
-        isLoading={isLoading || isDiscussionLoading}
-        onReplyTo={handleReplyToMessage}
-        onScrollToMessage={handleScrollToMessage}
-      />
+      <ScrollableContent
+        className="flex-1 overflow-y-auto"
+        id="messagesContainer"
+      >
+        <MessageList
+          messages={messages}
+          discussion={discussion}
+          isLoading={isLoading || isDiscussionLoading}
+          onReplyTo={handleReplyToMessage}
+          onScrollToMessage={handleScrollToMessage}
+        />
+      </ScrollableContent>
 
       <MessageInput
         onSend={handleSendMessage}

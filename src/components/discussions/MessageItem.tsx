@@ -20,6 +20,7 @@ interface MessageItemProps {
   message: Message;
   onReplyTo?: (message: Message) => void;
   onScrollToMessage?: (messageId: number) => void;
+  onResend?: (message: Message) => void;
   id?: string;
 }
 
@@ -27,6 +28,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
   message,
   onReplyTo,
   onScrollToMessage,
+  onResend,
   id,
 }) => {
   const canReply = !!onReplyTo;
@@ -197,8 +199,8 @@ const MessageItem: React.FC<MessageItemProps> = ({
         ref={messageRef}
         className={`relative max-w-[78%] sm:max-w-[70%] md:max-w-[65%] lg:max-w-[60%] px-4 py-4 rounded-3xl font-medium text-[15px] leading-tight animate-bubble-in transition-transform ${
           isOutgoing
-            ? 'ml-auto mr-3 bg-accent text-accent-foreground rounded-br-[4px]'
-            : 'ml-3 mr-auto bg-card text-card-foreground rounded-bl-[4px] shadow-sm'
+            ? 'ml-auto mr-3 bg-accent dark:text-accent-foreground text-white rounded-br-[4px]'
+            : 'ml-3 mr-auto bg-card dark:bg-surface-secondary text-card-foreground rounded-bl-[4px] shadow-sm'
         } ${
           canReply
             ? 'cursor-pointer hover:opacity-90 transition-opacity focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2'
@@ -276,7 +278,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
               <p
                 className={`text-xs ${
                   isOutgoing
-                    ? 'text-accent-foreground/60'
+                    ? 'dark:text-accent-foreground/60 text-white/80'
                     : 'text-muted-foreground/80'
                 }`}
               >
@@ -286,7 +288,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
               <p
                 className={`text-xs truncate ${
                   isOutgoing
-                    ? 'text-accent-foreground/60'
+                    ? 'dark:text-accent-foreground/60 text-white/80'
                     : 'text-muted-foreground/80'
                 } ${originalNotFound ? 'italic opacity-70' : ''}`}
               >
@@ -306,7 +308,9 @@ const MessageItem: React.FC<MessageItemProps> = ({
         {/* Timestamp and Status */}
         <div
           className={`flex items-center justify-end gap-1.5 mt-1.5 ${
-            isOutgoing ? 'text-accent-foreground/80' : 'text-muted-foreground'
+            isOutgoing
+              ? 'dark:text-accent-foreground/80 text-white/90'
+              : 'text-muted-foreground'
           }`}
         >
           <span className="text-[11px] font-medium">
@@ -325,8 +329,17 @@ const MessageItem: React.FC<MessageItemProps> = ({
               )}
               {message.status === MessageStatus.FAILED && (
                 <div className="flex items-center gap-1.5">
-                  <XCircle className="w-3.5 h-3.5 text-accent-foreground/90" />
+                  <XCircle className="w-3.5 h-3.5 dark:text-accent-foreground/90 text-white/90" />
                   <span className="text-[10px] font-medium">Failed</span>
+                  {onResend && (
+                    <button
+                      onClick={() => onResend(message)}
+                      className="ml-1 px-1.5 py-0.5 text-[10px] font-medium bg-accent-foreground/20 hover:bg-accent-foreground/30 rounded transition-colors dark:text-accent-foreground text-white"
+                      title="Resend message"
+                    >
+                      Resend
+                    </button>
+                  )}
                 </div>
               )}
               {(message.status === MessageStatus.DELIVERED ||

@@ -10,6 +10,7 @@ import {
 import ContactAvatar from '../avatar/ContactAvatar';
 import Button from '../ui/Button';
 import BackButton from '../ui/BackButton';
+import HeaderWrapper from '../ui/HeaderWrapper';
 import { ROUTES } from '../../constants/routes';
 
 interface DiscussionHeaderProps {
@@ -31,29 +32,25 @@ const DiscussionHeader: React.FC<DiscussionHeaderProps> = ({
   // Header with title (for list view with custom title)
   if (title && !contact) {
     return (
-      <div className="h-[72px] flex items-center bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl border-b border-gray-100 dark:border-gray-800/50 shadow-sm">
-        <div className="flex items-center w-full px-5">
-          <h1 className="text-xl font-semibold text-gray-900 dark:text-white">
-            {title}
-          </h1>
+      <HeaderWrapper>
+        <div className="flex items-center w-full">
+          <h1 className="text-xl font-semibold text-foreground">{title}</h1>
         </div>
-      </div>
+      </HeaderWrapper>
     );
   }
 
   // Guard against undefined/null contact when contact is expected
   if (!contact) {
     return (
-      <div className="h-[72px] flex items-center bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl border-b border-gray-100 dark:border-gray-800/50 shadow-sm">
-        <div className="flex items-center w-full px-5">
+      <HeaderWrapper>
+        <div className="flex items-center w-full">
           <BackButton />
           <div className="flex-1">
-            <p className="text-gray-500 dark:text-gray-400">
-              Contact not found
-            </p>
+            <p className="text-muted-foreground">Contact not found</p>
           </div>
         </div>
-      </div>
+      </HeaderWrapper>
     );
   }
 
@@ -77,44 +74,43 @@ const DiscussionHeader: React.FC<DiscussionHeaderProps> = ({
   };
 
   return (
-    <div className="h-[72px] flex items-center bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl border-b border-gray-100 dark:border-gray-800/50 shadow-sm">
-      <div className="flex items-center w-full px-5">
+    <HeaderWrapper>
+      <div className="flex items-center w-full gap-3">
         {onBack && (
           <Button
             onClick={onBack}
             variant="circular"
             size="custom"
-            className="w-11 h-11 flex items-center justify-center mr-2 group hover:bg-muted/50 active:bg-muted/70"
+            ariaLabel="Back"
+            className="w-8 h-8 flex items-center justify-center"
           >
-            <ChevronLeft className="w-6 h-6 text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-white transition-colors" />
+            <ChevronLeft className="w-5 h-5 text-muted-foreground" />
           </Button>
         )}
         <button
           onClick={handleHeaderClick}
-          className="flex items-center flex-1 min-w-0 group hover:opacity-80 transition-opacity active:opacity-70"
+          className="flex items-center flex-1 min-w-0 gap-3 group hover:opacity-80 transition-opacity active:opacity-70"
           title="Discussion settings"
         >
           <div className="relative">
             <ContactAvatar contact={contact} size={12} />
             {contact?.isOnline && (
-              <span className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-success border-2 border-white dark:border-gray-900 rounded-full shadow-sm"></span>
+              <span className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-success border-2 border-card rounded-full shadow-sm"></span>
             )}
           </div>
-          <div className="ml-3.5 flex-1 min-w-0 text-left">
-            <div className="flex items-center gap-2">
-              <h1 className="text-[17px] font-semibold text-gray-900 dark:text-white truncate leading-tight group-hover:text-primary transition-colors">
-                {displayName}
-              </h1>
-              {isPendingOutgoing && (
-                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-accent text-accent-foreground border border-border">
-                  Waiting approval
-                </span>
-              )}
-            </div>
+          <div className="flex-1 min-w-0 text-left">
+            <h1 className="text-xl font-semibold text-foreground truncate leading-tight">
+              {displayName}
+            </h1>
+            {isPendingOutgoing && (
+              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-accent text-accent-foreground border border-border">
+                Waiting approval
+              </span>
+            )}
           </div>
         </button>
       </div>
-    </div>
+    </HeaderWrapper>
   );
 };
 

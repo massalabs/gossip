@@ -60,8 +60,13 @@ const ShareContactCopySection: React.FC<ShareContactCopySectionProps> = ({
   }, []);
 
   return (
-    <div className="flex flex-col gap-2">
-      <Button variant="outline" onClick={handleCopyUserId}>
+    <div className="bg-card rounded-xl border border-border overflow-hidden">
+      <Button
+        variant="outline"
+        size="custom"
+        className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0 border-b border-border"
+        onClick={handleCopyUserId}
+      >
         {copiedUserId ? (
           <Check className="w-5 h-5 mr-4 text-success" />
         ) : (
@@ -73,7 +78,12 @@ const ShareContactCopySection: React.FC<ShareContactCopySectionProps> = ({
           {copiedUserId ? 'User ID Copied!' : 'Copy User ID'}
         </span>
       </Button>
-      <Button variant="outline" onClick={handleCopyQRUrl}>
+      <Button
+        variant="outline"
+        size="custom"
+        className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0"
+        onClick={handleCopyQRUrl}
+      >
         {copiedQRUrl ? (
           <Check className="w-5 h-5 mr-4 text-success" />
         ) : (

@@ -26,6 +26,7 @@ import { toastOptions } from './utils/toastOptions.ts';
 import LoadingScreen from './components/ui/LoadingScreen.tsx';
 import { ROUTES } from './constants/routes';
 import { useOnlineStore } from './stores/useOnlineStore.tsx';
+import { useTheme } from './hooks/useTheme.ts';
 
 const AppContent: React.FC = () => {
   const { isLoading, userProfile } = useAccountStore();
@@ -77,11 +78,14 @@ const AppContent: React.FC = () => {
 function App() {
   const { showUpdatePrompt, handleForceUpdate, dismissUpdate } =
     useVersionCheck();
-  const init = useOnlineStore(s => s.init);
+
+  const { initTheme } = useTheme();
+  const { initOnlineStore } = useOnlineStore();
 
   useEffect(() => {
-    void init();
-  }, [init]);
+    void initTheme();
+    void initOnlineStore();
+  }, [initTheme, initOnlineStore]);
 
   return (
     <BrowserRouter>

@@ -8,6 +8,7 @@ import { useAccountStore } from '../stores/accountStore';
 import ContactNameModal from '../components/ui/ContactNameModal';
 import Button from '../components/ui/Button';
 import PageHeader from '../components/ui/PageHeader';
+import HeaderWrapper from '../components/ui/HeaderWrapper';
 import UserIdDisplay from '../components/ui/UserIdDisplay';
 import BaseModal from '../components/ui/BaseModal';
 import { Check, Edit2, Trash2 } from 'react-feather';
@@ -149,8 +150,10 @@ const Contact: React.FC = () => {
     : true;
 
   return (
-    <div className="bg-card h-full overflow-auto app-max-w mx-auto">
-      <PageHeader title="Contact" onBack={() => navigate(-1)} />
+    <div className="bg-background h-full overflow-auto app-max-w mx-auto">
+      <HeaderWrapper>
+        <PageHeader title="Contact" onBack={() => navigate(-1)} />
+      </HeaderWrapper>
       <div className="flex-1 pt-4 px-6 pb-6">
         <div className="flex items-center gap-4">
           <ContactAvatar contact={contact} size={14} />

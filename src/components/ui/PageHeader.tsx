@@ -17,31 +17,29 @@ const PageHeader: React.FC<PageHeaderProps> = ({
   className = '',
 }) => {
   return (
-    <div className={`px-6 py-4 border-b border-border ${className}`}>
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          {onBack && (
-            <Button
-              onClick={onBack}
-              variant="circular"
-              size="custom"
-              ariaLabel="Back"
-              className="w-8 h-8 flex items-center justify-center"
-            >
-              <ChevronLeft className="w-5 h-5 text-gray-600 dark:text-gray-300" />
-            </Button>
-          )}
-          {showLogo && (
-            <img
-              src={appLogo}
-              className="w-9 h-9 rounded object-cover"
-              alt="Gossip logo"
-            />
-          )}
-          <h1 className="text-xl font-semibold text-black dark:text-white">
-            {title}
-          </h1>
-        </div>
+    <div className={`flex items-center justify-between ${className}`}>
+      <div className="flex items-center gap-3">
+        {onBack && (
+          <Button
+            onClick={onBack}
+            variant="circular"
+            size="custom"
+            ariaLabel="Back"
+            className="w-8 h-8 flex items-center justify-center"
+          >
+            <ChevronLeft className="w-5 h-5 text-gray-600 dark:text-gray-300" />
+          </Button>
+        )}
+        {showLogo && (
+          <img
+            src={appLogo}
+            className="w-9 h-9 rounded object-cover"
+            alt="Gossip logo"
+          />
+        )}
+        <h1 className="text-xl font-semibold text-black dark:text-white">
+          {title}
+        </h1>
       </div>
     </div>
   );

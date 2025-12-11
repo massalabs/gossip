@@ -140,7 +140,7 @@ const AccountSelection: React.FC<AccountSelectionProps> = ({
                 variant="primary"
                 size="custom"
                 fullWidth
-                className="h-12 bg-blue-600 dark:bg-blue-700 hover:bg-blue-700 dark:hover:bg-blue-800 text-white text-sm font-medium rounded-lg"
+                className="h-12 text-sm font-medium"
               >
                 Create New Account
               </Button>
@@ -191,10 +191,10 @@ const AccountSelection: React.FC<AccountSelectionProps> = ({
               {/* Create New Account Button */}
               <Button
                 onClick={onCreateNewAccount}
-                variant="outline"
+                variant="primary"
                 size="custom"
                 fullWidth
-                className="h-12 rounded-lg text-sm font-medium"
+                className="h-12 text-sm font-medium"
               >
                 Create New Account
               </Button>

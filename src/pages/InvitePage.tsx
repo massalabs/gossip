@@ -5,13 +5,14 @@ import { parseInvite } from '../utils/qrCodeParser';
 import { useAppStore } from '../stores/appStore';
 import Button from '../components/ui/Button';
 import PageHeader from '../components/ui/PageHeader';
+import HeaderWrapper from '../components/ui/HeaderWrapper';
 import { PrivacyGraphic } from '../components/ui/PrivacyGraphic';
 import {
   GOOGLE_PLAY_STORE_URL,
   APPLE_APP_STORE_URL,
   LAST_APK_GITHUB_URL,
 } from '../constants/links';
-import { Check, ChevronRight, GitHub, Smartphone } from 'react-feather';
+import { ChevronRight, GitHub, Smartphone } from 'react-feather';
 import toast from 'react-hot-toast';
 
 // Timing constants
@@ -23,7 +24,7 @@ export const InvitePage: React.FC = () => {
   const navigate = useNavigate();
   const setPendingDeepLinkInfo = useAppStore(s => s.setPendingDeepLinkInfo);
   const [isOpeningApp, setIsOpeningApp] = useState(false);
-  const [nativeAppOpened, setNativeAppOpened] = useState(false);
+  const [appOpenFailed, setAppOpenFailed] = useState(false);
   const cleanupFunctionsRef = useRef<Set<() => void>>(new Set());
 
   const addCleanup = useCallback((cleanup: () => void) => {
@@ -135,10 +136,14 @@ export const InvitePage: React.FC = () => {
     const opened = await tryOpenNativeApp(invitePath);
 
     if (opened) {
-      setNativeAppOpened(true);
-      // Don't navigate away - let the user see the success state
+      // App opened successfully - user will be switched to the app
+      // No need to show any UI as they won't see this page
     } else {
       setIsOpeningApp(false);
+      setAppOpenFailed(true);
+      toast.error(
+        'Could not open the app. You can continue in the web app instead.'
+      );
     }
   }, [userId, tryOpenNativeApp]);
 
@@ -206,128 +211,99 @@ export const InvitePage: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-background">
-      <PageHeader title="Invite" onBack={() => navigate('/')} />
+      <HeaderWrapper>
+        <PageHeader title="Invite" onBack={() => navigate('/')} />
+      </HeaderWrapper>
       <div className="flex flex-col items-center justify-center px-6 py-8 sm:py-12 max-w-lg mx-auto">
         <div className="w-full space-y-6 animate-fade-in">
-          {/* Success state when native app opened */}
-          {nativeAppOpened ? (
-            <div className="bg-card border border-border rounded-2xl p-8 sm:p-10 text-center shadow-sm">
-              <div className="w-24 h-24 mx-auto mb-6 bg-success rounded-full flex items-center justify-center animate-pulse-slow shadow-lg shadow-success/20">
-                <Check className="w-12 h-12 text-success-foreground" />
-              </div>
-              <h2 className="text-2xl sm:text-3xl font-semibold text-foreground mb-3">
-                Opening in App
-              </h2>
-              <p className="text-muted-foreground text-base mb-8">
-                The Gossip app should open shortly. If it doesn't, use the
-                options below.
-              </p>
-              <div className="pt-4 border-t border-border">
-                <Button
-                  onClick={handleContinueInWeb}
-                  variant="outline"
-                  fullWidth
-                  size="lg"
-                >
-                  Continue in Web App Instead
-                </Button>
-              </div>
+          {/* Hero Section */}
+          <div className="bg-card border border-border rounded-2xl p-8 sm:p-10 text-center shadow-sm">
+            <div className="mb-6 -mx-4 sm:-mx-6">
+              <PrivacyGraphic size={120} className="py-4" />
             </div>
-          ) : (
-            <>
-              {/* Hero Section */}
-              <div className="bg-card border border-border rounded-2xl p-8 sm:p-10 text-center shadow-sm">
-                <div className="mb-6 -mx-4 sm:-mx-6">
-                  <PrivacyGraphic size={120} className="py-4" />
-                </div>
-                <h2 className="text-2xl sm:text-3xl font-semibold text-foreground mb-3">
-                  You've been invited!
-                </h2>
-                <p className="text-muted-foreground text-base mb-8">
-                  Open this invite in the Gossip app to start chatting with your
-                  contact.
-                </p>
+            <h2 className="text-2xl sm:text-3xl font-semibold text-foreground mb-3">
+              You've been invited!
+            </h2>
+            <p className="text-muted-foreground text-base mb-8">
+              Open this invite in the Gossip app to start chatting with your
+              contact.
+            </p>
 
-                {/* Primary Actions */}
-                <div className="space-y-3 mb-6">
-                  <Button
-                    onClick={handleOpenInApp}
-                    disabled={isOpeningApp}
-                    loading={isOpeningApp}
-                    variant="primary"
-                    fullWidth
-                    size="lg"
-                    className="font-semibold"
-                  >
-                    {isOpeningApp ? 'Opening...' : 'Open in App'}
-                  </Button>
+            {/* Primary Actions */}
+            <div className="space-y-3 mb-6">
+              <Button
+                onClick={handleOpenInApp}
+                disabled={isOpeningApp}
+                loading={isOpeningApp}
+                variant={appOpenFailed ? 'outline' : 'primary'}
+                fullWidth
+                size="lg"
+                className="font-semibold rounded-full"
+              >
+                {isOpeningApp ? 'Opening...' : 'Open in App'}
+              </Button>
 
-                  <Button
-                    onClick={handleContinueInWeb}
-                    variant="outline"
-                    fullWidth
-                    size="lg"
-                  >
-                    Continue in Web App
-                  </Button>
-                </div>
-              </div>
+              <Button
+                onClick={handleContinueInWeb}
+                variant={appOpenFailed ? 'primary' : 'outline'}
+                fullWidth
+                size="lg"
+                className="rounded-full"
+              >
+                Continue in Web App
+              </Button>
+            </div>
+          </div>
 
-              {/* Install Section */}
-              <div className="bg-card border border-border rounded-2xl p-6 sm:p-8 shadow-sm">
-                <div className="text-center mb-6">
-                  <h3 className="text-lg font-semibold text-foreground mb-2">
-                    Don't have the app?
-                  </h3>
-                  <p className="text-sm text-muted-foreground">
-                    Install Gossip to get the best experience
-                  </p>
-                </div>
+          {/* Install Section */}
+          <div className="bg-card border border-border rounded-2xl p-6 sm:p-8 shadow-sm">
+            <div className="text-center mb-6">
+              <h3 className="text-lg font-semibold text-foreground mb-2">
+                Don't have the app?
+              </h3>
+              <p className="text-sm text-muted-foreground">
+                Install Gossip to get the best experience
+              </p>
+            </div>
 
-                <div className="space-y-3">
-                  <Button
-                    onClick={handleInstallIOS}
-                    variant="ghost"
-                    fullWidth
-                    size="lg"
-                    className="justify-start gap-3 hover:bg-accent/50"
-                  >
-                    <Smartphone className="w-6 h-6" />
-                    <span className="flex-1 text-left">Install for iOS</span>
-                    <ChevronRight className="w-5 h-5 text-muted-foreground" />
-                  </Button>
+            <div className="space-y-3">
+              <Button
+                onClick={handleInstallIOS}
+                variant="ghost"
+                fullWidth
+                size="lg"
+                className="justify-start gap-3 hover:bg-accent/50"
+              >
+                <Smartphone className="w-6 h-6" />
+                <span className="flex-1 text-left">Install for iOS</span>
+                <ChevronRight className="w-5 h-5 text-muted-foreground" />
+              </Button>
 
-                  <Button
-                    onClick={handleInstallAndroid}
-                    variant="ghost"
-                    fullWidth
-                    size="lg"
-                    className="justify-start gap-3 hover:bg-accent/50"
-                  >
-                    <Smartphone className="w-6 h-6" />
-                    <span className="flex-1 text-left">
-                      Install for Android
-                    </span>
-                    <ChevronRight className="w-5 h-5 text-muted-foreground" />
-                  </Button>
+              <Button
+                onClick={handleInstallAndroid}
+                variant="ghost"
+                fullWidth
+                size="lg"
+                className="justify-start gap-3 hover:bg-accent/50"
+              >
+                <Smartphone className="w-6 h-6" />
+                <span className="flex-1 text-left">Install for Android</span>
+                <ChevronRight className="w-5 h-5 text-muted-foreground" />
+              </Button>
 
-                  <Button
-                    onClick={handleDownloadAPK}
-                    variant="ghost"
-                    fullWidth
-                    size="lg"
-                    className="justify-start gap-3 hover:bg-accent/50"
-                  >
-                    <GitHub className="w-6 h-6" />
-                    <span className="flex-1 text-left">
-                      Download Last Release
-                    </span>
-                    <ChevronRight className="w-5 h-5 text-muted-foreground" />
-                  </Button>
-                </div>
-              </div>
-            </>
-          )}
+              <Button
+                onClick={handleDownloadAPK}
+                variant="ghost"
+                fullWidth
+                size="lg"
+                className="justify-start gap-3 hover:bg-accent/50"
+              >
+                <GitHub className="w-6 h-6" />
+                <span className="flex-1 text-left">Download Last Release</span>
+                <ChevronRight className="w-5 h-5 text-muted-foreground" />
+              </Button>
+            </div>
+          </div>
         </div>
       </div>
     </div>

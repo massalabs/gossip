@@ -16,7 +16,7 @@ const ShareContactFileSection: React.FC<ShareContactFileSectionProps> = ({
   onExport,
 }) => {
   return (
-    <div className="bg-card rounded-lg p-6">
+    <div className="bg-card rounded-xl border border-border p-6 mb-6">
       <div className="text-center mb-6">
         <div className="w-12 h-12 bg-primary/10 rounded-xl flex items-center justify-center mx-auto mb-4">
           <Download className="w-6 h-6 text-primary" />

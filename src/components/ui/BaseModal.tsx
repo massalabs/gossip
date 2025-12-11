@@ -37,7 +37,7 @@ const BaseModal: React.FC<BaseModalProps> = ({
   if (!isOpen) return null;
 
   const modalContent = (
-    <div className="fixed inset-0 z-1000 flex items-end md:items-center justify-center md:p-6 pb-[76px] pb-safe">
+    <div className="fixed inset-0 z-1000 flex flex-col items-center justify-end md:justify-center md:p-6">
       {/* Backdrop */}
       <div
         className="absolute inset-0 bg-black/50 dark:bg-black/60 transition-opacity"

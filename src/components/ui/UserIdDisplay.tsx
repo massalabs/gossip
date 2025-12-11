@@ -18,8 +18,6 @@ interface UserIdDisplayProps {
   copyTitle?: string;
 }
 
-const ADDITIONAL_DOTS = 3;
-
 const UserIdDisplay: React.FC<UserIdDisplayProps> = ({
   userId,
   visible = true, // Default to visible
@@ -35,7 +33,7 @@ const UserIdDisplay: React.FC<UserIdDisplayProps> = ({
   copyTitle = 'Copy user ID',
 }) => {
   const userIdFormatted = formatUserId(userId, prefixChars, suffixChars);
-  const userIdHidden = '•'.repeat(userIdFormatted.length + ADDITIONAL_DOTS);
+  const userIdHidden = '•'.repeat(userIdFormatted.length);
 
   const handleToggleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
     if (onToggleClick) {
@@ -52,7 +50,7 @@ const UserIdDisplay: React.FC<UserIdDisplayProps> = ({
     base: 'text-base',
   };
 
-  const defaultTextClasses = `font-medium truncate min-w-[120px] ${textSizeClasses[textSize]}`;
+  const defaultTextClasses = `font-medium truncate ${textSizeClasses[textSize]}`;
 
   // Determine text color based on context - use muted-foreground for xs/sm, gray for base
   // Only apply if textClassName doesn't already specify a color
@@ -67,28 +65,32 @@ const UserIdDisplay: React.FC<UserIdDisplayProps> = ({
     `${defaultTextClasses} ${textColorClasses} ${textClassName}`.trim();
 
   return (
-    <div className={`flex items-center gap-2 ${className}`.trim()}>
-      <p className={combinedTextClasses}>
+    <div className={`flex items-center gap-2 min-w-0 ${className}`.trim()}>
+      <p className={`${combinedTextClasses} min-w-0`}>
         {visible ? userIdFormatted : userIdHidden}
       </p>
-      {showCopy && <CopyClipboard text={userId} title={copyTitle} />}
-      {showHideToggle && onChange && (
-        <button
-          onClick={handleToggleClick}
-          className="shrink-0 p-1 hover:bg-muted rounded transition-colors"
-          title={visible ? 'Hide User ID' : 'Show User ID'}
-        >
-          {visible ? (
-            <Eye
-              className={`${textSize === 'base' ? 'w-4 h-4' : 'w-3 h-3'} text-muted-foreground`}
-            />
-          ) : (
-            <EyeOff
-              className={`${textSize === 'base' ? 'w-4 h-4' : 'w-3 h-3'} text-muted-foreground`}
-            />
-          )}
-        </button>
-      )}
+      <div className="flex items-center gap-1 shrink-0">
+        {showCopy && <CopyClipboard text={userId} title={copyTitle} />}
+        {showHideToggle && onChange && (
+          <button
+            onClick={handleToggleClick}
+            className="shrink-0 p-1 hover:bg-muted rounded transition-colors"
+            title={visible ? 'Hide User ID' : 'Show User ID'}
+            aria-pressed={visible}
+            aria-label={visible ? 'Hide User ID' : 'Show User ID'}
+          >
+            {visible ? (
+              <Eye
+                className={`${textSize === 'base' ? 'w-4 h-4' : 'w-3 h-3'} text-muted-foreground`}
+              />
+            ) : (
+              <EyeOff
+                className={`${textSize === 'base' ? 'w-4 h-4' : 'w-3 h-3'} text-muted-foreground`}
+              />
+            )}
+          </button>
+        )}
+      </div>
     </div>
   );
 };
