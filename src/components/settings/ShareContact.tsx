@@ -2,6 +2,7 @@ import React, { useState, useCallback, useMemo } from 'react';
 import { useFileShareContact } from '../../hooks/useFileShareContact';
 import PageHeader from '../ui/PageHeader';
 import HeaderWrapper from '../ui/HeaderWrapper';
+import ScrollableContent from '../ui/ScrollableContent';
 import TabSwitcher from '../ui/TabSwitcher';
 import { generateDeepLinkUrl } from '../../utils/inviteUrl';
 import { UserPublicKeys } from '../../assets/generated/wasm/gossip_wasm';
@@ -39,47 +40,44 @@ const ShareContact: React.FC<ShareContactProps> = ({
   }, [exportFileContact, publicKey, userName]);
 
   return (
-    <div className="bg-card h-full overflow-auto app-max-w mx-auto">
-      <div className="app-max-w mx-auto">
-        <HeaderWrapper>
-          <PageHeader title="Share Contact" onBack={onBack} />
-        </HeaderWrapper>
+    <div className="h-full flex flex-col bg-background app-max-w mx-auto">
+      {/* Header */}
+      <HeaderWrapper>
+        <PageHeader title="Share Contact" onBack={onBack} />
+      </HeaderWrapper>
 
-        <div className="px-4 pb-20 pt-4">
-          {/* Tab switcher */}
-          <div className="p-6 mb-8">
-            <TabSwitcher
-              options={[
-                { value: 'qr', label: 'Scan QR code' },
-                { value: 'files', label: 'File' },
-              ]}
-              value={activeTab}
-              onChange={setActiveTab}
-            />
-          </div>
-
-          <div className={activeTab === 'qr' ? 'block' : 'hidden'}>
-            <ShareContactQR deepLinkUrl={deepLinkUrl} />
-          </div>
-
-          <div className={activeTab === 'files' ? 'block' : 'hidden'}>
-            <ShareContactFileSection
-              disabled={isExportDisabled}
-              isLoading={fileState.isLoading}
-              error={fileState.error}
-              onExport={handleExportFile}
-            />
-          </div>
-
-          {/* Copy buttons section */}
-          <div className="mt-10">
-            <ShareContactCopySection
-              userId={userId}
-              deepLinkUrl={deepLinkUrl}
-            />
-          </div>
+      {/* Main Content */}
+      <ScrollableContent className="flex-1 overflow-y-auto px-6 py-6">
+        {/* Tab switcher */}
+        <div className="mb-6">
+          <TabSwitcher
+            options={[
+              { value: 'qr', label: 'Scan QR code' },
+              { value: 'files', label: 'File' },
+            ]}
+            value={activeTab}
+            onChange={setActiveTab}
+          />
         </div>
-      </div>
+
+        <div className={activeTab === 'qr' ? 'block' : 'hidden'}>
+          <ShareContactQR deepLinkUrl={deepLinkUrl} />
+        </div>
+
+        <div className={activeTab === 'files' ? 'block' : 'hidden'}>
+          <ShareContactFileSection
+            disabled={isExportDisabled}
+            isLoading={fileState.isLoading}
+            error={fileState.error}
+            onExport={handleExportFile}
+          />
+        </div>
+
+        {/* Copy buttons section */}
+        <div className="mt-6">
+          <ShareContactCopySection userId={userId} deepLinkUrl={deepLinkUrl} />
+        </div>
+      </ScrollableContent>
     </div>
   );
 };
