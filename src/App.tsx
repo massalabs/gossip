@@ -83,10 +83,26 @@ function App() {
   const { initOnlineStore } = useOnlineStore();
 
   useEffect(() => {
-    void initTheme();
-    void initOnlineStore();
+    let cleanup: (() => void) | undefined;
+
+    const initialize = async () => {
+      const cleanupFn = await initTheme();
+      cleanup = cleanupFn;
+      await initOnlineStore();
+    };
+
+    void initialize();
+
+    return () => {
+      if (cleanup) {
+        cleanup();
+      }
+    };
+    // Note: initTheme and initOnlineStore are intentionally excluded from dependencies
+    // as they are initialization functions that should only run once on mount.
+    // Including them could cause unnecessary re-initialization.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Only run once on mount - initTheme and initOnlineStore are stable initialization functions
+  }, []);
 
   return (
     <BrowserRouter>

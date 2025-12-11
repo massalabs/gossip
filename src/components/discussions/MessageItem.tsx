@@ -335,7 +335,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
                     <button
                       onClick={() => onResend(message)}
                       onKeyDown={e => {
-                        if (e.key === 'Enter' || e.key === ' ') {
+                        if (e.key === 'Enter') {
                           e.preventDefault();
                           onResend(message);
                         }

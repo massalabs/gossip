@@ -72,6 +72,13 @@ export function useTheme() {
       unsubscribeTheme = null;
     }
 
+    // Clean up existing media query listener if it exists
+    if (mediaQueryListener && mediaQuery) {
+      mediaQuery.removeEventListener('change', mediaQueryListener);
+      mediaQueryListener = null;
+      mediaQuery = null;
+    }
+
     // Initialize system theme listener
     initSystemThemeListener();
 
@@ -92,6 +99,19 @@ export function useTheme() {
     if (Capacitor.isNativePlatform()) {
       await initStatusBar();
     }
+
+    // Return cleanup function
+    return () => {
+      if (unsubscribeTheme) {
+        unsubscribeTheme();
+        unsubscribeTheme = null;
+      }
+      if (mediaQueryListener && mediaQuery) {
+        mediaQuery.removeEventListener('change', mediaQueryListener);
+        mediaQueryListener = null;
+        mediaQuery = null;
+      }
+    };
   };
 
   return {

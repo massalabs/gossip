@@ -83,12 +83,13 @@ const Button: React.FC<ButtonProps> = ({
   // - Standard: rounded-full, rounded-md, rounded-lg, etc.
   // - Arbitrary values: rounded-[10px]
   // - Corner-specific: rounded-t-3xl, rounded-br-[4px], etc.
-  const hasCustomRounded = /rounded[-\w[\]]+/.test(className);
+  // Uses word boundaries to ensure only standalone rounded classes are matched
+  const hasCustomRounded = /\brounded(-[\w[\]]+)?\b/.test(className);
   let variantClass = variantClasses[variant];
   if (hasCustomRounded) {
     // Remove default rounded classes from variant when custom rounded is provided
     // Matches any rounded class (standard, arbitrary, or corner-specific)
-    variantClass = variantClass.replace(/\s*rounded[-\w[\]]+/g, '');
+    variantClass = variantClass.replace(/\s*\brounded(-[\w[\]]+)?\b/g, '');
   }
 
   const combinedClasses = `${baseClasses} ${variantClass} ${

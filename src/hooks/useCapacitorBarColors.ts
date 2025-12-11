@@ -123,6 +123,8 @@ export const getBarsColors = (
 export const updateBarsColors = async (barsColors: BarColors) => {
   if (!Capacitor.isNativePlatform()) return;
 
+  // Use requestAnimationFrame to ensure DOM is ready before reading CSS variables
+  // This is necessary because CSS variables may not be computed immediately after theme changes
   await new Promise(resolve => requestAnimationFrame(resolve));
   await EdgeToEdge.setBackgroundColor({ color: barsColors.navBarBgColor });
 };
@@ -142,10 +144,16 @@ export const initStatusBar = async () => {
     const headerChanged = state.headerVisible !== prevState.headerVisible;
     const bottomNavChanged =
       state.bottomNavVisible !== prevState.bottomNavVisible;
-
+    const headerScrolledChanged =
+      state.headerIsScrolled !== prevState.headerIsScrolled;
     const themeChanged = state.resolvedTheme !== prevState.resolvedTheme;
 
-    if (headerChanged || bottomNavChanged || themeChanged) {
+    if (
+      headerChanged ||
+      bottomNavChanged ||
+      headerScrolledChanged ||
+      themeChanged
+    ) {
       const barColors = getBarsColors(
         state.headerVisible,
         state.headerIsScrolled,
