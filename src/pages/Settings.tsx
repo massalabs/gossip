@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import BaseModal from '../components/ui/BaseModal';
 import PageHeader from '../components/ui/PageHeader';
 import { useAccountStore } from '../stores/accountStore';
@@ -44,6 +44,10 @@ enum SettingsView {
   SCAN_QR_CODE = 'SCAN_QR_CODE',
 }
 
+// Debug mode unlock constants
+const REQUIRED_TAPS = 7;
+const TAP_TIMEOUT_MS = 2000; // Reset counter after 2 seconds of inactivity
+
 const Settings = (): React.ReactElement => {
   const { userProfile, getMnemonicBackupInfo, logout, resetAccount, ourPk } =
     useAccountStore();
@@ -56,6 +60,52 @@ const Settings = (): React.ReactElement => {
   const [isResetModalOpen, setIsResetModalOpen] = useState(false);
   const { isVersionDifferent, handleForceUpdate } = useVersionCheck();
   const navigate = useNavigate();
+
+  // Debug mode unlock: 7-tap gesture on profile image
+  const [tapCount, setTapCount] = useState(0);
+  const tapTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showDebugOptionRef = useRef(showDebugOption);
+
+  // Keep ref in sync with state
+  useEffect(() => {
+    showDebugOptionRef.current = showDebugOption;
+  }, [showDebugOption]);
+
+  // Reset tap counter after timeout
+  useEffect(() => {
+    if (tapCount > 0) {
+      if (tapTimeoutRef.current) {
+        clearTimeout(tapTimeoutRef.current);
+      }
+      tapTimeoutRef.current = setTimeout(() => {
+        setTapCount(0);
+      }, TAP_TIMEOUT_MS);
+    }
+
+    return () => {
+      if (tapTimeoutRef.current) {
+        clearTimeout(tapTimeoutRef.current);
+      }
+    };
+  }, [tapCount]);
+
+  // Handle profile image tap for debug mode unlock
+  const handleProfileImageTap = useCallback(() => {
+    setTapCount(prevCount => {
+      const newTapCount = prevCount + 1;
+
+      if (newTapCount >= REQUIRED_TAPS) {
+        // Toggle debug mode using ref to avoid closure dependency
+        setShowDebugOption(!showDebugOptionRef.current);
+        if (tapTimeoutRef.current) {
+          clearTimeout(tapTimeoutRef.current);
+        }
+        return 0; // Reset counter
+      }
+
+      return newTapCount;
+    });
+  }, [setShowDebugOption]);
 
   // Notification preferences state
   const [notificationPrefs, setNotificationPrefs] =
@@ -167,11 +217,17 @@ const Settings = (): React.ReactElement => {
 
         <div className="bg-white dark:bg-gray-800 rounded-lg p-6 mt-4">
           <div className="flex items-start gap-4 mb-4">
-            <img
-              src={ProfilePicture}
-              className="w-16 h-16 rounded-lg object-cover"
-              alt="Profile"
-            />
+            <button
+              onClick={handleProfileImageTap}
+              className="cursor-pointer focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 rounded-lg transition-opacity active:opacity-70"
+              aria-label="Profile"
+            >
+              <img
+                src={ProfilePicture}
+                className="w-16 h-16 rounded-lg object-cover"
+                alt="Profile"
+              />
+            </button>
             <div className="flex-1 min-w-0">
               <h3 className="text-base font-semibold text-black dark:text-white mb-2">
                 {userProfile?.username || 'Account name'}
@@ -317,61 +373,62 @@ const Settings = (): React.ReactElement => {
               ariaLabel="Toggle theme"
             />
           </div>
-          {/* Debug Options Toggle */}
-          <div className="bg-card border border-border rounded-lg h-[54px] flex items-center px-4 justify-start w-full shadow-sm">
-            <SettingsIconFeather className="text-foreground mr-4" />
-            <span className="text-base font-semibold text-foreground flex-1 text-left">
-              Show Debug Options
-            </span>
-            <Toggle
-              checked={showDebugOption}
-              onChange={setShowDebugOption}
-              ariaLabel="Show debug options"
-            />
-          </div>
-          {/* Debug Options - Only show when showDebugOption is true */}
+          {/* Debug Options - Only show when showDebugOption is true (unlocked via 7-tap gesture on profile image) */}
           {showDebugOption && (
-            <div className="space-y-2 pl-10">
-              {notificationService.isSupported() &&
-                notificationPrefs.permission.granted &&
-                notificationPrefs.enabled && (
-                  <Button
-                    variant="outline"
-                    className="w-full"
-                    onClick={async () => {
-                      await notificationService.showDiscussionNotification(
-                        'Test User',
-                        'Test Message',
-                        'test-user-id'
-                      );
-                    }}
-                  >
-                    <Bell className="mr-4" />
-                    <span className="text-base font-semibold flex-1 text-left">
-                      Test Notification
-                    </span>
-                  </Button>
-                )}
-              <Button
-                variant="outline"
-                className="w-full"
-                onClick={handleResetAllAccounts}
-              >
-                <AlertTriangle className="mr-4" />
-                <span className="text-base font-semibold flex-1 text-left">
-                  Reset App
+            <div className="bg-card border border-border rounded-lg overflow-hidden shadow-sm">
+              {/* Debug Options Header */}
+              <div className="h-[54px] flex items-center px-4 justify-start w-full border-b border-border">
+                <SettingsIconFeather
+                  className="text-foreground mr-4"
+                  aria-hidden="true"
+                />
+                <span className="text-base font-semibold text-foreground flex-1 text-left">
+                  Debug Options
                 </span>
-              </Button>
-              <Button
-                variant="outline"
-                className="w-full"
-                onClick={handleResetAllDiscussionsAndMessages}
-              >
-                <AlertTriangle className="mr-4" />
-                <span className="text-base font-semibold flex-1 text-left">
-                  Clear Messages & Contacts
-                </span>
-              </Button>
+              </div>
+              {/* Debug Options Content */}
+              <div className="px-4 py-3 space-y-2">
+                {notificationService.isSupported() &&
+                  notificationPrefs.permission.granted &&
+                  notificationPrefs.enabled && (
+                    <Button
+                      variant="outline"
+                      className="w-full"
+                      onClick={async () => {
+                        await notificationService.showDiscussionNotification(
+                          'Test User',
+                          'Test Message',
+                          'test-user-id'
+                        );
+                      }}
+                    >
+                      <Bell className="mr-4" />
+                      <span className="text-base font-semibold flex-1 text-left">
+                        Test Notification
+                      </span>
+                    </Button>
+                  )}
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  onClick={handleResetAllAccounts}
+                >
+                  <AlertTriangle className="mr-4" />
+                  <span className="text-base font-semibold flex-1 text-left">
+                    Reset App
+                  </span>
+                </Button>
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  onClick={handleResetAllDiscussionsAndMessages}
+                >
+                  <AlertTriangle className="mr-4" />
+                  <span className="text-base font-semibold flex-1 text-left">
+                    Clear Messages & Contacts
+                  </span>
+                </Button>
+              </div>
             </div>
           )}
           {/* Clear Cache & Database Button - Only show when version differs */}
