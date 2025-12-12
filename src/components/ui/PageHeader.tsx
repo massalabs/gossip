@@ -27,7 +27,7 @@ const PageHeader: React.FC<PageHeaderProps> = ({
             ariaLabel="Back"
             className="w-8 h-8 flex items-center justify-center"
           >
-            <ChevronLeft className="w-5 h-5 text-gray-600 dark:text-gray-300" />
+            <ChevronLeft className="w-5 h-5 text-muted-foreground" />
           </Button>
         )}
         {showLogo && (
@@ -37,9 +37,7 @@ const PageHeader: React.FC<PageHeaderProps> = ({
             alt="Gossip logo"
           />
         )}
-        <h1 className="text-xl font-semibold text-black dark:text-white">
-          {title}
-        </h1>
+        <h1 className="text-xl font-semibold text-foreground">{title}</h1>
       </div>
     </div>
   );

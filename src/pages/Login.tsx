@@ -5,6 +5,7 @@ import { biometricService } from '../services/biometricService';
 import AccountSelection from '../components/account/AccountSelection';
 import AccountImport from '../components/account/AccountImport';
 import Button from '../components/ui/Button';
+import RoundedInput from '../components/ui/RoundedInput';
 import { useNavigate } from 'react-router-dom';
 import { useVersionCheck } from '../hooks/useVersionCheck';
 import { ROUTES } from '../constants/routes';
@@ -288,7 +289,7 @@ const Login: React.FC<LoginProps> = React.memo(
             {/* Password authentication - show if biometrics not available OR for password accounts */}
             {(!biometricMethodAvailable || usePassword) && (
               <div className="space-y-2">
-                <input
+                <RoundedInput
                   type="password"
                   value={password}
                   onChange={e => {
@@ -304,11 +305,7 @@ const Login: React.FC<LoginProps> = React.memo(
                     }
                   }}
                   placeholder="Password"
-                  className={`w-full h-12 px-4 rounded-full border text-sm focus:outline-none focus:ring-2 transition text-gray-900 dark:text-white bg-white dark:bg-gray-800 ${
-                    persistentError
-                      ? 'border-red-300 dark:border-red-600 focus:ring-red-200 dark:focus:ring-red-900/40'
-                      : 'border-gray-200 dark:border-gray-700 focus:ring-blue-200 dark:focus:ring-blue-900/40'
-                  }`}
+                  error={!!persistentError}
                   disabled={isLoading}
                 />
                 <Button
@@ -358,7 +355,7 @@ const Login: React.FC<LoginProps> = React.memo(
                   size="custom"
                   className="h-[51px] rounded-full text-sm"
                 >
-                  Import
+                  Import with Mnemonic
                 </Button>
               </div>
             </div>
