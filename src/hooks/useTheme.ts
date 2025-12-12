@@ -3,8 +3,8 @@ import { useUiStore } from '../stores/uiStore';
 import { initStatusBar } from './useCapacitorBarColors';
 import { Theme } from '../stores/uiStore';
 import { resolveTheme } from '../utils/themeUtils';
-import { Capacitor } from '@capacitor/core';
-import { App, PluginListenerHandle } from '@capacitor/app';
+import { Capacitor, PluginListenerHandle } from '@capacitor/core';
+import { App } from '@capacitor/app';
 
 // Store the media query listener cleanup function
 let mediaQueryListener: ((event: MediaQueryListEvent) => void) | null = null;
