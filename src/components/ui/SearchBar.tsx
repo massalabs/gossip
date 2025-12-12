@@ -4,7 +4,7 @@ import { Search, X, Loader } from 'react-feather';
 interface SearchBarProps {
   value: string;
   onChange: (query: string) => void;
-  onSearch?: (query: string) => void; // Called with debounced value (optional)
+  onSearch?: (query: string) => void; // Called immediately on every input change (debouncing should be handled by the parent if needed)
   placeholder?: string;
   isLoading?: boolean;
   className?: string;
@@ -37,7 +37,7 @@ const SearchBar: React.FC<SearchBarProps> = React.memo(
       (e: React.ChangeEvent<HTMLInputElement>) => {
         const newValue = e.target.value;
         onChange(newValue);
-        // Call onSearch if provided (parent should handle debouncing)
+        // Call onSearch if provided (called immediately, not debounced)
         if (onSearch) {
           onSearch(newValue);
         }
