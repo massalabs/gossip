@@ -1,5 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Capacitor } from '@capacitor/core';
 import HeaderWrapper from '../../components/ui/HeaderWrapper';
 import PageHeader from '../../components/ui/PageHeader';
 import ScrollableContent from '../../components/ui/ScrollableContent';
@@ -122,10 +123,12 @@ const NotificationsSettings: React.FC = () => {
             )}
         </div>
 
-        {/* Background Sync Settings (Battery Optimization) */}
-        <div className="mt-6">
-          <BackgroundSyncSettings showDebugInfo={showDebugOption} />
-        </div>
+        {/* Background Sync Settings (Battery Optimization) - Only on native platforms */}
+        {Capacitor.isNativePlatform() && (
+          <div className="mt-6">
+            <BackgroundSyncSettings showDebugInfo={showDebugOption} />
+          </div>
+        )}
       </ScrollableContent>
     </div>
   );
