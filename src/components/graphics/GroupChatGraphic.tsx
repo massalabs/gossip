@@ -7,7 +7,11 @@ export function GroupChatGraphic({
   outerColor = 'fill-graphic-accent',
   innerColor = 'fill-card',
   detailColor = 'fill-foreground',
+  scale = 2.0,
 }: GraphicProps) {
+  // Center of the original viewBox (393, 414)
+  const centerX = 196.5;
+  const centerY = 207;
   return (
     <div
       className={`relative w-full flex items-center justify-center py-8 ${className}`}
@@ -38,7 +42,9 @@ export function GroupChatGraphic({
         xmlns="http://www.w3.org/2000/svg"
       >
         <g className={loading ? 'animate-tilt-loading' : 'animate-tilt'}>
-          <g transform="translate(196.5, 207) scale(2.5) translate(-196.5, -207)">
+          <g
+            transform={`translate(${centerX}, ${centerY}) scale(${scale}) translate(-${centerX}, -${centerY})`}
+          >
             {/* Left chat bubble - outer body */}
             <path
               d="M183.311 193.756C170.738 182.576 152.87 176.9 130.21 176.9C118.888 176.9 108.741 178.315 99.8451 181.138C90.9414 183.954 83.2883 188.17 76.9381 193.771C64.3726 204.869 58 221.051 58 241.869C58 254.285 60.3139 265.091 64.8668 273.964C69.3674 282.733 76.1893 289.682 85.1753 294.61L86.9351 295.576V304.442L86.8303 306.741C90.6194 305.61 95.397 305.049 101.283 305.049H130.21C152.878 305.049 170.753 299.485 183.34 288.514C195.764 277.671 202.069 261.975 202.069 241.869C202.069 221.763 195.756 204.854 183.311 193.756ZM171.501 281.131C162.223 289.241 148.332 293.344 130.21 293.344C112.089 293.344 98.1677 289.241 88.7847 281.138C79.237 272.916 74.407 260.073 74.407 242.962V240.064C74.407 222.946 79.252 210.088 88.7772 201.889C98.1527 193.779 112.096 189.675 130.21 189.675C148.325 189.675 162.223 193.786 171.501 201.904C180.907 210.133 185.684 222.976 185.684 240.064V242.962C185.684 260.043 180.907 272.886 171.501 281.131Z"
