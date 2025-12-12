@@ -23,6 +23,7 @@ import {
   Settings as SettingsIconFeather,
   Trash2,
   Bell,
+  X,
 } from 'react-feather';
 import { APP_VERSION } from '../config/version';
 import { useLocalStorage } from '../hooks/useLocalStorage';
@@ -475,32 +476,44 @@ const Settings = (): React.ReactElement => {
       <BaseModal
         isOpen={isResetModalOpen}
         onClose={() => setIsResetModalOpen(false)}
-        title="Delete account?"
+        title="Delete account"
       >
-        <div className="space-y-4">
-          <p className="text-sm text-foreground">
-            This will delete all your data and cannot be undone.
-          </p>
+        <div className="space-y-6">
+          <div className="flex flex-col items-center mb-4">
+            <div className="w-20 h-20 rounded-full flex items-center justify-center mb-4 bg-high-danger-red/5 border border-high-danger-red">
+              <X
+                className="w-10 h-10"
+                style={{ color: 'var(--high-danger-red)' }}
+              />
+            </div>
+          </div>
+          <div className="space-y-2 text-center">
+            <p className="text-sm text-foreground">
+              Are you sure you want to delete this account?
+            </p>
+            <p className="text-sm text-muted-foreground">
+              This action cannot be undone
+            </p>
+          </div>
           <div className="flex gap-3">
             <Button
+              onClick={() => setIsResetModalOpen(false)}
+              variant="outline"
+              size="custom"
+              className="flex-1 h-12 rounded-full font-medium"
+            >
+              Cancel
+            </Button>
+            <button
               onClick={async () => {
                 setIsResetModalOpen(false);
                 await handleResetAccount();
               }}
-              variant="danger"
-              size="custom"
-              className="flex-1 h-11 rounded-xl font-semibold"
+              className="flex-1 h-12 rounded-full font-medium text-white hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+              style={{ backgroundColor: 'var(--high-danger-red)' }}
             >
               Delete
-            </Button>
-            <Button
-              onClick={() => setIsResetModalOpen(false)}
-              variant="secondary"
-              size="custom"
-              className="flex-1 h-11 rounded-xl font-semibold"
-            >
-              Cancel
-            </Button>
+            </button>
           </div>
         </div>
       </BaseModal>

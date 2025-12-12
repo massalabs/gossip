@@ -41,6 +41,7 @@
   --success-foreground: #ffffff; /* white text on green */
   --warning: #92400e; /* amber-800 - warning states (6.1:1 contrast with white, WCAG AA compliant) */
   --warning-foreground: #ffffff; /* white text on amber */
+  --high-danger-red: #f33a3a; /* high danger red for critical actions */
 
   /* UI elements */
   --border: #e5e7eb; /* subtle border from Figma */
@@ -150,6 +151,7 @@
   --warning-foreground: var(
     --background
   ); /* dark text on amber for good contrast */
+  --high-danger-red: #f33a3a; /* high danger red for critical actions */
 
   /* UI elements */
   --border: #2a2a2e; /* subtle border */
