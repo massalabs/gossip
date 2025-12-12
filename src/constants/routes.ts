@@ -69,6 +69,13 @@ export const ROUTES = {
   wallet: route(`/${AppRoute.wallet}`),
   settings: route(`/${AppRoute.settings}`),
 
+  // Settings sub-pages
+  settingsSecurity: route(`/${AppRoute.settings}/security`),
+  settingsNotifications: route(`/${AppRoute.settings}/notifications`),
+  settingsAppearance: route(`/${AppRoute.settings}/appearance`),
+  settingsAbout: route(`/${AppRoute.settings}/about`),
+  settingsDebug: route(`/${AppRoute.settings}/debug`),
+
   // Actions
   newContact: route(`/${AppRoute.newContact}`),
   newDiscussion: route(`/${AppRoute.newDiscussion}`),
