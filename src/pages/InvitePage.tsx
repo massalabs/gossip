@@ -6,7 +6,7 @@ import { useAppStore } from '../stores/appStore';
 import Button from '../components/ui/Button';
 import PageHeader from '../components/ui/PageHeader';
 import HeaderWrapper from '../components/ui/HeaderWrapper';
-import { PrivacyGraphic } from '../components/ui/PrivacyGraphic';
+import { PrivacyGraphic } from '../components/graphics';
 import {
   GOOGLE_PLAY_STORE_URL,
   APPLE_APP_STORE_URL,

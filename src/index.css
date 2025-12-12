@@ -19,6 +19,7 @@
   --color-surface-secondary: var(--surface-secondary);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
+  --color-graphic-accent: var(--graphic-accent);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
   --color-success: var(--success);

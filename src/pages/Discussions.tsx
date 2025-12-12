@@ -4,7 +4,7 @@ import { useAccountStore } from '../stores/accountStore';
 import { useNavigate } from 'react-router-dom';
 import { Plus } from 'react-feather';
 import Button from '../components/ui/Button';
-import { PrivacyGraphic } from '../components/ui/PrivacyGraphic';
+import { PrivacyGraphic } from '../components/graphics';
 import HeaderWrapper from '../components/ui/HeaderWrapper';
 import UserProfileAvatar from '../components/avatar/UserProfileAvatar';
 import ScrollableContent from '../components/ui/ScrollableContent';
