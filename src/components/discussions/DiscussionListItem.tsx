@@ -122,7 +122,7 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
         className={`${
           isPendingIncoming ? 'cursor-not-allowed opacity-95' : 'cursor-pointer'
         } p-4 transition-colors `}
-        {...(!(isPendingIncoming || isPendingOutgoing)
+        {...(!isPendingIncoming
           ? {
               onClick: () => onSelect(discussion),
               role: 'button',
