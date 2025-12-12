@@ -9,7 +9,7 @@ export function LockGraphic({
   detailColor = 'fill-gray-800',
   scale = 2.0,
 }: GraphicProps) {
-  // Center of the original viewBox (362, 417)
+  // Center of the original viewBox (362x417)
   const centerX = 181;
   const centerY = 208.5;
   return (
