@@ -211,8 +211,8 @@ const AccountBackup: React.FC<AccountBackupProps> = ({ onBack }) => {
                   </div>
                   <div className="space-y-2">
                     <p className="text-sm text-foreground leading-relaxed font-medium">
-                      <strong>⚠️ Warning:</strong> This Massa private key cannot
-                      be used to restore your Gossip account. Use this only for
+                      <strong>Warning:</strong> This Massa private key cannot be
+                      used to restore your Gossip account. Use this only for
                       external wallet compatibility. To restore your Gossip
                       account, you must use the 24-word mnemonic phrase.
                     </p>
