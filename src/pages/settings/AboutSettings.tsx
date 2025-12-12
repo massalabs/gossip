@@ -46,4 +46,3 @@ const AboutSettings: React.FC = () => {
 };
 
 export default AboutSettings;
-

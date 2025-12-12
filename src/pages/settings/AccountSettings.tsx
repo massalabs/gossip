@@ -58,9 +58,7 @@ const AccountSettings: React.FC = () => {
   }
 
   if (activeView === AccountView.SCAN) {
-    return (
-      <ScanQRCode onBack={handleBack} onScanSuccess={handleScanSuccess} />
-    );
+    return <ScanQRCode onBack={handleBack} onScanSuccess={handleScanSuccess} />;
   }
 
   return (
@@ -113,4 +111,3 @@ const AccountSettings: React.FC = () => {
 };
 
 export default AccountSettings;
-

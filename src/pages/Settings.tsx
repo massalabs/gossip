@@ -14,13 +14,11 @@ import {
   Copy,
   Shield,
   Bell,
-  Palette,
   Info,
   Settings as SettingsIconFeather,
 } from 'react-feather';
 import { useNavigate } from 'react-router-dom';
-import { db } from '../db';
-import { clearAppStorage } from '../utils/localStorage';
+
 import ProfilePicture from '../assets/gossip_face.svg';
 import { useAppStore } from '../stores/appStore';
 

@@ -102,4 +102,3 @@ const NotificationsSettings: React.FC = () => {
 };
 
 export default NotificationsSettings;
-

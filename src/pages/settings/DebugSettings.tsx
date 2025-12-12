@@ -8,11 +8,15 @@ import Toggle from '../../components/ui/Toggle';
 import { useAppStore } from '../../stores/appStore';
 import { notificationService } from '../../services/notifications';
 import { db } from '../../db';
-import { STORAGE_KEYS, clearAppStorage } from '../../utils/localStorage';
+import { clearAppStorage } from '../../utils/localStorage';
 import { useAccountStore } from '../../stores/accountStore';
 import { useVersionCheck } from '../../hooks/useVersionCheck';
 import { ROUTES } from '../../constants/routes';
-import { AlertTriangle, Bell, Settings as SettingsIconFeather } from 'react-feather';
+import {
+  AlertTriangle,
+  Bell,
+  Settings as SettingsIconFeather,
+} from 'react-feather';
 
 const DebugSettings: React.FC = () => {
   const navigate = useNavigate();
@@ -140,4 +144,3 @@ const DebugSettings: React.FC = () => {
 };
 
 export default DebugSettings;
-
