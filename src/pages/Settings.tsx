@@ -157,12 +157,12 @@ const Settings = (): React.ReactElement => {
 
         {/* Settings Sections */}
         <div className="space-y-6">
-          {/* Account Section */}
+          {/* Account & Security Group */}
           <div className="bg-card rounded-xl border border-border overflow-hidden">
             <Button
               variant="outline"
               size="custom"
-              className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0 border-b border-border last:border-b-0"
+              className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0 border-b border-border"
               onClick={() => navigate(ROUTES.settingsAccount())}
             >
               <Copy className="mr-4" />
@@ -173,10 +173,6 @@ const Settings = (): React.ReactElement => {
                 <div className="w-2 h-2 bg-success rounded-full ml-auto"></div>
               )}
             </Button>
-          </div>
-
-          {/* Security Section */}
-          <div className="bg-card rounded-xl border border-border overflow-hidden">
             <Button
               variant="outline"
               size="custom"
@@ -190,12 +186,12 @@ const Settings = (): React.ReactElement => {
             </Button>
           </div>
 
-          {/* Notifications Section */}
+          {/* Notifications & Appearance Group */}
           <div className="bg-card rounded-xl border border-border overflow-hidden">
             <Button
               variant="outline"
               size="custom"
-              className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0"
+              className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0 border-b border-border"
               onClick={() => navigate(ROUTES.settingsNotifications())}
             >
               <Bell className="mr-4" />
@@ -203,10 +199,6 @@ const Settings = (): React.ReactElement => {
                 Notifications
               </span>
             </Button>
-          </div>
-
-          {/* Appearance Section */}
-          <div className="bg-card rounded-xl border border-border overflow-hidden">
             <Button
               variant="outline"
               size="custom"
@@ -220,12 +212,14 @@ const Settings = (): React.ReactElement => {
             </Button>
           </div>
 
-          {/* About Section */}
+          {/* About & Debug Group */}
           <div className="bg-card rounded-xl border border-border overflow-hidden">
             <Button
               variant="outline"
               size="custom"
-              className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0"
+              className={`w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0 ${
+                showDebugOption ? 'border-b border-border' : ''
+              }`}
               onClick={() => navigate(ROUTES.settingsAbout())}
             >
               <Info className="mr-4" />
@@ -233,11 +227,7 @@ const Settings = (): React.ReactElement => {
                 About
               </span>
             </Button>
-          </div>
-
-          {/* Debug Section - Only show if debug mode is enabled */}
-          {showDebugOption && (
-            <div className="bg-card rounded-xl border border-border overflow-hidden">
+            {showDebugOption && (
               <Button
                 variant="outline"
                 size="custom"
@@ -249,8 +239,8 @@ const Settings = (): React.ReactElement => {
                   Debug
                 </span>
               </Button>
-            </div>
-          )}
+            )}
+          </div>
 
           {/* Account Actions */}
           <div className="bg-card rounded-xl border border-border overflow-hidden">
