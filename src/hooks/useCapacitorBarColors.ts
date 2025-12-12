@@ -1,5 +1,5 @@
 import { Capacitor } from '@capacitor/core';
-import { Style } from '@capacitor/status-bar';
+import { StatusBar, Style } from '@capacitor/status-bar';
 import { EdgeToEdge } from '@capawesome/capacitor-android-edge-to-edge-support';
 import { useUiStore } from '../stores/uiStore';
 
@@ -105,8 +105,11 @@ export const getBarsColors = (
   topBarBgColor = normalizeColor(topBarBgColor, bgFallback);
   navBarBgColor = normalizeColor(navBarBgColor, bgFallback);
 
-  const topBarTextColor = resolvedTheme === 'dark' ? Style.Dark : Style.Light;
-  const navBarTextColor = resolvedTheme === 'dark' ? Style.Dark : Style.Light;
+  // Text color should be light on dark backgrounds, dark on light backgrounds
+  // Style.Light = light content (for dark backgrounds)
+  // Style.Dark = dark content (for light backgrounds)
+  const topBarTextColor = resolvedTheme === 'dark' ? Style.Light : Style.Dark;
+  const navBarTextColor = resolvedTheme === 'dark' ? Style.Light : Style.Dark;
 
   return {
     topBarBgColor,
@@ -126,7 +129,24 @@ export const updateBarsColors = async (barsColors: BarColors) => {
   // Use requestAnimationFrame to ensure DOM is ready before reading CSS variables
   // This is necessary because CSS variables may not be computed immediately after theme changes
   await new Promise(resolve => requestAnimationFrame(resolve));
-  await EdgeToEdge.setBackgroundColor({ color: barsColors.navBarBgColor });
+
+  try {
+    // Set status bar style (text color) - works on both iOS and Android
+    await StatusBar.setStyle({ style: barsColors.topBarTextColor });
+
+    // Set status bar background color - Android only (iOS uses transparent by default)
+    if (Capacitor.getPlatform() === 'android') {
+      await StatusBar.setBackgroundColor({ color: barsColors.topBarBgColor });
+    }
+
+    // Set navigation bar background color - Android only
+    if (Capacitor.getPlatform() === 'android') {
+      await EdgeToEdge.setBackgroundColor({ color: barsColors.navBarBgColor });
+    }
+  } catch (error) {
+    // Silently handle errors (e.g., if StatusBar plugin is not available)
+    console.warn('Failed to update status bar colors:', error);
+  }
 };
 // Store the unsubscribe function to prevent multiple subscriptions
 let unsubscribeBarColors: (() => void) | null = null;
