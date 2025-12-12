@@ -163,9 +163,6 @@
     --surface-secondary
   ); /* badge border color - uses secondary surface */
 
-  /* Graphic colors */
-  --graphic-accent: #b8f2e7; /* teal/green for graphics - consistent across modes */
-
   /* Chart colors */
   --chart-1: var(--accent); /* sea-foam proof */
   --chart-2: var(--primary); /* teal */
