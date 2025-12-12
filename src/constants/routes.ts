@@ -70,7 +70,6 @@ export const ROUTES = {
   settings: route(`/${AppRoute.settings}`),
 
   // Settings sub-pages
-  settingsAccount: route(`/${AppRoute.settings}/account`),
   settingsSecurity: route(`/${AppRoute.settings}/security`),
   settingsNotifications: route(`/${AppRoute.settings}/notifications`),
   settingsAppearance: route(`/${AppRoute.settings}/appearance`),

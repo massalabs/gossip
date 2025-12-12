@@ -17,6 +17,7 @@ import {
   Moon,
   Info,
   Settings as SettingsIconFeather,
+  Share2,
   User,
 } from 'react-feather';
 import { useNavigate } from 'react-router-dom';
@@ -206,27 +207,12 @@ const Settings = (): React.ReactElement => {
               className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0"
               onClick={() => setActiveView(SettingsView.SHARE_CONTACT)}
             >
-              <SettingsIconFeather className="mr-4" />
+              <Share2 className="mr-4" />
               <span className="text-base font-semibold flex-1 text-left">
                 Share Contact
               </span>
             </Button>
           </div>
-
-          {/* Security Section - Commented out as there is nothing inside for now */}
-          {/* <div className="bg-card rounded-xl border border-border overflow-hidden">
-            <Button
-              variant="outline"
-              size="custom"
-              className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0"
-              onClick={() => navigate(ROUTES.settingsSecurity())}
-            >
-              <Shield className="mr-4" />
-              <span className="text-base font-semibold flex-1 text-left">
-                Security
-              </span>
-            </Button>
-          </div> */}
 
           {/* Notifications & Appearance Group */}
           <div className="bg-card rounded-xl border border-border overflow-hidden">
