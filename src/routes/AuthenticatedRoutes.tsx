@@ -8,7 +8,6 @@ import DiscussionSettings from '../pages/DiscussionSettings';
 import NewDiscussion from '../pages/NewDiscussion';
 import NewContact from '../pages/NewContact';
 import Settings from '../pages/Settings';
-import AccountSettings from '../pages/settings/AccountSettings';
 import SecuritySettings from '../pages/settings/SecuritySettings';
 import NotificationsSettings from '../pages/settings/NotificationsSettings';
 import AppearanceSettings from '../pages/settings/AppearanceSettings';
@@ -42,14 +41,6 @@ export const AuthenticatedRoutes: React.FC = () => {
         element={
           <MainLayout>
             <Settings />
-          </MainLayout>
-        }
-      />
-      <Route
-        path={ROUTES.settingsAccount()}
-        element={
-          <MainLayout>
-            <AccountSettings />
           </MainLayout>
         }
       />

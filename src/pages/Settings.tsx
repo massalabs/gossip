@@ -6,6 +6,8 @@ import ScrollableContent from '../components/ui/ScrollableContent';
 import { useAccountStore } from '../stores/accountStore';
 import Button from '../components/ui/Button';
 import UserIdDisplay from '../components/ui/UserIdDisplay';
+import AccountBackup from '../components/account/AccountBackup';
+import ShareContact from '../components/settings/ShareContact';
 import { ROUTES } from '../constants/routes';
 import {
   LogOut,
@@ -23,17 +25,24 @@ import { useNavigate } from 'react-router-dom';
 import ProfilePicture from '../assets/gossip_face.svg';
 import { useAppStore } from '../stores/appStore';
 
+enum SettingsView {
+  MAIN = 'MAIN',
+  ACCOUNT_BACKUP = 'ACCOUNT_BACKUP',
+  SHARE_CONTACT = 'SHARE_CONTACT',
+}
+
 // Debug mode unlock constants
 const REQUIRED_TAPS = 7;
 const TAP_TIMEOUT_MS = 2000; // Reset counter after 2 seconds of inactivity
 
 const Settings = (): React.ReactElement => {
-  const { userProfile, getMnemonicBackupInfo, logout, resetAccount } =
+  const { userProfile, getMnemonicBackupInfo, logout, resetAccount, ourPk } =
     useAccountStore();
   const showDebugOption = useAppStore(s => s.showDebugOption);
   const setShowDebugOption = useAppStore(s => s.setShowDebugOption);
   const [showUserId, setShowUserId] = useState(false);
   const [isResetModalOpen, setIsResetModalOpen] = useState(false);
+  const [activeView, setActiveView] = useState<SettingsView>(SettingsView.MAIN);
   const navigate = useNavigate();
 
   // Debug mode unlock: 7-tap gesture on profile image
@@ -84,6 +93,10 @@ const Settings = (): React.ReactElement => {
 
   const mnemonicBackupInfo = getMnemonicBackupInfo();
 
+  const handleBack = useCallback(() => {
+    setActiveView(SettingsView.MAIN);
+  }, []);
+
   const handleResetAccount = useCallback(async () => {
     try {
       await resetAccount();
@@ -100,6 +113,21 @@ const Settings = (): React.ReactElement => {
       console.error('Failed to logout:', error);
     }
   };
+
+  if (activeView === SettingsView.ACCOUNT_BACKUP) {
+    return <AccountBackup onBack={handleBack} />;
+  }
+
+  if (activeView === SettingsView.SHARE_CONTACT) {
+    return (
+      <ShareContact
+        onBack={handleBack}
+        userId={userProfile!.userId}
+        userName={userProfile!.username}
+        publicKey={ourPk!}
+      />
+    );
+  }
 
   return (
     <div className="h-full flex flex-col bg-background app-max-w mx-auto">
@@ -157,22 +185,37 @@ const Settings = (): React.ReactElement => {
 
         {/* Settings Sections */}
         <div className="space-y-6">
-          {/* Account & Security Group */}
+          {/* Account Backup & Share Contact Group */}
           <div className="bg-card rounded-xl border border-border overflow-hidden">
             <Button
               variant="outline"
               size="custom"
               className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0 border-b border-border"
-              onClick={() => navigate(ROUTES.settingsAccount())}
+              onClick={() => setActiveView(SettingsView.ACCOUNT_BACKUP)}
             >
               <Copy className="mr-4" />
               <span className="text-base font-semibold flex-1 text-left">
-                Account
+                Account Backup
               </span>
               {mnemonicBackupInfo?.backedUp && (
                 <div className="w-2 h-2 bg-success rounded-full ml-auto"></div>
               )}
             </Button>
+            <Button
+              variant="outline"
+              size="custom"
+              className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0"
+              onClick={() => setActiveView(SettingsView.SHARE_CONTACT)}
+            >
+              <SettingsIconFeather className="mr-4" />
+              <span className="text-base font-semibold flex-1 text-left">
+                Share Contact
+              </span>
+            </Button>
+          </div>
+
+          {/* Security Section */}
+          <div className="bg-card rounded-xl border border-border overflow-hidden">
             <Button
               variant="outline"
               size="custom"
