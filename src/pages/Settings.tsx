@@ -14,6 +14,7 @@ import {
   Copy,
   Shield,
   Bell,
+  Moon,
   Info,
   Settings as SettingsIconFeather,
 } from 'react-feather';
@@ -212,7 +213,7 @@ const Settings = (): React.ReactElement => {
               className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0"
               onClick={() => navigate(ROUTES.settingsAppearance())}
             >
-              <Palette className="mr-4" />
+              <Moon className="mr-4" />
               <span className="text-base font-semibold flex-1 text-left">
                 Appearance
               </span>
