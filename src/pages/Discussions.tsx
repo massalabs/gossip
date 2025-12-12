@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React from 'react';
 import DiscussionListPanel from '../components/discussions/DiscussionList';
 import { useAccountStore } from '../stores/accountStore';
 import { useNavigate } from 'react-router-dom';
 import { Plus } from 'react-feather';
 import Button from '../components/ui/Button';
 import SearchBar from '../components/ui/SearchBar';
+import { useSearch } from '../hooks/useSearch';
 import { PrivacyGraphic } from '../components/graphics';
 import HeaderWrapper from '../components/ui/HeaderWrapper';
 import UserProfileAvatar from '../components/avatar/UserProfileAvatar';
@@ -14,7 +15,15 @@ import { ROUTES } from '../constants/routes';
 const Discussions: React.FC = () => {
   const navigate = useNavigate();
   const { ourPk, ourSk, session, isLoading } = useAccountStore();
-  const [searchQuery, setSearchQuery] = useState('');
+
+  // Use debounced search for filtering discussions
+  const {
+    query: searchQuery,
+    debouncedQuery: debouncedSearchQuery,
+    setQuery,
+  } = useSearch({
+    debounceMs: 300,
+  });
 
   if (isLoading || !ourPk || !ourSk || !session) {
     return (
@@ -41,7 +50,7 @@ const Discussions: React.FC = () => {
         <div className="px-2 mb-3">
           <SearchBar
             value={searchQuery}
-            onChange={setSearchQuery}
+            onChange={setQuery}
             placeholder="Search discussions..."
             aria-label="Search discussions"
           />
@@ -51,7 +60,7 @@ const Discussions: React.FC = () => {
             navigate(ROUTES.discussion({ userId: id }));
           }}
           headerVariant="link"
-          searchQuery={searchQuery}
+          searchQuery={debouncedSearchQuery}
         />
       </ScrollableContent>
       {/* Floating button positioned above bottom nav */}
