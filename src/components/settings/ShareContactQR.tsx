@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import QRCodeStyling from 'qr-code-styling';
 
-import { PrivacyGraphic } from '../ui/PrivacyGraphic';
+import { PrivacyGraphic } from '../graphics';
 
 interface ShareContactQRProps {
   deepLinkUrl: string;

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { ArrowRight, Zap } from 'react-feather';
 import appLogo from '../assets/gossip_face.svg';
-import { PrivacyGraphic } from './ui/PrivacyGraphic';
+import { PrivacyGraphic, LockGraphic, GroupChatGraphic } from './graphics';
 import Button from './ui/Button';
 
 interface OnboardingFlowProps {
@@ -23,13 +23,13 @@ const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
       image: appLogo,
     },
     {
-      title: 'Privacy by Design 🔒',
+      title: 'Privacy by Design',
       description:
         'All your messages are encrypted and stored locally on your device. Your conversations stay private, always.',
       image: appLogo,
     },
     {
-      title: "Let's Get Started! 🚀",
+      title: "Let's Get Started!",
       description:
         'Create your account in seconds and start connecting with people securely.',
       image: appLogo,
@@ -69,7 +69,13 @@ const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
             ))}
           </div>
         </div>
-        <PrivacyGraphic size={200} />
+        {currentStep === 0 ? (
+          <PrivacyGraphic size={200} />
+        ) : currentStep === 1 ? (
+          <LockGraphic size={200} />
+        ) : (
+          <GroupChatGraphic size={200} />
+        )}
         <div className="">
           <h1 className="text-3xl md:text-4xl font-bold text-foreground mb-4 leading-tight">
             {currentStep === 0 ? (

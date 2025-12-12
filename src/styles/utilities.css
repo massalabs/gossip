@@ -74,6 +74,119 @@
     transition: background-color 200ms cubic-bezier(0.4, 0, 0.2, 1);
   }
 
+  /* Graphic animation utilities */
+  @keyframes pulse-slow {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.5;
+    }
+  }
+
+  @keyframes float {
+    0%,
+    100% {
+      transform: translateY(0);
+    }
+    50% {
+      transform: translateY(-20px);
+    }
+  }
+
+  @keyframes tilt {
+    0%,
+    100% {
+      transform: rotate(-3deg);
+    }
+    50% {
+      transform: rotate(3deg);
+    }
+  }
+
+  @keyframes blink {
+    0%,
+    90%,
+    100% {
+      transform: scaleY(1);
+    }
+    95% {
+      transform: scaleY(0.1);
+    }
+  }
+
+  .animate-pulse-slow {
+    animation: pulse-slow 3s ease-in-out infinite;
+  }
+  .animate-float {
+    animation: float 4s ease-in-out infinite;
+  }
+  .animate-tilt {
+    animation: tilt 6s ease-in-out infinite;
+  }
+  .animate-blink {
+    animation: blink 4s ease-in-out infinite;
+    transform-origin: center;
+  }
+
+  /* Loading variants - faster, more intense animations */
+  @keyframes pulse-loading {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.3;
+    }
+  }
+
+  @keyframes float-loading {
+    0%,
+    100% {
+      transform: translateY(0);
+    }
+    50% {
+      transform: translateY(-30px);
+    }
+  }
+
+  @keyframes tilt-loading {
+    0%,
+    100% {
+      transform: rotate(-5deg);
+    }
+    50% {
+      transform: rotate(5deg);
+    }
+  }
+
+  @keyframes blink-loading {
+    0%,
+    85%,
+    100% {
+      transform: scaleY(1);
+    }
+    90%,
+    95% {
+      transform: scaleY(0.1);
+    }
+  }
+
+  .animate-pulse-loading {
+    animation: pulse-loading 1.5s ease-in-out infinite;
+  }
+  .animate-float-loading {
+    animation: float-loading 2s ease-in-out infinite;
+  }
+  .animate-tilt-loading {
+    animation: tilt-loading 3s ease-in-out infinite;
+  }
+  .animate-blink-loading {
+    animation: blink-loading 2s ease-in-out infinite;
+    transform-origin: center;
+  }
+
   @media (prefers-reduced-motion: reduce) {
     * {
       animation-duration: 0.01ms !important;

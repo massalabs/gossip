@@ -55,6 +55,9 @@
     --card
   ); /* secondary surface background (light mode uses card) */
 
+  /* Graphic colors */
+  --graphic-accent: #b8f2e7; /* teal/green for graphics - consistent across modes */
+
   /* Chart colors */
   --chart-1: var(--accent); /* deeper sea-foam */
   --chart-2: var(--primary); /* teal */
@@ -159,6 +162,9 @@
   --badge-border: var(
     --surface-secondary
   ); /* badge border color - uses secondary surface */
+
+  /* Graphic colors */
+  --graphic-accent: #b8f2e7; /* teal/green for graphics - consistent across modes */
 
   /* Chart colors */
   --chart-1: var(--accent); /* sea-foam proof */
