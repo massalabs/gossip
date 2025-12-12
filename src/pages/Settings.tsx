@@ -13,12 +13,11 @@ import {
   LogOut,
   Trash2,
   X,
-  Copy,
-  Shield,
   Bell,
   Moon,
   Info,
   Settings as SettingsIconFeather,
+  User,
 } from 'react-feather';
 import { useNavigate } from 'react-router-dom';
 
@@ -193,7 +192,7 @@ const Settings = (): React.ReactElement => {
               className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0 border-b border-border"
               onClick={() => setActiveView(SettingsView.ACCOUNT_BACKUP)}
             >
-              <Copy className="mr-4" />
+              <User className="mr-4" />
               <span className="text-base font-semibold flex-1 text-left">
                 Account Backup
               </span>
@@ -214,8 +213,8 @@ const Settings = (): React.ReactElement => {
             </Button>
           </div>
 
-          {/* Security Section */}
-          <div className="bg-card rounded-xl border border-border overflow-hidden">
+          {/* Security Section - Commented out as there is nothing inside for now */}
+          {/* <div className="bg-card rounded-xl border border-border overflow-hidden">
             <Button
               variant="outline"
               size="custom"
@@ -227,7 +226,7 @@ const Settings = (): React.ReactElement => {
                 Security
               </span>
             </Button>
-          </div>
+          </div> */}
 
           {/* Notifications & Appearance Group */}
           <div className="bg-card rounded-xl border border-border overflow-hidden">
