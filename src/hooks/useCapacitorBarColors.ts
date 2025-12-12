@@ -107,6 +107,8 @@ export const getBarsColors = (
   navBarBgColor = normalizeColor(navBarBgColor, bgFallback);
 
   // Text color: dark mode = white text, light mode = black text
+  // Style.Light = light content (white text) for dark backgrounds
+  // Style.Dark = dark content (black text) for light backgrounds
   const topBarTextColor = resolvedTheme === 'dark' ? Style.Light : Style.Dark;
   const navBarTextColor = resolvedTheme === 'dark' ? Style.Light : Style.Dark;
 
