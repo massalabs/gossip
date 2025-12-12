@@ -1,9 +1,10 @@
-import React from 'react';
+import React, { useState } from 'react';
 import DiscussionListPanel from '../components/discussions/DiscussionList';
 import { useAccountStore } from '../stores/accountStore';
 import { useNavigate } from 'react-router-dom';
 import { Plus } from 'react-feather';
 import Button from '../components/ui/Button';
+import SearchBar from '../components/ui/SearchBar';
 import { PrivacyGraphic } from '../components/graphics';
 import HeaderWrapper from '../components/ui/HeaderWrapper';
 import UserProfileAvatar from '../components/avatar/UserProfileAvatar';
@@ -13,6 +14,7 @@ import { ROUTES } from '../constants/routes';
 const Discussions: React.FC = () => {
   const navigate = useNavigate();
   const { ourPk, ourSk, session, isLoading } = useAccountStore();
+  const [searchQuery, setSearchQuery] = useState('');
 
   if (isLoading || !ourPk || !ourSk || !session) {
     return (
@@ -36,11 +38,20 @@ const Discussions: React.FC = () => {
         </div>
       </HeaderWrapper>
       <ScrollableContent className="flex-1 overflow-y-auto pt-2 px-2 pb-20">
+        <div className="px-2 mb-3">
+          <SearchBar
+            value={searchQuery}
+            onChange={setSearchQuery}
+            placeholder="Search discussions..."
+            aria-label="Search discussions"
+          />
+        </div>
         <DiscussionListPanel
           onSelect={id => {
             navigate(ROUTES.discussion({ userId: id }));
           }}
           headerVariant="link"
+          searchQuery={searchQuery}
         />
       </ScrollableContent>
       {/* Floating button positioned above bottom nav */}
