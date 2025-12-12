@@ -1,9 +1,14 @@
 import React, { useState } from 'react';
-import { Lock, Shield, ChevronLeft } from 'react-feather';
+import { Lock, Shield } from 'react-feather';
 import { useAccountStore } from '../../stores/accountStore';
 import { validateMnemonic } from '../../crypto/bip39';
 import { validatePassword } from '../../utils/validation';
 import Button from '../ui/Button';
+import PageHeader from '../ui/PageHeader';
+import HeaderWrapper from '../ui/HeaderWrapper';
+import ScrollableContent from '../ui/ScrollableContent';
+import RoundedInput from '../ui/RoundedInput';
+import TabSwitcher from '../ui/TabSwitcher';
 
 interface AccountImportProps {
   onBack: () => void;
@@ -95,35 +100,35 @@ const AccountImport: React.FC<AccountImportProps> = ({
   };
 
   const renderMnemonicStep = () => (
-    <div className="space-y-6">
+    <div className=" rounded-lg p-6 space-y-6">
       <div>
-        <h3 className="text-lg font-semibold text-black dark:text-white mb-2">
+        <h3 className="text-xl font-semibold text-foreground mb-2">
           Import with Mnemonic
         </h3>
-        <p className="text-sm text-gray-600 dark:text-gray-300 leading-relaxed">
+        <p className="text-sm text-muted-foreground leading-relaxed">
           Enter your 24-word mnemonic phrase to import your account. Make sure
           to enter the words in the correct order.
         </p>
         <div className="mt-4">
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+          <label className="block text-sm font-medium text-foreground mb-2">
             Mnemonic Phrase
           </label>
           <textarea
             value={mnemonic}
             onChange={e => setMnemonic(e.target.value)}
             placeholder="Enter your mnemonic phrase here..."
-            className="w-full h-32 px-4 py-3 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm resize-none text-black dark:text-white bg-white dark:bg-gray-800 placeholder-gray-500 dark:placeholder-gray-400"
+            className="w-full h-32 px-4 py-3 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm resize-none text-foreground bg-background placeholder-muted-foreground"
             disabled={isImporting}
           />
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+          <p className="text-xs text-muted-foreground mt-1">
             Separate words with spaces. The phrase is case-insensitive.
           </p>
         </div>
       </div>
 
       {error && (
-        <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
-          <p className="text-red-600 dark:text-red-400 text-sm">{error}</p>
+        <div className="p-4 bg-destructive/10 border border-destructive rounded-lg">
+          <p className="text-destructive text-sm">{error}</p>
         </div>
       )}
 
@@ -134,7 +139,7 @@ const AccountImport: React.FC<AccountImportProps> = ({
           variant="primary"
           size="custom"
           fullWidth
-          className="h-12 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg"
+          className="h-12 text-sm font-medium rounded-full"
         >
           Continue
         </Button>
@@ -143,111 +148,77 @@ const AccountImport: React.FC<AccountImportProps> = ({
   );
 
   const renderDetailsStep = () => (
-    <div className="space-y-6">
+    <div className="bg-card rounded-lg p-6 space-y-6">
       <div>
-        <h3 className="text-lg font-semibold text-black mb-2">
+        <h3 className="text-xl font-semibold text-foreground mb-2">
           Account Details
         </h3>
-        <p className="text-sm text-gray-600 leading-relaxed">
+        <p className="text-sm text-muted-foreground leading-relaxed">
           Choose a username and security method for your imported account.
         </p>
       </div>
 
       <div>
-        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+        <label className="block text-xl font-medium text-foreground mb-3">
           Username
         </label>
-        <input
+        <RoundedInput
           type="text"
           value={username}
           onChange={e => setUsername(e.target.value)}
           placeholder="Enter your username"
-          className="w-full h-12 px-4 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm text-black dark:text-white bg-white dark:bg-gray-800 placeholder-gray-500 dark:placeholder-gray-400"
           disabled={isImporting}
         />
       </div>
 
       {/* Security Method Selection */}
       <div>
-        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+        <p className="text-xl font-medium text-foreground mb-5">
           Security Method
-        </label>
-        <div className="space-y-3">
-          <label className="flex items-center p-4 border border-gray-200 dark:border-gray-700 rounded-lg cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800">
-            <input
-              type="radio"
-              name="security"
-              checked={useBiometrics}
-              onChange={() => setUseBiometrics(true)}
-              className="w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500"
-            />
-            <div className="ml-3">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 bg-blue-100 dark:bg-blue-900/40 rounded-full flex items-center justify-center">
-                  <Shield className="w-4 h-4 text-blue-600" />
-                </div>
-                <span className="font-medium text-gray-900 dark:text-gray-100">
-                  Biometric Authentication
-                </span>
-              </div>
-              <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                Use fingerprint, face ID, or Windows Hello
-              </p>
-            </div>
-          </label>
-
-          <label className="flex items-center p-4 border border-gray-200 dark:border-gray-700 rounded-lg cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800">
-            <input
-              type="radio"
-              name="security"
-              checked={!useBiometrics}
-              onChange={() => setUseBiometrics(false)}
-              className="w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500"
-            />
-            <div className="ml-3">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center">
-                  <Lock className="w-4 h-4 text-gray-600 dark:text-gray-300" />
-                </div>
-                <span className="font-medium text-gray-900 dark:text-gray-100">
-                  Password
-                </span>
-              </div>
-              <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                Use a password to secure your account
-              </p>
-            </div>
-          </label>
-        </div>
+        </p>
+        <TabSwitcher
+          options={[
+            {
+              value: 'biometrics',
+              label: 'Biometrics',
+              icon: <Shield className="w-4 h-4" />,
+            },
+            {
+              value: 'password',
+              label: 'Password',
+              icon: <Lock className="w-4 h-4" />,
+            },
+          ]}
+          value={useBiometrics ? 'biometrics' : 'password'}
+          onChange={value => setUseBiometrics(value === 'biometrics')}
+        />
       </div>
 
       {/* Password field - only show if not using biometrics */}
       {!useBiometrics && (
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-              Password
-            </label>
-            <input
-              type="password"
-              value={password}
-              onChange={e => setPassword(e.target.value)}
-              placeholder="Enter your password"
-              className="w-full h-12 px-4 border border-gray-200 dark:border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm text-black dark:text-white bg-white dark:bg-gray-800 placeholder-gray-500 dark:placeholder-gray-400"
-              disabled={isImporting}
-            />
-            {password && !validatePassword(password).valid && (
-              <p className="text-red-500 dark:text-red-400 text-xs mt-1">
-                {validatePassword(password).error}
-              </p>
-            )}
-          </div>
+        <div>
+          <label className="block text-xl font-medium text-foreground mb-3">
+            Password
+          </label>
+          <RoundedInput
+            type="password"
+            value={password}
+            onChange={e => setPassword(e.target.value)}
+            placeholder="Enter your password"
+            error={password ? !validatePassword(password).valid : false}
+            disabled={isImporting}
+          />
+          {password && !validatePassword(password).valid && (
+            <p className="text-destructive text-xs mt-1">
+              {validatePassword(password).error}
+            </p>
+          )}
         </div>
       )}
 
       {error && (
-        <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
-          <p className="text-red-600 dark:text-red-400 text-sm">{error}</p>
+        <div className="p-4 bg-destructive/10 border border-destructive rounded-lg">
+          <p className="text-destructive text-sm">{error}</p>
         </div>
       )}
 
@@ -263,7 +234,7 @@ const AccountImport: React.FC<AccountImportProps> = ({
           variant="primary"
           size="custom"
           fullWidth
-          className="h-12 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg"
+          className="h-12 text-sm font-medium rounded-full"
         >
           {!isImporting && 'Import Account'}
         </Button>
@@ -272,30 +243,18 @@ const AccountImport: React.FC<AccountImportProps> = ({
   );
 
   return (
-    <div className="bg-background">
-      <div className="app-max-w mx-auto">
-        <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-800">
-          <div className="flex items-center gap-4">
-            <Button
-              onClick={onBack}
-              variant="ghost"
-              size="custom"
-              className="p-2 text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-gray-100"
-            >
-              <ChevronLeft className="w-6 h-6" />
-            </Button>
-            <h1 className="text-xl font-semibold text-black dark:text-white">
-              Import Account
-            </h1>
-          </div>
-        </div>
+    <div className="h-full flex flex-col bg-background app-max-w mx-auto">
+      {/* Header */}
+      <HeaderWrapper>
+        <PageHeader title="Import Account" onBack={onBack} />
+      </HeaderWrapper>
 
-        {/* Content */}
-        <div className="px-4 py-6">
+      <ScrollableContent className="flex-1 overflow-y-auto">
+        <div className="p-4">
           {step === 'mnemonic' && renderMnemonicStep()}
           {step === 'details' && renderDetailsStep()}
         </div>
-      </div>
+      </ScrollableContent>
     </div>
   );
 };
