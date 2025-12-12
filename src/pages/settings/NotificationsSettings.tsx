@@ -1,19 +1,23 @@
 import React, { useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Capacitor } from '@capacitor/core';
 import HeaderWrapper from '../../components/ui/HeaderWrapper';
 import PageHeader from '../../components/ui/PageHeader';
 import ScrollableContent from '../../components/ui/ScrollableContent';
 import Button from '../../components/ui/Button';
 import Toggle from '../../components/ui/Toggle';
+import BackgroundSyncSettings from '../../components/settings/BackgroundSyncSettings';
 import {
   notificationService,
   type NotificationPreferences,
 } from '../../services/notifications';
+import { useAppStore } from '../../stores/appStore';
 import { ROUTES } from '../../constants/routes';
 import { Bell } from 'react-feather';
 
 const NotificationsSettings: React.FC = () => {
   const navigate = useNavigate();
+  const showDebugOption = useAppStore(s => s.showDebugOption);
   const [notificationPrefs, setNotificationPrefs] =
     useState<NotificationPreferences>(() =>
       notificationService.getPreferences()
@@ -95,7 +99,36 @@ const NotificationsSettings: React.FC = () => {
               </p>
             </div>
           )}
+          {/* Test Notification - Only show when debug mode is enabled */}
+          {showDebugOption &&
+            notificationPrefs.permission.granted &&
+            notificationPrefs.enabled && (
+              <Button
+                variant="outline"
+                size="custom"
+                className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0 border-t border-border"
+                onClick={async () => {
+                  await notificationService.showDiscussionNotification(
+                    'Test User',
+                    'Test Message',
+                    'test-user-id'
+                  );
+                }}
+              >
+                <Bell className="mr-4" />
+                <span className="text-base font-semibold flex-1 text-left">
+                  Test Notification
+                </span>
+              </Button>
+            )}
         </div>
+
+        {/* Background Sync Settings (Battery Optimization) - Only on native platforms */}
+        {Capacitor.isNativePlatform() && (
+          <div className="mt-6">
+            <BackgroundSyncSettings showDebugInfo={showDebugOption} />
+          </div>
+        )}
       </ScrollableContent>
     </div>
   );
