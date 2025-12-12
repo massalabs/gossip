@@ -81,28 +81,20 @@ export const getBarsColors = (
   headerIsScrolled: boolean,
   resolvedTheme: 'light' | 'dark'
 ): BarColors => {
-  let topBarBgColor: string;
-  let navBarBgColor: string;
-
-  if (headerVisible) {
-    topBarBgColor = headerIsScrolled
-      ? getCSSVariableValue('--header-scrolled')
-      : getCSSVariableValue('--card');
-  } else {
-    topBarBgColor = getCSSVariableValue('--background');
-  }
-
-  // Navigation bar background color always uses muted color to match bottom navigation
-  // The bottom navigation uses bg-muted class, so nav bar should match this color
-  navBarBgColor = getCSSVariableValue('--muted');
-
-  // Normalize colors to hex format with theme-based fallbacks
+  // Theme-based fallback colors
   const darkBgFallback = '#18181b';
   const lightBgFallback = '#fafbfc';
   const bgFallback =
     resolvedTheme === 'dark' ? darkBgFallback : lightBgFallback;
 
+  // Status bar background: use theme background color
+  // Light mode = light background, Dark mode = dark background
+  let topBarBgColor = getCSSVariableValue('--background');
   topBarBgColor = normalizeColor(topBarBgColor, bgFallback);
+
+  // Navigation bar background: use theme background color to match the app
+  // Light mode = light background, Dark mode = dark background
+  let navBarBgColor = getCSSVariableValue('--background');
   navBarBgColor = normalizeColor(navBarBgColor, bgFallback);
 
   // Text color should be light on dark backgrounds, dark on light backgrounds
