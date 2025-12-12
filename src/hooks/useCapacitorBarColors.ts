@@ -107,10 +107,11 @@ export const getBarsColors = (
   navBarBgColor = normalizeColor(navBarBgColor, bgFallback);
 
   // Text color: dark mode = white text, light mode = black text
-  // Style.Light = light content (white text) for dark backgrounds
-  // Style.Dark = dark content (black text) for light backgrounds
-  const topBarTextColor = resolvedTheme === 'dark' ? Style.Light : Style.Dark;
-  const navBarTextColor = resolvedTheme === 'dark' ? Style.Light : Style.Dark;
+  // Note: Capacitor Style enum may be inverted from naming
+  // Testing: if Style.Dark shows light text, then use that for dark mode
+  // If Style.Light shows dark text, then use that for light mode
+  const topBarTextColor = resolvedTheme === 'dark' ? Style.Dark : Style.Light;
+  const navBarTextColor = resolvedTheme === 'dark' ? Style.Dark : Style.Light;
 
   return {
     topBarBgColor,
