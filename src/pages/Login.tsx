@@ -8,6 +8,7 @@ import Button from '../components/ui/Button';
 import { useNavigate } from 'react-router-dom';
 import { useVersionCheck } from '../hooks/useVersionCheck';
 import { ROUTES } from '../constants/routes';
+import { PrivacyGraphic } from '../components/graphics';
 
 interface LoginProps {
   onCreateNewAccount: () => void;
@@ -239,11 +240,9 @@ const Login: React.FC<LoginProps> = React.memo(
           {/* Left column: logo + hero copy */}
           <div className="w-full max-w-md text-center space-y-4">
             <div className="space-y-2">
-              <img
-                src="/logo.svg"
-                alt="Gossip"
-                className="mx-auto dark:invert my-10"
-              />
+              <div className="my-10">
+                <PrivacyGraphic size={120} />
+              </div>
               <h1 className="text-[28px] md:text-[32px] font-semibold tracking-tight text-gray-900 dark:text-white">
                 {displayUsername ? (
                   <>
@@ -263,7 +262,7 @@ const Login: React.FC<LoginProps> = React.memo(
           </div>
 
           {/* Right column: unified auth card */}
-          <div className="w-full max-w-md rounded-2xl bg-white/80 dark:bg-gray-900/60 border border-gray-200/80 dark:border-gray-700/60 p-5 shadow-sm backdrop-blur space-y-5">
+          <div className="w-full max-w-md space-y-2">
             {/* Biometric authentication - show if account supports it */}
             {shouldShowBiometricOption && accountSupportsBiometrics && (
               <div className="space-y-3">
@@ -274,7 +273,7 @@ const Login: React.FC<LoginProps> = React.memo(
                   variant="primary"
                   size="custom"
                   fullWidth
-                  className="h-11 rounded-xl text-sm font-medium"
+                  className="h-[51px] rounded-full text-sm font-medium"
                 >
                   {!isLoading && <span>Login with biometrics</span>}
                 </Button>
@@ -288,7 +287,7 @@ const Login: React.FC<LoginProps> = React.memo(
 
             {/* Password authentication - show if biometrics not available OR for password accounts */}
             {(!biometricMethodAvailable || usePassword) && (
-              <div className="space-y-3">
+              <div className="space-y-2">
                 <input
                   type="password"
                   value={password}
@@ -305,7 +304,7 @@ const Login: React.FC<LoginProps> = React.memo(
                     }
                   }}
                   placeholder="Password"
-                  className={`w-full h-12 px-4 rounded-xl border text-sm focus:outline-none focus:ring-2 transition text-gray-900 dark:text-white bg-white dark:bg-gray-800 ${
+                  className={`w-full h-12 px-4 rounded-full border text-sm focus:outline-none focus:ring-2 transition text-gray-900 dark:text-white bg-white dark:bg-gray-800 ${
                     persistentError
                       ? 'border-red-300 dark:border-red-600 focus:ring-red-200 dark:focus:ring-red-900/40'
                       : 'border-gray-200 dark:border-gray-700 focus:ring-blue-200 dark:focus:ring-blue-900/40'
@@ -319,6 +318,7 @@ const Login: React.FC<LoginProps> = React.memo(
                   loading={isLoading}
                   variant="primary"
                   fullWidth
+                  className="h-[51px] rounded-full disabled:bg-primary/20"
                 >
                   {!isLoading && <span>Login</span>}
                 </Button>
@@ -333,34 +333,34 @@ const Login: React.FC<LoginProps> = React.memo(
               </div>
             )}
 
-            <div className="border-t border-gray-200/80 dark:border-gray-700/60 pt-4 space-y-2">
+            <div className="space-y-2">
               <Button
                 onClick={handleChangeAccount}
                 variant="outline"
                 size="custom"
                 fullWidth
-                className="h-10 rounded-xl text-sm"
+                className="h-[51px] rounded-full text-sm"
               >
                 Switch account
               </Button>
-              <Button
-                onClick={onCreateNewAccount}
-                variant="outline"
-                size="custom"
-                fullWidth
-                className="h-10 rounded-xl text-sm"
-              >
-                Create new account
-              </Button>
-              <Button
-                onClick={() => setShowAccountImport(true)}
-                variant="outline"
-                size="custom"
-                fullWidth
-                className="h-10 rounded-xl text-sm"
-              >
-                Import account
-              </Button>
+              <div className="grid grid-cols-2 gap-2">
+                <Button
+                  onClick={onCreateNewAccount}
+                  variant="outline"
+                  size="custom"
+                  className="h-[51px] rounded-full text-sm"
+                >
+                  Create new account
+                </Button>
+                <Button
+                  onClick={() => setShowAccountImport(true)}
+                  variant="outline"
+                  size="custom"
+                  className="h-[51px] rounded-full text-sm"
+                >
+                  Import
+                </Button>
+              </div>
             </div>
           </div>
         </div>

@@ -56,10 +56,8 @@ const Button: React.FC<ButtonProps> = ({
     ghost:
       'bg-transparent hover:bg-accent text-foreground focus:ring-ring rounded-md',
     outline: `bg-card border border-border text-foreground hover:bg-accent/50 
-    hover:border-accent shadow-sm hover:shadow-md disabled:bg-muted 
-    disabled:text-muted-foreground disabled:border-border/50 
-    disabled:opacity-60 disabled:hover:bg-muted disabled:hover:border-border/50 
-    disabled:hover:shadow-sm rounded-md`,
+    hover:border-accent disabled:bg-muted disabled:text-muted-foreground disabled:border-border/50 
+    disabled:opacity-60 disabled:hover:bg-muted disabled:hover:border-border/50 rounded-md`,
     circular: 'rounded-full hover:bg-accent/50 active:scale-95',
     link: 'bg-transparent text-primary hover:text-primary/80 underline p-0 shadow-none',
     icon: 'bg-transparent hover:bg-accent/50 rounded-full p-2',
