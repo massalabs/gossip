@@ -9,7 +9,7 @@ export function GroupChatGraphic({
   detailColor = 'fill-foreground',
   scale = 2.0,
 }: GraphicProps) {
-  // Center of the original viewBox (393, 414)
+  // Center of the viewBox (393x414)
   const centerX = 196.5;
   const centerY = 207;
   return (
