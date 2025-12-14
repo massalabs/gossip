@@ -13,6 +13,9 @@ import NotificationsSettings from '../pages/settings/NotificationsSettings';
 import AppearanceSettings from '../pages/settings/AppearanceSettings';
 import AboutSettings from '../pages/settings/AboutSettings';
 import DebugSettings from '../pages/settings/DebugSettings';
+import AccountBackupPage from '../pages/settings/AccountBackupPage';
+import ShareContactPage from '../pages/settings/ShareContactPage';
+import ContactSharePage from '../pages/ContactSharePage';
 import { InvitePage } from '../pages/InvitePage';
 import { usePendingDeepLink } from '../hooks/usePendingDeepLink';
 import { useAppStateRefresh } from '../hooks/useAppStateRefresh';
@@ -31,6 +34,7 @@ export const AuthenticatedRoutes: React.FC = () => {
       <Route path={ROUTES.newDiscussion()} element={<NewDiscussion />} />
       <Route path={ROUTES.newContact()} element={<NewContact />} />
       <Route path={ROUTES.contact()} element={<Contact />} />
+      <Route path={ROUTES.contactShare()} element={<ContactSharePage />} />
       <Route path={ROUTES.discussion()} element={<Discussion />} />
       <Route
         path={ROUTES.discussionSettings()}
@@ -44,45 +48,24 @@ export const AuthenticatedRoutes: React.FC = () => {
           </MainLayout>
         }
       />
-      <Route
-        path={ROUTES.settingsSecurity()}
-        element={
-          <MainLayout>
-            <SecuritySettings />
-          </MainLayout>
-        }
-      />
+      <Route path={ROUTES.settingsSecurity()} element={<SecuritySettings />} />
       <Route
         path={ROUTES.settingsNotifications()}
-        element={
-          <MainLayout>
-            <NotificationsSettings />
-          </MainLayout>
-        }
+        element={<NotificationsSettings />}
       />
       <Route
         path={ROUTES.settingsAppearance()}
-        element={
-          <MainLayout>
-            <AppearanceSettings />
-          </MainLayout>
-        }
+        element={<AppearanceSettings />}
+      />
+      <Route path={ROUTES.settingsAbout()} element={<AboutSettings />} />
+      <Route path={ROUTES.settingsDebug()} element={<DebugSettings />} />
+      <Route
+        path={ROUTES.settingsAccountBackup()}
+        element={<AccountBackupPage />}
       />
       <Route
-        path={ROUTES.settingsAbout()}
-        element={
-          <MainLayout>
-            <AboutSettings />
-          </MainLayout>
-        }
-      />
-      <Route
-        path={ROUTES.settingsDebug()}
-        element={
-          <MainLayout>
-            <DebugSettings />
-          </MainLayout>
-        }
+        path={ROUTES.settingsShareContact()}
+        element={<ShareContactPage />}
       />
       <Route
         path={ROUTES.discussions()}

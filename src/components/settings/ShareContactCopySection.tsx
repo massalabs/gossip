@@ -85,7 +85,7 @@ const ShareContactCopySection: React.FC<ShareContactCopySectionProps> = ({
         loading={isSharing}
       >
         <Share2 className="w-5 h-5 mr-4" />
-        <span className="text-base font-semibold flex-1 text-left">
+        <span className="text-base font-medium flex-1 text-left">
           Share Invitation
         </span>
       </Button>
@@ -101,7 +101,7 @@ const ShareContactCopySection: React.FC<ShareContactCopySectionProps> = ({
           <Copy className="w-5 h-5 mr-4" />
         )}
         <span
-          className={`text-base font-semibold flex-1 text-left ${copiedUserId ? 'text-success' : ''}`}
+          className={`text-base font-medium flex-1 text-left ${copiedUserId ? 'text-success' : ''}`}
         >
           {copiedUserId ? 'User ID Copied!' : 'Copy User ID'}
         </span>
@@ -118,7 +118,7 @@ const ShareContactCopySection: React.FC<ShareContactCopySectionProps> = ({
           <Copy className="w-5 h-5 mr-4" />
         )}
         <span
-          className={`text-base font-semibold flex-1 text-left ${copiedQRUrl ? 'text-success' : ''}`}
+          className={`text-base font-medium flex-1 text-left ${copiedQRUrl ? 'text-success' : ''}`}
         >
           {copiedQRUrl ? 'QR Code URL Copied!' : 'Copy QR Code Invite'}
         </span>

@@ -58,7 +58,7 @@ const ThemeSelect: React.FC<ThemeSelectProps> = ({
               <ThemeIcon className="text-foreground" size={18} />
             </div>
             <div className="flex flex-col items-start flex-1 min-w-0">
-              <span className="text-base font-semibold text-foreground truncate w-full">
+              <span className="text-base font-medium text-foreground truncate w-full">
                 Theme
               </span>
               <span className="text-xs text-muted-foreground truncate w-full">
@@ -66,10 +66,7 @@ const ThemeSelect: React.FC<ThemeSelectProps> = ({
               </span>
             </div>
           </div>
-          <ChevronRight
-            className="text-muted-foreground flex-shrink-0"
-            size={20}
-          />
+          <ChevronRight className="text-muted-foreground shrink-0" size={20} />
         </button>
       </div>
 

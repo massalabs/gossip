@@ -6,8 +6,6 @@ import ScrollableContent from '../components/ui/ScrollableContent';
 import { useAccountStore } from '../stores/accountStore';
 import Button from '../components/ui/Button';
 import UserIdDisplay from '../components/ui/UserIdDisplay';
-import AccountBackup from '../components/account/AccountBackup';
-import ShareContact from '../components/settings/ShareContact';
 import { ROUTES } from '../constants/routes';
 import {
   LogOut,
@@ -25,24 +23,17 @@ import { useNavigate } from 'react-router-dom';
 import ProfilePicture from '../assets/gossip_face.svg';
 import { useAppStore } from '../stores/appStore';
 
-enum SettingsView {
-  MAIN = 'MAIN',
-  ACCOUNT_BACKUP = 'ACCOUNT_BACKUP',
-  SHARE_CONTACT = 'SHARE_CONTACT',
-}
-
 // Debug mode unlock constants
 const REQUIRED_TAPS = 7;
 const TAP_TIMEOUT_MS = 2000; // Reset counter after 2 seconds of inactivity
 
 const Settings = (): React.ReactElement => {
-  const { userProfile, getMnemonicBackupInfo, logout, resetAccount, ourPk } =
+  const { userProfile, getMnemonicBackupInfo, logout, resetAccount } =
     useAccountStore();
   const showDebugOption = useAppStore(s => s.showDebugOption);
   const setShowDebugOption = useAppStore(s => s.setShowDebugOption);
   const [showUserId, setShowUserId] = useState(false);
   const [isResetModalOpen, setIsResetModalOpen] = useState(false);
-  const [activeView, setActiveView] = useState<SettingsView>(SettingsView.MAIN);
   const navigate = useNavigate();
 
   // Debug mode unlock: 7-tap gesture on profile image
@@ -93,10 +84,6 @@ const Settings = (): React.ReactElement => {
 
   const mnemonicBackupInfo = getMnemonicBackupInfo();
 
-  const handleBack = useCallback(() => {
-    setActiveView(SettingsView.MAIN);
-  }, []);
-
   const handleResetAccount = useCallback(async () => {
     try {
       await resetAccount();
@@ -114,21 +101,6 @@ const Settings = (): React.ReactElement => {
     }
   };
 
-  if (activeView === SettingsView.ACCOUNT_BACKUP) {
-    return <AccountBackup onBack={handleBack} />;
-  }
-
-  if (activeView === SettingsView.SHARE_CONTACT) {
-    return (
-      <ShareContact
-        onBack={handleBack}
-        userId={userProfile!.userId}
-        userName={userProfile!.username}
-        publicKey={ourPk!}
-      />
-    );
-  }
-
   return (
     <div className="h-full flex flex-col bg-background app-max-w mx-auto">
       {/* Header */}
@@ -138,7 +110,7 @@ const Settings = (): React.ReactElement => {
       {/* Main Content */}
       <ScrollableContent className="flex-1 overflow-y-auto px-6 py-6">
         {/* Account Profile Section */}
-        <div className="bg-card rounded-xl border border-border p-6 mb-6">
+        <div className="bg-card rounded-xl border border-border p-6 mb-4">
           <div className="flex items-start gap-4">
             <button
               onClick={handleProfileImageTap}
@@ -154,7 +126,7 @@ const Settings = (): React.ReactElement => {
             <div className="flex-1 min-w-0">
               <div className="mb-2 flex items-baseline gap-2">
                 <p className="text-xs text-muted-foreground shrink-0">Name:</p>
-                <h3 className="text-base font-semibold text-foreground truncate">
+                <h3 className="text-base font-normal text-foreground truncate">
                   {userProfile?.username || 'Account name'}
                 </h3>
               </div>
@@ -184,17 +156,17 @@ const Settings = (): React.ReactElement => {
         </div>
 
         {/* Settings Sections */}
-        <div className="space-y-6">
+        <div className="space-y-2">
           {/* Account Backup & Share Contact Group */}
           <div className="bg-card rounded-xl border border-border overflow-hidden">
             <Button
               variant="outline"
               size="custom"
               className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0 border-b border-border"
-              onClick={() => setActiveView(SettingsView.ACCOUNT_BACKUP)}
+              onClick={() => navigate(ROUTES.settingsAccountBackup())}
             >
               <User className="mr-4" />
-              <span className="text-base font-semibold flex-1 text-left">
+              <span className="text-base font-normal flex-1 text-left">
                 Account Backup
               </span>
               {mnemonicBackupInfo?.backedUp && (
@@ -205,10 +177,10 @@ const Settings = (): React.ReactElement => {
               variant="outline"
               size="custom"
               className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0"
-              onClick={() => setActiveView(SettingsView.SHARE_CONTACT)}
+              onClick={() => navigate(ROUTES.settingsShareContact())}
             >
               <Share2 className="mr-4" />
-              <span className="text-base font-semibold flex-1 text-left">
+              <span className="text-base font-normal flex-1 text-left">
                 Share Contact
               </span>
             </Button>
@@ -223,7 +195,7 @@ const Settings = (): React.ReactElement => {
               onClick={() => navigate(ROUTES.settingsNotifications())}
             >
               <Bell className="mr-4" />
-              <span className="text-base font-semibold flex-1 text-left">
+              <span className="text-base font-normal flex-1 text-left">
                 Notifications
               </span>
             </Button>
@@ -234,7 +206,7 @@ const Settings = (): React.ReactElement => {
               onClick={() => navigate(ROUTES.settingsAppearance())}
             >
               <Moon className="mr-4" />
-              <span className="text-base font-semibold flex-1 text-left">
+              <span className="text-base font-normal flex-1 text-left">
                 Appearance
               </span>
             </Button>
@@ -251,7 +223,7 @@ const Settings = (): React.ReactElement => {
               onClick={() => navigate(ROUTES.settingsAbout())}
             >
               <Info className="mr-4" />
-              <span className="text-base font-semibold flex-1 text-left">
+              <span className="text-base font-normal flex-1 text-left">
                 About
               </span>
             </Button>
@@ -263,7 +235,7 @@ const Settings = (): React.ReactElement => {
                 onClick={() => navigate(ROUTES.settingsDebug())}
               >
                 <SettingsIconFeather className="mr-4" />
-                <span className="text-base font-semibold flex-1 text-left">
+                <span className="text-base font-normal flex-1 text-left">
                   Debug
                 </span>
               </Button>
@@ -279,7 +251,7 @@ const Settings = (): React.ReactElement => {
               onClick={handleLogout}
             >
               <LogOut className="mr-4" />
-              <span className="text-base font-semibold flex-1 text-left">
+              <span className="text-base font-normal flex-1 text-left">
                 Logout
               </span>
             </Button>
@@ -290,7 +262,7 @@ const Settings = (): React.ReactElement => {
               onClick={() => setIsResetModalOpen(true)}
             >
               <Trash2 className="mr-4" />
-              <span className="text-base font-semibold flex-1 text-left">
+              <span className="text-base font-normal flex-1 text-left">
                 Delete Account
               </span>
             </Button>
@@ -324,7 +296,7 @@ const Settings = (): React.ReactElement => {
               onClick={() => setIsResetModalOpen(false)}
               variant="outline"
               size="custom"
-              className="flex-1 h-12 rounded-full font-medium"
+              className="flex-1 h-12 rounded-full font-normal"
             >
               Cancel
             </Button>
@@ -333,7 +305,7 @@ const Settings = (): React.ReactElement => {
                 setIsResetModalOpen(false);
                 await handleResetAccount();
               }}
-              className="flex-1 h-12 rounded-full font-medium text-white hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+              className="flex-1 h-12 rounded-full font-normal text-white hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
               style={{ backgroundColor: 'var(--high-danger-red)' }}
             >
               Delete

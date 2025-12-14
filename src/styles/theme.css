@@ -76,6 +76,12 @@
   --sidebar-border: var(--border);
   --sidebar-ring: var(--ring);
 
+  /* Font weights */
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
   /* Layout */
   --radius: 0.25rem;
   --bottom-nav-height: 56px; /* Reduced from 64px for more compact mobile experience */

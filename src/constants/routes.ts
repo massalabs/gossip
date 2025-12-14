@@ -75,6 +75,8 @@ export const ROUTES = {
   settingsAppearance: route(`/${AppRoute.settings}/appearance`),
   settingsAbout: route(`/${AppRoute.settings}/about`),
   settingsDebug: route(`/${AppRoute.settings}/debug`),
+  settingsAccountBackup: route(`/${AppRoute.settings}/account-backup`),
+  settingsShareContact: route(`/${AppRoute.settings}/share-contact`),
 
   // Actions
   newContact: route(`/${AppRoute.newContact}`),
@@ -82,6 +84,7 @@ export const ROUTES = {
 
   // Dynamic routes
   contact: route(`/${AppRoute.contact}/:userId`),
+  contactShare: route(`/${AppRoute.contact}/:userId/share`),
   discussion: route(`/${AppRoute.discussion}/:userId`),
   discussionSettings: route(
     `/${AppRoute.discussion}/:discussionId/${AppRoute.settings}`

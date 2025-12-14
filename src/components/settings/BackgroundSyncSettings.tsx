@@ -217,7 +217,7 @@ const BackgroundSyncSettings: React.FC<BackgroundSyncSettingsProps> = ({
       {/* Header */}
       <div className="h-[54px] flex items-center px-4 justify-start w-full border-b border-border">
         <Battery className="text-foreground mr-4" aria-hidden="true" />
-        <span className="text-base font-semibold text-foreground flex-1 text-left">
+        <span className="text-base font-medium text-foreground flex-1 text-left">
           Background Sync
         </span>
         {isLoading ? (

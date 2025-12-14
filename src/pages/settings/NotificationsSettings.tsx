@@ -69,7 +69,7 @@ const NotificationsSettings: React.FC = () => {
         <div className="bg-card border border-border rounded-xl overflow-hidden">
           <div className="h-[54px] flex items-center px-4 justify-start w-full border-b border-border">
             <Bell className="text-foreground mr-4" />
-            <span className="text-base font-semibold text-foreground flex-1 text-left">
+            <span className="text-base font-medium text-foreground flex-1 text-left">
               Notifications
             </span>
             {notificationPrefs.permission.granted ? (
@@ -116,7 +116,7 @@ const NotificationsSettings: React.FC = () => {
                 }}
               >
                 <Bell className="mr-4" />
-                <span className="text-base font-semibold flex-1 text-left">
+                <span className="text-base font-medium flex-1 text-left">
                   Test Notification
                 </span>
               </Button>

@@ -12,14 +12,9 @@ import HeaderWrapper from '../components/ui/HeaderWrapper';
 import UserIdDisplay from '../components/ui/UserIdDisplay';
 import BaseModal from '../components/ui/BaseModal';
 import { Check, Edit2, Trash2 } from 'react-feather';
-import ShareContact from '../components/settings/ShareContact';
 import { UserPublicKeys } from '../assets/generated/wasm/gossip_wasm';
 import { DiscussionStatus } from '../db';
-
-enum ContactView {
-  DETAILS = 'DETAILS',
-  SHARE_CONTACT = 'SHARE_CONTACT',
-}
+import { ROUTES } from '../constants/routes';
 
 const Contact: React.FC = () => {
   const { userId } = useParams();
@@ -50,9 +45,6 @@ const Contact: React.FC = () => {
     }
   }, [contact]);
   const [showSuccessCheck, setShowSuccessCheck] = useState(false);
-  const [activeView, setActiveView] = useState<ContactView>(
-    ContactView.DETAILS
-  );
 
   const contactPublicKeys = useMemo(() => {
     if (!contact?.publicKeys) return null;
@@ -134,17 +126,6 @@ const Contact: React.FC = () => {
     );
   }
 
-  if (activeView === ContactView.SHARE_CONTACT && contactPublicKeys) {
-    return (
-      <ShareContact
-        onBack={() => setActiveView(ContactView.DETAILS)}
-        userId={contact.userId}
-        userName={displayName || contact.name}
-        publicKey={contactPublicKeys}
-      />
-    );
-  }
-
   const canStart = discussion
     ? discussion.status === DiscussionStatus.ACTIVE
     : true;
@@ -189,7 +170,11 @@ const Contact: React.FC = () => {
 
         <div className="mt-6 grid grid-cols-1 gap-2">
           <Button
-            onClick={() => setActiveView(ContactView.SHARE_CONTACT)}
+            onClick={() => {
+              if (userId) {
+                navigate(ROUTES.contactShare({ userId }));
+              }
+            }}
             disabled={!contactPublicKeys}
             variant="outline"
             size="custom"

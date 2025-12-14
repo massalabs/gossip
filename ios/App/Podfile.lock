@@ -22,9 +22,9 @@ PODS:
     - Capacitor
   - CapacitorPreferences (7.0.3):
     - Capacitor
-  - CapacitorStatusBar (7.0.3):
+  - CapacitorShare (7.0.3):
     - Capacitor
-  - CapgoCapacitorNavigationBar (7.3.18):
+  - CapacitorStatusBar (7.0.3):
     - Capacitor
   - KeychainSwift (21.0.0)
   - OSBarcodeLib (2.0.1)
@@ -41,8 +41,8 @@ DEPENDENCIES:
   - "CapacitorLocalNotifications (from `../../node_modules/@capacitor/local-notifications`)"
   - "CapacitorNetwork (from `../../node_modules/@capacitor/network`)"
   - "CapacitorPreferences (from `../../node_modules/@capacitor/preferences`)"
+  - "CapacitorShare (from `../../node_modules/@capacitor/share`)"
   - "CapacitorStatusBar (from `../../node_modules/@capacitor/status-bar`)"
-  - "CapgoCapacitorNavigationBar (from `../../node_modules/@capgo/capacitor-navigation-bar`)"
 
 SPEC REPOS:
   trunk:
@@ -72,10 +72,10 @@ EXTERNAL SOURCES:
     :path: "../../node_modules/@capacitor/network"
   CapacitorPreferences:
     :path: "../../node_modules/@capacitor/preferences"
+  CapacitorShare:
+    :path: "../../node_modules/@capacitor/share"
   CapacitorStatusBar:
     :path: "../../node_modules/@capacitor/status-bar"
-  CapgoCapacitorNavigationBar:
-    :path: "../../node_modules/@capgo/capacitor-navigation-bar"
 
 SPEC CHECKSUMS:
   AparajitaCapacitorBiometricAuth: c7edb43d80486150b81224d3ff7e950b37a3c2f1
@@ -89,11 +89,11 @@ SPEC CHECKSUMS:
   CapacitorLocalNotifications: 0811aef56ab2e5f7f9ae72f47d3473ab50c29038
   CapacitorNetwork: 1a22460c6f900686f12ffa52f3074ee313821b08
   CapacitorPreferences: 913eef88272c13eb6445b21e51fe8ef6635412cc
+  CapacitorShare: a4f4f86eabd4b3ff52ba6a11b754713c6926a8d1
   CapacitorStatusBar: 0659ddc7b1713764a05831463d215b177a15d054
-  CapgoCapacitorNavigationBar: 3c59704af4b6774bebb36beaab82643c141dfa83
   KeychainSwift: 4a71a45c802fd9e73906457c2dcbdbdc06c9419d
   OSBarcodeLib: 57987d2eb1f916f701f4554e20e349b3cb83f023
 
-PODFILE CHECKSUM: 1330f98cc65a80b0fafbc39338f8faea151384a7
+PODFILE CHECKSUM: 5c7d0c60772b5a343e3fe70e4b3485734fd017f9
 
 COCOAPODS: 1.16.2

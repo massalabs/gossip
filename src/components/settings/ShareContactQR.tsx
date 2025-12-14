@@ -22,7 +22,8 @@ const ShareContactQR: React.FC<ShareContactQRProps> = ({ deepLinkUrl }) => {
         width: 300,
         height: 300,
         data: deepLinkUrl,
-        image: '/favicon/favicon-96x96.png',
+        image: '/favicon/favicon.svg',
+
         dotsOptions: { type: 'extra-rounded', color: foregroundColor },
         cornersSquareOptions: {
           type: 'extra-rounded',
@@ -31,7 +32,7 @@ const ShareContactQR: React.FC<ShareContactQRProps> = ({ deepLinkUrl }) => {
         cornersDotOptions: { type: 'dot', color: foregroundColor },
         backgroundOptions: { color: backgroundColor, round: 0 },
         imageOptions: {
-          margin: 15,
+          margin: 10,
           imageSize: 0.25,
           crossOrigin: 'anonymous',
         },
@@ -58,19 +59,18 @@ const ShareContactQR: React.FC<ShareContactQRProps> = ({ deepLinkUrl }) => {
   }, [deepLinkUrl]);
 
   return (
-    <div className="bg-card rounded-xl border border-border p-6 mb-6">
+    <div className="my-10 flex justify-center items-center">
       {/* Always use a white background for the QR code container to ensure high contrast and reliable scanning, regardless of theme */}
-      <div className="flex justify-center p-6 bg-white rounded-xl min-h-[300px] items-center w-full">
-        {qrDataUrl ? (
-          <img
-            src={qrDataUrl}
-            alt="Your contact QR code"
-            className="w-[300px] h-[300px]"
-          />
-        ) : (
-          <PrivacyGraphic size={120} loading={true} />
-        )}
-      </div>
+
+      {qrDataUrl ? (
+        <img
+          src={qrDataUrl}
+          alt="Your contact QR code"
+          className="rounded-2xl"
+        />
+      ) : (
+        <PrivacyGraphic size={120} loading={true} />
+      )}
     </div>
   );
 };

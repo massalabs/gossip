@@ -62,7 +62,7 @@ const DebugSettings: React.FC = () => {
             <div className="h-[54px] flex items-center px-4 justify-between border-b border-border">
               <div className="flex items-center flex-1">
                 <SettingsIconFeather className="text-foreground mr-4" />
-                <span className="text-base font-semibold text-foreground flex-1 text-left">
+                <span className="text-base font-medium text-foreground flex-1 text-left">
                   Show Debug Options
                 </span>
               </div>
@@ -79,7 +79,7 @@ const DebugSettings: React.FC = () => {
               onClick={handleResetAllAccounts}
             >
               <AlertTriangle className="mr-4" />
-              <span className="text-base font-semibold flex-1 text-left">
+              <span className="text-base font-medium flex-1 text-left">
                 Reset App
               </span>
             </Button>
@@ -90,7 +90,7 @@ const DebugSettings: React.FC = () => {
               onClick={handleResetAllDiscussionsAndMessages}
             >
               <AlertTriangle className="mr-4" />
-              <span className="text-base font-semibold flex-1 text-left">
+              <span className="text-base font-medium flex-1 text-left">
                 Clear Messages & Contacts
               </span>
             </Button>
@@ -104,7 +104,7 @@ const DebugSettings: React.FC = () => {
               onClick={handleForceUpdate}
             >
               <AlertTriangle className="mr-4" />
-              <span className="text-base font-semibold flex-1 text-left">
+              <span className="text-base font-medium flex-1 text-left">
                 Clear Cache & Database
               </span>
             </Button>
