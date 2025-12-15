@@ -8,7 +8,6 @@ import ScanQRCode from '../components/settings/ScanQRCode';
 import { useAccountStore } from '../stores/accountStore';
 import { Info, Upload } from 'react-feather';
 import QrCodeIcon from '../components/ui/customIcons/QrCodeIcon';
-import { ROUTES } from '../constants/routes';
 
 const NewContact: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -51,12 +50,12 @@ const NewContact: React.FC = () => {
       setIsDiscardModalOpen(true);
       return;
     }
-    navigate(ROUTES.default());
+    navigate(-1);
   }, [hasUnsavedChanges, navigate]);
 
   const handleDiscard = useCallback(() => {
     setIsDiscardModalOpen(false);
-    navigate(ROUTES.default());
+    navigate(-1);
   }, [navigate]);
 
   const handleCancel = useCallback(() => {
