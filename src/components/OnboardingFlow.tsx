@@ -70,7 +70,7 @@ const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
           </div>
         </div>
         {currentStep === 0 ? (
-          <PrivacyGraphic size={200} />
+          <PrivacyGraphic size={250} />
         ) : currentStep === 1 ? (
           <LockGraphic size={200} />
         ) : (

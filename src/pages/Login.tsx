@@ -242,7 +242,7 @@ const Login: React.FC<LoginProps> = React.memo(
           <div className="w-full max-w-md text-center space-y-4">
             <div className="space-y-2">
               <div className="my-10">
-                <PrivacyGraphic size={120} />
+                <PrivacyGraphic size={200} />
               </div>
               <h1 className="text-[28px] md:text-[32px] font-semibold tracking-tight text-gray-900 dark:text-white">
                 {displayUsername ? (
