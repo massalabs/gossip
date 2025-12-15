@@ -21,7 +21,7 @@ const ShareContactFileSection: React.FC<ShareContactFileSectionProps> = ({
         <div className="w-12 h-12 bg-primary/10 rounded-xl flex items-center justify-center mx-auto mb-4">
           <Download className="w-6 h-6 text-primary" />
         </div>
-        <h4 className="text-lg font-medium text-foreground mb-2">
+        <h4 className="text-lg font-normal text-foreground mb-2">
           Share with file
         </h4>
         <p className="text-sm text-muted-foreground mb-6">
@@ -37,7 +37,7 @@ const ShareContactFileSection: React.FC<ShareContactFileSectionProps> = ({
         variant="primary"
         size="custom"
         fullWidth
-        className="h-11 rounded-xl text-sm font-medium"
+        className="h-11 rounded-xl text-sm font-normal"
       >
         <Download />
         <span>Download</span>

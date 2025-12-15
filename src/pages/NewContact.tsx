@@ -176,6 +176,28 @@ const NewContact: React.FC = () => {
           </div>
         </div>
 
+        {/* Scan QR Code and File Options */}
+        <div className="flex gap-3 mb-6">
+          <button
+            onClick={() => setShowScanner(true)}
+            className="flex-1 flex items-center justify-center gap-2 text-primary hover:text-primary/80 transition-colors py-3"
+            aria-label="Scan QR code"
+          >
+            <QrCodeIcon className="w-5 h-5" />
+            <span className="text-base font-medium">Scan QR code</span>
+          </button>
+
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={fileState.isLoading}
+            className="flex-1 flex items-center justify-center gap-2 text-muted-foreground hover:text-foreground transition-colors py-3 disabled:opacity-50 disabled:cursor-not-allowed"
+            aria-label="Import from file"
+          >
+            <Upload className="w-5 h-5" />
+            <span className="text-base font-medium">Import from file</span>
+          </button>
+        </div>
+
         {/* Message Field */}
         <div className="bg-card rounded-xl border border-border p-4 mb-6">
           <textarea
@@ -235,28 +257,6 @@ const NewContact: React.FC = () => {
               </p>
             </div>
           </div>
-        </div>
-
-        {/* Scan QR Code and File Options */}
-        <div className="flex gap-3 mb-6">
-          <button
-            onClick={() => setShowScanner(true)}
-            className="flex-1 flex items-center justify-center gap-2 text-primary hover:text-primary/80 transition-colors py-3"
-            aria-label="Scan QR code"
-          >
-            <QrCodeIcon className="w-5 h-5" />
-            <span className="text-base font-medium">Scan QR code</span>
-          </button>
-
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={fileState.isLoading}
-            className="flex-1 flex items-center justify-center gap-2 text-muted-foreground hover:text-foreground transition-colors py-3 disabled:opacity-50 disabled:cursor-not-allowed"
-            aria-label="Import from file"
-          >
-            <Upload className="w-5 h-5" />
-            <span className="text-base font-medium">Import from file</span>
-          </button>
         </div>
 
         {/* Hidden file input for file import */}
