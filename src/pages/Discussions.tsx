@@ -97,8 +97,8 @@ const Discussions: React.FC = () => {
           <SearchBar
             value={searchQuery}
             onChange={setQuery}
-            placeholder="Search discussions..."
-            aria-label="Search discussions"
+            placeholder="Search..."
+            aria-label="Search"
           />
         </div>
         <DiscussionListPanel

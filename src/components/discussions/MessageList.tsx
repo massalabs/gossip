@@ -1,7 +1,6 @@
 import React, { useMemo, useEffect, useRef, useLayoutEffect } from 'react';
 import { Element } from 'react-scroll';
 import { Message, Discussion, DiscussionDirection } from '../../db';
-import { formatDateTime } from '../../utils/timeUtils';
 import MessageItem from './MessageItem';
 import LoadingState from './LoadingState';
 import EmptyState from './EmptyState';
@@ -117,9 +116,17 @@ const MessageList: React.FC<MessageListProps> = ({
             <p className="whitespace-pre-wrap wrap-break-word">
               {discussion.announcementMessage}
             </p>
-            <p className="mt-1.5 text-[11px] text-muted-foreground dark:text-accent-foreground text-right">
+            {/* isOutgoing ? 'text-accent-foreground/80' : 'text-muted-foreground' */}
+            {/* 
+            <p
+              className={`mt-1.5 text-[11px] ${
+                discussion.direction === DiscussionDirection.INITIATED
+                  ? 'text-accent-foreground/80'
+                  : 'text-muted-foreground'
+              } text-right`}
+            >
               {formatDateTime(discussion.createdAt)}
-            </p>
+            </p> */}
           </div>
         </div>
       )}
