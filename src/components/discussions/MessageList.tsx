@@ -1,6 +1,7 @@
 import React, { useMemo, useEffect, useRef, useLayoutEffect } from 'react';
 import { Element } from 'react-scroll';
-import { Message, Discussion } from '../../db';
+import { Message, Discussion, DiscussionDirection } from '../../db';
+import { formatDateTime } from '../../utils/timeUtils';
 import MessageItem from './MessageItem';
 import LoadingState from './LoadingState';
 import EmptyState from './EmptyState';
@@ -95,14 +96,29 @@ const MessageList: React.FC<MessageListProps> = ({
   return (
     <div className="px-4 md:px-6 lg:px-8 py-6 space-y-4">
       {/* Display announcement message if it exists */}
-      {discussion?.announcementMessage && (
-        <div className="flex justify-center mb-4">
-          <div className="max-w-[85%] sm:max-w-[75%] md:max-w-[70%] px-4 py-3 bg-muted/50 border border-border rounded-xl">
-            <p className="text-xs font-medium text-muted-foreground mb-1.5">
+      {discussion?.announcementMessage && discussion.createdAt && (
+        <div
+          className={`mb-4 flex ${
+            discussion.direction === DiscussionDirection.INITIATED
+              ? 'justify-end'
+              : 'justify-start'
+          }`}
+        >
+          <div
+            className={`max-w-[85%] sm:max-w-[75%] md:max-w-[70%] px-4 py-3 rounded-3xl text-sm leading-tight ${
+              discussion.direction === DiscussionDirection.INITIATED
+                ? 'bg-accent text-accent-foreground rounded-br-[4px]'
+                : 'bg-card dark:bg-surface-secondary text-card-foreground rounded-bl-[4px] shadow-sm'
+            }`}
+          >
+            <p className="text-xs text-center font-light opacity-80 mb-1.5">
               Announcement message:
             </p>
-            <p className="text-sm text-foreground whitespace-pre-wrap wrap-break-word">
+            <p className="whitespace-pre-wrap wrap-break-word">
               {discussion.announcementMessage}
+            </p>
+            <p className="mt-1.5 text-[11px] text-muted-foreground text-right">
+              {formatDateTime(discussion.createdAt)}
             </p>
           </div>
         </div>
