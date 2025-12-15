@@ -80,6 +80,8 @@ const NewContact: React.FC = () => {
     );
   }
 
+  const isAddDisabled = !canSubmit || isSubmitting;
+
   return (
     <div className="bg-background h-full overflow-auto app-max-w mx-auto">
       {/* Custom Header */}
@@ -95,9 +97,10 @@ const NewContact: React.FC = () => {
           <h1 className="text-xl font-semibold text-foreground">New contact</h1>
           <button
             onClick={handleSubmit}
-            disabled={!canSubmit || isSubmitting}
-            tabIndex={!canSubmit || isSubmitting ? -1 : 0}
-            className="text-foreground hover:text-primary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className={`text-foreground hover:text-primary transition-colors ${
+              isAddDisabled ? 'opacity-50 cursor-not-allowed' : ''
+            }`}
+            aria-disabled={isAddDisabled}
             aria-label="Add contact"
           >
             {isSubmitting ? 'Adding...' : 'Add'}

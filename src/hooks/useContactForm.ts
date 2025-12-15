@@ -167,6 +167,40 @@ export function useContactForm() {
   );
 
   const handleSubmit = useCallback(async () => {
+    const trimmedName = name.value.trim();
+    const trimmedUserId = userId.value.trim();
+
+    // Surface missing or pending requirements as field errors when user tries to submit
+    if (!trimmedName) {
+      setName(prev => ({
+        ...prev,
+        error: prev.error || 'Display name is required',
+      }));
+    }
+
+    if (!trimmedUserId) {
+      setUserId(prev => ({
+        ...prev,
+        error: prev.error || 'User ID is required',
+      }));
+    }
+
+    if (userId.loading) {
+      setUserId(prev => ({
+        ...prev,
+        error: prev.error || 'Resolving user ID, please wait…',
+      }));
+    }
+
+    if (!publicKeys && trimmedUserId) {
+      setUserId(prev => ({
+        ...prev,
+        error:
+          prev.error ||
+          'Unable to load public key for this user ID. Please check it.',
+      }));
+    }
+
     if (
       !canSubmit ||
       !userProfile?.userId ||
@@ -174,16 +208,14 @@ export function useContactForm() {
       !ourSk ||
       !ourPk ||
       !session
-    )
+    ) {
       return;
+    }
 
     setIsSubmitting(true);
     setGeneralError(null);
 
     try {
-      const trimmedName = name.value.trim();
-      const trimmedUserId = userId.value.trim();
-
       // Duplicate checks
       const contacts = await db.getContactsByOwner(userProfile.userId);
       const nameTaken = contacts.some(
@@ -255,6 +287,7 @@ export function useContactForm() {
     name.value,
     userId.value,
     message.value,
+    userId.loading,
     navigate,
     ourSk,
     ourPk,
