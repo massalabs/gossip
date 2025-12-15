@@ -32,10 +32,10 @@ const RoundedInput: React.FC<RoundedInputProps> = ({
       placeholder={placeholder}
       maxLength={maxLength}
       disabled={disabled}
-      className={`w-full h-12 px-4 rounded-full border text-sm focus:outline-none focus:ring-2 transition text-gray-900 dark:text-white bg-white dark:bg-gray-800 placeholder-gray-400 dark:placeholder-gray-500 ${
+      className={`w-full h-12 px-4 rounded-full border text-sm focus:outline-none focus:ring-2 transition text-foreground dark:text-foreground bg-card dark:bg-input placeholder-muted-foreground dark:placeholder-muted-foreground ${
         error
-          ? 'border-red-300 dark:border-red-600 focus:ring-red-200 dark:focus:ring-red-900/40'
-          : 'border-gray-200 dark:border-gray-700 focus:ring-blue-200 dark:focus:ring-blue-900/40'
+          ? 'border-destructive/60 focus:ring-destructive/30 dark:border-destructive/70 dark:focus:ring-destructive/40'
+          : 'border-border focus:ring-ring/30 dark:border-border dark:focus:ring-ring/40'
       } ${className}`}
     />
   );

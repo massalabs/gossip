@@ -163,7 +163,7 @@
 
   /* UI elements */
   --border: #2a2a2e; /* subtle border */
-  --input: var(--card); /* input background */
+  --input: #252528; /* dark input background */
   --tail-border: transparent; /* transparent border for dark mode tail */
   --badge: var(
     --surface-secondary
