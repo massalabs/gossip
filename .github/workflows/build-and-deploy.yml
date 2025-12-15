@@ -462,6 +462,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ios-app-${{ github.run_number }}
-          path: ios/App/*.ipa
+          path: ios/App/fastlane/build/*.ipa
           if-no-files-found: warn
           retention-days: 7

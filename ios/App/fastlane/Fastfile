@@ -32,22 +32,38 @@ platform :ios do
     )
     
     # Use match for code signing
-    # In CI, create certificates if they don't exist
+    # In CI, create App Store distribution profiles for both the main app and the iOS share extension
     match(
       type: "appstore",  # App Store type for TestFlight distribution
-      readonly: false,  # Create certificates if needed
-      app_identifier: "net.massa.gossip",
-      api_key: api_key  # Use API Key for authentication
+      readonly: false,   # Create certificates if needed
+      app_identifier: [
+        "net.massa.gossip",
+        "net.massa.gossip.GossipShareExtension"
+      ],
+      api_key: api_key   # Use API Key for authentication
     )
 
-    # Update project settings to use manual signing with Match profiles
+    # Force manual signing for both targets using the appropriate App Store profiles
+    # Main app target
     update_code_signing_settings(
       use_automatic_signing: false,
       path: "App.xcodeproj",
       team_id: ENV["APPLE_TEAM_ID"],
+      targets: ["Gossip"],
       profile_name: "match AppStore net.massa.gossip",
       code_sign_identity: "Apple Distribution",
       bundle_identifier: "net.massa.gossip"
+    )
+
+    # Share extension target
+    update_code_signing_settings(
+      use_automatic_signing: false,
+      path: "App.xcodeproj",
+      team_id: ENV["APPLE_TEAM_ID"],
+      targets: ["GossipShareExtension"],
+      profile_name: "match AppStore net.massa.gossip.GossipShareExtension",
+      code_sign_identity: "Apple Distribution",
+      bundle_identifier: "net.massa.gossip.GossipShareExtension"
     )
     
     # Build the app with manual signing using Match certificates
@@ -56,7 +72,7 @@ platform :ios do
       scheme: "Gossip",
       configuration: "Release",
       export_method: "app-store",
-      output_directory: "./",
+      output_directory: "fastlane/build",
       output_name: "Gossip.ipa",
       clean: false,
       export_options: {
@@ -99,7 +115,7 @@ platform :ios do
       skip_submission: true,
       distribute_external: false,
       notify_external_testers: false,
-      ipa: "./Gossip.ipa"
+      ipa: "fastlane/build/Gossip.ipa"
     )
 
     UI.success("🚀 Successfully uploaded to TestFlight!")
