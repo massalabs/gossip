@@ -150,8 +150,8 @@ const AccountCreation: React.FC<AccountCreationProps> = ({
         <div className="p-4">
           {/* Authentication Method Toggle */}
           {biometricAvailable && (
-            <div className="rounded-lg p-6">
-              <p className="text-xl font-medium text-black dark:text-white mb-5">
+            <div className="mb-6">
+              <p className="text-xl font-medium text-black dark:text-white mb-4">
                 Authentication Method
               </p>
               <TabSwitcher

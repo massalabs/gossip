@@ -73,8 +73,8 @@ const AccountBackup: React.FC<AccountBackupProps> = ({ onBack }) => {
         <div className="p-4 space-y-6">
           {/* Tabs - Only show when backup info is displayed */}
           {backupInfo && (
-            <div className="rounded-lg p-6">
-              <p className="text-xl font-medium text-foreground mb-5">
+            <div className="mb-4">
+              <p className="text-xl font-medium text-foreground mb-3">
                 Backup Method
               </p>
               <TabSwitcher
