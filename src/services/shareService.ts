@@ -6,6 +6,25 @@ export interface ShareInvitationOptions {
 }
 
 /**
+ * Returns true if we can open a native share sheet or Web Share API,
+ * i.e. actually share via other apps and not just copy to clipboard.
+ */
+export function canShareInvitationViaOtherApp(): boolean {
+  if (Capacitor.isNativePlatform()) {
+    return true;
+  }
+
+  if (
+    typeof navigator !== 'undefined' &&
+    typeof navigator.share === 'function'
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
  * Share invitation link using native share sheet on mobile devices
  * or Web Share API on web browsers.
  *

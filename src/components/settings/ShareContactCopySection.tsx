@@ -1,7 +1,11 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Check, Copy, Share2 } from 'react-feather';
+import toast from 'react-hot-toast';
 import Button from '../ui/Button';
-import { shareInvitation } from '../../services/shareService';
+import {
+  shareInvitation,
+  canShareInvitationViaOtherApp,
+} from '../../services/shareService';
 
 interface ShareContactCopySectionProps {
   userId: string;
@@ -15,6 +19,7 @@ const ShareContactCopySection: React.FC<ShareContactCopySectionProps> = ({
   const [copiedUserId, setCopiedUserId] = useState(false);
   const [copiedQRUrl, setCopiedQRUrl] = useState(false);
   const [isSharing, setIsSharing] = useState(false);
+  const [canShareViaOtherApp, setCanShareViaOtherApp] = useState(false);
   const userIdTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const qrUrlTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -58,12 +63,15 @@ const ShareContactCopySection: React.FC<ShareContactCopySectionProps> = ({
       });
     } catch (err) {
       console.error('Failed to share invitation:', err);
+      toast.error('Failed to share invitation. Please try again.');
     } finally {
       setIsSharing(false);
     }
   }, [deepLinkUrl]);
 
   useEffect(() => {
+    setCanShareViaOtherApp(canShareInvitationViaOtherApp());
+
     return () => {
       if (userIdTimeoutRef.current) {
         clearTimeout(userIdTimeoutRef.current);
@@ -81,7 +89,7 @@ const ShareContactCopySection: React.FC<ShareContactCopySectionProps> = ({
         size="custom"
         className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0 border-b border-border"
         onClick={handleShareInvitation}
-        disabled={isSharing}
+        disabled={isSharing || !canShareViaOtherApp}
         loading={isSharing}
       >
         <Share2 className="w-5 h-5 mr-4" />
