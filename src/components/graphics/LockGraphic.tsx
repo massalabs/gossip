@@ -5,8 +5,8 @@ export function LockGraphic({
   className = '',
   loading = false,
   outerColor = 'fill-graphic-accent',
-  innerColor = 'fill-gray-100',
-  detailColor = 'fill-gray-800',
+  innerColor = 'fill-card',
+  detailColor = 'fill-foreground',
   scale = 2.0,
 }: GraphicProps) {
   // Center of the original viewBox (362x417)
