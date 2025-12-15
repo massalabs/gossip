@@ -179,7 +179,7 @@ const Contact: React.FC = () => {
             variant="outline"
             size="custom"
             fullWidth
-            className="h-[46px] rounded-lg bg-card border border-border text-card-foreground font-semibold hover:bg-muted"
+            className="h-[46px] rounded-full bg-card border border-border text-card-foreground font-medium hover:bg-muted"
           >
             Share contact
           </Button>
@@ -195,7 +195,7 @@ const Contact: React.FC = () => {
             variant="danger"
             size="custom"
             fullWidth
-            className="h-[46px] rounded-lg font-semibold mt-4"
+            className="h-[46px] rounded-full font-medium mt-4"
           >
             <Trash2 className="w-4 h-4 mr-2" />
             Remove contact
@@ -243,7 +243,7 @@ const Contact: React.FC = () => {
               loading={isDeleting}
               variant="danger"
               size="custom"
-              className="flex-1 h-11 rounded-lg font-semibold"
+              className="flex-1 h-11 rounded-full font-medium"
             >
               {isDeleting ? 'Removing...' : 'Remove'}
             </Button>
@@ -255,7 +255,7 @@ const Contact: React.FC = () => {
               disabled={isDeleting}
               variant="secondary"
               size="custom"
-              className="flex-1 h-11 rounded-lg font-semibold"
+              className="flex-1 h-11 rounded-full font-medium"
             >
               Cancel
             </Button>
