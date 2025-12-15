@@ -57,7 +57,7 @@ public class MainActivity extends BridgeActivity {
     }
     
     @Override
-    protected void onDestroy() {
+    public void onDestroy() {
         super.onDestroy();
         // Clear tracking when Activity is destroyed to allow same content to be shared again in new session
         lastProcessedSharedText = null;
@@ -109,7 +109,7 @@ public class MainActivity extends BridgeActivity {
                 // Store shared content URL in Capacitor Preferences for JavaScript to read
                 // JavaScript will check Preferences on mount and when app becomes active
                 try {
-                    SharedPreferences prefs = getContext().getSharedPreferences(
+                    SharedPreferences prefs = getSharedPreferences(
                             "CapacitorStorage", Context.MODE_PRIVATE);
                     prefs.edit().putString("pendingGossipShareUrl", gossipUrl).apply();
                 } catch (Exception e) {
