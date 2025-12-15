@@ -12,9 +12,11 @@
   --popover-foreground: var(--foreground);
 
   /* Primary colors */
-  --primary: #14b8a6; /* teal-600 - green/cyan adapted for light mode */
-  --primary-foreground: #ffffff; /* white text on teal */
-  --ring: var(--primary); /* focus ring using teal */
+  --primary: #3af3d1; /* brand green - unified primary across modes */
+  --primary-foreground: var(
+    --foreground
+  ); /* dark text on primary in light mode */
+  --ring: var(--primary); /* focus ring using primary */
 
   /* Secondary colors */
   --secondary: #ff8c8c; /* coral timer - self-destruct/Secondary */
@@ -25,10 +27,10 @@
   --destructive-foreground: var(--secondary-foreground);
 
   /* Accent colors */
-  --accent: #6ab3a3; /* muted teal - softer, less flashy for light mode */
+  --accent: var(--primary); /* use brand green for accent surfaces */
   --accent-foreground: var(
     --foreground
-  ); /* dark text on accent for light mode */
+  ); /* dark text on accent in light mode */
 
   /* Muted colors */
   --muted: #f0f1f3; /* muted background */
@@ -57,7 +59,7 @@
   ); /* secondary surface background (light mode uses card) */
 
   /* Graphic colors */
-  --graphic-accent: #b8f2e7; /* teal/green for graphics - consistent across modes */
+  --graphic-accent: var(--primary); /* brand green for illustrations */
 
   /* Chart colors */
   --chart-1: var(--accent); /* deeper sea-foam */
@@ -118,7 +120,7 @@
   --popover-foreground: var(--foreground);
 
   /* Primary colors */
-  --primary: #3af3d1; /* bright cyan - primary from Figma */
+  --primary: #3af3d1; /* brand green - unified primary across modes */
   --primary-foreground: var(
     --background
   ); /* dark text on cyan for good contrast */
@@ -135,7 +137,7 @@
   --destructive-foreground: var(--secondary-foreground);
 
   /* Accent colors */
-  --accent: #b8f2e7; /* lighter cyan - accent from Figma */
+  --accent: var(--primary); /* use brand green for accent surfaces */
   --accent-foreground: var(
     --background
   ); /* dark text on accent for good contrast */
@@ -172,8 +174,8 @@
   ); /* badge border color - uses secondary surface */
 
   /* Chart colors */
-  --chart-1: var(--accent); /* sea-foam proof */
-  --chart-2: var(--primary); /* teal */
+  --chart-1: var(--accent); /* accent/primary */
+  --chart-2: var(--primary); /* primary */
   --chart-3: var(--secondary); /* peach timer */
   --chart-4: #d6a8dc; /* muted orchid - offline key */
   --chart-5: var(--chart-1); /* sea-foam variant */
