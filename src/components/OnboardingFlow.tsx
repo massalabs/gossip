@@ -102,7 +102,7 @@ const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
                 variant="primary"
                 size="custom"
                 fullWidth
-                className="h-14 text-base font-semibold rounded-2xl gap-2"
+                className="h-14 text-base font-semibold rounded-full gap-2"
               >
                 <Zap />
                 Create New Account
@@ -113,7 +113,7 @@ const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
                   variant="outline"
                   size="custom"
                   fullWidth
-                  className="h-14 text-base font-medium rounded-2xl"
+                  className="h-14 text-base font-medium rounded-full"
                 >
                   Import from Mnemonic
                 </Button>
