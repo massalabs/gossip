@@ -117,7 +117,7 @@ const MessageList: React.FC<MessageListProps> = ({
             <p className="whitespace-pre-wrap wrap-break-word">
               {discussion.announcementMessage}
             </p>
-            <p className="mt-1.5 text-[11px] text-muted-foreground text-right">
+            <p className="mt-1.5 text-[11px] text-muted-foreground dark:text-accent-foreground text-right">
               {formatDateTime(discussion.createdAt)}
             </p>
           </div>
