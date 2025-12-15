@@ -5,10 +5,12 @@ import { LocalNotifications } from '@capacitor/local-notifications';
 import { useNavigate } from 'react-router-dom';
 import { extractInvitePath, parseInvite } from '../utils/qrCodeParser';
 import { useAppStore } from '../stores/appStore';
+import { ROUTES } from '../constants/routes';
 
 export const AppUrlListener: React.FC = () => {
   const navigate = useNavigate();
   const setPendingDeepLinkInfo = useAppStore(s => s.setPendingDeepLinkInfo);
+  const setPendingSharedContent = useAppStore(s => s.setPendingSharedContent);
 
   const cleanupFunctionsRef = useRef<Set<() => void>>(new Set());
 
@@ -16,14 +18,30 @@ export const AppUrlListener: React.FC = () => {
     cleanupFunctionsRef.current.add(cleanup);
   }, []);
 
-  /**
-   * Handle OS-level deep links delivered via Capacitor appUrlOpen
-   * Only processes invite URLs; actual navigation is handled by usePendingDeepLink.
-   */
   const handleAppUrlOpen = useCallback(
     async (event: URLOpenListenerEvent) => {
       try {
-        const invitePath = extractInvitePath(event.url);
+        const url = event.url;
+
+        // Handle iOS share extension: gossip://share?text=...
+        if (url.startsWith('gossip://share')) {
+          try {
+            const urlObj = new URL(url);
+            const sharedText = urlObj.searchParams.get('text');
+            if (sharedText) {
+              setPendingSharedContent(sharedText);
+              navigate(ROUTES.discussions(), { replace: true });
+              return;
+            }
+          } catch (parseError) {
+            console.error(
+              'Failed to parse shared content URL from appUrlOpen:',
+              parseError
+            );
+          }
+        }
+
+        const invitePath = extractInvitePath(url);
         if (!invitePath) return;
 
         const parsed = parseInvite(invitePath);
@@ -32,10 +50,10 @@ export const AppUrlListener: React.FC = () => {
         // Reset browser history URL so React Router can control navigation
         window.history.replaceState(null, '', '/');
       } catch (err) {
-        console.error('Failed to handle appUrlOpen deep link:', err);
+        console.error('Failed to handle appUrlOpen event:', err);
       }
     },
-    [setPendingDeepLinkInfo]
+    [setPendingDeepLinkInfo, setPendingSharedContent, navigate]
   );
 
   /**
