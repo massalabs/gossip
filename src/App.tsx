@@ -18,8 +18,6 @@ import { setupServiceWorker } from './services/serviceWorkerSetup';
 import { AuthenticatedRoutes } from './routes/AuthenticatedRoutes';
 import { UnauthenticatedRoutes } from './routes/UnauthenticatedRoutes';
 import { Onboarding } from './pages/Onboarding.tsx';
-import { useVersionCheck } from './hooks/useVersionCheck.ts';
-import VersionUpdateModal from './components/ui/VersionUpdateModal.tsx';
 import { AppUrlListener } from './components/AppUrlListener';
 import { toastOptions } from './utils/toastOptions.ts';
 import LoadingScreen from './components/ui/LoadingScreen.tsx';
@@ -75,9 +73,6 @@ const AppContent: React.FC = () => {
 };
 
 function App() {
-  const { showUpdatePrompt, handleForceUpdate, dismissUpdate } =
-    useVersionCheck();
-
   const { initTheme } = useTheme();
   const { initOnlineStore } = useOnlineStore();
 
@@ -113,11 +108,6 @@ function App() {
           <PWABadge />
         </div> */}
         <Toaster position="top-center" toastOptions={toastOptions} />
-        <VersionUpdateModal
-          isOpen={showUpdatePrompt}
-          onClose={dismissUpdate}
-          onAccept={handleForceUpdate}
-        />
       </ErrorBoundary>
     </BrowserRouter>
   );
