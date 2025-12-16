@@ -187,7 +187,11 @@ export async function getDiscussion(
   contactUserId: string
 ): Promise<Discussion | null> {
   try {
-    return await db.getDiscussionByOwnerAndContact(ownerUserId, contactUserId);
+    const discussion = await db.getDiscussionByOwnerAndContact(
+      ownerUserId,
+      contactUserId
+    );
+    return discussion ?? null;
   } catch (error) {
     console.error('Error getting discussion:', error);
     return null;

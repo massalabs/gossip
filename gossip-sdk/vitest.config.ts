@@ -11,6 +11,13 @@ export default defineConfig({
     environment: 'node',
     setupFiles: [resolve(__dirname, 'test/setup.ts')],
     include: ['test/**/*.{test,spec}.{js,ts}'],
+    // Run tests sequentially to avoid database conflicts
+    pool: 'forks',
+    poolOptions: {
+      forks: {
+        singleFork: true,
+      },
+    },
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],

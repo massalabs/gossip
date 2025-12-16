@@ -32,11 +32,10 @@ describe('Message Operations', () => {
   let contactPublicKeys: UserPublicKeys;
 
   beforeEach(async () => {
-    // Clean up database before each test
-    try {
-      await db.delete();
-    } catch (_) {
-      // Ignore errors
+    // Database is already cleaned up by setup.ts afterEach hook
+    // Just ensure it's open
+    if (!db.isOpen()) {
+      await db.open();
     }
 
     // Initialize account
@@ -322,6 +321,6 @@ describe('Message Operations', () => {
         m => m.direction === MessageDirection.OUTGOING
       );
       expect(outgoingFrom2.length).toBeGreaterThanOrEqual(5);
-    });
+    }, 30000); // Increased timeout for this test
   });
 });

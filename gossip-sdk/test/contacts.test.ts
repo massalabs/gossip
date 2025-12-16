@@ -18,13 +18,18 @@ describe('Contact Management', () => {
   let ownerUserId: string;
   let contactPublicKeys: UserPublicKeys;
 
+  beforeAll(async () => {
+    const mockProtocol = createMessageProtocol(MessageProtocolType.MOCK);
+    announcementService.setMessageProtocol(mockProtocol);
+    messageService.setMessageProtocol(mockProtocol);
+  });
+
   beforeEach(async () => {
-    // Clean up database before each test
-    try {
-      const { db } = await import('../src/db');
-      await db.delete();
-    } catch (_) {
-      // Ignore errors
+    // Database is already cleaned up by setup.ts afterEach hook
+    // Just ensure it's open
+    const { db } = await import('../../src/db');
+    if (!db.isOpen()) {
+      await db.open();
     }
 
     // Initialize account
