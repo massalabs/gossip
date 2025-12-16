@@ -14,6 +14,7 @@ import {
 } from '../assets/generated/wasm/gossip_wasm';
 import { SessionModule } from '../wasm/session';
 import { notificationService } from './notifications';
+import { isAppInForeground } from '../utils/appState';
 
 const ONE_HOUR_MS = 60 * 60 * 1000;
 
@@ -413,12 +414,12 @@ export class AnnouncementService {
       const { discussionId } = await handleReceivedDiscussion(
         ownerUserId,
         contactUserIdString,
-        announcementMessage,
-        contact.name
+        announcementMessage
       );
 
       // Only show notification if app is not active (in background, minimized, or in another tab)
-      const isAppActive = typeof document !== 'undefined' && !document.hidden;
+      const isAppActive = await isAppInForeground();
+
       if (isIncomingAnnouncement && !isAppActive) {
         try {
           await notificationService.showNewDiscussionNotification(
@@ -459,8 +460,7 @@ export class AnnouncementService {
 async function handleReceivedDiscussion(
   ownerUserId: string,
   contactUserId: string,
-  announcementMessage?: string,
-  contactName?: string
+  announcementMessage?: string
 ): Promise<{ discussionId: number }> {
   const discussionId = await db.transaction(
     'rw',
@@ -505,17 +505,6 @@ async function handleReceivedDiscussion(
       return discussionId;
     }
   );
-
-  try {
-    await notificationService.showNewDiscussionNotification(
-      contactName || `User ${contactUserId.substring(0, 8)}`
-    );
-  } catch (notificationError) {
-    console.error(
-      'Failed to show new discussion notification:',
-      notificationError
-    );
-  }
 
   return { discussionId };
 }
