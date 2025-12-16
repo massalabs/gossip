@@ -133,7 +133,7 @@ const VirtualizedMessageList: React.FC<MessageListProps> = ({
   );
 
   const itemContent = useCallback(
-    (index: number, message: Message) => (
+    (_index: number, message: Message) => (
       <MessageItem
         id={`message-${message.id}`}
         message={message}
