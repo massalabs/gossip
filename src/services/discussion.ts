@@ -12,7 +12,7 @@ import {
   UserSecretKeys,
 } from '../assets/generated/wasm/gossip_wasm';
 import { announcementService, EstablishSessionError } from './announcement';
-import { SessionModule } from '../wasm/session';
+import { SessionModule, sessionStatusToString } from '../wasm/session';
 import { decodeUserId } from '../utils';
 import { SessionStatus } from '../assets/generated/wasm/gossip_wasm';
 
@@ -201,7 +201,7 @@ export async function renewDiscussion(
 
   const sessionStatus = session.peerSessionStatus(decodeUserId(contactUserId));
   console.log(
-    `renewDiscussion: session status for discussion between ${ownerUserId} and ${contactUserId} after reinitiation is ${sessionStatus}`
+    `renewDiscussion: session status for discussion between ${ownerUserId} and ${contactUserId} after reinitiation is ${sessionStatusToString(sessionStatus)}`
   );
 
   const status: DiscussionStatus = !result.success

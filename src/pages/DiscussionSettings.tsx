@@ -1,4 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useDiscussionStore } from '../stores/discussionStore';
 import { updateDiscussionName } from '../utils';
@@ -7,9 +13,10 @@ import ContactNameModal from '../components/ui/ContactNameModal';
 import Button from '../components/ui/Button';
 import PageHeader from '../components/ui/PageHeader';
 import HeaderWrapper from '../components/ui/HeaderWrapper';
-import { Check, Edit2, ChevronRight } from 'react-feather';
+import { Check, Edit2, ChevronRight, RotateCw } from 'react-feather';
 import { Contact } from '../db';
 import { ROUTES } from '../constants/routes';
+import { useResendFailedBlobs } from '../hooks/useResendFailedBlobs';
 
 const DiscussionSettings: React.FC = () => {
   const { discussionId } = useParams();
@@ -17,6 +24,7 @@ const DiscussionSettings: React.FC = () => {
 
   const discussions = useDiscussionStore(s => s.discussions);
   const contacts = useDiscussionStore(s => s.contacts);
+  const { manualRenewDiscussion } = useResendFailedBlobs(false);
 
   const discussion = useMemo(() => {
     if (!discussionId) return undefined;
@@ -46,6 +54,10 @@ const DiscussionSettings: React.FC = () => {
   const [proposedName, setProposedName] = useState(displayName);
   const [nameError, setNameError] = useState<string | null>(null);
   const [showSuccessCheck, setShowSuccessCheck] = useState(false);
+  const [reconnectSuccess, setReconnectSuccess] = useState(false);
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  );
 
   // Sync proposed name when display name changes
   useEffect(() => {
@@ -61,6 +73,15 @@ const DiscussionSettings: React.FC = () => {
       return () => clearTimeout(timer);
     }
   }, [showSuccessCheck]);
+
+  // Cleanup reconnect timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const handleOpenEditName = useCallback(() => {
     setProposedName(discussion?.customName || '');
@@ -90,6 +111,28 @@ const DiscussionSettings: React.FC = () => {
     },
     [navigate]
   );
+
+  const handleResetConnection = useCallback(async () => {
+    if (!discussion?.contactUserId) return;
+
+    try {
+      await manualRenewDiscussion(discussion.contactUserId);
+      setReconnectSuccess(true);
+
+      // Clear existing timeout if any
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+      }
+
+      // Reset feedback after 2 seconds
+      reconnectTimeoutRef.current = setTimeout(() => {
+        setReconnectSuccess(false);
+        reconnectTimeoutRef.current = null;
+      }, 2000);
+    } catch (error) {
+      console.error('Failed to reset connection:', error);
+    }
+  }, [discussion?.contactUserId, manualRenewDiscussion]);
 
   if (!discussion) {
     return (
@@ -135,6 +178,34 @@ const DiscussionSettings: React.FC = () => {
                   <Edit2 className="w-4 h-4 text-muted-foreground" />
                 </Button>
               </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Reset Connection Section */}
+        <div className="mb-6">
+          <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
+            Reset Connection
+          </h2>
+          <div className="bg-background rounded-xl p-4">
+            <p className="text-sm text-muted-foreground mb-4">
+              If you think you're disconnected from your peer, you can reset
+              connection. Don't worry, some messages may be sent again but you
+              will NOT lose your message history.
+            </p>
+            <div className="flex justify-center">
+              <Button
+                onClick={handleResetConnection}
+                variant="primary"
+                className="bg-success hover:bg-success/90 text-success-foreground"
+              >
+                {reconnectSuccess ? (
+                  <Check className="w-4 h-4 mr-2" />
+                ) : (
+                  <RotateCw className="w-4 h-4 mr-2" />
+                )}
+                {reconnectSuccess ? 'Reconnected!' : 'Reconnect'}
+              </Button>
             </div>
           </div>
         </div>

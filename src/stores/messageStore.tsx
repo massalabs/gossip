@@ -33,12 +33,6 @@ interface MessageStoreState {
     content: string,
     replyToId?: number
   ) => Promise<void>;
-  addMessage: (contactUserId: string, message: Message) => void;
-  updateMessage: (
-    contactUserId: string,
-    messageId: number,
-    updates: Partial<Message>
-  ) => void;
   getMessagesForContact: (contactUserId: string) => Message[];
   clearMessages: (contactUserId: string) => void;
   cleanup: () => void;
@@ -64,18 +58,6 @@ const messagesChanged = (
       );
     })
   );
-};
-
-// Helper to update messages map immutably
-const updateMessagesMap = (
-  currentMap: Map<string, Message[]>,
-  contactUserId: string,
-  updater: (messages: Message[]) => Message[]
-): Map<string, Message[]> => {
-  const newMap = new Map(currentMap);
-  const existing = newMap.get(contactUserId) || [];
-  newMap.set(contactUserId, updater(existing));
-  return newMap;
 };
 
 const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
@@ -227,33 +209,6 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
     } finally {
       set({ isSending: false });
     }
-  },
-
-  // Add a message to the store
-  addMessage: (contactUserId: string, message: Message) => {
-    set({
-      messagesByContact: updateMessagesMap(
-        get().messagesByContact,
-        contactUserId,
-        existing => [...existing, message]
-      ),
-    });
-  },
-
-  // Update a message in the store
-  updateMessage: (
-    contactUserId: string,
-    messageId: number,
-    updates: Partial<Message>
-  ) => {
-    set({
-      messagesByContact: updateMessagesMap(
-        get().messagesByContact,
-        contactUserId,
-        messages =>
-          messages.map(m => (m.id === messageId ? { ...m, ...updates } : m))
-      ),
-    });
   },
 
   // Get messages for a contact
