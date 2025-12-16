@@ -68,7 +68,9 @@ describe('Account Management', () => {
   });
 
   describe('getCurrentAccount', () => {
-    it('should return null when no account is loaded', () => {
+    it('should return null when no account is loaded', async () => {
+      // Ensure we're logged out first
+      await logout();
       const account = getCurrentAccount();
       expect(account).toBeNull();
     });

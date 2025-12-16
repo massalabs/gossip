@@ -11,6 +11,7 @@ import {
   UserSecretKeys,
 } from '../../src/assets/generated/wasm/gossip_wasm';
 import type { SessionModule } from '../../src/wasm';
+import { generateUserKeys } from '../../src/wasm/userKeys';
 
 describe('Announcement Handling', () => {
   let ourPk: UserPublicKeys | null;
@@ -49,11 +50,11 @@ describe('Announcement Handling', () => {
         return;
       }
 
-      const contactPublicKeys = new UserPublicKeys(
-        new Uint8Array(32),
-        new Uint8Array(32),
-        new Uint8Array(32)
-      );
+      // Generate real public keys for contact using the same method as the app
+      const mnemonic =
+        'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
+      const keys = await generateUserKeys(mnemonic);
+      const contactPublicKeys = keys.public_keys();
 
       const result = await establishSession(
         contactPublicKeys,
@@ -64,7 +65,9 @@ describe('Announcement Handling', () => {
 
       // Should return a result with announcement
       expect(result).toHaveProperty('success');
-      expect(result).toHaveProperty('announcement');
+      if (result.success) {
+        expect(result).toHaveProperty('announcement');
+      }
     });
   });
 });

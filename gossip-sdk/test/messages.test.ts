@@ -237,11 +237,23 @@ describe('Message Operations', () => {
       expect(contact2.success).toBe(true);
       if (!contact2.contact) throw new Error('Failed to add contact');
 
-      // Get and accept the discussion
+      // Process incoming announcements to create the discussion from account 2's announcement
+      const { fetchAndProcessAnnouncements } = await import(
+        '../src/announcements'
+      );
+      await fetchAndProcessAnnouncements(pk1, sk1, session1Reloaded);
+
+      // Get the discussion (should exist after processing announcements)
       const discussion = await getDiscussion(userId1, userId2);
-      if (discussion && discussion.status === DiscussionStatus.PENDING) {
-        await acceptDiscussionRequest(discussion, session1Reloaded, pk1, sk1);
-      }
+      expect(discussion).toBeDefined();
+      expect(discussion?.status).toBe(DiscussionStatus.PENDING);
+
+      // Now accept the discussion
+      await acceptDiscussionRequest(discussion!, session1Reloaded, pk1, sk1);
+
+      // Verify discussion is now active
+      const updatedDiscussion = await getDiscussion(userId1, userId2);
+      expect(updatedDiscussion?.status).toBe(DiscussionStatus.ACTIVE);
 
       // Send 5 messages from account 1 to account 2
       const messagesFrom1: string[] = [];
@@ -262,8 +274,11 @@ describe('Message Operations', () => {
           session1Reloaded
         );
 
-        // Message might succeed or fail depending on discussion state, but should not throw
+        // Message might succeed or fail depending on session state
+        // But it should be saved to the database
         expect(result).toHaveProperty('success');
+        expect(result.message).toBeDefined();
+        expect(result.message?.id).toBeDefined();
       }
 
       // Switch to account 2
@@ -294,8 +309,11 @@ describe('Message Operations', () => {
           session2Reloaded
         );
 
-        // Message might succeed or fail depending on discussion state, but should not throw
+        // Message might succeed or fail depending on session state
+        // But it should be saved to the database
         expect(result).toHaveProperty('success');
+        expect(result.message).toBeDefined();
+        expect(result.message?.id).toBeDefined();
       }
 
       // Verify messages from account 1's perspective

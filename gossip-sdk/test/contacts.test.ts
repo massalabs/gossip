@@ -2,7 +2,7 @@
  * Contact Management SDK Tests
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, beforeAll } from 'vitest';
 import {
   addContact,
   getContacts,
@@ -13,10 +13,17 @@ import {
 import { initializeAccount } from '../src/account';
 import { getAccount } from '../src/utils';
 import { UserPublicKeys } from '../../src/assets/generated/wasm/gossip_wasm';
+import { createMessageProtocol } from '../../src/api/messageProtocol';
+import { MessageProtocolType } from '../../src/config/protocol';
+import { announcementService } from '../../src/services/announcement';
+import { messageService } from '../../src/services/message';
+import { generateUserKeys } from '../../src/wasm/userKeys';
+import { encodeUserId } from '../../src/utils/userId';
 
 describe('Contact Management', () => {
   let ownerUserId: string;
   let contactPublicKeys: UserPublicKeys;
+  let contactUserId: string;
 
   beforeAll(async () => {
     const mockProtocol = createMessageProtocol(MessageProtocolType.MOCK);
@@ -37,19 +44,19 @@ describe('Contact Management', () => {
     const account = getAccount();
     ownerUserId = account.userProfile?.userId || '';
 
-    // Create mock public keys for contact
-    contactPublicKeys = new UserPublicKeys(
-      new Uint8Array(32),
-      new Uint8Array(32),
-      new Uint8Array(32)
-    );
+    // Generate real public keys for contact using the same method as the app
+    const mnemonic =
+      'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
+    const keys = await generateUserKeys(mnemonic);
+    contactPublicKeys = keys.public_keys();
+    contactUserId = encodeUserId(contactPublicKeys.derive_id());
   });
 
   describe('addContact', () => {
     it('should add a new contact', async () => {
       const result = await addContact(
         ownerUserId,
-        'gossip1testcontact',
+        contactUserId,
         'Test Contact',
         contactPublicKeys
       );
@@ -61,14 +68,14 @@ describe('Contact Management', () => {
     it('should return error if contact already exists', async () => {
       await addContact(
         ownerUserId,
-        'gossip1testcontact',
+        contactUserId,
         'Test Contact',
         contactPublicKeys
       );
 
       const result = await addContact(
         ownerUserId,
-        'gossip1testcontact',
+        contactUserId,
         'Test Contact 2',
         contactPublicKeys
       );
@@ -104,19 +111,24 @@ describe('Contact Management', () => {
 
   describe('getContact', () => {
     it('should return null for non-existent contact', async () => {
-      const contact = await getContact(ownerUserId, 'gossip1nonexistent');
+      // Generate a different userId for non-existent contact
+      const mnemonic2 =
+        'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon';
+      const keys2 = await generateUserKeys(mnemonic2);
+      const nonExistentUserId = encodeUserId(keys2.public_keys().derive_id());
+      const contact = await getContact(ownerUserId, nonExistentUserId);
       expect(contact).toBeNull();
     });
 
     it('should return contact when it exists', async () => {
       await addContact(
         ownerUserId,
-        'gossip1testcontact',
+        contactUserId,
         'Test Contact',
         contactPublicKeys
       );
 
-      const contact = await getContact(ownerUserId, 'gossip1testcontact');
+      const contact = await getContact(ownerUserId, contactUserId);
       expect(contact).toBeDefined();
       expect(contact?.name).toBe('Test Contact');
     });
@@ -126,35 +138,31 @@ describe('Contact Management', () => {
     it('should update contact name', async () => {
       await addContact(
         ownerUserId,
-        'gossip1testcontact',
+        contactUserId,
         'Original Name',
         contactPublicKeys
       );
 
       const result = await updateContactName(
         ownerUserId,
-        'gossip1testcontact',
+        contactUserId,
         'Updated Name'
       );
       expect(result.ok).toBe(true);
 
-      const contact = await getContact(ownerUserId, 'gossip1testcontact');
+      const contact = await getContact(ownerUserId, contactUserId);
       expect(contact?.name).toBe('Updated Name');
     });
 
     it('should return error for empty name', async () => {
       await addContact(
         ownerUserId,
-        'gossip1testcontact',
+        contactUserId,
         'Original Name',
         contactPublicKeys
       );
 
-      const result = await updateContactName(
-        ownerUserId,
-        'gossip1testcontact',
-        ''
-      );
+      const result = await updateContactName(ownerUserId, contactUserId, '');
       expect(result.ok).toBe(false);
       expect(result.reason).toBe('empty');
     });
@@ -164,15 +172,15 @@ describe('Contact Management', () => {
     it('should delete contact', async () => {
       await addContact(
         ownerUserId,
-        'gossip1testcontact',
+        contactUserId,
         'Test Contact',
         contactPublicKeys
       );
 
-      const result = await deleteContact(ownerUserId, 'gossip1testcontact');
+      const result = await deleteContact(ownerUserId, contactUserId);
       expect(result.ok).toBe(true);
 
-      const contact = await getContact(ownerUserId, 'gossip1testcontact');
+      const contact = await getContact(ownerUserId, contactUserId);
       expect(contact).toBeNull();
     });
   });

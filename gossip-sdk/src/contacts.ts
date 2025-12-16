@@ -69,7 +69,11 @@ export async function getContact(
   contactUserId: string
 ): Promise<Contact | null> {
   try {
-    return await db.getContactByOwnerAndUserId(ownerUserId, contactUserId);
+    const contact = await db.getContactByOwnerAndUserId(
+      ownerUserId,
+      contactUserId
+    );
+    return contact ?? null;
   } catch (error) {
     console.error('Error getting contact:', error);
     return null;

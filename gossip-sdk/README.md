@@ -14,6 +14,8 @@ The SDK is part of the Gossip project. To use it, import from the SDK directory:
 import { initializeAccount, sendMessage, getMessages } from './gossip-sdk/src';
 ```
 
+**Note**: The SDK requires the parent project's dependencies to be available. Make sure you're running from the project root or have the necessary dependencies installed.
+
 ## Features
 
 - **Account Management**: Create, load, restore, and manage user accounts
@@ -50,16 +52,27 @@ await logout();
 ### Contact Management
 
 ```typescript
-import { addContact, getContacts, updateContactName } from './gossip-sdk/src';
-import { getCurrentUserId } from './gossip-sdk/src';
+import {
+  addContact,
+  getContacts,
+  updateContactName,
+  getCurrentUserId,
+} from './gossip-sdk/src';
+import { generateUserKeys } from '../src/wasm/userKeys';
+import { encodeUserId } from '../src/utils/userId';
 
 const userId = getCurrentUserId();
 if (!userId) throw new Error('Not logged in');
 
+// Generate contact's public keys (in real usage, fetch from network)
+const contactKeys = await generateUserKeys('contact mnemonic');
+const contactPublicKeys = contactKeys.public_keys();
+const contactUserId = encodeUserId(contactPublicKeys.derive_id());
+
 // Add a contact
 const contactResult = await addContact(
   userId,
-  'gossip1contact123',
+  contactUserId,
   'Contact Name',
   contactPublicKeys
 );
@@ -68,15 +81,14 @@ const contactResult = await addContact(
 const contacts = await getContacts(userId);
 
 // Update contact name
-await updateContactName(userId, 'gossip1contact123', 'New Name');
+await updateContactName(userId, contactUserId, 'New Name');
 ```
 
 ### Sending Messages
 
 ```typescript
-import { sendMessage, getMessages } from './gossip-sdk/src';
-import { getAccount } from './gossip-sdk/src';
-import { MessageType, MessageDirection } from './gossip-sdk/src';
+import { sendMessage, getMessages, getAccount } from './gossip-sdk/src';
+import { MessageType, MessageDirection, MessageStatus } from './gossip-sdk/src';
 
 const account = getAccount();
 if (!account.session || !account.userProfile) {
@@ -87,7 +99,7 @@ if (!account.session || !account.userProfile) {
 const messageResult = await sendMessage(
   {
     ownerUserId: account.userProfile.userId,
-    contactUserId: 'gossip1contact123',
+    contactUserId: 'gossip1contact123', // Bech32-encoded user ID
     content: 'Hello!',
     type: MessageType.TEXT,
     direction: MessageDirection.OUTGOING,
@@ -111,25 +123,43 @@ import {
   initializeDiscussion,
   getDiscussions,
   acceptDiscussionRequest,
+  getAccount,
+  addContact,
 } from './gossip-sdk/src';
 
 const account = getAccount();
-if (!account.session || !account.ourPk || !account.ourSk) {
+if (
+  !account.session ||
+  !account.ourPk ||
+  !account.ourSk ||
+  !account.userProfile
+) {
   throw new Error('Account not initialized');
+}
+
+// First, add the contact
+const contactResult = await addContact(
+  account.userProfile.userId,
+  contactUserId,
+  'Contact Name',
+  contactPublicKeys
+);
+if (!contactResult.success || !contactResult.contact) {
+  throw new Error('Failed to add contact');
 }
 
 // Initialize a discussion
 const discussionResult = await initializeDiscussion(
-  contact,
+  contactResult.contact,
   account.ourPk,
   account.ourSk,
   account.session,
-  account.userProfile!.userId,
+  account.userProfile.userId,
   "Hello, let's chat!"
 );
 
 // Get all discussions
-const discussions = await getDiscussions(account.userProfile!.userId);
+const discussions = await getDiscussions(account.userProfile.userId);
 ```
 
 ## API Reference
@@ -198,12 +228,14 @@ const discussions = await getDiscussions(account.userProfile!.userId);
 
 ### Utility Functions
 
-- `getSession()` - Get current session module
-- `getAccount()` - Get current account state
-- `ensureInitialized()` - Ensure account is loaded
-- `getCurrentUserId()` - Get current user ID
+- `getSession()` - Get current session module (returns `SessionModule | null`)
+- `getAccount()` - Get current account state (returns object with `userProfile`, `encryptionKey`, `ourPk`, `ourSk`, `session`)
+- `ensureInitialized()` - Ensure account is loaded (throws if not initialized)
+- `getCurrentUserId()` - Get current user ID (returns `string | null`)
 
 ## Testing
+
+The SDK includes a comprehensive test suite using Vitest. All tests use the real WASM implementation and MOCK message protocol (no network calls).
 
 Run tests with:
 
@@ -212,11 +244,27 @@ cd gossip-sdk
 npm test
 ```
 
+Run tests once (no watch mode):
+
+```bash
+npm run test:run
+```
+
 Run tests with coverage:
 
 ```bash
 npm run test:coverage
 ```
+
+**Note**: Tests use `fake-indexeddb` to simulate IndexedDB in Node.js environment. The test suite includes:
+
+- Account management tests
+- Authentication tests
+- Contact management tests
+- Discussion management tests
+- Message operations tests (including a 5-message exchange test)
+- Announcement handling tests
+- Wallet operations tests
 
 ## Error Handling
 
@@ -250,9 +298,12 @@ import type {
 
 - All functions are async and return Promises
 - Functions that require authentication will throw if account is not loaded
-- Session and keys should be retrieved from store when not passed as parameters
+- Session and keys should be retrieved using `getAccount()` when not passed as parameters
 - The SDK reuses existing services and stores from the main application
 - Database operations use Dexie/IndexedDB
+- User IDs must be Bech32-encoded strings (format: `gossip1...`)
+- Public keys must be `UserPublicKeys` instances (created via `generateUserKeys()` or `UserPublicKeys.from_bytes()`)
+- The SDK uses the MOCK message protocol in tests to avoid network calls
 
 ## License
 
