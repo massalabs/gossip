@@ -1,4 +1,5 @@
 {
+  "address": "AS1HWrUqtDkZp49wiz8EtgncvAUE9REPCHTCp2c6eGSJygQoY3k1",
   "node_url": "https://mainnet.massa.net/api/v2",
   "metadatas": {
     "TITLE": "Gossip messenger",
