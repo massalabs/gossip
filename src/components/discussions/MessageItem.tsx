@@ -186,7 +186,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
   return (
     <div
       id={id}
-      className={`flex items-end gap-2 ${
+      className={`flex items-end ${
         isOutgoing ? 'justify-end' : 'justify-start'
       } group relative ${isHighlighted ? 'highlight-message' : ''}`}
       onTouchStart={canReply ? handleTouchStart : undefined}
@@ -201,10 +201,10 @@ const MessageItem: React.FC<MessageItemProps> = ({
         )} */}
       <div
         ref={messageRef}
-        className={`relative max-w-[78%] sm:max-w-[70%] md:max-w-[65%] lg:max-w-[60%] px-4 py-4 rounded-3xl font-medium text-[15px] leading-tight animate-bubble-in transition-transform ${
+        className={`relative max-w-[70%] sm:max-w-[60%] md:max-w-[55%] lg:max-w-[50%] px-4 py-4 rounded-3xl font-medium text-[15px] leading-tight animate-bubble-in transition-transform ${
           isOutgoing
-            ? 'ml-auto mr-3 bg-accent text-accent-foreground rounded-br-[4px]'
-            : 'ml-3 mr-auto bg-card dark:bg-surface-secondary text-card-foreground rounded-bl-[4px] shadow-sm'
+            ? 'ml-auto mr-4 bg-accent text-accent-foreground rounded-br-[4px]'
+            : 'ml-4 mr-auto bg-card dark:bg-surface-secondary text-card-foreground rounded-bl-[4px] shadow-sm'
         } ${
           canReply
             ? 'cursor-pointer hover:opacity-90 transition-opacity focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2'

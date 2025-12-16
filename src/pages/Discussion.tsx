@@ -134,12 +134,15 @@ const Discussion: React.FC = () => {
         className="flex-1 overflow-y-auto"
         id="messagesContainer"
       >
-        <VirtualizedMessageList
-          messages={messages}
-          discussion={discussion}
-          isLoading={isLoading || isDiscussionLoading}
-          onReplyTo={handleReplyToMessage}
-        />
+        {contact && (
+          <VirtualizedMessageList
+            contactUserId={contact.userId}
+            messages={messages}
+            discussion={discussion}
+            isLoading={isLoading || isDiscussionLoading}
+            onReplyTo={handleReplyToMessage}
+          />
+        )}
       </ScrollableContent>
 
       <MessageInput
