@@ -22,6 +22,7 @@ interface MessageItemProps {
   onScrollToMessage?: (messageId: number) => void;
   onResend?: (message: Message) => void;
   id?: string;
+  isHighlighted?: boolean;
 }
 
 const MessageItem: React.FC<MessageItemProps> = ({
@@ -30,6 +31,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
   onScrollToMessage,
   onResend,
   id,
+  isHighlighted,
 }) => {
   const canReply = !!onReplyTo;
   const isOutgoing = message.direction === MessageDirection.OUTGOING;
@@ -184,7 +186,9 @@ const MessageItem: React.FC<MessageItemProps> = ({
   return (
     <div
       id={id}
-      className={`flex items-end gap-2 ${isOutgoing ? 'justify-end' : 'justify-start'} group relative`}
+      className={`flex items-end gap-2 ${
+        isOutgoing ? 'justify-end' : 'justify-start'
+      } group relative ${isHighlighted ? 'highlight-message' : ''}`}
       onTouchStart={canReply ? handleTouchStart : undefined}
       onTouchMove={canReply ? handleTouchMove : undefined}
       onTouchEnd={canReply ? handleTouchEnd : undefined}

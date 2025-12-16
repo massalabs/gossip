@@ -73,6 +73,7 @@
     "qr-code-styling": "^1.9.2",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "react-virtuoso": "^4.11.0",
     "react-feather": "^2.0.10",
     "react-hot-toast": "^2.6.0",
     "react-router-dom": "^7.9.6",
