@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        network: [buildnet]
+        network: [mainnet]
     steps:
       - uses: actions/checkout@v4
 

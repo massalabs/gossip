@@ -1,0 +1,9 @@
+{
+  "node_url": "https://mainnet.massa.net/api/v2",
+  "metadatas": {
+    "TITLE": "Gossip messenger",
+    "DESCRIPTION": "Gossip messenger",
+    "KEYWORD1": "privacy",
+    "http-header:Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"
+  }
+}
