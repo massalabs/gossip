@@ -73,14 +73,9 @@ jobs:
         env:
           VITE_PROTOCOL_API_URL: https://api.usegossip.com/
         run: |
-          # Check if debug build is requested (manual trigger only)
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ] && ( [ "${{ github.event.inputs.android_build_type }}" == "debug" ] || [ "${{ github.event.inputs.android_build_type }}" == "both" ] ); then
-            echo "🔍 Building with sourcemaps for debug..."
-            npm run build -- --sourcemap
-          else
-            echo "🚀 Building production bundle..."
-            npm run build
-          fi
+          export VITE_APP_BUILD_ID=$(git rev-parse --short=7 HEAD)
+          echo "🚀 Building production bundle..."
+          npm run build
 
       - name: Upload web build artifacts
         uses: actions/upload-artifact@v4
