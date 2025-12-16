@@ -25,7 +25,7 @@ const NavButton: React.FC<NavButtonProps> = ({
         animationVariant === 'alt' ? 'nav-button-click-alt' : 'nav-button-click'
       } ${
         isActive
-          ? 'bg-primary/10 shadow-inner shadow-primary/10 dark:shadow-none scale-[1.02]'
+          ? 'bg-primary/10 dark:shadow-none scale-[1.02]'
           : 'hover:bg-muted'
       }`}
       title={title}
