@@ -143,6 +143,7 @@ const NewContact: React.FC = () => {
                 value={userId.value}
                 onChange={e => handleUserIdChange(e.target.value)}
                 placeholder="Gossip address"
+                aria-label="User ID"
                 className="w-full bg-transparent text-foreground placeholder-muted-foreground focus:outline-none pr-10"
                 aria-describedby={
                   userId.error
