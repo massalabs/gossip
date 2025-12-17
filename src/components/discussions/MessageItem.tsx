@@ -22,6 +22,10 @@ const SWIPE_RESISTANCE_OUTGOING = 0.65; // Less resistance (more sensitive) for 
 const SWIPE_THRESHOLD_OUTGOING = 30; // Lower threshold for easier triggering on outgoing messages (reduced from 35, matching SimpleX's 30dp)
 const SWIPE_INDICATOR_THRESHOLD_OUTGOING = 6; // Show indicator earlier for outgoing messages (reduced from 8)
 
+// Touch slop constants - prevents unintentional swipe triggers when scrolling
+const TOUCH_SLOP = 15; // Minimum distance (in pixels) touch must move before considering it a gesture
+const TOUCH_SLOP_OUTGOING = 12; // Lower touch slop for outgoing messages (more sensitive)
+
 interface MessageItemProps {
   message: Message;
   onReplyTo?: (message: Message) => void;
@@ -48,6 +52,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
   const isSwiping = useRef(false);
   const swipeCompleted = useRef(false); // Track if a swipe was just completed to prevent click
   const messageRef = useRef<HTMLDivElement | null>(null);
+  const touchSlopExceeded = useRef(false); // Track if touch slop threshold has been exceeded
 
   // Load original message if this is a reply
   useEffect(() => {
@@ -114,6 +119,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
     touchStartY.current = touch.clientY;
     isSwiping.current = false;
     swipeCompleted.current = false; // Reset on new touch start
+    touchSlopExceeded.current = false; // Reset touch slop tracking
   };
 
   const handleTouchMove = (e: React.TouchEvent) => {
@@ -123,6 +129,20 @@ const MessageItem: React.FC<MessageItemProps> = ({
     const touch = e.touches[0];
     const deltaX = touch.clientX - touchStartX.current;
     const deltaY = touch.clientY - touchStartY.current;
+    const totalDistance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+
+    // Get touch slop threshold based on message direction
+    const touchSlop = isOutgoing ? TOUCH_SLOP_OUTGOING : TOUCH_SLOP;
+
+    // Check if touch slop has been exceeded (prevents accidental triggers during scrolling)
+    if (!touchSlopExceeded.current) {
+      if (totalDistance >= touchSlop) {
+        touchSlopExceeded.current = true;
+      } else {
+        // Haven't exceeded touch slop yet, don't process swipe
+        return;
+      }
+    }
 
     // Only allow horizontal swipe (right direction) for all messages
     // Check if horizontal movement is greater than vertical (to avoid triggering on scroll)
@@ -150,6 +170,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
       touchStartX.current = null;
       touchStartY.current = null;
       isSwiping.current = false;
+      touchSlopExceeded.current = false;
       return;
     }
     // Use different threshold for outgoing messages (more sensitive)
@@ -168,6 +189,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
     touchStartX.current = null;
     touchStartY.current = null;
     isSwiping.current = false;
+    touchSlopExceeded.current = false;
   };
 
   const handleReplyContextClick = (e: React.MouseEvent) => {
