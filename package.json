@@ -1,7 +1,7 @@
 {
   "name": "gossip",
   "private": true,
-  "version": "0.0.2",
+  "version": "0.0.3",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -38,7 +38,8 @@
     "cap:copy": "cap copy",
     "cap:copy:ios": "cap copy ios",
     "cap:copy:android": "cap copy android",
-    "build:apk": "cd android && bundle exec fastlane build_debug"
+    "build:apk": "cd android && bundle exec fastlane build_debug",
+    "release": "node scripts/release.mjs"
   },
   "dependencies": {
     "@aparajita/capacitor-biometric-auth": "^9.1.2",
