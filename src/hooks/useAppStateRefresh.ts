@@ -33,10 +33,12 @@ export function useAppStateRefresh() {
       session: SessionModule
     ): Promise<void> => {
       if (isSyncing.current) return;
-      isSyncing.current = true;
       const isOnline = useOnlineStoreBase.getState().isOnline;
 
       if (!isOnline) return;
+
+      isSyncing.current = true;
+
       try {
         await Promise.all([
           announcementService.fetchAndProcessAnnouncements(
