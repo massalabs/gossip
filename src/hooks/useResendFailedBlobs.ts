@@ -11,24 +11,19 @@ import {
 } from '../db';
 import { renewDiscussion } from '../services/discussion';
 import { messageService } from '../services/message';
-import {
-  SyncKey,
-  SyncKeyNotFreeError,
-  useSyncStore,
-} from '../stores/syncStore';
+
 import { restMessageProtocol } from '../api/messageProtocol';
 
-const RESEND_INTERVAL_MS = 3000; // 3 seconds
+// const RESEND_INTERVAL_MS = 3000; // 3 seconds
 
 /**
  * Hook to resend failed blobs (announcements and messages) periodically when user is logged in
  * Attempts to resend failed blobs every 3 seconds
- * @param activatePeriodicResend - If false, disables the automatic periodic resend interval. Defaults to true.
+ * @param trackFailedBlobs - If true, tracks failed blobs from db and store them in state. Defaults to false.
  */
-export function useResendFailedBlobs(activatePeriodicResend: boolean = true) {
+export function useResendFailedBlobs(trackFailedBlobs: boolean = false) {
   const { userProfile, ourPk, ourSk, session } = useAccountStore();
   const isResending = useRef(false);
-  const { executeIfLockFree } = useSyncStore();
 
   /* Messages that need to be retrieved grouped by contact. Does not include messages from broken discussions */
   const [retryMessagesByContact, setRetryMessagesByContact] = useState<
@@ -84,28 +79,15 @@ export function useResendFailedBlobs(activatePeriodicResend: boolean = true) {
       );
       return;
     }
-    const result = await executeIfLockFree(
-      [SyncKey.RESEND_ANNOUNCEMENT],
-      [SyncKey.FETCH_ANNOUNCEMENT, SyncKey.RESEND_ANNOUNCEMENT],
-      async () => {
-        try {
-          await announcementService.resendAnnouncements(
-            sendFailedDiscussions,
-            session
-          );
-        } catch (error) {
-          console.error('Failed to resend failed announcements:', error);
-        }
-      }
-    );
-    if (!result.success) {
-      if (
-        (result.error as SyncKeyNotFreeError).notAvailableSyncKeys.length > 0
-      ) {
-        console.log(result.error.message);
-      }
+    try {
+      await announcementService.resendAnnouncements(
+        sendFailedDiscussions,
+        session
+      );
+    } catch (error) {
+      console.error('Failed to resend failed announcements:', error);
     }
-  }, [sendFailedDiscussions, session, executeIfLockFree]);
+  }, [sendFailedDiscussions, session]);
 
   const resendMessages = useCallback(async () => {
     if (!retryMessagesByContact.size) return;
@@ -124,7 +106,7 @@ export function useResendFailedBlobs(activatePeriodicResend: boolean = true) {
   So for performances reasons, we keep via Live query, retry messages and discussions up to date so that we don't need to 
   retrieve them from db at each interval*/
   useEffect(() => {
-    if (!userProfile?.userId) {
+    if (!userProfile?.userId || !trackFailedBlobs) {
       setRetryMessagesByContact(new Map());
       setBrokenDiscussions([]);
       setSendFailedDiscussions([]);
@@ -201,7 +183,7 @@ export function useResendFailedBlobs(activatePeriodicResend: boolean = true) {
     return () => {
       subscriptions.forEach(sub => sub.unsubscribe());
     };
-  }, [userProfile?.userId]);
+  }, [userProfile?.userId, trackFailedBlobs]);
 
   const resendFailedBlobs = useCallback(async (): Promise<void> => {
     if (isResending.current) return;
@@ -252,31 +234,35 @@ export function useResendFailedBlobs(activatePeriodicResend: boolean = true) {
     resendFailedBlobsRef.current = resendFailedBlobs;
   }, [resendFailedBlobs]);
 
-  useEffect(() => {
-    if (!activatePeriodicResend) {
-      return undefined;
-    }
+  // useEffect(() => {
+  //   if (!activatePeriodicResend) {
+  //     return undefined;
+  //   }
 
-    if (userProfile?.userId) {
-      console.log('User logged in, starting periodic failed blob resend task');
+  //   if (userProfile?.userId) {
+  //     console.log('User logged in, starting periodic failed blob resend task');
 
-      const resendInterval = setInterval(() => {
-        resendFailedBlobsRef.current?.().catch(error => {
-          console.error('Failed to resend blobs periodically:', error);
-        });
-      }, RESEND_INTERVAL_MS);
+  //     const resendInterval = setInterval(() => {
+  //       resendFailedBlobsRef.current?.().catch(error => {
+  //         console.error('Failed to resend blobs periodically:', error);
+  //       });
+  //     }, RESEND_INTERVAL_MS);
 
-      // Cleanup interval when user logs out or component unmounts
-      return () => {
-        clearInterval(resendInterval);
-        console.log('Periodic failed blob resend interval cleared');
-      };
-    }
-    return undefined;
-  }, [userProfile?.userId, activatePeriodicResend]);
+  //     // Cleanup interval when user logs out or component unmounts
+  //     return () => {
+  //       clearInterval(resendInterval);
+  //       console.log('Periodic failed blob resend interval cleared');
+  //     };
+  //   }
+  //   return undefined;
+  // }, [userProfile?.userId, activatePeriodicResend]);
+
+  if (!trackFailedBlobs) {
+    return { manualRenewDiscussion };
+  }
 
   return {
-    resendFailedBlobs,
+    resendFailedBlobs: resendFailedBlobsRef.current,
     reinitiateBrokenDiscussions,
     resendFailedAnnouncements,
     resendMessages,
