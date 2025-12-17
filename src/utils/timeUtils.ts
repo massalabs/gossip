@@ -119,3 +119,56 @@ export function createTimestamp(date: Date = new Date()): string {
     second: '2-digit',
   });
 }
+
+/**
+ * Format a date for use in date separators (e.g., "Today", "Yesterday", "January 15, 2024")
+ * @param date - The date to format
+ * @returns Formatted date string for separators
+ */
+export function formatDateSeparator(date: Date): string {
+  if (isToday(date)) {
+    return 'Today';
+  }
+
+  if (isYesterday(date)) {
+    return 'Yesterday';
+  }
+
+  const now = new Date();
+  const diff = now.getTime() - date.getTime();
+  const days = Math.floor(diff / 86400000);
+
+  // For dates within the last week, show day name
+  if (days < 7) {
+    return date.toLocaleDateString('en-US', { weekday: 'long' });
+  }
+
+  // For dates within the current year, show month and day
+  if (date.getFullYear() === now.getFullYear()) {
+    return date.toLocaleDateString('en-US', {
+      month: 'long',
+      day: 'numeric',
+    });
+  }
+
+  // For older dates, show full date
+  return date.toLocaleDateString('en-US', {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  });
+}
+
+/**
+ * Check if two dates are on different days
+ * @param date1 - First date
+ * @param date2 - Second date
+ * @returns True if the dates are on different days
+ */
+export function isDifferentDay(date1: Date, date2: Date): boolean {
+  return (
+    date1.getDate() !== date2.getDate() ||
+    date1.getMonth() !== date2.getMonth() ||
+    date1.getFullYear() !== date2.getFullYear()
+  );
+}
