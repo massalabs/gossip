@@ -50,11 +50,11 @@ const Button: React.FC<ButtonProps> = ({
     primary:
       'bg-primary hover:bg-primary/90 disabled:bg-muted text-primary-foreground disabled:text-muted-foreground focus:ring-ring rounded-full',
     secondary:
-      'bg-secondary hover:bg-secondary/80 disabled:bg-muted text-secondary-foreground disabled:text-muted-foreground focus:ring-ring rounded-md',
+      'bg-secondary hover:bg-secondary/80 disabled:bg-muted text-secondary-foreground disabled:text-muted-foreground focus:ring-ring rounded-full',
     danger:
-      'bg-destructive hover:bg-destructive/90 disabled:bg-destructive/50 text-destructive-foreground focus:ring-ring rounded-md',
+      'bg-destructive hover:bg-destructive/90 disabled:bg-destructive/50 text-destructive-foreground focus:ring-ring rounded-full',
     ghost:
-      'bg-transparent hover:bg-accent text-foreground focus:ring-ring rounded-md',
+      'bg-transparent hover:bg-accent hover:text-accent-foreground text-foreground focus:ring-ring rounded-full',
     outline: `bg-card border border-border text-foreground hover:bg-accent/50 
     hover:border-accent disabled:bg-muted disabled:text-muted-foreground disabled:border-border/50 
     disabled:opacity-60 disabled:hover:bg-muted disabled:hover:border-border/50 rounded-md`,

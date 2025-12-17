@@ -1,5 +1,5 @@
 import { Capacitor } from '@capacitor/core';
-import { DEFAULT_PUBLIC_BASE_URL } from '../constants/links';
+import { DEWEB_DEV_INVITE_DOMAIN } from '../constants/links';
 import { AppRoute } from '../constants/routes';
 
 /**
@@ -10,22 +10,22 @@ import { AppRoute } from '../constants/routes';
  *   • Web (opens web version)
  *   • QR codes, SMS, email, social sharing
  */
-function getPublicBaseUrl(): string {
+function getGossipDomain(): string {
   // 1. Explicit env var → highest priority (staging, prod, native builds)
-  const envUrl = import.meta.env.VITE_APP_BASE_URL;
+  const envUrl = import.meta.env.VITE_INVITE_DOMAIN;
 
-  const defaultBaseUrl = envUrl ?? DEFAULT_PUBLIC_BASE_URL;
+  if (envUrl) return envUrl;
 
   if (Capacitor.isNativePlatform()) {
-    return defaultBaseUrl;
+    return DEWEB_DEV_INVITE_DOMAIN;
   }
 
   const currentOrigin = window.location?.origin;
-  if (currentOrigin && !currentOrigin.includes('localhost')) {
+  if (currentOrigin) {
     return currentOrigin;
   }
 
-  return defaultBaseUrl;
+  return DEWEB_DEV_INVITE_DOMAIN;
 }
 
 /**
@@ -42,7 +42,7 @@ export function generateDeepLinkUrl(userId: string): string {
     throw new Error('userId is required');
   }
 
-  const base = getPublicBaseUrl();
+  const base = getGossipDomain();
   const safeId = encodeURIComponent(userId.trim());
 
   return `${base}/${AppRoute.invite}/${safeId}`;

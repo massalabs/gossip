@@ -90,9 +90,9 @@ const NewContact: React.FC = () => {
           <button
             onClick={handleBack}
             className="text-foreground hover:text-primary transition-colors"
-            aria-label="Cancel"
+            aria-label="Back"
           >
-            Cancel
+            Back
           </button>
           <h1 className="text-xl font-semibold text-foreground">New contact</h1>
           <button
@@ -143,6 +143,7 @@ const NewContact: React.FC = () => {
                 value={userId.value}
                 onChange={e => handleUserIdChange(e.target.value)}
                 placeholder="Gossip address"
+                aria-label="User ID"
                 className="w-full bg-transparent text-foreground placeholder-muted-foreground focus:outline-none pr-10"
                 aria-describedby={
                   userId.error
@@ -295,12 +296,8 @@ const NewContact: React.FC = () => {
             <Button onClick={handleDiscard} variant="danger" className="flex-1">
               Discard
             </Button>
-            <Button
-              onClick={handleCancel}
-              variant="secondary"
-              className="flex-1"
-            >
-              Cancel
+            <Button onClick={handleCancel} variant="ghost" className="flex-1">
+              Keep editing
             </Button>
           </div>
         </div>
