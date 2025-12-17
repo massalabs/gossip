@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   ArrowRightCircle,
   Check as CheckIcon,
@@ -38,6 +38,11 @@ interface MessageItemProps {
    * If undefined, timestamps are shown by default.
    */
   showTimestamp?: boolean;
+  /**
+   * Grouping information for message display
+   */
+  isFirstInGroup?: boolean;
+  isLastInGroup?: boolean;
 }
 
 const MessageItem: React.FC<MessageItemProps> = ({
@@ -47,6 +52,8 @@ const MessageItem: React.FC<MessageItemProps> = ({
   onResend,
   id,
   showTimestamp = true,
+  isFirstInGroup = true,
+  isLastInGroup = true,
 }) => {
   const canReply = !!onReplyTo;
   const isOutgoing = message.direction === MessageDirection.OUTGOING;
@@ -138,15 +145,26 @@ const MessageItem: React.FC<MessageItemProps> = ({
     const touch = e.touches[0];
     const deltaX = touch.clientX - touchStartX.current;
     const deltaY = touch.clientY - touchStartY.current;
-    const totalDistance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+    const distanceSquared = deltaX * deltaX + deltaY * deltaY;
 
     // Get touch slop threshold based on message direction
     const touchSlop = isOutgoing ? TOUCH_SLOP_OUTGOING : TOUCH_SLOP;
+    const touchSlopSquared = touchSlop * touchSlop;
+
+    // Check if this is a valid horizontal swipe direction (right direction)
+    const isHorizontalSwipe = Math.abs(deltaX) > Math.abs(deltaY) && deltaX > 0;
 
     // Check if touch slop has been exceeded (prevents accidental triggers during scrolling)
+    // Only mark as exceeded if it's a valid swipe direction to avoid issues with vertical/diagonal gestures
+    // Compare squared distances to avoid expensive Math.sqrt() call
     if (!touchSlopExceeded.current) {
-      if (totalDistance >= touchSlop) {
+      if (distanceSquared >= touchSlopSquared && isHorizontalSwipe) {
         touchSlopExceeded.current = true;
+      } else if (distanceSquared >= touchSlopSquared && !isHorizontalSwipe) {
+        // Movement exceeded threshold but not in swipe direction - likely scrolling
+        // Reset and don't process
+        setSwipeOffset(0);
+        return;
       } else {
         // Haven't exceeded touch slop yet, don't process swipe
         return;
@@ -155,7 +173,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
 
     // Only allow horizontal swipe (right direction) for all messages
     // Check if horizontal movement is greater than vertical (to avoid triggering on scroll)
-    if (Math.abs(deltaX) > Math.abs(deltaY) && deltaX > 0) {
+    if (isHorizontalSwipe) {
       isSwiping.current = true;
       // Use different constants for outgoing messages (more sensitive)
       const resistance = isOutgoing
@@ -225,26 +243,49 @@ const MessageItem: React.FC<MessageItemProps> = ({
     e.preventDefault();
   };
 
+  // Calculate spacing based on grouping
+  // Reduced spacing for messages in the same group
+  const spacingClass = isFirstInGroup ? 'mb-1' : 'mb-0.5';
+
+  // Memoize border radius calculation to avoid recalculating on every render
+  const borderRadiusClass = useMemo(() => {
+    if (isFirstInGroup && isLastInGroup) {
+      // Single message - full radius with tail
+      return isOutgoing
+        ? 'rounded-3xl rounded-br-[4px]'
+        : 'rounded-3xl rounded-bl-[4px]';
+    } else if (isFirstInGroup) {
+      // First in group - round top corners, keep tail on bottom
+      return isOutgoing
+        ? 'rounded-t-3xl rounded-bl-3xl rounded-br-[4px]'
+        : 'rounded-t-3xl rounded-br-3xl rounded-bl-[4px]';
+    } else if (isLastInGroup) {
+      // Last in group - round bottom corners, keep tail
+      return isOutgoing
+        ? 'rounded-b-3xl rounded-tr-3xl rounded-br-[4px]'
+        : 'rounded-b-3xl rounded-tl-3xl rounded-bl-[4px]';
+    } else {
+      // Middle of group - minimal rounding, keep tail
+      return isOutgoing
+        ? 'rounded-2xl rounded-br-[4px]'
+        : 'rounded-2xl rounded-bl-[4px]';
+    }
+  }, [isFirstInGroup, isLastInGroup, isOutgoing]);
+
   return (
     <div
       id={id}
-      className={`flex items-end gap-2 ${isOutgoing ? 'justify-end' : 'justify-start'} group relative`}
+      className={`flex items-end gap-2 ${isOutgoing ? 'justify-end' : 'justify-start'} group relative ${spacingClass}`}
       onTouchStart={canReply ? handleTouchStart : undefined}
       onTouchMove={canReply ? handleTouchMove : undefined}
       onTouchEnd={canReply ? handleTouchEnd : undefined}
     >
-      {/* TODO: Add on group chat */}
-      {/* {!isOutgoing && (
-          <div className="w-6 h-8 shrink-0 mb-1 opacity-0 opacity-100 transition-opacity">
-            {showAvatar && <ContactAvatar contact={contact} size={8} />}
-          </div>
-        )} */}
       <div
         ref={messageRef}
-        className={`relative max-w-[78%] sm:max-w-[70%] md:max-w-[65%] lg:max-w-[60%] px-4 py-4 rounded-3xl font-medium text-[15px] leading-tight animate-bubble-in transition-transform ${
+        className={`relative max-w-[78%] sm:max-w-[70%] md:max-w-[65%] lg:max-w-[60%] px-4 py-4 font-medium text-[15px] leading-tight animate-bubble-in transition-transform ${borderRadiusClass} ${
           isOutgoing
-            ? 'ml-auto mr-3 bg-accent text-accent-foreground rounded-br-[4px]'
-            : 'ml-3 mr-auto bg-card dark:bg-surface-secondary text-card-foreground rounded-bl-[4px] shadow-sm'
+            ? 'ml-auto mr-3 bg-accent text-accent-foreground'
+            : 'ml-3 mr-auto bg-card dark:bg-surface-secondary text-card-foreground shadow-sm'
         } ${
           canReply
             ? 'cursor-pointer hover:opacity-90 transition-opacity focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2'
