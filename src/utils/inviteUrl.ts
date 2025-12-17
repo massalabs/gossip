@@ -16,10 +16,8 @@ function getGossipDomain(): string {
 
   if (envUrl) return envUrl;
 
-  const defaultBaseUrl = envUrl ?? DEWEB_DEV_INVITE_DOMAIN;
-
   if (Capacitor.isNativePlatform()) {
-    return defaultBaseUrl;
+    return DEWEB_DEV_INVITE_DOMAIN;
   }
 
   const currentOrigin = window.location?.origin;
@@ -27,7 +25,7 @@ function getGossipDomain(): string {
     return currentOrigin;
   }
 
-  return defaultBaseUrl;
+  return DEWEB_DEV_INVITE_DOMAIN;
 }
 
 /**

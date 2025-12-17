@@ -51,7 +51,7 @@ describe('inviteUrl - generateDeepLinkUrl', () => {
     setWindowOrigin('http://localhost:5173');
 
     const url = generateDeepLinkUrl('user123');
-    expect(url).toBe(`http://localhost:5173f/${AppRoute.invite}/user123`);
+    expect(url).toBe(`http://localhost:5173/${AppRoute.invite}/user123`);
   });
 
   it('encodes userId safely in URL', () => {

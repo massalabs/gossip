@@ -230,13 +230,13 @@ describe('InvitePage - Deep Link Invite Flow', () => {
     });
     await continueButton.click();
 
-    // wait 1s
-    await new Promise(resolve => setTimeout(resolve, 1000));
-
-    // Check that invite data was stored
-    const pendingInvite = useAppStore.getState().pendingDeepLinkInfo;
-    expect(pendingInvite).toBeTruthy();
-    expect(pendingInvite?.userId).toBe(bobProfile.userId);
+    // Wait for the click handler side-effect (store update) instead of sleeping.
+    await expect
+      .poll(() => useAppStore.getState().pendingDeepLinkInfo, {
+        timeout: 2000,
+        interval: 25,
+      })
+      .toEqual(expect.objectContaining({ userId: bobProfile.userId }));
   });
 
   // it('handles Install for iOS button click - opens App Store', async () => {
