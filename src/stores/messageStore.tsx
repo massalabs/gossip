@@ -18,8 +18,6 @@ interface MessageStoreState {
   currentContactUserId: string | null;
   // Loading state (only one discussion can be viewed at a time)
   isLoading: boolean;
-  // Sending state (global, since you can only send to one contact at a time)
-  isSending: boolean;
   // Subscription for liveQuery
   subscription: Subscription | null;
 
@@ -65,7 +63,6 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
   messagesByContact: new Map(),
   currentContactUserId: null,
   isLoading: false,
-  isSending: false,
   subscription: null,
   isInitializing: false,
 
@@ -137,16 +134,14 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
   },
 
   // Send a message
+  // TODO: Handle send message in a queue to avoid sending messages in parallel
   sendMessage: async (
     contactUserId: string,
     content: string,
     replyToId?: number
   ) => {
     const { userProfile, session } = useAccountStore.getState();
-    if (!userProfile?.userId || !content.trim() || get().isSending || !session)
-      return;
-
-    set({ isSending: true });
+    if (!userProfile?.userId || !content.trim() || !session) return;
 
     try {
       const discussion = await db.getDiscussionByOwnerAndContact(
@@ -206,8 +201,6 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
     } catch (error) {
       console.error('Failed to send message:', error);
       throw error;
-    } finally {
-      set({ isSending: false });
     }
   },
 
@@ -233,7 +226,6 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
       messagesByContact: new Map(),
       currentContactUserId: null,
       isLoading: false,
-      isSending: false,
     });
   },
 }));

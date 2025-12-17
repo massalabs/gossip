@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   XCircle,
 } from 'react-feather';
+import { Capacitor } from '@capacitor/core';
 import { Message, MessageDirection, MessageStatus } from '../../db';
 import { formatTime } from '../../utils/timeUtils';
 import { messageService } from '../../services/message';
@@ -15,6 +16,8 @@ const SWIPE_RESISTANCE = 0.3; // Resistance factor applied to swipe distance for
 const SWIPE_THRESHOLD = 50; // Minimum swipe distance (in pixels) required to trigger reply action
 const SWIPE_INDICATOR_THRESHOLD = 10; // Minimum swipe distance before showing reply indicator
 const SWIPE_INDICATOR_MAX_WIDTH = 60; // Maximum width (in pixels) for the reply indicator
+const LONG_PRESS_COPY_DELAY = 450; // ms before long-press copy triggers on native
+const LONG_PRESS_MOVE_CANCEL_THRESHOLD = 10; // px movement cancels long-press
 
 interface MessageItemProps {
   message: Message;
@@ -36,6 +39,12 @@ const MessageItem: React.FC<MessageItemProps> = ({
   const [originalMessage, setOriginalMessage] = useState<Message | null>(null);
   const [isLoadingOriginal, setIsLoadingOriginal] = useState(false);
   const [originalNotFound, setOriginalNotFound] = useState(false);
+  const [copyFeedback, setCopyFeedback] = useState<'copied' | 'failed' | null>(
+    null
+  );
+  const copyFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  );
 
   // Swipe gesture state
   const [swipeOffset, setSwipeOffset] = useState(0);
@@ -44,6 +53,38 @@ const MessageItem: React.FC<MessageItemProps> = ({
   const isSwiping = useRef(false);
   const swipeCompleted = useRef(false); // Track if a swipe was just completed to prevent click
   const messageRef = useRef<HTMLDivElement | null>(null);
+
+  // Long-press copy state (native only)
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressTriggeredRef = useRef(false);
+  const activeElementBeforeLongPressRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (copyFeedbackTimerRef.current) {
+        clearTimeout(copyFeedbackTimerRef.current);
+        copyFeedbackTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  const clearLongPressTimer = () => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+
+  const copyMessageToClipboard = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      // Clipboard API not available/allowed (or denied). We intentionally do not use
+      // deprecated DOM copy fallbacks here.
+      return false;
+    }
+  };
 
   // Load original message if this is a reply
   useEffect(() => {
@@ -95,15 +136,50 @@ const MessageItem: React.FC<MessageItemProps> = ({
     }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    // Support Enter and Space keys for keyboard accessibility
-    if ((e.key === 'Enter' || e.key === ' ') && canReply && onReplyTo) {
-      e.preventDefault(); // Prevent page scroll on Space
-      onReplyTo(message);
-    }
-  };
-
   const handleTouchStart = (e: React.TouchEvent) => {
+    // Native-only: long press to copy message text.
+    if (Capacitor.isNativePlatform()) {
+      longPressTriggeredRef.current = false;
+      clearLongPressTimer();
+
+      // Best-effort: keep keyboard up by restoring focus to the previously
+      // focused input after copying.
+      activeElementBeforeLongPressRef.current =
+        (document.activeElement as HTMLElement | null) ?? null;
+
+      const messageText = message.content?.toString?.() ?? '';
+      longPressTimerRef.current = setTimeout(async () => {
+        if (longPressTriggeredRef.current) return;
+        longPressTriggeredRef.current = true;
+
+        const ok = await copyMessageToClipboard(messageText);
+        setCopyFeedback(ok ? 'copied' : 'failed');
+        if (copyFeedbackTimerRef.current) {
+          clearTimeout(copyFeedbackTimerRef.current);
+        }
+        copyFeedbackTimerRef.current = setTimeout(() => {
+          setCopyFeedback(null);
+          copyFeedbackTimerRef.current = null;
+        }, 1200);
+
+        // Best-effort: re-focus the input if it was focused before.
+        const prevActive = activeElementBeforeLongPressRef.current;
+        if (
+          prevActive &&
+          document.contains(prevActive) &&
+          (prevActive.tagName === 'TEXTAREA' || prevActive.tagName === 'INPUT')
+        ) {
+          requestAnimationFrame(() => {
+            try {
+              prevActive.focus();
+            } catch {
+              // ignore
+            }
+          });
+        }
+      }, LONG_PRESS_COPY_DELAY);
+    }
+
     if (!canReply) return;
     const touch = e.touches[0];
     touchStartX.current = touch.clientX;
@@ -113,6 +189,23 @@ const MessageItem: React.FC<MessageItemProps> = ({
   };
 
   const handleTouchMove = (e: React.TouchEvent) => {
+    // Cancel long-press if user starts moving (scrolling/swiping).
+    if (
+      Capacitor.isNativePlatform() &&
+      touchStartX.current !== null &&
+      touchStartY.current !== null
+    ) {
+      const touch = e.touches[0];
+      const deltaX = touch.clientX - touchStartX.current;
+      const deltaY = touch.clientY - touchStartY.current;
+      if (
+        Math.abs(deltaX) > LONG_PRESS_MOVE_CANCEL_THRESHOLD ||
+        Math.abs(deltaY) > LONG_PRESS_MOVE_CANCEL_THRESHOLD
+      ) {
+        clearLongPressTimer();
+      }
+    }
+
     if (!canReply) return;
     if (touchStartX.current === null || touchStartY.current === null) return;
 
@@ -134,7 +227,19 @@ const MessageItem: React.FC<MessageItemProps> = ({
   };
 
   const handleTouchEnd = () => {
+    // Stop pending long-press timer.
+    clearLongPressTimer();
+
     if (!canReply) {
+      setSwipeOffset(0);
+      touchStartX.current = null;
+      touchStartY.current = null;
+      isSwiping.current = false;
+      return;
+    }
+
+    // If a long-press copy fired, don't also trigger swipe-to-reply.
+    if (longPressTriggeredRef.current) {
       setSwipeOffset(0);
       touchStartX.current = null;
       touchStartY.current = null;
@@ -164,19 +269,6 @@ const MessageItem: React.FC<MessageItemProps> = ({
     }
   };
 
-  const handleReplyContextKeyDown = (e: React.KeyboardEvent) => {
-    // Support Enter and Space keys for keyboard accessibility
-    if (
-      (e.key === 'Enter' || e.key === ' ') &&
-      originalMessage?.id &&
-      onScrollToMessage
-    ) {
-      e.preventDefault(); // Prevent page scroll on Space
-      e.stopPropagation(); // Prevent triggering the message click
-      onScrollToMessage(originalMessage.id);
-    }
-  };
-
   const handleClick = (e: React.MouseEvent) => {
     e.preventDefault();
   };
@@ -185,9 +277,10 @@ const MessageItem: React.FC<MessageItemProps> = ({
     <div
       id={id}
       className={`flex items-end gap-2 ${isOutgoing ? 'justify-end' : 'justify-start'} group relative`}
-      onTouchStart={canReply ? handleTouchStart : undefined}
-      onTouchMove={canReply ? handleTouchMove : undefined}
-      onTouchEnd={canReply ? handleTouchEnd : undefined}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+      onTouchCancel={handleTouchEnd}
     >
       {/* TODO: Add on group chat */}
       {/* {!isOutgoing && (
@@ -202,16 +295,10 @@ const MessageItem: React.FC<MessageItemProps> = ({
             ? 'ml-auto mr-3 bg-accent text-accent-foreground rounded-br-[4px]'
             : 'ml-3 mr-auto bg-card dark:bg-surface-secondary text-card-foreground rounded-bl-[4px] shadow-sm'
         } ${
-          canReply
-            ? 'cursor-pointer hover:opacity-90 transition-opacity focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2'
-            : ''
+          canReply ? 'cursor-pointer hover:opacity-90 transition-opacity' : ''
         }`}
         onDoubleClick={handleDoubleClick}
         onMouseDown={handleClick}
-        onKeyDown={handleKeyDown}
-        tabIndex={canReply ? 0 : undefined}
-        role={canReply ? 'button' : undefined}
-        aria-label={canReply ? 'Reply to message' : undefined}
         style={{
           transform:
             swipeOffset > 0 ? `translateX(${swipeOffset}px)` : 'translateX(0)',
@@ -244,16 +331,12 @@ const MessageItem: React.FC<MessageItemProps> = ({
                 : 'border-card-foreground/30'
             } ${originalNotFound ? 'border-destructive/50' : ''} ${
               message.replyTo.originalSeeker && onScrollToMessage
-                ? 'cursor-pointer hover:bg-black/5 dark:hover:bg-white/5 rounded-r transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2'
+                ? 'cursor-pointer hover:bg-black/5 dark:hover:bg-white/5 rounded-r transition-colors'
                 : ''
             }`}
             {...(message.replyTo.originalSeeker && onScrollToMessage
               ? {
                   onClick: handleReplyContextClick,
-                  onKeyDown: handleReplyContextKeyDown,
-                  tabIndex: 0,
-                  role: 'button',
-                  'aria-label': 'Jump to original message',
                 }
               : {})}
           >
@@ -301,7 +384,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
         )}
 
         {/* Message */}
-        <p className="whitespace-pre-wrap wrap-break-word pr-6">
+        <p className="whitespace-pre-wrap wrap-break-word pr-6 select-none">
           {message.content}
         </p>
 
@@ -311,8 +394,12 @@ const MessageItem: React.FC<MessageItemProps> = ({
             isOutgoing ? 'text-accent-foreground/80' : 'text-muted-foreground'
           }`}
         >
-          <span className="text-[11px] font-medium">
-            {formatTime(message.timestamp)}
+          <span className="text-[11px] font-medium select-none">
+            {copyFeedback === 'copied'
+              ? 'Copied'
+              : copyFeedback === 'failed'
+                ? 'Copy failed'
+                : formatTime(message.timestamp)}
           </span>
           {isOutgoing && (
             <div className="flex items-center gap-1">

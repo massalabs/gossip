@@ -65,7 +65,6 @@ const Discussion: React.FC = () => {
   );
 
   const isLoading = useMessageStore(s => s.isLoading);
-  const isSending = useMessageStore(s => s.isSending);
   const sendMessage = useMessageStore(s => s.sendMessage);
 
   // Track previous contact userId to prevent unnecessary updates
@@ -184,7 +183,6 @@ const Discussion: React.FC = () => {
 
       <MessageInput
         onSend={handleSendMessage}
-        disabled={isSending}
         replyingTo={replyingTo}
         onCancelReply={handleCancelReply}
         initialValue={finalPrefilledMessage || undefined}
