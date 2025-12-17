@@ -2,7 +2,7 @@ import React, { useState, useEffect, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import Button from './Button';
 import { useKeyDown } from '../../hooks/useKeyDown';
-import { CloseIcon } from './icons';
+import { X } from 'react-feather';
 
 interface BaseModalProps {
   isOpen: boolean;
@@ -37,7 +37,7 @@ const BaseModal: React.FC<BaseModalProps> = ({
   if (!isOpen) return null;
 
   const modalContent = (
-    <div className="fixed inset-0 z-1000 flex items-end md:items-center justify-center md:p-6 pb-[76px] pb-safe">
+    <div className="fixed inset-0 z-1000 flex flex-col items-center justify-end md:justify-center md:p-6">
       {/* Backdrop */}
       <div
         className="absolute inset-0 bg-black/50 dark:bg-black/60 transition-opacity"
@@ -46,7 +46,7 @@ const BaseModal: React.FC<BaseModalProps> = ({
 
       {/* Modal */}
       <div
-        className={`relative w-full max-w-md md:max-w-md bg-card md:rounded-2xl rounded-t-3xl shadow-2xl transform transition-all duration-300 ease-out 
+        className={`relative w-full app-max-w md:app-max-w bg-card md:rounded-2xl rounded-t-3xl shadow-2xl transform transition-all duration-300 ease-out 
         ${mounted ? 'translate-y-0 md:translate-y-0 md:opacity-100' : 'translate-y-full md:translate-y-4 md:opacity-0'}`}
       >
         {/* Header */}
@@ -60,7 +60,7 @@ const BaseModal: React.FC<BaseModalProps> = ({
             size="custom"
             className="w-8 h-8 flex items-center justify-center"
           >
-            <CloseIcon className="w-5 h-5 text-gray-500" />
+            <X className="w-5 h-5 text-gray-500" />
           </Button>
         </div>
 

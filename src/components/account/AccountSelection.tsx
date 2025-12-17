@@ -1,8 +1,12 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { Shield, Key, Check as CheckIcon, User, Plus } from 'react-feather';
 import { useAccountStore } from '../../stores/accountStore';
 import { UserProfile } from '../../db';
 import { formatDate } from '../../utils/timeUtils';
 import Button from '../ui/Button';
+import PageHeader from '../ui/PageHeader';
+import HeaderWrapper from '../ui/HeaderWrapper';
+import ScrollableContent from '../ui/ScrollableContent';
 
 interface AccountSelectionProps {
   onBack: () => void;
@@ -62,38 +66,14 @@ const AccountSelection: React.FC<AccountSelectionProps> = ({
     const authMethod = account.security?.authMethod;
     if (authMethod === 'capacitor' || authMethod === 'webauthn') {
       return (
-        <div className="w-10 h-10 bg-blue-100 dark:bg-blue-900/40 rounded-full flex items-center justify-center">
-          <svg
-            className="w-5 h-5 text-blue-600 dark:text-blue-400"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
-            />
-          </svg>
+        <div className="w-10 h-10 bg-primary/10 rounded-full flex items-center justify-center shrink-0">
+          <Shield className="w-5 h-5 text-primary" />
         </div>
       );
     } else {
       return (
-        <div className="w-10 h-10 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center">
-          <svg
-            className="w-5 h-5 text-gray-600 dark:text-gray-300"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"
-            />
-          </svg>
+        <div className="w-10 h-10 bg-muted rounded-full flex items-center justify-center shrink-0">
+          <Key className="w-5 h-5 text-muted-foreground" />
         </div>
       );
     }
@@ -101,78 +81,44 @@ const AccountSelection: React.FC<AccountSelectionProps> = ({
 
   if (isLoading) {
     return (
-      <div className="bg-background flex items-center justify-center">
-        <div className="text-center">
-          <div className="w-8 h-8 border-2 border-gray-300 dark:border-gray-700 border-t-blue-600 rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-gray-600 dark:text-gray-300">
-            Loading accounts...
-          </p>
-        </div>
+      <div className="h-full flex flex-col bg-background app-max-w mx-auto">
+        <HeaderWrapper>
+          <PageHeader title="Select Account" onBack={onBack} />
+        </HeaderWrapper>
+        <ScrollableContent className="flex-1 overflow-y-auto flex items-center justify-center">
+          <div className="text-center">
+            <div className="w-8 h-8 border-2 border-muted border-t-primary rounded-full animate-spin mx-auto mb-4"></div>
+            <p className="text-muted-foreground">Loading accounts...</p>
+          </div>
+        </ScrollableContent>
       </div>
     );
   }
 
   return (
-    <div className="bg-background">
-      <div className="max-w-md mx-auto">
-        {/* Header */}
-        <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-800">
-          <div className="flex items-center gap-4">
-            <Button
-              onClick={onBack}
-              variant="ghost"
-              size="custom"
-              className="p-2 text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-gray-100"
-            >
-              <svg
-                className="w-6 h-6"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M15 19l-7-7 7-7"
-                />
-              </svg>
-            </Button>
-            <h1 className="text-xl font-semibold text-black dark:text-white">
-              Select Account
-            </h1>
-          </div>
-        </div>
+    <div className="h-full flex flex-col bg-background app-max-w mx-auto">
+      {/* Header */}
+      <HeaderWrapper>
+        <PageHeader title="Select Account" onBack={onBack} />
+      </HeaderWrapper>
 
-        {/* Content */}
-        <div className="px-4 py-6">
+      <ScrollableContent className="flex-1 overflow-y-auto">
+        <div className="p-4">
           {error && (
-            <div className="mb-4 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
-              <p className="text-red-600 dark:text-red-400 text-sm">{error}</p>
+            <div className="mb-4 p-4 bg-destructive/10 border border-destructive rounded-lg">
+              <p className="text-destructive text-sm">{error}</p>
             </div>
           )}
 
           {accounts.length === 0 ? (
-            <div className="text-center py-8">
-              <div className="w-16 h-16 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center mx-auto mb-4">
-                <svg
-                  className="w-8 h-8 text-gray-400 dark:text-gray-300"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
-                  />
-                </svg>
+            <div className="text-center py-12">
+              <div className="w-16 h-16 bg-muted rounded-full flex items-center justify-center mx-auto mb-4">
+                <User className="w-8 h-8 text-muted-foreground" />
               </div>
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
+              <h3 className="text-xl font-semibold text-foreground mb-2">
                 No Accounts Found
               </h3>
-              <p className="text-gray-600 dark:text-gray-300 mb-6">
+              <p className="text-muted-foreground mb-6">
                 You don't have any accounts yet. Create a new account to get
                 started.
               </p>
@@ -181,36 +127,45 @@ const AccountSelection: React.FC<AccountSelectionProps> = ({
                 variant="primary"
                 size="custom"
                 fullWidth
-                className="h-12 bg-blue-600 dark:bg-blue-700 hover:bg-blue-700 dark:hover:bg-blue-800 text-white text-sm font-medium rounded-lg"
+                className="h-12 text-sm font-medium rounded-full"
               >
+                <Plus className="w-4 h-4 mr-2" />
                 Create New Account
               </Button>
             </div>
           ) : (
             <div className="space-y-4">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-                Choose an Account
-              </h2>
+              {/* Create New Account Button */}
+              <Button
+                onClick={onCreateNewAccount}
+                variant="outline"
+                size="custom"
+                fullWidth
+                className="h-12 text-sm font-medium rounded-full"
+              >
+                <Plus className="w-4 h-4 mr-2" />
+                Create New Account
+              </Button>
 
               {/* Account List */}
               <div className="space-y-3">
                 {accounts.map(account => (
                   <div
                     key={account.userId}
-                    className={`p-4 border rounded-lg cursor-pointer transition-colors ${
+                    className={`p-4 border rounded-lg cursor-pointer transition-all duration-200 bg-card hover:shadow-sm ${
                       selectedAccount?.userId === account.userId
-                        ? 'border-blue-500 dark:border-blue-400 bg-blue-50 dark:bg-blue-900/20'
-                        : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+                        ? 'border-primary bg-primary/10 shadow-sm'
+                        : 'border-border hover:border-primary/50'
                     }`}
                     onClick={() => handleAccountSelect(account)}
                   >
                     <div className="flex items-center gap-3">
                       {getAccountIcon(account)}
-                      <div className="flex-1">
-                        <h3 className="font-semibold text-gray-900 dark:text-white">
+                      <div className="flex-1 min-w-0">
+                        <h3 className="font-semibold text-foreground truncate">
                           {account.username}
                         </h3>
-                        <p className="text-sm text-gray-600 dark:text-gray-400">
+                        <p className="text-sm text-muted-foreground">
                           {formatAccountType(account)} • Created{' '}
                           {account.createdAt
                             ? formatDate(new Date(account.createdAt))
@@ -218,41 +173,18 @@ const AccountSelection: React.FC<AccountSelectionProps> = ({
                         </p>
                       </div>
                       {selectedAccount?.userId === account.userId && (
-                        <div className="w-5 h-5 bg-blue-600 dark:bg-blue-500 rounded-full flex items-center justify-center">
-                          <svg
-                            className="w-3 h-3 text-white"
-                            fill="currentColor"
-                            viewBox="0 0 20 20"
-                          >
-                            <path
-                              fillRule="evenodd"
-                              d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                              clipRule="evenodd"
-                            />
-                          </svg>
+                        <div className="w-5 h-5 bg-primary rounded-full flex items-center justify-center shrink-0">
+                          <CheckIcon className="w-3 h-3 text-primary-foreground" />
                         </div>
                       )}
                     </div>
                   </div>
                 ))}
               </div>
-
-              {/* Authentication happens on WelcomeBack after selection */}
-
-              {/* Create New Account Button */}
-              <Button
-                onClick={onCreateNewAccount}
-                variant="outline"
-                size="custom"
-                fullWidth
-                className="h-12 rounded-lg text-sm font-medium"
-              >
-                Create New Account
-              </Button>
             </div>
           )}
         </div>
-      </div>
+      </ScrollableContent>
     </div>
   );
 };

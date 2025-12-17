@@ -24,7 +24,8 @@ jobs:
 
       - name: Build
         env:
-          VITE_PROTOCOL_API_URL: ${{ secrets.VITE_PROTOCOL_API_URL }}
+          VITE_GOSSIP_API_URL: ${{ vars.GOSSIP_API_URL }}
+          VITE_INVITE_DOMAIN: ${{ vars.INVITE_DOMAIN_DEV }}
           VITE_APP_BUILD_ID: ${{ steps.vars.outputs.commit_hash }}
         run: npm run build
 

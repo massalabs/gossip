@@ -1,128 +1,83 @@
-import React, { useState } from 'react';
-import { useAccountStore } from '../../stores/accountStore';
+import React, { useState, useCallback, useMemo } from 'react';
 import { useFileShareContact } from '../../hooks/useFileShareContact';
 import PageHeader from '../ui/PageHeader';
-import Button from '../ui/Button';
+import HeaderWrapper from '../ui/HeaderWrapper';
+import ScrollableContent from '../ui/ScrollableContent';
 import TabSwitcher from '../ui/TabSwitcher';
-// import { generateQRCodeUrl } from '../../utils/qrCodeUrl';
+import { generateDeepLinkUrl } from '../../utils/inviteUrl';
+import { UserPublicKeys } from '../../assets/generated/wasm/gossip_wasm';
+import ShareContactQR from './ShareContactQR';
+import ShareContactCopySection from './ShareContactCopySection';
+import ShareContactFileSection from './ShareContactFileSection';
 
 interface ShareContactProps {
   onBack: () => void;
-  pregeneratedQR: string;
+  userId: string;
+  userName: string;
+  publicKey: UserPublicKeys;
 }
 
 type ShareTab = 'qr' | 'files';
 
 const ShareContact: React.FC<ShareContactProps> = ({
   onBack,
-  pregeneratedQR,
+  userId,
+  userName,
+  publicKey,
 }) => {
   const [activeTab, setActiveTab] = useState<ShareTab>('qr');
-  const { ourPk, userProfile } = useAccountStore();
   const { exportFileContact, fileState } = useFileShareContact();
+  const deepLinkUrl = useMemo(() => generateDeepLinkUrl(userId), [userId]);
+  const isExportDisabled = !publicKey || fileState.isLoading;
 
-  if (!userProfile) return null;
+  const handleExportFile = useCallback(() => {
+    if (!publicKey || !userName) return;
+
+    exportFileContact({
+      userPubKeys: publicKey.to_bytes(),
+      userName,
+    });
+  }, [exportFileContact, publicKey, userName]);
 
   return (
-    <div className="bg-card h-full overflow-auto max-w-md mx-auto">
-      <div className="max-w-md mx-auto">
+    <div className="h-full flex flex-col bg-background app-max-w mx-auto">
+      {/* Header */}
+      <HeaderWrapper>
         <PageHeader title="Share Contact" onBack={onBack} />
+      </HeaderWrapper>
 
-        <div className="px-4 pb-20 space-y-6">
-          <div className="bg-card rounded-lg p-6">
-            <TabSwitcher
-              options={[
-                { value: 'qr', label: 'Scan QR code' },
-                { value: 'files', label: 'File' },
-              ]}
-              value={activeTab}
-              onChange={setActiveTab}
-            />
-          </div>
-
-          {activeTab === 'qr' && (
-            <div className="flex justify-center">
-              <img
-                src={pregeneratedQR}
-                alt="Your contact QR code"
-                className="w-[300px] h-[300px]"
-              />
-            </div>
-          )}
-
-          {activeTab === 'files' && (
-            <div className="relative">
-              <div className="bg-card rounded-lg p-6">
-                <div className="text-center mb-6">
-                  <div className="w-12 h-12 bg-primary/10 rounded-xl flex items-center justify-center mx-auto mb-3">
-                    <svg
-                      className="w-6 h-6 text-primary"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
-                      />
-                    </svg>
-                  </div>
-                  <h4 className="text-lg font-semibold text-foreground mb-2">
-                    Share with file
-                  </h4>
-                  <p className="text-sm text-muted-foreground mb-4">
-                    Download your profile file and share it with people you want
-                    to talk to.
-                  </p>
-                </div>
-
-                <Button
-                  onClick={() => {
-                    if (!ourPk || !userProfile?.username) return;
-                    exportFileContact({
-                      userPubKeys: ourPk.to_bytes(),
-                      userName: userProfile.username,
-                    });
-                  }}
-                  disabled={!ourPk || fileState.isLoading}
-                  loading={fileState.isLoading}
-                  variant="primary"
-                  size="custom"
-                  fullWidth
-                  className="h-11 rounded-xl text-sm font-medium"
-                >
-                  {!fileState.isLoading && (
-                    <>
-                      <svg
-                        className="w-5 h-5"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
-                        />
-                      </svg>
-                      <span>Download</span>
-                    </>
-                  )}
-                </Button>
-
-                {fileState.error && (
-                  <div className="mt-4 text-sm text-destructive text-center">
-                    {fileState.error}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
+      {/* Main Content */}
+      <ScrollableContent className="flex-1 overflow-y-auto px-6 py-6">
+        {/* Tab switcher */}
+        <div className="mb-6">
+          <TabSwitcher
+            options={[
+              { value: 'qr', label: 'Scan QR code' },
+              { value: 'files', label: 'File' },
+            ]}
+            value={activeTab}
+            onChange={setActiveTab}
+          />
         </div>
-      </div>
+
+        <div className={activeTab === 'qr' ? 'block' : 'hidden'}>
+          <ShareContactQR deepLinkUrl={deepLinkUrl} />
+        </div>
+
+        <div className={activeTab === 'files' ? 'block' : 'hidden'}>
+          <ShareContactFileSection
+            disabled={isExportDisabled}
+            isLoading={fileState.isLoading}
+            error={fileState.error}
+            onExport={handleExportFile}
+          />
+        </div>
+
+        {/* Copy buttons section */}
+        <div className="mt-6">
+          <ShareContactCopySection userId={userId} deepLinkUrl={deepLinkUrl} />
+        </div>
+      </ScrollableContent>
     </div>
   );
 };

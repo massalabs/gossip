@@ -7,8 +7,26 @@ android {
         applicationId "net.massa.gossip"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "0.0.1"
+        // Use an auto-generated numeric versionCode so each build is unique without manual bumping.
+        // We must stay within the 32-bit signed int limit required by Google Play (max 2147483647).
+        //
+        // If set, ANDROID_VERSION_CODE must be a numeric string (e.g. '1700000000') that is
+        // <= Integer.MAX_VALUE. If not set or invalid, we fall back to the current Unix time
+        // in seconds (System.currentTimeMillis() / 1000), which will be safely < 2147483647
+        // until year 2038.
+        def envVersionCode = System.getenv("ANDROID_VERSION_CODE")
+        def resolvedVersionCode
+        if (envVersionCode != null && envVersionCode ==~ /^\d+$/) {
+            resolvedVersionCode = envVersionCode.toLong()
+        } else {
+            resolvedVersionCode = (System.currentTimeMillis() / 1000L)
+        }
+        if (resolvedVersionCode > Integer.MAX_VALUE) {
+            throw new IllegalArgumentException("Resolved ANDROID_VERSION_CODE (" + resolvedVersionCode +
+                    ") exceeds 32-bit int max value (" + Integer.MAX_VALUE + ").")
+        }
+        versionCode resolvedVersionCode.toInteger()
+        versionName "0.0.3"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,8 +34,23 @@ android {
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+
+    signingConfigs {
+        release {
+            if (System.getenv('ANDROID_KEYSTORE_FILE')) {
+                storeFile file(System.getenv('ANDROID_KEYSTORE_FILE'))
+                storePassword System.getenv('ANDROID_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('ANDROID_KEY_ALIAS')
+                keyPassword System.getenv('ANDROID_KEY_PASSWORD')
+            }
+        }
+    }
+
     buildTypes {
         release {
+            if (System.getenv('ANDROID_KEYSTORE_FILE')) {
+                signingConfig signingConfigs.release
+            }
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
@@ -27,6 +60,7 @@ android {
 repositories {
     flatDir{
         dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
+		dirs '../../node_modules/@capacitor/background-runner/android/src/main/libs', 'libs'
     }
 }
 
@@ -35,6 +69,7 @@ dependencies {
     implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
+    implementation "androidx.work:work-runtime:$androidxWorkVersion"
     implementation project(':capacitor-android')
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"

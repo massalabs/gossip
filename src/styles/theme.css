@@ -1,0 +1,198 @@
+:root {
+  /* Quantum Dawn Light Mode - "Bert Light Mode" */
+  /* Airy, warm, privacy-first – the daytime twin of "Quantum Velvet" */
+  /* Teal primary - distinct from Phantom's purple */
+
+  /* Base colors */
+  --background: #fafbfc; /* light background from Figma */
+  --foreground: #1a1a1d; /* deep charcoal - primary text */
+  --card: #ffffff; /* true white cards */
+  --card-foreground: var(--foreground);
+  --popover: var(--card);
+  --popover-foreground: var(--foreground);
+
+  /* Primary colors */
+  --primary: #3af3d1; /* brand green - unified primary across modes */
+  --primary-foreground: var(
+    --foreground
+  ); /* dark text on primary in light mode */
+  --ring: var(--primary); /* focus ring using primary */
+
+  /* Secondary colors */
+  --secondary: #ff8c8c; /* coral timer - self-destruct/Secondary */
+  --secondary-foreground: #ffffff; /* white text on coral */
+  --destructive: var(
+    --secondary
+  ); /* coral timer - also works for destructive */
+  --destructive-foreground: var(--secondary-foreground);
+
+  /* Accent colors */
+  --accent: var(--primary); /* use brand green for accent surfaces */
+  --accent-foreground: var(
+    --foreground
+  ); /* dark text on accent in light mode */
+
+  /* Muted colors */
+  --muted: #f0f1f3; /* muted background */
+  --muted-foreground: #6b6b73; /* warm mid-gray - subtle text */
+  /* Header scrolled background - lighter grey for light mode */
+  --header-scrolled: #f5f6f7; /* lighter grey for scrolled header in light mode */
+
+  /* Status colors */
+  --success: #16a34a; /* green-600 - online status, success states */
+  --success-foreground: #ffffff; /* white text on green */
+  --warning: #92400e; /* amber-800 - warning states (6.1:1 contrast with white, WCAG AA compliant) */
+  --warning-foreground: #ffffff; /* white text on amber */
+  --high-danger-red: #f33a3a; /* high danger red for critical actions */
+
+  /* UI elements */
+  --border: #e5e7eb; /* subtle border from Figma */
+  --input: var(--card); /* input background */
+  --tail-border: var(--border); /* border for light mode tail */
+  --badge: #f5f5f5; /* badge background */
+  --badge-foreground: var(--foreground); /* badge text */
+  --badge-border: #f4f4f4; /* badge border color */
+
+  /* Surface colors */
+  --surface-secondary: var(
+    --card
+  ); /* secondary surface background (light mode uses card) */
+
+  /* Graphic colors */
+  --graphic-accent: var(--primary); /* brand green for illustrations */
+
+  /* Chart colors */
+  --chart-1: var(--accent); /* deeper sea-foam */
+  --chart-2: var(--primary); /* teal */
+  --chart-3: var(--secondary); /* coral timer */
+  --chart-4: #c17bc9; /* rich orchid - offline key */
+  --chart-5: var(--chart-1); /* sea-foam variant */
+
+  /* Sidebar colors */
+  --sidebar: var(--background);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-primary: var(--card);
+  --sidebar-primary-foreground: var(--foreground);
+  --sidebar-accent: var(--accent);
+  --sidebar-accent-foreground: var(--accent-foreground);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--ring);
+
+  /* Font weights */
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  /* Layout */
+  --radius: 0.25rem;
+  --bottom-nav-height: 56px; /* Reduced from 64px for more compact mobile experience */
+  /* Header height: safe area + padding (0.625rem top + 0.625rem bottom) + content (~1.75rem) */
+  --header-height: calc(var(--safe-area-inset-top, 0px) + 3rem);
+
+  /* Safe area insets - will be injected by EdgeToEdge plugin on Android, native env() on iOS */
+  --safe-area-inset-top: env(safe-area-inset-top, 0px);
+  --safe-area-inset-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-area-inset-left: env(safe-area-inset-left, 0px);
+  --safe-area-inset-right: env(safe-area-inset-right, 0px);
+
+  /* Scrollbar colors (light mode) */
+  --scrollbar-thumb-rgb: 26, 26, 29;
+}
+
+.dark {
+  /* Quantum Velvet Dark Mode - "Bert Dark Mode" */
+  /* Warm charcoal base, zero pure black, privacy-coded accents */
+  /* Teal primary - distinct from Phantom's purple */
+
+  /* Base colors */
+  --background: #18181b; /* dark background from Figma */
+  --foreground: #e8e8ea; /* creamy off-white - primary text */
+  --card: #1e1e22; /* surface/cards from Figma */
+  --card-foreground: var(--foreground);
+
+  /* Surface colors */
+  --surface-secondary: #243032; /* secondary surface background (incoming messages, discussion items, popups) */
+
+  --popover: var(
+    --surface-secondary
+  ); /* use secondary surface color for popups */
+  --popover-foreground: var(--foreground);
+
+  /* Primary colors */
+  --primary: #3af3d1; /* brand green - unified primary across modes */
+  --primary-foreground: var(
+    --background
+  ); /* dark text on cyan for good contrast */
+  --ring: var(--primary); /* focus ring using cyan */
+
+  /* Secondary colors */
+  --secondary: #ffb3b3; /* peach timer - self-destruct/Secondary */
+  --secondary-foreground: var(
+    --background
+  ); /* dark text on peach for good contrast */
+  --destructive: var(
+    --secondary
+  ); /* peach timer - also works for destructive */
+  --destructive-foreground: var(--secondary-foreground);
+
+  /* Accent colors */
+  --accent: var(--primary); /* use brand green for accent surfaces */
+  --accent-foreground: var(
+    --background
+  ); /* dark text on accent for good contrast */
+
+  /* Muted colors */
+  --muted: #252529; /* muted background */
+  --muted-foreground: #a0a0a8; /* dove gray - subtle text */
+  /* Header scrolled background - use muted in dark mode for contrast */
+  --header-scrolled: var(
+    --muted
+  ); /* muted grey for scrolled header in dark mode */
+
+  /* Status colors */
+  --success: #22c55e; /* green-500 - online status, success states */
+  --success-foreground: var(
+    --background
+  ); /* dark text on green for good contrast */
+  --warning: #fbbf24; /* amber-400 - warning states, needs attention */
+  --warning-foreground: var(
+    --background
+  ); /* dark text on amber for good contrast */
+  --high-danger-red: #f33a3a; /* high danger red for critical actions */
+
+  /* UI elements */
+  --border: #2a2a2e; /* subtle border */
+  --input: #252528; /* dark input background */
+  --tail-border: transparent; /* transparent border for dark mode tail */
+  --badge: var(
+    --surface-secondary
+  ); /* badge background - uses secondary surface */
+  --badge-foreground: var(--foreground); /* badge text */
+  --badge-border: var(
+    --surface-secondary
+  ); /* badge border color - uses secondary surface */
+
+  /* Chart colors */
+  --chart-1: var(--accent); /* accent/primary */
+  --chart-2: var(--primary); /* primary */
+  --chart-3: var(--secondary); /* peach timer */
+  --chart-4: #d6a8dc; /* muted orchid - offline key */
+  --chart-5: var(--chart-1); /* sea-foam variant */
+
+  /* Sidebar colors */
+  --sidebar: var(--background);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-primary: var(--card);
+  --sidebar-primary-foreground: var(--foreground);
+  --sidebar-accent: var(--accent);
+  --sidebar-accent-foreground: var(--accent-foreground);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--ring);
+
+  /* Layout */
+  --bottom-nav-height: 64px;
+
+  /* Scrollbar colors (dark mode) */
+  --scrollbar-thumb-rgb: 232, 232, 234;
+}

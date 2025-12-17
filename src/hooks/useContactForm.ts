@@ -1,41 +1,42 @@
-// src/hooks/useContactForm.ts
 import { useCallback, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Contact, db } from '../db';
 import { useAccountStore } from '../stores/accountStore';
-import { validateUsername, isValidUserId, encodeUserId } from '../utils';
+import {
+  encodeUserId,
+  validateUsernameFormat,
+  validateUserIdFormat,
+} from '../utils';
 import { UserPublicKeys } from '../assets/generated/wasm/gossip_wasm';
-import { ensureDiscussionExists } from '../crypto/discussionInit';
 import { useFileShareContact } from './useFileShareContact';
-import { authService } from '../services/auth';
+import { authService, PublicKeyResult } from '../services/auth';
 import toast from 'react-hot-toast';
+import { ROUTES } from '../constants/routes';
+import { initializeDiscussion } from '../services/discussion';
 
 type FieldState = {
   value: string;
-  error: string | null;
+  error?: string;
   loading: boolean;
 };
 
 export function useContactForm() {
   const navigate = useNavigate();
-  const { userProfile } = useAccountStore();
+  const { userProfile, ourSk, ourPk, session } = useAccountStore();
   const { importFileContact, fileState } = useFileShareContact();
 
   const publicKeysCache = useRef<Map<string, UserPublicKeys>>(new Map());
 
   const [name, setName] = useState<FieldState>({
     value: '',
-    error: null,
     loading: false,
   });
   const [userId, setUserId] = useState<FieldState>({
     value: '',
-    error: null,
     loading: false,
   });
   const [message, setMessage] = useState<FieldState>({
     value: '',
-    error: null,
     loading: false,
   });
 
@@ -44,41 +45,29 @@ export function useContactForm() {
   const [generalError, setGeneralError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const fetchPublicKey = useCallback(async (uid: string) => {
-    const trimmed = uid.trim();
-    const cached = publicKeysCache.current.get(trimmed);
+  const getPublicKey = useCallback(
+    async (uid: string): Promise<PublicKeyResult> => {
+      const cached = publicKeysCache.current.get(uid);
 
-    if (cached) {
-      setPublicKeys(cached);
-      setUserId(prev => ({ ...prev, error: null }));
-      return;
-    }
+      if (cached) {
+        return { publicKey: cached };
+      }
 
-    setUserId(prev => ({ ...prev, loading: true, error: null }));
+      const result = await authService.fetchPublicKeyByUserId(uid);
 
-    const { success, publicKey } =
-      await authService.fetchPublicKeyByUserId(trimmed);
+      if (result.publicKey) {
+        publicKeysCache.current.set(uid, result.publicKey);
+      }
 
-    if (!success || !publicKey) {
-      setUserId(prev => ({
-        ...prev,
-        loading: false,
-        // TODO: Improve user feedback: Network, api, not found...
-        // If can't fetch public key create discussion with announcement not sent, and retry regularly?
-        error: 'Associated public keys not found',
-      }));
-      setPublicKeys(null);
-    } else {
-      publicKeysCache.current.set(trimmed, publicKey);
-      setPublicKeys(publicKey);
-      setUserId(prev => ({ ...prev, loading: false, error: null }));
-    }
-  }, []);
+      return result;
+    },
+    []
+  );
 
   const canSubmit =
-    name.error === null &&
+    !name.error &&
     name.value.trim().length > 0 &&
-    userId.error === null &&
+    !userId.error &&
     userId.value.trim().length > 0 &&
     publicKeys !== null &&
     !isSubmitting &&
@@ -92,41 +81,54 @@ export function useContactForm() {
   // ──────────────────────────────────────────────────────────────
   const handleNameChange = useCallback((value: string) => {
     const trimmed = value.trim();
-    const error = trimmed
-      ? validateUsername(trimmed).valid
-        ? null
-        : (validateUsername(trimmed).error ?? 'Invalid display name')
-      : 'Display name is required';
-
-    setName({ value: trimmed, error, loading: false });
+    const result = validateUsernameFormat(trimmed);
+    setName(_ => ({
+      value: trimmed,
+      error: result.error,
+      loading: false,
+    }));
   }, []);
 
   const handleUserIdChange = useCallback(
-    (value: string) => {
+    async (value: string) => {
       const trimmed = value.trim();
-
-      // Reset everything
       setPublicKeys(null);
-      setUserId({ value: trimmed, error: null, loading: false });
+      setUserId(prev => ({ ...prev, value: trimmed }));
 
       if (!trimmed) return;
 
-      if (!isValidUserId(trimmed)) {
-        setUserId(prev => ({
-          ...prev,
-          error: 'Invalid format — must be a complete gossip1... address',
+      setUserId(prev => ({
+        ...prev,
+        error: undefined,
+        loading: true,
+      }));
+
+      const result = validateUserIdFormat(trimmed);
+
+      if (!result.valid) {
+        setUserId(_ => ({
+          value: trimmed,
+          error: result.error,
+          loading: false,
         }));
         return;
       }
 
-      // Valid format → check existence
-      fetchPublicKey(trimmed);
+      const { publicKey, error } = await getPublicKey(trimmed);
+
+      if (!publicKey) {
+        setUserId(prev => ({ ...prev, error, loading: false }));
+        return;
+      }
+
+      setPublicKeys(publicKey);
+      setUserId(prev => ({ ...prev, loading: false }));
     },
-    [fetchPublicKey]
+    [getPublicKey]
   );
 
   const handleMessageChange = useCallback((value: string) => {
-    setMessage({ value, error: null, loading: false });
+    setMessage({ value, loading: false });
   }, []);
 
   const handleFileImport = useCallback(
@@ -159,21 +161,61 @@ export function useContactForm() {
         handleNameChange(fileContact.userName);
       }
 
-      setUserId({ value: derivedUserId, error: null, loading: false });
+      setUserId({ value: derivedUserId, loading: false });
     },
     [importFileContact, handleNameChange, userProfile]
   );
 
   const handleSubmit = useCallback(async () => {
-    if (!canSubmit || !userProfile?.userId || !publicKeys) return;
+    const trimmedName = name.value.trim();
+    const trimmedUserId = userId.value.trim();
+
+    // Surface missing or pending requirements as field errors when user tries to submit
+    if (!trimmedName) {
+      setName(prev => ({
+        ...prev,
+        error: prev.error || 'Display name is required',
+      }));
+    }
+
+    if (!trimmedUserId) {
+      setUserId(prev => ({
+        ...prev,
+        error: prev.error || 'User ID is required',
+      }));
+    }
+
+    if (userId.loading) {
+      setUserId(prev => ({
+        ...prev,
+        error: prev.error || 'Resolving user ID, please wait…',
+      }));
+    }
+
+    if (!publicKeys && trimmedUserId) {
+      setUserId(prev => ({
+        ...prev,
+        error:
+          prev.error ||
+          'Unable to load public key for this user ID. Please check it.',
+      }));
+    }
+
+    if (
+      !canSubmit ||
+      !userProfile?.userId ||
+      !publicKeys ||
+      !ourSk ||
+      !ourPk ||
+      !session
+    ) {
+      return;
+    }
 
     setIsSubmitting(true);
     setGeneralError(null);
 
     try {
-      const trimmedName = name.value.trim();
-      const trimmedUserId = userId.value.trim();
-
       // Duplicate checks
       const contacts = await db.getContactsByOwner(userProfile.userId);
       const nameTaken = contacts.some(
@@ -214,12 +256,24 @@ export function useContactForm() {
 
       await db.contacts.add(contact);
 
-      const announcement = message.value.trim() || undefined;
-      await ensureDiscussionExists(contact, undefined, announcement).catch(
-        console.error
-      );
+      const announcementMessage = message.value.trim() || undefined;
+      try {
+        await initializeDiscussion(
+          contact,
+          ourPk,
+          ourSk,
+          session,
+          userProfile.userId,
+          announcementMessage
+        );
+      } catch (e) {
+        console.error(
+          'Failed to initialize discussion after contact creation:',
+          e
+        );
+      }
 
-      navigate('/');
+      navigate(ROUTES.default());
     } catch (err) {
       console.error(err);
       setGeneralError('Failed to add contact. Please try again.');
@@ -233,7 +287,11 @@ export function useContactForm() {
     name.value,
     userId.value,
     message.value,
+    userId.loading,
     navigate,
+    ourSk,
+    ourPk,
+    session,
   ]);
 
   return {

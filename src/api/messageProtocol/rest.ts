@@ -112,6 +112,10 @@ export class RestMessageProtocol implements IMessageProtocol {
       throw new Error(response.error || 'Failed to fetch public key');
     }
 
+    if (!response.data.value) {
+      throw new Error('Public key not found');
+    }
+
     return response.data.value;
   }
 
@@ -171,6 +175,16 @@ export class RestMessageProtocol implements IMessageProtocol {
     return {
       success: false,
       error: lastError?.message || 'Request failed after all retry attempts',
+    };
+  }
+
+  async changeNode(nodeUrl?: string): Promise<MessageProtocolResponse> {
+    return {
+      success: true,
+      data:
+        'This message protocol provider use a single node, so changing the node to ' +
+        nodeUrl +
+        ' is not supported',
     };
   }
 }

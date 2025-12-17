@@ -99,6 +99,12 @@ export class SessionModule {
       userDataBytes
     );
 
+    if (result.length === 0) {
+      throw new Error(
+        'Failed to establish outgoing session. Session manager returned empty announcement bytes.'
+      );
+    }
+
     this.persistIfNeeded();
     return result;
   }
@@ -222,5 +228,26 @@ export class SessionModule {
     const result = this.sessionManager.refresh();
     this.persistIfNeeded();
     return result;
+  }
+}
+
+export function sessionStatusToString(status: SessionStatus): string {
+  switch (status) {
+    case SessionStatus.Active:
+      return 'Active';
+    case SessionStatus.UnknownPeer:
+      return 'UnknownPeer';
+    case SessionStatus.NoSession:
+      return 'NoSession';
+    case SessionStatus.PeerRequested:
+      return 'PeerRequested';
+    case SessionStatus.SelfRequested:
+      return 'SelfRequested';
+    case SessionStatus.Killed:
+      return 'Killed';
+    case SessionStatus.Saturated:
+      return 'Saturated';
+    default:
+      throw new Error(`Unknown session status: ${status}`);
   }
 }

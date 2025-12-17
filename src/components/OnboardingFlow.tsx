@@ -1,44 +1,8 @@
 import React, { useState } from 'react';
+import { ArrowRight, Zap } from 'react-feather';
 import appLogo from '../assets/gossip_face.svg';
-import { PrivacyGraphic } from './ui/PrivacyGraphic';
+import { PrivacyGraphic, LockGraphic, GroupChatGraphic } from './graphics';
 import Button from './ui/Button';
-
-// Icon components
-const LightningIcon: React.FC<{ className?: string }> = ({
-  className = 'w-5 h-5',
-}) => (
-  <svg
-    className={className}
-    fill="none"
-    stroke="currentColor"
-    viewBox="0 0 24 24"
-  >
-    <path
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth={2}
-      d="M13 10V3L4 14h7v7l9-11h-7z"
-    />
-  </svg>
-);
-
-const ArrowRightIcon: React.FC<{ className?: string }> = ({
-  className = 'w-4 h-4',
-}) => (
-  <svg
-    className={className}
-    fill="none"
-    stroke="currentColor"
-    viewBox="0 0 24 24"
-  >
-    <path
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth={2}
-      d="M9 5l7 7-7 7"
-    />
-  </svg>
-);
 
 interface OnboardingFlowProps {
   onComplete: () => void;
@@ -59,13 +23,13 @@ const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
       image: appLogo,
     },
     {
-      title: 'Privacy by Design 🔒',
+      title: 'Privacy by Design',
       description:
         'All your messages are encrypted and stored locally on your device. Your conversations stay private, always.',
       image: appLogo,
     },
     {
-      title: "Let's Get Started! 🚀",
+      title: "Let's Get Started!",
       description:
         'Create your account in seconds and start connecting with people securely.',
       image: appLogo,
@@ -105,7 +69,13 @@ const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
             ))}
           </div>
         </div>
-        <PrivacyGraphic size={200} />
+        {currentStep === 0 ? (
+          <PrivacyGraphic size={250} />
+        ) : currentStep === 1 ? (
+          <LockGraphic size={200} />
+        ) : (
+          <GroupChatGraphic size={200} />
+        )}
         <div className="">
           <h1 className="text-3xl md:text-4xl font-bold text-foreground mb-4 leading-tight">
             {currentStep === 0 ? (
@@ -117,7 +87,7 @@ const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
               steps[currentStep].title
             )}
           </h1>
-          <p className="text-base md:text-lg text-muted-foreground leading-relaxed max-w-md mx-auto px-2">
+          <p className="text-base md:text-lg text-muted-foreground leading-relaxed app-max-w mx-auto px-2">
             {steps[currentStep].description}
           </p>
         </div>
@@ -132,9 +102,9 @@ const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
                 variant="primary"
                 size="custom"
                 fullWidth
-                className="h-14 text-base font-semibold rounded-2xl gap-2"
+                className="h-14 text-base font-semibold rounded-full gap-2"
               >
-                <LightningIcon />
+                <Zap />
                 Create New Account
               </Button>
               {onImportMnemonic && (
@@ -143,7 +113,7 @@ const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
                   variant="outline"
                   size="custom"
                   fullWidth
-                  className="h-14 text-base font-medium rounded-2xl"
+                  className="h-14 text-base font-medium rounded-full"
                 >
                   Import from Mnemonic
                 </Button>
@@ -169,7 +139,7 @@ const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
                 className="px-8 gap-2"
               >
                 {currentStep === steps.length - 2 ? 'Get Started' : 'Next'}
-                <ArrowRightIcon />
+                <ArrowRight />
               </Button>
             </div>
           )}

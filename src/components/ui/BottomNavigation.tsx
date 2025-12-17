@@ -1,55 +1,59 @@
-import React from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import React, { useEffect } from 'react';
+import { useLocation, useNavigate, matchPath } from 'react-router-dom';
+import { Settings as SettingsFeather } from 'react-feather';
 import NavButton from './NavButton';
-import {
-  // WalletIcon,
-  DiscussionsIcon,
-  SettingsIcon,
-} from './icons';
+import GossipIcon from './customIcons/gossip-icon';
+import { ROUTES } from '../../constants/routes';
+import { useUiStore } from '../../stores/uiStore';
+
+type BottomNavigationTab = 'discussions' | 'settings';
 
 const BottomNavigation: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const path = location.pathname || '/';
-  const activeTab: 'wallet' | 'discussions' | 'settings' = path.startsWith(
-    '/wallet'
+  const setBottomNavVisible = useUiStore(s => s.setBottomNavVisible);
+
+  // Declare bottom navigation presence
+  useEffect(() => {
+    setBottomNavVisible(true);
+    return () => {
+      setBottomNavVisible(false);
+    };
+  }, [setBottomNavVisible]);
+
+  const activeTab: BottomNavigationTab = matchPath(
+    location.pathname,
+    ROUTES.settings()
   )
-    ? 'wallet'
-    : path.startsWith('/settings')
-      ? 'settings'
-      : 'discussions';
+    ? 'settings'
+    : 'discussions';
 
   const navItems = [
-    // {
-    //   id: 'wallet' as const,
-    //   path: '/wallet',
-    //   title: 'Wallet',
-    //   icon: <WalletIcon />,
-    // },
     {
       id: 'discussions' as const,
-      path: '/',
+      path: ROUTES.discussions(),
       title: 'Discussions',
-      icon: <DiscussionsIcon />,
+      icon: <GossipIcon size={24} />,
     },
     {
       id: 'settings' as const,
-      path: '/settings',
+      path: ROUTES.settings(),
       title: 'Settings',
-      icon: <SettingsIcon />,
+      icon: <SettingsFeather />,
     },
   ];
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 bg-card mx-auto h-(--bottom-nav-height) max-w-md flex items-center justify-center shadow-2xl z-50 border-t border-border">
+    <div className="fixed bottom-0 left-0 right-0 bg-muted dark:bg-muted mx-auto h-(--bottom-nav-height) app-max-w flex items-center justify-center shadow-2xl z-50">
       <div className="flex items-center justify-center gap-8">
-        {navItems.map(item => (
+        {navItems.map((item, index) => (
           <NavButton
             key={item.id}
             onClick={() => navigate(item.path)}
             isActive={activeTab === item.id}
             title={item.title}
             icon={item.icon}
+            animationVariant={index === 0 ? 'default' : 'alt'}
           />
         ))}
       </div>

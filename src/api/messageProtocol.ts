@@ -36,3 +36,5 @@ export function createMessageProtocol(
       throw new Error(`Unsupported message protocol type: ${type}`);
   }
 }
+
+export const restMessageProtocol = createMessageProtocol();

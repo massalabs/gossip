@@ -12,7 +12,13 @@ dependencies {
     implementation project(':aparajita-capacitor-biometric-auth')
     implementation project(':aparajita-capacitor-secure-storage')
     implementation project(':capacitor-app')
+    implementation project(':capacitor-background-runner')
     implementation project(':capacitor-barcode-scanner')
+    implementation project(':capacitor-device')
+    implementation project(':capacitor-local-notifications')
+    implementation project(':capacitor-network')
+    implementation project(':capacitor-preferences')
+    implementation project(':capacitor-share')
     implementation project(':capacitor-status-bar')
     implementation project(':capawesome-capacitor-android-edge-to-edge-support')
 

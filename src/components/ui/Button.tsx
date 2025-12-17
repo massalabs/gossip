@@ -2,7 +2,8 @@ import React from 'react';
 
 interface ButtonProps {
   children: React.ReactNode;
-  onClick?: () => void;
+  onClick?: (e: React.MouseEvent<HTMLButtonElement>) => void;
+  onMouseDown?: (e: React.MouseEvent<HTMLButtonElement>) => void;
   disabled?: boolean;
   loading?: boolean;
   variant?:
@@ -11,8 +12,6 @@ interface ButtonProps {
     | 'danger'
     | 'ghost'
     | 'outline'
-    | 'gradient-emerald'
-    | 'gradient-blue'
     | 'circular'
     | 'link'
     | 'icon';
@@ -21,11 +20,16 @@ interface ButtonProps {
   type?: 'button' | 'submit' | 'reset';
   fullWidth?: boolean;
   title?: string;
+  ariaLabel?: string;
+  tabIndex?: number;
+  onKeyDown?: (e: React.KeyboardEvent<HTMLButtonElement>) => void;
 }
 
 const Button: React.FC<ButtonProps> = ({
   children,
   onClick,
+  onMouseDown,
+  onKeyDown,
   disabled = false,
   loading = false,
   variant = 'primary',
@@ -34,32 +38,35 @@ const Button: React.FC<ButtonProps> = ({
   type = 'button',
   fullWidth = false,
   title,
+  ariaLabel,
+  tabIndex,
 }) => {
-  const baseClasses =
-    'inline-flex items-center justify-center font-medium transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-transparent disabled:cursor-not-allowed';
+  const baseClasses = `inline-flex items-center justify-center font-medium transition-all 
+    focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 
+    focus-visible:ring-offset-transparent disabled:cursor-not-allowed 
+    disabled:pointer-events-none disabled:touch-none `;
 
   const variantClasses = {
     primary:
-      'bg-primary hover:bg-primary/90 disabled:bg-muted text-primary-foreground disabled:text-muted-foreground focus:ring-ring',
+      'bg-primary hover:bg-primary/90 disabled:bg-muted text-primary-foreground disabled:text-muted-foreground focus:ring-ring rounded-full',
     secondary:
-      'bg-secondary hover:bg-secondary/80 disabled:bg-muted text-secondary-foreground disabled:text-muted-foreground focus:ring-ring',
+      'bg-secondary hover:bg-secondary/80 disabled:bg-muted text-secondary-foreground disabled:text-muted-foreground focus:ring-ring rounded-full',
     danger:
-      'bg-destructive hover:bg-destructive/90 disabled:bg-destructive/50 text-destructive-foreground focus:ring-ring',
-    ghost: 'bg-transparent hover:bg-accent text-foreground focus:ring-ring',
-    outline:
-      'bg-card border border-border text-foreground hover:bg-accent/50 hover:border-accent shadow-sm hover:shadow-md disabled:bg-muted disabled:text-muted-foreground disabled:border-border/50 disabled:opacity-60 disabled:hover:bg-muted disabled:hover:border-border/50 disabled:hover:shadow-sm',
-    'gradient-emerald':
-      'bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm',
-    'gradient-blue': 'bg-blue-600 hover:bg-blue-700 text-white shadow-sm',
-    circular: 'rounded-full hover:bg-accent/50 active:scale-95',
+      'bg-destructive hover:bg-destructive/90 disabled:bg-destructive/50 text-destructive-foreground focus:ring-ring rounded-full',
+    ghost:
+      'bg-transparent hover:bg-accent hover:text-accent-foreground text-foreground focus:ring-ring rounded-full',
+    outline: `bg-card border border-border text-foreground hover:bg-accent/50 
+    hover:border-accent disabled:bg-muted disabled:text-muted-foreground disabled:border-border/50 
+    disabled:opacity-60 disabled:hover:bg-muted disabled:hover:border-border/50 rounded-md`,
+    circular: 'rounded-full active:scale-95',
     link: 'bg-transparent text-primary hover:text-primary/80 underline p-0 shadow-none',
     icon: 'bg-transparent hover:bg-accent/50 rounded-full p-2',
   };
 
   const sizeClasses = {
-    sm: 'px-3 py-2 text-sm rounded-lg',
-    md: 'px-4 py-3 text-base rounded-xl',
-    lg: 'px-6 py-4 text-lg rounded-xl',
+    sm: 'px-3 py-2 text-sm',
+    md: 'px-3 py-4 h-[51px] text-base gap-2.5',
+    lg: 'px-6 py-4 text-lg',
     custom: '', // Allow full customization via className
   };
 
@@ -69,7 +76,21 @@ const Button: React.FC<ButtonProps> = ({
   const shouldApplySize =
     variant !== 'circular' && variant !== 'icon' && size !== 'custom';
 
-  const combinedClasses = `${baseClasses} ${variantClasses[variant]} ${
+  // Check if className contains a rounded-* class to override default border-radius
+  // This regex matches all Tailwind rounded classes including:
+  // - Standard: rounded-full, rounded-md, rounded-lg, etc.
+  // - Arbitrary values: rounded-[10px]
+  // - Corner-specific: rounded-t-3xl, rounded-br-[4px], etc.
+  // Uses word boundaries to ensure only standalone rounded classes are matched
+  const hasCustomRounded = /\brounded(-[\w[\]]+)?\b/.test(className);
+  let variantClass = variantClasses[variant];
+  if (hasCustomRounded) {
+    // Remove default rounded classes from variant when custom rounded is provided
+    // Matches any rounded class (standard, arbitrary, or corner-specific)
+    variantClass = variantClass.replace(/\s*\brounded(-[\w[\]]+)?\b/g, '');
+  }
+
+  const combinedClasses = `${baseClasses} ${variantClass} ${
     shouldApplySize ? sizeClasses[size] : ''
   } ${widthClasses} ${className}`.trim();
 
@@ -77,9 +98,13 @@ const Button: React.FC<ButtonProps> = ({
     <button
       type={type}
       onClick={onClick}
+      onMouseDown={onMouseDown}
+      onKeyDown={onKeyDown}
       disabled={disabled || loading}
       className={combinedClasses}
       title={title}
+      aria-label={ariaLabel}
+      tabIndex={tabIndex}
     >
       {loading && (
         <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin mr-2" />

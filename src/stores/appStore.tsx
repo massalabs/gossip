@@ -21,6 +21,9 @@ interface AppStoreState {
   // Pending deep link
   pendingDeepLinkInfo: ParsedInvite | null;
   setPendingDeepLinkInfo: (value: ParsedInvite | null) => void;
+  // Pending shared content from other apps
+  pendingSharedContent: string | null;
+  setPendingSharedContent: (content: string | null) => void;
 }
 
 const useAppStoreBase = create<AppStoreState>()(
@@ -36,6 +39,7 @@ const useAppStoreBase = create<AppStoreState>()(
       setShowDebugOption: (show: boolean) => {
         set({ showDebugOption: show });
       },
+
       // Debug overlay visibility
       debugOverlayVisible: false,
       setDebugOverlayVisible: (visible: boolean) => {
@@ -51,6 +55,11 @@ const useAppStoreBase = create<AppStoreState>()(
       setPendingDeepLinkInfo: (value: ParsedInvite | null) => {
         set({ pendingDeepLinkInfo: value });
       },
+      // Pending shared content
+      pendingSharedContent: null,
+      setPendingSharedContent: (content: string | null) => {
+        set({ pendingSharedContent: content });
+      },
     }),
     {
       name: STORAGE_KEYS.APP_STORE,
@@ -60,7 +69,6 @@ const useAppStoreBase = create<AppStoreState>()(
         debugOverlayVisible: state.debugOverlayVisible,
         isInitialized: state.isInitialized,
         networkName: state.networkName,
-        setPendingDeepLinkInfo: state.setPendingDeepLinkInfo,
       }),
     }
   )

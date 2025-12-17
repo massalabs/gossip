@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { db } from '../db';
 import { STORAGE_KEYS, clearAppStorage } from '../utils/localStorage';
 import { useLocalStorage } from './useLocalStorage';
@@ -9,7 +9,6 @@ export function useVersionCheck() {
     STORAGE_KEYS.APP_BUILD_ID,
     null
   );
-  const [showUpdatePrompt, setShowUpdatePrompt] = useState(false);
 
   useEffect(() => {
     if (buildId === null) {
@@ -17,16 +16,10 @@ export function useVersionCheck() {
       setBuildId(APP_BUILD_ID);
     } else if (buildId !== APP_BUILD_ID) {
       // Version changed → show update prompt
-      setShowUpdatePrompt(true);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [buildId]);
+  }, [buildId, setBuildId]);
 
   const isVersionDifferent = buildId !== null && buildId !== APP_BUILD_ID;
-
-  const dismissUpdate = () => {
-    setShowUpdatePrompt(false);
-  };
 
   const handleForceUpdate = async () => {
     try {
@@ -51,13 +44,13 @@ export function useVersionCheck() {
     } catch (err) {
       console.error('Clean failed:', err);
       window.location.reload();
+    } finally {
+      setBuildId(APP_BUILD_ID);
     }
   };
 
   return {
-    showUpdatePrompt,
     handleForceUpdate,
     isVersionDifferent,
-    dismissUpdate,
   };
 }

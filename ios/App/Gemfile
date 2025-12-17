@@ -1,5 +1,7 @@
 source 'https://rubygems.org'
 
+ruby '~> 3.3.10' # Fastlane requires Ruby 3.2 or 3.3 (not 3.4+)
+
 gem 'fastlane'
 
 plugins_path = File.join(File.dirname(__FILE__), 'fastlane', 'Pluginfile')

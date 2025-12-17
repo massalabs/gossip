@@ -34,7 +34,7 @@ Gossip is a privacy-first, secure messaging application built with React, TypeSc
 
 ```bash
 git clone <repository-url>
-cd Gossip
+cd gossip
 ```
 
 2. Install dependencies:
@@ -58,6 +58,17 @@ npm run build
 ```
 
 The built files will be in the `dist` directory, ready for deployment.
+
+### message transfer protocol
+
+To config message transfer protocol setting:
+
+```bash
+mv .env.example .env
+```
+
+Set the VITE_GOSSIP_API_URL env var to the api url used for message transfer.
+For now message transfer is handled via a classic api backend. More decentralized approach is expected soon.
 
 ## Project Structure
 

@@ -1,5 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Remove location permissions added by @capacitor/background-runner (not used by this app) -->
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" tools:node="remove" />
 
     <application
         android:allowBackup="true"
@@ -15,11 +19,35 @@
             android:label="@string/title_activity_main"
             android:theme="@style/AppTheme.NoActionBarLaunch"
             android:launchMode="singleTask"
+            android:windowSoftInputMode="adjustResize"
             android:exported="true">
 
+            <!-- App launcher icon -->
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+
+            <intent-filter android:autoVerify="false">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />   <!-- REQUIRED -->
+                <data android:scheme="gossip" />
+            </intent-filter>
+
+            <!-- Share target: Accept text and URLs shared from other apps -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+
+            <!-- BackgroundRunner notification click intent filter -->
+            <!-- BackgroundRunner uses .NOTIFICATION_CLICKED as the action for notification taps -->
+            <intent-filter>
+                <action android:name=".NOTIFICATION_CLICKED" />
+                <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
 
         </activity>
@@ -33,13 +61,51 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths"></meta-data>
         </provider>
+
+        <!-- Boot Receiver: Restart background sync after device boot -->
+        <receiver
+            android:name=".BootReceiver"
+            android:enabled="true"
+            android:exported="false"
+            android:directBootAware="true">
+            <intent-filter>
+                <!-- Standard boot completed -->
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <!-- Quick boot on some devices -->
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <!-- HTC quick boot -->
+                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON" />
+                <!-- Direct boot for encrypted devices (Android 7+) -->
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- App Update Receiver: Restart background sync after app update -->
+        <receiver
+            android:name=".AppUpdateReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
     </application>
 
     <!-- Permissions -->
-
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
-    <!-- For Android 9 (API 28) or lower -->
     <uses-permission android:name="android.permission.USE_FINGERPRINT" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    
+    <!-- Background sync permissions -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    
+    <!-- Network state monitoring permission -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
 </manifest>

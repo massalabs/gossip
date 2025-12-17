@@ -1,4 +1,4 @@
-import { PrivacyGraphic } from './PrivacyGraphic';
+import { PrivacyGraphic } from '../graphics';
 
 const LoadingScreen = () => {
   return (
