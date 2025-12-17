@@ -1,5 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { Send, X } from 'react-feather';
+import { Capacitor } from '@capacitor/core';
 import { Message } from '../../db';
 import Button from '../ui/Button';
 
@@ -97,24 +98,44 @@ const MessageInput: React.FC<MessageInputProps> = ({
     }
   }, [initialValue, newMessage, autoResizeTextarea]);
 
-  const resetTextarea = () => {
+  const resetTextarea = useCallback(() => {
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
     }
     setIsTextareaMultiline(false);
     setNewMessage('');
-  };
+  }, []);
 
-  const handleSendMessage = (e: MessageInputEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const cleanedMessage = newMessage.trim();
-    if (cleanedMessage.length === 0) return;
+  const replyToId = replyingTo?.id;
+  const handleSendMessage = useCallback(
+    (e: MessageInputEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const cleanedMessage = newMessage.trim();
+      if (cleanedMessage.length === 0) return;
 
-    onSend(cleanedMessage, replyingTo?.id);
+      onSend(cleanedMessage, replyToId);
 
-    resetTextarea();
-  };
+      resetTextarea();
+    },
+    [newMessage, onSend, replyToId, resetTextarea]
+  );
+
+  const handleTextareaKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      // Web-only behavior: Enter sends, Shift+Enter inserts a newline.
+      // Keep native (Capacitor) behavior unchanged to avoid breaking mobile UX.
+      if (Capacitor.isNativePlatform()) return;
+
+      // Don't send while user is composing text via an IME.
+      if (e.nativeEvent.isComposing) return;
+
+      if (e.key === 'Enter' && !e.shiftKey) {
+        handleSendMessage(e);
+      }
+    },
+    [handleSendMessage]
+  );
 
   const handleCancelReply = (e: CancelReplyEvent) => {
     e.preventDefault();
@@ -167,6 +188,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
               ref={textareaRef}
               value={newMessage}
               onChange={handleTextareaChange}
+              onKeyDown={handleTextareaKeyDown}
               placeholder="Type a message"
               rows={1}
               inputMode="text"
