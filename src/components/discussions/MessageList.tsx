@@ -6,6 +6,11 @@ import LoadingState from './LoadingState';
 import EmptyState from './EmptyState';
 import DateSeparator from './DateSeparator';
 import { isDifferentDay } from '../../utils/timeUtils';
+import {
+  calculateMessageGroups,
+  MessageGroupInfo,
+  MESSAGE_GROUP_TIME_WINDOW_MINUTES,
+} from '../../utils/messageGrouping';
 
 interface MessageListProps {
   messages: Message[];
@@ -48,10 +53,15 @@ const MessageList: React.FC<MessageListProps> = ({
     }
   }, [isLoading, messages.length]);
 
-  // Minimum gap (in minutes) between messages to always show a timestamp
-  const TIMESTAMP_GROUP_GAP_MINUTES = 5;
+  // Use the same time window for timestamp display as for message grouping
+  // This ensures consistency: messages within the grouping window also share timestamps
 
-  // Memoize the message items with date separators and smart timestamps
+  // Calculate message groups for spacing and avatar display
+  const messageGroups = useMemo(() => {
+    return calculateMessageGroups(messages);
+  }, [messages]);
+
+  // Memoize the message items with date separators, smart timestamps, and grouping
   // to prevent re-rendering all messages when one is added
   const messageItems = useMemo(() => {
     const items: React.ReactNode[] = [];
@@ -61,6 +71,10 @@ const MessageList: React.FC<MessageListProps> = ({
       const nextMessage =
         index < messages.length - 1 ? messages[index + 1] : null;
       const isLastMessage = index === messages.length - 1;
+      const groupInfo: MessageGroupInfo = messageGroups[index] || {
+        isFirstInGroup: true,
+        isLastInGroup: true,
+      };
 
       // Show date separator if this is the first message or if the day changed
       if (
@@ -76,15 +90,25 @@ const MessageList: React.FC<MessageListProps> = ({
       // - Always show for the last message
       // - Show when the next message is from a different direction (sender)
       // - Show when there is a significant time gap to the next message
+      // - Always show for out-of-order messages (indicates data issue)
       let showTimestamp = isLastMessage;
       if (!isLastMessage && nextMessage) {
         const sameDirection = nextMessage.direction === message.direction;
         const timeDiffMs =
           nextMessage.timestamp.getTime() - message.timestamp.getTime();
-        const timeDiffMinutes = timeDiffMs / 60000;
 
-        if (!sameDirection || timeDiffMinutes >= TIMESTAMP_GROUP_GAP_MINUTES) {
+        // Handle out-of-order messages explicitly
+        if (timeDiffMs < 0) {
+          // Out-of-order messages: treat as a data issue and always show the timestamp
           showTimestamp = true;
+        } else {
+          const timeDiffMinutes = timeDiffMs / 60000;
+          if (
+            !sameDirection ||
+            timeDiffMinutes >= MESSAGE_GROUP_TIME_WINDOW_MINUTES
+          ) {
+            showTimestamp = true;
+          }
         }
       }
 
@@ -96,12 +120,14 @@ const MessageList: React.FC<MessageListProps> = ({
           onReplyTo={onReplyTo}
           onScrollToMessage={onScrollToMessage}
           showTimestamp={showTimestamp}
+          isFirstInGroup={groupInfo.isFirstInGroup}
+          isLastInGroup={groupInfo.isLastInGroup}
         />
       );
     });
 
     return items;
-  }, [messages, onReplyTo, onScrollToMessage]);
+  }, [messages, onReplyTo, onScrollToMessage, messageGroups]);
 
   // Auto-scroll to bottom when new messages are added (after initial render)
   useEffect(() => {
@@ -135,7 +161,7 @@ const MessageList: React.FC<MessageListProps> = ({
   }
 
   return (
-    <div className="px-4 md:px-6 lg:px-8 py-6 space-y-4">
+    <div className="px-4 md:px-6 lg:px-8 py-6">
       {/* Display announcement message if it exists */}
       {discussion?.announcementMessage && discussion.createdAt && (
         <div
