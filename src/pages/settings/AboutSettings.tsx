@@ -4,15 +4,12 @@ import HeaderWrapper from '../../components/ui/HeaderWrapper';
 import PageHeader from '../../components/ui/PageHeader';
 import ScrollableContent from '../../components/ui/ScrollableContent';
 import InfoRow from '../../components/ui/InfoRow';
-import { APP_VERSION } from '../../config/version';
-import { useLocalStorage } from '../../hooks/useLocalStorage';
-import { STORAGE_KEYS } from '../../utils/localStorage';
+import { APP_VERSION, APP_BUILD_ID } from '../../config/version';
 import { useAppStore } from '../../stores/appStore';
 import { ROUTES } from '../../constants/routes';
 
 const AboutSettings: React.FC = () => {
   const navigate = useNavigate();
-  const [appBuildId] = useLocalStorage(STORAGE_KEYS.APP_BUILD_ID, null);
   const showDebugOption = useAppStore(s => s.showDebugOption);
 
   const handleBack = () => {
@@ -34,7 +31,7 @@ const AboutSettings: React.FC = () => {
           {showDebugOption && (
             <InfoRow
               label="Build ID"
-              value={appBuildId || 'unknown'}
+              value={APP_BUILD_ID}
               valueClassName="text-xs text-muted-foreground font-mono"
               containerClassName="bg-transparent mt-2"
             />
