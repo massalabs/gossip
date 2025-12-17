@@ -3,7 +3,6 @@ import {
   ArrowRightCircle,
   Check as CheckIcon,
   AlertTriangle,
-  XCircle,
 } from 'react-feather';
 import { Message, MessageDirection, MessageStatus } from '../../db';
 import { formatTime } from '../../utils/timeUtils';
@@ -20,7 +19,6 @@ interface MessageItemProps {
   message: Message;
   onReplyTo?: (message: Message) => void;
   onScrollToMessage?: (messageId: number) => void;
-  onResend?: (message: Message) => void;
   id?: string;
 }
 
@@ -28,7 +26,6 @@ const MessageItem: React.FC<MessageItemProps> = ({
   message,
   onReplyTo,
   onScrollToMessage,
-  onResend,
   id,
 }) => {
   const canReply = !!onReplyTo;
@@ -316,7 +313,8 @@ const MessageItem: React.FC<MessageItemProps> = ({
           </span>
           {isOutgoing && (
             <div className="flex items-center gap-1">
-              {message.status === MessageStatus.SENDING && (
+              {(message.status === MessageStatus.SENDING ||
+                message.status === MessageStatus.FAILED) && (
                 <div className="flex items-center gap-1">
                   <div className="w-2.5 h-2.5 border border-current border-t-transparent rounded-full animate-spin"></div>
                   <span className="text-[10px] font-medium">Sending</span>
@@ -325,28 +323,12 @@ const MessageItem: React.FC<MessageItemProps> = ({
               {message.status === MessageStatus.SENT && (
                 <CheckIcon className="w-3.5 h-3.5" />
               )}
-              {message.status === MessageStatus.FAILED && (
+              {/* {message.status === MessageStatus.FAILED && (
                 <div className="flex items-center gap-1.5">
                   <XCircle className="w-3.5 h-3.5 text-accent-foreground/90" />
                   <span className="text-[10px] font-medium">Failed</span>
-                  {onResend && (
-                    <button
-                      onClick={() => onResend(message)}
-                      onKeyDown={e => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          onResend(message);
-                        }
-                      }}
-                      className="ml-1 px-1.5 py-0.5 text-[10px] font-medium bg-accent-foreground/20 hover:bg-accent-foreground/30 rounded transition-colors text-accent-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1"
-                      title="Resend message"
-                      aria-label="Resend message"
-                    >
-                      Resend
-                    </button>
-                  )}
                 </div>
-              )}
+              )} */}
               {(message.status === MessageStatus.DELIVERED ||
                 message.status === MessageStatus.READ) && (
                 <CheckIcon className="w-3.5 h-3.5" />
