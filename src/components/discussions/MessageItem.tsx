@@ -8,12 +8,19 @@ import { Message, MessageDirection, MessageStatus } from '../../db';
 import { formatTime } from '../../utils/timeUtils';
 import { messageService } from '../../services/message';
 
-// Swipe gesture constants
+// Swipe gesture constants - base values for incoming messages
 const SWIPE_MAX_DISTANCE = 80; // Maximum distance (in pixels) the message can be swiped
-const SWIPE_RESISTANCE = 0.3; // Resistance factor applied to swipe distance for smoother feel
-const SWIPE_THRESHOLD = 50; // Minimum swipe distance (in pixels) required to trigger reply action
-const SWIPE_INDICATOR_THRESHOLD = 10; // Minimum swipe distance before showing reply indicator
+const SWIPE_RESISTANCE = 0.5; // Resistance factor applied to swipe distance for smoother feel (increased from 0.4 for better responsiveness)
+const SWIPE_THRESHOLD = 40; // Minimum swipe distance (in pixels) required to trigger reply action (reduced from 50, closer to SimpleX's 30dp)
+const SWIPE_INDICATOR_THRESHOLD = 8; // Minimum swipe distance before showing reply indicator (reduced from 10 for earlier feedback)
 const SWIPE_INDICATOR_MAX_WIDTH = 60; // Maximum width (in pixels) for the reply indicator
+
+// Swipe gesture constants - more sensitive values for outgoing (right-aligned) messages
+// Outgoing messages need higher sensitivity due to right alignment making swipes harder
+const SWIPE_MAX_DISTANCE_OUTGOING = 90; // Slightly higher max distance for outgoing messages
+const SWIPE_RESISTANCE_OUTGOING = 0.65; // Less resistance (more sensitive) for outgoing messages (increased from 0.5)
+const SWIPE_THRESHOLD_OUTGOING = 30; // Lower threshold for easier triggering on outgoing messages (reduced from 35, matching SimpleX's 30dp)
+const SWIPE_INDICATOR_THRESHOLD_OUTGOING = 6; // Show indicator earlier for outgoing messages (reduced from 8)
 
 interface MessageItemProps {
   message: Message;
@@ -121,8 +128,15 @@ const MessageItem: React.FC<MessageItemProps> = ({
     // Check if horizontal movement is greater than vertical (to avoid triggering on scroll)
     if (Math.abs(deltaX) > Math.abs(deltaY) && deltaX > 0) {
       isSwiping.current = true;
+      // Use different constants for outgoing messages (more sensitive)
+      const resistance = isOutgoing
+        ? SWIPE_RESISTANCE_OUTGOING
+        : SWIPE_RESISTANCE;
+      const maxDistance = isOutgoing
+        ? SWIPE_MAX_DISTANCE_OUTGOING
+        : SWIPE_MAX_DISTANCE;
       // Limit swipe distance and add resistance
-      const swipe = Math.min(deltaX * SWIPE_RESISTANCE, SWIPE_MAX_DISTANCE);
+      const swipe = Math.min(deltaX * resistance, maxDistance);
       setSwipeOffset(swipe);
     } else if (Math.abs(deltaX) > 5 || Math.abs(deltaY) > 5) {
       // Reset offset if user is swiping in wrong direction (left or vertically)
@@ -138,8 +152,10 @@ const MessageItem: React.FC<MessageItemProps> = ({
       isSwiping.current = false;
       return;
     }
+    // Use different threshold for outgoing messages (more sensitive)
+    const threshold = isOutgoing ? SWIPE_THRESHOLD_OUTGOING : SWIPE_THRESHOLD;
     // Track if a swipe was completed to prevent click handler from triggering
-    const wasSwipeCompleted = swipeOffset >= SWIPE_THRESHOLD;
+    const wasSwipeCompleted = swipeOffset >= threshold;
 
     if (wasSwipeCompleted && onReplyTo) {
       // Trigger reply action
@@ -215,7 +231,10 @@ const MessageItem: React.FC<MessageItemProps> = ({
         }}
       >
         {/* Reply indicator that appears when swiping */}
-        {swipeOffset > SWIPE_INDICATOR_THRESHOLD && (
+        {swipeOffset >
+          (isOutgoing
+            ? SWIPE_INDICATOR_THRESHOLD_OUTGOING
+            : SWIPE_INDICATOR_THRESHOLD) && (
           <div
             className={`absolute left-0 top-0 bottom-0 flex items-center justify-center ${
               isOutgoing ? 'bg-accent/20' : 'bg-card/20'
