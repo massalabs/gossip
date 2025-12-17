@@ -143,8 +143,7 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
     replyToId?: number
   ) => {
     const { userProfile, session } = useAccountStore.getState();
-    if (!userProfile?.userId || !content.trim() || get().isSending || !session)
-      return;
+    if (!userProfile?.userId || !content.trim() || !session) return;
 
     set({ isSending: true });
 
