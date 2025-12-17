@@ -31,6 +31,11 @@ interface MessageItemProps {
   onReplyTo?: (message: Message) => void;
   onScrollToMessage?: (messageId: number) => void;
   id?: string;
+  /**
+   * Controls whether the timestamp should be shown for this message.
+   * If undefined, timestamps are shown by default.
+   */
+  showTimestamp?: boolean;
 }
 
 const MessageItem: React.FC<MessageItemProps> = ({
@@ -38,6 +43,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
   onReplyTo,
   onScrollToMessage,
   id,
+  showTimestamp = true,
 }) => {
   const canReply = !!onReplyTo;
   const isOutgoing = message.direction === MessageDirection.OUTGOING;
@@ -349,9 +355,11 @@ const MessageItem: React.FC<MessageItemProps> = ({
             isOutgoing ? 'text-accent-foreground/80' : 'text-muted-foreground'
           }`}
         >
-          <span className="text-[11px] font-medium">
-            {formatTime(message.timestamp)}
-          </span>
+          {showTimestamp && (
+            <span className="text-[11px] font-medium">
+              {formatTime(message.timestamp)}
+            </span>
+          )}
           {isOutgoing && (
             <div className="flex items-center gap-1">
               {(message.status === MessageStatus.SENDING ||
