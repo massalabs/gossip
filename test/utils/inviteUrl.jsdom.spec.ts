@@ -43,7 +43,7 @@ describe('inviteUrl - generateDeepLinkUrl', () => {
     expect(url).toBe(`https://app.example.com/${AppRoute.invite}/user123`);
   });
 
-  it('falls back to DEWEB_DEV_INVITE_DOMAIN when origin is localhost', () => {
+  it('use localhost on web when origin is localhost', () => {
     // Ensure env var is not set
     // @ts-expect-error - readonly env in tests
     delete import.meta.env.VITE_INVITE_DOMAIN;
@@ -51,7 +51,7 @@ describe('inviteUrl - generateDeepLinkUrl', () => {
     setWindowOrigin('http://localhost:5173');
 
     const url = generateDeepLinkUrl('user123');
-    expect(url).toBe(`${DEWEB_DEV_INVITE_DOMAIN}/${AppRoute.invite}/user123`);
+    expect(url).toBe(`http://localhost:5173f/${AppRoute.invite}/user123`);
   });
 
   it('encodes userId safely in URL', () => {

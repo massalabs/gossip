@@ -10,9 +10,11 @@ import { AppRoute } from '../constants/routes';
  *   • Web (opens web version)
  *   • QR codes, SMS, email, social sharing
  */
-function getPublicBaseUrl(): string {
+function getGossipDomain(): string {
   // 1. Explicit env var → highest priority (staging, prod, native builds)
   const envUrl = import.meta.env.VITE_INVITE_DOMAIN;
+
+  if (envUrl) return envUrl;
 
   const defaultBaseUrl = envUrl ?? DEWEB_DEV_INVITE_DOMAIN;
 
@@ -21,7 +23,7 @@ function getPublicBaseUrl(): string {
   }
 
   const currentOrigin = window.location?.origin;
-  if (currentOrigin && !currentOrigin.includes('localhost')) {
+  if (currentOrigin) {
     return currentOrigin;
   }
 
@@ -42,7 +44,7 @@ export function generateDeepLinkUrl(userId: string): string {
     throw new Error('userId is required');
   }
 
-  const base = getPublicBaseUrl();
+  const base = getGossipDomain();
   const safeId = encodeURIComponent(userId.trim());
 
   return `${base}/${AppRoute.invite}/${safeId}`;

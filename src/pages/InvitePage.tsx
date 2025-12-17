@@ -7,12 +7,12 @@ import Button from '../components/ui/Button';
 import PageHeader from '../components/ui/PageHeader';
 import HeaderWrapper from '../components/ui/HeaderWrapper';
 import { PrivacyGraphic } from '../components/graphics';
-import {
-  GOOGLE_PLAY_STORE_URL,
-  APPLE_APP_STORE_URL,
-  LAST_APK_GITHUB_URL,
-} from '../constants/links';
-import { ChevronRight, GitHub, Smartphone } from 'react-feather';
+// import {
+//   GOOGLE_PLAY_STORE_URL,
+//   APPLE_APP_STORE_URL,
+//   LAST_APK_GITHUB_URL,
+// } from '../constants/links';
+// import { ChevronRight, GitHub, Smartphone } from 'react-feather';
 import toast from 'react-hot-toast';
 
 // Timing constants
@@ -25,6 +25,7 @@ export const InvitePage: React.FC = () => {
   const setPendingDeepLinkInfo = useAppStore(s => s.setPendingDeepLinkInfo);
   const [isOpeningApp, setIsOpeningApp] = useState(false);
   const [appOpenFailed, setAppOpenFailed] = useState(false);
+  const [appOpened, setAppOpened] = useState(false);
   const cleanupFunctionsRef = useRef<Set<() => void>>(new Set());
 
   const addCleanup = useCallback((cleanup: () => void) => {
@@ -132,12 +133,16 @@ export const InvitePage: React.FC = () => {
     if (!userId) return;
 
     setIsOpeningApp(true);
+    setAppOpened(false);
     const invitePath = `/invite/${userId}`;
     const opened = await tryOpenNativeApp(invitePath);
 
     if (opened) {
-      // App opened successfully - user will be switched to the app
-      // No need to show any UI as they won't see this page
+      // App opened successfully (detected via visibilitychange).
+      // Users may come back to this tab, so show a success state.
+      setIsOpeningApp(false);
+      setAppOpenFailed(false);
+      setAppOpened(true);
     } else {
       setIsOpeningApp(false);
       setAppOpenFailed(true);
@@ -162,26 +167,26 @@ export const InvitePage: React.FC = () => {
     }
   }, [userId, setPendingDeepLinkInfo, navigate]);
 
-  /**
-   * Handle install from iOS App Store
-   */
-  const handleInstallIOS = useCallback(() => {
-    window.open(APPLE_APP_STORE_URL, '_blank');
-  }, []);
+  // /**
+  //  * Handle install from iOS App Store
+  //  */
+  // const handleInstallIOS = useCallback(() => {
+  //   window.open(APPLE_APP_STORE_URL, '_blank');
+  // }, []);
 
-  /**
-   * Handle install from Google Play Store
-   */
-  const handleInstallAndroid = useCallback(() => {
-    window.open(GOOGLE_PLAY_STORE_URL, '_blank');
-  }, []);
+  // /**
+  //  * Handle install from Google Play Store
+  //  */
+  // const handleInstallAndroid = useCallback(() => {
+  //   window.open(GOOGLE_PLAY_STORE_URL, '_blank');
+  // }, []);
 
-  /**
-   * Handle download APK directly
-   */
-  const handleDownloadAPK = useCallback(() => {
-    window.open(LAST_APK_GITHUB_URL, '_blank');
-  }, []);
+  // /**
+  //  * Handle download APK directly
+  //  */
+  // const handleDownloadAPK = useCallback(() => {
+  //   window.open(LAST_APK_GITHUB_URL, '_blank');
+  // }, []);
 
   // Auto-click the "Open in App" button on mount
   useEffect(() => {
@@ -222,41 +227,56 @@ export const InvitePage: React.FC = () => {
               <PrivacyGraphic size={120} className="py-4" />
             </div>
             <h2 className="text-2xl sm:text-3xl font-semibold text-foreground mb-3">
-              You've been invited!
+              {appOpened ? 'Opening in App' : "You've been invited!"}
             </h2>
             <p className="text-muted-foreground text-base mb-8">
-              Open this invite in the Gossip app to start chatting with your
-              contact.
+              {appOpened
+                ? "If the app didn't open, you can continue in the web app instead."
+                : 'Open this invite in the Gossip app to start chatting with your contact.'}
             </p>
 
             {/* Primary Actions */}
             <div className="space-y-3 mb-6">
-              <Button
-                onClick={handleOpenInApp}
-                disabled={isOpeningApp}
-                loading={isOpeningApp}
-                variant={appOpenFailed ? 'outline' : 'primary'}
-                fullWidth
-                size="lg"
-                className="font-semibold rounded-full"
-              >
-                {isOpeningApp ? 'Opening...' : 'Open in App'}
-              </Button>
+              {appOpened ? (
+                <Button
+                  onClick={handleContinueInWeb}
+                  variant="primary"
+                  fullWidth
+                  size="lg"
+                  className="rounded-full"
+                >
+                  Continue in Web App Instead
+                </Button>
+              ) : (
+                <>
+                  <Button
+                    onClick={handleOpenInApp}
+                    disabled={isOpeningApp}
+                    loading={isOpeningApp}
+                    variant={appOpenFailed ? 'outline' : 'primary'}
+                    fullWidth
+                    size="lg"
+                    className="font-semibold rounded-full"
+                  >
+                    {isOpeningApp ? 'Opening...' : 'Open in App'}
+                  </Button>
 
-              <Button
-                onClick={handleContinueInWeb}
-                variant={appOpenFailed ? 'primary' : 'outline'}
-                fullWidth
-                size="lg"
-                className="rounded-full"
-              >
-                Continue in Web App
-              </Button>
+                  <Button
+                    onClick={handleContinueInWeb}
+                    variant={appOpenFailed ? 'primary' : 'outline'}
+                    fullWidth
+                    size="lg"
+                    className="rounded-full"
+                  >
+                    Continue in Web App
+                  </Button>
+                </>
+              )}
             </div>
           </div>
 
           {/* Install Section */}
-          <div className="bg-card border border-border rounded-2xl p-6 sm:p-8 shadow-sm">
+          {/* <div className="bg-card border border-border rounded-2xl p-6 sm:p-8 shadow-sm">
             <div className="text-center mb-6">
               <h3 className="text-lg font-semibold text-foreground mb-2">
                 Don't have the app?
@@ -303,7 +323,7 @@ export const InvitePage: React.FC = () => {
                 <ChevronRight className="w-5 h-5 text-muted-foreground" />
               </Button>
             </div>
-          </div>
+          </div> */}
         </div>
       </div>
     </div>

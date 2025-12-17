@@ -20,7 +20,6 @@ export const usePendingDeepLink = () => {
 
       try {
         navigate(ROUTES.newContact(), {
-          replace: true,
           state: pendingDeepLinkInfo,
         });
       } catch (error) {
