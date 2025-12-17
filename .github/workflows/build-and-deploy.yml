@@ -75,7 +75,7 @@ jobs:
       - name: Build web app
         run: |
           export VITE_APP_BUILD_ID=$(git rev-parse --short=7 HEAD)
-          echo "🚀 Building production bundle..."
+          echo "🚀 Building production bundle... BUILD_ID: $VITE_APP_BUILD_ID"
           npm run build
 
       - name: Upload web build artifacts
