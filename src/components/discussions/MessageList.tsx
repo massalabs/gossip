@@ -48,12 +48,19 @@ const MessageList: React.FC<MessageListProps> = ({
     }
   }, [isLoading, messages.length]);
 
-  // Memoize the message items with date separators to prevent re-rendering all messages when one is added
+  // Minimum gap (in minutes) between messages to always show a timestamp
+  const TIMESTAMP_GROUP_GAP_MINUTES = 5;
+
+  // Memoize the message items with date separators and smart timestamps
+  // to prevent re-rendering all messages when one is added
   const messageItems = useMemo(() => {
     const items: React.ReactNode[] = [];
 
     messages.forEach((message, index) => {
       const prevMessage = index > 0 ? messages[index - 1] : null;
+      const nextMessage =
+        index < messages.length - 1 ? messages[index + 1] : null;
+      const isLastMessage = index === messages.length - 1;
 
       // Show date separator if this is the first message or if the day changed
       if (
@@ -65,6 +72,22 @@ const MessageList: React.FC<MessageListProps> = ({
         );
       }
 
+      // Smart timestamp display:
+      // - Always show for the last message
+      // - Show when the next message is from a different direction (sender)
+      // - Show when there is a significant time gap to the next message
+      let showTimestamp = isLastMessage;
+      if (!isLastMessage && nextMessage) {
+        const sameDirection = nextMessage.direction === message.direction;
+        const timeDiffMs =
+          nextMessage.timestamp.getTime() - message.timestamp.getTime();
+        const timeDiffMinutes = timeDiffMs / 60000;
+
+        if (!sameDirection || timeDiffMinutes >= TIMESTAMP_GROUP_GAP_MINUTES) {
+          showTimestamp = true;
+        }
+      }
+
       items.push(
         <MessageItem
           key={message.id}
@@ -72,6 +95,7 @@ const MessageList: React.FC<MessageListProps> = ({
           message={message}
           onReplyTo={onReplyTo}
           onScrollToMessage={onScrollToMessage}
+          showTimestamp={showTimestamp}
         />
       );
     });
