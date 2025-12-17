@@ -1,9 +1,14 @@
 import { create } from 'zustand';
-import { Message, db } from '../db';
+import {
+  Message,
+  db,
+  MessageDirection,
+  MessageStatus,
+  MessageType,
+} from '../db';
 import { createSelectors } from './utils/createSelectors';
 import { useAccountStore } from './accountStore';
 import { messageService } from '../services/message';
-import { notificationService } from '../services/notifications';
 import { liveQuery, Subscription } from 'dexie';
 
 interface MessageStoreState {
@@ -15,8 +20,6 @@ interface MessageStoreState {
   isLoading: boolean;
   // Sending state (global, since you can only send to one contact at a time)
   isSending: boolean;
-  // Syncing state (global)
-  isSyncing: boolean;
   // Subscription for liveQuery
   subscription: Subscription | null;
 
@@ -30,14 +33,6 @@ interface MessageStoreState {
     content: string,
     replyToId?: number
   ) => Promise<void>;
-  resendMessage: (message: Message) => Promise<void>;
-  syncMessages: (contactUserId?: string) => Promise<void>;
-  addMessage: (contactUserId: string, message: Message) => void;
-  updateMessage: (
-    contactUserId: string,
-    messageId: number,
-    updates: Partial<Message>
-  ) => void;
   getMessagesForContact: (contactUserId: string) => Message[];
   clearMessages: (contactUserId: string) => void;
   cleanup: () => void;
@@ -52,7 +47,7 @@ const messagesChanged = (
   newMessages: Message[]
 ): boolean => {
   return (
-    existing.length !== newMessages.length ||
+    newMessages.length > existing.length || // New messages at the end
     existing.some((existing, index) => {
       const newMsg = newMessages[index];
       if (!newMsg) return true; // New message added
@@ -61,21 +56,8 @@ const messagesChanged = (
         existing.content !== newMsg.content ||
         existing.status !== newMsg.status
       );
-    }) ||
-    newMessages.length > existing.length // New messages at the end
+    })
   );
-};
-
-// Helper to update messages map immutably
-const updateMessagesMap = (
-  currentMap: Map<string, Message[]>,
-  contactUserId: string,
-  updater: (messages: Message[]) => Message[]
-): Map<string, Message[]> => {
-  const newMap = new Map(currentMap);
-  const existing = newMap.get(contactUserId) || [];
-  newMap.set(contactUserId, updater(existing));
-  return newMap;
 };
 
 const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
@@ -84,7 +66,6 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
   currentContactUserId: null,
   isLoading: false,
   isSending: false,
-  isSyncing: false,
   subscription: null,
   isInitializing: false,
 
@@ -107,12 +88,11 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
     set({ isInitializing: true });
     // Set up a single liveQuery for all messages of the owner
     const query = liveQuery(() =>
-      db.messages.where('ownerUserId').equals(ownerUserId).sortBy('timestamp')
+      db.messages.where('ownerUserId').equals(ownerUserId).sortBy('id')
     );
 
     const subscriptionObj = query.subscribe({
       next: allMessages => {
-        console.log('Global live query received messages:', allMessages.length);
         // Group messages by contactUserId
         const newMap = new Map<string, Message[]>();
         allMessages.forEach(msg => {
@@ -124,16 +104,22 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
         // Check for changes before updating to avoid unnecessary sets
         let hasChanges = false;
         const currentMap = get().messagesByContact;
+
         newMap.forEach((msgs, contactId) => {
-          const existing = currentMap.get(contactId) || [];
-          if (messagesChanged(existing, msgs)) {
-            hasChanges = true;
+          if (!hasChanges) {
+            const existing = currentMap.get(contactId) || [];
+            if (messagesChanged(existing, msgs)) {
+              hasChanges = true;
+            }
           }
         });
+
         // Also check for removed contacts (unlikely, but complete)
-        currentMap.forEach((_, contactId) => {
-          if (!newMap.has(contactId)) hasChanges = true;
-        });
+        if (!hasChanges) {
+          currentMap.forEach((_, contactId) => {
+            if (!newMap.has(contactId)) hasChanges = true;
+          });
+        }
 
         if (hasChanges) {
           set({ messagesByContact: newMap });
@@ -156,8 +142,9 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
     content: string,
     replyToId?: number
   ) => {
-    const { userProfile } = useAccountStore.getState();
-    if (!userProfile?.userId || !content.trim() || get().isSending) return;
+    const { userProfile, session } = useAccountStore.getState();
+    if (!userProfile?.userId || !content.trim() || get().isSending || !session)
+      return;
 
     set({ isSending: true });
 
@@ -193,28 +180,28 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
         ownerUserId: userProfile.userId,
         contactUserId,
         content,
-        type: 'text',
-        direction: 'outgoing',
-        status: 'sending',
+        type: MessageType.TEXT,
+        direction: MessageDirection.OUTGOING,
+        status: MessageStatus.SENDING,
         timestamp: new Date(),
         replyTo,
       };
 
-      // Persist to DB
-      const messageId = await db.addMessage(message);
-      const messageWithId = { ...message, id: messageId };
-
       // Send via service
-      const result = await messageService.sendMessage(messageWithId);
-
-      // Update status
-      if (result.message) {
-        get().updateMessage(contactUserId, messageId, {
-          status: result.message.status,
-        });
-      } else if (!result.success) {
-        get().updateMessage(contactUserId, messageId, { status: 'failed' });
-        throw new Error(result.error);
+      const result = await messageService.sendMessage(message, session);
+      if (!result.success) {
+        if (result.message) {
+          console.warn(
+            `Message "${result.message.content}" has been added to pending queue waiting to be resent. Cause: ${result.error}`
+          );
+        } else {
+          console.error(
+            'Failed to send message ',
+            content,
+            ', got error:',
+            result.error
+          );
+        }
       }
     } catch (error) {
       console.error('Failed to send message:', error);
@@ -222,79 +209,6 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
     } finally {
       set({ isSending: false });
     }
-  },
-
-  // Resend a failed message
-  resendMessage: async (message: Message) => {
-    set({ isSending: true });
-    const result = await messageService.resendMessage(message);
-    if (result.error) {
-      // Update status to failed again
-      console.error('Failed to resend message:', result.error);
-    }
-    set({ isSending: false });
-  },
-
-  // Sync messages (fetch new ones from server)
-  syncMessages: async (contactUserId?: string) => {
-    const { userProfile } = useAccountStore.getState();
-    if (!userProfile?.userId) return;
-
-    if (get().isSyncing) return;
-    set({ isSyncing: true });
-
-    try {
-      const fetchResult = await messageService.fetchMessages();
-
-      if (fetchResult.success && fetchResult.newMessagesCount > 0) {
-        // Reload messages for the current contact if specified, or all contacts
-        if (contactUserId) {
-          // Show notification if app is in background
-          if (document.hidden) {
-            const contact = await db
-              .getContactByOwnerAndUserId(userProfile.userId, contactUserId)
-              .catch(() => null);
-            if (contact) {
-              await notificationService.showDiscussionNotification(
-                contact.name,
-                'New message received'
-              );
-            }
-          }
-        }
-      }
-    } catch (error) {
-      console.error('Failed to sync messages:', error);
-    } finally {
-      set({ isSyncing: false });
-    }
-  },
-
-  // Add a message to the store
-  addMessage: (contactUserId: string, message: Message) => {
-    set({
-      messagesByContact: updateMessagesMap(
-        get().messagesByContact,
-        contactUserId,
-        existing => [...existing, message]
-      ),
-    });
-  },
-
-  // Update a message in the store
-  updateMessage: (
-    contactUserId: string,
-    messageId: number,
-    updates: Partial<Message>
-  ) => {
-    set({
-      messagesByContact: updateMessagesMap(
-        get().messagesByContact,
-        contactUserId,
-        messages =>
-          messages.map(m => (m.id === messageId ? { ...m, ...updates } : m))
-      ),
-    });
   },
 
   // Get messages for a contact
@@ -320,7 +234,6 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
       currentContactUserId: null,
       isLoading: false,
       isSending: false,
-      isSyncing: false,
     });
   },
 }));

@@ -1,15 +1,55 @@
-import React from 'react';
+import React, { useCallback } from 'react';
 import DiscussionListPanel from '../components/discussions/DiscussionList';
 import { useAccountStore } from '../stores/accountStore';
+import { useAppStore } from '../stores/appStore';
 import { useNavigate } from 'react-router-dom';
+import { Plus, X } from 'react-feather';
 import Button from '../components/ui/Button';
-import { PrivacyGraphic } from '../components/ui/PrivacyGraphic';
-import PageHeader from '../components/ui/PageHeader';
+import SearchBar from '../components/ui/SearchBar';
+import { useSearch } from '../hooks/useSearch';
+import { PrivacyGraphic } from '../components/graphics';
+import HeaderWrapper from '../components/ui/HeaderWrapper';
+import UserProfileAvatar from '../components/avatar/UserProfileAvatar';
+import ScrollableContent from '../components/ui/ScrollableContent';
+import { ROUTES } from '../constants/routes';
 
 const Discussions: React.FC = () => {
   const navigate = useNavigate();
-  const isLoading = useAccountStore(s => s.isLoading);
-  if (isLoading) {
+  const { ourPk, ourSk, session, isLoading } = useAccountStore();
+  const pendingSharedContent = useAppStore(s => s.pendingSharedContent);
+  const setPendingSharedContent = useAppStore(s => s.setPendingSharedContent);
+
+  const handleSelectDiscussion = useCallback(
+    (contactUserId: string) => {
+      // If there's pending shared content, pass it as prefilled message
+      if (pendingSharedContent) {
+        navigate(ROUTES.discussion({ userId: contactUserId }), {
+          state: { prefilledMessage: pendingSharedContent },
+          replace: false,
+        });
+        // Clear pending shared content after navigation
+        setPendingSharedContent(null);
+      } else {
+        navigate(ROUTES.discussion({ userId: contactUserId }));
+      }
+    },
+    [navigate, pendingSharedContent, setPendingSharedContent]
+  );
+
+  const handleCancelShare = useCallback(() => {
+    setPendingSharedContent(null);
+  }, [setPendingSharedContent]);
+
+  // Use debounced search for filtering discussions
+  const {
+    query: searchQuery,
+    debouncedQuery: debouncedSearchQuery,
+    setQuery,
+  } = useSearch({
+    debounceMs: 300,
+  });
+
+  if (isLoading || !ourPk || !ourSk || !session) {
     return (
       <div className="bg-background flex items-center justify-center h-full">
         <PrivacyGraphic size={120} loading={true} />
@@ -20,37 +60,62 @@ const Discussions: React.FC = () => {
 
   return (
     <div className="h-full flex flex-col bg-card relative">
-      <PageHeader title="Discussions" />
-      {/* Scrollable content with bottom padding to prevent content from being hidden behind the button/nav */}
-      <div className="flex-1 overflow-y-auto pt-4 px-2 pb-20">
+      <HeaderWrapper>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <UserProfileAvatar size={10} />
+            <h1 className="text-xl font-semibold text-black dark:text-white">
+              Gossip
+            </h1>
+          </div>
+        </div>
+      </HeaderWrapper>
+      <ScrollableContent className="flex-1 overflow-y-auto pt-2 px-2 pb-20">
+        {/* Show banner when there's pending shared content */}
+        {pendingSharedContent && (
+          <div className="mx-2 mb-4 p-4 bg-accent/50 border border-border rounded-lg">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-foreground mb-1">
+                  Share content to discussion
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Select a discussion below to share the content.
+                </p>
+              </div>
+              <button
+                onClick={handleCancelShare}
+                className="shrink-0 p-1 hover:bg-accent rounded transition-colors"
+                aria-label="Cancel sharing"
+              >
+                <X className="w-4 h-4 text-muted-foreground" />
+              </button>
+            </div>
+          </div>
+        )}
+        <div className="px-2 mb-3">
+          <SearchBar
+            value={searchQuery}
+            onChange={setQuery}
+            placeholder="Search..."
+            aria-label="Search"
+          />
+        </div>
         <DiscussionListPanel
-          onSelect={id => {
-            navigate(`/discussion/${id}`);
-          }}
+          onSelect={handleSelectDiscussion}
           headerVariant="link"
+          searchQuery={debouncedSearchQuery}
         />
-      </div>
+      </ScrollableContent>
       {/* Floating button positioned above bottom nav */}
       <Button
-        onClick={() => navigate('/new-discussion')}
+        onClick={() => navigate(ROUTES.newDiscussion())}
         variant="primary"
         size="custom"
-        className="absolute bottom-3 right-4 px-5 h-14 rounded-full flex items-center gap-2 shadow-lg hover:shadow-xl transition-shadow z-50"
+        className="absolute bottom-3 right-4 h-14 w-14 rounded-full flex items-center gap-2 shadow-lg hover:shadow-xl transition-shadow z-50"
         title="Start new discussion"
       >
-        <svg
-          className="w-5 h-5 text-primary-foreground shrink-0"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M12 4v16m8-8H4"
-          />
-        </svg>
+        <Plus className="text-primary-foreground shrink-0" />
       </Button>
     </div>
   );

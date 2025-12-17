@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { Check, X } from 'react-feather';
 import { formatMassaAddress, isValidAddress } from '../../utils/addressUtils';
 
 interface AddressInputProps {
@@ -72,33 +73,9 @@ const AddressInput: React.FC<AddressInputProps> = ({
         {isValid !== null && (
           <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
             {isValid ? (
-              <svg
-                className="w-5 h-5 text-success"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M5 13l4 4L19 7"
-                />
-              </svg>
+              <Check className="w-5 h-5 text-success" />
             ) : (
-              <svg
-                className="w-5 h-5 text-red-500"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M6 18L18 6M6 6l12 12"
-                />
-              </svg>
+              <X className="w-5 h-5 text-red-500" />
             )}
           </div>
         )}

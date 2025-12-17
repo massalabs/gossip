@@ -7,7 +7,11 @@
  */
 
 import { encodeToBase64 } from '../../utils/base64';
-import { IMessageProtocol, EncryptedMessage } from './types';
+import {
+  IMessageProtocol,
+  EncryptedMessage,
+  MessageProtocolResponse,
+} from './types';
 
 export class MockMessageProtocol implements IMessageProtocol {
   private mockMessages: Map<string, EncryptedMessage[]> = new Map();
@@ -15,7 +19,10 @@ export class MockMessageProtocol implements IMessageProtocol {
   private bulletinCounter = 0;
 
   async fetchMessages(seekers: Uint8Array[]): Promise<EncryptedMessage[]> {
-    console.log('Mock: Fetching messages for seekers:', seekers.length);
+    console.log(
+      'Mock: Fetching messages for seekers:',
+      seekers.map(s => encodeToBase64(s))
+    );
 
     // For the mock, concatenate messages for all seeker base64 strings
     const collected: EncryptedMessage[] = [];
@@ -92,6 +99,13 @@ export class MockMessageProtocol implements IMessageProtocol {
 
     // Return a mock hex key (64 hex chars for 32 bytes)
     return 'a'.repeat(64);
+  }
+
+  async changeNode(nodeUrl?: string): Promise<MessageProtocolResponse> {
+    return {
+      success: true,
+      data: nodeUrl || 'https://node.example.com',
+    };
   }
 
   // Helper methods for testing

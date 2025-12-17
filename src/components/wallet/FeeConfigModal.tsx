@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useEffect } from 'react';
+import { Check, X } from 'react-feather';
 import Button from '../ui/Button';
 
 export interface FeeConfig {
@@ -91,7 +92,7 @@ const FeeConfigModal: React.FC<FeeConfigModalProps> = ({
 
       {/* Modal */}
       <div
-        className={`relative w-full max-w-md md:max-w-md mx-4 bg-card rounded-2xl shadow-2xl transform transition-all duration-300 ease-out ${mounted ? 'translate-y-0 opacity-100' : 'translate-y-4 opacity-0'}`}
+        className={`relative w-full app-max-w md:app-max-w mx-4 bg-card rounded-2xl shadow-2xl transform transition-all duration-300 ease-out ${mounted ? 'translate-y-0 opacity-100' : 'translate-y-4 opacity-0'}`}
       >
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
@@ -102,19 +103,7 @@ const FeeConfigModal: React.FC<FeeConfigModalProps> = ({
             onClick={onClose}
             className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
           >
-            <svg
-              className="w-5 h-5 text-gray-500"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M6 18L18 6M6 6l12 12"
-              />
-            </svg>
+            <X className="w-5 h-5 text-gray-500" />
           </button>
         </div>
 
@@ -173,17 +162,7 @@ const FeeConfigModal: React.FC<FeeConfigModalProps> = ({
                         </div>
                         {config.preset === key && (
                           <div className="w-5 h-5 bg-blue-500 rounded-full flex items-center justify-center">
-                            <svg
-                              className="w-3 h-3 text-white"
-                              fill="currentColor"
-                              viewBox="0 0 20 20"
-                            >
-                              <path
-                                fillRule="evenodd"
-                                d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                                clipRule="evenodd"
-                              />
-                            </svg>
+                            <Check className="w-3 h-3 text-white" />
                           </div>
                         )}
                       </div>

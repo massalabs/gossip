@@ -1,0 +1,11 @@
+# Appfile for Gossip Android App
+
+# Package name
+package_name("net.massa.gossip")
+
+# JSON key file for service account authentication
+json_key_file(ENV["PLAY_STORE_JSON_KEY_FILE"]) if ENV["PLAY_STORE_JSON_KEY_FILE"]
+
+# For more information about the Appfile, see:
+#     https://docs.fastlane.tools/advanced/#appfile
+

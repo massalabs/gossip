@@ -1,0 +1,107 @@
+# Fastfile for Gossip Android App
+
+default_platform(:android)
+
+platform :android do
+  # Private lane containing common build logic
+  private_lane :build_app_common do
+    # Setup CI environment
+    setup_ci if ENV['CI']
+    
+    # Build the app (AAB for Play Store)
+    # La signature est gérée automatiquement par build.gradle via les variables d'environnement
+    gradle(
+      task: "bundle",
+      build_type: "Release",
+      project_dir: ".",  # Le Fastfile est déjà dans android/, donc "." pointe vers android/
+      print_command: true
+    )
+
+    UI.success("✅ Build completed successfully!")
+    UI.message("📦 AAB file: app/build/outputs/bundle/release/app-release.aab")
+  end
+
+  desc "Build debug APK for local testing"
+  lane :build_debug do
+    setup_ci if ENV['CI']
+    
+    # Build debug APK
+    gradle(
+      task: "assembleDebug",
+      project_dir: ".",
+      print_command: true
+    )
+    
+    UI.success("✅ Debug APK built successfully!")
+    UI.message("📦 APK file: app/build/outputs/apk/debug/app-debug.apk")
+    UI.message("💡 Install with: adb install app/build/outputs/apk/debug/app-debug.apk")
+  end
+
+  desc "Build the Android app (AAB)"
+  lane :build do
+    build_app_common
+  end
+
+  desc "Build and upload to Google Play Internal Track"
+  lane :beta do
+    # Build the app using common logic
+    build_app_common
+
+    # Upload to Google Play Internal Testing
+    # Le fichier sera automatiquement signé et uploadé
+    upload_to_play_store(
+      track: 'internal',
+      aab: 'app/build/outputs/bundle/release/app-release.aab',
+      json_key_data: ENV['PLAY_STORE_JSON_KEY'],
+      skip_upload_apk: true,
+      skip_upload_metadata: true,
+      skip_upload_images: true,
+      skip_upload_screenshots: true,
+      release_status: 'draft'
+    )
+
+    UI.success("🚀 Successfully uploaded to Google Play Internal Track!")
+  end
+
+  desc "Build and upload to Google Play Beta Track (Open Testing)"
+  lane :beta_public do
+    build_app_common
+    
+    upload_to_play_store(
+      track: 'beta',
+      aab: 'app/build/outputs/bundle/release/app-release.aab',
+      json_key_data: ENV['PLAY_STORE_JSON_KEY'],
+      skip_upload_apk: true,
+      skip_upload_metadata: true,
+      skip_upload_images: true,
+      skip_upload_screenshots: true,
+      release_status: 'draft'
+    )
+
+    UI.success("🚀 Successfully uploaded to Google Play Beta Track!")
+  end
+
+  desc "Deploy a new version to Google Play Production"
+  lane :production do
+    build_app_common
+    
+    upload_to_play_store(
+      track: 'production',
+      aab: 'app/build/outputs/bundle/release/app-release.aab',
+      json_key_data: ENV['PLAY_STORE_JSON_KEY'],
+      skip_upload_apk: true,
+      skip_upload_metadata: true,
+      skip_upload_images: true,
+      skip_upload_screenshots: true,
+      release_status: 'draft'
+    )
+
+    UI.success("🚀 Successfully uploaded to Google Play Production!")
+  end
+
+  # Error handling
+  error do |lane, exception|
+    UI.error("❌ Error in lane '#{lane}': #{exception.message}")
+  end
+end
+

@@ -1,5 +1,5 @@
 import React from 'react';
-import { PrivacyGraphic } from '../ui/PrivacyGraphic';
+import { PrivacyGraphic } from '../graphics';
 
 const EmptyState: React.FC = () => {
   return (

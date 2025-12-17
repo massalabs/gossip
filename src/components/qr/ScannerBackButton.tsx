@@ -1,5 +1,5 @@
 import React from 'react';
-import { CloseIcon } from '../ui/icons';
+import { X } from 'react-feather';
 
 interface ScannerBackButtonProps {
   onClose: () => void;
@@ -12,7 +12,7 @@ const ScannerBackButton: React.FC<ScannerBackButtonProps> = ({ onClose }) => {
       className="absolute top-4 left-4 z-20 bg-black/50 backdrop-blur-sm text-white p-3 rounded-full hover:bg-black/70 transition"
       aria-label="Close scanner"
     >
-      <CloseIcon />
+      <X />
     </button>
   );
 };

@@ -52,4 +52,11 @@ export interface IMessageProtocol {
    * @returns The hash key (hex string) returned by the API
    */
   postPublicKey(base64PublicKeys: string): Promise<string>;
+
+  /**
+   * Change the current node provider
+   * @param nodeUrl - The URL of the new node
+   * @returns MessageProtocolResponse with the new node information
+   */
+  changeNode(nodeUrl?: string): Promise<MessageProtocolResponse>;
 }

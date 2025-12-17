@@ -1,5 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Message } from '../../db';
+import {
+  ArrowRightCircle,
+  Check as CheckIcon,
+  AlertTriangle,
+} from 'react-feather';
+import { Message, MessageDirection, MessageStatus } from '../../db';
 import { formatTime } from '../../utils/timeUtils';
 import { messageService } from '../../services/message';
 
@@ -12,7 +17,6 @@ const SWIPE_INDICATOR_MAX_WIDTH = 60; // Maximum width (in pixels) for the reply
 
 interface MessageItemProps {
   message: Message;
-  onResend: (message: Message) => void;
   onReplyTo?: (message: Message) => void;
   onScrollToMessage?: (messageId: number) => void;
   id?: string;
@@ -20,12 +24,12 @@ interface MessageItemProps {
 
 const MessageItem: React.FC<MessageItemProps> = ({
   message,
-  onResend,
   onReplyTo,
   onScrollToMessage,
   id,
 }) => {
-  const isOutgoing = message.direction === 'outgoing';
+  const canReply = !!onReplyTo;
+  const isOutgoing = message.direction === MessageDirection.OUTGOING;
   const [originalMessage, setOriginalMessage] = useState<Message | null>(null);
   const [isLoadingOriginal, setIsLoadingOriginal] = useState(false);
   const [originalNotFound, setOriginalNotFound] = useState(false);
@@ -36,8 +40,6 @@ const MessageItem: React.FC<MessageItemProps> = ({
   const touchStartY = useRef<number | null>(null);
   const isSwiping = useRef(false);
   const swipeCompleted = useRef(false); // Track if a swipe was just completed to prevent click
-  const isFocused = useRef(false); // Track if the element is currently focused
-  const wasFocusedBeforeClick = useRef(false); // Track if element was focused before click
   const messageRef = useRef<HTMLDivElement | null>(null);
 
   // Load original message if this is a reply
@@ -83,39 +85,23 @@ const MessageItem: React.FC<MessageItemProps> = ({
     }
   }, [message.replyTo, message.ownerUserId]);
 
-  const handleMouseDown = () => {
-    // Capture focus state before click event fires
-    wasFocusedBeforeClick.current = isFocused.current;
-  };
-
-  const handleClick = () => {
-    // Only trigger on click if:
-    // 1. A swipe was not just completed
-    // 2. The element was already focused before the click (to allow focusing without triggering reply)
-    if (!swipeCompleted.current && wasFocusedBeforeClick.current && onReplyTo) {
+  const handleDoubleClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    if (canReply && onReplyTo) {
       onReplyTo(message);
     }
-    // Reset swipe completed flag after checking
-    swipeCompleted.current = false;
-  };
-
-  const handleFocus = () => {
-    isFocused.current = true;
-  };
-
-  const handleBlur = () => {
-    isFocused.current = false;
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     // Support Enter and Space keys for keyboard accessibility
-    if ((e.key === 'Enter' || e.key === ' ') && onReplyTo) {
+    if ((e.key === 'Enter' || e.key === ' ') && canReply && onReplyTo) {
       e.preventDefault(); // Prevent page scroll on Space
       onReplyTo(message);
     }
   };
 
   const handleTouchStart = (e: React.TouchEvent) => {
+    if (!canReply) return;
     const touch = e.touches[0];
     touchStartX.current = touch.clientX;
     touchStartY.current = touch.clientY;
@@ -124,6 +110,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
   };
 
   const handleTouchMove = (e: React.TouchEvent) => {
+    if (!canReply) return;
     if (touchStartX.current === null || touchStartY.current === null) return;
 
     const touch = e.touches[0];
@@ -144,6 +131,13 @@ const MessageItem: React.FC<MessageItemProps> = ({
   };
 
   const handleTouchEnd = () => {
+    if (!canReply) {
+      setSwipeOffset(0);
+      touchStartX.current = null;
+      touchStartY.current = null;
+      isSwiping.current = false;
+      return;
+    }
     // Track if a swipe was completed to prevent click handler from triggering
     const wasSwipeCompleted = swipeOffset >= SWIPE_THRESHOLD;
 
@@ -180,13 +174,17 @@ const MessageItem: React.FC<MessageItemProps> = ({
     }
   };
 
+  const handleClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+  };
+
   return (
     <div
       id={id}
       className={`flex items-end gap-2 ${isOutgoing ? 'justify-end' : 'justify-start'} group relative`}
-      onTouchStart={handleTouchStart}
-      onTouchMove={handleTouchMove}
-      onTouchEnd={handleTouchEnd}
+      onTouchStart={canReply ? handleTouchStart : undefined}
+      onTouchMove={canReply ? handleTouchMove : undefined}
+      onTouchEnd={canReply ? handleTouchEnd : undefined}
     >
       {/* TODO: Add on group chat */}
       {/* {!isOutgoing && (
@@ -196,19 +194,21 @@ const MessageItem: React.FC<MessageItemProps> = ({
         )} */}
       <div
         ref={messageRef}
-        className={`relative max-w-[78%] sm:max-w-[70%] md:max-w-[65%] lg:max-w-[60%] px-4 py-3 rounded-2xl font-medium text-[15px] leading-tight animate-bubble-in transition-transform ${
+        className={`relative max-w-[78%] sm:max-w-[70%] md:max-w-[65%] lg:max-w-[60%] px-4 py-4 rounded-3xl font-medium text-[15px] leading-tight animate-bubble-in transition-transform ${
           isOutgoing
-            ? 'ml-auto mr-3 bg-accent text-accent-foreground rounded-br-[6px]'
-            : 'ml-3 mr-auto bg-card text-card-foreground rounded-bl-[6px] shadow-sm'
-        } ${onReplyTo ? 'cursor-pointer hover:opacity-90 transition-opacity focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2' : ''}`}
-        onMouseDown={handleMouseDown}
-        onClick={handleClick}
+            ? 'ml-auto mr-3 bg-accent text-accent-foreground rounded-br-[4px]'
+            : 'ml-3 mr-auto bg-card dark:bg-surface-secondary text-card-foreground rounded-bl-[4px] shadow-sm'
+        } ${
+          canReply
+            ? 'cursor-pointer hover:opacity-90 transition-opacity focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2'
+            : ''
+        }`}
+        onDoubleClick={handleDoubleClick}
+        onMouseDown={handleClick}
         onKeyDown={handleKeyDown}
-        onFocus={handleFocus}
-        onBlur={handleBlur}
-        tabIndex={onReplyTo ? 0 : undefined}
-        role={onReplyTo ? 'button' : undefined}
-        aria-label={onReplyTo ? 'Reply to message' : undefined}
+        tabIndex={canReply ? 0 : undefined}
+        role={canReply ? 'button' : undefined}
+        aria-label={canReply ? 'Reply to message' : undefined}
         style={{
           transform:
             swipeOffset > 0 ? `translateX(${swipeOffset}px)` : 'translateX(0)',
@@ -226,20 +226,10 @@ const MessageItem: React.FC<MessageItemProps> = ({
             }}
             aria-label="Swipe to reply indicator"
           >
-            <svg
+            <ArrowRightCircle
               className="w-5 h-5 text-muted-foreground"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
               aria-hidden="true"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"
-              />
-            </svg>
+            />
           </div>
         )}
         {/* Reply Context */}
@@ -270,22 +260,12 @@ const MessageItem: React.FC<MessageItemProps> = ({
                   className="inline-flex items-center gap-1"
                   title="Original message not found in database"
                 >
-                  <svg
-                    className="w-3.5 h-3.5 text-orange-500 dark:text-orange-400 shrink-0"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
+                  <AlertTriangle
+                    className="w-3.5 h-3.5 text-destructive shrink-0"
                     aria-hidden="true"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-                    />
-                  </svg>
+                  />
                   {/* Show text on mobile, tooltip on desktop */}
-                  <span className="text-xs text-orange-500 dark:text-orange-400 md:hidden">
+                  <span className="text-xs text-destructive md:hidden">
                     (Original message not found)
                   </span>
                 </span>
@@ -295,7 +275,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
               <p
                 className={`text-xs ${
                   isOutgoing
-                    ? 'text-accent-foreground/60'
+                    ? 'text-accent-foreground/80'
                     : 'text-muted-foreground/80'
                 }`}
               >
@@ -305,7 +285,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
               <p
                 className={`text-xs truncate ${
                   isOutgoing
-                    ? 'text-accent-foreground/60'
+                    ? 'text-accent-foreground/80'
                     : 'text-muted-foreground/80'
                 } ${originalNotFound ? 'italic opacity-70' : ''}`}
               >
@@ -333,117 +313,29 @@ const MessageItem: React.FC<MessageItemProps> = ({
           </span>
           {isOutgoing && (
             <div className="flex items-center gap-1">
-              {message.status === 'sending' && (
+              {(message.status === MessageStatus.SENDING ||
+                message.status === MessageStatus.FAILED) && (
                 <div className="flex items-center gap-1">
                   <div className="w-2.5 h-2.5 border border-current border-t-transparent rounded-full animate-spin"></div>
                   <span className="text-[10px] font-medium">Sending</span>
                 </div>
               )}
-              {message.status === 'sent' && (
-                <svg
-                  className="w-3.5 h-3.5"
-                  fill="currentColor"
-                  viewBox="0 0 20 20"
-                >
-                  <path
-                    fillRule="evenodd"
-                    d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                    clipRule="evenodd"
-                  />
-                </svg>
+              {message.status === MessageStatus.SENT && (
+                <CheckIcon className="w-3.5 h-3.5" />
               )}
-              {message.status === 'failed' && (
+              {/* {message.status === MessageStatus.FAILED && (
                 <div className="flex items-center gap-1.5">
-                  <svg
-                    className="w-3.5 h-3.5 text-accent-foreground/90"
-                    fill="currentColor"
-                    viewBox="0 0 20 20"
-                  >
-                    <path
-                      fillRule="evenodd"
-                      d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
-                      clipRule="evenodd"
-                    />
-                  </svg>
+                  <XCircle className="w-3.5 h-3.5 text-accent-foreground/90" />
                   <span className="text-[10px] font-medium">Failed</span>
-                  <button
-                    onClick={() => onResend(message)}
-                    className="ml-1 px-1.5 py-0.5 text-[10px] font-medium bg-accent-foreground/20 hover:bg-accent-foreground/30 rounded transition-colors text-accent-foreground"
-                    title="Resend message"
-                  >
-                    Resend
-                  </button>
                 </div>
-              )}
-              {(message.status === 'delivered' ||
-                message.status === 'read') && (
-                <svg
-                  className="w-3.5 h-3.5"
-                  fill="currentColor"
-                  viewBox="0 0 20 20"
-                >
-                  <path
-                    fillRule="evenodd"
-                    d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                    clipRule="evenodd"
-                  />
-                </svg>
+              )} */}
+              {(message.status === MessageStatus.DELIVERED ||
+                message.status === MessageStatus.READ) && (
+                <CheckIcon className="w-3.5 h-3.5" />
               )}
             </div>
           )}
         </div>
-
-        {/* Tail - Sent (right side) */}
-        {isOutgoing && (
-          <>
-            {/* Border layer (slightly larger, behind) */}
-            <div
-              className="absolute bottom-0 right-2 w-0 h-0"
-              style={{
-                borderLeft: '13px solid transparent',
-                borderTop: '13px solid var(--tail-border)',
-                marginBottom: '-13px',
-                zIndex: 0,
-              }}
-            />
-            {/* Fill layer (slightly smaller, in front) */}
-            <div
-              className="absolute bottom-0 right-2 w-0 h-0"
-              style={{
-                borderLeft: '12px solid transparent',
-                borderTop: '12px solid var(--accent)',
-                marginBottom: '-12px',
-                zIndex: 1,
-              }}
-            />
-          </>
-        )}
-
-        {/* Tail - Received (left side) */}
-        {!isOutgoing && (
-          <>
-            {/* Border layer (slightly larger, behind) */}
-            <div
-              className="absolute bottom-0 left-2 w-0 h-0"
-              style={{
-                borderRight: '13px solid transparent',
-                borderTop: '13px solid var(--tail-border)',
-                marginBottom: '-13px',
-                zIndex: 0,
-              }}
-            />
-            {/* Fill layer (slightly smaller, in front) */}
-            <div
-              className="absolute bottom-0 left-2 w-0 h-0"
-              style={{
-                borderRight: '12px solid transparent',
-                borderTop: '12px solid var(--card)',
-                marginBottom: '-12px',
-                zIndex: 1,
-              }}
-            />
-          </>
-        )}
       </div>
     </div>
   );

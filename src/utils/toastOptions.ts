@@ -3,21 +3,22 @@ import { DefaultToastOptions } from 'react-hot-toast';
 export const toastOptions: DefaultToastOptions = {
   duration: 4000,
   style: {
-    background: '#363636',
-    color: '#fff',
+    background: 'var(--card)',
+    color: 'var(--foreground)',
+    border: '1px solid var(--border)',
   },
   success: {
     duration: 3000,
     iconTheme: {
-      primary: '#4ade80',
-      secondary: '#fff',
+      primary: 'var(--success)',
+      secondary: 'var(--card)',
     },
   },
   error: {
     duration: 5000,
     iconTheme: {
-      primary: '#ef4444',
-      secondary: '#fff',
+      primary: 'var(--destructive)',
+      secondary: 'var(--card)',
     },
   },
 };

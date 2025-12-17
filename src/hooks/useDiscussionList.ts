@@ -1,13 +1,15 @@
 import { useCallback } from 'react';
 import { useAccountStore } from '../stores/accountStore';
-import { Discussion, db } from '../db';
-import { acceptDiscussionRequest } from '../crypto/discussionInit';
+import { Discussion, db, DiscussionStatus } from '../db';
+import { acceptDiscussionRequest } from '../services/discussion';
 
 export const useDiscussionList = () => {
-  const { userProfile } = useAccountStore();
+  const { userProfile, ourPk, ourSk, session } = useAccountStore();
 
   const handleAcceptDiscussionRequest = useCallback(
     async (discussion: Discussion, newName?: string) => {
+      if (!session || !ourPk || !ourSk)
+        throw new Error('Account store not initialized');
       try {
         if (discussion.id == null) return;
         // If the user provided a new contact name, update it first
@@ -21,12 +23,12 @@ export const useDiscussionList = () => {
             console.error('Failed to update contact name:', e);
           }
         }
-        await acceptDiscussionRequest(discussion);
+        await acceptDiscussionRequest(discussion, session, ourPk, ourSk);
       } catch (error) {
         console.error('Failed to accept discussion:', error);
       }
     },
-    [userProfile?.userId]
+    [userProfile?.userId, ourPk, ourSk, session]
   );
 
   const handleRefuseDiscussionRequest = useCallback(
@@ -34,7 +36,7 @@ export const useDiscussionList = () => {
       try {
         if (discussion.id == null) return;
         await db.discussions.update(discussion.id, {
-          status: 'closed',
+          status: DiscussionStatus.CLOSED,
           unreadCount: 0,
           updatedAt: new Date(),
         });

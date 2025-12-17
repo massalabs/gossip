@@ -1,17 +1,24 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { updateContactName, formatUserId } from '../utils';
+import { updateContactName, deleteContact } from '../utils';
 import { useDiscussionStore } from '../stores/discussionStore';
+import { useMessageStore } from '../stores/messageStore';
 import ContactAvatar from '../components/avatar/ContactAvatar';
-import { useFileShareContact } from '../hooks/useFileShareContact';
 import { useAccountStore } from '../stores/accountStore';
 import ContactNameModal from '../components/ui/ContactNameModal';
 import Button from '../components/ui/Button';
-import CopyClipboard from '../components/ui/CopyClipboard';
 import PageHeader from '../components/ui/PageHeader';
+import HeaderWrapper from '../components/ui/HeaderWrapper';
+import UserIdDisplay from '../components/ui/UserIdDisplay';
+import BaseModal from '../components/ui/BaseModal';
+import { Check, Edit2, Trash2 } from 'react-feather';
+import { UserPublicKeys } from '../assets/generated/wasm/gossip_wasm';
+import { DiscussionStatus } from '../db';
+import { ROUTES } from '../constants/routes';
 
 const Contact: React.FC = () => {
   const { userId } = useParams();
+  const [showUserId, setShowUserId] = useState(false);
   const navigate = useNavigate();
   const contact = useDiscussionStore(s =>
     s.contacts.find(c => c.userId === userId)
@@ -21,19 +28,31 @@ const Contact: React.FC = () => {
   );
 
   // All hooks must be called before early return
-  const { exportFileContact, fileState } = useFileShareContact();
   const ownerUserId = useAccountStore(s => s.userProfile?.userId);
+  const clearMessages = useMessageStore(s => s.clearMessages);
   const [isNameModalOpen, setIsNameModalOpen] = useState(false);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [proposedName, setProposedName] = useState(contact?.name || '');
   const [displayName, setDisplayName] = useState(contact?.name || '');
   const [nameError, setNameError] = useState<string | null>(null);
-  const [showSuccessCheck, setShowSuccessCheck] = useState(false);
 
-  // Update state when contact changes
   React.useEffect(() => {
     if (contact) {
       setProposedName(contact.name);
       setDisplayName(contact.name);
+    }
+  }, [contact]);
+  const [showSuccessCheck, setShowSuccessCheck] = useState(false);
+
+  const contactPublicKeys = useMemo(() => {
+    if (!contact?.publicKeys) return null;
+    try {
+      return UserPublicKeys.from_bytes(contact.publicKeys);
+    } catch (error) {
+      console.error('Failed to decode contact public keys', error);
+      return null;
     }
   }, [contact]);
 
@@ -70,108 +89,117 @@ const Contact: React.FC = () => {
     }
   }, [showSuccessCheck]);
 
+  const handleDeleteContact = useCallback(async () => {
+    if (!ownerUserId || !contact) return;
+
+    setIsDeleting(true);
+    setDeleteError(null);
+
+    try {
+      const result = await deleteContact(ownerUserId, contact.userId);
+      if (!result.ok) {
+        setDeleteError(result.message);
+        setIsDeleting(false);
+        return;
+      }
+
+      // Clear messages from message store
+      clearMessages(contact.userId);
+
+      // Navigate back to discussions
+      navigate('/discussions');
+    } catch (error) {
+      console.error('Error deleting contact:', error);
+      setDeleteError('Failed to delete contact. Please try again.');
+      setIsDeleting(false);
+    }
+  }, [ownerUserId, contact, clearMessages, navigate]);
+
   if (!contact) {
     return (
-      <div className="bg-background flex items-center justify-center">
+      <div className="bg-background flex items-center justify-center h-full">
         <div className="text-center">
-          <div className="w-8 h-8 border-2 border-gray-300 dark:border-gray-700 border-t-blue-600 rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-sm text-gray-600 dark:text-gray-300">
-            Loading contact…
-          </p>
+          <div className="w-8 h-8 border-2 border-border border-t-primary rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-sm text-muted-foreground">Loading contact…</p>
         </div>
       </div>
     );
   }
 
-  const canStart = discussion ? discussion.status === 'active' : true;
+  const canStart = discussion
+    ? discussion.status === DiscussionStatus.ACTIVE
+    : true;
 
   return (
-    <div className="bg-card h-full overflow-auto max-w-md mx-auto">
-      <PageHeader title="Contact" onBack={() => navigate(-1)} />
+    <div className="bg-background h-full overflow-auto app-max-w mx-auto">
+      <HeaderWrapper>
+        <PageHeader title="Contact" onBack={() => navigate(-1)} />
+      </HeaderWrapper>
       <div className="flex-1 pt-4 px-6 pb-6">
         <div className="flex items-center gap-4">
           <ContactAvatar contact={contact} size={14} />
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
-              <p className="text-base font-semibold text-gray-900 dark:text-white truncate">
+              <p className="text-base font-semibold text-foreground truncate">
                 {displayName}
               </p>
 
               <button
                 onClick={handleOpenEditName}
                 disabled={!canEditName}
-                className="shrink-0 p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                className="shrink-0 p-1 hover:bg-muted rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 title="Edit contact name"
               >
-                <svg
-                  className="w-4 h-4 text-gray-500 dark:text-gray-400"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
-                  />
-                </svg>
+                <Edit2 className="w-4 h-4 text-muted-foreground" />
               </button>
               <div className="flex items-center gap-1">
                 {showSuccessCheck && (
-                  <svg
-                    className="w-4 h-4 text-green-500 transition-opacity duration-200"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M5 13l4 4L19 7"
-                    />
-                  </svg>
+                  <Check className="w-4 h-4 text-success transition-opacity duration-200" />
                 )}
               </div>
             </div>
-            <div className="flex items-center gap-2">
-              <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                {formatUserId(contact.userId)}
-              </p>
-              <CopyClipboard text={contact.userId} title="Copy user ID" />
-            </div>
+            <UserIdDisplay
+              userId={contact.userId}
+              showCopy
+              showHideToggle
+              visible={showUserId}
+              onChange={setShowUserId}
+            />
           </div>
         </div>
 
         <div className="mt-6 grid grid-cols-1 gap-2">
           <Button
-            onClick={() =>
-              exportFileContact({
-                userPubKeys: contact.publicKeys,
-                userName: contact.name,
-              })
-            }
-            disabled={fileState.isLoading}
+            onClick={() => {
+              if (userId) {
+                navigate(ROUTES.contactShare({ userId }));
+              }
+            }}
+            disabled={!contactPublicKeys}
             variant="outline"
             size="custom"
             fullWidth
-            className="h-[46px] rounded-lg bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 text-black dark:text-white font-semibold hover:bg-gray-50 dark:hover:bg-gray-600"
+            className="h-[46px] rounded-full bg-card border border-border text-card-foreground font-medium hover:bg-muted"
           >
-            Export contact (.yaml)
+            Share contact
           </Button>
           {!canStart && (
-            <p className="text-xs text-gray-600 dark:text-gray-400">
+            <p className="text-xs text-muted-foreground">
               {discussion?.status === 'pending' &&
                 'Connection pending. You cannot chat yet.'}
               {discussion?.status === 'closed' && 'This discussion is closed.'}
             </p>
           )}
-          {fileState.error && (
-            <p className="text-xs text-red-600 dark:text-red-400">
-              {fileState.error}
-            </p>
-          )}
+          <Button
+            onClick={() => setIsDeleteModalOpen(true)}
+            variant="danger"
+            size="custom"
+            fullWidth
+            className="h-[46px] rounded-full font-medium mt-4"
+          >
+            <Trash2 className="w-4 h-4 mr-2" />
+            Remove contact
+          </Button>
         </div>
       </div>
       <ContactNameModal
@@ -189,6 +217,51 @@ const Contact: React.FC = () => {
           await handleSaveName(name);
         }}
       />
+      <BaseModal
+        isOpen={isDeleteModalOpen}
+        onClose={() => {
+          if (!isDeleting) {
+            setIsDeleteModalOpen(false);
+            setDeleteError(null);
+          }
+        }}
+        title="Remove contact?"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-foreground">
+            Are you sure you want to remove <strong>{displayName}</strong> from
+            your contacts? This will also delete all messages and discussions
+            with this contact. This action cannot be undone.
+          </p>
+          {deleteError && (
+            <p className="text-sm text-destructive">{deleteError}</p>
+          )}
+          <div className="flex gap-3">
+            <Button
+              onClick={handleDeleteContact}
+              disabled={isDeleting}
+              loading={isDeleting}
+              variant="danger"
+              size="custom"
+              className="flex-1 h-11 rounded-full font-medium"
+            >
+              {isDeleting ? 'Removing...' : 'Remove'}
+            </Button>
+            <Button
+              onClick={() => {
+                setIsDeleteModalOpen(false);
+                setDeleteError(null);
+              }}
+              disabled={isDeleting}
+              variant="secondary"
+              size="custom"
+              className="flex-1 h-11 rounded-full font-medium"
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      </BaseModal>
     </div>
   );
 };

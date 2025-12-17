@@ -34,7 +34,7 @@ export interface SyncConfig {
 
 export const defaultSyncConfig: SyncConfig = {
   // Request 5 minutes, but browser may delay significantly on mobile
-  periodicSyncMinIntervalMs: 5 * 60 * 1000, // 5 minutes
+  periodicSyncMinIntervalMs: 15 * 60 * 1000, // 15 minutes // chrome minimum
 
   // Fallback timer interval when app is in background (5 minutes)
   // On mobile, service workers may be terminated, so this is less reliable

@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
+import { ChevronDown } from 'react-feather';
 
 // Generic Select Item Component
 const SelectItem = <T,>({
@@ -153,8 +154,8 @@ function Select<T>({
         disabled={disabled}
         className={`w-full flex items-center p-3 rounded-xl border transition-colors ${
           disabled
-            ? 'border-gray-200 dark:border-gray-600 bg-gray-100 dark:bg-gray-800 cursor-not-allowed opacity-50'
-            : 'border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700'
+            ? 'border-border bg-muted dark:bg-input/40 cursor-not-allowed opacity-50'
+            : 'border-border bg-card hover:bg-muted/60 dark:bg-input dark:hover:bg-input/80'
         }`}
       >
         {selectedItem ? (
@@ -164,35 +165,25 @@ function Select<T>({
             {placeholder}
           </span>
         )}
-        <svg
+        <ChevronDown
           className={`w-5 h-5 text-gray-500 transition-transform ml-auto ${
             isOpen ? 'rotate-180' : ''
           }`}
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M19 9l-7 7-7-7"
-          />
-        </svg>
+        />
       </button>
 
       {/* Dropdown */}
       {isOpen && (
-        <div className="absolute top-full left-0 right-0 mt-1 z-10 border border-gray-200 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-800 shadow-lg max-h-80 flex flex-col">
+        <div className="absolute top-full left-0 right-0 mt-1 z-10 border border-border rounded-xl bg-card dark:bg-surface-secondary shadow-lg max-h-80 flex flex-col">
           {/* Search Input */}
           {showSearch && (
-            <div className="p-3 border-b border-gray-200 dark:border-gray-600 shrink-0">
+            <div className="p-3 border-b border-border shrink-0">
               <input
                 type="text"
                 placeholder={searchPlaceholder}
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
-                className="w-full px-3 py-2 bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:text-white placeholder-gray-500 dark:placeholder-gray-400"
+                className="w-full px-3 py-2 bg-muted dark:bg-input border border-border rounded-lg focus:ring-2 focus:ring-ring focus:border-transparent text-foreground placeholder-muted-foreground"
                 autoFocus
               />
             </div>

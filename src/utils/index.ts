@@ -1,6 +1,7 @@
 export * from './addressUtils';
 export * from './base64';
 export * from './contacts';
+export * from './discussions';
 export * from './fetchPrice';
 export * from './timeUtils';
 export * from './userId';

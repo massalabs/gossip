@@ -1,10 +1,11 @@
 import { VitePWA } from 'vite-plugin-pwa';
-import { defineConfig } from 'vite';
+import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { ViteImageOptimizer } from 'vite-plugin-image-optimizer';
 import { nodePolyfills } from 'vite-plugin-node-polyfills';
 import mkcert from 'vite-plugin-mkcert';
+import { playwright } from '@vitest/browser-playwright';
 
 // https://vitejs.dev/config/
 export default defineConfig({
@@ -123,5 +124,97 @@ export default defineConfig({
   },
   build: {
     target: 'esnext',
+  },
+  test: {
+    globals: true,
+
+    // Use "projects" for multiple test environments (replaces deprecated workspace)
+    projects: [
+      // Project 1: Browser mode for component tests
+      {
+        test: {
+          name: 'browser',
+          browser: {
+            enabled: true,
+            provider: playwright(),
+            headless: true,
+            instances: [
+              { browser: 'chromium' },
+              // { browser: 'webkit' },
+              // { browser: 'firefox' },
+            ],
+          },
+          setupFiles: ['./test/setup.browser.ts'],
+
+          include: [
+            'test/**/*.browser.{test,spec}.{ts,tsx}',
+            'test/**/browser/**/*.{test,spec}.{ts,tsx}',
+          ],
+        },
+      },
+
+      // Project 2: jsdom for unit tests (DOM simulation - faster)
+      {
+        test: {
+          name: 'jsdom',
+          environment: 'jsdom',
+          setupFiles: ['./test/setup.ts'],
+          include: [
+            'test/**/*.jsdom.{test,spec}.{ts,tsx}',
+            'test/**/jsdom/**/*.{test,spec}.{ts,tsx}',
+          ],
+        },
+      },
+
+      // Project 3: Node environment for pure logic tests (no DOM)
+      {
+        test: {
+          name: 'node',
+          environment: 'node',
+          // Support both patterns anywhere:
+          // - test/**/*.node.{test,spec}.{ts,tsx} (suffix pattern - anywhere)
+          // - test/**/node/**/*.{test,spec}.{ts,tsx} (folder pattern - anywhere)
+          include: [
+            'test/**/*.node.{test,spec}.{ts,tsx}',
+            'test/**/node/**/*.{test,spec}.{ts,tsx}',
+          ],
+        },
+      },
+
+      // Project 4: Default jsdom for tests without suffix (catch-all)
+      {
+        test: {
+          name: 'unit',
+          environment: 'jsdom',
+          setupFiles: ['./test/setup.ts'],
+          // Catch all test files that don't match specific patterns
+          include: ['test/**/*.{test,spec}.{ts,tsx}'],
+          exclude: [
+            // Exclude suffix patterns
+            'test/**/*.browser.*',
+            'test/**/*.jsdom.*',
+            'test/**/*.node.*',
+            // Exclude folder patterns (anywhere in path)
+            'test/**/browser/**',
+            'test/**/jsdom/**',
+            'test/**/node/**',
+          ],
+        },
+      },
+    ],
+
+    // Global coverage settings (shared by all projects)
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'json', 'html'],
+      exclude: [
+        'node_modules/',
+        'test/',
+        '**/*.d.ts',
+        '**/*.config.*',
+        '**/mockData',
+        'src/assets/generated/wasm/**',
+      ],
+    },
   },
 });

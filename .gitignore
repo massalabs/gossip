@@ -68,3 +68,6 @@ android/app/src/main/res/drawable-land-ldpi/
 android/app/src/main/res/drawable-port-ldpi/
 android/app/src/main/res/mipmap-ldpi/
 android/app/src/main/res/mipmap-*/ic_launcher_background.png
+
+# Test artifacts
+test/**/__screenshots__/
