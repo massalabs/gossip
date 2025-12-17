@@ -4,6 +4,8 @@ import { Message, Discussion, DiscussionDirection } from '../../db';
 import MessageItem from './MessageItem';
 import LoadingState from './LoadingState';
 import EmptyState from './EmptyState';
+import DateSeparator from './DateSeparator';
+import { isDifferentDay } from '../../utils/timeUtils';
 
 interface MessageListProps {
   messages: Message[];
@@ -46,10 +48,24 @@ const MessageList: React.FC<MessageListProps> = ({
     }
   }, [isLoading, messages.length]);
 
-  // Memoize the message items to prevent re-rendering all messages when one is added
+  // Memoize the message items with date separators to prevent re-rendering all messages when one is added
   const messageItems = useMemo(() => {
-    return messages.map(message => {
-      return (
+    const items: React.ReactNode[] = [];
+
+    messages.forEach((message, index) => {
+      const prevMessage = index > 0 ? messages[index - 1] : null;
+
+      // Show date separator if this is the first message or if the day changed
+      if (
+        !prevMessage ||
+        isDifferentDay(message.timestamp, prevMessage.timestamp)
+      ) {
+        items.push(
+          <DateSeparator key={`date-${message.id}`} date={message.timestamp} />
+        );
+      }
+
+      items.push(
         <MessageItem
           key={message.id}
           id={`message-${message.id}`}
@@ -59,6 +75,8 @@ const MessageList: React.FC<MessageListProps> = ({
         />
       );
     });
+
+    return items;
   }, [messages, onReplyTo, onScrollToMessage]);
 
   // Auto-scroll to bottom when new messages are added (after initial render)
