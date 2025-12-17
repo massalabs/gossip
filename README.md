@@ -67,7 +67,7 @@ To config message transfer protocol setting:
 mv .env.example .env
 ```
 
-Set the VITE_PROTOCOL_API_URL env var to the api url used for message transfer.
+Set the VITE_GOSSIP_API_URL env var to the api url used for message transfer.
 For now message transfer is handled via a classic api backend. More decentralized approach is expected soon.
 
 ## Project Structure

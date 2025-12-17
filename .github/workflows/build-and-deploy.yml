@@ -56,6 +56,9 @@ on:
 jobs:
   build-web:
     runs-on: ubuntu-latest
+    env:
+      VITE_GOSSIP_API_URL: ${{ vars.GOSSIP_API_URL }}
+      VITE_INVITE_DOMAIN: ${{ github.ref_name == 'main' && vars.INVITE_DOMAIN_MAIN || vars.INVITE_DOMAIN_DEV }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -70,8 +73,6 @@ jobs:
         run: npm ci
 
       - name: Build web app
-        env:
-          VITE_PROTOCOL_API_URL: https://api.usegossip.com/
         run: |
           export VITE_APP_BUILD_ID=$(git rev-parse --short=7 HEAD)
           echo "🚀 Building production bundle..."

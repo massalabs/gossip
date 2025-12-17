@@ -11,10 +11,18 @@ export interface ProtocolConfig {
   retryAttempts: number;
 }
 
+function buildProtocolApiBaseUrl(): string {
+  let apiUrl: string | undefined = import.meta.env.VITE_GOSSIP_API_URL;
+
+  if (!apiUrl) apiUrl = 'http://localhost:3000';
+
+  // Normalize trailing slashes to avoid `//api`
+  const trimmed = apiUrl.replace(/\/+$/, '');
+  return `${trimmed}/api`;
+}
+
 export const protocolConfig: ProtocolConfig = {
-  baseUrl: import.meta.env.VITE_PROTOCOL_API_URL
-    ? `${import.meta.env.VITE_PROTOCOL_API_URL}/api`
-    : 'http://localhost:3000/api',
+  baseUrl: buildProtocolApiBaseUrl(),
   timeout: 10000,
   retryAttempts: 3,
 };

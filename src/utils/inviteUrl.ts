@@ -1,5 +1,5 @@
 import { Capacitor } from '@capacitor/core';
-import { DEFAULT_PUBLIC_BASE_URL } from '../constants/links';
+import { DEWEB_DEV_INVITE_DOMAIN } from '../constants/links';
 import { AppRoute } from '../constants/routes';
 
 /**
@@ -12,9 +12,9 @@ import { AppRoute } from '../constants/routes';
  */
 function getPublicBaseUrl(): string {
   // 1. Explicit env var → highest priority (staging, prod, native builds)
-  const envUrl = import.meta.env.VITE_APP_BASE_URL;
+  const envUrl = import.meta.env.VITE_INVITE_DOMAIN;
 
-  const defaultBaseUrl = envUrl ?? DEFAULT_PUBLIC_BASE_URL;
+  const defaultBaseUrl = envUrl ?? DEWEB_DEV_INVITE_DOMAIN;
 
   if (Capacitor.isNativePlatform()) {
     return defaultBaseUrl;
