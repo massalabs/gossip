@@ -35,6 +35,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
   id,
 }) => {
   const canReply = !!onReplyTo;
+  const isNative = Capacitor.isNativePlatform();
   const isOutgoing = message.direction === MessageDirection.OUTGOING;
   const [originalMessage, setOriginalMessage] = useState<Message | null>(null);
   const [isLoadingOriginal, setIsLoadingOriginal] = useState(false);
@@ -129,16 +130,28 @@ const MessageItem: React.FC<MessageItemProps> = ({
     }
   }, [message.replyTo, message.ownerUserId]);
 
-  const handleDoubleClick = (e: React.MouseEvent) => {
-    e.preventDefault();
+  const triggerReply = () => {
     if (canReply && onReplyTo) {
       onReplyTo(message);
     }
   };
 
+  const handleDoubleClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    triggerReply();
+  };
+
+  const handleMessageKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!canReply) return;
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      triggerReply();
+    }
+  };
+
   const handleTouchStart = (e: React.TouchEvent) => {
     // Native-only: long press to copy message text.
-    if (Capacitor.isNativePlatform()) {
+    if (isNative) {
       longPressTriggeredRef.current = false;
       clearLongPressTimer();
 
@@ -191,7 +204,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
   const handleTouchMove = (e: React.TouchEvent) => {
     // Cancel long-press if user starts moving (scrolling/swiping).
     if (
-      Capacitor.isNativePlatform() &&
+      isNative &&
       touchStartX.current !== null &&
       touchStartY.current !== null
     ) {
@@ -263,24 +276,33 @@ const MessageItem: React.FC<MessageItemProps> = ({
   };
 
   const handleReplyContextClick = (e: React.MouseEvent) => {
+    e.preventDefault();
     e.stopPropagation(); // Prevent triggering the message click
     if (originalMessage?.id && onScrollToMessage) {
       onScrollToMessage(originalMessage.id);
     }
   };
 
-  const handleClick = (e: React.MouseEvent) => {
-    e.preventDefault();
+  const handleReplyContextKeyDown = (
+    e: React.KeyboardEvent<HTMLDivElement>
+  ) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      e.stopPropagation();
+      if (originalMessage?.id && onScrollToMessage) {
+        onScrollToMessage(originalMessage.id);
+      }
+    }
   };
 
   return (
     <div
       id={id}
       className={`flex items-end gap-2 ${isOutgoing ? 'justify-end' : 'justify-start'} group relative`}
-      onTouchStart={handleTouchStart}
-      onTouchMove={handleTouchMove}
-      onTouchEnd={handleTouchEnd}
-      onTouchCancel={handleTouchEnd}
+      onTouchStart={isNative || canReply ? handleTouchStart : undefined}
+      onTouchMove={isNative || canReply ? handleTouchMove : undefined}
+      onTouchEnd={isNative || canReply ? handleTouchEnd : undefined}
+      onTouchCancel={isNative || canReply ? handleTouchEnd : undefined}
     >
       {/* TODO: Add on group chat */}
       {/* {!isOutgoing && (
@@ -297,8 +319,15 @@ const MessageItem: React.FC<MessageItemProps> = ({
         } ${
           canReply ? 'cursor-pointer hover:opacity-90 transition-opacity' : ''
         }`}
+        {...(canReply
+          ? {
+              role: 'button' as const,
+              tabIndex: 0,
+              onKeyDown: handleMessageKeyDown,
+              'aria-label': 'Reply to message',
+            }
+          : {})}
         onDoubleClick={handleDoubleClick}
-        onMouseDown={handleClick}
         style={{
           transform:
             swipeOffset > 0 ? `translateX(${swipeOffset}px)` : 'translateX(0)',
@@ -337,6 +366,10 @@ const MessageItem: React.FC<MessageItemProps> = ({
             {...(message.replyTo.originalSeeker && onScrollToMessage
               ? {
                   onClick: handleReplyContextClick,
+                  role: 'button' as const,
+                  tabIndex: 0,
+                  onKeyDown: handleReplyContextKeyDown,
+                  'aria-label': 'Jump to original message',
                 }
               : {})}
           >
@@ -384,7 +417,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
         )}
 
         {/* Message */}
-        <p className="whitespace-pre-wrap wrap-break-word pr-6 select-none">
+        <p className="whitespace-pre-wrap wrap-break-word pr-6">
           {message.content}
         </p>
 
@@ -394,7 +427,9 @@ const MessageItem: React.FC<MessageItemProps> = ({
             isOutgoing ? 'text-accent-foreground/80' : 'text-muted-foreground'
           }`}
         >
-          <span className="text-[11px] font-medium select-none">
+          <span
+            className={`text-[11px] font-medium ${isNative ? 'select-none' : ''}`}
+          >
             {copyFeedback === 'copied'
               ? 'Copied'
               : copyFeedback === 'failed'

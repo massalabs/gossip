@@ -134,7 +134,6 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
   },
 
   // Send a message
-  // TODO: Handle send message in a queue to avoid sending messages in parallel
   sendMessage: async (
     contactUserId: string,
     content: string,

@@ -4,12 +4,15 @@ import { Capacitor } from '@capacitor/core';
 import { Message } from '../../db';
 import Button from '../ui/Button';
 
+const SELECTION_TAP_MOVE_THRESHOLD_PX = 6;
+
 interface MessageInputProps {
   onSend: (message: string, replyToId?: number) => void;
   disabled?: boolean;
   replyingTo?: Message | null;
   onCancelReply?: () => void;
   initialValue?: string;
+  onRequestScrollToBottom?: () => void;
 }
 
 type MessageInputEvent =
@@ -25,6 +28,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
   replyingTo,
   onCancelReply,
   initialValue,
+  onRequestScrollToBottom,
 }) => {
   const [newMessage, setNewMessage] = useState(initialValue || '');
   const [isTextareaMultiline, setIsTextareaMultiline] = useState(false);
@@ -32,6 +36,100 @@ const MessageInput: React.FC<MessageInputProps> = ({
   const prevInitialValueRef = useRef(initialValue);
   const hasInitialFocusRef = useRef(false);
   const sendButtonDisabled = disabled || !newMessage.trim();
+  const isNative = Capacitor.isNativePlatform();
+
+  const collapseTextareaSelection = useCallback(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    if (document.activeElement !== el) return;
+
+    const start = el.selectionStart;
+    const end = el.selectionEnd;
+    if (typeof start !== 'number' || typeof end !== 'number') return;
+    if (start === end) return;
+
+    try {
+      el.setSelectionRange(end, end);
+    } catch {
+      // ignore (can fail on some platforms if selection APIs are unavailable)
+    }
+  }, []);
+
+  // If user taps inside the textarea while there is an existing selection,
+  // collapse it (unless they are dragging to adjust selection).
+  const selectionTapRef = useRef<{
+    active: boolean;
+    moved: boolean;
+    startX: number;
+    startY: number;
+  } | null>(null);
+
+  const handleTextareaPointerDown = useCallback(
+    (e: React.PointerEvent<HTMLTextAreaElement>) => {
+      if (isNative) return;
+      const el = textareaRef.current;
+      if (!el) return;
+
+      const start = el.selectionStart;
+      const end = el.selectionEnd;
+      const hasSelection =
+        typeof start === 'number' && typeof end === 'number' && start !== end;
+
+      if (!hasSelection) {
+        selectionTapRef.current = null;
+        return;
+      }
+
+      selectionTapRef.current = {
+        active: true,
+        moved: false,
+        startX: e.clientX,
+        startY: e.clientY,
+      };
+    },
+    [isNative]
+  );
+
+  const handleTextareaPointerMove = useCallback(
+    (e: React.PointerEvent<HTMLTextAreaElement>) => {
+      const state = selectionTapRef.current;
+      if (!state?.active) return;
+      if (
+        Math.abs(e.clientX - state.startX) > SELECTION_TAP_MOVE_THRESHOLD_PX ||
+        Math.abs(e.clientY - state.startY) > SELECTION_TAP_MOVE_THRESHOLD_PX
+      ) {
+        state.moved = true;
+      }
+    },
+    []
+  );
+
+  const handleTextareaPointerUpOrCancel = useCallback(() => {
+    const state = selectionTapRef.current;
+    selectionTapRef.current = null;
+    if (!state?.active || state.moved) return;
+
+    // Let the browser place the caret first, then collapse selection.
+    requestAnimationFrame(() => collapseTextareaSelection());
+  }, [collapseTextareaSelection]);
+
+  // If user has a selection in the textarea and taps/clicks elsewhere, collapse selection.
+  // This matches the "selection goes away when interacting elsewhere" expectation.
+  useEffect(() => {
+    if (isNative) return;
+    const handler = (evt: MouseEvent | TouchEvent) => {
+      const el = textareaRef.current;
+      if (!el) return;
+      const target = evt.target as Node | null;
+      if (target && el.contains(target)) return;
+      collapseTextareaSelection();
+    };
+
+    document.addEventListener('pointerdown', handler, true);
+    return () => {
+      document.removeEventListener('pointerdown', handler, true);
+    };
+  }, [collapseTextareaSelection, isNative]);
 
   const autoResizeTextarea = useCallback(() => {
     const el = textareaRef.current;
@@ -125,7 +223,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
       // Web-only behavior: Enter sends, Shift+Enter inserts a newline.
       // Keep native (Capacitor) behavior unchanged to avoid breaking mobile UX.
-      if (Capacitor.isNativePlatform()) return;
+      if (isNative) return;
 
       // Don't send while user is composing text via an IME.
       if (e.nativeEvent.isComposing) return;
@@ -134,7 +232,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
         handleSendMessage(e);
       }
     },
-    [handleSendMessage]
+    [handleSendMessage, isNative]
   );
 
   const handleCancelReply = (e: CancelReplyEvent) => {
@@ -144,18 +242,30 @@ const MessageInput: React.FC<MessageInputProps> = ({
     onCancelReply();
   };
 
-  const focusTextarea = (e: MessageInputEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (!textareaRef.current) return;
-    textareaRef.current.focus();
-  };
+  const focusTextarea = useCallback(
+    (e: React.MouseEvent | React.TouchEvent) => {
+      const el = textareaRef.current;
+      if (!el) return;
+
+      // If the user is interacting with the textarea itself, don't interfere.
+      // Preventing default here breaks native caret placement + long-press selection.
+      const target = e.target as HTMLElement | null;
+      if (target && (target === el || target.closest('textarea'))) return;
+
+      el.focus();
+      onRequestScrollToBottom?.();
+      // If there was an existing selection, collapse it when user taps the container area.
+      requestAnimationFrame(() => collapseTextareaSelection());
+    },
+    [collapseTextareaSelection, onRequestScrollToBottom]
+  );
 
   return (
     <>
       <div
         className="bg-card border-t border-border px-4 md:px-8 py-3 md:py-4"
         onMouseDown={focusTextarea}
+        onTouchStart={focusTextarea}
       >
         {/* Reply Preview */}
         {replyingTo && (
@@ -189,15 +299,33 @@ const MessageInput: React.FC<MessageInputProps> = ({
               value={newMessage}
               onChange={handleTextareaChange}
               onKeyDown={handleTextareaKeyDown}
+              onFocus={onRequestScrollToBottom}
+              onPointerDown={handleTextareaPointerDown}
+              onPointerMove={handleTextareaPointerMove}
+              onPointerUp={handleTextareaPointerUpOrCancel}
+              onPointerCancel={handleTextareaPointerUpOrCancel}
               placeholder="Type a message"
               rows={1}
               inputMode="text"
               autoComplete="off"
               autoCapitalize="sentences"
               spellCheck={true}
+              // On native mobile (Capacitor WebView), disable selection/long-press callouts if desired.
+              // Keep normal selection behavior on web.
+              style={
+                isNative
+                  ? ({
+                      userSelect: 'none',
+                      WebkitUserSelect: 'none',
+                      WebkitTouchCallout: 'none',
+                    } as React.CSSProperties)
+                  : undefined
+              }
               className={`flex-1 bg-transparent text-foreground placeholder:text-muted-foreground
                          text-[15px] md:text-[18px] leading-relaxed resize-none p-0 m-0 focus:outline-none outline-none
-                         scrollbar-transparent ${isTextareaMultiline ? 'overflow-y-auto' : 'overflow-y-hidden'}`}
+                         scrollbar-transparent ${isTextareaMultiline ? 'overflow-y-auto' : 'overflow-y-hidden'} ${
+                           isNative ? 'select-none' : ''
+                         }`}
             />
           </div>
           <Button

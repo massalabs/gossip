@@ -157,6 +157,21 @@ const Discussion: React.FC = () => {
     }
   }, []);
 
+  const scrollToBottom = useCallback(() => {
+    const container = document.getElementById('messagesContainer');
+    if (!container) return;
+
+    // Do it in rAF so it happens after any layout triggered by focusing the input.
+    requestAnimationFrame(() => {
+      container.scrollTop = container.scrollHeight;
+    });
+
+    // Best-effort: some mobile browsers adjust viewport/scrollHeight after the keyboard opens.
+    window.setTimeout(() => {
+      container.scrollTop = container.scrollHeight;
+    }, 50);
+  }, []);
+
   if (!contact) return null;
 
   // Mobile-first: show only discussion page when selected
@@ -186,6 +201,7 @@ const Discussion: React.FC = () => {
         replyingTo={replyingTo}
         onCancelReply={handleCancelReply}
         initialValue={finalPrefilledMessage || undefined}
+        onRequestScrollToBottom={scrollToBottom}
       />
     </div>
   );
