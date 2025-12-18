@@ -11,108 +11,16 @@ import {
 } from '../db';
 import { renewDiscussion } from '../services/discussion';
 import { messageService } from '../services/message';
-
 import { restMessageProtocol } from '../api/messageProtocol';
 
-// const RESEND_INTERVAL_MS = 3000; // 3 seconds
-
 /**
- * Hook to resend failed blobs (announcements and messages) when the user is logged in.
- * Optionally tracks failed blobs from the database and stores them in state.
- * @param trackFailedBlobs - If true, tracks failed blobs from the DB and stores them in state. Defaults to false.
+ * Hook to manually renew a discussion (e.g., from settings page).
+ * Changes node and re-initiates the discussion.
  */
-export function useResendFailedBlobs(trackFailedBlobs: boolean = false) {
+export function useManualRenewDiscussion() {
   const { userProfile, ourPk, ourSk, session } = useAccountStore();
-  const isResending = useRef(false);
 
-  // State for tracking failed items (only populated if trackFailedBlobs is true)
-  const [retryMessagesByContact, setRetryMessagesByContact] = useState<
-    Map<string, Message[]>
-  >(new Map());
-  const [brokenDiscussions, setBrokenDiscussions] = useState<Discussion[]>([]);
-  const [sendFailedDiscussions, setSendFailedDiscussions] = useState<
-    Discussion[]
-  >([]);
-
-  // Ref to hold the resend function (avoids unnecessary re-renders in effects)
-  const resendFailedBlobsRef = useRef<(() => Promise<void>) | undefined>(
-    undefined
-  );
-
-  // Reinitiate broken discussions
-  const reinitiateBrokenDiscussions = useCallback(async () => {
-    if (
-      !userProfile?.userId ||
-      !brokenDiscussions.length ||
-      !session ||
-      !ourPk ||
-      !ourSk
-    ) {
-      if (!session || !ourPk || !ourSk) {
-        console.warn(
-          'Cannot reinitiate discussions: WASM keys or session unavailable'
-        );
-      }
-      return;
-    }
-
-    for (const discussion of brokenDiscussions) {
-      try {
-        await renewDiscussion(
-          userProfile.userId,
-          discussion.contactUserId,
-          session,
-          ourPk,
-          ourSk
-        );
-      } catch (error) {
-        console.error(
-          `Failed to reinitiate discussion with ${discussion.contactUserId}:`,
-          error
-        );
-      }
-    }
-  }, [brokenDiscussions, ourPk, ourSk, session, userProfile?.userId]);
-
-  // Resend failed announcements
-  const resendFailedAnnouncements = useCallback(async () => {
-    if (!sendFailedDiscussions.length || !session) {
-      if (!session) {
-        console.warn(
-          'Cannot resend failed announcements: session not initialized'
-        );
-      }
-      return;
-    }
-
-    try {
-      await announcementService.resendAnnouncements(
-        sendFailedDiscussions,
-        session
-      );
-    } catch (error) {
-      console.error('Failed to resend failed announcements:', error);
-    }
-  }, [sendFailedDiscussions, session]);
-
-  // Resend failed messages
-  const resendMessages = useCallback(async () => {
-    if (!retryMessagesByContact.size || !session) {
-      if (!session) {
-        console.warn('Cannot resend messages: session not initialized');
-      }
-      return;
-    }
-
-    try {
-      await messageService.resendMessages(retryMessagesByContact, session);
-    } catch (error) {
-      console.error('Failed to resend failed messages:', error);
-    }
-  }, [retryMessagesByContact, session]);
-
-  // Manual renewal for a specific discussion (with node change)
-  const manualRenewDiscussion = useCallback(
+  return useCallback(
     async (contactUserId: string): Promise<void> => {
       if (!userProfile?.userId || !session || !ourPk || !ourSk) {
         console.warn(
@@ -144,27 +52,27 @@ export function useResendFailedBlobs(trackFailedBlobs: boolean = false) {
     },
     [userProfile?.userId, session, ourPk, ourSk]
   );
+}
 
-  // Combined resend function (prevents concurrent resends)
-  const resendFailedBlobs = useCallback(async (): Promise<void> => {
-    if (isResending.current) return;
-    isResending.current = true;
+/**
+ * Hook that watches for failed blobs and provides a function to retry them.
+ * Used by useAppStateRefresh for automatic retry logic.
+ */
+export function useResendFailedBlobs() {
+  const { userProfile, ourPk, ourSk, session } = useAccountStore();
+  const isResending = useRef(false);
 
-    await reinitiateBrokenDiscussions();
-    await resendFailedAnnouncements();
-    await resendMessages();
+  const [retryMessagesByContact, setRetryMessagesByContact] = useState<
+    Map<string, Message[]>
+  >(new Map());
+  const [brokenDiscussions, setBrokenDiscussions] = useState<Discussion[]>([]);
+  const [sendFailedDiscussions, setSendFailedDiscussions] = useState<
+    Discussion[]
+  >([]);
 
-    isResending.current = false;
-  }, [reinitiateBrokenDiscussions, resendFailedAnnouncements, resendMessages]);
-
-  // Update ref with latest resend function
+  // Watch for failed items in the database
   useEffect(() => {
-    resendFailedBlobsRef.current = resendFailedBlobs;
-  }, [resendFailedBlobs]);
-
-  // Set up live queries to track failed items (only if tracking is enabled)
-  useEffect(() => {
-    if (!userProfile?.userId || !trackFailedBlobs) {
+    if (!userProfile?.userId) {
       setRetryMessagesByContact(new Map());
       setBrokenDiscussions([]);
       setSendFailedDiscussions([]);
@@ -173,96 +81,113 @@ export function useResendFailedBlobs(trackFailedBlobs: boolean = false) {
 
     const subscriptions: Subscription[] = [];
 
-    // Live query for failed messages and broken discussions (using transaction for efficiency)
-    const failedMessagesAndBrokenSub = liveQuery(async () => {
-      return await db.transaction(
-        'r',
-        [db.messages, db.discussions],
-        async () => {
-          const [failedMessages, brokenDiscussions] = await Promise.all([
-            db.messages
-              .where('[ownerUserId+status]')
-              .equals([userProfile.userId, MessageStatus.FAILED])
-              .toArray(),
-            db.discussions
-              .where('[ownerUserId+status]')
-              .equals([userProfile.userId, DiscussionStatus.BROKEN])
-              .toArray(),
-          ]);
-          return { failedMessages, brokenDiscussions };
-        }
-      );
+    // Failed messages and broken discussions
+    const failedSub = liveQuery(async () => {
+      return db.transaction('r', [db.messages, db.discussions], async () => {
+        const [failedMessages, broken] = await Promise.all([
+          db.messages
+            .where('[ownerUserId+status]')
+            .equals([userProfile.userId, MessageStatus.FAILED])
+            .toArray(),
+          db.discussions
+            .where('[ownerUserId+status]')
+            .equals([userProfile.userId, DiscussionStatus.BROKEN])
+            .toArray(),
+        ]);
+        return { failedMessages, broken };
+      });
     }).subscribe({
-      next: ({ failedMessages, brokenDiscussions }) => {
-        setBrokenDiscussions(brokenDiscussions);
+      next: ({ failedMessages, broken }) => {
+        setBrokenDiscussions(broken);
 
-        const brokenDiscussionIds = new Set(
-          brokenDiscussions.map(d => d.contactUserId)
-        );
-        const map = new Map<string, Message[]>();
-
-        failedMessages.forEach(message => {
-          if (!message.id || brokenDiscussionIds.has(message.contactUserId))
-            return;
-
-          const existing = map.get(message.contactUserId) || [];
-          existing.push(message);
-          map.set(message.contactUserId, existing);
-        });
-
-        setRetryMessagesByContact(map);
+        // Group failed messages by contact, excluding broken discussions
+        const brokenIds = new Set(broken.map(d => d.contactUserId));
+        const grouped = new Map<string, Message[]>();
+        for (const msg of failedMessages) {
+          if (!msg.id || brokenIds.has(msg.contactUserId)) continue;
+          const list = grouped.get(msg.contactUserId) || [];
+          list.push(msg);
+          grouped.set(msg.contactUserId, list);
+        }
+        setRetryMessagesByContact(grouped);
       },
-      error: error =>
-        console.error(
-          'Failed to observe failed messages and broken discussions:',
-          error
-        ),
+      error: err => console.error('Failed to observe failed items:', err),
     });
-    subscriptions.push(failedMessagesAndBrokenSub);
+    subscriptions.push(failedSub);
 
-    // Live query for send-failed discussions
+    // Send-failed discussions (announcement failed to send)
     const sendFailedSub = liveQuery(() =>
       db.discussions
         .where('[ownerUserId+status]')
         .equals([userProfile.userId, DiscussionStatus.SEND_FAILED])
         .toArray()
     ).subscribe({
-      next: discussions => setSendFailedDiscussions(discussions),
-      error: error =>
-        console.error('Failed to observe sendFailed discussions:', error),
+      next: setSendFailedDiscussions,
+      error: err =>
+        console.error('Failed to observe send-failed discussions:', err),
     });
     subscriptions.push(sendFailedSub);
 
-    return () => subscriptions.forEach(sub => sub.unsubscribe());
-  }, [userProfile?.userId, trackFailedBlobs]);
+    return () => subscriptions.forEach(s => s.unsubscribe());
+  }, [userProfile?.userId]);
 
-  // Commented out periodic resend (uncomment and adjust if needed)
-  // useEffect(() => {
-  //   if (!trackFailedBlobs || !userProfile?.userId) return;
-  //
-  //   console.log('User logged in, starting periodic failed blob resend task');
-  //   const resendInterval = setInterval(() => {
-  //     resendFailedBlobsRef.current?.().catch(error => {
-  //       console.error('Failed to resend blobs periodically:', error);
-  //     });
-  //   }, RESEND_INTERVAL_MS);
-  //
-  //   return () => {
-  //     clearInterval(resendInterval);
-  //     console.log('Periodic failed blob resend interval cleared');
-  //   };
-  // }, [userProfile?.userId, trackFailedBlobs]);
+  // Resend all failed items
+  const resendFailedBlobs = useCallback(async () => {
+    if (isResending.current) return;
+    if (!session || !ourPk || !ourSk || !userProfile?.userId) return;
 
-  // Return minimal set if not tracking, full set otherwise
-  if (!trackFailedBlobs) {
-    return { manualRenewDiscussion };
-  }
+    isResending.current = true;
+    try {
+      // Reinitiate broken discussions
+      for (const discussion of brokenDiscussions) {
+        try {
+          await renewDiscussion(
+            userProfile.userId,
+            discussion.contactUserId,
+            session,
+            ourPk,
+            ourSk
+          );
+        } catch (err) {
+          console.error(
+            `Failed to reinitiate discussion ${discussion.contactUserId}:`,
+            err
+          );
+        }
+      }
 
-  return {
-    resendFailedBlobs: resendFailedBlobsRef.current,
-    reinitiateBrokenDiscussions,
-    resendFailedAnnouncements,
-    resendMessages,
-    manualRenewDiscussion,
-  };
+      // Resend failed announcements
+      if (sendFailedDiscussions.length > 0) {
+        try {
+          await announcementService.resendAnnouncements(
+            sendFailedDiscussions,
+            session
+          );
+        } catch (err) {
+          console.error('Failed to resend announcements:', err);
+        }
+      }
+
+      // Resend failed messages
+      if (retryMessagesByContact.size > 0) {
+        try {
+          await messageService.resendMessages(retryMessagesByContact, session);
+        } catch (err) {
+          console.error('Failed to resend messages:', err);
+        }
+      }
+    } finally {
+      isResending.current = false;
+    }
+  }, [
+    session,
+    ourPk,
+    ourSk,
+    userProfile?.userId,
+    brokenDiscussions,
+    sendFailedDiscussions,
+    retryMessagesByContact,
+  ]);
+
+  return { resendFailedBlobs };
 }

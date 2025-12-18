@@ -21,7 +21,7 @@ import { useResendFailedBlobs } from './useResendFailedBlobs.ts';
 export function useAppStateRefresh() {
   const { userProfile, ourPk, ourSk, session } = useAccountStore();
   const isSyncing = useRef(false);
-  const { resendFailedBlobs } = useResendFailedBlobs(true);
+  const { resendFailedBlobs } = useResendFailedBlobs();
   const isOnline = useOnlineStoreBase(s => s.isOnline);
   const refreshInterval = useRef<NodeJS.Timeout | null>(null);
   const isInitiating = useRef(false);

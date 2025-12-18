@@ -21,7 +21,6 @@ import { usePendingDeepLink } from '../hooks/usePendingDeepLink';
 import { usePendingSharedContent } from '../hooks/usePendingSharedContent';
 import { useAppStateRefresh } from '../hooks/useAppStateRefresh';
 import { ROUTES } from '../constants/routes';
-import { useResendFailedBlobs } from '../hooks/useResendFailedBlobs';
 
 /**
  * Routes accessible when user is authenticated
@@ -30,7 +29,6 @@ export const AuthenticatedRoutes: React.FC = () => {
   useAppStateRefresh();
   usePendingDeepLink();
   usePendingSharedContent();
-  useResendFailedBlobs();
 
   return (
     <Routes>

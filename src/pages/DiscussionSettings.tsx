@@ -16,7 +16,7 @@ import HeaderWrapper from '../components/ui/HeaderWrapper';
 import { Check, Edit2, ChevronRight, RotateCw } from 'react-feather';
 import { Contact } from '../db';
 import { ROUTES } from '../constants/routes';
-import { useResendFailedBlobs } from '../hooks/useResendFailedBlobs';
+import { useManualRenewDiscussion } from '../hooks/useResendFailedBlobs';
 
 const DiscussionSettings: React.FC = () => {
   const { discussionId } = useParams();
@@ -24,7 +24,7 @@ const DiscussionSettings: React.FC = () => {
 
   const discussions = useDiscussionStore(s => s.discussions);
   const contacts = useDiscussionStore(s => s.contacts);
-  const { manualRenewDiscussion } = useResendFailedBlobs(false);
+  const manualRenewDiscussion = useManualRenewDiscussion();
 
   const discussion = useMemo(() => {
     if (!discussionId) return undefined;
