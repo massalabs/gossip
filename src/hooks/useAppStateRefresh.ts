@@ -37,17 +37,18 @@ export function useAppStateRefresh() {
       isSyncing.current = true;
 
       try {
-        await announcementService.fetchAndProcessAnnouncements(
-          ourPk,
-          ourSk,
-          session
-        );
-
-        await messageService.fetchMessages(
-          encodeUserId(ourPk.derive_id()),
-          ourSk,
-          session
-        );
+        await Promise.all([
+          announcementService.fetchAndProcessAnnouncements(
+            ourPk,
+            ourSk,
+            session
+          ),
+          messageService.fetchMessages(
+            encodeUserId(ourPk.derive_id()),
+            ourSk,
+            session
+          ),
+        ]);
 
         if (resendFailedBlobs) {
           await resendFailedBlobs();
