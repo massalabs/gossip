@@ -187,26 +187,24 @@ const DiscussionSettings: React.FC = () => {
           <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
             Reset Connection
           </h2>
-          <div className="bg-background rounded-xl p-4">
-            <p className="text-sm text-muted-foreground mb-4">
-              If you think you're disconnected from your peer, you can reset
-              connection. Don't worry, some messages may be sent again but you
-              will NOT lose your message history.
+          <div className="bg-background border border-border rounded-xl p-4">
+            <p className="text-sm text-muted-foreground mb-3">
+              If you think you're disconnected from your peer, you can reset the
+              connection. Some messages may be resent but your history will be
+              preserved.
             </p>
-            <div className="flex justify-center">
-              <Button
-                onClick={handleResetConnection}
-                variant="primary"
-                className="bg-success hover:bg-success/90 text-success-foreground"
-              >
-                {reconnectSuccess ? (
-                  <Check className="w-4 h-4 mr-2" />
-                ) : (
-                  <RotateCw className="w-4 h-4 mr-2" />
-                )}
-                {reconnectSuccess ? 'Reconnected!' : 'Reconnect'}
-              </Button>
-            </div>
+            <Button
+              onClick={handleResetConnection}
+              variant="secondary"
+              className="w-full"
+            >
+              {reconnectSuccess ? (
+                <Check className="w-4 h-4 mr-2" />
+              ) : (
+                <RotateCw className="w-4 h-4 mr-2" />
+              )}
+              {reconnectSuccess ? 'Reconnected!' : 'Reset Connection'}
+            </Button>
           </div>
         </div>
 
