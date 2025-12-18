@@ -92,7 +92,7 @@ export class RestMessageProtocol implements IMessageProtocol {
     });
 
     if (!response.success || !response.data) {
-      throw new Error(response.error);
+      throw new Error(response.error || 'Failed to fetch announcements');
     }
 
     return response.data.map(row => decodeFromBase64(row));
@@ -109,7 +109,7 @@ export class RestMessageProtocol implements IMessageProtocol {
     );
 
     if (!response.success || !response.data) {
-      throw new Error(response.error);
+      throw new Error(response.error || 'Failed to fetch public key');
     }
 
     if (!response.data.value) {
