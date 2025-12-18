@@ -17,39 +17,42 @@ import { restMessageProtocol } from '../api/messageProtocol';
 // const RESEND_INTERVAL_MS = 3000; // 3 seconds
 
 /**
- * Hook to resend failed blobs (announcements and messages) periodically when user is logged in
- * Attempts to resend failed blobs every 3 seconds
- * @param trackFailedBlobs - If true, tracks failed blobs from db and store them in state. Defaults to false.
+ * Hook to resend failed blobs (announcements and messages) when the user is logged in.
+ * Optionally tracks failed blobs from the database and stores them in state.
+ * @param trackFailedBlobs - If true, tracks failed blobs from the DB and stores them in state. Defaults to false.
  */
 export function useResendFailedBlobs(trackFailedBlobs: boolean = false) {
   const { userProfile, ourPk, ourSk, session } = useAccountStore();
   const isResending = useRef(false);
 
-  /* Messages that need to be retrieved grouped by contact. Does not include messages from broken discussions */
+  // State for tracking failed items (only populated if trackFailedBlobs is true)
   const [retryMessagesByContact, setRetryMessagesByContact] = useState<
     Map<string, Message[]>
   >(new Map());
-
-  /* Discussions that are in BROKEN status */
   const [brokenDiscussions, setBrokenDiscussions] = useState<Discussion[]>([]);
-
-  /* Discussions that are in SEND_FAILED status. The announcement has been created but could not be broadcasted on network */
   const [sendFailedDiscussions, setSendFailedDiscussions] = useState<
     Discussion[]
   >([]);
 
-  // useRef used to avoid activating the setInterval useEffect at each render
+  // Ref to hold the resend function (avoids unnecessary re-renders in effects)
   const resendFailedBlobsRef = useRef<(() => Promise<void>) | undefined>(
     undefined
   );
 
+  // Reinitiate broken discussions
   const reinitiateBrokenDiscussions = useCallback(async () => {
-    if (!userProfile?.userId) return;
-    if (!brokenDiscussions.length) return;
-    if (!session || !ourPk || !ourSk) {
-      console.warn(
-        'Cannot reinitiate discussions: WASM keys or session unavailable'
-      );
+    if (
+      !userProfile?.userId ||
+      !brokenDiscussions.length ||
+      !session ||
+      !ourPk ||
+      !ourSk
+    ) {
+      if (!session || !ourPk || !ourSk) {
+        console.warn(
+          'Cannot reinitiate discussions: WASM keys or session unavailable'
+        );
+      }
       return;
     }
 
@@ -71,14 +74,17 @@ export function useResendFailedBlobs(trackFailedBlobs: boolean = false) {
     }
   }, [brokenDiscussions, ourPk, ourSk, session, userProfile?.userId]);
 
+  // Resend failed announcements
   const resendFailedAnnouncements = useCallback(async () => {
-    if (!sendFailedDiscussions.length) return;
-    if (!session) {
-      console.warn(
-        'Cannot resend failed announcements: session not initialized'
-      );
+    if (!sendFailedDiscussions.length || !session) {
+      if (!session) {
+        console.warn(
+          'Cannot resend failed announcements: session not initialized'
+        );
+      }
       return;
     }
+
     try {
       await announcementService.resendAnnouncements(
         sendFailedDiscussions,
@@ -89,12 +95,15 @@ export function useResendFailedBlobs(trackFailedBlobs: boolean = false) {
     }
   }, [sendFailedDiscussions, session]);
 
+  // Resend failed messages
   const resendMessages = useCallback(async () => {
-    if (!retryMessagesByContact.size) return;
-    if (!session) {
-      console.warn('Cannot resend messages: session not initialized');
+    if (!retryMessagesByContact.size || !session) {
+      if (!session) {
+        console.warn('Cannot resend messages: session not initialized');
+      }
       return;
     }
+
     try {
       await messageService.resendMessages(retryMessagesByContact, session);
     } catch (error) {
@@ -102,9 +111,58 @@ export function useResendFailedBlobs(trackFailedBlobs: boolean = false) {
     }
   }, [retryMessagesByContact, session]);
 
-  /* The retry process is executed at small intervals.
-  So for performances reasons, we keep via Live query, retry messages and discussions up to date so that we don't need to 
-  retrieve them from db at each interval*/
+  // Manual renewal for a specific discussion (with node change)
+  const manualRenewDiscussion = useCallback(
+    async (contactUserId: string): Promise<void> => {
+      if (!userProfile?.userId || !session || !ourPk || !ourSk) {
+        console.warn(
+          'Cannot renew discussion: WASM keys or session unavailable'
+        );
+        return;
+      }
+
+      try {
+        await restMessageProtocol.changeNode();
+      } catch (error) {
+        console.error('Failed to change node:', error);
+      }
+
+      try {
+        await renewDiscussion(
+          userProfile.userId,
+          contactUserId,
+          session,
+          ourPk,
+          ourSk
+        );
+      } catch (error) {
+        console.error(
+          `Failed to renew discussion with ${contactUserId}:`,
+          error
+        );
+      }
+    },
+    [userProfile?.userId, session, ourPk, ourSk]
+  );
+
+  // Combined resend function (prevents concurrent resends)
+  const resendFailedBlobs = useCallback(async (): Promise<void> => {
+    if (isResending.current) return;
+    isResending.current = true;
+
+    await reinitiateBrokenDiscussions();
+    await resendFailedAnnouncements();
+    await resendMessages();
+
+    isResending.current = false;
+  }, [reinitiateBrokenDiscussions, resendFailedAnnouncements, resendMessages]);
+
+  // Update ref with latest resend function
+  useEffect(() => {
+    resendFailedBlobsRef.current = resendFailedBlobs;
+  }, [resendFailedBlobs]);
+
+  // Set up live queries to track failed items (only if tracking is enabled)
   useEffect(() => {
     if (!userProfile?.userId || !trackFailedBlobs) {
       setRetryMessagesByContact(new Map());
@@ -115,7 +173,7 @@ export function useResendFailedBlobs(trackFailedBlobs: boolean = false) {
 
     const subscriptions: Subscription[] = [];
 
-    // Combined liveQuery for failed messages and broken discussions using a transaction
+    // Live query for failed messages and broken discussions (using transaction for efficiency)
     const failedMessagesAndBrokenSub = liveQuery(async () => {
       return await db.transaction(
         'r',
@@ -136,38 +194,33 @@ export function useResendFailedBlobs(trackFailedBlobs: boolean = false) {
       );
     }).subscribe({
       next: ({ failedMessages, brokenDiscussions }) => {
-        // Update broken discussions state
         setBrokenDiscussions(brokenDiscussions);
 
-        // Build set of broken discussion contact IDs for filtering
         const brokenDiscussionIds = new Set(
           brokenDiscussions.map(d => d.contactUserId)
         );
-
-        // Build retry messages map, excluding messages from broken discussions
         const map = new Map<string, Message[]>();
-        failedMessages.forEach(message => {
-          if (!message.id) return;
 
-          // Exclude messages from broken discussions
-          if (brokenDiscussionIds.has(message.contactUserId)) return;
+        failedMessages.forEach(message => {
+          if (!message.id || brokenDiscussionIds.has(message.contactUserId))
+            return;
 
           const existing = map.get(message.contactUserId) || [];
           existing.push(message);
           map.set(message.contactUserId, existing);
         });
+
         setRetryMessagesByContact(map);
       },
-      error: error => {
+      error: error =>
         console.error(
           'Failed to observe failed messages and broken discussions:',
           error
-        );
-      },
+        ),
     });
     subscriptions.push(failedMessagesAndBrokenSub);
 
-    // Separate liveQuery for send-failed discussions
+    // Live query for send-failed discussions
     const sendFailedSub = liveQuery(() =>
       db.discussions
         .where('[ownerUserId+status]')
@@ -180,83 +233,27 @@ export function useResendFailedBlobs(trackFailedBlobs: boolean = false) {
     });
     subscriptions.push(sendFailedSub);
 
-    return () => {
-      subscriptions.forEach(sub => sub.unsubscribe());
-    };
+    return () => subscriptions.forEach(sub => sub.unsubscribe());
   }, [userProfile?.userId, trackFailedBlobs]);
 
-  const resendFailedBlobs = useCallback(async (): Promise<void> => {
-    if (isResending.current) return;
-    isResending.current = true;
-    await reinitiateBrokenDiscussions();
-    await resendFailedAnnouncements();
-    await resendMessages();
-    isResending.current = false;
-  }, [reinitiateBrokenDiscussions, resendFailedAnnouncements, resendMessages]);
-
-  const manualRenewDiscussion = useCallback(
-    async (contactUserId: string): Promise<void> => {
-      if (!userProfile?.userId) return;
-      if (!session || !ourPk || !ourSk) {
-        console.warn(
-          'Cannot reinitiate discussions: WASM keys or session unavailable'
-        );
-        return;
-      }
-
-      // Change the node used to fetch and send data to the network
-      try {
-        await restMessageProtocol.changeNode();
-      } catch (error) {
-        console.error('Failed to change node:', error);
-      }
-
-      // Renew the discussion
-      try {
-        await renewDiscussion(
-          userProfile.userId,
-          contactUserId,
-          session,
-          ourPk,
-          ourSk
-        );
-      } catch (error) {
-        console.error(
-          `Failed to renew discussion with ${contactUserId}:`,
-          error
-        );
-      }
-    },
-    [userProfile?.userId, session, ourPk, ourSk]
-  );
-
-  useEffect(() => {
-    resendFailedBlobsRef.current = resendFailedBlobs;
-  }, [resendFailedBlobs]);
-
+  // Commented out periodic resend (uncomment and adjust if needed)
   // useEffect(() => {
-  //   if (!activatePeriodicResend) {
-  //     return undefined;
-  //   }
+  //   if (!trackFailedBlobs || !userProfile?.userId) return;
+  //
+  //   console.log('User logged in, starting periodic failed blob resend task');
+  //   const resendInterval = setInterval(() => {
+  //     resendFailedBlobsRef.current?.().catch(error => {
+  //       console.error('Failed to resend blobs periodically:', error);
+  //     });
+  //   }, RESEND_INTERVAL_MS);
+  //
+  //   return () => {
+  //     clearInterval(resendInterval);
+  //     console.log('Periodic failed blob resend interval cleared');
+  //   };
+  // }, [userProfile?.userId, trackFailedBlobs]);
 
-  //   if (userProfile?.userId) {
-  //     console.log('User logged in, starting periodic failed blob resend task');
-
-  //     const resendInterval = setInterval(() => {
-  //       resendFailedBlobsRef.current?.().catch(error => {
-  //         console.error('Failed to resend blobs periodically:', error);
-  //       });
-  //     }, RESEND_INTERVAL_MS);
-
-  //     // Cleanup interval when user logs out or component unmounts
-  //     return () => {
-  //       clearInterval(resendInterval);
-  //       console.log('Periodic failed blob resend interval cleared');
-  //     };
-  //   }
-  //   return undefined;
-  // }, [userProfile?.userId, activatePeriodicResend]);
-
+  // Return minimal set if not tracking, full set otherwise
   if (!trackFailedBlobs) {
     return { manualRenewDiscussion };
   }
