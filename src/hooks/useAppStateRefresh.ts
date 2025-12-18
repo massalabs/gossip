@@ -15,8 +15,8 @@ import { encodeUserId } from '../utils/userId.ts';
 import { useResendFailedBlobs } from './useResendFailedBlobs.ts';
 
 /**
- * Hook to refresh app state periodically when user is logged in
- * Refreshes announcements, messages, discussions, and contacts
+ * Hook to refresh app state periodically when the user is logged in.
+ * Refreshes announcements, messages, discussions, and contacts.
  */
 export function useAppStateRefresh() {
   const { userProfile, ourPk, ourSk, session } = useAccountStore();
@@ -26,17 +26,14 @@ export function useAppStateRefresh() {
   const refreshInterval = useRef<NodeJS.Timeout | null>(null);
   const isInitiating = useRef(false);
 
-  /**
-   * Trigger message sync
-   */
+  // Trigger synchronization of announcements, messages, and failed blobs
   const triggerSync = useCallback(
     async (
       ourPk: UserPublicKeys,
       ourSk: UserSecretKeys,
       session: SessionModule
     ): Promise<void> => {
-      if (!isOnline) return;
-      if (isSyncing.current) return;
+      if (!isOnline || isSyncing.current) return;
       isSyncing.current = true;
 
       try {
@@ -67,18 +64,20 @@ export function useAppStateRefresh() {
     [resendFailedBlobs, isOnline]
   );
 
+  // Initialize stores, trigger initial sync, and set up refresh interval
   const init = useCallback(async () => {
-    if (isInitiating.current) return;
-
-    try {
+    if (isInitiating.current || !ourPk || !ourSk || !session) {
       if (!ourPk || !ourSk || !session) {
-        throw new Error(
-          'Failed to initialize app state: User public keys or secret keys or session not initialized'
+        console.warn(
+          'Cannot initialize app state: User keys or session not available'
         );
       }
+      return;
+    }
 
-      isInitiating.current = true;
+    isInitiating.current = true;
 
+    try {
       useMessageStore.getState().init();
       await useDiscussionStore.getState().init();
 
@@ -89,11 +88,15 @@ export function useAppStateRefresh() {
       }
 
       refreshInterval.current = setInterval(async () => {
-        await triggerSync(ourPk, ourSk, session);
+        // Fetch fresh values to avoid stale closures
+        const { ourPk, ourSk, session } = useAccountStore.getState();
+        if (ourPk && ourSk && session) {
+          await triggerSync(ourPk, ourSk, session);
+        }
       }, defaultSyncConfig.activeSyncIntervalMs);
     } catch (error) {
       console.error(
-        '[useAppStateRefresh] Failed to sync messages on login:',
+        '[useAppStateRefresh] Failed to initialize app state:',
         error
       );
     } finally {
@@ -101,6 +104,7 @@ export function useAppStateRefresh() {
     }
   }, [triggerSync, ourPk, ourSk, session]);
 
+  // Run init on user login and clean up on unmount or logout
   useEffect(() => {
     if (userProfile?.userId) {
       init();
@@ -109,6 +113,7 @@ export function useAppStateRefresh() {
     return () => {
       if (refreshInterval.current) {
         clearInterval(refreshInterval.current);
+        refreshInterval.current = null;
       }
     };
   }, [userProfile?.userId, init]);
