@@ -40,18 +40,23 @@ export function useAppStateRefresh() {
       isSyncing.current = true;
 
       try {
-        await Promise.all([
-          announcementService.fetchAndProcessAnnouncements(
-            ourPk,
-            ourSk,
-            session
-          ),
-          messageService.fetchMessages(
-            encodeUserId(ourPk.derive_id()),
-            ourSk,
-            session
-          ),
-        ]);
+        // IMPORTANT: Process announcements FIRST to update session state with new peers.
+        // This ensures fetchMessages has access to the correct seekers for newly established sessions.
+        // Running these in parallel can cause race conditions where messages are missed because
+        // the session manager doesn't have the peer's seeker yet (e.g., session stuck at SelfRequested).
+        await announcementService.fetchAndProcessAnnouncements(
+          ourPk,
+          ourSk,
+          session
+        );
+
+        // Now fetch messages with the updated session state
+        await messageService.fetchMessages(
+          encodeUserId(ourPk.derive_id()),
+          ourSk,
+          session
+        );
+
         if (resendFailedBlobs) {
           await resendFailedBlobs();
         }

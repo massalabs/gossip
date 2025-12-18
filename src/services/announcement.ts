@@ -12,7 +12,7 @@ import {
   UserSecretKeys,
   SessionStatus,
 } from '../assets/generated/wasm/gossip_wasm';
-import { SessionModule } from '../wasm/session';
+import { SessionModule, sessionStatusToString } from '../wasm/session';
 import { notificationService } from './notifications';
 import { isAppInForeground } from '../utils/appState';
 
@@ -60,7 +60,9 @@ export class AnnouncementService {
   }> {
     try {
       const counter = await this.messageProtocol.sendAnnouncement(announcement);
-
+      console.log(
+        `[INFO] AnnouncementService.sendAnnouncement: announcement broadcast successful, counter: ${counter}`
+      );
       return { success: true, counter };
     } catch (error) {
       logAnnouncementError('Failed to broadcast outgoing session:', error);
@@ -92,6 +94,11 @@ export class AnnouncementService {
     error?: string;
     announcement: Uint8Array;
   }> {
+    const contactUserId = encodeUserId(contactPublicKeys.derive_id());
+    console.log(
+      `[INFO] AnnouncementService.establishSession: establishing session with contact ${contactUserId}`
+    );
+
     const announcement = session.establishOutgoingSession(
       contactPublicKeys,
       ourPk,
@@ -100,6 +107,9 @@ export class AnnouncementService {
     );
 
     if (announcement.length === 0) {
+      console.error(
+        `[ERROR] AnnouncementService.establishSession: session manager returned empty announcement for contact ${contactUserId}`
+      );
       return {
         success: false,
         error: EstablishSessionError,
@@ -107,8 +117,19 @@ export class AnnouncementService {
       };
     }
 
+    // Check session status after establishing
+    const sessionStatus = session.peerSessionStatus(
+      contactPublicKeys.derive_id()
+    );
+    console.log(
+      `[INFO] AnnouncementService.establishSession: session status for ${contactUserId} after establish: ${sessionStatusToString(sessionStatus)}`
+    );
+
     const result = await this.sendAnnouncement(announcement);
     if (!result.success) {
+      console.error(
+        `[ERROR] AnnouncementService.establishSession: failed to send announcement to ${contactUserId}: ${result.error}`
+      );
       return {
         success: false,
         error: result.error,
@@ -116,6 +137,9 @@ export class AnnouncementService {
       };
     }
 
+    console.log(
+      `[INFO] AnnouncementService.establishSession: announcement sent successfully to ${contactUserId}`
+    );
     return { success: true, announcement };
   }
 
@@ -133,6 +157,9 @@ export class AnnouncementService {
       if (pendingAnnouncements.length > 0) {
         // Use announcements from IndexedDB
         announcements = pendingAnnouncements.map(p => p.announcement);
+        console.log(
+          `[INFO] AnnouncementService.fetchAndProcessAnnouncements: found ${announcements.length} pending announcements from IndexedDB`
+        );
         // Delete only the announcements we just read (by their IDs) to avoid race condition
         // If service worker adds new announcements between read and delete, they won't be lost
         const announcementIds = pendingAnnouncements
@@ -144,6 +171,11 @@ export class AnnouncementService {
       } else {
         // If no pending announcements, fetch from API
         announcements = await this._fetchAnnouncements();
+        if (announcements.length > 0) {
+          console.log(
+            `[INFO] AnnouncementService.fetchAndProcessAnnouncements: fetched ${announcements.length} announcements from API`
+          );
+        }
       }
 
       let newAnnouncementsCount = 0;
@@ -158,6 +190,9 @@ export class AnnouncementService {
           );
           // if success but no contactUserId, it means the announcement is not for us. So we don't count it as a new announcement.
           if (result.success && result.contactUserId) {
+            console.log(
+              `[INFO] AnnouncementService.fetchAndProcessAnnouncements: successfully processed announcement from contact ${result.contactUserId}`
+            );
             newAnnouncementsCount++;
           } else if (result.error) {
             errors.push(`${result.error}`);
@@ -353,10 +388,16 @@ export class AnnouncementService {
 
       // if we can't decrypt the announcement, it means we are not the intended recipient. It's not an error.
       if (!announcementResult) {
+        // Debug: log that we received an announcement not intended for us
+        // This is normal in a broadcast system - we receive all announcements but can only decrypt ours
         return {
           success: true,
         };
       }
+
+      console.log(
+        `[INFO] AnnouncementService._processIncomingAnnouncement: received an announcement intended for us, processing...`
+      );
 
       // Extract announcement's optional message
       const userData = announcementResult.user_data;
@@ -377,6 +418,12 @@ export class AnnouncementService {
       const contactUserId = announcerPkeys.derive_id();
       const contactUserIdString = encodeUserId(contactUserId);
       const ownerUserId = encodeUserId(ourPk.derive_id());
+
+      // Log session status after processing announcement
+      const sessionStatus = session.peerSessionStatus(contactUserId);
+      console.log(
+        `[INFO] AnnouncementService._processIncomingAnnouncement: processed announcement from ${contactUserIdString}, session status is now: ${sessionStatusToString(sessionStatus)}`
+      );
 
       let contact = await db.getContactByOwnerAndUserId(
         ownerUserId,
@@ -485,12 +532,22 @@ async function handleReceivedDiscussion(
           existing.direction === DiscussionDirection.INITIATED
         ) {
           updateData.status = DiscussionStatus.ACTIVE;
+          console.log(
+            `[INFO] handleReceivedDiscussion: transitioning discussion ${existing.id} with ${contactUserId} from PENDING/INITIATED to ACTIVE`
+          );
+        } else {
+          console.log(
+            `[INFO] handleReceivedDiscussion: updating existing discussion ${existing.id} with ${contactUserId} (status: ${existing.status}, direction: ${existing.direction})`
+          );
         }
 
         await db.discussions.update(existing.id!, updateData);
         return existing.id!;
       }
 
+      console.log(
+        `[INFO] handleReceivedDiscussion: creating new RECEIVED/PENDING discussion with contact ${contactUserId}`
+      );
       const discussionId = await db.discussions.add({
         ownerUserId: ownerUserId,
         contactUserId: contactUserId,
