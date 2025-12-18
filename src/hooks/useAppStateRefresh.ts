@@ -22,6 +22,9 @@ export function useAppStateRefresh() {
   const { userProfile, ourPk, ourSk, session } = useAccountStore();
   const isSyncing = useRef(false);
   const { resendFailedBlobs } = useResendFailedBlobs(true);
+  const isOnline = useOnlineStoreBase(s => s.isOnline);
+  const refreshInterval = useRef<NodeJS.Timeout | null>(null);
+  const isInitiating = useRef(false);
 
   /**
    * Trigger message sync
@@ -32,25 +35,17 @@ export function useAppStateRefresh() {
       ourSk: UserSecretKeys,
       session: SessionModule
     ): Promise<void> => {
-      if (isSyncing.current) return;
-      const isOnline = useOnlineStoreBase.getState().isOnline;
-
       if (!isOnline) return;
-
+      if (isSyncing.current) return;
       isSyncing.current = true;
 
       try {
-        // IMPORTANT: Process announcements FIRST to update session state with new peers.
-        // This ensures fetchMessages has access to the correct seekers for newly established sessions.
-        // Running these in parallel can cause race conditions where messages are missed because
-        // the session manager doesn't have the peer's seeker yet (e.g., session stuck at SelfRequested).
         await announcementService.fetchAndProcessAnnouncements(
           ourPk,
           ourSk,
           session
         );
 
-        // Now fetch messages with the updated session state
         await messageService.fetchMessages(
           encodeUserId(ourPk.derive_id()),
           ourSk,
@@ -61,42 +56,60 @@ export function useAppStateRefresh() {
           await resendFailedBlobs();
         }
       } catch (error) {
-        console.error('Failed to trigger manual sync:', error);
+        console.error(
+          '[useAppStateRefresh] Failed to trigger sync process:',
+          error
+        );
       } finally {
         isSyncing.current = false;
       }
     },
-    [resendFailedBlobs]
+    [resendFailedBlobs, isOnline]
   );
 
-  const initApp = useCallback(
-    async (
-      ourPk: UserPublicKeys,
-      ourSk: UserSecretKeys,
-      session: SessionModule
-    ) => {
+  const init = useCallback(async () => {
+    if (isInitiating.current) return;
+
+    try {
+      if (!ourPk || !ourSk || !session) {
+        throw new Error(
+          'Failed to initialize app state: User public keys or secret keys or session not initialized'
+        );
+      }
+
+      isInitiating.current = true;
+
       useMessageStore.getState().init();
       await useDiscussionStore.getState().init();
-      triggerSync(ourPk, ourSk, session).catch(error => {
-        console.error('Failed to sync messages on login:', error);
-      });
-    },
-    [triggerSync]
-  );
+
+      await triggerSync(ourPk, ourSk, session);
+
+      if (refreshInterval.current) {
+        clearInterval(refreshInterval.current);
+      }
+
+      refreshInterval.current = setInterval(async () => {
+        await triggerSync(ourPk, ourSk, session);
+      }, defaultSyncConfig.activeSyncIntervalMs);
+    } catch (error) {
+      console.error(
+        '[useAppStateRefresh] Failed to sync messages on login:',
+        error
+      );
+    } finally {
+      isInitiating.current = false;
+    }
+  }, [triggerSync, ourPk, ourSk, session]);
 
   useEffect(() => {
-    if (userProfile?.userId && ourPk && ourSk && session) {
-      initApp(ourPk, ourSk, session);
-      const refreshInterval = setInterval(() => {
-        triggerSync(ourPk, ourSk, session).catch(error => {
-          console.error('Failed to refresh app state periodically:', error);
-        });
-      }, defaultSyncConfig.activeSyncIntervalMs);
-
-      // Cleanup interval when user logs out or component unmounts
-      return () => {
-        clearInterval(refreshInterval);
-      };
+    if (userProfile?.userId) {
+      init();
     }
-  }, [userProfile?.userId, ourPk, ourSk, session, initApp, triggerSync]);
+
+    return () => {
+      if (refreshInterval.current) {
+        clearInterval(refreshInterval.current);
+      }
+    };
+  }, [userProfile?.userId, init]);
 }
