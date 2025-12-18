@@ -22,7 +22,7 @@ export const DebugConsole: React.FC = () => {
   const showDebugOption = useAppStore(s => s.showDebugOption);
   const [filter, setFilter] = useState<LogLevelFilter>('all');
   const [search, setSearch] = useState('');
-  const [autoScroll, setAutoScroll] = useState(true);
+  const [autoScroll, setAutoScroll] = useState(false);
   const [expandedLogs, setExpandedLogs] = useState<Set<number>>(new Set());
   const scrollRef = useRef<HTMLDivElement>(null);
 
