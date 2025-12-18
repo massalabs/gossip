@@ -258,20 +258,32 @@ export class AnnouncementService {
     const brokenDiscussions: number[] = [];
 
     for (const discussion of failedDiscussions) {
+      console.log(
+        `AnnouncementService.resendAnnouncements: resending announcement for discussion between ${discussion.ownerUserId} and ${discussion.contactUserId}. Status: ${discussion.status}`
+      );
       try {
         const result = await this.sendAnnouncement(
           discussion.initiationAnnouncement! // if a discussion is failed, it means the announcement has been encrypted by session manager, so we can resend it
         );
 
         if (result.success) {
+          console.log(
+            `AnnouncementService.resendAnnouncements: announcement sent successfully on network for discussion between ${discussion.ownerUserId} and ${discussion.contactUserId}`
+          );
           sentDiscussions.push(discussion);
 
           continue;
         }
 
+        console.log(
+          `AnnouncementService.resendAnnouncements: failed to send announcement on network for discussion between ${discussion.ownerUserId} and ${discussion.contactUserId}`
+        );
         // Failed to send - check if should mark as broken
         const lastUpdate = discussion.updatedAt.getTime() ?? 0;
         if (Date.now() - lastUpdate > ONE_HOUR_MS) {
+          console.log(
+            `AnnouncementService.resendAnnouncements: discussion between ${discussion.ownerUserId} and ${discussion.contactUserId} is too old. Marking as broken.`
+          );
           brokenDiscussions.push(discussion.id!);
         }
       } catch (error) {
@@ -287,9 +299,13 @@ export class AnnouncementService {
         // Update all successfully sent discussions to PENDING or ACTIVE based on the session status
         if (sentDiscussions.length > 0) {
           await Promise.all(
-            sentDiscussions.map(discussion => {
+            sentDiscussions.map(async discussion => {
               const status = session.peerSessionStatus(
                 decodeUserId(discussion.contactUserId)
+              );
+
+              console.log(
+                `AnnouncementService.resendAnnouncements: session status for discussion between ${discussion.ownerUserId} and ${discussion.contactUserId} is ${sessionStatusToString(status)}`
               );
 
               // If discussion has been broken, don't update it
@@ -297,22 +313,32 @@ export class AnnouncementService {
                 status !== SessionStatus.Active &&
                 status !== SessionStatus.SelfRequested
               ) {
+                console.log(
+                  `AnnouncementService.resendAnnouncements: discussion between ${discussion.ownerUserId} and ${discussion.contactUserId} is not active or self requested. Skipping update.`
+                );
                 return;
               }
 
-              return db.discussions.update(discussion.id!, {
+              const promis = db.discussions.update(discussion.id!, {
                 status:
                   status === SessionStatus.Active
                     ? DiscussionStatus.ACTIVE
                     : DiscussionStatus.PENDING,
                 updatedAt: now,
               });
+              console.log(
+                `AnnouncementService.resendAnnouncements: discussion between ${discussion.ownerUserId} and ${discussion.contactUserId} has been updated on db to ${status === SessionStatus.Active ? DiscussionStatus.ACTIVE : DiscussionStatus.PENDING}`
+              );
+              return promis;
             })
           );
         }
 
         // Update all broken discussions to BROKEN
         if (brokenDiscussions.length > 0) {
+          console.log(
+            `AnnouncementService.resendAnnouncements: updating ${brokenDiscussions.length} broken discussions on db to BROKEN`
+          );
           await Promise.all(
             brokenDiscussions.map(id =>
               db.discussions.update(id, {
