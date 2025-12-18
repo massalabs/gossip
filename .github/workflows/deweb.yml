@@ -5,19 +5,36 @@ on:
     branches: [dev, main]
 
 jobs:
+  matrix_prep:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+      - id: set-matrix
+        run: |
+          matrix=$(jq --arg branchName "${{ github.ref_name }}" 'map(
+            . | select(.branch == $branchName)
+          )' <<< '[
+            {
+              "branch": "dev",
+              "network": "buildnet",
+              "config_file": "deweb_cli_config.buildnet.json"
+            },
+            {
+              "branch": "main",
+              "network": "mainnet",
+              "config_file": "deweb_cli_config.mainnet.json"
+            }
+          ]')
+          echo "matrix={\"include\":$(echo $matrix)}" >> $GITHUB_OUTPUT
+
   deploy:
+    needs: matrix_prep
     runs-on: ubuntu-latest
     strategy:
-      matrix:
-        include:
-          - branch: dev
-            network: buildnet
-            invite_domain_var: INVITE_DOMAIN_DEV
-            config_file: deweb_cli_config.dev.buildnet.json
-          - branch: main
-            network: mainnet
-            invite_domain_var: INVITE_DOMAIN_MAIN
-            config_file: deweb_cli_config.main.mainnet.json
+      matrix: ${{ fromJson(needs.matrix_prep.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v4
 
@@ -51,4 +68,3 @@ jobs:
 
       - name: URL
         run: echo "${{ matrix.branch }} deployed → ${{ steps.deploy.outputs.deployed-website }}"
-
