@@ -9,8 +9,6 @@ import { Toaster } from 'react-hot-toast';
 
 // Hooks
 import { useProfileLoader } from './hooks/useProfileLoader';
-import { useAppStateRefresh } from './hooks/useAppStateRefresh';
-import { useResendFailedBlobs } from './hooks/useResendFailedBlobs';
 import { useAccountInfo } from './hooks/useAccountInfo';
 import { setupServiceWorker } from './services/serviceWorkerSetup';
 
@@ -31,8 +29,7 @@ const AppContent: React.FC = () => {
   const [showImport, setShowImport] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
   useProfileLoader();
-  useAppStateRefresh();
-  useResendFailedBlobs();
+
   const existingAccountInfo = useAccountInfo();
 
   const inviteMatch = useMatch(ROUTES.invite());

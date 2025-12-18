@@ -12,7 +12,7 @@ import {
   UserSecretKeys,
   SessionStatus,
 } from '../assets/generated/wasm/gossip_wasm';
-import { SessionModule } from '../wasm/session';
+import { SessionModule, sessionStatusToString } from '../wasm/session';
 import { notificationService } from './notifications';
 import { isAppInForeground } from '../utils/appState';
 
@@ -60,7 +60,9 @@ export class AnnouncementService {
   }> {
     try {
       const counter = await this.messageProtocol.sendAnnouncement(announcement);
-
+      console.log(
+        `[INFO] AnnouncementService.sendAnnouncement: announcement broadcast successful, counter: ${counter}`
+      );
       return { success: true, counter };
     } catch (error) {
       logAnnouncementError('Failed to broadcast outgoing session:', error);
@@ -92,6 +94,11 @@ export class AnnouncementService {
     error?: string;
     announcement: Uint8Array;
   }> {
+    const contactUserId = encodeUserId(contactPublicKeys.derive_id());
+    console.log(
+      `[INFO] AnnouncementService.establishSession: establishing session with contact ${contactUserId}`
+    );
+
     const announcement = session.establishOutgoingSession(
       contactPublicKeys,
       ourPk,
@@ -100,6 +107,9 @@ export class AnnouncementService {
     );
 
     if (announcement.length === 0) {
+      console.error(
+        `[ERROR] AnnouncementService.establishSession: session manager returned empty announcement for contact ${contactUserId}`
+      );
       return {
         success: false,
         error: EstablishSessionError,
@@ -107,8 +117,19 @@ export class AnnouncementService {
       };
     }
 
+    // Check session status after establishing
+    const sessionStatus = session.peerSessionStatus(
+      contactPublicKeys.derive_id()
+    );
+    console.log(
+      `[INFO] AnnouncementService.establishSession: session status for ${contactUserId} after establish: ${sessionStatusToString(sessionStatus)}`
+    );
+
     const result = await this.sendAnnouncement(announcement);
     if (!result.success) {
+      console.error(
+        `[ERROR] AnnouncementService.establishSession: failed to send announcement to ${contactUserId}: ${result.error}`
+      );
       return {
         success: false,
         error: result.error,
@@ -116,6 +137,9 @@ export class AnnouncementService {
       };
     }
 
+    console.log(
+      `[INFO] AnnouncementService.establishSession: announcement sent successfully to ${contactUserId}`
+    );
     return { success: true, announcement };
   }
 
@@ -133,6 +157,9 @@ export class AnnouncementService {
       if (pendingAnnouncements.length > 0) {
         // Use announcements from IndexedDB
         announcements = pendingAnnouncements.map(p => p.announcement);
+        console.log(
+          `[INFO] AnnouncementService.fetchAndProcessAnnouncements: found ${announcements.length} pending announcements from IndexedDB`
+        );
         // Delete only the announcements we just read (by their IDs) to avoid race condition
         // If service worker adds new announcements between read and delete, they won't be lost
         const announcementIds = pendingAnnouncements
@@ -144,6 +171,11 @@ export class AnnouncementService {
       } else {
         // If no pending announcements, fetch from API
         announcements = await this._fetchAnnouncements();
+        if (announcements.length > 0) {
+          console.log(
+            `[INFO] AnnouncementService.fetchAndProcessAnnouncements: fetched ${announcements.length} announcements from API`
+          );
+        }
       }
 
       let newAnnouncementsCount = 0;
@@ -158,6 +190,9 @@ export class AnnouncementService {
           );
           // if success but no contactUserId, it means the announcement is not for us. So we don't count it as a new announcement.
           if (result.success && result.contactUserId) {
+            console.log(
+              `[INFO] AnnouncementService.fetchAndProcessAnnouncements: successfully processed announcement from contact ${result.contactUserId}`
+            );
             newAnnouncementsCount++;
           } else if (result.error) {
             errors.push(`${result.error}`);
@@ -223,20 +258,32 @@ export class AnnouncementService {
     const brokenDiscussions: number[] = [];
 
     for (const discussion of failedDiscussions) {
+      console.log(
+        `AnnouncementService.resendAnnouncements: resending announcement for discussion between ${discussion.ownerUserId} and ${discussion.contactUserId}. Status: ${discussion.status}`
+      );
       try {
         const result = await this.sendAnnouncement(
           discussion.initiationAnnouncement! // if a discussion is failed, it means the announcement has been encrypted by session manager, so we can resend it
         );
 
         if (result.success) {
+          console.log(
+            `AnnouncementService.resendAnnouncements: announcement sent successfully on network for discussion between ${discussion.ownerUserId} and ${discussion.contactUserId}`
+          );
           sentDiscussions.push(discussion);
 
           continue;
         }
 
+        console.log(
+          `AnnouncementService.resendAnnouncements: failed to send announcement on network for discussion between ${discussion.ownerUserId} and ${discussion.contactUserId}`
+        );
         // Failed to send - check if should mark as broken
         const lastUpdate = discussion.updatedAt.getTime() ?? 0;
         if (Date.now() - lastUpdate > ONE_HOUR_MS) {
+          console.log(
+            `AnnouncementService.resendAnnouncements: discussion between ${discussion.ownerUserId} and ${discussion.contactUserId} is too old. Marking as broken.`
+          );
           brokenDiscussions.push(discussion.id!);
         }
       } catch (error) {
@@ -252,9 +299,13 @@ export class AnnouncementService {
         // Update all successfully sent discussions to PENDING or ACTIVE based on the session status
         if (sentDiscussions.length > 0) {
           await Promise.all(
-            sentDiscussions.map(discussion => {
+            sentDiscussions.map(async discussion => {
               const status = session.peerSessionStatus(
                 decodeUserId(discussion.contactUserId)
+              );
+
+              console.log(
+                `AnnouncementService.resendAnnouncements: session status for discussion between ${discussion.ownerUserId} and ${discussion.contactUserId} is ${sessionStatusToString(status)}`
               );
 
               // If discussion has been broken, don't update it
@@ -262,22 +313,32 @@ export class AnnouncementService {
                 status !== SessionStatus.Active &&
                 status !== SessionStatus.SelfRequested
               ) {
+                console.log(
+                  `AnnouncementService.resendAnnouncements: discussion between ${discussion.ownerUserId} and ${discussion.contactUserId} is not active or self requested. Skipping update.`
+                );
                 return;
               }
 
-              return db.discussions.update(discussion.id!, {
+              const promis = db.discussions.update(discussion.id!, {
                 status:
                   status === SessionStatus.Active
                     ? DiscussionStatus.ACTIVE
                     : DiscussionStatus.PENDING,
                 updatedAt: now,
               });
+              console.log(
+                `AnnouncementService.resendAnnouncements: discussion between ${discussion.ownerUserId} and ${discussion.contactUserId} has been updated on db to ${status === SessionStatus.Active ? DiscussionStatus.ACTIVE : DiscussionStatus.PENDING}`
+              );
+              return promis;
             })
           );
         }
 
         // Update all broken discussions to BROKEN
         if (brokenDiscussions.length > 0) {
+          console.log(
+            `AnnouncementService.resendAnnouncements: updating ${brokenDiscussions.length} broken discussions on db to BROKEN`
+          );
           await Promise.all(
             brokenDiscussions.map(id =>
               db.discussions.update(id, {
@@ -353,10 +414,16 @@ export class AnnouncementService {
 
       // if we can't decrypt the announcement, it means we are not the intended recipient. It's not an error.
       if (!announcementResult) {
+        // Debug: log that we received an announcement not intended for us
+        // This is normal in a broadcast system - we receive all announcements but can only decrypt ours
         return {
           success: true,
         };
       }
+
+      console.log(
+        `[INFO] AnnouncementService._processIncomingAnnouncement: received an announcement intended for us, processing...`
+      );
 
       // Extract announcement's optional message
       const userData = announcementResult.user_data;
@@ -377,6 +444,12 @@ export class AnnouncementService {
       const contactUserId = announcerPkeys.derive_id();
       const contactUserIdString = encodeUserId(contactUserId);
       const ownerUserId = encodeUserId(ourPk.derive_id());
+
+      // Log session status after processing announcement
+      const sessionStatus = session.peerSessionStatus(contactUserId);
+      console.log(
+        `[INFO] AnnouncementService._processIncomingAnnouncement: processed announcement from ${contactUserIdString}, session status is now: ${sessionStatusToString(sessionStatus)}`
+      );
 
       let contact = await db.getContactByOwnerAndUserId(
         ownerUserId,
@@ -485,12 +558,22 @@ async function handleReceivedDiscussion(
           existing.direction === DiscussionDirection.INITIATED
         ) {
           updateData.status = DiscussionStatus.ACTIVE;
+          console.log(
+            `[INFO] handleReceivedDiscussion: transitioning discussion ${existing.id} with ${contactUserId} from PENDING/INITIATED to ACTIVE`
+          );
+        } else {
+          console.log(
+            `[INFO] handleReceivedDiscussion: updating existing discussion ${existing.id} with ${contactUserId} (status: ${existing.status}, direction: ${existing.direction})`
+          );
         }
 
         await db.discussions.update(existing.id!, updateData);
         return existing.id!;
       }
 
+      console.log(
+        `[INFO] handleReceivedDiscussion: creating new RECEIVED/PENDING discussion with contact ${contactUserId}`
+      );
       const discussionId = await db.discussions.add({
         ownerUserId: ownerUserId,
         contactUserId: contactUserId,

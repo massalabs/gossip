@@ -15,28 +15,25 @@ import { encodeUserId } from '../utils/userId.ts';
 import { useResendFailedBlobs } from './useResendFailedBlobs.ts';
 
 /**
- * Hook to refresh app state periodically when user is logged in
- * Refreshes announcements, messages, discussions, and contacts
+ * Hook to refresh app state periodically when the user is logged in.
+ * Refreshes announcements, messages, discussions, and contacts.
  */
 export function useAppStateRefresh() {
   const { userProfile, ourPk, ourSk, session } = useAccountStore();
   const isSyncing = useRef(false);
-  const { resendFailedBlobs } = useResendFailedBlobs(true);
+  const { resendFailedBlobs } = useResendFailedBlobs();
+  const isOnline = useOnlineStoreBase(s => s.isOnline);
+  const refreshInterval = useRef<NodeJS.Timeout | null>(null);
+  const isInitiating = useRef(false);
 
-  /**
-   * Trigger message sync
-   */
+  // Trigger synchronization of announcements, messages, and failed blobs
   const triggerSync = useCallback(
     async (
       ourPk: UserPublicKeys,
       ourSk: UserSecretKeys,
       session: SessionModule
     ): Promise<void> => {
-      if (isSyncing.current) return;
-      const isOnline = useOnlineStoreBase.getState().isOnline;
-
-      if (!isOnline) return;
-
+      if (!isOnline || isSyncing.current) return;
       isSyncing.current = true;
 
       try {
@@ -52,46 +49,73 @@ export function useAppStateRefresh() {
             session
           ),
         ]);
+
         if (resendFailedBlobs) {
           await resendFailedBlobs();
         }
       } catch (error) {
-        console.error('Failed to trigger manual sync:', error);
+        console.error(
+          '[useAppStateRefresh] Failed to trigger sync process:',
+          error
+        );
       } finally {
         isSyncing.current = false;
       }
     },
-    [resendFailedBlobs]
+    [resendFailedBlobs, isOnline]
   );
 
-  const initApp = useCallback(
-    async (
-      ourPk: UserPublicKeys,
-      ourSk: UserSecretKeys,
-      session: SessionModule
-    ) => {
+  // Initialize stores, trigger initial sync, and set up refresh interval
+  const init = useCallback(async () => {
+    if (isInitiating.current || !ourPk || !ourSk || !session) {
+      if (!ourPk || !ourSk || !session) {
+        console.warn(
+          'Cannot initialize app state: User keys or session not available'
+        );
+      }
+      return;
+    }
+
+    isInitiating.current = true;
+
+    try {
       useMessageStore.getState().init();
       await useDiscussionStore.getState().init();
-      triggerSync(ourPk, ourSk, session).catch(error => {
-        console.error('Failed to sync messages on login:', error);
-      });
-    },
-    [triggerSync]
-  );
 
-  useEffect(() => {
-    if (userProfile?.userId && ourPk && ourSk && session) {
-      initApp(ourPk, ourSk, session);
-      const refreshInterval = setInterval(() => {
-        triggerSync(ourPk, ourSk, session).catch(error => {
-          console.error('Failed to refresh app state periodically:', error);
-        });
+      await triggerSync(ourPk, ourSk, session);
+
+      if (refreshInterval.current) {
+        clearInterval(refreshInterval.current);
+      }
+
+      refreshInterval.current = setInterval(async () => {
+        // Fetch fresh values to avoid stale closures
+        const { ourPk, ourSk, session } = useAccountStore.getState();
+        if (ourPk && ourSk && session) {
+          await triggerSync(ourPk, ourSk, session);
+        }
       }, defaultSyncConfig.activeSyncIntervalMs);
-
-      // Cleanup interval when user logs out or component unmounts
-      return () => {
-        clearInterval(refreshInterval);
-      };
+    } catch (error) {
+      console.error(
+        '[useAppStateRefresh] Failed to initialize app state:',
+        error
+      );
+    } finally {
+      isInitiating.current = false;
     }
-  }, [userProfile?.userId, ourPk, ourSk, session, initApp, triggerSync]);
+  }, [triggerSync, ourPk, ourSk, session]);
+
+  // Run init on user login and clean up on unmount or logout
+  useEffect(() => {
+    if (userProfile?.userId) {
+      init();
+    }
+
+    return () => {
+      if (refreshInterval.current) {
+        clearInterval(refreshInterval.current);
+        refreshInterval.current = null;
+      }
+    };
+  }, [userProfile?.userId, init]);
 }
