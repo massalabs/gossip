@@ -66,7 +66,7 @@ export async function initializeDiscussion(
       status = DiscussionStatus.SEND_FAILED;
     } else {
       console.log(
-        `initializeDiscussion: session established with contact and announcement sent: ${result.announcement.slice(0, 10).toString()}... bytes`
+        `initializeDiscussion: session established with contact and announcement sent: ${result.announcement}... bytes`
       );
     }
 
@@ -138,7 +138,7 @@ export async function acceptDiscussionRequest(
       status = DiscussionStatus.SEND_FAILED;
     } else {
       console.log(
-        `acceptDiscussionRequest: session established with contact and announcement sent: ${result.announcement.slice(0, 10).toString()}... bytes`
+        `acceptDiscussionRequest: session established with contact and announcement sent: ${result.announcement}... bytes`
       );
     }
 
