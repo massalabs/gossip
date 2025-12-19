@@ -5,9 +5,13 @@ import { PrivacyGraphic } from '../graphics';
 
 interface ShareContactQRProps {
   deepLinkUrl: string;
+  onQRCodeGenerated?: (qrDataUrl: string) => void;
 }
 
-const ShareContactQR: React.FC<ShareContactQRProps> = ({ deepLinkUrl }) => {
+const ShareContactQR: React.FC<ShareContactQRProps> = ({
+  deepLinkUrl,
+  onQRCodeGenerated,
+}) => {
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
 
   useEffect(() => {
@@ -44,7 +48,9 @@ const ShareContactQR: React.FC<ShareContactQRProps> = ({ deepLinkUrl }) => {
         const reader = new FileReader();
         reader.onload = () => {
           if (isMounted) {
-            setQrDataUrl(reader.result as string);
+            const dataUrl = reader.result as string;
+            setQrDataUrl(dataUrl);
+            onQRCodeGenerated?.(dataUrl);
           }
         };
         reader.readAsDataURL(svg as Blob);
@@ -56,7 +62,7 @@ const ShareContactQR: React.FC<ShareContactQRProps> = ({ deepLinkUrl }) => {
     return () => {
       isMounted = false;
     };
-  }, [deepLinkUrl]);
+  }, [deepLinkUrl, onQRCodeGenerated]);
 
   return (
     <div className="my-10 flex justify-center items-center">

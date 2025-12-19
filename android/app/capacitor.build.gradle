@@ -15,6 +15,7 @@ dependencies {
     implementation project(':capacitor-background-runner')
     implementation project(':capacitor-barcode-scanner')
     implementation project(':capacitor-device')
+    implementation project(':capacitor-filesystem')
     implementation project(':capacitor-local-notifications')
     implementation project(':capacitor-network')
     implementation project(':capacitor-preferences')
