@@ -48,12 +48,12 @@ const ShareContact: React.FC<ShareContactProps> = ({
       </HeaderWrapper>
 
       {/* Main Content */}
-      <ScrollableContent className="flex-1 overflow-y-auto px-6 py-6">
+      <ScrollableContent className="flex-1 overflow-y-auto px-6 py-4">
         {/* Tab switcher */}
-        <div className="mb-6">
+        <div className="mb-3">
           <TabSwitcher
             options={[
-              { value: 'qr', label: 'Scan QR code' },
+              { value: 'qr', label: 'Share Invitation' },
               { value: 'files', label: 'File' },
             ]}
             value={activeTab}
@@ -64,6 +64,7 @@ const ShareContact: React.FC<ShareContactProps> = ({
         <div className={activeTab === 'qr' ? 'block' : 'hidden'}>
           <ShareContactQR
             deepLinkUrl={deepLinkUrl}
+            userId={userId}
             onQRCodeGenerated={setQrDataUrl}
           />
         </div>
@@ -78,9 +79,8 @@ const ShareContact: React.FC<ShareContactProps> = ({
         </div>
 
         {/* Copy buttons section */}
-        <div className="mt-6">
+        <div className="mt-4">
           <ShareContactCopySection
-            userId={userId}
             deepLinkUrl={deepLinkUrl}
             qrDataUrl={qrDataUrl}
           />
