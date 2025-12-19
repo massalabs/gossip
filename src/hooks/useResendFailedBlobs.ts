@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { liveQuery, Subscription } from 'dexie';
 import { useAccountStore } from '../stores/accountStore';
 import { announcementService } from '../services/announcement';
@@ -56,20 +56,19 @@ export function useResendFailedBlobs() {
   const { userProfile, session } = useAccountStore();
   const isResending = useRef(false);
 
-  const [retryMessagesByContact, setRetryMessagesByContact] = useState<
-    Map<string, Message[]>
-  >(new Map());
-  const [brokenDiscussions, setBrokenDiscussions] = useState<Discussion[]>([]);
-  const [sendFailedDiscussions, setSendFailedDiscussions] = useState<
-    Discussion[]
-  >([]);
+  // Use refs to store the latest values from liveQuery
+  // They'll be updated directly by liveQuery callbacks
+  const retryMessagesByContactRef = useRef<Map<string, Message[]>>(new Map());
+  const brokenDiscussionsRef = useRef<Discussion[]>([]);
+  const sendFailedDiscussionsRef = useRef<Discussion[]>([]);
 
   // Watch for failed items in the database
   useEffect(() => {
     if (!userProfile?.userId) {
-      setRetryMessagesByContact(new Map());
-      setBrokenDiscussions([]);
-      setSendFailedDiscussions([]);
+      // Clear refs when no user is logged in
+      retryMessagesByContactRef.current = new Map();
+      brokenDiscussionsRef.current = [];
+      sendFailedDiscussionsRef.current = [];
       return;
     }
 
@@ -92,7 +91,9 @@ export function useResendFailedBlobs() {
       });
     }).subscribe({
       next: ({ failedMessages, broken }) => {
-        setBrokenDiscussions(broken);
+        // Update refs directly - no need for state since we only use refs
+        brokenDiscussionsRef.current = broken;
+        console.log('failedSub: failedMessages', failedMessages);
 
         // Group failed messages by contact, excluding broken discussions
         const brokenIds = new Set(broken.map(d => d.contactUserId));
@@ -103,7 +104,8 @@ export function useResendFailedBlobs() {
           list.push(msg);
           grouped.set(msg.contactUserId, list);
         }
-        setRetryMessagesByContact(grouped);
+        console.log('failedSub: grouped', grouped);
+        retryMessagesByContactRef.current = grouped;
       },
       error: err => console.error('Failed to observe failed items:', err),
     });
@@ -116,7 +118,10 @@ export function useResendFailedBlobs() {
         .equals([userProfile.userId, DiscussionStatus.SEND_FAILED])
         .toArray()
     ).subscribe({
-      next: setSendFailedDiscussions,
+      next: discussions => {
+        // Update ref directly - no need for state since we only use refs
+        sendFailedDiscussionsRef.current = discussions;
+      },
       error: err =>
         console.error('Failed to observe send-failed discussions:', err),
     });
@@ -133,7 +138,9 @@ export function useResendFailedBlobs() {
     isResending.current = true;
     try {
       // Reinitiate broken discussions
-      for (const discussion of brokenDiscussions) {
+      // Note: renewDiscussion marks old messages as FAILED in the database
+      const currentBrokenDiscussions = brokenDiscussionsRef.current;
+      for (const discussion of currentBrokenDiscussions) {
         try {
           await renewDiscussion(discussion.contactUserId, session);
         } catch (err) {
@@ -145,10 +152,11 @@ export function useResendFailedBlobs() {
       }
 
       // Resend failed announcements
-      if (sendFailedDiscussions.length > 0) {
+      const currentSendFailedDiscussions = sendFailedDiscussionsRef.current;
+      if (currentSendFailedDiscussions.length > 0) {
         try {
           await announcementService.resendAnnouncements(
-            sendFailedDiscussions,
+            currentSendFailedDiscussions,
             session
           );
         } catch (err) {
@@ -156,10 +164,17 @@ export function useResendFailedBlobs() {
         }
       }
 
+      // Read retry messages from ref - refs are updated immediately by liveQuery callbacks
+      const currentRetryMessages = retryMessagesByContactRef.current;
+      console.log(
+        'resendFailedBlobs: currentRetryMessages',
+        currentRetryMessages
+      );
+
       // Resend failed messages
-      if (retryMessagesByContact.size > 0) {
+      if (currentRetryMessages.size > 0) {
         try {
-          await messageService.resendMessages(retryMessagesByContact, session);
+          await messageService.resendMessages(currentRetryMessages, session);
         } catch (err) {
           console.error('Failed to resend messages:', err);
         }

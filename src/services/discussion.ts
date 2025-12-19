@@ -172,6 +172,7 @@ export async function renewDiscussion(
     `renewDiscussion: renewing discussion between ${ownerUserId} and ${contactUserId}`
   );
 
+  // reset session by creating and sending a new announcement
   const result = await announcementService.establishSession(
     UserPublicKeys.from_bytes(contact.publicKeys),
     session
@@ -181,6 +182,7 @@ export async function renewDiscussion(
   if (result.error && result.error.includes(EstablishSessionError))
     throw new Error(EstablishSessionError);
 
+  // get the new session status
   const sessionStatus = session.peerSessionStatus(decodeUserId(contactUserId));
   console.log(
     `renewDiscussion: session status for discussion between ${ownerUserId} and ${contactUserId} after reinitiation is ${sessionStatusToString(sessionStatus)}`

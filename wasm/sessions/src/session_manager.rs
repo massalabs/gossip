@@ -295,26 +295,12 @@ impl SessionManager {
             timestamp_now.saturating_sub(self.config.max_session_inactivity_millis);
         let keep_alive_timestamp =
             timestamp_now.saturating_sub(self.config.keep_alive_interval_millis);
-        let oldest_announcement_timestamp =
-            timestamp_now.saturating_sub(self.config.max_incoming_announcement_age_millis);
         let mut keep_alive_needed = Vec::new();
         for (peer_id, peer_info) in self.peers.iter_mut() {
             // session expiry
             if let Some(active_session) = &mut peer_info.active_session {
                 if active_session.last_incoming_message_timestamp < oldest_message_timestamp {
                     peer_info.active_session = None;
-                }
-            }
-
-            // announcement expiry
-            if let Some(latest_incoming_init_request) = &peer_info.latest_incoming_init_request {
-                if latest_incoming_init_request.timestamp_millis < oldest_announcement_timestamp {
-                    peer_info.latest_incoming_init_request = None;
-                }
-            }
-            if let Some(latest_outgoing_init_request) = &peer_info.latest_outgoing_init_request {
-                if latest_outgoing_init_request.timestamp_millis < oldest_announcement_timestamp {
-                    peer_info.latest_outgoing_init_request = None;
                 }
             }
 

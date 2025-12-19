@@ -12,7 +12,7 @@ import { useProfileLoader } from './hooks/useProfileLoader';
 import { useAccountInfo } from './hooks/useAccountInfo';
 import { setupServiceWorker } from './services/serviceWorkerSetup';
 
-// Route components
+// Route componentsmrAF
 import { AuthenticatedRoutes } from './routes/AuthenticatedRoutes';
 import { UnauthenticatedRoutes } from './routes/UnauthenticatedRoutes';
 import { Onboarding } from './pages/Onboarding.tsx';
@@ -29,7 +29,6 @@ const AppContent: React.FC = () => {
   const [showImport, setShowImport] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
   useProfileLoader();
-
   const existingAccountInfo = useAccountInfo();
 
   const inviteMatch = useMatch(ROUTES.invite());

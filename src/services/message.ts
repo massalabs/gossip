@@ -28,10 +28,12 @@ import {
   serializeRegularMessage,
   serializeReplyMessage,
   serializeForwardMessage,
+  serializeKeepAliveMessage,
   deserializeMessage,
 } from '../utils/messageSerialization';
 import { encodeToBase64 } from '../utils/base64';
 import { isAppInForeground } from '../utils/appState';
+import { Result } from '../utils/type';
 import { isDiscussionStableState } from './discussion';
 import { sessionStatusToString } from '../wasm/session';
 import { Logger } from '../utils/logs';
@@ -47,11 +49,6 @@ export interface SendMessageResult {
   message?: Message;
   error?: string;
 }
-
-type SerializeMessageResult = {
-  error?: string;
-  contentBytes?: Uint8Array;
-};
 
 interface Decrypted {
   content: string;
@@ -344,6 +341,12 @@ export class MessageService {
     session: SessionModule
   ): Promise<SendMessageResult> {
     const log = logger.forMethod('sendMessage');
+    log.info('sending message', {
+      messageContent: message.content,
+      messageType: message.type,
+      messageReplyTo: message.replyTo,
+      messageForwardOf: message.forwardOf,
+    });
 
     const peerId = decodeUserId(message.contactUserId);
     if (peerId.length !== 32) {
@@ -378,12 +381,21 @@ export class MessageService {
       return { success: false, error: 'No active session with peer' };
     }
 
-    const serializeResult = await this.serializeMessage(message);
-    if (serializeResult.error) {
-      return { success: false, error: serializeResult.error };
+    // Serialize message content (handle replies)
+    const serializeMessageResult = await this.serializeMessage(message);
+    if (!serializeMessageResult.success) {
+      return {
+        success: false,
+        error: serializeMessageResult.error,
+      };
     }
-    message.serializedContent = serializeResult.contentBytes!;
+    log.info('message serialized', {
+        serializedContent: serializeMessageResult.data,
+      }
+    );
+    message.serializedContent = serializeMessageResult.data;
 
+    // Check if we can send messages on this discussion
     const isUnstable = !(await isDiscussionStableState(
       message.ownerUserId,
       message.contactUserId
@@ -469,33 +481,39 @@ export class MessageService {
 
   private async serializeMessage(
     message: Message
-  ): Promise<SerializeMessageResult> {
+  ): Promise<Result<Uint8Array, string>> {
     const log = logger.forMethod('serializeMessage');
-
-    // Replies take precedence over forwards if both are somehow set
     if (message.replyTo?.originalSeeker) {
-      const original = await this.findMessageBySeeker(
+      const originalMessage = await this.findMessageBySeeker(
         message.replyTo.originalSeeker,
         message.ownerUserId
       );
-
-      if (!original) {
-        log.error('reply target not found', {
-          originalSeeker: encodeToBase64(message.replyTo.originalSeeker),
-        });
-        return { error: 'Original message not found for reply' };
+      log.info('reply target not found', {
+        originalSeeker: encodeToBase64(message.replyTo.originalSeeker),
+        originalMessageContent: originalMessage?.content,
+        messageContent: message.content,
+      });
+      if (!originalMessage) {
+        return {
+          success: false,
+          error: 'Original message not found for reply',
+        };
       }
 
       return {
-        contentBytes: serializeReplyMessage(
+        success: true,
+        data: serializeReplyMessage(
           message.content,
-          original.content,
+          originalMessage.content,
           message.replyTo.originalSeeker
         ),
       };
-    }
-
-    if (
+    } else if (message.type === MessageType.KEEP_ALIVE) {
+      return {
+        success: true,
+        data: serializeKeepAliveMessage(),
+      };
+    } else if (
       message.forwardOf?.originalContent &&
       message.forwardOf.originalSeeker
     ) {
@@ -511,9 +529,13 @@ export class MessageService {
         log.error('failed to serialize forward message', error);
         return { error: 'Failed to serialize forward message' };
       }
+    } else {
+      // Regular message with type tag
+      return {
+        success: true,
+        data: serializeRegularMessage(message.content),
+      };
     }
-
-    return { contentBytes: serializeRegularMessage(message.content) };
   }
 
   async resendMessages(
@@ -549,18 +571,88 @@ export class MessageService {
           }
           continue;
         }
-
-        // Needs encryption
-        if (!session) break;
-
+        
+        console.log(
+          `MessageService.resendMessages: message "${retryMessage.content}" has not been encrypted by sessionManager`
+        );
+        if (!session) {
+          console.error(`resendMessages: Session manager not initialized`);
+          break;
+        }
         const status = session.peerSessionStatus(peerId);
-
+        console.log(
+          `MessageService.resendMessages: session status for peer ${encodeUserId(peerId)}: ${sessionStatusToString(status)}`
+        );
+        /* If the session is waiting for peer acceptance, don't attempt to resend messages in this discussion
+        because we don't have the peer's next seeker yet*/
         if (status === SessionStatus.SelfRequested) {
           log.info('skipping resend — waiting for peer acceptance', {
             contactId,
           });
           break;
         }
+
+        /* 
+        If session manager encryption fails for a message N, we can't send next N+1, N+2, ... messages in the discussion.
+        If the message N+1 is passed with success in session.sendMessage() before passing the message N,
+        message N would be considered as posterior to message N+1, which is not correct.
+        So if a message fails in session.sendMessage(), we should break the loop and not send any other message in the discussion.
+        */
+        if (
+          status === SessionStatus.Killed ||
+          status === SessionStatus.Saturated
+        ) {
+          db.discussions
+            .where('[ownerUserId+contactUserId]')
+            .equals([retryMessage.ownerUserId, contactId])
+            .modify({
+              status: DiscussionStatus.BROKEN,
+            });
+          console.error(
+            `Session with peer ${encodeUserId(peerId)} is broken with status ${sessionStatusToString(status)}`
+          );
+          break;
+        }
+
+        if (status !== SessionStatus.Active) {
+          console.error(
+            `Session with peer ${encodeUserId(peerId)} has status ${sessionStatusToString(status)}`
+          );
+
+          break;
+        }
+
+        // if the message has not been serialized, serialize it
+        let serializedContent = retryMessage.serializedContent;
+        if (!serializedContent) {
+          console.log(
+            `MessageService.resendMessages: message "${retryMessage.content}" has not been serialized yet. Serialize it now`
+          );
+          const serializeResult = await this.serializeMessage(retryMessage);
+          if (!serializeResult.success) {
+            console.error(serializeResult.error);
+            break;
+          }
+          serializedContent = serializeResult.data;
+        }
+
+        console.log(
+          `MessageService.resendMessages: message "${retryMessage.content}" has been serialized to ${serializedContent}. Encrypt it with session manager`
+        );
+        const sendOutput = session.sendMessage(peerId, serializedContent);
+        if (!sendOutput) {
+          console.error(
+            `Session manager failed to send message ${retryMessage.id}`
+          );
+          break;
+        }
+
+        await db.messages.update(retryMessage.id, {
+          seeker: sendOutput.seeker,
+          encryptedMessage: sendOutput.data,
+        });
+        break;
+      }
 
         if ([SessionStatus.Killed, SessionStatus.Saturated].includes(status)) {
           await db.discussions

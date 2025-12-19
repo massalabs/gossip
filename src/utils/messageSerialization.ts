@@ -1,4 +1,5 @@
 import { strToBytes, bytesToStr, U32 } from '@massalabs/massa-web3';
+import { MessageType } from '../db';
 
 // Seeker format: [hash_length: 1 byte][hash_bytes: 32 bytes][key: 1 byte]
 // Seeker is always 34 bytes: 1 + 32 + 1
@@ -7,6 +8,7 @@ const SEEKER_SIZE = 34;
 const MESSAGE_TYPE_REGULAR = 0x00;
 const MESSAGE_TYPE_REPLY = 0x01;
 const MESSAGE_TYPE_FORWARD = 0x02;
+const MESSAGE_TYPE_KEEP_ALIVE = 0x03;
 
 export interface DeserializedMessage {
   content: string;
@@ -18,6 +20,15 @@ export interface DeserializedMessage {
     originalContent: string;
     originalSeeker: Uint8Array;
   };
+  type: MessageType;
+}
+
+/**
+ * Serialize a keep-alive message
+ * Format: [type: 1 byte]
+ */
+export function serializeKeepAliveMessage(): Uint8Array {
+  return new Uint8Array([MESSAGE_TYPE_KEEP_ALIVE]);
 }
 
 /**
@@ -115,14 +126,15 @@ export function deserializeMessage(buffer: Uint8Array): DeserializedMessage {
 
   const messageType = buffer[0];
 
+  /* REGULAR MESSAGE */
   if (messageType === MESSAGE_TYPE_REGULAR) {
     // Regular message: [0x00][content]
     const contentBytes = buffer.slice(1);
     const content = bytesToStr(contentBytes);
-    return { content };
-  }
+    return { content, type: MessageType.TEXT };
 
-  if (messageType === MESSAGE_TYPE_REPLY) {
+  /* REPLY MESSAGE */
+  } else if (messageType === MESSAGE_TYPE_REPLY) {
     // Reply message format: [0x01][seeker][new_len: 4][new][orig_len: 4][orig]
     if (buffer.length < 1 + SEEKER_SIZE + 4 + 4) {
       throw new Error('Invalid reply message format: too short');
@@ -178,10 +190,11 @@ export function deserializeMessage(buffer: Uint8Array): DeserializedMessage {
         originalContent,
         originalSeeker,
       },
+      type: MessageType.TEXT,
     };
-  }
-
-  if (messageType === MESSAGE_TYPE_FORWARD) {
+  
+  /* FORWARD MESSAGE */
+  } else if (messageType === MESSAGE_TYPE_FORWARD) {
     // Forward message format: [0x02][seeker][forward_len: 4][forward][new_len: 4][new]
     if (buffer.length < 1 + SEEKER_SIZE + 4 + 4) {
       throw new Error('Invalid forward message format: too short');
@@ -237,8 +250,16 @@ export function deserializeMessage(buffer: Uint8Array): DeserializedMessage {
         originalContent: forwardContent,
         originalSeeker,
       },
+      type: MessageType.TEXT,
     };
-  }
 
-  throw new Error(`Unknown message type: ${messageType}`);
+  /* KEEP ALIVE MESSAGE */
+  } else if (messageType === MESSAGE_TYPE_KEEP_ALIVE) {
+    return {
+      content: '',
+      type: MessageType.KEEP_ALIVE,
+    };
+  } else {
+    throw new Error(`Unknown message type: ${messageType}`);
+  }
 }

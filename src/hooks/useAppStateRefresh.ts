@@ -8,6 +8,10 @@ import { useOnlineStoreBase } from '../stores/useOnlineStore.tsx';
 import { messageService } from '../services/message.ts';
 import { announcementService } from '../services/announcement.ts';
 import { useResendFailedBlobs } from './useResendFailedBlobs.ts';
+import { DiscussionStatus } from '../db.ts';
+import { handleSessionRefresh } from '../services/refresh.ts';
+
+const SESSION_REFRESH_EVERY_N_CYCLES = 5;
 
 /**
  * Hook to refresh app state periodically when the user is logged in.
@@ -20,12 +24,17 @@ export function useAppStateRefresh() {
   const isOnline = useOnlineStoreBase(s => s.isOnline);
   const refreshInterval = useRef<NodeJS.Timeout | null>(null);
   const isInitiating = useRef(false);
-
+  const sessionRefreshCycle = useRef(0);
   // Trigger synchronization of announcements, messages, and failed blobs
   const triggerSync = useCallback(
     async (session: SessionModule): Promise<void> => {
+      if (!userProfile?.userId) return;
       if (!isOnline || isSyncing.current) return;
       isSyncing.current = true;
+
+      if (resendFailedBlobs) {
+        await resendFailedBlobs();
+      }
 
       try {
         await Promise.all([
@@ -33,9 +42,20 @@ export function useAppStateRefresh() {
           messageService.fetchMessages(session),
         ]);
 
-        if (resendFailedBlobs) {
-          await resendFailedBlobs();
+        // call refresh session of session manager
+        if (
+          sessionRefreshCycle.current % SESSION_REFRESH_EVERY_N_CYCLES ===
+          0
+        ) {
+          await handleSessionRefresh(
+            userProfile.userId,
+            session,
+            useDiscussionStore
+              .getState()
+              .getDiscussionsByStatus([DiscussionStatus.ACTIVE])
+          );
         }
+        sessionRefreshCycle.current++;
       } catch (error) {
         console.error(
           '[useAppStateRefresh] Failed to trigger sync process:',
@@ -45,7 +65,7 @@ export function useAppStateRefresh() {
         isSyncing.current = false;
       }
     },
-    [resendFailedBlobs, isOnline]
+    [resendFailedBlobs, isOnline, userProfile?.userId]
   );
 
   // Initialize stores, trigger initial sync, and set up refresh interval

@@ -23,6 +23,7 @@ import {
   UserSecretKeys,
   UserKeys,
   SessionStatus,
+  SessionConfig,
 } from '../../src/assets/generated/wasm/gossip_wasm';
 import { encodeUserId } from '../../src/utils/userId';
 import { MockMessageProtocol } from '../../src/api/messageProtocol/mock';
@@ -38,6 +39,7 @@ import {
 import { messageService } from '../../src/services/message';
 import { createMessageProtocol } from '../../src/api/messageProtocol';
 import { MessageProtocolType } from '../../src/config/protocol';
+import { handleSessionRefresh } from '../../src/services/refresh';
 
 // Mock the message protocol factory to always return mock protocol
 vi.mock('../src/api/messageProtocol', async importOriginal => {
@@ -164,7 +166,7 @@ describe('Message Service (Browser with Real WASM)', () => {
    * Helper to initialize a bidirectional session between Alice and Bob.
    * This simulates the announcement exchange that establishes an active session.
    */
-  async function initSession(): Promise<{
+  async function initAliceBobSession(): Promise<{
     aliceDiscussionId: number;
     bobDiscussionId: number;
   }> {
@@ -220,10 +222,101 @@ describe('Message Service (Browser with Real WASM)', () => {
     return { aliceDiscussionId, bobDiscussionId: bobDiscussion.id! };
   }
 
+  /**
+   * Generic helper to initialize a bidirectional session between any two peers.
+   * @param peer1Sk - First peer's secret keys
+   * @param peer1Pk - First peer's public keys
+   * @param peer1Session - First peer's session module
+   * @param peer2Sk - Second peer's secret keys
+   * @param peer2Pk - Second peer's public keys
+   * @param peer2Session - Second peer's session module
+   * @returns Discussion IDs for both peers
+   */
+  async function initSession(
+    peer1Sk: UserSecretKeys,
+    peer1Pk: UserPublicKeys,
+    peer1Session: SessionModule,
+    peer2Sk: UserSecretKeys,
+    peer2Pk: UserPublicKeys,
+    peer2Session: SessionModule
+  ): Promise<{
+    peer1DiscussionId: number;
+    peer2DiscussionId: number;
+  }> {
+    const peer1UserId = encodeUserId(peer1Pk.derive_id());
+    const peer2UserId = encodeUserId(peer2Pk.derive_id());
+
+    // Create reciprocal contacts
+    const peer1Peer2Contact: Omit<Contact, 'id'> = {
+      ownerUserId: peer1UserId,
+      userId: peer2UserId,
+      name: 'Peer2',
+      publicKeys: peer2Pk.to_bytes(),
+      avatar: undefined,
+      isOnline: false,
+      lastSeen: new Date(),
+      createdAt: new Date(),
+    };
+
+    const peer2Peer1Contact: Omit<Contact, 'id'> = {
+      ownerUserId: peer2UserId,
+      userId: peer1UserId,
+      name: 'Peer1',
+      publicKeys: peer1Pk.to_bytes(),
+      avatar: undefined,
+      isOnline: false,
+      lastSeen: new Date(),
+      createdAt: new Date(),
+    };
+
+    await db.contacts.add(peer1Peer2Contact);
+    await db.contacts.add(peer2Peer1Contact);
+
+    // Peer1 initiates session with Peer2
+    const { discussionId: peer1DiscussionId } = await initializeDiscussion(
+      peer1Peer2Contact,
+      peer1Pk,
+      peer1Sk,
+      peer1Session,
+      peer1UserId
+    );
+
+    // Peer2 fetches Peer1's announcement
+    await announcementService.fetchAndProcessAnnouncements(
+      peer2Pk,
+      peer2Sk,
+      peer2Session
+    );
+
+    // Peer2 accepts the discussion request
+    const peer2Discussion = await db.getDiscussionByOwnerAndContact(
+      peer2UserId,
+      peer1UserId
+    );
+    if (!peer2Discussion)
+      throw new Error('peer1 discussion not found on peer2 side');
+
+    await acceptDiscussionRequest(
+      peer2Discussion,
+      peer2Session,
+      peer2Pk,
+      peer2Sk
+    );
+
+    // Peer1 fetches Peer2's announcement and discussion is ACTIVE
+    await announcementService.fetchAndProcessAnnouncements(
+      peer1Pk,
+      peer1Sk,
+      peer1Session
+    );
+
+    return { peer1DiscussionId, peer2DiscussionId: peer2Discussion.id! };
+  }
+
   describe('send messages happy path', () => {
     beforeEach(async () => {
       // Initialize active discussion
-      await initSession();
+      await initAliceBobSession();
     });
 
     it('Alice sends several messages. Bob fetches them all at once and answers.', async () => {
@@ -682,7 +775,7 @@ describe('Message Service (Browser with Real WASM)', () => {
 
     it('Both alice and bob fail sending messages because of transport issue. Messages are resent in order', async () => {
       /* STEP 1: Initialize active discussion between Alice and Bob */
-      await initSession();
+      await initAliceBobSession();
 
       // Mock transport failures for the next sends
       const originalSendMessage = mockProtocol.sendMessage.bind(mockProtocol);
@@ -866,7 +959,7 @@ describe('Message Service (Browser with Real WASM)', () => {
 
     it('Both alice and bob fail sending messages because of transport issue. Messages are resent in disorder because of transport issue', async () => {
       /* STEP 1: Initialize active discussion between Alice and Bob */
-      await initSession();
+      await initAliceBobSession();
 
       // Get mock protocol instance
       // const mockProtocol = messageService.messageProtocol as MockMessageProtocol;
@@ -1081,7 +1174,7 @@ describe('Message Service (Browser with Real WASM)', () => {
      */
 
       /* STEP 1: Initialize active discussion between Alice and Bob */
-      await initSession();
+      await initAliceBobSession();
 
       // Get mock protocol instance
       // const mockProtocol = messageService.messageProtocol as MockMessageProtocol;
@@ -1396,6 +1489,766 @@ describe('Message Service (Browser with Real WASM)', () => {
       expect(
         allAliceMessages.every(m => m.status === MessageStatus.DELIVERED)
       ).toBe(true);
+    });
+  });
+
+  describe('session refresh function and keep alive', () => {
+    // Custom session config for faster testing (using factory function)
+    // Create test config helper function - each session needs its own config instance
+    const createTestConfig = () =>
+      new SessionConfig(
+        7 * 24 * 60 * 60 * 1000, // max_incoming_announcement_age_millis: 1 week
+        60 * 1000, // max_incoming_announcement_future_millis: 1 minute
+        7 * 24 * 60 * 60 * 1000, // max_incoming_message_age_millis: 1 week
+        60 * 1000, // max_incoming_message_future_millis: 1 minute
+        MAX_SESSION_INACTIVITY_MILLIS, // max_session_inactivity_millis: 4 seconds (instead of 1 week)
+        KEEP_ALIVE_INTERVAL_MILLIS, // keep_alive_interval_millis: 1 second (instead of 1 day)
+        10000n // max_session_lag_length: 10000 messages
+      );
+
+    let carolKeys: UserKeys;
+    let carolPk: UserPublicKeys;
+    let carolSk: UserSecretKeys;
+    let carolUserId: string;
+    let carolSession: SessionModule;
+    let daveKeys: UserKeys;
+    let davePk: UserPublicKeys;
+    let daveSk: UserSecretKeys;
+    let daveUserId: string;
+    let daveSession: SessionModule;
+
+    const MAX_SESSION_INACTIVITY_MILLIS = 4000;
+    const KEEP_ALIVE_INTERVAL_MILLIS = 2000;
+
+    beforeEach(async () => {
+      // Create custom config with shorter intervals for testing
+      // Constructor params: max_incoming_announcement_age_millis, max_incoming_announcement_future_millis,
+      //                     max_incoming_message_age_millis, max_incoming_message_future_millis,
+      //                     max_session_inactivity_millis, keep_alive_interval_millis, max_session_lag_length
+
+      // Recreate Alice and Bob sessions with test config
+      aliceSession.cleanup();
+      aliceSession = new SessionModule(() => {}, createTestConfig());
+      bobSession.cleanup();
+      bobSession = new SessionModule(() => {}, createTestConfig());
+
+      // Generate Carol's keys
+      carolKeys = await generateUserKeys('carol-test-passphrase-' + Date.now());
+      carolPk = carolKeys.public_keys();
+      carolSk = carolKeys.secret_keys();
+      carolUserId = encodeUserId(carolPk.derive_id());
+      carolSession = new SessionModule(() => {}, createTestConfig());
+
+      // Generate Dave's keys
+      daveKeys = await generateUserKeys('dave-test-passphrase-' + Date.now());
+      davePk = daveKeys.public_keys();
+      daveSk = daveKeys.secret_keys();
+      daveUserId = encodeUserId(davePk.derive_id());
+      daveSession = new SessionModule(() => {}, createTestConfig());
+    });
+
+    it('No active discussions', async () => {
+      // Call handleSessionRefresh with no active discussions
+      await handleSessionRefresh(aliceUserId, aliceSession, []);
+
+      // Should complete without errors
+      expect(true).toBe(true);
+    });
+
+    it('Alice-Bob discussion is killed by alice session because last incoming message too old. Renew discussion', async () => {
+      // STEP 1: Initialize active discussion between Alice and Bob
+      const { aliceDiscussionId, bobDiscussionId } =
+        await initAliceBobSession();
+
+      let aliceDiscussion = await db.discussions.get(aliceDiscussionId);
+      expect(aliceDiscussion?.status).toBe(DiscussionStatus.ACTIVE);
+
+      // STEP 2: Wait for session inactivity timeout and call refresh
+      await new Promise(resolve =>
+        setTimeout(resolve, MAX_SESSION_INACTIVITY_MILLIS)
+      ); // Wait > MAX_SESSION_INACTIVITY_MILLIS
+
+      // Get active discussions before refresh
+      const activeDiscussions = await db.discussions
+        .where('ownerUserId')
+        .equals(aliceUserId)
+        .and(
+          d =>
+            d.status !== DiscussionStatus.CLOSED &&
+            d.status !== DiscussionStatus.BROKEN
+        )
+        .toArray();
+
+      // Call handleSessionRefresh - should mark discussion as BROKEN
+      await handleSessionRefresh(aliceUserId, aliceSession, activeDiscussions);
+
+      // STEP 3: Verify discussion is now BROKEN
+      aliceDiscussion = await db.discussions.get(aliceDiscussionId)!;
+      expect(aliceDiscussion?.status).toBe(DiscussionStatus.BROKEN);
+
+      // STEP 4: Renew the discussion
+      await renewDiscussion(
+        aliceUserId,
+        bobUserId,
+        aliceSession,
+        alicePk,
+        aliceSk
+      );
+
+      // Bob fetches and accepts the renewal
+      await announcementService.fetchAndProcessAnnouncements(
+        bobPk,
+        bobSk,
+        bobSession
+      );
+      const bobDiscussion = await db.discussions.get(bobDiscussionId);
+      if (!bobDiscussion) throw new Error('bob discussion not found');
+
+      await acceptDiscussionRequest(bobDiscussion, bobSession, bobPk, bobSk);
+
+      // Alice fetches Bob's acceptance
+      await announcementService.fetchAndProcessAnnouncements(
+        alicePk,
+        aliceSk,
+        aliceSession
+      );
+
+      // STEP 5: Verify discussion is now ACTIVE again
+      aliceDiscussion = await db.getDiscussionByOwnerAndContact(
+        aliceUserId,
+        bobUserId
+      );
+      expect(aliceDiscussion?.status).toBe(DiscussionStatus.ACTIVE);
+    });
+
+    it('Alice-Bob discussion killed by both session. Renew discussion', async () => {
+      // STEP 1: Initialize active discussion
+      const { aliceDiscussionId, bobDiscussionId } =
+        await initAliceBobSession();
+
+      // STEP 2: Wait for session timeout on both sides
+      await new Promise(resolve =>
+        setTimeout(resolve, MAX_SESSION_INACTIVITY_MILLIS)
+      );
+
+      // Get active discussions for both
+      const aliceActiveDiscussions = await db.discussions
+        .where('ownerUserId')
+        .equals(aliceUserId)
+        .and(
+          d =>
+            d.status !== DiscussionStatus.CLOSED &&
+            d.status !== DiscussionStatus.BROKEN
+        )
+        .toArray();
+
+      const bobActiveDiscussions = await db.discussions
+        .where('ownerUserId')
+        .equals(bobUserId)
+        .and(
+          d =>
+            d.status !== DiscussionStatus.CLOSED &&
+            d.status !== DiscussionStatus.BROKEN
+        )
+        .toArray();
+
+      // Refresh both sessions - should kill discussions
+      await handleSessionRefresh(
+        aliceUserId,
+        aliceSession,
+        aliceActiveDiscussions
+      );
+      await handleSessionRefresh(bobUserId, bobSession, bobActiveDiscussions);
+
+      // STEP 3: Verify both discussions are BROKEN
+      let aliceDiscussion = await db.discussions.get(aliceDiscussionId);
+      if (!aliceDiscussion) throw new Error('alice discussion not found');
+      let bobDiscussion = await db.discussions.get(bobDiscussionId);
+      if (!bobDiscussion) throw new Error('bob discussion not found');
+      expect(aliceDiscussion?.status).toBe(DiscussionStatus.BROKEN);
+      expect(bobDiscussion?.status).toBe(DiscussionStatus.BROKEN);
+
+      // STEP 4: Alice renews the discussion
+      await renewDiscussion(
+        aliceUserId,
+        bobUserId,
+        aliceSession,
+        alicePk,
+        aliceSk
+      );
+
+      await announcementService.resendAnnouncements(
+        [aliceDiscussion],
+        aliceSession
+      );
+
+      // Bob fetches and accepts
+      await announcementService.fetchAndProcessAnnouncements(
+        bobPk,
+        bobSk,
+        bobSession
+      );
+      bobDiscussion = await db.discussions.get(bobDiscussionId);
+      if (!bobDiscussion) throw new Error('bob discussion not found');
+      await acceptDiscussionRequest(bobDiscussion, bobSession, bobPk, bobSk);
+
+      // Alice fetches Bob's acceptance
+      await announcementService.fetchAndProcessAnnouncements(
+        alicePk,
+        aliceSk,
+        aliceSession
+      );
+
+      // STEP 5: Verify both discussions are ACTIVE
+      aliceDiscussion = await db.discussions.get(aliceDiscussionId);
+      bobDiscussion = await db.discussions.get(bobDiscussionId);
+      expect(aliceDiscussion?.status).toBe(DiscussionStatus.ACTIVE);
+      expect(bobDiscussion?.status).toBe(DiscussionStatus.ACTIVE);
+    });
+
+    it('Alice send keep alive msg to Bob. Bob messages are acknowledged', async () => {
+      // STEP 1: Initialize active discussion
+      await initAliceBobSession();
+
+      // STEP 2: Bob sends a message to Alice
+      const bobMessage: Omit<Message, 'id'> = {
+        ownerUserId: bobUserId,
+        contactUserId: aliceUserId,
+        content: 'Hello Alice!',
+        type: MessageType.TEXT,
+        direction: MessageDirection.OUTGOING,
+        status: MessageStatus.SENDING,
+        timestamp: new Date(),
+      };
+      await messageService.sendMessage(bobMessage as Message, bobSession);
+
+      // alice fetch Bob's message
+      await messageService.fetchMessages(aliceUserId, aliceSk, aliceSession);
+
+      // STEP 3: Wait for keep-alive interval
+      await new Promise(resolve =>
+        setTimeout(resolve, KEEP_ALIVE_INTERVAL_MILLIS)
+      ); // Wait > KEEP_ALIVE_INTERVAL_MILLIS
+
+      // Get active discussions
+      const aliceActiveDiscussions = await db.discussions
+        .where('ownerUserId')
+        .equals(aliceUserId)
+        .and(
+          d =>
+            d.status !== DiscussionStatus.CLOSED &&
+            d.status !== DiscussionStatus.BROKEN
+        )
+        .toArray();
+
+      // STEP 4: Alice calls refresh - should send keep-alive
+      await handleSessionRefresh(
+        aliceUserId,
+        aliceSession,
+        aliceActiveDiscussions
+      );
+
+      // STEP 5: Verify keep-alive message was created
+      const aliceMessages = await db.messages
+        .where('[ownerUserId+contactUserId+direction]')
+        .equals([aliceUserId, bobUserId, MessageDirection.OUTGOING])
+        .toArray();
+
+      const keepAliveMsg = aliceMessages.find(
+        m => m.type === MessageType.KEEP_ALIVE
+      );
+      expect(keepAliveMsg).toBeDefined();
+      expect(keepAliveMsg?.content).toBe('');
+
+      // STEP 6: Bob fetches messages (including keep-alive)
+      await messageService.fetchMessages(bobUserId, bobSk, bobSession);
+
+      // Bob's message should now be DELIVERED (acknowledged by Alice's keep-alive)
+      const bobMessages = await db.messages
+        .where('[ownerUserId+contactUserId]')
+        .equals([bobUserId, aliceUserId])
+        .toArray();
+
+      const bobSentMessage = bobMessages.find(
+        m =>
+          m.direction === MessageDirection.OUTGOING &&
+          m.content === 'Hello Alice!'
+      );
+      const bobKeepAliveMessage = bobMessages.find(
+        m =>
+          m.direction === MessageDirection.INCOMING &&
+          m.type === MessageType.KEEP_ALIVE
+      );
+      expect(bobKeepAliveMessage?.status).toBe(MessageStatus.DELIVERED);
+      expect(bobSentMessage?.status).toBe(MessageStatus.DELIVERED);
+    });
+
+    it('Alice send keep alive message but fails because of network issue. Alice send normal message then keep alive one is resent', async () => {
+      // STEP 1: Initialize active discussion
+      await initAliceBobSession();
+
+      // STEP 2: Bob sends a message
+      const bobMessage: Omit<Message, 'id'> = {
+        ownerUserId: bobUserId,
+        contactUserId: aliceUserId,
+        content: 'Test message',
+        type: MessageType.TEXT,
+        direction: MessageDirection.OUTGOING,
+        status: MessageStatus.SENDING,
+        timestamp: new Date(),
+      };
+      await messageService.sendMessage(bobMessage as Message, bobSession);
+
+      // alice fetch Bob's message
+      await messageService.fetchMessages(aliceUserId, aliceSk, aliceSession);
+
+      // STEP 3: Mock transport failure for the first keep-alive attempt
+      const originalSendMessage = mockProtocol.sendMessage.bind(mockProtocol);
+      mockProtocol.sendMessage = vi.fn(async () => {
+        throw new Error('Network error');
+      });
+
+      // Wait for keep-alive interval
+      await new Promise(resolve =>
+        setTimeout(resolve, KEEP_ALIVE_INTERVAL_MILLIS)
+      );
+
+      // Get active discussions
+      const aliceActiveDiscussions = await db.discussions
+        .where('ownerUserId')
+        .equals(aliceUserId)
+        .and(
+          d =>
+            d.status !== DiscussionStatus.CLOSED &&
+            d.status !== DiscussionStatus.BROKEN
+        )
+        .toArray();
+
+      // STEP 4: Alice calls refresh - keep-alive should fail
+      await handleSessionRefresh(
+        aliceUserId,
+        aliceSession,
+        aliceActiveDiscussions
+      );
+
+      // STEP 5: Verify keep-alive message exists but failed
+      let aliceMessages = await db.messages
+        .where('[ownerUserId+contactUserId]')
+        .equals([aliceUserId, bobUserId])
+        .toArray();
+
+      let keepAliveMsg = aliceMessages.find(
+        m =>
+          m.type === MessageType.KEEP_ALIVE &&
+          m.direction === MessageDirection.OUTGOING
+      );
+      expect(keepAliveMsg).toBeDefined();
+      expect(keepAliveMsg?.status).toBe(MessageStatus.FAILED);
+
+      // STEP 6: Restore mock and send a normal message
+      mockProtocol.sendMessage = originalSendMessage;
+
+      const aliceMessage: Omit<Message, 'id'> = {
+        ownerUserId: aliceUserId,
+        contactUserId: bobUserId,
+        content: 'Normal message',
+        type: MessageType.TEXT,
+        direction: MessageDirection.OUTGOING,
+        status: MessageStatus.SENDING,
+        timestamp: new Date(),
+      };
+      await messageService.sendMessage(aliceMessage as Message, aliceSession);
+
+      // check message is SENT
+      aliceMessages = await db.messages
+        .where('[ownerUserId+contactUserId]')
+        .equals([aliceUserId, bobUserId])
+        .toArray();
+      expect(aliceMessages.length).toBe(3);
+      expect(aliceMessages[1].status).toBe(MessageStatus.FAILED);
+      expect(aliceMessages[1].type).toBe(MessageType.KEEP_ALIVE);
+      expect(aliceMessages[2].status).toBe(MessageStatus.SENT);
+      expect(aliceMessages[2].type).toBe(MessageType.TEXT);
+
+      // STEP 7: Resend failed messages (including keep-alive)
+      await resendFailedMessagesForContact(
+        aliceUserId,
+        bobUserId,
+        aliceSession
+      );
+
+      // STEP 8: Verify keep-alive was resent successfully
+      aliceMessages = await db.messages
+        .where('[ownerUserId+contactUserId]')
+        .equals([aliceUserId, bobUserId])
+        .toArray();
+
+      keepAliveMsg = aliceMessages.find(
+        m =>
+          m.type === MessageType.KEEP_ALIVE &&
+          m.direction === MessageDirection.OUTGOING
+      );
+      expect(keepAliveMsg?.status).toBe(MessageStatus.SENT);
+
+      // STEP 9: Bob fetches messages (including keep-alive)
+      await messageService.fetchMessages(bobUserId, bobSk, bobSession);
+
+      // Bob's message should now be DELIVERED (acknowledged by Alice's keep-alive)
+      const bobMessages = await db.messages
+        .where('[ownerUserId+contactUserId]')
+        .equals([bobUserId, aliceUserId])
+        .toArray();
+      expect(bobMessages.length).toBe(3);
+      expect(bobMessages[0].content).toBe('Test message');
+      expect(bobMessages[0].status).toBe(MessageStatus.DELIVERED);
+    });
+
+    it.skip('Alice send keep alive msg but fails because of session error. Discussion connection reset, normal msg sent, keep alive msg resent', async () => {
+      // STEP 1: Initialize active discussion
+      const { aliceDiscussionId } = await initAliceBobSession();
+
+      // bob send a message
+      const bobMsg: Omit<Message, 'id'> = {
+        ownerUserId: bobUserId,
+        contactUserId: aliceUserId,
+        content: 'Bob message',
+        type: MessageType.TEXT,
+        direction: MessageDirection.OUTGOING,
+        status: MessageStatus.SENDING,
+        timestamp: new Date(),
+      };
+      await messageService.sendMessage(bobMsg as Message, bobSession);
+
+      // alice fetch Bob's message
+      await messageService.fetchMessages(aliceUserId, aliceSk, aliceSession);
+
+      // STEP 2: Wait for keep-alive interval
+      await new Promise(resolve =>
+        setTimeout(resolve, KEEP_ALIVE_INTERVAL_MILLIS)
+      );
+
+      // STEP 3: Alice calls refresh - session should be killed, keep-alive fails
+      // Get active discussions
+      let aliceActiveDiscussions = await db.discussions
+        .where('ownerUserId')
+        .equals(aliceUserId)
+        .and(
+          d =>
+            d.status !== DiscussionStatus.CLOSED &&
+            d.status !== DiscussionStatus.BROKEN
+        )
+        .toArray();
+
+      // session should return killed status
+      const aliceSessionStatusSpy = vi
+        .spyOn(aliceSession, 'peerSessionStatus')
+        .mockReturnValueOnce(SessionStatus.Active)
+        .mockReturnValue(SessionStatus.Killed);
+
+      // call refresh function
+      await handleSessionRefresh(
+        aliceUserId,
+        aliceSession,
+        aliceActiveDiscussions
+      );
+
+      // restore spy
+      aliceSessionStatusSpy.mockRestore();
+
+      // verify discussion is broken
+      let aliceDiscussion = await db.discussions.get(aliceDiscussionId);
+      expect(aliceDiscussion?.status).toBe(DiscussionStatus.BROKEN);
+
+      // step 4: Alice sends a normal message which fails
+      const aliceMsg: Omit<Message, 'id'> = {
+        ownerUserId: aliceUserId,
+        contactUserId: bobUserId,
+        content: 'Normal message',
+        type: MessageType.TEXT,
+        direction: MessageDirection.OUTGOING,
+        status: MessageStatus.SENDING,
+        timestamp: new Date(),
+      };
+      await messageService.sendMessage(aliceMsg as Message, aliceSession);
+
+      // verify message is failed
+      const aliceMsgList = await db.messages
+        .where('[ownerUserId+contactUserId]')
+        .equals([aliceUserId, bobUserId])
+        .and(m => m.direction === MessageDirection.OUTGOING)
+        .toArray();
+
+      expect(aliceMsgList.length).toBe(2);
+      expect(aliceMsgList[0].status).toBe(MessageStatus.FAILED);
+      expect(aliceMsgList[0].type).toBe(MessageType.KEEP_ALIVE);
+      expect(aliceMsgList[1].status).toBe(MessageStatus.FAILED);
+      expect(aliceMsgList[1].type).toBe(MessageType.TEXT);
+
+      // Step 5 : renew discussion
+      await renewDiscussion(
+        aliceUserId,
+        bobUserId,
+        aliceSession,
+        alicePk,
+        aliceSk
+      );
+      aliceDiscussion = await db.discussions.get(aliceDiscussionId);
+      if (!aliceDiscussion) throw new Error('alice discussion not found');
+      await announcementService.resendAnnouncements(
+        [aliceDiscussion],
+        aliceSession
+      );
+      resendFailedMessagesForContact(aliceUserId, bobUserId, aliceSession);
+
+      // Bob fetch new announcement and messages
+      await announcementService.fetchAndProcessAnnouncements(
+        bobPk,
+        bobSk,
+        bobSession
+      );
+      await messageService.fetchMessages(bobUserId, bobSk, bobSession);
+
+      // check bob received alice msg
+      const bobReceivedMessages = await db.messages
+        .where('[ownerUserId+contactUserId]')
+        .equals([bobUserId, aliceUserId])
+        .and(m => m.direction === MessageDirection.INCOMING)
+        .toArray();
+      expect(bobReceivedMessages.length).toBe(2);
+      expect(bobReceivedMessages[0].content).toBe('');
+      expect(bobReceivedMessages[0].type).toBe(MessageType.KEEP_ALIVE);
+      expect(bobReceivedMessages[0].status).toBe(MessageStatus.DELIVERED);
+      expect(bobReceivedMessages[1].type).toBe(MessageType.TEXT);
+      expect(bobReceivedMessages[1].content).toBe('Normal message');
+      expect(bobReceivedMessages[1].status).toBe(MessageStatus.DELIVERED);
+
+      // STEP 6: Bob's message is delivered
+      const bobMessages = await db.messages
+        .where('[ownerUserId+contactUserId]')
+        .equals([bobUserId, aliceUserId])
+        .toArray();
+      expect(bobMessages.length).toBe(3);
+      expect(bobMessages[0].content).toBe('Bob message');
+      expect(bobMessages[0].status).toBe(MessageStatus.DELIVERED);
+
+      // STEP 7: Wait and trigger keep-alive again
+      await new Promise(resolve => setTimeout(resolve, 2500));
+
+      aliceActiveDiscussions = await db.discussions
+        .where('ownerUserId')
+        .equals(aliceUserId)
+        .and(
+          d =>
+            d.status !== DiscussionStatus.CLOSED &&
+            d.status !== DiscussionStatus.BROKEN
+        )
+        .toArray();
+
+      await handleSessionRefresh(
+        aliceUserId,
+        aliceSession,
+        aliceActiveDiscussions
+      );
+
+      // STEP 9: Verify new keep-alive was sent successfully
+      const aliceMessages = await db.messages
+        .where('[ownerUserId+contactUserId]')
+        .equals([aliceUserId, bobUserId])
+        .toArray();
+
+      const keepAliveMessages = aliceMessages.filter(
+        m =>
+          m.type === MessageType.KEEP_ALIVE &&
+          m.direction === MessageDirection.OUTGOING
+      );
+
+      // Should have at least one successful keep-alive
+      const successfulKeepAlive = keepAliveMessages.find(
+        m =>
+          m.status === MessageStatus.SENT ||
+          m.status === MessageStatus.DELIVERED
+      );
+      expect(successfulKeepAlive).toBeDefined();
+    });
+
+    it('Bob need keep alive but the discussion is killed', async () => {
+      // STEP 1: Initialize active discussion
+      const { bobDiscussionId } = await initAliceBobSession();
+
+      // STEP 2: Alice sends a message
+      const aliceMessage: Omit<Message, 'id'> = {
+        ownerUserId: aliceUserId,
+        contactUserId: bobUserId,
+        content: 'Test',
+        type: MessageType.TEXT,
+        direction: MessageDirection.OUTGOING,
+        status: MessageStatus.SENDING,
+        timestamp: new Date(),
+      };
+      await messageService.sendMessage(aliceMessage as Message, aliceSession);
+
+      // alice fetch Bob's message
+      await messageService.fetchMessages(aliceUserId, aliceSk, aliceSession);
+
+      // STEP 3: Wait for session timeout (should kill session and require keep-alive)
+      await new Promise(resolve =>
+        setTimeout(resolve, MAX_SESSION_INACTIVITY_MILLIS)
+      );
+
+      // Get active discussions
+      const bobActiveDiscussions = await db.discussions
+        .where('ownerUserId')
+        .equals(bobUserId)
+        .and(
+          d =>
+            d.status !== DiscussionStatus.CLOSED &&
+            d.status !== DiscussionStatus.BROKEN
+        )
+        .toArray();
+
+      // STEP 4: Bob calls refresh - should mark discussion as BROKEN (can't send keep-alive to killed session)
+      await handleSessionRefresh(bobUserId, bobSession, bobActiveDiscussions);
+
+      // STEP 5: Verify discussion is BROKEN
+      const bobDiscussion = await db.discussions.get(bobDiscussionId);
+      expect(bobDiscussion?.status).toBe(DiscussionStatus.BROKEN);
+
+      // STEP 6: Verify no keep-alive was sent (or if sent, it failed)
+      const bobMessages = await db.messages
+        .where('[ownerUserId+contactUserId]')
+        .equals([bobUserId, aliceUserId])
+        .toArray();
+
+      const keepAliveMsg = bobMessages.find(
+        m =>
+          m.type === MessageType.KEEP_ALIVE &&
+          m.direction === MessageDirection.OUTGOING
+      );
+
+      expect(keepAliveMsg).toBeUndefined();
+    });
+
+    it('Alice has discussion with Bob, Carol and Dave. Bob discussion killed, Carol need keep alive and Dave is ok.', async () => {
+      // STEP 1: Initialize discussions with all three peers
+      const { peer1DiscussionId: aliceBobDiscussionId } = await initSession(
+        aliceSk,
+        alicePk,
+        aliceSession,
+        bobSk,
+        bobPk,
+        bobSession
+      );
+
+      // wait for Bob's session to timeout
+      await new Promise(resolve =>
+        setTimeout(resolve, MAX_SESSION_INACTIVITY_MILLIS)
+      );
+
+      await initSession(
+        aliceSk,
+        alicePk,
+        aliceSession,
+        carolSk,
+        carolPk,
+        carolSession
+      );
+
+      // wait for Carol's session to need keep-alive
+      await new Promise(resolve =>
+        setTimeout(resolve, KEEP_ALIVE_INTERVAL_MILLIS)
+      );
+
+      const { peer1DiscussionId: aliceDaveDiscussionId } = await initSession(
+        aliceSk,
+        alicePk,
+        aliceSession,
+        daveSk,
+        davePk,
+        daveSession
+      );
+
+      // step 2: Carol and Dave sends a message
+      // Carol sends a message
+      const carolMessage: Omit<Message, 'id'> = {
+        ownerUserId: carolUserId,
+        contactUserId: aliceUserId,
+        content: 'Hi Alice!',
+        type: MessageType.TEXT,
+        direction: MessageDirection.OUTGOING,
+        status: MessageStatus.SENDING,
+        timestamp: new Date(),
+      };
+      await messageService.sendMessage(carolMessage as Message, carolSession);
+
+      // Dave sends a message recently (keeps session active)
+      const daveMessage: Omit<Message, 'id'> = {
+        ownerUserId: daveUserId,
+        contactUserId: aliceUserId,
+        content: 'Hey Alice!',
+        type: MessageType.TEXT,
+        direction: MessageDirection.OUTGOING,
+        status: MessageStatus.SENDING,
+        timestamp: new Date(),
+      };
+      await messageService.sendMessage(daveMessage as Message, daveSession);
+
+      // Alice fetches messages
+      await messageService.fetchMessages(aliceUserId, aliceSk, aliceSession);
+
+      // STEP 3: Alice call refresh function
+      const aliceActiveDiscussions = await db.discussions
+        .where('ownerUserId')
+        .equals(aliceUserId)
+        .and(
+          d =>
+            d.status !== DiscussionStatus.CLOSED &&
+            d.status !== DiscussionStatus.BROKEN
+        )
+        .toArray();
+
+      expect(aliceActiveDiscussions.length).toBe(3);
+
+      await handleSessionRefresh(
+        aliceUserId,
+        aliceSession,
+        aliceActiveDiscussions
+      );
+
+      // STEP 4: Verify Bob's discussion is BROKEN
+      const aliceBobDiscussion = await db.discussions.get(aliceBobDiscussionId);
+      expect(aliceBobDiscussion?.status).toBe(DiscussionStatus.BROKEN);
+
+      // STEP 5: Verify Carol received keep-alive
+      const aliceCarolMessages = await db.messages
+        .where('[ownerUserId+contactUserId]')
+        .equals([aliceUserId, carolUserId])
+        .toArray();
+
+      const carolKeepAlive = aliceCarolMessages.find(
+        m =>
+          m.type === MessageType.KEEP_ALIVE &&
+          m.direction === MessageDirection.OUTGOING
+      );
+      expect(carolKeepAlive).toBeDefined();
+
+      // STEP 6: Verify Dave's discussion is still ACTIVE and no keep-alive was sent
+      const aliceDaveDiscussion = await db.discussions.get(
+        aliceDaveDiscussionId
+      );
+      expect(aliceDaveDiscussion?.status).toBe(DiscussionStatus.ACTIVE);
+
+      const aliceDaveMessages = await db.messages
+        .where('[ownerUserId+contactUserId]')
+        .equals([aliceUserId, daveUserId])
+        .toArray();
+
+      const daveKeepAlive = aliceDaveMessages.find(
+        m =>
+          m.type === MessageType.KEEP_ALIVE &&
+          m.direction === MessageDirection.OUTGOING
+      );
+      // Dave should not receive keep-alive since session is fresh
+      expect(daveKeepAlive).toBeUndefined();
     });
   });
 });

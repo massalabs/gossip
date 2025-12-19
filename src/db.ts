@@ -104,6 +104,7 @@ export enum DiscussionDirection {
 
 export enum MessageType {
   TEXT = 'text',
+  KEEP_ALIVE = 'keep_alive',
   IMAGE = 'image',
   FILE = 'file',
   AUDIO = 'audio',
