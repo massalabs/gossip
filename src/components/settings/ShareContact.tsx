@@ -26,6 +26,7 @@ const ShareContact: React.FC<ShareContactProps> = ({
   publicKey,
 }) => {
   const [activeTab, setActiveTab] = useState<ShareTab>('qr');
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const { exportFileContact, fileState } = useFileShareContact();
   const deepLinkUrl = useMemo(() => generateDeepLinkUrl(userId), [userId]);
   const isExportDisabled = !publicKey || fileState.isLoading;
@@ -61,7 +62,10 @@ const ShareContact: React.FC<ShareContactProps> = ({
         </div>
 
         <div className={activeTab === 'qr' ? 'block' : 'hidden'}>
-          <ShareContactQR deepLinkUrl={deepLinkUrl} />
+          <ShareContactQR
+            deepLinkUrl={deepLinkUrl}
+            onQRCodeGenerated={setQrDataUrl}
+          />
         </div>
 
         <div className={activeTab === 'files' ? 'block' : 'hidden'}>
@@ -75,7 +79,11 @@ const ShareContact: React.FC<ShareContactProps> = ({
 
         {/* Copy buttons section */}
         <div className="mt-6">
-          <ShareContactCopySection userId={userId} deepLinkUrl={deepLinkUrl} />
+          <ShareContactCopySection
+            userId={userId}
+            deepLinkUrl={deepLinkUrl}
+            qrDataUrl={qrDataUrl}
+          />
         </div>
       </ScrollableContent>
     </div>
