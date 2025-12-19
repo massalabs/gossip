@@ -5,6 +5,12 @@ import { createSelectors } from './utils/createSelectors';
 import { STORAGE_KEYS } from '../utils/localStorage';
 import { ParsedInvite } from '../utils/qrCodeParser';
 
+// Debug console button position
+interface DebugButtonPosition {
+  x: number;
+  y: number;
+}
+
 interface AppStoreState {
   // Network config (read by accountStore)
   networkName: NetworkName;
@@ -15,6 +21,9 @@ interface AppStoreState {
   // Debug overlay visibility
   debugOverlayVisible: boolean;
   setDebugOverlayVisible: (visible: boolean) => void;
+  // Debug console button position
+  debugButtonPosition: DebugButtonPosition;
+  setDebugButtonPosition: (position: DebugButtonPosition) => void;
   // App initialization state (whether app has checked for existing accounts)
   isInitialized: boolean;
   setIsInitialized: (value: boolean) => void;
@@ -45,6 +54,11 @@ const useAppStoreBase = create<AppStoreState>()(
       setDebugOverlayVisible: (visible: boolean) => {
         set({ debugOverlayVisible: visible });
       },
+      // Debug console button position (default: bottom-left)
+      debugButtonPosition: { x: 8, y: 80 },
+      setDebugButtonPosition: (position: DebugButtonPosition) => {
+        set({ debugButtonPosition: position });
+      },
       // App initialization state
       isInitialized: false,
       setIsInitialized: (value: boolean) => {
@@ -67,6 +81,7 @@ const useAppStoreBase = create<AppStoreState>()(
       partialize: state => ({
         showDebugOption: state.showDebugOption,
         debugOverlayVisible: state.debugOverlayVisible,
+        debugButtonPosition: state.debugButtonPosition,
         isInitialized: state.isInitialized,
         networkName: state.networkName,
       }),
