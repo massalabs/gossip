@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useRef, useState, useEffect } from 'react';
 import DiscussionListPanel from '../components/discussions/DiscussionList';
 import { useAccountStore } from '../stores/accountStore';
 import { useAppStore } from '../stores/appStore';
@@ -10,7 +10,6 @@ import { useSearch } from '../hooks/useSearch';
 import { PrivacyGraphic } from '../components/graphics';
 import HeaderWrapper from '../components/ui/HeaderWrapper';
 import UserProfileAvatar from '../components/avatar/UserProfileAvatar';
-import ScrollableContent from '../components/ui/ScrollableContent';
 import { ROUTES } from '../constants/routes';
 
 const Discussions: React.FC = () => {
@@ -18,6 +17,16 @@ const Discussions: React.FC = () => {
   const { ourPk, ourSk, session, isLoading } = useAccountStore();
   const pendingSharedContent = useAppStore(s => s.pendingSharedContent);
   const setPendingSharedContent = useAppStore(s => s.setPendingSharedContent);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  // Force re-render when ref is set to ensure DiscussionList gets the scroll parent
+  const [scrollParentReady, setScrollParentReady] = useState(false);
+
+  // Set up scroll parent
+  useEffect(() => {
+    if (scrollContainerRef.current) {
+      setScrollParentReady(true);
+    }
+  }, []);
 
   const handleSelectDiscussion = useCallback(
     (contactUserId: string) => {
@@ -70,7 +79,10 @@ const Discussions: React.FC = () => {
           </div>
         </div>
       </HeaderWrapper>
-      <ScrollableContent className="flex-1 overflow-y-auto pt-2 px-2 pb-20">
+      <div
+        ref={scrollContainerRef}
+        className="flex-1 min-h-0 overflow-y-auto pt-2 px-2 pb-20"
+      >
         {/* Show banner when there's pending shared content */}
         {pendingSharedContent && (
           <div className="mx-2 mb-4 p-4 bg-accent/50 border border-border rounded-lg">
@@ -101,15 +113,20 @@ const Discussions: React.FC = () => {
             aria-label="Search"
           />
         </div>
-        <DiscussionListPanel
-          onSelect={handleSelectDiscussion}
-          headerVariant="link"
-          searchQuery={debouncedSearchQuery}
-        />
-      </ScrollableContent>
+        {scrollParentReady && scrollContainerRef.current && (
+          <DiscussionListPanel
+            onSelect={handleSelectDiscussion}
+            headerVariant="link"
+            searchQuery={debouncedSearchQuery}
+            scrollParent={scrollContainerRef.current}
+          />
+        )}
+      </div>
       {/* Floating button positioned above bottom nav */}
       <Button
-        onClick={() => navigate(ROUTES.newDiscussion())}
+        onClick={() => {
+          navigate(ROUTES.newDiscussion());
+        }}
         variant="primary"
         size="custom"
         className="absolute bottom-3 right-4 h-14 w-14 rounded-full flex items-center gap-2 shadow-lg hover:shadow-xl transition-shadow z-50"

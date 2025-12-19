@@ -261,20 +261,20 @@ const MessageItem: React.FC<MessageItemProps> = ({
   const borderRadiusClass = useMemo(() => {
     if (isFirstInGroup && isLastInGroup) {
       return isOutgoing
-        ? 'rounded-3xl rounded-br-[4px]'
-        : 'rounded-3xl rounded-bl-[4px]';
+        ? 'rounded-3xl rounded-br-lg'
+        : 'rounded-3xl rounded-bl-lg';
     } else if (isFirstInGroup) {
       return isOutgoing
-        ? 'rounded-t-3xl rounded-bl-3xl rounded-br-[4px]'
-        : 'rounded-t-3xl rounded-br-3xl rounded-bl-[4px]';
+        ? 'rounded-t-3xl rounded-bl-3xl rounded-br-lg'
+        : 'rounded-t-3xl rounded-br-3xl rounded-bl-lg';
     } else if (isLastInGroup) {
       return isOutgoing
-        ? 'rounded-b-3xl rounded-tr-3xl rounded-br-[4px]'
-        : 'rounded-b-3xl rounded-tl-3xl rounded-bl-[4px]';
+        ? 'rounded-b-3xl rounded-tl-3xl rounded-tr-lg'
+        : 'rounded-b-3xl rounded-tl-lg rounded-tr-3xl';
     } else {
       return isOutgoing
-        ? 'rounded-2xl rounded-br-[4px]'
-        : 'rounded-2xl rounded-bl-[4px]';
+        ? 'rounded-tr-lg rounded-br-lg rounded-tl-3xl rounded-bl-3xl'
+        : 'rounded-tr-3xl rounded-tl-lg rounded-br-3xl rounded-bl-lg';
     }
   }, [isFirstInGroup, isLastInGroup, isOutgoing]);
 

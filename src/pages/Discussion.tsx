@@ -1,4 +1,3 @@
-// TODO: use virtual list to render messages
 import React, { useEffect, useCallback, useRef, useState } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { db, Message } from '../db';
@@ -9,9 +8,10 @@ import { useDiscussionStore } from '../stores/discussionStore';
 import { useMessageStore } from '../stores/messageStore';
 import toast from 'react-hot-toast';
 import DiscussionHeader from '../components/discussions/DiscussionHeader';
-import MessageList from '../components/discussions/MessageList';
+import MessageList, {
+  MessageListHandle,
+} from '../components/discussions/MessageList';
 import MessageInput from '../components/discussions/MessageInput';
-import ScrollableContent from '../components/ui/ScrollableContent';
 
 const Discussion: React.FC = () => {
   const { userId } = useParams();
@@ -75,6 +75,9 @@ const Discussion: React.FC = () => {
   // Track timeout for message highlight
   const highlightTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Ref to the MessageList for imperative scrolling
+  const messageListRef = useRef<MessageListHandle>(null);
+
   // Cleanup timeout on unmount
   useEffect(() => {
     return () => {
@@ -107,21 +110,9 @@ const Discussion: React.FC = () => {
     }
   }, [messages.length, isLoading, userProfile?.userId, contact?.userId]);
 
-  // Scroll to bottom utility
-  const scrollToBottom = useCallback((smooth = true) => {
-    requestAnimationFrame(() => {
-      const container = document.getElementById('messagesContainer');
-      if (container) {
-        if (smooth) {
-          container.scrollTo({
-            top: container.scrollHeight,
-            behavior: 'smooth',
-          });
-        } else {
-          container.scrollTop = container.scrollHeight;
-        }
-      }
-    });
+  // Scroll to bottom utility - uses the virtuoso ref
+  const scrollToBottom = useCallback(() => {
+    messageListRef.current?.scrollToBottom();
   }, []);
 
   const handleSendMessage = useCallback(
@@ -130,24 +121,18 @@ const Discussion: React.FC = () => {
       try {
         await sendMessage(contact.userId, text, replyToId);
         setReplyingTo(null);
-        // Scroll to bottom after sending
-        scrollToBottom(false);
+        // Scroll to bottom after sending (handled automatically by followOutput)
       } catch (error) {
         toast.error('Failed to send message');
         console.error('Failed to send message:', error);
       }
     },
-    [sendMessage, contact?.userId, scrollToBottom]
+    [sendMessage, contact?.userId]
   );
 
-  const handleReplyToMessage = useCallback(
-    (message: Message) => {
-      setReplyingTo(message);
-      // Scroll to bottom when starting a reply
-      scrollToBottom();
-    },
-    [scrollToBottom]
-  );
+  const handleReplyToMessage = useCallback((message: Message) => {
+    setReplyingTo(message);
+  }, []);
 
   const handleCancelReply = useCallback(() => {
     setReplyingTo(null);
@@ -157,11 +142,11 @@ const Discussion: React.FC = () => {
   const handleInputFocus = useCallback(() => {
     // Delay to let the keyboard animation start and layout adjust
     setTimeout(() => {
-      scrollToBottom(false);
+      scrollToBottom();
     }, 150);
     // Second scroll after keyboard is fully open
     setTimeout(() => {
-      scrollToBottom(false);
+      scrollToBottom();
     }, 350);
   }, [scrollToBottom]);
 
@@ -201,18 +186,16 @@ const Discussion: React.FC = () => {
         onBack={onBack}
       />
 
-      <ScrollableContent
-        className="flex-1 overflow-y-auto"
-        id="messagesContainer"
-      >
+      <div className="flex-1 min-h-0 overflow-hidden">
         <MessageList
+          ref={messageListRef}
           messages={messages}
           discussion={discussion}
           isLoading={isLoading || isDiscussionLoading}
           onReplyTo={handleReplyToMessage}
           onScrollToMessage={handleScrollToMessage}
         />
-      </ScrollableContent>
+      </div>
 
       <MessageInput
         onSend={handleSendMessage}

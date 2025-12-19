@@ -1,16 +1,26 @@
-import React, { useMemo, useEffect, useRef, useLayoutEffect } from 'react';
-import { Element } from 'react-scroll';
-import { Message, Discussion, DiscussionDirection } from '../../db';
-import MessageItem from './MessageItem';
+import React, { useRef, useCallback, useEffect } from 'react';
+import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
+import { Message, Discussion } from '../../db';
+
 import LoadingState from './LoadingState';
 import EmptyState from './EmptyState';
-import DateSeparator from './DateSeparator';
-import { isDifferentDay } from '../../utils/timeUtils';
+
 import {
-  calculateMessageGroups,
-  MessageGroupInfo,
-  MESSAGE_GROUP_TIME_WINDOW_MINUTES,
-} from '../../utils/messageGrouping';
+  VirtualItem,
+  useMessageGroups,
+  useVirtualItems,
+} from './hooks/useMessageListItems';
+
+import {
+  AnnouncementRenderer,
+  DateRenderer,
+  MessageRenderer,
+  SpacerRenderer,
+} from './renderers/MessageItemRenderers';
+
+// =============================================================================
+// Types
+// =============================================================================
 
 interface MessageListProps {
   messages: Message[];
@@ -20,193 +30,141 @@ interface MessageListProps {
   onScrollToMessage?: (messageId: number) => void;
 }
 
-const MessageList: React.FC<MessageListProps> = ({
-  messages,
-  discussion,
-  isLoading,
-  onReplyTo,
-  onScrollToMessage,
-}) => {
-  const prevLastMessageIdRef = useRef<number | null>(null);
-  const hasInitiallyScrolledRef = useRef<boolean>(false);
-  const prevDiscussionIdRef = useRef<number | null>(null);
+export interface MessageListHandle {
+  scrollToBottom: () => void;
+  scrollToIndex: (index: number) => void;
+}
 
-  // Reset scroll state when discussion changes
-  useEffect(() => {
-    const currentDiscussionId = discussion?.id || null;
-    if (prevDiscussionIdRef.current !== currentDiscussionId) {
-      hasInitiallyScrolledRef.current = false;
-      prevLastMessageIdRef.current = null;
-      prevDiscussionIdRef.current = currentDiscussionId;
-    }
-  }, [discussion?.id]);
+// =============================================================================
+// Main Component
+// =============================================================================
 
-  // Set initial scroll position to bottom before first paint (prevents visible scroll)
-  useLayoutEffect(() => {
-    if (isLoading || hasInitiallyScrolledRef.current) return;
+const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
+  ({ messages, discussion, isLoading, onReplyTo, onScrollToMessage }, ref) => {
+    const virtuosoRef = useRef<VirtuosoHandle>(null);
+    const prevMessageCountRef = useRef<number>(0);
+    const isAtBottomRef = useRef<boolean>(true);
 
-    const container = document.getElementById('messagesContainer');
-    if (container && messages.length > 0) {
-      // Set scroll position synchronously before paint
-      container.scrollTop = container.scrollHeight;
-      hasInitiallyScrolledRef.current = true;
-    }
-  }, [isLoading, messages.length]);
+    // Derived state via hooks
+    const messageGroups = useMessageGroups(messages);
+    const virtualItems = useVirtualItems(messages, messageGroups, discussion);
 
-  // Use the same time window for timestamp display as for message grouping
-  // This ensures consistency: messages within the grouping window also share timestamps
+    // Scroll to bottom when new messages are added (if user was at bottom)
+    useEffect(() => {
+      const prevCount = prevMessageCountRef.current;
+      const currentCount = messages.length;
 
-  // Calculate message groups for spacing and avatar display
-  const messageGroups = useMemo(() => {
-    return calculateMessageGroups(messages);
-  }, [messages]);
-
-  // Memoize the message items with date separators, smart timestamps, and grouping
-  // to prevent re-rendering all messages when one is added
-  const messageItems = useMemo(() => {
-    const items: React.ReactNode[] = [];
-
-    messages.forEach((message, index) => {
-      const prevMessage = index > 0 ? messages[index - 1] : null;
-      const nextMessage =
-        index < messages.length - 1 ? messages[index + 1] : null;
-      const isLastMessage = index === messages.length - 1;
-      const groupInfo: MessageGroupInfo = messageGroups[index] || {
-        isFirstInGroup: true,
-        isLastInGroup: true,
-      };
-
-      // Show date separator if this is the first message or if the day changed
-      if (
-        !prevMessage ||
-        isDifferentDay(message.timestamp, prevMessage.timestamp)
-      ) {
-        items.push(
-          <DateSeparator key={`date-${message.id}`} date={message.timestamp} />
-        );
+      if (currentCount > prevCount && isAtBottomRef.current) {
+        requestAnimationFrame(() => {
+          virtuosoRef.current?.scrollToIndex({
+            index: virtualItems.length - 1,
+            behavior: 'smooth',
+          });
+        });
       }
 
-      // Smart timestamp display:
-      // - Always show for the last message
-      // - Show when the next message is from a different direction (sender)
-      // - Show when there is a significant time gap to the next message
-      // - Always show for out-of-order messages (indicates data issue)
-      let showTimestamp = isLastMessage;
-      if (!isLastMessage && nextMessage) {
-        const sameDirection = nextMessage.direction === message.direction;
-        const timeDiffMs =
-          nextMessage.timestamp.getTime() - message.timestamp.getTime();
+      prevMessageCountRef.current = currentCount;
+    }, [messages.length, virtualItems.length]);
 
-        // Handle out-of-order messages explicitly
-        if (timeDiffMs < 0) {
-          // Out-of-order messages: treat as a data issue and always show the timestamp
-          showTimestamp = true;
-        } else {
-          const timeDiffMinutes = timeDiffMs / 60000;
-          if (
-            !sameDirection ||
-            timeDiffMinutes >= MESSAGE_GROUP_TIME_WINDOW_MINUTES
-          ) {
-            showTimestamp = true;
-          }
+    // Track if user is at bottom
+    const handleAtBottomStateChange = useCallback((atBottom: boolean) => {
+      isAtBottomRef.current = atBottom;
+    }, []);
+
+    // Expose imperative methods via ref
+    React.useImperativeHandle(ref, () => ({
+      scrollToBottom: () => {
+        virtuosoRef.current?.scrollToIndex({
+          index: virtualItems.length - 1,
+          behavior: 'auto',
+        });
+      },
+      scrollToIndex: (index: number) => {
+        virtuosoRef.current?.scrollToIndex({
+          index,
+          behavior: 'smooth',
+          align: 'center',
+        });
+      },
+    }));
+
+    // Render individual item
+    const itemContent = useCallback(
+      (index: number) => {
+        const item: VirtualItem | undefined = virtualItems[index];
+        if (!item) return null;
+
+        switch (item.type) {
+          case 'announcement':
+            return (
+              <AnnouncementRenderer
+                key="announcement"
+                content={item.content}
+                direction={item.direction}
+              />
+            );
+
+          case 'date':
+            return <DateRenderer key={item.key} date={item.date} />;
+
+          case 'spacer':
+            return <SpacerRenderer key="spacer" />;
+
+          case 'message':
+            return (
+              <MessageRenderer
+                key={item.message.id}
+                message={item.message}
+                showTimestamp={item.showTimestamp}
+                groupInfo={item.groupInfo}
+                onReplyTo={onReplyTo}
+                onScrollToMessage={onScrollToMessage}
+              />
+            );
+
+          default:
+            return null;
         }
-      }
+      },
+      [virtualItems, onReplyTo, onScrollToMessage]
+    );
 
-      items.push(
-        <MessageItem
-          key={message.id}
-          id={`message-${message.id}`}
-          message={message}
-          onReplyTo={onReplyTo}
-          onScrollToMessage={onScrollToMessage}
-          showTimestamp={showTimestamp}
-          isFirstInGroup={groupInfo.isFirstInGroup}
-          isLastInGroup={groupInfo.isLastInGroup}
-        />
-      );
-    });
-
-    return items;
-  }, [messages, onReplyTo, onScrollToMessage, messageGroups]);
-
-  // Auto-scroll to bottom when new messages are added (after initial render)
-  useEffect(() => {
-    if (isLoading || !hasInitiallyScrolledRef.current) return;
-
-    const lastMessage = messages[messages.length - 1];
-    const currentLastMessageId = lastMessage?.id || null;
-    const prevLastMessageId = prevLastMessageIdRef.current;
-
-    // Only scroll when a new message is added (not on initial load)
-    if (
-      currentLastMessageId !== null &&
-      currentLastMessageId !== prevLastMessageId
-    ) {
-      // Use requestAnimationFrame to ensure DOM is updated, then scroll instantly
-      requestAnimationFrame(() => {
-        const container = document.getElementById('messagesContainer');
-        if (container) {
-          // Use instant scroll (no smooth behavior) for better performance
-          // This prevents lag when new messages arrive
-          container.scrollTop = container.scrollHeight;
-        }
-      });
+    // Loading state
+    if (isLoading) {
+      return <LoadingState />;
     }
 
-    prevLastMessageIdRef.current = currentLastMessageId;
-  }, [messages.length, isLoading, messages]);
-
-  if (isLoading) {
-    return <LoadingState />;
-  }
-
-  return (
-    <div className="px-4 md:px-6 lg:px-8 py-6">
-      {/* Display announcement message if it exists */}
-      {discussion?.announcementMessage && discussion.createdAt && (
-        <div
-          className={`mb-4 flex ${
-            discussion.direction === DiscussionDirection.INITIATED
-              ? 'justify-end'
-              : 'justify-start'
-          }`}
-        >
-          <div
-            className={`max-w-[85%] sm:max-w-[75%] md:max-w-[70%] px-4 py-3 rounded-3xl text-sm leading-tight ${
-              discussion.direction === DiscussionDirection.INITIATED
-                ? 'bg-accent text-accent-foreground rounded-br-[4px]'
-                : 'bg-card dark:bg-surface-secondary text-card-foreground rounded-bl-[4px] shadow-sm'
-            }`}
-          >
-            <p className="text-xs text-center font-light opacity-80 mb-1.5">
-              Announcement message:
-            </p>
-            <p className="whitespace-pre-wrap wrap-break-word">
-              {discussion.announcementMessage}
-            </p>
-            {/* isOutgoing ? 'text-accent-foreground/80' : 'text-muted-foreground' */}
-            {/* 
-            <p
-              className={`mt-1.5 text-[11px] ${
-                discussion.direction === DiscussionDirection.INITIATED
-                  ? 'text-accent-foreground/80'
-                  : 'text-muted-foreground'
-              } text-right`}
-            >
-              {formatDateTime(discussion.createdAt)}
-            </p> */}
-          </div>
+    // Empty state - only show if no messages AND no announcement
+    if (messages.length === 0 && !discussion?.announcementMessage) {
+      return (
+        <div className="px-4 md:px-6 lg:px-8 py-6">
+          <EmptyState />
         </div>
-      )}
+      );
+    }
 
-      {messages.length === 0 && !discussion?.announcementMessage ? (
-        <EmptyState />
-      ) : (
-        messageItems
-      )}
-      <Element name="messagesEnd" />
-    </div>
-  );
-};
+    // Main render
+    return (
+      <div className="h-full flex flex-col overflow-hidden min-h-0">
+        {virtualItems.length > 0 && (
+          <Virtuoso
+            ref={virtuosoRef}
+            style={{ flex: 1 }}
+            className="pt-6"
+            totalCount={virtualItems.length}
+            itemContent={itemContent}
+            initialTopMostItemIndex={virtualItems.length - 1}
+            alignToBottom
+            atBottomThreshold={150}
+            atBottomStateChange={handleAtBottomStateChange}
+            increaseViewportBy={{ top: 200, bottom: 200 }}
+          />
+        )}
+      </div>
+    );
+  }
+);
+
+MessageList.displayName = 'MessageList';
 
 export default MessageList;

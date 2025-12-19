@@ -1,178 +1,204 @@
-import React from 'react';
+import React, { useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Virtuoso } from 'react-virtuoso';
+
 import { useDiscussionList } from '../../hooks/useDiscussionList';
 import { useDiscussionStore } from '../../stores/discussionStore';
+import { ROUTES } from '../../constants/routes';
+import { Discussion } from '../../db';
+
 import EmptyDiscussions from './EmptyDiscussions';
 import DiscussionListItem from './DiscussionListItem';
-import { ROUTES } from '../../constants/routes';
-import { DiscussionStatus } from '../../db';
 import ContactAvatar from '../avatar/ContactAvatar';
 import UserIdDisplay from '../ui/UserIdDisplay';
+
+import {
+  HeaderItem,
+  ContactItem,
+  useContactsMap,
+  useFilteredDiscussions,
+  useFilteredContacts,
+  useVirtualItems,
+} from './hooks/useDiscussionListItems';
+
+// =============================================================================
+// Types
+// =============================================================================
 
 interface DiscussionListProps {
   onSelect: (contactUserId: string) => void;
   activeUserId?: string;
   headerVariant?: 'button' | 'link';
   searchQuery?: string;
+  scrollParent: HTMLElement;
 }
+
+// =============================================================================
+// Item Renderers
+// =============================================================================
+
+interface HeaderItemProps {
+  item: HeaderItem;
+}
+
+const HeaderItemRenderer: React.FC<HeaderItemProps> = ({ item }) => (
+  <p className="px-2 pb-1 pt-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+    {item.label}
+  </p>
+);
+
+interface ContactItemProps {
+  item: ContactItem;
+  onSelect: (userId: string) => void;
+}
+
+const ContactItemRenderer: React.FC<ContactItemProps> = ({
+  item,
+  onSelect,
+}) => (
+  <button
+    type="button"
+    onClick={() => onSelect(item.contact.userId)}
+    className="w-full px-3 py-2 flex items-center gap-3 rounded-xl hover:bg-accent/50 transition-colors text-left"
+  >
+    <ContactAvatar contact={item.contact} size={10} />
+    <div className="flex-1 min-w-0">
+      <p className="text-sm font-semibold text-foreground truncate">
+        {item.contact.name}
+      </p>
+      <UserIdDisplay
+        userId={item.contact.userId}
+        textClassName="text-muted-foreground"
+      />
+    </div>
+  </button>
+);
+
+// =============================================================================
+// Main Component
+// =============================================================================
 
 const DiscussionList: React.FC<DiscussionListProps> = ({
   onSelect,
   activeUserId,
   searchQuery = '',
+  scrollParent,
 }) => {
+  const navigate = useNavigate();
+
+  // Store selectors
   const discussions = useDiscussionStore(s => s.discussions);
   const lastMessages = useDiscussionStore(s => s.lastMessages);
   const contacts = useDiscussionStore(s => s.contacts);
-  const navigate = useNavigate();
 
+  // Discussion actions
   const { handleAcceptDiscussionRequest, handleRefuseDiscussionRequest } =
     useDiscussionList();
 
-  // Get all non-closed discussions (before search filter)
-  const allDiscussions = React.useMemo(() => {
-    return discussions.filter(d => d.status !== DiscussionStatus.CLOSED);
-  }, [discussions]);
-
-  // Create a Map for O(1) contact lookup instead of O(n) find operations
-  const contactsMap = React.useMemo(() => {
-    const map = new Map<string, (typeof contacts)[0]>();
-    contacts.forEach(contact => {
-      map.set(contact.userId, contact);
-    });
-    return map;
-  }, [contacts]);
-
-  // Filter discussions by status and search query
-  const filteredDiscussions = React.useMemo(() => {
-    let filtered = allDiscussions;
-
-    // Apply search filter if query exists
-    if (searchQuery.trim()) {
-      const query = searchQuery.toLowerCase().trim();
-      filtered = filtered.filter(discussion => {
-        const contact = contactsMap.get(discussion.contactUserId);
-        if (!contact) return false;
-
-        // displayName already includes contact.name as fallback, so we only need to check it and userId
-        const displayName = discussion.customName || contact.name || '';
-        const userId = contact.userId || '';
-
-        return (
-          displayName.toLowerCase().includes(query) ||
-          userId.toLowerCase().includes(query)
-        );
-      });
-    }
-
-    return filtered;
-  }, [allDiscussions, contactsMap, searchQuery]);
-
+  // Derived state
   const isSearching = searchQuery.trim().length > 0;
-  // Contacts that match search query (we intentionally allow duplicates so
-  // a contact and its discussion can both appear)
-  const filteredContacts = React.useMemo(() => {
-    if (!isSearching) return [];
+  const contactsMap = useContactsMap(contacts);
+  const filteredDiscussions = useFilteredDiscussions(
+    discussions,
+    contactsMap,
+    searchQuery
+  );
+  const filteredContacts = useFilteredContacts(contacts, searchQuery);
 
-    const query = searchQuery.toLowerCase().trim();
-    if (!query) return [];
+  // Build virtual items
+  const virtualItems = useVirtualItems(
+    filteredDiscussions,
+    filteredContacts,
+    contactsMap,
+    lastMessages,
+    activeUserId,
+    isSearching
+  );
 
-    return contacts.filter(contact => {
-      const name = (contact.name || '').toLowerCase();
-      const userId = (contact.userId || '').toLowerCase();
-      return name.includes(query) || userId.includes(query);
-    });
-  }, [contacts, isSearching, searchQuery]);
+  // Check for empty state
+  const hasNoResults = virtualItems.length === 0;
 
-  const hasDiscussionResults = filteredDiscussions.length > 0;
-  const hasContactResults = filteredContacts.length > 0;
-  const hasNoResults = !hasDiscussionResults && !hasContactResults;
+  // Handlers
+  const handleAccept = useCallback(
+    async (discussion: Discussion, newName?: string) => {
+      await handleAcceptDiscussionRequest(discussion, newName);
+      navigate(ROUTES.discussion({ userId: discussion.contactUserId }));
+    },
+    [handleAcceptDiscussionRequest, navigate]
+  );
 
-  const renderDiscussionItems = (items: typeof filteredDiscussions) => {
-    return items.map(discussion => {
-      const contact = contactsMap.get(discussion.contactUserId);
-      if (!contact) return null;
+  const handleRefuse = useCallback(
+    (discussion: Discussion) => {
+      handleRefuseDiscussionRequest(discussion);
+    },
+    [handleRefuseDiscussionRequest]
+  );
 
-      const lastMessage = lastMessages.get(discussion.contactUserId);
-      const isSelected = discussion.contactUserId === activeUserId;
+  // Virtuoso item renderer
+  const renderItem = useCallback(
+    (index: number) => {
+      const item = virtualItems[index];
+      if (!item) return null;
 
+      switch (item.type) {
+        case 'header':
+          return <HeaderItemRenderer key={item.key} item={item} />;
+
+        case 'contact':
+          return (
+            <ContactItemRenderer
+              key={item.contact.userId}
+              item={item}
+              onSelect={onSelect}
+            />
+          );
+
+        case 'discussion':
+          return (
+            <div
+              key={item.discussion.id}
+              className={
+                item.isSelected ? 'bg-blue-50 dark:bg-blue-950/20' : ''
+              }
+            >
+              <DiscussionListItem
+                discussion={item.discussion}
+                contact={item.contact}
+                lastMessage={item.lastMessage}
+                onSelect={d => onSelect(d.contactUserId)}
+                onAccept={handleAccept}
+                onRefuse={() => handleRefuse(item.discussion)}
+              />
+            </div>
+          );
+
+        default:
+          return null;
+      }
+    },
+    [virtualItems, onSelect, handleAccept, handleRefuse]
+  );
+
+  // Empty states
+  if (hasNoResults) {
+    if (isSearching) {
       return (
-        <div
-          key={discussion.id}
-          className={isSelected ? 'bg-blue-50 dark:bg-blue-950/20' : ''}
-        >
-          <DiscussionListItem
-            discussion={discussion}
-            contact={contact}
-            lastMessage={lastMessage}
-            onSelect={d => onSelect(d.contactUserId)}
-            onAccept={async (d, newName) => {
-              await handleAcceptDiscussionRequest(d, newName);
-              navigate(ROUTES.discussion({ userId: d.contactUserId }));
-            }}
-            onRefuse={() => handleRefuseDiscussionRequest(discussion)}
-          />
+        <div className="py-8 text-center">
+          <p className="text-sm text-muted-foreground">No results found</p>
         </div>
       );
-    });
-  };
+    }
+    return <EmptyDiscussions />;
+  }
 
+  // Main render
   return (
-    <>
-      {isSearching ? (
-        hasNoResults ? (
-          <div className="py-8 text-center">
-            <p className="text-sm text-muted-foreground">No results found</p>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {hasDiscussionResults && (
-              <div>
-                <p className="px-2 pb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Discussions
-                </p>
-                <div className="space-y-1">
-                  {renderDiscussionItems(filteredDiscussions)}
-                </div>
-              </div>
-            )}
-
-            {hasContactResults && (
-              <div>
-                <p className="px-2 pb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Contacts
-                </p>
-                <div className="space-y-1">
-                  {filteredContacts.map(contact => (
-                    <button
-                      key={contact.userId}
-                      type="button"
-                      onClick={() => onSelect(contact.userId)}
-                      className="w-full px-3 py-2 flex items-center gap-3 rounded-xl hover:bg-accent/50 transition-colors text-left"
-                    >
-                      <ContactAvatar contact={contact} size={10} />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold text-foreground truncate">
-                          {contact.name}
-                        </p>
-                        <UserIdDisplay
-                          userId={contact.userId}
-                          textClassName="text-muted-foreground"
-                        />
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        )
-      ) : hasNoResults ? (
-        <EmptyDiscussions />
-      ) : (
-        <>{renderDiscussionItems(filteredDiscussions)}</>
-      )}
-    </>
+    <Virtuoso
+      customScrollParent={scrollParent}
+      totalCount={virtualItems.length}
+      itemContent={renderItem}
+      increaseViewportBy={{ top: 200, bottom: 200 }}
+    />
   );
 };
 

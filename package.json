@@ -78,7 +78,6 @@
     "react-feather": "^2.0.10",
     "react-hot-toast": "^2.6.0",
     "react-router-dom": "^7.9.6",
-    "react-scroll": "^1.9.3",
     "react-virtuoso": "^4.17.0",
     "varint": "^6.0.0",
     "zustand": "^5.0.8"
@@ -93,7 +92,6 @@
     "@types/pbkdf2": "^3.1.2",
     "@types/react": "^19.0.8",
     "@types/react-dom": "^19.0.3",
-    "@types/react-scroll": "^1.8.10",
     "@types/varint": "^6.0.3",
     "@vite-pwa/assets-generator": "^0.2.6",
     "@vitejs/plugin-react": "^4.2.1",
