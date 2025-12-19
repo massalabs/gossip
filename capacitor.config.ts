@@ -15,7 +15,10 @@ const config: CapacitorConfig = {
     SystemBars: {
       insetsHandling: 'css',
     },
-
+    // Keyboard plugin configuration
+    Keyboard: {
+      resize: 'body',
+    },
     LocalNotifications: {
       smallIcon: 'ic_notification',
       iconColor: '#488AFF',

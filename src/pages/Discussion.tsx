@@ -30,8 +30,7 @@ const Discussion: React.FC = () => {
   // Use prefilledMessage from location state, or fallback to app store
   const finalPrefilledMessage = prefilledMessage || pendingSharedContent;
 
-  // Clear pendingSharedContent whenever it is used (either as prefilledMessage or fallback)
-  // This prevents it from persisting and appearing unexpectedly in future discussions
+  // Clear pendingSharedContent whenever it is used
   useEffect(() => {
     if (pendingSharedContent) {
       setPendingSharedContent(null);
@@ -58,7 +57,7 @@ const Discussion: React.FC = () => {
 
   const { userProfile } = useAccountStore();
 
-  // Use message store instead of hook
+  // Use message store
   const setCurrentContact = useMessageStore(s => s.setCurrentContact);
   const messages = useMessageStore(s =>
     contact ? s.getMessagesForContact(contact.userId) : []
@@ -108,37 +107,72 @@ const Discussion: React.FC = () => {
     }
   }, [messages.length, isLoading, userProfile?.userId, contact?.userId]);
 
+  // Scroll to bottom utility
+  const scrollToBottom = useCallback((smooth = true) => {
+    requestAnimationFrame(() => {
+      const container = document.getElementById('messagesContainer');
+      if (container) {
+        if (smooth) {
+          container.scrollTo({
+            top: container.scrollHeight,
+            behavior: 'smooth',
+          });
+        } else {
+          container.scrollTop = container.scrollHeight;
+        }
+      }
+    });
+  }, []);
+
   const handleSendMessage = useCallback(
     async (text: string, replyToId?: number) => {
       if (!contact?.userId) return;
       try {
         await sendMessage(contact.userId, text, replyToId);
         setReplyingTo(null);
+        // Scroll to bottom after sending
+        scrollToBottom(false);
       } catch (error) {
         toast.error('Failed to send message');
         console.error('Failed to send message:', error);
       }
     },
-    [sendMessage, contact?.userId, setReplyingTo]
+    [sendMessage, contact?.userId, scrollToBottom]
   );
 
-  const handleReplyToMessage = useCallback((message: Message) => {
-    setReplyingTo(message);
-  }, []);
+  const handleReplyToMessage = useCallback(
+    (message: Message) => {
+      setReplyingTo(message);
+      // Scroll to bottom when starting a reply
+      scrollToBottom();
+    },
+    [scrollToBottom]
+  );
 
   const handleCancelReply = useCallback(() => {
     setReplyingTo(null);
   }, []);
 
+  // Handle input focus - scroll to bottom after keyboard appears
+  const handleInputFocus = useCallback(() => {
+    // Delay to let the keyboard animation start and layout adjust
+    setTimeout(() => {
+      scrollToBottom(false);
+    }, 150);
+    // Second scroll after keyboard is fully open
+    setTimeout(() => {
+      scrollToBottom(false);
+    }, 350);
+  }, [scrollToBottom]);
+
   const handleScrollToMessage = useCallback((messageId: number) => {
-    // Use native scrollIntoView to scroll to the message
     const element = document.getElementById(`message-${messageId}`);
     if (element) {
       element.scrollIntoView({
         behavior: 'smooth',
         block: 'center',
       });
-      // Add visual feedback for the scrolled-to message
+      // Add visual feedback
       element.classList.add('highlight-message');
 
       // Clear any existing timeout
@@ -159,7 +193,6 @@ const Discussion: React.FC = () => {
 
   if (!contact) return null;
 
-  // Mobile-first: show only discussion page when selected
   return (
     <div className="h-full app-max-w mx-auto bg-card flex flex-col">
       <DiscussionHeader
@@ -186,6 +219,7 @@ const Discussion: React.FC = () => {
         replyingTo={replyingTo}
         onCancelReply={handleCancelReply}
         initialValue={finalPrefilledMessage || undefined}
+        onFocus={handleInputFocus}
       />
     </div>
   );
