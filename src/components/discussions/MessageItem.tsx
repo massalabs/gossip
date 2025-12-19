@@ -255,7 +255,8 @@ const MessageItem: React.FC<MessageItemProps> = ({
   }, []);
 
   // Calculate spacing based on grouping
-  const spacingClass = isFirstInGroup ? 'mb-1' : 'mb-0.5';
+  // Last message in group gets more margin to separate from next group
+  const spacingClass = isLastInGroup ? 'mb-1' : 'mb-0.5';
 
   // Memoize border radius calculation
   const borderRadiusClass = useMemo(() => {
