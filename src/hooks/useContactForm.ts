@@ -97,6 +97,16 @@ export function useContactForm() {
 
       if (!trimmed) return;
 
+      // Prevent adding own user ID as a contact
+      if (userProfile?.userId && trimmed === userProfile.userId) {
+        setUserId(_ => ({
+          value: trimmed,
+          error: 'You cannot add yourself as a contact',
+          loading: false,
+        }));
+        return;
+      }
+
       setUserId(prev => ({
         ...prev,
         error: undefined,
@@ -124,7 +134,7 @@ export function useContactForm() {
       setPublicKeys(publicKey);
       setUserId(prev => ({ ...prev, loading: false }));
     },
-    [getPublicKey]
+    [getPublicKey, userProfile?.userId]
   );
 
   const handleMessageChange = useCallback((value: string) => {
@@ -142,6 +152,12 @@ export function useContactForm() {
 
       const pubKeys = UserPublicKeys.from_bytes(fileContact.userPubKeys);
       const derivedUserId = encodeUserId(pubKeys.derive_id());
+
+      // Prevent importing our own user ID as a contact
+      if (derivedUserId === userProfile.userId) {
+        toast.error('You cannot add yourself as a contact');
+        return;
+      }
 
       // check here if user already exists in contacts
       const contact = await db.getContactByOwnerAndUserId(
@@ -199,6 +215,15 @@ export function useContactForm() {
           prev.error ||
           'Unable to load public key for this user ID. Please check it.',
       }));
+    }
+
+    // Prevent adding own user ID as a contact, even if previous checks passed
+    if (userProfile?.userId && trimmedUserId === userProfile.userId) {
+      setUserId(prev => ({
+        ...prev,
+        error: 'You cannot add yourself as a contact',
+      }));
+      return;
     }
 
     if (
