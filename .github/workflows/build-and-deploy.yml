@@ -244,6 +244,19 @@ jobs:
           name: gossip-android-aab
           path: android/app/build/outputs/bundle/release/
 
+      - name: Normalize AAB filename for Fastlane
+        run: |
+          AAB_PATH=$(ls android/app/build/outputs/bundle/release/*.aab 2>/dev/null | head -n 1)
+          if [ -z "$AAB_PATH" ]; then
+            echo "❌ No AAB file found after artifact download"
+            ls -R
+            exit 1
+          fi
+
+          echo "📦 Using AAB file: $AAB_PATH"
+          cp "$AAB_PATH" android/app/build/outputs/bundle/release/app-release.aab
+          echo "✅ Copied to android/app/build/outputs/bundle/release/app-release.aab for Fastlane"
+
       - name: Display upload info
         env:
           PLAY_STORE_TRACK: ${{ github.event.inputs.play_store_track || 'internal' }}
