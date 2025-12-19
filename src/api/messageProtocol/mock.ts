@@ -11,6 +11,7 @@ import {
   IMessageProtocol,
   EncryptedMessage,
   MessageProtocolResponse,
+  PaginatedAnnouncementsResponse,
 } from './types';
 
 export class MockMessageProtocol implements IMessageProtocol {
@@ -75,6 +76,56 @@ export class MockMessageProtocol implements IMessageProtocol {
     // Return empty array for now - in a real implementation, this would
     // simulate fetching from a global announcement channel
     return this.mockAnnouncements;
+  }
+
+  async fetchAnnouncementsFromCursor(
+    cursor?: string,
+    limit: number = 100
+  ): Promise<PaginatedAnnouncementsResponse> {
+    console.log(
+      'Mock: Fetching announcements from cursor:',
+      cursor,
+      'limit:',
+      limit
+    );
+
+    // Simulate network delay
+    await new Promise(resolve => setTimeout(resolve, 150));
+
+    // Parse cursor as starting index (1-based counter)
+    // Using BigInt for proper U256 support, but for mock we keep it simple with numbers
+    const startIndex = cursor ? parseInt(cursor, 10) - 1 : 0;
+    const endIndex = Math.min(
+      startIndex + limit,
+      this.mockAnnouncements.length
+    );
+    const slicedAnnouncements = this.mockAnnouncements.slice(
+      startIndex,
+      endIndex
+    );
+    const hasMore = endIndex < this.mockAnnouncements.length;
+    const nextCursor = hasMore ? String(endIndex + 1) : null;
+
+    // Create items with counter values
+    const items = slicedAnnouncements.map((data, index) => ({
+      counter: String(startIndex + index + 1), // 1-based counter
+      data,
+    }));
+
+    return {
+      items,
+      nextCursor,
+      hasMore,
+    };
+  }
+
+  async fetchBulletinCounter(): Promise<string> {
+    console.log('Mock: Fetching bulletin counter');
+
+    // Simulate network delay
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    return String(this.bulletinCounter);
   }
 
   async fetchPublicKeyByUserId(userId: Uint8Array): Promise<string> {

@@ -170,7 +170,8 @@ export class AnnouncementService {
         }
       } else {
         // If no pending announcements, fetch from API
-        announcements = await this._fetchAnnouncements();
+        const ownerUserId = encodeUserId(ourPk.derive_id());
+        announcements = await this._fetchAnnouncements(ownerUserId);
         if (announcements.length > 0) {
           console.log(
             `[INFO] AnnouncementService.fetchAndProcessAnnouncements: fetched ${announcements.length} announcements from API`
@@ -353,10 +354,78 @@ export class AnnouncementService {
     }
   }
 
-  private async _fetchAnnouncements(): Promise<Uint8Array[]> {
+  /**
+   * Fetch announcements incrementally using cursor-based pagination.
+   * Only fetches bulletins that are newer than the last processed counter.
+   * Updates the stored counter in the user's profile after successful fetch.
+   *
+   * @param ownerUserId - The current user's ID for storing the counter
+   * @returns Array of new announcement bytes
+   */
+  private async _fetchAnnouncements(
+    ownerUserId: string
+  ): Promise<Uint8Array[]> {
     try {
-      const announcements = await this.messageProtocol.fetchAnnouncements();
-      return announcements;
+      // Get the last processed bulletin counter from user profile
+      const userProfile = await db.userProfile.get(ownerUserId);
+      const lastCounter = userProfile?.lastBulletinCounter;
+
+      // Calculate the cursor: we want bulletins AFTER the last processed one
+      // The API returns bulletins starting FROM the cursor (inclusive),
+      // so we pass (lastCounter + 1) to get bulletins after our last processed one
+      // Using BigInt to support U256 counter values
+      let cursor: string | undefined;
+      if (lastCounter) {
+        const nextCounter = BigInt(lastCounter) + 1n;
+        cursor = nextCounter.toString();
+      }
+
+      const allAnnouncements: Uint8Array[] = [];
+      let highestCounter: string | null = null;
+      let currentCursor = cursor;
+
+      // Fetch all pages of new announcements
+      while (true) {
+        const response =
+          await this.messageProtocol.fetchAnnouncementsFromCursor(
+            currentCursor,
+            100 // Fetch 100 bulletins per page
+          );
+
+        // Extract announcement data from items
+        for (const item of response.items) {
+          allAnnouncements.push(item.data);
+
+          // Track the highest counter from the items themselves
+          // This is more reliable than calculating from cursor
+          if (
+            !highestCounter ||
+            BigInt(item.counter) > BigInt(highestCounter)
+          ) {
+            highestCounter = item.counter;
+          }
+        }
+
+        if (!response.hasMore) {
+          break;
+        }
+
+        currentCursor = response.nextCursor ?? undefined;
+      }
+
+      // Persist the highest counter in the user's profile
+      if (highestCounter) {
+        await db.userProfile.update(ownerUserId, {
+          lastBulletinCounter: highestCounter,
+        });
+        if (allAnnouncements.length > 0) {
+          console.log(
+            `[INFO] AnnouncementService._fetchAnnouncements: updated last bulletin counter to ${highestCounter}`
+          );
+        }
+      }
+
+      return allAnnouncements;
     } catch (error) {
       logAnnouncementError('Failed to fetch incoming announcements:', error);
       return [];

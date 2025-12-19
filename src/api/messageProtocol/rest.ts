@@ -6,6 +6,7 @@ import {
   EncryptedMessage,
   IMessageProtocol,
   MessageProtocolResponse,
+  PaginatedAnnouncementsResponse,
 } from './types';
 import { encodeToBase64, decodeFromBase64 } from '../../utils/base64';
 
@@ -96,6 +97,53 @@ export class RestMessageProtocol implements IMessageProtocol {
     }
 
     return response.data.map(row => decodeFromBase64(row));
+  }
+
+  async fetchAnnouncementsFromCursor(
+    cursor?: string,
+    limit: number = 100
+  ): Promise<PaginatedAnnouncementsResponse> {
+    const params = new URLSearchParams({ limit: limit.toString() });
+    if (cursor) {
+      params.set('cursor', cursor);
+    }
+
+    const url = `${this.baseUrl}${BULLETIN_ENDPOINT}?${params}`;
+
+    const response = await this.makeRequest<{
+      items: Array<{ counter: string; data: string }>;
+      nextCursor: string | null;
+      hasMore: boolean;
+    }>(url, {
+      method: 'GET',
+    });
+
+    if (!response.success || !response.data) {
+      throw new Error(response.error || 'Failed to fetch announcements');
+    }
+
+    return {
+      items: response.data.items.map(item => ({
+        counter: item.counter,
+        data: decodeFromBase64(item.data),
+      })),
+      nextCursor: response.data.nextCursor,
+      hasMore: response.data.hasMore,
+    };
+  }
+
+  async fetchBulletinCounter(): Promise<string> {
+    const url = `${this.baseUrl}${BULLETIN_ENDPOINT}/counter`;
+
+    const response = await this.makeRequest<{ counter: string }>(url, {
+      method: 'GET',
+    });
+
+    if (!response.success || !response.data) {
+      throw new Error(response.error || 'Failed to fetch bulletin counter');
+    }
+
+    return response.data.counter;
   }
 
   async fetchPublicKeyByUserId(userId: Uint8Array): Promise<string> {
