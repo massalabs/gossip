@@ -15,14 +15,25 @@ import {
   EncryptionKey,
   SessionConfig,
   AnnouncementResult,
+  UserKeys,
 } from '../assets/generated/wasm/gossip_wasm';
 import { UserProfile } from '../db';
+import { encodeUserId } from '../utils/userId';
 
 export class SessionModule {
   private sessionManager: SessionManagerWrapper | null = null;
   private onPersist?: () => void; // Callback for automatic persistence
+  public ourPk: UserPublicKeys;
+  public ourSk: UserSecretKeys;
+  public userId: Uint8Array;
+  public userIdEncoded: string;
 
-  constructor(onPersist?: () => void) {
+  constructor(userKeys: UserKeys, onPersist?: () => void) {
+    this.ourPk = userKeys.public_keys();
+    this.ourSk = userKeys.secret_keys();
+    this.userId = this.ourPk.derive_id();
+    this.userIdEncoded = encodeUserId(this.userId);
+
     const sessionConfig = SessionConfig.new_default();
     this.sessionManager = new SessionManagerWrapper(sessionConfig);
     this.onPersist = onPersist;
@@ -76,15 +87,11 @@ export class SessionModule {
   /**
    * Establish an outgoing session with a peer via the underlying WASM wrapper
    * @param peerPk - The peer's public keys
-   * @param ourPk - Our public keys
-   * @param ourSk - Our secret keys
    * @param userData - Optional user data to include in the announcement (defaults to empty array)
    * @returns The announcement bytes to publish
    */
   establishOutgoingSession(
     peerPk: UserPublicKeys,
-    ourPk: UserPublicKeys,
-    ourSk: UserSecretKeys,
     userData?: Uint8Array
   ): Uint8Array {
     if (!this.sessionManager) {
@@ -94,8 +101,8 @@ export class SessionModule {
     const userDataBytes = userData ?? new Uint8Array(0);
     const result = this.sessionManager.establish_outgoing_session(
       peerPk,
-      ourPk,
-      ourSk,
+      this.ourPk,
+      this.ourSk,
       userDataBytes
     );
 
@@ -114,9 +121,7 @@ export class SessionModule {
    * @returns AnnouncementResult containing the announcer's public keys, timestamp, and user data, or undefined if invalid
    */
   feedIncomingAnnouncement(
-    announcementBytes: Uint8Array,
-    ourPk: UserPublicKeys,
-    ourSk: UserSecretKeys
+    announcementBytes: Uint8Array
   ): AnnouncementResult | undefined {
     if (!this.sessionManager) {
       throw new Error('Session manager is not initialized');
@@ -124,8 +129,8 @@ export class SessionModule {
 
     const result = this.sessionManager.feed_incoming_announcement(
       announcementBytes,
-      ourPk,
-      ourSk
+      this.ourPk,
+      this.ourSk
     );
 
     if (result) {
@@ -150,8 +155,7 @@ export class SessionModule {
    */
   feedIncomingMessageBoardRead(
     seeker: Uint8Array,
-    ciphertext: Uint8Array,
-    ourSk: UserSecretKeys
+    ciphertext: Uint8Array
   ): ReceiveMessageOutput | undefined {
     if (!this.sessionManager) {
       throw new Error('Session manager is not initialized');
@@ -160,7 +164,7 @@ export class SessionModule {
     const result = this.sessionManager.feed_incoming_message_board_read(
       seeker,
       ciphertext,
-      ourSk
+      this.ourSk
     );
 
     this.persistIfNeeded();

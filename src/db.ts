@@ -67,6 +67,7 @@ export interface UserProfile {
   createdAt: Date;
   updatedAt: Date;
   lastPublicKeyPush?: Date;
+  lastBulletinCounter?: string;
 }
 
 // Unified discussion interface combining protocol state and UI metadata
@@ -141,6 +142,7 @@ export interface PendingAnnouncement {
   id?: number;
   announcement: Uint8Array;
   fetchedAt: Date;
+  counter?: string;
 }
 
 export interface ActiveSeeker {

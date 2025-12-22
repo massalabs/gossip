@@ -6,13 +6,13 @@ import { ROUTES } from '../../constants/routes';
 
 const ShareContactPage: React.FC = () => {
   const navigate = useNavigate();
-  const { userProfile, ourPk } = useAccountStore();
+  const { userProfile, session } = useAccountStore();
 
   const handleBack = () => {
     navigate(ROUTES.settings());
   };
 
-  if (!userProfile || !ourPk) {
+  if (!userProfile || !session) {
     // Redirect to settings if user profile or public key is not available
     navigate(ROUTES.settings());
     return null;
@@ -23,7 +23,7 @@ const ShareContactPage: React.FC = () => {
       onBack={handleBack}
       userId={userProfile.userId}
       userName={userProfile.username}
-      publicKey={ourPk}
+      publicKey={session.ourPk}
     />
   );
 };

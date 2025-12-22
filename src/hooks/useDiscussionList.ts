@@ -4,12 +4,11 @@ import { Discussion, db, DiscussionStatus } from '../db';
 import { acceptDiscussionRequest } from '../services/discussion';
 
 export const useDiscussionList = () => {
-  const { userProfile, ourPk, ourSk, session } = useAccountStore();
+  const { userProfile, session } = useAccountStore();
 
   const handleAcceptDiscussionRequest = useCallback(
     async (discussion: Discussion, newName?: string) => {
-      if (!session || !ourPk || !ourSk)
-        throw new Error('Account store not initialized');
+      if (!session) throw new Error('Account store not initialized');
       try {
         if (discussion.id == null) return;
         // If the user provided a new contact name, update it first
@@ -23,12 +22,12 @@ export const useDiscussionList = () => {
             console.error('Failed to update contact name:', e);
           }
         }
-        await acceptDiscussionRequest(discussion, session, ourPk, ourSk);
+        await acceptDiscussionRequest(discussion, session);
       } catch (error) {
         console.error('Failed to accept discussion:', error);
       }
     },
-    [userProfile?.userId, ourPk, ourSk, session]
+    [userProfile?.userId, session]
   );
 
   const handleRefuseDiscussionRequest = useCallback(

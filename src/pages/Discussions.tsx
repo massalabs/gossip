@@ -14,7 +14,7 @@ import { ROUTES } from '../constants/routes';
 
 const Discussions: React.FC = () => {
   const navigate = useNavigate();
-  const { ourPk, ourSk, session, isLoading } = useAccountStore();
+  const { session, isLoading } = useAccountStore();
   const pendingSharedContent = useAppStore(s => s.pendingSharedContent);
   const setPendingSharedContent = useAppStore(s => s.setPendingSharedContent);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -58,7 +58,7 @@ const Discussions: React.FC = () => {
     debounceMs: 300,
   });
 
-  if (isLoading || !ourPk || !ourSk || !session) {
+  if (isLoading || !session) {
     return (
       <div className="bg-background flex items-center justify-center h-full">
         <PrivacyGraphic size={120} loading={true} />

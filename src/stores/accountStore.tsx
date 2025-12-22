@@ -14,11 +14,6 @@ import {
   generateNonce,
   SessionModule,
 } from '../wasm';
-import {
-  UserPublicKeys,
-  UserSecretKeys,
-} from '../assets/generated/wasm/gossip_wasm';
-import { encodeUserId } from '../utils/userId';
 import { getActiveOrFirstProfile } from './utils/getAccount';
 import { ensureWasmInitialized } from '../wasm/loader';
 import { auth } from './utils/auth';
@@ -75,7 +70,6 @@ async function createProfileFromAccount(
 
 async function provisionAccount(
   username: string,
-  userId: Uint8Array,
   mnemonic: string | undefined,
   opts: { useBiometrics: boolean; password?: string; iCloudSync?: boolean },
   session: SessionModule
@@ -88,7 +82,7 @@ async function provisionAccount(
     built = await buildSecurityFromBiometrics(
       mnemonic,
       username,
-      userId,
+      session.userId,
       opts.iCloudSync ?? false
     );
   } else {
@@ -104,7 +98,7 @@ async function provisionAccount(
 
   const profile = await createProfileFromAccount(
     username,
-    encodeUserId(userId),
+    session.userIdEncoded,
     built.security,
     sessionBlob
   );
@@ -208,9 +202,6 @@ interface AccountState {
   platformAuthenticatorAvailable: boolean;
   account: Account | null;
   provider: Provider | null;
-  // In-memory WASM keys (not persisted)
-  ourPk?: UserPublicKeys | null;
-  ourSk?: UserSecretKeys | null;
   // WASM session module
   session: SessionModule | null;
   initializeAccountWithBiometrics: (
@@ -263,8 +254,6 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       account: null,
       userProfile: null,
       encryptionKey: null,
-      ourPk: null,
-      ourSk: null,
       session: null,
       isLoading: false,
     };
@@ -279,8 +268,6 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
     platformAuthenticatorAvailable: false,
     account: null,
     provider: null,
-    ourPk: null,
-    ourSk: null,
     session: null,
     // Actions
     initializeAccount: async (username: string, password: string) => {
@@ -289,9 +276,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
 
         const mnemonic = generateMnemonic(256);
         const keys = await generateUserKeys(mnemonic);
-        const userPublicKeys = keys.public_keys();
         const userSecretKeys = keys.secret_keys();
-        const userId = userPublicKeys.derive_id();
 
         const account = await Account.fromPrivateKey(
           PrivateKey.fromBytes(userSecretKeys.massa_secret_key)
@@ -299,13 +284,12 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
 
         // Initialize WASM and create session
         await ensureWasmInitialized();
-        const session = new SessionModule(() => {
+        const session = new SessionModule(keys, () => {
           get().persistSession();
         });
 
         const { profile, encryptionKey } = await provisionAccount(
           username,
-          userId,
           mnemonic,
           {
             useBiometrics: false,
@@ -319,8 +303,6 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           userProfile: profile,
           encryptionKey,
           account,
-          ourPk: userPublicKeys,
-          ourSk: userSecretKeys,
           session,
           isLoading: false,
         });
@@ -345,9 +327,6 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         }
 
         const keys = await generateUserKeys(mnemonic);
-        const userPublicKeys = keys.public_keys();
-        const userSecretKeys = keys.secret_keys();
-        const userId = userPublicKeys.derive_id();
 
         const massaSecretKey = keys.secret_keys().massa_secret_key;
         const account = await Account.fromPrivateKey(
@@ -356,13 +335,12 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
 
         // Initialize WASM and create session
         await ensureWasmInitialized();
-        const session = new SessionModule(() => {
+        const session = new SessionModule(keys, () => {
           get().persistSession();
         });
 
         const { profile, encryptionKey } = await provisionAccount(
           username,
-          userId,
           mnemonic,
           opts,
           session
@@ -373,8 +351,6 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           account,
           userProfile: profile,
           encryptionKey,
-          ourPk: userPublicKeys,
-          ourSk: userSecretKeys,
           session,
           isLoading: false,
         });
@@ -404,17 +380,16 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         const { mnemonic, encryptionKey } = await auth(profile, password);
 
         const keys = await generateUserKeys(mnemonic);
-        const ourPk = keys.public_keys();
-        const ourSk = keys.secret_keys();
-        const account = await Account.fromPrivateKey(
-          PrivateKey.fromBytes(ourSk.massa_secret_key)
-        );
 
         // Initialize WASM and load session from profile
         await ensureWasmInitialized();
-        const session = new SessionModule(() => {
+        const session = new SessionModule(keys, () => {
           get().persistSession();
         });
+
+        const account = await Account.fromPrivateKey(
+          PrivateKey.fromBytes(session.ourSk.massa_secret_key)
+        );
 
         session.load(profile, encryptionKey);
 
@@ -431,8 +406,6 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           userProfile: updatedProfile,
           account,
           encryptionKey,
-          ourPk,
-          ourSk,
           session,
           isLoading: false,
         });
@@ -515,8 +488,6 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         // Generate a BIP39 mnemonic and create account from it
         const mnemonic = generateMnemonic(256);
         const keys = await generateUserKeys(mnemonic);
-        const userPublicKeys = keys.public_keys();
-        const userId = userPublicKeys.derive_id();
 
         const account = await Account.fromPrivateKey(
           PrivateKey.fromBytes(keys.secret_keys().massa_secret_key)
@@ -524,13 +495,12 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
 
         // Initialize WASM and create session
         await ensureWasmInitialized();
-        const session = new SessionModule(() => {
+        const session = new SessionModule(keys, () => {
           get().persistSession();
         });
 
         const { profile, encryptionKey } = await provisionAccount(
           username,
-          userId,
           mnemonic,
           {
             useBiometrics: true,
@@ -544,8 +514,6 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           userProfile: profile,
           encryptionKey,
           account,
-          ourPk: userPublicKeys,
-          ourSk: keys.secret_keys(),
           session,
           isLoading: false,
           platformAuthenticatorAvailable: availability.available,
@@ -566,14 +534,13 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       try {
         const state = get();
         const profile = state.userProfile;
-        const ourSk = state.ourSk;
-        if (!profile || !ourSk) {
+        if (!profile || !state.session) {
           throw new Error('No authenticated user');
         }
 
         const { mnemonic } = await auth(profile, password);
 
-        const massaSecretKey = ourSk.massa_secret_key;
+        const massaSecretKey = state.session.ourSk.massa_secret_key;
         const account = await Account.fromPrivateKey(
           PrivateKey.fromBytes(massaSecretKey)
         );
@@ -733,12 +700,15 @@ useAccountStoreBase.subscribe(async (state, prevState) => {
   const current = state.userProfile;
   const previous = prevState.userProfile;
 
-  if (!current || !state.ourPk) return;
+  if (!current || !state.session) return;
   if (current === previous) return;
   if (previous && current.userId === previous.userId) return;
 
   try {
-    await authService.ensurePublicKeyPublished(state.ourPk, current.userId);
+    await authService.ensurePublicKeyPublished(
+      state.session.ourPk,
+      current.userId
+    );
   } catch (error) {
     console.error('Error publishing public key:', error);
   }
