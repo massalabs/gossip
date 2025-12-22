@@ -184,6 +184,34 @@ const SendModal: React.FC<SendModalProps> = ({
     setShowConfirmation(true);
   }, [validateForm]);
 
+  const handleAmountKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLInputElement>) => {
+      // Don't submit while composing (IME)
+      if (e.nativeEvent.isComposing) return;
+
+      // Handle Enter key to submit
+      if (
+        e.key === 'Enter' &&
+        !e.shiftKey &&
+        !e.ctrlKey &&
+        !e.altKey &&
+        !e.metaKey
+      ) {
+        e.preventDefault();
+        if (
+          recipient &&
+          amount &&
+          isValidRecipient !== false &&
+          !isConfirming &&
+          !isPending
+        ) {
+          handleSend();
+        }
+      }
+    },
+    [recipient, amount, isValidRecipient, isConfirming, isPending, handleSend]
+  );
+
   const handleConfirmTransaction = useCallback(async () => {
     setIsConfirming(true);
     setError(null);
@@ -338,10 +366,12 @@ const SendModal: React.FC<SendModalProps> = ({
               setAmount(e.target.value);
               setError(null);
             }}
+            onKeyDown={handleAmountKeyDown}
             placeholder="0.00"
             step="any"
             min="0"
             className="flex-1 px-4 py-3 bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:text-white placeholder-gray-500 dark:placeholder-gray-400"
+            enterKeyHint="done"
           />
           <Button
             onClick={handleMaxAmount}
