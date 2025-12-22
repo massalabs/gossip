@@ -13,6 +13,7 @@ import {
 import { Message, MessageDirection, MessageStatus } from '../../db';
 import { formatTime } from '../../utils/timeUtils';
 import { messageService } from '../../services/message';
+import { parseLinks, openUrl } from '../../utils/linkUtils';
 
 // Swipe gesture constants - base values for incoming messages
 const SWIPE_MAX_DISTANCE = 80;
@@ -254,6 +255,26 @@ const MessageItem: React.FC<MessageItemProps> = ({
     e.preventDefault();
   }, []);
 
+  const handleLinkClick = useCallback(
+    (e: React.MouseEvent<HTMLAnchorElement>) => {
+      // Stop propagation to prevent double-click to reply from triggering
+      e.preventDefault();
+      e.stopPropagation();
+      // Open URL using our utility function that works on both web and native
+      const url = e.currentTarget.href;
+      if (url) {
+        openUrl(url);
+      }
+    },
+    []
+  );
+
+  // Memoize parsed links to avoid re-parsing on every render
+  const parsedLinks = useMemo(
+    () => parseLinks(message.content),
+    [message.content]
+  );
+
   // Calculate spacing based on grouping
   // Last message in group gets more margin to separate from next group
   const spacingClass = isLastInGroup ? 'mb-1' : 'mb-0.5';
@@ -409,7 +430,28 @@ const MessageItem: React.FC<MessageItemProps> = ({
 
         {/* Message Content */}
         <p className="whitespace-pre-wrap wrap-break-word pr-6">
-          {message.content}
+          {parsedLinks.map((segment, index) => {
+            if (segment.type === 'link') {
+              return (
+                <a
+                  key={index}
+                  href={segment.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={handleLinkClick}
+                  aria-label={`${segment.content} (opens in a new tab)`}
+                  className="underline hover:opacity-80 transition-opacity break-all cursor-pointer"
+                  style={{
+                    textDecorationColor: 'currentColor',
+                    textDecorationThickness: '1px',
+                  }}
+                >
+                  {segment.content}
+                </a>
+              );
+            }
+            return <span key={index}>{segment.content}</span>;
+          })}
         </p>
 
         {/* Timestamp and Status */}
