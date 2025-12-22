@@ -78,16 +78,23 @@ export class MockMessageProtocol implements IMessageProtocol {
     // Simulate network delay
     await new Promise(resolve => setTimeout(resolve, 150));
 
-    // Simulate pagination by returning at most the requested number of announcements
+    // Simulate pagination by returning announcements after cursor, limited by limit
     // In a real implementation, cursor would filter announcements
-    if (this.mockAnnouncements.length < this.bulletinCounter - limit) {
-      return this.mockAnnouncements.map(a => ({
-        counter: String(this.bulletinCounter),
-        data: a,
-      }));
+    let startIndex = 0;
+    if (cursor) {
+      const cursorNum = parseInt(cursor, 10);
+      startIndex = Math.max(0, cursorNum);
     }
 
-    return [];
+    // Return announcements starting from the cursor position, up to the limit
+    const announcementsToReturn = this.mockAnnouncements
+      .slice(startIndex, startIndex + limit)
+      .map((data, index) => ({
+        counter: String(startIndex + index + 1),
+        data,
+      }));
+
+    return announcementsToReturn;
   }
 
   async fetchPublicKeyByUserId(userId: Uint8Array): Promise<string> {

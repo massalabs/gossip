@@ -99,7 +99,7 @@ export class RestMessageProtocol implements IMessageProtocol {
     params.set('limit', String(limit));
 
     if (cursor) {
-      params.set('after', cursor);
+      params.set('offset', cursor);
     }
 
     const url = `${this.baseUrl}${BULLETIN_ENDPOINT}?${params.toString()}`;

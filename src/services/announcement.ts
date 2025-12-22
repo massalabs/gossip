@@ -50,7 +50,7 @@ export class AnnouncementService {
 
     try {
       const counter = await this.messageProtocol.sendAnnouncement(announcement);
-      log.info(`broadcast successful`, { counter });
+      log.info('broadcast successful', { counter });
       return { success: true, counter };
     } catch (error) {
       log.error('broadcast failed', error);
@@ -73,7 +73,6 @@ export class AnnouncementService {
     const log = logger.forMethod('establishSession');
 
     const contactUserId = encodeUserId(contactPublicKeys.derive_id());
-    log.info(`establishing session with contact`, { contactUserId });
 
     const announcement = session.establishOutgoingSession(
       contactPublicKeys,
@@ -81,7 +80,7 @@ export class AnnouncementService {
     );
 
     if (announcement.length === 0) {
-      log.error(`empty announcement returned`, { contactUserId });
+      log.error('empty announcement returned', { contactUserId });
       return {
         success: false,
         error: EstablishSessionError,
@@ -89,17 +88,9 @@ export class AnnouncementService {
       };
     }
 
-    const sessionStatus = session.peerSessionStatus(
-      contactPublicKeys.derive_id()
-    );
-    log.info(`session established`, {
-      contactUserId,
-      status: sessionStatusToString(sessionStatus),
-    });
-
     const result = await this.sendAnnouncement(announcement);
     if (!result.success) {
-      log.error(`failed to broadcast announcement`, {
+      log.error('failed to broadcast announcement', {
         contactUserId,
         error: result.error,
       });
@@ -110,7 +101,7 @@ export class AnnouncementService {
       };
     }
 
-    log.info(`announcement sent successfully`, { contactUserId });
+    log.info('announcement sent successfully', { contactUserId });
     return { success: true, announcement };
   }
 
@@ -137,9 +128,9 @@ export class AnnouncementService {
           .filter((id): id is number => id !== undefined);
         if (ids.length > 0) await db.pendingAnnouncements.bulkDelete(ids);
       } else {
-        log.info('no pending announcements, fetching from network');
         const cursor = (await db.userProfile.get(session.userIdEncoded))
           ?.lastBulletinCounter;
+
         const fetched = await this._fetchAnnouncements(cursor);
         announcements = fetched.map(a => a.data);
         fetchedCounters = fetched.map(a => a.counter);
@@ -160,18 +151,9 @@ export class AnnouncementService {
 
             if (result.success && result.contactUserId) {
               newAnnouncementsCount++;
-              // Log only periodically to avoid spam
-              if (
-                newAnnouncementsCount <= 5 ||
-                newAnnouncementsCount % 10 === 0
-              ) {
-                log.info(
-                  `processed new announcement #${newAnnouncementsCount}`,
-                  {
-                    contactUserId: result.contactUserId,
-                  }
-                );
-              }
+              log.info(`processed new announcement #${newAnnouncementsCount}`, {
+                contactUserId: result.contactUserId,
+              });
             }
 
             if (result.error) errors.push(result.error);
@@ -187,22 +169,15 @@ export class AnnouncementService {
         }
       }
 
-      // Update cursor if we fetched from API and processed something new
-      if (fetchedCounters.length > 0 && newAnnouncementsCount > 0) {
+      if (fetchedCounters.length > 0) {
         const highestCounter = fetchedCounters.reduce((a, b) =>
-          a > b ? a : b
+          Number(a) > Number(b) ? a : b
         );
         await db.userProfile.update(session.userIdEncoded, {
           lastBulletinCounter: highestCounter,
         });
-        log.info(`updated lastBulletinCounter`, { highestCounter });
+        log.info('updated lastBulletinCounter', { highestCounter });
       }
-
-      log.info(`completed`, {
-        processed: newAnnouncementsCount,
-        totalAnnouncements: announcements.length,
-        errors: errors.length,
-      });
 
       return {
         success: errors.length === 0 || newAnnouncementsCount > 0,
@@ -246,12 +221,12 @@ export class AnnouncementService {
         );
 
         if (result.success) {
-          log.info(`resent successfully`, { ownerUserId, contactUserId });
+          log.info('resent successfully', { ownerUserId, contactUserId });
           sentDiscussions.push(discussion);
           continue;
         }
 
-        log.info(`network send failed (retry)`, { ownerUserId, contactUserId });
+        log.info('network send failed (retry)', { ownerUserId, contactUserId });
 
         const ageMs = Date.now() - (discussion.updatedAt.getTime() ?? 0);
         if (ageMs > ONE_HOUR_MS) {
@@ -265,7 +240,7 @@ export class AnnouncementService {
           brokenDiscussions.push(discussion.id!);
         }
       } catch (error) {
-        log.error(`exception during resend`, {
+        log.error('exception during resend', {
           error: error instanceof Error ? error.message : 'Unknown error',
           ownerUserId,
           contactUserId,
@@ -289,7 +264,7 @@ export class AnnouncementService {
                 status !== SessionStatus.Active &&
                 status !== SessionStatus.SelfRequested
               ) {
-                log.info(`skipping DB update - session not ready`, {
+                log.info('skipping DB update - session not ready', {
                   contactUserId: discussion.contactUserId,
                   status: statusStr,
                 });
@@ -306,7 +281,7 @@ export class AnnouncementService {
                 updatedAt: now,
               });
 
-              log.info(`updated discussion status in DB`, {
+              log.info('updated discussion status in DB', {
                 contactUserId: discussion.contactUserId,
                 newStatus,
               });
@@ -329,7 +304,7 @@ export class AnnouncementService {
       });
     }
 
-    log.info(`resend completed`, {
+    log.info('resend completed', {
       sent: sentDiscussions.length,
       broken: brokenDiscussions.length,
     });
@@ -346,10 +321,9 @@ export class AnnouncementService {
         limit,
         cursor
       );
-      log.info(`fetched ${items.length} announcements`, { cursor, limit });
       return items;
     } catch (error) {
-      log.error(`network fetch failed`, error);
+      log.error('network fetch failed', error);
       return [];
     }
   }
@@ -357,6 +331,7 @@ export class AnnouncementService {
   private async _generateTemporaryContactName(
     ownerUserId: string
   ): Promise<string> {
+    // Pas de log ici car c'est une fonction utilitaire simple et appelée souvent
     const newRequestContacts = await db.contacts
       .where('ownerUserId')
       .equals(ownerUserId)
@@ -388,18 +363,17 @@ export class AnnouncementService {
     const result = session.feedIncomingAnnouncement(announcementData);
 
     if (!result) {
-      // Not for us — silent success
       return { success: true };
     }
 
-    log.info(`announcement intended for us — decrypting`);
+    log.info('announcement intended for us — decrypting');
 
     let announcementMessage: string | undefined;
     if (result.user_data?.length > 0) {
       try {
         announcementMessage = new TextDecoder().decode(result.user_data);
       } catch (error) {
-        log.error(`failed to decode user data`, error);
+        log.error('failed to decode user data', error);
       }
     }
 
@@ -408,7 +382,7 @@ export class AnnouncementService {
     const contactUserId = encodeUserId(contactUserIdRaw);
 
     const sessionStatus = session.peerSessionStatus(contactUserIdRaw);
-    log.info(`session updated`, {
+    log.info('session updated', {
       contactUserId,
       status: sessionStatusToString(sessionStatus),
     });
@@ -438,11 +412,11 @@ export class AnnouncementService {
         session.userIdEncoded,
         contactUserId
       );
-      log.info(`created new contact`, { contactUserId, name });
+      log.info('created new contact', { contactUserId, name });
     }
 
     if (!contact) {
-      log.error(`contact lookup failed after creation`);
+      log.error('contact lookup failed after creation');
       throw new Error('Could not find or create contact');
     }
 
@@ -457,9 +431,9 @@ export class AnnouncementService {
         await notificationService.showNewDiscussionNotification(
           announcementMessage
         );
-        log.info(`notification shown for new discussion`);
+        log.info('notification shown for new discussion');
       } catch (error) {
-        log.error(`failed to show notification`, error);
+        log.error('failed to show notification', error);
       }
     }
 
@@ -494,12 +468,12 @@ async function handleReceivedDiscussion(
         existing.direction === DiscussionDirection.INITIATED
       ) {
         updateData.status = DiscussionStatus.ACTIVE;
-        log.info(`transitioning to ACTIVE`, {
+        log.info('transitioning to ACTIVE', {
           discussionId: existing.id,
           contactUserId,
         });
       } else {
-        log.info(`updating existing discussion`, {
+        log.info('updating existing discussion', {
           discussionId: existing.id,
           status: existing.status,
           direction: existing.direction,
@@ -510,7 +484,7 @@ async function handleReceivedDiscussion(
       return existing.id!;
     }
 
-    log.info(`creating new RECEIVED/PENDING discussion`, { contactUserId });
+    log.info('creating new RECEIVED/PENDING discussion', { contactUserId });
     return await db.discussions.add({
       ownerUserId,
       contactUserId,

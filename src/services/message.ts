@@ -99,16 +99,17 @@ export class MessageService {
           [...currentSeekers].every(s => previousSeekers.has(s));
 
         if (allSame || iterations >= LIMIT_FETCH_ITERATIONS) {
-          log.info('fetch loop ended', {
-            reason: allSame ? 'seekers unchanged' : 'max iterations',
-            iterations,
-          });
+          // Seulement loguer si on a traité quelque chose ou si on sort pour max iterations
+          if (iterations >= LIMIT_FETCH_ITERATIONS) {
+            log.warn('fetch loop stopped due to max iterations', {
+              iterations,
+            });
+          }
           break;
         }
 
         const encryptedMessages =
           await this.messageProtocol.fetchMessages(seekers);
-
         previousSeekers = currentSeekers;
 
         if (encryptedMessages.length === 0) {
@@ -117,39 +118,45 @@ export class MessageService {
           continue;
         }
 
-        log.info(`retrieved ${encryptedMessages.length} encrypted messages`);
+        // Un seul log par batch non vide
+        log.info(`received ${encryptedMessages.length} encrypted messages`);
 
         const { decrypted: decryptedMessages, acknowledgedSeekers } =
           this.decryptMessages(encryptedMessages, session);
 
-        log.info(`decrypted ${decryptedMessages.length} messages`);
+        if (decryptedMessages.length > 0) {
+          const storedIds = await this.storeDecryptedMessages(
+            decryptedMessages,
+            session.userIdEncoded
+          );
+          newMessagesCount += storedIds.length;
+        }
 
-        const storedIds = await this.storeDecryptedMessages(
-          decryptedMessages,
-          session.userIdEncoded
-        );
-        newMessagesCount += storedIds.length;
-
-        await this.acknowledgeMessages(
-          acknowledgedSeekers,
-          session.userIdEncoded
-        );
+        if (acknowledgedSeekers.size > 0) {
+          await this.acknowledgeMessages(
+            acknowledgedSeekers,
+            session.userIdEncoded
+          );
+        }
 
         iterations++;
         await sleep(100);
       }
 
-      // Update active seekers only when app is in foreground
+      // Mise à jour des seekers uniquement en foreground
       try {
         if (await isAppInForeground()) {
           await db.setActiveSeekers(seekers);
-          log.info('updated active seekers in storage');
         }
       } catch (error) {
         log.error('failed to update active seekers', error);
       }
 
-      log.info('fetch completed', { newMessagesCount, iterations });
+      // Résumé final : seul log vraiment utile toutes les 3 secondes
+      if (newMessagesCount > 0) {
+        log.info(`fetch completed — ${newMessagesCount} new messages received`);
+      }
+      // Pas de log si rien reçu → évite le spam
 
       return { success: true, newMessagesCount };
     } catch (err) {
@@ -208,7 +215,7 @@ export class MessageService {
           });
         }
       } catch (e) {
-        log.error('decryption failed for message', {
+        log.error('decryption failed', {
           error: e instanceof Error ? e.message : 'Unknown error',
           seeker: encodeToBase64(msg.seeker),
         });
@@ -224,8 +231,6 @@ export class MessageService {
   ): Promise<number[]> {
     const log = logger.forMethod('storeDecryptedMessages');
 
-    if (!decrypted.length) return [];
-
     const storedIds: number[] = [];
 
     for (const message of decrypted) {
@@ -235,7 +240,7 @@ export class MessageService {
       );
 
       if (!discussion) {
-        log.error('no discussion found for incoming message', {
+        log.error('no discussion for incoming message', {
           senderId: message.senderId,
           preview: message.content.slice(0, 50),
         });
@@ -289,7 +294,6 @@ export class MessageService {
       storedIds.push(id);
     }
 
-    log.info(`stored ${storedIds.length} new messages`);
     return storedIds;
   }
 
@@ -307,21 +311,21 @@ export class MessageService {
     seekers: Set<string>,
     userId: string
   ): Promise<void> {
-    const log = logger.forMethod('acknowledgeMessages');
-
     if (seekers.size === 0) return;
 
     const updatedCount = await db.messages
       .where('[ownerUserId+direction+status]')
       .equals([userId, MessageDirection.OUTGOING, MessageStatus.SENT])
-      .filter(msg => {
-        if (!msg.seeker) return false;
-        return seekers.has(encodeToBase64(msg.seeker));
-      })
+      .filter(
+        msg =>
+          msg.seeker !== undefined && seekers.has(encodeToBase64(msg.seeker))
+      )
       .modify({ status: MessageStatus.DELIVERED });
 
     if (updatedCount > 0) {
-      log.info(`acknowledged ${updatedCount} outgoing messages as delivered`);
+      logger
+        .forMethod('acknowledgeMessages')
+        .info(`acknowledged ${updatedCount} messages`);
     }
   }
 
@@ -348,9 +352,6 @@ export class MessageService {
     }
 
     const sessionStatus = session.peerSessionStatus(peerId);
-    log.info('session status check', {
-      status: sessionStatusToString(sessionStatus),
-    });
 
     if (sessionStatus === SessionStatus.PeerRequested) {
       return {
@@ -371,9 +372,7 @@ export class MessageService {
     if (serializeResult.error) {
       return { success: false, error: serializeResult.error };
     }
-
-    const contentBytes = serializeResult.contentBytes!;
-    message.serializedContent = contentBytes;
+    message.serializedContent = serializeResult.contentBytes!;
 
     const isUnstable = !(await isDiscussionStableState(
       message.ownerUserId,
@@ -399,10 +398,6 @@ export class MessageService {
       ...message,
       status: MessageStatus.SENDING,
     });
-    log.info('message persisted as sending', {
-      messageId,
-      preview: message.content.slice(0, 30),
-    });
 
     let sendOutput: SendMessageOutput | undefined;
     try {
@@ -412,12 +407,8 @@ export class MessageService {
         );
       }
 
-      sendOutput = session.sendMessage(peerId, contentBytes);
+      sendOutput = session.sendMessage(peerId, message.serializedContent!);
       if (!sendOutput) throw new Error('sendMessage returned null');
-
-      log.info('encrypted by session manager', {
-        seeker: encodeToBase64(sendOutput.seeker),
-      });
     } catch (error) {
       await db.transaction('rw', db.messages, db.discussions, async () => {
         await db.messages.update(messageId, { status: MessageStatus.FAILED });
@@ -426,10 +417,10 @@ export class MessageService {
         });
       });
 
-      log.error('session encryption failed → marked discussion broken', error);
+      log.error('encryption failed → discussion marked broken', error);
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Session error',
+        error: 'Session error',
         message: { ...message, id: messageId, status: MessageStatus.FAILED },
       };
     }
@@ -446,7 +437,6 @@ export class MessageService {
         encryptedMessage: sendOutput.data,
       });
 
-      log.info('message sent successfully on network');
       return {
         success: true,
         message: { ...message, id: messageId, status: MessageStatus.SENT },
@@ -458,7 +448,7 @@ export class MessageService {
         encryptedMessage: sendOutput.data,
       });
 
-      log.error('network broadcast failed (will retry later)', error);
+      log.error('network send failed → will retry later', error);
       return {
         success: false,
         error: 'Network send failed',
@@ -479,15 +469,12 @@ export class MessageService {
       );
 
       if (!original) {
-        log.error('reply target message not found', {
+        log.error('reply target not found', {
           originalSeeker: encodeToBase64(message.replyTo.originalSeeker),
         });
         return { error: 'Original message not found for reply' };
       }
 
-      log.info('serializing reply message', {
-        originalContent: original.content.slice(0, 30),
-      });
       return {
         contentBytes: serializeReplyMessage(
           message.content,
@@ -507,113 +494,100 @@ export class MessageService {
     const log = logger.forMethod('resendMessages');
 
     const successfullySent: number[] = [];
+    let totalProcessed = 0;
 
     for (const [contactId, retryMessages] of messages.entries()) {
       const peerId = decodeUserId(contactId);
-      log.info(`resending ${retryMessages.length} messages`, { contactId });
+      totalProcessed += retryMessages.length;
 
-      let shouldStopThisDiscussion = false;
+      let shouldStop = false;
 
       for (const msg of retryMessages) {
-        if (shouldStopThisDiscussion) break;
-
-        log.info('processing failed message', {
-          id: msg.id,
-          preview: msg.content.slice(0, 30),
-        });
+        if (shouldStop) break;
 
         if (msg.encryptedMessage && msg.seeker) {
-          // Already encrypted — just rebroadcast
           try {
             await this.messageProtocol.sendMessage({
               seeker: msg.seeker,
               ciphertext: msg.encryptedMessage,
             });
             successfullySent.push(msg.id!);
-            log.info('rebroadcast success (previously encrypted)');
           } catch (error) {
-            log.error('rebroadcast failed', error);
+            log.error('rebroadcast failed', {
+              error: error instanceof Error ? error.message : 'Unknown error',
+              messageId: msg.id,
+            });
           }
-        } else {
-          // Needs fresh encryption
-          if (!session) {
-            log.error('session module missing');
-            break;
-          }
+          continue;
+        }
 
-          const status = session.peerSessionStatus(peerId);
-          log.info('session status during resend', {
-            status: sessionStatusToString(status),
+        // Needs encryption
+        if (!session) break;
+
+        const status = session.peerSessionStatus(peerId);
+
+        if (status === SessionStatus.SelfRequested) {
+          log.info('skipping resend — waiting for peer acceptance', {
+            contactId,
           });
+          break;
+        }
 
-          if (status === SessionStatus.SelfRequested) {
-            log.info('skipping resend — waiting for peer acceptance');
-            break;
-          }
+        if ([SessionStatus.Killed, SessionStatus.Saturated].includes(status)) {
+          await db.discussions
+            .where('[ownerUserId+contactUserId]')
+            .equals([msg.ownerUserId, contactId])
+            .modify({ status: DiscussionStatus.BROKEN });
+          log.error('session broken during resend', { status, contactId });
+          break;
+        }
 
-          if (
-            [SessionStatus.Killed, SessionStatus.Saturated].includes(status)
-          ) {
-            await db.discussions
-              .where('[ownerUserId+contactUserId]')
-              .equals([msg.ownerUserId, contactId])
-              .modify({ status: DiscussionStatus.BROKEN });
-            log.error('session broken → marked discussion BROKEN', { status });
-            break;
-          }
+        if (status !== SessionStatus.Active) {
+          log.warn('session not active — stopping resend', {
+            status,
+            contactId,
+          });
+          break;
+        }
 
-          if (status !== SessionStatus.Active) {
-            log.warn(
-              'session not active — stopping resend for this discussion',
-              { status }
-            );
-            break;
-          }
-
-          let serialized = msg.serializedContent;
-          if (!serialized) {
-            const result = await this.serializeMessage(msg);
-            if (result.error) {
-              log.error('serialization failed during resend', {
-                error: result.error,
-              });
-              shouldStopThisDiscussion = true;
-              continue;
-            }
-            serialized = result.contentBytes!;
-          }
-
-          let sendOutput: SendMessageOutput | undefined;
-          try {
-            sendOutput = session.sendMessage(peerId, serialized);
-            if (!sendOutput) throw new Error('sendMessage returned null');
-          } catch (error) {
-            log.error(
-              'session encryption failed → stopping further resends',
-              error
-            );
-            shouldStopThisDiscussion = true;
+        let serialized = msg.serializedContent;
+        if (!serialized) {
+          const result = await this.serializeMessage(msg);
+          if (result.error) {
+            log.error('serialization failed during resend', {
+              error: result.error,
+            });
+            shouldStop = true;
             continue;
           }
-
-          await db.messages.update(msg.id!, {
-            seeker: sendOutput.seeker,
-            encryptedMessage: sendOutput.data,
-          });
-
-          try {
-            await this.messageProtocol.sendMessage({
-              seeker: sendOutput.seeker,
-              ciphertext: sendOutput.data,
-            });
-            log.info('full resend success (encrypted + broadcast)');
-          } catch (error) {
-            log.error('network send failed after encryption', error);
-            // Continue trying next message — network issues shouldn't block queue
-          }
-
-          successfullySent.push(msg.id!);
+          serialized = result.contentBytes!;
         }
+
+        let sendOutput: SendMessageOutput | undefined;
+        try {
+          sendOutput = session.sendMessage(peerId, serialized);
+          if (!sendOutput) throw new Error('sendMessage returned null');
+        } catch (error) {
+          log.error('encryption failed during resend → stopping', error);
+          shouldStop = true;
+          continue;
+        }
+
+        await db.messages.update(msg.id!, {
+          seeker: sendOutput.seeker,
+          encryptedMessage: sendOutput.data,
+        });
+
+        try {
+          await this.messageProtocol.sendMessage({
+            seeker: sendOutput.seeker,
+            ciphertext: sendOutput.data,
+          });
+        } catch (error) {
+          log.error('network send failed during resend', error);
+        }
+
+        successfullySent.push(msg.id!);
       }
     }
 
@@ -625,10 +599,11 @@ export class MessageService {
           )
         );
       });
-      log.info(`updated ${successfullySent.length} resent messages to SENT`);
     }
 
-    log.info('resend operation completed', {
+    log.info('resend completed', {
+      contacts: messages.size,
+      messagesProcessed: totalProcessed,
       successfullySent: successfullySent.length,
     });
   }

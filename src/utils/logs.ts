@@ -9,47 +9,59 @@ export class Logger {
     this.context = context;
   }
 
-  private formatPrefix(): string {
+  private getSource(): string {
     return this.context ? `${this.module}:${this.context}` : this.module;
   }
 
+  private formatMainMessage(message: string): string {
+    const source = this.getSource();
+    return `[${source}] ${message}`;
+  }
+
   info(message: string, extra?: unknown): void {
-    console.log(`[INFO] ${this.formatPrefix()}`, message);
+    const main = this.formatMainMessage(message);
     if (extra !== undefined) {
-      console.log('   ↳', extra);
+      console.log(main, extra);
+    } else {
+      console.log(main);
     }
   }
 
   error(messageOrError: string | Error | unknown, extra?: unknown): void {
-    const prefix = `[ERROR] ${this.formatPrefix()}`;
+    const source = this.getSource();
+
     if (messageOrError instanceof Error) {
-      console.error(prefix, messageOrError.message);
-      if (messageOrError.stack) {
-        console.error(messageOrError.stack);
-      }
+      const main = `[${source}] ${messageOrError.message}`;
+      console.error(main, messageOrError, extra);
     } else {
-      console.error(prefix, messageOrError);
-    }
-    if (extra !== undefined) {
-      console.error('   ↳', extra);
+      const main = `[${source}] ${messageOrError}`;
+      if (extra !== undefined) {
+        console.error(main, extra);
+      } else {
+        console.error(main);
+      }
     }
   }
 
   debug(message: string, extra?: unknown): void {
-    console.debug(`[DEBUG] ${this.formatPrefix()}`, message);
+    const main = this.formatMainMessage(message);
     if (extra !== undefined) {
-      console.debug('   ↳', extra);
+      console.debug(main, extra);
+    } else {
+      console.debug(main);
     }
   }
 
   warn(message: string, extra?: unknown): void {
-    console.warn(`[WARN] ${this.formatPrefix()}`, message);
+    const main = this.formatMainMessage(message);
     if (extra !== undefined) {
-      console.warn('   ↳', extra);
+      console.warn(main, extra);
+    } else {
+      console.warn(main);
     }
   }
 
-  // NEW: Create a new logger with added context (immutable, chainable)
+  // Chainable context
   withContext(newContext: string): Logger {
     const fullContext = this.context
       ? `${this.context}:${newContext}`
@@ -57,7 +69,6 @@ export class Logger {
     return new Logger(this.module, fullContext);
   }
 
-  // Optional: shortcut for method-scoped logging
   forMethod(methodName: string): Logger {
     return this.withContext(methodName);
   }
