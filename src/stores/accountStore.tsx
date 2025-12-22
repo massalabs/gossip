@@ -25,6 +25,7 @@ import { auth } from './utils/auth';
 import { useDiscussionStore } from './discussionStore';
 import { useMessageStore } from './messageStore';
 import { authService } from '../services/auth';
+import { validateUsernameFormat } from '../utils/validation';
 
 async function createProfileFromAccount(
   username: string,
@@ -242,6 +243,9 @@ interface AccountState {
 
   // Session persistence
   persistSession: () => Promise<void>;
+
+  // Username update
+  updateUsername: (newUsername: string) => Promise<void>;
 }
 
 const useAccountStoreBase = create<AccountState>((set, get) => {
@@ -687,6 +691,39 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       } catch (error) {
         console.error('Error persisting session:', error);
         // Don't throw - persistence failures shouldn't break the app
+      }
+    },
+
+    updateUsername: async (newUsername: string) => {
+      try {
+        const state = get();
+        const profile = state.userProfile;
+
+        if (!profile) {
+          throw new Error('No user profile found');
+        }
+
+        const trimmedUsername = newUsername.trim();
+
+        // Validate username format (consistency with account creation)
+        const formatResult = validateUsernameFormat(trimmedUsername);
+        if (!formatResult.valid) {
+          throw new Error(formatResult.error || 'Invalid username format');
+        }
+
+        const updatedProfile = {
+          ...profile,
+          username: trimmedUsername,
+          updatedAt: new Date(),
+        };
+
+        await db.userProfile.update(profile.userId, updatedProfile);
+
+        // Update the store with the new profile
+        set({ userProfile: updatedProfile });
+      } catch (error) {
+        console.error('Error updating username:', error);
+        throw error;
       }
     },
   };

@@ -17,6 +17,7 @@ import {
   Settings as SettingsIconFeather,
   Share2,
   User,
+  Edit2,
 } from 'react-feather';
 import { useNavigate } from 'react-router-dom';
 
@@ -24,6 +25,7 @@ import ProfilePicture from '../assets/gossip_face.svg';
 import { useAppStore } from '../stores/appStore';
 import AccountBackup from '../components/account/AccountBackup';
 import ShareContact from '../components/settings/ShareContact';
+import UsernameEditModal from '../components/settings/UsernameEditModal';
 
 enum SettingsView {
   MAIN = 'MAIN',
@@ -36,12 +38,19 @@ const REQUIRED_TAPS = 7;
 const TAP_TIMEOUT_MS = 2000; // Reset counter after 2 seconds of inactivity
 
 const Settings = (): React.ReactElement => {
-  const { userProfile, getMnemonicBackupInfo, logout, resetAccount, ourPk } =
-    useAccountStore();
+  const {
+    userProfile,
+    getMnemonicBackupInfo,
+    logout,
+    resetAccount,
+    ourPk,
+    updateUsername,
+  } = useAccountStore();
   const showDebugOption = useAppStore(s => s.showDebugOption);
   const setShowDebugOption = useAppStore(s => s.setShowDebugOption);
   const [showUserId, setShowUserId] = useState(false);
   const [isResetModalOpen, setIsResetModalOpen] = useState(false);
+  const [isUsernameModalOpen, setIsUsernameModalOpen] = useState(false);
   const [activeView, setActiveView] = useState<SettingsView>(SettingsView.MAIN);
   const navigate = useNavigate();
 
@@ -114,6 +123,18 @@ const Settings = (): React.ReactElement => {
     }
   };
 
+  const handleUpdateUsername = useCallback(
+    async (newUsername: string) => {
+      try {
+        await updateUsername(newUsername);
+      } catch (error) {
+        console.error('Failed to update username:', error);
+        throw error;
+      }
+    },
+    [updateUsername]
+  );
+
   if (activeView === SettingsView.ACCOUNT_BACKUP) {
     return <AccountBackup onBack={handleBack} />;
   }
@@ -152,11 +173,18 @@ const Settings = (): React.ReactElement => {
               />
             </button>
             <div className="flex-1 min-w-0">
-              <div className="mb-2 flex items-baseline gap-2">
+              <div className="mb-2 flex items-center gap-2">
                 <p className="text-xs text-muted-foreground shrink-0">Name:</p>
                 <h3 className="text-base font-semibold text-foreground truncate">
                   {userProfile?.username || 'Account name'}
                 </h3>
+                <button
+                  onClick={() => setIsUsernameModalOpen(true)}
+                  className="flex-shrink-0 p-1 rounded-lg hover:bg-muted transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                  aria-label="Edit username"
+                >
+                  <Edit2 className="w-3.5 h-3.5 text-muted-foreground" />
+                </button>
               </div>
               {userProfile?.userId && (
                 <div className="flex items-center gap-2 min-w-0">
@@ -341,6 +369,15 @@ const Settings = (): React.ReactElement => {
           </div>
         </div>
       </BaseModal>
+      {userProfile && (
+        <UsernameEditModal
+          isOpen={isUsernameModalOpen}
+          currentUsername={userProfile.username}
+          currentUserId={userProfile.userId}
+          onConfirm={handleUpdateUsername}
+          onClose={() => setIsUsernameModalOpen(false)}
+        />
+      )}
     </div>
   );
 };
