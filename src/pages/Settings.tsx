@@ -43,9 +43,10 @@ const Settings = (): React.ReactElement => {
     getMnemonicBackupInfo,
     logout,
     resetAccount,
-    ourPk,
     updateUsername,
+    session,
   } = useAccountStore();
+
   const showDebugOption = useAppStore(s => s.showDebugOption);
   const setShowDebugOption = useAppStore(s => s.setShowDebugOption);
   const [showUserId, setShowUserId] = useState(false);
@@ -145,7 +146,7 @@ const Settings = (): React.ReactElement => {
         onBack={handleBack}
         userId={userProfile!.userId}
         userName={userProfile!.username}
-        publicKey={ourPk!}
+        publicKey={session!.ourPk}
       />
     );
   }
@@ -180,7 +181,7 @@ const Settings = (): React.ReactElement => {
                 </h3>
                 <button
                   onClick={() => setIsUsernameModalOpen(true)}
-                  className="flex-shrink-0 p-1 rounded-lg hover:bg-muted transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                  className="shrink-0 p-1 rounded-lg hover:bg-muted transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
                   aria-label="Edit username"
                 >
                   <Edit2 className="w-3.5 h-3.5 text-muted-foreground" />

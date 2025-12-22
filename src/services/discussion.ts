@@ -7,10 +7,7 @@ import {
   MessageStatus,
   DiscussionDirection,
 } from '../db';
-import {
-  UserPublicKeys,
-  UserSecretKeys,
-} from '../assets/generated/wasm/gossip_wasm';
+import { UserPublicKeys } from '../assets/generated/wasm/gossip_wasm';
 import { announcementService, EstablishSessionError } from './announcement';
 import { SessionModule, sessionStatusToString } from '../wasm/session';
 import { decodeUserId } from '../utils';
@@ -20,8 +17,6 @@ import { SessionStatus } from '../assets/generated/wasm/gossip_wasm';
 /**
  * Initialize a discussion with a contact using SessionManager
  * @param contact - The contact to start a discussion with
- * @param ourPk - Our public keys
- * @param ourSk - Our secret keys
  * @param session - The SessionModule instance to use
  * @param userId - The user ID of the current user (discussion owner)
  * @param message - Optional message to include in the announcement
@@ -29,8 +24,6 @@ import { SessionStatus } from '../assets/generated/wasm/gossip_wasm';
  */
 export async function initializeDiscussion(
   contact: Contact,
-  ourPk: UserPublicKeys,
-  ourSk: UserSecretKeys,
   session: SessionModule,
   userId: string,
   message?: string
@@ -49,8 +42,6 @@ export async function initializeDiscussion(
     );
     const result = await announcementService.establishSession(
       UserPublicKeys.from_bytes(contact.publicKeys),
-      ourPk,
-      ourSk,
       session,
       userData
     );
@@ -66,7 +57,7 @@ export async function initializeDiscussion(
       status = DiscussionStatus.SEND_FAILED;
     } else {
       console.log(
-        `initializeDiscussion: session established with contact and announcement sent: ${result.announcement}... bytes`
+        `initializeDiscussion: session established with contact and announcement sent: ${result.announcement.length}... bytes`
       );
     }
 
@@ -99,15 +90,11 @@ export async function initializeDiscussion(
  * Accept a discussion request from a contact using SessionManager
  * @param discussion - The discussion to accept
  * @param session - The SessionModule instance to use
- * @param ourPk - Our public keys
- * @param ourSk - Our secret keys
  * @returns void
  */
 export async function acceptDiscussionRequest(
   discussion: Discussion,
-  session: SessionModule,
-  ourPk: UserPublicKeys,
-  ourSk: UserSecretKeys
+  session: SessionModule
 ): Promise<void> {
   try {
     const contact = await db.getContactByOwnerAndUserId(
@@ -122,8 +109,6 @@ export async function acceptDiscussionRequest(
 
     const result = await announcementService.establishSession(
       UserPublicKeys.from_bytes(contact.publicKeys),
-      ourPk,
-      ourSk,
       session
     );
 
@@ -138,7 +123,7 @@ export async function acceptDiscussionRequest(
       status = DiscussionStatus.SEND_FAILED;
     } else {
       console.log(
-        `acceptDiscussionRequest: session established with contact and announcement sent: ${result.announcement}... bytes`
+        `acceptDiscussionRequest: session established with contact and announcement sent: ${result.announcement.length}... bytes`
       );
     }
 
@@ -165,9 +150,7 @@ export async function acceptDiscussionRequest(
 export async function renewDiscussion(
   ownerUserId: string,
   contactUserId: string,
-  session: SessionModule,
-  ourPk: UserPublicKeys,
-  ourSk: UserSecretKeys
+  session: SessionModule
 ): Promise<void> {
   const contact = await db.getContactByOwnerAndUserId(
     ownerUserId,
@@ -190,8 +173,6 @@ export async function renewDiscussion(
 
   const result = await announcementService.establishSession(
     UserPublicKeys.from_bytes(contact.publicKeys),
-    ourPk,
-    ourSk,
     session
   );
 

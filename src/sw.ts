@@ -165,7 +165,7 @@ class ServiceWorkerMessageReception {
           const now = new Date();
           await db.pendingAnnouncements.bulkAdd(
             announcements.map(announcement => ({
-              announcement,
+              announcement: announcement.data,
               fetchedAt: now,
             }))
           );

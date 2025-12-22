@@ -18,11 +18,11 @@ import { restMessageProtocol } from '../api/messageProtocol';
  * Changes node and re-initiates the discussion.
  */
 export function useManualRenewDiscussion() {
-  const { userProfile, ourPk, ourSk, session } = useAccountStore();
+  const { userProfile, session } = useAccountStore();
 
   return useCallback(
     async (contactUserId: string): Promise<void> => {
-      if (!userProfile?.userId || !session || !ourPk || !ourSk) {
+      if (!userProfile?.userId || !session) {
         console.warn(
           'Cannot renew discussion: WASM keys or session unavailable'
         );
@@ -36,13 +36,7 @@ export function useManualRenewDiscussion() {
       }
 
       try {
-        await renewDiscussion(
-          userProfile.userId,
-          contactUserId,
-          session,
-          ourPk,
-          ourSk
-        );
+        await renewDiscussion(userProfile.userId, contactUserId, session);
       } catch (error) {
         console.error(
           `Failed to renew discussion with ${contactUserId}:`,
@@ -50,7 +44,7 @@ export function useManualRenewDiscussion() {
         );
       }
     },
-    [userProfile?.userId, session, ourPk, ourSk]
+    [userProfile?.userId, session]
   );
 }
 
@@ -59,7 +53,7 @@ export function useManualRenewDiscussion() {
  * Used by useAppStateRefresh for automatic retry logic.
  */
 export function useResendFailedBlobs() {
-  const { userProfile, ourPk, ourSk, session } = useAccountStore();
+  const { userProfile, session } = useAccountStore();
   const isResending = useRef(false);
 
   const [retryMessagesByContact, setRetryMessagesByContact] = useState<
@@ -134,7 +128,7 @@ export function useResendFailedBlobs() {
   // Resend all failed items
   const resendFailedBlobs = useCallback(async () => {
     if (isResending.current) return;
-    if (!session || !ourPk || !ourSk || !userProfile?.userId) return;
+    if (!session || !userProfile?.userId) return;
 
     isResending.current = true;
     try {
@@ -144,9 +138,7 @@ export function useResendFailedBlobs() {
           await renewDiscussion(
             userProfile.userId,
             discussion.contactUserId,
-            session,
-            ourPk,
-            ourSk
+            session
           );
         } catch (err) {
           console.error(
@@ -181,8 +173,6 @@ export function useResendFailedBlobs() {
     }
   }, [
     session,
-    ourPk,
-    ourSk,
     userProfile?.userId,
     brokenDiscussions,
     sendFailedDiscussions,
