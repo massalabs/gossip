@@ -122,6 +122,10 @@ export class AnnouncementService {
           `processing ${pending.length} pending announcements from IndexedDB`
         );
         announcements = pending.map(p => p.announcement);
+        // Track counters from pending announcements to avoid re-processing
+        fetchedCounters = pending
+          .map(p => p.counter)
+          .filter((counter): counter is string => counter !== undefined);
 
         const ids = pending
           .map(p => p.id)
@@ -331,7 +335,6 @@ export class AnnouncementService {
   private async _generateTemporaryContactName(
     ownerUserId: string
   ): Promise<string> {
-    // Pas de log ici car c'est une fonction utilitaire simple et appelée souvent
     const newRequestContacts = await db.contacts
       .where('ownerUserId')
       .equals(ownerUserId)

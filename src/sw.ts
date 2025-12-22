@@ -167,6 +167,7 @@ class ServiceWorkerMessageReception {
             announcements.map(announcement => ({
               announcement: announcement.data,
               fetchedAt: now,
+              counter: announcement.counter,
             }))
           );
           // All announcements were added successfully

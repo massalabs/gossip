@@ -99,7 +99,6 @@ export class MessageService {
           [...currentSeekers].every(s => previousSeekers.has(s));
 
         if (allSame || iterations >= LIMIT_FETCH_ITERATIONS) {
-          // Seulement loguer si on a traité quelque chose ou si on sort pour max iterations
           if (iterations >= LIMIT_FETCH_ITERATIONS) {
             log.warn('fetch loop stopped due to max iterations', {
               iterations,
@@ -140,7 +139,6 @@ export class MessageService {
         await sleep(100);
       }
 
-      // Mise à jour des seekers uniquement en foreground
       try {
         if (await isAppInForeground()) {
           await db.setActiveSeekers(seekers);
@@ -149,11 +147,9 @@ export class MessageService {
         log.error('failed to update active seekers', error);
       }
 
-      // Résumé final : seul log vraiment utile toutes les 3 secondes
       if (newMessagesCount > 0) {
         log.info(`fetch completed — ${newMessagesCount} new messages received`);
       }
-      // Pas de log si rien reçu → évite le spam
 
       return { success: true, newMessagesCount };
     } catch (err) {

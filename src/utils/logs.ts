@@ -34,7 +34,13 @@ export class Logger {
       const main = `[${source}] ${messageOrError.message}`;
       console.error(main, messageOrError, extra);
     } else {
-      const main = `[${source}] ${messageOrError}`;
+      const message =
+        typeof messageOrError === 'string'
+          ? messageOrError
+          : messageOrError instanceof Error
+            ? messageOrError.message
+            : JSON.stringify(messageOrError);
+      const main = `[${source}] ${message}`;
       if (extra !== undefined) {
         console.error(main, extra);
       } else {

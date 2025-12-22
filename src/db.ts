@@ -142,6 +142,7 @@ export interface PendingAnnouncement {
   id?: number;
   announcement: Uint8Array;
   fetchedAt: Date;
+  counter?: string;
 }
 
 export interface ActiveSeeker {
