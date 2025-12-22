@@ -118,9 +118,6 @@ export class MessageService {
           continue;
         }
 
-        // Un seul log par batch non vide
-        log.info(`received ${encryptedMessages.length} encrypted messages`);
-
         const { decrypted: decryptedMessages, acknowledgedSeekers } =
           this.decryptMessages(encryptedMessages, session);
 
