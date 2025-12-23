@@ -3,16 +3,12 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
 import { parseInvite } from '../utils/qrCodeParser';
 import { useAppStore } from '../stores/appStore';
+import { LANDING_PAGE_URL } from '../constants/links';
 import Button from '../components/ui/Button';
 import PageHeader from '../components/ui/PageHeader';
 import HeaderWrapper from '../components/ui/HeaderWrapper';
 import { PrivacyGraphic } from '../components/graphics';
-// import {
-//   GOOGLE_PLAY_STORE_URL,
-//   APPLE_APP_STORE_URL,
-//   LAST_APK_GITHUB_URL,
-// } from '../constants/links';
-// import { ChevronRight, GitHub, Smartphone } from 'react-feather';
+
 import toast from 'react-hot-toast';
 
 // Timing constants
@@ -273,6 +269,18 @@ export const InvitePage: React.FC = () => {
                 </>
               )}
             </div>
+          </div>
+
+          {/* Landing Page Link */}
+          <div className="text-center">
+            <Button
+              onClick={() => window.open(LANDING_PAGE_URL, '_blank')}
+              variant="outline"
+              size="md"
+              className="rounded-full"
+            >
+              Learn more about Gossip
+            </Button>
           </div>
 
           {/* Install Section */}
