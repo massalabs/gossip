@@ -33,6 +33,9 @@ interface AppStoreState {
   // Pending shared content from other apps
   pendingSharedContent: string | null;
   setPendingSharedContent: (content: string | null) => void;
+  // Pending forward message id (used during discussion selection)
+  pendingForwardMessageId: number | null;
+  setPendingForwardMessageId: (messageId: number | null) => void;
 }
 
 const useAppStoreBase = create<AppStoreState>()(
@@ -73,6 +76,11 @@ const useAppStoreBase = create<AppStoreState>()(
       pendingSharedContent: null,
       setPendingSharedContent: (content: string | null) => {
         set({ pendingSharedContent: content });
+      },
+      // Pending forward message id
+      pendingForwardMessageId: null,
+      setPendingForwardMessageId: (messageId: number | null) => {
+        set({ pendingForwardMessageId: messageId });
       },
     }),
     {

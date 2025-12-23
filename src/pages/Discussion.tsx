@@ -7,6 +7,7 @@ import { useAppStore } from '../stores/appStore';
 import { useDiscussionStore } from '../stores/discussionStore';
 import { useMessageStore } from '../stores/messageStore';
 import toast from 'react-hot-toast';
+import { ROUTES } from '../constants/routes';
 import DiscussionHeader from '../components/discussions/DiscussionHeader';
 import MessageList, {
   MessageListHandle,
@@ -21,22 +22,62 @@ const Discussion: React.FC = () => {
   const contacts = useDiscussionStore(s => s.contacts);
 
   // Get prefilled message from location state (for shared content)
-  const locationState = location.state as { prefilledMessage?: string } | null;
+  const locationState = location.state as {
+    prefilledMessage?: string;
+    forwardFromMessageId?: number;
+    scrollToMessageId?: number;
+  } | null;
   const prefilledMessage = locationState?.prefilledMessage;
 
   // Also check app store as fallback (in case location state is lost)
   const pendingSharedContent = useAppStore(s => s.pendingSharedContent);
   const setPendingSharedContent = useAppStore(s => s.setPendingSharedContent);
+  const setPendingForwardMessageId = useAppStore(
+    s => s.setPendingForwardMessageId
+  );
 
   // Use prefilledMessage from location state, or fallback to app store
   const finalPrefilledMessage = prefilledMessage || pendingSharedContent;
 
-  // Clear pendingSharedContent whenever it is used
+  // Local one-shot prefill state for the input. This lets us clear the input
+  // after sending (especially for forwards) without reusing location state.
+  const [inputPrefill, setInputPrefill] = useState<string | undefined>(
+    finalPrefilledMessage || undefined
+  );
+
+  // Dedicated preview text for forwards (loaded from DB using forwardFromMessageId)
+  const [forwardPreviewText, setForwardPreviewText] = useState<string | null>(
+    null
+  );
+  const [forwardPreviewMode, setForwardPreviewMode] = useState<
+    'forward' | 'reply'
+  >('forward');
+
+  // Track forwardFromMessageId for a single send
+  const [forwardFromMessageId, setForwardFromMessageId] = useState<
+    number | undefined
+  >(locationState?.forwardFromMessageId);
+
+  // Track an optional initial message to scroll to when opening this discussion
+  const initialScrollToMessageIdRef = useRef<number | null>(
+    locationState?.scrollToMessageId ?? null
+  );
+
+  // Clear pendingSharedContent only when this discussion was opened
+  // with a prefilled message from the share/forward flow.
+  const hasPrefilledMessage = !!locationState?.prefilledMessage;
   useEffect(() => {
-    if (pendingSharedContent) {
+    if (hasPrefilledMessage && pendingSharedContent) {
       setPendingSharedContent(null);
     }
-  }, [pendingSharedContent, setPendingSharedContent]);
+  }, [hasPrefilledMessage, pendingSharedContent, setPendingSharedContent]);
+
+  // Keep inputPrefill in sync with finalPrefilledMessage for third-party shares.
+  useEffect(() => {
+    if (finalPrefilledMessage) {
+      setInputPrefill(finalPrefilledMessage);
+    }
+  }, [finalPrefilledMessage]);
 
   const contact = userId ? contacts.find(c => c.userId === userId) : undefined;
   const onBack = () => navigate(-1);
@@ -128,23 +169,50 @@ const Discussion: React.FC = () => {
     async (text: string, replyToId?: number) => {
       if (!contact?.userId) return;
       try {
-        await sendMessage(contact.userId, text, replyToId);
+        await sendMessage(
+          contact.userId,
+          text,
+          replyToId,
+          forwardFromMessageId
+        );
         setReplyingTo(null);
+        if (forwardFromMessageId !== undefined) {
+          setForwardFromMessageId(undefined);
+        }
+        // Clear any prefill after a successful send so the input is empty
+        setInputPrefill(undefined);
+        setForwardPreviewText(null);
         // Scroll to bottom after sending (handled automatically by followOutput)
       } catch (error) {
         toast.error('Failed to send message');
         console.error('Failed to send message:', error);
       }
     },
-    [sendMessage, contact?.userId]
+    [sendMessage, contact?.userId, forwardFromMessageId]
   );
 
   const handleReplyToMessage = useCallback((message: Message) => {
     setReplyingTo(message);
   }, []);
 
+  const handleForwardMessage = useCallback(
+    (message: Message) => {
+      if (!message.id) return;
+      // Reuse the share flow: set pending content + forward id, then navigate to discussions
+      setPendingSharedContent(message.content);
+      setPendingForwardMessageId(message.id);
+      navigate(ROUTES.discussions());
+    },
+    [navigate, setPendingForwardMessageId, setPendingSharedContent]
+  );
+
   const handleCancelReply = useCallback(() => {
     setReplyingTo(null);
+  }, []);
+
+  const handleCancelForward = useCallback(() => {
+    setForwardFromMessageId(undefined);
+    setForwardPreviewText(null);
   }, []);
 
   // Handle input focus - scroll to bottom after keyboard appears
@@ -159,31 +227,96 @@ const Discussion: React.FC = () => {
     }, 350);
   }, [scrollToBottom]);
 
-  const handleScrollToMessage = useCallback((messageId: number) => {
-    const element = document.getElementById(`message-${messageId}`);
-    if (element) {
-      element.scrollIntoView({
-        behavior: 'smooth',
-        block: 'center',
-      });
-      // Add visual feedback
-      element.classList.add('highlight-message');
+  const handleScrollToMessage = useCallback(
+    (messageId: number) => {
+      (async () => {
+        // Look up the message to determine which discussion it belongs to
+        const target = await db.messages.get(messageId);
+        if (!target) {
+          console.warn(`Message with id ${messageId} not found in database`);
+          return;
+        }
 
-      // Clear any existing timeout
-      if (highlightTimeoutRef.current) {
-        clearTimeout(highlightTimeoutRef.current);
+        // If the message belongs to a different discussion, navigate there
+        if (target.contactUserId !== contact?.userId) {
+          navigate(ROUTES.discussion({ userId: target.contactUserId }), {
+            state: { scrollToMessageId: messageId },
+          });
+          return;
+        }
+
+        // Same discussion → scroll within current view
+        const element = document.getElementById(`message-${messageId}`);
+        if (element) {
+          element.scrollIntoView({
+            behavior: 'smooth',
+            block: 'center',
+          });
+          // Add visual feedback
+          element.classList.add('highlight-message');
+
+          // Clear any existing timeout
+          if (highlightTimeoutRef.current) {
+            clearTimeout(highlightTimeoutRef.current);
+          }
+
+          highlightTimeoutRef.current = setTimeout(() => {
+            const el = document.getElementById(`message-${messageId}`);
+            if (el) {
+              el.classList.remove('highlight-message');
+            }
+          }, 2000);
+        } else {
+          console.warn(
+            `Message element with id message-${messageId} not found`
+          );
+        }
+      })();
+    },
+    [contact?.userId, navigate]
+  );
+
+  // Load forward preview text from DB when a forward is active
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadForwardPreview = async () => {
+      if (forwardFromMessageId == null) {
+        setForwardPreviewText(null);
+        setForwardPreviewMode('forward');
+        return;
       }
 
-      highlightTimeoutRef.current = setTimeout(() => {
-        const el = document.getElementById(`message-${messageId}`);
-        if (el) {
-          el.classList.remove('highlight-message');
+      const original = await db.messages.get(forwardFromMessageId);
+      if (!cancelled) {
+        setForwardPreviewText(original?.content ?? null);
+        if (original && contact && original.contactUserId === contact.userId) {
+          setForwardPreviewMode('reply');
+        } else {
+          setForwardPreviewMode('forward');
         }
-      }, 2000);
-    } else {
-      console.warn(`Message element with id message-${messageId} not found`);
+      }
+    };
+
+    loadForwardPreview();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [forwardFromMessageId, contact]);
+
+  // When opening a discussion with a target message (e.g. from forwarded content),
+  // automatically scroll to that message once messages have loaded.
+  useEffect(() => {
+    if (
+      initialScrollToMessageIdRef.current != null &&
+      messages.length > 0 &&
+      !isLoading
+    ) {
+      handleScrollToMessage(initialScrollToMessageIdRef.current);
+      initialScrollToMessageIdRef.current = null;
     }
-  }, []);
+  }, [messages.length, isLoading, handleScrollToMessage]);
 
   if (!contact) return null;
 
@@ -202,6 +335,7 @@ const Discussion: React.FC = () => {
           discussion={discussion}
           isLoading={isLoading || isDiscussionLoading}
           onReplyTo={handleReplyToMessage}
+          onForward={handleForwardMessage}
           onScrollToMessage={handleScrollToMessage}
           onAtBottomChange={handleAtBottomChange}
         />
@@ -216,7 +350,10 @@ const Discussion: React.FC = () => {
         onSend={handleSendMessage}
         replyingTo={replyingTo}
         onCancelReply={handleCancelReply}
-        initialValue={finalPrefilledMessage || undefined}
+        initialValue={forwardFromMessageId ? undefined : inputPrefill}
+        forwardPreview={forwardFromMessageId ? forwardPreviewText : null}
+        forwardMode={forwardPreviewMode}
+        onCancelForward={handleCancelForward}
         onFocus={handleInputFocus}
       />
     </div>

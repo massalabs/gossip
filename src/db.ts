@@ -32,6 +32,10 @@ export interface Message {
     originalContent?: string;
     originalSeeker: Uint8Array; // Seeker of the original message (required for replies)
   };
+  forwardOf?: {
+    originalContent?: string;
+    originalSeeker: Uint8Array;
+  };
   encryptedMessage?: Uint8Array; // Ciphertext of the message
 }
 

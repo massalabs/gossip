@@ -17,6 +17,10 @@ const Discussions: React.FC = () => {
   const { session, isLoading } = useAccountStore();
   const pendingSharedContent = useAppStore(s => s.pendingSharedContent);
   const setPendingSharedContent = useAppStore(s => s.setPendingSharedContent);
+  const pendingForwardMessageId = useAppStore(s => s.pendingForwardMessageId);
+  const setPendingForwardMessageId = useAppStore(
+    s => s.setPendingForwardMessageId
+  );
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   // Force re-render when ref is set to ensure DiscussionList gets the scroll parent
   const [scrollParentReady, setScrollParentReady] = useState(false);
@@ -32,22 +36,39 @@ const Discussions: React.FC = () => {
     (contactUserId: string) => {
       // If there's pending shared content, pass it as prefilled message
       if (pendingSharedContent) {
+        const state =
+          pendingForwardMessageId != null
+            ? {
+                forwardFromMessageId: pendingForwardMessageId,
+              }
+            : {
+                prefilledMessage: pendingSharedContent,
+              };
+
         navigate(ROUTES.discussion({ userId: contactUserId }), {
-          state: { prefilledMessage: pendingSharedContent },
+          state,
           replace: false,
         });
         // Clear pending shared content after navigation
         setPendingSharedContent(null);
+        setPendingForwardMessageId(null);
       } else {
         navigate(ROUTES.discussion({ userId: contactUserId }));
       }
     },
-    [navigate, pendingSharedContent, setPendingSharedContent]
+    [
+      navigate,
+      pendingSharedContent,
+      pendingForwardMessageId,
+      setPendingSharedContent,
+      setPendingForwardMessageId,
+    ]
   );
 
   const handleCancelShare = useCallback(() => {
     setPendingSharedContent(null);
-  }, [setPendingSharedContent]);
+    setPendingForwardMessageId(null);
+  }, [setPendingSharedContent, setPendingForwardMessageId]);
 
   // Use debounced search for filtering discussions
   const {

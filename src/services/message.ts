@@ -27,6 +27,7 @@ import { SessionModule } from '../wasm';
 import {
   serializeRegularMessage,
   serializeReplyMessage,
+  serializeForwardMessage,
   deserializeMessage,
 } from '../utils/messageSerialization';
 import { encodeToBase64 } from '../utils/base64';
@@ -58,6 +59,10 @@ interface Decrypted {
   senderId: string;
   seeker: Uint8Array;
   replyTo?: {
+    originalContent: string;
+    originalSeeker: Uint8Array;
+  };
+  forwardOf?: {
     originalContent: string;
     originalSeeker: Uint8Array;
   };
@@ -193,6 +198,12 @@ export class MessageService {
                   originalSeeker: deserialized.replyTo.originalSeeker,
                 }
               : undefined,
+            forwardOf: deserialized.forwardOf
+              ? {
+                  originalContent: deserialized.forwardOf.originalContent,
+                  originalSeeker: deserialized.forwardOf.originalSeeker,
+                }
+              : undefined,
           });
 
           out.acknowledged_seekers.forEach(seeker =>
@@ -270,6 +281,12 @@ export class MessageService {
                 ? undefined
                 : message.replyTo.originalContent,
               originalSeeker: message.replyTo.originalSeeker,
+            }
+          : undefined,
+        forwardOf: message.forwardOf
+          ? {
+              originalContent: message.forwardOf.originalContent,
+              originalSeeker: message.forwardOf.originalSeeker,
             }
           : undefined,
       });
@@ -455,6 +472,7 @@ export class MessageService {
   ): Promise<SerializeMessageResult> {
     const log = logger.forMethod('serializeMessage');
 
+    // Replies take precedence over forwards if both are somehow set
     if (message.replyTo?.originalSeeker) {
       const original = await this.findMessageBySeeker(
         message.replyTo.originalSeeker,
@@ -475,6 +493,24 @@ export class MessageService {
           message.replyTo.originalSeeker
         ),
       };
+    }
+
+    if (
+      message.forwardOf?.originalContent &&
+      message.forwardOf.originalSeeker
+    ) {
+      try {
+        return {
+          contentBytes: serializeForwardMessage(
+            message.forwardOf.originalContent,
+            message.content,
+            message.forwardOf.originalSeeker
+          ),
+        };
+      } catch (error) {
+        log.error('failed to serialize forward message', error);
+        return { error: 'Failed to serialize forward message' };
+      }
     }
 
     return { contentBytes: serializeRegularMessage(message.content) };

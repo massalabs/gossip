@@ -10,10 +10,14 @@ interface MessageInputProps {
   onCancelReply?: () => void;
   initialValue?: string;
   onFocus?: () => void;
+  forwardPreview?: string | null;
+  onCancelForward?: () => void;
+  forwardMode?: 'forward' | 'reply';
 }
 type MessageInputEvent = React.MouseEvent | React.KeyboardEvent;
 
 type CancelReplyEvent = React.MouseEvent;
+type CancelForwardEvent = React.MouseEvent;
 
 const MessageInput: React.FC<MessageInputProps> = ({
   onSend,
@@ -22,13 +26,17 @@ const MessageInput: React.FC<MessageInputProps> = ({
   onCancelReply,
   initialValue,
   onFocus,
+  forwardPreview,
+  onCancelForward,
+  forwardMode = 'forward',
 }) => {
   const [newMessage, setNewMessage] = useState(initialValue || '');
   const [isTextareaMultiline, setIsTextareaMultiline] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const prevInitialValueRef = useRef(initialValue);
   const hasInitialFocusRef = useRef(false);
-  const sendButtonDisabled = disabled || !newMessage.trim();
+  const isForwarding = !!forwardPreview;
+  const sendButtonDisabled = disabled || (!newMessage.trim() && !isForwarding);
 
   const autoResizeTextarea = useCallback(() => {
     const el = textareaRef.current;
@@ -96,7 +104,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
 
       if (sendButtonDisabled) return;
       const cleanedMessage = newMessage.trim();
-      if (cleanedMessage.length === 0) return;
+      if (cleanedMessage.length === 0 && !isForwarding) return;
 
       onSend(cleanedMessage, replyToId);
 
@@ -107,7 +115,14 @@ const MessageInput: React.FC<MessageInputProps> = ({
         textareaRef.current?.focus();
       });
     },
-    [newMessage, onSend, replyToId, resetTextarea, sendButtonDisabled]
+    [
+      newMessage,
+      onSend,
+      replyToId,
+      resetTextarea,
+      sendButtonDisabled,
+      isForwarding,
+    ]
   );
 
   const handleTextareaKeyDown = useCallback(
@@ -133,6 +148,16 @@ const MessageInput: React.FC<MessageInputProps> = ({
       onCancelReply();
     },
     [onCancelReply]
+  );
+
+  const handleCancelForward = useCallback(
+    (e: CancelForwardEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!onCancelForward) return;
+      onCancelForward();
+    },
+    [onCancelForward]
   );
 
   const focusTextarea = useCallback((e: React.MouseEvent) => {
@@ -194,6 +219,41 @@ const MessageInput: React.FC<MessageInputProps> = ({
                   onMouseDown={handleCancelReply}
                   className="shrink-0 p-1.5 hover:bg-muted rounded-full transition-colors active:scale-90"
                   aria-label="Cancel reply"
+                >
+                  <X className="w-4 h-4 text-muted-foreground" />
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Forward Preview with animation */}
+      <div
+        className={`overflow-hidden transition-all duration-200 ease-out ${
+          forwardPreview
+            ? 'max-h-20 opacity-100 mb-2'
+            : 'max-h-0 opacity-0 mb-0'
+        }`}
+      >
+        {forwardPreview && (
+          <div className="px-3 py-2 bg-muted/50 border-l-2 border-primary rounded-r-lg">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex-1 min-w-0">
+                <p className="text-[10px] text-muted-foreground font-medium mb-0.5">
+                  {forwardMode === 'reply'
+                    ? 'Replying to'
+                    : 'Forwarding message'}
+                </p>
+                <p className="text-xs text-foreground/80 truncate">
+                  {forwardPreview}
+                </p>
+              </div>
+              {onCancelForward && (
+                <button
+                  onMouseDown={handleCancelForward}
+                  className="shrink-0 p-1.5 hover:bg-muted rounded-full transition-colors active:scale-90"
+                  aria-label="Cancel forward"
                 >
                   <X className="w-4 h-4 text-muted-foreground" />
                 </button>
