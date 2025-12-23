@@ -28,11 +28,13 @@ interface MessageListProps {
   isLoading: boolean;
   onReplyTo?: (message: Message) => void;
   onScrollToMessage?: (messageId: number) => void;
+  onAtBottomChange?: (atBottom: boolean) => void;
 }
 
 export interface MessageListHandle {
   scrollToBottom: () => void;
   scrollToIndex: (index: number) => void;
+  isAtBottom: boolean;
 }
 
 // =============================================================================
@@ -40,7 +42,17 @@ export interface MessageListHandle {
 // =============================================================================
 
 const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
-  ({ messages, discussion, isLoading, onReplyTo, onScrollToMessage }, ref) => {
+  (
+    {
+      messages,
+      discussion,
+      isLoading,
+      onReplyTo,
+      onScrollToMessage,
+      onAtBottomChange,
+    },
+    ref
+  ) => {
     const virtuosoRef = useRef<VirtuosoHandle>(null);
     const prevMessageCountRef = useRef<number>(0);
     const isAtBottomRef = useRef<boolean>(true);
@@ -67,9 +79,13 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
     }, [messages.length, virtualItems.length]);
 
     // Track if user is at bottom
-    const handleAtBottomStateChange = useCallback((atBottom: boolean) => {
-      isAtBottomRef.current = atBottom;
-    }, []);
+    const handleAtBottomStateChange = useCallback(
+      (atBottom: boolean) => {
+        isAtBottomRef.current = atBottom;
+        onAtBottomChange?.(atBottom);
+      },
+      [onAtBottomChange]
+    );
 
     // Expose imperative methods via ref
     React.useImperativeHandle(ref, () => ({
@@ -85,6 +101,9 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
           behavior: 'smooth',
           align: 'center',
         });
+      },
+      get isAtBottom() {
+        return isAtBottomRef.current;
       },
     }));
 
