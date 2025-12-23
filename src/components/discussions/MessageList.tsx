@@ -27,6 +27,7 @@ interface MessageListProps {
   discussion?: Discussion | null;
   isLoading: boolean;
   onReplyTo?: (message: Message) => void;
+  onForward?: (message: Message) => void;
   onScrollToMessage?: (messageId: number) => void;
   onAtBottomChange?: (atBottom: boolean) => void;
 }
@@ -48,6 +49,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
       discussion,
       isLoading,
       onReplyTo,
+      onForward,
       onScrollToMessage,
       onAtBottomChange,
     },
@@ -137,6 +139,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
                 showTimestamp={item.showTimestamp}
                 groupInfo={item.groupInfo}
                 onReplyTo={onReplyTo}
+                onForward={onForward}
                 onScrollToMessage={onScrollToMessage}
               />
             );
@@ -145,7 +148,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
             return null;
         }
       },
-      [virtualItems, onReplyTo, onScrollToMessage]
+      [virtualItems, onReplyTo, onForward, onScrollToMessage]
     );
 
     // Loading state

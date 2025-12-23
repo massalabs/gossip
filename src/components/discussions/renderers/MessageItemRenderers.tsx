@@ -104,6 +104,7 @@ interface MessageRendererProps {
   showTimestamp: boolean;
   groupInfo: MessageGroupInfo;
   onReplyTo?: (message: Message) => void;
+  onForward?: (message: Message) => void;
   onScrollToMessage?: (messageId: number) => void;
 }
 
@@ -112,6 +113,7 @@ export const MessageRenderer: React.FC<MessageRendererProps> = ({
   showTimestamp,
   groupInfo,
   onReplyTo,
+  onForward,
   onScrollToMessage,
 }) => (
   <div className="px-4 md:px-6 lg:px-8">
@@ -119,6 +121,7 @@ export const MessageRenderer: React.FC<MessageRendererProps> = ({
       id={`message-${message.id}`}
       message={message}
       onReplyTo={onReplyTo}
+      onForward={onForward}
       onScrollToMessage={onScrollToMessage}
       showTimestamp={showTimestamp}
       isFirstInGroup={groupInfo.isFirstInGroup}

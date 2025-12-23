@@ -7,6 +7,7 @@ import React, {
 } from 'react';
 import {
   ArrowRightCircle,
+  ArrowLeftCircle,
   Check as CheckIcon,
   AlertTriangle,
 } from 'react-feather';
@@ -36,6 +37,7 @@ interface MessageItemProps {
   message: Message;
   onReplyTo?: (message: Message) => void;
   onScrollToMessage?: (messageId: number) => void;
+  onForward?: (message: Message) => void;
   id?: string;
   showTimestamp?: boolean;
   isFirstInGroup?: boolean;
@@ -46,12 +48,14 @@ const MessageItem: React.FC<MessageItemProps> = ({
   message,
   onReplyTo,
   onScrollToMessage,
+  onForward,
   id,
   showTimestamp = true,
   isFirstInGroup = true,
   isLastInGroup = true,
 }) => {
   const canReply = !!onReplyTo;
+  const canForward = !!onForward;
   const isOutgoing = message.direction === MessageDirection.OUTGOING;
   const [originalMessage, setOriginalMessage] = useState<Message | null>(null);
   const [isLoadingOriginal, setIsLoadingOriginal] = useState(false);
@@ -68,16 +72,19 @@ const MessageItem: React.FC<MessageItemProps> = ({
   const touchSlopExceeded = useRef(false);
   const hasTriggeredHaptic = useRef(false);
 
-  // Load original message if this is a reply
+  // Load original message if this is a reply or a forward with a seeker
   useEffect(() => {
-    if (message.replyTo?.originalSeeker) {
+    const seekerForContext =
+      message.replyTo?.originalSeeker || message.forwardOf?.originalSeeker;
+
+    if (seekerForContext) {
       setIsLoadingOriginal(true);
       setOriginalNotFound(false);
 
       const findMessage = async () => {
         try {
           const msg = await messageService.findMessageBySeeker(
-            message.replyTo!.originalSeeker!,
+            seekerForContext,
             message.ownerUserId
           );
 
@@ -98,7 +105,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
       };
 
       findMessage();
-    } else if (message.replyTo?.originalContent) {
+    } else if (message.replyTo?.originalContent || message.forwardOf) {
       setOriginalMessage(null);
       setOriginalNotFound(true);
       setIsLoadingOriginal(false);
@@ -107,7 +114,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
       setOriginalNotFound(false);
       setIsLoadingOriginal(false);
     }
-  }, [message.replyTo, message.ownerUserId]);
+  }, [message.replyTo, message.forwardOf, message.ownerUserId]);
 
   const handleDoubleClick = useCallback(
     (e: React.MouseEvent) => {
@@ -131,7 +138,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
 
   const handleTouchStart = useCallback(
     (e: React.TouchEvent) => {
-      if (!canReply) return;
+      if (!canReply && !canForward) return;
       const touch = e.touches[0];
       touchStartX.current = touch.clientX;
       touchStartY.current = touch.clientY;
@@ -141,12 +148,12 @@ const MessageItem: React.FC<MessageItemProps> = ({
       hasTriggeredHaptic.current = false;
       setIsAnimatingBack(false);
     },
-    [canReply]
+    [canReply, canForward]
   );
 
   const handleTouchMove = useCallback(
     (e: React.TouchEvent) => {
-      if (!canReply) return;
+      if (!canReply && !canForward) return;
       if (touchStartX.current === null || touchStartY.current === null) return;
 
       const touch = e.touches[0];
@@ -156,8 +163,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
 
       const touchSlop = isOutgoing ? TOUCH_SLOP_OUTGOING : TOUCH_SLOP;
       const touchSlopSquared = touchSlop * touchSlop;
-      const isHorizontalSwipe =
-        Math.abs(deltaX) > Math.abs(deltaY) && deltaX > 0;
+      const isHorizontalSwipe = Math.abs(deltaX) > Math.abs(deltaY);
 
       if (!touchSlopExceeded.current) {
         if (distanceSquared >= touchSlopSquared && isHorizontalSwipe) {
@@ -178,25 +184,32 @@ const MessageItem: React.FC<MessageItemProps> = ({
         const maxDistance = isOutgoing
           ? SWIPE_MAX_DISTANCE_OUTGOING
           : SWIPE_MAX_DISTANCE;
-        const swipe = Math.min(deltaX * resistance, maxDistance);
-        setSwipeOffset(swipe);
+        const rawSwipe = deltaX * resistance;
+        const clampedSwipe = Math.max(
+          -maxDistance,
+          Math.min(rawSwipe, maxDistance)
+        );
+        setSwipeOffset(clampedSwipe);
 
         // Trigger haptic when crossing the threshold
         const threshold = isOutgoing
           ? SWIPE_THRESHOLD_OUTGOING
           : SWIPE_THRESHOLD;
-        if (swipe >= threshold && !hasTriggeredHaptic.current) {
+        if (
+          Math.abs(clampedSwipe) >= threshold &&
+          !hasTriggeredHaptic.current
+        ) {
           hasTriggeredHaptic.current = true;
         }
       } else if (Math.abs(deltaX) > 5 || Math.abs(deltaY) > 5) {
         setSwipeOffset(0);
       }
     },
-    [canReply, isOutgoing]
+    [canReply, canForward, isOutgoing]
   );
 
   const handleTouchEnd = useCallback(() => {
-    if (!canReply) {
+    if (!canReply && !canForward) {
       setSwipeOffset(0);
       touchStartX.current = null;
       touchStartY.current = null;
@@ -206,9 +219,13 @@ const MessageItem: React.FC<MessageItemProps> = ({
     }
 
     const threshold = isOutgoing ? SWIPE_THRESHOLD_OUTGOING : SWIPE_THRESHOLD;
-    const wasSwipeCompleted = swipeOffset >= threshold;
+    const isRightSwipeCompleted = swipeOffset >= threshold;
+    const isLeftSwipeCompleted = swipeOffset <= -threshold;
 
-    if (wasSwipeCompleted && onReplyTo) {
+    if (isRightSwipeCompleted && onForward) {
+      onForward(message);
+      swipeCompleted.current = true;
+    } else if (isLeftSwipeCompleted && onReplyTo) {
       onReplyTo(message);
       swipeCompleted.current = true;
     }
@@ -224,7 +241,15 @@ const MessageItem: React.FC<MessageItemProps> = ({
 
     // Remove animation class after animation completes
     setTimeout(() => setIsAnimatingBack(false), 300);
-  }, [canReply, isOutgoing, swipeOffset, onReplyTo, message]);
+  }, [
+    canReply,
+    canForward,
+    isOutgoing,
+    swipeOffset,
+    onReplyTo,
+    onForward,
+    message,
+  ]);
 
   const handleReplyContextClick = useCallback(
     (e: React.MouseEvent) => {
@@ -304,6 +329,9 @@ const MessageItem: React.FC<MessageItemProps> = ({
     ? SWIPE_INDICATOR_THRESHOLD_OUTGOING
     : SWIPE_INDICATOR_THRESHOLD;
 
+  const canNavigateToForwarded =
+    !!originalMessage?.id && typeof onScrollToMessage === 'function';
+
   return (
     <div
       id={id}
@@ -333,14 +361,16 @@ const MessageItem: React.FC<MessageItemProps> = ({
         aria-label={canReply ? 'Double-tap to reply' : undefined}
         style={{
           transform:
-            swipeOffset > 0 ? `translateX(${swipeOffset}px)` : 'translateX(0)',
+            swipeOffset !== 0
+              ? `translateX(${swipeOffset}px)`
+              : 'translateX(0)',
           transition: isAnimatingBack
             ? 'transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)'
             : 'none',
         }}
       >
-        {/* Reply indicator that appears when swiping */}
-        {swipeOffset > indicatorThreshold && (
+        {/* Forward indicator (right swipe) */}
+        {swipeOffset > indicatorThreshold && canForward && (
           <div
             className={`absolute left-0 top-0 bottom-0 flex items-center justify-center ${
               isOutgoing ? 'bg-accent/20' : 'bg-card/20'
@@ -355,6 +385,37 @@ const MessageItem: React.FC<MessageItemProps> = ({
             <ArrowRightCircle
               className={`w-5 h-5 text-muted-foreground transition-transform ${
                 swipeOffset >=
+                (isOutgoing ? SWIPE_THRESHOLD_OUTGOING : SWIPE_THRESHOLD)
+                  ? 'scale-110'
+                  : 'scale-100'
+              }`}
+              aria-hidden="true"
+            />
+          </div>
+        )}
+
+        {/* Reply indicator (left swipe) */}
+        {swipeOffset < -indicatorThreshold && canReply && (
+          <div
+            className={`absolute right-0 top-0 bottom-0 flex items-center justify-center ${
+              isOutgoing ? 'bg-accent/20' : 'bg-card/20'
+            } rounded-r-2xl`}
+            style={{
+              width: `${Math.min(
+                Math.abs(swipeOffset),
+                SWIPE_INDICATOR_MAX_WIDTH
+              )}px`,
+              opacity: Math.min(
+                Math.abs(swipeOffset) / SWIPE_INDICATOR_MAX_WIDTH,
+                1
+              ),
+              transition: isAnimatingBack ? 'all 0.3s ease-out' : 'none',
+            }}
+            aria-hidden="true"
+          >
+            <ArrowLeftCircle
+              className={`w-5 h-5 text-muted-foreground transition-transform ${
+                Math.abs(swipeOffset) >=
                 (isOutgoing ? SWIPE_THRESHOLD_OUTGOING : SWIPE_THRESHOLD)
                   ? 'scale-110'
                   : 'scale-100'
@@ -424,6 +485,65 @@ const MessageItem: React.FC<MessageItemProps> = ({
                   message.replyTo.originalContent ||
                   'Original message'}
               </p>
+            )}
+          </div>
+        )}
+
+        {/* Forwarded Context */}
+        {message.forwardOf && (
+          <div
+            className={`mb-2 pb-2 border-l-2 pl-2 ${
+              isOutgoing
+                ? 'border-accent-foreground/30'
+                : 'border-card-foreground/30'
+            } ${
+              canNavigateToForwarded
+                ? 'cursor-pointer hover:bg-black/5 dark:hover:bg-white/5 rounded-r transition-colors active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2'
+                : ''
+            }`}
+            {...(canNavigateToForwarded
+              ? {
+                  onClick: handleReplyContextClick,
+                  onKeyDown: handleReplyContextKeyDown,
+                  tabIndex: 0,
+                  role: 'button',
+                  'aria-label': 'Tap to jump to original message',
+                }
+              : {})}
+          >
+            {isLoadingOriginal ? (
+              <p
+                className={`text-xs ${
+                  isOutgoing
+                    ? 'text-accent-foreground/80'
+                    : 'text-muted-foreground/80'
+                }`}
+              >
+                Loading...
+              </p>
+            ) : (
+              <>
+                <p
+                  className={`text-[11px] font-medium mb-0.5 ${
+                    isOutgoing
+                      ? 'text-accent-foreground/80'
+                      : 'text-muted-foreground/80'
+                  }`}
+                >
+                  Forwarded message:
+                </p>
+                <p
+                  className={`text-xs truncate ${
+                    isOutgoing
+                      ? 'text-accent-foreground/80'
+                      : 'text-muted-foreground/80'
+                  }`}
+                >
+                  {originalMessage?.content ||
+                    message.forwardOf.originalContent ||
+                    'Original message'}
+                </p>
+              </>
             )}
           </div>
         )}
