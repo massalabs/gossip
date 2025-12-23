@@ -300,6 +300,22 @@ const MessageItem: React.FC<MessageItemProps> = ({
     [message.content]
   );
 
+  // Parse links in reply original content
+  const replyOriginalContent =
+    originalMessage?.content || message.replyTo?.originalContent || '';
+  const parsedReplyLinks = useMemo(
+    () => parseLinks(replyOriginalContent),
+    [replyOriginalContent]
+  );
+
+  // Parse links in forward original content
+  const forwardOriginalContent =
+    originalMessage?.content || message.forwardOf?.originalContent || '';
+  const parsedForwardLinks = useMemo(
+    () => parseLinks(forwardOriginalContent),
+    [forwardOriginalContent]
+  );
+
   // Calculate spacing based on grouping
   // Last message in group gets more margin to separate from next group
   const spacingClass = isLastInGroup ? 'mb-1' : 'mb-0.5';
@@ -481,9 +497,32 @@ const MessageItem: React.FC<MessageItemProps> = ({
                     : 'text-muted-foreground/80'
                 } ${originalNotFound ? 'italic opacity-70' : ''}`}
               >
-                {originalMessage?.content ||
-                  message.replyTo.originalContent ||
-                  'Original message'}
+                {parsedReplyLinks.length > 0
+                  ? parsedReplyLinks.map((segment, index) => {
+                      if (segment.type === 'link') {
+                        return (
+                          <a
+                            key={index}
+                            href={segment.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={handleLinkClick}
+                            aria-label={`${segment.content} (opens in a new tab)`}
+                            className="underline hover:opacity-80 transition-opacity break-all cursor-pointer"
+                            style={{
+                              textDecorationColor: 'currentColor',
+                              textDecorationThickness: '1px',
+                            }}
+                          >
+                            {segment.content}
+                          </a>
+                        );
+                      }
+                      return <span key={index}>{segment.content}</span>;
+                    })
+                  : originalMessage?.content ||
+                    message.replyTo.originalContent ||
+                    'Original message'}
               </p>
             )}
           </div>
@@ -539,9 +578,32 @@ const MessageItem: React.FC<MessageItemProps> = ({
                       : 'text-muted-foreground/80'
                   }`}
                 >
-                  {originalMessage?.content ||
-                    message.forwardOf.originalContent ||
-                    'Original message'}
+                  {parsedForwardLinks.length > 0
+                    ? parsedForwardLinks.map((segment, index) => {
+                        if (segment.type === 'link') {
+                          return (
+                            <a
+                              key={index}
+                              href={segment.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={handleLinkClick}
+                              aria-label={`${segment.content} (opens in a new tab)`}
+                              className="underline hover:opacity-80 transition-opacity break-all cursor-pointer"
+                              style={{
+                                textDecorationColor: 'currentColor',
+                                textDecorationThickness: '1px',
+                              }}
+                            >
+                              {segment.content}
+                            </a>
+                          );
+                        }
+                        return <span key={index}>{segment.content}</span>;
+                      })
+                    : originalMessage?.content ||
+                      message.forwardOf.originalContent ||
+                      'Original message'}
                 </p>
               </>
             )}
