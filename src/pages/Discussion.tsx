@@ -12,6 +12,7 @@ import MessageList, {
   MessageListHandle,
 } from '../components/discussions/MessageList';
 import MessageInput from '../components/discussions/MessageInput';
+import ScrollToBottomButton from '../components/discussions/ScrollToBottomButton';
 
 const Discussion: React.FC = () => {
   const { userId } = useParams();
@@ -71,6 +72,14 @@ const Discussion: React.FC = () => {
 
   // Reply state
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
+
+  // Scroll to bottom button visibility
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+
+  // Handle at bottom state changes
+  const handleAtBottomChange = useCallback((atBottom: boolean) => {
+    setShowScrollToBottom(!atBottom);
+  }, []);
 
   // Track timeout for message highlight
   const highlightTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -179,7 +188,7 @@ const Discussion: React.FC = () => {
   if (!contact) return null;
 
   return (
-    <div className="h-full app-max-w mx-auto bg-card flex flex-col">
+    <div className="h-full app-max-w mx-auto bg-card flex flex-col relative">
       <DiscussionHeader
         contact={contact}
         discussion={discussion}
@@ -194,8 +203,14 @@ const Discussion: React.FC = () => {
           isLoading={isLoading || isDiscussionLoading}
           onReplyTo={handleReplyToMessage}
           onScrollToMessage={handleScrollToMessage}
+          onAtBottomChange={handleAtBottomChange}
         />
       </div>
+
+      <ScrollToBottomButton
+        onClick={scrollToBottom}
+        isVisible={showScrollToBottom}
+      />
 
       <MessageInput
         onSend={handleSendMessage}
