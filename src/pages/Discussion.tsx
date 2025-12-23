@@ -14,6 +14,7 @@ import MessageList, {
 } from '../components/discussions/MessageList';
 import MessageInput from '../components/discussions/MessageInput';
 import ScrollToBottomButton from '../components/discussions/ScrollToBottomButton';
+import { isDifferentDay } from '../utils/timeUtils';
 
 const Discussion: React.FC = () => {
   const { userId } = useParams();
@@ -246,34 +247,84 @@ const Discussion: React.FC = () => {
         }
 
         // Same discussion → scroll within current view
-        const element = document.getElementById(`message-${messageId}`);
-        if (element) {
-          element.scrollIntoView({
-            behavior: 'smooth',
-            block: 'center',
-          });
-          // Add visual feedback
-          element.classList.add('highlight-message');
+        // Find the message in the messages array and calculate its virtual index
+        const messageIndex = messages.findIndex(msg => msg.id === messageId);
+        if (messageIndex === -1) {
+          console.warn(
+            `Message ${messageId} not found in current messages array. It may not be loaded yet.`
+          );
+          return;
+        }
 
-          // Clear any existing timeout
-          if (highlightTimeoutRef.current) {
-            clearTimeout(highlightTimeoutRef.current);
+        // Calculate virtual index by counting items before the target message
+        let virtualIndex = 0;
+
+        // Add announcement if exists
+        if (discussion?.announcementMessage && discussion.createdAt) {
+          virtualIndex++;
+        }
+
+        // Count items before the target message
+        for (let i = 0; i < messageIndex; i++) {
+          const message = messages[i];
+          const prevMessage = i > 0 ? messages[i - 1] : null;
+
+          // Add date separator if day changed
+          if (
+            !prevMessage ||
+            isDifferentDay(message.timestamp, prevMessage.timestamp)
+          ) {
+            virtualIndex++;
           }
 
-          highlightTimeoutRef.current = setTimeout(() => {
-            const el = document.getElementById(`message-${messageId}`);
-            if (el) {
-              el.classList.remove('highlight-message');
-            }
-          }, 2000);
-        } else {
-          console.warn(
-            `Message element with id message-${messageId} not found`
-          );
+          // Add the message itself
+          virtualIndex++;
         }
+
+        // Add date separator for the target message if needed
+        const prevMessage =
+          messageIndex > 0 ? messages[messageIndex - 1] : null;
+        const targetMessage = messages[messageIndex];
+        if (
+          !prevMessage ||
+          isDifferentDay(targetMessage.timestamp, prevMessage.timestamp)
+        ) {
+          virtualIndex++;
+        }
+
+        // The target message is at this virtual index
+        // Use scrollToIndex to scroll to the message
+        messageListRef.current?.scrollToIndex(virtualIndex);
+
+        // Add highlight after a short delay to ensure element is rendered
+        setTimeout(() => {
+          const element = document.getElementById(`message-${messageId}`);
+          if (element) {
+            element.classList.add('highlight-message');
+
+            // Clear any existing timeout
+            if (highlightTimeoutRef.current) {
+              clearTimeout(highlightTimeoutRef.current);
+            }
+
+            highlightTimeoutRef.current = setTimeout(() => {
+              const el = document.getElementById(`message-${messageId}`);
+              if (el) {
+                el.classList.remove('highlight-message');
+              }
+            }, 2000);
+          }
+        }, 200);
       })();
     },
-    [contact?.userId, navigate]
+    [
+      contact?.userId,
+      navigate,
+      messages,
+      messageListRef,
+      discussion?.announcementMessage,
+      discussion?.createdAt,
+    ]
   );
 
   // Load forward preview text from DB when a forward is active
