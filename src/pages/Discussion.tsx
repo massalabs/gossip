@@ -1,8 +1,7 @@
 import React, { useEffect, useCallback, useRef, useState } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import { db, Message } from '../db';
+import { Message } from '../db';
 import { useDiscussion } from '../hooks/useDiscussion';
-import { useAccountStore } from '../stores/accountStore';
 import { useAppStore } from '../stores/appStore';
 import { useDiscussionStore } from '../stores/discussionStore';
 import { useMessageStore } from '../stores/messageStore';
@@ -98,7 +97,8 @@ const Discussion: React.FC = () => {
     contact: safeContact,
   });
 
-  const { userProfile } = useAccountStore();
+  const showDebugOption = useAppStore(s => s.showDebugOption);
+  const [isSendingTestMessages, setIsSendingTestMessages] = useState(false);
 
   // Use message store
   const setCurrentContact = useMessageStore(s => s.setCurrentContact);
@@ -111,6 +111,9 @@ const Discussion: React.FC = () => {
 
   // Track previous contact userId to prevent unnecessary updates
   const prevContactUserIdRef = useRef<string | null>(null);
+
+  // Track if we've handled initial scroll for this discussion
+  const hasHandledInitialScrollRef = useRef<boolean>(false);
 
   // Reply state
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
@@ -143,23 +146,10 @@ const Discussion: React.FC = () => {
     const contactUserId = contact?.userId || null;
     if (prevContactUserIdRef.current !== contactUserId) {
       prevContactUserIdRef.current = contactUserId;
+      hasHandledInitialScrollRef.current = false; // Reset scroll handling for new contact
       setCurrentContact(contactUserId);
     }
   }, [contact?.userId, setCurrentContact]);
-
-  // Mark messages as read when viewing the discussion
-  useEffect(() => {
-    if (
-      messages.length > 0 &&
-      !isLoading &&
-      userProfile?.userId &&
-      contact?.userId
-    ) {
-      db.markMessagesAsRead(userProfile.userId, contact.userId).catch(error =>
-        console.error('Failed to mark messages as read:', error)
-      );
-    }
-  }, [messages.length, isLoading, userProfile?.userId, contact?.userId]);
 
   // Scroll to bottom utility - uses the virtuoso ref
   const scrollToBottom = useCallback(() => {
@@ -369,6 +359,30 @@ const Discussion: React.FC = () => {
     }
   }, [messages.length, isLoading, handleScrollToMessage]);
 
+  // Debug function to send 50 test messages
+  const handleSendTestMessages = useCallback(async () => {
+    if (!contact?.userId || isSendingTestMessages) return;
+
+    setIsSendingTestMessages(true);
+    try {
+      const promises = [];
+      for (let i = 1; i <= 50; i++) {
+        promises.push(sendMessage(contact.userId, i.toString()));
+        // Small delay between messages to avoid overwhelming the system
+        if (i % 10 === 0) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+      }
+      await Promise.all(promises);
+      toast.success('Sent 50 test messages!');
+    } catch (error) {
+      toast.error('Failed to send some test messages');
+      console.error('Failed to send test messages:', error);
+    } finally {
+      setIsSendingTestMessages(false);
+    }
+  }, [contact?.userId, sendMessage, isSendingTestMessages]);
+
   if (!contact) return null;
 
   return (
@@ -396,6 +410,22 @@ const Discussion: React.FC = () => {
         onClick={scrollToBottom}
         isVisible={showScrollToBottom}
       />
+
+      {/* Debug test button - only show when debug mode is enabled */}
+      {showDebugOption && (
+        <div className="absolute bottom-32 right-4 z-10">
+          <button
+            onClick={handleSendTestMessages}
+            disabled={isSendingTestMessages}
+            className={`w-12 h-12 rounded-full bg-orange-500 hover:bg-orange-600 disabled:bg-orange-300 text-white shadow-lg border border-border flex items-center justify-center text-xs font-bold transition-all ${
+              isSendingTestMessages ? 'animate-pulse' : ''
+            }`}
+            title="Send 50 test messages (Debug)"
+          >
+            {isSendingTestMessages ? '...' : '50'}
+          </button>
+        </div>
+      )}
 
       <MessageInput
         onSend={handleSendMessage}

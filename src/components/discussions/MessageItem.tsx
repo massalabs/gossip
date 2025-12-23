@@ -15,6 +15,7 @@ import { Message, MessageDirection, MessageStatus } from '../../db';
 import { formatTime } from '../../utils/timeUtils';
 import { messageService } from '../../services/message';
 import { parseLinks, openUrl } from '../../utils/linkUtils';
+import { useMarkMessageAsRead } from '../../hooks/useMarkMessageAsRead';
 
 // Swipe gesture constants - base values for incoming messages
 const SWIPE_MAX_DISTANCE = 80;
@@ -68,7 +69,8 @@ const MessageItem: React.FC<MessageItemProps> = ({
   const touchStartY = useRef<number | null>(null);
   const isSwiping = useRef(false);
   const swipeCompleted = useRef(false);
-  const messageRef = useRef<HTMLDivElement | null>(null);
+  // Handle automatic message read marking
+  const messageRef = useMarkMessageAsRead(message);
   const touchSlopExceeded = useRef(false);
   const hasTriggeredHaptic = useRef(false);
 
