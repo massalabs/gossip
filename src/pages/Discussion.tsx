@@ -15,6 +15,10 @@ import MessageInput from '../components/discussions/MessageInput';
 import ScrollToBottomButton from '../components/discussions/ScrollToBottomButton';
 import { isDifferentDay } from '../utils/timeUtils';
 
+// Debug test message constants
+const TEST_MESSAGE_COUNT = 50;
+const TEST_MESSAGE_BATCH_DELAY_MS = 100;
+
 const Discussion: React.FC = () => {
   const { userId } = useParams();
   const navigate = useNavigate();
@@ -355,20 +359,22 @@ const Discussion: React.FC = () => {
     }
   }, [messages.length, isLoading, handleScrollToMessage]);
 
-  // Debug function to send 50 test messages
+  // Debug function to send test messages
   const handleSendTestMessages = useCallback(async () => {
     if (!contact?.userId || isSendingTestMessages) return;
 
     setIsSendingTestMessages(true);
     try {
-      for (let i = 1; i <= 50; i++) {
+      for (let i = 1; i <= TEST_MESSAGE_COUNT; i++) {
         await sendMessage(contact.userId, i.toString());
         // Small delay between messages to avoid overwhelming the system
         if (i % 10 === 0) {
-          await new Promise(resolve => setTimeout(resolve, 100));
+          await new Promise(resolve =>
+            setTimeout(resolve, TEST_MESSAGE_BATCH_DELAY_MS)
+          );
         }
       }
-      toast.success('Sent 50 test messages!');
+      toast.success(`Sent ${TEST_MESSAGE_COUNT} test messages!`);
     } catch (error) {
       toast.error('Failed to send some test messages');
       console.error('Failed to send test messages:', error);
@@ -414,9 +420,9 @@ const Discussion: React.FC = () => {
             className={`w-12 h-12 rounded-full bg-orange-500 hover:bg-orange-600 disabled:bg-orange-300 text-white shadow-lg border border-border flex items-center justify-center text-xs font-bold transition-all ${
               isSendingTestMessages ? 'animate-pulse' : ''
             }`}
-            title="Send 50 test messages (Debug)"
+            title={`Send ${TEST_MESSAGE_COUNT} test messages (Debug)`}
           >
-            {isSendingTestMessages ? '...' : '50'}
+            {isSendingTestMessages ? '...' : TEST_MESSAGE_COUNT.toString()}
           </button>
         </div>
       )}

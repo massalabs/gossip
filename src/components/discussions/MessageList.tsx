@@ -21,6 +21,16 @@ import {
 } from './renderers/MessageItemRenderers';
 
 // =============================================================================
+// Constants
+// =============================================================================
+
+// Number of messages to show above the first unread message when scrolling to it
+const MESSAGES_ABOVE_UNREAD = 3;
+
+// Delay in milliseconds before initial scroll positioning to ensure messages are loaded
+const INITIAL_SCROLL_DELAY_MS = 100;
+
+// =============================================================================
 // Types
 // =============================================================================
 
@@ -61,10 +71,17 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
     const prevMessageCountRef = useRef<number>(0);
     const isAtBottomRef = useRef<boolean>(true);
     const initialPositioningDoneRef = useRef<boolean>(false);
+    // Store latest values in refs to avoid stale closures in setTimeout
+    const messagesRef = useRef<Message[]>(messages);
+    const virtualItemsRef = useRef<VirtualItem[]>([]);
 
     // Derived state via hooks
     const messageGroups = useMessageGroups(messages);
     const virtualItems = useVirtualItems(messages, messageGroups, discussion);
+
+    // Update refs when values change
+    messagesRef.current = messages;
+    virtualItemsRef.current = virtualItems;
 
     // Find the first unread message for visual indicator and initial positioning
     const firstUnreadMessage = findFirstUnreadMessage(messages);
@@ -82,18 +99,27 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
       ) {
         // Add a delay to ensure messages are fully loaded and Virtuoso is ready
         const timeoutId = setTimeout(() => {
+          // Use refs to get latest values inside timeout to avoid stale closures
+          const currentMessages = messagesRef.current;
+          const currentVirtualItems = virtualItemsRef.current;
+          const currentFirstUnreadMessage =
+            findFirstUnreadMessage(currentMessages);
+
           if (!initialPositioningDoneRef.current) {
             initialPositioningDoneRef.current = true;
 
-            if (firstUnreadMessage) {
+            if (currentFirstUnreadMessage) {
               // Scroll to the first unread message
-              const unreadVirtualIndex = virtualItems.findIndex(
+              const unreadVirtualIndex = currentVirtualItems.findIndex(
                 item =>
                   item.type === 'message' &&
-                  item.message.id === firstUnreadMessage.id
+                  item.message.id === currentFirstUnreadMessage.id
               );
               if (unreadVirtualIndex >= 0) {
-                const targetIndex = Math.max(0, unreadVirtualIndex - 3);
+                const targetIndex = Math.max(
+                  0,
+                  unreadVirtualIndex - MESSAGES_ABOVE_UNREAD
+                );
                 virtuosoRef.current?.scrollToIndex({
                   index: targetIndex,
                   behavior: 'auto', // Use auto for initial positioning
@@ -102,19 +128,21 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
             } else {
               // No unread messages, scroll to bottom
               virtuosoRef.current?.scrollToIndex({
-                index: virtualItems.length - 1,
+                index: currentVirtualItems.length - 1,
                 behavior: 'auto', // Use auto for initial positioning
               });
             }
           }
-        }, 100); // Small delay to ensure everything is ready
+        }, INITIAL_SCROLL_DELAY_MS);
 
         return () => clearTimeout(timeoutId);
       }
       // Scroll to bottom when new messages are added
       else if (currentCount > prevCount) {
         // Check if the newest message is outgoing (sent by user) - always scroll for sent messages
-        const newestMessage = messages[messages.length - 1];
+        const currentMessages = messagesRef.current;
+        const currentVirtualItems = virtualItemsRef.current;
+        const newestMessage = currentMessages[currentMessages.length - 1];
         const shouldScrollToBottom =
           newestMessage?.direction === MessageDirection.OUTGOING ||
           isAtBottomRef.current;
@@ -122,7 +150,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
         if (shouldScrollToBottom) {
           requestAnimationFrame(() => {
             virtuosoRef.current?.scrollToIndex({
-              index: virtualItems.length - 1,
+              index: currentVirtualItems.length - 1,
               behavior: 'smooth',
             });
           });
@@ -130,7 +158,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
       }
 
       prevMessageCountRef.current = currentCount;
-    }, [messages, virtualItems, firstUnreadMessage]);
+    }, [messages.length, virtualItems.length, firstUnreadMessage?.id]);
 
     // Reset initial positioning when switching between discussions
     useEffect(() => {
