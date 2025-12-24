@@ -13,9 +13,14 @@ PODS:
   - CapacitorBarcodeScanner (2.2.0):
     - Capacitor
     - OSBarcodeLib (= 2.0.1)
+  - CapacitorCommunityPrivacyScreen (6.0.0):
+    - Capacitor
   - CapacitorCordova (7.4.4)
   - CapacitorDevice (7.0.3):
     - Capacitor
+  - CapacitorFilesystem (7.1.6):
+    - Capacitor
+    - IONFilesystemLib (~> 1.0.1)
   - CapacitorLocalNotifications (7.0.3):
     - Capacitor
   - CapacitorNetwork (7.0.3):
@@ -26,6 +31,7 @@ PODS:
     - Capacitor
   - CapacitorStatusBar (7.0.3):
     - Capacitor
+  - IONFilesystemLib (1.0.1)
   - KeychainSwift (21.0.0)
   - OSBarcodeLib (2.0.1)
 
@@ -36,8 +42,10 @@ DEPENDENCIES:
   - "CapacitorApp (from `../../node_modules/@capacitor/app`)"
   - "CapacitorBackgroundRunner (from `../../node_modules/@capacitor/background-runner`)"
   - "CapacitorBarcodeScanner (from `../../node_modules/@capacitor/barcode-scanner`)"
+  - "CapacitorCommunityPrivacyScreen (from `../../node_modules/@capacitor-community/privacy-screen`)"
   - "CapacitorCordova (from `../../node_modules/@capacitor/ios`)"
   - "CapacitorDevice (from `../../node_modules/@capacitor/device`)"
+  - "CapacitorFilesystem (from `../../node_modules/@capacitor/filesystem`)"
   - "CapacitorLocalNotifications (from `../../node_modules/@capacitor/local-notifications`)"
   - "CapacitorNetwork (from `../../node_modules/@capacitor/network`)"
   - "CapacitorPreferences (from `../../node_modules/@capacitor/preferences`)"
@@ -46,6 +54,7 @@ DEPENDENCIES:
 
 SPEC REPOS:
   trunk:
+    - IONFilesystemLib
     - KeychainSwift
     - OSBarcodeLib
 
@@ -62,10 +71,14 @@ EXTERNAL SOURCES:
     :path: "../../node_modules/@capacitor/background-runner"
   CapacitorBarcodeScanner:
     :path: "../../node_modules/@capacitor/barcode-scanner"
+  CapacitorCommunityPrivacyScreen:
+    :path: "../../node_modules/@capacitor-community/privacy-screen"
   CapacitorCordova:
     :path: "../../node_modules/@capacitor/ios"
   CapacitorDevice:
     :path: "../../node_modules/@capacitor/device"
+  CapacitorFilesystem:
+    :path: "../../node_modules/@capacitor/filesystem"
   CapacitorLocalNotifications:
     :path: "../../node_modules/@capacitor/local-notifications"
   CapacitorNetwork:
@@ -84,16 +97,19 @@ SPEC CHECKSUMS:
   CapacitorApp: 26587c2ce485d88ddb39adb21cac64f8e481afe3
   CapacitorBackgroundRunner: 22c4aa45c3555b1e2adeac1dbcbaf20fc6ecc169
   CapacitorBarcodeScanner: 4b6d4ecfff4133af982d09acd423610c14ac0c3f
+  CapacitorCommunityPrivacyScreen: 682470c41cce325d7a85b95907887919d4694066
   CapacitorCordova: bf648a636f3c153f652d312ae145fb508b6ffced
   CapacitorDevice: b64654eb4d404373e733c01d835055ba59286e5c
+  CapacitorFilesystem: 66f05ee0d8b1ccdc00d509091273a9b3b57c4a0b
   CapacitorLocalNotifications: 0811aef56ab2e5f7f9ae72f47d3473ab50c29038
   CapacitorNetwork: 1a22460c6f900686f12ffa52f3074ee313821b08
   CapacitorPreferences: 913eef88272c13eb6445b21e51fe8ef6635412cc
   CapacitorShare: a4f4f86eabd4b3ff52ba6a11b754713c6926a8d1
   CapacitorStatusBar: 0659ddc7b1713764a05831463d215b177a15d054
+  IONFilesystemLib: 89258b8e3e85465da93127d25d7ce37f977e8a6f
   KeychainSwift: 4a71a45c802fd9e73906457c2dcbdbdc06c9419d
   OSBarcodeLib: 57987d2eb1f916f701f4554e20e349b3cb83f023
 
-PODFILE CHECKSUM: 5c7d0c60772b5a343e3fe70e4b3485734fd017f9
+PODFILE CHECKSUM: 3215cc558361dc87e00bc3e93e3dffcf4f52ac93
 
 COCOAPODS: 1.16.2
