@@ -1,6 +1,5 @@
 import React, { useEffect, useCallback, useRef, useState } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import { Message } from '../db';
 import { useDiscussion } from '../hooks/useDiscussion';
 import { useAppStore } from '../stores/appStore';
 import { useDiscussionStore } from '../stores/discussionStore';
@@ -13,6 +12,7 @@ import MessageList, {
 } from '../components/discussions/MessageList';
 import MessageInput from '../components/discussions/MessageInput';
 import ScrollToBottomButton from '../components/discussions/ScrollToBottomButton';
+import { Message, db } from '../db';
 import { isDifferentDay } from '../utils/timeUtils';
 
 // Debug test message constants
