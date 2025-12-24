@@ -112,9 +112,6 @@ const Discussion: React.FC = () => {
   // Track previous contact userId to prevent unnecessary updates
   const prevContactUserIdRef = useRef<string | null>(null);
 
-  // Track if we've handled initial scroll for this discussion
-  const hasHandledInitialScrollRef = useRef<boolean>(false);
-
   // Reply state
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
 
@@ -146,7 +143,6 @@ const Discussion: React.FC = () => {
     const contactUserId = contact?.userId || null;
     if (prevContactUserIdRef.current !== contactUserId) {
       prevContactUserIdRef.current = contactUserId;
-      hasHandledInitialScrollRef.current = false; // Reset scroll handling for new contact
       setCurrentContact(contactUserId);
     }
   }, [contact?.userId, setCurrentContact]);
@@ -365,15 +361,13 @@ const Discussion: React.FC = () => {
 
     setIsSendingTestMessages(true);
     try {
-      const promises = [];
       for (let i = 1; i <= 50; i++) {
-        promises.push(sendMessage(contact.userId, i.toString()));
+        await sendMessage(contact.userId, i.toString());
         // Small delay between messages to avoid overwhelming the system
         if (i % 10 === 0) {
           await new Promise(resolve => setTimeout(resolve, 100));
         }
       }
-      await Promise.all(promises);
       toast.success('Sent 50 test messages!');
     } catch (error) {
       toast.error('Failed to send some test messages');

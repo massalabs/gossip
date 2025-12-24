@@ -8,6 +8,12 @@ import { useAccountStore } from '../stores/accountStore';
  */
 export function useMarkMessageAsRead(message: Message) {
   const messageRef = useRef<HTMLDivElement | null>(null);
+  const hasBeenMarkedAsReadRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    // Reset the mark-as-read flag when the message changes
+    hasBeenMarkedAsReadRef.current = false;
+  }, [message.id]);
 
   useEffect(() => {
     const { userProfile } = useAccountStore.getState();
@@ -18,7 +24,8 @@ export function useMarkMessageAsRead(message: Message) {
       !messageElement ||
       message.direction !== MessageDirection.INCOMING ||
       message.status !== MessageStatus.DELIVERED ||
-      !userProfile?.userId
+      !userProfile?.userId ||
+      hasBeenMarkedAsReadRef.current
     ) {
       return;
     }
@@ -28,9 +35,11 @@ export function useMarkMessageAsRead(message: Message) {
         entries.forEach(entry => {
           if (
             entry.isIntersecting &&
-            message.status === MessageStatus.DELIVERED
+            message.status === MessageStatus.DELIVERED &&
+            !hasBeenMarkedAsReadRef.current
           ) {
             // Mark this specific message as read
+            hasBeenMarkedAsReadRef.current = true;
             db.transaction('rw', [db.messages, db.discussions], async () => {
               // Update message status
               await db.messages.update(message.id!, {
@@ -48,13 +57,15 @@ export function useMarkMessageAsRead(message: Message) {
                 });
             }).catch(error => {
               console.error('Failed to mark message as read:', error);
+              // Reset flag on error so it can be retried
+              hasBeenMarkedAsReadRef.current = false;
             });
           }
         });
       },
       {
         threshold: 0.5, // Message is considered "viewed" when 50% visible
-        rootMargin: '0px 0px -50px 0px', // Trigger when message is near the top
+        rootMargin: '0px 0px -50px 0px', // Require message to be 50px into viewport from bottom before marking as read
       }
     );
 
@@ -64,11 +75,11 @@ export function useMarkMessageAsRead(message: Message) {
       observer.disconnect();
     };
   }, [
-    message.id,
     message.direction,
     message.status,
     message.contactUserId,
     message.ownerUserId,
+    message.id,
   ]);
 
   return messageRef;

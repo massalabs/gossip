@@ -81,7 +81,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
         !initialPositioningDoneRef.current
       ) {
         // Add a delay to ensure messages are fully loaded and Virtuoso is ready
-        setTimeout(() => {
+        const timeoutId = setTimeout(() => {
           if (!initialPositioningDoneRef.current) {
             initialPositioningDoneRef.current = true;
 
@@ -108,6 +108,8 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
             }
           }
         }, 100); // Small delay to ensure everything is ready
+
+        return () => clearTimeout(timeoutId);
       }
       // Scroll to bottom when new messages are added
       else if (currentCount > prevCount) {
@@ -129,6 +131,11 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
 
       prevMessageCountRef.current = currentCount;
     }, [messages, virtualItems, firstUnreadMessage]);
+
+    // Reset initial positioning when switching between discussions
+    useEffect(() => {
+      initialPositioningDoneRef.current = false;
+    }, [discussion?.id]);
 
     // Track if user is at bottom
     const handleAtBottomStateChange = useCallback(
