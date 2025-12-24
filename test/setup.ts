@@ -42,9 +42,8 @@ vi.mock('../src/assets/generated/wasm/gossip_wasm', async importOriginal => {
     await importOriginal<
       typeof import('../src/assets/generated/wasm/gossip_wasm')
     >();
-  const { MockUserPublicKeys, MockUserSecretKeys } = await import(
-    '../src/wasm/mock'
-  );
+  const { MockUserPublicKeys, MockUserSecretKeys } =
+    await import('../src/wasm/mock');
   return {
     ...actual,
     UserPublicKeys: MockUserPublicKeys,
