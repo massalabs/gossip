@@ -8,7 +8,7 @@ import {
   mnemonicToSeedSync,
   validateMnemonic as validateMnemonicScure,
 } from '@scure/bip39';
-import { wordlist } from '@scure/bip39/wordlists/english';
+import { wordlist } from '@scure/bip39/wordlists/english.js';
 import { Account, PrivateKey } from '@massalabs/massa-web3';
 import varint from 'varint';
 
