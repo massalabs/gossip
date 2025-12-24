@@ -117,6 +117,9 @@ export class MockSessionModule {
   toEncryptedBlob = vi.fn(() => new Uint8Array(100));
   cleanup = vi.fn();
 
+  // userIdEncoded is required by AnnouncementService.fetchAndProcessAnnouncements
+  userIdEncoded: string = '';
+
   establishOutgoingSession = vi.fn(() => new Uint8Array(200));
   feedIncomingAnnouncement = vi.fn(() => undefined);
   getMessageBoardReadKeys = vi.fn((): Uint8Array[] => []);

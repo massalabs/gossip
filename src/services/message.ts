@@ -612,11 +612,10 @@ export class MessageService {
             seeker: sendOutput.seeker,
             ciphertext: sendOutput.data,
           });
+          successfullySent.push(msg.id!);
         } catch (error) {
           log.error('network send failed during resend', error);
         }
-
-        successfullySent.push(msg.id!);
       }
     }
 

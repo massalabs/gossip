@@ -5,7 +5,7 @@ import {
   MockSessionModule,
   MockUserPublicKeys,
   MockUserSecretKeys,
-} from '../src/wasm/mock';
+} from './wasm/mock';
 
 interface InitSessionResult {
   aliceDiscussionId: number;
@@ -72,16 +72,12 @@ export async function initSession(
   // Initialize discussions
   const { discussionId: aliceDiscussionId } = await initializeDiscussion(
     aliceBobContact,
-    alicePk,
-    aliceSk,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     aliceSession as any,
     aliceUserId
   );
   const { discussionId: bobDiscussionId } = await initializeDiscussion(
     bobAliceContact,
-    bobPk,
-    bobSk,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     bobSession as any,
     bobUserId
