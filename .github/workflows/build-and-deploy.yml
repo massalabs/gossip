@@ -52,6 +52,7 @@ jobs:
         with:
           node-version: '24'
           cache: 'npm'
+          cache-dependency-path: 'package-lock.json'
 
       - name: Check release tag matches package.json version
         if: github.event_name == 'release'
@@ -103,6 +104,7 @@ jobs:
         with:
           node-version: '24'
           cache: 'npm'
+          cache-dependency-path: 'package-lock.json'
 
       - name: Install dependencies (for Capacitor CLI)
         run: npm ci
@@ -347,6 +349,7 @@ jobs:
         with:
           node-version: '24'
           cache: 'npm'
+          cache-dependency-path: 'package-lock.json'
 
       - name: Install dependencies (for Capacitor CLI)
         run: npm ci
