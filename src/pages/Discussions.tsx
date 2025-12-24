@@ -10,6 +10,7 @@ import { useSearch } from '../hooks/useSearch';
 import { PrivacyGraphic } from '../components/graphics';
 import HeaderWrapper from '../components/ui/HeaderWrapper';
 import UserProfileAvatar from '../components/avatar/UserProfileAvatar';
+import QrCodeIcon from '../components/ui/customIcons/QrCodeIcon';
 import { ROUTES } from '../constants/routes';
 
 const Discussions: React.FC = () => {
@@ -98,6 +99,13 @@ const Discussions: React.FC = () => {
               Gossip
             </h1>
           </div>
+          <button
+            onClick={() => navigate(ROUTES.settingsShareContact())}
+            aria-label="Share my contact"
+            title="Share my contact"
+          >
+            <QrCodeIcon className="w-5 h-5 text-accent hover:brightness-150" />
+          </button>
         </div>
       </HeaderWrapper>
       <div

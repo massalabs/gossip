@@ -9,7 +9,7 @@ const ShareContactPage: React.FC = () => {
   const { userProfile, session } = useAccountStore();
 
   const handleBack = () => {
-    navigate(ROUTES.settings());
+    navigate(-1);
   };
 
   if (!userProfile || !session) {
