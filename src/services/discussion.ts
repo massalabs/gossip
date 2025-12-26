@@ -18,20 +18,19 @@ import { SessionStatus } from '../assets/generated/wasm/gossip_wasm';
  * Initialize a discussion with a contact using SessionManager
  * @param contact - The contact to start a discussion with
  * @param session - The SessionModule instance to use
- * @param userId - The user ID of the current user (discussion owner)
  * @param message - Optional message to include in the announcement
  * @returns The discussion ID and the created announcement
  */
 export async function initializeDiscussion(
   contact: Contact,
   session: SessionModule,
-  userId: string,
   message?: string
 ): Promise<{
   discussionId: number;
   announcement: Uint8Array;
 }> {
   try {
+    const userId = session.userIdEncoded;
     // Encode message as UTF-8 if provided
     const userData = message
       ? new TextEncoder().encode(message)
@@ -148,10 +147,10 @@ export async function acceptDiscussionRequest(
  * Renew a discussion by resetting sent outgoing messages and sending a new announcement.
  */
 export async function renewDiscussion(
-  ownerUserId: string,
   contactUserId: string,
   session: SessionModule
 ): Promise<void> {
+  const ownerUserId = session.userIdEncoded;
   const contact = await db.getContactByOwnerAndUserId(
     ownerUserId,
     contactUserId

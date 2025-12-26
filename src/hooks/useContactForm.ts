@@ -276,12 +276,7 @@ export function useContactForm() {
 
       const announcementMessage = message.value.trim() || undefined;
       try {
-        await initializeDiscussion(
-          contact,
-          session,
-          userProfile.userId,
-          announcementMessage
-        );
+        await initializeDiscussion(contact, session, announcementMessage);
       } catch (e) {
         console.error(
           'Failed to initialize discussion after contact creation:',

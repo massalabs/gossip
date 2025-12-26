@@ -88,8 +88,7 @@ describe('Discussion Service', () => {
       // Step 2: Alice initializes discussion with Bob
       const { discussionId: aliceDiscussionId } = await initializeDiscussion(
         aliceBobContact,
-        aliceSession as any,
-        aliceSession.userIdEncoded
+        aliceSession as any
       );
 
       // Verify Alice's discussion was created with status PENDING
@@ -199,8 +198,7 @@ describe('Discussion Service', () => {
       // Step 3: Alice initializes discussion with Bob
       const { discussionId: aliceDiscussionId } = await initializeDiscussion(
         aliceBobContact,
-        aliceSession as any,
-        aliceSession.userIdEncoded
+        aliceSession as any
       );
 
       // Step 4: Bob initializes discussion with Alice (simultaneous)
@@ -274,11 +272,7 @@ describe('Discussion Service', () => {
 
       // Step 2: Alice tries to initialize discussion with Bob - should throw
       await expect(
-        initializeDiscussion(
-          aliceBobContact,
-          aliceSession as any,
-          aliceSession.userIdEncoded
-        )
+        initializeDiscussion(aliceBobContact, aliceSession as any)
       ).rejects.toThrow('Discussion initialization failed');
 
       // Verify no discussion was created
@@ -314,8 +308,7 @@ describe('Discussion Service', () => {
       // Step 2: Alice initializes discussion - network fails
       const { discussionId: aliceDiscussionId } = await initializeDiscussion(
         aliceBobContact,
-        aliceSession as any,
-        aliceSession.userIdEncoded
+        aliceSession as any
       );
 
       // Verify discussion is in SEND_FAILED status
@@ -442,8 +435,7 @@ describe('Discussion Service', () => {
       // Step 2: Alice initializes discussion - network fails
       const { discussionId: aliceDiscussionId } = await initializeDiscussion(
         aliceBobContact,
-        aliceSession as any,
-        aliceSession.userIdEncoded
+        aliceSession as any
       );
 
       let aliceDiscussion = await db.discussions.get(aliceDiscussionId);
@@ -535,8 +527,7 @@ describe('Discussion Service', () => {
       // Step 2: Alice initializes discussion - network fails
       const { discussionId: aliceDiscussionId } = await initializeDiscussion(
         aliceBobContact,
-        aliceSession as any,
-        aliceSession.userIdEncoded
+        aliceSession as any
       );
 
       let aliceDiscussion = await db.discussions.get(aliceDiscussionId);
@@ -567,11 +558,7 @@ describe('Discussion Service', () => {
       aliceSession.peerSessionStatus.mockReturnValue(
         SessionStatus.SelfRequested
       );
-      await renewDiscussion(
-        aliceSession.userIdEncoded,
-        bobSession.userIdEncoded,
-        aliceSession as any
-      );
+      await renewDiscussion(bobSession.userIdEncoded, aliceSession as any);
 
       aliceDiscussion = await db.discussions.get(aliceDiscussionId);
       expect(aliceDiscussion?.status).toBe(DiscussionStatus.PENDING); // PENDING until network confirms
@@ -657,11 +644,7 @@ describe('Discussion Service', () => {
         'counter-123'
       );
 
-      await initializeDiscussion(
-        aliceBobContact,
-        aliceSession as any,
-        aliceSession.userIdEncoded
-      );
+      await initializeDiscussion(aliceBobContact, aliceSession as any);
 
       // Step 2: Bob receives Alice's announcement
       vi.spyOn(mockProtocol, 'fetchAnnouncements').mockResolvedValue([
@@ -731,11 +714,7 @@ describe('Discussion Service', () => {
         .mockClear()
         .mockResolvedValue('counter-456');
 
-      await renewDiscussion(
-        bobSession.userIdEncoded,
-        aliceSession.userIdEncoded,
-        bobSession as any
-      );
+      await renewDiscussion(aliceSession.userIdEncoded, bobSession as any);
 
       bobDiscussionAfterAccept = await db.discussions.get(bobDiscussion!.id!);
       expect(bobDiscussionAfterAccept?.status).toBe(DiscussionStatus.PENDING); // PENDING until Alice responds
@@ -809,8 +788,7 @@ describe('Discussion Service', () => {
 
       const { discussionId: aliceDiscussionId } = await initializeDiscussion(
         aliceBobContact,
-        aliceSession as any,
-        aliceSession.userIdEncoded
+        aliceSession as any
       );
 
       const { discussionId: bobDiscussionId } = await initializeDiscussion(
@@ -928,8 +906,7 @@ describe('Discussion Service', () => {
 
       const { discussionId: aliceDiscussionId } = await initializeDiscussion(
         aliceBobContact,
-        aliceSession as any,
-        aliceSession.userIdEncoded
+        aliceSession as any
       );
 
       const { discussionId: bobDiscussionId } = await initializeDiscussion(
@@ -980,11 +957,7 @@ describe('Discussion Service', () => {
         'counter-456'
       );
 
-      await renewDiscussion(
-        bobSession.userIdEncoded,
-        aliceSession.userIdEncoded,
-        bobSession as any
-      );
+      await renewDiscussion(aliceSession.userIdEncoded, bobSession as any);
 
       bobDiscussion = await db.discussions.get(bobDiscussionId);
       expect(bobDiscussion?.status).toBe(DiscussionStatus.ACTIVE);
@@ -1012,11 +985,7 @@ describe('Discussion Service', () => {
         new Error('Session manager error')
       );
       await expect(
-        renewDiscussion(
-          aliceSession.userIdEncoded,
-          bobSession.userIdEncoded,
-          aliceSession as any
-        )
+        renewDiscussion(bobSession.userIdEncoded, aliceSession as any)
       ).rejects.toThrow();
       let aliceDiscussion = await db.discussions.get(aliceDiscussionId);
       expect(aliceDiscussion?.status).toBe(DiscussionStatus.BROKEN); // Still broken
@@ -1027,11 +996,7 @@ describe('Discussion Service', () => {
         new Error('Network down')
       );
 
-      await renewDiscussion(
-        aliceSession.userIdEncoded,
-        bobSession.userIdEncoded,
-        aliceSession as any
-      );
+      await renewDiscussion(bobSession.userIdEncoded, aliceSession as any);
 
       aliceDiscussion = await db.discussions.get(aliceDiscussionId);
       expect(aliceDiscussion?.status).toBe(DiscussionStatus.SEND_FAILED);
@@ -1048,11 +1013,7 @@ describe('Discussion Service', () => {
       );
       aliceSession.peerSessionStatus.mockReturnValue(SessionStatus.Active);
 
-      await renewDiscussion(
-        aliceSession.userIdEncoded,
-        bobSession.userIdEncoded,
-        aliceSession as any
-      );
+      await renewDiscussion(bobSession.userIdEncoded, aliceSession as any);
 
       aliceDiscussion = await db.discussions.get(aliceDiscussionId);
       expect(aliceDiscussion?.status).toBe(DiscussionStatus.ACTIVE);
