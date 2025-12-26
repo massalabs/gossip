@@ -15,6 +15,26 @@ interface InitSessionResult {
 }
 
 /**
+ * Initialize a session mock with provided keys.
+ * This helper:
+ * - Encodes the user ID from public keys
+ * - Creates and configures a MockSessionModule
+ * - Returns the configured session
+ */
+export function initializeSessionMock(
+  publicKeys: MockUserPublicKeys,
+  secretKeys: MockUserSecretKeys
+): MockSessionModule {
+  const userId = publicKeys.user_id;
+  const userIdEncoded = encodeUserId(userId);
+  const session = new MockSessionModule(publicKeys, secretKeys);
+  session.userId = userId;
+  session.userIdEncoded = userIdEncoded;
+
+  return session;
+}
+
+/**
  * Initialize an active discussion session between Alice and Bob for message tests.
  * This helper:
  * - Creates reciprocal contacts

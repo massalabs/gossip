@@ -6,6 +6,16 @@
 
 import { vi } from 'vitest';
 import { blake3 } from '@noble/hashes/blake3';
+import type {
+  UserPublicKeys,
+  UserSecretKeys,
+  SessionStatus,
+  AnnouncementResult,
+  SendMessageOutput,
+  ReceiveMessageOutput,
+  EncryptionKey,
+} from '../../src/assets/generated/wasm/gossip_wasm';
+import type { UserProfile } from '../../src/db';
 
 /**
  * Mock UserPublicKeys class
@@ -107,34 +117,72 @@ export const mockGenerateUserKeys = vi.fn(() => {
 
 /**
  * Mock SessionModule class
+ *
+ * This class implements the same interface as SessionModule to allow
+ * it to be used as a drop-in replacement in tests without type casts.
  */
 export class MockSessionModule {
-  // Add minimal fields/methods to match SessionModule's public shape
-  persistIfNeeded = vi.fn();
+  // Properties matching SessionModule's public interface exactly
+  public ourPk: MockUserPublicKeys & UserPublicKeys;
+  public ourSk: MockUserSecretKeys & UserSecretKeys;
+  public userId: Uint8Array;
+  public userIdEncoded: string;
 
-  setOnPersist = vi.fn();
-  load = vi.fn();
-  toEncryptedBlob = vi.fn(() => new Uint8Array(100));
-  cleanup = vi.fn();
+  // Private properties matching SessionModule exactly
+  // Note: TypeScript doesn't allow assigning classes with private properties of the same name
+  // This is a known limitation. The mock will work at runtime but requires type handling.
+  private sessionManager: unknown | null = null;
+  private onPersist?: () => void;
 
-  // userIdEncoded is required by AnnouncementService.fetchAndProcessAnnouncements
-  userIdEncoded: string = '';
-
-  establishOutgoingSession = vi.fn(() => new Uint8Array(200));
-  feedIncomingAnnouncement = vi.fn(() => undefined);
-  getMessageBoardReadKeys = vi.fn((): Uint8Array[] => []);
-  feedIncomingMessageBoardRead = vi.fn(() => undefined);
-  sendMessage = vi.fn(() => {
-    // Default mock returns a SendMessageOutput-like object
+  // Methods matching SessionModule's public interface exactly
+  // Using vi.fn() to allow mocking in tests
+  setOnPersist = vi.fn<(callback: () => void) => void>();
+  load = vi.fn<(profile: UserProfile, encryptionKey: EncryptionKey) => void>();
+  toEncryptedBlob = vi.fn<(key: EncryptionKey) => Uint8Array>(
+    () => new Uint8Array(100)
+  );
+  cleanup = vi.fn<() => void>();
+  establishOutgoingSession = vi.fn<
+    (peerPk: UserPublicKeys, userData?: Uint8Array) => Uint8Array
+  >(() => new Uint8Array(200));
+  feedIncomingAnnouncement = vi.fn<
+    (announcementBytes: Uint8Array) => AnnouncementResult | undefined
+  >(() => undefined);
+  getMessageBoardReadKeys = vi.fn<() => Array<Uint8Array>>(() => []);
+  feedIncomingMessageBoardRead = vi.fn<
+    (
+      seeker: Uint8Array,
+      ciphertext: Uint8Array
+    ) => ReceiveMessageOutput | undefined
+  >(() => undefined);
+  sendMessage = vi.fn<
+    (peerId: Uint8Array, message: Uint8Array) => SendMessageOutput | undefined
+  >(() => {
     const seeker = new Uint8Array(32);
     const data = new Uint8Array(100);
     crypto.getRandomValues(seeker);
     crypto.getRandomValues(data);
-    return { seeker, data };
+    return { seeker, data } as SendMessageOutput;
   });
-  receiveMessage = vi.fn(() => undefined);
-  peerList = vi.fn(() => []);
-  peerSessionStatus = vi.fn(() => 2); // NoSession
-  peerDiscard = vi.fn();
-  refresh = vi.fn(() => []);
+  peerList = vi.fn<() => Array<Uint8Array>>(() => []);
+  peerSessionStatus = vi.fn<(peerId: Uint8Array) => SessionStatus>(() => 2); // NoSession
+  peerDiscard = vi.fn<(peerId: Uint8Array) => void>();
+  refresh = vi.fn<() => Array<Uint8Array>>(() => []);
+
+  // Private method matching SessionModule
+  private persistIfNeeded = vi.fn<() => void>();
+
+  constructor(
+    publicKeys?: MockUserPublicKeys,
+    secretKeys?: MockUserSecretKeys
+  ) {
+    // Initialize with provided keys or create empty placeholders
+    // Cast to satisfy type compatibility
+    this.ourPk = (publicKeys ||
+      new MockUserPublicKeys()) as MockUserPublicKeys & UserPublicKeys;
+    this.ourSk = (secretKeys ||
+      new MockUserSecretKeys()) as MockUserSecretKeys & UserSecretKeys;
+    this.userId = this.ourPk.user_id;
+    this.userIdEncoded = '';
+  }
 }
