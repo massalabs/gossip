@@ -1236,9 +1236,9 @@ describe('Message Service (Browser with Real WASM)', () => {
       aliceSession.establishOutgoingSession = vi.fn(() => new Uint8Array(0));
 
       // First renewal attempt - fails
-      await expect(
-        renewDiscussion(aliceUserId, bobUserId, aliceSession)
-      ).rejects.toThrow(EstablishSessionError);
+      await expect(renewDiscussion(bobUserId, aliceSession)).rejects.toThrow(
+        EstablishSessionError
+      );
       aliceSession.establishOutgoingSession = originalEstablishOutgoingSession;
 
       // Verify discussion is BROKEN
@@ -1250,7 +1250,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       // Second renewal attempt - succeeds
       peerSessionStatusSpy.mockRestore();
       console.log('Second renewal attempt aliceSession:', aliceSession);
-      await renewDiscussion(aliceUserId, bobUserId, aliceSession);
+      await renewDiscussion(bobUserId, aliceSession);
 
       // Verify discussion is ACTIVE
       const discussionAfterRenew = await db.getDiscussionByOwnerAndContact(

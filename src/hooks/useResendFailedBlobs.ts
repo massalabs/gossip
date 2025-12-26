@@ -36,7 +36,7 @@ export function useManualRenewDiscussion() {
       }
 
       try {
-        await renewDiscussion(userProfile.userId, contactUserId, session);
+        await renewDiscussion(contactUserId, session);
       } catch (error) {
         console.error(
           `Failed to renew discussion with ${contactUserId}:`,
@@ -135,11 +135,7 @@ export function useResendFailedBlobs() {
       // Reinitiate broken discussions
       for (const discussion of brokenDiscussions) {
         try {
-          await renewDiscussion(
-            userProfile.userId,
-            discussion.contactUserId,
-            session
-          );
+          await renewDiscussion(discussion.contactUserId, session);
         } catch (err) {
           console.error(
             `Failed to reinitiate discussion ${discussion.contactUserId}:`,
