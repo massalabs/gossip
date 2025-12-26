@@ -145,6 +145,8 @@ export async function acceptDiscussionRequest(
 
 /**
  * Renew a discussion by resetting sent outgoing messages and sending a new announcement.
+ * @param contactUserId - The user ID of the contact whose discussion should be renewed.
+ * @param session - The SessionModule instance for the current owner user.
  */
 export async function renewDiscussion(
   contactUserId: string,

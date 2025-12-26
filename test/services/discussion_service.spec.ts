@@ -110,10 +110,10 @@ describe('Discussion Service', () => {
       await announcementService.fetchAndProcessAnnouncements(bobSession as any);
 
       // Verify Bob's discussion was created with status PENDING (received)
-      const bobDiscussion = await db.discussions
-        .where('[ownerUserId+contactUserId]')
-        .equals([bobSession.userIdEncoded, aliceSession.userIdEncoded])
-        .first();
+      const bobDiscussion = await db.getDiscussionByOwnerAndContact(
+        bobSession.userIdEncoded,
+        aliceSession.userIdEncoded
+      );
 
       expect(bobDiscussion).toBeDefined();
       expect(bobDiscussion?.status).toBe(DiscussionStatus.PENDING);
@@ -204,8 +204,7 @@ describe('Discussion Service', () => {
       // Step 4: Bob initializes discussion with Alice (simultaneous)
       const { discussionId: bobDiscussionId } = await initializeDiscussion(
         bobAliceContact,
-        bobSession as any,
-        bobSession.userIdEncoded
+        bobSession as any
       );
 
       // Verify both have PENDING discussions with direction 'initiated'
@@ -340,10 +339,10 @@ describe('Discussion Service', () => {
 
       await announcementService.fetchAndProcessAnnouncements(bobSession as any);
 
-      const bobDiscussion = await db.discussions
-        .where('[ownerUserId+contactUserId]')
-        .equals([bobSession.userIdEncoded, aliceSession.userIdEncoded])
-        .first();
+      const bobDiscussion = await db.getDiscussionByOwnerAndContact(
+        bobSession.userIdEncoded,
+        aliceSession.userIdEncoded
+      );
 
       expect(bobDiscussion).toBeDefined();
       expect(bobDiscussion?.status).toBe(DiscussionStatus.PENDING);
@@ -392,10 +391,11 @@ describe('Discussion Service', () => {
         aliceSession as any
       );
 
-      const aliceDiscussionAfterBobAccept = await db.discussions
-        .where('[ownerUserId+contactUserId]')
-        .equals([aliceSession.userIdEncoded, bobSession.userIdEncoded])
-        .first();
+      const aliceDiscussionAfterBobAccept =
+        await db.getDiscussionByOwnerAndContact(
+          aliceSession.userIdEncoded,
+          bobSession.userIdEncoded
+        );
 
       expect(aliceDiscussionAfterBobAccept).toBeDefined();
       expect(aliceDiscussionAfterBobAccept?.status).toBe(
@@ -475,10 +475,10 @@ describe('Discussion Service', () => {
 
       await announcementService.fetchAndProcessAnnouncements(bobSession as any);
 
-      const bobDiscussion = await db.discussions
-        .where('[ownerUserId+contactUserId]')
-        .equals([bobSession.userIdEncoded, aliceSession.userIdEncoded])
-        .first();
+      const bobDiscussion = await db.getDiscussionByOwnerAndContact(
+        bobSession.userIdEncoded,
+        aliceSession.userIdEncoded
+      );
 
       const bobAcceptanceAnnouncement = new Uint8Array(200);
       crypto.getRandomValues(bobAcceptanceAnnouncement);
@@ -577,10 +577,10 @@ describe('Discussion Service', () => {
 
       await announcementService.fetchAndProcessAnnouncements(bobSession as any);
 
-      const bobDiscussion = await db.discussions
-        .where('[ownerUserId+contactUserId]')
-        .equals([bobSession.userIdEncoded, aliceSession.userIdEncoded])
-        .first();
+      const bobDiscussion = await db.getDiscussionByOwnerAndContact(
+        bobSession.userIdEncoded,
+        aliceSession.userIdEncoded
+      );
 
       const bobAcceptanceAnnouncement = new Uint8Array(200);
       crypto.getRandomValues(bobAcceptanceAnnouncement);
@@ -609,10 +609,11 @@ describe('Discussion Service', () => {
         aliceSession as any
       );
 
-      const aliceDiscussionAfterBobAccept = await db.discussions
-        .where('[ownerUserId+contactUserId]')
-        .equals([aliceSession.userIdEncoded, bobSession.userIdEncoded])
-        .first();
+      const aliceDiscussionAfterBobAccept =
+        await db.getDiscussionByOwnerAndContact(
+          aliceSession.userIdEncoded,
+          bobSession.userIdEncoded
+        );
 
       expect(aliceDiscussionAfterBobAccept).toBeDefined();
       expect(aliceDiscussionAfterBobAccept?.status).toBe(
@@ -659,10 +660,10 @@ describe('Discussion Service', () => {
 
       await announcementService.fetchAndProcessAnnouncements(bobSession as any);
 
-      const bobDiscussion = await db.discussions
-        .where('[ownerUserId+contactUserId]')
-        .equals([bobSession.userIdEncoded, aliceSession.userIdEncoded])
-        .first();
+      const bobDiscussion = await db.getDiscussionByOwnerAndContact(
+        bobSession.userIdEncoded,
+        aliceSession.userIdEncoded
+      );
 
       // Step 3: Bob tries to accept but session manager error
       bobSession.establishOutgoingSession.mockImplementation(() => {
@@ -733,10 +734,11 @@ describe('Discussion Service', () => {
         aliceSession as any
       );
 
-      const aliceDiscussionAfterBobAccept = await db.discussions
-        .where('[ownerUserId+contactUserId]')
-        .equals([aliceSession.userIdEncoded, bobSession.userIdEncoded])
-        .first();
+      const aliceDiscussionAfterBobAccept =
+        await db.getDiscussionByOwnerAndContact(
+          aliceSession.userIdEncoded,
+          bobSession.userIdEncoded
+        );
 
       expect(aliceDiscussionAfterBobAccept).toBeDefined();
       expect(aliceDiscussionAfterBobAccept?.status).toBe(
@@ -793,8 +795,7 @@ describe('Discussion Service', () => {
 
       const { discussionId: bobDiscussionId } = await initializeDiscussion(
         bobAliceContact,
-        bobSession as any,
-        bobSession.userIdEncoded
+        bobSession as any
       );
 
       let aliceDiscussion = await db.discussions.get(aliceDiscussionId);
@@ -911,8 +912,7 @@ describe('Discussion Service', () => {
 
       const { discussionId: bobDiscussionId } = await initializeDiscussion(
         bobAliceContact,
-        bobSession as any,
-        bobSession.userIdEncoded
+        bobSession as any
       );
 
       const aliceDiscussion = await db.discussions.get(aliceDiscussionId);

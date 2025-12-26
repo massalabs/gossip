@@ -25,10 +25,8 @@ export function initializeSessionMock(
   publicKeys: MockUserPublicKeys,
   secretKeys: MockUserSecretKeys
 ): MockSessionModule {
-  const userId = publicKeys.user_id;
-  const userIdEncoded = encodeUserId(userId);
+  const userIdEncoded = encodeUserId(publicKeys.user_id);
   const session = new MockSessionModule(publicKeys, secretKeys);
-  session.userId = userId;
   session.userIdEncoded = userIdEncoded;
 
   return session;
@@ -51,12 +49,9 @@ export async function initSession(
   aliceSession: MockSessionModule,
   bobSession: MockSessionModule
 ): Promise<InitSessionResult> {
-  const aliceUserId = encodeUserId(alicePk.user_id);
-  const bobUserId = encodeUserId(bobPk.user_id);
-
   const aliceBobContact: Omit<Contact, 'id'> = {
-    ownerUserId: aliceUserId,
-    userId: bobUserId,
+    ownerUserId: aliceSession.userIdEncoded,
+    userId: bobSession.userIdEncoded,
     name: 'Bob',
     publicKeys: bobPk.to_bytes(),
     avatar: undefined,
@@ -66,8 +61,8 @@ export async function initSession(
   };
 
   const bobAliceContact: Omit<Contact, 'id'> = {
-    ownerUserId: bobUserId,
-    userId: aliceUserId,
+    ownerUserId: bobSession.userIdEncoded,
+    userId: aliceSession.userIdEncoded,
     name: 'Alice',
     publicKeys: alicePk.to_bytes(),
     avatar: undefined,
@@ -93,14 +88,12 @@ export async function initSession(
   const { discussionId: aliceDiscussionId } = await initializeDiscussion(
     aliceBobContact,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    aliceSession as any,
-    aliceUserId
+    aliceSession as any
   );
   const { discussionId: bobDiscussionId } = await initializeDiscussion(
     bobAliceContact,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    bobSession as any,
-    bobUserId
+    bobSession as any
   );
 
   return {
