@@ -312,10 +312,10 @@ export class GossipDatabase extends Dexie {
     const messageId = await this.messages.add(message);
 
     // Get existing discussion
-    const discussion = await this.discussions
-      .where('[ownerUserId+contactUserId]')
-      .equals([message.ownerUserId, message.contactUserId])
-      .first();
+    const discussion = await this.getDiscussionByOwnerAndContact(
+      message.ownerUserId,
+      message.contactUserId
+    );
 
     if (discussion) {
       await this.discussions.update(discussion.id!, {
