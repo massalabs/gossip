@@ -7,7 +7,6 @@ import {
   renewDiscussion,
 } from '../../src/services/discussion';
 import { announcementService } from '../../src/services/announcement';
-import { encodeUserId } from '../../src/utils/userId';
 
 // Import mock classes after vi.mock calls (due to hoisting)
 import {
@@ -16,9 +15,8 @@ import {
   MockUserSecretKeys,
   mockGenerateUserKeys,
 } from '../wasm/mock';
-import { SessionModule } from '../../src/wasm/session';
 import { SessionStatus } from '../../src/assets/generated/wasm/gossip_wasm';
-import { initSession } from '../utils';
+import { initSession, initializeSessionMock } from '../utils';
 import { MockMessageProtocol } from '../../src/api/messageProtocol/mock';
 import { createMessageProtocol } from '../../src/api/messageProtocol';
 import { MessageProtocolType } from '../../src/config/protocol';
@@ -26,13 +24,11 @@ import { MessageProtocolType } from '../../src/config/protocol';
 describe('Discussion Service', () => {
   let mockProtocol: MockMessageProtocol;
   // Alice's test data
-  let aliceUserId: string;
   let aliceSession: MockSessionModule;
   let alicePk: MockUserPublicKeys;
   let aliceSk: MockUserSecretKeys;
 
   // Bob's test data
-  let bobUserId: string;
   let bobSession: MockSessionModule;
   let bobPk: MockUserPublicKeys;
   let bobSk: MockUserSecretKeys;
@@ -57,31 +53,23 @@ describe('Discussion Service', () => {
 
     // Generate Alice's keys
     const aliceKeys = mockGenerateUserKeys();
-    aliceUserId = encodeUserId(aliceKeys.publicKeys.user_id);
     alicePk = aliceKeys.publicKeys;
     aliceSk = aliceKeys.secretKeys;
-
-    // Create Alice's session
-    aliceSession = new MockSessionModule();
-    aliceSession.userIdEncoded = aliceUserId;
+    aliceSession = initializeSessionMock(alicePk, aliceSk);
 
     // Generate Bob's keys
     const bobKeys = mockGenerateUserKeys();
-    bobUserId = encodeUserId(bobKeys.publicKeys.user_id);
     bobPk = bobKeys.publicKeys;
     bobSk = bobKeys.secretKeys;
-
-    // Create Bob's session
-    bobSession = new MockSessionModule();
-    bobSession.userIdEncoded = bobUserId;
+    bobSession = initializeSessionMock(bobPk, bobSk);
   });
 
   describe('Discussion Initiation Happy Path', () => {
     it('Alice sends announcement and Bob accepts', async () => {
       // Step 1: Alice creates Bob as a contact (like in NewContact.tsx handleSubmit)
       const aliceBobContact: Omit<Contact, 'id'> = {
-        ownerUserId: aliceUserId,
-        userId: bobUserId,
+        ownerUserId: aliceSession.userIdEncoded,
+        userId: bobSession.userIdEncoded,
         name: 'Bob',
         publicKeys: bobPk.to_bytes(),
         avatar: undefined,
@@ -100,8 +88,8 @@ describe('Discussion Service', () => {
       // Step 2: Alice initializes discussion with Bob
       const { discussionId: aliceDiscussionId } = await initializeDiscussion(
         aliceBobContact,
-        aliceSession as unknown as SessionModule,
-        aliceUserId
+        aliceSession as any,
+        aliceSession.userIdEncoded
       );
 
       // Verify Alice's discussion was created with status PENDING
@@ -125,7 +113,7 @@ describe('Discussion Service', () => {
       // Verify Bob's discussion was created with status PENDING (received)
       const bobDiscussion = await db.discussions
         .where('[ownerUserId+contactUserId]')
-        .equals([bobUserId, aliceUserId])
+        .equals([bobSession.userIdEncoded, aliceSession.userIdEncoded])
         .first();
 
       expect(bobDiscussion).toBeDefined();
@@ -173,8 +161,8 @@ describe('Discussion Service', () => {
     it('Both Alice and Bob send announcement at the same time', async () => {
       // Step 1: Alice creates Bob as a contact
       const aliceBobContact: Omit<Contact, 'id'> = {
-        ownerUserId: aliceUserId,
-        userId: bobUserId,
+        ownerUserId: aliceSession.userIdEncoded,
+        userId: bobSession.userIdEncoded,
         name: 'Bob',
         publicKeys: bobPk.to_bytes(),
         avatar: undefined,
@@ -187,8 +175,8 @@ describe('Discussion Service', () => {
 
       // Step 2: Bob creates Alice as a contact
       const bobAliceContact: Omit<Contact, 'id'> = {
-        ownerUserId: bobUserId,
-        userId: aliceUserId,
+        ownerUserId: bobSession.userIdEncoded,
+        userId: aliceSession.userIdEncoded,
         name: 'Alice',
         publicKeys: alicePk.to_bytes(),
         avatar: undefined,
@@ -212,14 +200,14 @@ describe('Discussion Service', () => {
       const { discussionId: aliceDiscussionId } = await initializeDiscussion(
         aliceBobContact,
         aliceSession as any,
-        aliceUserId
+        aliceSession.userIdEncoded
       );
 
       // Step 4: Bob initializes discussion with Alice (simultaneous)
       const { discussionId: bobDiscussionId } = await initializeDiscussion(
         bobAliceContact,
         bobSession as any,
-        bobUserId
+        bobSession.userIdEncoded
       );
 
       // Verify both have PENDING discussions with direction 'initiated'
@@ -267,8 +255,8 @@ describe('Discussion Service', () => {
     it('Alice try to send announcement but session manager error', async () => {
       // Step 1: Alice creates Bob as a contact
       const aliceBobContact: Omit<Contact, 'id'> = {
-        ownerUserId: aliceUserId,
-        userId: bobUserId,
+        ownerUserId: aliceSession.userIdEncoded,
+        userId: bobSession.userIdEncoded,
         name: 'Bob',
         publicKeys: bobPk.to_bytes(),
         avatar: undefined,
@@ -286,7 +274,11 @@ describe('Discussion Service', () => {
 
       // Step 2: Alice tries to initialize discussion with Bob - should throw
       await expect(
-        initializeDiscussion(aliceBobContact, aliceSession as any, aliceUserId)
+        initializeDiscussion(
+          aliceBobContact,
+          aliceSession as any,
+          aliceSession.userIdEncoded
+        )
       ).rejects.toThrow('Discussion initialization failed');
 
       // Verify no discussion was created
@@ -297,8 +289,8 @@ describe('Discussion Service', () => {
     it('Alice sign announcement but could not be sent on network. Resend it with success. Same thing happens to Bob acceptation announcement', async () => {
       // Step 1: Alice creates Bob as a contact
       const aliceBobContact: Omit<Contact, 'id'> = {
-        ownerUserId: aliceUserId,
-        userId: bobUserId,
+        ownerUserId: aliceSession.userIdEncoded,
+        userId: bobSession.userIdEncoded,
         name: 'Bob',
         publicKeys: bobPk.to_bytes(),
         avatar: undefined,
@@ -323,7 +315,7 @@ describe('Discussion Service', () => {
       const { discussionId: aliceDiscussionId } = await initializeDiscussion(
         aliceBobContact,
         aliceSession as any,
-        aliceUserId
+        aliceSession.userIdEncoded
       );
 
       // Verify discussion is in SEND_FAILED status
@@ -357,7 +349,7 @@ describe('Discussion Service', () => {
 
       const bobDiscussion = await db.discussions
         .where('[ownerUserId+contactUserId]')
-        .equals([bobUserId, aliceUserId])
+        .equals([bobSession.userIdEncoded, aliceSession.userIdEncoded])
         .first();
 
       expect(bobDiscussion).toBeDefined();
@@ -409,7 +401,7 @@ describe('Discussion Service', () => {
 
       const aliceDiscussionAfterBobAccept = await db.discussions
         .where('[ownerUserId+contactUserId]')
-        .equals([aliceUserId, bobUserId])
+        .equals([aliceSession.userIdEncoded, bobSession.userIdEncoded])
         .first();
 
       expect(aliceDiscussionAfterBobAccept).toBeDefined();
@@ -421,8 +413,8 @@ describe('Discussion Service', () => {
     it('Alice sign announcement but could not be sent. Resend fails 3 times and success the 4th time. Bob accept without issue', async () => {
       // Step 1: Alice creates Bob as a contact
       const aliceBobContact: Omit<Contact, 'id'> = {
-        ownerUserId: aliceUserId,
-        userId: bobUserId,
+        ownerUserId: aliceSession.userIdEncoded,
+        userId: bobSession.userIdEncoded,
         name: 'Bob',
         publicKeys: bobPk.to_bytes(),
         avatar: undefined,
@@ -451,7 +443,7 @@ describe('Discussion Service', () => {
       const { discussionId: aliceDiscussionId } = await initializeDiscussion(
         aliceBobContact,
         aliceSession as any,
-        aliceUserId
+        aliceSession.userIdEncoded
       );
 
       let aliceDiscussion = await db.discussions.get(aliceDiscussionId);
@@ -493,7 +485,7 @@ describe('Discussion Service', () => {
 
       const bobDiscussion = await db.discussions
         .where('[ownerUserId+contactUserId]')
-        .equals([bobUserId, aliceUserId])
+        .equals([bobSession.userIdEncoded, aliceSession.userIdEncoded])
         .first();
 
       const bobAcceptanceAnnouncement = new Uint8Array(200);
@@ -517,8 +509,8 @@ describe('Discussion Service', () => {
     it('Alice sign announcement but could not be sent. Resend fails too many times and session is broken. Renew session and resend. Bob accept.', async () => {
       // Step 1: Alice creates Bob as a contact
       const aliceBobContact: Omit<Contact, 'id'> = {
-        ownerUserId: aliceUserId,
-        userId: bobUserId,
+        ownerUserId: aliceSession.userIdEncoded,
+        userId: bobSession.userIdEncoded,
         name: 'Bob',
         publicKeys: bobPk.to_bytes(),
         avatar: undefined,
@@ -544,7 +536,7 @@ describe('Discussion Service', () => {
       const { discussionId: aliceDiscussionId } = await initializeDiscussion(
         aliceBobContact,
         aliceSession as any,
-        aliceUserId
+        aliceSession.userIdEncoded
       );
 
       let aliceDiscussion = await db.discussions.get(aliceDiscussionId);
@@ -575,7 +567,11 @@ describe('Discussion Service', () => {
       aliceSession.peerSessionStatus.mockReturnValue(
         SessionStatus.SelfRequested
       );
-      await renewDiscussion(aliceUserId, bobUserId, aliceSession as any);
+      await renewDiscussion(
+        aliceSession.userIdEncoded,
+        bobSession.userIdEncoded,
+        aliceSession as any
+      );
 
       aliceDiscussion = await db.discussions.get(aliceDiscussionId);
       expect(aliceDiscussion?.status).toBe(DiscussionStatus.PENDING); // PENDING until network confirms
@@ -596,7 +592,7 @@ describe('Discussion Service', () => {
 
       const bobDiscussion = await db.discussions
         .where('[ownerUserId+contactUserId]')
-        .equals([bobUserId, aliceUserId])
+        .equals([bobSession.userIdEncoded, aliceSession.userIdEncoded])
         .first();
 
       const bobAcceptanceAnnouncement = new Uint8Array(200);
@@ -628,7 +624,7 @@ describe('Discussion Service', () => {
 
       const aliceDiscussionAfterBobAccept = await db.discussions
         .where('[ownerUserId+contactUserId]')
-        .equals([aliceUserId, bobUserId])
+        .equals([aliceSession.userIdEncoded, bobSession.userIdEncoded])
         .first();
 
       expect(aliceDiscussionAfterBobAccept).toBeDefined();
@@ -640,8 +636,8 @@ describe('Discussion Service', () => {
     it('Alice send announcement, bob accept but get session manager error. Retry, sign announcement but could not be sent on network until session broke. Renew session and resend with success', async () => {
       // Step 1: Alice creates Bob and sends announcement successfully
       const aliceBobContact: Omit<Contact, 'id'> = {
-        ownerUserId: aliceUserId,
-        userId: bobUserId,
+        ownerUserId: aliceSession.userIdEncoded,
+        userId: bobSession.userIdEncoded,
         name: 'Bob',
         publicKeys: bobPk.to_bytes(),
         avatar: undefined,
@@ -664,7 +660,7 @@ describe('Discussion Service', () => {
       await initializeDiscussion(
         aliceBobContact,
         aliceSession as any,
-        aliceUserId
+        aliceSession.userIdEncoded
       );
 
       // Step 2: Bob receives Alice's announcement
@@ -682,7 +678,7 @@ describe('Discussion Service', () => {
 
       const bobDiscussion = await db.discussions
         .where('[ownerUserId+contactUserId]')
-        .equals([bobUserId, aliceUserId])
+        .equals([bobSession.userIdEncoded, aliceSession.userIdEncoded])
         .first();
 
       // Step 3: Bob tries to accept but session manager error
@@ -735,7 +731,11 @@ describe('Discussion Service', () => {
         .mockClear()
         .mockResolvedValue('counter-456');
 
-      await renewDiscussion(bobUserId, aliceUserId, bobSession as any);
+      await renewDiscussion(
+        bobSession.userIdEncoded,
+        aliceSession.userIdEncoded,
+        bobSession as any
+      );
 
       bobDiscussionAfterAccept = await db.discussions.get(bobDiscussion!.id!);
       expect(bobDiscussionAfterAccept?.status).toBe(DiscussionStatus.PENDING); // PENDING until Alice responds
@@ -756,7 +756,7 @@ describe('Discussion Service', () => {
 
       const aliceDiscussionAfterBobAccept = await db.discussions
         .where('[ownerUserId+contactUserId]')
-        .equals([aliceUserId, bobUserId])
+        .equals([aliceSession.userIdEncoded, bobSession.userIdEncoded])
         .first();
 
       expect(aliceDiscussionAfterBobAccept).toBeDefined();
@@ -768,8 +768,8 @@ describe('Discussion Service', () => {
     it("Alice and Bob both send announcements at the same time. Both have network issue and resend. Alice receive Bob's announcement while resending", async () => {
       /* Step 1: Both create contacts */
       const aliceBobContact: Omit<Contact, 'id'> = {
-        ownerUserId: aliceUserId,
-        userId: bobUserId,
+        ownerUserId: aliceSession.userIdEncoded,
+        userId: bobSession.userIdEncoded,
         name: 'Bob',
         publicKeys: bobPk.to_bytes(),
         avatar: undefined,
@@ -779,8 +779,8 @@ describe('Discussion Service', () => {
       };
 
       const bobAliceContact: Omit<Contact, 'id'> = {
-        ownerUserId: bobUserId,
-        userId: aliceUserId,
+        ownerUserId: bobSession.userIdEncoded,
+        userId: aliceSession.userIdEncoded,
         name: 'Alice',
         publicKeys: alicePk.to_bytes(),
         avatar: undefined,
@@ -810,13 +810,13 @@ describe('Discussion Service', () => {
       const { discussionId: aliceDiscussionId } = await initializeDiscussion(
         aliceBobContact,
         aliceSession as any,
-        aliceUserId
+        aliceSession.userIdEncoded
       );
 
       const { discussionId: bobDiscussionId } = await initializeDiscussion(
         bobAliceContact,
         bobSession as any,
-        bobUserId
+        bobSession.userIdEncoded
       );
 
       let aliceDiscussion = await db.discussions.get(aliceDiscussionId);
@@ -888,8 +888,8 @@ describe('Discussion Service', () => {
     it("Alice and Bob both send announcement at same time. Bob session is broken because of too much resend. Bob receive Alice's announcement while session is broken.", async () => {
       // Step 1: Both create contacts
       const aliceBobContact: Omit<Contact, 'id'> = {
-        ownerUserId: aliceUserId,
-        userId: bobUserId,
+        ownerUserId: aliceSession.userIdEncoded,
+        userId: bobSession.userIdEncoded,
         name: 'Bob',
         publicKeys: bobPk.to_bytes(),
         avatar: undefined,
@@ -899,8 +899,8 @@ describe('Discussion Service', () => {
       };
 
       const bobAliceContact: Omit<Contact, 'id'> = {
-        ownerUserId: bobUserId,
-        userId: aliceUserId,
+        ownerUserId: bobSession.userIdEncoded,
+        userId: aliceSession.userIdEncoded,
         name: 'Alice',
         publicKeys: alicePk.to_bytes(),
         avatar: undefined,
@@ -929,13 +929,13 @@ describe('Discussion Service', () => {
       const { discussionId: aliceDiscussionId } = await initializeDiscussion(
         aliceBobContact,
         aliceSession as any,
-        aliceUserId
+        aliceSession.userIdEncoded
       );
 
       const { discussionId: bobDiscussionId } = await initializeDiscussion(
         bobAliceContact,
         bobSession as any,
-        bobUserId
+        bobSession.userIdEncoded
       );
 
       const aliceDiscussion = await db.discussions.get(aliceDiscussionId);
@@ -980,7 +980,11 @@ describe('Discussion Service', () => {
         'counter-456'
       );
 
-      await renewDiscussion(bobUserId, aliceUserId, bobSession as any);
+      await renewDiscussion(
+        bobSession.userIdEncoded,
+        aliceSession.userIdEncoded,
+        bobSession as any
+      );
 
       bobDiscussion = await db.discussions.get(bobDiscussionId);
       expect(bobDiscussion?.status).toBe(DiscussionStatus.ACTIVE);
@@ -1008,7 +1012,11 @@ describe('Discussion Service', () => {
         new Error('Session manager error')
       );
       await expect(
-        renewDiscussion(aliceUserId, bobUserId, aliceSession as any)
+        renewDiscussion(
+          aliceSession.userIdEncoded,
+          bobSession.userIdEncoded,
+          aliceSession as any
+        )
       ).rejects.toThrow();
       let aliceDiscussion = await db.discussions.get(aliceDiscussionId);
       expect(aliceDiscussion?.status).toBe(DiscussionStatus.BROKEN); // Still broken
@@ -1019,7 +1027,11 @@ describe('Discussion Service', () => {
         new Error('Network down')
       );
 
-      await renewDiscussion(aliceUserId, bobUserId, aliceSession as any);
+      await renewDiscussion(
+        aliceSession.userIdEncoded,
+        bobSession.userIdEncoded,
+        aliceSession as any
+      );
 
       aliceDiscussion = await db.discussions.get(aliceDiscussionId);
       expect(aliceDiscussion?.status).toBe(DiscussionStatus.SEND_FAILED);
@@ -1036,7 +1048,11 @@ describe('Discussion Service', () => {
       );
       aliceSession.peerSessionStatus.mockReturnValue(SessionStatus.Active);
 
-      await renewDiscussion(aliceUserId, bobUserId, aliceSession as any);
+      await renewDiscussion(
+        aliceSession.userIdEncoded,
+        bobSession.userIdEncoded,
+        aliceSession as any
+      );
 
       aliceDiscussion = await db.discussions.get(aliceDiscussionId);
       expect(aliceDiscussion?.status).toBe(DiscussionStatus.ACTIVE);
