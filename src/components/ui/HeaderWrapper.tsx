@@ -24,7 +24,16 @@ const HeaderWrapper: React.FC<HeaderWrapperProps> = ({
   const bgClass = headerIsScrolled ? 'bg-muted' : 'bg-card';
 
   return (
-    <div className={`px-6 py-4 header-bg-transition ${bgClass} ${className}`}>
+    <div
+      className={`px-6 py-4 header-bg-transition ${bgClass} ${className}`}
+      style={{
+        boxShadow: headerIsScrolled
+          ? '0 2px 4px -1px rgba(0, 0, 0, 0.06), 0 4px 6px -1px rgba(0, 0, 0, 0.1)'
+          : 'none',
+        transition:
+          'background-color 200ms cubic-bezier(0.4, 0, 0.2, 1), box-shadow 200ms cubic-bezier(0.4, 0, 0.2, 1)',
+      }}
+    >
       {children}
     </div>
   );

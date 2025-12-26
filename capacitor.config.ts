@@ -8,12 +8,15 @@ const config: CapacitorConfig = {
     scheme: 'Gossip',
     contentInset: 'automatic',
     backgroundColor: '#000000',
-    scrollEnabled: true,
+    scrollEnabled: false, // Disable webview scrolling - we handle scrolling in app content
     allowsLinkPreview: false,
   },
   plugins: {
     SystemBars: {
       insetsHandling: 'css',
+      style: 'DEFAULT',
+      hidden: false,
+      animation: 'FADE',
     },
     // Keyboard plugin configuration
     Keyboard: {

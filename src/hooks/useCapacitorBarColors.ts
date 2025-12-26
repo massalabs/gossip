@@ -1,6 +1,9 @@
-import { Capacitor } from '@capacitor/core';
-import { Style } from '@capacitor/status-bar';
-import { EdgeToEdge } from '@capawesome/capacitor-android-edge-to-edge-support';
+import {
+  Capacitor,
+  SystemBars,
+  SystemBarsStyle,
+  SystemBarType,
+} from '@capacitor/core';
 import { useUiStore } from '../stores/uiStore';
 
 /**
@@ -67,9 +70,9 @@ const normalizeColor = (color: string, fallback: string): string => {
  */
 interface BarColors {
   topBarBgColor: string;
-  topBarTextColor: Style;
+  topBarTextColor: SystemBarsStyle;
   navBarBgColor: string;
-  navBarTextColor: Style;
+  navBarTextColor: SystemBarsStyle;
 }
 
 /**
@@ -105,8 +108,10 @@ export const getBarsColors = (
   topBarBgColor = normalizeColor(topBarBgColor, bgFallback);
   navBarBgColor = normalizeColor(navBarBgColor, bgFallback);
 
-  const topBarTextColor = resolvedTheme === 'dark' ? Style.Dark : Style.Light;
-  const navBarTextColor = resolvedTheme === 'dark' ? Style.Dark : Style.Light;
+  const topBarTextColor =
+    resolvedTheme === 'dark' ? SystemBarsStyle.Dark : SystemBarsStyle.Light;
+  const navBarTextColor =
+    resolvedTheme === 'dark' ? SystemBarsStyle.Dark : SystemBarsStyle.Light;
 
   return {
     topBarBgColor,
@@ -117,8 +122,10 @@ export const getBarsColors = (
 };
 
 /**
- * Update top bar (status bar) colors
- * Applies the provided colors to the native status bar
+ * Update system bars (status bar and navigation bar) styles
+ * Applies the provided styles to the native system bars
+ * Note: SystemBars API doesn't support background colors - the system determines
+ * background color based on the style (Dark/Light/Default)
  */
 export const updateBarsColors = async (barsColors: BarColors) => {
   if (!Capacitor.isNativePlatform()) return;
@@ -126,7 +133,18 @@ export const updateBarsColors = async (barsColors: BarColors) => {
   // Use requestAnimationFrame to ensure DOM is ready before reading CSS variables
   // This is necessary because CSS variables may not be computed immediately after theme changes
   await new Promise(resolve => requestAnimationFrame(resolve));
-  await EdgeToEdge.setBackgroundColor({ color: barsColors.navBarBgColor });
+
+  // Set status bar style
+  await SystemBars.setStyle({
+    style: barsColors.topBarTextColor,
+    bar: SystemBarType.StatusBar,
+  });
+
+  // Set navigation bar style
+  await SystemBars.setStyle({
+    style: barsColors.navBarTextColor,
+    bar: SystemBarType.NavigationBar,
+  });
 };
 // Store the unsubscribe function to prevent multiple subscriptions
 let unsubscribeBarColors: (() => void) | null = null;

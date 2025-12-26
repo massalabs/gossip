@@ -198,6 +198,9 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
       totalCount={virtualItems.length}
       itemContent={renderItem}
       increaseViewportBy={{ top: 200, bottom: 200 }}
+      components={{
+        Footer: () => <div className="h-20" />, // Add padding at bottom
+      }}
     />
   );
 };

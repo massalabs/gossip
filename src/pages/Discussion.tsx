@@ -14,6 +14,7 @@ import MessageInput from '../components/discussions/MessageInput';
 import ScrollToBottomButton from '../components/discussions/ScrollToBottomButton';
 import { Message, db } from '../db';
 import { isDifferentDay } from '../utils/timeUtils';
+import { useUiStore } from '../stores/uiStore';
 
 // Debug test message constants
 const TEST_MESSAGE_COUNT = 50;
@@ -132,6 +133,78 @@ const Discussion: React.FC = () => {
 
   // Ref to the MessageList for imperative scrolling
   const messageListRef = useRef<MessageListHandle>(null);
+  const messageListContainerRef = useRef<HTMLDivElement>(null);
+
+  // Find Virtuoso's scroll container and set up header scroll detection
+  useEffect(() => {
+    if (!messageListContainerRef.current) return;
+
+    let scrollContainer: HTMLElement | null = null;
+    let rafId: number | null = null;
+    const setHeaderIsScrolled = useUiStore.getState().setHeaderIsScrolled;
+
+    // Virtuoso creates a scroll container, find it
+    const findScrollContainer = (): HTMLElement | null => {
+      // Virtuoso typically creates a div with overflow-y-auto or overflow-auto
+      const container = messageListContainerRef.current?.querySelector(
+        '[data-virtuoso-scroller]'
+      ) as HTMLElement;
+
+      if (container) {
+        return container;
+      }
+
+      // Fallback: find any element with overflow-y-auto or overflow-auto
+      const allElements =
+        messageListContainerRef.current?.querySelectorAll('*');
+      if (allElements) {
+        for (const el of Array.from(allElements)) {
+          const htmlEl = el as HTMLElement;
+          const style = window.getComputedStyle(htmlEl);
+          if (
+            (style.overflowY === 'auto' || style.overflowY === 'scroll') &&
+            htmlEl.scrollHeight > htmlEl.clientHeight
+          ) {
+            return htmlEl;
+          }
+        }
+      }
+      return null;
+    };
+
+    const handleScroll = () => {
+      if (!scrollContainer) return;
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+      }
+      rafId = requestAnimationFrame(() => {
+        setHeaderIsScrolled(scrollContainer!.scrollTop > 0);
+        rafId = null;
+      });
+    };
+
+    // Try to find scroll container after a short delay to ensure Virtuoso has rendered
+    const timeoutId = setTimeout(() => {
+      scrollContainer = findScrollContainer();
+      if (scrollContainer) {
+        // Set initial state
+        setHeaderIsScrolled(scrollContainer.scrollTop > 0);
+        scrollContainer.addEventListener('scroll', handleScroll, {
+          passive: true,
+        });
+      }
+    }, 100);
+
+    return () => {
+      clearTimeout(timeoutId);
+      if (scrollContainer) {
+        scrollContainer.removeEventListener('scroll', handleScroll);
+      }
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+      }
+    };
+  }, [messages.length, discussion?.id]);
 
   // Cleanup timeout on unmount
   useEffect(() => {
@@ -393,7 +466,10 @@ const Discussion: React.FC = () => {
         onBack={onBack}
       />
 
-      <div className="flex-1 min-h-0 overflow-hidden">
+      <div
+        ref={messageListContainerRef}
+        className="flex-1 min-h-0 overflow-hidden"
+      >
         <MessageList
           ref={messageListRef}
           messages={messages}

@@ -12,6 +12,7 @@ import HeaderWrapper from '../components/ui/HeaderWrapper';
 import UserProfileAvatar from '../components/avatar/UserProfileAvatar';
 import QrCodeIcon from '../components/ui/customIcons/QrCodeIcon';
 import { ROUTES } from '../constants/routes';
+import { useHeaderScroll } from '../hooks/useHeaderScroll';
 
 const Discussions: React.FC = () => {
   const navigate = useNavigate();
@@ -26,12 +27,15 @@ const Discussions: React.FC = () => {
   // Force re-render when ref is set to ensure DiscussionList gets the scroll parent
   const [scrollParentReady, setScrollParentReady] = useState(false);
 
-  // Set up scroll parent
+  // Set up scroll parent and header scroll detection
   useEffect(() => {
     if (scrollContainerRef.current) {
       setScrollParentReady(true);
     }
   }, []);
+
+  // Detect scroll to update header shadow
+  useHeaderScroll({ scrollContainerRef });
 
   const handleSelectDiscussion = useCallback(
     (contactUserId: string) => {
@@ -110,7 +114,7 @@ const Discussions: React.FC = () => {
       </HeaderWrapper>
       <div
         ref={scrollContainerRef}
-        className="flex-1 min-h-0 overflow-y-auto pt-2 px-2 pb-20"
+        className="flex-1 min-h-0 overflow-y-auto pt-2 px-2 pb-4"
       >
         {/* Show banner when there's pending shared content */}
         {pendingSharedContent && (
