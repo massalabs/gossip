@@ -40,6 +40,12 @@ import { messageService } from '../../src/services/message';
 import { createMessageProtocol } from '../../src/api/messageProtocol';
 import { MessageProtocolType } from '../../src/config/protocol';
 import { handleSessionRefresh } from '../../src/services/refresh';
+import {
+  serializeRegularMessage,
+  serializeReplyMessage,
+  MESSAGE_TYPE_KEEP_ALIVE,
+} from '../../src/utils/messageSerialization';
+import { Result } from '../../src/utils/type';
 
 // Mock the message protocol factory to always return mock protocol
 vi.mock('../src/api/messageProtocol', async importOriginal => {
@@ -1942,8 +1948,8 @@ describe('Message Service (Browser with Real WASM)', () => {
       // session should return killed status
       const aliceSessionStatusSpy = vi
         .spyOn(aliceSession, 'peerSessionStatus')
-        .mockReturnValueOnce(SessionStatus.Active)
-        .mockReturnValue(SessionStatus.Killed);
+        .mockReturnValueOnce(SessionStatus.Active) // session should still be active after session.refresh function is called
+        .mockReturnValue(SessionStatus.Killed); // session should be killed when sending keep alive msg
 
       // call refresh function
       await handleSessionRefresh(
@@ -2032,7 +2038,9 @@ describe('Message Service (Browser with Real WASM)', () => {
       expect(bobMessages[0].status).toBe(MessageStatus.DELIVERED);
 
       // STEP 7: Wait and trigger keep-alive again
-      await new Promise(resolve => setTimeout(resolve, 2500));
+      await new Promise(resolve =>
+        setTimeout(resolve, KEEP_ALIVE_INTERVAL_MILLIS)
+      );
 
       aliceActiveDiscussions = await db.discussions
         .where('ownerUserId')
@@ -2249,6 +2257,180 @@ describe('Message Service (Browser with Real WASM)', () => {
       );
       // Dave should not receive keep-alive since session is fresh
       expect(daveKeepAlive).toBeUndefined();
+    });
+  });
+
+  describe('serializeMessage', () => {
+    // Type helper to access private serializeMessage method in tests
+    type MessageServiceWithSerialize = {
+      serializeMessage: (
+        message: Message
+      ) => Promise<Result<Uint8Array, string>>;
+    };
+
+    it('should serialize a regular text message', async () => {
+      const message: Message = {
+        ownerUserId: aliceUserId,
+        contactUserId: bobUserId,
+        content: 'Hello, world!',
+        type: MessageType.TEXT,
+        direction: MessageDirection.OUTGOING,
+        status: MessageStatus.SENDING,
+        timestamp: new Date(),
+      };
+
+      // Access the private method via type assertion
+      const result = await (
+        messageService as unknown as MessageServiceWithSerialize
+      ).serializeMessage(message);
+
+      expect(result.success).toBe(true);
+      if (!result.success) throw new Error('Expected success');
+      expect(result.data).toBeDefined();
+
+      // Verify it matches the expected serialization
+      const expected = serializeRegularMessage('Hello, world!');
+      expect(result.data).toEqual(expected);
+    });
+
+    it('should serialize a keep-alive message', async () => {
+      const message: Message = {
+        ownerUserId: aliceUserId,
+        contactUserId: bobUserId,
+        content: '',
+        type: MessageType.KEEP_ALIVE,
+        direction: MessageDirection.OUTGOING,
+        status: MessageStatus.SENDING,
+        timestamp: new Date(),
+      };
+
+      const result = await (
+        messageService as unknown as MessageServiceWithSerialize
+      ).serializeMessage(message);
+
+      expect(result.success).toBe(true);
+      if (!result.success) throw new Error('Expected success');
+      expect(result.data).toBeDefined();
+
+      // Verify it matches the expected serialization
+      const expected = new Uint8Array([MESSAGE_TYPE_KEEP_ALIVE]);
+      expect(result.data).toEqual(expected);
+    });
+
+    it('should serialize a reply message when original message exists', async () => {
+      // Create a seeker for the original message (34 bytes: 1 byte length + 32 bytes hash + 1 byte key)
+      const originalSeeker = new Uint8Array(34);
+      originalSeeker[0] = 32; // hash length
+      crypto.getRandomValues(originalSeeker.slice(1, 33)); // hash bytes
+      originalSeeker[33] = 0; // key
+
+      // Create the original message in the database
+      // In browser tests, real IndexedDB supports Uint8Array in compound indexes
+      const originalMessage: Message = {
+        ownerUserId: aliceUserId,
+        contactUserId: bobUserId,
+        content: 'Original message',
+        type: MessageType.TEXT,
+        direction: MessageDirection.INCOMING,
+        status: MessageStatus.DELIVERED,
+        timestamp: new Date(),
+        seeker: originalSeeker,
+      };
+
+      await db.messages.add(originalMessage);
+
+      // Create a reply message
+      const replyMessage: Message = {
+        ownerUserId: aliceUserId,
+        contactUserId: bobUserId,
+        content: 'This is a reply',
+        type: MessageType.TEXT,
+        direction: MessageDirection.OUTGOING,
+        status: MessageStatus.SENDING,
+        timestamp: new Date(),
+        replyTo: {
+          originalSeeker,
+        },
+      };
+
+      const result = await (
+        messageService as unknown as MessageServiceWithSerialize
+      ).serializeMessage(replyMessage);
+
+      expect(result.success).toBe(true);
+      if (!result.success) throw new Error('Expected success');
+      expect(result.data).toBeDefined();
+
+      // Verify it matches the expected serialization
+      const expected = serializeReplyMessage(
+        'This is a reply',
+        'Original message',
+        originalSeeker
+      );
+      expect(result.data).toEqual(expected);
+    });
+
+    it('should return error when original message not found for reply', async () => {
+      // Create a seeker that doesn't exist in the database
+      const nonExistentSeeker = new Uint8Array(34);
+      nonExistentSeeker[0] = 32;
+      crypto.getRandomValues(nonExistentSeeker.slice(1, 33));
+      nonExistentSeeker[33] = 0;
+
+      const replyMessage: Message = {
+        ownerUserId: aliceUserId,
+        contactUserId: bobUserId,
+        content: 'This is a reply',
+        type: MessageType.TEXT,
+        direction: MessageDirection.OUTGOING,
+        status: MessageStatus.SENDING,
+        timestamp: new Date(),
+        replyTo: {
+          originalSeeker: nonExistentSeeker,
+        },
+      };
+
+      const result = await (
+        messageService as unknown as MessageServiceWithSerialize
+      ).serializeMessage(replyMessage);
+
+      expect(result.success).toBe(false);
+      if (result.success) throw new Error('Expected failure');
+      expect(result.error).toBe('Original message not found for reply');
+    });
+
+    it('should handle reply message with originalContent fallback when original message not found by seeker', async () => {
+      // This test verifies that if the original message is not found by seeker,
+      // the function should still fail (as per current implementation)
+      // Note: The current implementation requires the original message to exist in DB
+
+      const originalSeeker = new Uint8Array(34);
+      originalSeeker[0] = 32;
+      crypto.getRandomValues(originalSeeker.slice(1, 33));
+      originalSeeker[33] = 0;
+
+      const replyMessage: Message = {
+        ownerUserId: aliceUserId,
+        contactUserId: bobUserId,
+        content: 'This is a reply',
+        type: MessageType.TEXT,
+        direction: MessageDirection.OUTGOING,
+        status: MessageStatus.SENDING,
+        timestamp: new Date(),
+        replyTo: {
+          originalSeeker,
+          originalContent: 'Original content fallback',
+        },
+      };
+
+      const result = await (
+        messageService as unknown as MessageServiceWithSerialize
+      ).serializeMessage(replyMessage);
+
+      // Current implementation requires original message to exist in DB
+      expect(result.success).toBe(false);
+      if (result.success) throw new Error('Expected failure');
+      expect(result.error).toBe('Original message not found for reply');
     });
   });
 });

@@ -92,7 +92,7 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
       db.messages
         .where('ownerUserId')
         .equals(ownerUserId)
-        //.and(m => m.type !== MessageType.KEEP_ALIVE)
+        .and(m => m.type !== MessageType.KEEP_ALIVE)
         .sortBy('id')
     );
 

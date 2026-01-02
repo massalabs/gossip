@@ -288,6 +288,7 @@ export class GossipDatabase extends Dexie {
     await this.messages
       .where('[ownerUserId+contactUserId+status]')
       .equals([ownerUserId, contactUserId, MessageStatus.DELIVERED])
+      .and(msg => msg.direction === MessageDirection.INCOMING)
       .modify({ status: MessageStatus.READ });
 
     await this.discussions
