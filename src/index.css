@@ -73,7 +73,7 @@
   --spacing-nav-padding: var(--nav-padding, 1.5rem);
 
   /* Reduced safe area bottom for bottom nav (slightly less padding) */
-  --spacing-nav-bottom-safe: calc(var(--sab) - 10px);
+  --spacing-nav-bottom-safe: max(0px, calc(var(--sab) - 10px));
 
   /* ============================================
    * HEIGHT UTILITIES
