@@ -10,7 +10,7 @@ import {
 import ContactAvatar from '../avatar/ContactAvatar';
 import Button from '../ui/Button';
 import BackButton from '../ui/BackButton';
-import HeaderBar from '../ui/HeaderWrapper';
+import HeaderBar from '../ui/HeaderBar';
 import { ROUTES } from '../../constants/routes';
 
 interface DiscussionHeaderProps {

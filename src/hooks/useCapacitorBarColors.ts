@@ -1,6 +1,10 @@
 import { Capacitor, SystemBars, SystemBarsStyle } from '@capacitor/core';
 import { useUiStore } from '../stores/uiStore';
 
+/**
+ * Initialize and sync system bar style (status bar icons) with the current theme.
+ * Sets light/dark icons based on the app's resolved theme.
+ */
 export const initStatusBar = async () => {
   if (!Capacitor.isNativePlatform()) return;
 

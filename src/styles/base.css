@@ -18,7 +18,9 @@
       'Mozilla Headline', system-ui, -apple-system, BlinkMacSystemFont,
       'Segoe UI', sans-serif;
 
-    /* Safe area insets with fallback to 0 for browsers that don't support env() */
+    /* Safe area insets - defaults use env() for web/iOS Safari.
+       On native platforms (Android/iOS), these are overridden by JavaScript
+       in main.tsx using capacitor-plugin-safe-area for accurate values. */
     --sat: env(safe-area-inset-top, 0px);
     --sab: env(safe-area-inset-bottom, 0px);
     --sal: env(safe-area-inset-left, 0px);
