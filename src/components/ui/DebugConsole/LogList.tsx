@@ -1,5 +1,5 @@
 import React from 'react';
-import { LogEntry } from '../../../stores/useDebugLogs';
+import { LogEntry } from '../../../stores/useDebugLogs.types';
 import { LogEntryItem } from './LogEntryItem';
 
 interface LogListProps {

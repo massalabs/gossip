@@ -282,20 +282,19 @@ export class MessageService {
             metadata: {},
             seeker: message.seeker, // Store the seeker of the incoming message
             encryptedMessage: message.encryptedMessage, // Store the ciphertext of the incoming message
-            replyTo:
-              message.replyTo
-                ? {
-                    // Store the original content as a fallback only if we couldn't find
-                    // the original message in the database (replyToMessageId is undefined).
-                    // If the original message exists, we don't need to store the content
-                    // since we can fetch it using the originalSeeker.
-                    originalContent: replyToMessageId
-                      ? undefined
-                      : message.replyTo.originalContent,
-                    // Store the seeker (used to find the original message)
-                    originalSeeker: message.replyTo.originalSeeker,
-                  }
-                : undefined,
+            replyTo: message.replyTo
+              ? {
+                  // Store the original content as a fallback only if we couldn't find
+                  // the original message in the database (replyToMessageId is undefined).
+                  // If the original message exists, we don't need to store the content
+                  // since we can fetch it using the originalSeeker.
+                  originalContent: replyToMessageId
+                    ? undefined
+                    : message.replyTo.originalContent,
+                  // Store the seeker (used to find the original message)
+                  originalSeeker: message.replyTo.originalSeeker,
+                }
+              : undefined,
 
             forwardOf: message.forwardOf
               ? {
@@ -408,9 +407,8 @@ export class MessageService {
       };
     }
     log.info('message serialized', {
-        serializedContent: serializeMessageResult.data,
-      }
-    );
+      serializedContent: serializeMessageResult.data,
+    });
     message.serializedContent = serializeMessageResult.data;
 
     // Check if we can send messages on this discussion
@@ -537,7 +535,8 @@ export class MessageService {
     ) {
       try {
         return {
-          contentBytes: serializeForwardMessage(
+          success: true,
+          data: serializeForwardMessage(
             message.forwardOf.originalContent,
             message.content,
             message.forwardOf.originalSeeker
@@ -545,7 +544,10 @@ export class MessageService {
         };
       } catch (error) {
         log.error('failed to serialize forward message', error);
-        return { error: 'Failed to serialize forward message' };
+        return {
+          success: false,
+          error: 'Failed to serialize forward message',
+        };
       }
     } else {
       // Regular message with type tag
@@ -569,11 +571,12 @@ export class MessageService {
       const peerId = decodeUserId(contactId);
       totalProcessed += retryMessages.length;
 
-      let shouldStop = false;
+      const shouldStop = false;
 
       for (const msg of retryMessages) {
         if (shouldStop) break;
 
+        /* If the message has already been encrypted by sessionManager, resend it */
         if (msg.encryptedMessage && msg.seeker) {
           try {
             await this.messageProtocol.sendMessage({
@@ -589,34 +592,34 @@ export class MessageService {
           }
           continue;
         }
-        
+
         console.log(
-          `MessageService.resendMessages: message "${retryMessage.content}" has not been encrypted by sessionManager`
+          `MessageService.resendMessages: message "${msg.content}" has not been encrypted by sessionManager`
         );
-        if (retryMessage.encryptedMessage && retryMessage.seeker) {
+        if (msg.encryptedMessage && msg.seeker) {
           // if the message has already been encrypted by sessionManager, resend it
           console.log(
-            `MessageService.resendMessages: message "${retryMessage.content}" has already been encrypted by sessionManager with seeker: ${encodeToBase64(retryMessage.seeker)}`
+            `MessageService.resendMessages: message "${msg.content}" has already been encrypted by sessionManager with seeker: ${encodeToBase64(msg.seeker)}`
           );
           try {
             await this.messageProtocol.sendMessage({
-              seeker: retryMessage.seeker,
-              ciphertext: retryMessage.encryptedMessage,
+              seeker: msg.seeker,
+              ciphertext: msg.encryptedMessage,
             });
-            messageSent.push(retryMessage.id!);
+            successfullySent.push(msg.id!);
             console.log(
-              `MessageService.resendMessages: message "${retryMessage.content}" has been resend successfully on the network`
+              `MessageService.resendMessages: message "${msg.content}" has been resend successfully on the network`
             );
           } catch (error) {
             console.error(
-              `Failed to resend message ${retryMessage.id!}: ${error instanceof Error ? error.message : error}`
+              `Failed to resend message ${msg.id!}: ${error instanceof Error ? error.message : error}`
             );
           }
-        } else {
-          // if the message has not been encrypted by sessionManager, encrypt it and resend it
 
+          /* If the message has not been encrypted by sessionManager, encrypt it and resend it */
+        } else {
           console.log(
-            `MessageService.resendMessages: message "${retryMessage.content}" has not been encrypted by sessionManager`
+            `MessageService.resendMessages: message "${msg.content}" has not been encrypted by sessionManager`
           );
           if (!session) {
             console.error(`resendMessages: Session manager not initialized`);
@@ -648,171 +651,66 @@ export class MessageService {
           ) {
             db.discussions
               .where('[ownerUserId+contactUserId]')
-              .equals([retryMessage.ownerUserId, contactId])
+              .equals([msg.ownerUserId, contactId])
               .modify({
                 status: DiscussionStatus.BROKEN,
               });
-            console.error(
-              `Session with peer ${encodeUserId(peerId)} is broken with status ${sessionStatusToString(status)}`
-            );
+            log.error('session broken during resend', { status, contactId });
             break;
           }
 
           if (status !== SessionStatus.Active) {
-            console.error(
-              `Session with peer ${encodeUserId(peerId)} has status ${sessionStatusToString(status)}`
-            );
-
+            log.warn('session not active — stopping resend', {
+              sessionStatus: sessionStatusToString(status),
+              contactId,
+            });
             break;
           }
 
           // if the message has not been serialized, serialize it
-          let serializedContent = retryMessage.serializedContent;
+          let serializedContent = msg.serializedContent;
           if (!serializedContent) {
-            console.log(
-              `MessageService.resendMessages: message "${retryMessage.content}" has not been serialized yet. Serialize it now`
-            );
-            const serializeResult = await this.serializeMessage(retryMessage);
+            log.info('message not serialized yet — serializing it', {
+              messageContent: msg.content,
+            });
+            const serializeResult = await this.serializeMessage(msg);
             if (!serializeResult.success) {
-              console.error(serializeResult.error);
+              log.error('serialization failed during resend', {
+                error: serializeResult.error,
+              });
               break;
             }
             serializedContent = serializeResult.data;
           }
 
-          console.log(
-            `MessageService.resendMessages: message "${retryMessage.content}" has been serialized to ${serializedContent}. Encrypt it with session manager`
-          );
-          const sendOutput = session.sendMessage(peerId, serializedContent);
+          log.info('message serialized', {
+            messageContent: msg.content,
+            serializedContent: serializedContent,
+          });
+
+          const sendOutput = session.sendMessage(peerId, serializedContent!);
           if (!sendOutput) {
-            console.error(
-              `Session manager failed to send message ${retryMessage.id}`
-            );
+            log.error('session manager failed to send message', {
+              messageId: msg.id,
+              messageContent: msg.content,
+            });
             break;
           }
 
-          await db.messages.update(retryMessage.id, {
+          await db.messages.update(msg.id, {
             seeker: sendOutput.seeker,
             encryptedMessage: sendOutput.data,
           });
-          break;
-        }
 
-        /* 
-        If session manager encryption fails for a message N, we can't send next N+1, N+2, ... messages in the discussion.
-        If the message N+1 is passed with success in session.sendMessage() before passing the message N,
-        message N would be considered as posterior to message N+1, which is not correct.
-        So if a message fails in session.sendMessage(), we should break the loop and not send any other message in the discussion.
-        */
-        if (
-          status === SessionStatus.Killed ||
-          status === SessionStatus.Saturated
-        ) {
-          db.discussions
-            .where('[ownerUserId+contactUserId]')
-            .equals([retryMessage.ownerUserId, contactId])
-            .modify({
-              status: DiscussionStatus.BROKEN,
+          try {
+            await this.messageProtocol.sendMessage({
+              seeker: sendOutput.seeker,
+              ciphertext: sendOutput.data,
             });
-          console.error(
-            `Session with peer ${encodeUserId(peerId)} is broken with status ${sessionStatusToString(status)}`
-          );
-          break;
-        }
-
-        if (status !== SessionStatus.Active) {
-          console.error(
-            `Session with peer ${encodeUserId(peerId)} has status ${sessionStatusToString(status)}`
-          );
-
-          break;
-        }
-
-        // if the message has not been serialized, serialize it
-        let serializedContent = retryMessage.serializedContent;
-        if (!serializedContent) {
-          console.log(
-            `MessageService.resendMessages: message "${retryMessage.content}" has not been serialized yet. Serialize it now`
-          );
-          const serializeResult = await this.serializeMessage(retryMessage);
-          if (!serializeResult.success) {
-            console.error(serializeResult.error);
-            break;
+            successfullySent.push(msg.id!);
+          } catch (error) {
+            log.error('network send failed during resend', error);
           }
-          serializedContent = serializeResult.data;
-        }
-
-        console.log(
-          `MessageService.resendMessages: message "${retryMessage.content}" has been serialized to ${serializedContent}. Encrypt it with session manager`
-        );
-        const sendOutput = session.sendMessage(peerId, serializedContent);
-        if (!sendOutput) {
-          console.error(
-            `Session manager failed to send message ${retryMessage.id}`
-          );
-          break;
-        }
-
-        await db.messages.update(retryMessage.id, {
-          seeker: sendOutput.seeker,
-          encryptedMessage: sendOutput.data,
-        });
-        break;
-      }
-
-        if ([SessionStatus.Killed, SessionStatus.Saturated].includes(status)) {
-          await db.discussions
-            .where('[ownerUserId+contactUserId]')
-            .equals([msg.ownerUserId, contactId])
-            .modify({ status: DiscussionStatus.BROKEN });
-          log.error('session broken during resend', { status, contactId });
-          break;
-        }
-
-        if (status !== SessionStatus.Active) {
-          log.warn('session not active — stopping resend', {
-            status,
-            contactId,
-          });
-          break;
-        }
-
-        let serialized = msg.serializedContent;
-        if (!serialized) {
-          const result = await this.serializeMessage(msg);
-          if (result.error) {
-            log.error('serialization failed during resend', {
-              error: result.error,
-            });
-            shouldStop = true;
-            continue;
-          }
-          serialized = result.contentBytes!;
-        }
-
-        let sendOutput: SendMessageOutput | undefined;
-        try {
-          sendOutput = session.sendMessage(peerId, serialized);
-          if (!sendOutput) throw new Error('sendMessage returned null');
-        } catch (error) {
-          log.error('encryption failed during resend → stopping', error);
-          shouldStop = true;
-          continue;
-        }
-
-        await db.messages.update(msg.id!, {
-          seeker: sendOutput.seeker,
-          encryptedMessage: sendOutput.data,
-        });
-
-        try {
-          await this.messageProtocol.sendMessage({
-            seeker: sendOutput.seeker,
-            ciphertext: sendOutput.data,
-          });
-          successfullySent.push(msg.id!);
-        } catch (error) {
-          log.error('network send failed during resend', error);
         }
       }
     }

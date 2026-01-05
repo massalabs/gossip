@@ -17,6 +17,9 @@ import { SessionModule, sessionStatusToString } from '../wasm/session';
 import { SessionStatus } from '../assets/generated/wasm/gossip_wasm';
 import { decodeUserId, encodeUserId } from '../utils/userId';
 import { messageService } from './message';
+import { Logger } from '../utils/logs';
+
+const logger = new Logger('RefreshService');
 
 /**
  * Handle session refresh for a given user:
@@ -34,14 +37,17 @@ export async function handleSessionRefresh(
   session: SessionModule,
   ActiveDiscussions: Discussion[]
 ): Promise<void> {
+  const log = logger.forMethod('handleSessionRefresh');
+  log.info('calling session refresh', {
+    ownerUserId: ownerUserId,
+    discussions: ActiveDiscussions.map(discussion => discussion.contactUserId),
+  });
   if (!ActiveDiscussions.length) {
     return;
   }
 
   if (!ownerUserId) {
-    console.error(
-      'handleSessionRefresh: ownerUserId is empty, skipping session refresh'
-    );
+    log.error('ownerUserId is empty, skipping session refresh');
     return;
   }
 
@@ -50,10 +56,7 @@ export async function handleSessionRefresh(
     // Ask the session manager which peers require keep-alive messages
     keepAlivePeerIds = session.refresh().map(peer => encodeUserId(peer));
   } catch (error) {
-    console.error(
-      'handleSessionRefresh: error while refreshing session:',
-      error
-    );
+    log.error('error while refreshing session', { error });
     return;
   }
 
@@ -70,26 +73,26 @@ export async function handleSessionRefresh(
       const status = session.peerSessionStatus(peerId);
 
       if (status === SessionStatus.Killed) {
-        console.log(
-          `handleSessionRefresh: session for discussion between ${discussion.ownerUserId} and ${discussion.contactUserId} is killed. Marking as broken.`
-        );
+        log.info('session for discussion is killed. Marking as broken.', {
+          ownerUserId: discussion.ownerUserId,
+          contactUserId: discussion.contactUserId,
+        });
         // Mark discussion as broken if session is killed
         await db.discussions.update(discussion.id!, {
           status: DiscussionStatus.BROKEN,
           updatedAt: now,
         });
-        console.log(
-          `handleSessionRefresh: discussion between ${discussion.ownerUserId} and ${discussion.contactUserId} has been marked as broken.`
-        );
+        log.info('discussion has been marked as broken.', {
+          ownerUserId: discussion.ownerUserId,
+          contactUserId: discussion.contactUserId,
+        });
         continue;
       }
     } catch (error) {
-      console.error(
-        'handleSessionRefresh: error while processing discussion',
-        discussion.id,
-        ', error:',
-        error
-      );
+      log.error('error while processing discussion', {
+        error: error,
+        discussionId: discussion.id,
+      });
       continue;
     }
 
@@ -102,9 +105,10 @@ export async function handleSessionRefresh(
       continue;
     }
 
-    console.log(
-      `handleSessionRefresh: discussion between ${discussion.ownerUserId} and ${discussion.contactUserId} does require a keep-alive message.`
-    );
+    log.info('discussion does require a keep-alive message.', {
+      ownerUserId: discussion.ownerUserId,
+      contactUserId: discussion.contactUserId,
+    });
 
     try {
       // Send a keep-alive message via the session manager
@@ -120,20 +124,18 @@ export async function handleSessionRefresh(
         },
         session
       );
-      console.log(
-        `handleSessionRefresh: keep-alive message sent successfully for discussion between ${discussion.ownerUserId} and ${discussion.contactUserId}`
-      );
+      log.info('keep-alive message sent successfully.', {
+        ownerUserId: discussion.ownerUserId,
+        contactUserId: discussion.contactUserId,
+      });
     } catch (error) {
-      console.error(
-        'handleSessionRefresh: failed to send keep-alive message for discussion',
-        discussion.id,
-        ', session status:',
-        sessionStatusToString(
+      log.error('failed to send keep-alive message', {
+        error: error,
+        discussionId: discussion.id,
+        sessionStatus: sessionStatusToString(
           session.peerSessionStatus(decodeUserId(discussion.contactUserId))
         ),
-        ', error:',
-        error
-      );
+      });
     }
   }
 }

@@ -166,13 +166,12 @@ export function useResendFailedBlobs() {
 
       // Read retry messages from ref - refs are updated immediately by liveQuery callbacks
       const currentRetryMessages = retryMessagesByContactRef.current;
-      console.log(
-        'resendFailedBlobs: currentRetryMessages',
-        currentRetryMessages
-      );
-
       // Resend failed messages
       if (currentRetryMessages.size > 0) {
+        console.log(
+          'resendFailedBlobs: currentRetryMessages',
+          currentRetryMessages
+        );
         try {
           await messageService.resendMessages(currentRetryMessages, session);
         } catch (err) {
@@ -182,13 +181,7 @@ export function useResendFailedBlobs() {
     } finally {
       isResending.current = false;
     }
-  }, [
-    session,
-    userProfile?.userId,
-    brokenDiscussions,
-    sendFailedDiscussions,
-    retryMessagesByContact,
-  ]);
+  }, [session, userProfile?.userId]);
 
   return { resendFailedBlobs };
 }

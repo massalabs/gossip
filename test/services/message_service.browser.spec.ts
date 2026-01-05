@@ -153,6 +153,9 @@ describe('Message Service (Browser with Real WASM)', () => {
     }
     await db.open();
 
+    // Reset mock protocol state to prevent test interference
+    mockProtocol.clearMockData();
+
     // Generate Alice's keys using real WASM
     aliceKeys = await generateUserKeys('alice-test-passphrase-' + Date.now());
     alicePk = aliceKeys.public_keys();
@@ -281,18 +284,12 @@ describe('Message Service (Browser with Real WASM)', () => {
     // Peer1 initiates session with Peer2
     const { discussionId: peer1DiscussionId } = await initializeDiscussion(
       peer1Peer2Contact,
-      peer1Pk,
-      peer1Sk,
       peer1Session,
       peer1UserId
     );
 
     // Peer2 fetches Peer1's announcement
-    await announcementService.fetchAndProcessAnnouncements(
-      peer2Pk,
-      peer2Sk,
-      peer2Session
-    );
+    await announcementService.fetchAndProcessAnnouncements(peer2Session);
 
     // Peer2 accepts the discussion request
     const peer2Discussion = await db.getDiscussionByOwnerAndContact(
@@ -302,19 +299,10 @@ describe('Message Service (Browser with Real WASM)', () => {
     if (!peer2Discussion)
       throw new Error('peer1 discussion not found on peer2 side');
 
-    await acceptDiscussionRequest(
-      peer2Discussion,
-      peer2Session,
-      peer2Pk,
-      peer2Sk
-    );
+    await acceptDiscussionRequest(peer2Discussion, peer2Session);
 
     // Peer1 fetches Peer2's announcement and discussion is ACTIVE
-    await announcementService.fetchAndProcessAnnouncements(
-      peer1Pk,
-      peer1Sk,
-      peer1Session
-    );
+    await announcementService.fetchAndProcessAnnouncements(peer1Session);
 
     return { peer1DiscussionId, peer2DiscussionId: peer2Discussion.id! };
   }
@@ -1534,23 +1522,23 @@ describe('Message Service (Browser with Real WASM)', () => {
 
       // Recreate Alice and Bob sessions with test config
       aliceSession.cleanup();
-      aliceSession = new SessionModule(() => {}, createTestConfig());
+      aliceSession = new SessionModule(aliceKeys, () => {}, createTestConfig());
       bobSession.cleanup();
-      bobSession = new SessionModule(() => {}, createTestConfig());
+      bobSession = new SessionModule(bobKeys, () => {}, createTestConfig());
 
       // Generate Carol's keys
       carolKeys = await generateUserKeys('carol-test-passphrase-' + Date.now());
       carolPk = carolKeys.public_keys();
       carolSk = carolKeys.secret_keys();
       carolUserId = encodeUserId(carolPk.derive_id());
-      carolSession = new SessionModule(() => {}, createTestConfig());
+      carolSession = new SessionModule(carolKeys, () => {}, createTestConfig());
 
       // Generate Dave's keys
       daveKeys = await generateUserKeys('dave-test-passphrase-' + Date.now());
       davePk = daveKeys.public_keys();
       daveSk = daveKeys.secret_keys();
       daveUserId = encodeUserId(davePk.derive_id());
-      daveSession = new SessionModule(() => {}, createTestConfig());
+      daveSession = new SessionModule(daveKeys, () => {}, createTestConfig());
     });
 
     it('No active discussions', async () => {
@@ -1593,31 +1581,17 @@ describe('Message Service (Browser with Real WASM)', () => {
       expect(aliceDiscussion?.status).toBe(DiscussionStatus.BROKEN);
 
       // STEP 4: Renew the discussion
-      await renewDiscussion(
-        aliceUserId,
-        bobUserId,
-        aliceSession,
-        alicePk,
-        aliceSk
-      );
+      await renewDiscussion(aliceUserId, bobUserId, aliceSession);
 
       // Bob fetches and accepts the renewal
-      await announcementService.fetchAndProcessAnnouncements(
-        bobPk,
-        bobSk,
-        bobSession
-      );
+      await announcementService.fetchAndProcessAnnouncements(bobSession);
       const bobDiscussion = await db.discussions.get(bobDiscussionId);
       if (!bobDiscussion) throw new Error('bob discussion not found');
 
-      await acceptDiscussionRequest(bobDiscussion, bobSession, bobPk, bobSk);
+      await acceptDiscussionRequest(bobDiscussion, bobSession);
 
       // Alice fetches Bob's acceptance
-      await announcementService.fetchAndProcessAnnouncements(
-        alicePk,
-        aliceSk,
-        aliceSession
-      );
+      await announcementService.fetchAndProcessAnnouncements(aliceSession);
 
       // STEP 5: Verify discussion is now ACTIVE again
       aliceDiscussion = await db.getDiscussionByOwnerAndContact(
@@ -1675,13 +1649,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       expect(bobDiscussion?.status).toBe(DiscussionStatus.BROKEN);
 
       // STEP 4: Alice renews the discussion
-      await renewDiscussion(
-        aliceUserId,
-        bobUserId,
-        aliceSession,
-        alicePk,
-        aliceSk
-      );
+      await renewDiscussion(aliceUserId, bobUserId, aliceSession);
 
       await announcementService.resendAnnouncements(
         [aliceDiscussion],
@@ -1689,21 +1657,13 @@ describe('Message Service (Browser with Real WASM)', () => {
       );
 
       // Bob fetches and accepts
-      await announcementService.fetchAndProcessAnnouncements(
-        bobPk,
-        bobSk,
-        bobSession
-      );
+      await announcementService.fetchAndProcessAnnouncements(bobSession);
       bobDiscussion = await db.discussions.get(bobDiscussionId);
       if (!bobDiscussion) throw new Error('bob discussion not found');
-      await acceptDiscussionRequest(bobDiscussion, bobSession, bobPk, bobSk);
+      await acceptDiscussionRequest(bobDiscussion, bobSession);
 
       // Alice fetches Bob's acceptance
-      await announcementService.fetchAndProcessAnnouncements(
-        alicePk,
-        aliceSk,
-        aliceSession
-      );
+      await announcementService.fetchAndProcessAnnouncements(aliceSession);
 
       // STEP 5: Verify both discussions are ACTIVE
       aliceDiscussion = await db.discussions.get(aliceDiscussionId);
@@ -1729,7 +1689,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       await messageService.sendMessage(bobMessage as Message, bobSession);
 
       // alice fetch Bob's message
-      await messageService.fetchMessages(aliceUserId, aliceSk, aliceSession);
+      await messageService.fetchMessages(aliceSession);
 
       // STEP 3: Wait for keep-alive interval
       await new Promise(resolve =>
@@ -1767,7 +1727,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       expect(keepAliveMsg?.content).toBe('');
 
       // STEP 6: Bob fetches messages (including keep-alive)
-      await messageService.fetchMessages(bobUserId, bobSk, bobSession);
+      await messageService.fetchMessages(bobSession);
 
       // Bob's message should now be DELIVERED (acknowledged by Alice's keep-alive)
       const bobMessages = await db.messages
@@ -1806,7 +1766,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       await messageService.sendMessage(bobMessage as Message, bobSession);
 
       // alice fetch Bob's message
-      await messageService.fetchMessages(aliceUserId, aliceSk, aliceSession);
+      await messageService.fetchMessages(aliceSession);
 
       // STEP 3: Mock transport failure for the first keep-alive attempt
       const originalSendMessage = mockProtocol.sendMessage.bind(mockProtocol);
@@ -1897,7 +1857,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       expect(keepAliveMsg?.status).toBe(MessageStatus.SENT);
 
       // STEP 9: Bob fetches messages (including keep-alive)
-      await messageService.fetchMessages(bobUserId, bobSk, bobSession);
+      await messageService.fetchMessages(bobSession);
 
       // Bob's message should now be DELIVERED (acknowledged by Alice's keep-alive)
       const bobMessages = await db.messages
@@ -1926,7 +1886,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       await messageService.sendMessage(bobMsg as Message, bobSession);
 
       // alice fetch Bob's message
-      await messageService.fetchMessages(aliceUserId, aliceSk, aliceSession);
+      await messageService.fetchMessages(aliceSession);
 
       // STEP 2: Wait for keep-alive interval
       await new Promise(resolve =>
@@ -1991,13 +1951,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       expect(aliceMsgList[1].type).toBe(MessageType.TEXT);
 
       // Step 5 : renew discussion
-      await renewDiscussion(
-        aliceUserId,
-        bobUserId,
-        aliceSession,
-        alicePk,
-        aliceSk
-      );
+      await renewDiscussion(aliceUserId, bobUserId, aliceSession);
       aliceDiscussion = await db.discussions.get(aliceDiscussionId);
       if (!aliceDiscussion) throw new Error('alice discussion not found');
       await announcementService.resendAnnouncements(
@@ -2007,12 +1961,8 @@ describe('Message Service (Browser with Real WASM)', () => {
       resendFailedMessagesForContact(aliceUserId, bobUserId, aliceSession);
 
       // Bob fetch new announcement and messages
-      await announcementService.fetchAndProcessAnnouncements(
-        bobPk,
-        bobSk,
-        bobSession
-      );
-      await messageService.fetchMessages(bobUserId, bobSk, bobSession);
+      await announcementService.fetchAndProcessAnnouncements(bobSession);
+      await messageService.fetchMessages(bobSession);
 
       // check bob received alice msg
       const bobReceivedMessages = await db.messages
@@ -2096,7 +2046,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       await messageService.sendMessage(aliceMessage as Message, aliceSession);
 
       // alice fetch Bob's message
-      await messageService.fetchMessages(aliceUserId, aliceSk, aliceSession);
+      await messageService.fetchMessages(aliceSession);
 
       // STEP 3: Wait for session timeout (should kill session and require keep-alive)
       await new Promise(resolve =>
@@ -2152,6 +2102,7 @@ describe('Message Service (Browser with Real WASM)', () => {
         setTimeout(resolve, MAX_SESSION_INACTIVITY_MILLIS)
       );
 
+      // alice init session with carol
       await initSession(
         aliceSk,
         alicePk,
@@ -2166,6 +2117,7 @@ describe('Message Service (Browser with Real WASM)', () => {
         setTimeout(resolve, KEEP_ALIVE_INTERVAL_MILLIS)
       );
 
+      // alice init session with dave
       const { peer1DiscussionId: aliceDaveDiscussionId } = await initSession(
         aliceSk,
         alicePk,
@@ -2201,7 +2153,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       await messageService.sendMessage(daveMessage as Message, daveSession);
 
       // Alice fetches messages
-      await messageService.fetchMessages(aliceUserId, aliceSk, aliceSession);
+      await messageService.fetchMessages(aliceSession);
 
       // STEP 3: Alice call refresh function
       const aliceActiveDiscussions = await db.discussions

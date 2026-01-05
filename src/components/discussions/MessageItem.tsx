@@ -669,7 +669,10 @@ const MessageItem: React.FC<MessageItemProps> = ({
               )}
               {(message.status === MessageStatus.DELIVERED ||
                 message.status === MessageStatus.READ) && (
-                <div className="relative inline-flex items-center w-4 h-3.5" aria-label="Delivered">
+                <div
+                  className="relative inline-flex items-center w-4 h-3.5"
+                  aria-label="Delivered"
+                >
                   <CheckIcon className="w-3.5 h-3.5 absolute left-0" />
                   <CheckIcon className="w-3.5 h-3.5 absolute left-[5px] top-[1.5px]" />
                 </div>

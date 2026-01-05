@@ -5,37 +5,19 @@ import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import { toast } from 'react-hot-toast';
+import {
+  LOG_LIMIT_OPTIONS,
+  type LogLimit,
+  type LogLevel,
+  type ErrorLogData,
+  type LogData,
+  type LogEntry,
+} from './useDebugLogs.types';
 
 const LOG_STORAGE_KEY = 'debug-logs';
 const LOG_STORAGE_VERSION = 1;
 const LOG_STORAGE_KEY_PREFIX = `${LOG_STORAGE_KEY}-v${LOG_STORAGE_VERSION}`;
-export const LOG_LIMIT_OPTIONS = [20, 50, 100, 200, 500] as const;
-export type LogLimit = (typeof LOG_LIMIT_OPTIONS)[number];
 const DEFAULT_LOG_STORAGE_LIMIT: LogLimit = 200;
-export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
-
-export interface ErrorLogData {
-  name: string;
-  message: string;
-  stack?: string;
-  args: unknown[];
-}
-
-export type LogData =
-  | ErrorLogData
-  | string
-  | undefined
-  | Record<string, unknown>
-  | unknown[];
-
-export interface LogEntry {
-  id: number;
-  ts: string;
-  level: LogLevel;
-  msg: string;
-  data?: LogData;
-  repeatCount?: number; // Number of times this log was repeated consecutively
-}
 
 interface DebugStore {
   logs: LogEntry[];

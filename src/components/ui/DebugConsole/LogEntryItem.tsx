@@ -1,5 +1,5 @@
 import React from 'react';
-import { LogEntry } from '../../../stores/useDebugLogs';
+import { LogEntry } from '../../../stores/useDebugLogs.types';
 import { ChevronRight } from 'react-feather';
 import { levelColor, levelBg } from './constants';
 import { formatTime, formatLogMessage } from './utils';

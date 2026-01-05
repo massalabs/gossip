@@ -28,7 +28,11 @@ export class SessionModule {
   public userId: Uint8Array;
   public userIdEncoded: string;
 
-  constructor(userKeys: UserKeys, onPersist?: () => void, config?: SessionConfig) {
+  constructor(
+    userKeys: UserKeys,
+    onPersist?: () => void,
+    config?: SessionConfig
+  ) {
     this.ourPk = userKeys.public_keys();
     this.ourSk = userKeys.secret_keys();
     this.userId = this.ourPk.derive_id();

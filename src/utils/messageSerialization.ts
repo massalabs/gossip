@@ -8,7 +8,7 @@ const SEEKER_SIZE = 34;
 const MESSAGE_TYPE_REGULAR = 0x00;
 const MESSAGE_TYPE_REPLY = 0x01;
 const MESSAGE_TYPE_FORWARD = 0x02;
-const MESSAGE_TYPE_KEEP_ALIVE = 0x03;
+export const MESSAGE_TYPE_KEEP_ALIVE = 0x03;
 
 export interface DeserializedMessage {
   content: string;
@@ -133,7 +133,7 @@ export function deserializeMessage(buffer: Uint8Array): DeserializedMessage {
     const content = bytesToStr(contentBytes);
     return { content, type: MessageType.TEXT };
 
-  /* REPLY MESSAGE */
+    /* REPLY MESSAGE */
   } else if (messageType === MESSAGE_TYPE_REPLY) {
     // Reply message format: [0x01][seeker][new_len: 4][new][orig_len: 4][orig]
     if (buffer.length < 1 + SEEKER_SIZE + 4 + 4) {
@@ -192,8 +192,8 @@ export function deserializeMessage(buffer: Uint8Array): DeserializedMessage {
       },
       type: MessageType.TEXT,
     };
-  
-  /* FORWARD MESSAGE */
+
+    /* FORWARD MESSAGE */
   } else if (messageType === MESSAGE_TYPE_FORWARD) {
     // Forward message format: [0x02][seeker][forward_len: 4][forward][new_len: 4][new]
     if (buffer.length < 1 + SEEKER_SIZE + 4 + 4) {
@@ -253,7 +253,7 @@ export function deserializeMessage(buffer: Uint8Array): DeserializedMessage {
       type: MessageType.TEXT,
     };
 
-  /* KEEP ALIVE MESSAGE */
+    /* KEEP ALIVE MESSAGE */
   } else if (messageType === MESSAGE_TYPE_KEEP_ALIVE) {
     return {
       content: '',

@@ -143,5 +143,6 @@ export class MockMessageProtocol implements IMessageProtocol {
   clearMockData(): void {
     this.mockMessages.clear();
     this.mockAnnouncements = [];
+    this.bulletinCounter = 0;
   }
 }
