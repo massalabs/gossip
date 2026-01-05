@@ -1,5 +1,13 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { describe, it, expect, beforeEach, vi, beforeAll } from 'vitest';
+import {
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterEach,
+  vi,
+  beforeAll,
+} from 'vitest';
 import { db, Contact, DiscussionStatus } from '../../src/db';
 import {
   initializeDiscussion,
@@ -9,13 +17,14 @@ import {
 import { announcementService } from '../../src/services/announcement';
 
 // Import mock classes after vi.mock calls (due to hoisting)
+import { MockSessionModule } from '../wasm/mock';
 import {
-  MockSessionModule,
-  MockUserPublicKeys,
-  MockUserSecretKeys,
-  mockGenerateUserKeys,
-} from '../wasm/mock';
-import { SessionStatus } from '../../src/assets/generated/wasm/gossip_wasm';
+  SessionStatus,
+  UserPublicKeys,
+  UserSecretKeys,
+  UserKeys,
+} from '../../src/assets/generated/wasm/gossip_wasm';
+import { generateUserKeys } from '../../src/wasm/userKeys';
 import { initSession, initializeSessionMock } from '../utils';
 import { MockMessageProtocol } from '../../src/api/messageProtocol/mock';
 import { createMessageProtocol } from '../../src/api/messageProtocol';
@@ -25,13 +34,15 @@ describe('Discussion Service', () => {
   let mockProtocol: MockMessageProtocol;
   // Alice's test data
   let aliceSession: MockSessionModule;
-  let alicePk: MockUserPublicKeys;
-  let aliceSk: MockUserSecretKeys;
+  let alicePk: UserPublicKeys;
+  let aliceSk: UserSecretKeys;
+  let aliceKeys: UserKeys | null = null;
 
   // Bob's test data
   let bobSession: MockSessionModule;
-  let bobPk: MockUserPublicKeys;
-  let bobSk: MockUserSecretKeys;
+  let bobPk: UserPublicKeys;
+  let bobSk: UserSecretKeys;
+  let bobKeys: UserKeys | null = null;
 
   // Initialize WASM before all tests
   beforeAll(async () => {
@@ -51,17 +62,51 @@ describe('Discussion Service', () => {
     // Reset all mocks
     vi.clearAllMocks();
 
-    // Generate Alice's keys
-    const aliceKeys = mockGenerateUserKeys();
-    alicePk = aliceKeys.publicKeys;
-    aliceSk = aliceKeys.secretKeys;
+    // Generate Alice's keys using real WASM
+    aliceKeys = await generateUserKeys(
+      `alice-test-passphrase-${Date.now()}-${Math.random()}`
+    );
+    alicePk = aliceKeys.public_keys();
+    aliceSk = aliceKeys.secret_keys();
+    // Free the UserKeys object after extracting keys to prevent memory leaks
+    aliceKeys.free();
+    aliceKeys = null;
     aliceSession = initializeSessionMock(alicePk, aliceSk);
 
-    // Generate Bob's keys
-    const bobKeys = mockGenerateUserKeys();
-    bobPk = bobKeys.publicKeys;
-    bobSk = bobKeys.secretKeys;
+    // Generate Bob's keys using real WASM
+    bobKeys = await generateUserKeys(
+      `bob-test-passphrase-${Date.now()}-${Math.random()}`
+    );
+    bobPk = bobKeys.public_keys();
+    bobSk = bobKeys.secret_keys();
+    // Free the UserKeys object after extracting keys to prevent memory leaks
+    bobKeys.free();
+    bobKeys = null;
     bobSession = initializeSessionMock(bobPk, bobSk);
+  });
+
+  afterEach(async () => {
+    // Free WASM objects to prevent memory leaks
+    if (alicePk) {
+      alicePk.free();
+
+      alicePk = null as any;
+    }
+    if (aliceSk) {
+      aliceSk.free();
+
+      aliceSk = null as any;
+    }
+    if (bobPk) {
+      bobPk.free();
+
+      bobPk = null as any;
+    }
+    if (bobSk) {
+      bobSk.free();
+
+      bobSk = null as any;
+    }
   });
 
   describe('Discussion Initiation Happy Path', () => {
