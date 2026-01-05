@@ -7,6 +7,7 @@ import AccountCreation from '../components/account/AccountCreation';
 import { InvitePage } from '../pages/InvitePage';
 import { UserProfile } from '../db';
 import { ROUTES } from '../constants/routes';
+import MainLayout from '../components/ui/MainLayout';
 
 interface UnauthenticatedRoutesProps {
   existingAccountInfo: UserProfile | null;
@@ -15,7 +16,10 @@ interface UnauthenticatedRoutesProps {
 }
 
 /**
- * Routes accessible when user is not authenticated
+ * Routes accessible when user is not authenticated.
+ *
+ * MainLayout automatically shows/hides bottom nav based on route.
+ * Configure which routes show bottom nav in `src/constants/pageConfig.ts`
  */
 export const UnauthenticatedRoutes: React.FC<UnauthenticatedRoutesProps> = ({
   existingAccountInfo,
@@ -53,32 +57,34 @@ export const UnauthenticatedRoutes: React.FC<UnauthenticatedRoutesProps> = ({
   };
 
   return (
-    <Routes>
-      <Route path={ROUTES.invite()} element={<InvitePage />} />
-      <Route
-        path={ROUTES.welcome()}
-        element={
-          <Login
-            key="login-router"
-            onCreateNewAccount={handleCreateNewAccount}
-            onAccountSelected={handleAccountSelected}
-            accountInfo={existingAccountInfo}
-            persistentError={loginError}
-            onErrorChange={onLoginErrorChange}
-          />
-        }
-      />
-      <Route
-        path={ROUTES.setup()}
-        element={
-          <AccountCreation
-            onComplete={handleNewAccountComplete}
-            onBack={handleNewAccountBack}
-          />
-        }
-      />
-      <Route path="/" element={<Navigate to={ROUTES.welcome()} replace />} />
-      <Route path="*" element={<Navigate to={ROUTES.welcome()} replace />} />
-    </Routes>
+    <MainLayout>
+      <Routes>
+        <Route path={ROUTES.invite()} element={<InvitePage />} />
+        <Route
+          path={ROUTES.welcome()}
+          element={
+            <Login
+              key="login-router"
+              onCreateNewAccount={handleCreateNewAccount}
+              onAccountSelected={handleAccountSelected}
+              accountInfo={existingAccountInfo}
+              persistentError={loginError}
+              onErrorChange={onLoginErrorChange}
+            />
+          }
+        />
+        <Route
+          path={ROUTES.setup()}
+          element={
+            <AccountCreation
+              onComplete={handleNewAccountComplete}
+              onBack={handleNewAccountBack}
+            />
+          }
+        />
+        <Route path="/" element={<Navigate to={ROUTES.welcome()} replace />} />
+        <Route path="*" element={<Navigate to={ROUTES.welcome()} replace />} />
+      </Routes>
+    </MainLayout>
   );
 };

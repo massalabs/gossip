@@ -10,7 +10,7 @@ import {
 import ContactAvatar from '../avatar/ContactAvatar';
 import Button from '../ui/Button';
 import BackButton from '../ui/BackButton';
-import HeaderWrapper from '../ui/HeaderWrapper';
+import HeaderBar from '../ui/HeaderBar';
 import { ROUTES } from '../../constants/routes';
 
 interface DiscussionHeaderProps {
@@ -32,25 +32,25 @@ const DiscussionHeader: React.FC<DiscussionHeaderProps> = ({
   // Header with title (for list view with custom title)
   if (title && !contact) {
     return (
-      <HeaderWrapper>
+      <HeaderBar>
         <div className="flex items-center w-full">
           <h1 className="text-xl font-semibold text-foreground">{title}</h1>
         </div>
-      </HeaderWrapper>
+      </HeaderBar>
     );
   }
 
   // Guard against undefined/null contact when contact is expected
   if (!contact) {
     return (
-      <HeaderWrapper>
+      <HeaderBar>
         <div className="flex items-center w-full">
           <BackButton />
           <div className="flex-1">
             <p className="text-muted-foreground">Contact not found</p>
           </div>
         </div>
-      </HeaderWrapper>
+      </HeaderBar>
     );
   }
 
@@ -74,7 +74,7 @@ const DiscussionHeader: React.FC<DiscussionHeaderProps> = ({
   };
 
   return (
-    <HeaderWrapper>
+    <HeaderBar>
       <div className="flex items-center w-full gap-3">
         {onBack && (
           <Button
@@ -110,7 +110,7 @@ const DiscussionHeader: React.FC<DiscussionHeaderProps> = ({
           </div>
         </button>
       </div>
-    </HeaderWrapper>
+    </HeaderBar>
   );
 };
 

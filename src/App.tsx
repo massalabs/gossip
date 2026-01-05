@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useLayoutEffect } from 'react';
 import { BrowserRouter, useMatch } from 'react-router-dom';
 import { useAccountStore } from './stores/accountStore';
 import { useAppStore } from './stores/appStore';
@@ -73,6 +73,20 @@ function App() {
   const { initTheme } = useTheme();
   const { initOnlineStore } = useOnlineStore();
 
+  const [ready, setReady] = useState(false);
+
+  useLayoutEffect(() => {
+    // Safe area insets are captured in main.tsx before app renders
+    // Here we just initialize theme and online store
+    const init = async () => {
+      await initTheme();
+      await initOnlineStore();
+      setReady(true);
+    };
+
+    init();
+  }, [initTheme, initOnlineStore]);
+
   useEffect(() => {
     let cleanup: (() => void) | undefined;
 
@@ -94,6 +108,10 @@ function App() {
     // Including them could cause unnecessary re-initialization.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  if (!ready) {
+    return <LoadingScreen />;
+  }
 
   return (
     <BrowserRouter>

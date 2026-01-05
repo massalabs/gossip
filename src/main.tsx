@@ -15,6 +15,10 @@ import { sha512 } from '@noble/hashes/sha2';
 import * as ed from '@noble/ed25519';
 ed.utils.sha512Sync = (...m) => sha512(ed.utils.concatBytes(...m));
 
+// Capacitor imports
+import { Capacitor } from '@capacitor/core';
+import { SafeArea } from 'capacitor-plugin-safe-area';
+
 // Extend Window interface to include Buffer
 declare global {
   interface Window {
@@ -92,8 +96,34 @@ startWasmInitialization();
 enableDebugLogger();
 // }
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <App />
-  </StrictMode>
-);
+/**
+ * Initialize safe area insets using capacitor-plugin-safe-area.
+ * This plugin injects CSS variables --safe-area-inset-* that work on both iOS and Android.
+ */
+async function initSafeArea(): Promise<void> {
+  if (!Capacitor.isNativePlatform()) return;
+
+  try {
+    const { insets } = await SafeArea.getSafeAreaInsets();
+    const root = document.documentElement;
+
+    // Set CSS variables for safe areas
+    root.style.setProperty('--sat', `${insets.top}px`);
+    root.style.setProperty('--sab', `${insets.bottom}px`);
+    root.style.setProperty('--sal', `${insets.left}px`);
+    root.style.setProperty('--sar', `${insets.right}px`);
+
+    console.log('[SafeArea] Insets applied:', insets);
+  } catch (error) {
+    console.error('[SafeArea] Failed to get insets:', error);
+  }
+}
+
+// Initialize safe areas then render app
+initSafeArea().finally(() => {
+  createRoot(document.getElementById('root')!).render(
+    <StrictMode>
+      <App />
+    </StrictMode>
+  );
+});

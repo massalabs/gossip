@@ -8,7 +8,7 @@ import { useAccountStore } from '../stores/accountStore';
 import ContactNameModal from '../components/ui/ContactNameModal';
 import Button from '../components/ui/Button';
 import PageHeader from '../components/ui/PageHeader';
-import HeaderWrapper from '../components/ui/HeaderWrapper';
+import PageLayout from '../components/ui/PageLayout';
 import UserIdDisplay from '../components/ui/UserIdDisplay';
 import BaseModal from '../components/ui/BaseModal';
 import { Check, Edit2, Trash2 } from 'react-feather';
@@ -131,76 +131,75 @@ const Contact: React.FC = () => {
     : true;
 
   return (
-    <div className="bg-background h-full overflow-auto app-max-w mx-auto">
-      <HeaderWrapper>
-        <PageHeader title="Contact" onBack={() => navigate(-1)} />
-      </HeaderWrapper>
-      <div className="flex-1 pt-4 px-6 pb-6">
-        <div className="flex items-center gap-4">
-          <ContactAvatar contact={contact} size={14} />
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <p className="text-base font-semibold text-foreground truncate">
-                {displayName}
-              </p>
-
-              <button
-                onClick={handleOpenEditName}
-                disabled={!canEditName}
-                className="shrink-0 p-1 hover:bg-muted rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                title="Edit contact name"
-              >
-                <Edit2 className="w-4 h-4 text-muted-foreground" />
-              </button>
-              <div className="flex items-center gap-1">
-                {showSuccessCheck && (
-                  <Check className="w-4 h-4 text-success transition-opacity duration-200" />
-                )}
-              </div>
-            </div>
-            <UserIdDisplay
-              userId={contact.userId}
-              showCopy
-              showHideToggle
-              visible={showUserId}
-              onChange={setShowUserId}
-            />
-          </div>
-        </div>
-
-        <div className="mt-6 grid grid-cols-1 gap-2">
-          <Button
-            onClick={() => {
-              if (userId) {
-                navigate(ROUTES.contactShare({ userId }));
-              }
-            }}
-            disabled={!contactPublicKeys}
-            variant="outline"
-            size="custom"
-            fullWidth
-            className="h-[46px] rounded-full bg-card border border-border text-card-foreground font-medium hover:bg-muted"
-          >
-            Share contact
-          </Button>
-          {!canStart && (
-            <p className="text-xs text-muted-foreground">
-              {discussion?.status === 'pending' &&
-                'Connection pending. You cannot chat yet.'}
-              {discussion?.status === 'closed' && 'This discussion is closed.'}
+    <PageLayout
+      header={<PageHeader title="Contact" onBack={() => navigate(-1)} />}
+      className="app-max-w mx-auto"
+      contentClassName="pt-4 px-6 pb-6"
+    >
+      <div className="flex items-center gap-4">
+        <ContactAvatar contact={contact} size={14} />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <p className="text-base font-semibold text-foreground truncate">
+              {displayName}
             </p>
-          )}
-          <Button
-            onClick={() => setIsDeleteModalOpen(true)}
-            variant="danger"
-            size="custom"
-            fullWidth
-            className="h-[46px] rounded-full font-medium mt-4"
-          >
-            <Trash2 className="w-4 h-4 mr-2" />
-            Remove contact
-          </Button>
+
+            <button
+              onClick={handleOpenEditName}
+              disabled={!canEditName}
+              className="shrink-0 p-1 hover:bg-muted rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Edit contact name"
+            >
+              <Edit2 className="w-4 h-4 text-muted-foreground" />
+            </button>
+            <div className="flex items-center gap-1">
+              {showSuccessCheck && (
+                <Check className="w-4 h-4 text-success transition-opacity duration-200" />
+              )}
+            </div>
+          </div>
+          <UserIdDisplay
+            userId={contact.userId}
+            showCopy
+            showHideToggle
+            visible={showUserId}
+            onChange={setShowUserId}
+          />
         </div>
+      </div>
+
+      <div className="mt-6 grid grid-cols-1 gap-2">
+        <Button
+          onClick={() => {
+            if (userId) {
+              navigate(ROUTES.contactShare({ userId }));
+            }
+          }}
+          disabled={!contactPublicKeys}
+          variant="outline"
+          size="custom"
+          fullWidth
+          className="h-[46px] rounded-full bg-card border border-border text-card-foreground font-medium hover:bg-muted"
+        >
+          Share contact
+        </Button>
+        {!canStart && (
+          <p className="text-xs text-muted-foreground">
+            {discussion?.status === 'pending' &&
+              'Connection pending. You cannot chat yet.'}
+            {discussion?.status === 'closed' && 'This discussion is closed.'}
+          </p>
+        )}
+        <Button
+          onClick={() => setIsDeleteModalOpen(true)}
+          variant="danger"
+          size="custom"
+          fullWidth
+          className="h-[46px] rounded-full font-medium mt-4"
+        >
+          <Trash2 className="w-4 h-4 mr-2" />
+          Remove contact
+        </Button>
       </div>
       <ContactNameModal
         isOpen={isNameModalOpen}
@@ -217,6 +216,7 @@ const Contact: React.FC = () => {
           await handleSaveName(name);
         }}
       />
+
       <BaseModal
         isOpen={isDeleteModalOpen}
         onClose={() => {
@@ -262,7 +262,7 @@ const Contact: React.FC = () => {
           </div>
         </div>
       </BaseModal>
-    </div>
+    </PageLayout>
   );
 };
 

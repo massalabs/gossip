@@ -1,8 +1,7 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import BaseModal from '../components/ui/BaseModal';
-import HeaderWrapper from '../components/ui/HeaderWrapper';
+import PageLayout from '../components/ui/PageLayout';
 import PageHeader from '../components/ui/PageHeader';
-import ScrollableContent from '../components/ui/ScrollableContent';
 import { useAccountStore } from '../stores/accountStore';
 import Button from '../components/ui/Button';
 import UserIdDisplay from '../components/ui/UserIdDisplay';
@@ -152,180 +151,177 @@ const Settings = (): React.ReactElement => {
   }
 
   return (
-    <div className="h-full flex flex-col bg-background app-max-w mx-auto">
-      {/* Header */}
-      <HeaderWrapper>
-        <PageHeader title="Settings" />
-      </HeaderWrapper>
-      {/* Main Content */}
-      <ScrollableContent className="flex-1 overflow-y-auto px-6 py-6">
-        {/* Account Profile Section */}
-        <div className="bg-card rounded-xl border border-border p-6 mb-6">
-          <div className="flex items-start gap-4">
-            <button
-              onClick={handleProfileImageTap}
-              className="cursor-pointer focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 rounded-full transition-opacity active:opacity-70"
-              aria-label="Profile"
-            >
-              <img
-                src={ProfilePicture}
-                className="w-16 h-16 rounded-full object-cover"
-                alt="Profile"
-              />
-            </button>
-            <div className="flex-1 min-w-0">
-              <div className="mb-2 flex items-center gap-2">
-                <p className="text-xs text-muted-foreground shrink-0">Name:</p>
-                <h3 className="text-base font-semibold text-foreground truncate">
-                  {userProfile?.username || 'Account name'}
-                </h3>
-                <button
-                  onClick={() => setIsUsernameModalOpen(true)}
-                  className="shrink-0 p-1 rounded-lg hover:bg-muted transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
-                  aria-label="Edit username"
-                >
-                  <Edit2 className="w-3.5 h-3.5 text-muted-foreground" />
-                </button>
-              </div>
-              {userProfile?.userId && (
-                <div className="flex items-center gap-2 min-w-0">
-                  <p className="text-xs text-muted-foreground shrink-0">
-                    User ID:
-                  </p>
-                  <div className="flex-1 min-w-0">
-                    <UserIdDisplay
-                      userId={userProfile.userId}
-                      visible={showUserId}
-                      onChange={setShowUserId}
-                      textSize="sm"
-                      textClassName="text-muted-foreground"
-                      showCopy
-                      showHideToggle
-                      className="w-full"
-                      prefixChars={3}
-                      suffixChars={3}
-                    />
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Settings Sections */}
-        <div className="space-y-6">
-          {/* Account Backup & Share Contact Group */}
-          <div className="bg-card rounded-xl border border-border overflow-hidden">
-            <Button
-              variant="outline"
-              size="custom"
-              className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0 border-b border-border"
-              onClick={() => setActiveView(SettingsView.ACCOUNT_BACKUP)}
-            >
-              <User className="mr-4" />
-              <span className="text-base font-semibold flex-1 text-left">
-                Account Backup
-              </span>
-              {mnemonicBackupInfo?.backedUp && (
-                <div className="w-2 h-2 bg-success rounded-full ml-auto"></div>
-              )}
-            </Button>
-            <Button
-              variant="outline"
-              size="custom"
-              className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0"
-              onClick={() => setActiveView(SettingsView.SHARE_CONTACT)}
-            >
-              <Share2 className="mr-4" />
-              <span className="text-base font-semibold flex-1 text-left">
-                Share Contact
-              </span>
-            </Button>
-          </div>
-
-          {/* Notifications & Appearance Group */}
-          <div className="bg-card rounded-xl border border-border overflow-hidden">
-            <Button
-              variant="outline"
-              size="custom"
-              className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0 border-b border-border"
-              onClick={() => navigate(ROUTES.settingsNotifications())}
-            >
-              <Bell className="mr-4" />
-              <span className="text-base font-semibold flex-1 text-left">
-                Notifications
-              </span>
-            </Button>
-            <Button
-              variant="outline"
-              size="custom"
-              className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0"
-              onClick={() => navigate(ROUTES.settingsAppearance())}
-            >
-              <Moon className="mr-4" />
-              <span className="text-base font-semibold flex-1 text-left">
-                Appearance
-              </span>
-            </Button>
-          </div>
-
-          {/* About & Debug Group */}
-          <div className="bg-card rounded-xl border border-border overflow-hidden">
-            <Button
-              variant="outline"
-              size="custom"
-              className={`w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0 ${
-                showDebugOption ? 'border-b border-border' : ''
-              }`}
-              onClick={() => navigate(ROUTES.settingsAbout())}
-            >
-              <Info className="mr-4" />
-              <span className="text-base font-semibold flex-1 text-left">
-                About
-              </span>
-            </Button>
-            {showDebugOption && (
-              <Button
-                variant="outline"
-                size="custom"
-                className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0"
-                onClick={() => navigate(ROUTES.settingsDebug())}
+    <PageLayout
+      header={<PageHeader title="Settings" />}
+      className="app-max-w mx-auto"
+      contentClassName="px-6 py-6"
+    >
+      {/* Account Profile Section */}
+      <div className="bg-card rounded-xl border border-border p-6 mb-6">
+        <div className="flex items-start gap-4">
+          <button
+            onClick={handleProfileImageTap}
+            className="cursor-pointer focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 rounded-full transition-opacity active:opacity-70"
+            aria-label="Profile"
+          >
+            <img
+              src={ProfilePicture}
+              className="w-16 h-16 rounded-full object-cover"
+              alt="Profile"
+            />
+          </button>
+          <div className="flex-1 min-w-0">
+            <div className="mb-2 flex items-center gap-2">
+              <p className="text-xs text-muted-foreground shrink-0">Name:</p>
+              <h3 className="text-base font-semibold text-foreground truncate">
+                {userProfile?.username || 'Account name'}
+              </h3>
+              <button
+                onClick={() => setIsUsernameModalOpen(true)}
+                className="shrink-0 p-1 rounded-lg hover:bg-muted transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                aria-label="Edit username"
               >
-                <SettingsIconFeather className="mr-4" />
-                <span className="text-base font-semibold flex-1 text-left">
-                  Debug
-                </span>
-              </Button>
+                <Edit2 className="w-3.5 h-3.5 text-muted-foreground" />
+              </button>
+            </div>
+            {userProfile?.userId && (
+              <div className="flex items-center gap-2 min-w-0">
+                <p className="text-xs text-muted-foreground shrink-0">
+                  User ID:
+                </p>
+                <div className="flex-1 min-w-0">
+                  <UserIdDisplay
+                    userId={userProfile.userId}
+                    visible={showUserId}
+                    onChange={setShowUserId}
+                    textSize="sm"
+                    textClassName="text-muted-foreground"
+                    showCopy
+                    showHideToggle
+                    className="w-full"
+                    prefixChars={3}
+                    suffixChars={3}
+                  />
+                </div>
+              </div>
             )}
           </div>
-
-          {/* Account Actions */}
-          <div className="bg-card rounded-xl border border-border overflow-hidden">
-            <Button
-              variant="outline"
-              size="custom"
-              className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0 border-b border-border text-foreground"
-              onClick={handleLogout}
-            >
-              <LogOut className="mr-4" />
-              <span className="text-base font-semibold flex-1 text-left">
-                Logout
-              </span>
-            </Button>
-            <Button
-              variant="outline"
-              size="custom"
-              className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0 text-destructive border-destructive hover:bg-destructive/10"
-              onClick={() => setIsResetModalOpen(true)}
-            >
-              <Trash2 className="mr-4" />
-              <span className="text-base font-semibold flex-1 text-left">
-                Delete Account
-              </span>
-            </Button>
-          </div>
         </div>
-      </ScrollableContent>
+      </div>
+
+      {/* Settings Sections */}
+      <div className="space-y-6">
+        {/* Account Backup & Share Contact Group */}
+        <div className="bg-card rounded-xl border border-border overflow-hidden">
+          <Button
+            variant="outline"
+            size="custom"
+            className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0 border-b border-border"
+            onClick={() => setActiveView(SettingsView.ACCOUNT_BACKUP)}
+          >
+            <User className="mr-4" />
+            <span className="text-base font-semibold flex-1 text-left">
+              Account Backup
+            </span>
+            {mnemonicBackupInfo?.backedUp && (
+              <div className="w-2 h-2 bg-success rounded-full ml-auto"></div>
+            )}
+          </Button>
+          <Button
+            variant="outline"
+            size="custom"
+            className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0"
+            onClick={() => setActiveView(SettingsView.SHARE_CONTACT)}
+          >
+            <Share2 className="mr-4" />
+            <span className="text-base font-semibold flex-1 text-left">
+              Share Contact
+            </span>
+          </Button>
+        </div>
+
+        {/* Notifications & Appearance Group */}
+        <div className="bg-card rounded-xl border border-border overflow-hidden">
+          <Button
+            variant="outline"
+            size="custom"
+            className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0 border-b border-border"
+            onClick={() => navigate(ROUTES.settingsNotifications())}
+          >
+            <Bell className="mr-4" />
+            <span className="text-base font-semibold flex-1 text-left">
+              Notifications
+            </span>
+          </Button>
+          <Button
+            variant="outline"
+            size="custom"
+            className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0"
+            onClick={() => navigate(ROUTES.settingsAppearance())}
+          >
+            <Moon className="mr-4" />
+            <span className="text-base font-semibold flex-1 text-left">
+              Appearance
+            </span>
+          </Button>
+        </div>
+
+        {/* About & Debug Group */}
+        <div className="bg-card rounded-xl border border-border overflow-hidden">
+          <Button
+            variant="outline"
+            size="custom"
+            className={`w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0 ${
+              showDebugOption ? 'border-b border-border' : ''
+            }`}
+            onClick={() => navigate(ROUTES.settingsAbout())}
+          >
+            <Info className="mr-4" />
+            <span className="text-base font-semibold flex-1 text-left">
+              About
+            </span>
+          </Button>
+          {showDebugOption && (
+            <Button
+              variant="outline"
+              size="custom"
+              className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0"
+              onClick={() => navigate(ROUTES.settingsDebug())}
+            >
+              <SettingsIconFeather className="mr-4" />
+              <span className="text-base font-semibold flex-1 text-left">
+                Debug
+              </span>
+            </Button>
+          )}
+        </div>
+
+        {/* Account Actions */}
+        <div className="bg-card rounded-xl border border-border overflow-hidden">
+          <Button
+            variant="outline"
+            size="custom"
+            className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0 border-b border-border text-foreground"
+            onClick={handleLogout}
+          >
+            <LogOut className="mr-4" />
+            <span className="text-base font-semibold flex-1 text-left">
+              Logout
+            </span>
+          </Button>
+          <Button
+            variant="outline"
+            size="custom"
+            className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0 text-destructive border-destructive hover:bg-destructive/10"
+            onClick={() => setIsResetModalOpen(true)}
+          >
+            <Trash2 className="mr-4" />
+            <span className="text-base font-semibold flex-1 text-left">
+              Delete Account
+            </span>
+          </Button>
+        </div>
+      </div>
       <BaseModal
         isOpen={isResetModalOpen}
         onClose={() => setIsResetModalOpen(false)}
@@ -379,7 +375,7 @@ const Settings = (): React.ReactElement => {
           onClose={() => setIsUsernameModalOpen(false)}
         />
       )}
-    </div>
+    </PageLayout>
   );
 };
 

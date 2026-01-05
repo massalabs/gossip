@@ -188,14 +188,10 @@ const MessageInput: React.FC<MessageInputProps> = ({
     }
   }, [newMessage]);
 
-  // Use the standard Capacitor pattern: var(--safe-area-inset-x, env(safe-area-inset-x, 0px))
-  // - Android: Uses --safe-area-inset-bottom injected by SystemBars (clamped to max 16px, min 12px)
-  // - iOS: Falls back to env(safe-area-inset-bottom) which works natively (min 12px)
-  // - Web: Falls back to 12px minimum padding
-  const isAndroid = Capacitor.getPlatform() === 'android';
-  const safeAreaBottom = isAndroid
-    ? 'max(min(var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 12px)), 16px), 12px)' // Android: clamp to max 16px, min 12px
-    : 'max(var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 12px)), 12px)'; // iOS: use env() with min 12px, web: 12px
+  const safeAreaBottom =
+    Capacitor.getPlatform() === 'android'
+      ? 'max(min(var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 12px)), 16px), 12px)' // Android: clamp to max 16px, min 12px
+      : '12px';
 
   return (
     <div

@@ -93,7 +93,7 @@ export const DebugConsole: React.FC = () => {
   }
 
   return (
-    <div className="fixed inset-0 z-9999 flex flex-col bg-background/95 text-foreground font-sans text-xs">
+    <div className="fixed inset-0 z-9999 flex flex-col bg-background/95 text-foreground font-sans text-xs pt-safe-t pb-safe-b">
       <ConsoleHeader
         logCount={logs.length}
         onClose={() => setShowDebugConsole(false)}

@@ -12,12 +12,6 @@ const config: CapacitorConfig = {
     allowsLinkPreview: false,
   },
   plugins: {
-    SystemBars: {
-      insetsHandling: 'css',
-      style: 'DEFAULT',
-      hidden: false,
-      animation: 'FADE',
-    },
     // Keyboard plugin configuration
     Keyboard: {
       resize: 'body',

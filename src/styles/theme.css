@@ -86,14 +86,6 @@
 
   /* Layout */
   --radius: 0.25rem;
-  --bottom-nav-height: 56px; /* Reduced from 64px for more compact mobile experience */
-  /* Header height: content height only (3rem)
-   * Note: Safe area top is NOT included here because:
-   * - iOS: contentInset: 'automatic' handles it automatically
-   * - Android: SystemBars handles it, and HeaderWrapper is positioned within the safe area
-   * If you need safe area spacing, add it to the specific component that needs it
-   */
-  --header-height: 3rem;
 
   /* Safe area insets - SystemBars plugin injects --safe-area-inset-x CSS variables on Android */
   /* iOS uses native env() directly. Use var(--safe-area-inset-x, env(...)) pattern for compatibility */
@@ -192,9 +184,6 @@
   --sidebar-accent-foreground: var(--accent-foreground);
   --sidebar-border: var(--border);
   --sidebar-ring: var(--ring);
-
-  /* Layout */
-  --bottom-nav-height: 64px;
 
   /* Scrollbar colors (dark mode) */
   --scrollbar-thumb-rgb: 232, 232, 234;
