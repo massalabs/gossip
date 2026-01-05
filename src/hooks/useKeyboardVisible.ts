@@ -1,11 +1,9 @@
 import { useState, useEffect } from 'react';
-import { Capacitor } from '@capacitor/core';
 import { Keyboard } from '@capacitor/keyboard';
+import { Capacitor } from '@capacitor/core';
 
 /**
- * Hook to detect if the virtual keyboard is visible.
- *
- * Uses the @capacitor/keyboard plugin for native keyboard events.
+ * Hook to detect if the virtual keyboard  * Uses the @capacitor/keyboard plugin for native keyboard events.
  * Uses 'keyboardWillShow/Hide' events for instant response (before animation).
  * Falls back to visualViewport API for web.
  *

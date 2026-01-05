@@ -1,8 +1,6 @@
 import { Capacitor, SystemBars, SystemBarsStyle } from '@capacitor/core';
 import { useUiStore } from '../stores/uiStore';
 
-// Inject safe area insets as CSS variables
-
 export const initStatusBar = async () => {
   if (!Capacitor.isNativePlatform()) return;
 

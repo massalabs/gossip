@@ -15,9 +15,9 @@ import { sha512 } from '@noble/hashes/sha2';
 import * as ed from '@noble/ed25519';
 ed.utils.sha512Sync = (...m) => sha512(ed.utils.concatBytes(...m));
 
-// Capacitor imports for early safe area capture
+// Capacitor imports
 import { Capacitor } from '@capacitor/core';
-import { EdgeToEdge } from '@capawesome/capacitor-android-edge-to-edge-support';
+import { SafeArea } from 'capacitor-plugin-safe-area';
 
 // Extend Window interface to include Buffer
 declare global {
@@ -97,70 +97,30 @@ enableDebugLogger();
 // }
 
 /**
- * Capture Android safe area insets BEFORE the app renders.
- * This must happen early because:
- * 1. EdgeToEdge.getInsets() only returns valid values before EdgeToEdge.disable()
- * 2. The service worker may trigger a reload shortly after app start
- * 3. We store insets in sessionStorage to survive reloads
+ * Initialize safe area insets using capacitor-plugin-safe-area.
+ * This plugin injects CSS variables --safe-area-inset-* that work on both iOS and Android.
  */
-async function captureAndroidSafeAreaInsets(): Promise<void> {
-  if (Capacitor.getPlatform() !== 'android') return;
-
-  const STORAGE_KEY = 'safe-area-insets';
-  const stored = sessionStorage.getItem(STORAGE_KEY);
-
-  // Skip if already captured (survives reloads)
-  if (stored) {
-    const { sat, sab, sal, sar } = JSON.parse(stored);
-    const root = document.documentElement;
-    root.style.setProperty('--sat', `${sat}px`);
-    root.style.setProperty('--sab', `${sab}px`);
-    root.style.setProperty('--sal', `${sal}px`);
-    root.style.setProperty('--sar', `${sar}px`);
-    console.log('[SafeArea] Applied stored insets:', { sat, sab });
-    return;
-  }
+async function initSafeArea(): Promise<void> {
+  if (!Capacitor.isNativePlatform()) return;
 
   try {
-    // Get insets BEFORE disabling edge-to-edge
-    const insets = await EdgeToEdge.getInsets();
-    console.log('[SafeArea] Raw Android insets:', insets);
+    const { insets } = await SafeArea.getSafeAreaInsets();
+    const root = document.documentElement;
 
-    if (insets.top > 0 || insets.bottom > 0) {
-      // Convert from physical pixels to CSS pixels
-      const density = window.devicePixelRatio || 1;
-      const safeInsets = {
-        sat: Math.round(insets.top / density),
-        sab: Math.round(insets.bottom / density),
-        sal: Math.round(insets.left / density),
-        sar: Math.round(insets.right / density),
-      };
+    // Set CSS variables for safe areas
+    root.style.setProperty('--sat', `${insets.top}px`);
+    root.style.setProperty('--sab', `${insets.bottom}px`);
+    root.style.setProperty('--sal', `${insets.left}px`);
+    root.style.setProperty('--sar', `${insets.right}px`);
 
-      // Store for future reloads
-      sessionStorage.setItem(STORAGE_KEY, JSON.stringify(safeInsets));
-
-      // Apply to CSS
-      const root = document.documentElement;
-      root.style.setProperty('--sat', `${safeInsets.sat}px`);
-      root.style.setProperty('--sab', `${safeInsets.sab}px`);
-      root.style.setProperty('--sal', `${safeInsets.sal}px`);
-      root.style.setProperty('--sar', `${safeInsets.sar}px`);
-
-      console.log(
-        '[SafeArea] Captured and stored insets (density=' + density + '):',
-        safeInsets
-      );
-    }
-
-    // Disable edge-to-edge after capturing insets
-    await EdgeToEdge.disable();
+    console.log('[SafeArea] Insets applied:', insets);
   } catch (error) {
-    console.error('[SafeArea] Failed to capture insets:', error);
+    console.error('[SafeArea] Failed to get insets:', error);
   }
 }
 
-// Capture safe area insets immediately, then render app
-captureAndroidSafeAreaInsets().finally(() => {
+// Initialize safe areas then render app
+initSafeArea().finally(() => {
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
       <App />

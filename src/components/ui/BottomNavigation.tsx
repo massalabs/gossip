@@ -48,10 +48,7 @@ const BottomNavigation: React.FC = () => {
   }
 
   return (
-    <div
-      className="bg-muted"
-      style={{ paddingBottom: 'var(--spacing-nav-bottom-safe)' }}
-    >
+    <div className="bg-muted pb-safe-b">
       <div className="mx-auto app-max-w flex items-center justify-center h-bottom-nav px-nav-padding">
         <div className="flex items-center justify-center gap-8">
           {navItems.map((item, index) => (
