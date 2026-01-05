@@ -23,6 +23,15 @@ export async function updateContactName(
   contactUserId: string,
   newName: string
 ): Promise<UpdateContactNameResult> {
+  // Validate parameters to prevent IDBKeyRange errors
+  if (!ownerUserId || !contactUserId) {
+    return {
+      ok: false,
+      reason: 'error',
+      message: 'Invalid parameters.',
+    };
+  }
+
   const trimmed = newName.trim();
   if (!trimmed)
     return { ok: false, reason: 'empty', message: 'Name cannot be empty.' };
@@ -61,6 +70,15 @@ export async function deleteContact(
   contactUserId: string
 ): Promise<DeleteContactResult> {
   try {
+    // Validate parameters to prevent IDBKeyRange errors
+    if (!ownerUserId || !contactUserId) {
+      return {
+        ok: false,
+        reason: 'error',
+        message: 'Invalid parameters.',
+      };
+    }
+
     // Verify contact exists
     const contact = await db.getContactByOwnerAndUserId(
       ownerUserId,

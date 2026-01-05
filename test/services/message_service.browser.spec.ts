@@ -1562,6 +1562,9 @@ describe('Message Service (Browser with Real WASM)', () => {
     });
 
     it('Alice-Bob discussion is killed by alice session because last incoming message too old. Renew discussion', async () => {
+      console.log(
+        'DEBUG: Alice-Bob discussion is killed by alice session because last incoming message too old. Renew discussion'
+      );
       // STEP 1: Initialize active discussion between Alice and Bob
       const { aliceDiscussionId, bobDiscussionId } =
         await initAliceBobSession();
