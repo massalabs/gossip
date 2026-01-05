@@ -22,17 +22,12 @@ import { encodeUserId } from '../../src/utils/userId';
 import { encodeToBase64, decodeFromBase64 } from '../../src/utils/base64';
 import { db } from '../../src/db';
 import { userProfile } from '../helpers/factories/userProfile';
-import { UserPublicKeys } from '../../src/assets/generated/wasm/gossip_wasm';
-
-// Mock the WASM module using helper
-// Use vi.hoisted to import the helper before the mock is hoisted
-const { getMockUserPublicKeys } = await vi.hoisted(async () => {
-  return await import('../helpers/mock/wasm');
-});
-
-vi.mock('../../src/assets/generated/wasm/gossip_wasm', () => ({
-  UserPublicKeys: getMockUserPublicKeys(),
-}));
+import {
+  UserPublicKeys,
+  UserKeys,
+  generate_user_keys,
+} from '../../src/assets/generated/wasm/gossip_wasm';
+import { ensureWasmInitialized } from '../../src/wasm/loader';
 
 describe('getPublicKeyErrorMessage', () => {
   it('should return specific message for "Public key not found" error', () => {
@@ -74,9 +69,13 @@ describe('AuthService', () => {
   let authService: AuthService;
   let testUserId: string;
   let testUserIdBytes: Uint8Array;
-  let mockPublicKeys: UserPublicKeys;
+  let testPublicKeys: UserPublicKeys;
+  let userKeys: UserKeys | null = null;
 
   beforeEach(async () => {
+    // Ensure WASM is initialized
+    await ensureWasmInitialized();
+
     // Ensure database is open (it gets deleted by global afterEach in setup.ts)
     if (!db.isOpen()) {
       await db.open();
@@ -86,10 +85,9 @@ describe('AuthService', () => {
     testUserIdBytes = new Uint8Array(32).fill(42);
     testUserId = encodeUserId(testUserIdBytes);
 
-    // Create mock public keys using the mocked UserPublicKeys
-    const keyBytes = new Uint8Array(96);
-    crypto.getRandomValues(keyBytes);
-    mockPublicKeys = UserPublicKeys.from_bytes(keyBytes);
+    // Generate real public keys using WASM
+    userKeys = generate_user_keys('test-passphrase-' + Date.now());
+    testPublicKeys = userKeys.public_keys();
 
     // Create mock message protocol
     mockMessageProtocol = {
@@ -109,13 +107,25 @@ describe('AuthService', () => {
   });
 
   afterEach(async () => {
+    // Free WASM objects to prevent memory leaks
+    if (testPublicKeys) {
+      testPublicKeys.free();
+      // Reset to null for next test (TypeScript doesn't allow null assignment to non-nullable type)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      testPublicKeys = null as any;
+    }
+    if (userKeys) {
+      userKeys.free();
+      userKeys = null;
+    }
+
     vi.clearAllMocks();
     await db.userProfile.clear();
   });
 
   describe('fetchPublicKeyByUserId', () => {
     it('should successfully fetch and decode public key', async () => {
-      const publicKeyBytes = mockPublicKeys.to_bytes();
+      const publicKeyBytes = testPublicKeys.to_bytes();
       const base64PublicKey = encodeToBase64(publicKeyBytes);
 
       vi.mocked(mockMessageProtocol.fetchPublicKeyByUserId).mockResolvedValue(
@@ -173,7 +183,7 @@ describe('AuthService', () => {
     });
 
     it('should decode userId correctly before fetching', async () => {
-      const publicKeyBytes = mockPublicKeys.to_bytes();
+      const publicKeyBytes = testPublicKeys.to_bytes();
       const base64PublicKey = encodeToBase64(publicKeyBytes);
 
       vi.mocked(mockMessageProtocol.fetchPublicKeyByUserId).mockResolvedValue(
@@ -200,7 +210,7 @@ describe('AuthService', () => {
 
       await db.userProfile.add(profile);
 
-      await authService.ensurePublicKeyPublished(mockPublicKeys, testUserId);
+      await authService.ensurePublicKeyPublished(testPublicKeys, testUserId);
 
       expect(mockMessageProtocol.postPublicKey).not.toHaveBeenCalled();
     });
@@ -215,12 +225,12 @@ describe('AuthService', () => {
 
       vi.mocked(mockMessageProtocol.postPublicKey).mockResolvedValue('hash123');
 
-      await authService.ensurePublicKeyPublished(mockPublicKeys, testUserId);
+      await authService.ensurePublicKeyPublished(testPublicKeys, testUserId);
 
       expect(mockMessageProtocol.postPublicKey).toHaveBeenCalledTimes(1);
       const calledWith = vi.mocked(mockMessageProtocol.postPublicKey).mock
         .calls[0][0];
-      expect(calledWith).toBe(encodeToBase64(mockPublicKeys.to_bytes()));
+      expect(calledWith).toBe(encodeToBase64(testPublicKeys.to_bytes()));
 
       // Verify lastPublicKeyPush was updated
       const updatedProfile = await db.userProfile.get(testUserId);
@@ -238,12 +248,12 @@ describe('AuthService', () => {
 
       vi.mocked(mockMessageProtocol.postPublicKey).mockResolvedValue('hash123');
 
-      await authService.ensurePublicKeyPublished(mockPublicKeys, testUserId);
+      await authService.ensurePublicKeyPublished(testPublicKeys, testUserId);
 
       expect(mockMessageProtocol.postPublicKey).toHaveBeenCalledTimes(1);
       const calledWith = vi.mocked(mockMessageProtocol.postPublicKey).mock
         .calls[0][0];
-      expect(calledWith).toBe(encodeToBase64(mockPublicKeys.to_bytes()));
+      expect(calledWith).toBe(encodeToBase64(testPublicKeys.to_bytes()));
 
       // Verify lastPublicKeyPush was set
       const updatedProfile = await db.userProfile.get(testUserId);
@@ -261,7 +271,7 @@ describe('AuthService', () => {
 
       vi.mocked(mockMessageProtocol.postPublicKey).mockResolvedValue('hash123');
 
-      await authService.ensurePublicKeyPublished(mockPublicKeys, testUserId);
+      await authService.ensurePublicKeyPublished(testPublicKeys, testUserId);
 
       // Exactly one week should trigger a push
       expect(mockMessageProtocol.postPublicKey).toHaveBeenCalledTimes(1);
@@ -271,7 +281,7 @@ describe('AuthService', () => {
       // Don't add profile to database
 
       await expect(
-        authService.ensurePublicKeyPublished(mockPublicKeys, testUserId)
+        authService.ensurePublicKeyPublished(testPublicKeys, testUserId)
       ).rejects.toThrow('User profile not found');
 
       expect(mockMessageProtocol.postPublicKey).not.toHaveBeenCalled();
@@ -287,12 +297,12 @@ describe('AuthService', () => {
 
       vi.mocked(mockMessageProtocol.postPublicKey).mockResolvedValue('hash123');
 
-      await authService.ensurePublicKeyPublished(mockPublicKeys, testUserId);
+      await authService.ensurePublicKeyPublished(testPublicKeys, testUserId);
 
       const calledWith = vi.mocked(mockMessageProtocol.postPublicKey).mock
         .calls[0][0];
       const decoded = decodeFromBase64(calledWith);
-      const originalBytes = mockPublicKeys.to_bytes();
+      const originalBytes = testPublicKeys.to_bytes();
 
       expect(Array.from(decoded)).toEqual(Array.from(originalBytes));
     });

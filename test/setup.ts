@@ -18,7 +18,6 @@ import { IDBKeyRange } from 'fake-indexeddb';
 import { afterEach, vi } from 'vitest';
 import { db } from '../src/db';
 import { MessageProtocolType } from '../src/config/protocol';
-import { MockUserPublicKeys, MockUserSecretKeys } from './wasm/mock';
 
 // Make IDBKeyRange available globally
 if (typeof globalThis.IDBKeyRange === 'undefined') {
@@ -36,21 +35,6 @@ vi.mock('../src/services/notifications', () => ({
     showNewMessageNotification: vi.fn(),
   },
 }));
-
-// Mock the WASM module - regular import works because Vitest processes imports
-// before executing mock factories, so MockUserPublicKeys and MockUserSecretKeys
-// are available when the factory function runs
-vi.mock('../src/assets/generated/wasm/gossip_wasm', async importOriginal => {
-  const actual =
-    await importOriginal<
-      typeof import('../src/assets/generated/wasm/gossip_wasm')
-    >();
-  return {
-    ...actual,
-    UserPublicKeys: MockUserPublicKeys,
-    UserSecretKeys: MockUserSecretKeys,
-  };
-});
 
 // Mock the message protocol factory to always return mock protocol
 vi.mock('../src/api/messageProtocol', async importOriginal => {
