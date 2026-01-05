@@ -8,6 +8,7 @@ interface PageHeaderProps {
   onBack?: () => void;
   showLogo?: boolean;
   className?: string;
+  rightAction?: React.ReactNode;
 }
 
 const PageHeader: React.FC<PageHeaderProps> = ({
@@ -15,6 +16,7 @@ const PageHeader: React.FC<PageHeaderProps> = ({
   onBack,
   showLogo = false,
   className = '',
+  rightAction,
 }) => {
   return (
     <div className={`flex items-center justify-between ${className}`}>
@@ -39,6 +41,7 @@ const PageHeader: React.FC<PageHeaderProps> = ({
         )}
         <h1 className="text-xl font-semibold text-foreground">{title}</h1>
       </div>
+      {rightAction && <div>{rightAction}</div>}
     </div>
   );
 };

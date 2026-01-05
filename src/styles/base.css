@@ -18,6 +18,16 @@
       'Mozilla Headline', system-ui, -apple-system, BlinkMacSystemFont,
       'Segoe UI', sans-serif;
 
+    /* Safe area insets with fallback to 0 for browsers that don't support env() */
+    --sat: env(safe-area-inset-top, 0px);
+    --sab: env(safe-area-inset-bottom, 0px);
+    --sal: env(safe-area-inset-left, 0px);
+    --sar: env(safe-area-inset-right, 0px);
+    --header-height: 3.5rem;
+    --bottom-nav-height: 4rem;
+    --header-padding: 1.5rem;
+    --nav-padding: 1.5rem;
+
     font-family: var(--font-body);
     line-height: 1.5;
     font-weight: 400;
@@ -48,7 +58,6 @@
   body {
     @apply bg-background text-foreground;
     margin: 0;
-    padding: 0;
     min-width: 20rem; /* min-w-80 */
     /* Disable pull-to-refresh and bounce scrolling on mobile */
     overscroll-behavior-y: none;
@@ -72,22 +81,8 @@
     width: 100%;
     overflow: hidden;
     position: relative;
-    /* Safe area handling:
-     * - iOS: Use env(safe-area-inset-top) directly (works natively, needed for notch/status bar)
-     * - Android: env() returns 0px or small value (status bar handled by SystemBars, no extra padding needed)
-     * - Web: Falls back to 0px
-     * 
-     * Note: We use env() directly instead of var(--safe-area-inset-top, env(...)) for top padding
-     * because Android SystemBars injects --safe-area-inset-top with status bar height, but we don't
-     * need that extra padding on Android. iOS needs env() for the notch/status bar area.
-     */
-    padding-top: env(safe-area-inset-top, 0px);
-    padding-left: var(--safe-area-inset-left, env(safe-area-inset-left, 0px));
-    padding-right: var(
-      --safe-area-inset-right,
-      env(safe-area-inset-right, 0px)
-    );
-    /* Bottom safe area is handled by BottomNavigation component */
+    padding-left: var(--sal);
+    padding-right: var(--sar);
   }
 
   /* Utility class for content that comes after fixed HeaderWrapper */
