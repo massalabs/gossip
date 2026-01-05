@@ -29,20 +29,20 @@ const logger = new Logger('RefreshService');
  *   - If the discussion is not BROKEN and its peer requires a keep-alive,
  *     sends a keep-alive message via the session manager.
  *
- * Errors are logged with console.error but do not throw, so callers can safely
+ * Errors are logged via the Logger instance (log.error) but do not throw, so callers can safely
  * invoke this periodically (e.g. from background tasks).
  */
 export async function handleSessionRefresh(
   ownerUserId: string,
   session: SessionModule,
-  ActiveDiscussions: Discussion[]
+  activeDiscussions: Discussion[]
 ): Promise<void> {
   const log = logger.forMethod('handleSessionRefresh');
   log.info('calling session refresh', {
     ownerUserId: ownerUserId,
-    discussions: ActiveDiscussions.map(discussion => discussion.contactUserId),
+    discussions: activeDiscussions.map(discussion => discussion.contactUserId),
   });
-  if (!ActiveDiscussions.length) {
+  if (!activeDiscussions.length) {
     return;
   }
 
@@ -64,7 +64,7 @@ export async function handleSessionRefresh(
 
   /* refresh function kill sessions that have no incoming messages for a long time
   So we need to mark corresponding discussions as broken if it is the case */
-  for (const discussion of ActiveDiscussions) {
+  for (const discussion of activeDiscussions) {
     try {
       // Decode contact userId to the peerId format expected by SessionModule
       const peerId = decodeUserId(discussion.contactUserId);

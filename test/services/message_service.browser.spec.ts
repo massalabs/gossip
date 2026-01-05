@@ -1495,8 +1495,8 @@ describe('Message Service (Browser with Real WASM)', () => {
         60 * 1000, // max_incoming_announcement_future_millis: 1 minute
         7 * 24 * 60 * 60 * 1000, // max_incoming_message_age_millis: 1 week
         60 * 1000, // max_incoming_message_future_millis: 1 minute
-        MAX_SESSION_INACTIVITY_MILLIS, // max_session_inactivity_millis: 4 seconds (instead of 1 week)
-        KEEP_ALIVE_INTERVAL_MILLIS, // keep_alive_interval_millis: 1 second (instead of 1 day)
+        MAX_SESSION_INACTIVITY_MILLIS,
+        KEEP_ALIVE_INTERVAL_MILLIS,
         10000n // max_session_lag_length: 10000 messages
       );
 
@@ -1519,6 +1519,13 @@ describe('Message Service (Browser with Real WASM)', () => {
       // Constructor params: max_incoming_announcement_age_millis, max_incoming_announcement_future_millis,
       //                     max_incoming_message_age_millis, max_incoming_message_future_millis,
       //                     max_session_inactivity_millis, keep_alive_interval_millis, max_session_lag_length
+
+      // Ensure Alice and Bob keys are initialized (from parent beforeEach)
+      if (!aliceKeys || !bobKeys) {
+        throw new Error(
+          'Alice or Bob keys not initialized. Parent beforeEach may have failed.'
+        );
+      }
 
       // Recreate Alice and Bob sessions with test config
       aliceSession.cleanup();
@@ -1543,10 +1550,15 @@ describe('Message Service (Browser with Real WASM)', () => {
 
     it('No active discussions', async () => {
       // Call handleSessionRefresh with no active discussions
-      await handleSessionRefresh(aliceUserId, aliceSession, []);
+      let error: Error | undefined;
+      try {
+        await handleSessionRefresh(aliceUserId, aliceSession, []);
+      } catch (e) {
+        error = e as Error;
+      }
 
       // Should complete without errors
-      expect(true).toBe(true);
+      expect(error).toBeUndefined();
     });
 
     it('Alice-Bob discussion is killed by alice session because last incoming message too old. Renew discussion', async () => {
@@ -1958,7 +1970,11 @@ describe('Message Service (Browser with Real WASM)', () => {
         [aliceDiscussion],
         aliceSession
       );
-      resendFailedMessagesForContact(aliceUserId, bobUserId, aliceSession);
+      await resendFailedMessagesForContact(
+        aliceUserId,
+        bobUserId,
+        aliceSession
+      );
 
       // Bob fetch new announcement and messages
       await announcementService.fetchAndProcessAnnouncements(bobSession);

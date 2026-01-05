@@ -262,6 +262,10 @@ export class GossipDatabase extends Dexie {
     ownerUserId: string,
     contactUserId: string
   ): Promise<Discussion | undefined> {
+    // Validate parameters to prevent IDBKeyRange errors
+    if (!ownerUserId || !contactUserId) {
+      return undefined;
+    }
     return await this.discussions
       .where('[ownerUserId+contactUserId]')
       .equals([ownerUserId, contactUserId])

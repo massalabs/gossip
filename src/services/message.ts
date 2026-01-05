@@ -504,11 +504,7 @@ export class MessageService {
         message.replyTo.originalSeeker,
         message.ownerUserId
       );
-      log.info('reply target not found', {
-        originalSeeker: encodeToBase64(message.replyTo.originalSeeker),
-        originalMessageContent: originalMessage?.content,
-        messageContent: message.content,
-      });
+
       if (!originalMessage) {
         return {
           success: false,
@@ -571,35 +567,15 @@ export class MessageService {
       const peerId = decodeUserId(contactId);
       totalProcessed += retryMessages.length;
 
-      const shouldStop = false;
-
       for (const msg of retryMessages) {
-        if (shouldStop) break;
-
         /* If the message has already been encrypted by sessionManager, resend it */
         if (msg.encryptedMessage && msg.seeker) {
-          try {
-            await this.messageProtocol.sendMessage({
-              seeker: msg.seeker,
-              ciphertext: msg.encryptedMessage,
-            });
-            successfullySent.push(msg.id!);
-          } catch (error) {
-            log.error('rebroadcast failed', {
-              error: error instanceof Error ? error.message : 'Unknown error',
-              messageId: msg.id,
-            });
-          }
-          continue;
-        }
-
-        console.log(
-          `MessageService.resendMessages: message "${msg.content}" has not been encrypted by sessionManager`
-        );
-        if (msg.encryptedMessage && msg.seeker) {
-          // if the message has already been encrypted by sessionManager, resend it
-          console.log(
-            `MessageService.resendMessages: message "${msg.content}" has already been encrypted by sessionManager with seeker: ${encodeToBase64(msg.seeker)}`
+          log.info(
+            'message has already been encrypted by sessionManager with seeker',
+            {
+              messageContent: msg.content,
+              seeker: encodeToBase64(msg.seeker),
+            }
           );
           try {
             await this.messageProtocol.sendMessage({
@@ -607,28 +583,33 @@ export class MessageService {
               ciphertext: msg.encryptedMessage,
             });
             successfullySent.push(msg.id!);
-            console.log(
-              `MessageService.resendMessages: message "${msg.content}" has been resend successfully on the network`
-            );
+            log.info('message has been resend successfully on the network', {
+              messageContent: msg.content,
+            });
           } catch (error) {
-            console.error(
-              `Failed to resend message ${msg.id!}: ${error instanceof Error ? error.message : error}`
-            );
+            log.error('failed to resend message', {
+              error: error,
+              messageId: msg.id,
+              messageContent: msg.content,
+            });
           }
 
           /* If the message has not been encrypted by sessionManager, encrypt it and resend it */
         } else {
-          console.log(
-            `MessageService.resendMessages: message "${msg.content}" has not been encrypted by sessionManager`
-          );
+          log.info('message has not been encrypted by sessionManager', {
+            messageContent: msg.content,
+          });
           if (!session) {
-            console.error(`resendMessages: Session manager not initialized`);
+            log.error('session manager not initialized', {
+              messageContent: msg.content,
+            });
             break;
           }
           const status = session.peerSessionStatus(peerId);
-          console.log(
-            `MessageService.resendMessages: session status for peer ${encodeUserId(peerId)}: ${sessionStatusToString(status)}`
-          );
+          log.info('session status for peer', {
+            peerId: encodeUserId(peerId),
+            sessionStatus: sessionStatusToString(status),
+          });
           /* If the session is waiting for peer acceptance, don't attempt to resend messages in this discussion
           because we don't have the peer's next seeker yet*/
           if (status === SessionStatus.SelfRequested) {
@@ -649,7 +630,7 @@ export class MessageService {
             status === SessionStatus.Killed ||
             status === SessionStatus.Saturated
           ) {
-            db.discussions
+            await db.discussions
               .where('[ownerUserId+contactUserId]')
               .equals([msg.ownerUserId, contactId])
               .modify({
@@ -681,12 +662,11 @@ export class MessageService {
               break;
             }
             serializedContent = serializeResult.data;
+            log.info('message serialized', {
+              messageContent: msg.content,
+              serializedContent: serializedContent,
+            });
           }
-
-          log.info('message serialized', {
-            messageContent: msg.content,
-            serializedContent: serializedContent,
-          });
 
           const sendOutput = session.sendMessage(peerId, serializedContent!);
           if (!sendOutput) {
