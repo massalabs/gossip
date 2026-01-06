@@ -19,7 +19,7 @@ const PageHeader: React.FC<PageHeaderProps> = ({
   rightAction,
 }) => {
   return (
-    <div className={`flex items-center justify-between ${className}`}>
+    <div className={`w-full flex items-center justify-between ${className}`}>
       <div className="flex items-center gap-3">
         {onBack && (
           <Button
@@ -41,7 +41,7 @@ const PageHeader: React.FC<PageHeaderProps> = ({
         )}
         <h1 className="text-xl font-semibold text-foreground">{title}</h1>
       </div>
-      {rightAction && <div>{rightAction}</div>}
+      {rightAction && <div className="flex items-center">{rightAction}</div>}
     </div>
   );
 };
