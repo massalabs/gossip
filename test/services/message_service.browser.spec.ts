@@ -1562,13 +1562,13 @@ describe('Message Service (Browser with Real WASM)', () => {
     });
 
     it('Alice-Bob discussion is killed by alice session because last incoming message too old. Renew discussion', async () => {
-      console.log(
-        'DEBUG: Alice-Bob discussion is killed by alice session because last incoming message too old. Renew discussion'
-      );
       // STEP 1: Initialize active discussion between Alice and Bob
       const { aliceDiscussionId, bobDiscussionId } =
         await initAliceBobSession();
 
+      console.log(
+        'DEBUG: Alice-Bob discussion is killed by alice session because last incoming message too old. Renew discussion'
+      );
       let aliceDiscussion = await db.discussions.get(aliceDiscussionId);
       expect(aliceDiscussion?.status).toBe(DiscussionStatus.ACTIVE);
 
@@ -1623,6 +1623,9 @@ describe('Message Service (Browser with Real WASM)', () => {
       const { aliceDiscussionId, bobDiscussionId } =
         await initAliceBobSession();
 
+      console.log(
+        'DEBUG: Alice-Bob discussion killed by both session. Renew discussion'
+      );
       // STEP 2: Wait for session timeout on both sides
       await new Promise(resolve =>
         setTimeout(resolve, MAX_SESSION_INACTIVITY_MILLIS)
@@ -1639,6 +1642,7 @@ describe('Message Service (Browser with Real WASM)', () => {
         )
         .toArray();
 
+      console.log('DEBUG: aliceActiveDiscussions:', aliceActiveDiscussions);
       const bobActiveDiscussions = await db.discussions
         .where('ownerUserId')
         .equals(bobUserId)
@@ -1649,6 +1653,7 @@ describe('Message Service (Browser with Real WASM)', () => {
         )
         .toArray();
 
+      console.log('DEBUG: bobActiveDiscussions:', bobActiveDiscussions);
       // Refresh both sessions - should kill discussions
       await handleSessionRefresh(
         aliceUserId,
