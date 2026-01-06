@@ -1598,7 +1598,7 @@ describe('Message Service (Browser with Real WASM)', () => {
 
       console.log('DEBUG: aliceDiscussion:', aliceDiscussion);
       // STEP 4: Renew the discussion
-      await renewDiscussion(aliceUserId, bobUserId, aliceSession);
+      await renewDiscussion(bobUserId, aliceSession);
 
       // Bob fetches and accepts the renewal
       await announcementService.fetchAndProcessAnnouncements(bobSession);
@@ -1671,7 +1671,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       expect(bobDiscussion?.status).toBe(DiscussionStatus.BROKEN);
 
       // STEP 4: Alice renews the discussion
-      await renewDiscussion(aliceUserId, bobUserId, aliceSession);
+      await renewDiscussion(bobUserId, aliceSession);
 
       await announcementService.resendAnnouncements(
         [aliceDiscussion],
@@ -1973,7 +1973,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       expect(aliceMsgList[1].type).toBe(MessageType.TEXT);
 
       // Step 5 : renew discussion
-      await renewDiscussion(aliceUserId, bobUserId, aliceSession);
+      await renewDiscussion(bobUserId, aliceSession);
       aliceDiscussion = await db.discussions.get(aliceDiscussionId);
       if (!aliceDiscussion) throw new Error('alice discussion not found');
       await announcementService.resendAnnouncements(
