@@ -186,6 +186,15 @@ export class MessageService {
         try {
           const deserialized = deserializeMessage(out.message);
 
+          out.acknowledged_seekers.forEach(seeker =>
+            acknowledgedSeekers.add(encodeToBase64(seeker))
+          );
+
+          // keep-alive messages are just useful to keep the session alive, we don't need to store them
+          if (deserialized.type === MessageType.KEEP_ALIVE) {
+            continue;
+          }
+
           decrypted.push({
             content: deserialized.content,
             sentAt: new Date(Number(out.timestamp)),
@@ -206,10 +215,6 @@ export class MessageService {
                 }
               : undefined,
           });
-
-          out.acknowledged_seekers.forEach(seeker =>
-            acknowledgedSeekers.add(encodeToBase64(seeker))
-          );
         } catch (deserializationError) {
           log.error('deserialization failed', {
             error:
@@ -345,6 +350,15 @@ export class MessageService {
           msg.seeker !== undefined && seekers.has(encodeToBase64(msg.seeker))
       )
       .modify({ status: MessageStatus.DELIVERED });
+
+    // After marking messages as DELIVERED, clean up DELIVERED keep-alive messages
+    await db.messages
+      .where({
+        ownerUserId: userId,
+        status: MessageStatus.DELIVERED,
+        type: MessageType.KEEP_ALIVE,
+      })
+      .delete();
 
     if (updatedCount > 0) {
       logger
@@ -668,7 +682,7 @@ export class MessageService {
             });
           }
 
-          const sendOutput = session.sendMessage(peerId, serializedContent!);
+          const sendOutput = session.sendMessage(peerId, serializedContent);
           if (!sendOutput) {
             log.error('session manager failed to send message', {
               messageId: msg.id,

@@ -1757,7 +1757,7 @@ describe('Message Service (Browser with Real WASM)', () => {
           m.direction === MessageDirection.INCOMING &&
           m.type === MessageType.KEEP_ALIVE
       );
-      expect(bobKeepAliveMessage?.status).toBe(MessageStatus.DELIVERED);
+      expect(bobKeepAliveMessage).toBeUndefined(); // Once acknowledged, keep-alive messages are deleted from database
       expect(bobSentMessage?.status).toBe(MessageStatus.DELIVERED);
     });
 
@@ -1876,7 +1876,7 @@ describe('Message Service (Browser with Real WASM)', () => {
         .where('[ownerUserId+contactUserId]')
         .equals([bobUserId, aliceUserId])
         .toArray();
-      expect(bobMessages.length).toBe(3);
+      expect(bobMessages.length).toBe(2); // incoming keep-alive message are not stored in database
       expect(bobMessages[0].content).toBe('Test message');
       expect(bobMessages[0].status).toBe(MessageStatus.DELIVERED);
     });
