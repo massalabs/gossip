@@ -316,7 +316,7 @@ export class AnnouncementService {
 
   private async _fetchAnnouncements(
     cursor?: string,
-    limit = 20
+    limit = 50
   ): Promise<BulletinItem[]> {
     const log = logger.forMethod('_fetchAnnouncements');
 

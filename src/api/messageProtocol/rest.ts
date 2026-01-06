@@ -91,16 +91,15 @@ export class RestMessageProtocol implements IMessageProtocol {
   }
 
   async fetchAnnouncements(
-    limit: number = 20,
+    limit: number = 50,
     cursor?: string
   ): Promise<BulletinItem[]> {
     const params = new URLSearchParams();
 
     params.set('limit', limit.toString());
-
-    if (cursor) {
-      params.set('after', cursor);
-    }
+    // Always pass 'after' parameter. If cursor is undefined, use '0' to fetch from the beginning.
+    // This ensures pagination works correctly: after=0 gets counters 1-20, after=20 gets 21-40, etc.
+    params.set('after', cursor ?? '0');
 
     const url = `${this.baseUrl}${BULLETIN_ENDPOINT}?${params.toString()}`;
 
