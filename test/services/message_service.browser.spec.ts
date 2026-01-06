@@ -1566,9 +1566,6 @@ describe('Message Service (Browser with Real WASM)', () => {
       const { aliceDiscussionId, bobDiscussionId } =
         await initAliceBobSession();
 
-      console.log(
-        'DEBUG: Alice-Bob discussion is killed by alice session because last incoming message too old. Renew discussion'
-      );
       let aliceDiscussion = await db.discussions.get(aliceDiscussionId);
       expect(aliceDiscussion?.status).toBe(DiscussionStatus.ACTIVE);
 
@@ -1592,11 +1589,9 @@ describe('Message Service (Browser with Real WASM)', () => {
       await handleSessionRefresh(aliceUserId, aliceSession, activeDiscussions);
 
       // STEP 3: Verify discussion is now BROKEN
-      console.log('DEBUG: aliceDiscussionId:', aliceDiscussionId);
       aliceDiscussion = await db.discussions.get(aliceDiscussionId)!;
       expect(aliceDiscussion?.status).toBe(DiscussionStatus.BROKEN);
 
-      console.log('DEBUG: aliceDiscussion:', aliceDiscussion);
       // STEP 4: Renew the discussion
       await renewDiscussion(bobUserId, aliceSession);
 
@@ -1623,9 +1618,6 @@ describe('Message Service (Browser with Real WASM)', () => {
       const { aliceDiscussionId, bobDiscussionId } =
         await initAliceBobSession();
 
-      console.log(
-        'DEBUG: Alice-Bob discussion killed by both session. Renew discussion'
-      );
       // STEP 2: Wait for session timeout on both sides
       await new Promise(resolve =>
         setTimeout(resolve, MAX_SESSION_INACTIVITY_MILLIS)
@@ -1642,7 +1634,6 @@ describe('Message Service (Browser with Real WASM)', () => {
         )
         .toArray();
 
-      console.log('DEBUG: aliceActiveDiscussions:', aliceActiveDiscussions);
       const bobActiveDiscussions = await db.discussions
         .where('ownerUserId')
         .equals(bobUserId)
@@ -1653,7 +1644,6 @@ describe('Message Service (Browser with Real WASM)', () => {
         )
         .toArray();
 
-      console.log('DEBUG: bobActiveDiscussions:', bobActiveDiscussions);
       // Refresh both sessions - should kill discussions
       await handleSessionRefresh(
         aliceUserId,

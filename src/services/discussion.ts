@@ -153,18 +153,12 @@ export async function renewDiscussion(
   session: SessionModule
 ): Promise<void> {
   const ownerUserId = session.userIdEncoded;
-  console.log(
-    'DEBUG: ownerUserId:',
-    ownerUserId,
-    'contactUserId:',
-    contactUserId
-  );
+
   const contact = await db.getContactByOwnerAndUserId(
     ownerUserId,
     contactUserId
   );
 
-  console.log('DEBUG: contact:', contact);
   if (!contact) throw new Error('Contact not found');
 
   const existingDiscussion = await db.getDiscussionByOwnerAndContact(
