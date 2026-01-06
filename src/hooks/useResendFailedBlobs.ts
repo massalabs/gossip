@@ -93,7 +93,6 @@ export function useResendFailedBlobs() {
       next: ({ failedMessages, broken }) => {
         // Update refs directly - no need for state since we only use refs
         brokenDiscussionsRef.current = broken;
-        console.log('failedSub: failedMessages', failedMessages);
 
         // Group failed messages by contact, excluding broken discussions
         const brokenIds = new Set(broken.map(d => d.contactUserId));
@@ -104,7 +103,6 @@ export function useResendFailedBlobs() {
           list.push(msg);
           grouped.set(msg.contactUserId, list);
         }
-        console.log('failedSub: grouped', grouped);
         retryMessagesByContactRef.current = grouped;
       },
       error: err => console.error('Failed to observe failed items:', err),
