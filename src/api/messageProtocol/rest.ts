@@ -96,10 +96,10 @@ export class RestMessageProtocol implements IMessageProtocol {
   ): Promise<BulletinItem[]> {
     const params = new URLSearchParams();
 
-    params.set('limit', String(limit));
+    params.set('limit', limit.toString());
 
     if (cursor) {
-      params.set('offset', cursor);
+      params.set('after', cursor);
     }
 
     const url = `${this.baseUrl}${BULLETIN_ENDPOINT}?${params.toString()}`;
