@@ -1592,9 +1592,11 @@ describe('Message Service (Browser with Real WASM)', () => {
       await handleSessionRefresh(aliceUserId, aliceSession, activeDiscussions);
 
       // STEP 3: Verify discussion is now BROKEN
+      console.log('DEBUG: aliceDiscussionId:', aliceDiscussionId);
       aliceDiscussion = await db.discussions.get(aliceDiscussionId)!;
       expect(aliceDiscussion?.status).toBe(DiscussionStatus.BROKEN);
 
+      console.log('DEBUG: aliceDiscussion:', aliceDiscussion);
       // STEP 4: Renew the discussion
       await renewDiscussion(aliceUserId, bobUserId, aliceSession);
 

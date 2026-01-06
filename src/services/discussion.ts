@@ -158,6 +158,12 @@ export async function renewDiscussion(
     contactUserId
   );
 
+  console.log(
+    'DEBUG: ownerUserId:',
+    ownerUserId,
+    'contactUserId:',
+    contactUserId
+  );
   if (!contact) throw new Error('Contact not found');
 
   const existingDiscussion = await db.getDiscussionByOwnerAndContact(
