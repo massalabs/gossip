@@ -29,7 +29,6 @@ const AppContent: React.FC = () => {
   const [showImport, setShowImport] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
   useProfileLoader();
-
   const existingAccountInfo = useAccountInfo();
 
   const inviteMatch = useMatch(ROUTES.invite());

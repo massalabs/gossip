@@ -28,13 +28,17 @@ export class SessionModule {
   public userId: Uint8Array;
   public userIdEncoded: string;
 
-  constructor(userKeys: UserKeys, onPersist?: () => void) {
+  constructor(
+    userKeys: UserKeys,
+    onPersist?: () => void,
+    config?: SessionConfig
+  ) {
     this.ourPk = userKeys.public_keys();
     this.ourSk = userKeys.secret_keys();
     this.userId = this.ourPk.derive_id();
     this.userIdEncoded = encodeUserId(this.userId);
 
-    const sessionConfig = SessionConfig.new_default();
+    const sessionConfig = config ?? SessionConfig.new_default();
     this.sessionManager = new SessionManagerWrapper(sessionConfig);
     this.onPersist = onPersist;
   }

@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { Subscription } from 'dexie';
 import { liveQuery } from 'dexie';
-import { Discussion, Contact, db } from '../db';
+import { Discussion, Contact, db, DiscussionStatus } from '../db';
 import { createSelectors } from './utils/createSelectors';
 import { useAccountStore } from './accountStore';
 
@@ -16,7 +16,7 @@ interface DiscussionStoreState {
 
   init: () => void;
   getDiscussionsForContact: (contactUserId: string) => Discussion[];
-
+  getDiscussionsByStatus: (status: DiscussionStatus[]) => Discussion[];
   cleanup: () => void;
   setModalOpen: (discussionId: number, isOpen: boolean) => void;
   isModalOpen: (discussionId: number) => boolean;
@@ -113,6 +113,14 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
     if (!ownerUserId) return [];
     return get().discussions.filter(
       discussion => discussion.contactUserId === contactUserId
+    );
+  },
+
+  getDiscussionsByStatus: (status: DiscussionStatus[]) => {
+    const ownerUserId = useAccountStore.getState().userProfile?.userId;
+    if (!ownerUserId) return [];
+    return get().discussions.filter(discussion =>
+      status.includes(discussion.status)
     );
   },
 

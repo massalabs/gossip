@@ -28,10 +28,12 @@ import {
   serializeRegularMessage,
   serializeReplyMessage,
   serializeForwardMessage,
+  serializeKeepAliveMessage,
   deserializeMessage,
 } from '../utils/messageSerialization';
 import { encodeToBase64 } from '../utils/base64';
 import { isAppInForeground } from '../utils/appState';
+import { Result } from '../utils/type';
 import { isDiscussionStableState } from './discussion';
 import { sessionStatusToString } from '../wasm/session';
 import { Logger } from '../utils/logs';
@@ -48,11 +50,6 @@ export interface SendMessageResult {
   error?: string;
 }
 
-type SerializeMessageResult = {
-  error?: string;
-  contentBytes?: Uint8Array;
-};
-
 interface Decrypted {
   content: string;
   sentAt: Date;
@@ -66,6 +63,8 @@ interface Decrypted {
     originalContent: string;
     originalSeeker: Uint8Array;
   };
+  encryptedMessage: Uint8Array;
+  type: MessageType;
 }
 
 const LIMIT_FETCH_ITERATIONS = 30;
@@ -133,6 +132,8 @@ export class MessageService {
           newMessagesCount += storedIds.length;
         }
 
+        console.log('acknowledgedSeekers:', acknowledgedSeekers);
+
         if (acknowledgedSeekers.size > 0) {
           await this.acknowledgeMessages(
             acknowledgedSeekers,
@@ -187,11 +188,22 @@ export class MessageService {
         try {
           const deserialized = deserializeMessage(out.message);
 
+          out.acknowledged_seekers.forEach(seeker =>
+            acknowledgedSeekers.add(encodeToBase64(seeker))
+          );
+
+          // keep-alive messages are just useful to keep the session alive, we don't need to store them
+          if (deserialized.type === MessageType.KEEP_ALIVE) {
+            continue;
+          }
+
           decrypted.push({
             content: deserialized.content,
             sentAt: new Date(Number(out.timestamp)),
             senderId: encodeUserId(out.user_id),
             seeker: msg.seeker,
+            encryptedMessage: msg.ciphertext,
+            type: deserialized.type,
             replyTo: deserialized.replyTo
               ? {
                   originalContent: deserialized.replyTo.originalContent,
@@ -205,10 +217,6 @@ export class MessageService {
                 }
               : undefined,
           });
-
-          out.acknowledged_seekers.forEach(seeker =>
-            acknowledgedSeekers.add(encodeToBase64(seeker))
-          );
         } catch (deserializationError) {
           log.error('deserialization failed', {
             error:
@@ -265,42 +273,55 @@ export class MessageService {
         replyToMessageId = original?.id;
       }
 
-      const id = await db.messages.add({
-        ownerUserId,
-        contactUserId: discussion.contactUserId,
-        content: message.content,
-        type: MessageType.TEXT,
-        direction: MessageDirection.INCOMING,
-        status: MessageStatus.DELIVERED,
-        timestamp: message.sentAt,
-        metadata: {},
-        seeker: message.seeker,
-        replyTo: message.replyTo
-          ? {
-              originalContent: replyToMessageId
-                ? undefined
-                : message.replyTo.originalContent,
-              originalSeeker: message.replyTo.originalSeeker,
-            }
-          : undefined,
-        forwardOf: message.forwardOf
-          ? {
-              originalContent: message.forwardOf.originalContent,
-              originalSeeker: message.forwardOf.originalSeeker,
-            }
-          : undefined,
-      });
+      const id = await db.transaction(
+        'rw',
+        db.messages,
+        db.discussions,
+        async () => {
+          const id = await db.messages.add({
+            ownerUserId,
+            contactUserId: discussion.contactUserId,
+            content: message.content,
+            type: message.type,
+            direction: MessageDirection.INCOMING,
+            status: MessageStatus.DELIVERED,
+            timestamp: message.sentAt,
+            metadata: {},
+            seeker: message.seeker, // Store the seeker of the incoming message
+            encryptedMessage: message.encryptedMessage, // Store the ciphertext of the incoming message
+            replyTo: message.replyTo
+              ? {
+                  // Store the original content as a fallback only if we couldn't find
+                  // the original message in the database (replyToMessageId is undefined).
+                  // If the original message exists, we don't need to store the content
+                  // since we can fetch it using the originalSeeker.
+                  originalContent: replyToMessageId
+                    ? undefined
+                    : message.replyTo.originalContent,
+                  // Store the seeker (used to find the original message)
+                  originalSeeker: message.replyTo.originalSeeker,
+                }
+              : undefined,
 
-      const now = new Date();
-      await db.discussions.update(discussion.id, {
-        lastMessageId: id,
-        lastMessageContent: message.content,
-        lastMessageTimestamp: message.sentAt,
-        updatedAt: now,
-        lastSyncTimestamp: now,
-        unreadCount: discussion.unreadCount + 1,
-      });
-
+            forwardOf: message.forwardOf
+              ? {
+                  originalContent: message.forwardOf.originalContent,
+                  originalSeeker: message.forwardOf.originalSeeker,
+                }
+              : undefined,
+          });
+          const now = new Date();
+          await db.discussions.update(discussion.id, {
+            lastMessageId: id,
+            lastMessageContent: message.content,
+            lastMessageTimestamp: message.sentAt,
+            updatedAt: now,
+            lastSyncTimestamp: now,
+            unreadCount: discussion.unreadCount + 1,
+          });
+          return id;
+        }
+      );
       storedIds.push(id);
     }
 
@@ -332,6 +353,15 @@ export class MessageService {
       )
       .modify({ status: MessageStatus.DELIVERED });
 
+    // After marking messages as DELIVERED, clean up DELIVERED keep-alive messages
+    await db.messages
+      .where({
+        ownerUserId: userId,
+        status: MessageStatus.DELIVERED,
+        type: MessageType.KEEP_ALIVE,
+      })
+      .delete();
+
     if (updatedCount > 0) {
       logger
         .forMethod('acknowledgeMessages')
@@ -344,6 +374,12 @@ export class MessageService {
     session: SessionModule
   ): Promise<SendMessageResult> {
     const log = logger.forMethod('sendMessage');
+    log.info('sending message', {
+      messageContent: message.content,
+      messageType: message.type,
+      messageReplyTo: message.replyTo,
+      messageForwardOf: message.forwardOf,
+    });
 
     const peerId = decodeUserId(message.contactUserId);
     if (peerId.length !== 32) {
@@ -378,12 +414,20 @@ export class MessageService {
       return { success: false, error: 'No active session with peer' };
     }
 
-    const serializeResult = await this.serializeMessage(message);
-    if (serializeResult.error) {
-      return { success: false, error: serializeResult.error };
+    // Serialize message content (handle replies)
+    const serializeMessageResult = await this.serializeMessage(message);
+    if (!serializeMessageResult.success) {
+      return {
+        success: false,
+        error: serializeMessageResult.error,
+      };
     }
-    message.serializedContent = serializeResult.contentBytes!;
+    log.info('message serialized', {
+      serializedContent: serializeMessageResult.data,
+    });
+    message.serializedContent = serializeMessageResult.data;
 
+    // Check if we can send messages on this discussion
     const isUnstable = !(await isDiscussionStableState(
       message.ownerUserId,
       message.contactUserId
@@ -469,39 +513,42 @@ export class MessageService {
 
   private async serializeMessage(
     message: Message
-  ): Promise<SerializeMessageResult> {
+  ): Promise<Result<Uint8Array, string>> {
     const log = logger.forMethod('serializeMessage');
-
-    // Replies take precedence over forwards if both are somehow set
     if (message.replyTo?.originalSeeker) {
-      const original = await this.findMessageBySeeker(
+      const originalMessage = await this.findMessageBySeeker(
         message.replyTo.originalSeeker,
         message.ownerUserId
       );
 
-      if (!original) {
-        log.error('reply target not found', {
-          originalSeeker: encodeToBase64(message.replyTo.originalSeeker),
-        });
-        return { error: 'Original message not found for reply' };
+      if (!originalMessage) {
+        return {
+          success: false,
+          error: 'Original message not found for reply',
+        };
       }
 
       return {
-        contentBytes: serializeReplyMessage(
+        success: true,
+        data: serializeReplyMessage(
           message.content,
-          original.content,
+          originalMessage.content,
           message.replyTo.originalSeeker
         ),
       };
-    }
-
-    if (
+    } else if (message.type === MessageType.KEEP_ALIVE) {
+      return {
+        success: true,
+        data: serializeKeepAliveMessage(),
+      };
+    } else if (
       message.forwardOf?.originalContent &&
       message.forwardOf.originalSeeker
     ) {
       try {
         return {
-          contentBytes: serializeForwardMessage(
+          success: true,
+          data: serializeForwardMessage(
             message.forwardOf.originalContent,
             message.content,
             message.forwardOf.originalSeeker
@@ -509,11 +556,18 @@ export class MessageService {
         };
       } catch (error) {
         log.error('failed to serialize forward message', error);
-        return { error: 'Failed to serialize forward message' };
+        return {
+          success: false,
+          error: 'Failed to serialize forward message',
+        };
       }
+    } else {
+      // Regular message with type tag
+      return {
+        success: true,
+        data: serializeRegularMessage(message.content),
+      };
     }
-
-    return { contentBytes: serializeRegularMessage(message.content) };
   }
 
   async resendMessages(
@@ -529,92 +583,130 @@ export class MessageService {
       const peerId = decodeUserId(contactId);
       totalProcessed += retryMessages.length;
 
-      let shouldStop = false;
-
       for (const msg of retryMessages) {
-        if (shouldStop) break;
-
+        /* If the message has already been encrypted by sessionManager, resend it */
         if (msg.encryptedMessage && msg.seeker) {
+          log.info(
+            'message has already been encrypted by sessionManager with seeker',
+            {
+              messageContent: msg.content,
+              seeker: encodeToBase64(msg.seeker),
+            }
+          );
           try {
             await this.messageProtocol.sendMessage({
               seeker: msg.seeker,
               ciphertext: msg.encryptedMessage,
             });
             successfullySent.push(msg.id!);
+            log.info('message has been resent successfully on the network', {
+              messageContent: msg.content,
+            });
           } catch (error) {
-            log.error('rebroadcast failed', {
-              error: error instanceof Error ? error.message : 'Unknown error',
+            log.error('failed to resend message', {
+              error: error,
               messageId: msg.id,
+              messageContent: msg.content,
             });
           }
-          continue;
-        }
 
-        // Needs encryption
-        if (!session) break;
-
-        const status = session.peerSessionStatus(peerId);
-
-        if (status === SessionStatus.SelfRequested) {
-          log.info('skipping resend — waiting for peer acceptance', {
-            contactId,
+          /* If the message has not been encrypted by sessionManager, encrypt it and resend it */
+        } else {
+          log.info('message has not been encrypted by sessionManager', {
+            messageContent: msg.content,
           });
-          break;
-        }
-
-        if ([SessionStatus.Killed, SessionStatus.Saturated].includes(status)) {
-          await db.discussions
-            .where('[ownerUserId+contactUserId]')
-            .equals([msg.ownerUserId, contactId])
-            .modify({ status: DiscussionStatus.BROKEN });
-          log.error('session broken during resend', { status, contactId });
-          break;
-        }
-
-        if (status !== SessionStatus.Active) {
-          log.warn('session not active — stopping resend', {
-            status,
-            contactId,
-          });
-          break;
-        }
-
-        let serialized = msg.serializedContent;
-        if (!serialized) {
-          const result = await this.serializeMessage(msg);
-          if (result.error) {
-            log.error('serialization failed during resend', {
-              error: result.error,
+          if (!session) {
+            log.error('session manager not initialized', {
+              messageContent: msg.content,
             });
-            shouldStop = true;
-            continue;
+            break;
           }
-          serialized = result.contentBytes!;
-        }
+          const status = session.peerSessionStatus(peerId);
+          log.info('session status for peer', {
+            peerId: encodeUserId(peerId),
+            sessionStatus: sessionStatusToString(status),
+          });
+          /* If the session is waiting for peer acceptance, don't attempt to resend messages in this discussion
+          because we don't have the peer's next seeker yet*/
+          if (status === SessionStatus.SelfRequested) {
+            log.info('skipping resend — waiting for peer acceptance', {
+              contactId,
+            });
+            break;
+          }
 
-        let sendOutput: SendMessageOutput | undefined;
-        try {
-          sendOutput = session.sendMessage(peerId, serialized);
-          if (!sendOutput) throw new Error('sendMessage returned null');
-        } catch (error) {
-          log.error('encryption failed during resend → stopping', error);
-          shouldStop = true;
-          continue;
-        }
+          /* 
+          If session manager encryption fails for a message N, we can't send next N+1, N+2, ... messages in the discussion.
+          If the message N+1 is passed with success in session.sendMessage() before passing the message N,
+          message N would be considered as posterior to message N+1, which is not correct.
+          So if a message can't be encrypted in session.sendMessage() because of error session status,
+          we should break the loop and not send any other message in the discussion.
+          */
+          if (
+            status === SessionStatus.Killed ||
+            status === SessionStatus.Saturated
+          ) {
+            await db.discussions
+              .where('[ownerUserId+contactUserId]')
+              .equals([msg.ownerUserId, contactId])
+              .modify({
+                status: DiscussionStatus.BROKEN,
+              });
+            log.error('session broken during resend', { status, contactId });
+            break;
+          }
 
-        await db.messages.update(msg.id!, {
-          seeker: sendOutput.seeker,
-          encryptedMessage: sendOutput.data,
-        });
+          if (status !== SessionStatus.Active) {
+            log.warn('session not active — stopping resend', {
+              sessionStatus: sessionStatusToString(status),
+              contactId,
+            });
+            break;
+          }
 
-        try {
-          await this.messageProtocol.sendMessage({
+          // if the message has not been serialized, serialize it
+          let serializedContent = msg.serializedContent;
+          if (!serializedContent) {
+            log.info('message not serialized yet — serializing it', {
+              messageContent: msg.content,
+            });
+            const serializeResult = await this.serializeMessage(msg);
+            if (!serializeResult.success) {
+              log.error('serialization failed during resend', {
+                error: serializeResult.error,
+              });
+              break;
+            }
+            serializedContent = serializeResult.data;
+            log.info('message serialized', {
+              messageContent: msg.content,
+              serializedContent: serializedContent,
+            });
+          }
+
+          const sendOutput = session.sendMessage(peerId, serializedContent);
+          if (!sendOutput) {
+            log.error('session manager failed to send message', {
+              messageId: msg.id,
+              messageContent: msg.content,
+            });
+            break;
+          }
+
+          await db.messages.update(msg.id, {
             seeker: sendOutput.seeker,
-            ciphertext: sendOutput.data,
+            encryptedMessage: sendOutput.data,
           });
-          successfullySent.push(msg.id!);
-        } catch (error) {
-          log.error('network send failed during resend', error);
+
+          try {
+            await this.messageProtocol.sendMessage({
+              seeker: sendOutput.seeker,
+              ciphertext: sendOutput.data,
+            });
+            successfullySent.push(msg.id!);
+          } catch (error) {
+            log.error('network send failed during resend', error);
+          }
         }
       }
     }

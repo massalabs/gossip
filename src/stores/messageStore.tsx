@@ -89,7 +89,11 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
     set({ isInitializing: true });
     // Set up a single liveQuery for all messages of the owner
     const query = liveQuery(() =>
-      db.messages.where('ownerUserId').equals(ownerUserId).sortBy('id')
+      db.messages
+        .where('ownerUserId')
+        .equals(ownerUserId)
+        .and(m => m.type !== MessageType.KEEP_ALIVE)
+        .sortBy('id')
     );
 
     const subscriptionObj = query.subscribe({

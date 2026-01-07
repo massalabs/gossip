@@ -104,6 +104,7 @@ export enum DiscussionDirection {
 
 export enum MessageType {
   TEXT = 'text',
+  KEEP_ALIVE = 'keep_alive',
   IMAGE = 'image',
   FILE = 'file',
   AUDIO = 'audio',
@@ -261,6 +262,9 @@ export class GossipDatabase extends Dexie {
     ownerUserId: string,
     contactUserId: string
   ): Promise<Discussion | undefined> {
+    if (!ownerUserId || !contactUserId) {
+      return undefined;
+    }
     return await this.discussions
       .where('[ownerUserId+contactUserId]')
       .equals([ownerUserId, contactUserId])
@@ -287,6 +291,7 @@ export class GossipDatabase extends Dexie {
     await this.messages
       .where('[ownerUserId+contactUserId+status]')
       .equals([ownerUserId, contactUserId, MessageStatus.DELIVERED])
+      .and(msg => msg.direction === MessageDirection.INCOMING)
       .modify({ status: MessageStatus.READ });
 
     await this.discussions

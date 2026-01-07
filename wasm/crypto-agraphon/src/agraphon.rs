@@ -201,7 +201,7 @@ impl Agraphon {
         let scan_ids = self
             .self_msg_history
             .iter()
-            .rev()
+            .rev() // scan from most recent to oldest (from back to front)
             .map(|msg| msg.height)
             .collect::<Vec<u64>>();
         for p_self_id in scan_ids {
