@@ -23,7 +23,6 @@ export async function updateContactName(
   contactUserId: string,
   newName: string
 ): Promise<UpdateContactNameResult> {
-  // Validate parameters to prevent IDBKeyRange errors
   if (!ownerUserId || !contactUserId) {
     return {
       ok: false,
@@ -70,7 +69,6 @@ export async function deleteContact(
   contactUserId: string
 ): Promise<DeleteContactResult> {
   try {
-    // Validate parameters to prevent IDBKeyRange errors
     if (!ownerUserId || !contactUserId) {
       return {
         ok: false,

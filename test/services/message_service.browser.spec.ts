@@ -1480,6 +1480,7 @@ describe('Message Service (Browser with Real WASM)', () => {
         .equals([aliceUserId, bobUserId, MessageDirection.OUTGOING])
         .sortBy('id');
 
+      console.log('allAliceMessages:', allAliceMessages);
       expect(
         allAliceMessages.every(m => m.status === MessageStatus.DELIVERED)
       ).toBe(true);
@@ -1487,6 +1488,8 @@ describe('Message Service (Browser with Real WASM)', () => {
   });
 
   describe('session refresh function and keep alive', () => {
+    const MAX_SESSION_INACTIVITY_MILLIS = 4000;
+    const KEEP_ALIVE_INTERVAL_MILLIS = 2000;
     // Custom session config for faster testing (using factory function)
     // Create test config helper function - each session needs its own config instance
     const createTestConfig = () =>
@@ -1510,9 +1513,6 @@ describe('Message Service (Browser with Real WASM)', () => {
     let daveSk: UserSecretKeys;
     let daveUserId: string;
     let daveSession: SessionModule;
-
-    const MAX_SESSION_INACTIVITY_MILLIS = 4000;
-    const KEEP_ALIVE_INTERVAL_MILLIS = 2000;
 
     beforeEach(async () => {
       // Create custom config with shorter intervals for testing
@@ -1589,7 +1589,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       await handleSessionRefresh(aliceUserId, aliceSession, activeDiscussions);
 
       // STEP 3: Verify discussion is now BROKEN
-      aliceDiscussion = await db.discussions.get(aliceDiscussionId)!;
+      aliceDiscussion = await db.discussions.get(aliceDiscussionId);
       expect(aliceDiscussion?.status).toBe(DiscussionStatus.BROKEN);
 
       // STEP 4: Renew the discussion

@@ -132,6 +132,8 @@ export class MessageService {
           newMessagesCount += storedIds.length;
         }
 
+        console.log('acknowledgedSeekers:', acknowledgedSeekers);
+
         if (acknowledgedSeekers.size > 0) {
           await this.acknowledgeMessages(
             acknowledgedSeekers,
@@ -597,7 +599,7 @@ export class MessageService {
               ciphertext: msg.encryptedMessage,
             });
             successfullySent.push(msg.id!);
-            log.info('message has been resend successfully on the network', {
+            log.info('message has been resent successfully on the network', {
               messageContent: msg.content,
             });
           } catch (error) {

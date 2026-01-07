@@ -1,4 +1,4 @@
-/* These type declaration where initialiy in useDebugLogs.tsx file. We moved them in a specific file to avoid the lint warning:
+/* These type declarations were initially in useDebugLogs.tsx file. We moved them in a specific file to avoid the lint warning:
 "warning  Fast refresh only works when a file only exports components. Use a new file to share constants or functions between components  
 react-refresh/only-export-components"
 */
