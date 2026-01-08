@@ -5,7 +5,14 @@ import { encrypt, deriveKey } from '../crypto/encryption';
 import { isWebAuthnSupported } from '../crypto/webauthn';
 import { biometricService } from '../services/biometricService';
 import { generateMnemonic, validateMnemonic } from '../crypto/bip39';
-import { Provider, Account, PrivateKey } from '@massalabs/massa-web3';
+import {
+  Provider,
+  Account,
+  PrivateKey,
+  JsonRpcProvider,
+  PublicApiUrl,
+  NetworkName,
+} from '@massalabs/massa-web3';
 import { useAppStore } from './appStore';
 import { createSelectors } from './utils/createSelectors';
 import {
@@ -711,6 +718,37 @@ useAccountStoreBase.subscribe(async (state, prevState) => {
     );
   } catch (error) {
     console.error('Error publishing public key:', error);
+  }
+});
+
+// Subscribe to account changes to initialize provider
+useAccountStoreBase.subscribe(async (state, prevState) => {
+  // Compare account addresses to detect actual account changes
+  const currentAddress = state.account?.address?.toString();
+  const prevAddress = prevState.account?.address?.toString();
+
+  // Only proceed if account address actually changed
+  if (currentAddress === prevAddress) return;
+
+  try {
+    const networkName = useAppStore.getState().networkName;
+    const publicApiUrl =
+      networkName === NetworkName.Buildnet
+        ? PublicApiUrl.Buildnet
+        : PublicApiUrl.Mainnet;
+
+    if (state.account) {
+      const provider = await JsonRpcProvider.fromRPCUrl(
+        publicApiUrl,
+        state.account
+      );
+
+      useAccountStoreBase.setState({ provider });
+    } else {
+      useAccountStoreBase.setState({ provider: null });
+    }
+  } catch (error) {
+    console.error('Error initializing provider:', error);
   }
 });
 

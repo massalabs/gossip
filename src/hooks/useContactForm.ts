@@ -10,6 +10,7 @@ import {
 import { UserPublicKeys } from '../assets/generated/wasm/gossip_wasm';
 import { useFileShareContact } from './useFileShareContact';
 import { authService, PublicKeyResult } from '../services/auth';
+import { mnsService, isMnsDomain } from '../services/mns';
 import toast from 'react-hot-toast';
 import { ROUTES } from '../constants/routes';
 import { initializeDiscussion } from '../services/discussion';
@@ -18,6 +19,15 @@ type FieldState = {
   value: string;
   error?: string;
   loading: boolean;
+};
+
+type MnsState = {
+  /** Whether an MNS domain resolution is in progress */
+  isResolving: boolean;
+  /** The resolved gossip ID (if successful) */
+  resolvedGossipId: string | null;
+  /** The original MNS domain that was resolved */
+  resolvedDomain: string | null;
 };
 
 export function useContactForm() {
@@ -41,6 +51,12 @@ export function useContactForm() {
   });
 
   const [publicKeys, setPublicKeys] = useState<UserPublicKeys | null>(null);
+
+  const [mnsState, setMnsState] = useState<MnsState>({
+    isResolving: false,
+    resolvedGossipId: null,
+    resolvedDomain: null,
+  });
 
   const [generalError, setGeneralError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -92,11 +108,80 @@ export function useContactForm() {
   const handleUserIdChange = useCallback(
     async (value: string) => {
       const trimmed = value.trim();
+
       setPublicKeys(null);
       setUserId(prev => ({ ...prev, value: trimmed }));
+      setMnsState({
+        isResolving: false,
+        resolvedGossipId: null,
+        resolvedDomain: null,
+      });
 
       if (!trimmed) return;
+      // Check if the input looks like an MNS domain (ends with .massa)
+      if (isMnsDomain(trimmed)) {
+        setUserId(prev => ({
+          ...prev,
+          error: undefined,
+          loading: true,
+        }));
+        setMnsState(prev => ({ ...prev, isResolving: true }));
 
+        // Resolve MNS domain to gossip ID
+        const mnsResult = await mnsService.resolveToGossipId(trimmed);
+
+        if (!mnsResult.success) {
+          setUserId(_ => ({
+            value: trimmed,
+            error: mnsResult.error,
+            loading: false,
+          }));
+          setMnsState({
+            isResolving: false,
+            resolvedGossipId: null,
+            resolvedDomain: null,
+          });
+          return;
+        }
+
+        const resolvedGossipId = mnsResult.gossipId;
+
+        // Prevent adding own user ID as a contact
+        if (userProfile?.userId && resolvedGossipId === userProfile.userId) {
+          setUserId(_ => ({
+            value: trimmed,
+            error: 'You cannot add yourself as a contact',
+            loading: false,
+          }));
+          setMnsState({
+            isResolving: false,
+            resolvedGossipId: null,
+            resolvedDomain: null,
+          });
+          return;
+        }
+
+        // Store the resolved gossip ID and continue with public key fetching
+        setMnsState({
+          isResolving: false,
+          resolvedGossipId,
+          resolvedDomain: trimmed,
+        });
+
+        // Fetch public key for the resolved gossip ID
+        const { publicKey, error } = await getPublicKey(resolvedGossipId);
+
+        if (!publicKey) {
+          setUserId(prev => ({ ...prev, error, loading: false }));
+          return;
+        }
+
+        setPublicKeys(publicKey);
+        setUserId(prev => ({ ...prev, loading: false }));
+        return;
+      }
+
+      // Not an MNS domain - handle as regular gossip ID
       // Prevent adding own user ID as a contact
       if (userProfile?.userId && trimmed === userProfile.userId) {
         setUserId(_ => ({
@@ -118,7 +203,7 @@ export function useContactForm() {
       if (!result.valid) {
         setUserId(_ => ({
           value: trimmed,
-          error: result.error,
+          error: 'Invalid format — must be a valid user ID or MNS (name.massa)',
           loading: false,
         }));
         return;
@@ -186,6 +271,9 @@ export function useContactForm() {
     const trimmedName = name.value.trim();
     const trimmedUserId = userId.value.trim();
 
+    // Use resolved gossip ID if MNS resolution was successful, otherwise use the input
+    const effectiveUserId = mnsState.resolvedGossipId || trimmedUserId;
+
     // Surface missing or pending requirements as field errors when user tries to submit
     if (!trimmedName) {
       setName(prev => ({
@@ -218,7 +306,7 @@ export function useContactForm() {
     }
 
     // Prevent adding own user ID as a contact, even if previous checks passed
-    if (userProfile?.userId && trimmedUserId === userProfile.userId) {
+    if (userProfile?.userId && effectiveUserId === userProfile.userId) {
       setUserId(prev => ({
         ...prev,
         error: 'You cannot add yourself as a contact',
@@ -250,7 +338,7 @@ export function useContactForm() {
 
       const existing = await db.getContactByOwnerAndUserId(
         userProfile.userId,
-        trimmedUserId
+        effectiveUserId
       );
       if (existing) {
         setUserId(prev => ({
@@ -264,7 +352,7 @@ export function useContactForm() {
       const contact: Omit<Contact, 'id'> = {
         ownerUserId: userProfile.userId,
         name: trimmedName,
-        userId: trimmedUserId,
+        userId: effectiveUserId,
         publicKeys: publicKeys.to_bytes(),
         avatar: undefined,
         isOnline: false,
@@ -299,6 +387,7 @@ export function useContactForm() {
     userId.value,
     message.value,
     userId.loading,
+    mnsState.resolvedGossipId,
     navigate,
     session,
   ]);
@@ -307,6 +396,7 @@ export function useContactForm() {
     name,
     userId,
     message,
+    mnsState,
 
     generalError,
     isSubmitting,
