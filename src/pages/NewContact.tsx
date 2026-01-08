@@ -6,7 +6,8 @@ import { useContactForm } from '../hooks/useContactForm';
 import ErrorDisplay from '../components/account/ErrorDisplay';
 import ScanQRCode from '../components/settings/ScanQRCode';
 import { useAccountStore } from '../stores/accountStore';
-import { Info, Upload } from 'react-feather';
+import { Info, Upload, CheckCircle } from 'react-feather';
+import { formatUserId } from '../utils/userId';
 import QrCodeIcon from '../components/ui/customIcons/QrCodeIcon';
 import PageLayout from '../components/ui/PageLayout';
 import PageHeader from '../components/ui/PageHeader';
@@ -24,6 +25,7 @@ const NewContact: React.FC = () => {
     name,
     userId,
     message,
+    mnsState,
     isSubmitting,
     canSubmit,
     hasUnsavedChanges,
@@ -141,30 +143,60 @@ const NewContact: React.FC = () => {
               type="text"
               value={userId.value}
               onChange={e => handleUserIdChange(e.target.value)}
-              placeholder="Gossip address"
-              aria-label="User ID"
+              placeholder="Gossip address or name.massa"
+              aria-label="Gossip address or name.massa (MNS domain)"
               className="w-full bg-transparent text-foreground placeholder-muted-foreground focus:outline-none pr-10"
               aria-describedby={
                 userId.error
                   ? 'contact-user-id-error'
-                  : 'contact-user-id-helper'
+                  : mnsState.resolvedGossipId
+                    ? 'contact-user-id-mns-resolved'
+                    : 'contact-user-id-helper'
               }
             />
             {userId.loading && (
               <div className="absolute right-0 top-1/2 -translate-y-1/2">
                 <div
                   className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin"
-                  aria-label="Loading public key"
+                  aria-label={
+                    mnsState.isResolving
+                      ? 'Resolving MNS domain'
+                      : 'Loading public key'
+                  }
+                />
+              </div>
+            )}
+            {!userId.loading && mnsState.resolvedGossipId && !userId.error && (
+              <div className="absolute right-0 top-1/2 -translate-y-1/2">
+                <CheckCircle
+                  className="w-5 h-5 text-success"
+                  aria-label="MNS domain resolved"
                 />
               </div>
             )}
           </div>
-          {!userId.error && !userId.loading && (
+          {/* MNS Resolution Success */}
+          {!userId.error && !userId.loading && mnsState.resolvedGossipId && (
+            <div
+              id="contact-user-id-mns-resolved"
+              className="mt-1.5 text-xs text-success"
+              aria-live="polite"
+              role="status"
+            >
+              <span className="font-medium">{mnsState.resolvedDomain}</span>{' '}
+              resolved to{' '}
+              <span className="text-muted-foreground">
+                {formatUserId(mnsState.resolvedGossipId, 6, 4)}
+              </span>
+            </div>
+          )}
+          {/* Default helper text */}
+          {!userId.error && !userId.loading && !mnsState.resolvedGossipId && (
             <p
               id="contact-user-id-helper"
               className="mt-1.5 text-xs text-muted-foreground"
             >
-              User ID is a unique 32-byte identifier
+              Enter a Gossip ID or MNS domain (e.g., alice.massa)
             </p>
           )}
           {userId.error && (
