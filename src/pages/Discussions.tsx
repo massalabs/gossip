@@ -6,6 +6,7 @@ import React, {
   useMemo,
 } from 'react';
 import DiscussionListPanel from '../components/discussions/DiscussionList';
+import DiscussionFilterButtons from '../components/discussions/DiscussionFilterButtons';
 import { useAccountStore } from '../stores/accountStore';
 import { useAppStore } from '../stores/appStore';
 import { useNavigate } from 'react-router-dom';
@@ -36,6 +37,14 @@ const Discussions: React.FC = () => {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   // Force re-render when ref is set to ensure DiscussionList gets the scroll parent
   const [scrollParentReady, setScrollParentReady] = useState(false);
+
+  const {
+    query: searchQuery,
+    debouncedQuery: debouncedSearchQuery,
+    setQuery,
+  } = useSearch({
+    debounceMs: 300,
+  });
 
   // Set up scroll parent ready state
   useEffect(() => {
@@ -81,15 +90,6 @@ const Discussions: React.FC = () => {
     setPendingSharedContent(null);
     setPendingForwardMessageId(null);
   }, [setPendingSharedContent, setPendingForwardMessageId]);
-
-  // Use debounced search for filtering discussions
-  const {
-    query: searchQuery,
-    debouncedQuery: debouncedSearchQuery,
-    setQuery,
-  } = useSearch({
-    debounceMs: 300,
-  });
 
   // Calculate filter counts
   const filterCounts = useMemo(() => {
@@ -170,41 +170,11 @@ const Discussions: React.FC = () => {
       </div>
       {/* Filter buttons - only show when not searching */}
       {!searchQuery.trim() && (
-        <div className="px-2 mb-3">
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setFilter('all')}
-              className={`px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 ${
-                filter === 'all'
-                  ? 'bg-primary text-primary-foreground'
-                  : 'bg-muted text-muted-foreground hover:bg-accent hover:text-foreground'
-              }`}
-            >
-              All{filterCounts.all > 0 ? ` (${filterCounts.all})` : ''}
-            </button>
-            <button
-              onClick={() => setFilter('unread')}
-              className={`px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 ${
-                filter === 'unread'
-                  ? 'bg-primary text-primary-foreground'
-                  : 'bg-muted text-muted-foreground hover:bg-accent hover:text-foreground'
-              }`}
-            >
-              Unread{filterCounts.unread > 0 ? ` (${filterCounts.unread})` : ''}
-            </button>
-            <button
-              onClick={() => setFilter('pending')}
-              className={`px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 ${
-                filter === 'pending'
-                  ? 'bg-primary text-primary-foreground'
-                  : 'bg-muted text-muted-foreground hover:bg-accent hover:text-foreground'
-              }`}
-            >
-              Pending
-              {filterCounts.pending > 0 ? ` (${filterCounts.pending})` : ''}
-            </button>
-          </div>
-        </div>
+        <DiscussionFilterButtons
+          filter={filter}
+          onFilterChange={setFilter}
+          filterCounts={filterCounts}
+        />
       )}
       {scrollParentReady && scrollContainerRef.current && (
         <DiscussionListPanel

@@ -2,6 +2,7 @@ import React, { useState, useEffect, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import Button from './Button';
 import { useKeyDown } from '../../hooks/useKeyDown';
+import { useFixedKeyboardStyles } from '../../hooks/useKeyboardVisible';
 import { X } from 'react-feather';
 
 interface BaseModalProps {
@@ -20,6 +21,12 @@ const BaseModal: React.FC<BaseModalProps> = ({
   // Animation mount flag (animate on open)
   const [mounted, setMounted] = useState(false);
   const { onEsc } = useKeyDown({ enabled: isOpen });
+  const keyboardStyles = useFixedKeyboardStyles();
+
+  // Workaround: On iOS, when keyboard is visible, resize modal container
+  // to prevent it from being pushed off-screen due to slow keyboard resize.
+  // Note: Modal uses fixed positioning, so it needs its own height adjustment.
+  // See: https://github.com/ionic-team/capacitor-keyboard/issues/19
 
   useEffect(() => {
     onEsc(() => onClose());
@@ -39,17 +46,17 @@ const BaseModal: React.FC<BaseModalProps> = ({
   const modalContent = (
     <div
       className={`fixed inset-0 z-1000 flex flex-col items-center justify-end md:justify-center md:p-6 
-      pointer-events-non 
-      `}
+      pointer-events-non pt-safe-t border-2 border-red-500`}
+      style={keyboardStyles}
     >
       {/* Backdrop */}
       <div
-        className="absolute inset-0 bg-black/50 dark:bg-black/60 transition-opacity"
+        className="absolute inset-0 bg-black/50 dark:bg-black/60 transition-opacity border-2 border-blue-500"
         onClick={onClose}
       />
 
       <div
-        className={`relative w-full max-w-md bg-card md:rounded-2xl rounded-t-3xl shadow-2xl transform transition-all duration-300 ease-out flex flex-col h-3/4
+        className={`relative pb-safe-b w-full max-w-md bg-card md:rounded-2xl rounded-t-3xl shadow-2xl transform transition-all duration-300 ease-out flex flex-col border-2 border-green-500
         ${mounted ? 'translate-y-0 md:translate-y-0 md:opacity-100' : 'translate-y-full md:translate-y-4 md:opacity-0'}`}
       >
         <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">

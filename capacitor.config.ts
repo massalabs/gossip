@@ -15,7 +15,7 @@ const config: CapacitorConfig = {
   plugins: {
     // Keyboard plugin configuration
     Keyboard: {
-      resize: KeyboardResize.Body,
+      resize: KeyboardResize.None,
     },
     LocalNotifications: {
       smallIcon: 'ic_notification',
