@@ -5,6 +5,7 @@ import PageHeader from '../components/ui/PageHeader';
 import { useAccountStore } from '../stores/accountStore';
 import Button from '../components/ui/Button';
 import UserIdDisplay from '../components/ui/UserIdDisplay';
+import { useUserMnsDomain } from '../hooks/useUserMnsDomain';
 import { ROUTES } from '../constants/routes';
 import {
   LogOut,
@@ -53,6 +54,8 @@ const Settings = (): React.ReactElement => {
   const [isUsernameModalOpen, setIsUsernameModalOpen] = useState(false);
   const [activeView, setActiveView] = useState<SettingsView>(SettingsView.MAIN);
   const navigate = useNavigate();
+  const { mnsDomains } = useUserMnsDomain();
+  const mnsDomain = mnsDomains.length > 0 ? mnsDomains[0] : null;
 
   // Debug mode unlock: 7-tap gesture on profile image
   const [tapCount, setTapCount] = useState(0);
@@ -146,6 +149,7 @@ const Settings = (): React.ReactElement => {
         userId={userProfile!.userId}
         userName={userProfile!.username}
         publicKey={session!.ourPk}
+        mnsDomain={mnsDomain}
       />
     );
   }
@@ -187,21 +191,37 @@ const Settings = (): React.ReactElement => {
             {userProfile?.userId && (
               <div className="flex items-center gap-2 min-w-0">
                 <p className="text-xs text-muted-foreground shrink-0">
-                  User ID:
+                  {mnsDomain ? 'MNS:' : 'User ID:'}
                 </p>
                 <div className="flex-1 min-w-0">
-                  <UserIdDisplay
-                    userId={userProfile.userId}
-                    visible={showUserId}
-                    onChange={setShowUserId}
-                    textSize="sm"
-                    textClassName="text-muted-foreground"
-                    showCopy
-                    showHideToggle
-                    className="w-full"
-                    prefixChars={3}
-                    suffixChars={3}
-                  />
+                  {mnsDomain ? (
+                    <UserIdDisplay
+                      userId={mnsDomain}
+                      visible={showUserId}
+                      onChange={setShowUserId}
+                      textSize="sm"
+                      textClassName="text-muted-foreground"
+                      showCopy
+                      showHideToggle
+                      className="w-full"
+                      prefixChars={0}
+                      suffixChars={0}
+                      copyTitle="Copy MNS domain"
+                    />
+                  ) : (
+                    <UserIdDisplay
+                      userId={userProfile.userId}
+                      visible={showUserId}
+                      onChange={setShowUserId}
+                      textSize="sm"
+                      textClassName="text-muted-foreground"
+                      showCopy
+                      showHideToggle
+                      className="w-full"
+                      prefixChars={3}
+                      suffixChars={3}
+                    />
+                  )}
                 </div>
               </div>
             )}

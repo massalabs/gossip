@@ -137,6 +137,27 @@ class MnsService {
       };
     }
   }
+
+  /**
+   * Reverse resolve a gossip ID to get MNS domains pointing to it
+   *
+   * @param gossipId - The gossip user ID (e.g., "gossip1...")
+   * @returns Array of MNS domain names (without .massa suffix), or empty array if none found
+   */
+  async getDomainsFromGossipId(gossipId: string): Promise<string[]> {
+    try {
+      const mns = await this.getMnsInstance();
+      const domains = await mns.getDomainsFromTarget(gossipId);
+      // Filter out empty strings and return valid domains
+      return (domains || []).filter(
+        domain => domain && domain.trim().length > 0
+      );
+    } catch (_error) {
+      // If gossip ID has no domains, getDomainsFromTarget might throw or return empty
+      // Return empty array to indicate no domains found
+      return [];
+    }
+  }
 }
 
 // Export singleton instance
