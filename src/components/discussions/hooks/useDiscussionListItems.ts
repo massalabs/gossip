@@ -160,12 +160,14 @@ export function useVirtualItems(
 
       if (filter === 'pending') {
         // Show only pending discussions
+        // The store already sorts by activity time, so we only need to sort by direction
+        // Incoming (RECEIVED) requests should appear before outgoing (INITIATED) requests
         discussionsToShow = filteredDiscussions.filter(
           d => d.status === DiscussionStatus.PENDING
         );
 
-        // Sort pending: incoming (RECEIVED) first, then outgoing (INITIATED)
-        // Within each group, sort by updatedAt (newest first)
+        // Sort by direction: RECEIVED first, then INITIATED
+        // The store's activity time sorting is preserved within each direction group
         discussionsToShow.sort((a, b) => {
           if (
             a.direction === DiscussionDirection.RECEIVED &&
@@ -179,9 +181,8 @@ export function useVirtualItems(
           ) {
             return 1;
           }
-          const timeA = a.updatedAt?.getTime() || a.createdAt.getTime();
-          const timeB = b.updatedAt?.getTime() || b.createdAt.getTime();
-          return timeB - timeA;
+          // Same direction - preserve store's sorting order (already sorted by activity time)
+          return 0;
         });
       } else if (filter === 'unread') {
         // Show only unread active discussions
