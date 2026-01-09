@@ -1,4 +1,5 @@
 import type { CapacitorConfig } from '@capacitor/cli';
+import { KeyboardResize } from '@capacitor/keyboard';
 
 const config: CapacitorConfig = {
   appId: 'net.massa.gossip',
@@ -14,7 +15,7 @@ const config: CapacitorConfig = {
   plugins: {
     // Keyboard plugin configuration
     Keyboard: {
-      resize: 'body',
+      resize: KeyboardResize.Body,
     },
     LocalNotifications: {
       smallIcon: 'ic_notification',

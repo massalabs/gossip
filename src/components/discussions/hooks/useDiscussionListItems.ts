@@ -1,6 +1,12 @@
 import { useMemo } from 'react';
-import { Discussion, Contact, DiscussionStatus } from '../../../db';
+import {
+  Discussion,
+  Contact,
+  DiscussionStatus,
+  DiscussionDirection,
+} from '../../../db';
 import { LastMessageInfo } from '../DiscussionListItem';
+import { DiscussionFilter } from '../../../stores/discussionStore';
 
 // =============================================================================
 // Types
@@ -106,7 +112,8 @@ export function useVirtualItems(
   contactsMap: Map<string, Contact>,
   lastMessages: Map<string, LastMessageInfo>,
   activeUserId: string | undefined,
-  isSearching: boolean
+  isSearching: boolean,
+  filter: DiscussionFilter = 'all'
 ): VirtualItem[] {
   return useMemo(() => {
     const items: VirtualItem[] = [];
@@ -148,8 +155,134 @@ export function useVirtualItems(
         });
       }
     } else {
-      // Normal mode - just show discussions
-      filteredDiscussions.forEach(discussion => {
+      // Normal mode - filter discussions based on selected filter
+      let discussionsToShow: Discussion[] = [];
+
+      if (filter === 'pending') {
+        // Show only pending discussions
+        discussionsToShow = filteredDiscussions.filter(
+          d => d.status === DiscussionStatus.PENDING
+        );
+
+        // Sort pending: incoming (RECEIVED) first, then outgoing (INITIATED)
+        // Within each group, sort by updatedAt (newest first)
+        discussionsToShow.sort((a, b) => {
+          if (
+            a.direction === DiscussionDirection.RECEIVED &&
+            b.direction === DiscussionDirection.INITIATED
+          ) {
+            return -1;
+          }
+          if (
+            a.direction === DiscussionDirection.INITIATED &&
+            b.direction === DiscussionDirection.RECEIVED
+          ) {
+            return 1;
+          }
+          const timeA = a.updatedAt?.getTime() || a.createdAt.getTime();
+          const timeB = b.updatedAt?.getTime() || b.createdAt.getTime();
+          return timeB - timeA;
+        });
+      } else if (filter === 'unread') {
+        // Show only unread active discussions
+        discussionsToShow = filteredDiscussions.filter(
+          d => d.status === DiscussionStatus.ACTIVE && d.unreadCount > 0
+        );
+
+        // Sort by latest message timestamp (newest first)
+        discussionsToShow.sort((a, b) => {
+          const hasMessageA = !!a.lastMessageTimestamp;
+          const hasMessageB = !!b.lastMessageTimestamp;
+          if (hasMessageA && !hasMessageB) return -1;
+          if (!hasMessageA && hasMessageB) return 1;
+          const timeA =
+            a.lastMessageTimestamp?.getTime() ||
+            a.updatedAt?.getTime() ||
+            a.createdAt.getTime();
+          const timeB =
+            b.lastMessageTimestamp?.getTime() ||
+            b.updatedAt?.getTime() ||
+            b.createdAt.getTime();
+          return timeB - timeA;
+        });
+      } else {
+        // 'all' - show all discussions sorted by most recent update
+        // Sort by: lastMessageTimestamp (if exists) or updatedAt (for new incoming discussions)
+        const allDiscussions = [...filteredDiscussions];
+
+        // Sort all discussions by most recent update (new message or new incoming discussion)
+        allDiscussions.sort((a, b) => {
+          // Use lastMessageTimestamp if available (new message), otherwise use updatedAt (new incoming discussion)
+          const timeA =
+            a.lastMessageTimestamp?.getTime() ||
+            a.updatedAt?.getTime() ||
+            a.createdAt.getTime();
+          const timeB =
+            b.lastMessageTimestamp?.getTime() ||
+            b.updatedAt?.getTime() ||
+            b.createdAt.getTime();
+          return timeB - timeA; // Newest first
+        });
+
+        // Separate into pending and active sections, but maintain the sorted order
+        const pendingDiscussions: Discussion[] = [];
+        const activeDiscussions: Discussion[] = [];
+
+        allDiscussions.forEach(discussion => {
+          if (discussion.status === DiscussionStatus.PENDING) {
+            pendingDiscussions.push(discussion);
+          } else if (discussion.status === DiscussionStatus.ACTIVE) {
+            activeDiscussions.push(discussion);
+          }
+        });
+
+        // Add pending section if any
+        if (pendingDiscussions.length > 0) {
+          items.push({
+            type: 'header',
+            label: 'Pending',
+            key: 'header-pending',
+          });
+
+          pendingDiscussions.forEach(discussion => {
+            const contact = contactsMap.get(discussion.contactUserId);
+            if (contact) {
+              items.push({
+                type: 'discussion',
+                discussion,
+                contact,
+                lastMessage: lastMessages.get(discussion.contactUserId),
+                isSelected: discussion.contactUserId === activeUserId,
+              });
+            }
+          });
+        }
+
+        // Add active section
+        if (activeDiscussions.length > 0) {
+          items.push({
+            type: 'header',
+            label: 'Active',
+            key: 'header-active',
+          });
+
+          activeDiscussions.forEach(discussion => {
+            const contact = contactsMap.get(discussion.contactUserId);
+            if (contact) {
+              items.push({
+                type: 'discussion',
+                discussion,
+                contact,
+                lastMessage: lastMessages.get(discussion.contactUserId),
+                isSelected: discussion.contactUserId === activeUserId,
+              });
+            }
+          });
+        }
+      }
+
+      // For 'pending' and 'unread' filters, show discussions directly without headers
+      discussionsToShow.forEach(discussion => {
         const contact = contactsMap.get(discussion.contactUserId);
         if (contact) {
           items.push({
@@ -171,5 +304,6 @@ export function useVirtualItems(
     lastMessages,
     activeUserId,
     isSearching,
+    filter,
   ]);
 }

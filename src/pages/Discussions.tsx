@@ -1,4 +1,10 @@
-import React, { useCallback, useRef, useState, useEffect } from 'react';
+import React, {
+  useCallback,
+  useRef,
+  useState,
+  useEffect,
+  useMemo,
+} from 'react';
 import DiscussionListPanel from '../components/discussions/DiscussionList';
 import { useAccountStore } from '../stores/accountStore';
 import { useAppStore } from '../stores/appStore';
@@ -12,6 +18,8 @@ import PageLayout from '../components/ui/PageLayout';
 import UserProfileAvatar from '../components/avatar/UserProfileAvatar';
 import QrCodeIcon from '../components/ui/customIcons/QrCodeIcon';
 import { ROUTES } from '../constants/routes';
+import { useDiscussionStore } from '../stores/discussionStore';
+import { DiscussionStatus } from '../db';
 
 const Discussions: React.FC = () => {
   const navigate = useNavigate();
@@ -22,6 +30,9 @@ const Discussions: React.FC = () => {
   const setPendingForwardMessageId = useAppStore(
     s => s.setPendingForwardMessageId
   );
+  const discussions = useDiscussionStore(s => s.discussions);
+  const filter = useDiscussionStore(s => s.filter);
+  const setFilter = useDiscussionStore(s => s.setFilter);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   // Force re-render when ref is set to ensure DiscussionList gets the scroll parent
   const [scrollParentReady, setScrollParentReady] = useState(false);
@@ -79,6 +90,21 @@ const Discussions: React.FC = () => {
   } = useSearch({
     debounceMs: 300,
   });
+
+  // Calculate filter counts
+  const filterCounts = useMemo(() => {
+    const allCount = discussions.filter(
+      d => d.status !== DiscussionStatus.CLOSED
+    ).length;
+    const unreadCount = discussions.filter(
+      d => d.status === DiscussionStatus.ACTIVE && d.unreadCount > 0
+    ).length;
+    const pendingCount = discussions.filter(
+      d => d.status === DiscussionStatus.PENDING
+    ).length;
+
+    return { all: allCount, unread: unreadCount, pending: pendingCount };
+  }, [discussions]);
 
   if (isLoading || !session) {
     return (
@@ -142,12 +168,51 @@ const Discussions: React.FC = () => {
           aria-label="Search"
         />
       </div>
+      {/* Filter buttons - only show when not searching */}
+      {!searchQuery.trim() && (
+        <div className="px-2 mb-3">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setFilter('all')}
+              className={`px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 ${
+                filter === 'all'
+                  ? 'bg-primary text-primary-foreground'
+                  : 'bg-muted text-muted-foreground hover:bg-accent hover:text-foreground'
+              }`}
+            >
+              All{filterCounts.all > 0 ? ` (${filterCounts.all})` : ''}
+            </button>
+            <button
+              onClick={() => setFilter('unread')}
+              className={`px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 ${
+                filter === 'unread'
+                  ? 'bg-primary text-primary-foreground'
+                  : 'bg-muted text-muted-foreground hover:bg-accent hover:text-foreground'
+              }`}
+            >
+              Unread{filterCounts.unread > 0 ? ` (${filterCounts.unread})` : ''}
+            </button>
+            <button
+              onClick={() => setFilter('pending')}
+              className={`px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 ${
+                filter === 'pending'
+                  ? 'bg-primary text-primary-foreground'
+                  : 'bg-muted text-muted-foreground hover:bg-accent hover:text-foreground'
+              }`}
+            >
+              Pending
+              {filterCounts.pending > 0 ? ` (${filterCounts.pending})` : ''}
+            </button>
+          </div>
+        </div>
+      )}
       {scrollParentReady && scrollContainerRef.current && (
         <DiscussionListPanel
           onSelect={handleSelectDiscussion}
           headerVariant="link"
           searchQuery={debouncedSearchQuery}
           scrollParent={scrollContainerRef.current}
+          filter={filter}
         />
       )}
       {/* Floating button positioned above bottom nav */}
