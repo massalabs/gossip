@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Contact, db } from '../db';
 import { useAccountStore } from '../stores/accountStore';
+import { useAppStore } from '../stores/appStore';
 import {
   encodeUserId,
   validateUsernameFormat,
@@ -33,6 +34,7 @@ type MnsState = {
 export function useContactForm() {
   const navigate = useNavigate();
   const { userProfile, session } = useAccountStore();
+  const mnsEnabled = useAppStore(s => s.mnsEnabled);
   const { importFileContact, fileState } = useFileShareContact();
 
   const publicKeysCache = useRef<Map<string, UserPublicKeys>>(new Map());
@@ -119,7 +121,8 @@ export function useContactForm() {
 
       if (!trimmed) return;
       // Check if the input looks like an MNS domain (ends with .massa)
-      if (isMnsDomain(trimmed)) {
+      // Only resolve MNS domains if MNS support is enabled
+      if (mnsEnabled && isMnsDomain(trimmed)) {
         setUserId(prev => ({
           ...prev,
           error: undefined,
@@ -203,7 +206,9 @@ export function useContactForm() {
       if (!result.valid) {
         setUserId(_ => ({
           value: trimmed,
-          error: 'Invalid format — must be a valid user ID or MNS (name.massa)',
+          error: mnsEnabled
+            ? 'Invalid format — must be a valid user ID or MNS (name.massa)'
+            : 'Invalid format — must be a valid user ID',
           loading: false,
         }));
         return;
@@ -219,7 +224,7 @@ export function useContactForm() {
       setPublicKeys(publicKey);
       setUserId(prev => ({ ...prev, loading: false }));
     },
-    [getPublicKey, userProfile?.userId]
+    [getPublicKey, userProfile?.userId, mnsEnabled]
   );
 
   const handleMessageChange = useCallback((value: string) => {

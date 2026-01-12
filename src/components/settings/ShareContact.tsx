@@ -14,7 +14,7 @@ interface ShareContactProps {
   userId: string;
   userName: string;
   publicKey: UserPublicKeys;
-  mnsDomain?: string | null;
+  mnsDomains?: string[];
 }
 
 type ShareTab = 'qr' | 'files';
@@ -24,7 +24,7 @@ const ShareContact: React.FC<ShareContactProps> = ({
   userId,
   userName,
   publicKey,
-  mnsDomain,
+  mnsDomains,
 }) => {
   const [activeTab, setActiveTab] = useState<ShareTab>('qr');
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
@@ -63,7 +63,7 @@ const ShareContact: React.FC<ShareContactProps> = ({
         <ShareContactQR
           deepLinkUrl={deepLinkUrl}
           userId={userId}
-          mnsDomain={mnsDomain}
+          mnsDomains={mnsDomains}
           onQRCodeGenerated={setQrDataUrl}
         />
       </div>

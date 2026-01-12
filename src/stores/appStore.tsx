@@ -36,6 +36,9 @@ interface AppStoreState {
   // Pending forward message id (used during discussion selection)
   pendingForwardMessageId: number | null;
   setPendingForwardMessageId: (messageId: number | null) => void;
+  // MNS support enabled/disabled
+  mnsEnabled: boolean;
+  setMnsEnabled: (enabled: boolean) => void;
 }
 
 const useAppStoreBase = create<AppStoreState>()(
@@ -82,6 +85,11 @@ const useAppStoreBase = create<AppStoreState>()(
       setPendingForwardMessageId: (messageId: number | null) => {
         set({ pendingForwardMessageId: messageId });
       },
+      // MNS support (disabled by default)
+      mnsEnabled: false,
+      setMnsEnabled: (enabled: boolean) => {
+        set({ mnsEnabled: enabled });
+      },
     }),
     {
       name: STORAGE_KEYS.APP_STORE,
@@ -92,6 +100,7 @@ const useAppStoreBase = create<AppStoreState>()(
         debugButtonPosition: state.debugButtonPosition,
         isInitialized: state.isInitialized,
         networkName: state.networkName,
+        mnsEnabled: state.mnsEnabled,
       }),
     }
   )

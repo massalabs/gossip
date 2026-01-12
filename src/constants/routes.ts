@@ -77,6 +77,7 @@ export const ROUTES = {
   settingsDebug: route(`/${AppRoute.settings}/debug`),
   settingsAccountBackup: route(`/${AppRoute.settings}/account-backup`),
   settingsShareContact: route(`/${AppRoute.settings}/share-contact`),
+  settingsWeb3: route(`/${AppRoute.settings}/web3`),
 
   // Actions
   newContact: route(`/${AppRoute.newContact}`),
