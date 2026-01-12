@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useAccountStore } from '../stores/accountStore';
+import { useAppStore } from '../stores/appStore';
 import { mnsService } from '../services/mns';
 
 /**
@@ -11,6 +12,7 @@ export function useUserMnsDomain(): {
   isLoading: boolean;
 } {
   const { userProfile, provider } = useAccountStore();
+  const mnsEnabled = useAppStore(s => s.mnsEnabled);
   const [mnsDomains, setMnsDomains] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -18,7 +20,7 @@ export function useUserMnsDomain(): {
     let isMounted = true;
 
     const fetchMnsDomains = async () => {
-      if (!userProfile?.userId || !provider) {
+      if (!mnsEnabled || !userProfile?.userId || !provider) {
         setMnsDomains([]);
         setIsLoading(false);
         return;
@@ -50,7 +52,7 @@ export function useUserMnsDomain(): {
     return () => {
       isMounted = false;
     };
-  }, [userProfile?.userId, provider]);
+  }, [mnsEnabled, userProfile?.userId, provider]);
 
   return {
     mnsDomains,

@@ -8,35 +8,39 @@ import { formatUserId } from '../../utils/userId';
 interface ShareContactQRProps {
   deepLinkUrl: string;
   userId: string;
-  mnsDomain?: string | null;
+  mnsDomains?: string[];
   onQRCodeGenerated?: (qrDataUrl: string) => void;
 }
 
 const ShareContactQR: React.FC<ShareContactQRProps> = ({
   deepLinkUrl,
   userId,
-  mnsDomain,
+  mnsDomains,
   onQRCodeGenerated,
 }) => {
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
-  const [isCopiedMns, setIsCopiedMns] = useState(false);
+  const [copiedMnsDomains, setCopiedMnsDomains] = useState<Set<string>>(
+    new Set()
+  );
   const [isCopiedUserId, setIsCopiedUserId] = useState(false);
   const [containerWidth, setContainerWidth] = useState<number>(0);
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Get shortened MNS domain for display
-  const getShortenedMns = useCallback(() => {
-    if (!mnsDomain) return '';
-    if (containerWidth === 0) {
-      return mnsDomain.length > 20 ? `${mnsDomain.slice(0, 17)}...` : mnsDomain;
-    }
-    const availableTextWidth = containerWidth - 60;
-    const charsPerWidth = Math.floor(availableTextWidth / 7.5);
-    if (mnsDomain.length > charsPerWidth) {
-      return `${mnsDomain.slice(0, charsPerWidth - 3)}...`;
-    }
-    return mnsDomain;
-  }, [mnsDomain, containerWidth]);
+  const getShortenedMns = useCallback(
+    (domain: string) => {
+      if (containerWidth === 0) {
+        return domain.length > 20 ? `${domain.slice(0, 17)}...` : domain;
+      }
+      const availableTextWidth = containerWidth - 60;
+      const charsPerWidth = Math.floor(availableTextWidth / 7.5);
+      if (domain.length > charsPerWidth) {
+        return `${domain.slice(0, charsPerWidth - 3)}...`;
+      }
+      return domain;
+    },
+    [containerWidth]
+  );
 
   // Get shortened user ID for display
   const getShortenedUserId = useCallback(() => {
@@ -55,19 +59,23 @@ const ShareContactQR: React.FC<ShareContactQRProps> = ({
     return formatUserId(userId, prefixChars, suffixChars);
   }, [userId, containerWidth]);
 
-  const shortenedMns = getShortenedMns();
   const shortenedUserId = getShortenedUserId();
 
-  const handleCopyMns = useCallback(async () => {
-    if (!mnsDomain) return;
+  const handleCopyMns = useCallback(async (domain: string) => {
     try {
-      await navigator.clipboard.writeText(mnsDomain);
-      setIsCopiedMns(true);
-      setTimeout(() => setIsCopiedMns(false), 2000);
+      await navigator.clipboard.writeText(domain);
+      setCopiedMnsDomains(prev => new Set(prev).add(domain));
+      setTimeout(() => {
+        setCopiedMnsDomains(prev => {
+          const next = new Set(prev);
+          next.delete(domain);
+          return next;
+        });
+      }, 2000);
     } catch (err) {
       console.error('Failed to copy MNS domain:', err);
     }
-  }, [mnsDomain]);
+  }, []);
 
   const handleCopyUserId = useCallback(async () => {
     try {
@@ -164,29 +172,35 @@ const ShareContactQR: React.FC<ShareContactQRProps> = ({
     <div className="my-4 flex flex-col items-center gap-3">
       {/* Always use a white background for the QR code container to ensure high contrast and reliable scanning, regardless of theme */}
 
-      {/* MNS Domain and User ID with copy functionality */}
+      {/* MNS Domains and User ID with copy functionality */}
       <div className="flex flex-col gap-2 w-full max-w-xs" ref={containerRef}>
-        {mnsDomain && (
+        {mnsDomains && mnsDomains.length > 0 && (
           <div className="flex flex-col gap-1.5">
             <p className="text-[10px] font-medium text-muted-foreground text-left tracking-wider">
               MNS:
             </p>
-            <button
-              onClick={handleCopyMns}
-              className="group relative flex items-center justify-between gap-2 px-3 py-2 bg-card rounded-xl border border-border hover:border-accent hover:bg-accent/5 active:scale-[0.98] transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background w-full"
-              title="Click to copy MNS domain"
-            >
-              <span className="text-xs font-semibold text-foreground font-mono tracking-tight flex-1 text-left min-w-0 truncate">
-                {shortenedMns}
-              </span>
-              <div className="shrink-0 flex items-center justify-center w-6 h-6">
-                {isCopiedMns ? (
-                  <Check className="w-4 h-4 text-success transition-all" />
-                ) : (
-                  <Copy className="w-4 h-4 text-muted-foreground group-hover:text-accent transition-colors" />
-                )}
-              </div>
-            </button>
+            {mnsDomains.map(domain => {
+              const isCopied = copiedMnsDomains.has(domain);
+              return (
+                <button
+                  key={domain}
+                  onClick={() => handleCopyMns(domain)}
+                  className="group relative flex items-center justify-between gap-2 px-3 py-2 bg-card rounded-xl border border-border hover:border-accent hover:bg-accent/5 active:scale-[0.98] transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background w-full"
+                  title="Click to copy MNS domain"
+                >
+                  <span className="text-xs font-semibold text-foreground font-mono tracking-tight flex-1 text-left min-w-0 truncate">
+                    {getShortenedMns(domain)}
+                  </span>
+                  <div className="shrink-0 flex items-center justify-center w-6 h-6">
+                    {isCopied ? (
+                      <Check className="w-4 h-4 text-success transition-all" />
+                    ) : (
+                      <Copy className="w-4 h-4 text-muted-foreground group-hover:text-accent transition-colors" />
+                    )}
+                  </div>
+                </button>
+              );
+            })}
           </div>
         )}
         <div className="flex flex-col gap-1.5">

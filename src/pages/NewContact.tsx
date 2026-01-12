@@ -6,6 +6,7 @@ import { useContactForm } from '../hooks/useContactForm';
 import ErrorDisplay from '../components/account/ErrorDisplay';
 import ScanQRCode from '../components/settings/ScanQRCode';
 import { useAccountStore } from '../stores/accountStore';
+import { useAppStore } from '../stores/appStore';
 import { Info, Upload, CheckCircle } from 'react-feather';
 import { formatUserId } from '../utils/userId';
 import QrCodeIcon from '../components/ui/customIcons/QrCodeIcon';
@@ -19,6 +20,7 @@ const NewContact: React.FC = () => {
   const [isDiscardModalOpen, setIsDiscardModalOpen] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
   const { userProfile } = useAccountStore();
+  const mnsEnabled = useAppStore(s => s.mnsEnabled);
 
   const {
     generalError,
@@ -143,8 +145,14 @@ const NewContact: React.FC = () => {
               type="text"
               value={userId.value}
               onChange={e => handleUserIdChange(e.target.value)}
-              placeholder="Gossip address or name.massa"
-              aria-label="Gossip address or name.massa (MNS domain)"
+              placeholder={
+                mnsEnabled ? 'Gossip address or name.massa' : 'Gossip address'
+              }
+              aria-label={
+                mnsEnabled
+                  ? 'Gossip address or name.massa (MNS domain)'
+                  : 'Gossip address'
+              }
               className="w-full bg-transparent text-foreground placeholder-muted-foreground focus:outline-none pr-10"
               aria-describedby={
                 userId.error
@@ -196,7 +204,9 @@ const NewContact: React.FC = () => {
               id="contact-user-id-helper"
               className="mt-1.5 text-xs text-muted-foreground"
             >
-              Enter a Gossip ID or MNS domain (e.g., alice.massa)
+              {mnsEnabled
+                ? 'Enter a Gossip ID or MNS domain (e.g., alice.massa)'
+                : 'Enter a Gossip ID'}
             </p>
           )}
           {userId.error && (

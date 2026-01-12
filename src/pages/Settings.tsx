@@ -5,6 +5,7 @@ import PageHeader from '../components/ui/PageHeader';
 import { useAccountStore } from '../stores/accountStore';
 import Button from '../components/ui/Button';
 import UserIdDisplay from '../components/ui/UserIdDisplay';
+import CopyClipboard from '../components/ui/CopyClipboard';
 import { useUserMnsDomain } from '../hooks/useUserMnsDomain';
 import { ROUTES } from '../constants/routes';
 import {
@@ -18,6 +19,7 @@ import {
   Share2,
   User,
   Edit2,
+  Globe,
 } from 'react-feather';
 import { useNavigate } from 'react-router-dom';
 
@@ -49,13 +51,13 @@ const Settings = (): React.ReactElement => {
 
   const showDebugOption = useAppStore(s => s.showDebugOption);
   const setShowDebugOption = useAppStore(s => s.setShowDebugOption);
+  const mnsEnabled = useAppStore(s => s.mnsEnabled);
   const [showUserId, setShowUserId] = useState(false);
   const [isResetModalOpen, setIsResetModalOpen] = useState(false);
   const [isUsernameModalOpen, setIsUsernameModalOpen] = useState(false);
   const [activeView, setActiveView] = useState<SettingsView>(SettingsView.MAIN);
   const navigate = useNavigate();
   const { mnsDomains } = useUserMnsDomain();
-  const mnsDomain = mnsDomains.length > 0 ? mnsDomains[0] : null;
 
   // Debug mode unlock: 7-tap gesture on profile image
   const [tapCount, setTapCount] = useState(0);
@@ -149,7 +151,9 @@ const Settings = (): React.ReactElement => {
         userId={userProfile!.userId}
         userName={userProfile!.username}
         publicKey={session!.ourPk}
-        mnsDomain={mnsDomain}
+        mnsDomains={
+          mnsEnabled && mnsDomains.length > 0 ? mnsDomains : undefined
+        }
       />
     );
   }
@@ -189,26 +193,31 @@ const Settings = (): React.ReactElement => {
               </button>
             </div>
             {userProfile?.userId && (
-              <div className="flex items-center gap-2 min-w-0">
-                <p className="text-xs text-muted-foreground shrink-0">
-                  {mnsDomain ? 'MNS:' : 'User ID:'}
-                </p>
-                <div className="flex-1 min-w-0">
-                  {mnsDomain ? (
-                    <UserIdDisplay
-                      userId={mnsDomain}
-                      visible={showUserId}
-                      onChange={setShowUserId}
-                      textSize="sm"
-                      textClassName="text-muted-foreground"
-                      showCopy
-                      showHideToggle
-                      className="w-full"
-                      prefixChars={0}
-                      suffixChars={0}
-                      copyTitle="Copy MNS domain"
-                    />
-                  ) : (
+              <div className="space-y-2">
+                {mnsEnabled && mnsDomains.length > 0 ? (
+                  <div className="space-y-1.5">
+                    <p className="text-xs text-muted-foreground">MNS:</p>
+                    {mnsDomains.map(domain => (
+                      <div
+                        key={domain}
+                        className="flex items-center gap-2 min-w-0"
+                      >
+                        <p className="text-sm font-medium text-muted-foreground font-mono truncate flex-1 min-w-0">
+                          {domain}
+                        </p>
+                        <CopyClipboard
+                          text={domain}
+                          title="Copy MNS domain"
+                          iconSize="w-3.5 h-3.5"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 min-w-0">
+                    <p className="text-xs text-muted-foreground shrink-0">
+                      User ID:
+                    </p>
                     <UserIdDisplay
                       userId={userProfile.userId}
                       visible={showUserId}
@@ -221,8 +230,8 @@ const Settings = (): React.ReactElement => {
                       prefixChars={3}
                       suffixChars={3}
                     />
-                  )}
-                </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -282,6 +291,21 @@ const Settings = (): React.ReactElement => {
             <Moon className="mr-4" />
             <span className="text-base font-semibold flex-1 text-left">
               Appearance
+            </span>
+          </Button>
+        </div>
+
+        {/* Web 3 Group */}
+        <div className="bg-card rounded-xl border border-border overflow-hidden">
+          <Button
+            variant="outline"
+            size="custom"
+            className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0"
+            onClick={() => navigate(ROUTES.settingsWeb3())}
+          >
+            <Globe className="mr-4" />
+            <span className="text-base font-semibold flex-1 text-left">
+              Web3
             </span>
           </Button>
         </div>
