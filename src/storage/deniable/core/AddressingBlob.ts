@@ -10,6 +10,8 @@
  * @module core/AddressingBlob
  */
 
+import type { SessionAddress } from '../types';
+
 /**
  * Constants for addressing blob structure
  */
@@ -41,11 +43,11 @@ export function createAddressingBlob(): Uint8Array {
 /**
  * Derives 46 unique slot indices from a password
  *
- * Uses HKDF-SHA256 to derive pseudo-random bytes from the password,
+ * Uses Argon2id (via WASM EncryptionKey.from_seed) to derive pseudo-random bytes,
  * then maps them to slot indices in [0..65535]. This ensures:
  * - Deterministic: same password always gives same indices
  * - Uniform distribution across all slots
- * - Cryptographically secure derivation
+ * - Cryptographically secure derivation (Argon2id KDF)
  *
  * @param password - The password to derive indices from
  * @returns Array of 46 unique slot indices
@@ -60,27 +62,29 @@ export function createAddressingBlob(): Uint8Array {
 export async function deriveSlotIndices(
   password: string,
 ): Promise<number[]> {
-  // Import hkdf from @noble/hashes
-  const { hkdf } = await import('@noble/hashes/hkdf');
-  const { sha256 } = await import('@noble/hashes/sha256');
+  // Use WASM EncryptionKey.from_seed for Argon2id-based derivation
+  const { generateEncryptionKeyFromSeed } = await import(
+    '../../../wasm/encryption'
+  );
 
-  // Convert password to bytes
-  const passwordBytes = new TextEncoder().encode(password);
+  // Fixed salt for slot derivation (deterministic per password)
+  const salt = new TextEncoder().encode('deniable-storage-slot-v1');
 
-  // Use HKDF to derive enough bytes for 46 indices
-  // Each index needs 2 bytes (uint16 for 0-65535 range)
-  // We derive extra to handle potential collisions
-  const bytesNeeded = SLOTS_PER_SESSION * 2 * 2; // 184 bytes (extra for uniqueness)
-  const info = new TextEncoder().encode('deniable-storage-slot-derivation-v1');
-  const salt = new Uint8Array(32); // Zero salt for simplicity
-
-  const derivedBytes = hkdf(sha256, passwordBytes, salt, info, bytesNeeded);
+  // Derive 64 bytes using Argon2id
+  const key = await generateEncryptionKeyFromSeed(password, salt);
+  const derivedBytes = key.to_bytes();
 
   // Convert bytes to slot indices
+  // We need 46 unique indices in range [0..65535]
   const indices: number[] = [];
   const seenIndices = new Set<number>();
 
-  for (let i = 0; i < derivedBytes.length - 1 && indices.length < SLOTS_PER_SESSION; i += 2) {
+  // Use all 64 bytes (32 potential indices)
+  for (
+    let i = 0;
+    i < derivedBytes.length - 1 && indices.length < SLOTS_PER_SESSION;
+    i += 2
+  ) {
     // Read 2 bytes as uint16 (big-endian)
     const index = (derivedBytes[i] << 8) | derivedBytes[i + 1];
 
@@ -91,16 +95,170 @@ export async function deriveSlotIndices(
     }
   }
 
-  // Ensure we have exactly 46 indices
-  if (indices.length < SLOTS_PER_SESSION) {
-    throw new Error(
-      `Failed to derive enough unique slot indices (got ${indices.length}, need ${SLOTS_PER_SESSION})`,
-    );
+  // If we don't have enough unique indices from first 64 bytes,
+  // derive more by appending a counter to the password
+  let counter = 1;
+  while (indices.length < SLOTS_PER_SESSION) {
+    const extendedPassword = `${password}:${counter}`;
+    const extraKey = await generateEncryptionKeyFromSeed(extendedPassword, salt);
+    const extraBytes = extraKey.to_bytes();
+
+    for (let i = 0; i < extraBytes.length - 1 && indices.length < SLOTS_PER_SESSION; i += 2) {
+      const index = (extraBytes[i] << 8) | extraBytes[i + 1];
+      if (!seenIndices.has(index)) {
+        indices.push(index);
+        seenIndices.add(index);
+      }
+    }
+
+    counter++;
+
+    // Safety check to avoid infinite loop
+    if (counter > 10) {
+      throw new Error(
+        `Failed to derive enough unique slot indices (got ${indices.length}, need ${SLOTS_PER_SESSION})`,
+      );
+    }
   }
 
   return indices.slice(0, SLOTS_PER_SESSION);
 }
 
-// TODO: Sprint 1.3 - Implement writeSlot()
-// TODO: Sprint 1.4 - Implement readSlots()
-// TODO: Sprint 1.5 - Implement writeSessionAddress()
+/**
+ * Writes a session address to a specific slot using AEAD encryption
+ *
+ * The slot is encrypted with AES-256-SIV using a key derived from the password.
+ * Format: [nonce(16 bytes)][ciphertext(variable)]
+ *
+ * @param blob - The addressing blob to write to
+ * @param slotIndex - The slot index [0..65535]
+ * @param address - The session address to write
+ * @param password - Password to derive encryption key
+ *
+ * @example
+ * ```typescript
+ * const blob = createAddressingBlob();
+ * const address = { offset: 1024, blockSize: 35000000, ... };
+ * await writeSlot(blob, 42391, address, 'my-password');
+ * ```
+ */
+export async function writeSlot(
+  blob: Uint8Array,
+  slotIndex: number,
+  address: SessionAddress,
+  password: string,
+): Promise<void> {
+  const {
+    generateEncryptionKeyFromSeed,
+    generateNonce,
+    encryptAead,
+  } = await import('../../../wasm/encryption');
+
+  // Validate slot index
+  if (slotIndex < 0 || slotIndex >= SLOT_COUNT) {
+    throw new Error(`Invalid slot index: ${slotIndex}`);
+  }
+
+  // Derive encryption key from password
+  const salt = new TextEncoder().encode('deniable-storage-slot-key-v1');
+  const key = await generateEncryptionKeyFromSeed(password, salt);
+
+  // Serialize address to JSON then bytes
+  const addressJson = JSON.stringify(address);
+  const plaintext = new TextEncoder().encode(addressJson);
+
+  // Generate unique nonce
+  const nonce = await generateNonce();
+
+  // Encrypt with AEAD (no additional authenticated data)
+  const ciphertext = await encryptAead(key, nonce, plaintext, new Uint8Array());
+
+  // Pack into slot: [nonce(16 bytes)][ciphertext]
+  const slotData = new Uint8Array(SLOT_SIZE);
+  const nonceBytes = nonce.to_bytes();
+
+  // Write nonce (16 bytes)
+  slotData.set(nonceBytes, 0);
+
+  // Write ciphertext (up to 16 bytes remaining)
+  const maxCiphertextSize = SLOT_SIZE - 16;
+  if (ciphertext.length > maxCiphertextSize) {
+    throw new Error(
+      `Ciphertext too large for slot: ${ciphertext.length} > ${maxCiphertextSize}`,
+    );
+  }
+  slotData.set(ciphertext.slice(0, maxCiphertextSize), 16);
+
+  // Write to blob at slot offset
+  const slotOffset = slotIndex * SLOT_SIZE;
+  blob.set(slotData, slotOffset);
+}
+
+/**
+ * Reads a session address from a specific slot using AEAD decryption
+ *
+ * @param blob - The addressing blob to read from
+ * @param slotIndex - The slot index [0..65535]
+ * @param password - Password to derive decryption key
+ * @returns The decrypted session address, or null if decryption fails
+ *
+ * @example
+ * ```typescript
+ * const address = await readSlot(blob, 42391, 'my-password');
+ * if (address) {
+ *   console.log('Found session at offset:', address.offset);
+ * }
+ * ```
+ */
+export async function readSlot(
+  blob: Uint8Array,
+  slotIndex: number,
+  password: string,
+): Promise<SessionAddress | null> {
+  const {
+    generateEncryptionKeyFromSeed,
+    decryptAead,
+  } = await import('../../../wasm/encryption');
+  const { Nonce } = await import('../../../wasm/encryption');
+
+  // Validate slot index
+  if (slotIndex < 0 || slotIndex >= SLOT_COUNT) {
+    return null;
+  }
+
+  // Read slot data
+  const slotOffset = slotIndex * SLOT_SIZE;
+  const slotData = blob.slice(slotOffset, slotOffset + SLOT_SIZE);
+
+  // Extract nonce (first 16 bytes)
+  const nonceBytes = slotData.slice(0, 16);
+  const nonce = Nonce.from_bytes(nonceBytes);
+
+  // Extract ciphertext (remaining bytes)
+  const ciphertext = slotData.slice(16);
+
+  // Derive decryption key from password
+  const salt = new TextEncoder().encode('deniable-storage-slot-key-v1');
+  const key = await generateEncryptionKeyFromSeed(password, salt);
+
+  // Decrypt with AEAD
+  const plaintext = await decryptAead(key, nonce, ciphertext, new Uint8Array());
+
+  if (!plaintext) {
+    // Decryption failed (wrong password or corrupted data)
+    return null;
+  }
+
+  // Deserialize address from JSON
+  try {
+    const addressJson = new TextDecoder().decode(plaintext);
+    const address = JSON.parse(addressJson) as SessionAddress;
+    return address;
+  } catch {
+    // Invalid JSON
+    return null;
+  }
+}
+
+// TODO: Sprint 1.4 - Implement readSlots() (scan all 46 slots)
+// TODO: Sprint 1.5 - Implement writeSessionAddress() (write to all 46 slots)
