@@ -7,6 +7,7 @@ import { page } from 'vitest/browser';
 import IOSKeyboardWrapper from '../../../src/components/ui/IOSKeyboardWrapper';
 import * as CapacitorCore from '@capacitor/core';
 import * as CapacitorKeyboard from '@capacitor/keyboard';
+import { wait } from '../../helpers/utils';
 
 // Mock Capacitor modules
 vi.mock('@capacitor/core', () => ({
@@ -79,7 +80,7 @@ describe('IOSKeyboardWrapper', () => {
     let showCallback: ((info: { keyboardHeight: number }) => void) | null =
       null;
     vi.mocked(CapacitorKeyboard.Keyboard.addListener).mockImplementation(
-      (event, callback) => {
+      (event: string, callback: unknown) => {
         if (event === 'keyboardWillShow') {
           showCallback = callback as (info: { keyboardHeight: number }) => void;
         }
@@ -97,13 +98,19 @@ describe('IOSKeyboardWrapper', () => {
       </IOSKeyboardWrapper>
     );
 
+    // Wait for mock to be called and callback to be set
+    await wait(10);
+
     // Simulate keyboard showing with 300px height
-    if (showCallback) {
-      showCallback({ keyboardHeight: 300 });
+    const callback = showCallback;
+    if (callback) {
+      (callback as (info: { keyboardHeight: number }) => void)({
+        keyboardHeight: 300,
+      });
     }
 
     // Wait for state update
-    await new Promise(resolve => setTimeout(resolve, 100));
+    await wait(100);
 
     const content = page.getByTestId('content');
     const wrapper = await content.element().parentElement;
