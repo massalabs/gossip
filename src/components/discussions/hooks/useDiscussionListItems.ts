@@ -160,29 +160,32 @@ export function useVirtualItems(
 
       if (filter === 'pending') {
         // Show only pending discussions
-        // The store already sorts by activity time, so we only need to sort by direction
-        // Incoming (RECEIVED) requests should appear before outgoing (INITIATED) requests
+        // Sort by direction: RECEIVED first, then INITIATED.
+        // Within each direction group, sort by latest activity time (newest first)
+        // to maintain the intended ordering from the store.
         discussionsToShow = filteredDiscussions.filter(
           d => d.status === DiscussionStatus.PENDING
         );
 
-        // Sort by direction: RECEIVED first, then INITIATED
-        // The store's activity time sorting is preserved within each direction group
         discussionsToShow.sort((a, b) => {
-          if (
-            a.direction === DiscussionDirection.RECEIVED &&
-            b.direction === DiscussionDirection.INITIATED
-          ) {
-            return -1;
+          const dirRank = (d: Discussion) =>
+            d.direction === DiscussionDirection.RECEIVED ? 0 : 1;
+          const dirA = dirRank(a);
+          const dirB = dirRank(b);
+          if (dirA !== dirB) {
+            return dirA - dirB;
           }
-          if (
-            a.direction === DiscussionDirection.INITIATED &&
-            b.direction === DiscussionDirection.RECEIVED
-          ) {
-            return 1;
-          }
-          // Same direction - preserve store's sorting order (already sorted by activity time)
-          return 0;
+          // Same direction - sort by activity time (newest first)
+          const timeA =
+            a.lastMessageTimestamp?.getTime() ||
+            a.updatedAt?.getTime() ||
+            a.createdAt.getTime();
+          const timeB =
+            b.lastMessageTimestamp?.getTime() ||
+            b.updatedAt?.getTime() ||
+            b.createdAt.getTime();
+          // Newer (larger) timestamps should come first
+          return timeB - timeA;
         });
       } else if (filter === 'unread') {
         // Show only unread active discussions
@@ -207,29 +210,14 @@ export function useVirtualItems(
           return timeB - timeA;
         });
       } else {
-        // 'all' - show all discussions sorted by most recent update
-        // Sort by: lastMessageTimestamp (if exists) or updatedAt (for new incoming discussions)
-        const allDiscussions = [...filteredDiscussions];
-
-        // Sort all discussions by most recent update (new message or new incoming discussion)
-        allDiscussions.sort((a, b) => {
-          // Use lastMessageTimestamp if available (new message), otherwise use updatedAt (new incoming discussion)
-          const timeA =
-            a.lastMessageTimestamp?.getTime() ||
-            a.updatedAt?.getTime() ||
-            a.createdAt.getTime();
-          const timeB =
-            b.lastMessageTimestamp?.getTime() ||
-            b.updatedAt?.getTime() ||
-            b.createdAt.getTime();
-          return timeB - timeA; // Newest first
-        });
-
-        // Separate into pending and active sections, but maintain the sorted order
+        // 'all' - show all discussions respecting the store's sorting order
+        // The store already sorts by status priority (PENDING first) and activity time
+        // We just need to separate into sections while preserving that order
         const pendingDiscussions: Discussion[] = [];
         const activeDiscussions: Discussion[] = [];
 
-        allDiscussions.forEach(discussion => {
+        // filteredDiscussions is already sorted by the store (status priority + activity time)
+        filteredDiscussions.forEach(discussion => {
           if (discussion.status === DiscussionStatus.PENDING) {
             pendingDiscussions.push(discussion);
           } else if (discussion.status === DiscussionStatus.ACTIVE) {
