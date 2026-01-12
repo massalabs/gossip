@@ -26,7 +26,6 @@ export function useKeyboardVisible(): {
         'keyboardWillShow',
         async (info: KeyboardInfo) => {
           setIsKeyboardVisible(true);
-          console.log('keyboardWillShow', info.keyboardHeight);
           setKeyboardHeight(info.keyboardHeight);
         }
       );
