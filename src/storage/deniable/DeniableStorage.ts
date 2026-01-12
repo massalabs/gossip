@@ -251,6 +251,8 @@ export class DeniableStorage {
   /**
    * Update an existing session
    *
+   * Uses multi-block architecture: appends new data as a new block and updates the allocation table.
+   *
    * @param password - Password of the session to update
    * @param newData - New data to store
    * @throws {DeniableStorageException} If session not found or storage error
@@ -267,7 +269,7 @@ export class DeniableStorage {
       throw new Error(`Invalid password: ${passwordValidation.error}`);
     }
 
-    const dataValidation = validateDataSize(newData, 100 * 1024 * 1024);
+    const dataValidation = validateDataSize(newData, 1024 * 1024 * 1024);
     if (!dataValidation.valid) {
       throw new Error(`Invalid data: ${dataValidation.error}`);
     }
@@ -275,7 +277,12 @@ export class DeniableStorage {
     // Import required functions
     const { readSlots, writeSessionAddress } =
       await import('./core/AddressingBlob');
-    const { createDataBlock, appendBlock } = await import('./core/DataBlob');
+    const { generateEncryptionKeyFromSeed } =
+      await import('../../wasm/encryption');
+    const { decryptRootBlock, encryptRootBlock } =
+      await import('./core/AllocationTable');
+    const { deriveBlockKey, createDataBlockWithKey, appendBlock } =
+      await import('./core/DataBlob');
 
     // 1. Find current session address
     const addressingBlob = await this.config.adapter.readAddressingBlob();
@@ -285,38 +292,77 @@ export class DeniableStorage {
       throw new Error('Session not found');
     }
 
-    // 2. Create new encrypted block
-    const newBlock = await createDataBlock(newData, password);
+    // 2. Derive session key
+    const sessionSalt = new TextEncoder().encode('deniable-storage-session-v1');
+    const sessionKey = await generateEncryptionKeyFromSeed(
+      password,
+      sessionSalt
+    );
 
-    // 3. Strategy: Always append as new block (simpler, preserves deniability)
-    // Could optimize to reuse space if new size <= old size, but appending is safer
-    const currentDataBlob = await this.config.adapter.readDataBlob();
-    const newDataBlob = appendBlock(currentDataBlob, newBlock);
+    // 3. Read and decrypt current root block
+    let currentDataBlob = await this.config.adapter.readDataBlob();
+    const rootBlock = await decryptRootBlock(
+      currentDataBlob,
+      currentAddress.rootBlockOffset,
+      sessionKey
+    );
 
-    // 4. Calculate new block offset
-    const newBlockOffset = currentDataBlob.length;
+    if (!rootBlock) {
+      throw new Error('Failed to decrypt root block');
+    }
 
-    // 5. Update session address with new offset and metadata
+    // 4. Create new data block with unique block ID
+    const blockId = crypto.getRandomValues(new Uint8Array(32));
+    const blockKey = await deriveBlockKey(sessionKey, blockId);
+    const newDataBlock = await createDataBlockWithKey(newData, blockKey);
+
+    // 5. Append new data block to data blob
+    const newDataBlockOffset = currentDataBlob.length;
+    currentDataBlob = appendBlock(currentDataBlob, newDataBlock);
+
+    // 6. Strategy: Replace entire session data (simple approach)
+    // Clear old allocation table and add single new entry
+    rootBlock.entries = [
+      {
+        offset: newDataBlockOffset,
+        length: newData.length,
+        logicalAddress: 0,
+        blockSize: newDataBlock.size,
+        blockId: blockId,
+      },
+    ];
+    rootBlock.entryCount = 1;
+    rootBlock.totalDataSize = newData.length;
+
+    // 7. Encrypt and append new root block
+    const encryptedRootBlock = await encryptRootBlock(rootBlock, sessionKey);
+    const newRootBlockOffset = currentDataBlob.length;
+    currentDataBlob = appendBlock(currentDataBlob, encryptedRootBlock);
+
+    // 8. Update session address with new root block location
     const updatedAddress = {
-      offset: newBlockOffset,
-      blockSize: newBlock.size,
+      rootBlockOffset: newRootBlockOffset,
+      rootBlockSize: encryptedRootBlock.size,
+      sessionKeyDerivationSalt: currentAddress.sessionKeyDerivationSalt,
       createdAt: currentAddress.createdAt,
       updatedAt: Date.now(),
-      salt: currentAddress.salt,
     };
 
-    // 6. Write updated address to addressing blob (overwrites 46 slots)
+    // 9. Write updated address to addressing blob (overwrites 46 slots)
     await writeSessionAddress(addressingBlob, password, updatedAddress);
 
-    // 7. Persist both blobs
+    // 10. Persist both blobs
     await this.config.adapter.writeAddressingBlob(addressingBlob);
-    await this.config.adapter.writeDataBlob(newDataBlob);
+    await this.config.adapter.writeDataBlob(currentDataBlob);
 
-    // Note: Old block remains in data blob as "padding" for plausible deniability
+    // Note: Old blocks remain in data blob as "padding" for plausible deniability
   }
 
   /**
    * Delete a session (secure wipe)
+   *
+   * Uses multi-block architecture: wipes all data blocks referenced in allocation table,
+   * then wipes the root block, then overwrites all 46 addressing slots.
    *
    * @param password - Password of the session to delete
    * @throws {DeniableStorageException} If session not found
@@ -334,6 +380,9 @@ export class DeniableStorage {
     // Import required functions
     const { readSlots, deriveSlotIndices, SLOT_SIZE } =
       await import('./core/AddressingBlob');
+    const { generateEncryptionKeyFromSeed } =
+      await import('../../wasm/encryption');
+    const { decryptRootBlock } = await import('./core/AllocationTable');
 
     // 1. Find session to verify it exists
     const addressingBlob = await this.config.adapter.readAddressingBlob();
@@ -343,8 +392,51 @@ export class DeniableStorage {
       throw new Error('Session not found');
     }
 
-    // 2. Overwrite all 46 addressing slots with random data
-    // This makes the session unrecoverable
+    // 2. Derive session key to decrypt root block
+    const sessionSalt = new TextEncoder().encode('deniable-storage-session-v1');
+    const sessionKey = await generateEncryptionKeyFromSeed(
+      password,
+      sessionSalt
+    );
+
+    // 3. Read and decrypt root block to get allocation table
+    const dataBlob = await this.config.adapter.readDataBlob();
+    const rootBlock = await decryptRootBlock(
+      dataBlob,
+      sessionAddress.rootBlockOffset,
+      sessionKey
+    );
+
+    if (!rootBlock) {
+      throw new Error('Failed to decrypt root block for deletion');
+    }
+
+    // 4. Securely wipe all data blocks referenced in allocation table
+    for (const entry of rootBlock.entries) {
+      // Overwrite the entire data block with random data
+      if (
+        entry.offset >= 0 &&
+        entry.offset + entry.blockSize <= dataBlob.length
+      ) {
+        const randomBlock = new Uint8Array(entry.blockSize);
+        crypto.getRandomValues(randomBlock);
+        dataBlob.set(randomBlock, entry.offset);
+      }
+    }
+
+    // 5. Securely wipe the root block
+    if (
+      sessionAddress.rootBlockOffset >= 0 &&
+      sessionAddress.rootBlockOffset + sessionAddress.rootBlockSize <=
+        dataBlob.length
+    ) {
+      const randomRootBlock = new Uint8Array(sessionAddress.rootBlockSize);
+      crypto.getRandomValues(randomRootBlock);
+      dataBlob.set(randomRootBlock, sessionAddress.rootBlockOffset);
+    }
+
+    // 6. Overwrite all 46 addressing slots with random data
+    // This makes the session completely unrecoverable
     const slotIndices = await deriveSlotIndices(password);
 
     for (const slotIndex of slotIndices) {
@@ -354,39 +446,7 @@ export class DeniableStorage {
       addressingBlob.set(randomData, slotOffset);
     }
 
-    // 3. Overwrite the data block with random data
-    const dataBlob = await this.config.adapter.readDataBlob();
-
-    // Find the actual block start (same logic as unlockSession)
-    let blockStart = -1;
-    const searchStart = sessionAddress.offset;
-    const searchEnd = Math.min(
-      searchStart + 600 * 1024 * 1024,
-      dataBlob.length
-    );
-
-    for (let i = searchStart; i < searchEnd - 4; i++) {
-      const view = new DataView(dataBlob.buffer, i, 4);
-      const size = view.getUint32(0, false);
-
-      if (
-        size === sessionAddress.blockSize &&
-        size > 20 &&
-        size < 256 * 1024 * 1024
-      ) {
-        blockStart = i;
-        break;
-      }
-    }
-
-    if (blockStart !== -1) {
-      // Overwrite the entire block with random data
-      const randomBlock = new Uint8Array(sessionAddress.blockSize);
-      crypto.getRandomValues(randomBlock);
-      dataBlob.set(randomBlock, blockStart);
-    }
-
-    // 4. Persist updated blobs
+    // 7. Persist updated blobs
     await this.config.adapter.writeAddressingBlob(addressingBlob);
     await this.config.adapter.writeDataBlob(dataBlob);
 
