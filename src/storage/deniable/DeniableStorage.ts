@@ -240,7 +240,13 @@ export class DeniableStorage {
       sessionData.set(dataToWrite, entry.logicalAddress);
     }
 
-    // 5. Return unlocked session
+    // 5. Self-healing: Re-write all 46 slots with fresh nonces
+    // This recovers from any slot corruption and provides forward security
+    const { writeSessionAddress } = await import('./core/AddressingBlob');
+    await writeSessionAddress(addressingBlob, password, sessionAddress);
+    await this.config.adapter.writeAddressingBlob(addressingBlob);
+
+    // 6. Return unlocked session
     return {
       data: sessionData,
       createdAt: sessionAddress.createdAt,
