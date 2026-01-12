@@ -2,6 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>net.massa.gossip.background.sync</string>
+	</array>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
@@ -18,8 +22,6 @@
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
 	<string>$(MARKETING_VERSION)</string>
-	<key>CFBundleVersion</key>
-	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -31,6 +33,8 @@
 			</array>
 		</dict>
 	</array>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>LSRequiresIPhoneOS</key>
@@ -48,22 +52,18 @@
 	</dict>
 	<key>NSCameraUsageDescription</key>
 	<string>This app may use the camera for profile pictures and media sharing.</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>This app uses Face ID for secure biometric authentication.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>This app does not use your location. This permission may be requested by included libraries.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>This app does not use your location. This permission may be requested by included libraries.</string>
-	<key>NSFaceIDUsageDescription</key>
-	<string>This app uses Face ID for secure biometric authentication.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>This app may use the microphone for voice messages and calls.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>This app may save images to your photo library.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>This app may access your photo library to share images.</string>
-	<key>BGTaskSchedulerPermittedIdentifiers</key>
-	<array>
-		<string>net.massa.gossip.background.sync</string>
-	</array>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>
