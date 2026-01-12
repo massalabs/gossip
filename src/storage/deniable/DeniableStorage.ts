@@ -29,6 +29,13 @@ export class DeniableStorage {
   private initialized = false;
 
   constructor(config: DeniableStorageConfig) {
+    // Validate adapter
+    const { validateAdapter } = require('./utils/validation');
+    const validation = validateAdapter(config.adapter);
+    if (!validation.valid) {
+      throw new Error(`Invalid adapter: ${validation.error}`);
+    }
+
     this.config = {
       addressingBlobSize: 2 * 1024 * 1024, // 2MB default
       timingSafe: true,
@@ -81,6 +88,21 @@ export class DeniableStorage {
   async createSession(password: string, data: Uint8Array): Promise<void> {
     this.ensureInitialized();
 
+    // Validate inputs
+    const { validatePassword, validateDataSize } = await import(
+      './utils/validation'
+    );
+
+    const passwordValidation = validatePassword(password);
+    if (!passwordValidation.valid) {
+      throw new Error(`Invalid password: ${passwordValidation.error}`);
+    }
+
+    const dataValidation = validateDataSize(data, 100 * 1024 * 1024); // 100MB max
+    if (!dataValidation.valid) {
+      throw new Error(`Invalid data: ${dataValidation.error}`);
+    }
+
     // Import required functions
     const { createDataBlock, appendBlock } = await import('./core/DataBlob');
     const { writeSessionAddress } = await import('./core/AddressingBlob');
@@ -124,6 +146,13 @@ export class DeniableStorage {
    */
   async unlockSession(password: string): Promise<UnlockResult | null> {
     this.ensureInitialized();
+
+    // Validate password
+    const { validatePassword } = await import('./utils/validation');
+    const passwordValidation = validatePassword(password);
+    if (!passwordValidation.valid) {
+      throw new Error(`Invalid password: ${passwordValidation.error}`);
+    }
 
     // Import required functions
     const { readSlots } = await import('./core/AddressingBlob');
@@ -190,6 +219,21 @@ export class DeniableStorage {
   async updateSession(password: string, newData: Uint8Array): Promise<void> {
     this.ensureInitialized();
 
+    // Validate inputs
+    const { validatePassword, validateDataSize } = await import(
+      './utils/validation'
+    );
+
+    const passwordValidation = validatePassword(password);
+    if (!passwordValidation.valid) {
+      throw new Error(`Invalid password: ${passwordValidation.error}`);
+    }
+
+    const dataValidation = validateDataSize(newData, 100 * 1024 * 1024);
+    if (!dataValidation.valid) {
+      throw new Error(`Invalid data: ${dataValidation.error}`);
+    }
+
     // Import required functions
     const { readSlots, writeSessionAddress } = await import('./core/AddressingBlob');
     const { createDataBlock, appendBlock } = await import('./core/DataBlob');
@@ -240,6 +284,13 @@ export class DeniableStorage {
    */
   async deleteSession(password: string): Promise<void> {
     this.ensureInitialized();
+
+    // Validate password
+    const { validatePassword } = await import('./utils/validation');
+    const passwordValidation = validatePassword(password);
+    if (!passwordValidation.valid) {
+      throw new Error(`Invalid password: ${passwordValidation.error}`);
+    }
 
     // Import required functions
     const { readSlots, deriveSlotIndices, SLOT_SIZE } = await import('./core/AddressingBlob');
