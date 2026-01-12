@@ -5,9 +5,13 @@
 import { describe, it, expect } from 'vitest';
 import {
   generateBlockSize,
+  generatePaddingSize,
   BLOCK_SIZE_MIN,
   BLOCK_SIZE_MAX,
   BLOCK_SIZE_MEAN,
+  PADDING_SIZE_MIN,
+  PADDING_SIZE_MAX,
+  PADDING_SIZE_MEAN,
 } from '../core/distributions';
 
 describe('distributions', () => {
@@ -110,6 +114,129 @@ describe('distributions', () => {
       // Just check they're valid, not necessarily different
       expect(size1).toBeGreaterThanOrEqual(BLOCK_SIZE_MIN);
       expect(size2).toBeGreaterThanOrEqual(BLOCK_SIZE_MIN);
+    });
+  });
+
+  describe('generatePaddingSize (Pareto)', () => {
+    it('should generate sizes within valid range', () => {
+      for (let i = 0; i < 100; i++) {
+        const size = generatePaddingSize();
+        expect(size).toBeGreaterThanOrEqual(PADDING_SIZE_MIN);
+        expect(size).toBeLessThanOrEqual(PADDING_SIZE_MAX);
+      }
+    });
+
+    it('should generate integer byte values', () => {
+      for (let i = 0; i < 50; i++) {
+        const size = generatePaddingSize();
+        expect(Number.isInteger(size)).toBe(true);
+      }
+    });
+
+    it('should have mean close to 17.5MB (statistical test)', () => {
+      const samples = 2000; // More samples for Pareto due to high variance
+      let sum = 0;
+
+      for (let i = 0; i < samples; i++) {
+        sum += generatePaddingSize();
+      }
+
+      const mean = sum / samples;
+      const expectedMean = PADDING_SIZE_MEAN; // 17.5 MB
+
+      // Allow 30% deviation due to high variance of Pareto
+      const tolerance = expectedMean * 0.3;
+      expect(mean).toBeGreaterThan(expectedMean - tolerance);
+      expect(mean).toBeLessThan(expectedMean + tolerance);
+    });
+
+    it('should have heavy tail (Pareto property)', () => {
+      const samples = 1000;
+      const sizes: number[] = [];
+
+      for (let i = 0; i < samples; i++) {
+        sizes.push(generatePaddingSize());
+      }
+
+      sizes.sort((a, b) => a - b);
+
+      // Pareto has heavy right tail
+      // Check that top 10% has significantly larger values
+      const p90 = sizes[Math.floor(samples * 0.9)];
+      const median = sizes[Math.floor(samples * 0.5)];
+
+      // P90 should be much larger than median (heavy tail)
+      expect(p90).toBeGreaterThan(median * 2);
+
+      // Check for very large values in tail
+      const p95 = sizes[Math.floor(samples * 0.95)];
+      const p99 = sizes[Math.floor(samples * 0.99)];
+
+      expect(p99).toBeGreaterThan(p95);
+      expect(p99).toBeGreaterThan(100 * 1024 * 1024); // At least 100MB
+    });
+
+    it('should have most values near minimum (α=1.25)', () => {
+      const samples = 1000;
+      const sizes: number[] = [];
+
+      for (let i = 0; i < samples; i++) {
+        sizes.push(generatePaddingSize());
+      }
+
+      // Count values in [5MB, 20MB] (near minimum)
+      const nearMin = sizes.filter(
+        (s) => s >= PADDING_SIZE_MIN && s <= 20 * 1024 * 1024,
+      ).length;
+
+      // With α=1.25, most values should be near x_min
+      const percentage = (nearMin / samples) * 100;
+      expect(percentage).toBeGreaterThan(50); // At least 50%
+    });
+
+    it('should generate variety in sizes', () => {
+      const samples = 100;
+      const sizes = new Set<number>();
+
+      for (let i = 0; i < samples; i++) {
+        sizes.add(generatePaddingSize());
+      }
+
+      // Should have many unique values
+      expect(sizes.size).toBeGreaterThan(70);
+    });
+
+    it('should occasionally produce very large values (tail behavior)', () => {
+      const samples = 500;
+      let largeCount = 0;
+
+      for (let i = 0; i < samples; i++) {
+        const size = generatePaddingSize();
+        if (size > 200 * 1024 * 1024) {
+          // > 200 MB
+          largeCount++;
+        }
+      }
+
+      // Should have some large values in tail
+      expect(largeCount).toBeGreaterThan(0);
+    });
+
+    it('should have lower median than mean (right-skewed)', () => {
+      const samples = 1000;
+      const sizes: number[] = [];
+
+      for (let i = 0; i < samples; i++) {
+        sizes.push(generatePaddingSize());
+      }
+
+      sizes.sort((a, b) => a - b);
+
+      const median = sizes[Math.floor(samples * 0.5)];
+      const mean = sizes.reduce((a, b) => a + b, 0) / samples;
+
+      // Pareto is right-skewed: median < mean
+      expect(median).toBeLessThan(mean);
     });
   });
 });

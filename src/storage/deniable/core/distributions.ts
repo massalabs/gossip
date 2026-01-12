@@ -86,4 +86,55 @@ export function generateBlockSize(): number {
   return Math.floor(Math.max(minSize, Math.min(maxSize, size)));
 }
 
-// TODO: Sprint 2.2 - Implement paretoDistribution()
+/**
+ * Generates a random value from a Pareto distribution
+ *
+ * Pareto distribution is used for padding sizes to create a heavy-tailed
+ * distribution. This means most padding will be small (around 5-20MB),
+ * but there's a significant probability of much larger padding (up to 600MB).
+ *
+ * The heavy tail is crucial for plausible deniability: it allows hiding
+ * large data blocks within what appears to be random padding.
+ *
+ * The Pareto distribution is characterized by:
+ * - x_min: minimum value (5 MB)
+ * - α (alpha): shape parameter (1.25) - controls tail heaviness
+ *
+ * PDF: f(x) = α·x_min^α / x^(α+1) for x ≥ x_min
+ * CDF: F(x) = 1 - (x_min/x)^α
+ *
+ * @returns Padding size in bytes [5MB..600MB]
+ *
+ * @example
+ * ```typescript
+ * const size = generatePaddingSize();
+ * console.log(`Padding size: ${(size / 1024 / 1024).toFixed(2)} MB`);
+ * ```
+ */
+export function generatePaddingSize(): number {
+  const xMin = PADDING_SIZE_MIN; // 5 MB
+  const alpha = PADDING_ALPHA; // 1.25
+  const maxSize = PADDING_SIZE_MAX; // 600 MB
+
+  // Inverse transform sampling for Pareto distribution
+  // If U ~ Uniform(0,1), then X = x_min / U^(1/α) ~ Pareto(x_min, α)
+
+  let size: number;
+  let attempts = 0;
+  const maxAttempts = 100;
+
+  do {
+    // Generate uniform random value in (0, 1]
+    // Avoid exactly 0 to prevent division by zero
+    const u = crypto.getRandomValues(new Uint32Array(1))[0] / 0xffffffff;
+    const uniformValue = Math.max(u, 1e-10);
+
+    // Inverse CDF: X = x_min / U^(1/α)
+    size = xMin / Math.pow(uniformValue, 1 / alpha);
+
+    attempts++;
+  } while (size > maxSize && attempts < maxAttempts);
+
+  // Clamp to valid range
+  return Math.floor(Math.max(xMin, Math.min(maxSize, size)));
+}
