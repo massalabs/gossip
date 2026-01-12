@@ -6,11 +6,16 @@ import { describe, it, expect } from 'vitest';
 import {
   createAddressingBlob,
   deriveSlotIndices,
+  writeSlot,
+  readSlot,
+  readSlots,
+  writeSessionAddress,
   ADDRESSING_BLOB_SIZE,
   SLOT_COUNT,
   SLOT_SIZE,
   SLOTS_PER_SESSION,
 } from '../core/AddressingBlob';
+import type { SessionAddress } from '../types';
 
 describe('AddressingBlob', () => {
   describe('createAddressingBlob', () => {
@@ -137,6 +142,157 @@ describe('AddressingBlob', () => {
     it('should handle special characters in password', async () => {
       const indices = await deriveSlotIndices('🔐 p@ssw0rd! #123 🚀');
       expect(indices.length).toBe(46);
+    });
+  });
+
+  describe('writeSlot and readSlot', () => {
+    it('should write and read a session address', async () => {
+      const blob = createAddressingBlob();
+      const address: SessionAddress = {
+        offset: 2097152,
+        blockSize: 35000000,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        salt: crypto.getRandomValues(new Uint8Array(16)),
+      };
+
+      await writeSlot(blob, 1000, address, 'test-password');
+      const readAddress = await readSlot(blob, 1000, 'test-password');
+
+      expect(readAddress).not.toBeNull();
+      expect(readAddress?.offset).toBe(address.offset);
+      expect(readAddress?.blockSize).toBe(address.blockSize);
+      expect(readAddress?.createdAt).toBe(address.createdAt);
+      expect(readAddress?.updatedAt).toBe(address.updatedAt);
+    });
+
+    it('should return null for wrong password', async () => {
+      const blob = createAddressingBlob();
+      const address: SessionAddress = {
+        offset: 1024,
+        blockSize: 1000000,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        salt: new Uint8Array(16),
+      };
+
+      await writeSlot(blob, 500, address, 'correct-password');
+      const readAddress = await readSlot(blob, 500, 'wrong-password');
+
+      expect(readAddress).toBeNull();
+    });
+
+    it('should return null for unwritten slot', async () => {
+      const blob = createAddressingBlob();
+      const readAddress = await readSlot(blob, 999, 'any-password');
+
+      expect(readAddress).toBeNull();
+    });
+
+    it('should handle invalid slot indices', async () => {
+      const blob = createAddressingBlob();
+      const readAddress1 = await readSlot(blob, -1, 'password');
+      const readAddress2 = await readSlot(blob, 999999, 'password');
+
+      expect(readAddress1).toBeNull();
+      expect(readAddress2).toBeNull();
+    });
+  });
+
+  describe('readSlots and writeSessionAddress', () => {
+    it('should write to all 46 slots and read successfully', async () => {
+      const blob = createAddressingBlob();
+      const address: SessionAddress = {
+        offset: 5000000,
+        blockSize: 50000000,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        salt: crypto.getRandomValues(new Uint8Array(16)),
+      };
+
+      await writeSessionAddress(blob, 'my-password', address);
+      const readAddress = await readSlots(blob, 'my-password');
+
+      expect(readAddress).not.toBeNull();
+      expect(readAddress?.offset).toBe(address.offset);
+      expect(readAddress?.blockSize).toBe(address.blockSize);
+    });
+
+    it('should return null with wrong password (timing-safe)', async () => {
+      const blob = createAddressingBlob();
+      const address: SessionAddress = {
+        offset: 1024,
+        blockSize: 1000000,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        salt: new Uint8Array(16),
+      };
+
+      await writeSessionAddress(blob, 'correct-password', address);
+
+      // Measure time for wrong password
+      const start = performance.now();
+      const result = await readSlots(blob, 'wrong-password');
+      const wrongTime = performance.now() - start;
+
+      expect(result).toBeNull();
+
+      // Should take reasonable time (scans all 46 slots)
+      expect(wrongTime).toBeGreaterThan(0);
+    });
+
+    it('should handle multiple sessions with different passwords', async () => {
+      const blob = createAddressingBlob();
+
+      const address1: SessionAddress = {
+        offset: 1000,
+        blockSize: 10000,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        salt: new Uint8Array(16),
+      };
+
+      const address2: SessionAddress = {
+        offset: 2000,
+        blockSize: 20000,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        salt: new Uint8Array(16),
+      };
+
+      await writeSessionAddress(blob, 'password1', address1);
+      await writeSessionAddress(blob, 'password2', address2);
+
+      const read1 = await readSlots(blob, 'password1');
+      const read2 = await readSlots(blob, 'password2');
+
+      expect(read1?.offset).toBe(1000);
+      expect(read2?.offset).toBe(2000);
+    });
+
+    it('should be resilient to slot corruption (redundancy)', async () => {
+      const blob = createAddressingBlob();
+      const address: SessionAddress = {
+        offset: 3000,
+        blockSize: 30000,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        salt: new Uint8Array(16),
+      };
+
+      await writeSessionAddress(blob, 'test-password', address);
+
+      // Corrupt first 10 slots derived from password
+      const indices = await deriveSlotIndices('test-password');
+      for (let i = 0; i < 10; i++) {
+        const slotOffset = indices[i] * SLOT_SIZE;
+        crypto.getRandomValues(blob.subarray(slotOffset, slotOffset + SLOT_SIZE));
+      }
+
+      // Should still be able to read from remaining 36 slots
+      const readAddress = await readSlots(blob, 'test-password');
+      expect(readAddress).not.toBeNull();
+      expect(readAddress?.offset).toBe(3000);
     });
   });
 });

@@ -260,5 +260,83 @@ export async function readSlot(
   }
 }
 
-// TODO: Sprint 1.4 - Implement readSlots() (scan all 46 slots)
-// TODO: Sprint 1.5 - Implement writeSessionAddress() (write to all 46 slots)
+/**
+ * Reads session address by scanning all 46 password-derived slots
+ *
+ * This function is timing-safe: it always scans all 46 slots even if
+ * a valid address is found early. This prevents timing attacks that
+ * could reveal slot locations.
+ *
+ * @param blob - The addressing blob to read from
+ * @param password - Password to derive slot indices and decryption key
+ * @returns The session address, or null if not found
+ *
+ * @example
+ * ```typescript
+ * const address = await readSlots(blob, 'my-password');
+ * if (address) {
+ *   console.log('Session found at offset:', address.offset);
+ * } else {
+ *   console.log('No session found (or wrong password)');
+ * }
+ * ```
+ */
+export async function readSlots(
+  blob: Uint8Array,
+  password: string,
+): Promise<SessionAddress | null> {
+  // Derive the 46 slot indices from password
+  const indices = await deriveSlotIndices(password);
+
+  // Timing-safe: scan ALL 46 slots, don't early return
+  let foundAddress: SessionAddress | null = null;
+
+  for (const slotIndex of indices) {
+    const address = await readSlot(blob, slotIndex, password);
+
+    // Store first valid address found, but continue scanning
+    if (address && !foundAddress) {
+      foundAddress = address;
+    }
+  }
+
+  return foundAddress;
+}
+
+/**
+ * Writes session address to all 46 password-derived slots
+ *
+ * Writes the same session address to all 46 slots for redundancy.
+ * This ensures the session can be found even if some slots are
+ * corrupted or overwritten by collisions.
+ *
+ * @param blob - The addressing blob to write to
+ * @param password - Password to derive slot indices and encryption key
+ * @param address - The session address to write
+ *
+ * @example
+ * ```typescript
+ * const blob = createAddressingBlob();
+ * const address = {
+ *   offset: 2097152,
+ *   blockSize: 35000000,
+ *   createdAt: Date.now(),
+ *   updatedAt: Date.now(),
+ *   salt: crypto.getRandomValues(new Uint8Array(16))
+ * };
+ * await writeSessionAddress(blob, 'my-password', address);
+ * ```
+ */
+export async function writeSessionAddress(
+  blob: Uint8Array,
+  password: string,
+  address: SessionAddress,
+): Promise<void> {
+  // Derive the 46 slot indices from password
+  const indices = await deriveSlotIndices(password);
+
+  // Write to all 46 slots
+  for (const slotIndex of indices) {
+    await writeSlot(blob, slotIndex, address, password);
+  }
+}
