@@ -46,10 +46,29 @@ export class DeniableStorage {
     }
 
     await this.config.adapter.initialize();
-    this.initialized = true;
 
-    // TODO: Sprint 1.1 - Create addressing blob if not exists
-    // TODO: Sprint 2.5 - Create data blob if not exists
+    // Check if blobs exist, create if not
+    try {
+      await this.config.adapter.readAddressingBlob();
+    } catch {
+      // Addressing blob doesn't exist, create it
+      const { createAddressingBlob } = await import('./core/AddressingBlob');
+      const addressingBlob = createAddressingBlob();
+      await this.config.adapter.writeAddressingBlob(addressingBlob);
+    }
+
+    try {
+      await this.config.adapter.readDataBlob();
+    } catch {
+      // Data blob doesn't exist, create it with initial padding
+      const { generatePaddingSize } = await import('./core/distributions');
+      const { generatePadding } = await import('./core/DataBlob');
+      const initialSize = generatePaddingSize();
+      const dataBlob = generatePadding(initialSize);
+      await this.config.adapter.writeDataBlob(dataBlob);
+    }
+
+    this.initialized = true;
   }
 
   /**
@@ -62,13 +81,38 @@ export class DeniableStorage {
   async createSession(password: string, data: Uint8Array): Promise<void> {
     this.ensureInitialized();
 
-    // TODO: Sprint 3.2 - Implement session creation
-    // 1. Generate block size from log-normal distribution
-    // 2. Encrypt data -> DataBlock
-    // 3. Append to DataBlob with padding
-    // 4. Write address to AddressingBlob (46 slots)
+    // Import required functions
+    const { createDataBlock, appendBlock } = await import('./core/DataBlob');
+    const { writeSessionAddress } = await import('./core/AddressingBlob');
 
-    throw new Error('Not implemented yet');
+    // 1. Encrypt data into a DataBlock
+    const block = await createDataBlock(data, password);
+
+    // 2. Read current data blob and append new block with padding
+    const currentDataBlob = await this.config.adapter.readDataBlob();
+    const newDataBlob = appendBlock(currentDataBlob, block);
+
+    // 3. Calculate offset where this block was written
+    // Offset is: currentDataBlob.length + paddingSize + BLOCK_HEADER
+    // We know the block starts after the current blob and its preceding padding
+    const blockOffset = currentDataBlob.length; // Points to start of padding+block
+
+    // 4. Create session address
+    const sessionAddress = {
+      offset: blockOffset,
+      blockSize: block.size,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      salt: crypto.getRandomValues(new Uint8Array(16)),
+    };
+
+    // 5. Write address to addressing blob (46 slots)
+    const addressingBlob = await this.config.adapter.readAddressingBlob();
+    await writeSessionAddress(addressingBlob, password, sessionAddress);
+
+    // 6. Persist both blobs
+    await this.config.adapter.writeAddressingBlob(addressingBlob);
+    await this.config.adapter.writeDataBlob(newDataBlob);
   }
 
   /**
@@ -81,13 +125,59 @@ export class DeniableStorage {
   async unlockSession(password: string): Promise<UnlockResult | null> {
     this.ensureInitialized();
 
-    // TODO: Sprint 3.3 - Implement session unlock
-    // 1. Read AddressingBlob -> find SessionAddress (scan all 46 slots)
-    // 2. Parse DataBlob at offset
-    // 3. Decrypt and return data
-    // IMPORTANT: Timing-safe - same time for valid/invalid password
+    // Import required functions
+    const { readSlots } = await import('./core/AddressingBlob');
+    const { parseDataBlob } = await import('./core/DataBlob');
 
-    throw new Error('Not implemented yet');
+    // 1. Read addressing blob and find session address
+    // This is timing-safe: scans all 46 slots regardless of success
+    const addressingBlob = await this.config.adapter.readAddressingBlob();
+    const sessionAddress = await readSlots(addressingBlob, password);
+
+    if (!sessionAddress) {
+      // No session found for this password (or wrong password)
+      return null;
+    }
+
+    // 2. Read data blob and parse block at offset
+    const dataBlob = await this.config.adapter.readDataBlob();
+
+    // Need to find the actual block start within the padding+block region
+    // The offset points to padding+block, we need to scan for the block header
+    let blockStart = -1;
+    const searchStart = sessionAddress.offset;
+    const searchEnd = Math.min(searchStart + 600 * 1024 * 1024, dataBlob.length); // Max padding size
+
+    for (let i = searchStart; i < searchEnd - 4; i++) {
+      const view = new DataView(dataBlob.buffer, i, 4);
+      const size = view.getUint32(0, false);
+
+      // Check if this could be a valid block header
+      if (size === sessionAddress.blockSize && size > 20 && size < 256 * 1024 * 1024) {
+        blockStart = i;
+        break;
+      }
+    }
+
+    if (blockStart === -1) {
+      // Block not found at expected offset
+      return null;
+    }
+
+    // 3. Decrypt block data
+    const decryptedData = await parseDataBlob(dataBlob, blockStart, password);
+
+    if (!decryptedData) {
+      // Decryption failed (wrong password or corrupted data)
+      return null;
+    }
+
+    // 4. Return unlocked session
+    return {
+      data: decryptedData,
+      createdAt: sessionAddress.createdAt,
+      updatedAt: sessionAddress.updatedAt,
+    };
   }
 
   /**
@@ -100,13 +190,46 @@ export class DeniableStorage {
   async updateSession(password: string, newData: Uint8Array): Promise<void> {
     this.ensureInitialized();
 
-    // TODO: Sprint 3.4 - Implement session update
-    // 1. Unlock to find address
-    // 2. If size changes: reallocate in DataBlob
-    // 3. Encrypt newData -> write
-    // 4. Update address if offset changed
+    // Import required functions
+    const { readSlots, writeSessionAddress } = await import('./core/AddressingBlob');
+    const { createDataBlock, appendBlock } = await import('./core/DataBlob');
 
-    throw new Error('Not implemented yet');
+    // 1. Find current session address
+    const addressingBlob = await this.config.adapter.readAddressingBlob();
+    const currentAddress = await readSlots(addressingBlob, password);
+
+    if (!currentAddress) {
+      throw new Error('Session not found');
+    }
+
+    // 2. Create new encrypted block
+    const newBlock = await createDataBlock(newData, password);
+
+    // 3. Strategy: Always append as new block (simpler, preserves deniability)
+    // Could optimize to reuse space if new size <= old size, but appending is safer
+    const currentDataBlob = await this.config.adapter.readDataBlob();
+    const newDataBlob = appendBlock(currentDataBlob, newBlock);
+
+    // 4. Calculate new block offset
+    const newBlockOffset = currentDataBlob.length;
+
+    // 5. Update session address with new offset and metadata
+    const updatedAddress = {
+      offset: newBlockOffset,
+      blockSize: newBlock.size,
+      createdAt: currentAddress.createdAt,
+      updatedAt: Date.now(),
+      salt: currentAddress.salt,
+    };
+
+    // 6. Write updated address to addressing blob (overwrites 46 slots)
+    await writeSessionAddress(addressingBlob, password, updatedAddress);
+
+    // 7. Persist both blobs
+    await this.config.adapter.writeAddressingBlob(addressingBlob);
+    await this.config.adapter.writeDataBlob(newDataBlob);
+
+    // Note: Old block remains in data blob as "padding" for plausible deniability
   }
 
   /**
@@ -118,12 +241,59 @@ export class DeniableStorage {
   async deleteSession(password: string): Promise<void> {
     this.ensureInitialized();
 
-    // TODO: Sprint 3.5 - Implement session deletion
-    // 1. Overwrite 46 slots in AddressingBlob with random
-    // 2. Overwrite DataBlock with random
-    // Note: Leaves padding intact for deniability
+    // Import required functions
+    const { readSlots, deriveSlotIndices, SLOT_SIZE } = await import('./core/AddressingBlob');
 
-    throw new Error('Not implemented yet');
+    // 1. Find session to verify it exists
+    const addressingBlob = await this.config.adapter.readAddressingBlob();
+    const sessionAddress = await readSlots(addressingBlob, password);
+
+    if (!sessionAddress) {
+      throw new Error('Session not found');
+    }
+
+    // 2. Overwrite all 46 addressing slots with random data
+    // This makes the session unrecoverable
+    const slotIndices = await deriveSlotIndices(password);
+
+    for (const slotIndex of slotIndices) {
+      const slotOffset = slotIndex * SLOT_SIZE;
+      const randomData = new Uint8Array(SLOT_SIZE);
+      crypto.getRandomValues(randomData);
+      addressingBlob.set(randomData, slotOffset);
+    }
+
+    // 3. Overwrite the data block with random data
+    const dataBlob = await this.config.adapter.readDataBlob();
+
+    // Find the actual block start (same logic as unlockSession)
+    let blockStart = -1;
+    const searchStart = sessionAddress.offset;
+    const searchEnd = Math.min(searchStart + 600 * 1024 * 1024, dataBlob.length);
+
+    for (let i = searchStart; i < searchEnd - 4; i++) {
+      const view = new DataView(dataBlob.buffer, i, 4);
+      const size = view.getUint32(0, false);
+
+      if (size === sessionAddress.blockSize && size > 20 && size < 256 * 1024 * 1024) {
+        blockStart = i;
+        break;
+      }
+    }
+
+    if (blockStart !== -1) {
+      // Overwrite the entire block with random data
+      const blockEnd = blockStart + sessionAddress.blockSize;
+      const randomBlock = new Uint8Array(sessionAddress.blockSize);
+      crypto.getRandomValues(randomBlock);
+      dataBlob.set(randomBlock, blockStart);
+    }
+
+    // 4. Persist updated blobs
+    await this.config.adapter.writeAddressingBlob(addressingBlob);
+    await this.config.adapter.writeDataBlob(dataBlob);
+
+    // Note: Padding remains intact, making deletion indistinguishable from random data
   }
 
   /**
