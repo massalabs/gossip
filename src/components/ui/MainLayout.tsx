@@ -19,6 +19,7 @@ interface MainLayoutProps {
  * - Bottom navigation visibility based on current route (via pageConfig)
  * - Safe area insets (top when no header, bottom when no nav)
  * - Flex column layout with scrollable content
+ * - iOS keyboard workaround: shifts entire app up when keyboard is visible
  *
  * Safe area padding:
  * - Top (pt-safe-t): Applied by HeaderWrapper when present
@@ -41,7 +42,7 @@ const MainLayout: React.FC<MainLayoutProps> = ({
 }) => {
   const location = useLocation();
   const showBottomNav = shouldShowBottomNav(location.pathname);
-  const isKeyboardVisible = useKeyboardVisible();
+  const { isKeyboardVisible } = useKeyboardVisible();
 
   // Apply bottom safe area padding when there's no bottom nav AND keyboard is not visible
   const safeAreaClass = showBottomNav || isKeyboardVisible ? '' : 'pb-safe-b';

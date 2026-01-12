@@ -13,7 +13,7 @@ const BottomNavigation: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const setBottomNavVisible = useUiStore(s => s.setBottomNavVisible);
-  const isKeyboardVisible = useKeyboardVisible();
+  const { isKeyboardVisible } = useKeyboardVisible();
 
   useEffect(() => {
     setBottomNavVisible(true);
