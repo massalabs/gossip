@@ -3,7 +3,10 @@ import { useNavigate } from 'react-router-dom';
 import { Virtuoso } from 'react-virtuoso';
 
 import { useDiscussionList } from '../../hooks/useDiscussionList';
-import { useDiscussionStore } from '../../stores/discussionStore';
+import {
+  DiscussionFilter,
+  useDiscussionStore,
+} from '../../stores/discussionStore';
 import { ROUTES } from '../../constants/routes';
 import { Discussion } from '../../db';
 
@@ -31,6 +34,7 @@ interface DiscussionListProps {
   headerVariant?: 'button' | 'link';
   searchQuery?: string;
   scrollParent: HTMLElement;
+  filter?: DiscussionFilter;
 }
 
 // =============================================================================
@@ -41,11 +45,13 @@ interface HeaderItemProps {
   item: HeaderItem;
 }
 
-const HeaderItemRenderer: React.FC<HeaderItemProps> = ({ item }) => (
-  <p className="px-2 pb-1 pt-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-    {item.label}
-  </p>
-);
+const HeaderItemRenderer: React.FC<HeaderItemProps> = ({ item }) => {
+  return (
+    <p className="px-2 pb-1 pt-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+      {item.label}
+    </p>
+  );
+};
 
 interface ContactItemProps {
   item: ContactItem;
@@ -83,6 +89,7 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
   activeUserId,
   searchQuery = '',
   scrollParent,
+  filter = 'all',
 }) => {
   const navigate = useNavigate();
 
@@ -112,7 +119,8 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
     contactsMap,
     lastMessages,
     activeUserId,
-    isSearching
+    isSearching,
+    filter
   );
 
   // Check for empty state
