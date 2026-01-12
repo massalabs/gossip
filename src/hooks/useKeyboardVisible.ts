@@ -111,17 +111,17 @@ export function useIOSKeyboardWorkaround(): {
  */
 export function useFixedKeyboardStyles(): React.CSSProperties {
   const { active, keyboardHeight } = useIOSKeyboardWorkaround();
-  const isIOS = Capacitor.getPlatform() === 'ios';
 
-  // Only apply keyboard workaround on iOS
-  if (!isIOS) {
+  // useIOSKeyboardWorkaround already handles iOS platform check
+  // If not iOS, active will be false and keyboardHeight will be 0
+  if (!active) {
     return {};
   }
 
   return {
     // Calculate height only accounting for keyboard
     // Safe areas are handled by padding (pt-safe-t, pb-safe-b) in the component
-    height: active ? `calc(100vh - ${keyboardHeight}px)` : '100vh',
+    height: `calc(100vh - ${keyboardHeight}px)`,
     transition: 'height 300ms ease-out',
   };
 }
