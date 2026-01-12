@@ -24,7 +24,7 @@ export function useKeyboardVisible(): {
       // Note: On Android, Will and Did events fire almost simultaneously
       const showListener = Keyboard.addListener(
         'keyboardWillShow',
-        async (info: KeyboardInfo) => {
+        (info: KeyboardInfo) => {
           setIsKeyboardVisible(true);
           setKeyboardHeight(info.keyboardHeight);
         }
