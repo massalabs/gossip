@@ -3,14 +3,13 @@ import { useNavigate } from 'react-router-dom';
 import ShareContact from '../../components/settings/ShareContact';
 import { useAccountStore } from '../../stores/accountStore';
 import { useAppStore } from '../../stores/appStore';
-import { useUserMnsDomain } from '../../hooks/useUserMnsDomain';
 import { ROUTES } from '../../constants/routes';
 
 const ShareContactPage: React.FC = () => {
   const navigate = useNavigate();
   const { userProfile, session } = useAccountStore();
   const mnsEnabled = useAppStore(s => s.mnsEnabled);
-  const { mnsDomains } = useUserMnsDomain();
+  const mnsDomains = useAppStore(s => s.mnsDomains);
 
   const handleBack = () => {
     navigate(-1);

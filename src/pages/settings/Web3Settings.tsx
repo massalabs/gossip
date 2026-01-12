@@ -4,6 +4,7 @@ import PageLayout from '../../components/ui/PageLayout';
 import PageHeader from '../../components/ui/PageHeader';
 import Toggle from '../../components/ui/Toggle';
 import { useAppStore } from '../../stores/appStore';
+import { useAccountStore } from '../../stores/accountStore';
 import { ROUTES } from '../../constants/routes';
 import { Globe, AlertCircle } from 'react-feather';
 
@@ -11,13 +12,19 @@ const Web3Settings: React.FC = () => {
   const navigate = useNavigate();
   const mnsEnabled = useAppStore(s => s.mnsEnabled);
   const setMnsEnabled = useAppStore(s => s.setMnsEnabled);
+  const fetchMnsDomains = useAppStore(s => s.fetchMnsDomains);
+  const { userProfile, provider } = useAccountStore();
 
   const handleBack = () => {
     navigate(ROUTES.settings());
   };
 
-  const handleMnsToggle = (enabled: boolean) => {
+  const handleMnsToggle = async (enabled: boolean) => {
     setMnsEnabled(enabled);
+    // If enabling MNS, fetch and cache domains
+    if (enabled) {
+      await fetchMnsDomains(userProfile, provider);
+    }
   };
 
   return (

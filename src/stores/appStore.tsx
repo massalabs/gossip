@@ -1,9 +1,11 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
-import { NetworkName } from '@massalabs/massa-web3';
+import { NetworkName, Provider } from '@massalabs/massa-web3';
 import { createSelectors } from './utils/createSelectors';
 import { STORAGE_KEYS } from '../utils/localStorage';
 import { ParsedInvite } from '../utils/qrCodeParser';
+import { mnsService } from '../services/mns';
+import { UserProfile } from '../db';
 
 // Debug console button position
 interface DebugButtonPosition {
@@ -39,11 +41,18 @@ interface AppStoreState {
   // MNS support enabled/disabled
   mnsEnabled: boolean;
   setMnsEnabled: (enabled: boolean) => void;
+  // MNS domains cache
+  mnsDomains: string[];
+  setMnsDomains: (domains: string[]) => void;
+  fetchMnsDomains: (
+    userProfile: UserProfile | null,
+    provider: Provider | null
+  ) => Promise<void>;
 }
 
 const useAppStoreBase = create<AppStoreState>()(
   persist(
-    set => ({
+    (set, get) => ({
       // Network config
       networkName: NetworkName.Buildnet,
       setNetworkName: (networkName: NetworkName) => {
@@ -89,6 +98,37 @@ const useAppStoreBase = create<AppStoreState>()(
       mnsEnabled: false,
       setMnsEnabled: (enabled: boolean) => {
         set({ mnsEnabled: enabled });
+        // If disabling, clear cache
+        if (!enabled) {
+          set({ mnsDomains: [] });
+        }
+      },
+      // MNS domains cache
+      mnsDomains: [],
+      setMnsDomains: (domains: string[]) => {
+        set({ mnsDomains: domains });
+      },
+      fetchMnsDomains: async (
+        userProfile: UserProfile | null,
+        provider: Provider | null
+      ) => {
+        const state = get();
+
+        if (!state.mnsEnabled || !userProfile?.userId || !provider) {
+          set({ mnsDomains: [] });
+          return;
+        }
+
+        try {
+          const domains = await mnsService.getDomainsFromGossipId(
+            userProfile.userId
+          );
+          const domainsWithSuffix = domains.map(domain => `${domain}.massa`);
+          set({ mnsDomains: domainsWithSuffix });
+        } catch (error) {
+          console.error('Error fetching MNS domains:', error);
+          set({ mnsDomains: [] });
+        }
       },
     }),
     {
@@ -101,6 +141,7 @@ const useAppStoreBase = create<AppStoreState>()(
         isInitialized: state.isInitialized,
         networkName: state.networkName,
         mnsEnabled: state.mnsEnabled,
+        mnsDomains: state.mnsDomains,
       }),
     }
   )

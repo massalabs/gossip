@@ -65,9 +65,7 @@ describe('InvitePage - Deep Link Invite Flow', () => {
     await expect.element(heading).toBeVisible();
 
     // And the User ID field should be prefilled with the invite userId
-    const userIdInput = page.getByLabelText(
-      'Gossip address or name.massa (MNS domain)'
-    );
+    const userIdInput = page.getByLabelText('Gossip address');
     await expect.element(userIdInput).toHaveValue(bobProfile.userId);
   });
 
