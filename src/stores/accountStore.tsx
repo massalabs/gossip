@@ -266,6 +266,20 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
     };
   };
 
+  // Helper function to fetch MNS domains if MNS is enabled
+  const fetchMnsDomainsIfEnabled = (profile: UserProfile) => {
+    const { mnsEnabled } = useAppStore.getState();
+    if (mnsEnabled) {
+      const state = get();
+      useAppStore
+        .getState()
+        .fetchMnsDomains(profile, state.provider)
+        .catch(error => {
+          console.error('Error fetching MNS domains:', error);
+        });
+    }
+  };
+
   return {
     // Initial state
     userProfile: null,
@@ -313,6 +327,9 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           session,
           isLoading: false,
         });
+
+        // Fetch MNS domains if MNS is enabled
+        fetchMnsDomainsIfEnabled(profile);
       } catch (error) {
         console.error('Error creating user profile:', error);
         set({ isLoading: false });
@@ -361,6 +378,9 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           session,
           isLoading: false,
         });
+
+        // Fetch MNS domains if MNS is enabled
+        fetchMnsDomainsIfEnabled(profile);
       } catch (error) {
         console.error('Error restoring account from mnemonic:', error);
         set({ isLoading: false });
@@ -416,6 +436,9 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           session,
           isLoading: false,
         });
+
+        // Fetch MNS domains if MNS is enabled
+        fetchMnsDomainsIfEnabled(updatedProfile);
 
         try {
           session.refresh();
@@ -525,6 +548,9 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           isLoading: false,
           platformAuthenticatorAvailable: availability.available,
         });
+
+        // Fetch MNS domains if MNS is enabled
+        fetchMnsDomainsIfEnabled(profile);
       } catch (error) {
         console.error('Error creating user profile with biometrics:', error);
         set({ isLoading: false });

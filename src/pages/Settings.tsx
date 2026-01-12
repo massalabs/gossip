@@ -6,7 +6,6 @@ import { useAccountStore } from '../stores/accountStore';
 import Button from '../components/ui/Button';
 import UserIdDisplay from '../components/ui/UserIdDisplay';
 import CopyClipboard from '../components/ui/CopyClipboard';
-import { useUserMnsDomain } from '../hooks/useUserMnsDomain';
 import { ROUTES } from '../constants/routes';
 import {
   LogOut,
@@ -57,7 +56,7 @@ const Settings = (): React.ReactElement => {
   const [isUsernameModalOpen, setIsUsernameModalOpen] = useState(false);
   const [activeView, setActiveView] = useState<SettingsView>(SettingsView.MAIN);
   const navigate = useNavigate();
-  const { mnsDomains } = useUserMnsDomain();
+  const mnsDomains = useAppStore(s => s.mnsDomains);
 
   // Debug mode unlock: 7-tap gesture on profile image
   const [tapCount, setTapCount] = useState(0);
