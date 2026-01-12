@@ -83,49 +83,29 @@ export interface UnlockResult {
   data: Uint8Array;
 
   /**
-   * Session metadata
-   */
-  metadata: SessionMetadata;
-}
-
-/**
- * Metadata about a session
- */
-export interface SessionMetadata {
-  /**
-   * When the session was created
+   * Timestamp when created
    */
   createdAt: number;
 
   /**
-   * When the session was last updated
+   * Timestamp when last updated
    */
   updatedAt: number;
-
-  /**
-   * Size of the encrypted block (bytes)
-   */
-  blockSize: number;
-
-  /**
-   * Offset in the data blob
-   */
-  offset: number;
 }
 
 /**
- * Internal: Address of a session in the data blob
+ * Internal: Address of a session in the data blob (multi-block architecture)
  */
 export interface SessionAddress {
   /**
-   * Byte offset in the data blob
+   * Byte offset of the root block in data blob
    */
-  offset: number;
+  rootBlockOffset: number;
 
   /**
-   * Size of the encrypted block
+   * Size of the encrypted root block
    */
-  blockSize: number;
+  rootBlockSize: number;
 
   /**
    * Timestamp when created
@@ -138,9 +118,9 @@ export interface SessionAddress {
   updatedAt: number;
 
   /**
-   * KDF salt for this session
+   * KDF salt for session key derivation
    */
-  salt: Uint8Array;
+  sessionKeyDerivationSalt: Uint8Array;
 }
 
 /**
@@ -218,7 +198,7 @@ export class DeniableStorageException extends Error {
   constructor(
     public code: DeniableStorageError,
     message: string,
-    public cause?: Error,
+    public cause?: Error
   ) {
     super(message);
     this.name = 'DeniableStorageException';

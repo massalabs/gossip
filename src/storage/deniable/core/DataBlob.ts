@@ -12,7 +12,11 @@
  */
 
 import type { DataBlock } from '../types';
-import { generateBlockSize, generatePaddingSize } from './distributions';
+import type { EncryptionKey } from '../../../wasm/encryption';
+import {
+  generateBlockSize as _generateBlockSize,
+  generatePaddingSize,
+} from './distributions';
 
 /**
  * Block header format: [blockSize(4 bytes)][nonce(16 bytes)][ciphertext(variable)]
@@ -38,13 +42,10 @@ const NONCE_SIZE = 16; // 16 bytes for AES-SIV nonce
  */
 export async function createDataBlock(
   data: Uint8Array,
-  password: string,
+  password: string
 ): Promise<DataBlock> {
-  const {
-    generateEncryptionKeyFromSeed,
-    generateNonce,
-    encryptAead,
-  } = await import('../../../wasm/encryption');
+  const { generateEncryptionKeyFromSeed, generateNonce, encryptAead } =
+    await import('../../../wasm/encryption');
 
   // Derive encryption key from password
   const salt = new TextEncoder().encode('deniable-storage-data-key-v1');
@@ -175,13 +176,10 @@ export function assembleDataBlob(blocks: DataBlock[]): Uint8Array {
 export async function parseDataBlob(
   blob: Uint8Array,
   offset: number,
-  password: string,
+  password: string
 ): Promise<Uint8Array | null> {
-  const {
-    generateEncryptionKeyFromSeed,
-    decryptAead,
-    Nonce,
-  } = await import('../../../wasm/encryption');
+  const { generateEncryptionKeyFromSeed, decryptAead, Nonce } =
+    await import('../../../wasm/encryption');
 
   // Validate offset
   if (offset < 0 || offset >= blob.length) {
@@ -198,7 +196,10 @@ export async function parseDataBlob(
     const blockSize = view.getUint32(0, false); // big-endian
 
     // Validate block size
-    if (blockSize < BLOCK_HEADER_SIZE + NONCE_SIZE || blockSize > blob.length - offset) {
+    if (
+      blockSize < BLOCK_HEADER_SIZE + NONCE_SIZE ||
+      blockSize > blob.length - offset
+    ) {
       return null;
     }
 
@@ -216,14 +217,22 @@ export async function parseDataBlob(
     if (ciphertextOffset + ciphertextSize > blob.length) {
       return null;
     }
-    const ciphertext = blob.slice(ciphertextOffset, ciphertextOffset + ciphertextSize);
+    const ciphertext = blob.slice(
+      ciphertextOffset,
+      ciphertextOffset + ciphertextSize
+    );
 
     // Derive decryption key
     const salt = new TextEncoder().encode('deniable-storage-data-key-v1');
     const key = await generateEncryptionKeyFromSeed(password, salt);
 
     // Decrypt with AEAD
-    const plaintext = await decryptAead(key, nonce, ciphertext, new Uint8Array());
+    const plaintext = await decryptAead(
+      key,
+      nonce,
+      ciphertext,
+      new Uint8Array()
+    );
 
     return plaintext || null;
   } catch {
@@ -265,4 +274,158 @@ export function appendBlock(blob: Uint8Array, block: DataBlock): Uint8Array {
   newBlob.set(block.ciphertext, offset);
 
   return newBlob;
+}
+
+/**
+ * Derives a block-specific encryption key from session key and block ID
+ *
+ * Per spec: block_key = kdf(session_aead_key, [block_id])
+ *
+ * This provides key isolation: each block is encrypted with a unique key
+ * derived from the session key and the block's unique identifier.
+ *
+ * @param sessionKey - Master session key (derived from password)
+ * @param blockId - Unique 32-byte block identifier
+ * @returns Block-specific encryption key
+ *
+ * @example
+ * ```typescript
+ * const blockId = crypto.getRandomValues(new Uint8Array(32));
+ * const blockKey = await deriveBlockKey(sessionKey, blockId);
+ * ```
+ */
+export async function deriveBlockKey(
+  sessionKey: EncryptionKey,
+  blockId: Uint8Array
+): Promise<EncryptionKey> {
+  const { generateEncryptionKeyFromSeed } =
+    await import('../../../wasm/encryption');
+
+  // Use session key bytes as password seed, blockId as salt
+  // This creates: kdf(sessionKey, blockId)
+  const sessionKeyBytes = sessionKey.to_bytes();
+  const sessionKeyHex = Array.from(sessionKeyBytes)
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('');
+
+  return await generateEncryptionKeyFromSeed(sessionKeyHex, blockId);
+}
+
+/**
+ * Creates an encrypted data block with block-ID-derived key
+ *
+ * This is the multi-block version that uses block-specific keys
+ * instead of password-derived keys.
+ *
+ * @param data - Plaintext data to encrypt
+ * @param blockKey - Block-specific encryption key (from deriveBlockKey)
+ * @returns Encrypted data block with metadata
+ *
+ * @example
+ * ```typescript
+ * const blockId = crypto.getRandomValues(new Uint8Array(32));
+ * const blockKey = await deriveBlockKey(sessionKey, blockId);
+ * const block = await createDataBlockWithKey(data, blockKey);
+ * ```
+ */
+export async function createDataBlockWithKey(
+  data: Uint8Array,
+  blockKey: EncryptionKey
+): Promise<DataBlock> {
+  const { generateNonce, encryptAead } =
+    await import('../../../wasm/encryption');
+
+  // Generate unique nonce
+  const nonce = await generateNonce();
+
+  // Encrypt data with AEAD using block-specific key
+  const ciphertext = await encryptAead(blockKey, nonce, data, new Uint8Array());
+
+  // Calculate total block size: header + nonce + ciphertext
+  const totalSize = BLOCK_HEADER_SIZE + NONCE_SIZE + ciphertext.length;
+
+  return {
+    size: totalSize,
+    nonce: nonce.to_bytes(),
+    ciphertext,
+  };
+}
+
+/**
+ * Parses and decrypts a data blob block using a specific key
+ *
+ * This is the multi-block version that accepts a pre-derived key
+ * instead of a password.
+ *
+ * @param blob - The data blob to parse
+ * @param offset - Byte offset where the block starts
+ * @param blockKey - Block-specific decryption key
+ * @returns Decrypted data, or null if decryption fails
+ *
+ * @example
+ * ```typescript
+ * const blockKey = await deriveBlockKey(sessionKey, blockId);
+ * const data = await parseDataBlobWithKey(blob, offset, blockKey);
+ * ```
+ */
+export async function parseDataBlobWithKey(
+  blob: Uint8Array,
+  offset: number,
+  blockKey: EncryptionKey
+): Promise<Uint8Array | null> {
+  const { decryptAead, Nonce } = await import('../../../wasm/encryption');
+
+  // Validate offset
+  if (offset < 0 || offset >= blob.length) {
+    return null;
+  }
+
+  try {
+    // Read block size (4 bytes, uint32 big-endian)
+    if (offset + 4 > blob.length) {
+      return null;
+    }
+    const sizeBytes = blob.slice(offset, offset + 4);
+    const view = new DataView(sizeBytes.buffer);
+    const blockSize = view.getUint32(0, false); // big-endian
+
+    // Validate block size
+    if (
+      blockSize < BLOCK_HEADER_SIZE + NONCE_SIZE ||
+      blockSize > blob.length - offset
+    ) {
+      return null;
+    }
+
+    // Read nonce (16 bytes)
+    const nonceOffset = offset + 4;
+    if (nonceOffset + NONCE_SIZE > blob.length) {
+      return null;
+    }
+    const nonceBytes = blob.slice(nonceOffset, nonceOffset + NONCE_SIZE);
+    const nonce = Nonce.from_bytes(nonceBytes);
+
+    // Read ciphertext
+    const ciphertextOffset = nonceOffset + NONCE_SIZE;
+    const ciphertextSize = blockSize - BLOCK_HEADER_SIZE - NONCE_SIZE;
+    if (ciphertextOffset + ciphertextSize > blob.length) {
+      return null;
+    }
+    const ciphertext = blob.slice(
+      ciphertextOffset,
+      ciphertextOffset + ciphertextSize
+    );
+
+    // Decrypt with AEAD using block-specific key
+    const plaintext = await decryptAead(
+      blockKey,
+      nonce,
+      ciphertext,
+      new Uint8Array()
+    );
+
+    return plaintext || null;
+  } catch {
+    return null;
+  }
 }
