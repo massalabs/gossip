@@ -123,8 +123,8 @@ function App() {
           {/* <div className="hidden">
             <PWABadge />
           </div> */}
-          <Toaster position="top-center" toastOptions={toastOptions} />
         </IOSKeyboardWrapper>
+        <Toaster position="top-center" toastOptions={toastOptions} />
       </ErrorBoundary>
     </BrowserRouter>
   );
