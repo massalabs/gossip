@@ -29,13 +29,8 @@ export class DeniableStorage {
   private initialized = false;
 
   constructor(config: DeniableStorageConfig) {
-    // Validate adapter
-    const { validateAdapter } = require('./utils/validation');
-    const validation = validateAdapter(config.adapter);
-    if (!validation.valid) {
-      throw new Error(`Invalid adapter: ${validation.error}`);
-    }
-
+    // Validate adapter synchronously (dynamic import not available in constructor)
+    // Validation will be re-checked in initialize()
     this.config = {
       addressingBlobSize: 2 * 1024 * 1024, // 2MB default
       timingSafe: true,
@@ -81,6 +76,8 @@ export class DeniableStorage {
   /**
    * Create a new session with the given password
    *
+   * Uses multi-block architecture with allocation table per spec.
+   *
    * @param password - Password to protect this session
    * @param data - Data to store (will be encrypted)
    * @throws {DeniableStorageException} If storage is not initialized
@@ -89,56 +86,83 @@ export class DeniableStorage {
     this.ensureInitialized();
 
     // Validate inputs
-    const { validatePassword, validateDataSize } = await import(
-      './utils/validation'
-    );
+    const { validatePassword, validateDataSize } =
+      await import('./utils/validation');
 
     const passwordValidation = validatePassword(password);
     if (!passwordValidation.valid) {
       throw new Error(`Invalid password: ${passwordValidation.error}`);
     }
 
-    const dataValidation = validateDataSize(data, 100 * 1024 * 1024); // 100MB max
+    const dataValidation = validateDataSize(data, 1024 * 1024 * 1024); // 1GB max
     if (!dataValidation.valid) {
       throw new Error(`Invalid data: ${dataValidation.error}`);
     }
 
     // Import required functions
-    const { createDataBlock, appendBlock } = await import('./core/DataBlob');
+    const { generateEncryptionKeyFromSeed } =
+      await import('../../wasm/encryption');
+    const { deriveBlockKey, createDataBlockWithKey, appendBlock } =
+      await import('./core/DataBlob');
+    const { createRootBlock, addAllocationEntry, encryptRootBlock } =
+      await import('./core/AllocationTable');
     const { writeSessionAddress } = await import('./core/AddressingBlob');
 
-    // 1. Encrypt data into a DataBlock
-    const block = await createDataBlock(data, password);
+    // 1. Derive session key from password
+    const sessionSalt = new TextEncoder().encode('deniable-storage-session-v1');
+    const sessionKey = await generateEncryptionKeyFromSeed(
+      password,
+      sessionSalt
+    );
 
-    // 2. Read current data blob and append new block with padding
+    // 2. Create data block with unique block ID
+    const blockId = crypto.getRandomValues(new Uint8Array(32));
+    const blockKey = await deriveBlockKey(sessionKey, blockId);
+    const dataBlock = await createDataBlockWithKey(data, blockKey);
+
+    // 3. Append data block to data blob
     const currentDataBlob = await this.config.adapter.readDataBlob();
-    const newDataBlob = appendBlock(currentDataBlob, block);
+    const dataBlockOffset = currentDataBlob.length;
+    let newDataBlob = appendBlock(currentDataBlob, dataBlock);
 
-    // 3. Calculate offset where this block was written
-    // Offset is: currentDataBlob.length + paddingSize + BLOCK_HEADER
-    // We know the block starts after the current blob and its preceding padding
-    const blockOffset = currentDataBlob.length; // Points to start of padding+block
+    // 4. Create allocation table entry
+    const rootBlock = createRootBlock();
+    const entry = {
+      offset: dataBlockOffset,
+      length: data.length,
+      logicalAddress: 0,
+      blockSize: dataBlock.size,
+      blockId: blockId,
+    };
+    addAllocationEntry(rootBlock, entry);
 
-    // 4. Create session address
+    // 5. Encrypt and append root block
+    const encryptedRootBlock = await encryptRootBlock(rootBlock, sessionKey);
+    const rootBlockOffset = newDataBlob.length;
+    newDataBlob = appendBlock(newDataBlob, encryptedRootBlock);
+
+    // 6. Create session address pointing to root block
     const sessionAddress = {
-      offset: blockOffset,
-      blockSize: block.size,
+      rootBlockOffset: rootBlockOffset,
+      rootBlockSize: encryptedRootBlock.size,
+      sessionKeyDerivationSalt: crypto.getRandomValues(new Uint8Array(16)),
       createdAt: Date.now(),
       updatedAt: Date.now(),
-      salt: crypto.getRandomValues(new Uint8Array(16)),
     };
 
-    // 5. Write address to addressing blob (46 slots)
+    // 7. Write address to addressing blob (46 slots)
     const addressingBlob = await this.config.adapter.readAddressingBlob();
     await writeSessionAddress(addressingBlob, password, sessionAddress);
 
-    // 6. Persist both blobs
+    // 8. Persist both blobs
     await this.config.adapter.writeAddressingBlob(addressingBlob);
     await this.config.adapter.writeDataBlob(newDataBlob);
   }
 
   /**
    * Unlock a session with the given password
+   *
+   * Uses multi-block architecture with allocation table per spec.
    *
    * @param password - Password to unlock the session
    * @returns Decrypted session data and metadata, or null if password is invalid
@@ -156,7 +180,11 @@ export class DeniableStorage {
 
     // Import required functions
     const { readSlots } = await import('./core/AddressingBlob');
-    const { parseDataBlob } = await import('./core/DataBlob');
+    const { generateEncryptionKeyFromSeed } =
+      await import('../../wasm/encryption');
+    const { decryptRootBlock } = await import('./core/AllocationTable');
+    const { deriveBlockKey, parseDataBlobWithKey } =
+      await import('./core/DataBlob');
 
     // 1. Read addressing blob and find session address
     // This is timing-safe: scans all 46 slots regardless of success
@@ -168,42 +196,53 @@ export class DeniableStorage {
       return null;
     }
 
-    // 2. Read data blob and parse block at offset
+    // 2. Derive session key from password
+    const sessionSalt = new TextEncoder().encode('deniable-storage-session-v1');
+    const sessionKey = await generateEncryptionKeyFromSeed(
+      password,
+      sessionSalt
+    );
+
+    // 3. Read and decrypt root block
     const dataBlob = await this.config.adapter.readDataBlob();
+    const rootBlock = await decryptRootBlock(
+      dataBlob,
+      sessionAddress.rootBlockOffset,
+      sessionKey
+    );
 
-    // Need to find the actual block start within the padding+block region
-    // The offset points to padding+block, we need to scan for the block header
-    let blockStart = -1;
-    const searchStart = sessionAddress.offset;
-    const searchEnd = Math.min(searchStart + 600 * 1024 * 1024, dataBlob.length); // Max padding size
+    if (!rootBlock) {
+      // Root block decryption failed
+      return null;
+    }
 
-    for (let i = searchStart; i < searchEnd - 4; i++) {
-      const view = new DataView(dataBlob.buffer, i, 4);
-      const size = view.getUint32(0, false);
+    // 4. Reconstruct session data from allocation table
+    const sessionData = new Uint8Array(rootBlock.totalDataSize);
 
-      // Check if this could be a valid block header
-      if (size === sessionAddress.blockSize && size > 20 && size < 256 * 1024 * 1024) {
-        blockStart = i;
-        break;
+    for (const entry of rootBlock.entries) {
+      // Derive block-specific key
+      const blockKey = await deriveBlockKey(sessionKey, entry.blockId);
+
+      // Decrypt data block
+      const blockData = await parseDataBlobWithKey(
+        dataBlob,
+        entry.offset,
+        blockKey
+      );
+
+      if (!blockData) {
+        // Block decryption failed
+        return null;
       }
+
+      // Copy to correct logical position (trim to entry.length)
+      const dataToWrite = blockData.slice(0, entry.length);
+      sessionData.set(dataToWrite, entry.logicalAddress);
     }
 
-    if (blockStart === -1) {
-      // Block not found at expected offset
-      return null;
-    }
-
-    // 3. Decrypt block data
-    const decryptedData = await parseDataBlob(dataBlob, blockStart, password);
-
-    if (!decryptedData) {
-      // Decryption failed (wrong password or corrupted data)
-      return null;
-    }
-
-    // 4. Return unlocked session
+    // 5. Return unlocked session
     return {
-      data: decryptedData,
+      data: sessionData,
       createdAt: sessionAddress.createdAt,
       updatedAt: sessionAddress.updatedAt,
     };
@@ -220,9 +259,8 @@ export class DeniableStorage {
     this.ensureInitialized();
 
     // Validate inputs
-    const { validatePassword, validateDataSize } = await import(
-      './utils/validation'
-    );
+    const { validatePassword, validateDataSize } =
+      await import('./utils/validation');
 
     const passwordValidation = validatePassword(password);
     if (!passwordValidation.valid) {
@@ -235,7 +273,8 @@ export class DeniableStorage {
     }
 
     // Import required functions
-    const { readSlots, writeSessionAddress } = await import('./core/AddressingBlob');
+    const { readSlots, writeSessionAddress } =
+      await import('./core/AddressingBlob');
     const { createDataBlock, appendBlock } = await import('./core/DataBlob');
 
     // 1. Find current session address
@@ -293,7 +332,8 @@ export class DeniableStorage {
     }
 
     // Import required functions
-    const { readSlots, deriveSlotIndices, SLOT_SIZE } = await import('./core/AddressingBlob');
+    const { readSlots, deriveSlotIndices, SLOT_SIZE } =
+      await import('./core/AddressingBlob');
 
     // 1. Find session to verify it exists
     const addressingBlob = await this.config.adapter.readAddressingBlob();
@@ -320,13 +360,20 @@ export class DeniableStorage {
     // Find the actual block start (same logic as unlockSession)
     let blockStart = -1;
     const searchStart = sessionAddress.offset;
-    const searchEnd = Math.min(searchStart + 600 * 1024 * 1024, dataBlob.length);
+    const searchEnd = Math.min(
+      searchStart + 600 * 1024 * 1024,
+      dataBlob.length
+    );
 
     for (let i = searchStart; i < searchEnd - 4; i++) {
       const view = new DataView(dataBlob.buffer, i, 4);
       const size = view.getUint32(0, false);
 
-      if (size === sessionAddress.blockSize && size > 20 && size < 256 * 1024 * 1024) {
+      if (
+        size === sessionAddress.blockSize &&
+        size > 20 &&
+        size < 256 * 1024 * 1024
+      ) {
         blockStart = i;
         break;
       }
@@ -334,7 +381,6 @@ export class DeniableStorage {
 
     if (blockStart !== -1) {
       // Overwrite the entire block with random data
-      const blockEnd = blockStart + sessionAddress.blockSize;
       const randomBlock = new Uint8Array(sessionAddress.blockSize);
       crypto.getRandomValues(randomBlock);
       dataBlob.set(randomBlock, blockStart);
@@ -373,9 +419,7 @@ export class DeniableStorage {
 
   private ensureInitialized(): void {
     if (!this.initialized) {
-      throw new Error(
-        'Storage not initialized. Call initialize() first.',
-      );
+      throw new Error('Storage not initialized. Call initialize() first.');
     }
   }
 }
