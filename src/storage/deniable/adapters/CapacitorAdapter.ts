@@ -20,7 +20,7 @@ export class CapacitorAdapter implements StorageAdapter {
 
   constructor(
     basePath: string = 'deniable-storage',
-    directory: Directory = Directory.Data,
+    directory: Directory = Directory.Data
   ) {
     this.basePath = basePath;
     this.directory = directory;
@@ -34,7 +34,7 @@ export class CapacitorAdapter implements StorageAdapter {
         directory: this.directory,
         recursive: true,
       });
-    } catch (error) {
+    } catch (_) {
       // Directory might already exist, ignore error
     }
   }

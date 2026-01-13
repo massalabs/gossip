@@ -82,8 +82,14 @@ describe('DataBlob', () => {
     });
 
     it('should assemble blob from multiple blocks', async () => {
-      const block1 = await createDataBlock(new TextEncoder().encode('data1'), 'pass1');
-      const block2 = await createDataBlock(new TextEncoder().encode('data2'), 'pass2');
+      const block1 = await createDataBlock(
+        new TextEncoder().encode('data1'),
+        'pass1'
+      );
+      const block2 = await createDataBlock(
+        new TextEncoder().encode('data2'),
+        'pass2'
+      );
 
       const blob = assembleDataBlob([block1, block2]);
 
@@ -99,7 +105,10 @@ describe('DataBlob', () => {
     });
 
     it('should create blobs with variety in sizes', async () => {
-      const block = await createDataBlock(new TextEncoder().encode('test'), 'pass');
+      const block = await createDataBlock(
+        new TextEncoder().encode('test'),
+        'pass'
+      );
 
       const blob1 = assembleDataBlob([block]);
       const blob2 = assembleDataBlob([block]);
@@ -187,7 +196,11 @@ describe('DataBlob', () => {
         const view = new DataView(blob.buffer, i, 4);
         const size = view.getUint32(0, false);
 
-        if ((size === block1.size || size === block2.size) && size > 20 && size < 1000000) {
+        if (
+          (size === block1.size || size === block2.size) &&
+          size > 20 &&
+          size < 1000000
+        ) {
           blockOffsets.push(i);
         }
       }
@@ -195,9 +208,17 @@ describe('DataBlob', () => {
       expect(blockOffsets.length).toBeGreaterThanOrEqual(2);
 
       // Decrypt first block with password1
-      const decrypted1 = await parseDataBlob(blob, blockOffsets[0], 'password1');
+      const decrypted1 = await parseDataBlob(
+        blob,
+        blockOffsets[0],
+        'password1'
+      );
       // Decrypt second block with password2
-      const decrypted2 = await parseDataBlob(blob, blockOffsets[1], 'password2');
+      const decrypted2 = await parseDataBlob(
+        blob,
+        blockOffsets[1],
+        'password2'
+      );
 
       expect(decrypted1).not.toBeNull();
       expect(decrypted2).not.toBeNull();
@@ -206,10 +227,16 @@ describe('DataBlob', () => {
 
   describe('appendBlock', () => {
     it('should append block to existing blob', async () => {
-      const block1 = await createDataBlock(new TextEncoder().encode('first'), 'pass1');
+      const block1 = await createDataBlock(
+        new TextEncoder().encode('first'),
+        'pass1'
+      );
       const blob1 = assembleDataBlob([block1]);
 
-      const block2 = await createDataBlock(new TextEncoder().encode('second'), 'pass2');
+      const block2 = await createDataBlock(
+        new TextEncoder().encode('second'),
+        'pass2'
+      );
       const blob2 = appendBlock(blob1, block2);
 
       expect(blob2.length).toBeGreaterThan(blob1.length);
@@ -217,10 +244,16 @@ describe('DataBlob', () => {
     });
 
     it('should preserve existing data', async () => {
-      const block1 = await createDataBlock(new TextEncoder().encode('preserved'), 'pass');
+      const block1 = await createDataBlock(
+        new TextEncoder().encode('preserved'),
+        'pass'
+      );
       const blob1 = assembleDataBlob([block1]);
 
-      const block2 = await createDataBlock(new TextEncoder().encode('new'), 'pass');
+      const block2 = await createDataBlock(
+        new TextEncoder().encode('new'),
+        'pass'
+      );
       const blob2 = appendBlock(blob1, block2);
 
       // Original blob should be at start of new blob
@@ -231,7 +264,10 @@ describe('DataBlob', () => {
 
   describe('statistical properties', () => {
     it('should have padding sizes following Pareto-like distribution', async () => {
-      const block = await createDataBlock(new TextEncoder().encode('test'), 'pass');
+      const block = await createDataBlock(
+        new TextEncoder().encode('test'),
+        'pass'
+      );
 
       const blobSizes: number[] = [];
       for (let i = 0; i < 50; i++) {

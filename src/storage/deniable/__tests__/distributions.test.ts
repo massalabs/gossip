@@ -96,8 +96,7 @@ describe('distributions', () => {
 
       // Count values within [20MB, 50MB] (around 35MB mean)
       const inRange = sizes.filter(
-        (s) =>
-          s >= 20 * 1024 * 1024 && s <= 50 * 1024 * 1024,
+        s => s >= 20 * 1024 * 1024 && s <= 50 * 1024 * 1024
       ).length;
 
       // Expect most values to be in this range
@@ -186,7 +185,7 @@ describe('distributions', () => {
 
       // Count values in [5MB, 20MB] (near minimum)
       const nearMin = sizes.filter(
-        (s) => s >= PADDING_SIZE_MIN && s <= 20 * 1024 * 1024,
+        s => s >= PADDING_SIZE_MIN && s <= 20 * 1024 * 1024
       ).length;
 
       // With α=1.25, most values should be near x_min

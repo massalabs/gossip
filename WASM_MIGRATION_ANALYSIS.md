@@ -9,22 +9,26 @@ After analyzing the deniable storage implementation, several critical operations
 ## 🔴 HIGH PRIORITY - Should Move to WASM
 
 ### 1. **Statistical Distributions** (`core/distributions.ts`)
+
 **Current:** JavaScript Box-Muller & Pareto implementation
 **Location:** `src/storage/deniable/core/distributions.ts`
 
 **Why move to WASM:**
+
 - ✅ **Performance:** Called frequently (every block/padding generation)
 - ✅ **Reliability:** Floating-point precision issues in JS
 - ✅ **Security:** Rust's deterministic math prevents timing variations
 - ✅ **Quality:** Better random number generation with `rand` crate
 
 **Functions to migrate:**
+
 ```typescript
 generateBlockSize(): number  // Log-Normal distribution
 generatePaddingSize(): number // Pareto distribution
 ```
 
 **Rust equivalent:**
+
 ```rust
 // Using `rand` and `rand_distr` crates
 pub fn generate_block_size() -> usize {
@@ -45,15 +49,18 @@ pub fn generate_padding_size() -> usize {
 ---
 
 ### 2. **Secure Memory Operations** (`utils/memory.ts`)
+
 **Current:** JavaScript buffer overwrites
 **Location:** `src/storage/deniable/utils/memory.ts`
 
 **Why move to WASM:**
+
 - ✅ **Security:** JS can't prevent compiler optimizations removing "dead" overwrites
 - ✅ **Reliability:** Rust's `zeroize` crate provides guaranteed memory wiping
 - ✅ **Hardware:** Can use CPU instructions (e.g., `memset_s`)
 
 **Functions to migrate:**
+
 ```typescript
 secureWipe(buffer: Uint8Array): void
 secureZero(buffer: Uint8Array): void
@@ -61,6 +68,7 @@ wipeAll(...buffers: Uint8Array[]): void
 ```
 
 **Rust equivalent:**
+
 ```rust
 use zeroize::Zeroize;
 
@@ -80,20 +88,24 @@ pub fn secure_wipe(mut buffer: &mut [u8]) {
 ---
 
 ### 3. **Timing-Safe Comparison** (`utils/timing.ts`)
+
 **Current:** JavaScript XOR-based comparison
 **Location:** `src/storage/deniable/utils/timing.ts`
 
 **Why move to WASM:**
+
 - ✅ **Security:** JS JIT optimizations can introduce timing variations
 - ✅ **Reliability:** Rust's `subtle` crate provides constant-time guarantees
 - ✅ **Performance:** SIMD operations in Rust
 
 **Functions to migrate:**
+
 ```typescript
 timingSafeEqual(a: Uint8Array, b: Uint8Array): boolean
 ```
 
 **Rust equivalent:**
+
 ```rust
 use subtle::ConstantTimeEq;
 
@@ -109,20 +121,27 @@ pub fn timing_safe_equal(a: &[u8], b: &[u8]) -> bool {
 ## 🟡 MEDIUM PRIORITY - Consider Moving to WASM
 
 ### 4. **Block Scanning** (in `DeniableStorage.unlockSession()`)
+
 **Current:** JavaScript linear scan through data blob
 **Location:** `src/storage/deniable/DeniableStorage.ts:151-182`
 
 **Why move to WASM:**
+
 - ✅ **Performance:** Scanning 600MB+ of data
 - ✅ **Efficiency:** SIMD can scan 16-32 bytes at once
 - ⚠️ **Complexity:** Moderate implementation effort
 
 **Current code:**
+
 ```typescript
 for (let i = searchStart; i < searchEnd - 4; i++) {
   const view = new DataView(dataBlob.buffer, i, 4);
   const size = view.getUint32(0, false);
-  if (size === sessionAddress.blockSize && size > 20 && size < 256 * 1024 * 1024) {
+  if (
+    size === sessionAddress.blockSize &&
+    size > 20 &&
+    size < 256 * 1024 * 1024
+  ) {
     blockStart = i;
     break;
   }
@@ -130,6 +149,7 @@ for (let i = searchStart; i < searchEnd - 4; i++) {
 ```
 
 **Rust equivalent:**
+
 ```rust
 pub fn find_block_header(
     blob: &[u8],
@@ -152,25 +172,32 @@ pub fn find_block_header(
 ---
 
 ### 5. **Slot Derivation** (`core/AddressingBlob.ts`)
+
 **Current:** Multiple Argon2id calls + JS array operations
 **Location:** `src/storage/deniable/core/AddressingBlob.ts:60-123`
 
 **Why move to WASM:**
+
 - ✅ **Performance:** Called on every session operation
 - ✅ **Atomicity:** Single WASM call vs multiple round-trips
 - ⚠️ **Complexity:** Already uses WASM crypto, just needs aggregation
 
 **Current code:**
+
 ```typescript
 const indices: number[] = [];
 // ... multiple WASM calls with counter ...
 while (indices.length < SLOTS_PER_SESSION) {
-  const key = await generateEncryptionKeyFromSeed(`${password}:${counter}`, salt);
+  const key = await generateEncryptionKeyFromSeed(
+    `${password}:${counter}`,
+    salt
+  );
   // Process bytes...
 }
 ```
 
 **Rust equivalent:**
+
 ```rust
 pub fn derive_slot_indices(password: &str, slot_count: usize) -> Vec<u16> {
     let mut indices = HashSet::new();
@@ -194,14 +221,18 @@ pub fn derive_slot_indices(password: &str, slot_count: usize) -> Vec<u16> {
 ## 🟢 LOW PRIORITY - Keep in JavaScript
 
 ### 6. **Validation Functions** (`utils/validation.ts`)
+
 **Keep in JS because:**
+
 - ❌ Simple string/type checks
 - ❌ Better error messages in JS
 - ❌ No performance benefit from WASM
 - ❌ Easier to maintain and modify
 
 ### 7. **DeniableStorage Orchestration** (`DeniableStorage.ts`)
+
 **Keep in JS because:**
+
 - ❌ High-level business logic
 - ❌ Better suited for async/await patterns
 - ❌ Easier debugging and error handling
@@ -211,13 +242,13 @@ pub fn derive_slot_indices(password: &str, slot_count: usize) -> Vec<u16> {
 
 ## 📊 Performance Impact Estimation
 
-| Operation | Current (JS) | With WASM | Speedup |
-|-----------|-------------|-----------|---------|
-| Generate distributions | ~100 µs | ~5-10 µs | **10-20x** |
-| Secure memory wipe | ~1 ms (not guaranteed) | ~200 µs (guaranteed) | **5x + security** |
-| Timing-safe compare | ~10 µs (variable) | ~5 µs (constant) | **2x + security** |
-| Block scanning (600MB) | ~50-100 ms | ~5-10 ms | **10x** |
-| Slot derivation | ~5-10 ms | ~1-2 ms | **5x** |
+| Operation              | Current (JS)           | With WASM            | Speedup           |
+| ---------------------- | ---------------------- | -------------------- | ----------------- |
+| Generate distributions | ~100 µs                | ~5-10 µs             | **10-20x**        |
+| Secure memory wipe     | ~1 ms (not guaranteed) | ~200 µs (guaranteed) | **5x + security** |
+| Timing-safe compare    | ~10 µs (variable)      | ~5 µs (constant)     | **2x + security** |
+| Block scanning (600MB) | ~50-100 ms             | ~5-10 ms             | **10x**           |
+| Slot derivation        | ~5-10 ms               | ~1-2 ms              | **5x**            |
 
 **Total Impact:** 20-50% faster session operations, significantly better security guarantees
 
@@ -226,15 +257,18 @@ pub fn derive_slot_indices(password: &str, slot_count: usize) -> Vec<u16> {
 ## 🎯 Recommended Implementation Plan
 
 ### Phase A: Critical Security (Week 1)
+
 1. ✅ `secure_wipe()` - Guaranteed memory wiping
 2. ✅ `timing_safe_equal()` - Constant-time comparison
 3. ✅ `generate_block_size()` / `generate_padding_size()` - Better RNG
 
 ### Phase B: Performance (Week 2)
+
 4. ✅ `find_block_header()` - Fast block scanning
 5. ✅ `derive_slot_indices()` - Atomic slot derivation
 
 ### Phase C: Polish (Week 3)
+
 6. ✅ Integration tests
 7. ✅ Benchmark comparisons
 8. ✅ Documentation
@@ -244,6 +278,7 @@ pub fn derive_slot_indices(password: &str, slot_count: usize) -> Vec<u16> {
 ## 🔧 Implementation Notes
 
 ### Required Rust Crates
+
 ```toml
 [dependencies]
 rand = "0.8"
@@ -254,6 +289,7 @@ getrandom = "0.2"   # For cryptographic RNG
 ```
 
 ### WASM Bindings
+
 ```rust
 #[wasm_bindgen]
 pub fn generate_block_size() -> u32 { /* ... */ }
@@ -279,15 +315,15 @@ pub fn derive_slot_indices(password: &str) -> Vec<u16> { /* ... */ }
 ## ✅ Summary
 
 **Must migrate to WASM:**
+
 1. Statistical distributions (performance + reliability)
 2. Secure memory operations (security guarantee)
 3. Timing-safe comparison (security guarantee)
 
-**Should migrate to WASM:**
-4. Block scanning (performance)
-5. Slot derivation (performance + atomicity)
+**Should migrate to WASM:** 4. Block scanning (performance) 5. Slot derivation (performance + atomicity)
 
 **Keep in JavaScript:**
+
 - Validation (simplicity)
 - Orchestration (maintainability)
 

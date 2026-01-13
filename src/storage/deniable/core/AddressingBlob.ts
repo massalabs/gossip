@@ -59,13 +59,10 @@ export function createAddressingBlob(): Uint8Array {
  * console.log(indices[0]); // e.g., 42391
  * ```
  */
-export async function deriveSlotIndices(
-  password: string,
-): Promise<number[]> {
+export async function deriveSlotIndices(password: string): Promise<number[]> {
   // Use WASM EncryptionKey.from_seed for Argon2id-based derivation
-  const { generateEncryptionKeyFromSeed } = await import(
-    '../../../wasm/encryption'
-  );
+  const { generateEncryptionKeyFromSeed } =
+    await import('../../../wasm/encryption');
 
   // Fixed salt for slot derivation (deterministic per password)
   const salt = new TextEncoder().encode('deniable-storage-slot-v1');
@@ -100,10 +97,17 @@ export async function deriveSlotIndices(
   let counter = 1;
   while (indices.length < SLOTS_PER_SESSION) {
     const extendedPassword = `${password}:${counter}`;
-    const extraKey = await generateEncryptionKeyFromSeed(extendedPassword, salt);
+    const extraKey = await generateEncryptionKeyFromSeed(
+      extendedPassword,
+      salt
+    );
     const extraBytes = extraKey.to_bytes();
 
-    for (let i = 0; i < extraBytes.length - 1 && indices.length < SLOTS_PER_SESSION; i += 2) {
+    for (
+      let i = 0;
+      i < extraBytes.length - 1 && indices.length < SLOTS_PER_SESSION;
+      i += 2
+    ) {
       const index = (extraBytes[i] << 8) | extraBytes[i + 1];
       if (!seenIndices.has(index)) {
         indices.push(index);
@@ -116,7 +120,7 @@ export async function deriveSlotIndices(
     // Safety check to avoid infinite loop
     if (counter > 10) {
       throw new Error(
-        `Failed to derive enough unique slot indices (got ${indices.length}, need ${SLOTS_PER_SESSION})`,
+        `Failed to derive enough unique slot indices (got ${indices.length}, need ${SLOTS_PER_SESSION})`
       );
     }
   }
@@ -146,13 +150,10 @@ export async function writeSlot(
   blob: Uint8Array,
   slotIndex: number,
   address: SessionAddress,
-  password: string,
+  password: string
 ): Promise<void> {
-  const {
-    generateEncryptionKeyFromSeed,
-    generateNonce,
-    encryptAead,
-  } = await import('../../../wasm/encryption');
+  const { generateEncryptionKeyFromSeed, generateNonce, encryptAead } =
+    await import('../../../wasm/encryption');
 
   // Validate slot index
   if (slotIndex < 0 || slotIndex >= SLOT_COUNT) {
@@ -184,7 +185,7 @@ export async function writeSlot(
   const maxCiphertextSize = SLOT_SIZE - 16;
   if (ciphertext.length > maxCiphertextSize) {
     throw new Error(
-      `Ciphertext too large for slot: ${ciphertext.length} > ${maxCiphertextSize}`,
+      `Ciphertext too large for slot: ${ciphertext.length} > ${maxCiphertextSize}`
     );
   }
   slotData.set(ciphertext.slice(0, maxCiphertextSize), 16);
@@ -213,12 +214,10 @@ export async function writeSlot(
 export async function readSlot(
   blob: Uint8Array,
   slotIndex: number,
-  password: string,
+  password: string
 ): Promise<SessionAddress | null> {
-  const {
-    generateEncryptionKeyFromSeed,
-    decryptAead,
-  } = await import('../../../wasm/encryption');
+  const { generateEncryptionKeyFromSeed, decryptAead } =
+    await import('../../../wasm/encryption');
   const { Nonce } = await import('../../../wasm/encryption');
 
   // Validate slot index
@@ -283,7 +282,7 @@ export async function readSlot(
  */
 export async function readSlots(
   blob: Uint8Array,
-  password: string,
+  password: string
 ): Promise<SessionAddress | null> {
   // Derive the 46 slot indices from password
   const indices = await deriveSlotIndices(password);
@@ -330,7 +329,7 @@ export async function readSlots(
 export async function writeSessionAddress(
   blob: Uint8Array,
   password: string,
-  address: SessionAddress,
+  address: SessionAddress
 ): Promise<void> {
   // Derive the 46 slot indices from password
   const indices = await deriveSlotIndices(password);

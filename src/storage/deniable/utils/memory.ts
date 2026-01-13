@@ -94,7 +94,7 @@ export function secureZero(buffer: Uint8Array): void {
  */
 export async function withSecureBuffer<T>(
   size: number,
-  callback: (buffer: Uint8Array) => Promise<T> | T,
+  callback: (buffer: Uint8Array) => Promise<T> | T
 ): Promise<T> {
   const buffer = new Uint8Array(size);
 

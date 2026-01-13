@@ -59,7 +59,7 @@ export function validatePassword(password: string): {
  */
 export function validateDataSize(
   data: Uint8Array,
-  maxSize: number = 100 * 1024 * 1024, // 100MB default
+  maxSize: number = 100 * 1024 * 1024 // 100MB default
 ): {
   valid: boolean;
   error?: string;
@@ -147,7 +147,7 @@ export function validateAdapter(adapter: unknown): {
 export function validateBlobSize(
   blob: Uint8Array,
   expectedSize: number,
-  tolerance: number = 0,
+  tolerance: number = 0
 ): {
   valid: boolean;
   error?: string;
