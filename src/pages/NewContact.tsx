@@ -245,38 +245,28 @@ const NewContact: React.FC = () => {
 
       {/* Message Field */}
       <div className="bg-card rounded-xl border border-border p-4 mb-6">
+        <label
+          htmlFor="contact-message"
+          className="block text-sm font-medium text-foreground mb-2"
+        >
+          Announcement message:
+        </label>
         <textarea
           id="contact-message"
           value={message.value}
           onChange={e => handleMessageChange(e.target.value)}
-          placeholder="Contact request message (optional)"
+          placeholder={getDefaultMessage()}
           rows={3}
           maxLength={500}
           className="w-full bg-transparent text-foreground placeholder-muted-foreground focus:outline-none resize-none"
-          aria-label="Contact request message (optional)"
+          aria-label="Announcement message (optional)"
         />
         {message.value && (
-          <div className="flex items-center justify-between mt-2">
-            <button
-              type="button"
-              onClick={() => handleMessageChange(getDefaultMessage())}
-              className="text-xs text-muted-foreground hover:text-primary underline underline-offset-2 transition-colors"
-            >
-              Use default message
-            </button>
+          <div className="flex items-center justify-end mt-2">
             <span className="text-xs text-muted-foreground">
               {message.value.length}/500
             </span>
           </div>
-        )}
-        {!message.value && (
-          <button
-            type="button"
-            onClick={() => handleMessageChange(getDefaultMessage())}
-            className="text-xs text-muted-foreground hover:text-primary underline underline-offset-2 mt-2 transition-colors"
-          >
-            Use default message
-          </button>
         )}
       </div>
 
