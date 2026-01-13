@@ -46,7 +46,6 @@ export type {
   DeniableStorageConfig,
   StorageAdapter,
   UnlockResult,
-  SessionMetadata,
   StorageStats,
 } from './types';
 

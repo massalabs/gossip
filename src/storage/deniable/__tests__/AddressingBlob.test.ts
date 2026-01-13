@@ -30,7 +30,7 @@ describe('AddressingBlob', () => {
       const blob = createAddressingBlob();
 
       // Check that not all bytes are zero (extremely unlikely with random data)
-      const allZeros = blob.every((byte) => byte === 0);
+      const allZeros = blob.every(byte => byte === 0);
       expect(allZeros).toBe(false);
 
       // Check that there's variety in the data (basic entropy check)
@@ -83,7 +83,7 @@ describe('AddressingBlob', () => {
 
       // Count different indices
       const set1 = new Set(indices1);
-      const differences = indices2.filter((idx) => !set1.has(idx)).length;
+      const differences = indices2.filter(idx => !set1.has(idx)).length;
 
       // Expect most indices to be different
       expect(differences).toBeGreaterThan(40);
@@ -111,10 +111,10 @@ describe('AddressingBlob', () => {
       const indices = await deriveSlotIndices('distribution-test');
 
       // Divide slot space into 4 quartiles
-      const quartile1 = indices.filter((i) => i < 16384).length;
-      const quartile2 = indices.filter((i) => i >= 16384 && i < 32768).length;
-      const quartile3 = indices.filter((i) => i >= 32768 && i < 49152).length;
-      const quartile4 = indices.filter((i) => i >= 49152).length;
+      const quartile1 = indices.filter(i => i < 16384).length;
+      const quartile2 = indices.filter(i => i >= 16384 && i < 32768).length;
+      const quartile3 = indices.filter(i => i >= 32768 && i < 49152).length;
+      const quartile4 = indices.filter(i => i >= 49152).length;
 
       // Each quartile should have some indices (not perfect, but reasonable)
       // With 46 indices and 4 quartiles, expect ~11-12 per quartile
@@ -122,9 +122,12 @@ describe('AddressingBlob', () => {
       expect(quartile1 + quartile2 + quartile3 + quartile4).toBe(46);
 
       // At least 3 out of 4 quartiles should have some indices
-      const nonEmptyQuartiles = [quartile1, quartile2, quartile3, quartile4].filter(
-        (q) => q > 0,
-      ).length;
+      const nonEmptyQuartiles = [
+        quartile1,
+        quartile2,
+        quartile3,
+        quartile4,
+      ].filter(q => q > 0).length;
       expect(nonEmptyQuartiles).toBeGreaterThanOrEqual(3);
     });
 
@@ -149,19 +152,19 @@ describe('AddressingBlob', () => {
     it('should write and read a session address', async () => {
       const blob = createAddressingBlob();
       const address: SessionAddress = {
-        offset: 2097152,
-        blockSize: 35000000,
+        rootBlockOffset: 2097152,
+        rootBlockSize: 35000000,
+        sessionKeyDerivationSalt: crypto.getRandomValues(new Uint8Array(16)),
         createdAt: Date.now(),
         updatedAt: Date.now(),
-        salt: crypto.getRandomValues(new Uint8Array(16)),
       };
 
       await writeSlot(blob, 1000, address, 'test-password');
       const readAddress = await readSlot(blob, 1000, 'test-password');
 
       expect(readAddress).not.toBeNull();
-      expect(readAddress?.offset).toBe(address.offset);
-      expect(readAddress?.blockSize).toBe(address.blockSize);
+      expect(readAddress?.rootBlockOffset).toBe(address.rootBlockOffset);
+      expect(readAddress?.rootBlockSize).toBe(address.rootBlockSize);
       expect(readAddress?.createdAt).toBe(address.createdAt);
       expect(readAddress?.updatedAt).toBe(address.updatedAt);
     });
@@ -169,11 +172,11 @@ describe('AddressingBlob', () => {
     it('should return null for wrong password', async () => {
       const blob = createAddressingBlob();
       const address: SessionAddress = {
-        offset: 1024,
-        blockSize: 1000000,
+        rootBlockOffset: 1024,
+        rootBlockSize: 1000000,
+        sessionKeyDerivationSalt: new Uint8Array(16),
         createdAt: Date.now(),
         updatedAt: Date.now(),
-        salt: new Uint8Array(16),
       };
 
       await writeSlot(blob, 500, address, 'correct-password');
@@ -203,29 +206,29 @@ describe('AddressingBlob', () => {
     it('should write to all 46 slots and read successfully', async () => {
       const blob = createAddressingBlob();
       const address: SessionAddress = {
-        offset: 5000000,
-        blockSize: 50000000,
+        rootBlockOffset: 5000000,
+        rootBlockSize: 50000000,
+        sessionKeyDerivationSalt: crypto.getRandomValues(new Uint8Array(16)),
         createdAt: Date.now(),
         updatedAt: Date.now(),
-        salt: crypto.getRandomValues(new Uint8Array(16)),
       };
 
       await writeSessionAddress(blob, 'my-password', address);
       const readAddress = await readSlots(blob, 'my-password');
 
       expect(readAddress).not.toBeNull();
-      expect(readAddress?.offset).toBe(address.offset);
-      expect(readAddress?.blockSize).toBe(address.blockSize);
+      expect(readAddress?.rootBlockOffset).toBe(address.rootBlockOffset);
+      expect(readAddress?.rootBlockSize).toBe(address.rootBlockSize);
     });
 
     it('should return null with wrong password (timing-safe)', async () => {
       const blob = createAddressingBlob();
       const address: SessionAddress = {
-        offset: 1024,
-        blockSize: 1000000,
+        rootBlockOffset: 1024,
+        rootBlockSize: 1000000,
+        sessionKeyDerivationSalt: new Uint8Array(16),
         createdAt: Date.now(),
         updatedAt: Date.now(),
-        salt: new Uint8Array(16),
       };
 
       await writeSessionAddress(blob, 'correct-password', address);
@@ -245,19 +248,19 @@ describe('AddressingBlob', () => {
       const blob = createAddressingBlob();
 
       const address1: SessionAddress = {
-        offset: 1000,
-        blockSize: 10000,
+        rootBlockOffset: 1000,
+        rootBlockSize: 10000,
+        sessionKeyDerivationSalt: new Uint8Array(16),
         createdAt: Date.now(),
         updatedAt: Date.now(),
-        salt: new Uint8Array(16),
       };
 
       const address2: SessionAddress = {
-        offset: 2000,
-        blockSize: 20000,
+        rootBlockOffset: 2000,
+        rootBlockSize: 20000,
+        sessionKeyDerivationSalt: new Uint8Array(16),
         createdAt: Date.now(),
         updatedAt: Date.now(),
-        salt: new Uint8Array(16),
       };
 
       await writeSessionAddress(blob, 'password1', address1);
@@ -266,18 +269,18 @@ describe('AddressingBlob', () => {
       const read1 = await readSlots(blob, 'password1');
       const read2 = await readSlots(blob, 'password2');
 
-      expect(read1?.offset).toBe(1000);
-      expect(read2?.offset).toBe(2000);
+      expect(read1?.rootBlockOffset).toBe(1000);
+      expect(read2?.rootBlockOffset).toBe(2000);
     });
 
     it('should be resilient to slot corruption (redundancy)', async () => {
       const blob = createAddressingBlob();
       const address: SessionAddress = {
-        offset: 3000,
-        blockSize: 30000,
+        rootBlockOffset: 3000,
+        rootBlockSize: 30000,
+        sessionKeyDerivationSalt: new Uint8Array(16),
         createdAt: Date.now(),
         updatedAt: Date.now(),
-        salt: new Uint8Array(16),
       };
 
       await writeSessionAddress(blob, 'test-password', address);
@@ -286,13 +289,15 @@ describe('AddressingBlob', () => {
       const indices = await deriveSlotIndices('test-password');
       for (let i = 0; i < 10; i++) {
         const slotOffset = indices[i] * SLOT_SIZE;
-        crypto.getRandomValues(blob.subarray(slotOffset, slotOffset + SLOT_SIZE));
+        crypto.getRandomValues(
+          blob.subarray(slotOffset, slotOffset + SLOT_SIZE)
+        );
       }
 
       // Should still be able to read from remaining 36 slots
       const readAddress = await readSlots(blob, 'test-password');
       expect(readAddress).not.toBeNull();
-      expect(readAddress?.offset).toBe(3000);
+      expect(readAddress?.rootBlockOffset).toBe(3000);
     });
   });
 });

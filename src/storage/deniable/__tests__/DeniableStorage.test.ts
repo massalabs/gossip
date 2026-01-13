@@ -43,6 +43,17 @@ class MemoryAdapter implements StorageAdapter {
     return this.dataBlob?.length || 0;
   }
 
+  async appendToDataBlob(data: Uint8Array): Promise<void> {
+    if (!this.dataBlob) {
+      this.dataBlob = new Uint8Array(data);
+    } else {
+      const newBlob = new Uint8Array(this.dataBlob.length + data.length);
+      newBlob.set(this.dataBlob, 0);
+      newBlob.set(data, this.dataBlob.length);
+      this.dataBlob = newBlob;
+    }
+  }
+
   async secureWipe(): Promise<void> {
     this.addressingBlob = null;
     this.dataBlob = null;
@@ -107,7 +118,9 @@ describe('DeniableStorage', () => {
       // Verify session can be unlocked
       const result = await storage.unlockSession('my-password');
       expect(result).not.toBeNull();
-      expect(new TextDecoder().decode(result!.data)).toBe('Secret session data');
+      expect(new TextDecoder().decode(result!.data)).toBe(
+        'Secret session data'
+      );
     });
 
     it('should create multiple sessions with different passwords', async () => {
@@ -149,11 +162,13 @@ describe('DeniableStorage', () => {
     });
 
     it('should throw if not initialized', async () => {
-      const uninitStorage = new DeniableStorage({ adapter: new MemoryAdapter() });
+      const uninitStorage = new DeniableStorage({
+        adapter: new MemoryAdapter(),
+      });
       const data = new TextEncoder().encode('test');
 
       await expect(uninitStorage.createSession('pass', data)).rejects.toThrow(
-        'Storage not initialized',
+        'Storage not initialized'
       );
     });
   });
@@ -197,7 +212,9 @@ describe('DeniableStorage', () => {
 
       const result = await storage.unlockSession('unicode-pass');
       expect(result).not.toBeNull();
-      expect(new TextDecoder().decode(result!.data)).toBe('Hello 🌍! Привет! 你好!');
+      expect(new TextDecoder().decode(result!.data)).toBe(
+        'Hello 🌍! Привет! 你好!'
+      );
     });
   });
 
@@ -223,7 +240,7 @@ describe('DeniableStorage', () => {
       await storage.createSession('password', data);
 
       // Wait a bit to ensure different timestamp
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      await new Promise(resolve => setTimeout(resolve, 10));
 
       const newData = new TextEncoder().encode('new data');
       await storage.updateSession('password', newData);
@@ -250,7 +267,7 @@ describe('DeniableStorage', () => {
       const data = new TextEncoder().encode('data');
 
       await expect(storage.updateSession('non-existent', data)).rejects.toThrow(
-        'Session not found',
+        'Session not found'
       );
     });
 
@@ -261,7 +278,10 @@ describe('DeniableStorage', () => {
       const result1 = await storage.unlockSession('password');
       const originalCreatedAt = result1!.createdAt;
 
-      await storage.updateSession('password', new TextEncoder().encode('new data'));
+      await storage.updateSession(
+        'password',
+        new TextEncoder().encode('new data')
+      );
 
       const result2 = await storage.unlockSession('password');
       expect(result2!.createdAt).toBe(originalCreatedAt);
@@ -291,7 +311,7 @@ describe('DeniableStorage', () => {
 
     it('should throw if session does not exist', async () => {
       await expect(storage.deleteSession('non-existent')).rejects.toThrow(
-        'Session not found',
+        'Session not found'
       );
     });
 
@@ -383,7 +403,9 @@ describe('DeniableStorage', () => {
       for (let i = 0; i < sessionCount; i++) {
         const result = await storage.unlockSession(`password-${i}`);
         expect(result).not.toBeNull();
-        expect(new TextDecoder().decode(result!.data)).toBe(`Session ${i} data`);
+        expect(new TextDecoder().decode(result!.data)).toBe(
+          `Session ${i} data`
+        );
       }
     });
 
@@ -394,7 +416,10 @@ describe('DeniableStorage', () => {
       await storage.createSession('pass3', new TextEncoder().encode('data3'));
 
       // Update
-      await storage.updateSession('pass2', new TextEncoder().encode('updated2'));
+      await storage.updateSession(
+        'pass2',
+        new TextEncoder().encode('updated2')
+      );
 
       // Delete
       await storage.deleteSession('pass1');
@@ -404,15 +429,15 @@ describe('DeniableStorage', () => {
 
       // Verify final state
       expect(await storage.unlockSession('pass1')).toBeNull();
-      expect(new TextDecoder().decode((await storage.unlockSession('pass2'))!.data)).toBe(
-        'updated2',
-      );
-      expect(new TextDecoder().decode((await storage.unlockSession('pass3'))!.data)).toBe(
-        'data3',
-      );
-      expect(new TextDecoder().decode((await storage.unlockSession('pass4'))!.data)).toBe(
-        'data4',
-      );
+      expect(
+        new TextDecoder().decode((await storage.unlockSession('pass2'))!.data)
+      ).toBe('updated2');
+      expect(
+        new TextDecoder().decode((await storage.unlockSession('pass3'))!.data)
+      ).toBe('data3');
+      expect(
+        new TextDecoder().decode((await storage.unlockSession('pass4'))!.data)
+      ).toBe('data4');
     });
   });
 
@@ -427,7 +452,9 @@ describe('DeniableStorage', () => {
 
       const result = await storage.unlockSession('');
       expect(result).not.toBeNull();
-      expect(new TextDecoder().decode(result!.data)).toBe('data with empty password');
+      expect(new TextDecoder().decode(result!.data)).toBe(
+        'data with empty password'
+      );
     });
 
     it('should handle very long password', async () => {
@@ -451,9 +478,18 @@ describe('DeniableStorage', () => {
     });
 
     it('should distinguish similar passwords', async () => {
-      await storage.createSession('password', new TextEncoder().encode('data1'));
-      await storage.createSession('password1', new TextEncoder().encode('data2'));
-      await storage.createSession('password ', new TextEncoder().encode('data3'));
+      await storage.createSession(
+        'password',
+        new TextEncoder().encode('data1')
+      );
+      await storage.createSession(
+        'password1',
+        new TextEncoder().encode('data2')
+      );
+      await storage.createSession(
+        'password ',
+        new TextEncoder().encode('data3')
+      );
 
       const result1 = await storage.unlockSession('password');
       const result2 = await storage.unlockSession('password1');
