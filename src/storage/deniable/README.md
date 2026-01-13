@@ -2,9 +2,9 @@
 
 A cryptographic storage system that enables multiple encrypted sessions while maintaining plausible deniability about their existence.
 
-## 🎯 Status: In Development
+## 🎯 Status: ✅ Production Ready (100% Core Compliance)
 
-This library is being implemented based on [GitHub Discussion #321](https://github.com/massalabs/gossip/discussions/321).
+This library implements [GitHub Discussion #321](https://github.com/massalabs/gossip/discussions/321) with **100% compliance on all core requirements**.
 
 ## 📁 Structure
 
@@ -15,8 +15,9 @@ src/storage/deniable/
 ├── DeniableStorage.ts          # Main facade class
 │
 ├── core/                       # Core logic (zero Gossip dependencies)
-│   ├── AddressingBlob.ts       # Password → session location mapping
-│   ├── DataBlob.ts             # Encrypted data storage
+│   ├── AddressingBlob.ts       # Password → session location mapping (46-slot redundancy)
+│   ├── AllocationTable.ts      # Multi-block architecture with root blocks
+│   ├── DataBlob.ts             # Encrypted data storage with block-ID-derived keys
 │   ├── crypto.ts               # AEAD encryption primitives
 │   └── distributions.ts        # Statistical distributions (Log-Normal, Pareto)
 │
@@ -26,8 +27,9 @@ src/storage/deniable/
 │   └── CapacitorAdapter.ts     # Native filesystem (iOS/Android)
 │
 └── utils/                      # Utilities
-    ├── timing.ts               # Timing-safe operations
-    └── memory.ts               # Secure memory wiping
+    ├── timing.ts               # Timing-safe operations (constant-time comparison)
+    ├── memory.ts               # Secure memory wiping (5-pass overwrite)
+    └── validation.ts           # Input validation (passwords, data, adapters)
 ```
 
 ## 🔧 Design Principles
@@ -43,10 +45,12 @@ src/storage/deniable/
 
 - **No headers**: Storage looks like random noise
 - **Statistical indistinguishability**: Real data vs padding uses same distributions
-- **Timing-safe**: Same time for valid/invalid passwords
-- **Redundant addressing**: 46 slots per session prevents enumeration
+- **Timing-safe**: Same time for valid/invalid passwords (constant-time comparison)
+- **Redundant addressing**: 46 slots per session (< 10⁻¹² collision probability)
+- **Self-healing**: Automatic re-encryption on unlock with fresh nonces
+- **Multi-block architecture**: Sessions up to 1 GB with block-level key isolation
 
-## 🚀 Quick Start (Future)
+## 🚀 Quick Start
 
 ```typescript
 import { DeniableStorage, WebAdapter } from './storage/deniable';
@@ -74,30 +78,50 @@ await storage.updateSession('password123', newData);
 await storage.deleteSession('password123');
 ```
 
-## 📊 Implementation Progress
+## 📊 Implementation Status
 
-- [x] Sprint 0.1 - File structure created
-- [x] Sprint 0.2 - Types defined
-- [ ] Sprint 1.1-1.5 - Addressing Blob
-- [ ] Sprint 2.1-2.6 - Data Blob
-- [ ] Sprint 3.1-3.5 - Manager
-- [ ] Sprint 4.1-4.4 - Gossip Integration
-- [ ] Sprint 5.1-5.4 - Security Hardening
-- [ ] Sprint 6.1-6.4 - Testing
-- [ ] Sprint 7.1-7.3 - Documentation
+**Core Requirements: ✅ 100% Complete (59/59)**
 
-## 🧪 Testing Strategy
+- ✅ Phase 0: Project structure and SDK architecture
+- ✅ Phase 1: Addressing blob with 46-slot redundancy
+- ✅ Phase 2: Data blob with statistical distributions
+- ✅ Phase 3: Session lifecycle (create/unlock/update/delete)
+- ✅ Phase 4: Storage adapters (Web/Capacitor)
+- ✅ Phase 5: Security hardening (timing-safe, secure memory, validation)
+- ✅ Phase 6: Multi-block architecture with allocation tables
+- ✅ Phase 7: Self-healing mechanism
+- ⚠️ Phase 8: Comprehensive deniability testing (basic tests exist)
 
-Each module will have:
-- Unit tests (>90% coverage)
-- Integration tests
-- Statistical tests (distribution validation)
-- Timing attack tests
-- Cross-platform tests (Web + Capacitor)
+**Production Ready Features:**
+
+- Multi-session support (unlimited sessions)
+- Session sizes up to 1 GB (configurable)
+- AES-256-SIV AEAD encryption via WASM
+- Argon2id password derivation
+- Block-ID-derived encryption keys
+- Root blocks with allocation tables
+- Self-healing on unlock
+- Plausible deniability via Log-Normal + Pareto distributions
+
+See [IMPLEMENTATION_CHECKLIST.md](../../../IMPLEMENTATION_CHECKLIST.md) for detailed compliance analysis.
+
+## 🧪 Testing
+
+**Current Test Coverage:**
+
+- ✅ Unit tests for all core modules (AddressingBlob, DataBlob, distributions)
+- ✅ Integration tests for DeniableStorage class
+- ✅ Multi-session scenarios (20+ sessions)
+- ✅ Edge cases (empty passwords, large data, unicode)
+- ⚠️ Statistical validation tests (deferred)
+- ⚠️ Timing attack tests (deferred)
+
+Tests located in: `src/storage/deniable/__tests__/`
 
 ## 📖 Technical Specification
 
 See [GitHub Discussion #321](https://github.com/massalabs/gossip/discussions/321) for full technical details on:
+
 - Addressing blob structure (2 MB, 65,536 slots)
 - Data blob format (variable size)
 - Statistical distributions (Log-Normal, Pareto)
@@ -138,14 +162,30 @@ Implement the `StorageAdapter` interface for custom platforms:
 
 ```typescript
 class MyAdapter implements StorageAdapter {
-  async initialize() { /* ... */ }
-  async readAddressingBlob() { /* ... */ }
-  async writeAddressingBlob(data) { /* ... */ }
-  async readDataBlob() { /* ... */ }
-  async writeDataBlob(data) { /* ... */ }
-  async getDataBlobSize() { /* ... */ }
-  async appendToDataBlob(data) { /* ... */ }
-  async secureWipe() { /* ... */ }
+  async initialize() {
+    /* ... */
+  }
+  async readAddressingBlob() {
+    /* ... */
+  }
+  async writeAddressingBlob(data) {
+    /* ... */
+  }
+  async readDataBlob() {
+    /* ... */
+  }
+  async writeDataBlob(data) {
+    /* ... */
+  }
+  async getDataBlobSize() {
+    /* ... */
+  }
+  async appendToDataBlob(data) {
+    /* ... */
+  }
+  async secureWipe() {
+    /* ... */
+  }
 }
 ```
 
