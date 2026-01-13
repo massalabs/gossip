@@ -23,6 +23,7 @@ import IOSKeyboardWrapper from './components/ui/IOSKeyboardWrapper';
 import { ROUTES } from './constants/routes';
 import { useOnlineStore } from './stores/useOnlineStore.tsx';
 import { useTheme } from './hooks/useTheme.ts';
+import { useScreenshotProtection } from './hooks/useScreenshotProtection';
 
 const AppContent: React.FC = () => {
   const { isLoading, userProfile } = useAccountStore();
@@ -72,6 +73,7 @@ const AppContent: React.FC = () => {
 function App() {
   const { initTheme } = useTheme();
   const { initOnlineStore } = useOnlineStore();
+  useScreenshotProtection();
 
   const [ready, setReady] = useState(false);
 

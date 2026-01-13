@@ -29,6 +29,10 @@ const DebugSettings: React.FC = () => {
   const setShowDebugOption = useAppStore(s => s.setShowDebugOption);
   const debugOverlayVisible = useAppStore(s => s.debugOverlayVisible);
   const setDebugOverlayVisible = useAppStore(s => s.setDebugOverlayVisible);
+  const disableNativeScreenshot = useAppStore(s => s.disableNativeScreenshot);
+  const setDisableNativeScreenshot = useAppStore(
+    s => s.setDisableNativeScreenshot
+  );
   const { resetAccount, userProfile } = useAccountStore();
   const { isVersionDifferent, handleForceUpdate } = useVersionCheck();
 
@@ -158,19 +162,34 @@ const DebugSettings: React.FC = () => {
             />
           </div>
           {showDebugOption && (
-            <div className="h-[54px] flex items-center px-4 justify-between border-b border-border">
-              <div className="flex items-center flex-1">
-                <Terminal className="text-foreground mr-4" size={20} />
-                <span className="text-base font-medium text-foreground flex-1 text-left">
-                  Show Console Button
-                </span>
+            <>
+              <div className="h-[54px] flex items-center px-4 justify-between border-b border-border">
+                <div className="flex items-center flex-1">
+                  <Terminal className="text-foreground mr-4" size={20} />
+                  <span className="text-base font-medium text-foreground flex-1 text-left">
+                    Show Console Button
+                  </span>
+                </div>
+                <Toggle
+                  checked={debugOverlayVisible}
+                  onChange={setDebugOverlayVisible}
+                  ariaLabel="Show console button"
+                />
               </div>
-              <Toggle
-                checked={debugOverlayVisible}
-                onChange={setDebugOverlayVisible}
-                ariaLabel="Show console button"
-              />
-            </div>
+              <div className="h-[54px] flex items-center px-4 justify-between border-b border-border">
+                <div className="flex items-center flex-1">
+                  <SettingsIconFeather className="text-foreground mr-4" />
+                  <span className="text-base font-medium text-foreground flex-1 text-left">
+                    Disable screenshot protection
+                  </span>
+                </div>
+                <Toggle
+                  checked={disableNativeScreenshot}
+                  onChange={setDisableNativeScreenshot}
+                  ariaLabel="Disable screenshot protection"
+                />
+              </div>
+            </>
           )}
           <Button
             variant="outline"

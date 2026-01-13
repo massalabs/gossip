@@ -23,6 +23,9 @@ interface AppStoreState {
   // Debug overlay visibility
   debugOverlayVisible: boolean;
   setDebugOverlayVisible: (visible: boolean) => void;
+  // Native screenshot protection
+  disableNativeScreenshot: boolean;
+  setDisableNativeScreenshot: (disabled: boolean) => void;
   // Debug console button position
   debugButtonPosition: DebugButtonPosition;
   setDebugButtonPosition: (position: DebugButtonPosition) => void;
@@ -68,6 +71,11 @@ const useAppStoreBase = create<AppStoreState>()(
       debugOverlayVisible: false,
       setDebugOverlayVisible: (visible: boolean) => {
         set({ debugOverlayVisible: visible });
+      },
+      // Native screenshot protection (off by default)
+      disableNativeScreenshot: false,
+      setDisableNativeScreenshot: (disabled: boolean) => {
+        set({ disableNativeScreenshot: disabled });
       },
       // Debug console button position (default: bottom-left)
       debugButtonPosition: { x: 8, y: 80 },
@@ -142,6 +150,7 @@ const useAppStoreBase = create<AppStoreState>()(
         networkName: state.networkName,
         mnsEnabled: state.mnsEnabled,
         mnsDomains: state.mnsDomains,
+        disableNativeScreenshot: state.disableNativeScreenshot,
       }),
     }
   )
