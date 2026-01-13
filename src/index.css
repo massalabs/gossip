@@ -2,6 +2,35 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* Self-hosted fonts - privacy-friendly alternative to Google Fonts */
+@font-face {
+  font-family: 'Roboto';
+  src: url('/fonts/Roboto-VariableFont_wdth,wght.ttf') format('truetype');
+  font-weight: 100 900;
+  font-stretch: 75% 100%;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Roboto';
+  src: url('/fonts/Roboto-Italic-VariableFont_wdth,wght.ttf') format('truetype');
+  font-weight: 100 900;
+  font-stretch: 75% 100%;
+  font-style: italic;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Mozilla Headline';
+  src: url('/fonts/MozillaHeadline-VariableFont_wdth,wght.ttf')
+    format('truetype');
+  font-weight: 100 900;
+  font-stretch: 75% 100%;
+  font-style: normal;
+  font-display: swap;
+}
+
 @theme inline {
   /* Map CSS variables to Tailwind theme values */
   --color-background: var(--background);
