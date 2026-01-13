@@ -28,9 +28,9 @@
 export function timingSafeEqual(a: Uint8Array, b: Uint8Array): boolean {
   if (a.length !== b.length) {
     // Even on length mismatch, scan a fixed amount to avoid timing leak
-    let dummy = 0;
+    let _dummy = 0;
     for (let i = 0; i < 256; i++) {
-      dummy |= i;
+      _dummy |= i;
     }
     return false;
   }
@@ -58,7 +58,7 @@ export function timingSafeEqual(a: Uint8Array, b: Uint8Array): boolean {
  * ```
  */
 export async function constantTimeDelay(minMs: number): Promise<void> {
-  return new Promise((resolve) => {
+  return new Promise(resolve => {
     setTimeout(resolve, minMs);
   });
 }
@@ -82,7 +82,7 @@ export async function constantTimeDelay(minMs: number): Promise<void> {
  */
 export async function timingSafeOperation<T>(
   operation: () => Promise<T>,
-  minMs: number,
+  minMs: number
 ): Promise<T> {
   const startTime = performance.now();
   const result = await operation();
@@ -114,7 +114,7 @@ export async function timingSafeOperation<T>(
 export function constantTimeSelect<T>(
   condition: boolean,
   ifTrue: T,
-  ifFalse: T,
+  ifFalse: T
 ): T {
   // Avoid branch prediction by using arithmetic
   const mask = condition ? 1 : 0;
