@@ -47,7 +47,7 @@ const DiscussionFilterButtons: React.FC<DiscussionFilterButtonsProps> = ({
             }`}
           >
             {option.label}
-            {option.count > 0 ? ` (${option.count})` : ''}
+            {option.count > 0 ? ` ${option.count}` : ''}
           </button>
         ))}
       </div>
