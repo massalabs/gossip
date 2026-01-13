@@ -16,6 +16,7 @@ import { notificationService } from './notifications';
 import { isAppInForeground } from '../utils/appState';
 import { Logger } from '../utils/logs';
 import { BulletinItem } from '../api/messageProtocol/types';
+import { invalidateNonAcknowledgedMessages } from './discussion';
 
 const logger = new Logger('AnnouncementService');
 
@@ -416,6 +417,13 @@ export class AnnouncementService {
         contactUserId
       );
       log.info('created new contact', { contactUserId, name });
+    } else {
+      /* If contact already exists, mark all outgoing messages that are not delivered or read 
+      as failed and remove the encryptedMessage */
+      await invalidateNonAcknowledgedMessages(
+        session.userIdEncoded,
+        contactUserId
+      );
     }
 
     if (!contact) {

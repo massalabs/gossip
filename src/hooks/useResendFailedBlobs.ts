@@ -166,10 +166,6 @@ export function useResendFailedBlobs() {
       const currentRetryMessages = retryMessagesByContactRef.current;
       // Resend failed messages
       if (currentRetryMessages.size > 0) {
-        console.log(
-          'resendFailedBlobs: currentRetryMessages',
-          currentRetryMessages
-        );
         try {
           await messageService.resendMessages(currentRetryMessages, session);
         } catch (err) {

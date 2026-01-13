@@ -10,6 +10,7 @@ import { announcementService } from '../services/announcement.ts';
 import { useResendFailedBlobs } from './useResendFailedBlobs.ts';
 import { DiscussionStatus } from '../db.ts';
 import { handleSessionRefresh } from '../services/refresh.ts';
+import { useAppStore } from '../stores/appStore.tsx';
 
 const SESSION_REFRESH_EVERY_N_CYCLES = 5;
 
@@ -25,18 +26,23 @@ export function useAppStateRefresh() {
   const refreshInterval = useRef<NodeJS.Timeout | null>(null);
   const isInitiating = useRef(false);
   const sessionRefreshCycle = useRef(0);
+  const lockActivated = useAppStore(s => s.lockActivated);
+  const setLockActivated = useAppStore(s => s.setLockActivated);
+  const lockActivatedRef = useRef(lockActivated);
+
   // Trigger synchronization of announcements, messages, and failed blobs
   const triggerSync = useCallback(
     async (session: SessionModule): Promise<void> => {
       if (!userProfile?.userId) return;
-      if (!isOnline || isSyncing.current) return;
+      if (!isOnline || isSyncing.current || lockActivatedRef.current) return;
+      setLockActivated(true);
       isSyncing.current = true;
 
-      if (resendFailedBlobs) {
-        await resendFailedBlobs();
-      }
-
       try {
+        if (resendFailedBlobs) {
+          await resendFailedBlobs();
+        }
+
         await Promise.all([
           announcementService.fetchAndProcessAnnouncements(session),
           messageService.fetchMessages(session),
@@ -63,9 +69,10 @@ export function useAppStateRefresh() {
         );
       } finally {
         isSyncing.current = false;
+        setLockActivated(false);
       }
     },
-    [resendFailedBlobs, isOnline, userProfile?.userId]
+    [resendFailedBlobs, isOnline, userProfile?.userId, setLockActivated]
   );
 
   // Initialize stores, trigger initial sync, and set up refresh interval

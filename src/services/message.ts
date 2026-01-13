@@ -132,8 +132,6 @@ export class MessageService {
           newMessagesCount += storedIds.length;
         }
 
-        console.log('acknowledgedSeekers:', acknowledgedSeekers);
-
         if (acknowledgedSeekers.size > 0) {
           await this.acknowledgeMessages(
             acknowledgedSeekers,

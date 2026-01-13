@@ -8,6 +8,7 @@ import {
 } from '../db';
 import { createSelectors } from './utils/createSelectors';
 import { useAccountStore } from './accountStore';
+import { useAppStore } from './appStore';
 import { messageService } from '../services/message';
 import { liveQuery, Subscription } from 'dexie';
 
@@ -67,6 +68,7 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
   currentContactUserId: null,
   isLoading: false,
   isSending: false,
+
   subscription: null,
   isInitializing: false,
 
@@ -92,7 +94,7 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
       db.messages
         .where('ownerUserId')
         .equals(ownerUserId)
-        .and(m => m.type !== MessageType.KEEP_ALIVE)
+        //.and(m => m.type !== MessageType.KEEP_ALIVE) // comment this line to display keep-alive messages (debug only)
         .sortBy('id')
     );
 
@@ -150,10 +152,16 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
   ) => {
     const { userProfile, session } = useAccountStore.getState();
     const isForward = !!forwardFromMessageId;
-    if (!userProfile?.userId || (!content.trim() && !isForward) || !session)
+    if (
+      useAppStore.getState().lockActivated ||
+      !userProfile?.userId ||
+      (!content.trim() && !isForward) ||
+      !session
+    )
       return;
 
     set({ isSending: true });
+    useAppStore.getState().setLockActivated(true);
 
     try {
       const discussion = await db.getDiscussionByOwnerAndContact(
@@ -242,6 +250,7 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
       throw error;
     } finally {
       set({ isSending: false });
+      useAppStore.getState().setLockActivated(false);
     }
   },
 

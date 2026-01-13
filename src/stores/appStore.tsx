@@ -48,6 +48,9 @@ interface AppStoreState {
     userProfile: UserProfile | null,
     provider: Provider | null
   ) => Promise<void>;
+  // Lock
+  lockActivated: boolean;
+  setLockActivated: (lock: boolean) => void;
 }
 
 const useAppStoreBase = create<AppStoreState>()(
@@ -129,6 +132,10 @@ const useAppStoreBase = create<AppStoreState>()(
           console.error('Error fetching MNS domains:', error);
           set({ mnsDomains: [] });
         }
+      },
+      lockActivated: false,
+      setLockActivated: (lock: boolean) => {
+        set({ lockActivated: lock });
       },
     }),
     {

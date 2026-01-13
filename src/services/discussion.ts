@@ -206,20 +206,7 @@ export async function renewDiscussion(
     console.log(`renewDiscussion: discussion updated with status: ${status}`);
 
     /* Mark all outgoing messages that are not delivered or read as failed and remove the encryptedMessage */
-    await db.messages
-      .where('[ownerUserId+contactUserId]')
-      .equals([ownerUserId, contactUserId])
-      .and(
-        msg =>
-          msg.direction === MessageDirection.OUTGOING &&
-          msg.status !== MessageStatus.DELIVERED &&
-          msg.status !== MessageStatus.READ
-      )
-      .modify({
-        status: MessageStatus.FAILED,
-        encryptedMessage: undefined,
-        seeker: undefined,
-      });
+    await invalidateNonAcknowledgedMessages(ownerUserId, contactUserId);
     console.log(
       `renewDiscussion: all outgoing messages that are not delivered or read have been marked as failed`
     );
@@ -272,4 +259,25 @@ export async function isDiscussionStableState(
   }
 
   return true;
+}
+
+/* Mark all outgoing messages that are not delivered or read as failed and remove the encryptedMessage */
+export async function invalidateNonAcknowledgedMessages(
+  ownerUserId: string,
+  contactUserId: string
+) {
+  await db.messages
+    .where('[ownerUserId+contactUserId]')
+    .equals([ownerUserId, contactUserId])
+    .and(
+      msg =>
+        msg.direction === MessageDirection.OUTGOING &&
+        msg.status !== MessageStatus.DELIVERED &&
+        msg.status !== MessageStatus.READ
+    )
+    .modify({
+      status: MessageStatus.FAILED,
+      encryptedMessage: undefined,
+      seeker: undefined,
+    });
 }

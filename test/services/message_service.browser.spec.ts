@@ -1480,7 +1480,6 @@ describe('Message Service (Browser with Real WASM)', () => {
         .equals([aliceUserId, bobUserId, MessageDirection.OUTGOING])
         .sortBy('id');
 
-      console.log('allAliceMessages:', allAliceMessages);
       expect(
         allAliceMessages.every(m => m.status === MessageStatus.DELIVERED)
       ).toBe(true);
@@ -1986,13 +1985,10 @@ describe('Message Service (Browser with Real WASM)', () => {
         .equals([bobUserId, aliceUserId])
         .and(m => m.direction === MessageDirection.INCOMING)
         .toArray();
-      expect(bobReceivedMessages.length).toBe(2);
-      expect(bobReceivedMessages[0].content).toBe('');
-      expect(bobReceivedMessages[0].type).toBe(MessageType.KEEP_ALIVE);
+      expect(bobReceivedMessages.length).toBe(1); // the incoming keep-alive message is not stored in database
+      expect(bobReceivedMessages[0].type).toBe(MessageType.TEXT);
+      expect(bobReceivedMessages[0].content).toBe('Normal message');
       expect(bobReceivedMessages[0].status).toBe(MessageStatus.DELIVERED);
-      expect(bobReceivedMessages[1].type).toBe(MessageType.TEXT);
-      expect(bobReceivedMessages[1].content).toBe('Normal message');
-      expect(bobReceivedMessages[1].status).toBe(MessageStatus.DELIVERED);
 
       // STEP 6: Bob's message is delivered
       const bobMessages = await db.messages
