@@ -269,15 +269,17 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
   // Helper function to fetch MNS domains if MNS is enabled
   const fetchMnsDomainsIfEnabled = (profile: UserProfile) => {
     const { mnsEnabled } = useAppStore.getState();
-    if (mnsEnabled) {
-      const state = get();
-      useAppStore
-        .getState()
-        .fetchMnsDomains(profile, state.provider)
-        .catch(error => {
-          console.error('Error fetching MNS domains:', error);
-        });
-    }
+    if (!mnsEnabled) return;
+
+    const state = get();
+    if (!state.provider) return;
+
+    useAppStore
+      .getState()
+      .fetchMnsDomains(profile, state.provider)
+      .catch(error => {
+        console.error('Error fetching MNS domains:', error);
+      });
   };
 
   return {
@@ -777,5 +779,33 @@ useAccountStoreBase.subscribe(async (state, prevState) => {
     console.error('Error initializing provider:', error);
   }
 });
+
+// Subscribe to provider changes to fetch MNS domains when provider becomes available
+useAccountStoreBase.subscribe(async (state, prevState) => {
+  // Only proceed if provider actually changed (became available)
+  if (state.provider === prevState.provider) return;
+
+  // Fetch MNS domains if provider is available and user profile exists
+  if (state.provider && state.userProfile) {
+    fetchMnsDomainsIfEnabled(state.userProfile, state.provider);
+  }
+});
+
+// Helper function to fetch MNS domains if MNS is enabled
+// Used in subscriptions where we have explicit provider
+function fetchMnsDomainsIfEnabled(
+  profile: UserProfile,
+  provider: Provider
+): void {
+  const { mnsEnabled } = useAppStore.getState();
+  if (!mnsEnabled) return;
+
+  useAppStore
+    .getState()
+    .fetchMnsDomains(profile, provider)
+    .catch(error => {
+      console.error('Error fetching MNS domains:', error);
+    });
+}
 
 export const useAccountStore = createSelectors(useAccountStoreBase);
