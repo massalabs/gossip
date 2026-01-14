@@ -136,7 +136,16 @@ export default defineConfig({
           name: 'browser',
           browser: {
             enabled: true,
-            provider: playwright(),
+            provider: playwright({
+              launch: {
+                // Enable video recording (kept on failure for debugging)
+                video: 'retain-on-failure',
+                // Enable trace for interactive debugging
+                trace: 'retain-on-failure',
+                // Capture screenshots on failure
+                screenshot: 'only-on-failure',
+              },
+            }),
             headless: true,
             instances: [
               { browser: 'chromium' },
@@ -215,6 +224,10 @@ export default defineConfig({
         '**/mockData',
         'src/assets/generated/wasm/**',
       ],
+    },
+    // Output directory for test artifacts (screenshots, videos, traces)
+    outputFile: {
+      // Playwright artifacts are saved to test-results/ by default
     },
   },
 });
