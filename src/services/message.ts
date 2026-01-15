@@ -31,7 +31,7 @@ import {
   serializeKeepAliveMessage,
   deserializeMessage,
 } from '../utils/messageSerialization';
-import { encodeToBase64 } from '../utils/base64';
+import { encodeToBase64 } from '../../gossip-sdk/src/utils/base64';
 import { isAppInForeground } from '../utils/appState';
 import { Result } from '../../gossip-sdk/src/utils/type';
 import { isDiscussionStableState } from './discussion';

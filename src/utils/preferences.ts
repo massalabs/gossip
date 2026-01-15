@@ -13,7 +13,7 @@
 
 import { Preferences } from '@capacitor/preferences';
 import { Capacitor } from '@capacitor/core';
-import { encodeToBase64 } from './base64';
+import { encodeToBase64 } from '../../gossip-sdk/src/utils/base64';
 import { backgroundRunnerStorageService } from '../services/backgroundRunnerStorage';
 import { isAppInForeground } from './appState';
 
