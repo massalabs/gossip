@@ -1,0 +1,36 @@
+{
+  "name": "gossip-sdk",
+  "version": "0.0.1",
+  "description": "Gossip SDK for automation, chatbot, and integration use cases",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "test": "vitest",
+    "test:run": "vitest run",
+    "test:coverage": "vitest run --coverage"
+  },
+  "keywords": [
+    "gossip",
+    "messenger",
+    "sdk",
+    "massa",
+    "blockchain"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "fake-indexeddb": "^6.2.5",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.17"
+  },
+  "peerDependencies": {
+    "dexie": "^4.0.0",
+    "zustand": "^5.0.0"
+  }
+}
