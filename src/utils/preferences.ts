@@ -15,7 +15,7 @@ import { Preferences } from '@capacitor/preferences';
 import { Capacitor } from '@capacitor/core';
 import { encodeToBase64 } from '../../gossip-sdk/src/utils/base64';
 import { backgroundRunnerStorageService } from '../services/backgroundRunnerStorage';
-import { isAppInForeground } from './appState';
+import { isAppInForeground } from '../../gossip-sdk/src/utils/appState';
 
 // Preferences keys
 const ACTIVE_SEEKERS_KEY = 'gossip-active-seekers';

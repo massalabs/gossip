@@ -16,7 +16,7 @@ import {
   sessionStatusToString,
 } from '../../gossip-sdk/src/wasm/session';
 import { notificationService } from './notifications';
-import { isAppInForeground } from '../utils/appState';
+import { isAppInForeground } from '../../gossip-sdk/src/utils/appState';
 import { Logger } from '../../gossip-sdk/src/utils/logs';
 import { BulletinItem } from '../api/messageProtocol/types';
 
