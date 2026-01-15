@@ -17,7 +17,7 @@ import {
 } from '../../gossip-sdk/src/wasm/session';
 import { notificationService } from './notifications';
 import { isAppInForeground } from '../utils/appState';
-import { Logger } from '../utils/logs';
+import { Logger } from '../../gossip-sdk/src/utils/logs';
 import { BulletinItem } from '../api/messageProtocol/types';
 
 const logger = new Logger('AnnouncementService');

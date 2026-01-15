@@ -36,7 +36,7 @@ import { isAppInForeground } from '../utils/appState';
 import { Result } from '../../gossip-sdk/src/utils/type';
 import { isDiscussionStableState } from './discussion';
 import { sessionStatusToString } from '../../gossip-sdk/src/wasm/session';
-import { Logger } from '../utils/logs';
+import { Logger } from '../../gossip-sdk/src/utils/logs';
 
 export interface MessageResult {
   success: boolean;

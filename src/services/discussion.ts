@@ -15,7 +15,7 @@ import {
 } from '../../gossip-sdk/src/wasm/session';
 import { decodeUserId } from '../utils';
 import { SessionStatus } from '../../gossip-sdk/src/assets/generated/wasm/gossip_wasm';
-import { Logger } from '../utils/logs';
+import { Logger } from '../../gossip-sdk/src/utils/logs';
 
 const logger = new Logger('DiscussionService');
 
