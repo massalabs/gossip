@@ -32,10 +32,10 @@ async function loadWasmForNode(): Promise<WebAssembly.Module> {
   const __filename = fileURLToPath(import.meta.url);
   const __dirname = path.dirname(__filename);
 
-  // Resolve path to WASM file - WASM is in React app's src folder (via @/ alias)
+  // Resolve path to WASM file - WASM is in the SDK's generated folder
   const wasmPath = path.resolve(
     __dirname,
-    '../../../src/assets/generated/wasm/gossip_wasm_bg.wasm'
+    '../assets/generated/wasm/gossip_wasm_bg.wasm'
   );
 
   // Read WASM file as binary

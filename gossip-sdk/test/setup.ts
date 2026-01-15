@@ -231,7 +231,7 @@ vi.mock('@/assets/generated/wasm/gossip_wasm', async () => {
   const __dirname = dirname(__filename);
   const wasmPath = join(
     __dirname,
-    '../../src/assets/generated/wasm/gossip_wasm_bg.wasm'
+    '../src/assets/generated/wasm/gossip_wasm_bg.wasm'
   );
 
   return {

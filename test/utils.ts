@@ -5,8 +5,8 @@ import { MockSessionModule } from './wasm/mock';
 import {
   UserPublicKeys,
   UserSecretKeys,
-} from '../src/assets/generated/wasm/gossip_wasm';
-import { generateUserKeys, UserKeys } from '../src/wasm/userKeys';
+} from '../gossip-sdk/src/assets/generated/wasm/gossip_wasm';
+import { generateUserKeys, UserKeys } from '../gossip-sdk/src/wasm/userKeys';
 
 interface InitSessionResult {
   aliceDiscussionId: number;

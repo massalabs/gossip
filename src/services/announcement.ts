@@ -10,8 +10,11 @@ import { IMessageProtocol, restMessageProtocol } from '../api/messageProtocol';
 import {
   UserPublicKeys,
   SessionStatus,
-} from '../assets/generated/wasm/gossip_wasm';
-import { SessionModule, sessionStatusToString } from '../wasm/session';
+} from '../../gossip-sdk/src/assets/generated/wasm/gossip_wasm';
+import {
+  SessionModule,
+  sessionStatusToString,
+} from '../../gossip-sdk/src/wasm/session';
 import { notificationService } from './notifications';
 import { isAppInForeground } from '../utils/appState';
 import { Logger } from '../utils/logs';

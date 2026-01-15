@@ -22,8 +22,8 @@ import {
 import {
   SessionStatus,
   SendMessageOutput,
-} from '../assets/generated/wasm/gossip_wasm';
-import { SessionModule } from '../wasm';
+} from '../../gossip-sdk/src/assets/generated/wasm/gossip_wasm';
+import { SessionModule } from '../../gossip-sdk/src/wasm';
 import {
   serializeRegularMessage,
   serializeReplyMessage,
@@ -35,7 +35,7 @@ import { encodeToBase64 } from '../utils/base64';
 import { isAppInForeground } from '../utils/appState';
 import { Result } from '../utils/type';
 import { isDiscussionStableState } from './discussion';
-import { sessionStatusToString } from '../wasm/session';
+import { sessionStatusToString } from '../../gossip-sdk/src/wasm/session';
 import { Logger } from '../utils/logs';
 
 export interface MessageResult {
@@ -188,7 +188,7 @@ export class MessageService {
         try {
           const deserialized = deserializeMessage(out.message);
 
-          out.acknowledged_seekers.forEach(seeker =>
+          out.acknowledged_seekers.forEach((seeker: Uint8Array) =>
             acknowledgedSeekers.add(encodeToBase64(seeker))
           );
 

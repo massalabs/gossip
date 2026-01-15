@@ -15,16 +15,16 @@ import {
   Message,
   Contact,
 } from '../../src/db';
-import { initializeWasm } from '../../src/wasm/loader';
-import { generateUserKeys } from '../../src/wasm/userKeys';
-import { SessionModule } from '../../src/wasm/session';
+import { initializeWasm } from '../../gossip-sdk/src/wasm/loader';
+import { generateUserKeys } from '../../gossip-sdk/src/wasm/userKeys';
+import { SessionModule } from '../../gossip-sdk/src/wasm/session';
 import {
   UserPublicKeys,
   UserSecretKeys,
   UserKeys,
   SessionStatus,
   SessionConfig,
-} from '../../src/assets/generated/wasm/gossip_wasm';
+} from '../../gossip-sdk/src/assets/generated/wasm/gossip_wasm';
 import { encodeUserId } from '../../src/utils/userId';
 import { MockMessageProtocol } from '../../src/api/messageProtocol/mock';
 import {

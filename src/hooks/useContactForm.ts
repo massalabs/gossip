@@ -8,7 +8,7 @@ import {
   validateUserIdFormat,
   validateUsernameFormat,
 } from '../utils';
-import { UserPublicKeys } from '../assets/generated/wasm/gossip_wasm';
+import { UserPublicKeys } from '../../gossip-sdk/src/assets/generated/wasm/gossip_wasm';
 import { useFileShareContact } from './useFileShareContact';
 import {
   authService,

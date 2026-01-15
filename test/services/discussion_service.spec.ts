@@ -22,9 +22,8 @@ import {
   SessionStatus,
   UserPublicKeys,
   UserSecretKeys,
-  UserKeys,
-} from '../../src/assets/generated/wasm/gossip_wasm';
-import { generateUserKeys } from '../../src/wasm/userKeys';
+} from '../../gossip-sdk/src/assets/generated/wasm/gossip_wasm';
+import { generateUserKeys } from '../../gossip-sdk/src/wasm/userKeys';
 import { initSession, initializeSessionMock } from '../utils';
 import { MockMessageProtocol } from '../../src/api/messageProtocol/mock';
 import { createMessageProtocol } from '../../src/api/messageProtocol';
@@ -36,13 +35,11 @@ describe('Discussion Service', () => {
   let aliceSession: MockSessionModule;
   let alicePk: UserPublicKeys;
   let aliceSk: UserSecretKeys;
-  let aliceKeys: UserKeys | null = null;
 
   // Bob's test data
   let bobSession: MockSessionModule;
   let bobPk: UserPublicKeys;
   let bobSk: UserSecretKeys;
-  let bobKeys: UserKeys | null = null;
 
   // Initialize WASM before all tests
   beforeAll(async () => {
@@ -63,25 +60,21 @@ describe('Discussion Service', () => {
     vi.clearAllMocks();
 
     // Generate Alice's keys using real WASM
-    aliceKeys = await generateUserKeys(
+    const generatedAliceKeys = await generateUserKeys(
       `alice-test-passphrase-${Date.now()}-${Math.random()}`
     );
-    alicePk = aliceKeys.public_keys();
-    aliceSk = aliceKeys.secret_keys();
-    // Free the UserKeys object after extracting keys to prevent memory leaks
-    aliceKeys.free();
-    aliceKeys = null;
+    alicePk = generatedAliceKeys.public_keys();
+    aliceSk = generatedAliceKeys.secret_keys();
+    generatedAliceKeys.free();
     aliceSession = initializeSessionMock(alicePk, aliceSk);
 
     // Generate Bob's keys using real WASM
-    bobKeys = await generateUserKeys(
+    const generatedBobKeys = await generateUserKeys(
       `bob-test-passphrase-${Date.now()}-${Math.random()}`
     );
-    bobPk = bobKeys.public_keys();
-    bobSk = bobKeys.secret_keys();
-    // Free the UserKeys object after extracting keys to prevent memory leaks
-    bobKeys.free();
-    bobKeys = null;
+    bobPk = generatedBobKeys.public_keys();
+    bobSk = generatedBobKeys.secret_keys();
+    generatedBobKeys.free();
     bobSession = initializeSessionMock(bobPk, bobSk);
   });
 

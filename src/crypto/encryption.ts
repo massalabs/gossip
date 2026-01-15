@@ -4,7 +4,7 @@ import {
   EncryptionKey,
   generateNonce,
   Nonce,
-} from '../wasm/encryption';
+} from '../../gossip-sdk/src/wasm/encryption';
 
 export async function encrypt(
   plaintext: string,

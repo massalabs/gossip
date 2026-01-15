@@ -26,8 +26,8 @@ import {
   UserPublicKeys,
   UserKeys,
   generate_user_keys,
-} from '../../src/assets/generated/wasm/gossip_wasm';
-import { ensureWasmInitialized } from '../../src/wasm/loader';
+} from '../../gossip-sdk/src/assets/generated/wasm/gossip_wasm';
+import { ensureWasmInitialized } from '../../gossip-sdk/src/wasm/loader';
 
 describe('getPublicKeyErrorMessage', () => {
   it('should return specific message for "Public key not found" error', () => {

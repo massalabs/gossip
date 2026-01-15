@@ -13,7 +13,7 @@ import {
   SendMessageOutput,
   ReceiveMessageOutput,
   EncryptionKey,
-} from '../../src/assets/generated/wasm/gossip_wasm';
+} from '../../gossip-sdk/src/assets/generated/wasm/gossip_wasm';
 import type { UserProfile } from '../../src/db';
 
 /**
