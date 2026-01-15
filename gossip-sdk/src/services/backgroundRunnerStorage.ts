@@ -1,7 +1,7 @@
 /**
  * BackgroundRunner Storage Service
  *
- * Provides a bridge between main app storage (CapacitorStorage) and
+ * Provides a bridge between host app storage (CapacitorStorage) and
  * BackgroundRunner storage (net.massa.gossip.background.sync).
  *
  * In SDK/Node.js context, this service is a no-op since there's no background runner.
@@ -29,7 +29,7 @@ class BackgroundRunnerStorageService {
 
   /**
    * Write a key-value pair to the BackgroundRunner's storage.
-   * This bridges the gap between main app storage (CapacitorStorage) and
+   * This bridges the gap between host app storage (CapacitorStorage) and
    * BackgroundRunner storage (net.massa.gossip.background.sync).
    *
    * In SDK/Node.js context, this is a no-op.

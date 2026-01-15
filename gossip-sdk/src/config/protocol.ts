@@ -11,7 +11,8 @@ export interface ProtocolConfig {
   retryAttempts: number;
 }
 
-// Default API URL - can be overridden at runtime
+// Default API URL for the hosted REST protocol.
+// Override via setProtocolBaseUrl() or environment variables.
 const DEFAULT_API_URL = 'https://api.usegossip.com';
 
 // Mutable config that can be updated at runtime

@@ -1,8 +1,8 @@
 /**
  * Account Management SDK
  *
- * Functions for managing user accounts including creation, loading,
- * restoration from mnemonic, and backup operations.
+ * Functions for managing user accounts via the configured account store adapter,
+ * including creation, loading, restoration from mnemonic, and backup operations.
  *
  * @example
  * ```typescript

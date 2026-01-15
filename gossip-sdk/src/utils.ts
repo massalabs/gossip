@@ -1,11 +1,24 @@
 /**
  * SDK Utilities
  *
- * Helper functions for accessing stores, session, and common operations.
+ * Helper functions for accessing configured adapters, sessions, and common operations.
  *
  * @example
  * ```typescript
- * import { getSession, getCurrentUserId, ensureInitialized } from 'gossip-sdk';
+ * import {
+ *   configureSdk,
+ *   getSession,
+ *   getCurrentUserId,
+ *   ensureInitialized,
+ * } from 'gossip-sdk';
+ *
+ * configureSdk({
+ *   accountStore,
+ *   walletStore,
+ *   db,
+ *   preferences,
+ *   notificationHandler,
+ * });
  *
  * // Get current session
  * const session = getSession();
@@ -82,7 +95,7 @@ export function getAccountStore(): AccountStoreAdapter {
 }
 
 /**
- * Get current session module from account store.
+ * Get current session module from the configured account store adapter.
  * The session is required for most cryptographic operations.
  *
  * @returns SessionModule or null if not loaded
@@ -198,7 +211,7 @@ export function getCurrentUserId(): string | null {
 }
 
 /**
- * Check if an account is currently loaded.
+ * Check if an account is currently loaded in the configured adapter.
  *
  * @returns True if account is loaded and session is available
  *
@@ -217,7 +230,7 @@ export function isAccountLoaded(): boolean {
 }
 
 /**
- * Check if account store is in loading state.
+ * Check if the configured account adapter is in loading state.
  *
  * @returns True if account operations are in progress
  */
@@ -234,6 +247,10 @@ export interface SdkRuntimeConfig {
   walletStore?: WalletStoreAdapter;
 }
 
+/**
+ * Configure runtime adapters and protocol defaults for the SDK.
+ * Call this once during application startup.
+ */
 export function configureSdk(config: SdkRuntimeConfig): void {
   if (config.db) {
     setDb(config.db);

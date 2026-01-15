@@ -81,9 +81,9 @@ export async function updateContactName(
 /**
  * Delete a contact and all associated discussions and messages
  *
- * NOTE: This function accesses the configured account store for session access.
- * This is a known coupling issue. See README for more details.
- * TODO: Refactor to pass session as a parameter for better decoupling.
+ * NOTE: This function reads the session from the configured account store adapter.
+ * Set the adapter via configureSdk() before calling in non-React runtimes.
+ * TODO: Refactor to accept the session explicitly for full decoupling.
  *
  * @param ownerUserId - Owner user ID
  * @param contactUserId - Contact user ID
@@ -141,7 +141,7 @@ export async function deleteContact(
     );
 
     // Discard peer from session manager
-    // NOTE: This accesses the store directly - see TODO above
+    // NOTE: This reads the adapter directly - see note above
     const session = getAccountStore().getState().session;
     if (!session) {
       return {

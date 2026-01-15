@@ -1,7 +1,7 @@
 /**
  * Message Operations SDK
  *
- * Functions for sending, receiving, and managing messages.
+ * Functions for sending, receiving, and managing messages via the configured protocol.
  *
  * @example
  * ```typescript

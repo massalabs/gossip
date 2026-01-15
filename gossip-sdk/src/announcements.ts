@@ -1,7 +1,7 @@
 /**
  * Announcement Handling SDK
  *
- * Functions for managing session announcements.
+ * Functions for managing session announcements using the configured protocol.
  *
  * @example
  * ```typescript

@@ -2,7 +2,7 @@
  * Message Reception Service
  *
  * Handles fetching encrypted messages from the protocol and decrypting them.
- * This service works both in the main app context and SDK/automation context.
+ * This service works both in host app contexts and SDK/automation context.
  */
 
 import {

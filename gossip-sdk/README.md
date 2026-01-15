@@ -15,7 +15,7 @@ The Gossip SDK provides a clean, typed interface for:
 
 ## Installation
 
-The SDK is designed to be used alongside the main Gossip application. It shares dependencies with the React app via peer dependencies.
+The SDK is designed to be used alongside the main Gossip application. It shares dependencies with host apps via peer dependencies.
 
 ```bash
 cd gossip-sdk
@@ -24,22 +24,36 @@ npm install
 
 ### Peer Dependencies
 
-The SDK requires these peer dependencies (provided by the parent project):
+The SDK requires these peer dependencies (provided by the host project):
 
 - `dexie` ^4.0.0 - IndexedDB wrapper for local storage
-- `zustand` ^5.0.0 - State management
+- `zustand` ^5.0.0 - State management (for app adapters)
 
 ## Usage
 
 ### Basic Example
 
+Before using the SDK, call `configureSdk` to inject the runtime adapters
+(account store, wallet store, database, preferences, notification handler).
+Use `setProtocolBaseUrl` if you need to override the default REST endpoint; call it before network operations.
+
 ```typescript
 import {
+  configureSdk,
+  getSession,
   initializeAccount,
   addContact,
   initializeDiscussion,
   sendMessage,
 } from 'gossip-sdk';
+
+configureSdk({
+  accountStore,
+  walletStore,
+  db,
+  preferences,
+  notificationHandler,
+});
 
 // Create a new account
 const accountResult = await initializeAccount('alice', 'secure-password');
@@ -63,24 +77,25 @@ if (contactResult.success) {
 }
 
 // Start a discussion with the contact
-const discussionResult = await initializeDiscussion(
-  contactResult.contact,
-  ourPublicKeys,
-  ourSecretKeys,
-  session,
-  accountResult.userProfile.userId,
-  'Hello Bob!'
-);
+const session = getSession();
+if (contactResult.success && session) {
+  const discussionResult = await initializeDiscussion(
+    contactResult.contact,
+    session,
+    'Hello Bob!'
+  );
 
-if (discussionResult.success) {
   console.log('Discussion started, ID:', discussionResult.discussionId);
 }
 ```
 
 ### Account Management
 
+Account operations require the configured account store adapter and a configured database instance.
+
 ```typescript
 import {
+  configureSdk,
   initializeAccount,
   loadAccount,
   restoreAccountFromMnemonic,
@@ -91,6 +106,14 @@ import {
   hasExistingAccount,
   getCurrentAccount,
 } from 'gossip-sdk';
+
+configureSdk({
+  accountStore,
+  walletStore,
+  db,
+  preferences,
+  notificationHandler,
+});
 
 // Create a new account with username and password
 const result = await initializeAccount('username', 'password');
@@ -171,23 +194,16 @@ import {
 const discussions = await getDiscussions(ownerUserId);
 
 // Initialize a new discussion
-const result = await initializeDiscussion(
-  contact,
-  ourPublicKeys,
-  ourSecretKeys,
-  session,
-  userId,
-  'Initial message'
-);
+const result = await initializeDiscussion(contact, session, 'Initial message');
 
 // Accept incoming discussion request
-await acceptDiscussionRequest(discussion, session, ourPk, ourSk);
+await acceptDiscussionRequest(discussion, session);
 
 // Check if discussion can send messages
 const canSend = await isDiscussionStableState(ownerUserId, contactUserId);
 
 // Renew a broken discussion
-await renewDiscussion(ownerUserId, contactUserId, session, ourPk, ourSk);
+await renewDiscussion(contactUserId, session);
 ```
 
 ### Message Operations
@@ -208,7 +224,7 @@ const messages = await getMessages(ownerUserId, contactUserId);
 const result = await sendMessage(message, session);
 
 // Fetch new messages from server
-const fetchResult = await fetchMessages(userId, secretKeys, session);
+const fetchResult = await fetchMessages(session);
 
 // Resend failed messages
 await resendMessages(failedMessagesMap, session);
@@ -230,7 +246,7 @@ interface Result<T> {
 
 ### Types
 
-The SDK re-exports types from the main application:
+The SDK exports shared types (database entities and enums):
 
 ```typescript
 import type {
@@ -255,22 +271,25 @@ npm run test:run   # Single run
 npm run test:coverage  # With coverage report
 ```
 
+WASM bindings are generated into `gossip-sdk/src/assets/generated/wasm` by the root `wasm:build` script.
+
 Tests use `fake-indexeddb` to simulate IndexedDB in Node.js environment.
 
 ## Architecture
 
-The SDK wraps the existing Gossip application logic, providing:
+The SDK provides platform-agnostic wrappers around shared Gossip logic, with:
 
 1. **Stable Interface** - Functions with consistent signatures across versions
 2. **Error Handling** - All async operations return result objects with error info
 3. **Type Safety** - Full TypeScript support with exported types
-4. **Platform Agnostic** - Works in Node.js, browsers, and other JS runtimes
+4. **Runtime Adapters** - Inject account/wallet stores, DB, and preferences
 
 ### Path Aliases
 
-The SDK uses path aliases to import from the main app:
+The SDK uses path aliases for local imports:
 
-- `@/*` resolves to `../src/*` (parent project source)
+- `@/*` resolves to `gossip-sdk/src/*`
+- `@/assets/generated/wasm/*` resolves within the SDK output
 
 ## Development
 
@@ -331,23 +350,21 @@ gossip-sdk/
 
 ### Store Coupling in deleteContact
 
-The `deleteContact` function (`src/utils/contacts.ts`) still accesses `useAccountStore` from the React app to get the current user's session. This creates a coupling between the SDK and the React app's state management.
+The `deleteContact` function (`src/utils/contacts.ts`) still reads the current session from the configured account store adapter. This keeps a dependency on application-provided state.
 
-**Impact:** The `deleteContact` function will not work correctly in a pure Node.js environment without the React store being initialized.
+**Impact:** `deleteContact` requires `configureSdk({ accountStore })` to be called in non-React environments.
 
-**Future Solution:** Pass the session/userId explicitly as a parameter to `deleteContact`, making it fully independent of React stores.
+**Future Solution:** Pass the session explicitly as a parameter to `deleteContact`, making it fully independent of store adapters.
 
 ### Workspace Setup for Imports
 
-Currently, the React app imports from the SDK using relative paths like `../../gossip-sdk/src`. This works but is verbose.
+Host apps currently import from the SDK using relative paths like `../../gossip-sdk/src`. This works but is verbose.
 
 **Future Solution:** Set up npm workspaces or TypeScript project references for cleaner imports like `import { authService } from 'gossip-sdk'`.
 
 ### Announcement Service Notifications
 
-The SDK's `AnnouncementService` uses an injectable `NotificationHandler` interface for platform-agnostic notification support. However, the React app still uses its own copy with direct `notificationService` calls.
-
-**Future Solution:** Update React app to use SDK's announcement service and inject the notification handler during app initialization.
+The SDK's `AnnouncementService` uses an injectable `NotificationHandler` for platform-agnostic notification support. Host apps should inject their notification handler via `configureSdk` during startup.
 
 ## License
 

@@ -1,7 +1,7 @@
 /**
  * Discussion Management SDK
  *
- * Functions for managing discussions including initialization, acceptance, and updates.
+ * Functions for managing discussions using SDK services and adapters.
  *
  * @example
  * ```typescript

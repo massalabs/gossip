@@ -3,17 +3,27 @@
  *
  * Main entry point for the Gossip SDK.
  * Provides a platform-agnostic interface for automation, chatbot,
- * and integration use cases with the Gossip messenger.
+ * and integration use cases with the Gossip messenger. Configure
+ * runtime adapters (stores, db, preferences, notifications) before use.
  *
  * @example
  * ```typescript
  * import {
+ *   configureSdk,
  *   initializeAccount,
  *   addContact,
  *   initializeDiscussion,
  *   sendMessage,
  *   getSession,
  * } from 'gossip-sdk';
+ *
+ * configureSdk({
+ *   accountStore,
+ *   walletStore,
+ *   db,
+ *   preferences,
+ *   notificationHandler,
+ * });
  *
  * // Create a new account
  * const accountResult = await initializeAccount('alice', 'secure-password');
@@ -32,7 +42,7 @@
  *   bobPublicKeys
  * );
  *
- * if (contactResult.success) {
+ * if (contactResult.success && session) {
  *   const discussionResult = await initializeDiscussion(
  *     contactResult.contact,
  *     session,
@@ -153,7 +163,7 @@ export {
   getAccountStore,
 } from './utils';
 
-// Services - for direct use by React app and other clients
+// Services - for direct use by host apps and other clients
 export { authService, AuthService } from './services/auth';
 export type { PublicKeyResult } from './services/auth';
 // Note: initializeDiscussion, acceptDiscussionRequest, renewDiscussion, isDiscussionStableState
@@ -165,7 +175,7 @@ export {
 } from './services/announcement';
 export type { NotificationHandler } from './services/announcement';
 
-// Message Protocol - for direct use by React app
+// Message Protocol - for direct use by host apps
 export {
   createMessageProtocol,
   restMessageProtocol,
@@ -188,7 +198,7 @@ export {
 } from './config/protocol';
 export type { ProtocolConfig } from './config/protocol';
 
-// Database - for direct access by React app
+// Database - for direct access by host apps
 export { setDb, db, type GossipDatabase } from './db';
 
 // WASM utilities - for session management

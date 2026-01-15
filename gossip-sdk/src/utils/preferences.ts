@@ -4,8 +4,8 @@
  * Wrapper around storage APIs for cross-platform compatibility.
  * In SDK context (Node.js), these operations are no-ops.
  *
- * - On web: Uses Capacitor Preferences (accessible by service worker)
- * - On mobile: Uses native storage via Capacitor
+ * - On web: Uses injected adapter or Capacitor Preferences
+ * - On mobile: Uses injected adapter or native storage via Capacitor
  * - In Node.js/SDK: No-ops (data is in-memory only)
  */
 
@@ -32,7 +32,7 @@ const ACTIVE_SEEKERS_KEY = 'gossip-active-seekers';
  * Store active seekers for background runner access.
  *
  * In SDK/Node.js context, this is a no-op since there's no background runner.
- * On native platforms, this bridges main app storage with BackgroundRunner storage.
+ * On native platforms, this bridges host app storage with BackgroundRunner storage.
  *
  * @param seekers - Array of seeker Uint8Arrays to store
  */

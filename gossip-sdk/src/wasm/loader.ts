@@ -112,8 +112,8 @@ export async function ensureWasmInitialized(): Promise<void> {
 }
 
 /**
- * Start WASM initialization in the background
- * This should be called early in the app lifecycle (e.g., in main.tsx)
+ * Start WASM initialization in the background.
+ * Call this early in the app lifecycle (for example in main.tsx).
  */
 export function startWasmInitialization(): void {
   // Fire and forget - start initialization in background
