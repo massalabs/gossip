@@ -176,7 +176,6 @@ export class AnnouncementService {
         await db.userProfile.update(session.userIdEncoded, {
           lastBulletinCounter: highestCounter,
         });
-        log.info('updated lastBulletinCounter', { highestCounter });
       }
 
       return {
@@ -323,9 +322,7 @@ export class AnnouncementService {
         limit,
         cursor
       );
-      log.info('fetched announcements', {
-        counters: items.map(i => i.counter),
-      });
+
       return items; //.sort((a, b) => Number(a.counter) - Number(b.counter)); // sort by counter ascending
     } catch (error) {
       log.error('network fetch failed', error);
