@@ -188,7 +188,7 @@ export class MessageService {
         try {
           const deserialized = deserializeMessage(out.message);
 
-          out.acknowledged_seekers.forEach(seeker =>
+          out.acknowledged_seekers.forEach((seeker: Uint8Array) =>
             acknowledgedSeekers.add(encodeToBase64(seeker))
           );
 

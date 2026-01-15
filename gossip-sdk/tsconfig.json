@@ -22,7 +22,8 @@
     "types": ["vite/client"],
     "baseUrl": ".",
     "paths": {
-      "@/*": ["../src/*"]
+      "@/*": ["src/*"],
+      "@/assets/generated/wasm/*": ["src/assets/generated/wasm/*"]
     }
   },
   "include": ["src", "test", "../src/vite-env.d.ts"]
