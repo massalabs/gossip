@@ -12,7 +12,7 @@ export interface ProtocolConfig {
 }
 
 // Default API URL - can be overridden at runtime
-const DEFAULT_API_URL = 'http://localhost:3000';
+const DEFAULT_API_URL = 'https://api.usegossip.com';
 
 // Mutable config that can be updated at runtime
 let currentBaseUrl: string | null = null;

@@ -11,6 +11,12 @@
 // Import fake-indexeddb to polyfill IndexedDB in Node environment
 import 'fake-indexeddb/auto';
 
+// Ensure API base URL points to production for tests
+if (typeof process !== 'undefined') {
+  process.env.GOSSIP_API_URL = 'https://api.usegossip.com';
+  process.env.VITE_GOSSIP_API_URL = 'https://api.usegossip.com';
+}
+
 // Import IDBKeyRange polyfill
 import { IDBKeyRange } from 'fake-indexeddb';
 import { afterEach, vi } from 'vitest';
@@ -137,32 +143,6 @@ vi.mock('@/assets/generated/wasm/gossip_wasm', async () => {
       const wasmBytes = await readFile(wasmPath);
       return actual.default(wasmBytes);
     },
-  };
-});
-
-// Use MOCK message protocol for tests - using local SDK paths
-import { MessageProtocolType } from '../src/config/protocol';
-vi.mock('../src/api/messageProtocol', async importOriginal => {
-  const actual =
-    await importOriginal<typeof import('../src/api/messageProtocol')>();
-  const mockProtocol = actual.createMessageProtocol(MessageProtocolType.MOCK);
-  return {
-    ...actual,
-    createMessageProtocol: vi.fn(() => mockProtocol),
-    restMessageProtocol: mockProtocol,
-  };
-});
-
-// Also mock the React app's message protocol (used by accountStore via @/ imports)
-// This is needed because SDK's account.ts imports @/stores/accountStore which uses
-// @/api/messageProtocol - a different module path than the SDK's ../src/api/messageProtocol
-vi.mock('@/api/messageProtocol', async () => {
-  const { createMessageProtocol } = await import('../src/api/messageProtocol');
-  const { MessageProtocolType } = await import('../src/config/protocol');
-  const mockProtocol = createMessageProtocol(MessageProtocolType.MOCK);
-  return {
-    createMessageProtocol: vi.fn(() => mockProtocol),
-    restMessageProtocol: mockProtocol,
   };
 });
 

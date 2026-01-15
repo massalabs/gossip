@@ -2,24 +2,14 @@
  * Announcement Handling SDK Tests
  */
 
-import { describe, it, expect, beforeEach, beforeAll } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { sendAnnouncement, establishSession } from '../src/announcements';
 import { initializeAccount } from '../src/account';
 import { getSession } from '../src/utils';
 import { db } from '../src/db';
-import { createMessageProtocol } from '../src/api/messageProtocol';
-import { MessageProtocolType } from '../src/config/protocol';
-import { announcementService } from '../src/services/announcement';
-import { messageService } from '../src/services/message';
 import { generateUserKeys } from '../src/wasm/userKeys';
 
 describe('Announcement Handling', () => {
-  beforeAll(async () => {
-    const mockProtocol = createMessageProtocol(MessageProtocolType.MOCK);
-    announcementService.setMessageProtocol(mockProtocol);
-    messageService.setMessageProtocol(mockProtocol);
-  });
-
   beforeEach(async () => {
     // Database is cleaned up by setup.ts afterEach hook
     if (!db.isOpen()) {
@@ -34,7 +24,7 @@ describe('Announcement Handling', () => {
     it('should send an announcement', async () => {
       const announcement = new Uint8Array(64);
       const result = await sendAnnouncement(announcement);
-      // Result may succeed or fail depending on mock, but should return a result
+      // Result should return a response shape
       expect(result).toHaveProperty('success');
     });
 

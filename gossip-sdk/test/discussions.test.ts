@@ -2,7 +2,7 @@
  * Discussion Management SDK Tests
  */
 
-import { describe, it, expect, beforeEach, beforeAll } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import {
   getDiscussions,
   getDiscussion,
@@ -23,10 +23,6 @@ import {
   MessageStatus,
   MessageType,
 } from '../src/db';
-import { createMessageProtocol } from '../src/api/messageProtocol';
-import { MessageProtocolType } from '../src/config/protocol';
-import { announcementService } from '../src/services/announcement';
-import { messageService } from '../src/services/message';
 import { generateUserKeys } from '../src/wasm/userKeys';
 import { encodeUserId } from '../src/utils/userId';
 import type { UserPublicKeys } from '@/assets/generated/wasm/gossip_wasm';
@@ -35,12 +31,6 @@ describe('Discussion Management', () => {
   let ownerUserId: string;
   let contactUserId: string;
   let contactPublicKeys: UserPublicKeys;
-
-  beforeAll(async () => {
-    const mockProtocol = createMessageProtocol(MessageProtocolType.MOCK);
-    announcementService.setMessageProtocol(mockProtocol);
-    messageService.setMessageProtocol(mockProtocol);
-  });
 
   beforeEach(async () => {
     // Database is cleaned up by setup.ts afterEach hook

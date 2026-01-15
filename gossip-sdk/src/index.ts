@@ -158,7 +158,7 @@ export {
   createMessageProtocol,
   restMessageProtocol,
   RestMessageProtocol,
-  MockMessageProtocol,
+  MessageProtocol,
 } from './api/messageProtocol';
 export type {
   IMessageProtocol,

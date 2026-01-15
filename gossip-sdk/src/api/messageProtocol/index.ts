@@ -11,7 +11,7 @@ export type {
   BulletinItem,
 } from './types';
 export { RestMessageProtocol } from './rest';
-export { MockMessageProtocol } from './mock';
+export { MessageProtocol } from './mock';
 
 import type { IMessageProtocol } from './types';
 import {
@@ -21,7 +21,7 @@ import {
 } from '../../config/protocol';
 
 import { RestMessageProtocol } from './rest';
-import { MockMessageProtocol } from './mock';
+import { MessageProtocol } from './mock';
 
 /**
  * Factory function to create message protocol instances
@@ -39,7 +39,11 @@ export function createMessageProtocol(
       );
     }
     case 'mock': {
-      return new MockMessageProtocol();
+      return new MessageProtocol(
+        config?.baseUrl || protocolConfig.baseUrl,
+        config?.timeout || 10000,
+        config?.retryAttempts || 3
+      );
     }
     default:
       throw new Error(`Unsupported message protocol type: ${type}`);
