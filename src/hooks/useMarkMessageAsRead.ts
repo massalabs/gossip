@@ -3,7 +3,9 @@ import { Message, MessageDirection, MessageStatus, db } from '../db';
 import { useAccountStore } from '../stores/accountStore';
 
 // IntersectionObserver configuration constants
-const MESSAGE_READ_VISIBILITY_THRESHOLD = 0.5; // Message is considered "viewed" when 50% visible
+// Use a lower threshold to handle very long messages that are taller than the viewport
+// For messages taller than viewport, 50% threshold can never be met, so we use 0.1 (10%)
+const MESSAGE_READ_VISIBILITY_THRESHOLD = 0.1; // Message is considered "viewed" when 10% visible
 const MESSAGE_READ_BOTTOM_MARGIN = '0px 0px -50px 0px'; // Require message to be 50px into viewport from bottom before marking as read
 
 /**
@@ -39,8 +41,20 @@ export function useMarkMessageAsRead(message: Message) {
     const observer = new IntersectionObserver(
       entries => {
         entries.forEach(entry => {
-          if (
+          // Check if message should be marked as read:
+          // 1. Message is intersecting (partially visible) with enough visibility threshold
+          // 2. OR message has been scrolled past (bottom edge is above viewport top)
+          //    This handles very long messages that are taller than the viewport
+          const isIntersectingWithThreshold =
             entry.isIntersecting &&
+            entry.intersectionRatio >= MESSAGE_READ_VISIBILITY_THRESHOLD;
+          // If bottom of message is above viewport top (negative), it's been scrolled past
+          const hasBeenScrolledPast = entry.boundingClientRect.bottom < 0;
+          const shouldMarkAsRead =
+            isIntersectingWithThreshold || hasBeenScrolledPast;
+
+          if (
+            shouldMarkAsRead &&
             message.status === MessageStatus.DELIVERED &&
             !hasBeenMarkedAsReadRef.current
           ) {
