@@ -1,5 +1,5 @@
 /**
- * Basic SDK tests
+ * Basic SDK Tests
  *
  * Verifies that the SDK module loads correctly and exports are available.
  */

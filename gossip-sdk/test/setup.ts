@@ -5,6 +5,7 @@
  * - fake-indexeddb for Dexie/IndexedDB testing in Node
  * - Global test utilities and mocks
  * - Mocks for platform-specific modules (biometrics, notifications, etc.)
+ * - Real WASM modules loaded from filesystem
  */
 
 // Import fake-indexeddb to polyfill IndexedDB in Node environment
@@ -12,13 +13,40 @@ import 'fake-indexeddb/auto';
 
 // Import IDBKeyRange polyfill
 import { IDBKeyRange } from 'fake-indexeddb';
-import { vi } from 'vitest';
+import { afterEach, vi } from 'vitest';
+import { db } from '@/db';
 
 // Make IDBKeyRange available globally (required for Dexie in Node)
 if (typeof globalThis.IDBKeyRange === 'undefined') {
   (globalThis as { IDBKeyRange?: typeof IDBKeyRange }).IDBKeyRange =
     IDBKeyRange;
 }
+
+// Mock localStorage for zustand persist middleware
+const localStorageMock = (() => {
+  let store: Record<string, string> = {};
+  return {
+    getItem: (key: string) => store[key] ?? null,
+    setItem: (key: string, value: string) => {
+      store[key] = value;
+    },
+    removeItem: (key: string) => {
+      delete store[key];
+    },
+    clear: () => {
+      store = {};
+    },
+    get length() {
+      return Object.keys(store).length;
+    },
+    key: (index: number) => Object.keys(store)[index] ?? null,
+  };
+})();
+
+Object.defineProperty(globalThis, 'localStorage', {
+  value: localStorageMock,
+  writable: true,
+});
 
 // Mock the notification service (Node.js doesn't have notifications)
 vi.mock('@/services/notifications', () => ({
@@ -87,6 +115,30 @@ vi.mock('@/services/biometricService', () => ({
   },
 }));
 
+// Use real WASM - configure it to load from filesystem in Node.js instead of fetch
+import { readFile } from 'fs/promises';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+
+vi.mock('@/assets/generated/wasm/gossip_wasm', async () => {
+  const actual = await import('@/assets/generated/wasm/gossip_wasm');
+  const __filename = fileURLToPath(import.meta.url);
+  const __dirname = dirname(__filename);
+  const wasmPath = join(
+    __dirname,
+    '../../src/assets/generated/wasm/gossip_wasm_bg.wasm'
+  );
+
+  return {
+    ...actual,
+    default: async () => {
+      // In Node.js, read the WASM file from filesystem and pass as Uint8Array
+      const wasmBytes = await readFile(wasmPath);
+      return actual.default(wasmBytes);
+    },
+  };
+});
+
 // Use MOCK message protocol for tests
 import { MessageProtocolType } from '@/config/protocol';
 vi.mock('@/api/messageProtocol', async importOriginal => {
@@ -97,6 +149,16 @@ vi.mock('@/api/messageProtocol', async importOriginal => {
     createMessageProtocol: vi.fn(() => mockProtocol),
     restMessageProtocol: mockProtocol,
   };
+});
+
+// Clean up between tests to avoid state leakage
+afterEach(async () => {
+  try {
+    // Dexie's delete() method automatically closes the connection if open
+    await db.delete();
+  } catch (_) {
+    // Ignore errors - database might already be deleted or closed
+  }
 });
 
 console.log('SDK test setup complete: fake-indexeddb initialized');
