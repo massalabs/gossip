@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { db, UserProfile } from '../db';
 
-import { encrypt, deriveKey } from '../crypto/encryption';
+import { encrypt, deriveKey } from '../../gossip-sdk/src/crypto/encryption';
 import { isWebAuthnSupported } from '../crypto/webauthn';
 import { biometricService } from '../services/biometricService';
 import {

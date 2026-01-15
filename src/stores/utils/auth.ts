@@ -1,6 +1,6 @@
 import { EncryptionKey } from '../../../gossip-sdk/src/assets/generated/wasm/gossip_wasm';
 import { validateMnemonic } from '../../../gossip-sdk/src/crypto/bip39';
-import { decrypt, deriveKey } from '../../crypto/encryption';
+import { decrypt, deriveKey } from '../../../gossip-sdk/src/crypto/encryption';
 import { biometricService } from '../../services/biometricService';
 import { UserProfile } from '../../db';
 
