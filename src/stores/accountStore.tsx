@@ -4,7 +4,10 @@ import { db, UserProfile } from '../db';
 import { encrypt, deriveKey } from '../crypto/encryption';
 import { isWebAuthnSupported } from '../crypto/webauthn';
 import { biometricService } from '../services/biometricService';
-import { generateMnemonic, validateMnemonic } from '../crypto/bip39';
+import {
+  generateMnemonic,
+  validateMnemonic,
+} from '../../gossip-sdk/src/crypto/bip39';
 import {
   Provider,
   Account,

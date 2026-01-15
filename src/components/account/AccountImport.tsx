@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Lock, Shield } from 'react-feather';
 import { useAccountStore } from '../../stores/accountStore';
-import { validateMnemonic } from '../../crypto/bip39';
+import { validateMnemonic } from '../../../gossip-sdk/src/crypto/bip39';
 import { validatePassword } from '../../utils/validation';
 import Button from '../ui/Button';
 import PageHeader from '../ui/PageHeader';
