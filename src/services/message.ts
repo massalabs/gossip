@@ -33,7 +33,7 @@ import {
 } from '../utils/messageSerialization';
 import { encodeToBase64 } from '../utils/base64';
 import { isAppInForeground } from '../utils/appState';
-import { Result } from '../utils/type';
+import { Result } from '../../gossip-sdk/src/utils/type';
 import { isDiscussionStableState } from './discussion';
 import { sessionStatusToString } from '../../gossip-sdk/src/wasm/session';
 import { Logger } from '../utils/logs';
