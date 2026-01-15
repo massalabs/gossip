@@ -140,3 +140,64 @@ export {
   isAccountLoaded,
   isAccountLoading,
 } from './utils';
+
+// Services - for direct use by React app and other clients
+export { authService, AuthService } from './services/auth';
+export type { PublicKeyResult } from './services/auth';
+// Note: initializeDiscussion, acceptDiscussionRequest, renewDiscussion, isDiscussionStableState
+// are already exported from ./discussions which re-exports from ./services/discussion
+export { messageService, MessageService } from './services/message';
+export {
+  announcementService,
+  AnnouncementService,
+} from './services/announcement';
+export type { NotificationHandler } from './services/announcement';
+
+// Message Protocol - for direct use by React app
+export {
+  createMessageProtocol,
+  restMessageProtocol,
+  RestMessageProtocol,
+  MockMessageProtocol,
+} from './api/messageProtocol';
+export type {
+  IMessageProtocol,
+  EncryptedMessage,
+  MessageProtocolResponse,
+  BulletinItem,
+} from './api/messageProtocol';
+
+// Config - for runtime configuration
+export {
+  setProtocolBaseUrl,
+  resetProtocolBaseUrl,
+  MessageProtocolType,
+  protocolConfig,
+} from './config/protocol';
+export type { ProtocolConfig } from './config/protocol';
+
+// Database - for direct access by React app
+export { db, GossipDatabase } from './db';
+
+// WASM utilities - for session management
+export { SessionModule, sessionStatusToString } from './wasm/session';
+export {
+  initializeWasm,
+  ensureWasmInitialized,
+  startWasmInitialization,
+} from './wasm/loader';
+export {
+  EncryptionKey,
+  Nonce,
+  generateEncryptionKey,
+  generateEncryptionKeyFromSeed,
+  encryptionKeyFromBytes,
+  generateNonce,
+  nonceFromBytes,
+  encryptAead,
+  decryptAead,
+} from './wasm/encryption';
+export { generateUserKeys } from './wasm/userKeys';
+
+// Utility functions - for direct use
+export { encodeUserId, decodeUserId } from './utils/userId';

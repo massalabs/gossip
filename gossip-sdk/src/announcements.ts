@@ -1,47 +1,43 @@
 /**
  * Announcement Handling SDK
  *
- * Functions for sending, receiving, and processing announcements.
- * Announcements are used for session establishment between users.
+ * Functions for managing session announcements.
  *
  * @example
  * ```typescript
  * import {
  *   fetchAndProcessAnnouncements,
- *   resendAnnouncements,
+ *   establishSession,
  * } from 'gossip-sdk';
  *
  * // Fetch and process new announcements
  * const result = await fetchAndProcessAnnouncements(session);
  *
- * // Resend failed announcements
- * await resendAnnouncements(failedDiscussions, session);
+ * // Establish a session with a contact
+ * const sessionResult = await establishSession(contactPublicKeys, session);
  * ```
  */
 
-import { announcementService } from '@/services/announcement';
-import type { AnnouncementReceptionResult } from '@/services/announcement';
-import type { Discussion } from '@/db';
-import type { SessionModule } from '@/wasm';
+import { announcementService } from './services/announcement';
+import type { Discussion } from './db';
+import type { SessionModule } from './wasm';
+import type { AnnouncementReceptionResult } from './services/announcement';
 import type { UserPublicKeys } from '@/assets/generated/wasm/gossip_wasm';
 
 // Re-export result type
 export type { AnnouncementReceptionResult };
 
 /**
- * Fetch and process announcements from the server.
- * Processes incoming session requests and updates discussions accordingly.
+ * Fetch and process new announcements from the server.
  *
- * @param session - The SessionModule instance for the current user
- * @returns Result with count of new announcements processed
+ * @param session - The SessionModule instance
+ * @returns Result with success status and new announcement count
  *
  * @example
  * ```typescript
  * const result = await fetchAndProcessAnnouncements(session);
  * if (result.success) {
- *   console.log(`Processed ${result.newAnnouncementsCount} announcements`);
- * } else if (result.error) {
- *   console.error('Error:', result.error);
+ *   console.log('Processed', result.newAnnouncementsCount, 'announcements');
  * }
  * ```
  */
@@ -53,16 +49,14 @@ export async function fetchAndProcessAnnouncements(
 
 /**
  * Resend announcements for failed discussions.
- * Attempts to resend announcements that failed to be broadcast.
  *
- * @param failedDiscussions - Array of discussions with SEND_FAILED status
- * @param session - The SessionModule instance for the current user
+ * @param failedDiscussions - Array of discussions that failed to send
+ * @param session - The SessionModule instance
  *
  * @example
  * ```typescript
- * // Get failed discussions from database
- * const failed = discussions.filter(d => d.status === DiscussionStatus.SEND_FAILED);
- * await resendAnnouncements(failed, session);
+ * const failedDiscussions = discussions.filter(d => d.status === 'sendFailed');
+ * await resendAnnouncements(failedDiscussions, session);
  * ```
  */
 export async function resendAnnouncements(
@@ -77,10 +71,9 @@ export async function resendAnnouncements(
 
 /**
  * Send an announcement directly.
- * Used internally for session establishment.
  *
- * @param announcement - The announcement bytes to broadcast
- * @returns Result with success status and optional counter
+ * @param announcement - The announcement bytes to send
+ * @returns Result with success status and counter
  *
  * @example
  * ```typescript
@@ -100,18 +93,19 @@ export async function sendAnnouncement(announcement: Uint8Array): Promise<{
 
 /**
  * Establish a session with a contact.
- * Creates and sends an announcement to initiate or accept a session.
  *
  * @param contactPublicKeys - The contact's public keys
- * @param session - The SessionModule instance for the current user
- * @param userData - Optional user data to include in the announcement
- * @returns Result with success status and announcement bytes
+ * @param session - The SessionModule instance
+ * @param userData - Optional user data to include in announcement
+ * @returns Result with announcement bytes
  *
  * @example
  * ```typescript
- * const result = await establishSession(contactPubKeys, session, userData);
+ * const result = await establishSession(contactPublicKeys, session, userData);
  * if (result.success) {
  *   console.log('Session established');
+ * } else {
+ *   console.error('Failed:', result.error);
  * }
  * ```
  */

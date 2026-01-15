@@ -1,8 +1,7 @@
 /**
  * SDK Types
  *
- * Re-exports types from the main application for SDK consumers.
- * This provides a stable interface for types used across the SDK.
+ * Re-exports types from internal SDK modules for external consumers.
  */
 
 // Database entity types
@@ -15,7 +14,7 @@ export type {
   PendingAnnouncement,
   ActiveSeeker,
   AuthMethod,
-} from '@/db';
+} from './db';
 
 // Database enums
 export {
@@ -24,16 +23,24 @@ export {
   MessageStatus,
   DiscussionDirection,
   MessageType,
-} from '@/db';
+} from './db';
 
 // Service result types
-export type { PublicKeyResult } from '@/services/auth';
-export type { MessageResult, SendMessageResult } from '@/services/message';
-export type { AnnouncementReceptionResult } from '@/services/announcement';
+export type { PublicKeyResult } from './services/auth';
+export type { MessageResult, SendMessageResult } from './services/message';
+export type { AnnouncementReceptionResult } from './services/announcement';
 
 // Utility result types
 export type {
   UpdateContactNameResult,
   DeleteContactResult,
-} from '@/utils/contacts';
-export type { UpdateDiscussionNameResult } from '@/utils/discussions';
+} from './utils/contacts';
+export type { UpdateDiscussionNameResult } from './utils/discussions';
+
+// API types
+export type {
+  IMessageProtocol,
+  EncryptedMessage,
+  MessageProtocolResponse,
+  BulletinItem,
+} from './api/messageProtocol/types';

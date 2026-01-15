@@ -19,13 +19,12 @@
  */
 
 import { useAccountStore } from '@/stores/accountStore';
-import type { SessionModule } from '@/wasm';
+import type { SessionModule, EncryptionKey } from './wasm';
 import type {
   UserPublicKeys,
   UserSecretKeys,
 } from '@/assets/generated/wasm/gossip_wasm';
-import type { UserProfile } from '@/db';
-import type { EncryptionKey } from '@/wasm';
+import type { UserProfile } from './db';
 
 /**
  * Get current session module from account store.

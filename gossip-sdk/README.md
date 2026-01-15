@@ -279,20 +279,40 @@ The SDK uses path aliases to import from the main app:
 ```
 gossip-sdk/
 ├── src/
-│   ├── index.ts        # Main exports
-│   ├── account.ts      # Account management
-│   ├── auth.ts         # Authentication
-│   ├── contacts.ts     # Contact operations
-│   ├── discussions.ts  # Discussion management
-│   ├── messages.ts     # Message operations
-│   ├── announcements.ts# Announcement handling
-│   ├── wallet.ts       # Wallet operations
-│   ├── types.ts        # Type re-exports
-│   └── utils.ts        # Utility functions
+│   ├── index.ts          # Main exports
+│   ├── account.ts        # Account management wrapper
+│   ├── auth.ts           # Authentication wrapper
+│   ├── contacts.ts       # Contact operations wrapper
+│   ├── discussions.ts    # Discussion management wrapper
+│   ├── messages.ts       # Message operations wrapper
+│   ├── announcements.ts  # Announcement handling wrapper
+│   ├── wallet.ts         # Wallet operations wrapper
+│   ├── types.ts          # Type re-exports
+│   ├── utils.ts          # Utility functions
+│   ├── db.ts             # Database (Dexie) implementation
+│   ├── api/
+│   │   └── messageProtocol/  # REST and mock protocol implementations
+│   ├── config/
+│   │   └── protocol.ts   # API configuration with runtime override
+│   ├── crypto/           # Encryption and BIP39 utilities
+│   ├── services/         # Core service implementations
+│   │   ├── auth.ts       # Auth service
+│   │   ├── message.ts    # Message service
+│   │   ├── discussion.ts # Discussion service
+│   │   └── announcement.ts # Announcement service
+│   ├── utils/            # Utility modules
+│   │   ├── userId.ts     # User ID encoding/decoding
+│   │   ├── base64.ts     # Base64 encoding
+│   │   ├── logs.ts       # Logging utility
+│   │   └── ...           # Other utilities
+│   └── wasm/             # WASM module wrappers
+│       ├── loader.ts     # WASM initialization
+│       ├── session.ts    # Session management
+│       └── ...           # Other WASM utilities
 ├── test/
-│   ├── setup.ts        # Test environment setup
-│   ├── helpers.ts      # Test utilities
-│   └── *.test.ts       # Test files
+│   ├── setup.ts          # Test environment setup
+│   ├── helpers.ts        # Test utilities
+│   └── *.test.ts         # Test files
 ├── package.json
 ├── tsconfig.json
 ├── vitest.config.ts
@@ -306,6 +326,28 @@ gossip-sdk/
 3. Add JSDoc documentation with examples
 4. Export from module file and `index.ts`
 5. Add corresponding tests
+
+## Known Limitations & TODOs
+
+### Store Coupling in deleteContact
+
+The `deleteContact` function (`src/utils/contacts.ts`) still accesses `useAccountStore` from the React app to get the current user's session. This creates a coupling between the SDK and the React app's state management.
+
+**Impact:** The `deleteContact` function will not work correctly in a pure Node.js environment without the React store being initialized.
+
+**Future Solution:** Pass the session/userId explicitly as a parameter to `deleteContact`, making it fully independent of React stores.
+
+### Workspace Setup for Imports
+
+Currently, the React app imports from the SDK using relative paths like `../../gossip-sdk/src`. This works but is verbose.
+
+**Future Solution:** Set up npm workspaces or TypeScript project references for cleaner imports like `import { authService } from 'gossip-sdk'`.
+
+### Announcement Service Notifications
+
+The SDK's `AnnouncementService` uses an injectable `NotificationHandler` interface for platform-agnostic notification support. However, the React app still uses its own copy with direct `notificationService` calls.
+
+**Future Solution:** Update React app to use SDK's announcement service and inject the notification handler during app initialization.
 
 ## License
 

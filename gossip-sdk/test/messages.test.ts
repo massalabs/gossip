@@ -12,13 +12,13 @@ import {
 import { initializeAccount } from '../src/account';
 import { getSession } from '../src/utils';
 import { addContact } from '../src/contacts';
-import { db, MessageType, MessageDirection, MessageStatus } from '@/db';
-import { createMessageProtocol } from '@/api/messageProtocol';
-import { MessageProtocolType } from '@/config/protocol';
-import { announcementService } from '@/services/announcement';
-import { messageService } from '@/services/message';
-import { generateUserKeys } from '@/wasm/userKeys';
-import { encodeUserId } from '@/utils/userId';
+import { db, MessageType, MessageDirection, MessageStatus } from '../src/db';
+import { createMessageProtocol } from '../src/api/messageProtocol';
+import { MessageProtocolType } from '../src/config/protocol';
+import { announcementService } from '../src/services/announcement';
+import { messageService } from '../src/services/message';
+import { generateUserKeys } from '../src/wasm/userKeys';
+import { encodeUserId } from '../src/utils/userId';
 import type { UserPublicKeys } from '@/assets/generated/wasm/gossip_wasm';
 
 describe('Message Operations', () => {
@@ -121,9 +121,9 @@ describe('Message Operations', () => {
   });
 
   describe('getMessage', () => {
-    it('should return undefined for non-existent message', async () => {
+    it('should return null for non-existent message', async () => {
       const message = await getMessage(999);
-      expect(message).toBeUndefined();
+      expect(message).toBeNull();
     });
 
     it('should return message when it exists', async () => {

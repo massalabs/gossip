@@ -6,7 +6,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { fetchPublicKeyByUserId, ensurePublicKeyPublished } from '../src/auth';
 import { initializeAccount } from '../src/account';
 import { getSession, getSessionKeys } from '../src/utils';
-import { db } from '@/db';
+import { db } from '../src/db';
 
 describe('Authentication', () => {
   beforeEach(async () => {

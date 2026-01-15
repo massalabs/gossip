@@ -14,30 +14,29 @@
  * const fetchResult = await fetchMessages(session);
  *
  * // Get messages from database
- * const messages = await getMessages(ownerUserId, contactUserId);
+ * const messages = await getMessages(userId, contactUserId);
  * ```
  */
 
-import { messageService } from '@/services/message';
-import { db } from '@/db';
-import type { Message } from '@/db';
-import type { MessageResult, SendMessageResult } from '@/services/message';
-import type { SessionModule } from '@/wasm';
+import { messageService } from './services/message';
+import { db } from './db';
+import type { Message } from './db';
+import type { SessionModule } from './wasm';
+import type { MessageResult, SendMessageResult } from './services/message';
 
 // Re-export result types
 export type { MessageResult, SendMessageResult };
 
 /**
  * Send a message to a contact.
- * The message is encrypted and sent via the message protocol.
  *
- * @param message - Message object to send (without id)
- * @param session - The SessionModule instance for the current user
+ * @param message - The message to send
+ * @param session - The SessionModule instance
  * @returns Result with success status and sent message
  *
  * @example
  * ```typescript
- * const message = {
+ * const result = await sendMessage({
  *   ownerUserId: myUserId,
  *   contactUserId: theirUserId,
  *   content: 'Hello!',
@@ -45,13 +44,10 @@ export type { MessageResult, SendMessageResult };
  *   direction: MessageDirection.OUTGOING,
  *   status: MessageStatus.SENDING,
  *   timestamp: new Date(),
- * };
+ * }, session);
  *
- * const result = await sendMessage(message, session);
  * if (result.success) {
  *   console.log('Message sent:', result.message?.id);
- * } else {
- *   console.error('Failed:', result.error);
  * }
  * ```
  */
@@ -64,16 +60,15 @@ export async function sendMessage(
 
 /**
  * Fetch new messages from the server.
- * Decrypts messages and stores them in the database.
  *
- * @param session - The SessionModule instance for the current user
- * @returns Result with count of new messages fetched
+ * @param session - The SessionModule instance
+ * @returns Result with success status and new message count
  *
  * @example
  * ```typescript
  * const result = await fetchMessages(session);
  * if (result.success) {
- *   console.log(`Fetched ${result.newMessagesCount} new messages`);
+ *   console.log('Fetched', result.newMessagesCount, 'new messages');
  * }
  * ```
  */
@@ -85,15 +80,14 @@ export async function fetchMessages(
 
 /**
  * Resend failed messages.
- * Attempts to resend messages that failed to send previously.
  *
- * @param messages - Map from contactUserId to array of messages to retry
- * @param session - The SessionModule instance for the current user
+ * @param messages - Map of contact IDs to arrays of failed messages
+ * @param session - The SessionModule instance
  *
  * @example
  * ```typescript
  * const failedMessages = new Map([
- *   [contactUserId, [message1, message2]],
+ *   [contactUserId, [msg1, msg2]],
  * ]);
  * await resendMessages(failedMessages, session);
  * ```
@@ -106,18 +100,17 @@ export async function resendMessages(
 }
 
 /**
- * Find message by seeker.
- * Useful for finding the original message when processing replies.
+ * Find a message by its seeker.
  *
- * @param seeker - Message seeker (Uint8Array)
- * @param ownerUserId - Owner user ID
+ * @param seeker - The seeker bytes
+ * @param ownerUserId - The owner user ID
  * @returns Message or undefined if not found
  *
  * @example
  * ```typescript
- * const originalMessage = await findMessageBySeeker(seeker, myUserId);
- * if (originalMessage) {
- *   console.log('Found original:', originalMessage.content);
+ * const message = await findMessageBySeeker(seekerBytes, myUserId);
+ * if (message) {
+ *   console.log('Found message:', message.content);
  * }
  * ```
  */
@@ -129,16 +122,15 @@ export async function findMessageBySeeker(
 }
 
 /**
- * Get messages from the database.
- * Optionally filter by contact user ID.
+ * Get messages for an owner, optionally filtered by contact.
  *
- * @param ownerUserId - Owner user ID
+ * @param ownerUserId - The owner user ID
  * @param contactUserId - Optional contact user ID to filter by
- * @returns Array of messages sorted by id
+ * @returns Array of messages
  *
  * @example
  * ```typescript
- * // Get all messages for a user
+ * // Get all messages
  * const allMessages = await getMessages(myUserId);
  *
  * // Get messages for a specific contact
@@ -151,16 +143,10 @@ export async function getMessages(
 ): Promise<Message[]> {
   try {
     if (contactUserId) {
-      return await db.messages
-        .where('[ownerUserId+contactUserId]')
-        .equals([ownerUserId, contactUserId])
-        .sortBy('id');
-    } else {
-      return await db.messages
-        .where('ownerUserId')
-        .equals(ownerUserId)
-        .sortBy('id');
+      return await db.getMessagesForContactByOwner(ownerUserId, contactUserId);
     }
+    // Get all messages for owner
+    return await db.messages.where('ownerUserId').equals(ownerUserId).toArray();
   } catch (error) {
     console.error('Error getting messages:', error);
     return [];
@@ -170,46 +156,44 @@ export async function getMessages(
 /**
  * Get a specific message by ID.
  *
- * @param messageId - Message ID
- * @returns Message or undefined if not found
+ * @param messageId - The message ID
+ * @returns Message or null if not found
  *
  * @example
  * ```typescript
  * const message = await getMessage(123);
  * if (message) {
- *   console.log('Message:', message.content);
+ *   console.log('Message content:', message.content);
  * }
  * ```
  */
-export async function getMessage(
-  messageId: number
-): Promise<Message | undefined> {
+export async function getMessage(messageId: number): Promise<Message | null> {
   try {
-    return await db.messages.get(messageId);
+    const message = await db.messages.get(messageId);
+    return message ?? null;
   } catch (error) {
     console.error('Error getting message:', error);
-    return undefined;
+    return null;
   }
 }
 
 /**
- * Get messages for a contact with pagination.
+ * Get messages for a contact with optional limit.
  *
- * @param ownerUserId - Owner user ID
- * @param contactUserId - Contact user ID
+ * @param ownerUserId - The owner user ID
+ * @param contactUserId - The contact user ID
  * @param limit - Maximum number of messages to return (default: 50)
  * @returns Array of messages (most recent first)
  *
  * @example
  * ```typescript
- * // Get last 20 messages
- * const messages = await getMessagesForContact(myUserId, contactUserId, 20);
+ * const recentMessages = await getMessagesForContact(myUserId, contactUserId, 20);
  * ```
  */
 export async function getMessagesForContact(
   ownerUserId: string,
   contactUserId: string,
-  limit = 50
+  limit: number = 50
 ): Promise<Message[]> {
   try {
     return await db.getMessagesForContactByOwner(

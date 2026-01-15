@@ -12,13 +12,13 @@ import {
 } from '../src/contacts';
 import { initializeAccount } from '../src/account';
 import { getSession } from '../src/utils';
-import { db } from '@/db';
-import { createMessageProtocol } from '@/api/messageProtocol';
-import { MessageProtocolType } from '@/config/protocol';
-import { announcementService } from '@/services/announcement';
-import { messageService } from '@/services/message';
-import { generateUserKeys } from '@/wasm/userKeys';
-import { encodeUserId } from '@/utils/userId';
+import { db } from '../src/db';
+import { createMessageProtocol } from '../src/api/messageProtocol';
+import { MessageProtocolType } from '../src/config/protocol';
+import { announcementService } from '../src/services/announcement';
+import { messageService } from '../src/services/message';
+import { generateUserKeys } from '../src/wasm/userKeys';
+import { encodeUserId } from '../src/utils/userId';
 import type { UserPublicKeys } from '@/assets/generated/wasm/gossip_wasm';
 
 describe('Contact Management', () => {

@@ -4,7 +4,7 @@
  * Helper functions for creating test data and utilities.
  */
 
-import type { Contact, Discussion, Message, UserProfile } from '@/db';
+import type { Contact, Discussion, Message, UserProfile } from '../src/db';
 import type { UserPublicKeys } from '@/assets/generated/wasm/gossip_wasm';
 import {
   MessageType,
@@ -12,7 +12,7 @@ import {
   MessageStatus,
   DiscussionStatus,
   DiscussionDirection,
-} from '@/db';
+} from '../src/db';
 
 /**
  * Create a test contact object (without id).

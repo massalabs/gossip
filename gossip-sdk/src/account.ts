@@ -23,7 +23,7 @@
  */
 
 import { useAccountStore } from '@/stores/accountStore';
-import type { UserProfile } from '@/db';
+import type { UserProfile } from './db';
 import type { Account } from '@massalabs/massa-web3';
 
 export interface InitializeAccountResult {

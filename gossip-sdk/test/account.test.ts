@@ -12,7 +12,7 @@ import {
   getMnemonicBackupInfo,
   markMnemonicBackupComplete,
 } from '../src/account';
-import { db } from '@/db';
+import { db } from '../src/db';
 
 describe('Account Management', () => {
   beforeEach(async () => {

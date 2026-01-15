@@ -14,7 +14,7 @@ import 'fake-indexeddb/auto';
 // Import IDBKeyRange polyfill
 import { IDBKeyRange } from 'fake-indexeddb';
 import { afterEach, vi } from 'vitest';
-import { db } from '@/db';
+import { db } from '../src/db';
 
 // Make IDBKeyRange available globally (required for Dexie in Node)
 if (typeof globalThis.IDBKeyRange === 'undefined') {
@@ -49,6 +49,7 @@ Object.defineProperty(globalThis, 'localStorage', {
 });
 
 // Mock the notification service (Node.js doesn't have notifications)
+// Note: SDK doesn't import this directly, but React app code might via transitive imports
 vi.mock('@/services/notifications', () => ({
   notificationService: {
     scheduleNotification: vi.fn(),
@@ -139,10 +140,11 @@ vi.mock('@/assets/generated/wasm/gossip_wasm', async () => {
   };
 });
 
-// Use MOCK message protocol for tests
-import { MessageProtocolType } from '@/config/protocol';
-vi.mock('@/api/messageProtocol', async importOriginal => {
-  const actual = await importOriginal<typeof import('@/api/messageProtocol')>();
+// Use MOCK message protocol for tests - using local SDK paths
+import { MessageProtocolType } from '../src/config/protocol';
+vi.mock('../src/api/messageProtocol', async importOriginal => {
+  const actual =
+    await importOriginal<typeof import('../src/api/messageProtocol')>();
   const mockProtocol = actual.createMessageProtocol(MessageProtocolType.MOCK);
   return {
     ...actual,

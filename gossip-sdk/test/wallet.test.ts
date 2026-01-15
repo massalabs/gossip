@@ -12,7 +12,7 @@ import {
   getWalletError,
 } from '../src/wallet';
 import { initializeAccount } from '../src/account';
-import { db } from '@/db';
+import { db } from '../src/db';
 
 describe('Wallet Operations', () => {
   beforeEach(async () => {
