@@ -323,7 +323,10 @@ export class AnnouncementService {
         limit,
         cursor
       );
-      return items;
+      log.info('fetched announcements', {
+        counters: items.map(i => i.counter),
+      });
+      return items; //.sort((a, b) => Number(a.counter) - Number(b.counter)); // sort by counter ascending
     } catch (error) {
       log.error('network fetch failed', error);
       return [];
@@ -469,7 +472,7 @@ async function handleReceivedDiscussion(
         existing.direction === DiscussionDirection.INITIATED
       ) {
         updateData.status = DiscussionStatus.ACTIVE;
-        log.info('transitioning to ACTIVE', {
+        log.info('discussion transitioning from PENDING to ACTIVE', {
           discussionId: existing.id,
           contactUserId,
         });

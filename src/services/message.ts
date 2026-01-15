@@ -399,6 +399,11 @@ export class MessageService {
 
     const sessionStatus = session.peerSessionStatus(peerId);
 
+    log.info('session status', {
+      sessionStatus: sessionStatusToString(sessionStatus),
+      peerId: encodeUserId(peerId),
+    });
+
     if (sessionStatus === SessionStatus.PeerRequested) {
       return {
         success: false,
@@ -424,6 +429,7 @@ export class MessageService {
     }
     log.info('message serialized', {
       serializedContent: serializeMessageResult.data,
+      messageContent: message.content,
     });
     message.serializedContent = serializeMessageResult.data;
 
@@ -442,7 +448,7 @@ export class MessageService {
       return {
         success: false,
         error: isUnstable
-          ? 'Discussion is broken'
+          ? 'Discussion is unstable'
           : 'Waiting for peer acceptance',
         message: { ...message, id: messageId, status: MessageStatus.FAILED },
       };
@@ -696,6 +702,12 @@ export class MessageService {
           await db.messages.update(msg.id, {
             seeker: sendOutput.seeker,
             encryptedMessage: sendOutput.data,
+          });
+
+          log.info('message updated in db with seeker and ciphertext', {
+            messageContent: msg.content,
+            seeker: encodeToBase64(sendOutput.seeker),
+            ciphertext: encodeToBase64(sendOutput.data),
           });
 
           try {
