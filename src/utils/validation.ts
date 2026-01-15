@@ -1,5 +1,5 @@
 import { db } from '../db';
-import { isValidUserId } from './userId';
+import { isValidUserId } from '../../gossip-sdk/src/utils/userId';
 
 export type ValidationResult =
   | { valid: true; error?: never }

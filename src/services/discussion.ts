@@ -13,7 +13,7 @@ import {
   SessionModule,
   sessionStatusToString,
 } from '../../gossip-sdk/src/wasm/session';
-import { decodeUserId } from '../utils';
+import { decodeUserId } from '../../gossip-sdk/src/utils/userId';
 import { SessionStatus } from '../../gossip-sdk/src/assets/generated/wasm/gossip_wasm';
 import { Logger } from '../../gossip-sdk/src/utils/logs';
 

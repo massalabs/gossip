@@ -16,7 +16,7 @@ import {
 import { sessionStatusToString } from '../../gossip-sdk/src/wasm/session';
 import type { SessionModule } from '../../gossip-sdk/src/wasm/session';
 import { SessionStatus } from '../../gossip-sdk/src/assets/generated/wasm/gossip_wasm';
-import { decodeUserId, encodeUserId } from '../utils/userId';
+import { decodeUserId, encodeUserId } from '../../gossip-sdk/src/utils/userId';
 import { messageService } from './message';
 import { Logger } from '../../gossip-sdk/src/utils/logs';
 

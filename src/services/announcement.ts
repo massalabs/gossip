@@ -5,7 +5,7 @@
  */
 
 import { db, Discussion, DiscussionStatus, DiscussionDirection } from '../db';
-import { decodeUserId, encodeUserId } from '../utils/userId';
+import { decodeUserId, encodeUserId } from '../../gossip-sdk/src/utils/userId';
 import { IMessageProtocol, restMessageProtocol } from '../api/messageProtocol';
 import {
   UserPublicKeys,

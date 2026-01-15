@@ -13,7 +13,7 @@ import {
   MessageStatus,
   MessageType,
 } from '../db';
-import { decodeUserId, encodeUserId } from '../utils/userId';
+import { decodeUserId, encodeUserId } from '../../gossip-sdk/src/utils/userId';
 import {
   IMessageProtocol,
   EncryptedMessage,

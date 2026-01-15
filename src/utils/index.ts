@@ -2,7 +2,7 @@ export * from './addressUtils';
 export * from '../../gossip-sdk/src/utils/base64';
 export * from './fetchPrice';
 export * from './timeUtils';
-export * from './userId';
+export * from '../../gossip-sdk/src/utils/userId';
 export * from './validation';
 export {
   updateContactName,

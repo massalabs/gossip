@@ -7,7 +7,7 @@
 
 import { MNS } from '@massalabs/massa-web3';
 import { useAccountStore } from '../stores/accountStore';
-import { isValidUserId } from '../utils/userId';
+import { isValidUserId } from '../../gossip-sdk/src/utils/userId';
 
 const MNS_SUFFIX = '.massa';
 
