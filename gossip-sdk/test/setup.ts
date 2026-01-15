@@ -122,6 +122,28 @@ vi.mock('@/services/biometricService', () => ({
   },
 }));
 
+// Mock price fetching to avoid CoinGecko rate limits
+vi.mock('@/utils/fetchPrice', async () => {
+  const actual = await import('@/utils/fetchPrice');
+  return {
+    ...actual,
+    priceFetcher: {
+      getTokenPrice: vi.fn().mockResolvedValue(0.01),
+      getTokenPrices: vi.fn().mockImplementation(async (bases: string[]) => {
+        return Object.fromEntries(
+          bases.map(base => [base.toUpperCase(), 0.01])
+        );
+      }),
+      getUsdPrice: vi.fn().mockResolvedValue(0.01),
+      getUsdPrices: vi.fn().mockImplementation(async (bases: string[]) => {
+        return Object.fromEntries(
+          bases.map(base => [base.toUpperCase(), 0.01])
+        );
+      }),
+    },
+  };
+});
+
 // Use real WASM - configure it to load from filesystem in Node.js instead of fetch
 import { readFile } from 'fs/promises';
 import { fileURLToPath } from 'url';
