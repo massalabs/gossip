@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import BaseModal from '../ui/BaseModal';
 import Button from '../ui/Button';
 import { useKeyDown } from '../../hooks/useKeyDown';
-import { validateUsernameFormat } from '../../utils/validation';
+import { validateUsernameFormat } from '../../../gossip-sdk/src/utils/validation';
 import { db } from '../../db';
 
 interface UsernameEditModalProps {

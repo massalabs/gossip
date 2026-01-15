@@ -3,7 +3,10 @@ import { useNavigate } from 'react-router-dom';
 import { Contact, db } from '../db';
 import { useAccountStore } from '../stores/accountStore';
 import { useAppStore } from '../stores/appStore';
-import { validateUserIdFormat, validateUsernameFormat } from '../utils';
+import {
+  validateUserIdFormat,
+  validateUsernameFormat,
+} from '../../gossip-sdk/src/utils/validation';
 import { encodeUserId } from '../../gossip-sdk/src/utils/userId';
 import { UserPublicKeys } from '../../gossip-sdk/src/assets/generated/wasm/gossip_wasm';
 import { useFileShareContact } from './useFileShareContact';

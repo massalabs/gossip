@@ -1,5 +1,5 @@
 import { AppRoute } from '../constants/routes';
-import { validateUserIdFormat } from './validation';
+import { validateUserIdFormat } from '../../gossip-sdk/src/utils/validation';
 
 // Matches a clean invite path like "/invite/<userId>" (no query/fragment)
 const INVITE_REGEX = new RegExp(`^/${AppRoute.invite}/([^/#?\\s]+)$`, 'i');

@@ -3,7 +3,7 @@ export * from '../../gossip-sdk/src/utils/base64';
 export * from './fetchPrice';
 export * from './timeUtils';
 export * from '../../gossip-sdk/src/utils/userId';
-export * from './validation';
+export * from '../../gossip-sdk/src/utils/validation';
 export {
   updateContactName,
   deleteContact,

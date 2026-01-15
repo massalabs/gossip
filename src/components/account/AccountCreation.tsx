@@ -7,7 +7,7 @@ import {
   validatePassword,
   validateUsernameFormat,
   validateUsernameFormatAndAvailability,
-} from '../../utils/validation';
+} from '../../../gossip-sdk/src/utils/validation';
 import PageHeader from '../ui/PageHeader';
 import PageLayout from '../ui/PageLayout';
 import TabSwitcher from '../ui/TabSwitcher';
