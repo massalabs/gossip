@@ -153,6 +153,19 @@ vi.mock('../src/api/messageProtocol', async importOriginal => {
   };
 });
 
+// Also mock the React app's message protocol (used by accountStore via @/ imports)
+// This is needed because SDK's account.ts imports @/stores/accountStore which uses
+// @/api/messageProtocol - a different module path than the SDK's ../src/api/messageProtocol
+vi.mock('@/api/messageProtocol', async () => {
+  const { createMessageProtocol } = await import('../src/api/messageProtocol');
+  const { MessageProtocolType } = await import('../src/config/protocol');
+  const mockProtocol = createMessageProtocol(MessageProtocolType.MOCK);
+  return {
+    createMessageProtocol: vi.fn(() => mockProtocol),
+    restMessageProtocol: mockProtocol,
+  };
+});
+
 // Clean up between tests to avoid state leakage
 afterEach(async () => {
   try {
