@@ -7,12 +7,37 @@
  *
  * @example
  * ```typescript
- * import { initializeAccount, sendMessage } from 'gossip-sdk';
+ * import {
+ *   initializeAccount,
+ *   addContact,
+ *   initializeDiscussion,
+ *   sendMessage,
+ *   getSession,
+ * } from 'gossip-sdk';
  *
  * // Create a new account
- * const result = await initializeAccount('username', 'password');
- * if (result.success) {
- *   console.log('Account created:', result.userProfile);
+ * const accountResult = await initializeAccount('alice', 'secure-password');
+ * if (!accountResult.success) {
+ *   throw new Error(accountResult.error);
+ * }
+ *
+ * // Get session for operations
+ * const session = getSession();
+ *
+ * // Add a contact and start a discussion
+ * const contactResult = await addContact(
+ *   accountResult.userProfile.userId,
+ *   contactUserId,
+ *   'Bob',
+ *   bobPublicKeys
+ * );
+ *
+ * if (contactResult.success) {
+ *   const discussionResult = await initializeDiscussion(
+ *     contactResult.contact,
+ *     session,
+ *     'Hello Bob!'
+ *   );
  * }
  * ```
  *
@@ -22,30 +47,96 @@
 // SDK version - matches package.json
 export const SDK_VERSION = '0.0.1';
 
-// Placeholder exports - will be populated in Step 2
 // Account Management
-// export * from './account';
+export {
+  initializeAccount,
+  loadAccount,
+  restoreAccountFromMnemonic,
+  logout,
+  resetAccount,
+  showBackup,
+  getAllAccounts,
+  hasExistingAccount,
+  getCurrentAccount,
+  getMnemonicBackupInfo,
+  markMnemonicBackupComplete,
+} from './account';
+export type {
+  InitializeAccountResult,
+  LoadAccountResult,
+  RestoreAccountResult,
+  BackupResult,
+} from './account';
 
 // Authentication & Public Keys
-// export * from './auth';
+export { fetchPublicKeyByUserId, ensurePublicKeyPublished } from './auth';
 
 // Contact Management
-// export * from './contacts';
+export {
+  getContacts,
+  getContact,
+  addContact,
+  updateContactName,
+  deleteContact,
+} from './contacts';
 
 // Discussion Management
-// export * from './discussions';
+export {
+  initializeDiscussion,
+  acceptDiscussionRequest,
+  renewDiscussion,
+  updateDiscussionName,
+  isDiscussionStableState,
+  getDiscussions,
+  getDiscussion,
+  getActiveDiscussions,
+  getUnreadCount,
+  markDiscussionAsRead,
+} from './discussions';
 
 // Message Operations
-// export * from './messages';
+export {
+  sendMessage,
+  fetchMessages,
+  resendMessages,
+  findMessageBySeeker,
+  getMessages,
+  getMessage,
+  getMessagesForContact,
+} from './messages';
 
 // Announcement Handling
-// export * from './announcements';
+export {
+  fetchAndProcessAnnouncements,
+  resendAnnouncements,
+  sendAnnouncement,
+  establishSession,
+} from './announcements';
 
 // Wallet Operations
-// export * from './wallet';
+export {
+  initializeTokens,
+  refreshBalances,
+  refreshBalance,
+  getTokenBalances,
+  getTokens,
+  isWalletLoading,
+  isWalletInitialized,
+  getWalletError,
+  getFeeConfig,
+  setFeeConfig,
+} from './wallet';
 
-// Types
-// export * from './types';
+// Types - re-export all types from the types module
+export * from './types';
 
 // Utilities
-// export * from './utils';
+export {
+  getSession,
+  getAccount,
+  getSessionKeys,
+  ensureInitialized,
+  getCurrentUserId,
+  isAccountLoaded,
+  isAccountLoading,
+} from './utils';
