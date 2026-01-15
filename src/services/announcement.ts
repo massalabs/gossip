@@ -32,6 +32,7 @@ export const EstablishSessionError =
 
 export class AnnouncementService {
   private messageProtocol: IMessageProtocol;
+  private isProcessingAnnouncements = false;
 
   constructor(messageProtocol: IMessageProtocol) {
     this.messageProtocol = messageProtocol;
@@ -110,10 +111,16 @@ export class AnnouncementService {
   ): Promise<AnnouncementReceptionResult> {
     const log = logger.forMethod('fetchAndProcessAnnouncements');
 
+    if (this.isProcessingAnnouncements) {
+      log.info('fetch already in progress, skipping');
+      return { success: true, newAnnouncementsCount: 0 };
+    }
+
     const errors: string[] = [];
     let announcements: Uint8Array[] = [];
     let fetchedCounters: string[] = [];
 
+    this.isProcessingAnnouncements = true;
     try {
       const pending = await db.pendingAnnouncements.toArray();
 
@@ -140,36 +147,25 @@ export class AnnouncementService {
         fetchedCounters = fetched.map(a => a.counter);
       }
 
-      const BATCH_SIZE = 50;
       let newAnnouncementsCount = 0;
 
-      for (let i = 0; i < announcements.length; i += BATCH_SIZE) {
-        const batch = announcements.slice(i, i + BATCH_SIZE);
+      for (const announcement of announcements) {
+        try {
+          const result = await this._processIncomingAnnouncement(
+            announcement,
+            session
+          );
 
-        for (const announcement of batch) {
-          try {
-            const result = await this._processIncomingAnnouncement(
-              announcement,
-              session
-            );
-
-            if (result.success && result.contactUserId) {
-              newAnnouncementsCount++;
-              log.info(`processed new announcement #${newAnnouncementsCount}`, {
-                contactUserId: result.contactUserId,
-              });
-            }
-
-            if (result.error) errors.push(result.error);
-          } catch (error) {
-            errors.push(
-              error instanceof Error ? error.message : 'Unknown error'
-            );
+          if (result.success && result.contactUserId) {
+            newAnnouncementsCount++;
+            log.info(`processed new announcement #${newAnnouncementsCount}`, {
+              contactUserId: result.contactUserId,
+            });
           }
-        }
 
-        if (i + BATCH_SIZE < announcements.length) {
-          await new Promise(resolve => setTimeout(resolve, 0));
+          if (result.error) errors.push(result.error);
+        } catch (error) {
+          errors.push(error instanceof Error ? error.message : 'Unknown error');
         }
       }
 
@@ -195,6 +191,8 @@ export class AnnouncementService {
         newAnnouncementsCount: 0,
         error: error instanceof Error ? error.message : 'Unknown error',
       };
+    } finally {
+      this.isProcessingAnnouncements = false;
     }
   }
 
@@ -316,7 +314,7 @@ export class AnnouncementService {
 
   private async _fetchAnnouncements(
     cursor?: string,
-    limit = 50
+    limit = 500
   ): Promise<BulletinItem[]> {
     const log = logger.forMethod('_fetchAnnouncements');
 
