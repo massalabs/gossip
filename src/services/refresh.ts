@@ -13,7 +13,8 @@ import {
   MessageStatus,
   MessageType,
 } from '../db';
-import { SessionModule, sessionStatusToString } from '../wasm/session';
+import { sessionStatusToString } from '../wasm/session';
+import type { SessionModule } from '../wasm/session';
 import { SessionStatus } from '../assets/generated/wasm/gossip_wasm';
 import { decodeUserId, encodeUserId } from '../utils/userId';
 import { messageService } from './message';
@@ -122,7 +123,7 @@ export async function handleSessionRefresh(
           status: MessageStatus.SENDING,
           timestamp: new Date(),
         },
-        session
+        session as never
       );
       log.info('keep-alive message sent successfully.', {
         ownerUserId: discussion.ownerUserId,

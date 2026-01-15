@@ -19,8 +19,84 @@ if (typeof process !== 'undefined') {
 
 // Import IDBKeyRange polyfill
 import { IDBKeyRange } from 'fake-indexeddb';
-import { afterEach, vi } from 'vitest';
+import { afterAll, beforeAll, beforeEach, vi } from 'vitest';
+import type { Account } from '@massalabs/massa-web3';
+import type { AccountStoreState } from '../src/utils';
+import type { WalletStoreState } from '../src/wallet';
+import type { UserProfile } from '../src/db';
 import { db } from '../src/db';
+import { setAccountStore } from '../src/utils';
+import { setWalletStore } from '../src/wallet';
+import { generateUserKeys } from '../src/wasm/userKeys';
+import { ensureWasmInitialized } from '../src/wasm/loader';
+import { SessionModule } from '../src/wasm/session';
+import { generateNonce } from '../src/wasm/encryption';
+import { deriveKey, encrypt } from '../src/crypto/encryption';
+
+const defaultAccountState: AccountStoreState = {
+  userProfile: null,
+  encryptionKey: null,
+  session: null,
+  isLoading: false,
+  account: null,
+};
+
+let accountState: AccountStoreState = { ...defaultAccountState };
+let accountProfiles: UserProfile[] = [];
+let accountExists = false;
+let lastBackupInfo: { createdAt: Date; backedUp: boolean } | null = null;
+let walletState: Pick<WalletStoreState, 'tokens' | 'feeConfig'> = {
+  tokens: [
+    {
+      address: 'MASSA',
+      name: 'Massa',
+      ticker: 'MAS',
+      icon: 'mas-icon',
+      balance: null,
+      priceUsd: null,
+      valueUsd: null,
+      isNative: true,
+      decimals: 9,
+    },
+  ],
+  feeConfig: {
+    type: 'preset',
+    preset: 'standard',
+  },
+};
+
+async function createSessionModule(): Promise<{
+  session: AccountStoreState['session'];
+  encryptionKey: AccountStoreState['encryptionKey'];
+  security: UserProfile['security'];
+}> {
+  await ensureWasmInitialized();
+  const mnemonic =
+    'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
+  const keys = await generateUserKeys(mnemonic);
+  const session = new SessionModule(keys, () => undefined);
+  const salt = (await generateNonce()).to_bytes();
+  const encryptionKey = await deriveKey('testpassword123', salt);
+  const { encryptedData: encryptedMnemonic } = await encrypt(
+    mnemonic,
+    encryptionKey,
+    salt
+  );
+
+  return {
+    session: session as unknown as AccountStoreState['session'],
+    encryptionKey,
+    security: {
+      authMethod: 'password',
+      encKeySalt: salt,
+      mnemonicBackup: {
+        encryptedMnemonic,
+        createdAt: new Date(),
+        backedUp: false,
+      },
+    },
+  };
+}
 
 // Make IDBKeyRange available globally (required for Dexie in Node)
 if (typeof globalThis.IDBKeyRange === 'undefined') {
@@ -145,12 +221,12 @@ vi.mock('@/utils/fetchPrice', async () => {
 });
 
 // Use real WASM - configure it to load from filesystem in Node.js instead of fetch
-import { readFile } from 'fs/promises';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
-
 vi.mock('@/assets/generated/wasm/gossip_wasm', async () => {
   const actual = await import('@/assets/generated/wasm/gossip_wasm');
+  const { readFile } = await import('fs/promises');
+  const { fileURLToPath } = await import('url');
+  const { dirname, join } = await import('path');
+
   const __filename = fileURLToPath(import.meta.url);
   const __dirname = dirname(__filename);
   const wasmPath = join(
@@ -168,13 +244,309 @@ vi.mock('@/assets/generated/wasm/gossip_wasm', async () => {
   };
 });
 
-// Clean up between tests to avoid state leakage
-afterEach(async () => {
+async function clearDatabase(): Promise<void> {
+  await Promise.all(db.tables.map(table => table.clear()));
+}
+
+beforeAll(async () => {
+  if (!db.isOpen()) {
+    await db.open();
+  }
+  await clearDatabase();
+
+  accountState = { ...defaultAccountState };
+  accountProfiles = [];
+  accountExists = false;
+  lastBackupInfo = null;
+  walletState = {
+    tokens: [
+      {
+        address: 'MASSA',
+        name: 'Massa',
+        ticker: 'MAS',
+        icon: 'mas-icon',
+        balance: null,
+        priceUsd: null,
+        valueUsd: null,
+        isNative: true,
+        decimals: 9,
+      },
+    ],
+    feeConfig: {
+      type: 'preset',
+      preset: 'standard',
+    },
+  };
+
+  setAccountStore({
+    getState: () => accountState,
+    initializeAccount: vi
+      .fn()
+      .mockImplementation(async (username, password) => {
+        if (!password) {
+          throw new Error('Password is required');
+        }
+
+        const profile: UserProfile = {
+          userId: 'gossip1test',
+          username,
+          security: {
+            encKeySalt: new Uint8Array(),
+            authMethod: 'password',
+            mnemonicBackup: {
+              encryptedMnemonic: new Uint8Array(),
+              createdAt: new Date(),
+              backedUp: false,
+            },
+          },
+          session: new Uint8Array(),
+          status: 'online',
+          lastSeen: new Date(),
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+
+        const { session, encryptionKey, security } =
+          await createSessionModule();
+        if (!encryptionKey) {
+          throw new Error('Encryption key not initialized');
+        }
+
+        const sessionModule = session as unknown as SessionModule;
+        const sessionBlob = sessionModule.toEncryptedBlob(encryptionKey);
+        const userId = sessionModule.userIdEncoded;
+
+        const userProfile: UserProfile = {
+          ...profile,
+          userId,
+          security,
+          session: sessionBlob,
+        };
+
+        accountState = {
+          ...accountState,
+          userProfile,
+          encryptionKey,
+          session,
+          isLoading: false,
+        };
+
+        await db.userProfile.put(userProfile);
+        accountProfiles.push(userProfile);
+        accountExists = true;
+        lastBackupInfo = {
+          createdAt: new Date(),
+          backedUp: false,
+        };
+      }),
+    initializeAccountWithBiometrics: vi
+      .fn()
+      .mockImplementation(async username => {
+        const profile: UserProfile = {
+          userId: 'gossip1test',
+          username,
+          security: {
+            encKeySalt: new Uint8Array(),
+            authMethod: 'webauthn',
+            mnemonicBackup: {
+              encryptedMnemonic: new Uint8Array(),
+              createdAt: new Date(),
+              backedUp: false,
+            },
+          },
+          session: new Uint8Array(),
+          status: 'online',
+          lastSeen: new Date(),
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+
+        const { session, encryptionKey, security } =
+          await createSessionModule();
+        if (!encryptionKey) {
+          throw new Error('Encryption key not initialized');
+        }
+
+        const sessionModule = session as unknown as SessionModule;
+        const sessionBlob = sessionModule.toEncryptedBlob(encryptionKey);
+        const userId = sessionModule.userIdEncoded;
+
+        const userProfile: UserProfile = {
+          ...profile,
+          userId,
+          security,
+          session: sessionBlob,
+        };
+
+        accountState = {
+          ...accountState,
+          userProfile,
+          encryptionKey,
+          session,
+          isLoading: false,
+        };
+
+        await db.userProfile.put(userProfile);
+
+        accountProfiles.push(userProfile);
+        accountExists = true;
+        lastBackupInfo = {
+          createdAt: new Date(),
+          backedUp: false,
+        };
+      }),
+
+    loadAccount: vi.fn().mockImplementation(async () => {
+      if (!accountExists) {
+        throw new Error('No user profile found');
+      }
+    }),
+    restoreAccountFromMnemonic: vi.fn().mockImplementation(async username => {
+      const profile: UserProfile = {
+        userId: 'gossip1restored',
+        username,
+        security: {
+          encKeySalt: new Uint8Array(),
+          authMethod: 'password',
+          mnemonicBackup: {
+            encryptedMnemonic: new Uint8Array(),
+            createdAt: new Date(),
+            backedUp: false,
+          },
+        },
+        session: new Uint8Array(),
+        status: 'online',
+        lastSeen: new Date(),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      const { session, encryptionKey, security } = await createSessionModule();
+      if (!encryptionKey) {
+        throw new Error('Encryption key not initialized');
+      }
+
+      accountState = {
+        ...accountState,
+        userProfile: {
+          ...profile,
+          security,
+        },
+        encryptionKey,
+        session,
+        isLoading: false,
+      };
+
+      const sessionModule = session as unknown as SessionModule;
+      await db.userProfile.put({
+        ...profile,
+        security,
+        session: sessionModule.toEncryptedBlob(encryptionKey),
+      });
+
+      accountProfiles.push({
+        ...profile,
+        security,
+      });
+      accountExists = true;
+      lastBackupInfo = {
+        createdAt: new Date(),
+        backedUp: false,
+      };
+    }),
+
+    logout: vi.fn().mockImplementation(async () => {
+      accountState = {
+        ...accountState,
+        userProfile: null,
+        session: null,
+        encryptionKey: null,
+        account: null,
+      };
+    }),
+    resetAccount: vi.fn().mockImplementation(async () => {
+      accountProfiles = [];
+      accountExists = false;
+      accountState = {
+        ...defaultAccountState,
+      };
+    }),
+    showBackup: vi.fn().mockResolvedValue({
+      mnemonic: '',
+      account: {} as Account,
+    }),
+    getMnemonicBackupInfo: vi.fn().mockImplementation(() => lastBackupInfo),
+    markMnemonicBackupComplete: vi.fn().mockImplementation(async () => {
+      if (lastBackupInfo) {
+        lastBackupInfo = {
+          ...lastBackupInfo,
+          backedUp: true,
+        };
+      }
+    }),
+    getAllAccounts: vi.fn().mockImplementation(async () => accountProfiles),
+    hasExistingAccount: vi.fn().mockImplementation(async () => accountExists),
+  });
+
+  setWalletStore({
+    getState: () => ({
+      tokens: walletState.tokens,
+      isLoading: false,
+      isInitialized: false,
+      error: null,
+      feeConfig: walletState.feeConfig,
+      initializeTokens: vi.fn(),
+      getTokenBalances: vi.fn().mockResolvedValue([]),
+      refreshBalances: vi.fn(),
+      refreshBalance: vi.fn(),
+      setFeeConfig: vi.fn().mockImplementation(config => {
+        walletState = {
+          ...walletState,
+          feeConfig: config,
+        };
+      }),
+      getFeeConfig: vi.fn().mockImplementation(() => walletState.feeConfig),
+    }),
+  });
+});
+
+beforeEach(async () => {
+  if (!db.isOpen()) {
+    await db.open();
+  }
+  await clearDatabase();
+
+  accountState = { ...defaultAccountState };
+  accountProfiles = [];
+  accountExists = false;
+  lastBackupInfo = null;
+  walletState = {
+    tokens: [
+      {
+        address: 'MASSA',
+        name: 'Massa',
+        ticker: 'MAS',
+        icon: 'mas-icon',
+        balance: null,
+        priceUsd: null,
+        valueUsd: null,
+        isNative: true,
+        decimals: 9,
+      },
+    ],
+    feeConfig: {
+      type: 'preset',
+      preset: 'standard',
+    },
+  };
+});
+
+afterAll(async () => {
   try {
-    // Dexie's delete() method automatically closes the connection if open
-    await db.delete();
+    await clearDatabase();
+    await db.close();
   } catch (_) {
-    // Ignore errors - database might already be deleted or closed
+    // Ignore errors - database might already be closed
   }
 });
 

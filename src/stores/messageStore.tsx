@@ -8,7 +8,7 @@ import {
 } from '../db';
 import { createSelectors } from './utils/createSelectors';
 import { useAccountStore } from './accountStore';
-import { messageService } from '../services/message';
+import { messageService } from '../../gossip-sdk/src';
 import { liveQuery, Subscription } from 'dexie';
 
 interface MessageStoreState {

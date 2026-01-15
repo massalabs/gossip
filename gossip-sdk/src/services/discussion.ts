@@ -6,8 +6,8 @@
 
 import {
   DiscussionStatus,
-  Discussion,
-  Contact,
+  type Discussion,
+  type Contact,
   db,
   MessageDirection,
   MessageStatus,
@@ -107,7 +107,6 @@ export async function acceptDiscussionRequest(
       discussion.ownerUserId,
       discussion.contactUserId
     );
-
     if (!contact)
       throw new Error(
         `Contact ${discussion.contactUserId} not found for ownerUserId ${discussion.ownerUserId}`
@@ -166,7 +165,6 @@ export async function renewDiscussion(
     ownerUserId,
     contactUserId
   );
-
   if (!contact) throw new Error('Contact not found');
 
   const existingDiscussion = await db.getDiscussionByOwnerAndContact(
@@ -216,10 +214,10 @@ export async function renewDiscussion(
       .where('[ownerUserId+contactUserId]')
       .equals([ownerUserId, contactUserId])
       .and(
-        msg =>
-          msg.direction === MessageDirection.OUTGOING &&
-          msg.status !== MessageStatus.DELIVERED &&
-          msg.status !== MessageStatus.READ
+        message =>
+          message.direction === MessageDirection.OUTGOING &&
+          message.status !== MessageStatus.DELIVERED &&
+          message.status !== MessageStatus.READ
       )
       .modify({
         status: MessageStatus.FAILED,

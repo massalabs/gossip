@@ -18,13 +18,68 @@
  * ```
  */
 
-import { useAccountStore } from '@/stores/accountStore';
-import type { SessionModule, EncryptionKey } from './wasm';
+import type { Account } from '@massalabs/massa-web3';
+import type { EncryptionKey } from './wasm';
+import type { SessionModule as AppSessionModule } from '@/wasm/session';
 import type {
   UserPublicKeys,
   UserSecretKeys,
 } from '@/assets/generated/wasm/gossip_wasm';
-import type { UserProfile } from './db';
+import type { UserProfile, GossipDatabase } from './db';
+import type { PreferencesAdapter } from './utils/preferences';
+import type { NotificationHandler } from './services/announcement';
+import { setPreferencesAdapter } from './utils/preferences';
+import { setDb } from './db';
+import { announcementService } from './services/announcement';
+import { messageService } from './services/message';
+import { restMessageProtocol } from './api/messageProtocol';
+import { setAuthMessageProtocol } from './services/auth';
+import { setWalletStore, type WalletStoreAdapter } from './wallet';
+
+export interface AccountStoreState {
+  userProfile: UserProfile | null;
+  encryptionKey: EncryptionKey | null;
+  session: AppSessionModule | null;
+  isLoading: boolean;
+  account: Account | null;
+}
+
+export interface AccountStoreAdapter {
+  getState(): AccountStoreState;
+  initializeAccount(username: string, password: string): Promise<void>;
+  initializeAccountWithBiometrics(
+    username: string,
+    iCloudSync?: boolean
+  ): Promise<void>;
+  loadAccount(password?: string, userId?: string): Promise<void>;
+  restoreAccountFromMnemonic(
+    username: string,
+    mnemonic: string,
+    opts: { useBiometrics: boolean; password?: string }
+  ): Promise<void>;
+  logout(): Promise<void>;
+  resetAccount(): Promise<void>;
+  showBackup(
+    password?: string
+  ): Promise<{ mnemonic: string; account: Account }>;
+  getMnemonicBackupInfo(): { createdAt: Date; backedUp: boolean } | null;
+  markMnemonicBackupComplete(): Promise<void>;
+  getAllAccounts(): Promise<UserProfile[]>;
+  hasExistingAccount(): Promise<boolean>;
+}
+
+let accountStore: AccountStoreAdapter | null = null;
+
+export function setAccountStore(store: AccountStoreAdapter): void {
+  accountStore = store;
+}
+
+export function getAccountStore(): AccountStoreAdapter {
+  if (!accountStore) {
+    throw new Error('Account store adapter not configured.');
+  }
+  return accountStore;
+}
 
 /**
  * Get current session module from account store.
@@ -40,9 +95,9 @@ import type { UserProfile } from './db';
  * }
  * ```
  */
-export function getSession(): SessionModule | null {
-  const state = useAccountStore.getState();
-  return state.session ?? null;
+export function getSession(): AppSessionModule | null {
+  const state = getAccountStore().getState();
+  return state.session as AppSessionModule | null;
 }
 
 /**
@@ -62,13 +117,13 @@ export function getSession(): SessionModule | null {
 export function getAccount(): {
   userProfile: UserProfile | null;
   encryptionKey: EncryptionKey | null;
-  session: SessionModule | null;
+  session: AppSessionModule | null;
 } {
-  const state = useAccountStore.getState();
+  const state = getAccountStore().getState();
   return {
     userProfile: state.userProfile,
     encryptionKey: state.encryptionKey,
-    session: state.session,
+    session: state.session as AppSessionModule | null,
   };
 }
 
@@ -90,7 +145,7 @@ export function getSessionKeys(): {
   ourPk: UserPublicKeys | null;
   ourSk: UserSecretKeys | null;
 } {
-  const state = useAccountStore.getState();
+  const state = getAccountStore().getState();
   const session = state.session;
   if (!session) {
     return { ourPk: null, ourSk: null };
@@ -118,7 +173,7 @@ export function getSessionKeys(): {
  * ```
  */
 export function ensureInitialized(): void {
-  const state = useAccountStore.getState();
+  const state = getAccountStore().getState();
   if (!state.userProfile || !state.session) {
     throw new Error('Account not initialized. Please load an account first.');
   }
@@ -138,7 +193,7 @@ export function ensureInitialized(): void {
  * ```
  */
 export function getCurrentUserId(): string | null {
-  const state = useAccountStore.getState();
+  const state = getAccountStore().getState();
   return state.userProfile?.userId ?? null;
 }
 
@@ -157,7 +212,7 @@ export function getCurrentUserId(): string | null {
  * ```
  */
 export function isAccountLoaded(): boolean {
-  const state = useAccountStore.getState();
+  const state = getAccountStore().getState();
   return !!(state.userProfile && state.session);
 }
 
@@ -167,6 +222,39 @@ export function isAccountLoaded(): boolean {
  * @returns True if account operations are in progress
  */
 export function isAccountLoading(): boolean {
-  const state = useAccountStore.getState();
+  const state = getAccountStore().getState();
   return state.isLoading;
+}
+
+export interface SdkRuntimeConfig {
+  db?: GossipDatabase;
+  preferences?: PreferencesAdapter | null;
+  notificationHandler?: NotificationHandler;
+  accountStore?: AccountStoreAdapter;
+  walletStore?: WalletStoreAdapter;
+}
+
+export function configureSdk(config: SdkRuntimeConfig): void {
+  if (config.db) {
+    setDb(config.db);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(config, 'preferences')) {
+    setPreferencesAdapter(config.preferences ?? null);
+  }
+
+  if (config.notificationHandler) {
+    announcementService.setNotificationHandler(config.notificationHandler);
+  }
+
+  if (config.accountStore) {
+    setAccountStore(config.accountStore);
+  }
+
+  if (config.walletStore) {
+    setWalletStore(config.walletStore);
+  }
+
+  messageService.setMessageProtocol(restMessageProtocol);
+  setAuthMessageProtocol(restMessageProtocol);
 }

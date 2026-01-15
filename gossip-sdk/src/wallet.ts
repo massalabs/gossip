@@ -16,13 +16,63 @@
  * ```
  */
 
-import { useWalletStore } from '@/stores/walletStore';
-import type { TokenState, TokenMeta, Ticker } from '@/stores/walletStore';
-import type { FeeConfig } from '@/components/wallet/FeeConfigModal';
 import type { Provider } from '@massalabs/massa-web3';
 
-// Re-export types for consumers
-export type { TokenState, TokenMeta, Ticker, FeeConfig };
+export type Ticker = string;
+
+export interface TokenMeta {
+  address: string;
+  name: string;
+  ticker: Ticker;
+  icon: string;
+  decimals: number;
+  isNative: boolean;
+}
+
+export interface TokenState extends TokenMeta {
+  balance: bigint | null;
+  priceUsd: number | null;
+  valueUsd: number | null;
+}
+
+export interface FeeConfig {
+  type: 'preset' | 'custom';
+  preset?: 'low' | 'standard' | 'high';
+  customFee?: string;
+}
+
+export interface WalletStoreState {
+  tokens: TokenState[];
+  isLoading: boolean;
+  isInitialized: boolean;
+  error: string | null;
+  feeConfig: FeeConfig;
+  initializeTokens: () => Promise<void>;
+  getTokenBalances: (
+    provider: Provider
+  ) => Promise<(TokenState & { balance: bigint })[]>;
+  refreshBalances: () => Promise<void>;
+  refreshBalance: (tokenIndex: number) => Promise<void>;
+  setFeeConfig: (config: FeeConfig) => void;
+  getFeeConfig: () => FeeConfig;
+}
+
+export interface WalletStoreAdapter {
+  getState(): WalletStoreState;
+}
+
+let walletStore: WalletStoreAdapter | null = null;
+
+export function setWalletStore(store: WalletStoreAdapter): void {
+  walletStore = store;
+}
+
+export function getWalletStore(): WalletStoreAdapter {
+  if (!walletStore) {
+    throw new Error('Wallet store adapter not configured.');
+  }
+  return walletStore;
+}
 
 /**
  * Initialize wallet tokens.
@@ -35,7 +85,7 @@ export type { TokenState, TokenMeta, Ticker, FeeConfig };
  * ```
  */
 export async function initializeTokens(): Promise<void> {
-  const store = useWalletStore.getState();
+  const store = getWalletStore().getState();
   return await store.initializeTokens();
 }
 
@@ -51,7 +101,7 @@ export async function initializeTokens(): Promise<void> {
  * ```
  */
 export async function refreshBalances(): Promise<void> {
-  const store = useWalletStore.getState();
+  const store = getWalletStore().getState();
   return await store.refreshBalances();
 }
 
@@ -67,7 +117,7 @@ export async function refreshBalances(): Promise<void> {
  * ```
  */
 export async function refreshBalance(tokenIndex: number): Promise<void> {
-  const store = useWalletStore.getState();
+  const store = getWalletStore().getState();
   return await store.refreshBalance(tokenIndex);
 }
 
@@ -87,7 +137,7 @@ export async function refreshBalance(tokenIndex: number): Promise<void> {
 export async function getTokenBalances(
   provider: Provider
 ): Promise<(TokenState & { balance: bigint })[]> {
-  const store = useWalletStore.getState();
+  const store = getWalletStore().getState();
   return await store.getTokenBalances(provider);
 }
 
@@ -106,7 +156,7 @@ export async function getTokenBalances(
  * ```
  */
 export function getTokens(): TokenState[] {
-  const state = useWalletStore.getState();
+  const state = getWalletStore().getState();
   return state.tokens;
 }
 
@@ -116,7 +166,7 @@ export function getTokens(): TokenState[] {
  * @returns True if wallet operations are in progress
  */
 export function isWalletLoading(): boolean {
-  const state = useWalletStore.getState();
+  const state = getWalletStore().getState();
   return state.isLoading;
 }
 
@@ -126,7 +176,7 @@ export function isWalletLoading(): boolean {
  * @returns True if wallet has been initialized
  */
 export function isWalletInitialized(): boolean {
-  const state = useWalletStore.getState();
+  const state = getWalletStore().getState();
   return state.isInitialized;
 }
 
@@ -136,7 +186,7 @@ export function isWalletInitialized(): boolean {
  * @returns Error message or null
  */
 export function getWalletError(): string | null {
-  const state = useWalletStore.getState();
+  const state = getWalletStore().getState();
   return state.error;
 }
 
@@ -152,7 +202,7 @@ export function getWalletError(): string | null {
  * ```
  */
 export function getFeeConfig(): FeeConfig {
-  const store = useWalletStore.getState();
+  const store = getWalletStore().getState();
   return store.getFeeConfig();
 }
 
@@ -163,10 +213,11 @@ export function getFeeConfig(): FeeConfig {
  *
  * @example
  * ```typescript
- * setFeeConfig({ type: 'preset', preset: 'fast' });
+  * setFeeConfig({ type: 'preset', preset: 'high' });
+
  * ```
  */
 export function setFeeConfig(config: FeeConfig): void {
-  const store = useWalletStore.getState();
+  const store = getWalletStore().getState();
   store.setFeeConfig(config);
 }

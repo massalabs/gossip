@@ -71,8 +71,9 @@ export function serializeReplyMessage(
 ): Uint8Array {
   const newContentBytes = strToBytes(newContent);
   const originalContentBytes = strToBytes(originalContent);
-  const originalContentLenBytes = U32.toBytes(originalContentBytes.length);
-
+  const originalContentLenBytes = U32.toBytes(
+    BigInt(originalContentBytes.length)
+  );
   // Calculate total size
   const totalSize =
     1 + // type
@@ -122,8 +123,9 @@ export function serializeForwardMessage(
 ): Uint8Array {
   const newContentBytes = strToBytes(newContent);
   const forwardContentBytes = strToBytes(forwardContent);
-  const forwardContentLenBytes = U32.toBytes(forwardContentBytes.length);
-
+  const forwardContentLenBytes = U32.toBytes(
+    BigInt(forwardContentBytes.length)
+  );
   // Calculate total size
   const totalSize =
     1 + // type
@@ -188,8 +190,8 @@ export function deserializeMessage(buffer: Uint8Array): DeserializedMessage {
       let offset = 1;
 
       // Read original content length (4 bytes)
-      const originalContentLen = U32.fromBytes(
-        buffer.slice(offset, offset + 4)
+      const originalContentLen = Number(
+        U32.fromBytes(buffer.slice(offset, offset + 4))
       );
       offset += 4;
 
@@ -221,7 +223,9 @@ export function deserializeMessage(buffer: Uint8Array): DeserializedMessage {
       let offset = 1;
 
       // Read forward content length (4 bytes)
-      const forwardContentLen = U32.fromBytes(buffer.slice(offset, offset + 4));
+      const forwardContentLen = Number(
+        U32.fromBytes(buffer.slice(offset, offset + 4))
+      );
       offset += 4;
 
       // Read forward content

@@ -4,31 +4,14 @@ import { useAccountStore } from './accountStore';
 import { priceFetcher } from '../utils/fetchPrice';
 import { createSelectors } from './utils/createSelectors';
 
-import { FeeConfig } from '../components/wallet/FeeConfigModal';
+import type { FeeConfig, TokenState } from '../../gossip-sdk/src/wallet';
 import { initialTokens } from './utils/const';
 
 type WithNonNull<T, K extends keyof T> = Omit<T, K> & {
   [P in K]-?: NonNullable<T[P]>;
 };
 
-export type Ticker = string;
-
 type TokenWithBalance = WithNonNull<TokenState, 'balance'>;
-
-export interface TokenMeta {
-  address: string;
-  name: string;
-  ticker: Ticker;
-  icon: string;
-  decimals: number;
-  isNative: boolean;
-}
-
-export interface TokenState extends TokenMeta {
-  balance: bigint | null;
-  priceUsd: number | null;
-  valueUsd: number | null;
-}
 
 interface WalletStoreState {
   tokens: TokenState[];

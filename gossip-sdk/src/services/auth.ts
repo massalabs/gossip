@@ -16,7 +16,7 @@ export type PublicKeyResult =
   | { publicKey?: never; error: string };
 
 export class AuthService {
-  constructor(public readonly messageProtocol: IMessageProtocol) {}
+  constructor(public messageProtocol: IMessageProtocol) {}
 
   /**
    * Fetch public key by userId
@@ -71,6 +71,10 @@ function moreThanOneWeekAgo(date: Date): boolean {
 }
 
 export const authService = new AuthService(restMessageProtocol);
+
+export function setAuthMessageProtocol(protocol: IMessageProtocol): void {
+  authService.messageProtocol = protocol;
+}
 
 export const PUBLIC_KEY_NOT_FOUND_ERROR = 'Public key not found';
 export const PUBLIC_KEY_NOT_FOUND_MESSAGE =

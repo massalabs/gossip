@@ -5,8 +5,8 @@
  */
 
 import { db } from '../db';
-import { useAccountStore } from '@/stores/accountStore';
 import { decodeUserId } from './userId';
+import { getAccountStore } from '../utils';
 
 export type UpdateContactNameResult =
   | { ok: true; trimmedName: string }
@@ -51,9 +51,9 @@ export async function updateContactName(
   try {
     const list = await db.getContactsByOwner(ownerUserId);
     const duplicate = list.find(
-      c =>
-        c.userId !== contactUserId &&
-        c.name.toLowerCase() === trimmed.toLowerCase()
+      contact =>
+        contact.userId !== contactUserId &&
+        contact.name.toLowerCase() === trimmed.toLowerCase()
     );
     if (duplicate)
       return {
@@ -81,7 +81,7 @@ export async function updateContactName(
 /**
  * Delete a contact and all associated discussions and messages
  *
- * NOTE: This function accesses useAccountStore.getState().session directly.
+ * NOTE: This function accesses the configured account store for session access.
  * This is a known coupling issue. See README for more details.
  * TODO: Refactor to pass session as a parameter for better decoupling.
  *
@@ -142,7 +142,7 @@ export async function deleteContact(
 
     // Discard peer from session manager
     // NOTE: This accesses the store directly - see TODO above
-    const session = useAccountStore.getState().session;
+    const session = getAccountStore().getState().session;
     if (!session) {
       return {
         ok: false,

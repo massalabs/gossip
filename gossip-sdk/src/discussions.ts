@@ -29,8 +29,7 @@ import {
   isDiscussionStableState as isDiscussionStableStateService,
 } from './services/discussion';
 import { updateDiscussionName as updateDiscussionNameUtil } from './utils/discussions';
-import { db } from './db';
-import type { Discussion, Contact } from './db';
+import { db, type Discussion, type Contact } from './db';
 import type { SessionModule } from './wasm';
 import type { UpdateDiscussionNameResult } from './utils/discussions';
 

@@ -4,7 +4,12 @@
  * Handles broadcasting and processing of session announcements.
  */
 
-import { db, Discussion, DiscussionStatus, DiscussionDirection } from '../db';
+import {
+  db,
+  type Discussion,
+  DiscussionStatus,
+  DiscussionDirection,
+} from '../db';
 import { decodeUserId, encodeUserId } from '../utils/userId';
 import { IMessageProtocol, restMessageProtocol } from '../api/messageProtocol';
 import {
@@ -356,15 +361,15 @@ export class AnnouncementService {
     const newRequestContacts = await db.contacts
       .where('ownerUserId')
       .equals(ownerUserId)
-      .filter(c => c.name.startsWith('New Request'))
+      .filter(contact => contact.name.startsWith('New Request'))
       .toArray();
 
     const numbers = newRequestContacts
-      .map(c => {
-        const match = c.name.match(/^New Request (\d+)$/);
+      .map(contact => {
+        const match = contact.name.match(/^New Request (\d+)$/);
         return match ? parseInt(match[1], 10) : 0;
       })
-      .filter(n => n > 0);
+      .filter(number => number > 0);
 
     const next = numbers.length ? Math.max(...numbers) + 1 : 1;
     return `New Request ${next}`;

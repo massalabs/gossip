@@ -5,16 +5,19 @@ import { useAccountStore } from '../stores/accountStore';
 import { useAppStore } from '../stores/appStore';
 import {
   encodeUserId,
-  validateUsernameFormat,
   validateUserIdFormat,
+  validateUsernameFormat,
 } from '../utils';
 import { UserPublicKeys } from '../assets/generated/wasm/gossip_wasm';
 import { useFileShareContact } from './useFileShareContact';
-import { authService, PublicKeyResult } from '../services/auth';
+import {
+  authService,
+  initializeDiscussion,
+  type PublicKeyResult,
+} from '../../gossip-sdk/src';
 import { mnsService, isMnsDomain } from '../services/mns';
 import toast from 'react-hot-toast';
 import { ROUTES } from '../constants/routes';
-import { initializeDiscussion } from '../services/discussion';
 
 type FieldState = {
   value: string;

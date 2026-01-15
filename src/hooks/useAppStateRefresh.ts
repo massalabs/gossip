@@ -3,10 +3,8 @@ import { useAccountStore } from '../stores/accountStore';
 import { defaultSyncConfig } from '../config/sync';
 import { useMessageStore } from '../stores/messageStore.tsx';
 import { useDiscussionStore } from '../stores/discussionStore.tsx';
-import { SessionModule } from '../wasm/session.ts';
 import { useOnlineStoreBase } from '../stores/useOnlineStore.tsx';
-import { messageService } from '../services/message.ts';
-import { announcementService } from '../services/announcement.ts';
+import { messageService, announcementService } from '../../gossip-sdk/src';
 import { useResendFailedBlobs } from './useResendFailedBlobs.ts';
 import { DiscussionStatus } from '../db.ts';
 import { handleSessionRefresh } from '../services/refresh.ts';
@@ -27,7 +25,9 @@ export function useAppStateRefresh() {
   const sessionRefreshCycle = useRef(0);
   // Trigger synchronization of announcements, messages, and failed blobs
   const triggerSync = useCallback(
-    async (session: SessionModule): Promise<void> => {
+    async (
+      session: Parameters<typeof messageService.fetchMessages>[0]
+    ): Promise<void> => {
       if (!userProfile?.userId) return;
       if (!isOnline || isSyncing.current) return;
       isSyncing.current = true;
@@ -38,8 +38,8 @@ export function useAppStateRefresh() {
 
       try {
         await Promise.all([
-          announcementService.fetchAndProcessAnnouncements(session),
-          messageService.fetchMessages(session),
+          announcementService.fetchAndProcessAnnouncements(session as never),
+          messageService.fetchMessages(session as never),
         ]);
 
         // call refresh session of session manager
@@ -49,7 +49,7 @@ export function useAppStateRefresh() {
         ) {
           await handleSessionRefresh(
             userProfile.userId,
-            session,
+            session as never,
             useDiscussionStore
               .getState()
               .getDiscussionsByStatus([DiscussionStatus.ACTIVE])
@@ -85,7 +85,7 @@ export function useAppStateRefresh() {
       useMessageStore.getState().init();
       await useDiscussionStore.getState().init();
 
-      await triggerSync(session);
+      await triggerSync(session as never);
 
       if (refreshInterval.current) {
         clearInterval(refreshInterval.current);
@@ -95,7 +95,7 @@ export function useAppStateRefresh() {
         // Fetch fresh values to avoid stale closures
         const { session } = useAccountStore.getState();
         if (session) {
-          await triggerSync(session);
+          await triggerSync(session as never);
         }
       }, defaultSyncConfig.activeSyncIntervalMs);
     } catch (error) {

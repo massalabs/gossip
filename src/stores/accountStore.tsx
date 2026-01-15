@@ -20,14 +20,14 @@ import {
   EncryptionKey,
   generateNonce,
   SessionModule,
-} from '../wasm';
+  authService,
+  validateUsernameFormat,
+  ensureWasmInitialized,
+} from '../../gossip-sdk/src';
 import { getActiveOrFirstProfile } from './utils/getAccount';
-import { ensureWasmInitialized } from '../wasm/loader';
 import { auth } from './utils/auth';
 import { useDiscussionStore } from './discussionStore';
 import { useMessageStore } from './messageStore';
-import { authService } from '../services/auth';
-import { validateUsernameFormat } from '../utils/validation';
 
 async function createProfileFromAccount(
   username: string,

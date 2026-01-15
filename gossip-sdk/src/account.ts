@@ -22,9 +22,9 @@
  * ```
  */
 
-import { useAccountStore } from '@/stores/accountStore';
-import type { UserProfile } from './db';
 import type { Account } from '@massalabs/massa-web3';
+import type { UserProfile } from './db';
+import { getAccountStore } from './utils';
 
 export interface InitializeAccountResult {
   success: boolean;
@@ -74,9 +74,9 @@ export async function initializeAccount(
   password: string
 ): Promise<InitializeAccountResult> {
   try {
-    const store = useAccountStore.getState();
+    const store = getAccountStore();
     await store.initializeAccount(username, password);
-    const state = useAccountStore.getState();
+    const state = store.getState();
     return {
       success: true,
       userProfile: state.userProfile ?? undefined,
@@ -109,9 +109,9 @@ export async function loadAccount(
   userId?: string
 ): Promise<LoadAccountResult> {
   try {
-    const store = useAccountStore.getState();
+    const store = getAccountStore();
     await store.loadAccount(password, userId);
-    const state = useAccountStore.getState();
+    const state = store.getState();
     return {
       success: true,
       userProfile: state.userProfile ?? undefined,
@@ -147,12 +147,12 @@ export async function restoreAccountFromMnemonic(
   password: string
 ): Promise<RestoreAccountResult> {
   try {
-    const store = useAccountStore.getState();
+    const store = getAccountStore();
     await store.restoreAccountFromMnemonic(username, mnemonic, {
       useBiometrics: false,
       password,
     });
-    const state = useAccountStore.getState();
+    const state = getAccountStore().getState();
     return {
       success: true,
       userProfile: state.userProfile ?? undefined,
@@ -181,7 +181,7 @@ export async function restoreAccountFromMnemonic(
  */
 export async function logout(): Promise<{ success: boolean; error?: string }> {
   try {
-    const store = useAccountStore.getState();
+    const store = getAccountStore();
     await store.logout();
     return { success: true };
   } catch (error) {
@@ -211,7 +211,7 @@ export async function resetAccount(): Promise<{
   error?: string;
 }> {
   try {
-    const store = useAccountStore.getState();
+    const store = getAccountStore();
     await store.resetAccount();
     return { success: true };
   } catch (error) {
@@ -240,7 +240,7 @@ export async function resetAccount(): Promise<{
  */
 export async function showBackup(password?: string): Promise<BackupResult> {
   try {
-    const store = useAccountStore.getState();
+    const store = getAccountStore();
     const backup = await store.showBackup(password);
     return {
       success: true,
@@ -268,7 +268,7 @@ export async function showBackup(password?: string): Promise<BackupResult> {
  */
 export async function getAllAccounts(): Promise<UserProfile[]> {
   try {
-    const store = useAccountStore.getState();
+    const store = getAccountStore();
     return await store.getAllAccounts();
   } catch (error) {
     console.error('Error getting all accounts:', error);
@@ -293,7 +293,7 @@ export async function getAllAccounts(): Promise<UserProfile[]> {
  */
 export async function hasExistingAccount(): Promise<boolean> {
   try {
-    const store = useAccountStore.getState();
+    const store = getAccountStore();
     return await store.hasExistingAccount();
   } catch (error) {
     console.error('Error checking for existing account:', error);
@@ -315,7 +315,7 @@ export async function hasExistingAccount(): Promise<boolean> {
  * ```
  */
 export function getCurrentAccount(): UserProfile | null {
-  const state = useAccountStore.getState();
+  const state = getAccountStore().getState();
   return state.userProfile ?? null;
 }
 
@@ -337,7 +337,7 @@ export function getMnemonicBackupInfo(): {
   createdAt: Date;
   backedUp: boolean;
 } | null {
-  const store = useAccountStore.getState();
+  const store = getAccountStore();
   return store.getMnemonicBackupInfo();
 }
 
@@ -360,7 +360,7 @@ export async function markMnemonicBackupComplete(): Promise<{
   error?: string;
 }> {
   try {
-    const store = useAccountStore.getState();
+    const store = getAccountStore();
     await store.markMnemonicBackupComplete();
     return { success: true };
   } catch (error) {

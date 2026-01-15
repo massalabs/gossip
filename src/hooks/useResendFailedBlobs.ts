@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { liveQuery, Subscription } from 'dexie';
 import { useAccountStore } from '../stores/accountStore';
-import { announcementService } from '../services/announcement';
+import {
+  announcementService,
+  messageService,
+  renewDiscussion,
+  restMessageProtocol,
+} from '../../gossip-sdk/src';
 import {
   Discussion,
   DiscussionStatus,
@@ -9,9 +14,6 @@ import {
   MessageStatus,
   Message,
 } from '../db';
-import { renewDiscussion } from '../services/discussion';
-import { messageService } from '../services/message';
-import { restMessageProtocol } from '../api/messageProtocol';
 
 /**
  * Hook to manually renew a discussion (e.g., from settings page).
@@ -36,7 +38,7 @@ export function useManualRenewDiscussion() {
       }
 
       try {
-        await renewDiscussion(contactUserId, session);
+        await renewDiscussion(contactUserId, session as never);
       } catch (error) {
         console.error(
           `Failed to renew discussion with ${contactUserId}:`,
@@ -140,7 +142,7 @@ export function useResendFailedBlobs() {
       const currentBrokenDiscussions = brokenDiscussionsRef.current;
       for (const discussion of currentBrokenDiscussions) {
         try {
-          await renewDiscussion(discussion.contactUserId, session);
+          await renewDiscussion(discussion.contactUserId, session as never);
         } catch (err) {
           console.error(
             `Failed to reinitiate discussion ${discussion.contactUserId}:`,
@@ -155,7 +157,7 @@ export function useResendFailedBlobs() {
         try {
           await announcementService.resendAnnouncements(
             currentSendFailedDiscussions,
-            session
+            session as never
           );
         } catch (err) {
           console.error('Failed to resend announcements:', err);
@@ -171,7 +173,10 @@ export function useResendFailedBlobs() {
           currentRetryMessages
         );
         try {
-          await messageService.resendMessages(currentRetryMessages, session);
+          await messageService.resendMessages(
+            currentRetryMessages,
+            session as never
+          );
         } catch (err) {
           console.error('Failed to resend messages:', err);
         }

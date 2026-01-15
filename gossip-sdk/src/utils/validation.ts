@@ -4,7 +4,7 @@
  * Functions for validating user input like usernames, passwords, and user IDs.
  */
 
-import { db } from '../db';
+import { db, type UserProfile } from '../db';
 import { isValidUserId } from './userId';
 
 export type ValidationResult =
@@ -79,7 +79,7 @@ export async function validateUsernameAvailability(
 
     const existingProfile = await db.userProfile
       .filter(
-        profile =>
+        (profile: UserProfile) =>
           profile.username.trim().toLowerCase() === value.trim().toLowerCase()
       )
       .first();

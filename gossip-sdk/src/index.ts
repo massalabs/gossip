@@ -67,6 +67,7 @@ export type {
   RestoreAccountResult,
   BackupResult,
 } from './account';
+export type { AccountStoreAdapter, AccountStoreState } from './utils';
 
 // Authentication & Public Keys
 export { fetchPublicKeyByUserId, ensurePublicKeyPublished } from './auth';
@@ -126,6 +127,14 @@ export {
   getFeeConfig,
   setFeeConfig,
 } from './wallet';
+export type {
+  TokenState,
+  TokenMeta,
+  Ticker,
+  FeeConfig,
+  WalletStoreAdapter,
+  WalletStoreState,
+} from './wallet';
 
 // Types - re-export all types from the types module
 export * from './types';
@@ -139,6 +148,9 @@ export {
   getCurrentUserId,
   isAccountLoaded,
   isAccountLoading,
+  configureSdk,
+  setAccountStore,
+  getAccountStore,
 } from './utils';
 
 // Services - for direct use by React app and other clients
@@ -177,7 +189,7 @@ export {
 export type { ProtocolConfig } from './config/protocol';
 
 // Database - for direct access by React app
-export { db, GossipDatabase } from './db';
+export { setDb, db, type GossipDatabase } from './db';
 
 // WASM utilities - for session management
 export { SessionModule, sessionStatusToString } from './wasm/session';
@@ -201,3 +213,4 @@ export { generateUserKeys } from './wasm/userKeys';
 
 // Utility functions - for direct use
 export { encodeUserId, decodeUserId } from './utils/userId';
+export { validateUsernameFormat, validatePassword } from './utils/validation';

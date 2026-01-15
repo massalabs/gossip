@@ -22,8 +22,7 @@ import {
   updateContactName as updateContactNameUtil,
   deleteContact as deleteContactUtil,
 } from './utils/contacts';
-import { db } from './db';
-import type { Contact } from './db';
+import { db, type Contact } from './db';
 import type {
   UpdateContactNameResult,
   DeleteContactResult,
@@ -119,14 +118,10 @@ export async function addContact(
     // Check if contact already exists
     const existing = await db.getContactByOwnerAndUserId(ownerUserId, userId);
     if (existing) {
-      return {
-        success: false,
-        error: 'Contact already exists',
-        contact: existing,
-      };
+      return { success: false, error: 'Contact already exists' };
     }
 
-    const contact: Omit<Contact, 'id'> = {
+    const contact: Contact = {
       ownerUserId,
       userId,
       name,
@@ -138,11 +133,9 @@ export async function addContact(
 
     const id = await db.contacts.add(contact);
     const newContact = await db.contacts.get(id);
-    return {
-      success: true,
-      contact: newContact ?? undefined,
-    };
+    return { success: true, contact: newContact };
   } catch (error) {
+    console.error('Error adding contact:', error);
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',

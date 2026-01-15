@@ -429,4 +429,8 @@ export class GossipDatabase extends Dexie {
 }
 
 // Create and export the database instance
-export const db = new GossipDatabase();
+export let db = new GossipDatabase();
+
+export function setDb(database: GossipDatabase): void {
+  db = database;
+}

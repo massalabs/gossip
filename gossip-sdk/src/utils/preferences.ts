@@ -11,6 +11,20 @@
 
 import { encodeToBase64 } from './base64';
 
+export interface PreferencesAdapter {
+  get: (key: string) => Promise<string | null>;
+  set: (key: string, value: string) => Promise<void>;
+  remove?: (key: string) => Promise<void>;
+}
+
+let preferencesAdapter: PreferencesAdapter | null = null;
+
+export function setPreferencesAdapter(
+  adapter: PreferencesAdapter | null
+): void {
+  preferencesAdapter = adapter;
+}
+
 // Preferences keys
 const ACTIVE_SEEKERS_KEY = 'gossip-active-seekers';
 
@@ -25,14 +39,19 @@ const ACTIVE_SEEKERS_KEY = 'gossip-active-seekers';
 export async function setActiveSeekersInPreferences(
   seekers: Uint8Array[]
 ): Promise<void> {
+  const serializedSeekers = seekers.map(seeker => encodeToBase64(seeker));
+  const value = JSON.stringify(serializedSeekers);
+
+  if (preferencesAdapter) {
+    await preferencesAdapter.set(ACTIVE_SEEKERS_KEY, value);
+    return;
+  }
+
   // Check if we're in a browser/Capacitor environment
   if (typeof document === 'undefined') {
     // In Node.js/SDK context, this is a no-op
     return;
   }
-
-  const serializedSeekers = seekers.map(seeker => encodeToBase64(seeker));
-  const value = JSON.stringify(serializedSeekers);
 
   // Try to use Capacitor if available
   try {

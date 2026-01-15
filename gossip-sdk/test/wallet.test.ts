@@ -56,7 +56,7 @@ describe('Wallet Operations', () => {
     it('should set fee configuration', () => {
       const newConfig = {
         type: 'preset' as const,
-        preset: 'fast' as const,
+        preset: 'high' as const,
       };
 
       setFeeConfig(newConfig);

@@ -8,7 +8,7 @@
 import {
   db,
   DiscussionStatus,
-  Message,
+  type Message,
   MessageDirection,
   MessageStatus,
   MessageType,
@@ -348,8 +348,9 @@ export class MessageService {
       .where('[ownerUserId+direction+status]')
       .equals([userId, MessageDirection.OUTGOING, MessageStatus.SENT])
       .filter(
-        msg =>
-          msg.seeker !== undefined && seekers.has(encodeToBase64(msg.seeker))
+        message =>
+          message.seeker !== undefined &&
+          seekers.has(encodeToBase64(message.seeker))
       )
       .modify({ status: MessageStatus.DELIVERED });
 

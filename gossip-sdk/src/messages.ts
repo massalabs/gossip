@@ -19,8 +19,7 @@
  */
 
 import { messageService } from './services/message';
-import { db } from './db';
-import type { Message } from './db';
+import { db, type Message } from './db';
 import type { SessionModule } from './wasm';
 import type { MessageResult, SendMessageResult } from './services/message';
 
