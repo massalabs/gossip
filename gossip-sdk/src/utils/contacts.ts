@@ -9,17 +9,17 @@ import { decodeUserId } from './userId';
 import type { SessionModule } from '../wasm/session';
 
 export type UpdateContactNameResult =
-  | { ok: true; trimmedName: string }
+  | { success: true; trimmedName: string }
   | {
-      ok: false;
+      success: false;
       reason: 'empty' | 'duplicate' | 'error';
       message: string;
     };
 
 export type DeleteContactResult =
-  | { ok: true }
+  | { success: true }
   | {
-      ok: false;
+      success: false;
       reason: 'not_found' | 'error';
       message: string;
     };
@@ -41,7 +41,7 @@ export async function updateContactName(
 ): Promise<UpdateContactNameResult> {
   if (!ownerUserId || !contactUserId) {
     return {
-      ok: false,
+      success: false,
       reason: 'error',
       message: 'Invalid parameters.',
     };
@@ -49,7 +49,11 @@ export async function updateContactName(
 
   const trimmed = newName.trim();
   if (!trimmed)
-    return { ok: false, reason: 'empty', message: 'Name cannot be empty.' };
+    return {
+      success: false,
+      reason: 'empty',
+      message: 'Name cannot be empty.',
+    };
   try {
     const list = await db.getContactsByOwner(ownerUserId);
     const duplicate = list.find(
@@ -59,7 +63,7 @@ export async function updateContactName(
     );
     if (duplicate)
       return {
-        ok: false,
+        success: false,
         reason: 'duplicate',
         message: 'This name is already used by another contact.',
       };
@@ -69,11 +73,11 @@ export async function updateContactName(
       .equals([ownerUserId, contactUserId])
       .modify({ name: trimmed });
 
-    return { ok: true, trimmedName: trimmed };
+    return { success: true, trimmedName: trimmed };
   } catch (e) {
     console.error('updateContactName failed', e);
     return {
-      ok: false,
+      success: false,
       reason: 'error',
       message: 'Failed to update name. Please try again.',
     };
@@ -98,7 +102,7 @@ export async function deleteContact(
   try {
     if (!ownerUserId || !contactUserId) {
       return {
-        ok: false,
+        success: false,
         reason: 'error',
         message: 'Invalid parameters.',
       };
@@ -111,7 +115,7 @@ export async function deleteContact(
     );
     if (!contact) {
       return {
-        ok: false,
+        success: false,
         reason: 'not_found',
         message: 'Contact not found.',
       };
@@ -145,11 +149,11 @@ export async function deleteContact(
     // Discard peer from session manager
     session.peerDiscard(decodeUserId(contactUserId));
 
-    return { ok: true };
+    return { success: true };
   } catch (e) {
     console.error('deleteContact failed', e);
     return {
-      ok: false,
+      success: false,
       reason: 'error',
       message: 'Failed to delete contact. Please try again.',
     };

@@ -47,9 +47,9 @@ export type {
 } from './gossipSdk';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SDK Factory - Legacy API (deprecated, use gossipSdk singleton instead)
+// SDK Factory - For testing multi-user scenarios
+// Use gossipSdk singleton for production app code
 // ─────────────────────────────────────────────────────────────────────────────
-/** @deprecated Use `gossipSdk` singleton instead */
 export { createGossipSdk } from './sdk';
 export type { GossipSdk, SdkUtils, GossipSdkEvents } from './sdk';
 
@@ -97,10 +97,6 @@ export type { UpdateDiscussionNameResult } from './utils/discussions';
 
 // Types - re-export all types from the types module
 export * from './types';
-
-// Utilities
-/** @deprecated Use `gossipSdk.init()` instead */
-export { configureSdk } from './utils';
 
 // Message Protocol - for direct use by host apps
 export {

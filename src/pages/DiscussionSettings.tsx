@@ -94,7 +94,7 @@ const DiscussionSettings: React.FC = () => {
       if (!discussion?.id) return;
 
       const result = await updateDiscussionName(discussion.id, name, db);
-      if (!result.ok) {
+      if (!result.success) {
         setNameError(result.message);
         return;
       }

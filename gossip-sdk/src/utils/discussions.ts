@@ -7,9 +7,9 @@
 import { type GossipDatabase } from '../db';
 
 export type UpdateDiscussionNameResult =
-  | { ok: true; trimmedName: string | undefined }
+  | { success: true; trimmedName: string | undefined }
   | {
-      ok: false;
+      success: false;
       reason: 'not_found' | 'error';
       message: string;
     };
@@ -35,7 +35,7 @@ export async function updateDiscussionName(
     const discussion = await db.discussions.get(discussionId);
     if (!discussion) {
       return {
-        ok: false,
+        success: false,
         reason: 'not_found',
         message: 'Discussion not found.',
       };
@@ -43,11 +43,11 @@ export async function updateDiscussionName(
 
     await db.discussions.update(discussionId, { customName });
 
-    return { ok: true, trimmedName: customName };
+    return { success: true, trimmedName: customName };
   } catch (e) {
     console.error('updateDiscussionName failed', e);
     return {
-      ok: false,
+      success: false,
       reason: 'error',
       message: 'Failed to update name. Please try again.',
     };

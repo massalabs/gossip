@@ -74,6 +74,7 @@ import {
   validateUsernameFormat,
   type ValidationResult,
 } from './utils/validation';
+import { QueueManager } from './utils/queue';
 import { encodeUserId, decodeUserId } from './utils/userId';
 import {
   getContacts,
@@ -160,6 +161,10 @@ class GossipSdkImpl {
     discussionRequest: new Set<SdkEventHandlers['discussionRequest']>(),
     error: new Set<SdkEventHandlers['error']>(),
   };
+
+  // Per-contact queue for serializing message operations
+  // Ensures messages are sent in order per contact
+  private messageQueues = new QueueManager();
 
   // Services (created when session opens)
   private _auth: AuthService | null = null;
@@ -299,6 +304,9 @@ class GossipSdkImpl {
     this._message = null;
     this._refresh = null;
 
+    // Clear message queues
+    this.messageQueues.clear();
+
     // Reset to initialized state
     this.state = {
       status: 'initialized',
@@ -364,9 +372,25 @@ class GossipSdkImpl {
   get messages(): MessageServiceAPI {
     this.requireSession();
     return {
-      send: message => this._message!.sendMessage(message),
+      // Queue sends per contact to ensure ordering
+      send: message =>
+        this.messageQueues.enqueue(message.contactUserId, () =>
+          this._message!.sendMessage(message)
+        ),
       fetch: () => this._message!.fetchMessages(),
-      resend: messages => this._message!.resendMessages(messages),
+      // Resend processes messages per contact - queue each contact's batch
+      resend: async messages => {
+        const promises: Promise<void>[] = [];
+        for (const [contactId, contactMessages] of messages.entries()) {
+          const singleContactMap = new Map([[contactId, contactMessages]]);
+          promises.push(
+            this.messageQueues.enqueue(contactId, () =>
+              this._message!.resendMessages(singleContactMap)
+            )
+          );
+        }
+        await Promise.all(promises);
+      },
       findBySeeker: (seeker, ownerUserId) =>
         this._message!.findMessageBySeeker(seeker, ownerUserId),
     };

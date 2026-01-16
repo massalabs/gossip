@@ -73,7 +73,7 @@ const Contact: React.FC = () => {
         name,
         db
       );
-      if (!result.ok) {
+      if (!result.success) {
         setNameError(result.message);
         return;
       }
@@ -105,7 +105,7 @@ const Contact: React.FC = () => {
         ownerUserId,
         contact.userId
       );
-      if (!result.ok) {
+      if (!result.success) {
         setDeleteError(result.message);
         setIsDeleting(false);
         return;
