@@ -412,19 +412,42 @@ export class MessageService {
 
     const sessionStatus = this.session.peerSessionStatus(peerId);
 
-    if (sessionStatus === SessionStatus.PeerRequested) {
-      return {
-        success: false,
-        error: 'Must accept peer request before sending messages',
-      };
-    }
+    // Check for session states that prevent sending immediately
+    // Per spec: when session is lost, queue message as WAITING_SESSION and trigger auto-renewal
+    const noSessionStatuses = [
+      SessionStatus.UnknownPeer,
+      SessionStatus.NoSession,
+      SessionStatus.Killed,
+      SessionStatus.PeerRequested, // Peer is re-initiating, our session is gone
+    ];
 
-    if (
-      [SessionStatus.UnknownPeer, SessionStatus.NoSession].includes(
-        sessionStatus
-      )
-    ) {
-      return { success: false, error: 'No active session with peer' };
+    if (noSessionStatuses.includes(sessionStatus)) {
+      // Add message as WAITING_SESSION - it will be sent when session becomes Active
+      const messageId = await this.db.addMessage({
+        ...message,
+        status: MessageStatus.WAITING_SESSION,
+      });
+
+      log.info('session not active, queuing message as WAITING_SESSION', {
+        sessionStatus: sessionStatusToString(sessionStatus),
+        messageId,
+      });
+
+      // Trigger auto-renewal (per spec: call create_session when session is lost)
+      this.events.onSessionRenewalNeeded?.(message.contactUserId);
+
+      const queuedMessage = {
+        ...message,
+        id: messageId,
+        status: MessageStatus.WAITING_SESSION,
+      };
+
+      // Return success=true because the message is queued and will be sent later
+      // This matches the spec where messages in WAITING_SESSION are valid queue items
+      return {
+        success: true,
+        message: queuedMessage,
+      };
     }
 
     // Serialize message content (handle replies)
@@ -448,17 +471,26 @@ export class MessageService {
     ));
     const isSelfRequested = sessionStatus === SessionStatus.SelfRequested;
 
+    // Per spec: if session is SelfRequested or discussion unstable, queue as WAITING_SESSION
     if (isUnstable || isSelfRequested) {
       const messageId = await this.db.addMessage({
         ...message,
-        status: MessageStatus.FAILED,
+        status: MessageStatus.WAITING_SESSION,
       });
+
+      log.info('discussion/session not ready, queuing as WAITING_SESSION', {
+        isUnstable,
+        isSelfRequested,
+        sessionStatus: sessionStatusToString(sessionStatus),
+      });
+
       return {
-        success: false,
-        error: isUnstable
-          ? 'Discussion is broken'
-          : 'Waiting for peer acceptance',
-        message: { ...message, id: messageId, status: MessageStatus.FAILED },
+        success: true,
+        message: {
+          ...message,
+          id: messageId,
+          status: MessageStatus.WAITING_SESSION,
+        },
       };
     }
 
@@ -674,24 +706,29 @@ export class MessageService {
             break;
           }
 
-          /* 
+          /*
           If session manager encryption fails for a message N, we can't send next N+1, N+2, ... messages in the discussion.
           If the message N+1 is passed with success in session.sendMessage() before passing the message N,
           message N would be considered as posterior to message N+1, which is not correct.
           So if a message can't be encrypted in session.sendMessage() because of error session status,
-          we should break the loop and not send any other message in the discussion.
+          we should break the loop and trigger auto-renewal.
           */
-          if (
-            status === SessionStatus.Killed ||
-            status === SessionStatus.Saturated
-          ) {
-            await this.db.discussions
-              .where('[ownerUserId+contactUserId]')
-              .equals([msg.ownerUserId, contactId])
-              .modify({
-                status: DiscussionStatus.BROKEN,
-              });
-            log.error('session broken during resend', { status, contactId });
+          const noActiveSessionStatuses = [
+            SessionStatus.Killed,
+            SessionStatus.Saturated,
+            SessionStatus.NoSession,
+            SessionStatus.UnknownPeer,
+            SessionStatus.PeerRequested, // Peer is re-initiating, our session is gone
+          ];
+
+          if (noActiveSessionStatuses.includes(status)) {
+            // Per spec: trigger auto-renewal instead of marking as BROKEN
+            // Messages stay in WAITING_SESSION/FAILED and will be processed when session is Active
+            log.info('session not active during resend, triggering renewal', {
+              sessionStatus: sessionStatusToString(status),
+              contactId,
+            });
+            this.events.onSessionRenewalNeeded?.(contactId);
             break;
           }
 
@@ -768,5 +805,129 @@ export class MessageService {
       messagesProcessed: totalProcessed,
       successfullySent: successfullySent.length,
     });
+  }
+
+  /**
+   * Process messages that are waiting for an active session.
+   * Called when a session becomes Active to send queued messages.
+   * Per spec: when session becomes Active, encrypt and send WAITING_SESSION messages.
+   *
+   * @param contactUserId - The contact whose session became active
+   * @returns Number of messages successfully sent
+   */
+  async processWaitingMessages(contactUserId: string): Promise<number> {
+    const log = logger.forMethod('processWaitingMessages');
+    const ownerUserId = this.session.userIdEncoded;
+    const peerId = decodeUserId(contactUserId);
+
+    // Check session is actually active
+    const sessionStatus = this.session.peerSessionStatus(peerId);
+    if (sessionStatus !== SessionStatus.Active) {
+      log.warn('cannot process waiting messages - session not active', {
+        sessionStatus: sessionStatusToString(sessionStatus),
+        contactUserId,
+      });
+      return 0;
+    }
+
+    // Get all WAITING_SESSION messages for this contact, ordered by timestamp
+    const waitingMessages = await this.db.messages
+      .where('[ownerUserId+contactUserId+status]')
+      .equals([ownerUserId, contactUserId, MessageStatus.WAITING_SESSION])
+      .sortBy('timestamp');
+
+    if (waitingMessages.length === 0) {
+      return 0;
+    }
+
+    log.info('processing waiting messages', {
+      count: waitingMessages.length,
+      contactUserId,
+    });
+
+    let successCount = 0;
+
+    for (const msg of waitingMessages) {
+      // Serialize if not already done
+      let serializedContent = msg.serializedContent;
+      if (!serializedContent) {
+        const serializeResult = await this.serializeMessage(msg);
+        if (!serializeResult.success) {
+          log.error('failed to serialize waiting message', {
+            messageId: msg.id,
+            error: serializeResult.error,
+          });
+          // Mark as FAILED since we can't serialize
+          await this.db.messages.update(msg.id!, {
+            status: MessageStatus.FAILED,
+          });
+          continue;
+        }
+        serializedContent = serializeResult.data;
+      }
+
+      // Encrypt with session manager
+      const sendOutput = this.session.sendMessage(peerId, serializedContent);
+      if (!sendOutput) {
+        log.error('session manager failed to encrypt waiting message', {
+          messageId: msg.id,
+        });
+        // Don't mark as FAILED - session might have changed, retry later
+        break;
+      }
+
+      // Update message with encrypted data
+      await this.db.messages.update(msg.id!, {
+        status: MessageStatus.SENDING,
+        seeker: sendOutput.seeker,
+        encryptedMessage: sendOutput.data,
+        serializedContent,
+      });
+
+      // Send over network
+      try {
+        await this.messageProtocol.sendMessage({
+          seeker: sendOutput.seeker,
+          ciphertext: sendOutput.data,
+        });
+
+        await this.db.messages.update(msg.id!, {
+          status: MessageStatus.SENT,
+        });
+
+        successCount++;
+        this.events.onMessageSent?.({
+          ...msg,
+          status: MessageStatus.SENT,
+        });
+      } catch (error) {
+        log.error('network send failed for waiting message', {
+          messageId: msg.id,
+          error,
+        });
+        // Keep as SENDING - will be retried by resendMessages
+        await this.db.messages.update(msg.id!, {
+          status: MessageStatus.FAILED,
+        });
+      }
+    }
+
+    log.info('processed waiting messages', {
+      total: waitingMessages.length,
+      sent: successCount,
+    });
+
+    return successCount;
+  }
+
+  /**
+   * Get count of messages waiting for session with a specific contact.
+   */
+  async getWaitingMessageCount(contactUserId: string): Promise<number> {
+    const ownerUserId = this.session.userIdEncoded;
+    return await this.db.messages
+      .where('[ownerUserId+contactUserId+status]')
+      .equals([ownerUserId, contactUserId, MessageStatus.WAITING_SESSION])
+      .count();
   }
 }

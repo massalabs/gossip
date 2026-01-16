@@ -8,7 +8,6 @@
 import {
   type Discussion,
   type GossipDatabase,
-  DiscussionStatus,
   MessageDirection,
   MessageStatus,
   MessageType,
@@ -93,8 +92,6 @@ export class RefreshService {
       return;
     }
 
-    const now = new Date();
-
     /* refresh function kill sessions that have no incoming messages for a long time
     So we need to mark corresponding discussions as broken if it is the case */
     for (const discussion of activeDiscussions) {
@@ -105,30 +102,24 @@ export class RefreshService {
         // Check current session status for this peer
         const status = this.session.peerSessionStatus(peerId);
 
-        if (status === SessionStatus.Killed) {
-          log.info('session for discussion is killed. Marking as broken.', {
+        // Per spec: when session is Killed/Saturated/UnknownPeer/NoSession,
+        // trigger auto-renewal instead of marking as BROKEN
+        const needsRenewal = [
+          SessionStatus.Killed,
+          SessionStatus.Saturated,
+          SessionStatus.NoSession,
+          SessionStatus.UnknownPeer,
+        ].includes(status);
+
+        if (needsRenewal) {
+          log.info('session needs renewal, triggering auto-renewal', {
             ownerUserId: discussion.ownerUserId,
             contactUserId: discussion.contactUserId,
-          });
-          // Mark discussion as broken if session is killed
-          await this.db.discussions.update(discussion.id!, {
-            status: DiscussionStatus.BROKEN,
-            updatedAt: now,
-          });
-          log.info('discussion has been marked as broken.', {
-            ownerUserId: discussion.ownerUserId,
-            contactUserId: discussion.contactUserId,
+            sessionStatus: sessionStatusToString(status),
           });
 
-          // Emit events for broken session
-          const updatedDiscussion = await this.db.discussions.get(
-            discussion.id!
-          );
-          if (updatedDiscussion) {
-            this.events.onDiscussionStatusChanged?.(updatedDiscussion);
-            this.events.onSessionBroken?.(updatedDiscussion);
-          }
-
+          // Trigger auto-renewal (spec: call create_session)
+          this.events.onSessionRenewalNeeded?.(discussion.contactUserId);
           continue;
         }
       } catch (error) {

@@ -61,13 +61,21 @@ export interface GossipSdkEvents {
   /**
    * Called when a session with a contact is broken and needs renewal.
    * Use this to show appropriate UI state.
+   * @deprecated Use onSessionRenewalNeeded for auto-renewal flow
    */
-  onSessionBroken?: (discussion: Discussion) => void;
+  onSessionBroken?: (contactUserId: string) => void;
 
   /**
    * Called when a session is successfully renewed.
    */
   onSessionRenewed?: (discussion: Discussion) => void;
+
+  /**
+   * Called when a session needs to be renewed (auto-renewal).
+   * The SDK will automatically attempt to renew the session.
+   * Messages are queued with WAITING_SESSION status until session is active.
+   */
+  onSessionRenewalNeeded?: (contactUserId: string) => void;
 
   // ─────────────────────────────────────────────────────────────────
   // Error Events

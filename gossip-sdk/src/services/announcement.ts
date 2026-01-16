@@ -363,20 +363,22 @@ export class AnnouncementService {
         }
 
         if (brokenDiscussions.length > 0) {
-          log.info(`marking ${brokenDiscussions.length} discussions as BROKEN`);
+          // Per spec: announcement failures should trigger session renewal, not BROKEN status
+          // Clear the failed announcement and trigger renewal
+          log.info(
+            `${brokenDiscussions.length} announcements timed out, triggering renewal`
+          );
           await Promise.all(
             brokenDiscussions.map(async id => {
               await this.db.discussions.update(id, {
-                status: DiscussionStatus.BROKEN,
                 initiationAnnouncement: undefined,
                 updatedAt: now,
               });
 
-              // Emit status change event
-              const updatedDiscussion = await this.db.discussions.get(id);
-              if (updatedDiscussion) {
-                this.events.onDiscussionStatusChanged?.(updatedDiscussion);
-                this.events.onSessionBroken?.(updatedDiscussion);
+              // Emit renewal needed event
+              const discussion = await this.db.discussions.get(id);
+              if (discussion) {
+                this.events.onSessionRenewalNeeded?.(discussion.contactUserId);
               }
             })
           );

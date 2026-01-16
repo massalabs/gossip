@@ -97,11 +97,12 @@ export enum MessageDirection {
 }
 
 export enum MessageStatus {
+  WAITING_SESSION = 'waiting_session', // Waiting for active session with peer
   SENDING = 'sending',
   SENT = 'sent',
   DELIVERED = 'delivered',
   READ = 'read',
-  FAILED = 'failed',
+  FAILED = 'failed', // Only for unrecoverable errors (network down, blocked, etc.)
 }
 
 export enum DiscussionDirection {
