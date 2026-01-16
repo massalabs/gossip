@@ -14,7 +14,7 @@ import { db } from './db';
 import {
   getLastSyncTimestamp,
   setLastSyncTimestamp,
-} from './utils/preferences';
+} from '../gossip-sdk/src/utils/preferences';
 import { APP_BUILD_ID } from './config/version';
 
 declare let self: ServiceWorkerGlobalScope;

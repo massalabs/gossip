@@ -224,3 +224,11 @@ export { generateUserKeys } from './wasm/userKeys';
 // Utility functions - for direct use
 export { encodeUserId, decodeUserId } from './utils/userId';
 export { validateUsernameFormat, validatePassword } from './utils/validation';
+export {
+  getLastSyncTimestamp,
+  setLastSyncTimestamp,
+  setApiBaseUrlForBackgroundSync,
+  setActiveSeekersInPreferences,
+  setPreferencesAdapter,
+  setForegroundChecker,
+} from './utils/preferences';
