@@ -76,6 +76,7 @@ import {
 } from './utils/validation';
 import { QueueManager } from './utils/queue';
 import { encodeUserId, decodeUserId } from './utils/userId';
+import type { GossipSdkEvents } from './types/events';
 import {
   getContacts,
   getContact,
@@ -112,11 +113,24 @@ export interface OpenSessionOptions {
   persistEncryptionKey?: EncryptionKey;
 }
 
-export type SdkEventType = 'message' | 'discussionRequest' | 'error';
+export type SdkEventType =
+  | 'message'
+  | 'messageSent'
+  | 'messageFailed'
+  | 'discussionRequest'
+  | 'discussionStatusChanged'
+  | 'sessionBroken'
+  | 'sessionRenewed'
+  | 'error';
 
 export interface SdkEventHandlers {
   message: (message: Message) => void;
+  messageSent: (message: Message) => void;
+  messageFailed: (message: Message, error: Error) => void;
   discussionRequest: (discussion: Discussion, contact: Contact) => void;
+  discussionStatusChanged: (discussion: Discussion) => void;
+  sessionBroken: (discussion: Discussion) => void;
+  sessionRenewed: (discussion: Discussion) => void;
   error: (error: Error, context: string) => void;
 }
 
@@ -158,7 +172,14 @@ class GossipSdkImpl {
   private state: SdkState = { status: 'uninitialized' };
   private eventHandlers = {
     message: new Set<SdkEventHandlers['message']>(),
+    messageSent: new Set<SdkEventHandlers['messageSent']>(),
+    messageFailed: new Set<SdkEventHandlers['messageFailed']>(),
     discussionRequest: new Set<SdkEventHandlers['discussionRequest']>(),
+    discussionStatusChanged: new Set<
+      SdkEventHandlers['discussionStatusChanged']
+    >(),
+    sessionBroken: new Set<SdkEventHandlers['sessionBroken']>(),
+    sessionRenewed: new Set<SdkEventHandlers['sessionRenewed']>(),
     error: new Set<SdkEventHandlers['error']>(),
   };
 
@@ -225,6 +246,30 @@ class GossipSdkImpl {
 
     const { db, messageProtocol } = this.state;
 
+    // Validate session restore options - must have both or neither
+    if (options.encryptedSession && !options.encryptionKey) {
+      throw new Error(
+        'encryptedSession provided without encryptionKey. Session restore requires both.'
+      );
+    }
+    if (options.encryptionKey && !options.encryptedSession) {
+      console.warn(
+        '[GossipSdk] encryptionKey provided without encryptedSession - key will be ignored'
+      );
+    }
+
+    // Validate persistence options - warn if incomplete
+    if (options.onPersist && !options.persistEncryptionKey) {
+      console.warn(
+        '[GossipSdk] onPersist provided without persistEncryptionKey - session will not be persisted'
+      );
+    }
+    if (options.persistEncryptionKey && !options.onPersist) {
+      console.warn(
+        '[GossipSdk] persistEncryptionKey provided without onPersist callback - key will be unused'
+      );
+    }
+
     // Ensure WASM is ready
     await ensureWasmInitialized();
 
@@ -246,14 +291,27 @@ class GossipSdkImpl {
     }
 
     // Create event handlers that wire to our event system
-    const events = {
+    const events: GossipSdkEvents = {
       onMessageReceived: (message: Message) => {
-        // For the new API, we emit with message only
-        // The contact can be looked up from the message.contactUserId
         this.emit('message', message);
+      },
+      onMessageSent: (message: Message) => {
+        this.emit('messageSent', message);
+      },
+      onMessageFailed: (message: Message, error: Error) => {
+        this.emit('messageFailed', message, error);
       },
       onDiscussionRequest: (discussion: Discussion, contact: Contact) => {
         this.emit('discussionRequest', discussion, contact);
+      },
+      onDiscussionStatusChanged: (discussion: Discussion) => {
+        this.emit('discussionStatusChanged', discussion);
+      },
+      onSessionBroken: (discussion: Discussion) => {
+        this.emit('sessionBroken', discussion);
+      },
+      onSessionRenewed: (discussion: Discussion) => {
+        this.emit('sessionRenewed', discussion);
       },
       onError: (error: Error, context: string) => {
         this.emit('error', error, context);

@@ -135,30 +135,84 @@ export class AnnouncementService {
     this.isProcessingAnnouncements = true;
     try {
       const pending = await this.db.pendingAnnouncements.toArray();
+      const successfullyProcessedPendingIds: number[] = [];
 
       if (pending.length > 0) {
         log.info(
           `processing ${pending.length} pending announcements from IndexedDB`
         );
-        announcements = pending.map(p => p.announcement);
-        // Track counters from pending announcements to avoid re-processing
-        fetchedCounters = pending
-          .map(p => p.counter)
-          .filter((counter): counter is string => counter !== undefined);
 
-        const ids = pending
-          .map(p => p.id)
-          .filter((id): id is number => id !== undefined);
-        if (ids.length > 0) await this.db.pendingAnnouncements.bulkDelete(ids);
-      } else {
-        const cursor = (
-          await this.db.userProfile.get(this.session.userIdEncoded)
-        )?.lastBulletinCounter;
+        // Process pending announcements one by one, tracking successes
+        let newAnnouncementsCount = 0;
+        for (const item of pending) {
+          try {
+            const result = await this._processIncomingAnnouncement(
+              item.announcement
+            );
 
-        const fetched = await this._fetchAnnouncements(cursor);
-        announcements = fetched.map(a => a.data);
-        fetchedCounters = fetched.map(a => a.counter);
+            // Mark as successfully processed (even if announcement was for unknown peer)
+            // Only keep if processing threw an error
+            if (item.id !== undefined) {
+              successfullyProcessedPendingIds.push(item.id);
+            }
+
+            if (result.success && result.contactUserId) {
+              newAnnouncementsCount++;
+              log.info(
+                `processed pending announcement #${newAnnouncementsCount}`,
+                {
+                  contactUserId: result.contactUserId,
+                }
+              );
+            }
+            if (item.counter) fetchedCounters.push(item.counter);
+            if (result.error) errors.push(result.error);
+          } catch (error) {
+            // Don't mark as processed - will be retried next time
+            log.error('failed to process pending announcement, will retry', {
+              id: item.id,
+              error,
+            });
+            errors.push(
+              error instanceof Error ? error.message : 'Unknown error'
+            );
+          }
+        }
+
+        // Delete only successfully processed pending announcements
+        if (successfullyProcessedPendingIds.length > 0) {
+          await this.db.pendingAnnouncements.bulkDelete(
+            successfullyProcessedPendingIds
+          );
+          log.info(
+            `deleted ${successfullyProcessedPendingIds.length} processed pending announcements`
+          );
+        }
+
+        if (fetchedCounters.length > 0) {
+          const highestCounter = fetchedCounters.reduce((a, b) =>
+            Number(a) > Number(b) ? a : b
+          );
+          await this.db.userProfile.update(this.session.userIdEncoded, {
+            lastBulletinCounter: highestCounter,
+          });
+          log.info('updated lastBulletinCounter', { highestCounter });
+        }
+
+        return {
+          success: errors.length === 0 || newAnnouncementsCount > 0,
+          newAnnouncementsCount,
+          error: errors.length > 0 ? errors.join(', ') : undefined,
+        };
       }
+
+      // No pending - fetch from API
+      const cursor = (await this.db.userProfile.get(this.session.userIdEncoded))
+        ?.lastBulletinCounter;
+
+      const fetched = await this._fetchAnnouncements(cursor);
+      announcements = fetched.map(a => a.data);
+      fetchedCounters = fetched.map(a => a.counter);
 
       let newAnnouncementsCount = 0;
 
