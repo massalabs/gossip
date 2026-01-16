@@ -28,11 +28,11 @@ import {
   deserializeMessage,
 } from '../utils/messageSerialization';
 import { encodeToBase64 } from '../utils/base64';
-import { isAppInForeground } from '../utils/appState';
 import { Result } from '../utils/type';
 import { isDiscussionStableState } from './discussion';
 import { sessionStatusToString } from '../wasm/session';
 import { Logger } from '../utils/logs';
+import { GossipSdkEvents } from '../types/events';
 
 export interface MessageResult {
   success: boolean;
@@ -71,21 +71,26 @@ const logger = new Logger('MessageService');
 export class MessageService {
   private db: GossipDatabase;
   private messageProtocol: IMessageProtocol;
+  private session: SessionModule;
+  private events: GossipSdkEvents;
 
-  constructor(db: GossipDatabase, messageProtocol: IMessageProtocol) {
+  constructor(
+    db: GossipDatabase,
+    messageProtocol: IMessageProtocol,
+    session: SessionModule,
+    events: GossipSdkEvents = {}
+  ) {
     this.db = db;
     this.messageProtocol = messageProtocol;
+    this.session = session;
+    this.events = events;
   }
 
-  setMessageProtocol(messageProtocol: IMessageProtocol): void {
-    this.messageProtocol = messageProtocol;
-  }
-
-  async fetchMessages(session: SessionModule): Promise<MessageResult> {
+  async fetchMessages(): Promise<MessageResult> {
     const log = logger.forMethod('fetchMessages');
 
     try {
-      if (!session) throw new Error('Session module not initialized');
+      if (!this.session) throw new Error('Session module not initialized');
 
       let previousSeekers = new Set<string>();
       let iterations = 0;
@@ -93,7 +98,7 @@ export class MessageService {
       let seekers: Uint8Array[] = [];
 
       while (true) {
-        seekers = session.getMessageBoardReadKeys();
+        seekers = this.session.getMessageBoardReadKeys();
         const currentSeekers = new Set(seekers.map(s => encodeToBase64(s)));
 
         const allSame =
@@ -120,12 +125,12 @@ export class MessageService {
         }
 
         const { decrypted: decryptedMessages, acknowledgedSeekers } =
-          this.decryptMessages(encryptedMessages, session);
+          this.decryptMessages(encryptedMessages);
 
         if (decryptedMessages.length > 0) {
           const storedIds = await this.storeDecryptedMessages(
             decryptedMessages,
-            session.userIdEncoded
+            this.session.userIdEncoded
           );
           newMessagesCount += storedIds.length;
         }
@@ -135,7 +140,7 @@ export class MessageService {
         if (acknowledgedSeekers.size > 0) {
           await this.acknowledgeMessages(
             acknowledgedSeekers,
-            session.userIdEncoded
+            this.session.userIdEncoded
           );
         }
 
@@ -144,9 +149,7 @@ export class MessageService {
       }
 
       try {
-        if (await isAppInForeground()) {
-          await this.db.setActiveSeekers(seekers);
-        }
+        await this.db.setActiveSeekers(seekers);
       } catch (error) {
         log.error('failed to update active seekers', error);
       }
@@ -166,10 +169,10 @@ export class MessageService {
     }
   }
 
-  private decryptMessages(
-    encrypted: EncryptedMessage[],
-    session: SessionModule
-  ): { decrypted: Decrypted[]; acknowledgedSeekers: Set<string> } {
+  private decryptMessages(encrypted: EncryptedMessage[]): {
+    decrypted: Decrypted[];
+    acknowledgedSeekers: Set<string>;
+  } {
     const log = logger.forMethod('decryptMessages');
 
     const decrypted: Decrypted[] = [];
@@ -177,7 +180,7 @@ export class MessageService {
 
     for (const msg of encrypted) {
       try {
-        const out = session.feedIncomingMessageBoardRead(
+        const out = this.session.feedIncomingMessageBoardRead(
           msg.seeker,
           msg.ciphertext
         );
@@ -321,6 +324,14 @@ export class MessageService {
         }
       );
       storedIds.push(id);
+
+      // Emit event for new message
+      if (this.events.onMessageReceived) {
+        const storedMessage = await this.db.messages.get(id);
+        if (storedMessage) {
+          this.events.onMessageReceived(storedMessage);
+        }
+      }
     }
 
     return storedIds;
@@ -368,10 +379,7 @@ export class MessageService {
     }
   }
 
-  async sendMessage(
-    message: Message,
-    session: SessionModule
-  ): Promise<SendMessageResult> {
+  async sendMessage(message: Message): Promise<SendMessageResult> {
     const log = logger.forMethod('sendMessage');
     log.info('sending message', {
       messageContent: message.content,
@@ -396,7 +404,7 @@ export class MessageService {
       return { success: false, error: 'Discussion not found' };
     }
 
-    const sessionStatus = session.peerSessionStatus(peerId);
+    const sessionStatus = this.session.peerSessionStatus(peerId);
 
     if (sessionStatus === SessionStatus.PeerRequested) {
       return {
@@ -461,7 +469,7 @@ export class MessageService {
         );
       }
 
-      sendOutput = session.sendMessage(peerId, message.serializedContent!);
+      sendOutput = this.session.sendMessage(peerId, message.serializedContent!);
       if (!sendOutput) throw new Error('sendMessage returned null');
     } catch (error) {
       await this.db.transaction(
@@ -479,10 +487,20 @@ export class MessageService {
       );
 
       log.error('encryption failed → discussion marked broken', error);
+      const failedMessage = {
+        ...message,
+        id: messageId,
+        status: MessageStatus.FAILED,
+      };
+      this.events.onMessageFailed?.(
+        failedMessage,
+        error instanceof Error ? error : new Error('Session error')
+      );
+
       return {
         success: false,
         error: 'Session error',
-        message: { ...message, id: messageId, status: MessageStatus.FAILED },
+        message: failedMessage,
       };
     }
 
@@ -498,9 +516,16 @@ export class MessageService {
         encryptedMessage: sendOutput.data,
       });
 
+      const sentMessage = {
+        ...message,
+        id: messageId,
+        status: MessageStatus.SENT,
+      };
+      this.events.onMessageSent?.(sentMessage);
+
       return {
         success: true,
-        message: { ...message, id: messageId, status: MessageStatus.SENT },
+        message: sentMessage,
       };
     } catch (error) {
       await this.db.messages.update(messageId, {
@@ -510,10 +535,20 @@ export class MessageService {
       });
 
       log.error('network send failed → will retry later', error);
+      const failedMessage = {
+        ...message,
+        id: messageId,
+        status: MessageStatus.FAILED,
+      };
+      this.events.onMessageFailed?.(
+        failedMessage,
+        error instanceof Error ? error : new Error('Network send failed')
+      );
+
       return {
         success: false,
         error: 'Network send failed',
-        message: { ...message, id: messageId, status: MessageStatus.FAILED },
+        message: failedMessage,
       };
     }
   }
@@ -577,10 +612,7 @@ export class MessageService {
     }
   }
 
-  async resendMessages(
-    messages: Map<string, Message[]>,
-    session: SessionModule
-  ) {
+  async resendMessages(messages: Map<string, Message[]>) {
     const log = logger.forMethod('resendMessages');
 
     const successfullySent: number[] = [];
@@ -622,13 +654,7 @@ export class MessageService {
           log.info('message has not been encrypted by sessionManager', {
             messageContent: msg.content,
           });
-          if (!session) {
-            log.error('session manager not initialized', {
-              messageContent: msg.content,
-            });
-            break;
-          }
-          const status = session.peerSessionStatus(peerId);
+          const status = this.session.peerSessionStatus(peerId);
           log.info('session status for peer', {
             peerId: encodeUserId(peerId),
             sessionStatus: sessionStatusToString(status),
@@ -691,7 +717,10 @@ export class MessageService {
             });
           }
 
-          const sendOutput = session.sendMessage(peerId, serializedContent);
+          const sendOutput = this.session.sendMessage(
+            peerId,
+            serializedContent
+          );
           if (!sendOutput) {
             log.error('session manager failed to send message', {
               messageId: msg.id,

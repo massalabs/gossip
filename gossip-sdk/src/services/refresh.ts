@@ -19,6 +19,7 @@ import { SessionStatus } from '../assets/generated/wasm/gossip_wasm';
 import { decodeUserId, encodeUserId } from '../utils/userId';
 import { MessageService } from './message';
 import { Logger } from '../utils/logs';
+import { GossipSdkEvents } from '../types/events';
 
 const logger = new Logger('RefreshService');
 
@@ -27,19 +28,28 @@ const logger = new Logger('RefreshService');
  *
  * @example
  * ```typescript
- * const refreshService = new RefreshService(db, messageService);
+ * const refreshService = new RefreshService(db, messageService, session);
  *
  * // Handle session refresh for active discussions
- * await refreshService.handleSessionRefresh(ownerUserId, session, activeDiscussions);
+ * await refreshService.handleSessionRefresh(activeDiscussions);
  * ```
  */
 export class RefreshService {
   private db: GossipDatabase;
   private messageService: MessageService;
+  private session: SessionModule;
+  private events: GossipSdkEvents;
 
-  constructor(db: GossipDatabase, messageService: MessageService) {
+  constructor(
+    db: GossipDatabase,
+    messageService: MessageService,
+    session: SessionModule,
+    events: GossipSdkEvents = {}
+  ) {
     this.db = db;
     this.messageService = messageService;
+    this.session = session;
+    this.events = events;
   }
 
   /**
@@ -53,16 +63,12 @@ export class RefreshService {
    * Errors are logged via the Logger instance (log.error) but do not throw, so callers can safely
    * invoke this periodically (e.g. from background tasks).
    *
-   * @param ownerUserId - The owner user ID
-   * @param session - The SessionModule instance
    * @param activeDiscussions - Array of active discussions
    */
-  async handleSessionRefresh(
-    ownerUserId: string,
-    session: SessionModule,
-    activeDiscussions: Discussion[]
-  ): Promise<void> {
+  async handleSessionRefresh(activeDiscussions: Discussion[]): Promise<void> {
     const log = logger.forMethod('handleSessionRefresh');
+    const ownerUserId = this.session.userIdEncoded;
+
     log.info('calling session refresh', {
       ownerUserId: ownerUserId,
       discussions: activeDiscussions.map(
@@ -81,7 +87,7 @@ export class RefreshService {
     let keepAlivePeerIds: string[] = [];
     try {
       // Ask the session manager which peers require keep-alive messages
-      keepAlivePeerIds = session.refresh().map(peer => encodeUserId(peer));
+      keepAlivePeerIds = this.session.refresh().map(peer => encodeUserId(peer));
     } catch (error) {
       log.error('error while refreshing session', { error });
       return;
@@ -97,7 +103,7 @@ export class RefreshService {
         const peerId = decodeUserId(discussion.contactUserId);
 
         // Check current session status for this peer
-        const status = session.peerSessionStatus(peerId);
+        const status = this.session.peerSessionStatus(peerId);
 
         if (status === SessionStatus.Killed) {
           log.info('session for discussion is killed. Marking as broken.', {
@@ -113,6 +119,16 @@ export class RefreshService {
             ownerUserId: discussion.ownerUserId,
             contactUserId: discussion.contactUserId,
           });
+
+          // Emit events for broken session
+          const updatedDiscussion = await this.db.discussions.get(
+            discussion.id!
+          );
+          if (updatedDiscussion) {
+            this.events.onDiscussionStatusChanged?.(updatedDiscussion);
+            this.events.onSessionBroken?.(updatedDiscussion);
+          }
+
           continue;
         }
       } catch (error) {
@@ -139,18 +155,15 @@ export class RefreshService {
 
       try {
         // Send a keep-alive message via the session manager
-        await this.messageService.sendMessage(
-          {
-            ownerUserId: discussion.ownerUserId,
-            contactUserId: discussion.contactUserId,
-            content: '',
-            type: MessageType.KEEP_ALIVE,
-            direction: MessageDirection.OUTGOING,
-            status: MessageStatus.SENDING,
-            timestamp: new Date(),
-          },
-          session as never
-        );
+        await this.messageService.sendMessage({
+          ownerUserId: discussion.ownerUserId,
+          contactUserId: discussion.contactUserId,
+          content: '',
+          type: MessageType.KEEP_ALIVE,
+          direction: MessageDirection.OUTGOING,
+          status: MessageStatus.SENDING,
+          timestamp: new Date(),
+        });
         log.info('keep-alive message sent successfully.', {
           ownerUserId: discussion.ownerUserId,
           contactUserId: discussion.contactUserId,
@@ -160,7 +173,9 @@ export class RefreshService {
           error: error,
           discussionId: discussion.id,
           sessionStatus: sessionStatusToString(
-            session.peerSessionStatus(decodeUserId(discussion.contactUserId))
+            this.session.peerSessionStatus(
+              decodeUserId(discussion.contactUserId)
+            )
           ),
         });
       }

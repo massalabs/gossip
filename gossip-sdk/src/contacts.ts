@@ -28,6 +28,7 @@ import type {
   DeleteContactResult,
 } from './utils/contacts';
 import type { UserPublicKeys } from './assets/generated/wasm/gossip_wasm';
+import type { SessionModule } from './wasm/session';
 
 // Re-export result types
 export type { UpdateContactNameResult, DeleteContactResult };
@@ -186,11 +187,12 @@ export async function updateContactName(
  * @param ownerUserId - The user ID of the contact owner
  * @param contactUserId - The user ID of the contact to delete
  * @param db - Database instance
+ * @param session - Session module for peer management
  * @returns Result with success status
  *
  * @example
  * ```typescript
- * const result = await deleteContact(myUserId, theirUserId, db);
+ * const result = await deleteContact(myUserId, theirUserId, db, session);
  * if (result.ok) {
  *   console.log('Contact deleted');
  * } else {
@@ -201,7 +203,8 @@ export async function updateContactName(
 export async function deleteContact(
   ownerUserId: string,
   contactUserId: string,
-  db: GossipDatabase
+  db: GossipDatabase,
+  session: SessionModule
 ): Promise<DeleteContactResult> {
-  return await deleteContactUtil(ownerUserId, contactUserId, db);
+  return await deleteContactUtil(ownerUserId, contactUserId, db, session);
 }

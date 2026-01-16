@@ -11,7 +11,10 @@ import { defaultSyncConfig } from './config/sync';
 import { RestMessageProtocol } from './api/messageProtocol/rest';
 import type { EncryptedMessage } from './api/messageProtocol/types';
 import { db } from './db';
-import { getLastSyncTimestamp, setLastSyncTimestamp } from 'gossip-sdk';
+import {
+  getLastSyncTimestamp,
+  setLastSyncTimestamp,
+} from './utils/preferences';
 import { APP_BUILD_ID } from './config/version';
 
 declare let self: ServiceWorkerGlobalScope;

@@ -13,6 +13,7 @@ import {
   AnnouncementService,
   DiscussionService,
   SessionStatus,
+  SessionModule,
   UserPublicKeys,
   UserSecretKeys,
   generateUserKeys,
@@ -27,25 +28,26 @@ import { MessageProtocolType } from '../../src/config/protocol';
 
 describe('Discussion Service', () => {
   let mockProtocol: MockMessageProtocol;
-  let announcementService: AnnouncementService;
-  let discussionService: DiscussionService;
+
   // Alice's test data
   let aliceSession: MockSessionModule;
   let alicePk: UserPublicKeys;
   let aliceSk: UserSecretKeys;
+  let aliceAnnouncementService: AnnouncementService;
+  let aliceDiscussionService: DiscussionService;
 
   // Bob's test data
   let bobSession: MockSessionModule;
   let bobPk: UserPublicKeys;
   let bobSk: UserSecretKeys;
+  let bobAnnouncementService: AnnouncementService;
+  let bobDiscussionService: DiscussionService;
 
-  // Initialize WASM before all tests
+  // Initialize mock protocol before all tests
   beforeAll(async () => {
     mockProtocol = createMessageProtocol(
       MessageProtocolType.MOCK
     ) as MockMessageProtocol;
-    announcementService = new AnnouncementService(appDb, mockProtocol);
-    discussionService = new DiscussionService(appDb, announcementService);
   });
 
   beforeEach(async () => {
@@ -67,6 +69,18 @@ describe('Discussion Service', () => {
     generatedAliceKeys.free();
     aliceSession = initializeSessionMock(alicePk, aliceSk);
 
+    // Create Alice's services with her session
+    aliceAnnouncementService = new AnnouncementService(
+      appDb,
+      mockProtocol,
+      aliceSession as unknown as SessionModule
+    );
+    aliceDiscussionService = new DiscussionService(
+      appDb,
+      aliceAnnouncementService,
+      aliceSession as unknown as SessionModule
+    );
+
     // Generate Bob's keys using real WASM
     const generatedBobKeys = await generateUserKeys(
       `bob-test-passphrase-${Date.now()}-${Math.random()}`
@@ -75,6 +89,18 @@ describe('Discussion Service', () => {
     bobSk = generatedBobKeys.secret_keys();
     generatedBobKeys.free();
     bobSession = initializeSessionMock(bobPk, bobSk);
+
+    // Create Bob's services with his session
+    bobAnnouncementService = new AnnouncementService(
+      appDb,
+      mockProtocol,
+      bobSession as unknown as SessionModule
+    );
+    bobDiscussionService = new DiscussionService(
+      appDb,
+      bobAnnouncementService,
+      bobSession as unknown as SessionModule
+    );
   });
 
   afterEach(async () => {
@@ -124,10 +150,7 @@ describe('Discussion Service', () => {
 
       // Step 2: Alice initializes discussion with Bob
       const { discussionId: aliceDiscussionId } =
-        await discussionService.initialize(
-          aliceBobContact,
-          aliceSession as any
-        );
+        await aliceDiscussionService.initialize(aliceBobContact);
 
       // Verify Alice's discussion was created with status PENDING
       const aliceDiscussion = await appDb.discussions.get(aliceDiscussionId);
@@ -145,7 +168,7 @@ describe('Discussion Service', () => {
         user_data: new Uint8Array(0),
       } as any);
 
-      await announcementService.fetchAndProcessAnnouncements(bobSession as any);
+      await bobAnnouncementService.fetchAndProcessAnnouncements();
 
       // Verify Bob's discussion was created with status PENDING (received)
       const bobDiscussion = await appDb.getDiscussionByOwnerAndContact(
@@ -167,7 +190,7 @@ describe('Discussion Service', () => {
         bobAcceptanceAnnouncement
       );
 
-      await discussionService.accept(bobDiscussion, bobSession as any);
+      await bobDiscussionService.accept(bobDiscussion);
 
       // Verify Bob's discussion is now ACTIVE
       const bobDiscussionAfterAccept = await appDb.discussions.get(
@@ -183,9 +206,7 @@ describe('Discussion Service', () => {
         user_data: new Uint8Array(0),
       } as any);
 
-      await announcementService.fetchAndProcessAnnouncements(
-        aliceSession as any
-      );
+      await aliceAnnouncementService.fetchAndProcessAnnouncements();
 
       // Verify Alice's discussion is now ACTIVE
       const aliceDiscussionAfterAcceptance =
@@ -235,14 +256,11 @@ describe('Discussion Service', () => {
 
       // Step 3: Alice initializes discussion with Bob
       const { discussionId: aliceDiscussionId } =
-        await discussionService.initialize(
-          aliceBobContact,
-          aliceSession as any
-        );
+        await aliceDiscussionService.initialize(aliceBobContact);
 
       // Step 4: Bob initializes discussion with Alice (simultaneous)
       const { discussionId: bobDiscussionId } =
-        await discussionService.initialize(bobAliceContact, bobSession as any);
+        await bobDiscussionService.initialize(bobAliceContact);
 
       // Verify both have PENDING discussions with direction 'initiated'
       const aliceDiscussion = await appDb.discussions.get(aliceDiscussionId);
@@ -260,9 +278,7 @@ describe('Discussion Service', () => {
         user_data: new Uint8Array(0),
       } as any);
 
-      await announcementService.fetchAndProcessAnnouncements(
-        aliceSession as any
-      );
+      await aliceAnnouncementService.fetchAndProcessAnnouncements();
 
       // Alice should now have an ACTIVE discussion (mutual initiation)
       const aliceDiscussionAfterFetch =
@@ -277,7 +293,7 @@ describe('Discussion Service', () => {
         user_data: new Uint8Array(0),
       } as any);
 
-      await announcementService.fetchAndProcessAnnouncements(bobSession as any);
+      await bobAnnouncementService.fetchAndProcessAnnouncements();
 
       // Bob should now have an ACTIVE discussion (mutual initiation)
       const bobDiscussionAfterFetch =
@@ -309,11 +325,7 @@ describe('Discussion Service', () => {
 
       // Step 2: Alice tries to initialize discussion with Bob - should throw
       await expect(
-        discussionService.initialize(
-          aliceBobContact,
-          aliceSession as any,
-          undefined
-        )
+        aliceDiscussionService.initialize(aliceBobContact, undefined)
       ).rejects.toThrow('Discussion initialization failed');
 
       // Verify no discussion was created
@@ -348,10 +360,7 @@ describe('Discussion Service', () => {
 
       // Step 2: Alice initializes discussion - network fails
       const { discussionId: aliceDiscussionId } =
-        await discussionService.initialize(
-          aliceBobContact,
-          aliceSession as any
-        );
+        await aliceDiscussionService.initialize(aliceBobContact);
 
       // Verify discussion is in SEND_FAILED status
       let aliceDiscussion = await appDb.discussions.get(aliceDiscussionId);
@@ -362,10 +371,7 @@ describe('Discussion Service', () => {
 
       // Step 3: Resend announcement - should succeed
       aliceSession.peerSessionStatus.mockReturnValue(SessionStatus.Active);
-      await announcementService.resendAnnouncements(
-        [aliceDiscussion!],
-        aliceSession as any
-      );
+      await aliceAnnouncementService.resendAnnouncements([aliceDiscussion!]);
 
       aliceDiscussion = await appDb.discussions.get(aliceDiscussionId);
       expect(aliceDiscussion?.status).toBe(DiscussionStatus.ACTIVE);
@@ -380,7 +386,7 @@ describe('Discussion Service', () => {
         user_data: new Uint8Array(0),
       } as any);
 
-      await announcementService.fetchAndProcessAnnouncements(bobSession as any);
+      await bobAnnouncementService.fetchAndProcessAnnouncements();
 
       const bobDiscussion = await appDb.getDiscussionByOwnerAndContact(
         bobSession.userIdEncoded,
@@ -401,7 +407,7 @@ describe('Discussion Service', () => {
         .mockRejectedValueOnce(new Error('Network error'))
         .mockResolvedValue('counter-456');
 
-      await discussionService.accept(bobDiscussion!, bobSession as any);
+      await bobDiscussionService.accept(bobDiscussion!);
 
       let bobDiscussionAfterAccept = await appDb.discussions.get(
         bobDiscussion!.id!
@@ -415,10 +421,9 @@ describe('Discussion Service', () => {
 
       // Step 6: Resend Bob's acceptance - should succeed
       bobSession.peerSessionStatus.mockReturnValue(SessionStatus.Active);
-      await announcementService.resendAnnouncements(
-        [bobDiscussionAfterAccept!],
-        bobSession as any
-      );
+      await bobAnnouncementService.resendAnnouncements([
+        bobDiscussionAfterAccept!,
+      ]);
 
       bobDiscussionAfterAccept = await appDb.discussions.get(
         bobDiscussion!.id!
@@ -432,9 +437,7 @@ describe('Discussion Service', () => {
         { counter: '2', data: bobAcceptanceAnnouncement },
       ]);
 
-      await announcementService.fetchAndProcessAnnouncements(
-        aliceSession as any
-      );
+      await aliceAnnouncementService.fetchAndProcessAnnouncements();
 
       const aliceDiscussionAfterBobAccept =
         await appDb.getDiscussionByOwnerAndContact(
@@ -479,10 +482,7 @@ describe('Discussion Service', () => {
 
       // Step 2: Alice initializes discussion - network fails
       const { discussionId: aliceDiscussionId } =
-        await discussionService.initialize(
-          aliceBobContact,
-          aliceSession as any
-        );
+        await aliceDiscussionService.initialize(aliceBobContact);
 
       let aliceDiscussion = await appDb.discussions.get(aliceDiscussionId);
       expect(aliceDiscussion?.status).toBe(DiscussionStatus.SEND_FAILED);
@@ -491,20 +491,14 @@ describe('Discussion Service', () => {
       aliceSession.peerSessionStatus.mockReturnValue(SessionStatus.Active);
       for (let i = 0; i < 3; i++) {
         await new Promise(resolve => setTimeout(resolve, 1000));
-        await announcementService.resendAnnouncements(
-          [aliceDiscussion!],
-          aliceSession as any
-        );
+        await aliceAnnouncementService.resendAnnouncements([aliceDiscussion!]);
         aliceDiscussion = await appDb.discussions.get(aliceDiscussionId);
         expect(aliceDiscussion?.status).toBe(DiscussionStatus.SEND_FAILED);
       }
 
       // Step 4: 4th retry succeeds
       await new Promise(resolve => setTimeout(resolve, 1000));
-      await announcementService.resendAnnouncements(
-        [aliceDiscussion!],
-        aliceSession as any
-      );
+      await aliceAnnouncementService.resendAnnouncements([aliceDiscussion!]);
       aliceDiscussion = await appDb.discussions.get(aliceDiscussionId);
       expect(aliceDiscussion?.status).toBe(DiscussionStatus.ACTIVE);
 
@@ -519,7 +513,7 @@ describe('Discussion Service', () => {
         user_data: new Uint8Array(0),
       } as any);
 
-      await announcementService.fetchAndProcessAnnouncements(bobSession as any);
+      await bobAnnouncementService.fetchAndProcessAnnouncements();
 
       const bobDiscussion = await appDb.getDiscussionByOwnerAndContact(
         bobSession.userIdEncoded,
@@ -536,7 +530,7 @@ describe('Discussion Service', () => {
         'counter-456'
       );
 
-      await discussionService.accept(bobDiscussion!, bobSession as any);
+      await bobDiscussionService.accept(bobDiscussion!);
 
       const bobDiscussionAfterAccept = await appDb.discussions.get(
         bobDiscussion!.id!
@@ -572,10 +566,7 @@ describe('Discussion Service', () => {
 
       // Step 2: Alice initializes discussion - network fails
       const { discussionId: aliceDiscussionId } =
-        await discussionService.initialize(
-          aliceBobContact,
-          aliceSession as any
-        );
+        await aliceDiscussionService.initialize(aliceBobContact);
 
       let aliceDiscussion = await appDb.discussions.get(aliceDiscussionId);
       expect(aliceDiscussion?.status).toBe(DiscussionStatus.SEND_FAILED);
@@ -587,10 +578,9 @@ describe('Discussion Service', () => {
       });
 
       // Step 4: Resend - should mark as BROKEN
-      await announcementService.resendAnnouncements(
-        [{ ...aliceDiscussion!, updatedAt: oneHourAgo }],
-        aliceSession as any
-      );
+      await aliceAnnouncementService.resendAnnouncements([
+        { ...aliceDiscussion!, updatedAt: oneHourAgo },
+      ]);
 
       aliceDiscussion = await appDb.discussions.get(aliceDiscussionId);
       expect(aliceDiscussion?.status).toBe(DiscussionStatus.BROKEN);
@@ -607,10 +597,7 @@ describe('Discussion Service', () => {
       aliceSession.peerSessionStatus.mockReturnValue(
         SessionStatus.SelfRequested
       );
-      await discussionService.renew(
-        bobSession.userIdEncoded,
-        aliceSession as any
-      );
+      await aliceDiscussionService.renew(bobSession.userIdEncoded);
 
       aliceDiscussion = await appDb.discussions.get(aliceDiscussionId);
       expect(aliceDiscussion?.status).toBe(DiscussionStatus.PENDING); // PENDING until network confirms
@@ -627,7 +614,7 @@ describe('Discussion Service', () => {
         user_data: new Uint8Array(0),
       } as any);
 
-      await announcementService.fetchAndProcessAnnouncements(bobSession as any);
+      await bobAnnouncementService.fetchAndProcessAnnouncements();
 
       const bobDiscussion = await appDb.getDiscussionByOwnerAndContact(
         bobSession.userIdEncoded,
@@ -640,7 +627,7 @@ describe('Discussion Service', () => {
         bobAcceptanceAnnouncement
       );
 
-      await discussionService.accept(bobDiscussion!, bobSession as any);
+      await bobDiscussionService.accept(bobDiscussion!);
 
       const bobDiscussionAfterAccept = await appDb.discussions.get(
         bobDiscussion!.id!
@@ -657,9 +644,7 @@ describe('Discussion Service', () => {
         user_data: new Uint8Array(0),
       } as any);
 
-      await announcementService.fetchAndProcessAnnouncements(
-        aliceSession as any
-      );
+      await aliceAnnouncementService.fetchAndProcessAnnouncements();
 
       const aliceDiscussionAfterBobAccept =
         await appDb.getDiscussionByOwnerAndContact(
@@ -697,11 +682,7 @@ describe('Discussion Service', () => {
         'counter-123'
       );
 
-      await discussionService.initialize(
-        aliceBobContact,
-        aliceSession as any,
-        undefined
-      );
+      await aliceDiscussionService.initialize(aliceBobContact, undefined);
 
       // Step 2: Bob receives Alice's announcement
       vi.spyOn(mockProtocol, 'fetchAnnouncements').mockResolvedValue([
@@ -714,7 +695,7 @@ describe('Discussion Service', () => {
         user_data: new Uint8Array(0),
       } as any);
 
-      await announcementService.fetchAndProcessAnnouncements(bobSession as any);
+      await bobAnnouncementService.fetchAndProcessAnnouncements();
 
       const bobDiscussion = await appDb.getDiscussionByOwnerAndContact(
         bobSession.userIdEncoded,
@@ -726,9 +707,9 @@ describe('Discussion Service', () => {
         throw new Error('Session manager error');
       });
 
-      await expect(
-        discussionService.accept(bobDiscussion!, bobSession as any)
-      ).rejects.toThrow('Failed to accept pending discussion');
+      await expect(bobDiscussionService.accept(bobDiscussion!)).rejects.toThrow(
+        'Failed to accept pending discussion'
+      );
 
       // Step 4: Bob retries - session works but network fails
       const bobAcceptanceAnnouncement = new Uint8Array(200);
@@ -740,7 +721,7 @@ describe('Discussion Service', () => {
         new Error('Network error')
       );
 
-      await discussionService.accept(bobDiscussion!, bobSession as any);
+      await bobDiscussionService.accept(bobDiscussion!);
 
       let bobDiscussionAfterAccept = await appDb.discussions.get(
         bobDiscussion!.id!
@@ -755,10 +736,9 @@ describe('Discussion Service', () => {
         updatedAt: oneHourAgo,
       });
 
-      await announcementService.resendAnnouncements(
-        [{ ...bobDiscussionAfterAccept!, updatedAt: oneHourAgo }],
-        bobSession as any
-      );
+      await bobAnnouncementService.resendAnnouncements([
+        { ...bobDiscussionAfterAccept!, updatedAt: oneHourAgo },
+      ]);
 
       bobDiscussionAfterAccept = await appDb.discussions.get(
         bobDiscussion!.id!
@@ -773,10 +753,7 @@ describe('Discussion Service', () => {
         .mockClear()
         .mockResolvedValue('counter-456');
 
-      await discussionService.renew(
-        aliceSession.userIdEncoded,
-        bobSession as any
-      );
+      await bobDiscussionService.renew(aliceSession.userIdEncoded);
 
       bobDiscussionAfterAccept = await appDb.discussions.get(
         bobDiscussion!.id!
@@ -793,9 +770,7 @@ describe('Discussion Service', () => {
         user_data: new Uint8Array(0),
       } as any);
 
-      await announcementService.fetchAndProcessAnnouncements(
-        aliceSession as any
-      );
+      await aliceAnnouncementService.fetchAndProcessAnnouncements();
 
       const aliceDiscussionAfterBobAccept =
         await appDb.getDiscussionByOwnerAndContact(
@@ -852,13 +827,10 @@ describe('Discussion Service', () => {
         .mockResolvedValue('counter-123');
 
       const { discussionId: aliceDiscussionId } =
-        await discussionService.initialize(
-          aliceBobContact,
-          aliceSession as any
-        );
+        await aliceDiscussionService.initialize(aliceBobContact);
 
       const { discussionId: bobDiscussionId } =
-        await discussionService.initialize(bobAliceContact, bobSession as any);
+        await bobDiscussionService.initialize(bobAliceContact);
 
       let aliceDiscussion = await appDb.discussions.get(aliceDiscussionId);
       let bobDiscussion = await appDb.discussions.get(bobDiscussionId);
@@ -870,10 +842,7 @@ describe('Discussion Service', () => {
       await new Promise(resolve => setTimeout(resolve, 1000));
 
       bobSession.peerSessionStatus.mockReturnValue(SessionStatus.SelfRequested);
-      await announcementService.resendAnnouncements(
-        [bobDiscussion!],
-        bobSession as any
-      );
+      await bobAnnouncementService.resendAnnouncements([bobDiscussion!]);
 
       bobDiscussion = await appDb.discussions.get(bobDiscussionId);
 
@@ -890,19 +859,14 @@ describe('Discussion Service', () => {
         user_data: new Uint8Array(0),
       } as any);
 
-      await announcementService.fetchAndProcessAnnouncements(
-        aliceSession as any
-      );
+      await aliceAnnouncementService.fetchAndProcessAnnouncements();
 
       aliceDiscussion = await appDb.discussions.get(aliceDiscussionId);
       expect(aliceDiscussion?.status).toBe(DiscussionStatus.SEND_FAILED);
 
       /* Step 5: Alice resend her announcement */
       aliceSession.peerSessionStatus.mockReturnValue(SessionStatus.Active);
-      await announcementService.resendAnnouncements(
-        [aliceDiscussion!],
-        aliceSession as any
-      );
+      await aliceAnnouncementService.resendAnnouncements([aliceDiscussion!]);
 
       aliceDiscussion = await appDb.discussions.get(aliceDiscussionId);
       expect(aliceDiscussion?.status).toBe(DiscussionStatus.ACTIVE);
@@ -917,7 +881,7 @@ describe('Discussion Service', () => {
         user_data: new Uint8Array(0),
       } as any);
 
-      await announcementService.fetchAndProcessAnnouncements(bobSession as any);
+      await bobAnnouncementService.fetchAndProcessAnnouncements();
 
       const bobDiscussionAfterAliceResend =
         await appDb.discussions.get(bobDiscussionId);
@@ -968,13 +932,10 @@ describe('Discussion Service', () => {
         .mockRejectedValue(new Error('Network error')); // Bob fails
 
       const { discussionId: aliceDiscussionId } =
-        await discussionService.initialize(
-          aliceBobContact,
-          aliceSession as any
-        );
+        await aliceDiscussionService.initialize(aliceBobContact);
 
       const { discussionId: bobDiscussionId } =
-        await discussionService.initialize(bobAliceContact, bobSession as any);
+        await bobDiscussionService.initialize(bobAliceContact);
 
       const aliceDiscussion = await appDb.discussions.get(aliceDiscussionId);
       let bobDiscussion = await appDb.discussions.get(bobDiscussionId);
@@ -988,10 +949,9 @@ describe('Discussion Service', () => {
         updatedAt: oneHourAgo,
       });
 
-      await announcementService.resendAnnouncements(
-        [{ ...bobDiscussion!, updatedAt: oneHourAgo }],
-        bobSession as any
-      );
+      await bobAnnouncementService.resendAnnouncements([
+        { ...bobDiscussion!, updatedAt: oneHourAgo },
+      ]);
 
       bobDiscussion = await appDb.discussions.get(bobDiscussionId);
       expect(bobDiscussion?.status).toBe(DiscussionStatus.BROKEN);
@@ -1007,7 +967,7 @@ describe('Discussion Service', () => {
         user_data: new Uint8Array(0),
       } as any);
 
-      await announcementService.fetchAndProcessAnnouncements(bobSession as any);
+      await bobAnnouncementService.fetchAndProcessAnnouncements();
 
       // Bob's broken discussion should remain BROKEN until it is reinitialized
       bobDiscussion = await appDb.discussions.get(bobDiscussionId);
@@ -1020,10 +980,7 @@ describe('Discussion Service', () => {
         'counter-456'
       );
 
-      await discussionService.renew(
-        aliceSession.userIdEncoded,
-        bobSession as any
-      );
+      await bobDiscussionService.renew(aliceSession.userIdEncoded);
 
       bobDiscussion = await appDb.discussions.get(bobDiscussionId);
       expect(bobDiscussion?.status).toBe(DiscussionStatus.ACTIVE);
@@ -1051,7 +1008,7 @@ describe('Discussion Service', () => {
         new Error('Session manager error')
       );
       await expect(
-        discussionService.renew(bobSession.userIdEncoded, aliceSession as any)
+        aliceDiscussionService.renew(bobSession.userIdEncoded)
       ).rejects.toThrow();
       let aliceDiscussion = await appDb.discussions.get(aliceDiscussionId);
       expect(aliceDiscussion?.status).toBe(DiscussionStatus.BROKEN); // Still broken
@@ -1062,10 +1019,7 @@ describe('Discussion Service', () => {
         new Error('Network down')
       );
 
-      await discussionService.renew(
-        bobSession.userIdEncoded,
-        aliceSession as any
-      );
+      await aliceDiscussionService.renew(bobSession.userIdEncoded);
 
       aliceDiscussion = await appDb.discussions.get(aliceDiscussionId);
       expect(aliceDiscussion?.status).toBe(DiscussionStatus.SEND_FAILED);
@@ -1082,10 +1036,7 @@ describe('Discussion Service', () => {
       );
       aliceSession.peerSessionStatus.mockReturnValue(SessionStatus.Active);
 
-      await discussionService.renew(
-        bobSession.userIdEncoded,
-        aliceSession as any
-      );
+      await aliceDiscussionService.renew(bobSession.userIdEncoded);
 
       aliceDiscussion = await appDb.discussions.get(aliceDiscussionId);
       expect(aliceDiscussion?.status).toBe(DiscussionStatus.ACTIVE);
@@ -1101,7 +1052,7 @@ describe('Discussion Service', () => {
         user_data: new Uint8Array(0),
       } as any);
 
-      await announcementService.fetchAndProcessAnnouncements(bobSession as any);
+      await bobAnnouncementService.fetchAndProcessAnnouncements();
 
       const bobDiscussion = await appDb.discussions.get(bobDiscussionId);
       expect(bobDiscussion?.status === DiscussionStatus.ACTIVE).toBeTruthy();

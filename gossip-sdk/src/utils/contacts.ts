@@ -6,7 +6,7 @@
 
 import { type GossipDatabase } from '../db';
 import { decodeUserId } from './userId';
-import { getAccountStore } from '../utils';
+import type { SessionModule } from '../wasm/session';
 
 export type UpdateContactNameResult =
   | { ok: true; trimmedName: string }
@@ -83,19 +83,17 @@ export async function updateContactName(
 /**
  * Delete a contact and all associated discussions and messages
  *
- * NOTE: This function reads the session from the configured account store adapter.
- * Set the adapter via configureSdk() before calling in non-React runtimes.
- * TODO: Refactor to accept the session explicitly for full decoupling.
- *
  * @param ownerUserId - Owner user ID
  * @param contactUserId - Contact user ID
  * @param db - Database instance
+ * @param session - Session module for peer management
  * @returns Result with success status
  */
 export async function deleteContact(
   ownerUserId: string,
   contactUserId: string,
-  db: GossipDatabase
+  db: GossipDatabase,
+  session: SessionModule
 ): Promise<DeleteContactResult> {
   try {
     if (!ownerUserId || !contactUserId) {
@@ -145,15 +143,6 @@ export async function deleteContact(
     );
 
     // Discard peer from session manager
-    // NOTE: This reads the adapter directly - see note above
-    const session = getAccountStore().getState().session;
-    if (!session) {
-      return {
-        ok: false,
-        reason: 'error',
-        message: 'Session not found.',
-      };
-    }
     session.peerDiscard(decodeUserId(contactUserId));
 
     return { ok: true };

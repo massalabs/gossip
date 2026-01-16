@@ -7,14 +7,10 @@ import { enableDebugLogger } from './utils/logger.ts';
 // Polyfill for Buffer
 import { Buffer } from 'buffer';
 
-// WASM initialization service
-import { startWasmInitialization } from 'gossip-sdk';
-import { configureSdk, setProtocolBaseUrl } from 'gossip-sdk';
+// SDK configuration
+import { gossipSdk } from 'gossip-sdk';
 import { protocolConfig } from './config/protocol';
 import { db } from './db';
-import { Preferences } from '@capacitor/preferences';
-import { useAccountStore } from './stores/accountStore';
-import { useWalletStore } from './stores/walletStore';
 
 // Setup SHA-512 for @noble/ed25519 (required for massa-web3)
 import { sha512 } from '@noble/hashes/sha2';
@@ -91,50 +87,11 @@ window.addEventListener('load', () => {
   }
 });
 
-// Configure SDK runtime wiring
-configureSdk({
+// Initialize SDK (also starts WASM initialization in background)
+gossipSdk.init({
   db,
-  preferences: {
-    get: async key => (await Preferences.get({ key })).value ?? null,
-    set: async (key, value) => {
-      await Preferences.set({ key, value });
-    },
-    remove: async key => {
-      await Preferences.remove({ key });
-    },
-  },
-  accountStore: {
-    getState: useAccountStore.getState,
-    initializeAccount: (username, password) =>
-      useAccountStore.getState().initializeAccount(username, password),
-    initializeAccountWithBiometrics: (username, iCloudSync) =>
-      useAccountStore
-        .getState()
-        .initializeAccountWithBiometrics(username, iCloudSync),
-    loadAccount: (password, userId) =>
-      useAccountStore.getState().loadAccount(password, userId),
-    restoreAccountFromMnemonic: (username, mnemonic, opts) =>
-      useAccountStore
-        .getState()
-        .restoreAccountFromMnemonic(username, mnemonic, opts),
-    logout: () => useAccountStore.getState().logout(),
-    resetAccount: () => useAccountStore.getState().resetAccount(),
-    showBackup: password => useAccountStore.getState().showBackup(password),
-    getMnemonicBackupInfo: () =>
-      useAccountStore.getState().getMnemonicBackupInfo(),
-    markMnemonicBackupComplete: () =>
-      useAccountStore.getState().markMnemonicBackupComplete(),
-    getAllAccounts: () => useAccountStore.getState().getAllAccounts(),
-    hasExistingAccount: () => useAccountStore.getState().hasExistingAccount(),
-  },
-  walletStore: {
-    getState: useWalletStore.getState,
-  },
+  protocolBaseUrl: protocolConfig.baseUrl,
 });
-setProtocolBaseUrl(protocolConfig.baseUrl);
-
-// Start WASM initialization in the background (non-blocking)
-startWasmInitialization();
 
 // Only enable the debug logger in development to avoid persisting
 // potentially sensitive console output in production builds.

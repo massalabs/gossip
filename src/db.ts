@@ -1,5 +1,5 @@
 import Dexie, { Table } from 'dexie';
-import { setActiveSeekersInPreferences } from 'gossip-sdk';
+import { setActiveSeekersInPreferences } from './utils/preferences';
 
 // Define authentication method type
 export type AuthMethod = 'capacitor' | 'webauthn' | 'password';

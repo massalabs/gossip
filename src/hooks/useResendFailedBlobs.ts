@@ -1,12 +1,7 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { liveQuery, Subscription } from 'dexie';
 import { useAccountStore } from '../stores/accountStore';
-import { restMessageProtocol } from 'gossip-sdk';
-import {
-  announcementService,
-  messageService,
-  discussionService,
-} from '../services';
+import { restMessageProtocol, gossipSdk } from 'gossip-sdk';
 import {
   Discussion,
   DiscussionStatus,
@@ -20,13 +15,13 @@ import {
  * Changes node and re-initiates the discussion.
  */
 export function useManualRenewDiscussion() {
-  const { userProfile, session } = useAccountStore();
+  const userProfile = useAccountStore(s => s.userProfile);
 
   return useCallback(
     async (contactUserId: string): Promise<void> => {
-      if (!userProfile?.userId || !session) {
+      if (!userProfile?.userId || !gossipSdk.isSessionOpen) {
         console.warn(
-          'Cannot renew discussion: WASM keys or session unavailable'
+          'Cannot renew discussion: Services or session unavailable'
         );
         return;
       }
@@ -38,7 +33,7 @@ export function useManualRenewDiscussion() {
       }
 
       try {
-        await discussionService.renew(contactUserId, session as never);
+        await gossipSdk.discussions.renew(contactUserId);
       } catch (error) {
         console.error(
           `Failed to renew discussion with ${contactUserId}:`,
@@ -46,7 +41,7 @@ export function useManualRenewDiscussion() {
         );
       }
     },
-    [userProfile?.userId, session]
+    [userProfile?.userId]
   );
 }
 
@@ -55,7 +50,7 @@ export function useManualRenewDiscussion() {
  * Used by useAppStateRefresh for automatic retry logic.
  */
 export function useResendFailedBlobs() {
-  const { userProfile, session } = useAccountStore();
+  const userProfile = useAccountStore(s => s.userProfile);
   const isResending = useRef(false);
 
   // Use refs to store the latest values from liveQuery
@@ -137,7 +132,7 @@ export function useResendFailedBlobs() {
   // Resend all failed items
   const resendFailedBlobs = useCallback(async () => {
     if (isResending.current) return;
-    if (!session || !userProfile?.userId) return;
+    if (!gossipSdk.isSessionOpen || !userProfile?.userId) return;
 
     isResending.current = true;
     try {
@@ -146,10 +141,7 @@ export function useResendFailedBlobs() {
       const currentBrokenDiscussions = brokenDiscussionsRef.current;
       for (const discussion of currentBrokenDiscussions) {
         try {
-          await discussionService.renew(
-            discussion.contactUserId,
-            session as never
-          );
+          await gossipSdk.discussions.renew(discussion.contactUserId);
         } catch (err) {
           console.error(
             `Failed to reinitiate discussion ${discussion.contactUserId}:`,
@@ -162,10 +154,7 @@ export function useResendFailedBlobs() {
       const currentSendFailedDiscussions = sendFailedDiscussionsRef.current;
       if (currentSendFailedDiscussions.length > 0) {
         try {
-          await announcementService.resendAnnouncements(
-            currentSendFailedDiscussions,
-            session as never
-          );
+          await gossipSdk.announcements.resend(currentSendFailedDiscussions);
         } catch (err) {
           console.error('Failed to resend announcements:', err);
         }
@@ -180,10 +169,7 @@ export function useResendFailedBlobs() {
           currentRetryMessages
         );
         try {
-          await messageService.resendMessages(
-            currentRetryMessages,
-            session as never
-          );
+          await gossipSdk.messages.resend(currentRetryMessages);
         } catch (err) {
           console.error('Failed to resend messages:', err);
         }
@@ -191,7 +177,7 @@ export function useResendFailedBlobs() {
     } finally {
       isResending.current = false;
     }
-  }, [session, userProfile?.userId]);
+  }, [userProfile?.userId]);
 
   return { resendFailedBlobs };
 }

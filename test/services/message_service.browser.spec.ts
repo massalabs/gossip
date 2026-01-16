@@ -69,27 +69,21 @@ function getFailedOutgoingMessagesForContact(
 async function resendFailedMessagesForContact(
   ownerUserId: string,
   contactUserId: string,
-  session: SessionModule,
   msgService: MessageService
 ): Promise<void> {
   const failedMessages = await getFailedOutgoingMessagesForContact(
     ownerUserId,
     contactUserId
   );
-  await msgService.resendMessages(
-    new Map([[contactUserId, failedMessages]]),
-    session
-  );
+  await msgService.resendMessages(new Map([[contactUserId, failedMessages]]));
 }
 
 async function fetchMessagesFromContact(
   ownerUserId: string,
   contactUserId: string,
-  ourSk: UserSecretKeys,
-  session: SessionModule,
   msgService: MessageService
 ): Promise<Message[]> {
-  await msgService.fetchMessages(session);
+  await msgService.fetchMessages();
 
   const messages = await appDb.messages
     .where('[ownerUserId+contactUserId+direction]')
@@ -115,11 +109,6 @@ async function getMessagesToContact(
 describe('Message Service (Browser with Real WASM)', () => {
   // Shared mock protocol for all tests
   let mockProtocol: MockMessageProtocol;
-  // Service instances
-  let announcementService: AnnouncementService;
-  let discussionService: DiscussionService;
-  let messageService: MessageService;
-  let refreshService: RefreshService;
 
   // Alice's test data
   let aliceUserId: string;
@@ -127,6 +116,11 @@ describe('Message Service (Browser with Real WASM)', () => {
   let alicePk: UserPublicKeys;
   let aliceSk: UserSecretKeys;
   let aliceKeys: UserKeys;
+  // Alice's services
+  let aliceAnnouncementService: AnnouncementService;
+  let aliceDiscussionService: DiscussionService;
+  let aliceMessageService: MessageService;
+  let aliceRefreshService: RefreshService;
 
   // Bob's test data
   let bobUserId: string;
@@ -134,6 +128,11 @@ describe('Message Service (Browser with Real WASM)', () => {
   let bobPk: UserPublicKeys;
   let bobSk: UserSecretKeys;
   let bobKeys: UserKeys;
+  // Bob's services
+  let bobAnnouncementService: AnnouncementService;
+  let bobDiscussionService: DiscussionService;
+  let bobMessageService: MessageService;
+  let bobRefreshService: RefreshService;
 
   // Initialize WASM before all tests
   beforeAll(async () => {
@@ -141,10 +140,6 @@ describe('Message Service (Browser with Real WASM)', () => {
     mockProtocol = createMessageProtocol(
       MessageProtocolType.MOCK
     ) as MockMessageProtocol;
-    announcementService = new AnnouncementService(appDb, mockProtocol);
-    discussionService = new DiscussionService(appDb, announcementService);
-    messageService = new MessageService(appDb, mockProtocol);
-    refreshService = new RefreshService(appDb, messageService);
   });
 
   beforeEach(async () => {
@@ -164,12 +159,48 @@ describe('Message Service (Browser with Real WASM)', () => {
     aliceUserId = encodeUserId(alicePk.derive_id());
     aliceSession = new SessionModule(aliceKeys);
 
+    // Create Alice's services
+    aliceAnnouncementService = new AnnouncementService(
+      appDb,
+      mockProtocol,
+      aliceSession
+    );
+    aliceMessageService = new MessageService(appDb, mockProtocol, aliceSession);
+    aliceDiscussionService = new DiscussionService(
+      appDb,
+      aliceAnnouncementService,
+      aliceSession
+    );
+    aliceRefreshService = new RefreshService(
+      appDb,
+      aliceMessageService,
+      aliceSession
+    );
+
     // Generate Bob's keys using real WASM
     bobKeys = await generateUserKeys('bob-test-passphrase-' + Date.now());
     bobPk = bobKeys.public_keys();
     bobSk = bobKeys.secret_keys();
     bobUserId = encodeUserId(bobPk.derive_id());
     bobSession = new SessionModule(bobKeys);
+
+    // Create Bob's services
+    bobAnnouncementService = new AnnouncementService(
+      appDb,
+      mockProtocol,
+      bobSession
+    );
+    bobMessageService = new MessageService(appDb, mockProtocol, bobSession);
+    bobDiscussionService = new DiscussionService(
+      appDb,
+      bobAnnouncementService,
+      bobSession
+    );
+    bobRefreshService = new RefreshService(
+      appDb,
+      bobMessageService,
+      bobSession
+    );
   });
 
   /**
@@ -208,14 +239,10 @@ describe('Message Service (Browser with Real WASM)', () => {
 
     // Alice initiates session with Bob (establishes outgoing session)
     const { discussionId: aliceDiscussionId } =
-      await discussionService.initialize(
-        aliceBobContact,
-        aliceSession,
-        aliceUserId
-      );
+      await aliceDiscussionService.initialize(aliceBobContact);
 
     // Bob fetches Alice's announcement and discussion is ACTIVE
-    await announcementService.fetchAndProcessAnnouncements(bobSession);
+    await bobAnnouncementService.fetchAndProcessAnnouncements();
 
     // Bob accepts the discussion request
     const bobDiscussion = await appDb.getDiscussionByOwnerAndContact(
@@ -225,16 +252,17 @@ describe('Message Service (Browser with Real WASM)', () => {
     if (!bobDiscussion)
       throw new Error('alice discussion not found on bob side');
 
-    await discussionService.accept(bobDiscussion, bobSession);
+    await bobDiscussionService.accept(bobDiscussion);
 
     // Alice fetches Bob's announcement and discussion is ACTIVE
-    await announcementService.fetchAndProcessAnnouncements(aliceSession);
+    await aliceAnnouncementService.fetchAndProcessAnnouncements();
 
     return { aliceDiscussionId, bobDiscussionId: bobDiscussion.id! };
   }
 
   /**
    * Generic helper to initialize a bidirectional session between any two peers.
+   * Creates services dynamically for each peer based on their sessions.
    * @param peer1Sk - First peer's secret keys
    * @param peer1Pk - First peer's public keys
    * @param peer1Session - First peer's session module
@@ -256,6 +284,30 @@ describe('Message Service (Browser with Real WASM)', () => {
   }> {
     const peer1UserId = encodeUserId(peer1Pk.derive_id());
     const peer2UserId = encodeUserId(peer2Pk.derive_id());
+
+    // Create services for peer1
+    const peer1AnnouncementService = new AnnouncementService(
+      appDb,
+      mockProtocol,
+      peer1Session
+    );
+    const peer1DiscussionService = new DiscussionService(
+      appDb,
+      peer1AnnouncementService,
+      peer1Session
+    );
+
+    // Create services for peer2
+    const peer2AnnouncementService = new AnnouncementService(
+      appDb,
+      mockProtocol,
+      peer2Session
+    );
+    const peer2DiscussionService = new DiscussionService(
+      appDb,
+      peer2AnnouncementService,
+      peer2Session
+    );
 
     // Create reciprocal contacts
     const peer1Peer2Contact: Omit<Contact, 'id'> = {
@@ -285,14 +337,10 @@ describe('Message Service (Browser with Real WASM)', () => {
 
     // Peer1 initiates session with Peer2
     const { discussionId: peer1DiscussionId } =
-      await discussionService.initialize(
-        peer1Peer2Contact,
-        peer1Session,
-        peer1UserId
-      );
+      await peer1DiscussionService.initialize(peer1Peer2Contact);
 
     // Peer2 fetches Peer1's announcement
-    await announcementService.fetchAndProcessAnnouncements(peer2Session);
+    await peer2AnnouncementService.fetchAndProcessAnnouncements();
 
     // Peer2 accepts the discussion request
     const peer2Discussion = await appDb.getDiscussionByOwnerAndContact(
@@ -302,10 +350,10 @@ describe('Message Service (Browser with Real WASM)', () => {
     if (!peer2Discussion)
       throw new Error('peer1 discussion not found on peer2 side');
 
-    await discussionService.accept(peer2Discussion, peer2Session);
+    await peer2DiscussionService.accept(peer2Discussion);
 
     // Peer1 fetches Peer2's announcement and discussion is ACTIVE
-    await announcementService.fetchAndProcessAnnouncements(peer1Session);
+    await peer1AnnouncementService.fetchAndProcessAnnouncements();
 
     return { peer1DiscussionId, peer2DiscussionId: peer2Discussion.id! };
   }
@@ -337,10 +385,7 @@ describe('Message Service (Browser with Real WASM)', () => {
           timestamp: new Date(),
         };
 
-        const res = await messageService.sendMessage(
-          message as Message,
-          aliceSession
-        );
+        const res = await aliceMessageService.sendMessage(message as Message);
         expect(res.success).toBe(true);
         aliceMessageIds.push(res.message!.id!);
       }
@@ -352,7 +397,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       }
 
       // STEP 2: Bob fetches all messages at once
-      await messageService.fetchMessages(bobSession);
+      await bobMessageService.fetchMessages();
 
       // Verify Bob received all messages
       const bobReceivedMessages = await appDb.messages
@@ -380,16 +425,13 @@ describe('Message Service (Browser with Real WASM)', () => {
           timestamp: new Date(),
         };
 
-        const res = await messageService.sendMessage(
-          message as Message,
-          bobSession
-        );
+        const res = await bobMessageService.sendMessage(message as Message);
         expect(res.success).toBe(true);
         bobMessageIds.push(res.message!.id!);
       }
 
       // STEP 4: Alice receives Bob's messages
-      await messageService.fetchMessages(aliceSession);
+      await aliceMessageService.fetchMessages();
 
       // Verify Alice received all Bob's messages
       const aliceReceivedMessages = await appDb.messages
@@ -421,9 +463,8 @@ describe('Message Service (Browser with Real WASM)', () => {
         timestamp: new Date(),
       };
 
-      const aliceResult = await messageService.sendMessage(
-        aliceMessageData as Message,
-        aliceSession
+      const aliceResult = await aliceMessageService.sendMessage(
+        aliceMessageData as Message
       );
       expect(aliceResult.success).toBe(true);
       const aliceMessageId = aliceResult.message!.id!;
@@ -439,9 +480,8 @@ describe('Message Service (Browser with Real WASM)', () => {
         timestamp: new Date(),
       };
 
-      const bobResult = await messageService.sendMessage(
-        bobMessageData as Message,
-        bobSession
+      const bobResult = await bobMessageService.sendMessage(
+        bobMessageData as Message
       );
       expect(bobResult.success).toBe(true);
       const bobMessageId = bobResult.message!.id!;
@@ -455,10 +495,10 @@ describe('Message Service (Browser with Real WASM)', () => {
       );
 
       // Alice fetches Bob's message
-      await messageService.fetchMessages(aliceSession);
+      await aliceMessageService.fetchMessages();
 
       // Bob fetches Alice's message
-      await messageService.fetchMessages(bobSession);
+      await bobMessageService.fetchMessages();
 
       // Verify both received each other's messages
       const aliceReceived = await appDb.messages
@@ -485,10 +525,10 @@ describe('Message Service (Browser with Real WASM)', () => {
         status: MessageStatus.SENDING,
         timestamp: new Date(),
       };
-      await messageService.sendMessage(bobFollowUp as Message, bobSession);
+      await bobMessageService.sendMessage(bobFollowUp as Message);
 
       // Alice fetches Bob's follow-up which contains acknowledgment for her message
-      await messageService.fetchMessages(aliceSession);
+      await aliceMessageService.fetchMessages();
 
       // Now Alice's first message should be delivered
       expect((await appDb.messages.get(aliceMessageId))?.status).toBe(
@@ -505,10 +545,10 @@ describe('Message Service (Browser with Real WASM)', () => {
         status: MessageStatus.SENDING,
         timestamp: new Date(),
       };
-      await messageService.sendMessage(aliceFollowUp as Message, aliceSession);
+      await aliceMessageService.sendMessage(aliceFollowUp as Message);
 
       // Bob fetches Alice's follow-up which contains acknowledgment for his message
-      await messageService.fetchMessages(bobSession);
+      await bobMessageService.fetchMessages();
 
       // Now Bob's first message should be delivered
       expect((await appDb.messages.get(bobMessageId))?.status).toBe(
@@ -528,14 +568,13 @@ describe('Message Service (Browser with Real WASM)', () => {
         timestamp: new Date(),
       };
 
-      const alice1Result = await messageService.sendMessage(
-        alice1Data as Message,
-        aliceSession
+      const alice1Result = await aliceMessageService.sendMessage(
+        alice1Data as Message
       );
       const alice1Id = alice1Result.message!.id!;
 
       // Bob receives Alice's first message
-      await messageService.fetchMessages(bobSession);
+      await bobMessageService.fetchMessages();
 
       // Verify Bob received Alice's message
       const bobReceivedFirst = await appDb.messages
@@ -555,14 +594,13 @@ describe('Message Service (Browser with Real WASM)', () => {
         timestamp: new Date(),
       };
 
-      const bob1Result = await messageService.sendMessage(
-        bob1Data as Message,
-        bobSession
+      const bob1Result = await bobMessageService.sendMessage(
+        bob1Data as Message
       );
       const bob1Id = bob1Result.message!.id!;
 
       // Alice receives Bob's response - this should acknowledge Alice's first message
-      await messageService.fetchMessages(aliceSession);
+      await aliceMessageService.fetchMessages();
 
       // Alice's first message should now be delivered (acknowledged by Bob's response)
       expect((await appDb.messages.get(alice1Id))?.status).toBe(
@@ -580,14 +618,13 @@ describe('Message Service (Browser with Real WASM)', () => {
         timestamp: new Date(),
       };
 
-      const alice2Result = await messageService.sendMessage(
-        alice2Data as Message,
-        aliceSession
+      const alice2Result = await aliceMessageService.sendMessage(
+        alice2Data as Message
       );
       const alice2Id = alice2Result.message!.id!;
 
       // Bob receives Alice's second message - this acknowledges Bob's response
-      await messageService.fetchMessages(bobSession);
+      await bobMessageService.fetchMessages();
 
       // Bob's message should now be delivered
       expect((await appDb.messages.get(bob1Id))?.status).toBe(
@@ -604,10 +641,10 @@ describe('Message Service (Browser with Real WASM)', () => {
         status: MessageStatus.SENDING,
         timestamp: new Date(),
       };
-      await messageService.sendMessage(bob2Data as Message, bobSession);
+      await bobMessageService.sendMessage(bob2Data as Message);
 
       // Alice fetches Bob's second response
-      await messageService.fetchMessages(aliceSession);
+      await aliceMessageService.fetchMessages();
 
       // Alice's second message should now be delivered
       expect((await appDb.messages.get(alice2Id))?.status).toBe(
@@ -650,11 +687,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       await appDb.contacts.add(aliceBobContact);
 
       // Alice initiates session (SelfRequested state)
-      await discussionService.initialize(
-        aliceBobContact,
-        aliceSession,
-        aliceUserId
-      );
+      await aliceDiscussionService.initialize(aliceBobContact);
 
       // Verify Alice's session is in SelfRequested state
       expect(aliceSession.peerSessionStatus(bobPk.derive_id())).toBe(
@@ -675,10 +708,7 @@ describe('Message Service (Browser with Real WASM)', () => {
           status: MessageStatus.SENDING,
           timestamp: new Date(),
         });
-        const res = await messageService.sendMessage(
-          aliceMessageData[i],
-          aliceSession
-        );
+        const res = await aliceMessageService.sendMessage(aliceMessageData[i]);
         /* It's not possible to send message while the discussion is still in pending state waiting for peer acceptance
         But the message should be added to the database as failed and will be resent later when the discussion is accepted by the peer*/
         expect(res.success).toBe(false);
@@ -686,7 +716,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       }
 
       /* STEP 3: Bob fetches Alice's announcement and accept it */
-      await announcementService.fetchAndProcessAnnouncements(bobSession);
+      await bobAnnouncementService.fetchAndProcessAnnouncements();
 
       const bobDiscussion = await appDb.getDiscussionByOwnerAndContact(
         bobUserId,
@@ -694,7 +724,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       );
       if (!bobDiscussion)
         throw new Error('alice discussion not found on bob side');
-      await discussionService.accept(bobDiscussion, bobSession);
+      await bobDiscussionService.accept(bobDiscussion);
 
       // Verify Bob's session is now Active
       expect(bobSession.peerSessionStatus(alicePk.derive_id())).toBe(
@@ -702,7 +732,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       );
 
       /* STEP 4: Alice receive Bob's announcement and resends her messages */
-      await announcementService.fetchAndProcessAnnouncements(aliceSession);
+      await aliceAnnouncementService.fetchAndProcessAnnouncements();
 
       // Verify Alice's session is now Active
       expect(aliceSession.peerSessionStatus(bobPk.derive_id())).toBe(
@@ -714,9 +744,8 @@ describe('Message Service (Browser with Real WASM)', () => {
         aliceUserId,
         bobUserId
       );
-      await messageService.resendMessages(
-        new Map([[bobUserId, messagesDb]]),
-        aliceSession
+      await aliceMessageService.resendMessages(
+        new Map([[bobUserId, messagesDb]])
       );
 
       // Verify Alice's messages are resent
@@ -730,7 +759,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       expect(aliceFailedMessages[1].status).toBe(MessageStatus.SENT);
 
       /* STEP 5: Bob receives Alice's messages */
-      await messageService.fetchMessages(bobSession);
+      await bobMessageService.fetchMessages();
 
       // Verify Bob received both messages
       const bobReceivedMessages = await appDb.messages
@@ -751,14 +780,13 @@ describe('Message Service (Browser with Real WASM)', () => {
         status: MessageStatus.SENDING,
         timestamp: new Date(),
       };
-      const bobMessageResult = await messageService.sendMessage(
-        bobMessageData as Message,
-        bobSession
+      const bobMessageResult = await bobMessageService.sendMessage(
+        bobMessageData as Message
       );
       expect(bobMessageResult.success).toBe(true);
 
       /* STEP 7: Alice fetch bob message and her message is acknowledged*/
-      await messageService.fetchMessages(aliceSession);
+      await aliceMessageService.fetchMessages();
 
       // Verify Alice received Bob's message
       const aliceReceivedMessages = await appDb.messages
@@ -813,16 +841,14 @@ describe('Message Service (Browser with Real WASM)', () => {
         timestamp: new Date(),
       };
 
-      const aliceResult1 = await messageService.sendMessage(
-        aliceMessage1 as Message,
-        aliceSession
+      const aliceResult1 = await aliceMessageService.sendMessage(
+        aliceMessage1 as Message
       );
       expect(aliceResult1.success).toBe(false);
       expect(aliceResult1.message?.status).toBe(MessageStatus.FAILED);
 
-      const aliceResult2 = await messageService.sendMessage(
-        aliceMessage2 as Message,
-        aliceSession
+      const aliceResult2 = await aliceMessageService.sendMessage(
+        aliceMessage2 as Message
       );
       expect(aliceResult2.success).toBe(false);
       expect(aliceResult2.message?.status).toBe(MessageStatus.FAILED);
@@ -848,23 +874,21 @@ describe('Message Service (Browser with Real WASM)', () => {
         timestamp: new Date(),
       };
 
-      const bobResult1 = await messageService.sendMessage(
-        bobMessage1 as Message,
-        bobSession
+      const bobResult1 = await bobMessageService.sendMessage(
+        bobMessage1 as Message
       );
       expect(bobResult1.success).toBe(false);
       expect(bobResult1.message?.status).toBe(MessageStatus.FAILED);
 
-      const bobResult2 = await messageService.sendMessage(
-        bobMessage2 as Message,
-        bobSession
+      const bobResult2 = await bobMessageService.sendMessage(
+        bobMessage2 as Message
       );
       expect(bobResult2.success).toBe(false);
       expect(bobResult2.message?.status).toBe(MessageStatus.FAILED);
 
       /* STEP 4: Alice and Bob fetch messages but nothing is received */
-      await messageService.fetchMessages(aliceSession);
-      await messageService.fetchMessages(bobSession);
+      await aliceMessageService.fetchMessages();
+      await bobMessageService.fetchMessages();
       const aliceMessages = await appDb.messages
         .where('[ownerUserId+contactUserId+direction]')
         .equals([aliceUserId, bobUserId, MessageDirection.INCOMING])
@@ -904,12 +928,12 @@ describe('Message Service (Browser with Real WASM)', () => {
       // Resend Alice's messages in order
       const aliceMessagesToResend = new Map<string, Message[]>();
       aliceMessagesToResend.set(bobUserId, aliceFailedMessages);
-      await messageService.resendMessages(aliceMessagesToResend, aliceSession);
+      await aliceMessageService.resendMessages(aliceMessagesToResend);
 
       // Resend Bob's messages in order
       const bobMessagesToResend = new Map<string, Message[]>();
       bobMessagesToResend.set(aliceUserId, bobFailedMessages);
-      await messageService.resendMessages(bobMessagesToResend, bobSession);
+      await bobMessageService.resendMessages(bobMessagesToResend);
 
       // Verify all messages are now SENT
       const aliceSentMessages = await appDb.messages
@@ -931,7 +955,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       expect(bobSentMessages[1].status).toBe(MessageStatus.SENT);
 
       /* STEP 6: Bob and Alice fetch messages with success */
-      await messageService.fetchMessages(bobSession);
+      await bobMessageService.fetchMessages();
 
       const bobReceivedMessages = await appDb.messages
         .where('[ownerUserId+contactUserId+direction]')
@@ -943,7 +967,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       expect(bobReceivedMessages[1].content).toBe('Alice message 2');
 
       // Alice fetches Bob's messages
-      await messageService.fetchMessages(aliceSession);
+      await aliceMessageService.fetchMessages();
 
       const aliceReceivedMessages = await appDb.messages
         .where('[ownerUserId+contactUserId+direction]')
@@ -993,9 +1017,8 @@ describe('Message Service (Browser with Real WASM)', () => {
           timestamp: new Date(),
         };
 
-        const result = await messageService.sendMessage(
-          message as Message,
-          aliceSession
+        const result = await aliceMessageService.sendMessage(
+          message as Message
         );
         expect(result.success).toBe(false);
         aliceMessages.push(result.message!);
@@ -1014,10 +1037,7 @@ describe('Message Service (Browser with Real WASM)', () => {
           timestamp: new Date(),
         };
 
-        const result = await messageService.sendMessage(
-          message as Message,
-          bobSession
-        );
+        const result = await bobMessageService.sendMessage(message as Message);
         expect(result.success).toBe(false);
         bobMessages.push(result.message!);
       }
@@ -1043,17 +1063,14 @@ describe('Message Service (Browser with Real WASM)', () => {
       await resendFailedMessagesForContact(
         aliceUserId,
         bobUserId,
-        aliceSession,
-        messageService
+        aliceMessageService
       );
 
       // Bob fetch messages but nothing is received
       let bobMsg = await fetchMessagesFromContact(
         bobUserId,
         aliceUserId,
-        bobSk,
-        bobSession,
-        messageService
+        bobMessageService
       );
       expect(bobMsg.length).toBe(0);
 
@@ -1061,17 +1078,14 @@ describe('Message Service (Browser with Real WASM)', () => {
       await resendFailedMessagesForContact(
         bobUserId,
         aliceUserId,
-        bobSession,
-        messageService
+        bobMessageService
       );
 
       // Alice fetch messages but nothing is received
       let aliceMsg = await fetchMessagesFromContact(
-        bobUserId,
         aliceUserId,
-        bobSk,
-        bobSession,
-        messageService
+        bobUserId,
+        aliceMessageService
       );
       expect(aliceMsg.length).toBe(0);
 
@@ -1079,17 +1093,14 @@ describe('Message Service (Browser with Real WASM)', () => {
       await resendFailedMessagesForContact(
         aliceUserId,
         bobUserId,
-        aliceSession,
-        messageService
+        aliceMessageService
       );
 
       // Bob received message 1 but not 3 and 4
       bobMsg = await fetchMessagesFromContact(
         bobUserId,
         aliceUserId,
-        bobSk,
-        bobSession,
-        messageService
+        bobMessageService
       );
       expect(bobMsg.length).toBe(1);
       expect(bobMsg[0].content).toBe('Alice message 1');
@@ -1098,17 +1109,14 @@ describe('Message Service (Browser with Real WASM)', () => {
       await resendFailedMessagesForContact(
         bobUserId,
         aliceUserId,
-        bobSession,
-        messageService
+        bobMessageService
       );
 
       // Alice received all messages in order
       aliceMsg = await fetchMessagesFromContact(
         aliceUserId,
         bobUserId,
-        aliceSk,
-        aliceSession,
-        messageService
+        aliceMessageService
       );
       expect(aliceMsg.length).toEqual(4);
       expect(aliceMsg[0].content).toBe('Bob message 1');
@@ -1120,17 +1128,14 @@ describe('Message Service (Browser with Real WASM)', () => {
       await resendFailedMessagesForContact(
         aliceUserId,
         bobUserId,
-        aliceSession,
-        messageService
+        aliceMessageService
       );
 
       // Bob received all messages in order
       bobMsg = await fetchMessagesFromContact(
         bobUserId,
         aliceUserId,
-        bobSk,
-        bobSession,
-        messageService
+        bobMessageService
       );
       expect(bobMsg.length).toBe(4);
       expect(bobMsg[0].content).toBe('Alice message 1');
@@ -1220,16 +1225,15 @@ describe('Message Service (Browser with Real WASM)', () => {
         timestamp: new Date(),
       };
 
-      const result1 = await messageService.sendMessage(
-        message1 as Message,
-        aliceSession
+      const result1 = await aliceMessageService.sendMessage(
+        message1 as Message
       );
       console.log(' result1:', result1);
       expect(result1.success).toBe(true);
       const message1Id = result1.message!.id!;
 
       // Bob fetches and acknowledges message 1
-      await messageService.fetchMessages(bobSession);
+      await bobMessageService.fetchMessages();
 
       // Bob sends acknowledgment
       const bobAck: Omit<Message, 'id'> = {
@@ -1241,10 +1245,10 @@ describe('Message Service (Browser with Real WASM)', () => {
         status: MessageStatus.SENDING,
         timestamp: new Date(),
       };
-      await messageService.sendMessage(bobAck as Message, bobSession);
+      await bobMessageService.sendMessage(bobAck as Message);
 
       // Alice fetches Bob's message - this marks message 1 as DELIVERED
-      await messageService.fetchMessages(aliceSession);
+      await aliceMessageService.fetchMessages();
 
       expect((await appDb.messages.get(message1Id))?.status).toBe(
         MessageStatus.DELIVERED
@@ -1261,9 +1265,8 @@ describe('Message Service (Browser with Real WASM)', () => {
         timestamp: new Date(),
       };
 
-      const result2 = await messageService.sendMessage(
-        message2 as Message,
-        aliceSession
+      const result2 = await aliceMessageService.sendMessage(
+        message2 as Message
       );
       expect(result2.success).toBe(true);
       const message2Id = result2.message!.id!;
@@ -1285,9 +1288,8 @@ describe('Message Service (Browser with Real WASM)', () => {
         timestamp: new Date(),
       };
 
-      const result3 = await messageService.sendMessage(
-        message3 as Message,
-        aliceSession
+      const result3 = await aliceMessageService.sendMessage(
+        message3 as Message
       );
       mockProtocol.sendMessage = originalSendMessage;
 
@@ -1316,9 +1318,8 @@ describe('Message Service (Browser with Real WASM)', () => {
         timestamp: new Date(),
       };
 
-      const result4 = await messageService.sendMessage(
-        message4 as Message,
-        aliceSession
+      const result4 = await aliceMessageService.sendMessage(
+        message4 as Message
       );
       expect(result4.success).toBe(false);
       const message4Id = result4.message!.id!;
@@ -1340,7 +1341,7 @@ describe('Message Service (Browser with Real WASM)', () => {
         status: MessageStatus.SENDING,
         timestamp: new Date(),
       };
-      await messageService.sendMessage(bobMessage as Message, bobSession);
+      await bobMessageService.sendMessage(bobMessage as Message);
 
       /* STEP 3: Alice attempts to renew session but establishSession fails */
       const originalEstablishOutgoingSession =
@@ -1348,9 +1349,9 @@ describe('Message Service (Browser with Real WASM)', () => {
       aliceSession.establishOutgoingSession = vi.fn(() => new Uint8Array(0));
 
       // First renewal attempt - fails
-      await expect(
-        discussionService.renew(bobUserId, aliceSession)
-      ).rejects.toThrow(EstablishSessionError);
+      await expect(aliceDiscussionService.renew(bobUserId)).rejects.toThrow(
+        EstablishSessionError
+      );
       aliceSession.establishOutgoingSession = originalEstablishOutgoingSession;
 
       // Verify discussion is BROKEN
@@ -1362,7 +1363,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       // Second renewal attempt - succeeds
       peerSessionStatusSpy.mockRestore();
       console.log('Second renewal attempt aliceSession:', aliceSession);
-      await discussionService.renew(bobUserId, aliceSession);
+      await aliceDiscussionService.renew(bobUserId);
 
       // Verify discussion is ACTIVE
       const discussionAfterRenew = await appDb.getDiscussionByOwnerAndContact(
@@ -1386,7 +1387,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       expect(msg4AfterRenew?.encryptedMessage).toBeUndefined();
 
       // Bob fetches and processes Alice's new announcement
-      await announcementService.fetchAndProcessAnnouncements(bobSession);
+      await bobAnnouncementService.fetchAndProcessAnnouncements();
 
       // Bob's discussion with Alice should be still ACTIVE
       const bobDiscussion = await appDb.getDiscussionByOwnerAndContact(
@@ -1427,7 +1428,7 @@ describe('Message Service (Browser with Real WASM)', () => {
 
       const messagesToResend = new Map<string, Message[]>();
       messagesToResend.set(bobUserId, failedMessages);
-      await messageService.resendMessages(messagesToResend, aliceSession);
+      await aliceMessageService.resendMessages(messagesToResend);
 
       // Verify statuses after first resend attempt:
       // - Message 2: success
@@ -1447,7 +1448,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       expect(msg4AfterResend?.status).toBe(MessageStatus.SENT);
 
       // Bob tries to fetch - should get messages 2 but not 4
-      await messageService.fetchMessages(bobSession);
+      await bobMessageService.fetchMessages();
 
       let bobReceivedMessages = await appDb.messages
         .where('[ownerUserId+contactUserId+direction]')
@@ -1466,12 +1467,11 @@ describe('Message Service (Browser with Real WASM)', () => {
       await resendFailedMessagesForContact(
         aliceUserId,
         bobUserId,
-        aliceSession,
-        messageService
+        aliceMessageService
       );
 
       // Bob fetches all messages
-      await messageService.fetchMessages(bobSession);
+      await bobMessageService.fetchMessages();
 
       bobReceivedMessages = await appDb.messages
         .where('[ownerUserId+contactUserId+direction]')
@@ -1495,10 +1495,10 @@ describe('Message Service (Browser with Real WASM)', () => {
         status: MessageStatus.SENDING,
         timestamp: new Date(),
       };
-      await messageService.sendMessage(bobReply as Message, bobSession);
+      await bobMessageService.sendMessage(bobReply as Message);
 
       // Alice fetches messages
-      await messageService.fetchMessages(aliceSession);
+      await aliceMessageService.fetchMessages();
 
       // All Alice's messages should now be DELIVERED
       const allAliceMessages = await appDb.messages
@@ -1534,11 +1534,13 @@ describe('Message Service (Browser with Real WASM)', () => {
     let carolSk: UserSecretKeys;
     let carolUserId: string;
     let carolSession: SessionModule;
+    let carolMessageService: MessageService;
     let daveKeys: UserKeys;
     let davePk: UserPublicKeys;
     let daveSk: UserSecretKeys;
     let daveUserId: string;
     let daveSession: SessionModule;
+    let daveMessageService: MessageService;
 
     beforeEach(async () => {
       // Create custom config with shorter intervals for testing
@@ -1559,12 +1561,56 @@ describe('Message Service (Browser with Real WASM)', () => {
       bobSession.cleanup();
       bobSession = new SessionModule(bobKeys, () => {}, createTestConfig());
 
+      // Recreate Alice and Bob services with new sessions
+      aliceAnnouncementService = new AnnouncementService(
+        appDb,
+        mockProtocol,
+        aliceSession
+      );
+      aliceMessageService = new MessageService(
+        appDb,
+        mockProtocol,
+        aliceSession
+      );
+      aliceDiscussionService = new DiscussionService(
+        appDb,
+        aliceAnnouncementService,
+        aliceSession
+      );
+      aliceRefreshService = new RefreshService(
+        appDb,
+        aliceMessageService,
+        aliceSession
+      );
+
+      bobAnnouncementService = new AnnouncementService(
+        appDb,
+        mockProtocol,
+        bobSession
+      );
+      bobMessageService = new MessageService(appDb, mockProtocol, bobSession);
+      bobDiscussionService = new DiscussionService(
+        appDb,
+        bobAnnouncementService,
+        bobSession
+      );
+      bobRefreshService = new RefreshService(
+        appDb,
+        bobMessageService,
+        bobSession
+      );
+
       // Generate Carol's keys
       carolKeys = await generateUserKeys('carol-test-passphrase-' + Date.now());
       carolPk = carolKeys.public_keys();
       carolSk = carolKeys.secret_keys();
       carolUserId = encodeUserId(carolPk.derive_id());
       carolSession = new SessionModule(carolKeys, () => {}, createTestConfig());
+      carolMessageService = new MessageService(
+        appDb,
+        mockProtocol,
+        carolSession
+      );
 
       // Generate Dave's keys
       daveKeys = await generateUserKeys('dave-test-passphrase-' + Date.now());
@@ -1572,17 +1618,14 @@ describe('Message Service (Browser with Real WASM)', () => {
       daveSk = daveKeys.secret_keys();
       daveUserId = encodeUserId(davePk.derive_id());
       daveSession = new SessionModule(daveKeys, () => {}, createTestConfig());
+      daveMessageService = new MessageService(appDb, mockProtocol, daveSession);
     });
 
     it('No active discussions', async () => {
       // Call handleSessionRefresh with no active discussions
       let error: Error | undefined;
       try {
-        await refreshService.handleSessionRefresh(
-          aliceUserId,
-          aliceSession,
-          []
-        );
+        await aliceRefreshService.handleSessionRefresh([]);
       } catch (e) {
         error = e as Error;
       }
@@ -1616,28 +1659,24 @@ describe('Message Service (Browser with Real WASM)', () => {
         .toArray();
 
       // Call handleSessionRefresh - should mark discussion as BROKEN
-      await refreshService.handleSessionRefresh(
-        aliceUserId,
-        aliceSession,
-        activeDiscussions
-      );
+      await aliceRefreshService.handleSessionRefresh(activeDiscussions);
 
       // STEP 3: Verify discussion is now BROKEN
       aliceDiscussion = await appDb.discussions.get(aliceDiscussionId);
       expect(aliceDiscussion?.status).toBe(DiscussionStatus.BROKEN);
 
       // STEP 4: Renew the discussion
-      await discussionService.renew(bobUserId, aliceSession);
+      await aliceDiscussionService.renew(bobUserId);
 
       // Bob fetches and accepts the renewal
-      await announcementService.fetchAndProcessAnnouncements(bobSession);
+      await bobAnnouncementService.fetchAndProcessAnnouncements();
       const bobDiscussion = await appDb.discussions.get(bobDiscussionId);
       if (!bobDiscussion) throw new Error('bob discussion not found');
 
-      await discussionService.accept(bobDiscussion, bobSession);
+      await bobDiscussionService.accept(bobDiscussion);
 
       // Alice fetches Bob's acceptance
-      await announcementService.fetchAndProcessAnnouncements(aliceSession);
+      await aliceAnnouncementService.fetchAndProcessAnnouncements();
 
       // STEP 5: Verify discussion is now ACTIVE again
       aliceDiscussion = await appDb.getDiscussionByOwnerAndContact(
@@ -1679,16 +1718,8 @@ describe('Message Service (Browser with Real WASM)', () => {
         .toArray();
 
       // Refresh both sessions - should kill discussions
-      await refreshService.handleSessionRefresh(
-        aliceUserId,
-        aliceSession,
-        aliceActiveDiscussions
-      );
-      await refreshService.handleSessionRefresh(
-        bobUserId,
-        bobSession,
-        bobActiveDiscussions
-      );
+      await aliceRefreshService.handleSessionRefresh(aliceActiveDiscussions);
+      await bobRefreshService.handleSessionRefresh(bobActiveDiscussions);
 
       // STEP 3: Verify both discussions are BROKEN
       let aliceDiscussion = await appDb.discussions.get(aliceDiscussionId);
@@ -1699,21 +1730,18 @@ describe('Message Service (Browser with Real WASM)', () => {
       expect(bobDiscussion?.status).toBe(DiscussionStatus.BROKEN);
 
       // STEP 4: Alice renews the discussion
-      await discussionService.renew(bobUserId, aliceSession);
+      await aliceDiscussionService.renew(bobUserId);
 
-      await announcementService.resendAnnouncements(
-        [aliceDiscussion],
-        aliceSession
-      );
+      await aliceAnnouncementService.resendAnnouncements([aliceDiscussion]);
 
       // Bob fetches and accepts
-      await announcementService.fetchAndProcessAnnouncements(bobSession);
+      await bobAnnouncementService.fetchAndProcessAnnouncements();
       bobDiscussion = await appDb.discussions.get(bobDiscussionId);
       if (!bobDiscussion) throw new Error('bob discussion not found');
-      await discussionService.accept(bobDiscussion, bobSession);
+      await bobDiscussionService.accept(bobDiscussion);
 
       // Alice fetches Bob's acceptance
-      await announcementService.fetchAndProcessAnnouncements(aliceSession);
+      await aliceAnnouncementService.fetchAndProcessAnnouncements();
 
       // STEP 5: Verify both discussions are ACTIVE
       aliceDiscussion = await appDb.discussions.get(aliceDiscussionId);
@@ -1736,10 +1764,10 @@ describe('Message Service (Browser with Real WASM)', () => {
         status: MessageStatus.SENDING,
         timestamp: new Date(),
       };
-      await messageService.sendMessage(bobMessage as Message, bobSession);
+      await bobMessageService.sendMessage(bobMessage as Message);
 
       // alice fetch Bob's message
-      await messageService.fetchMessages(aliceSession);
+      await aliceMessageService.fetchMessages();
 
       // STEP 3: Wait for keep-alive interval
       await new Promise(resolve =>
@@ -1758,11 +1786,7 @@ describe('Message Service (Browser with Real WASM)', () => {
         .toArray();
 
       // STEP 4: Alice calls refresh - should send keep-alive
-      await refreshService.handleSessionRefresh(
-        aliceUserId,
-        aliceSession,
-        aliceActiveDiscussions
-      );
+      await aliceRefreshService.handleSessionRefresh(aliceActiveDiscussions);
 
       // STEP 5: Verify keep-alive message was created
       const aliceMessages = await appDb.messages
@@ -1777,7 +1801,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       expect(keepAliveMsg?.content).toBe('');
 
       // STEP 6: Bob fetches messages (including keep-alive)
-      await messageService.fetchMessages(bobSession);
+      await bobMessageService.fetchMessages();
 
       // Bob's message should now be DELIVERED (acknowledged by Alice's keep-alive)
       const bobMessages = await appDb.messages
@@ -1813,10 +1837,10 @@ describe('Message Service (Browser with Real WASM)', () => {
         status: MessageStatus.SENDING,
         timestamp: new Date(),
       };
-      await messageService.sendMessage(bobMessage as Message, bobSession);
+      await bobMessageService.sendMessage(bobMessage as Message);
 
       // alice fetch Bob's message
-      await messageService.fetchMessages(aliceSession);
+      await aliceMessageService.fetchMessages();
 
       // STEP 3: Mock transport failure for the first keep-alive attempt
       const originalSendMessage = mockProtocol.sendMessage.bind(mockProtocol);
@@ -1841,11 +1865,7 @@ describe('Message Service (Browser with Real WASM)', () => {
         .toArray();
 
       // STEP 4: Alice calls refresh - keep-alive should fail
-      await refreshService.handleSessionRefresh(
-        aliceUserId,
-        aliceSession,
-        aliceActiveDiscussions
-      );
+      await aliceRefreshService.handleSessionRefresh(aliceActiveDiscussions);
 
       // STEP 5: Verify keep-alive message exists but failed
       let aliceMessages = await appDb.messages
@@ -1873,7 +1893,7 @@ describe('Message Service (Browser with Real WASM)', () => {
         status: MessageStatus.SENDING,
         timestamp: new Date(),
       };
-      await messageService.sendMessage(aliceMessage as Message, aliceSession);
+      await aliceMessageService.sendMessage(aliceMessage as Message);
 
       // check message is SENT
       aliceMessages = await appDb.messages
@@ -1890,8 +1910,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       await resendFailedMessagesForContact(
         aliceUserId,
         bobUserId,
-        aliceSession,
-        messageService
+        aliceMessageService
       );
 
       // STEP 8: Verify keep-alive was resent successfully
@@ -1908,7 +1927,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       expect(keepAliveMsg?.status).toBe(MessageStatus.SENT);
 
       // STEP 9: Bob fetches messages (including keep-alive)
-      await messageService.fetchMessages(bobSession);
+      await bobMessageService.fetchMessages();
 
       // Bob's message should now be DELIVERED (acknowledged by Alice's keep-alive)
       const bobMessages = await appDb.messages
@@ -1934,10 +1953,10 @@ describe('Message Service (Browser with Real WASM)', () => {
         status: MessageStatus.SENDING,
         timestamp: new Date(),
       };
-      await messageService.sendMessage(bobMsg as Message, bobSession);
+      await bobMessageService.sendMessage(bobMsg as Message);
 
       // alice fetch Bob's message
-      await messageService.fetchMessages(aliceSession);
+      await aliceMessageService.fetchMessages();
 
       // STEP 2: Wait for keep-alive interval
       await new Promise(resolve =>
@@ -1963,11 +1982,7 @@ describe('Message Service (Browser with Real WASM)', () => {
         .mockReturnValue(SessionStatus.Killed); // session should be killed when sending keep alive msg
 
       // call refresh function
-      await refreshService.handleSessionRefresh(
-        aliceUserId,
-        aliceSession,
-        aliceActiveDiscussions
-      );
+      await aliceRefreshService.handleSessionRefresh(aliceActiveDiscussions);
 
       // restore spy
       aliceSessionStatusSpy.mockRestore();
@@ -1986,7 +2001,7 @@ describe('Message Service (Browser with Real WASM)', () => {
         status: MessageStatus.SENDING,
         timestamp: new Date(),
       };
-      await messageService.sendMessage(aliceMsg as Message, aliceSession);
+      await aliceMessageService.sendMessage(aliceMsg as Message);
 
       // verify message is failed
       const aliceMsgList = await appDb.messages
@@ -2002,23 +2017,19 @@ describe('Message Service (Browser with Real WASM)', () => {
       expect(aliceMsgList[1].type).toBe(MessageType.TEXT);
 
       // Step 5 : renew discussion
-      await discussionService.renew(bobUserId, aliceSession);
+      await aliceDiscussionService.renew(bobUserId);
       aliceDiscussion = await appDb.discussions.get(aliceDiscussionId);
       if (!aliceDiscussion) throw new Error('alice discussion not found');
-      await announcementService.resendAnnouncements(
-        [aliceDiscussion],
-        aliceSession
-      );
+      await aliceAnnouncementService.resendAnnouncements([aliceDiscussion]);
       await resendFailedMessagesForContact(
         aliceUserId,
         bobUserId,
-        aliceSession,
-        messageService
+        aliceMessageService
       );
 
       // Bob fetch new announcement and messages
-      await announcementService.fetchAndProcessAnnouncements(bobSession);
-      await messageService.fetchMessages(bobSession);
+      await bobAnnouncementService.fetchAndProcessAnnouncements();
+      await bobMessageService.fetchMessages();
 
       // check bob received alice msg
       const bobReceivedMessages = await appDb.messages
@@ -2058,11 +2069,7 @@ describe('Message Service (Browser with Real WASM)', () => {
         )
         .toArray();
 
-      await refreshService.handleSessionRefresh(
-        aliceUserId,
-        aliceSession,
-        aliceActiveDiscussions
-      );
+      await aliceRefreshService.handleSessionRefresh(aliceActiveDiscussions);
 
       // STEP 9: Verify new keep-alive was sent successfully
       const aliceMessages = await appDb.messages
@@ -2099,10 +2106,10 @@ describe('Message Service (Browser with Real WASM)', () => {
         status: MessageStatus.SENDING,
         timestamp: new Date(),
       };
-      await messageService.sendMessage(aliceMessage as Message, aliceSession);
+      await aliceMessageService.sendMessage(aliceMessage as Message);
 
       // alice fetch Bob's message
-      await messageService.fetchMessages(aliceSession);
+      await aliceMessageService.fetchMessages();
 
       // STEP 3: Wait for session timeout (should kill session and require keep-alive)
       await new Promise(resolve =>
@@ -2121,11 +2128,7 @@ describe('Message Service (Browser with Real WASM)', () => {
         .toArray();
 
       // STEP 4: Bob calls refresh - should mark discussion as BROKEN (can't send keep-alive to killed session)
-      await refreshService.handleSessionRefresh(
-        bobUserId,
-        bobSession,
-        bobActiveDiscussions
-      );
+      await bobRefreshService.handleSessionRefresh(bobActiveDiscussions);
 
       // STEP 5: Verify discussion is BROKEN
       const bobDiscussion = await appDb.discussions.get(bobDiscussionId);
@@ -2198,7 +2201,7 @@ describe('Message Service (Browser with Real WASM)', () => {
         status: MessageStatus.SENDING,
         timestamp: new Date(),
       };
-      await messageService.sendMessage(carolMessage as Message, carolSession);
+      await carolMessageService.sendMessage(carolMessage as Message);
 
       // Dave sends a message recently (keeps session active)
       const daveMessage: Omit<Message, 'id'> = {
@@ -2210,10 +2213,10 @@ describe('Message Service (Browser with Real WASM)', () => {
         status: MessageStatus.SENDING,
         timestamp: new Date(),
       };
-      await messageService.sendMessage(daveMessage as Message, daveSession);
+      await daveMessageService.sendMessage(daveMessage as Message);
 
       // Alice fetches messages
-      await messageService.fetchMessages(aliceSession);
+      await aliceMessageService.fetchMessages();
 
       // STEP 3: Alice call refresh function
       const aliceActiveDiscussions = await appDb.discussions
@@ -2228,11 +2231,7 @@ describe('Message Service (Browser with Real WASM)', () => {
 
       expect(aliceActiveDiscussions.length).toBe(3);
 
-      await refreshService.handleSessionRefresh(
-        aliceUserId,
-        aliceSession,
-        aliceActiveDiscussions
-      );
+      await aliceRefreshService.handleSessionRefresh(aliceActiveDiscussions);
 
       // STEP 4: Verify Bob's discussion is BROKEN
       const aliceBobDiscussion =
@@ -2294,7 +2293,7 @@ describe('Message Service (Browser with Real WASM)', () => {
 
       // Access the private method via type assertion
       const result = await (
-        messageService as unknown as MessageServiceWithSerialize
+        aliceMessageService as unknown as MessageServiceWithSerialize
       ).serializeMessage(message);
 
       expect(result.success).toBe(true);
@@ -2318,7 +2317,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       };
 
       const result = await (
-        messageService as unknown as MessageServiceWithSerialize
+        aliceMessageService as unknown as MessageServiceWithSerialize
       ).serializeMessage(message);
 
       expect(result.success).toBe(true);
@@ -2367,7 +2366,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       };
 
       const result = await (
-        messageService as unknown as MessageServiceWithSerialize
+        aliceMessageService as unknown as MessageServiceWithSerialize
       ).serializeMessage(replyMessage);
 
       expect(result.success).toBe(true);
@@ -2404,7 +2403,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       };
 
       const result = await (
-        messageService as unknown as MessageServiceWithSerialize
+        aliceMessageService as unknown as MessageServiceWithSerialize
       ).serializeMessage(replyMessage);
 
       expect(result.success).toBe(false);
@@ -2437,7 +2436,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       };
 
       const result = await (
-        messageService as unknown as MessageServiceWithSerialize
+        aliceMessageService as unknown as MessageServiceWithSerialize
       ).serializeMessage(replyMessage);
 
       // Current implementation requires original message to exist in DB

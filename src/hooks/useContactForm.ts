@@ -8,9 +8,10 @@ import {
   validateUsernameFormat,
   encodeUserId,
   UserPublicKeys,
+  gossipSdk,
   type PublicKeyResult,
 } from 'gossip-sdk';
-import { authService, discussionService } from '../services';
+import { authService } from '../services';
 import { useFileShareContact } from './useFileShareContact';
 import { mnsService, isMnsDomain } from '../services/mns';
 import toast from 'react-hot-toast';
@@ -33,7 +34,7 @@ type MnsState = {
 
 export function useContactForm() {
   const navigate = useNavigate();
-  const { userProfile, session } = useAccountStore();
+  const userProfile = useAccountStore(s => s.userProfile);
   const mnsEnabled = useAppStore(s => s.mnsEnabled);
   const { importFileContact, fileState } = useFileShareContact();
 
@@ -319,7 +320,12 @@ export function useContactForm() {
       return;
     }
 
-    if (!canSubmit || !userProfile?.userId || !publicKeys || !session) {
+    if (
+      !canSubmit ||
+      !userProfile?.userId ||
+      !publicKeys ||
+      !gossipSdk.isSessionOpen
+    ) {
       return;
     }
 
@@ -369,11 +375,7 @@ export function useContactForm() {
 
       const announcementMessage = message.value.trim() || undefined;
       try {
-        await discussionService.initialize(
-          contact,
-          session,
-          announcementMessage
-        );
+        await gossipSdk.discussions.start(contact, announcementMessage);
       } catch (e) {
         console.error(
           'Failed to initialize discussion after contact creation:',
@@ -398,7 +400,6 @@ export function useContactForm() {
     userId.loading,
     mnsState.resolvedGossipId,
     navigate,
-    session,
   ]);
 
   return {

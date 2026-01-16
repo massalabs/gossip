@@ -6,6 +6,11 @@ import {
   deriveKey,
   generateMnemonic,
   validateMnemonic,
+  gossipSdk,
+  generateUserKeys,
+  EncryptionKey,
+  generateNonce,
+  validateUsernameFormat,
 } from 'gossip-sdk';
 import { isWebAuthnSupported } from '../crypto/webauthn';
 import { biometricService } from '../services/biometricService';
@@ -19,14 +24,6 @@ import {
 } from '@massalabs/massa-web3';
 import { useAppStore } from './appStore';
 import { createSelectors } from './utils/createSelectors';
-import {
-  generateUserKeys,
-  EncryptionKey,
-  generateNonce,
-  SessionModule,
-  validateUsernameFormat,
-  ensureWasmInitialized,
-} from 'gossip-sdk';
 import { authService } from '../services';
 import { getActiveOrFirstProfile } from './utils/getAccount';
 import { auth } from './utils/auth';
@@ -82,18 +79,22 @@ async function createProfileFromAccount(
 async function provisionAccount(
   username: string,
   mnemonic: string | undefined,
-  opts: { useBiometrics: boolean; password?: string; iCloudSync?: boolean },
-  session: SessionModule
+  opts: { useBiometrics: boolean; password?: string; iCloudSync?: boolean }
 ): Promise<{ profile: UserProfile; encryptionKey: EncryptionKey }> {
   let built:
     | { security: UserProfile['security']; encryptionKey: EncryptionKey }
     | undefined;
 
+  // gossipSdk session must be open at this point
+  if (!gossipSdk.isSessionOpen) {
+    throw new Error('SDK session must be open before provisioning account');
+  }
+
   if (opts.useBiometrics) {
     built = await buildSecurityFromBiometrics(
       mnemonic,
       username,
-      session.userId,
+      gossipSdk.userIdBytes,
       opts.iCloudSync ?? false
     );
   } else {
@@ -105,11 +106,11 @@ async function provisionAccount(
   }
 
   // Serialize and encrypt the session
-  const sessionBlob = session.toEncryptedBlob(built.encryptionKey);
+  const sessionBlob = gossipSdk.getEncryptedSession(built.encryptionKey);
 
   const profile = await createProfileFromAccount(
     username,
-    session.userIdEncoded,
+    gossipSdk.userId,
     built.security,
     sessionBlob
   );
@@ -213,8 +214,6 @@ interface AccountState {
   platformAuthenticatorAvailable: boolean;
   account: Account | null;
   provider: Provider | null;
-  // WASM session module
-  session: SessionModule | null;
   initializeAccountWithBiometrics: (
     username: string,
     iCloudSync?: boolean
@@ -252,10 +251,9 @@ interface AccountState {
 
 const useAccountStoreBase = create<AccountState>((set, get) => {
   // Helper function to cleanup session
-  const cleanupSession = () => {
-    const state = get();
-    if (state.session) {
-      state.session.cleanup();
+  const cleanupSession = async () => {
+    if (gossipSdk.isSessionOpen) {
+      await gossipSdk.closeSession();
     }
   };
 
@@ -265,7 +263,6 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       account: null,
       userProfile: null,
       encryptionKey: null,
-      session: null,
       isLoading: false,
     };
   };
@@ -295,34 +292,32 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
     platformAuthenticatorAvailable: false,
     account: null,
     provider: null,
-    session: null,
     // Actions
     initializeAccount: async (username: string, password: string) => {
       try {
         set({ isLoading: true });
 
         const mnemonic = generateMnemonic(256);
-        const keys = await generateUserKeys(mnemonic);
-        const userSecretKeys = keys.secret_keys();
 
+        // Generate keys for Massa wallet (SDK generates its own internally)
+        const keys = await generateUserKeys(mnemonic);
         const account = await Account.fromPrivateKey(
-          PrivateKey.fromBytes(userSecretKeys.massa_secret_key)
+          PrivateKey.fromBytes(keys.secret_keys().massa_secret_key)
         );
 
-        // Initialize WASM and create session
-        await ensureWasmInitialized();
-        const session = new SessionModule(keys, () => {
-          get().persistSession();
+        // Open SDK session
+        await gossipSdk.openSession({
+          mnemonic,
         });
 
+        // Now provision the account (SDK session must be open)
         const { profile, encryptionKey } = await provisionAccount(
           username,
           mnemonic,
           {
             useBiometrics: false,
             password,
-          },
-          session
+          }
         );
 
         useAppStore.getState().setIsInitialized(true);
@@ -330,7 +325,6 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           userProfile: profile,
           encryptionKey,
           account,
-          session,
           isLoading: false,
         });
 
@@ -356,24 +350,22 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           throw new Error('Invalid mnemonic phrase');
         }
 
+        // Generate keys for Massa wallet
         const keys = await generateUserKeys(mnemonic);
-
-        const massaSecretKey = keys.secret_keys().massa_secret_key;
         const account = await Account.fromPrivateKey(
-          PrivateKey.fromBytes(massaSecretKey)
+          PrivateKey.fromBytes(keys.secret_keys().massa_secret_key)
         );
 
-        // Initialize WASM and create session
-        await ensureWasmInitialized();
-        const session = new SessionModule(keys, () => {
-          get().persistSession();
+        // Open SDK session
+        await gossipSdk.openSession({
+          mnemonic,
         });
 
+        // Provision the account
         const { profile, encryptionKey } = await provisionAccount(
           username,
           mnemonic,
-          opts,
-          session
+          opts
         );
 
         useAppStore.getState().setIsInitialized(true);
@@ -381,7 +373,6 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           account,
           userProfile: profile,
           encryptionKey,
-          session,
           isLoading: false,
         });
 
@@ -412,19 +403,18 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
 
         const { mnemonic, encryptionKey } = await auth(profile, password);
 
+        // Generate keys for Massa wallet
         const keys = await generateUserKeys(mnemonic);
-
-        // Initialize WASM and load session from profile
-        await ensureWasmInitialized();
-        const session = new SessionModule(keys, () => {
-          get().persistSession();
-        });
-
         const account = await Account.fromPrivateKey(
-          PrivateKey.fromBytes(session.ourSk.massa_secret_key)
+          PrivateKey.fromBytes(keys.secret_keys().massa_secret_key)
         );
 
-        session.load(profile, encryptionKey);
+        // Open SDK session with existing encrypted session state
+        await gossipSdk.openSession({
+          mnemonic,
+          encryptedSession: profile.session,
+          encryptionKey,
+        });
 
         // Update lastSeen timestamp for the logged-in user
         const lastSeen = new Date();
@@ -439,18 +429,13 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           userProfile: updatedProfile,
           account,
           encryptionKey,
-          session,
           isLoading: false,
         });
 
         // Fetch MNS domains if MNS is enabled
         fetchMnsDomainsIfEnabled(updatedProfile);
 
-        try {
-          session.refresh();
-        } catch (e) {
-          console.error('Session refresh after login failed:', e);
-        }
+        // TODO: Add session refresh via SDK if needed
       } catch (error) {
         console.error('Error loading account:', error);
         set({ isLoading: false });
@@ -463,7 +448,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         set({ isLoading: true });
 
         // Cleanup session
-        cleanupSession();
+        await cleanupSession();
         useDiscussionStore.getState().cleanup();
         useMessageStore.getState().cleanup();
 
@@ -488,7 +473,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         set({ isLoading: true });
 
         // Cleanup session
-        cleanupSession();
+        await cleanupSession();
         useDiscussionStore.getState().cleanup();
         useMessageStore.getState().cleanup();
         // Clear in-memory state but keep data in database
@@ -521,28 +506,28 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           );
         }
 
-        // Generate a BIP39 mnemonic and create account from it
+        // Generate a BIP39 mnemonic
         const mnemonic = generateMnemonic(256);
-        const keys = await generateUserKeys(mnemonic);
 
+        // Generate keys for Massa wallet
+        const keys = await generateUserKeys(mnemonic);
         const account = await Account.fromPrivateKey(
           PrivateKey.fromBytes(keys.secret_keys().massa_secret_key)
         );
 
-        // Initialize WASM and create session
-        await ensureWasmInitialized();
-        const session = new SessionModule(keys, () => {
-          get().persistSession();
+        // Open SDK session
+        await gossipSdk.openSession({
+          mnemonic,
         });
 
+        // Provision the account
         const { profile, encryptionKey } = await provisionAccount(
           username,
           mnemonic,
           {
             useBiometrics: true,
             iCloudSync,
-          },
-          session
+          }
         );
 
         useAppStore.getState().setIsInitialized(true);
@@ -550,7 +535,6 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           userProfile: profile,
           encryptionKey,
           account,
-          session,
           isLoading: false,
           platformAuthenticatorAvailable: availability.available,
         });
@@ -573,23 +557,22 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       try {
         const state = get();
         const profile = state.userProfile;
-        if (!profile || !state.session) {
+        if (!profile || !gossipSdk.isSessionOpen) {
           throw new Error('No authenticated user');
         }
 
         const { mnemonic } = await auth(profile, password);
 
-        const massaSecretKey = state.session.ourSk.massa_secret_key;
+        // Derive Massa account from mnemonic (SDK doesn't expose secret keys)
+        const keys = await generateUserKeys(mnemonic);
         const account = await Account.fromPrivateKey(
-          PrivateKey.fromBytes(massaSecretKey)
+          PrivateKey.fromBytes(keys.secret_keys().massa_secret_key)
         );
 
-        const backupInfo = {
+        return {
           mnemonic,
           account,
         };
-
-        return backupInfo;
       } catch (error) {
         console.error('Error showing mnemonic backup:', error);
         throw error;
@@ -670,9 +653,9 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
 
     persistSession: async () => {
       const state = get();
-      const { session, userProfile, encryptionKey } = state;
+      const { userProfile, encryptionKey } = state;
 
-      if (!session || !userProfile || !encryptionKey) {
+      if (!gossipSdk.isSessionOpen || !userProfile || !encryptionKey) {
         console.warn(
           'No session, user profile, or encryption key to persist, skipping persistence'
         );
@@ -680,8 +663,12 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       }
 
       try {
-        // Serialize the session
-        const sessionBlob = session.toEncryptedBlob(encryptionKey);
+        // Serialize the session via SDK
+        const sessionBlob = gossipSdk.getEncryptedSession(encryptionKey);
+        if (!sessionBlob) {
+          console.warn('Failed to get encrypted session');
+          return;
+        }
 
         // Update the profile with the new session blob
         const updatedProfile = {
@@ -739,13 +726,13 @@ useAccountStoreBase.subscribe(async (state, prevState) => {
   const current = state.userProfile;
   const previous = prevState.userProfile;
 
-  if (!current || !state.session) return;
+  if (!current || !gossipSdk.isSessionOpen) return;
   if (current === previous) return;
   if (previous && current.userId === previous.userId) return;
 
   try {
     await authService.ensurePublicKeyPublished(
-      state.session.ourPk,
+      gossipSdk.publicKeys,
       current.userId
     );
   } catch (error) {

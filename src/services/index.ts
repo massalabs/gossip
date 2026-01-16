@@ -1,35 +1,52 @@
 /**
  * Service Instances
  *
- * Creates and exports service instances for use throughout the app.
- * Services are instantiated with their required dependencies.
+ * Sets up SDK event handlers and exports auth service.
+ * The SDK singleton (gossipSdk) handles all session-scoped services.
  */
 
-import {
-  MessageService,
-  AnnouncementService,
-  DiscussionService,
-  RefreshService,
-  AuthService,
-  db,
-  createMessageProtocol,
-} from 'gossip-sdk';
+import { AuthService, db, createMessageProtocol, gossipSdk } from 'gossip-sdk';
+import { notificationService } from './notifications';
+import { isAppInForeground } from '../utils/appState';
 
-// Create message protocol instance
+// Create message protocol instance (app-scoped)
 const messageProtocol = createMessageProtocol();
 
-// Create service instances with dependencies
+// AuthService doesn't need session - app-scoped
 export const authService = new AuthService(db, messageProtocol);
-export const announcementService = new AnnouncementService(db, messageProtocol);
-export const messageService = new MessageService(db, messageProtocol);
-export const discussionService = new DiscussionService(db, announcementService);
-export const refreshService = new RefreshService(db, messageService);
 
-// Re-export classes for direct instantiation if needed
-export {
-  MessageService,
-  AnnouncementService,
-  DiscussionService,
-  RefreshService,
-  AuthService,
-};
+/**
+ * Wire up SDK events to app behaviors like notifications.
+ *
+ * Note: Zustand stores use liveQuery to watch the database directly,
+ * so we don't need to manually push state updates here. The events
+ * are primarily for side effects like notifications.
+ */
+function setupSdkEventHandlers(): void {
+  // Show notification for new discussion requests when app is in background
+  gossipSdk.on('discussionRequest', async (discussion, contact) => {
+    const foreground = await isAppInForeground();
+    if (!foreground) {
+      try {
+        await notificationService.showNewDiscussionNotification(
+          discussion.announcementMessage
+        );
+        console.log('[SDK Event] New discussion request notification shown', {
+          contactUserId: contact.userId,
+        });
+      } catch (error) {
+        console.error('[SDK Event] Failed to show notification:', error);
+      }
+    }
+  });
+
+  // Log errors for debugging
+  gossipSdk.on('error', (error, context) => {
+    console.error(`[SDK Error:${context}]`, error);
+  });
+}
+
+// Set up event handlers (will be ready when SDK initializes)
+setupSdkEventHandlers();
+
+export { AuthService };

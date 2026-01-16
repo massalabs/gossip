@@ -6,7 +6,6 @@
  */
 
 import Dexie, { Table } from 'dexie';
-import { setActiveSeekersInPreferences } from './utils/preferences';
 
 // Define authentication method type
 export type AuthMethod = 'capacitor' | 'webauthn' | 'password';
@@ -407,15 +406,6 @@ export class GossipDatabase extends Dexie {
         );
       }
     });
-
-    // Best-effort persistence using Capacitor Preferences API.
-    // This allows the Background Runner to read seekers without IndexedDB.
-    // In SDK/Node.js context, this is a no-op.
-    try {
-      await setActiveSeekersInPreferences(seekers);
-    } catch {
-      // Silently ignore - this is best-effort
-    }
   }
 
   /**

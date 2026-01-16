@@ -1,14 +1,14 @@
 import { useCallback } from 'react';
 import { useAccountStore } from '../stores/accountStore';
+import { gossipSdk } from 'gossip-sdk';
 import { Discussion, db as appDb, DiscussionStatus } from '../db';
-import { discussionService } from '../services';
 
 export const useDiscussionList = () => {
-  const { userProfile, session } = useAccountStore();
+  const userProfile = useAccountStore(s => s.userProfile);
 
   const handleAcceptDiscussionRequest = useCallback(
     async (discussion: Discussion, newName?: string) => {
-      if (!session) throw new Error('Account store not initialized');
+      if (!gossipSdk.isSessionOpen) throw new Error('SDK session not open');
       try {
         if (discussion.id == null) return;
         // If the user provided a new contact name, update it first
@@ -22,12 +22,12 @@ export const useDiscussionList = () => {
             console.error('Failed to update contact name:', e);
           }
         }
-        await discussionService.accept(discussion, session);
+        await gossipSdk.discussions.accept(discussion);
       } catch (error) {
         console.error('Failed to accept discussion:', error);
       }
     },
-    [userProfile?.userId, session]
+    [userProfile?.userId]
   );
 
   const handleRefuseDiscussionRequest = useCallback(

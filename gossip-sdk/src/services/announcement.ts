@@ -17,9 +17,9 @@ import {
   SessionStatus,
 } from '../assets/generated/wasm/gossip_wasm';
 import { SessionModule, sessionStatusToString } from '../wasm/session';
-import { isAppInForeground } from '../utils/appState';
 import { Logger } from '../utils/logs';
 import { BulletinItem } from '../api/messageProtocol/types';
+import { GossipSdkEvents } from '../types/events';
 
 const logger = new Logger('AnnouncementService');
 
@@ -34,36 +34,23 @@ export interface AnnouncementReceptionResult {
 export const EstablishSessionError =
   'Session manager failed to establish outgoing session';
 
-/**
- * Optional notification handler interface for SDK consumers.
- * In browser/mobile context, this can be provided to show notifications.
- * In Node.js/SDK context, this is typically not provided.
- */
-export interface NotificationHandler {
-  showNewDiscussionNotification(message?: string): Promise<void>;
-}
-
 export class AnnouncementService {
   private db: GossipDatabase;
   private messageProtocol: IMessageProtocol;
+  private session: SessionModule;
   private isProcessingAnnouncements = false;
-  private notificationHandler?: NotificationHandler;
+  private events: GossipSdkEvents;
 
   constructor(
     db: GossipDatabase,
     messageProtocol: IMessageProtocol,
-    notificationHandler?: NotificationHandler
+    session: SessionModule,
+    events: GossipSdkEvents = {}
   ) {
     this.db = db;
     this.messageProtocol = messageProtocol;
-    this.notificationHandler = notificationHandler;
-  }
-
-  /**
-   * Set a notification handler for showing notifications
-   */
-  setNotificationHandler(handler: NotificationHandler): void {
-    this.notificationHandler = handler;
+    this.session = session;
+    this.events = events;
   }
 
   setMessageProtocol(messageProtocol: IMessageProtocol): void {
@@ -92,7 +79,6 @@ export class AnnouncementService {
 
   async establishSession(
     contactPublicKeys: UserPublicKeys,
-    session: SessionModule,
     userData?: Uint8Array
   ): Promise<{
     success: boolean;
@@ -103,7 +89,7 @@ export class AnnouncementService {
 
     const contactUserId = encodeUserId(contactPublicKeys.derive_id());
 
-    const announcement = session.establishOutgoingSession(
+    const announcement = this.session.establishOutgoingSession(
       contactPublicKeys,
       userData
     );
@@ -134,9 +120,7 @@ export class AnnouncementService {
     return { success: true, announcement };
   }
 
-  async fetchAndProcessAnnouncements(
-    session: SessionModule
-  ): Promise<AnnouncementReceptionResult> {
+  async fetchAndProcessAnnouncements(): Promise<AnnouncementReceptionResult> {
     const log = logger.forMethod('fetchAndProcessAnnouncements');
 
     if (this.isProcessingAnnouncements) {
@@ -167,8 +151,9 @@ export class AnnouncementService {
           .filter((id): id is number => id !== undefined);
         if (ids.length > 0) await this.db.pendingAnnouncements.bulkDelete(ids);
       } else {
-        const cursor = (await this.db.userProfile.get(session.userIdEncoded))
-          ?.lastBulletinCounter;
+        const cursor = (
+          await this.db.userProfile.get(this.session.userIdEncoded)
+        )?.lastBulletinCounter;
 
         const fetched = await this._fetchAnnouncements(cursor);
         announcements = fetched.map(a => a.data);
@@ -179,10 +164,7 @@ export class AnnouncementService {
 
       for (const announcement of announcements) {
         try {
-          const result = await this._processIncomingAnnouncement(
-            announcement,
-            session
-          );
+          const result = await this._processIncomingAnnouncement(announcement);
 
           if (result.success && result.contactUserId) {
             newAnnouncementsCount++;
@@ -201,7 +183,7 @@ export class AnnouncementService {
         const highestCounter = fetchedCounters.reduce((a, b) =>
           Number(a) > Number(b) ? a : b
         );
-        await this.db.userProfile.update(session.userIdEncoded, {
+        await this.db.userProfile.update(this.session.userIdEncoded, {
           lastBulletinCounter: highestCounter,
         });
         log.info('updated lastBulletinCounter', { highestCounter });
@@ -224,10 +206,7 @@ export class AnnouncementService {
     }
   }
 
-  async resendAnnouncements(
-    failedDiscussions: Discussion[],
-    session: SessionModule
-  ): Promise<void> {
+  async resendAnnouncements(failedDiscussions: Discussion[]): Promise<void> {
     const log = logger.forMethod('resendAnnouncements');
 
     if (!failedDiscussions.length) {
@@ -285,7 +264,7 @@ export class AnnouncementService {
         if (sentDiscussions.length > 0) {
           await Promise.all(
             sentDiscussions.map(async discussion => {
-              const status = session.peerSessionStatus(
+              const status = this.session.peerSessionStatus(
                 decodeUserId(discussion.contactUserId)
               );
               const statusStr = sessionStatusToString(status);
@@ -315,6 +294,14 @@ export class AnnouncementService {
                 contactUserId: discussion.contactUserId,
                 newStatus,
               });
+
+              // Emit status change event
+              const updatedDiscussion = await this.db.discussions.get(
+                discussion.id!
+              );
+              if (updatedDiscussion) {
+                this.events.onDiscussionStatusChanged?.(updatedDiscussion);
+              }
             })
           );
         }
@@ -322,13 +309,20 @@ export class AnnouncementService {
         if (brokenDiscussions.length > 0) {
           log.info(`marking ${brokenDiscussions.length} discussions as BROKEN`);
           await Promise.all(
-            brokenDiscussions.map(id =>
-              this.db.discussions.update(id, {
+            brokenDiscussions.map(async id => {
+              await this.db.discussions.update(id, {
                 status: DiscussionStatus.BROKEN,
                 initiationAnnouncement: undefined,
                 updatedAt: now,
-              })
-            )
+              });
+
+              // Emit status change event
+              const updatedDiscussion = await this.db.discussions.get(id);
+              if (updatedDiscussion) {
+                this.events.onDiscussionStatusChanged?.(updatedDiscussion);
+                this.events.onSessionBroken?.(updatedDiscussion);
+              }
+            })
           );
         }
       });
@@ -379,8 +373,7 @@ export class AnnouncementService {
   }
 
   private async _processIncomingAnnouncement(
-    announcementData: Uint8Array,
-    session: SessionModule
+    announcementData: Uint8Array
   ): Promise<{
     success: boolean;
     discussionId?: number;
@@ -389,7 +382,7 @@ export class AnnouncementService {
   }> {
     const log = logger.forMethod('_processIncomingAnnouncement');
 
-    const result = session.feedIncomingAnnouncement(announcementData);
+    const result = this.session.feedIncomingAnnouncement(announcementData);
 
     if (!result) {
       return { success: true };
@@ -410,24 +403,24 @@ export class AnnouncementService {
     const contactUserIdRaw = announcerPkeys.derive_id();
     const contactUserId = encodeUserId(contactUserIdRaw);
 
-    const sessionStatus = session.peerSessionStatus(contactUserIdRaw);
+    const sessionStatus = this.session.peerSessionStatus(contactUserIdRaw);
     log.info('session updated', {
       contactUserId,
       status: sessionStatusToString(sessionStatus),
     });
 
     let contact = await this.db.getContactByOwnerAndUserId(
-      session.userIdEncoded,
+      this.session.userIdEncoded,
       contactUserId
     );
     const isNewContact = !contact;
 
     if (isNewContact) {
       const name = await this._generateTemporaryContactName(
-        session.userIdEncoded
+        this.session.userIdEncoded
       );
       await this.db.contacts.add({
-        ownerUserId: session.userIdEncoded,
+        ownerUserId: this.session.userIdEncoded,
         userId: contactUserId,
         name,
         publicKeys: announcerPkeys.to_bytes(),
@@ -438,7 +431,7 @@ export class AnnouncementService {
       });
 
       contact = await this.db.getContactByOwnerAndUserId(
-        session.userIdEncoded,
+        this.session.userIdEncoded,
         contactUserId
       );
       log.info('created new contact', { contactUserId, name });
@@ -450,23 +443,16 @@ export class AnnouncementService {
     }
 
     const { discussionId } = await this._handleReceivedDiscussion(
-      session.userIdEncoded,
+      this.session.userIdEncoded,
       contactUserId,
       announcementMessage
     );
 
-    // Show notification if handler is available and app is in background
-    if (isNewContact && this.notificationHandler) {
-      const foreground = await isAppInForeground();
-      if (!foreground) {
-        try {
-          await this.notificationHandler.showNewDiscussionNotification(
-            announcementMessage
-          );
-          log.info('notification shown for new discussion');
-        } catch (error) {
-          log.error('failed to show notification', error);
-        }
+    // Emit event for new discussion request
+    if (this.events.onDiscussionRequest) {
+      const discussion = await this.db.discussions.get(discussionId);
+      if (discussion && contact) {
+        this.events.onDiscussionRequest(discussion, contact);
       }
     }
 

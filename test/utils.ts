@@ -6,8 +6,9 @@ import {
   generateUserKeys,
   UserKeys,
   encodeUserId,
-  DiscussionService,
-  AnnouncementService,
+  createGossipSdk,
+  SessionModule,
+  type GossipSdk,
 } from 'gossip-sdk';
 import { createMessageProtocol } from '../src/api/messageProtocol';
 import { MessageProtocolType } from '../src/config/protocol';
@@ -91,6 +92,22 @@ export async function initializeSessionMockWithOptionalKeys(
 }
 
 /**
+ * Create a GossipSdk instance for testing with a mock session.
+ * This is the recommended way to set up services for tests.
+ */
+export function createTestSdk(
+  session: MockSessionModule,
+  appDb = localAppDb
+): GossipSdk {
+  const mockProtocol = createMessageProtocol(MessageProtocolType.MOCK);
+  return createGossipSdk(
+    appDb,
+    mockProtocol,
+    session as unknown as SessionModule
+  );
+}
+
+/**
  * Initialize an active discussion session between Alice and Bob for message tests.
  * This helper:
  * - Creates reciprocal contacts
@@ -107,10 +124,9 @@ export async function initSession(
   aliceSession: MockSessionModule,
   bobSession: MockSessionModule
 ): Promise<InitSessionResult> {
-  // Create services for the test
-  const mockProtocol = createMessageProtocol(MessageProtocolType.MOCK);
-  const announcementService = new AnnouncementService(appDb, mockProtocol);
-  const discussionService = new DiscussionService(appDb, announcementService);
+  // Create SDK instances for each user
+  const aliceSdk = createTestSdk(aliceSession, appDb);
+  const bobSdk = createTestSdk(bobSession, appDb);
 
   const aliceBobContact: Omit<Contact, 'id'> = {
     ownerUserId: aliceSession.userIdEncoded,
@@ -147,18 +163,11 @@ export async function initSession(
   crypto.getRandomValues(bobAnnouncement);
   bobSession.establishOutgoingSession.mockReturnValue(bobAnnouncement);
 
-  // Initialize discussions
+  // Initialize discussions - each user uses their own SDK
   const { discussionId: aliceDiscussionId } =
-    await discussionService.initialize(
-      aliceBobContact,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      aliceSession as any
-    );
-  const { discussionId: bobDiscussionId } = await discussionService.initialize(
-    bobAliceContact,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    bobSession as any
-  );
+    await aliceSdk.discussion.initialize(aliceBobContact);
+  const { discussionId: bobDiscussionId } =
+    await bobSdk.discussion.initialize(bobAliceContact);
 
   return {
     aliceDiscussionId,

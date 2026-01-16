@@ -7,26 +7,26 @@
  *
  * @example
  * ```typescript
- * import {
- *   MessageService,
- *   AnnouncementService,
- *   DiscussionService,
- *   RefreshService,
- *   AuthService,
+ * import { gossipSdk } from 'gossip-sdk';
+ *
+ * // Initialize once at app startup
+ * await gossipSdk.init({
  *   db,
- * } from 'gossip-sdk';
+ *   protocolBaseUrl: 'https://api.example.com',
+ * });
  *
- * // Create service instances with dependencies
- * const messageProtocol = createMessageProtocol();
- * const authService = new AuthService(db, messageProtocol);
- * const announcementService = new AnnouncementService(db, messageProtocol);
- * const messageService = new MessageService(db, messageProtocol);
- * const discussionService = new DiscussionService(db, announcementService);
- * const refreshService = new RefreshService(db, messageService);
+ * // Open session (login)
+ * await gossipSdk.openSession({ mnemonic: '...' });
  *
- * // Use services
- * const result = await discussionService.initialize(contact, session, 'Hello!');
- * await messageService.sendMessage(message, session);
+ * // Use clean API
+ * await gossipSdk.messages.send(contactId, 'Hello!');
+ * await gossipSdk.discussions.start(contact);
+ *
+ * // Events
+ * gossipSdk.on('message', (msg) => { ... });
+ *
+ * // Logout
+ * await gossipSdk.closeSession();
  * ```
  *
  * @packageDocumentation
@@ -35,27 +35,23 @@
 // SDK version - matches package.json
 export const SDK_VERSION = '0.0.1';
 
-// Account Management
-export {
-  initializeAccount,
-  loadAccount,
-  restoreAccountFromMnemonic,
-  logout,
-  resetAccount,
-  showBackup,
-  getAllAccounts,
-  hasExistingAccount,
-  getCurrentAccount,
-  getMnemonicBackupInfo,
-  markMnemonicBackupComplete,
-} from './account';
+// ─────────────────────────────────────────────────────────────────────────────
+// SDK Singleton - Primary API (NEW)
+// ─────────────────────────────────────────────────────────────────────────────
+export { gossipSdk, GossipSdkImpl } from './gossipSdk';
 export type {
-  InitializeAccountResult,
-  LoadAccountResult,
-  RestoreAccountResult,
-  BackupResult,
-} from './account';
-export type { AccountStoreAdapter, AccountStoreState } from './utils';
+  GossipSdkInitOptions,
+  OpenSessionOptions,
+  SdkEventType,
+  SdkEventHandlers,
+} from './gossipSdk';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SDK Factory - Legacy API (deprecated, use gossipSdk singleton instead)
+// ─────────────────────────────────────────────────────────────────────────────
+/** @deprecated Use `gossipSdk` singleton instead */
+export { createGossipSdk } from './sdk';
+export type { GossipSdk, SdkUtils, GossipSdkEvents } from './sdk';
 
 // Services - class-based with dependency injection
 export { AuthService } from './services/auth';
@@ -73,10 +69,7 @@ export {
   AnnouncementService,
   EstablishSessionError,
 } from './services/announcement';
-export type {
-  NotificationHandler,
-  AnnouncementReceptionResult,
-} from './services/announcement';
+export type { AnnouncementReceptionResult } from './services/announcement';
 
 export { MessageService } from './services/message';
 export type { MessageResult, SendMessageResult } from './services/message';
@@ -102,44 +95,12 @@ export type {
 export { updateDiscussionName } from './utils/discussions';
 export type { UpdateDiscussionNameResult } from './utils/discussions';
 
-// Wallet Operations
-export {
-  initializeTokens,
-  refreshBalances,
-  refreshBalance,
-  getTokenBalances,
-  getTokens,
-  isWalletLoading,
-  isWalletInitialized,
-  getWalletError,
-  getFeeConfig,
-  setFeeConfig,
-} from './wallet';
-export type {
-  TokenState,
-  TokenMeta,
-  Ticker,
-  FeeConfig,
-  WalletStoreAdapter,
-  WalletStoreState,
-} from './wallet';
-
 // Types - re-export all types from the types module
 export * from './types';
 
 // Utilities
-export {
-  getSession,
-  getAccount,
-  getSessionKeys,
-  ensureInitialized,
-  getCurrentUserId,
-  isAccountLoaded,
-  isAccountLoading,
-  configureSdk,
-  setAccountStore,
-  getAccountStore,
-} from './utils';
+/** @deprecated Use `gossipSdk.init()` instead */
+export { configureSdk } from './utils';
 
 // Message Protocol - for direct use by host apps
 export {
@@ -204,14 +165,6 @@ export {
 } from './utils/validation';
 export type { ValidationResult } from './utils/validation';
 export {
-  getLastSyncTimestamp,
-  setLastSyncTimestamp,
-  setApiBaseUrlForBackgroundSync,
-  setActiveSeekersInPreferences,
-  setPreferencesAdapter,
-  setForegroundChecker,
-} from './utils/preferences';
-export {
   encodeToBase64,
   decodeFromBase64,
   encodeToBase64Url,
@@ -252,4 +205,5 @@ export {
   AnnouncementResult,
   generate_user_keys,
 } from './assets/generated/wasm/gossip_wasm';
+
 export { UserKeys } from './wasm/userKeys';

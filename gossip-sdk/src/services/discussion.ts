@@ -19,6 +19,7 @@ import { SessionModule, sessionStatusToString } from '../wasm/session';
 import { decodeUserId } from '../utils/userId';
 import { SessionStatus } from '../assets/generated/wasm/gossip_wasm';
 import { Logger } from '../utils/logs';
+import { GossipSdkEvents } from '../types/events';
 
 const logger = new Logger('DiscussionService');
 
@@ -27,37 +28,44 @@ const logger = new Logger('DiscussionService');
  *
  * @example
  * ```typescript
- * const discussionService = new DiscussionService(db, announcementService);
+ * const discussionService = new DiscussionService(db, announcementService, session);
  *
  * // Initialize a new discussion
- * const result = await discussionService.initialize(contact, session, 'Hello!');
+ * const result = await discussionService.initialize(contact, 'Hello!');
  *
  * // Accept a discussion request
- * await discussionService.accept(discussion, session);
+ * await discussionService.accept(discussion);
  *
  * // Renew a broken discussion
- * await discussionService.renew(contactUserId, session);
+ * await discussionService.renew(contactUserId);
  * ```
  */
 export class DiscussionService {
   private db: GossipDatabase;
   private announcementService: AnnouncementService;
+  private session: SessionModule;
+  private events: GossipSdkEvents;
 
-  constructor(db: GossipDatabase, announcementService: AnnouncementService) {
+  constructor(
+    db: GossipDatabase,
+    announcementService: AnnouncementService,
+    session: SessionModule,
+    events: GossipSdkEvents = {}
+  ) {
     this.db = db;
     this.announcementService = announcementService;
+    this.session = session;
+    this.events = events;
   }
 
   /**
    * Initialize a discussion with a contact using SessionManager
    * @param contact - The contact to start a discussion with
-   * @param session - The SessionModule instance to use
    * @param message - Optional message to include in the announcement
    * @returns The discussion ID and the created announcement
    */
   async initialize(
     contact: Contact,
-    session: SessionModule,
     message?: string
   ): Promise<{
     discussionId: number;
@@ -65,7 +73,7 @@ export class DiscussionService {
   }> {
     const log = logger.forMethod('initialize');
     try {
-      const userId = session.userIdEncoded;
+      const userId = this.session.userIdEncoded;
       // Encode message as UTF-8 if provided
       const userData = message
         ? new TextEncoder().encode(message)
@@ -76,7 +84,6 @@ export class DiscussionService {
       );
       const result = await this.announcementService.establishSession(
         UserPublicKeys.from_bytes(contact.publicKeys),
-        session,
         userData
       );
 
@@ -112,6 +119,12 @@ export class DiscussionService {
 
       log.info(`discussion created with id: ${discussionId}`);
 
+      // Emit status change event
+      const discussion = await this.db.discussions.get(discussionId);
+      if (discussion) {
+        this.events.onDiscussionStatusChanged?.(discussion);
+      }
+
       return { discussionId, announcement: result.announcement };
     } catch (error) {
       log.error(`Failed to initialize discussion, error: ${error}`);
@@ -122,9 +135,8 @@ export class DiscussionService {
   /**
    * Accept a discussion request from a contact using SessionManager
    * @param discussion - The discussion to accept
-   * @param session - The SessionModule instance to use
    */
-  async accept(discussion: Discussion, session: SessionModule): Promise<void> {
+  async accept(discussion: Discussion): Promise<void> {
     const log = logger.forMethod('accept');
     try {
       const contact = await this.db.getContactByOwnerAndUserId(
@@ -137,8 +149,7 @@ export class DiscussionService {
         );
 
       const result = await this.announcementService.establishSession(
-        UserPublicKeys.from_bytes(contact.publicKeys),
-        session
+        UserPublicKeys.from_bytes(contact.publicKeys)
       );
 
       let status: DiscussionStatus = DiscussionStatus.ACTIVE;
@@ -166,6 +177,12 @@ export class DiscussionService {
       });
       log.info(`discussion updated in db with status: ${status}`);
 
+      // Emit status change event
+      const updatedDiscussion = await this.db.discussions.get(discussion.id!);
+      if (updatedDiscussion) {
+        this.events.onDiscussionStatusChanged?.(updatedDiscussion);
+      }
+
       return;
     } catch (error) {
       log.error(`Failed to accept pending discussion, error: ${error}`);
@@ -176,11 +193,10 @@ export class DiscussionService {
   /**
    * Renew a discussion by resetting sent outgoing messages and sending a new announcement.
    * @param contactUserId - The user ID of the contact whose discussion should be renewed.
-   * @param session - The SessionModule instance for the current owner user.
    */
-  async renew(contactUserId: string, session: SessionModule): Promise<void> {
+  async renew(contactUserId: string): Promise<void> {
     const log = logger.forMethod('renew');
-    const ownerUserId = session.userIdEncoded;
+    const ownerUserId = this.session.userIdEncoded;
 
     const contact = await this.db.getContactByOwnerAndUserId(
       ownerUserId,
@@ -200,8 +216,7 @@ export class DiscussionService {
 
     // reset session by creating and sending a new announcement
     const result = await this.announcementService.establishSession(
-      UserPublicKeys.from_bytes(contact.publicKeys),
-      session
+      UserPublicKeys.from_bytes(contact.publicKeys)
     );
 
     // if the error is due to the session manager failed to establish outgoing session, throw the error
@@ -209,7 +224,7 @@ export class DiscussionService {
       throw new Error(EstablishSessionError);
 
     // get the new session status
-    const sessionStatus = session.peerSessionStatus(
+    const sessionStatus = this.session.peerSessionStatus(
       decodeUserId(contactUserId)
     );
     log.info(
@@ -255,6 +270,15 @@ export class DiscussionService {
         );
       }
     );
+
+    // Emit events after transaction completes
+    const updatedDiscussion = await this.db.discussions.get(
+      existingDiscussion.id!
+    );
+    if (updatedDiscussion) {
+      this.events.onDiscussionStatusChanged?.(updatedDiscussion);
+      this.events.onSessionRenewed?.(updatedDiscussion);
+    }
   }
 
   /**
