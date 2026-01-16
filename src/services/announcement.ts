@@ -74,6 +74,7 @@ export class AnnouncementService {
     const log = logger.forMethod('establishSession');
 
     const contactUserId = encodeUserId(contactPublicKeys.derive_id());
+    const ownerUserId = session.userIdEncoded;
 
     const announcement = session.establishOutgoingSession(
       contactPublicKeys,
@@ -81,7 +82,7 @@ export class AnnouncementService {
     );
 
     if (announcement.length === 0) {
-      log.error('empty announcement returned', { contactUserId });
+      log.error('empty announcement returned', { contactUserId, ownerUserId });
       return {
         success: false,
         error: EstablishSessionError,
@@ -94,6 +95,7 @@ export class AnnouncementService {
       log.error('failed to broadcast announcement', {
         contactUserId,
         error: result.error,
+        ownerUserId,
       });
       return {
         success: false,
@@ -102,7 +104,7 @@ export class AnnouncementService {
       };
     }
 
-    log.info('announcement sent successfully', { contactUserId });
+    log.info('announcement sent successfully', { contactUserId, ownerUserId });
     return { success: true, announcement };
   }
 
@@ -110,6 +112,7 @@ export class AnnouncementService {
     session: SessionModule
   ): Promise<AnnouncementReceptionResult> {
     const log = logger.forMethod('fetchAndProcessAnnouncements');
+    const ownerUserId = session.userIdEncoded;
 
     if (this.isProcessingAnnouncements) {
       log.info('fetch already in progress, skipping');
@@ -126,7 +129,10 @@ export class AnnouncementService {
 
       if (pending.length > 0) {
         log.info(
-          `processing ${pending.length} pending announcements from IndexedDB`
+          `processing ${pending.length} pending announcements from IndexedDB`,
+          {
+            ownerUserId,
+          }
         );
         announcements = pending.map(p => p.announcement);
         // Track counters from pending announcements to avoid re-processing
@@ -160,6 +166,7 @@ export class AnnouncementService {
             newAnnouncementsCount++;
             log.info(`processed new announcement #${newAnnouncementsCount}`, {
               contactUserId: result.contactUserId,
+              ownerUserId,
             });
           }
 
@@ -184,7 +191,10 @@ export class AnnouncementService {
         error: errors.length > 0 ? errors.join(', ') : undefined,
       };
     } catch (error) {
-      log.error('unexpected error during fetch/process', error);
+      log.error('unexpected error during fetch/process', {
+        error: error,
+        ownerUserId,
+      });
       return {
         success: false,
         newAnnouncementsCount: 0,
@@ -207,7 +217,10 @@ export class AnnouncementService {
     }
 
     log.info(
-      `starting resend for ${failedDiscussions.length} failed discussions`
+      `starting resend for ${failedDiscussions.length} failed discussions`,
+      {
+        ownerUserId: session.userIdEncoded,
+      }
     );
 
     const sentDiscussions: Discussion[] = [];
@@ -267,6 +280,7 @@ export class AnnouncementService {
               ) {
                 log.info('skipping DB update - session not ready', {
                   contactUserId: discussion.contactUserId,
+                  ownerUserId: discussion.ownerUserId,
                   status: statusStr,
                 });
                 return;
@@ -285,13 +299,19 @@ export class AnnouncementService {
               log.info('updated discussion status in DB', {
                 contactUserId: discussion.contactUserId,
                 newStatus,
+                ownerUserId: discussion.ownerUserId,
               });
             })
           );
         }
 
         if (brokenDiscussions.length > 0) {
-          log.info(`marking ${brokenDiscussions.length} discussions as BROKEN`);
+          log.info(
+            `marking ${brokenDiscussions.length} discussions as BROKEN`,
+            {
+              ownerUserId: session.userIdEncoded,
+            }
+          );
           await Promise.all(
             brokenDiscussions.map(id =>
               db.discussions.update(id, {
@@ -308,6 +328,7 @@ export class AnnouncementService {
     log.info('resend completed', {
       sent: sentDiscussions.length,
       broken: brokenDiscussions.length,
+      ownerUserId: session.userIdEncoded,
     });
   }
 
@@ -367,7 +388,9 @@ export class AnnouncementService {
       return { success: true };
     }
 
-    log.info('announcement intended for us — decrypting');
+    log.info('announcement intended for us — decrypting', {
+      ownerUserId: session.userIdEncoded,
+    });
 
     let announcementMessage: string | undefined;
     if (result.user_data?.length > 0) {
@@ -478,6 +501,8 @@ async function handleReceivedDiscussion(
           discussionId: existing.id,
           status: existing.status,
           direction: existing.direction,
+          ownerUserId,
+          contactUserId,
         });
       }
 
@@ -485,7 +510,10 @@ async function handleReceivedDiscussion(
       return existing.id!;
     }
 
-    log.info('creating new RECEIVED/PENDING discussion', { contactUserId });
+    log.info('creating new RECEIVED/PENDING discussion', {
+      contactUserId,
+      ownerUserId,
+    });
     return await db.discussions.add({
       ownerUserId,
       contactUserId,

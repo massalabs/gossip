@@ -34,6 +34,7 @@
     "cap:build:ios": "npm run build && cap sync ios",
     "cap:build:android": "npm run build && cap sync android",
     "cap:list:ios": "cap run ios --list",
+    "cap:list:android": "cap run android --list",
     "cap:run:ios": "npm run build && cap sync ios && cap run ios",
     "cap:run:ios:device": "scripts/run-ios-device.sh",
     "cap:run:android": "npm run build && cap sync android && cap run android",

@@ -172,8 +172,9 @@ export class GossipDatabase extends Dexie {
     this.version(13).stores({
       contacts:
         '++id, ownerUserId, userId, name, isOnline, lastSeen, createdAt, [ownerUserId+userId] , [ownerUserId+name]',
+      // TODO check that there isn't too much index here
       messages:
-        '++id, ownerUserId, contactUserId, type, direction, status, timestamp, seeker, [ownerUserId+contactUserId], [ownerUserId+status], [ownerUserId+contactUserId+status], [ownerUserId+seeker], [ownerUserId+contactUserId+direction], [ownerUserId+direction+status]',
+        '++id, ownerUserId, contactUserId, type, direction, status, timestamp, seeker, [ownerUserId+contactUserId], [ownerUserId+status], [ownerUserId+contactUserId+status], [ownerUserId+seeker], [ownerUserId+contactUserId+direction], [ownerUserId+direction+status], [ownerUserId+status+type]',
       userProfile: 'userId, username, status, lastSeen',
       discussions:
         '++id, ownerUserId, &[ownerUserId+contactUserId], status, [ownerUserId+status], lastSyncTimestamp, unreadCount, lastMessageTimestamp, createdAt, updatedAt',

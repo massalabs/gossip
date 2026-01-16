@@ -33,8 +33,8 @@ export async function initializeDiscussion(
   announcement: Uint8Array;
 }> {
   const log = logger.forMethod('initializeDiscussion');
+  const userId = session.userIdEncoded;
   try {
-    const userId = session.userIdEncoded;
     // Encode message as UTF-8 if provided
     const userData = message
       ? new TextEncoder().encode(message)
@@ -50,7 +50,13 @@ export async function initializeDiscussion(
     let status: DiscussionStatus = DiscussionStatus.PENDING;
     if (!result.success) {
       log.error(
-        `Failed to establish session with contact ${contact.name}, got error: ${result.error}`
+        `Failed to establish session with contact ${contact.name}, got error: ${result.error}`,
+        {
+          contactId: contact.userId,
+          ownerUserId: userId,
+          contactName: contact.name,
+          error: result.error,
+        }
       );
       // if the error is due to the session manager failed to establish outgoing session, throw the error
       if (result.error && result.error.includes(EstablishSessionError))
@@ -59,7 +65,13 @@ export async function initializeDiscussion(
       status = DiscussionStatus.SEND_FAILED;
     } else {
       log.info(
-        `session established with contact and announcement sent: ${result.announcement.length}... bytes`
+        `session established with contact and announcement sent: ${result.announcement.length}... bytes`,
+        {
+          contactId: contact.userId,
+          ownerUserId: userId,
+          contactName: contact.name,
+          announcementLength: result.announcement.length,
+        }
       );
     }
 
@@ -77,11 +89,20 @@ export async function initializeDiscussion(
       updatedAt: new Date(),
     });
 
-    log.info(`discussion created with id: ${discussionId}`);
+    log.info(`discussion created with id: ${discussionId}`, {
+      ownerUserId: userId,
+      contactId: contact.userId,
+      contactName: contact.name,
+    });
 
     return { discussionId, announcement: result.announcement };
   } catch (error) {
-    log.error(`Failed to initialize discussion, error: ${error}`);
+    log.error(`Failed to initialize discussion, error: ${error}`, {
+      error: error,
+      ownerUserId: userId,
+      contactId: contact.userId,
+      contactName: contact.name,
+    });
     throw new Error('Discussion initialization failed, error: ' + error);
   }
 }
@@ -116,7 +137,13 @@ export async function acceptDiscussionRequest(
     let status: DiscussionStatus = DiscussionStatus.ACTIVE;
     if (!result.success) {
       log.error(
-        `Failed to establish session with contact ${contact.name}, got error: ${result.error}`
+        `Failed to establish session with contact ${contact.name}, got error: ${result.error}`,
+        {
+          contactId: contact.userId,
+          ownerUserId: discussion.ownerUserId,
+          contactName: contact.name,
+          error: result.error,
+        }
       );
 
       // if the error is due to the session manager failed to establish outgoing session, throw the error
@@ -126,7 +153,13 @@ export async function acceptDiscussionRequest(
       status = DiscussionStatus.SEND_FAILED;
     } else {
       log.info(
-        `session established with contact and announcement sent: ${result.announcement.length}... bytes`
+        `session established with contact and announcement sent: ${result.announcement.length}... bytes`,
+        {
+          contactId: contact.userId,
+          ownerUserId: discussion.ownerUserId,
+          contactName: contact.name,
+          announcementLength: result.announcement.length,
+        }
       );
     }
 
@@ -136,11 +169,20 @@ export async function acceptDiscussionRequest(
       initiationAnnouncement: result.announcement,
       updatedAt: new Date(),
     });
-    log.info(`discussion updated in db with status: ${status}`);
+    log.info(`discussion updated in db with status: ${status}`, {
+      ownerUserId: discussion.ownerUserId,
+      contactId: contact.userId,
+      contactName: contact.name,
+      status: status,
+    });
 
     return;
   } catch (error) {
-    log.error(`Failed to accept pending discussion, error: ${error}`);
+    log.error(`Failed to accept pending discussion, error: ${error}`, {
+      error: error,
+      ownerUserId: discussion.ownerUserId,
+      contactId: discussion.contactUserId,
+    });
     throw new Error('Failed to accept pending discussion, error: ' + error);
   }
 }
@@ -172,7 +214,11 @@ export async function renewDiscussion(
   if (!existingDiscussion)
     throw new Error('Discussion with contact ' + contact.name + ' not found');
 
-  log.info(`renewing discussion between ${ownerUserId} and ${contactUserId}`);
+  log.info(`renewing discussion between ${ownerUserId} and ${contactUserId}`, {
+    ownerUserId: ownerUserId,
+    contactUserId: contactUserId,
+    contactName: contact.name,
+  });
 
   // reset session by creating and sending a new announcement
   const result = await announcementService.establishSession(

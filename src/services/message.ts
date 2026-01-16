@@ -343,6 +343,11 @@ export class MessageService {
     userId: string
   ): Promise<void> {
     if (seekers.size === 0) return;
+    const log = logger.forMethod('acknowledgeMessages');
+    log.info('acknowledging messages', {
+      userId,
+      seekers: Array.from(seekers),
+    });
 
     const updatedCount = await db.messages
       .where('[ownerUserId+direction+status]')
@@ -355,17 +360,14 @@ export class MessageService {
 
     // After marking messages as DELIVERED, clean up DELIVERED keep-alive messages
     await db.messages
-      .where({
-        ownerUserId: userId,
-        status: MessageStatus.DELIVERED,
-        type: MessageType.KEEP_ALIVE,
-      })
+      .where('[ownerUserId+status+type]')
+      .equals([userId, MessageStatus.DELIVERED, MessageType.KEEP_ALIVE])
       .delete();
 
     if (updatedCount > 0) {
-      logger
-        .forMethod('acknowledgeMessages')
-        .info(`acknowledged ${updatedCount} messages`);
+      log.info(`acknowledged ${updatedCount} messages`, {
+        userId,
+      });
     }
   }
 
@@ -377,6 +379,8 @@ export class MessageService {
     log.info('sending message', {
       messageContent: message.content,
       messageType: message.type,
+      contactId: message.contactUserId,
+      ownerUserId: message.ownerUserId,
       messageReplyTo: message.replyTo,
       messageForwardOf: message.forwardOf,
     });
@@ -401,7 +405,8 @@ export class MessageService {
 
     log.info('session status', {
       sessionStatus: sessionStatusToString(sessionStatus),
-      peerId: encodeUserId(peerId),
+      ownerUserId: message.ownerUserId,
+      contactId: message.contactUserId,
     });
 
     if (sessionStatus === SessionStatus.PeerRequested) {
@@ -430,6 +435,8 @@ export class MessageService {
     log.info('message serialized', {
       serializedContent: serializeMessageResult.data,
       messageContent: message.content,
+      ownerUserId: message.ownerUserId,
+      contactId: message.contactUserId,
     });
     message.serializedContent = serializeMessageResult.data;
 
@@ -597,6 +604,8 @@ export class MessageService {
             {
               messageContent: msg.content,
               seeker: encodeToBase64(msg.seeker),
+              contact: msg.contactUserId,
+              userId: msg.ownerUserId,
             }
           );
           try {
@@ -607,12 +616,16 @@ export class MessageService {
             successfullySent.push(msg.id!);
             log.info('message has been resent successfully on the network', {
               messageContent: msg.content,
+              contact: msg.contactUserId,
+              userId: msg.ownerUserId,
             });
           } catch (error) {
             log.error('failed to resend message', {
               error: error,
               messageId: msg.id,
               messageContent: msg.content,
+              contact: msg.contactUserId,
+              userId: msg.ownerUserId,
             });
           }
 
@@ -620,10 +633,14 @@ export class MessageService {
         } else {
           log.info('message has not been encrypted by sessionManager', {
             messageContent: msg.content,
+            contact: msg.contactUserId,
+            userId: msg.ownerUserId,
           });
           if (!session) {
             log.error('session manager not initialized', {
               messageContent: msg.content,
+              contact: msg.contactUserId,
+              userId: msg.ownerUserId,
             });
             break;
           }
@@ -631,12 +648,14 @@ export class MessageService {
           log.info('session status for peer', {
             peerId: encodeUserId(peerId),
             sessionStatus: sessionStatusToString(status),
+            contact: msg.contactUserId,
           });
           /* If the session is waiting for peer acceptance, don't attempt to resend messages in this discussion
           because we don't have the peer's next seeker yet*/
           if (status === SessionStatus.SelfRequested) {
             log.info('skipping resend — waiting for peer acceptance', {
               contactId,
+              userId: msg.ownerUserId,
             });
             break;
           }

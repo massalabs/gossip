@@ -32,11 +32,13 @@ export function useAppStateRefresh() {
       if (!isOnline || isSyncing.current) return;
       isSyncing.current = true;
 
+      // resend failed messages and discussion
       if (resendFailedBlobs) {
         await resendFailedBlobs();
       }
 
       try {
+        // fetch and process announcements and messages from peer
         await Promise.all([
           announcementService.fetchAndProcessAnnouncements(session),
           messageService.fetchMessages(session),
