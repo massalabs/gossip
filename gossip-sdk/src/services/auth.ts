@@ -8,15 +8,17 @@ import { UserPublicKeys } from '../assets/generated/wasm/gossip_wasm';
 import { decodeUserId } from '../utils/userId';
 import { encodeToBase64, decodeFromBase64 } from '../utils/base64';
 import { IMessageProtocol } from '../api/messageProtocol/types';
-import { restMessageProtocol } from '../api/messageProtocol';
-import { db } from '../db';
+import { type GossipDatabase } from '../db';
 
 export type PublicKeyResult =
   | { publicKey: UserPublicKeys; error?: never }
   | { publicKey?: never; error: string };
 
 export class AuthService {
-  constructor(public messageProtocol: IMessageProtocol) {}
+  constructor(
+    private db: GossipDatabase,
+    public messageProtocol: IMessageProtocol
+  ) {}
 
   /**
    * Fetch public key by userId
@@ -47,7 +49,7 @@ export class AuthService {
     publicKeys: UserPublicKeys,
     userId: string
   ): Promise<void> {
-    const profile = await db.userProfile.get(userId);
+    const profile = await this.db.userProfile.get(userId);
     if (!profile) throw new Error('User profile not found');
 
     const lastPush = profile.lastPublicKeyPush;
@@ -60,7 +62,7 @@ export class AuthService {
       encodeToBase64(publicKeys.to_bytes())
     );
 
-    await db.userProfile.update(userId, { lastPublicKeyPush: new Date() });
+    await this.db.userProfile.update(userId, { lastPublicKeyPush: new Date() });
   }
 }
 
@@ -68,12 +70,6 @@ const ONE_WEEK_IN_MILLIS = 7 * 24 * 60 * 60 * 1000;
 
 function moreThanOneWeekAgo(date: Date): boolean {
   return Date.now() - date.getTime() >= ONE_WEEK_IN_MILLIS;
-}
-
-export const authService = new AuthService(restMessageProtocol);
-
-export function setAuthMessageProtocol(protocol: IMessageProtocol): void {
-  authService.messageProtocol = protocol;
 }
 
 export const PUBLIC_KEY_NOT_FOUND_ERROR = 'Public key not found';

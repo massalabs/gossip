@@ -16,6 +16,7 @@ export {
   updateContactName,
   deleteContact,
   updateDiscussionName,
+  db,
 } from 'gossip-sdk';
 export type {
   ValidationResult,

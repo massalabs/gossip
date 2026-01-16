@@ -1,7 +1,7 @@
 import { useCallback } from 'react';
 import { useAccountStore } from '../stores/accountStore';
-import { Discussion, db, DiscussionStatus } from '../db';
-import { acceptDiscussionRequest } from 'gossip-sdk';
+import { Discussion, db as appDb, DiscussionStatus } from '../db';
+import { discussionService } from '../services';
 
 export const useDiscussionList = () => {
   const { userProfile, session } = useAccountStore();
@@ -14,7 +14,7 @@ export const useDiscussionList = () => {
         // If the user provided a new contact name, update it first
         if (newName && userProfile?.userId) {
           try {
-            await db.contacts
+            await appDb.contacts
               .where('[ownerUserId+userId]')
               .equals([userProfile.userId, discussion.contactUserId])
               .modify({ name: newName });
@@ -22,7 +22,7 @@ export const useDiscussionList = () => {
             console.error('Failed to update contact name:', e);
           }
         }
-        await acceptDiscussionRequest(discussion, session);
+        await discussionService.accept(discussion, session);
       } catch (error) {
         console.error('Failed to accept discussion:', error);
       }
@@ -34,7 +34,7 @@ export const useDiscussionList = () => {
     async (discussion: Discussion) => {
       try {
         if (discussion.id == null) return;
-        await db.discussions.update(discussion.id, {
+        await appDb.discussions.update(discussion.id, {
           status: DiscussionStatus.CLOSED,
           unreadCount: 0,
           updatedAt: new Date(),

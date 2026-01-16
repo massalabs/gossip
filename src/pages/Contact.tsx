@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { updateContactName, deleteContact } from '../utils';
+import { updateContactName, deleteContact, db } from '../utils';
 import { useDiscussionStore } from '../stores/discussionStore';
 import { useMessageStore } from '../stores/messageStore';
 import ContactAvatar from '../components/avatar/ContactAvatar';
@@ -67,7 +67,12 @@ const Contact: React.FC = () => {
   const handleSaveName = useCallback(
     async (name: string) => {
       if (!ownerUserId || !contact) return;
-      const result = await updateContactName(ownerUserId, contact.userId, name);
+      const result = await updateContactName(
+        ownerUserId,
+        contact.userId,
+        name,
+        db
+      );
       if (!result.ok) {
         setNameError(result.message);
         return;
@@ -96,7 +101,7 @@ const Contact: React.FC = () => {
     setDeleteError(null);
 
     try {
-      const result = await deleteContact(ownerUserId, contact.userId);
+      const result = await deleteContact(ownerUserId, contact.userId, db);
       if (!result.ok) {
         setDeleteError(result.message);
         setIsDeleting(false);

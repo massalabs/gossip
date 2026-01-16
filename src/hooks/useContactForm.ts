@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Contact, db } from '../db';
+import { Contact, db as appDb } from '../db';
 import { useAccountStore } from '../stores/accountStore';
 import { useAppStore } from '../stores/appStore';
 import {
@@ -8,10 +8,9 @@ import {
   validateUsernameFormat,
   encodeUserId,
   UserPublicKeys,
-  authService,
-  initializeDiscussion,
   type PublicKeyResult,
 } from 'gossip-sdk';
+import { authService, discussionService } from '../services';
 import { useFileShareContact } from './useFileShareContact';
 import { mnsService, isMnsDomain } from '../services/mns';
 import toast from 'react-hot-toast';
@@ -251,7 +250,7 @@ export function useContactForm() {
       }
 
       // check here if user already exists in contacts
-      const contact = await db.getContactByOwnerAndUserId(
+      const contact = await appDb.getContactByOwnerAndUserId(
         userProfile.userId,
         derivedUserId
       );
@@ -329,7 +328,7 @@ export function useContactForm() {
 
     try {
       // Duplicate checks
-      const contacts = await db.getContactsByOwner(userProfile.userId);
+      const contacts = await appDb.getContactsByOwner(userProfile.userId);
       const nameTaken = contacts.some(
         c => c.name.toLowerCase() === trimmedName.toLowerCase()
       );
@@ -342,7 +341,7 @@ export function useContactForm() {
         return;
       }
 
-      const existing = await db.getContactByOwnerAndUserId(
+      const existing = await appDb.getContactByOwnerAndUserId(
         userProfile.userId,
         effectiveUserId
       );
@@ -366,11 +365,15 @@ export function useContactForm() {
         createdAt: new Date(),
       };
 
-      await db.contacts.add(contact);
+      await appDb.contacts.add(contact);
 
       const announcementMessage = message.value.trim() || undefined;
       try {
-        await initializeDiscussion(contact, session, announcementMessage);
+        await discussionService.initialize(
+          contact,
+          session,
+          announcementMessage
+        );
       } catch (e) {
         console.error(
           'Failed to initialize discussion after contact creation:',

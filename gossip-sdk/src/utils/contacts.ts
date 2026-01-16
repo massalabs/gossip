@@ -4,7 +4,7 @@
  * Functions for managing contacts including updating names and deleting contacts.
  */
 
-import { db } from '../db';
+import { type GossipDatabase } from '../db';
 import { decodeUserId } from './userId';
 import { getAccountStore } from '../utils';
 
@@ -30,12 +30,14 @@ export type DeleteContactResult =
  * @param ownerUserId - Owner user ID
  * @param contactUserId - Contact user ID
  * @param newName - New name for the contact
+ * @param db - Database instance
  * @returns Result with success status
  */
 export async function updateContactName(
   ownerUserId: string,
   contactUserId: string,
-  newName: string
+  newName: string,
+  db: GossipDatabase
 ): Promise<UpdateContactNameResult> {
   if (!ownerUserId || !contactUserId) {
     return {
@@ -87,11 +89,13 @@ export async function updateContactName(
  *
  * @param ownerUserId - Owner user ID
  * @param contactUserId - Contact user ID
+ * @param db - Database instance
  * @returns Result with success status
  */
 export async function deleteContact(
   ownerUserId: string,
-  contactUserId: string
+  contactUserId: string,
+  db: GossipDatabase
 ): Promise<DeleteContactResult> {
   try {
     if (!ownerUserId || !contactUserId) {

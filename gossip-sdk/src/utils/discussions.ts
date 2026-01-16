@@ -4,7 +4,7 @@
  * Functions for managing discussion metadata.
  */
 
-import { db } from '../db';
+import { type GossipDatabase } from '../db';
 
 export type UpdateDiscussionNameResult =
   | { ok: true; trimmedName: string | undefined }
@@ -20,11 +20,13 @@ export type UpdateDiscussionNameResult =
  *
  * @param discussionId - The discussion ID to update
  * @param newName - The new custom name (or empty/undefined to clear)
+ * @param db - Database instance
  * @returns Result with success status
  */
 export async function updateDiscussionName(
   discussionId: number,
-  newName: string | undefined
+  newName: string | undefined,
+  db: GossipDatabase
 ): Promise<UpdateDiscussionNameResult> {
   const trimmed = newName?.trim();
   const customName = trimmed && trimmed.length > 0 ? trimmed : undefined;

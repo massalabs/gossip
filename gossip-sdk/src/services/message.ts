@@ -6,19 +6,15 @@
  */
 
 import {
-  db,
   DiscussionStatus,
   type Message,
+  type GossipDatabase,
   MessageDirection,
   MessageStatus,
   MessageType,
 } from '../db';
 import { decodeUserId, encodeUserId } from '../utils/userId';
-import {
-  IMessageProtocol,
-  EncryptedMessage,
-  restMessageProtocol,
-} from '../api/messageProtocol';
+import { IMessageProtocol, EncryptedMessage } from '../api/messageProtocol';
 import {
   SessionStatus,
   SendMessageOutput,
@@ -73,9 +69,11 @@ const sleep = (ms: number) => new Promise(res => setTimeout(res, ms));
 const logger = new Logger('MessageService');
 
 export class MessageService {
+  private db: GossipDatabase;
   private messageProtocol: IMessageProtocol;
 
-  constructor(messageProtocol: IMessageProtocol) {
+  constructor(db: GossipDatabase, messageProtocol: IMessageProtocol) {
+    this.db = db;
     this.messageProtocol = messageProtocol;
   }
 
@@ -147,7 +145,7 @@ export class MessageService {
 
       try {
         if (await isAppInForeground()) {
-          await db.setActiveSeekers(seekers);
+          await this.db.setActiveSeekers(seekers);
         }
       } catch (error) {
         log.error('failed to update active seekers', error);
@@ -246,7 +244,7 @@ export class MessageService {
     const storedIds: number[] = [];
 
     for (const message of decrypted) {
-      const discussion = await db.getDiscussionByOwnerAndContact(
+      const discussion = await this.db.getDiscussionByOwnerAndContact(
         ownerUserId,
         message.senderId
       );
@@ -273,12 +271,12 @@ export class MessageService {
         replyToMessageId = original?.id;
       }
 
-      const id = await db.transaction(
+      const id = await this.db.transaction(
         'rw',
-        db.messages,
-        db.discussions,
+        this.db.messages,
+        this.db.discussions,
         async () => {
-          const id = await db.messages.add({
+          const id = await this.db.messages.add({
             ownerUserId,
             contactUserId: discussion.contactUserId,
             content: message.content,
@@ -311,7 +309,7 @@ export class MessageService {
               : undefined,
           });
           const now = new Date();
-          await db.discussions.update(discussion.id, {
+          await this.db.discussions.update(discussion.id, {
             lastMessageId: id,
             lastMessageContent: message.content,
             lastMessageTimestamp: message.sentAt,
@@ -332,7 +330,7 @@ export class MessageService {
     seeker: Uint8Array,
     ownerUserId: string
   ): Promise<Message | undefined> {
-    return await db.messages
+    return await this.db.messages
       .where('[ownerUserId+seeker]')
       .equals([ownerUserId, seeker])
       .first();
@@ -344,7 +342,7 @@ export class MessageService {
   ): Promise<void> {
     if (seekers.size === 0) return;
 
-    const updatedCount = await db.messages
+    const updatedCount = await this.db.messages
       .where('[ownerUserId+direction+status]')
       .equals([userId, MessageDirection.OUTGOING, MessageStatus.SENT])
       .filter(
@@ -355,7 +353,7 @@ export class MessageService {
       .modify({ status: MessageStatus.DELIVERED });
 
     // After marking messages as DELIVERED, clean up DELIVERED keep-alive messages
-    await db.messages
+    await this.db.messages
       .where({
         ownerUserId: userId,
         status: MessageStatus.DELIVERED,
@@ -390,7 +388,7 @@ export class MessageService {
       };
     }
 
-    const discussion = await db.getDiscussionByOwnerAndContact(
+    const discussion = await this.db.getDiscussionByOwnerAndContact(
       message.ownerUserId,
       message.contactUserId
     );
@@ -431,12 +429,13 @@ export class MessageService {
     // Check if we can send messages on this discussion
     const isUnstable = !(await isDiscussionStableState(
       message.ownerUserId,
-      message.contactUserId
+      message.contactUserId,
+      this.db
     ));
     const isSelfRequested = sessionStatus === SessionStatus.SelfRequested;
 
     if (isUnstable || isSelfRequested) {
-      const messageId = await db.addMessage({
+      const messageId = await this.db.addMessage({
         ...message,
         status: MessageStatus.FAILED,
       });
@@ -449,7 +448,7 @@ export class MessageService {
       };
     }
 
-    const messageId = await db.addMessage({
+    const messageId = await this.db.addMessage({
       ...message,
       status: MessageStatus.SENDING,
     });
@@ -465,12 +464,19 @@ export class MessageService {
       sendOutput = session.sendMessage(peerId, message.serializedContent!);
       if (!sendOutput) throw new Error('sendMessage returned null');
     } catch (error) {
-      await db.transaction('rw', db.messages, db.discussions, async () => {
-        await db.messages.update(messageId, { status: MessageStatus.FAILED });
-        await db.discussions.update(discussion.id, {
-          status: DiscussionStatus.BROKEN,
-        });
-      });
+      await this.db.transaction(
+        'rw',
+        this.db.messages,
+        this.db.discussions,
+        async () => {
+          await this.db.messages.update(messageId, {
+            status: MessageStatus.FAILED,
+          });
+          await this.db.discussions.update(discussion.id, {
+            status: DiscussionStatus.BROKEN,
+          });
+        }
+      );
 
       log.error('encryption failed → discussion marked broken', error);
       return {
@@ -486,7 +492,7 @@ export class MessageService {
         ciphertext: sendOutput.data,
       });
 
-      await db.messages.update(messageId, {
+      await this.db.messages.update(messageId, {
         status: MessageStatus.SENT,
         seeker: sendOutput.seeker,
         encryptedMessage: sendOutput.data,
@@ -497,7 +503,7 @@ export class MessageService {
         message: { ...message, id: messageId, status: MessageStatus.SENT },
       };
     } catch (error) {
-      await db.messages.update(messageId, {
+      await this.db.messages.update(messageId, {
         status: MessageStatus.FAILED,
         seeker: sendOutput.seeker,
         encryptedMessage: sendOutput.data,
@@ -647,7 +653,7 @@ export class MessageService {
             status === SessionStatus.Killed ||
             status === SessionStatus.Saturated
           ) {
-            await db.discussions
+            await this.db.discussions
               .where('[ownerUserId+contactUserId]')
               .equals([msg.ownerUserId, contactId])
               .modify({
@@ -694,7 +700,7 @@ export class MessageService {
             break;
           }
 
-          await db.messages.update(msg.id, {
+          await this.db.messages.update(msg.id, {
             seeker: sendOutput.seeker,
             encryptedMessage: sendOutput.data,
           });
@@ -713,10 +719,10 @@ export class MessageService {
     }
 
     if (successfullySent.length > 0) {
-      await db.transaction('rw', db.messages, async () => {
+      await this.db.transaction('rw', this.db.messages, async () => {
         await Promise.all(
           successfullySent.map(id =>
-            db.messages.update(id, { status: MessageStatus.SENT })
+            this.db.messages.update(id, { status: MessageStatus.SENT })
           )
         );
       });
@@ -729,5 +735,3 @@ export class MessageService {
     });
   }
 }
-
-export const messageService = new MessageService(restMessageProtocol);

@@ -3,6 +3,7 @@ import {
   validateUsernameAvailability,
   validateUsernameFormatAndAvailability,
   setDb,
+  db,
 } from 'gossip-sdk';
 import { db as appDb } from '../../../src/db';
 import { userProfile } from '../../helpers';
@@ -31,7 +32,7 @@ describe('utils/validation.ts - Database tests (requires IndexedDB)', () => {
     });
 
     it('should accept username that does not exist', async () => {
-      const result = await validateUsernameAvailability('newuser');
+      const result = await validateUsernameAvailability('newuser', db);
       expect(result.valid).toBe(true);
       expect(result.error).toBeUndefined();
     });
@@ -45,7 +46,7 @@ describe('utils/validation.ts - Database tests (requires IndexedDB)', () => {
           .build()
       );
 
-      const result = await validateUsernameAvailability('existinguser');
+      const result = await validateUsernameAvailability('existinguser', db);
       expect(result.valid).toBe(false);
       expect(result.error).toBe(
         'This username is already in use. Please choose another.'
@@ -62,7 +63,7 @@ describe('utils/validation.ts - Database tests (requires IndexedDB)', () => {
       );
 
       // Try with uppercase
-      const result = await validateUsernameAvailability('TestUser');
+      const result = await validateUsernameAvailability('TestUser', db);
       expect(result.valid).toBe(false);
       expect(result.error).toBe(
         'This username is already in use. Please choose another.'
@@ -79,7 +80,7 @@ describe('utils/validation.ts - Database tests (requires IndexedDB)', () => {
       );
 
       // Try with whitespace
-      const result = await validateUsernameAvailability('  testuser  ');
+      const result = await validateUsernameAvailability('  testuser  ', db);
       expect(result.valid).toBe(false);
       expect(result.error).toBe(
         'This username is already in use. Please choose another.'
@@ -98,7 +99,7 @@ describe('utils/validation.ts - Database tests (requires IndexedDB)', () => {
         throw new Error('Database connection failed');
       }) as unknown as () => PromiseExtended<Dexie>;
 
-      const result = await validateUsernameAvailability('testuser');
+      const result = await validateUsernameAvailability('testuser', db);
       expect(result.valid).toBe(false);
       expect(result.error).toContain('Database connection failed');
 
@@ -123,7 +124,7 @@ describe('utils/validation.ts - Database tests (requires IndexedDB)', () => {
     });
 
     it('should reject if format is invalid', async () => {
-      const result = await validateUsernameFormatAndAvailability('ab');
+      const result = await validateUsernameFormatAndAvailability('ab', db);
       expect(result.valid).toBe(false);
       expect(result.error).toBe('Username must be at least 3 characters long');
     });
@@ -136,8 +137,10 @@ describe('utils/validation.ts - Database tests (requires IndexedDB)', () => {
           .build()
       );
 
-      const result =
-        await validateUsernameFormatAndAvailability('existinguser');
+      const result = await validateUsernameFormatAndAvailability(
+        'existinguser',
+        db
+      );
       expect(result.valid).toBe(false);
       expect(result.error).toBe(
         'This username is already in use. Please choose another.'
@@ -145,7 +148,10 @@ describe('utils/validation.ts - Database tests (requires IndexedDB)', () => {
     });
 
     it('should accept if format is valid and username is available', async () => {
-      const result = await validateUsernameFormatAndAvailability('newuser123');
+      const result = await validateUsernameFormatAndAvailability(
+        'newuser123',
+        db
+      );
       expect(result.valid).toBe(true);
       expect(result.error).toBeUndefined();
     });

@@ -4,7 +4,7 @@
  * Functions for validating user input like usernames, passwords, and user IDs.
  */
 
-import { db, type UserProfile } from '../db';
+import { type UserProfile, type GossipDatabase } from '../db';
 import { isValidUserId } from './userId';
 
 export type ValidationResult =
@@ -67,10 +67,12 @@ export function validateUsernameFormat(value: string): ValidationResult {
  * Validate a username is available (not already in use)
  *
  * @param value - The username to check
+ * @param db - Database instance
  * @returns Validation result
  */
 export async function validateUsernameAvailability(
-  value: string
+  value: string,
+  db: GossipDatabase
 ): Promise<ValidationResult> {
   try {
     if (!db.isOpen()) {
@@ -107,17 +109,19 @@ export async function validateUsernameAvailability(
  * Validate a username format and availability
  *
  * @param value - The username to validate
+ * @param db - Database instance
  * @returns Validation result
  */
 export async function validateUsernameFormatAndAvailability(
-  value: string
+  value: string,
+  db: GossipDatabase
 ): Promise<ValidationResult> {
   const result = validateUsernameFormat(value);
   if (!result.valid) {
     return result;
   }
 
-  return await validateUsernameAvailability(value);
+  return await validateUsernameAvailability(value, db);
 }
 
 /**

@@ -428,9 +428,38 @@ export class GossipDatabase extends Dexie {
   }
 }
 
-// Create and export the database instance
-export let db = new GossipDatabase();
+// Database instance - initialized lazily or via setDb()
+let _db: GossipDatabase | null = null;
 
-export function setDb(database: GossipDatabase): void {
-  db = database;
+/**
+ * Get the database instance.
+ * Creates a default instance if none was set via setDb().
+ *
+ * @deprecated Use createGossipSdk() factory instead of global db access
+ */
+export function getDb(): GossipDatabase {
+  if (!_db) {
+    _db = new GossipDatabase();
+  }
+  return _db;
 }
+
+/**
+ * Set the database instance.
+ * Call this before using any SDK functions if you need a custom db instance.
+ *
+ * @deprecated Use createGossipSdk() factory instead
+ */
+export function setDb(database: GossipDatabase): void {
+  _db = database;
+}
+
+/**
+ * @deprecated Use getDb() or createGossipSdk() factory instead.
+ * This getter exists for backward compatibility during migration.
+ */
+export const db: GossipDatabase = new Proxy({} as GossipDatabase, {
+  get(_target, prop) {
+    return Reflect.get(getDb(), prop);
+  },
+});

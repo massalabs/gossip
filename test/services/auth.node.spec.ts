@@ -100,7 +100,7 @@ describe('AuthService', () => {
       changeNode: vi.fn(),
     };
 
-    authService = new AuthService(mockMessageProtocol);
+    authService = new AuthService(db, mockMessageProtocol);
 
     // Clear database before each test
     await db.userProfile.clear();

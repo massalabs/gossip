@@ -7,7 +7,7 @@
  */
 import { describe, it, expect, beforeEach, beforeAll, vi } from 'vitest';
 import {
-  db,
+  db as appDb,
   DiscussionStatus,
   MessageDirection,
   MessageStatus,
@@ -25,13 +25,11 @@ import {
   SessionStatus,
   SessionConfig,
   encodeUserId,
-  acceptDiscussionRequest,
-  initializeDiscussion,
-  renewDiscussion,
-  announcementService,
+  AnnouncementService,
+  DiscussionService,
+  MessageService,
+  RefreshService,
   EstablishSessionError,
-  messageService,
-  handleSessionRefresh,
   serializeRegularMessage,
   serializeReplyMessage,
   MESSAGE_TYPE_KEEP_ALIVE,
@@ -57,7 +55,7 @@ function getFailedOutgoingMessagesForContact(
   ownerUserId: string,
   contactUserId: string
 ): Promise<Message[]> {
-  return db.messages
+  return appDb.messages
     .where('[ownerUserId+contactUserId]')
     .equals([ownerUserId, contactUserId])
     .and(
@@ -71,13 +69,14 @@ function getFailedOutgoingMessagesForContact(
 async function resendFailedMessagesForContact(
   ownerUserId: string,
   contactUserId: string,
-  session: SessionModule
+  session: SessionModule,
+  msgService: MessageService
 ): Promise<void> {
   const failedMessages = await getFailedOutgoingMessagesForContact(
     ownerUserId,
     contactUserId
   );
-  await messageService.resendMessages(
+  await msgService.resendMessages(
     new Map([[contactUserId, failedMessages]]),
     session
   );
@@ -87,11 +86,12 @@ async function fetchMessagesFromContact(
   ownerUserId: string,
   contactUserId: string,
   ourSk: UserSecretKeys,
-  session: SessionModule
+  session: SessionModule,
+  msgService: MessageService
 ): Promise<Message[]> {
-  await messageService.fetchMessages(session);
+  await msgService.fetchMessages(session);
 
-  const messages = await db.messages
+  const messages = await appDb.messages
     .where('[ownerUserId+contactUserId+direction]')
     .equals([ownerUserId, contactUserId, MessageDirection.INCOMING])
     .toArray();
@@ -103,7 +103,7 @@ async function getMessagesToContact(
   ownerUserId: string,
   status?: MessageStatus
 ): Promise<Message[]> {
-  const req = db.messages
+  const req = appDb.messages
     .where('[ownerUserId+contactUserId+direction]')
     .equals([contactUserId, ownerUserId, MessageDirection.OUTGOING]);
   if (status) {
@@ -115,6 +115,11 @@ async function getMessagesToContact(
 describe('Message Service (Browser with Real WASM)', () => {
   // Shared mock protocol for all tests
   let mockProtocol: MockMessageProtocol;
+  // Service instances
+  let announcementService: AnnouncementService;
+  let discussionService: DiscussionService;
+  let messageService: MessageService;
+  let refreshService: RefreshService;
 
   // Alice's test data
   let aliceUserId: string;
@@ -136,16 +141,18 @@ describe('Message Service (Browser with Real WASM)', () => {
     mockProtocol = createMessageProtocol(
       MessageProtocolType.MOCK
     ) as MockMessageProtocol;
-    announcementService.setMessageProtocol(mockProtocol);
-    messageService.setMessageProtocol(mockProtocol);
+    announcementService = new AnnouncementService(appDb, mockProtocol);
+    discussionService = new DiscussionService(appDb, announcementService);
+    messageService = new MessageService(appDb, mockProtocol);
+    refreshService = new RefreshService(appDb, messageService);
   });
 
   beforeEach(async () => {
     // Clean up database
-    if (db.isOpen()) {
-      await db.delete();
+    if (appDb.isOpen()) {
+      await appDb.delete();
     }
-    await db.open();
+    await appDb.open();
 
     // Reset mock protocol state to prevent test interference
     mockProtocol.clearMockData();
@@ -196,28 +203,29 @@ describe('Message Service (Browser with Real WASM)', () => {
       createdAt: new Date(),
     };
 
-    await db.contacts.add(aliceBobContact);
-    await db.contacts.add(bobAliceContact);
+    await appDb.contacts.add(aliceBobContact);
+    await appDb.contacts.add(bobAliceContact);
 
     // Alice initiates session with Bob (establishes outgoing session)
-    const { discussionId: aliceDiscussionId } = await initializeDiscussion(
-      aliceBobContact,
-      aliceSession,
-      aliceUserId
-    );
+    const { discussionId: aliceDiscussionId } =
+      await discussionService.initialize(
+        aliceBobContact,
+        aliceSession,
+        aliceUserId
+      );
 
     // Bob fetches Alice's announcement and discussion is ACTIVE
     await announcementService.fetchAndProcessAnnouncements(bobSession);
 
     // Bob accepts the discussion request
-    const bobDiscussion = await db.getDiscussionByOwnerAndContact(
+    const bobDiscussion = await appDb.getDiscussionByOwnerAndContact(
       bobUserId,
       aliceUserId
     );
     if (!bobDiscussion)
       throw new Error('alice discussion not found on bob side');
 
-    await acceptDiscussionRequest(bobDiscussion, bobSession);
+    await discussionService.accept(bobDiscussion, bobSession);
 
     // Alice fetches Bob's announcement and discussion is ACTIVE
     await announcementService.fetchAndProcessAnnouncements(aliceSession);
@@ -272,28 +280,29 @@ describe('Message Service (Browser with Real WASM)', () => {
       createdAt: new Date(),
     };
 
-    await db.contacts.add(peer1Peer2Contact);
-    await db.contacts.add(peer2Peer1Contact);
+    await appDb.contacts.add(peer1Peer2Contact);
+    await appDb.contacts.add(peer2Peer1Contact);
 
     // Peer1 initiates session with Peer2
-    const { discussionId: peer1DiscussionId } = await initializeDiscussion(
-      peer1Peer2Contact,
-      peer1Session,
-      peer1UserId
-    );
+    const { discussionId: peer1DiscussionId } =
+      await discussionService.initialize(
+        peer1Peer2Contact,
+        peer1Session,
+        peer1UserId
+      );
 
     // Peer2 fetches Peer1's announcement
     await announcementService.fetchAndProcessAnnouncements(peer2Session);
 
     // Peer2 accepts the discussion request
-    const peer2Discussion = await db.getDiscussionByOwnerAndContact(
+    const peer2Discussion = await appDb.getDiscussionByOwnerAndContact(
       peer2UserId,
       peer1UserId
     );
     if (!peer2Discussion)
       throw new Error('peer1 discussion not found on peer2 side');
 
-    await acceptDiscussionRequest(peer2Discussion, peer2Session);
+    await discussionService.accept(peer2Discussion, peer2Session);
 
     // Peer1 fetches Peer2's announcement and discussion is ACTIVE
     await announcementService.fetchAndProcessAnnouncements(peer1Session);
@@ -338,7 +347,7 @@ describe('Message Service (Browser with Real WASM)', () => {
 
       // Verify all Alice's messages are sent
       for (const messageId of aliceMessageIds) {
-        const msg = await db.messages.get(messageId);
+        const msg = await appDb.messages.get(messageId);
         expect(msg?.status).toBe(MessageStatus.SENT);
       }
 
@@ -346,7 +355,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       await messageService.fetchMessages(bobSession);
 
       // Verify Bob received all messages
-      const bobReceivedMessages = await db.messages
+      const bobReceivedMessages = await appDb.messages
         .where('[ownerUserId+contactUserId+direction]')
         .equals([bobUserId, aliceUserId, MessageDirection.INCOMING])
         .toArray();
@@ -383,7 +392,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       await messageService.fetchMessages(aliceSession);
 
       // Verify Alice received all Bob's messages
-      const aliceReceivedMessages = await db.messages
+      const aliceReceivedMessages = await appDb.messages
         .where('[ownerUserId+contactUserId+direction]')
         .equals([aliceUserId, bobUserId, MessageDirection.INCOMING])
         .toArray();
@@ -395,7 +404,7 @@ describe('Message Service (Browser with Real WASM)', () => {
 
       // STEP 5: Alice's messages are set to delivered
       for (const messageId of aliceMessageIds) {
-        const msg = await db.messages.get(messageId);
+        const msg = await appDb.messages.get(messageId);
         expect(msg?.status).toBe(MessageStatus.DELIVERED);
       }
     });
@@ -438,10 +447,10 @@ describe('Message Service (Browser with Real WASM)', () => {
       const bobMessageId = bobResult.message!.id!;
 
       // Both messages are sent
-      expect((await db.messages.get(aliceMessageId))?.status).toBe(
+      expect((await appDb.messages.get(aliceMessageId))?.status).toBe(
         MessageStatus.SENT
       );
-      expect((await db.messages.get(bobMessageId))?.status).toBe(
+      expect((await appDb.messages.get(bobMessageId))?.status).toBe(
         MessageStatus.SENT
       );
 
@@ -452,13 +461,13 @@ describe('Message Service (Browser with Real WASM)', () => {
       await messageService.fetchMessages(bobSession);
 
       // Verify both received each other's messages
-      const aliceReceived = await db.messages
+      const aliceReceived = await appDb.messages
         .where('[ownerUserId+contactUserId+direction]')
         .equals([aliceUserId, bobUserId, MessageDirection.INCOMING])
         .first();
       expect(aliceReceived?.content).toBe('Hey Alice!');
 
-      const bobReceived = await db.messages
+      const bobReceived = await appDb.messages
         .where('[ownerUserId+contactUserId+direction]')
         .equals([bobUserId, aliceUserId, MessageDirection.INCOMING])
         .first();
@@ -482,7 +491,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       await messageService.fetchMessages(aliceSession);
 
       // Now Alice's first message should be delivered
-      expect((await db.messages.get(aliceMessageId))?.status).toBe(
+      expect((await appDb.messages.get(aliceMessageId))?.status).toBe(
         MessageStatus.DELIVERED
       );
 
@@ -502,7 +511,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       await messageService.fetchMessages(bobSession);
 
       // Now Bob's first message should be delivered
-      expect((await db.messages.get(bobMessageId))?.status).toBe(
+      expect((await appDb.messages.get(bobMessageId))?.status).toBe(
         MessageStatus.DELIVERED
       );
     });
@@ -529,7 +538,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       await messageService.fetchMessages(bobSession);
 
       // Verify Bob received Alice's message
-      const bobReceivedFirst = await db.messages
+      const bobReceivedFirst = await appDb.messages
         .where('[ownerUserId+contactUserId+direction]')
         .equals([bobUserId, aliceUserId, MessageDirection.INCOMING])
         .first();
@@ -556,7 +565,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       await messageService.fetchMessages(aliceSession);
 
       // Alice's first message should now be delivered (acknowledged by Bob's response)
-      expect((await db.messages.get(alice1Id))?.status).toBe(
+      expect((await appDb.messages.get(alice1Id))?.status).toBe(
         MessageStatus.DELIVERED
       );
 
@@ -581,7 +590,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       await messageService.fetchMessages(bobSession);
 
       // Bob's message should now be delivered
-      expect((await db.messages.get(bob1Id))?.status).toBe(
+      expect((await appDb.messages.get(bob1Id))?.status).toBe(
         MessageStatus.DELIVERED
       );
 
@@ -601,12 +610,12 @@ describe('Message Service (Browser with Real WASM)', () => {
       await messageService.fetchMessages(aliceSession);
 
       // Alice's second message should now be delivered
-      expect((await db.messages.get(alice2Id))?.status).toBe(
+      expect((await appDb.messages.get(alice2Id))?.status).toBe(
         MessageStatus.DELIVERED
       );
 
       // Verify all messages are received
-      const bobReceivedMessages = await db.messages
+      const bobReceivedMessages = await appDb.messages
         .where('[ownerUserId+contactUserId+direction]')
         .equals([bobUserId, aliceUserId, MessageDirection.INCOMING])
         .toArray();
@@ -638,10 +647,14 @@ describe('Message Service (Browser with Real WASM)', () => {
         lastSeen: new Date(),
         createdAt: new Date(),
       };
-      await db.contacts.add(aliceBobContact);
+      await appDb.contacts.add(aliceBobContact);
 
       // Alice initiates session (SelfRequested state)
-      await initializeDiscussion(aliceBobContact, aliceSession, aliceUserId);
+      await discussionService.initialize(
+        aliceBobContact,
+        aliceSession,
+        aliceUserId
+      );
 
       // Verify Alice's session is in SelfRequested state
       expect(aliceSession.peerSessionStatus(bobPk.derive_id())).toBe(
@@ -675,13 +688,13 @@ describe('Message Service (Browser with Real WASM)', () => {
       /* STEP 3: Bob fetches Alice's announcement and accept it */
       await announcementService.fetchAndProcessAnnouncements(bobSession);
 
-      const bobDiscussion = await db.getDiscussionByOwnerAndContact(
+      const bobDiscussion = await appDb.getDiscussionByOwnerAndContact(
         bobUserId,
         aliceUserId
       );
       if (!bobDiscussion)
         throw new Error('alice discussion not found on bob side');
-      await acceptDiscussionRequest(bobDiscussion, bobSession);
+      await discussionService.accept(bobDiscussion, bobSession);
 
       // Verify Bob's session is now Active
       expect(bobSession.peerSessionStatus(alicePk.derive_id())).toBe(
@@ -707,7 +720,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       );
 
       // Verify Alice's messages are resent
-      const aliceFailedMessages = await db.messages
+      const aliceFailedMessages = await appDb.messages
         .where('[ownerUserId+contactUserId]')
         .equals([aliceUserId, bobUserId])
         .toArray();
@@ -720,7 +733,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       await messageService.fetchMessages(bobSession);
 
       // Verify Bob received both messages
-      const bobReceivedMessages = await db.messages
+      const bobReceivedMessages = await appDb.messages
         .where('[ownerUserId+contactUserId+direction]')
         .equals([bobUserId, aliceUserId, MessageDirection.INCOMING])
         .toArray();
@@ -748,7 +761,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       await messageService.fetchMessages(aliceSession);
 
       // Verify Alice received Bob's message
-      const aliceReceivedMessages = await db.messages
+      const aliceReceivedMessages = await appDb.messages
         .where('[ownerUserId+contactUserId]')
         .equals([aliceUserId, bobUserId])
         .toArray();
@@ -852,11 +865,11 @@ describe('Message Service (Browser with Real WASM)', () => {
       /* STEP 4: Alice and Bob fetch messages but nothing is received */
       await messageService.fetchMessages(aliceSession);
       await messageService.fetchMessages(bobSession);
-      const aliceMessages = await db.messages
+      const aliceMessages = await appDb.messages
         .where('[ownerUserId+contactUserId+direction]')
         .equals([aliceUserId, bobUserId, MessageDirection.INCOMING])
         .toArray();
-      const bobMessages = await db.messages
+      const bobMessages = await appDb.messages
         .where('[ownerUserId+contactUserId+direction]')
         .equals([bobUserId, aliceUserId, MessageDirection.INCOMING])
         .toArray();
@@ -865,7 +878,7 @@ describe('Message Service (Browser with Real WASM)', () => {
 
       /* STEP 5: Alice and Bob resend messages */
       // Get failed messages for resending
-      const aliceFailedMessages = await db.messages
+      const aliceFailedMessages = await appDb.messages
         .where('[ownerUserId+contactUserId]')
         .equals([aliceUserId, bobUserId])
         .and(
@@ -875,7 +888,7 @@ describe('Message Service (Browser with Real WASM)', () => {
         )
         .sortBy('id');
 
-      const bobFailedMessages = await db.messages
+      const bobFailedMessages = await appDb.messages
         .where('[ownerUserId+contactUserId]')
         .equals([bobUserId, aliceUserId])
         .and(
@@ -899,7 +912,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       await messageService.resendMessages(bobMessagesToResend, bobSession);
 
       // Verify all messages are now SENT
-      const aliceSentMessages = await db.messages
+      const aliceSentMessages = await appDb.messages
         .where('[ownerUserId+contactUserId+direction]')
         .equals([aliceUserId, bobUserId, MessageDirection.OUTGOING])
         .sortBy('id');
@@ -908,7 +921,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       expect(aliceSentMessages[0].status).toBe(MessageStatus.SENT);
       expect(aliceSentMessages[1].status).toBe(MessageStatus.SENT);
 
-      const bobSentMessages = await db.messages
+      const bobSentMessages = await appDb.messages
         .where('[ownerUserId+contactUserId+direction]')
         .equals([bobUserId, aliceUserId, MessageDirection.OUTGOING])
         .sortBy('id');
@@ -920,7 +933,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       /* STEP 6: Bob and Alice fetch messages with success */
       await messageService.fetchMessages(bobSession);
 
-      const bobReceivedMessages = await db.messages
+      const bobReceivedMessages = await appDb.messages
         .where('[ownerUserId+contactUserId+direction]')
         .equals([bobUserId, aliceUserId, MessageDirection.INCOMING])
         .sortBy('timestamp');
@@ -932,7 +945,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       // Alice fetches Bob's messages
       await messageService.fetchMessages(aliceSession);
 
-      const aliceReceivedMessages = await db.messages
+      const aliceReceivedMessages = await appDb.messages
         .where('[ownerUserId+contactUserId+direction]')
         .equals([aliceUserId, bobUserId, MessageDirection.INCOMING])
         .sortBy('timestamp');
@@ -1030,7 +1043,8 @@ describe('Message Service (Browser with Real WASM)', () => {
       await resendFailedMessagesForContact(
         aliceUserId,
         bobUserId,
-        aliceSession
+        aliceSession,
+        messageService
       );
 
       // Bob fetch messages but nothing is received
@@ -1038,19 +1052,26 @@ describe('Message Service (Browser with Real WASM)', () => {
         bobUserId,
         aliceUserId,
         bobSk,
-        bobSession
+        bobSession,
+        messageService
       );
       expect(bobMsg.length).toBe(0);
 
       // Bob 1st resend
-      await resendFailedMessagesForContact(bobUserId, aliceUserId, bobSession);
+      await resendFailedMessagesForContact(
+        bobUserId,
+        aliceUserId,
+        bobSession,
+        messageService
+      );
 
       // Alice fetch messages but nothing is received
       let aliceMsg = await fetchMessagesFromContact(
         bobUserId,
         aliceUserId,
         bobSk,
-        bobSession
+        bobSession,
+        messageService
       );
       expect(aliceMsg.length).toBe(0);
 
@@ -1058,7 +1079,8 @@ describe('Message Service (Browser with Real WASM)', () => {
       await resendFailedMessagesForContact(
         aliceUserId,
         bobUserId,
-        aliceSession
+        aliceSession,
+        messageService
       );
 
       // Bob received message 1 but not 3 and 4
@@ -1066,20 +1088,27 @@ describe('Message Service (Browser with Real WASM)', () => {
         bobUserId,
         aliceUserId,
         bobSk,
-        bobSession
+        bobSession,
+        messageService
       );
       expect(bobMsg.length).toBe(1);
       expect(bobMsg[0].content).toBe('Alice message 1');
 
       // Bob 2nd resend
-      await resendFailedMessagesForContact(bobUserId, aliceUserId, bobSession);
+      await resendFailedMessagesForContact(
+        bobUserId,
+        aliceUserId,
+        bobSession,
+        messageService
+      );
 
       // Alice received all messages in order
       aliceMsg = await fetchMessagesFromContact(
         aliceUserId,
         bobUserId,
         aliceSk,
-        aliceSession
+        aliceSession,
+        messageService
       );
       expect(aliceMsg.length).toEqual(4);
       expect(aliceMsg[0].content).toBe('Bob message 1');
@@ -1091,7 +1120,8 @@ describe('Message Service (Browser with Real WASM)', () => {
       await resendFailedMessagesForContact(
         aliceUserId,
         bobUserId,
-        aliceSession
+        aliceSession,
+        messageService
       );
 
       // Bob received all messages in order
@@ -1099,7 +1129,8 @@ describe('Message Service (Browser with Real WASM)', () => {
         bobUserId,
         aliceUserId,
         bobSk,
-        bobSession
+        bobSession,
+        messageService
       );
       expect(bobMsg.length).toBe(4);
       expect(bobMsg[0].content).toBe('Alice message 1');
@@ -1215,7 +1246,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       // Alice fetches Bob's message - this marks message 1 as DELIVERED
       await messageService.fetchMessages(aliceSession);
 
-      expect((await db.messages.get(message1Id))?.status).toBe(
+      expect((await appDb.messages.get(message1Id))?.status).toBe(
         MessageStatus.DELIVERED
       );
 
@@ -1265,7 +1296,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       const message3Id = result3.message!.id!;
 
       // Verify message 3 has encryptedMessage
-      const msg3 = await db.messages.get(message3Id);
+      const msg3 = await appDb.messages.get(message3Id);
       expect(msg3?.encryptedMessage).toBeDefined();
       expect(msg3?.seeker).toBeDefined();
 
@@ -1293,7 +1324,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       const message4Id = result4.message!.id!;
 
       // Verify discussion is BROKEN
-      const discussion = await db.getDiscussionByOwnerAndContact(
+      const discussion = await appDb.getDiscussionByOwnerAndContact(
         aliceUserId,
         bobUserId
       );
@@ -1317,40 +1348,40 @@ describe('Message Service (Browser with Real WASM)', () => {
       aliceSession.establishOutgoingSession = vi.fn(() => new Uint8Array(0));
 
       // First renewal attempt - fails
-      await expect(renewDiscussion(bobUserId, aliceSession)).rejects.toThrow(
-        EstablishSessionError
-      );
+      await expect(
+        discussionService.renew(bobUserId, aliceSession)
+      ).rejects.toThrow(EstablishSessionError);
       aliceSession.establishOutgoingSession = originalEstablishOutgoingSession;
 
       // Verify discussion is BROKEN
       const discussionAfterFailedRenew =
-        await db.getDiscussionByOwnerAndContact(aliceUserId, bobUserId);
+        await appDb.getDiscussionByOwnerAndContact(aliceUserId, bobUserId);
       expect(discussionAfterFailedRenew?.status).toBe(DiscussionStatus.BROKEN);
 
       /* STEP 4: Second renewal attempt - succeeds */
       // Second renewal attempt - succeeds
       peerSessionStatusSpy.mockRestore();
       console.log('Second renewal attempt aliceSession:', aliceSession);
-      await renewDiscussion(bobUserId, aliceSession);
+      await discussionService.renew(bobUserId, aliceSession);
 
       // Verify discussion is ACTIVE
-      const discussionAfterRenew = await db.getDiscussionByOwnerAndContact(
+      const discussionAfterRenew = await appDb.getDiscussionByOwnerAndContact(
         aliceUserId,
         bobUserId
       );
       expect(discussionAfterRenew?.status).toBe(DiscussionStatus.ACTIVE);
 
       // Verify messages 2, 3, 4 are FAILED with undefined encryptedMessage and seeker
-      const msg2AfterRenew = await db.messages.get(message2Id);
+      const msg2AfterRenew = await appDb.messages.get(message2Id);
       expect(msg2AfterRenew?.status).toBe(MessageStatus.FAILED);
       expect(msg2AfterRenew?.encryptedMessage).toBeUndefined();
       // Note: seeker may still exist after renewal (it's only cleared for messages that haven't been encrypted yet)
 
-      const msg3AfterRenew = await db.messages.get(message3Id);
+      const msg3AfterRenew = await appDb.messages.get(message3Id);
       expect(msg3AfterRenew?.status).toBe(MessageStatus.FAILED);
       expect(msg3AfterRenew?.encryptedMessage).toBeUndefined();
 
-      const msg4AfterRenew = await db.messages.get(message4Id);
+      const msg4AfterRenew = await appDb.messages.get(message4Id);
       expect(msg4AfterRenew?.status).toBe(MessageStatus.FAILED);
       expect(msg4AfterRenew?.encryptedMessage).toBeUndefined();
 
@@ -1358,7 +1389,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       await announcementService.fetchAndProcessAnnouncements(bobSession);
 
       // Bob's discussion with Alice should be still ACTIVE
-      const bobDiscussion = await db.getDiscussionByOwnerAndContact(
+      const bobDiscussion = await appDb.getDiscussionByOwnerAndContact(
         bobUserId,
         aliceUserId
       );
@@ -1366,7 +1397,7 @@ describe('Message Service (Browser with Real WASM)', () => {
 
       /* STEP 5: Mock partial transport failures for resend */
       // Resend failed messages (2, 3, 4)
-      const failedMessages = await db.messages
+      const failedMessages = await appDb.messages
         .where('[ownerUserId+contactUserId]')
         .equals([aliceUserId, bobUserId])
         .and(
@@ -1402,15 +1433,15 @@ describe('Message Service (Browser with Real WASM)', () => {
       // - Message 2: success
       // - Message 3: FAILED (transport failed, but encryptedMessage was stored)
       // - Message 4: success
-      const msg2AfterResend = await db.messages.get(message2Id);
+      const msg2AfterResend = await appDb.messages.get(message2Id);
       expect(msg2AfterResend?.status).toBe(MessageStatus.SENT);
 
-      const msg3AfterResend = await db.messages.get(message3Id);
+      const msg3AfterResend = await appDb.messages.get(message3Id);
       expect(msg3AfterResend?.status).toBe(MessageStatus.FAILED); // Still FAILED, not attempted
       expect(msg3AfterResend?.encryptedMessage).toBeDefined(); // Was encrypted before transport failure
       console.log('message3Id:', message3Id);
       console.log('message4Id:', message4Id);
-      const msg4AfterResend = await db.messages.get(message4Id);
+      const msg4AfterResend = await appDb.messages.get(message4Id);
       console.log('msg4AfterResend :', msg4AfterResend);
 
       expect(msg4AfterResend?.status).toBe(MessageStatus.SENT);
@@ -1418,7 +1449,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       // Bob tries to fetch - should get messages 2 but not 4
       await messageService.fetchMessages(bobSession);
 
-      let bobReceivedMessages = await db.messages
+      let bobReceivedMessages = await appDb.messages
         .where('[ownerUserId+contactUserId+direction]')
         .equals([bobUserId, aliceUserId, MessageDirection.INCOMING])
         .sortBy('timestamp');
@@ -1435,13 +1466,14 @@ describe('Message Service (Browser with Real WASM)', () => {
       await resendFailedMessagesForContact(
         aliceUserId,
         bobUserId,
-        aliceSession
+        aliceSession,
+        messageService
       );
 
       // Bob fetches all messages
       await messageService.fetchMessages(bobSession);
 
-      bobReceivedMessages = await db.messages
+      bobReceivedMessages = await appDb.messages
         .where('[ownerUserId+contactUserId+direction]')
         .equals([bobUserId, aliceUserId, MessageDirection.INCOMING])
         .sortBy('timestamp');
@@ -1469,7 +1501,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       await messageService.fetchMessages(aliceSession);
 
       // All Alice's messages should now be DELIVERED
-      const allAliceMessages = await db.messages
+      const allAliceMessages = await appDb.messages
         .where('[ownerUserId+contactUserId+direction]')
         .equals([aliceUserId, bobUserId, MessageDirection.OUTGOING])
         .sortBy('id');
@@ -1546,7 +1578,11 @@ describe('Message Service (Browser with Real WASM)', () => {
       // Call handleSessionRefresh with no active discussions
       let error: Error | undefined;
       try {
-        await handleSessionRefresh(aliceUserId, aliceSession, []);
+        await refreshService.handleSessionRefresh(
+          aliceUserId,
+          aliceSession,
+          []
+        );
       } catch (e) {
         error = e as Error;
       }
@@ -1560,7 +1596,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       const { aliceDiscussionId, bobDiscussionId } =
         await initAliceBobSession();
 
-      let aliceDiscussion = await db.discussions.get(aliceDiscussionId);
+      let aliceDiscussion = await appDb.discussions.get(aliceDiscussionId);
       expect(aliceDiscussion?.status).toBe(DiscussionStatus.ACTIVE);
 
       // STEP 2: Wait for session inactivity timeout and call refresh
@@ -1569,7 +1605,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       ); // Wait > MAX_SESSION_INACTIVITY_MILLIS
 
       // Get active discussions before refresh
-      const activeDiscussions = await db.discussions
+      const activeDiscussions = await appDb.discussions
         .where('ownerUserId')
         .equals(aliceUserId)
         .and(
@@ -1580,27 +1616,31 @@ describe('Message Service (Browser with Real WASM)', () => {
         .toArray();
 
       // Call handleSessionRefresh - should mark discussion as BROKEN
-      await handleSessionRefresh(aliceUserId, aliceSession, activeDiscussions);
+      await refreshService.handleSessionRefresh(
+        aliceUserId,
+        aliceSession,
+        activeDiscussions
+      );
 
       // STEP 3: Verify discussion is now BROKEN
-      aliceDiscussion = await db.discussions.get(aliceDiscussionId);
+      aliceDiscussion = await appDb.discussions.get(aliceDiscussionId);
       expect(aliceDiscussion?.status).toBe(DiscussionStatus.BROKEN);
 
       // STEP 4: Renew the discussion
-      await renewDiscussion(bobUserId, aliceSession);
+      await discussionService.renew(bobUserId, aliceSession);
 
       // Bob fetches and accepts the renewal
       await announcementService.fetchAndProcessAnnouncements(bobSession);
-      const bobDiscussion = await db.discussions.get(bobDiscussionId);
+      const bobDiscussion = await appDb.discussions.get(bobDiscussionId);
       if (!bobDiscussion) throw new Error('bob discussion not found');
 
-      await acceptDiscussionRequest(bobDiscussion, bobSession);
+      await discussionService.accept(bobDiscussion, bobSession);
 
       // Alice fetches Bob's acceptance
       await announcementService.fetchAndProcessAnnouncements(aliceSession);
 
       // STEP 5: Verify discussion is now ACTIVE again
-      aliceDiscussion = await db.getDiscussionByOwnerAndContact(
+      aliceDiscussion = await appDb.getDiscussionByOwnerAndContact(
         aliceUserId,
         bobUserId
       );
@@ -1618,7 +1658,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       );
 
       // Get active discussions for both
-      const aliceActiveDiscussions = await db.discussions
+      const aliceActiveDiscussions = await appDb.discussions
         .where('ownerUserId')
         .equals(aliceUserId)
         .and(
@@ -1628,7 +1668,7 @@ describe('Message Service (Browser with Real WASM)', () => {
         )
         .toArray();
 
-      const bobActiveDiscussions = await db.discussions
+      const bobActiveDiscussions = await appDb.discussions
         .where('ownerUserId')
         .equals(bobUserId)
         .and(
@@ -1639,23 +1679,27 @@ describe('Message Service (Browser with Real WASM)', () => {
         .toArray();
 
       // Refresh both sessions - should kill discussions
-      await handleSessionRefresh(
+      await refreshService.handleSessionRefresh(
         aliceUserId,
         aliceSession,
         aliceActiveDiscussions
       );
-      await handleSessionRefresh(bobUserId, bobSession, bobActiveDiscussions);
+      await refreshService.handleSessionRefresh(
+        bobUserId,
+        bobSession,
+        bobActiveDiscussions
+      );
 
       // STEP 3: Verify both discussions are BROKEN
-      let aliceDiscussion = await db.discussions.get(aliceDiscussionId);
+      let aliceDiscussion = await appDb.discussions.get(aliceDiscussionId);
       if (!aliceDiscussion) throw new Error('alice discussion not found');
-      let bobDiscussion = await db.discussions.get(bobDiscussionId);
+      let bobDiscussion = await appDb.discussions.get(bobDiscussionId);
       if (!bobDiscussion) throw new Error('bob discussion not found');
       expect(aliceDiscussion?.status).toBe(DiscussionStatus.BROKEN);
       expect(bobDiscussion?.status).toBe(DiscussionStatus.BROKEN);
 
       // STEP 4: Alice renews the discussion
-      await renewDiscussion(bobUserId, aliceSession);
+      await discussionService.renew(bobUserId, aliceSession);
 
       await announcementService.resendAnnouncements(
         [aliceDiscussion],
@@ -1664,16 +1708,16 @@ describe('Message Service (Browser with Real WASM)', () => {
 
       // Bob fetches and accepts
       await announcementService.fetchAndProcessAnnouncements(bobSession);
-      bobDiscussion = await db.discussions.get(bobDiscussionId);
+      bobDiscussion = await appDb.discussions.get(bobDiscussionId);
       if (!bobDiscussion) throw new Error('bob discussion not found');
-      await acceptDiscussionRequest(bobDiscussion, bobSession);
+      await discussionService.accept(bobDiscussion, bobSession);
 
       // Alice fetches Bob's acceptance
       await announcementService.fetchAndProcessAnnouncements(aliceSession);
 
       // STEP 5: Verify both discussions are ACTIVE
-      aliceDiscussion = await db.discussions.get(aliceDiscussionId);
-      bobDiscussion = await db.discussions.get(bobDiscussionId);
+      aliceDiscussion = await appDb.discussions.get(aliceDiscussionId);
+      bobDiscussion = await appDb.discussions.get(bobDiscussionId);
       expect(aliceDiscussion?.status).toBe(DiscussionStatus.ACTIVE);
       expect(bobDiscussion?.status).toBe(DiscussionStatus.ACTIVE);
     });
@@ -1703,7 +1747,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       ); // Wait > KEEP_ALIVE_INTERVAL_MILLIS
 
       // Get active discussions
-      const aliceActiveDiscussions = await db.discussions
+      const aliceActiveDiscussions = await appDb.discussions
         .where('ownerUserId')
         .equals(aliceUserId)
         .and(
@@ -1714,14 +1758,14 @@ describe('Message Service (Browser with Real WASM)', () => {
         .toArray();
 
       // STEP 4: Alice calls refresh - should send keep-alive
-      await handleSessionRefresh(
+      await refreshService.handleSessionRefresh(
         aliceUserId,
         aliceSession,
         aliceActiveDiscussions
       );
 
       // STEP 5: Verify keep-alive message was created
-      const aliceMessages = await db.messages
+      const aliceMessages = await appDb.messages
         .where('[ownerUserId+contactUserId+direction]')
         .equals([aliceUserId, bobUserId, MessageDirection.OUTGOING])
         .toArray();
@@ -1736,7 +1780,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       await messageService.fetchMessages(bobSession);
 
       // Bob's message should now be DELIVERED (acknowledged by Alice's keep-alive)
-      const bobMessages = await db.messages
+      const bobMessages = await appDb.messages
         .where('[ownerUserId+contactUserId]')
         .equals([bobUserId, aliceUserId])
         .toArray();
@@ -1786,7 +1830,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       );
 
       // Get active discussions
-      const aliceActiveDiscussions = await db.discussions
+      const aliceActiveDiscussions = await appDb.discussions
         .where('ownerUserId')
         .equals(aliceUserId)
         .and(
@@ -1797,14 +1841,14 @@ describe('Message Service (Browser with Real WASM)', () => {
         .toArray();
 
       // STEP 4: Alice calls refresh - keep-alive should fail
-      await handleSessionRefresh(
+      await refreshService.handleSessionRefresh(
         aliceUserId,
         aliceSession,
         aliceActiveDiscussions
       );
 
       // STEP 5: Verify keep-alive message exists but failed
-      let aliceMessages = await db.messages
+      let aliceMessages = await appDb.messages
         .where('[ownerUserId+contactUserId]')
         .equals([aliceUserId, bobUserId])
         .toArray();
@@ -1832,7 +1876,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       await messageService.sendMessage(aliceMessage as Message, aliceSession);
 
       // check message is SENT
-      aliceMessages = await db.messages
+      aliceMessages = await appDb.messages
         .where('[ownerUserId+contactUserId]')
         .equals([aliceUserId, bobUserId])
         .toArray();
@@ -1846,11 +1890,12 @@ describe('Message Service (Browser with Real WASM)', () => {
       await resendFailedMessagesForContact(
         aliceUserId,
         bobUserId,
-        aliceSession
+        aliceSession,
+        messageService
       );
 
       // STEP 8: Verify keep-alive was resent successfully
-      aliceMessages = await db.messages
+      aliceMessages = await appDb.messages
         .where('[ownerUserId+contactUserId]')
         .equals([aliceUserId, bobUserId])
         .toArray();
@@ -1866,7 +1911,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       await messageService.fetchMessages(bobSession);
 
       // Bob's message should now be DELIVERED (acknowledged by Alice's keep-alive)
-      const bobMessages = await db.messages
+      const bobMessages = await appDb.messages
         .where('[ownerUserId+contactUserId]')
         .equals([bobUserId, aliceUserId])
         .toArray();
@@ -1901,7 +1946,7 @@ describe('Message Service (Browser with Real WASM)', () => {
 
       // STEP 3: Alice calls refresh - session should be killed, keep-alive fails
       // Get active discussions
-      let aliceActiveDiscussions = await db.discussions
+      let aliceActiveDiscussions = await appDb.discussions
         .where('ownerUserId')
         .equals(aliceUserId)
         .and(
@@ -1918,7 +1963,7 @@ describe('Message Service (Browser with Real WASM)', () => {
         .mockReturnValue(SessionStatus.Killed); // session should be killed when sending keep alive msg
 
       // call refresh function
-      await handleSessionRefresh(
+      await refreshService.handleSessionRefresh(
         aliceUserId,
         aliceSession,
         aliceActiveDiscussions
@@ -1928,7 +1973,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       aliceSessionStatusSpy.mockRestore();
 
       // verify discussion is broken
-      let aliceDiscussion = await db.discussions.get(aliceDiscussionId);
+      let aliceDiscussion = await appDb.discussions.get(aliceDiscussionId);
       expect(aliceDiscussion?.status).toBe(DiscussionStatus.BROKEN);
 
       // step 4: Alice sends a normal message which fails
@@ -1944,7 +1989,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       await messageService.sendMessage(aliceMsg as Message, aliceSession);
 
       // verify message is failed
-      const aliceMsgList = await db.messages
+      const aliceMsgList = await appDb.messages
         .where('[ownerUserId+contactUserId]')
         .equals([aliceUserId, bobUserId])
         .and(m => m.direction === MessageDirection.OUTGOING)
@@ -1957,8 +2002,8 @@ describe('Message Service (Browser with Real WASM)', () => {
       expect(aliceMsgList[1].type).toBe(MessageType.TEXT);
 
       // Step 5 : renew discussion
-      await renewDiscussion(bobUserId, aliceSession);
-      aliceDiscussion = await db.discussions.get(aliceDiscussionId);
+      await discussionService.renew(bobUserId, aliceSession);
+      aliceDiscussion = await appDb.discussions.get(aliceDiscussionId);
       if (!aliceDiscussion) throw new Error('alice discussion not found');
       await announcementService.resendAnnouncements(
         [aliceDiscussion],
@@ -1967,7 +2012,8 @@ describe('Message Service (Browser with Real WASM)', () => {
       await resendFailedMessagesForContact(
         aliceUserId,
         bobUserId,
-        aliceSession
+        aliceSession,
+        messageService
       );
 
       // Bob fetch new announcement and messages
@@ -1975,7 +2021,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       await messageService.fetchMessages(bobSession);
 
       // check bob received alice msg
-      const bobReceivedMessages = await db.messages
+      const bobReceivedMessages = await appDb.messages
         .where('[ownerUserId+contactUserId]')
         .equals([bobUserId, aliceUserId])
         .and(m => m.direction === MessageDirection.INCOMING)
@@ -1989,7 +2035,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       expect(bobReceivedMessages[1].status).toBe(MessageStatus.DELIVERED);
 
       // STEP 6: Bob's message is delivered
-      const bobMessages = await db.messages
+      const bobMessages = await appDb.messages
         .where('[ownerUserId+contactUserId]')
         .equals([bobUserId, aliceUserId])
         .toArray();
@@ -2002,7 +2048,7 @@ describe('Message Service (Browser with Real WASM)', () => {
         setTimeout(resolve, KEEP_ALIVE_INTERVAL_MILLIS)
       );
 
-      aliceActiveDiscussions = await db.discussions
+      aliceActiveDiscussions = await appDb.discussions
         .where('ownerUserId')
         .equals(aliceUserId)
         .and(
@@ -2012,14 +2058,14 @@ describe('Message Service (Browser with Real WASM)', () => {
         )
         .toArray();
 
-      await handleSessionRefresh(
+      await refreshService.handleSessionRefresh(
         aliceUserId,
         aliceSession,
         aliceActiveDiscussions
       );
 
       // STEP 9: Verify new keep-alive was sent successfully
-      const aliceMessages = await db.messages
+      const aliceMessages = await appDb.messages
         .where('[ownerUserId+contactUserId]')
         .equals([aliceUserId, bobUserId])
         .toArray();
@@ -2064,7 +2110,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       );
 
       // Get active discussions
-      const bobActiveDiscussions = await db.discussions
+      const bobActiveDiscussions = await appDb.discussions
         .where('ownerUserId')
         .equals(bobUserId)
         .and(
@@ -2075,14 +2121,18 @@ describe('Message Service (Browser with Real WASM)', () => {
         .toArray();
 
       // STEP 4: Bob calls refresh - should mark discussion as BROKEN (can't send keep-alive to killed session)
-      await handleSessionRefresh(bobUserId, bobSession, bobActiveDiscussions);
+      await refreshService.handleSessionRefresh(
+        bobUserId,
+        bobSession,
+        bobActiveDiscussions
+      );
 
       // STEP 5: Verify discussion is BROKEN
-      const bobDiscussion = await db.discussions.get(bobDiscussionId);
+      const bobDiscussion = await appDb.discussions.get(bobDiscussionId);
       expect(bobDiscussion?.status).toBe(DiscussionStatus.BROKEN);
 
       // STEP 6: Verify no keep-alive was sent (or if sent, it failed)
-      const bobMessages = await db.messages
+      const bobMessages = await appDb.messages
         .where('[ownerUserId+contactUserId]')
         .equals([bobUserId, aliceUserId])
         .toArray();
@@ -2166,7 +2216,7 @@ describe('Message Service (Browser with Real WASM)', () => {
       await messageService.fetchMessages(aliceSession);
 
       // STEP 3: Alice call refresh function
-      const aliceActiveDiscussions = await db.discussions
+      const aliceActiveDiscussions = await appDb.discussions
         .where('ownerUserId')
         .equals(aliceUserId)
         .and(
@@ -2178,18 +2228,19 @@ describe('Message Service (Browser with Real WASM)', () => {
 
       expect(aliceActiveDiscussions.length).toBe(3);
 
-      await handleSessionRefresh(
+      await refreshService.handleSessionRefresh(
         aliceUserId,
         aliceSession,
         aliceActiveDiscussions
       );
 
       // STEP 4: Verify Bob's discussion is BROKEN
-      const aliceBobDiscussion = await db.discussions.get(aliceBobDiscussionId);
+      const aliceBobDiscussion =
+        await appDb.discussions.get(aliceBobDiscussionId);
       expect(aliceBobDiscussion?.status).toBe(DiscussionStatus.BROKEN);
 
       // STEP 5: Verify Carol received keep-alive
-      const aliceCarolMessages = await db.messages
+      const aliceCarolMessages = await appDb.messages
         .where('[ownerUserId+contactUserId]')
         .equals([aliceUserId, carolUserId])
         .toArray();
@@ -2202,12 +2253,12 @@ describe('Message Service (Browser with Real WASM)', () => {
       expect(carolKeepAlive).toBeDefined();
 
       // STEP 6: Verify Dave's discussion is still ACTIVE and no keep-alive was sent
-      const aliceDaveDiscussion = await db.discussions.get(
+      const aliceDaveDiscussion = await appDb.discussions.get(
         aliceDaveDiscussionId
       );
       expect(aliceDaveDiscussion?.status).toBe(DiscussionStatus.ACTIVE);
 
-      const aliceDaveMessages = await db.messages
+      const aliceDaveMessages = await appDb.messages
         .where('[ownerUserId+contactUserId]')
         .equals([aliceUserId, daveUserId])
         .toArray();
@@ -2299,7 +2350,7 @@ describe('Message Service (Browser with Real WASM)', () => {
         seeker: originalSeeker,
       };
 
-      await db.messages.add(originalMessage);
+      await appDb.messages.add(originalMessage);
 
       // Create a reply message
       const replyMessage: Message = {

@@ -1,16 +1,16 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { liveQuery, Subscription } from 'dexie';
 import { useAccountStore } from '../stores/accountStore';
+import { restMessageProtocol } from 'gossip-sdk';
 import {
   announcementService,
   messageService,
-  renewDiscussion,
-  restMessageProtocol,
-} from 'gossip-sdk';
+  discussionService,
+} from '../services';
 import {
   Discussion,
   DiscussionStatus,
-  db,
+  db as appDb,
   MessageStatus,
   Message,
 } from '../db';
@@ -38,7 +38,7 @@ export function useManualRenewDiscussion() {
       }
 
       try {
-        await renewDiscussion(contactUserId, session as never);
+        await discussionService.renew(contactUserId, session as never);
       } catch (error) {
         console.error(
           `Failed to renew discussion with ${contactUserId}:`,
@@ -78,19 +78,23 @@ export function useResendFailedBlobs() {
 
     // Failed messages and broken discussions
     const failedSub = liveQuery(async () => {
-      return db.transaction('r', [db.messages, db.discussions], async () => {
-        const [failedMessages, broken] = await Promise.all([
-          db.messages
-            .where('[ownerUserId+status]')
-            .equals([userProfile.userId, MessageStatus.FAILED])
-            .toArray(),
-          db.discussions
-            .where('[ownerUserId+status]')
-            .equals([userProfile.userId, DiscussionStatus.BROKEN])
-            .toArray(),
-        ]);
-        return { failedMessages, broken };
-      });
+      return appDb.transaction(
+        'r',
+        [appDb.messages, appDb.discussions],
+        async () => {
+          const [failedMessages, broken] = await Promise.all([
+            appDb.messages
+              .where('[ownerUserId+status]')
+              .equals([userProfile.userId, MessageStatus.FAILED])
+              .toArray(),
+            appDb.discussions
+              .where('[ownerUserId+status]')
+              .equals([userProfile.userId, DiscussionStatus.BROKEN])
+              .toArray(),
+          ]);
+          return { failedMessages, broken };
+        }
+      );
     }).subscribe({
       next: ({ failedMessages, broken }) => {
         // Update refs directly - no need for state since we only use refs
@@ -113,7 +117,7 @@ export function useResendFailedBlobs() {
 
     // Send-failed discussions (announcement failed to send)
     const sendFailedSub = liveQuery(() =>
-      db.discussions
+      appDb.discussions
         .where('[ownerUserId+status]')
         .equals([userProfile.userId, DiscussionStatus.SEND_FAILED])
         .toArray()
@@ -142,7 +146,10 @@ export function useResendFailedBlobs() {
       const currentBrokenDiscussions = brokenDiscussionsRef.current;
       for (const discussion of currentBrokenDiscussions) {
         try {
-          await renewDiscussion(discussion.contactUserId, session as never);
+          await discussionService.renew(
+            discussion.contactUserId,
+            session as never
+          );
         } catch (err) {
           console.error(
             `Failed to reinitiate discussion ${discussion.contactUserId}:`,

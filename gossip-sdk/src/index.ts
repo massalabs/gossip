@@ -3,52 +3,30 @@
  *
  * Main entry point for the Gossip SDK.
  * Provides a platform-agnostic interface for automation, chatbot,
- * and integration use cases with the Gossip messenger. Configure
- * runtime adapters (stores, db, preferences, notifications) before use.
+ * and integration use cases with the Gossip messenger.
  *
  * @example
  * ```typescript
  * import {
- *   configureSdk,
- *   initializeAccount,
- *   addContact,
- *   initializeDiscussion,
- *   sendMessage,
- *   getSession,
+ *   MessageService,
+ *   AnnouncementService,
+ *   DiscussionService,
+ *   RefreshService,
+ *   AuthService,
+ *   db,
  * } from 'gossip-sdk';
  *
- * configureSdk({
- *   accountStore,
- *   walletStore,
- *   db,
- *   preferences,
- *   notificationHandler,
- * });
+ * // Create service instances with dependencies
+ * const messageProtocol = createMessageProtocol();
+ * const authService = new AuthService(db, messageProtocol);
+ * const announcementService = new AnnouncementService(db, messageProtocol);
+ * const messageService = new MessageService(db, messageProtocol);
+ * const discussionService = new DiscussionService(db, announcementService);
+ * const refreshService = new RefreshService(db, messageService);
  *
- * // Create a new account
- * const accountResult = await initializeAccount('alice', 'secure-password');
- * if (!accountResult.success) {
- *   throw new Error(accountResult.error);
- * }
- *
- * // Get session for operations
- * const session = getSession();
- *
- * // Add a contact and start a discussion
- * const contactResult = await addContact(
- *   accountResult.userProfile.userId,
- *   contactUserId,
- *   'Bob',
- *   bobPublicKeys
- * );
- *
- * if (contactResult.success && session) {
- *   const discussionResult = await initializeDiscussion(
- *     contactResult.contact,
- *     session,
- *     'Hello Bob!'
- *   );
- * }
+ * // Use services
+ * const result = await discussionService.initialize(contact, session, 'Hello!');
+ * await messageService.sendMessage(message, session);
  * ```
  *
  * @packageDocumentation
@@ -79,10 +57,35 @@ export type {
 } from './account';
 export type { AccountStoreAdapter, AccountStoreState } from './utils';
 
-// Authentication & Public Keys
-export { fetchPublicKeyByUserId, ensurePublicKeyPublished } from './auth';
+// Services - class-based with dependency injection
+export { AuthService } from './services/auth';
+export type { PublicKeyResult } from './services/auth';
+export {
+  getPublicKeyErrorMessage,
+  PUBLIC_KEY_NOT_FOUND_ERROR,
+  PUBLIC_KEY_NOT_FOUND_MESSAGE,
+  FAILED_TO_FETCH_ERROR,
+  FAILED_TO_FETCH_MESSAGE,
+  FAILED_TO_RETRIEVE_CONTACT_PUBLIC_KEY_ERROR,
+} from './services/auth';
 
-// Contact Management
+export {
+  AnnouncementService,
+  EstablishSessionError,
+} from './services/announcement';
+export type {
+  NotificationHandler,
+  AnnouncementReceptionResult,
+} from './services/announcement';
+
+export { MessageService } from './services/message';
+export type { MessageResult, SendMessageResult } from './services/message';
+
+export { DiscussionService } from './services/discussion';
+
+export { RefreshService } from './services/refresh';
+
+// Contact Management (utility functions)
 export {
   getContacts,
   getContact,
@@ -90,39 +93,14 @@ export {
   updateContactName,
   deleteContact,
 } from './contacts';
+export type {
+  UpdateContactNameResult,
+  DeleteContactResult,
+} from './utils/contacts';
 
-// Discussion Management
-export {
-  initializeDiscussion,
-  acceptDiscussionRequest,
-  renewDiscussion,
-  updateDiscussionName,
-  isDiscussionStableState,
-  getDiscussions,
-  getDiscussion,
-  getActiveDiscussions,
-  getUnreadCount,
-  markDiscussionAsRead,
-} from './discussions';
-
-// Message Operations
-export {
-  sendMessage,
-  fetchMessages,
-  resendMessages,
-  findMessageBySeeker,
-  getMessages,
-  getMessage,
-  getMessagesForContact,
-} from './messages';
-
-// Announcement Handling
-export {
-  fetchAndProcessAnnouncements,
-  resendAnnouncements,
-  sendAnnouncement,
-  establishSession,
-} from './announcements';
+// Discussion utilities
+export { updateDiscussionName } from './utils/discussions';
+export type { UpdateDiscussionNameResult } from './utils/discussions';
 
 // Wallet Operations
 export {
@@ -163,29 +141,6 @@ export {
   getAccountStore,
 } from './utils';
 
-// Services - for direct use by host apps and other clients
-export {
-  authService,
-  AuthService,
-  getPublicKeyErrorMessage,
-  PUBLIC_KEY_NOT_FOUND_ERROR,
-  PUBLIC_KEY_NOT_FOUND_MESSAGE,
-  FAILED_TO_FETCH_ERROR,
-  FAILED_TO_FETCH_MESSAGE,
-  FAILED_TO_RETRIEVE_CONTACT_PUBLIC_KEY_ERROR,
-} from './services/auth';
-export type { PublicKeyResult } from './services/auth';
-// Note: initializeDiscussion, acceptDiscussionRequest, renewDiscussion, isDiscussionStableState
-// are already exported from ./discussions which re-exports from ./services/discussion
-export { messageService, MessageService } from './services/message';
-export {
-  announcementService,
-  AnnouncementService,
-  EstablishSessionError,
-} from './services/announcement';
-export type { NotificationHandler } from './services/announcement';
-export { handleSessionRefresh } from './services/refresh';
-
 // Message Protocol - for direct use by host apps
 export {
   createMessageProtocol,
@@ -210,7 +165,7 @@ export {
 export type { ProtocolConfig } from './config/protocol';
 
 // Database - for direct access by host apps
-export { setDb, db, type GossipDatabase } from './db';
+export { setDb, getDb, db, GossipDatabase } from './db';
 
 // WASM utilities - for session management
 export { SessionModule, sessionStatusToString } from './wasm/session';
@@ -262,11 +217,6 @@ export {
   encodeToBase64Url,
   decodeFromBase64Url,
 } from './utils/base64';
-export type {
-  UpdateContactNameResult,
-  DeleteContactResult,
-} from './utils/contacts';
-export type { UpdateDiscussionNameResult } from './utils/discussions';
 export type { Result } from './utils/type';
 
 // Message serialization utilities

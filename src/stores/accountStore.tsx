@@ -24,10 +24,10 @@ import {
   EncryptionKey,
   generateNonce,
   SessionModule,
-  authService,
   validateUsernameFormat,
   ensureWasmInitialized,
 } from 'gossip-sdk';
+import { authService } from '../services';
 import { getActiveOrFirstProfile } from './utils/getAccount';
 import { auth } from './utils/auth';
 import { useDiscussionStore } from './discussionStore';

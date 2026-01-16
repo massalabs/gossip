@@ -5,13 +5,13 @@
  */
 
 import {
-  db,
   type Discussion,
+  type GossipDatabase,
   DiscussionStatus,
   DiscussionDirection,
 } from '../db';
 import { decodeUserId, encodeUserId } from '../utils/userId';
-import { IMessageProtocol, restMessageProtocol } from '../api/messageProtocol';
+import { IMessageProtocol } from '../api/messageProtocol';
 import {
   UserPublicKeys,
   SessionStatus,
@@ -44,14 +44,17 @@ export interface NotificationHandler {
 }
 
 export class AnnouncementService {
+  private db: GossipDatabase;
   private messageProtocol: IMessageProtocol;
   private isProcessingAnnouncements = false;
   private notificationHandler?: NotificationHandler;
 
   constructor(
+    db: GossipDatabase,
     messageProtocol: IMessageProtocol,
     notificationHandler?: NotificationHandler
   ) {
+    this.db = db;
     this.messageProtocol = messageProtocol;
     this.notificationHandler = notificationHandler;
   }
@@ -147,7 +150,7 @@ export class AnnouncementService {
 
     this.isProcessingAnnouncements = true;
     try {
-      const pending = await db.pendingAnnouncements.toArray();
+      const pending = await this.db.pendingAnnouncements.toArray();
 
       if (pending.length > 0) {
         log.info(
@@ -162,9 +165,9 @@ export class AnnouncementService {
         const ids = pending
           .map(p => p.id)
           .filter((id): id is number => id !== undefined);
-        if (ids.length > 0) await db.pendingAnnouncements.bulkDelete(ids);
+        if (ids.length > 0) await this.db.pendingAnnouncements.bulkDelete(ids);
       } else {
-        const cursor = (await db.userProfile.get(session.userIdEncoded))
+        const cursor = (await this.db.userProfile.get(session.userIdEncoded))
           ?.lastBulletinCounter;
 
         const fetched = await this._fetchAnnouncements(cursor);
@@ -198,7 +201,7 @@ export class AnnouncementService {
         const highestCounter = fetchedCounters.reduce((a, b) =>
           Number(a) > Number(b) ? a : b
         );
-        await db.userProfile.update(session.userIdEncoded, {
+        await this.db.userProfile.update(session.userIdEncoded, {
           lastBulletinCounter: highestCounter,
         });
         log.info('updated lastBulletinCounter', { highestCounter });
@@ -276,7 +279,7 @@ export class AnnouncementService {
     }
 
     if (sentDiscussions.length > 0 || brokenDiscussions.length > 0) {
-      await db.transaction('rw', db.discussions, async () => {
+      await this.db.transaction('rw', this.db.discussions, async () => {
         const now = new Date();
 
         if (sentDiscussions.length > 0) {
@@ -303,7 +306,7 @@ export class AnnouncementService {
                   ? DiscussionStatus.ACTIVE
                   : DiscussionStatus.PENDING;
 
-              await db.discussions.update(discussion.id!, {
+              await this.db.discussions.update(discussion.id!, {
                 status: newStatus,
                 updatedAt: now,
               });
@@ -320,7 +323,7 @@ export class AnnouncementService {
           log.info(`marking ${brokenDiscussions.length} discussions as BROKEN`);
           await Promise.all(
             brokenDiscussions.map(id =>
-              db.discussions.update(id, {
+              this.db.discussions.update(id, {
                 status: DiscussionStatus.BROKEN,
                 initiationAnnouncement: undefined,
                 updatedAt: now,
@@ -358,7 +361,7 @@ export class AnnouncementService {
   private async _generateTemporaryContactName(
     ownerUserId: string
   ): Promise<string> {
-    const newRequestContacts = await db.contacts
+    const newRequestContacts = await this.db.contacts
       .where('ownerUserId')
       .equals(ownerUserId)
       .filter(contact => contact.name.startsWith('New Request'))
@@ -413,7 +416,7 @@ export class AnnouncementService {
       status: sessionStatusToString(sessionStatus),
     });
 
-    let contact = await db.getContactByOwnerAndUserId(
+    let contact = await this.db.getContactByOwnerAndUserId(
       session.userIdEncoded,
       contactUserId
     );
@@ -423,7 +426,7 @@ export class AnnouncementService {
       const name = await this._generateTemporaryContactName(
         session.userIdEncoded
       );
-      await db.contacts.add({
+      await this.db.contacts.add({
         ownerUserId: session.userIdEncoded,
         userId: contactUserId,
         name,
@@ -434,7 +437,7 @@ export class AnnouncementService {
         createdAt: new Date(),
       });
 
-      contact = await db.getContactByOwnerAndUserId(
+      contact = await this.db.getContactByOwnerAndUserId(
         session.userIdEncoded,
         contactUserId
       );
@@ -446,7 +449,7 @@ export class AnnouncementService {
       throw new Error('Could not find or create contact');
     }
 
-    const { discussionId } = await handleReceivedDiscussion(
+    const { discussionId } = await this._handleReceivedDiscussion(
       session.userIdEncoded,
       contactUserId,
       announcementMessage
@@ -473,62 +476,64 @@ export class AnnouncementService {
       contactUserId,
     };
   }
-}
 
-async function handleReceivedDiscussion(
-  ownerUserId: string,
-  contactUserId: string,
-  announcementMessage?: string
-): Promise<{ discussionId: number }> {
-  const log = logger.forMethod('handleReceivedDiscussion');
+  private async _handleReceivedDiscussion(
+    ownerUserId: string,
+    contactUserId: string,
+    announcementMessage?: string
+  ): Promise<{ discussionId: number }> {
+    const log = logger.forMethod('handleReceivedDiscussion');
 
-  const discussionId = await db.transaction('rw', db.discussions, async () => {
-    const existing = await db.getDiscussionByOwnerAndContact(
-      ownerUserId,
-      contactUserId
-    );
+    const discussionId = await this.db.transaction(
+      'rw',
+      this.db.discussions,
+      async () => {
+        const existing = await this.db.getDiscussionByOwnerAndContact(
+          ownerUserId,
+          contactUserId
+        );
 
-    if (existing) {
-      const updateData: Partial<Discussion> = { updatedAt: new Date() };
-      if (announcementMessage)
-        updateData.announcementMessage = announcementMessage;
+        if (existing) {
+          const updateData: Partial<Discussion> = { updatedAt: new Date() };
+          if (announcementMessage)
+            updateData.announcementMessage = announcementMessage;
 
-      if (
-        existing.status === DiscussionStatus.PENDING &&
-        existing.direction === DiscussionDirection.INITIATED
-      ) {
-        updateData.status = DiscussionStatus.ACTIVE;
-        log.info('transitioning to ACTIVE', {
-          discussionId: existing.id,
+          if (
+            existing.status === DiscussionStatus.PENDING &&
+            existing.direction === DiscussionDirection.INITIATED
+          ) {
+            updateData.status = DiscussionStatus.ACTIVE;
+            log.info('transitioning to ACTIVE', {
+              discussionId: existing.id,
+              contactUserId,
+            });
+          } else {
+            log.info('updating existing discussion', {
+              discussionId: existing.id,
+              status: existing.status,
+              direction: existing.direction,
+            });
+          }
+
+          await this.db.discussions.update(existing.id!, updateData);
+          return existing.id!;
+        }
+
+        log.info('creating new RECEIVED/PENDING discussion', { contactUserId });
+        return await this.db.discussions.add({
+          ownerUserId,
           contactUserId,
-        });
-      } else {
-        log.info('updating existing discussion', {
-          discussionId: existing.id,
-          status: existing.status,
-          direction: existing.direction,
+          direction: DiscussionDirection.RECEIVED,
+          status: DiscussionStatus.PENDING,
+          nextSeeker: undefined,
+          announcementMessage,
+          unreadCount: 0,
+          createdAt: new Date(),
+          updatedAt: new Date(),
         });
       }
+    );
 
-      await db.discussions.update(existing.id!, updateData);
-      return existing.id!;
-    }
-
-    log.info('creating new RECEIVED/PENDING discussion', { contactUserId });
-    return await db.discussions.add({
-      ownerUserId,
-      contactUserId,
-      direction: DiscussionDirection.RECEIVED,
-      status: DiscussionStatus.PENDING,
-      nextSeeker: undefined,
-      announcementMessage,
-      unreadCount: 0,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
-  });
-
-  return { discussionId };
+    return { discussionId };
+  }
 }
-
-export const announcementService = new AnnouncementService(restMessageProtocol);

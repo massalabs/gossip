@@ -22,7 +22,7 @@ import {
   updateContactName as updateContactNameUtil,
   deleteContact as deleteContactUtil,
 } from './utils/contacts';
-import { db, type Contact } from './db';
+import { type Contact, type GossipDatabase } from './db';
 import type {
   UpdateContactNameResult,
   DeleteContactResult,
@@ -36,15 +36,19 @@ export type { UpdateContactNameResult, DeleteContactResult };
  * Get all contacts for an owner.
  *
  * @param ownerUserId - The user ID of the contact owner
+ * @param db - Database instance
  * @returns Array of contacts
  *
  * @example
  * ```typescript
- * const contacts = await getContacts(myUserId);
+ * const contacts = await getContacts(myUserId, db);
  * contacts.forEach(c => console.log(c.name, c.userId));
  * ```
  */
-export async function getContacts(ownerUserId: string): Promise<Contact[]> {
+export async function getContacts(
+  ownerUserId: string,
+  db: GossipDatabase
+): Promise<Contact[]> {
   try {
     return await db.getContactsByOwner(ownerUserId);
   } catch (error) {
@@ -58,11 +62,12 @@ export async function getContacts(ownerUserId: string): Promise<Contact[]> {
  *
  * @param ownerUserId - The user ID of the contact owner
  * @param contactUserId - The user ID of the contact
+ * @param db - Database instance
  * @returns Contact or null if not found
  *
  * @example
  * ```typescript
- * const contact = await getContact(myUserId, theirUserId);
+ * const contact = await getContact(myUserId, theirUserId, db);
  * if (contact) {
  *   console.log('Found contact:', contact.name);
  * }
@@ -70,7 +75,8 @@ export async function getContacts(ownerUserId: string): Promise<Contact[]> {
  */
 export async function getContact(
   ownerUserId: string,
-  contactUserId: string
+  contactUserId: string,
+  db: GossipDatabase
 ): Promise<Contact | null> {
   try {
     const contact = await db.getContactByOwnerAndUserId(
@@ -91,6 +97,7 @@ export async function getContact(
  * @param userId - The user ID of the contact (Bech32-encoded)
  * @param name - Display name for the contact
  * @param publicKeys - The contact's public keys
+ * @param db - Database instance
  * @returns Result with success status and optional contact
  *
  * @example
@@ -99,7 +106,8 @@ export async function getContact(
  *   myUserId,
  *   'gossip1abc...',
  *   'Alice',
- *   alicePublicKeys
+ *   alicePublicKeys,
+ *   db
  * );
  * if (result.success) {
  *   console.log('Contact added:', result.contact?.name);
@@ -112,7 +120,8 @@ export async function addContact(
   ownerUserId: string,
   userId: string,
   name: string,
-  publicKeys: UserPublicKeys
+  publicKeys: UserPublicKeys,
+  db: GossipDatabase
 ): Promise<{ success: boolean; error?: string; contact?: Contact }> {
   try {
     // Check if contact already exists
@@ -149,11 +158,12 @@ export async function addContact(
  * @param ownerUserId - The user ID of the contact owner
  * @param contactUserId - The user ID of the contact
  * @param newName - New name for the contact
+ * @param db - Database instance
  * @returns Result with success status and trimmed name
  *
  * @example
  * ```typescript
- * const result = await updateContactName(myUserId, theirUserId, 'Alice Smith');
+ * const result = await updateContactName(myUserId, theirUserId, 'Alice Smith', db);
  * if (result.ok) {
  *   console.log('Updated to:', result.trimmedName);
  * } else {
@@ -164,9 +174,10 @@ export async function addContact(
 export async function updateContactName(
   ownerUserId: string,
   contactUserId: string,
-  newName: string
+  newName: string,
+  db: GossipDatabase
 ): Promise<UpdateContactNameResult> {
-  return await updateContactNameUtil(ownerUserId, contactUserId, newName);
+  return await updateContactNameUtil(ownerUserId, contactUserId, newName, db);
 }
 
 /**
@@ -174,11 +185,12 @@ export async function updateContactName(
  *
  * @param ownerUserId - The user ID of the contact owner
  * @param contactUserId - The user ID of the contact to delete
+ * @param db - Database instance
  * @returns Result with success status
  *
  * @example
  * ```typescript
- * const result = await deleteContact(myUserId, theirUserId);
+ * const result = await deleteContact(myUserId, theirUserId, db);
  * if (result.ok) {
  *   console.log('Contact deleted');
  * } else {
@@ -188,7 +200,8 @@ export async function updateContactName(
  */
 export async function deleteContact(
   ownerUserId: string,
-  contactUserId: string
+  contactUserId: string,
+  db: GossipDatabase
 ): Promise<DeleteContactResult> {
-  return await deleteContactUtil(ownerUserId, contactUserId);
+  return await deleteContactUtil(ownerUserId, contactUserId, db);
 }

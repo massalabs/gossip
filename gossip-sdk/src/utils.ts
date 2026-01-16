@@ -40,13 +40,8 @@ import type {
 } from './assets/generated/wasm/gossip_wasm';
 import type { UserProfile, GossipDatabase } from './db';
 import type { PreferencesAdapter } from './utils/preferences';
-import type { NotificationHandler } from './services/announcement';
 import { setPreferencesAdapter } from './utils/preferences';
 import { setDb } from './db';
-import { announcementService } from './services/announcement';
-import { messageService } from './services/message';
-import { restMessageProtocol } from './api/messageProtocol';
-import { setAuthMessageProtocol } from './services/auth';
 import { setWalletStore, type WalletStoreAdapter } from './wallet';
 
 export interface AccountStoreState {
@@ -242,14 +237,16 @@ export function isAccountLoading(): boolean {
 export interface SdkRuntimeConfig {
   db?: GossipDatabase;
   preferences?: PreferencesAdapter | null;
-  notificationHandler?: NotificationHandler;
   accountStore?: AccountStoreAdapter;
   walletStore?: WalletStoreAdapter;
 }
 
 /**
- * Configure runtime adapters and protocol defaults for the SDK.
+ * Configure runtime adapters for the SDK.
  * Call this once during application startup.
+ *
+ * Note: Service instances (MessageService, AnnouncementService, etc.)
+ * should be created by the app with the required dependencies.
  */
 export function configureSdk(config: SdkRuntimeConfig): void {
   if (config.db) {
@@ -260,10 +257,6 @@ export function configureSdk(config: SdkRuntimeConfig): void {
     setPreferencesAdapter(config.preferences ?? null);
   }
 
-  if (config.notificationHandler) {
-    announcementService.setNotificationHandler(config.notificationHandler);
-  }
-
   if (config.accountStore) {
     setAccountStore(config.accountStore);
   }
@@ -271,7 +264,4 @@ export function configureSdk(config: SdkRuntimeConfig): void {
   if (config.walletStore) {
     setWalletStore(config.walletStore);
   }
-
-  messageService.setMessageProtocol(restMessageProtocol);
-  setAuthMessageProtocol(restMessageProtocol);
 }

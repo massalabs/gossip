@@ -7,8 +7,8 @@ import { useOnlineStoreBase } from '../stores/useOnlineStore.tsx';
 import {
   messageService,
   announcementService,
-  handleSessionRefresh,
-} from 'gossip-sdk';
+  refreshService,
+} from '../services';
 import { useResendFailedBlobs } from './useResendFailedBlobs.ts';
 import { DiscussionStatus } from '../db.ts';
 
@@ -50,7 +50,7 @@ export function useAppStateRefresh() {
           sessionRefreshCycle.current % SESSION_REFRESH_EVERY_N_CYCLES ===
           0
         ) {
-          await handleSessionRefresh(
+          await refreshService.handleSessionRefresh(
             userProfile.userId,
             session as never,
             useDiscussionStore

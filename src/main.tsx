@@ -12,7 +12,6 @@ import { startWasmInitialization } from 'gossip-sdk';
 import { configureSdk, setProtocolBaseUrl } from 'gossip-sdk';
 import { protocolConfig } from './config/protocol';
 import { db } from './db';
-import { notificationService } from './services/notifications';
 import { Preferences } from '@capacitor/preferences';
 import { useAccountStore } from './stores/accountStore';
 import { useWalletStore } from './stores/walletStore';
@@ -104,7 +103,6 @@ configureSdk({
       await Preferences.remove({ key });
     },
   },
-  notificationHandler: notificationService,
   accountStore: {
     getState: useAccountStore.getState,
     initializeAccount: (username, password) =>

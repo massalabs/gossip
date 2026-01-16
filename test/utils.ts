@@ -1,13 +1,16 @@
-import { db as appDb, Contact } from '../src/db';
+import { Contact, db as localAppDb } from '../src/db';
 import { MockSessionModule } from './wasm/mock';
 import {
   UserPublicKeys,
   UserSecretKeys,
   generateUserKeys,
   UserKeys,
-  initializeDiscussion,
   encodeUserId,
+  DiscussionService,
+  AnnouncementService,
 } from 'gossip-sdk';
+import { createMessageProtocol } from '../src/api/messageProtocol';
+import { MessageProtocolType } from '../src/config/protocol';
 
 interface InitSessionResult {
   aliceDiscussionId: number;
@@ -100,10 +103,15 @@ export async function initSession(
   aliceSk: UserSecretKeys,
   bobPk: UserPublicKeys,
   bobSk: UserSecretKeys,
-  db = appDb,
+  appDb = localAppDb,
   aliceSession: MockSessionModule,
   bobSession: MockSessionModule
 ): Promise<InitSessionResult> {
+  // Create services for the test
+  const mockProtocol = createMessageProtocol(MessageProtocolType.MOCK);
+  const announcementService = new AnnouncementService(appDb, mockProtocol);
+  const discussionService = new DiscussionService(appDb, announcementService);
+
   const aliceBobContact: Omit<Contact, 'id'> = {
     ownerUserId: aliceSession.userIdEncoded,
     userId: bobSession.userIdEncoded,
@@ -127,8 +135,8 @@ export async function initSession(
   };
 
   // Add contacts
-  await db.contacts.add(aliceBobContact);
-  await db.contacts.add(bobAliceContact);
+  await appDb.contacts.add(aliceBobContact);
+  await appDb.contacts.add(bobAliceContact);
 
   // Mock announcements
   const aliceAnnouncement = new Uint8Array(200);
@@ -140,12 +148,13 @@ export async function initSession(
   bobSession.establishOutgoingSession.mockReturnValue(bobAnnouncement);
 
   // Initialize discussions
-  const { discussionId: aliceDiscussionId } = await initializeDiscussion(
-    aliceBobContact,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    aliceSession as any
-  );
-  const { discussionId: bobDiscussionId } = await initializeDiscussion(
+  const { discussionId: aliceDiscussionId } =
+    await discussionService.initialize(
+      aliceBobContact,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      aliceSession as any
+    );
+  const { discussionId: bobDiscussionId } = await discussionService.initialize(
     bobAliceContact,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     bobSession as any
