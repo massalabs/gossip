@@ -45,6 +45,7 @@ import {
   type Discussion,
   type Message,
   type UserProfile,
+  MessageStatus,
 } from './db';
 import { setDb } from './db';
 import { IMessageProtocol, createMessageProtocol } from './api/messageProtocol';
@@ -334,6 +335,10 @@ class GossipSdkImpl {
     );
     this._refresh = new RefreshService(db, this._message, session, events);
 
+    // Reset any messages stuck in SENDING status to FAILED
+    // This handles app crash/close during message send
+    await this.resetStuckSendingMessages(db);
+
     this.state = {
       status: 'session_open',
       db,
@@ -572,6 +577,28 @@ class GossipSdkImpl {
       await onPersist(blob, persistEncryptionKey);
     } catch (error) {
       console.error('[GossipSdk] Session persistence failed:', error);
+    }
+  }
+
+  /**
+   * Reset any messages stuck in SENDING status to FAILED.
+   * This handles the case where the app crashed or was closed during message send.
+   * Per spec: SENDING should never be persisted - if we find it on startup, it failed.
+   */
+  private async resetStuckSendingMessages(db: GossipDatabase): Promise<void> {
+    try {
+      const count = await db.messages
+        .where('status')
+        .equals(MessageStatus.SENDING)
+        .modify({ status: MessageStatus.FAILED });
+
+      if (count > 0) {
+        console.log(
+          `[GossipSdk] Reset ${count} stuck SENDING message(s) to FAILED`
+        );
+      }
+    } catch (error) {
+      console.error('[GossipSdk] Failed to reset stuck messages:', error);
     }
   }
 }

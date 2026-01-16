@@ -450,6 +450,11 @@ export function setDb(database: GossipDatabase): void {
  */
 export const db: GossipDatabase = new Proxy({} as GossipDatabase, {
   get(_target, prop) {
-    return Reflect.get(getDb(), prop);
+    const target = getDb();
+    const value = Reflect.get(target, prop);
+    if (typeof value === 'function') {
+      return value.bind(target);
+    }
+    return value;
   },
 });
