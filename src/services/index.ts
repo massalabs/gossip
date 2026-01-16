@@ -5,9 +5,10 @@
  * The SDK singleton (gossipSdk) handles all session-scoped services.
  */
 
-import { AuthService, db, createMessageProtocol, gossipSdk } from 'gossip-sdk';
+import { AuthService, createMessageProtocol, gossipSdk } from 'gossip-sdk';
 import { notificationService } from './notifications';
 import { isAppInForeground } from '../utils/appState';
+import { db } from '../db';
 
 // Create message protocol instance (app-scoped)
 const messageProtocol = createMessageProtocol();

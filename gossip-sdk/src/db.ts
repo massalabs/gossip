@@ -420,6 +420,7 @@ export class GossipDatabase extends Dexie {
 
 // Database instance - initialized lazily or via setDb()
 let _db: GossipDatabase | null = null;
+let _warnedGlobalDbAccess = false;
 
 /**
  * Get the database instance.
@@ -450,6 +451,12 @@ export function setDb(database: GossipDatabase): void {
  */
 export const db: GossipDatabase = new Proxy({} as GossipDatabase, {
   get(_target, prop) {
+    if (!_warnedGlobalDbAccess) {
+      _warnedGlobalDbAccess = true;
+      console.warn(
+        '[GossipSdk] Global db access is deprecated. Use createGossipSdk() or setDb().'
+      );
+    }
     const target = getDb();
     const value = Reflect.get(target, prop);
     if (typeof value === 'function') {

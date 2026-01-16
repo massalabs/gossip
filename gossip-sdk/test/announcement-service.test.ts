@@ -56,4 +56,48 @@ describe('AnnouncementService', () => {
     expect(result.success).toBe(false);
     expect(result.error).toBe('network error');
   });
+
+  it('keeps pending announcements when processing fails', async () => {
+    const messageProtocol = createMockProtocol();
+    const session = { userIdEncoded: 'gossip1test' } as SessionModule;
+    const service = new AnnouncementService(db, messageProtocol, session);
+
+    await db.userProfile.put({
+      userId: session.userIdEncoded,
+      username: 'test',
+      security: {
+        encKeySalt: new Uint8Array(),
+        authMethod: 'password',
+        mnemonicBackup: {
+          encryptedMnemonic: new Uint8Array(),
+          createdAt: new Date(),
+          backedUp: false,
+        },
+      },
+      session: new Uint8Array(),
+      status: 'online',
+      lastSeen: new Date(),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    await db.pendingAnnouncements.add({
+      announcement: new Uint8Array([1, 2, 3]),
+      fetchedAt: new Date(),
+      counter: '1',
+    });
+
+    (
+      service as unknown as {
+        _processIncomingAnnouncement?: (data: Uint8Array) => unknown;
+      }
+    )._processIncomingAnnouncement = vi
+      .fn()
+      .mockRejectedValue(new Error('decode failed'));
+
+    await service.fetchAndProcessAnnouncements();
+
+    const remaining = await db.pendingAnnouncements.toArray();
+    expect(remaining.length).toBe(1);
+  });
 });

@@ -126,6 +126,8 @@ export interface GossipSdk {
  * This is the main entry point for using the gossip SDK.
  * Call this after user login when you have a valid session.
  *
+ * @deprecated Prefer using the singleton `gossipSdk` for app integrations.
+ *
  * @param db - The gossip database instance
  * @param messageProtocol - The message protocol for network communication
  * @param session - The user's session module (from WASM)

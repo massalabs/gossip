@@ -49,6 +49,7 @@ export type {
 // ─────────────────────────────────────────────────────────────────────────────
 // SDK Factory - For testing multi-user scenarios
 // Use gossipSdk singleton for production app code
+// @deprecated Prefer `gossipSdk` singleton for app integrations
 // ─────────────────────────────────────────────────────────────────────────────
 export { createGossipSdk } from './sdk';
 export type { GossipSdk, SdkUtils, GossipSdkEvents } from './sdk';

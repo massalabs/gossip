@@ -245,6 +245,18 @@ class GossipSdkImpl {
       throw new Error('Session already open. Call closeSession() first.');
     }
 
+    if (options.encryptedSession && !options.encryptionKey) {
+      throw new Error(
+        'encryptionKey is required when encryptedSession is provided.'
+      );
+    }
+
+    if (options.onPersist && !options.persistEncryptionKey) {
+      throw new Error(
+        'persistEncryptionKey is required when onPersist is provided.'
+      );
+    }
+
     const { db, messageProtocol } = this.state;
 
     // Validate session restore options - must have both or neither
