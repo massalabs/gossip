@@ -19,12 +19,7 @@
     "resolveJsonModule": true,
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
-    "types": ["vite/client"],
-    "baseUrl": ".",
-    "paths": {
-      "@/*": ["src/*"],
-      "@/assets/generated/wasm/*": ["src/assets/generated/wasm/*"]
-    }
+    "types": ["vite/client"]
   },
   "include": ["src", "test", "../src/vite-env.d.ts"]
 }

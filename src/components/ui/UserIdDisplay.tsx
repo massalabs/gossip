@@ -1,5 +1,5 @@
 import React from 'react';
-import { formatUserId } from '../../../gossip-sdk/src/utils/userId';
+import { formatUserId } from 'gossip-sdk';
 import CopyClipboard from './CopyClipboard';
 
 interface UserIdDisplayProps {

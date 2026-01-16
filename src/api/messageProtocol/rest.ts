@@ -8,10 +8,7 @@ import {
   IMessageProtocol,
   MessageProtocolResponse,
 } from './types';
-import {
-  encodeToBase64,
-  decodeFromBase64,
-} from '../../../gossip-sdk/src/utils/base64';
+import { encodeToBase64, decodeFromBase64 } from 'gossip-sdk';
 
 const BULLETIN_ENDPOINT = '/bulletin';
 const MESSAGES_ENDPOINT = '/messages';

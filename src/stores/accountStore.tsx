@@ -1,13 +1,14 @@
 import { create } from 'zustand';
 import { db, UserProfile } from '../db';
 
-import { encrypt, deriveKey } from '../../gossip-sdk/src/crypto/encryption';
-import { isWebAuthnSupported } from '../crypto/webauthn';
-import { biometricService } from '../services/biometricService';
 import {
+  encrypt,
+  deriveKey,
   generateMnemonic,
   validateMnemonic,
-} from '../../gossip-sdk/src/crypto/bip39';
+} from 'gossip-sdk';
+import { isWebAuthnSupported } from '../crypto/webauthn';
+import { biometricService } from '../services/biometricService';
 import {
   Provider,
   Account,
@@ -26,7 +27,7 @@ import {
   authService,
   validateUsernameFormat,
   ensureWasmInitialized,
-} from '../../gossip-sdk/src';
+} from 'gossip-sdk';
 import { getActiveOrFirstProfile } from './utils/getAccount';
 import { auth } from './utils/auth';
 import { useDiscussionStore } from './discussionStore';

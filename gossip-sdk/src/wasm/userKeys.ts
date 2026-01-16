@@ -9,7 +9,7 @@ import { ensureWasmInitialized } from './loader';
 import {
   generate_user_keys as _generate_user_keys,
   UserKeys,
-} from '@/assets/generated/wasm/gossip_wasm';
+} from '../assets/generated/wasm/gossip_wasm';
 
 // Re-export classes
 export { UserKeys };

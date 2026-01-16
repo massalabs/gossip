@@ -4,7 +4,7 @@ import { useAccountStore } from './accountStore';
 import { priceFetcher } from '../utils/fetchPrice';
 import { createSelectors } from './utils/createSelectors';
 
-import type { FeeConfig, TokenState } from '../../gossip-sdk/src/wallet';
+import type { FeeConfig, TokenState } from 'gossip-sdk';
 import { initialTokens } from './utils/const';
 
 type WithNonNull<T, K extends keyof T> = Omit<T, K> & {

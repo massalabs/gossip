@@ -6,7 +6,7 @@
  * the application lifecycle.
  */
 
-import init from '@/assets/generated/wasm/gossip_wasm';
+import init from '../assets/generated/wasm/gossip_wasm';
 
 /**
  * Check if we're running in Node.js environment

@@ -6,7 +6,7 @@
 
 import { notificationService } from './notifications';
 import { defaultSyncConfig } from '../config/sync';
-import { setApiBaseUrlForBackgroundSync } from '../../gossip-sdk/src/utils/preferences';
+import { setApiBaseUrlForBackgroundSync } from 'gossip-sdk';
 import { protocolConfig } from '../config/protocol';
 import { Capacitor } from '@capacitor/core';
 import { networkObserverService } from './networkObserver';

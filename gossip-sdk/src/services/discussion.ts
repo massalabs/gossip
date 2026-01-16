@@ -13,11 +13,11 @@ import {
   MessageStatus,
   DiscussionDirection,
 } from '../db';
-import { UserPublicKeys } from '@/assets/generated/wasm/gossip_wasm';
+import { UserPublicKeys } from '../assets/generated/wasm/gossip_wasm';
 import { announcementService, EstablishSessionError } from './announcement';
 import { SessionModule, sessionStatusToString } from '../wasm/session';
 import { decodeUserId } from '../utils/userId';
-import { SessionStatus } from '@/assets/generated/wasm/gossip_wasm';
+import { SessionStatus } from '../assets/generated/wasm/gossip_wasm';
 import { Logger } from '../utils/logs';
 
 const logger = new Logger('DiscussionService');

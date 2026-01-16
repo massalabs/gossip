@@ -7,7 +7,7 @@ import {
   BiometricCredentials,
 } from '../services/biometricService';
 import { decodeFromBase64Url, encodeToBase64 } from '../utils';
-import { generateEncryptionKeyFromSeed } from '../../gossip-sdk/src/wasm';
+import { generateEncryptionKeyFromSeed } from 'gossip-sdk';
 /**
  * Check if WebAuthn is supported in the current browser
  */

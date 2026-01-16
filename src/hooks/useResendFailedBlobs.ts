@@ -6,7 +6,7 @@ import {
   messageService,
   renewDiscussion,
   restMessageProtocol,
-} from '../../gossip-sdk/src';
+} from 'gossip-sdk';
 import {
   Discussion,
   DiscussionStatus,

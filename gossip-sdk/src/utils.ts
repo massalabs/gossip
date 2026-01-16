@@ -33,11 +33,11 @@
 
 import type { Account } from '@massalabs/massa-web3';
 import type { EncryptionKey } from './wasm';
-import type { SessionModule as AppSessionModule } from '@/wasm/session';
+import type { SessionModule as AppSessionModule } from './wasm/session';
 import type {
   UserPublicKeys,
   UserSecretKeys,
-} from '@/assets/generated/wasm/gossip_wasm';
+} from './assets/generated/wasm/gossip_wasm';
 import type { UserProfile, GossipDatabase } from './db';
 import type { PreferencesAdapter } from './utils/preferences';
 import type { NotificationHandler } from './services/announcement';

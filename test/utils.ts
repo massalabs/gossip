@@ -1,12 +1,13 @@
 import { db as appDb, Contact } from '../src/db';
-import { initializeDiscussion } from '../src/services/discussion';
-import { encodeUserId } from '../src/utils/userId';
 import { MockSessionModule } from './wasm/mock';
 import {
   UserPublicKeys,
   UserSecretKeys,
-} from '../gossip-sdk/src/assets/generated/wasm/gossip_wasm';
-import { generateUserKeys, UserKeys } from '../gossip-sdk/src/wasm/userKeys';
+  generateUserKeys,
+  UserKeys,
+  initializeDiscussion,
+  encodeUserId,
+} from 'gossip-sdk';
 
 interface InitSessionResult {
   aliceDiscussionId: number;

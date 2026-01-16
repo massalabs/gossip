@@ -8,8 +8,8 @@ import { enableDebugLogger } from './utils/logger.ts';
 import { Buffer } from 'buffer';
 
 // WASM initialization service
-import { startWasmInitialization } from '../gossip-sdk/src';
-import { configureSdk, setProtocolBaseUrl } from '../gossip-sdk/src';
+import { startWasmInitialization } from 'gossip-sdk';
+import { configureSdk, setProtocolBaseUrl } from 'gossip-sdk';
 import { protocolConfig } from './config/protocol';
 import { db } from './db';
 import { notificationService } from './services/notifications';

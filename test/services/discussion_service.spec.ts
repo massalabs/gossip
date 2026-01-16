@@ -13,8 +13,8 @@ import {
   initializeDiscussion,
   acceptDiscussionRequest,
   renewDiscussion,
-} from '../../src/services/discussion';
-import { announcementService } from '../../src/services/announcement';
+  announcementService,
+} from 'gossip-sdk';
 
 // Import mock classes after vi.mock calls (due to hoisting)
 import { MockSessionModule } from '../wasm/mock';
@@ -22,8 +22,8 @@ import {
   SessionStatus,
   UserPublicKeys,
   UserSecretKeys,
-} from '../../gossip-sdk/src/assets/generated/wasm/gossip_wasm';
-import { generateUserKeys } from '../../gossip-sdk/src/wasm/userKeys';
+  generateUserKeys,
+} from 'gossip-sdk';
 import { initSession, initializeSessionMock } from '../utils';
 import { MockMessageProtocol } from '../../src/api/messageProtocol/mock';
 import { createMessageProtocol } from '../../src/api/messageProtocol';

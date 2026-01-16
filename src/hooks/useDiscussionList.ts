@@ -1,7 +1,7 @@
 import { useCallback } from 'react';
 import { useAccountStore } from '../stores/accountStore';
 import { Discussion, db, DiscussionStatus } from '../db';
-import { acceptDiscussionRequest } from '../../gossip-sdk/src';
+import { acceptDiscussionRequest } from 'gossip-sdk';
 
 export const useDiscussionList = () => {
   const { userProfile, session } = useAccountStore();

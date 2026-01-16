@@ -6,7 +6,7 @@
  * Useful for development and testing when the backend is not available.
  */
 
-import { encodeToBase64 } from '../../../gossip-sdk/src/utils/base64';
+import { encodeToBase64 } from 'gossip-sdk';
 import {
   IMessageProtocol,
   EncryptedMessage,

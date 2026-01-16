@@ -9,11 +9,6 @@ import { playwright } from '@vitest/browser-playwright';
 
 // https://vitejs.dev/config/
 export default defineConfig({
-  resolve: {
-    alias: {
-      '@': new URL('./gossip-sdk/src', import.meta.url).pathname,
-    },
-  },
   plugins: [
     react(),
     tailwindcss(),

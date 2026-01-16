@@ -164,7 +164,16 @@ export {
 } from './utils';
 
 // Services - for direct use by host apps and other clients
-export { authService, AuthService } from './services/auth';
+export {
+  authService,
+  AuthService,
+  getPublicKeyErrorMessage,
+  PUBLIC_KEY_NOT_FOUND_ERROR,
+  PUBLIC_KEY_NOT_FOUND_MESSAGE,
+  FAILED_TO_FETCH_ERROR,
+  FAILED_TO_FETCH_MESSAGE,
+  FAILED_TO_RETRIEVE_CONTACT_PUBLIC_KEY_ERROR,
+} from './services/auth';
 export type { PublicKeyResult } from './services/auth';
 // Note: initializeDiscussion, acceptDiscussionRequest, renewDiscussion, isDiscussionStableState
 // are already exported from ./discussions which re-exports from ./services/discussion
@@ -172,8 +181,10 @@ export { messageService, MessageService } from './services/message';
 export {
   announcementService,
   AnnouncementService,
+  EstablishSessionError,
 } from './services/announcement';
 export type { NotificationHandler } from './services/announcement';
+export { handleSessionRefresh } from './services/refresh';
 
 // Message Protocol - for direct use by host apps
 export {
@@ -222,8 +233,21 @@ export {
 export { generateUserKeys } from './wasm/userKeys';
 
 // Utility functions - for direct use
-export { encodeUserId, decodeUserId } from './utils/userId';
-export { validateUsernameFormat, validatePassword } from './utils/validation';
+export {
+  encodeUserId,
+  decodeUserId,
+  isValidUserId,
+  formatUserId,
+  generate as generateUserId,
+} from './utils/userId';
+export {
+  validateUsernameFormat,
+  validatePassword,
+  validateUserIdFormat,
+  validateUsernameAvailability,
+  validateUsernameFormatAndAvailability,
+} from './utils/validation';
+export type { ValidationResult } from './utils/validation';
 export {
   getLastSyncTimestamp,
   setLastSyncTimestamp,
@@ -232,3 +256,50 @@ export {
   setPreferencesAdapter,
   setForegroundChecker,
 } from './utils/preferences';
+export {
+  encodeToBase64,
+  decodeFromBase64,
+  encodeToBase64Url,
+  decodeFromBase64Url,
+} from './utils/base64';
+export type {
+  UpdateContactNameResult,
+  DeleteContactResult,
+} from './utils/contacts';
+export type { UpdateDiscussionNameResult } from './utils/discussions';
+export type { Result } from './utils/type';
+
+// Message serialization utilities
+export {
+  MESSAGE_TYPE_KEEP_ALIVE,
+  serializeKeepAliveMessage,
+  serializeRegularMessage,
+  serializeReplyMessage,
+  serializeForwardMessage,
+  deserializeMessage,
+} from './utils/messageSerialization';
+export type { DeserializedMessage } from './utils/messageSerialization';
+
+// Crypto utilities
+export {
+  generateMnemonic,
+  validateMnemonic,
+  mnemonicToSeed,
+  accountFromMnemonic,
+  PRIVATE_KEY_VERSION,
+} from './crypto/bip39';
+export { encrypt, decrypt, deriveKey } from './crypto/encryption';
+
+// WASM types and functions re-exported for convenience
+export {
+  UserPublicKeys,
+  UserSecretKeys,
+  SessionStatus,
+  SessionConfig,
+  SessionManagerWrapper,
+  SendMessageOutput,
+  ReceiveMessageOutput,
+  AnnouncementResult,
+  generate_user_keys,
+} from './assets/generated/wasm/gossip_wasm';
+export { UserKeys } from './wasm/userKeys';

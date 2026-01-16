@@ -6,15 +6,13 @@ import { useAppStore } from '../stores/appStore';
 import {
   validateUserIdFormat,
   validateUsernameFormat,
-} from '../../gossip-sdk/src/utils/validation';
-import { encodeUserId } from '../../gossip-sdk/src/utils/userId';
-import { UserPublicKeys } from '../../gossip-sdk/src/assets/generated/wasm/gossip_wasm';
-import { useFileShareContact } from './useFileShareContact';
-import {
+  encodeUserId,
+  UserPublicKeys,
   authService,
   initializeDiscussion,
   type PublicKeyResult,
-} from '../../gossip-sdk/src';
+} from 'gossip-sdk';
+import { useFileShareContact } from './useFileShareContact';
 import { mnsService, isMnsDomain } from '../services/mns';
 import toast from 'react-hot-toast';
 import { ROUTES } from '../constants/routes';

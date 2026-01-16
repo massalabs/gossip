@@ -15,37 +15,31 @@ import {
   Message,
   Contact,
 } from '../../src/db';
-import { initializeWasm } from '../../gossip-sdk/src/wasm/loader';
-import { generateUserKeys } from '../../gossip-sdk/src/wasm/userKeys';
-import { SessionModule } from '../../gossip-sdk/src/wasm/session';
 import {
+  initializeWasm,
+  generateUserKeys,
+  SessionModule,
   UserPublicKeys,
   UserSecretKeys,
   UserKeys,
   SessionStatus,
   SessionConfig,
-} from '../../gossip-sdk/src/assets/generated/wasm/gossip_wasm';
-import { encodeUserId } from '../../src/utils/userId';
-import { MockMessageProtocol } from '../../src/api/messageProtocol/mock';
-import {
+  encodeUserId,
   acceptDiscussionRequest,
   initializeDiscussion,
   renewDiscussion,
-} from '../../src/services/discussion';
-import {
   announcementService,
   EstablishSessionError,
-} from '../../src/services/announcement';
-import { messageService } from '../../src/services/message';
-import { createMessageProtocol } from '../../src/api/messageProtocol';
-import { MessageProtocolType } from '../../src/config/protocol';
-import { handleSessionRefresh } from '../../src/services/refresh';
-import {
+  messageService,
+  handleSessionRefresh,
   serializeRegularMessage,
   serializeReplyMessage,
   MESSAGE_TYPE_KEEP_ALIVE,
-} from '../../src/utils/messageSerialization';
-import { Result } from '../../src/utils/type';
+  Result,
+} from 'gossip-sdk';
+import { MockMessageProtocol } from '../../src/api/messageProtocol/mock';
+import { createMessageProtocol } from '../../src/api/messageProtocol';
+import { MessageProtocolType } from '../../src/config/protocol';
 
 // Mock the message protocol factory to always return mock protocol
 vi.mock('../src/api/messageProtocol', async importOriginal => {

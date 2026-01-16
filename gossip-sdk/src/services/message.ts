@@ -22,7 +22,7 @@ import {
 import {
   SessionStatus,
   SendMessageOutput,
-} from '@/assets/generated/wasm/gossip_wasm';
+} from '../assets/generated/wasm/gossip_wasm';
 import { SessionModule } from '../wasm';
 import {
   serializeRegularMessage,

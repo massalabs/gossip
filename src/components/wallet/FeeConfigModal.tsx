@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { Check, X } from 'react-feather';
 import Button from '../ui/Button';
-import type { FeeConfig } from '../../../gossip-sdk/src/wallet';
+import type { FeeConfig } from 'gossip-sdk';
 
 interface FeeConfigModalProps {
   isOpen: boolean;

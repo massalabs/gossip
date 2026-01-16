@@ -7,18 +7,18 @@
 
 import {
   db,
-  Discussion,
+  type Discussion,
   DiscussionStatus,
   MessageDirection,
   MessageStatus,
   MessageType,
 } from '../db';
-import { sessionStatusToString } from '../../gossip-sdk/src/wasm/session';
-import type { SessionModule } from '../../gossip-sdk/src/wasm/session';
-import { SessionStatus } from '../../gossip-sdk/src/assets/generated/wasm/gossip_wasm';
-import { decodeUserId, encodeUserId } from '../../gossip-sdk/src/utils/userId';
+import { sessionStatusToString } from '../wasm/session';
+import type { SessionModule } from '../wasm/session';
+import { SessionStatus } from '../assets/generated/wasm/gossip_wasm';
+import { decodeUserId, encodeUserId } from '../utils/userId';
 import { messageService } from './message';
-import { Logger } from '../../gossip-sdk/src/utils/logs';
+import { Logger } from '../utils/logs';
 
 const logger = new Logger('RefreshService');
 

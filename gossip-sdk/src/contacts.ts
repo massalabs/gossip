@@ -27,7 +27,7 @@ import type {
   UpdateContactNameResult,
   DeleteContactResult,
 } from './utils/contacts';
-import type { UserPublicKeys } from '@/assets/generated/wasm/gossip_wasm';
+import type { UserPublicKeys } from './assets/generated/wasm/gossip_wasm';
 
 // Re-export result types
 export type { UpdateContactNameResult, DeleteContactResult };

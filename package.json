@@ -45,6 +45,7 @@
     "release": "node scripts/release.mjs"
   },
   "dependencies": {
+    "gossip-sdk": "file:./gossip-sdk/src",
     "@aparajita/capacitor-biometric-auth": "^9.1.2",
     "@aparajita/capacitor-secure-storage": "^7.1.6",
     "@capacitor-community/privacy-screen": "^6.0.0",

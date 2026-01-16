@@ -4,10 +4,13 @@ import { defaultSyncConfig } from '../config/sync';
 import { useMessageStore } from '../stores/messageStore.tsx';
 import { useDiscussionStore } from '../stores/discussionStore.tsx';
 import { useOnlineStoreBase } from '../stores/useOnlineStore.tsx';
-import { messageService, announcementService } from '../../gossip-sdk/src';
+import {
+  messageService,
+  announcementService,
+  handleSessionRefresh,
+} from 'gossip-sdk';
 import { useResendFailedBlobs } from './useResendFailedBlobs.ts';
 import { DiscussionStatus } from '../db.ts';
-import { handleSessionRefresh } from '../services/refresh.ts';
 
 const SESSION_REFRESH_EVERY_N_CYCLES = 5;
 

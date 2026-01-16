@@ -3,8 +3,8 @@ import {
   validatePassword,
   validateUsernameFormat,
   validateUserIdFormat,
-} from '../../../src/utils/validation';
-import { encodeUserId } from '../../../src/utils/userId';
+  encodeUserId,
+} from 'gossip-sdk';
 
 describe('utils/validation.ts', () => {
   describe('validatePassword()', () => {

@@ -8,7 +8,7 @@ import ScanQRCode from '../components/settings/ScanQRCode';
 import { useAccountStore } from '../stores/accountStore';
 import { useAppStore } from '../stores/appStore';
 import { Info, Upload, CheckCircle } from 'react-feather';
-import { formatUserId } from '../../gossip-sdk/src/utils/userId';
+import { formatUserId } from 'gossip-sdk';
 import QrCodeIcon from '../components/ui/customIcons/QrCodeIcon';
 import PageLayout from '../components/ui/PageLayout';
 import PageHeader from '../components/ui/PageHeader';

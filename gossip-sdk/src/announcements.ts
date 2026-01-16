@@ -22,7 +22,7 @@ import { announcementService } from './services/announcement';
 import type { Discussion } from './db';
 import type { SessionModule } from './wasm';
 import type { AnnouncementReceptionResult } from './services/announcement';
-import type { UserPublicKeys } from '@/assets/generated/wasm/gossip_wasm';
+import type { UserPublicKeys } from './assets/generated/wasm/gossip_wasm';
 
 // Re-export result type
 export type { AnnouncementReceptionResult };

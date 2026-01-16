@@ -1,7 +1,7 @@
 import React from 'react';
 import { Check } from 'react-feather';
 import Select from '../ui/Select';
-import type { TokenState } from '../../../gossip-sdk/src/wallet';
+import type { TokenState } from 'gossip-sdk';
 import { formatAmount } from '../../utils/parseAmount';
 
 interface TokenSelectProps {

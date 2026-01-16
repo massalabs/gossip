@@ -2,11 +2,7 @@
 // Example: testing real app crypto utilities (userId encoding/decoding)
 
 import { describe, it, expect } from 'vitest';
-import {
-  encodeUserId,
-  decodeUserId,
-  isValidUserId,
-} from '../../src/utils/userId';
+import { encodeUserId, decodeUserId, isValidUserId } from 'gossip-sdk';
 
 describe('userId crypto utilities (node environment)', () => {
   it('encodes and decodes a 32-byte userId round-trip', () => {

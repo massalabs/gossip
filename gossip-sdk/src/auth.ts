@@ -28,7 +28,7 @@ import {
   FAILED_TO_RETRIEVE_CONTACT_PUBLIC_KEY_ERROR,
   getPublicKeyErrorMessage,
 } from './services/auth';
-import type { UserPublicKeys } from '@/assets/generated/wasm/gossip_wasm';
+import type { UserPublicKeys } from './assets/generated/wasm/gossip_wasm';
 
 // Re-export types and constants
 export type { PublicKeyResult };

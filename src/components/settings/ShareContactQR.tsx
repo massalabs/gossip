@@ -3,7 +3,7 @@ import QRCodeStyling from 'qr-code-styling';
 import { Check, Copy } from 'react-feather';
 
 import { PrivacyGraphic } from '../graphics';
-import { formatUserId } from '../../../gossip-sdk/src/utils/userId';
+import { formatUserId } from 'gossip-sdk';
 
 interface ShareContactQRProps {
   deepLinkUrl: string;
