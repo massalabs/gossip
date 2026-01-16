@@ -389,7 +389,7 @@ describe('Pending Announcements', () => {
     await db.pendingAnnouncements.add({
       announcement,
       counter,
-      receivedAt: new Date(),
+      fetchedAt: new Date(),
     });
 
     const pending = await db.pendingAnnouncements.toArray();
@@ -401,19 +401,19 @@ describe('Pending Announcements', () => {
     await db.pendingAnnouncements.add({
       announcement: new Uint8Array([1]),
       counter: '1',
-      receivedAt: new Date(),
+      fetchedAt: new Date(),
     });
 
     await db.pendingAnnouncements.add({
       announcement: new Uint8Array([2]),
       counter: '2',
-      receivedAt: new Date(),
+      fetchedAt: new Date(),
     });
 
     await db.pendingAnnouncements.add({
       announcement: new Uint8Array([3]),
       counter: '3',
-      receivedAt: new Date(),
+      fetchedAt: new Date(),
     });
 
     const pending = await db.pendingAnnouncements.toArray();
