@@ -4,6 +4,7 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { GossipDatabase } from '../src/db';
+import type { EncryptionKey } from '../src/wasm/encryption';
 
 const protocolMock = vi.hoisted(() => ({
   createMessageProtocolMock: vi.fn(),
@@ -191,7 +192,7 @@ describe('GossipSdkImpl lifecycle', () => {
     const { GossipSdkImpl } = await import('../src/gossipSdk');
     const sdk = new GossipSdkImpl();
     const encryptedSession = new Uint8Array([1, 2, 3]);
-    const encryptionKey = {} as unknown;
+    const encryptionKey = {} as EncryptionKey;
 
     await sdk.init({ db: new GossipDatabase() });
     await sdk.openSession({
@@ -207,7 +208,7 @@ describe('GossipSdkImpl lifecycle', () => {
     const { GossipSdkImpl } = await import('../src/gossipSdk');
     const sdk = new GossipSdkImpl();
     const onPersist = vi.fn().mockResolvedValue(undefined);
-    const persistEncryptionKey = {} as unknown;
+    const persistEncryptionKey = {} as EncryptionKey;
 
     await sdk.init({ db: new GossipDatabase() });
     await sdk.openSession({
