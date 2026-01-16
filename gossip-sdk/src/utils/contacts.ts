@@ -146,8 +146,8 @@ export async function deleteContact(
       }
     );
 
-    // Discard peer from session manager
-    session.peerDiscard(decodeUserId(contactUserId));
+    // Discard peer from session manager and persist
+    await session.peerDiscard(decodeUserId(contactUserId));
 
     return { success: true };
   } catch (e) {

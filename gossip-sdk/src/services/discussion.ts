@@ -17,7 +17,6 @@ import { UserPublicKeys } from '../assets/generated/wasm/gossip_wasm';
 import { AnnouncementService, EstablishSessionError } from './announcement';
 import { SessionModule, sessionStatusToString } from '../wasm/session';
 import { decodeUserId } from '../utils/userId';
-import { SessionStatus } from '../assets/generated/wasm/gossip_wasm';
 import { Logger } from '../utils/logs';
 import { GossipSdkEvents } from '../types/events';
 
@@ -231,11 +230,13 @@ export class DiscussionService {
       `session status for discussion between ${ownerUserId} and ${contactUserId} after reinitiation is ${sessionStatusToString(sessionStatus)}`
     );
 
+    // For renewals, keep discussion ACTIVE unless send actually failed.
+    // SelfRequested means we're waiting for peer to respond - that's expected for renewal.
+    // We don't want to show "waiting for approval" for session recovery.
+    // PENDING should only be used for FIRST TIME contact requests, not renewals.
     const status: DiscussionStatus = !result.success
       ? DiscussionStatus.SEND_FAILED
-      : sessionStatus === SessionStatus.Active
-        ? DiscussionStatus.ACTIVE
-        : DiscussionStatus.PENDING;
+      : DiscussionStatus.ACTIVE;
 
     await this.db.transaction(
       'rw',
@@ -250,24 +251,35 @@ export class DiscussionService {
 
         log.info(`discussion updated with status: ${status}`);
 
-        /* Mark all outgoing messages that are not delivered or read as failed and remove the encryptedMessage */
-        await this.db.messages
+        /* Reset outgoing messages that haven't been sent to the network yet.
+         * SENT messages are already on the bulletin board - leave them alone.
+         * They'll be acknowledged when the peer reads them with the new session.
+         *
+         * Messages to reset:
+         * - SENDING: Was in progress, needs re-encryption with new session
+         * - FAILED: Previous send failed, needs re-encryption
+         * - WAITING_SESSION: Waiting for session, will be sent with new session
+         *
+         * Messages to keep:
+         * - SENT: Already on network, waiting for ack
+         * - DELIVERED: Peer received it
+         * - READ: Peer read it
+         */
+        const messagesToReset = await this.db.messages
           .where('[ownerUserId+contactUserId]')
           .equals([ownerUserId, contactUserId])
           .and(
             message =>
               message.direction === MessageDirection.OUTGOING &&
-              message.status !== MessageStatus.DELIVERED &&
-              message.status !== MessageStatus.READ
+              (message.status === MessageStatus.SENDING ||
+                message.status === MessageStatus.FAILED)
           )
           .modify({
-            status: MessageStatus.FAILED,
+            status: MessageStatus.WAITING_SESSION,
             encryptedMessage: undefined,
             seeker: undefined,
           });
-        log.info(
-          `all outgoing messages that are not delivered or read have been marked as failed`
-        );
+        log.info(`reset ${messagesToReset} messages to WAITING_SESSION`);
       }
     );
 

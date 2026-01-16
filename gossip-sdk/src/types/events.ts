@@ -63,7 +63,7 @@ export interface GossipSdkEvents {
    * Use this to show appropriate UI state.
    * @deprecated Use onSessionRenewalNeeded for auto-renewal flow
    */
-  onSessionBroken?: (contactUserId: string) => void;
+  onSessionBroken?: (discussion: Discussion) => void;
 
   /**
    * Called when a session is successfully renewed.
@@ -76,6 +76,14 @@ export interface GossipSdkEvents {
    * Messages are queued with WAITING_SESSION status until session is active.
    */
   onSessionRenewalNeeded?: (contactUserId: string) => void;
+
+  /**
+   * Called when a peer has requested a session and we need to accept it.
+   * This is different from renewal - the peer has sent us an announcement
+   * and we need to respond (via DiscussionService.accept()).
+   * NOT calling this correctly can cause stuck sessions (both sides waiting).
+   */
+  onSessionAcceptNeeded?: (contactUserId: string) => void;
 
   // ─────────────────────────────────────────────────────────────────
   // Error Events

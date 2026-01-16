@@ -22,7 +22,7 @@ import { encodeUserId } from '../utils/userId';
 
 export class SessionModule {
   private sessionManager: SessionManagerWrapper | null = null;
-  private onPersist?: () => void; // Callback for automatic persistence
+  private onPersist?: () => Promise<void>; // Async callback for persistence
   public ourPk: UserPublicKeys;
   public ourSk: UserSecretKeys;
   public userId: Uint8Array;
@@ -30,7 +30,7 @@ export class SessionModule {
 
   constructor(
     userKeys: UserKeys,
-    onPersist?: () => void,
+    onPersist?: () => Promise<void>,
     config?: SessionConfig
   ) {
     this.ourPk = userKeys.public_keys();
@@ -46,17 +46,28 @@ export class SessionModule {
   /**
    * Set the persistence callback
    */
-  setOnPersist(callback: () => void): void {
+  setOnPersist(callback: () => Promise<void>): void {
     this.onPersist = callback;
   }
 
   /**
-   * Helper to trigger persistence after state changes
+   * Helper to trigger persistence after state changes.
+   * Returns a promise that resolves when persistence is complete.
+   * IMPORTANT: Callers should await this before sending data to network
+   * to prevent state loss on app crash.
    */
-  private persistIfNeeded(): void {
+  private async persistIfNeeded(): Promise<void> {
     if (this.onPersist) {
-      this.onPersist();
+      await this.onPersist();
     }
+  }
+
+  /**
+   * Trigger persistence explicitly and wait for completion.
+   * Use this when you need to ensure state is saved before proceeding.
+   */
+  async persist(): Promise<void> {
+    await this.persistIfNeeded();
   }
 
   /**
@@ -94,10 +105,10 @@ export class SessionModule {
    * @param userData - Optional user data to include in the announcement (defaults to empty array)
    * @returns The announcement bytes to publish
    */
-  establishOutgoingSession(
+  async establishOutgoingSession(
     peerPk: UserPublicKeys,
     userData?: Uint8Array
-  ): Uint8Array {
+  ): Promise<Uint8Array> {
     if (!this.sessionManager) {
       throw new Error('Session manager is not initialized');
     }
@@ -116,7 +127,7 @@ export class SessionModule {
       );
     }
 
-    this.persistIfNeeded();
+    await this.persistIfNeeded();
     return result;
   }
 
@@ -124,9 +135,9 @@ export class SessionModule {
    * Feed an incoming announcement into the session manager
    * @returns AnnouncementResult containing the announcer's public keys, timestamp, and user data, or undefined if invalid
    */
-  feedIncomingAnnouncement(
+  async feedIncomingAnnouncement(
     announcementBytes: Uint8Array
-  ): AnnouncementResult | undefined {
+  ): Promise<AnnouncementResult | undefined> {
     if (!this.sessionManager) {
       throw new Error('Session manager is not initialized');
     }
@@ -138,7 +149,7 @@ export class SessionModule {
     );
 
     if (result) {
-      this.persistIfNeeded();
+      await this.persistIfNeeded();
     }
     return result;
   }
@@ -157,10 +168,10 @@ export class SessionModule {
   /**
    * Process an incoming ciphertext from the message board
    */
-  feedIncomingMessageBoardRead(
+  async feedIncomingMessageBoardRead(
     seeker: Uint8Array,
     ciphertext: Uint8Array
-  ): ReceiveMessageOutput | undefined {
+  ): Promise<ReceiveMessageOutput | undefined> {
     if (!this.sessionManager) {
       throw new Error('Session manager is not initialized');
     }
@@ -171,23 +182,27 @@ export class SessionModule {
       this.ourSk
     );
 
-    this.persistIfNeeded();
+    await this.persistIfNeeded();
     return result;
   }
 
   /**
-   * Send a message to a peer
+   * Send a message to a peer.
+   * IMPORTANT: This persists session state before returning.
+   * The returned output should only be sent to network AFTER this resolves.
    */
-  sendMessage(
+  async sendMessage(
     peerId: Uint8Array,
     message: Uint8Array
-  ): SendMessageOutput | undefined {
+  ): Promise<SendMessageOutput | undefined> {
     if (!this.sessionManager) {
       throw new Error('Session manager is not initialized');
     }
 
     const result = this.sessionManager.send_message(peerId, message);
-    this.persistIfNeeded();
+    // CRITICAL: Persist session state BEFORE returning
+    // This ensures state is saved before the encrypted message goes on the network
+    await this.persistIfNeeded();
     return result;
   }
 
@@ -216,25 +231,25 @@ export class SessionModule {
   /**
    * Discard a peer and all associated session state
    */
-  peerDiscard(peerId: Uint8Array): void {
+  async peerDiscard(peerId: Uint8Array): Promise<void> {
     if (!this.sessionManager) {
       throw new Error('Session manager is not initialized');
     }
 
     this.sessionManager.peer_discard(peerId);
-    this.persistIfNeeded();
+    await this.persistIfNeeded();
   }
 
   /**
    * Refresh sessions, returning peer IDs that need keep-alive messages
    */
-  refresh(): Array<Uint8Array> {
+  async refresh(): Promise<Array<Uint8Array>> {
     if (!this.sessionManager) {
       throw new Error('Session manager is not initialized');
     }
 
     const result = this.sessionManager.refresh();
-    this.persistIfNeeded();
+    await this.persistIfNeeded();
     return result;
   }
 }

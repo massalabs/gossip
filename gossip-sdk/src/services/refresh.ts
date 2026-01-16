@@ -34,18 +34,17 @@ const logger = new Logger('RefreshService');
  * ```
  */
 export class RefreshService {
-  private db: GossipDatabase;
   private messageService: MessageService;
   private session: SessionModule;
   private events: GossipSdkEvents;
 
   constructor(
-    db: GossipDatabase,
+    _db: GossipDatabase,
     messageService: MessageService,
     session: SessionModule,
     events: GossipSdkEvents = {}
   ) {
-    this.db = db;
+    // Note: db parameter kept for API compatibility but not currently used
     this.messageService = messageService;
     this.session = session;
     this.events = events;
@@ -86,7 +85,8 @@ export class RefreshService {
     let keepAlivePeerIds: string[] = [];
     try {
       // Ask the session manager which peers require keep-alive messages
-      keepAlivePeerIds = this.session.refresh().map(peer => encodeUserId(peer));
+      const refreshResult = await this.session.refresh();
+      keepAlivePeerIds = refreshResult.map(peer => encodeUserId(peer));
     } catch (error) {
       log.error('error while refreshing session', { error });
       return;
@@ -120,6 +120,18 @@ export class RefreshService {
 
           // Trigger auto-renewal (spec: call create_session)
           this.events.onSessionRenewalNeeded?.(discussion.contactUserId);
+          continue;
+        }
+
+        // PeerRequested: peer sent us an announcement but we haven't accepted yet
+        // This can happen if app crashed/refreshed before accept completed
+        if (status === SessionStatus.PeerRequested) {
+          log.info('session is PeerRequested, triggering auto-accept', {
+            ownerUserId: discussion.ownerUserId,
+            contactUserId: discussion.contactUserId,
+          });
+
+          this.events.onSessionAcceptNeeded?.(discussion.contactUserId);
           continue;
         }
       } catch (error) {

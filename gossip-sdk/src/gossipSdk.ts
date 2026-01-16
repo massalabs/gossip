@@ -319,8 +319,9 @@ class GossipSdkImpl {
     const userKeys = await generateUserKeys(options.mnemonic);
 
     // Create session with persistence callback
-    const session = new SessionModule(userKeys, () => {
-      this.handleSessionPersist();
+    // IMPORTANT: This callback is awaited by the session module before network sends
+    const session = new SessionModule(userKeys, async () => {
+      await this.handleSessionPersist();
     });
 
     // Restore existing session state if provided
@@ -357,6 +358,16 @@ class GossipSdkImpl {
       },
       onError: (error: Error, context: string) => {
         this.emit('error', error, context);
+      },
+      // Auto-renewal: when session is lost, automatically renew it
+      onSessionRenewalNeeded: (contactUserId: string) => {
+        console.log('[GossipSdk] Session renewal needed for', contactUserId);
+        this.handleSessionRenewal(contactUserId);
+      },
+      // Auto-accept: when peer sent us an announcement, accept/respond to establish session
+      onSessionAcceptNeeded: (contactUserId: string) => {
+        console.log('[GossipSdk] Session accept needed for', contactUserId);
+        this.handleSessionAccept(contactUserId);
       },
     };
 
@@ -654,6 +665,9 @@ class GossipSdkImpl {
     // Start session refresh polling
     this.pollingState.sessionRefreshTimer = setInterval(async () => {
       try {
+        console.log('[GossipSdk] Session refresh polling', {
+          status: this.state.status,
+        });
         if (this.state.status !== 'session_open') {
           return;
         }
@@ -731,6 +745,80 @@ class GossipSdkImpl {
       throw new Error('No session open. Call openSession() first.');
     }
     return this.state;
+  }
+
+  /**
+   * Handle automatic session renewal when session is lost.
+   * Called by onSessionRenewalNeeded event.
+   */
+  private async handleSessionRenewal(contactUserId: string): Promise<void> {
+    if (this.state.status !== 'session_open') return;
+
+    try {
+      await this._discussion!.renew(contactUserId);
+      console.log('[GossipSdk] Session renewed for', contactUserId);
+
+      // After successful renewal, process any waiting messages
+      const sentCount =
+        await this._message!.processWaitingMessages(contactUserId);
+      if (sentCount > 0) {
+        console.log(
+          `[GossipSdk] Sent ${sentCount} waiting messages after renewal`
+        );
+      }
+    } catch (error) {
+      console.error('[GossipSdk] Session renewal failed:', error);
+      this.emit(
+        'error',
+        error instanceof Error ? error : new Error(String(error)),
+        'session_renewal'
+      );
+    }
+  }
+
+  /**
+   * Handle automatic session accept when peer has sent us an announcement.
+   * Called by onSessionAcceptNeeded event.
+   * This is different from renewal - we respond to their session request.
+   */
+  private async handleSessionAccept(contactUserId: string): Promise<void> {
+    if (this.state.status !== 'session_open') return;
+
+    try {
+      const ownerUserId = this.state.session.userIdEncoded;
+      const discussion = await this.state.db.getDiscussionByOwnerAndContact(
+        ownerUserId,
+        contactUserId
+      );
+
+      if (!discussion) {
+        console.warn(
+          '[GossipSdk] No discussion found for accept, contactUserId:',
+          contactUserId
+        );
+        return;
+      }
+
+      // Accept the discussion (sends our announcement back to establish session)
+      await this._discussion!.accept(discussion);
+      console.log('[GossipSdk] Session accepted for', contactUserId);
+
+      // After successful accept, process any waiting messages
+      const sentCount =
+        await this._message!.processWaitingMessages(contactUserId);
+      if (sentCount > 0) {
+        console.log(
+          `[GossipSdk] Sent ${sentCount} waiting messages after accept`
+        );
+      }
+    } catch (error) {
+      console.error('[GossipSdk] Session accept failed:', error);
+      this.emit(
+        'error',
+        error instanceof Error ? error : new Error(String(error)),
+        'session_accept'
+      );
+    }
   }
 
   private emit<K extends SdkEventType>(

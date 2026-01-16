@@ -130,7 +130,7 @@ export class MessageService {
         }
 
         const { decrypted: decryptedMessages, acknowledgedSeekers } =
-          this.decryptMessages(encryptedMessages);
+          await this.decryptMessages(encryptedMessages);
 
         if (decryptedMessages.length > 0) {
           const storedIds = await this.storeDecryptedMessages(
@@ -175,10 +175,10 @@ export class MessageService {
     }
   }
 
-  private decryptMessages(encrypted: EncryptedMessage[]): {
+  private async decryptMessages(encrypted: EncryptedMessage[]): Promise<{
     decrypted: Decrypted[];
     acknowledgedSeekers: Set<string>;
-  } {
+  }> {
     const log = logger.forMethod('decryptMessages');
 
     const decrypted: Decrypted[] = [];
@@ -186,7 +186,7 @@ export class MessageService {
 
     for (const msg of encrypted) {
       try {
-        const out = this.session.feedIncomingMessageBoardRead(
+        const out = await this.session.feedIncomingMessageBoardRead(
           msg.seeker,
           msg.ciphertext
         );
@@ -412,23 +412,24 @@ export class MessageService {
 
     const sessionStatus = this.session.peerSessionStatus(peerId);
 
-    // Check for session states that prevent sending immediately
+    // Check for session states that require renewal (session is truly lost)
     // Per spec: when session is lost, queue message as WAITING_SESSION and trigger auto-renewal
-    const noSessionStatuses = [
+    const needsRenewalStatuses = [
       SessionStatus.UnknownPeer,
       SessionStatus.NoSession,
       SessionStatus.Killed,
-      SessionStatus.PeerRequested, // Peer is re-initiating, our session is gone
+      // Note: PeerRequested is NOT included - it means peer sent us an announcement
+      // and we should accept it, not trigger renewal (which would create a race condition)
     ];
 
-    if (noSessionStatuses.includes(sessionStatus)) {
+    if (needsRenewalStatuses.includes(sessionStatus)) {
       // Add message as WAITING_SESSION - it will be sent when session becomes Active
       const messageId = await this.db.addMessage({
         ...message,
         status: MessageStatus.WAITING_SESSION,
       });
 
-      log.info('session not active, queuing message as WAITING_SESSION', {
+      log.info('session lost, queuing message as WAITING_SESSION', {
         sessionStatus: sessionStatusToString(sessionStatus),
         messageId,
       });
@@ -447,6 +448,32 @@ export class MessageService {
       return {
         success: true,
         message: queuedMessage,
+      };
+    }
+
+    // PeerRequested: peer sent us an announcement, we need to accept/respond
+    // Queue the message but trigger accept flow, not renewal
+    if (sessionStatus === SessionStatus.PeerRequested) {
+      const messageId = await this.db.addMessage({
+        ...message,
+        status: MessageStatus.WAITING_SESSION,
+      });
+
+      log.info('peer requested session, queuing message - need to accept', {
+        sessionStatus: sessionStatusToString(sessionStatus),
+        messageId,
+      });
+
+      // Trigger accept flow (different from renewal - we respond to their announcement)
+      this.events.onSessionAcceptNeeded?.(message.contactUserId);
+
+      return {
+        success: true,
+        message: {
+          ...message,
+          id: messageId,
+          status: MessageStatus.WAITING_SESSION,
+        },
       };
     }
 
@@ -507,7 +534,12 @@ export class MessageService {
         );
       }
 
-      sendOutput = this.session.sendMessage(peerId, message.serializedContent!);
+      // CRITICAL: await session.sendMessage to ensure session state is persisted
+      // before the encrypted message is sent to the network
+      sendOutput = await this.session.sendMessage(
+        peerId,
+        message.serializedContent!
+      );
       if (!sendOutput) throw new Error('sendMessage returned null');
     } catch (error) {
       await this.db.transaction(
@@ -713,22 +745,36 @@ export class MessageService {
           So if a message can't be encrypted in session.sendMessage() because of error session status,
           we should break the loop and trigger auto-renewal.
           */
-          const noActiveSessionStatuses = [
+          const needsRenewalStatuses = [
             SessionStatus.Killed,
             SessionStatus.Saturated,
             SessionStatus.NoSession,
             SessionStatus.UnknownPeer,
-            SessionStatus.PeerRequested, // Peer is re-initiating, our session is gone
+            // Note: PeerRequested is NOT included - it means peer sent us an announcement
+            // and we should accept it, not trigger renewal
           ];
 
-          if (noActiveSessionStatuses.includes(status)) {
+          if (needsRenewalStatuses.includes(status)) {
             // Per spec: trigger auto-renewal instead of marking as BROKEN
             // Messages stay in WAITING_SESSION/FAILED and will be processed when session is Active
-            log.info('session not active during resend, triggering renewal', {
+            log.info('session lost during resend, triggering renewal', {
               sessionStatus: sessionStatusToString(status),
               contactId,
             });
             this.events.onSessionRenewalNeeded?.(contactId);
+            break;
+          }
+
+          // PeerRequested: peer sent us an announcement, need to accept
+          if (status === SessionStatus.PeerRequested) {
+            log.info(
+              'peer requested session during resend, triggering accept',
+              {
+                sessionStatus: sessionStatusToString(status),
+                contactId,
+              }
+            );
+            this.events.onSessionAcceptNeeded?.(contactId);
             break;
           }
 
@@ -760,7 +806,7 @@ export class MessageService {
             });
           }
 
-          const sendOutput = this.session.sendMessage(
+          const sendOutput = await this.session.sendMessage(
             peerId,
             serializedContent
           );
@@ -866,8 +912,11 @@ export class MessageService {
         serializedContent = serializeResult.data;
       }
 
-      // Encrypt with session manager
-      const sendOutput = this.session.sendMessage(peerId, serializedContent);
+      // Encrypt with session manager (await to ensure persistence before network send)
+      const sendOutput = await this.session.sendMessage(
+        peerId,
+        serializedContent
+      );
       if (!sendOutput) {
         log.error('session manager failed to encrypt waiting message', {
           messageId: msg.id,

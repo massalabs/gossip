@@ -231,14 +231,15 @@ describe('MessageService', () => {
       expect(onSessionRenewalNeeded).toHaveBeenCalledWith(CONTACT_USER_ID);
     });
 
-    it('should queue message as WAITING_SESSION when session is PeerRequested', async () => {
+    it('should queue message as WAITING_SESSION and trigger accept when session is PeerRequested', async () => {
       const mockSession = createMockSession(SessionStatus.PeerRequested);
+      const onSessionAcceptNeeded = vi.fn();
       const onSessionRenewalNeeded = vi.fn();
       const service = new MessageService(
         db,
         createMockProtocol(),
         mockSession,
-        { onSessionRenewalNeeded }
+        { onSessionAcceptNeeded, onSessionRenewalNeeded }
       );
 
       const message = {
@@ -262,8 +263,10 @@ describe('MessageService', () => {
       expect(dbMessage).toBeDefined();
       expect(dbMessage?.status).toBe(MessageStatus.WAITING_SESSION);
 
-      // Verify onSessionRenewalNeeded was emitted
-      expect(onSessionRenewalNeeded).toHaveBeenCalledWith(CONTACT_USER_ID);
+      // Verify onSessionAcceptNeeded was emitted (NOT renewal - peer sent us an announcement)
+      expect(onSessionAcceptNeeded).toHaveBeenCalledWith(CONTACT_USER_ID);
+      // Renewal should NOT be called for PeerRequested
+      expect(onSessionRenewalNeeded).not.toHaveBeenCalled();
     });
 
     it('should queue message as WAITING_SESSION when session is SelfRequested', async () => {

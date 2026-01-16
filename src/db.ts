@@ -95,6 +95,7 @@ export enum MessageStatus {
   DELIVERED = 'delivered',
   READ = 'read',
   FAILED = 'failed',
+  WAITING_SESSION = 'waiting_session',
 }
 
 export enum DiscussionDirection {

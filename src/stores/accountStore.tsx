@@ -410,10 +410,25 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         );
 
         // Open SDK session with existing encrypted session state
+        // IMPORTANT: Pass onPersist callback so session changes are automatically saved
         await gossipSdk.openSession({
           mnemonic,
           encryptedSession: profile.session,
           encryptionKey,
+          persistEncryptionKey: encryptionKey,
+          onPersist: async (blob: Uint8Array, _key: EncryptionKey) => {
+            // Save the new session blob to the database
+            await db.userProfile.update(profile.userId, {
+              session: blob,
+              updatedAt: new Date(),
+            });
+            // Update the store's cached profile
+            set(state => ({
+              userProfile: state.userProfile
+                ? { ...state.userProfile, session: blob, updatedAt: new Date() }
+                : null,
+            }));
+          },
         });
 
         // Update lastSeen timestamp for the logged-in user

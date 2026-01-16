@@ -91,7 +91,8 @@ export class AnnouncementService {
 
     const contactUserId = encodeUserId(contactPublicKeys.derive_id());
 
-    const announcement = this.session.establishOutgoingSession(
+    // CRITICAL: await to ensure session state is persisted before sending
+    const announcement = await this.session.establishOutgoingSession(
       contactPublicKeys,
       userData
     );
@@ -441,7 +442,8 @@ export class AnnouncementService {
   }> {
     const log = logger.forMethod('_processIncomingAnnouncement');
 
-    const result = this.session.feedIncomingAnnouncement(announcementData);
+    const result =
+      await this.session.feedIncomingAnnouncement(announcementData);
 
     if (!result) {
       return { success: true };
@@ -513,6 +515,22 @@ export class AnnouncementService {
       if (discussion && contact) {
         this.events.onDiscussionRequest(discussion, contact);
       }
+    }
+
+    // Auto-accept ONLY for existing contacts (session recovery scenario).
+    // For NEW contacts, the user must manually accept the discussion request.
+    // This completes the handshake by sending our announcement back.
+    if (sessionStatus === SessionStatus.PeerRequested && !isNewContact) {
+      log.info(
+        'session is PeerRequested for existing contact, triggering auto-accept',
+        { contactUserId }
+      );
+      this.events.onSessionAcceptNeeded?.(contactUserId);
+    } else if (sessionStatus === SessionStatus.PeerRequested && isNewContact) {
+      log.info(
+        'session is PeerRequested for NEW contact, waiting for manual accept',
+        { contactUserId }
+      );
     }
 
     return {
