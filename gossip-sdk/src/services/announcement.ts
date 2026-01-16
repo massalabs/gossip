@@ -20,10 +20,9 @@ import { SessionModule, sessionStatusToString } from '../wasm/session';
 import { Logger } from '../utils/logs';
 import { BulletinItem } from '../api/messageProtocol/types';
 import { GossipSdkEvents } from '../types/events';
+import { SdkConfig, defaultSdkConfig } from '../config/sdk';
 
 const logger = new Logger('AnnouncementService');
-
-const ONE_HOUR_MS = 60 * 60 * 1000;
 
 export interface AnnouncementReceptionResult {
   success: boolean;
@@ -40,17 +39,20 @@ export class AnnouncementService {
   private session: SessionModule;
   private isProcessingAnnouncements = false;
   private events: GossipSdkEvents;
+  private config: SdkConfig;
 
   constructor(
     db: GossipDatabase,
     messageProtocol: IMessageProtocol,
     session: SessionModule,
-    events: GossipSdkEvents = {}
+    events: GossipSdkEvents = {},
+    config: SdkConfig = defaultSdkConfig
   ) {
     this.db = db;
     this.messageProtocol = messageProtocol;
     this.session = session;
     this.events = events;
+    this.config = config;
   }
 
   setMessageProtocol(messageProtocol: IMessageProtocol): void {
@@ -292,7 +294,7 @@ export class AnnouncementService {
         log.info('network send failed (retry)', { ownerUserId, contactUserId });
 
         const ageMs = Date.now() - (discussion.updatedAt.getTime() ?? 0);
-        if (ageMs > ONE_HOUR_MS) {
+        if (ageMs > this.config.announcements.brokenThresholdMs) {
           log.info(
             `marking as broken (too old: ${Math.round(ageMs / 60000)}min)`,
             {
@@ -390,13 +392,14 @@ export class AnnouncementService {
 
   private async _fetchAnnouncements(
     cursor?: string,
-    limit = 500
+    limit?: number
   ): Promise<BulletinItem[]> {
+    const fetchLimit = limit ?? this.config.announcements.fetchLimit;
     const log = logger.forMethod('_fetchAnnouncements');
 
     try {
       const items = await this.messageProtocol.fetchAnnouncements(
-        limit,
+        fetchLimit,
         cursor
       );
       return items;

@@ -122,6 +122,16 @@ export {
 } from './config/protocol';
 export type { ProtocolConfig } from './config/protocol';
 
+// SDK Config - for SDK initialization options
+export { defaultSdkConfig, mergeConfig } from './config/sdk';
+export type {
+  SdkConfig,
+  PollingConfig,
+  MessagesConfig,
+  AnnouncementsConfig,
+  DeepPartial,
+} from './config/sdk';
+
 // Database - for direct access by host apps
 export { setDb, getDb, db, GossipDatabase } from './db';
 

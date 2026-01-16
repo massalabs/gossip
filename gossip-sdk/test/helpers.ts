@@ -5,7 +5,7 @@
  */
 
 import type { Contact, Discussion, Message, UserProfile } from '../src/db';
-import type { UserPublicKeys } from '@/assets/generated/wasm/gossip_wasm';
+import type { UserPublicKeys } from '../src/assets/generated/wasm/gossip_wasm';
 import {
   MessageType,
   MessageDirection,

@@ -33,6 +33,7 @@ import { isDiscussionStableState } from './discussion';
 import { sessionStatusToString } from '../wasm/session';
 import { Logger } from '../utils/logs';
 import { GossipSdkEvents } from '../types/events';
+import { SdkConfig, defaultSdkConfig } from '../config/sdk';
 
 export interface MessageResult {
   success: boolean;
@@ -63,7 +64,6 @@ interface Decrypted {
   type: MessageType;
 }
 
-const LIMIT_FETCH_ITERATIONS = 30;
 const sleep = (ms: number) => new Promise(res => setTimeout(res, ms));
 
 const logger = new Logger('MessageService');
@@ -73,17 +73,20 @@ export class MessageService {
   private messageProtocol: IMessageProtocol;
   private session: SessionModule;
   private events: GossipSdkEvents;
+  private config: SdkConfig;
 
   constructor(
     db: GossipDatabase,
     messageProtocol: IMessageProtocol,
     session: SessionModule,
-    events: GossipSdkEvents = {}
+    events: GossipSdkEvents = {},
+    config: SdkConfig = defaultSdkConfig
   ) {
     this.db = db;
     this.messageProtocol = messageProtocol;
     this.session = session;
     this.events = events;
+    this.config = config;
   }
 
   async fetchMessages(): Promise<MessageResult> {
@@ -105,10 +108,12 @@ export class MessageService {
           seekers.length === previousSeekers.size &&
           [...currentSeekers].every(s => previousSeekers.has(s));
 
-        if (allSame || iterations >= LIMIT_FETCH_ITERATIONS) {
-          if (iterations >= LIMIT_FETCH_ITERATIONS) {
+        const maxIterations = this.config.messages.maxFetchIterations;
+        if (allSame || iterations >= maxIterations) {
+          if (iterations >= maxIterations) {
             log.warn('fetch loop stopped due to max iterations', {
               iterations,
+              maxIterations,
             });
           }
           break;
@@ -120,7 +125,7 @@ export class MessageService {
 
         if (encryptedMessages.length === 0) {
           iterations++;
-          await sleep(100);
+          await sleep(this.config.messages.fetchDelayMs);
           continue;
         }
 
@@ -146,7 +151,7 @@ export class MessageService {
         }
 
         iterations++;
-        await sleep(100);
+        await sleep(this.config.messages.fetchDelayMs);
       }
 
       try {

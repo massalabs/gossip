@@ -50,6 +50,12 @@ import {
 import { setDb } from './db';
 import { IMessageProtocol, createMessageProtocol } from './api/messageProtocol';
 import { setProtocolBaseUrl } from './config/protocol';
+import {
+  type SdkConfig,
+  type DeepPartial,
+  defaultSdkConfig,
+  mergeConfig,
+} from './config/sdk';
 import { startWasmInitialization, ensureWasmInitialized } from './wasm/loader';
 import { generateUserKeys, UserKeys } from './wasm/userKeys';
 import { SessionModule } from './wasm/session';
@@ -94,8 +100,10 @@ import type { UserPublicKeys } from './assets/generated/wasm/gossip_wasm';
 export interface GossipSdkInitOptions {
   /** Database instance */
   db: GossipDatabase;
-  /** Protocol API base URL */
+  /** Protocol API base URL (shorthand for config.protocol.baseUrl) */
   protocolBaseUrl?: string;
+  /** SDK configuration (optional - uses defaults if not provided) */
+  config?: DeepPartial<SdkConfig>;
 }
 
 export interface OpenSessionOptions {
@@ -145,12 +153,14 @@ type SdkStateInitialized = {
   status: 'initialized';
   db: GossipDatabase;
   messageProtocol: IMessageProtocol;
+  config: SdkConfig;
 };
 
 type SdkStateSessionOpen = {
   status: 'session_open';
   db: GossipDatabase;
   messageProtocol: IMessageProtocol;
+  config: SdkConfig;
   session: SessionModule;
   userKeys: UserKeys;
   persistEncryptionKey?: EncryptionKey;
@@ -164,6 +174,13 @@ type SdkState =
   | SdkStateUninitialized
   | SdkStateInitialized
   | SdkStateSessionOpen;
+
+/** Polling timers state */
+interface PollingState {
+  messagesTimer: ReturnType<typeof setInterval> | null;
+  announcementsTimer: ReturnType<typeof setInterval> | null;
+  sessionRefreshTimer: ReturnType<typeof setInterval> | null;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SDK Class
@@ -188,6 +205,13 @@ class GossipSdkImpl {
   // Ensures messages are sent in order per contact
   private messageQueues = new QueueManager();
 
+  // Polling state for built-in message/announcement fetching
+  private pollingState: PollingState = {
+    messagesTimer: null,
+    announcementsTimer: null,
+    sessionRefreshTimer: null,
+  };
+
   // Services (created when session opens)
   private _auth: AuthService | null = null;
   private _announcement: AnnouncementService | null = null;
@@ -208,12 +232,16 @@ class GossipSdkImpl {
       return;
     }
 
+    // Merge config with defaults
+    const config = mergeConfig(options.config);
+
     // Configure database
     setDb(options.db);
 
-    // Configure protocol URL
-    if (options.protocolBaseUrl) {
-      setProtocolBaseUrl(options.protocolBaseUrl);
+    // Configure protocol URL (prefer explicit option, then config)
+    const baseUrl = options.protocolBaseUrl ?? config.protocol.baseUrl;
+    if (baseUrl) {
+      setProtocolBaseUrl(baseUrl);
     }
 
     // Start WASM initialization
@@ -229,6 +257,7 @@ class GossipSdkImpl {
       status: 'initialized',
       db: options.db,
       messageProtocol,
+      config,
     };
   }
 
@@ -331,14 +360,24 @@ class GossipSdkImpl {
       },
     };
 
-    // Create services
+    // Get config from initialized state
+    const { config } = this.state;
+
+    // Create services with config
     this._announcement = new AnnouncementService(
       db,
       messageProtocol,
       session,
-      events
+      events,
+      config
     );
-    this._message = new MessageService(db, messageProtocol, session, events);
+    this._message = new MessageService(
+      db,
+      messageProtocol,
+      session,
+      events,
+      config
+    );
     this._discussion = new DiscussionService(
       db,
       this._announcement,
@@ -355,11 +394,17 @@ class GossipSdkImpl {
       status: 'session_open',
       db,
       messageProtocol,
+      config,
       session,
       userKeys,
       persistEncryptionKey: options.persistEncryptionKey,
       onPersist: options.onPersist,
     };
+
+    // Auto-start polling if enabled in config
+    if (config.polling.enabled) {
+      this.startPolling();
+    }
   }
 
   /**
@@ -369,6 +414,9 @@ class GossipSdkImpl {
     if (this.state.status !== 'session_open') {
       return;
     }
+
+    // Stop polling first
+    this.stopPolling();
 
     // Cleanup session
     this.state.session.cleanup();
@@ -387,6 +435,7 @@ class GossipSdkImpl {
       status: 'initialized',
       db: this.state.db,
       messageProtocol: this.state.messageProtocol,
+      config: this.state.config,
     };
   }
 
@@ -530,6 +579,128 @@ class GossipSdkImpl {
       encodeUserId,
       decodeUserId,
     };
+  }
+
+  /** Current SDK configuration (read-only) */
+  get config(): SdkConfig {
+    if (this.state.status === 'uninitialized') {
+      return defaultSdkConfig;
+    }
+    return this.state.config;
+  }
+
+  /** Polling control API */
+  get polling(): PollingAPI {
+    return {
+      start: () => this.startPolling(),
+      stop: () => this.stopPolling(),
+      isRunning: this.isPollingRunning(),
+    };
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // Polling
+  // ─────────────────────────────────────────────────────────────────
+
+  /**
+   * Start polling for messages, announcements, and session refresh.
+   * Uses intervals from config.polling.
+   */
+  private startPolling(): void {
+    if (this.state.status !== 'session_open') {
+      console.warn('[GossipSdk] Cannot start polling - no session open');
+      return;
+    }
+
+    const { config } = this.state;
+
+    // Stop any existing timers first
+    this.stopPolling();
+
+    console.log('[GossipSdk] Starting polling', {
+      messagesIntervalMs: config.polling.messagesIntervalMs,
+      announcementsIntervalMs: config.polling.announcementsIntervalMs,
+      sessionRefreshIntervalMs: config.polling.sessionRefreshIntervalMs,
+    });
+
+    // Start message polling
+    this.pollingState.messagesTimer = setInterval(async () => {
+      try {
+        await this._message?.fetchMessages();
+      } catch (error) {
+        console.error('[GossipSdk] Message polling error:', error);
+        this.emit(
+          'error',
+          error instanceof Error ? error : new Error(String(error)),
+          'message_polling'
+        );
+      }
+    }, config.polling.messagesIntervalMs);
+
+    // Start announcement polling
+    this.pollingState.announcementsTimer = setInterval(async () => {
+      try {
+        await this._announcement?.fetchAndProcessAnnouncements();
+      } catch (error) {
+        console.error('[GossipSdk] Announcement polling error:', error);
+        this.emit(
+          'error',
+          error instanceof Error ? error : new Error(String(error)),
+          'announcement_polling'
+        );
+      }
+    }, config.polling.announcementsIntervalMs);
+
+    // Start session refresh polling
+    this.pollingState.sessionRefreshTimer = setInterval(async () => {
+      try {
+        if (this.state.status !== 'session_open') {
+          return;
+        }
+        const discussions = await this.state.db.getActiveDiscussionsByOwner(
+          this.state.session.userIdEncoded
+        );
+        if (discussions.length > 0) {
+          await this._refresh?.handleSessionRefresh(discussions);
+        }
+      } catch (error) {
+        console.error('[GossipSdk] Session refresh polling error:', error);
+        this.emit(
+          'error',
+          error instanceof Error ? error : new Error(String(error)),
+          'session_refresh_polling'
+        );
+      }
+    }, config.polling.sessionRefreshIntervalMs);
+  }
+
+  /**
+   * Stop all polling timers.
+   */
+  private stopPolling(): void {
+    if (this.pollingState.messagesTimer) {
+      clearInterval(this.pollingState.messagesTimer);
+      this.pollingState.messagesTimer = null;
+    }
+    if (this.pollingState.announcementsTimer) {
+      clearInterval(this.pollingState.announcementsTimer);
+      this.pollingState.announcementsTimer = null;
+    }
+    if (this.pollingState.sessionRefreshTimer) {
+      clearInterval(this.pollingState.sessionRefreshTimer);
+      this.pollingState.sessionRefreshTimer = null;
+    }
+  }
+
+  /**
+   * Check if polling is currently running.
+   */
+  private isPollingRunning(): boolean {
+    return (
+      this.pollingState.messagesTimer !== null ||
+      this.pollingState.announcementsTimer !== null ||
+      this.pollingState.sessionRefreshTimer !== null
+    );
   }
 
   // ─────────────────────────────────────────────────────────────────
@@ -700,6 +871,15 @@ interface SdkUtils {
   encodeUserId(rawId: Uint8Array): string;
   /** Decode user ID string to raw bytes */
   decodeUserId(encodedId: string): Uint8Array;
+}
+
+interface PollingAPI {
+  /** Start polling for messages, announcements, and session refresh */
+  start(): void;
+  /** Stop all polling */
+  stop(): void;
+  /** Whether polling is currently running */
+  isRunning: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
