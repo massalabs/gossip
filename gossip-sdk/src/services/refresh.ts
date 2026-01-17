@@ -82,15 +82,46 @@ export class RefreshService {
       return;
     }
 
+    // Log session status BEFORE refresh for debugging
+    const statusBefore = activeDiscussions.map(d => {
+      try {
+        const peerId = decodeUserId(d.contactUserId);
+        const status = this.session.peerSessionStatus(peerId);
+        return {
+          contact: d.contactUserId.slice(0, 12),
+          status: sessionStatusToString(status),
+        };
+      } catch {
+        return { contact: d.contactUserId.slice(0, 12), status: 'ERROR' };
+      }
+    });
+    console.log('[SessionStatus] Before refresh():', statusBefore);
+
     let keepAlivePeerIds: string[] = [];
     try {
       // Ask the session manager which peers require keep-alive messages
+      // WARNING: refresh() may KILL sessions based on timeout logic!
       const refreshResult = await this.session.refresh();
       keepAlivePeerIds = refreshResult.map(peer => encodeUserId(peer));
     } catch (error) {
       log.error('error while refreshing session', { error });
       return;
     }
+
+    // Log session status AFTER refresh for debugging
+    const statusAfter = activeDiscussions.map(d => {
+      try {
+        const peerId = decodeUserId(d.contactUserId);
+        const status = this.session.peerSessionStatus(peerId);
+        return {
+          contact: d.contactUserId.slice(0, 12),
+          status: sessionStatusToString(status),
+        };
+      } catch {
+        return { contact: d.contactUserId.slice(0, 12), status: 'ERROR' };
+      }
+    });
+    console.log('[SessionStatus] After refresh():', statusAfter);
 
     /* refresh function kill sessions that have no incoming messages for a long time
     So we need to mark corresponding discussions as broken if it is the case */
@@ -112,6 +143,11 @@ export class RefreshService {
         ].includes(status);
 
         if (needsRenewal) {
+          // Log clearly to console for debugging
+          console.warn(
+            `[SessionStatus] ${discussion.contactUserId.slice(0, 16)}... -> ${sessionStatusToString(status)} (triggering renewal)`
+          );
+
           log.info('session needs renewal, triggering auto-renewal', {
             ownerUserId: discussion.ownerUserId,
             contactUserId: discussion.contactUserId,

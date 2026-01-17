@@ -465,6 +465,10 @@ export class AnnouncementService {
     const contactUserId = encodeUserId(contactUserIdRaw);
 
     const sessionStatus = this.session.peerSessionStatus(contactUserIdRaw);
+    // Log clearly for debugging
+    console.log(
+      `[Announcement] Received from ${contactUserId.slice(0, 12)}... -> session status: ${sessionStatusToString(sessionStatus)}`
+    );
     log.info('session updated', {
       contactUserId,
       status: sessionStatusToString(sessionStatus),

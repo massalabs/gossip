@@ -491,6 +491,34 @@ class GossipSdkImpl {
     return state.session.toEncryptedBlob(encryptionKey);
   }
 
+  /**
+   * Configure session persistence after session is opened.
+   * Use this when you need to set up persistence after account creation.
+   *
+   * @param encryptionKey - Key to encrypt session blob
+   * @param onPersist - Callback to save encrypted session blob
+   */
+  configurePersistence(
+    encryptionKey: EncryptionKey,
+    onPersist: (
+      encryptedBlob: Uint8Array,
+      encryptionKey: EncryptionKey
+    ) => Promise<void>
+  ): void {
+    if (this.state.status !== 'session_open') {
+      throw new Error('No session open. Call openSession() first.');
+    }
+
+    // Update state with persistence config
+    this.state = {
+      ...this.state,
+      persistEncryptionKey: encryptionKey,
+      onPersist,
+    };
+
+    console.log('[GossipSdk] Session persistence configured');
+  }
+
   // ─────────────────────────────────────────────────────────────────
   // Services (accessible only when session is open)
   // ─────────────────────────────────────────────────────────────────
@@ -845,6 +873,9 @@ class GossipSdkImpl {
 
     try {
       const blob = session.toEncryptedBlob(persistEncryptionKey);
+      console.log(
+        `[SessionPersist] Saving session blob (${blob.length} bytes)`
+      );
       await onPersist(blob, persistEncryptionKey);
     } catch (error) {
       console.error('[GossipSdk] Session persistence failed:', error);

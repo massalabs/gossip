@@ -505,6 +505,11 @@ export class MessageService {
         status: MessageStatus.WAITING_SESSION,
       });
 
+      // Clear console log for debugging
+      console.warn(
+        `[SendMessage] WAITING_SESSION - isUnstable=${isUnstable}, isSelfRequested=${isSelfRequested}, sessionStatus=${sessionStatusToString(sessionStatus)}`
+      );
+
       log.info('discussion/session not ready, queuing as WAITING_SESSION', {
         isUnstable,
         isSelfRequested,

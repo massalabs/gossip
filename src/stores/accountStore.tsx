@@ -297,6 +297,9 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       try {
         set({ isLoading: true });
 
+        // Ensure any existing session is closed before creating new account
+        await cleanupSession();
+
         const mnemonic = generateMnemonic(256);
 
         // Generate keys for Massa wallet (SDK generates its own internally)
@@ -319,6 +322,19 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
             password,
           }
         );
+
+        // Configure persistence now that we have the profile and encryption key
+        gossipSdk.configurePersistence(encryptionKey, async (blob, _key) => {
+          await db.userProfile.update(profile.userId, {
+            session: blob,
+            updatedAt: new Date(),
+          });
+          set(state => ({
+            userProfile: state.userProfile
+              ? { ...state.userProfile, session: blob, updatedAt: new Date() }
+              : null,
+          }));
+        });
 
         useAppStore.getState().setIsInitialized(true);
         set({
@@ -345,6 +361,9 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       try {
         set({ isLoading: true });
 
+        // Ensure any existing session is closed before restoring account
+        await cleanupSession();
+
         // Validate mnemonic
         if (!validateMnemonic(mnemonic)) {
           throw new Error('Invalid mnemonic phrase');
@@ -367,6 +386,19 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           mnemonic,
           opts
         );
+
+        // Configure persistence now that we have the profile and encryption key
+        gossipSdk.configurePersistence(encryptionKey, async (blob, _key) => {
+          await db.userProfile.update(profile.userId, {
+            session: blob,
+            updatedAt: new Date(),
+          });
+          set(state => ({
+            userProfile: state.userProfile
+              ? { ...state.userProfile, session: blob, updatedAt: new Date() }
+              : null,
+          }));
+        });
 
         useAppStore.getState().setIsInitialized(true);
         set({
@@ -513,6 +545,9 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       try {
         set({ isLoading: true });
 
+        // Ensure any existing session is closed before creating new account
+        await cleanupSession();
+
         // Check biometric support using unified service
         const availability = await biometricService.checkAvailability();
         if (!availability.available) {
@@ -544,6 +579,19 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
             iCloudSync,
           }
         );
+
+        // Configure persistence now that we have the profile and encryption key
+        gossipSdk.configurePersistence(encryptionKey, async (blob, _key) => {
+          await db.userProfile.update(profile.userId, {
+            session: blob,
+            updatedAt: new Date(),
+          });
+          set(state => ({
+            userProfile: state.userProfile
+              ? { ...state.userProfile, session: blob, updatedAt: new Date() }
+              : null,
+          }));
+        });
 
         useAppStore.getState().setIsInitialized(true);
         set({

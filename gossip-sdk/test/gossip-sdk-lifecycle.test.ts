@@ -237,3 +237,110 @@ describe('GossipSdkImpl lifecycle', () => {
     expect(handler).toHaveBeenCalledWith({ id: 1 });
   });
 });
+
+/**
+ * Tests for configurePersistence method
+ *
+ * CRITICAL: These tests ensure session persistence can be configured AFTER
+ * openSession() is called. This is essential for account creation flows where
+ * we need to create the user profile before we can set up persistence.
+ *
+ * Bug prevented: Without configurePersistence, new accounts created with
+ * openSession() (without onPersist) would never persist session state,
+ * causing WAITING_SESSION issues after page reload.
+ */
+describe('GossipSdkImpl.configurePersistence', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    protocolMock.createMessageProtocolMock.mockReturnValue({
+      fetchMessages: vi.fn(),
+      sendMessage: vi.fn(),
+      sendAnnouncement: vi.fn(),
+      fetchAnnouncements: vi.fn(),
+      fetchPublicKeyByUserId: vi.fn(),
+      postPublicKey: vi.fn(),
+      changeNode: vi.fn(),
+    });
+    sessionMock.state.lastSessionInstance = null;
+    eventState.lastEvents = null;
+  });
+
+  it('throws if called before session is opened', async () => {
+    const { GossipSdkImpl } = await import('../src/gossipSdk');
+    const sdk = new GossipSdkImpl();
+    const onPersist = vi.fn();
+    const encryptionKey = {} as EncryptionKey;
+
+    await sdk.init({ db: new GossipDatabase() });
+
+    // Session not opened yet - should throw
+    expect(() => sdk.configurePersistence(encryptionKey, onPersist)).toThrow(
+      'No session open'
+    );
+  });
+
+  it('configures persistence after session is opened without initial onPersist', async () => {
+    const { GossipSdkImpl } = await import('../src/gossipSdk');
+    const sdk = new GossipSdkImpl();
+    const onPersist = vi.fn().mockResolvedValue(undefined);
+    const encryptionKey = {} as EncryptionKey;
+
+    await sdk.init({ db: new GossipDatabase() });
+
+    // Open session WITHOUT onPersist (simulates account creation flow)
+    await sdk.openSession({ mnemonic: 'test words' });
+
+    // Configure persistence after profile is created
+    sdk.configurePersistence(encryptionKey, onPersist);
+
+    // Trigger persist event from session
+    sessionMock.state.lastSessionInstance?.emitPersist();
+
+    // Should have called the newly configured onPersist
+    expect(onPersist).toHaveBeenCalledWith(new Uint8Array([9]), encryptionKey);
+  });
+
+  it('replaces existing onPersist callback when reconfigured', async () => {
+    const { GossipSdkImpl } = await import('../src/gossipSdk');
+    const sdk = new GossipSdkImpl();
+    const originalOnPersist = vi.fn().mockResolvedValue(undefined);
+    const newOnPersist = vi.fn().mockResolvedValue(undefined);
+    const originalKey = { original: true } as unknown as EncryptionKey;
+    const newKey = { new: true } as unknown as EncryptionKey;
+
+    await sdk.init({ db: new GossipDatabase() });
+
+    // Open session with initial persistence
+    await sdk.openSession({
+      mnemonic: 'test words',
+      onPersist: originalOnPersist,
+      persistEncryptionKey: originalKey,
+    });
+
+    // Reconfigure with new callback
+    sdk.configurePersistence(newKey, newOnPersist);
+
+    // Trigger persist
+    sessionMock.state.lastSessionInstance?.emitPersist();
+
+    // Only the new callback should be called
+    expect(originalOnPersist).not.toHaveBeenCalled();
+    expect(newOnPersist).toHaveBeenCalledWith(new Uint8Array([9]), newKey);
+  });
+
+  it('ensures persistence is called with correct encryption key', async () => {
+    const { GossipSdkImpl } = await import('../src/gossipSdk');
+    const sdk = new GossipSdkImpl();
+    const onPersist = vi.fn().mockResolvedValue(undefined);
+    const specificKey = { keyId: 'test-key-123' } as unknown as EncryptionKey;
+
+    await sdk.init({ db: new GossipDatabase() });
+    await sdk.openSession({ mnemonic: 'test words' });
+
+    sdk.configurePersistence(specificKey, onPersist);
+    sessionMock.state.lastSessionInstance?.emitPersist();
+
+    // Verify the specific encryption key is passed
+    expect(onPersist).toHaveBeenCalledWith(expect.any(Uint8Array), specificKey);
+  });
+});
