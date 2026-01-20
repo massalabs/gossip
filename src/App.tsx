@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useLayoutEffect } from 'react';
 import { BrowserRouter, useMatch } from 'react-router-dom';
 import { useAccountStore } from './stores/accountStore';
 import { useAppStore } from './stores/appStore';
@@ -9,8 +9,6 @@ import { Toaster } from 'react-hot-toast';
 
 // Hooks
 import { useProfileLoader } from './hooks/useProfileLoader';
-import { useAppStateRefresh } from './hooks/useAppStateRefresh';
-import { useResendFailedBlobs } from './hooks/useResendFailedBlobs';
 import { useAccountInfo } from './hooks/useAccountInfo';
 import { setupServiceWorker } from './services/serviceWorkerSetup';
 
@@ -21,9 +19,11 @@ import { Onboarding } from './pages/Onboarding.tsx';
 import { AppUrlListener } from './components/AppUrlListener';
 import { toastOptions } from './utils/toastOptions.ts';
 import LoadingScreen from './components/ui/LoadingScreen.tsx';
+import IOSKeyboardWrapper from './components/ui/IOSKeyboardWrapper';
 import { ROUTES } from './constants/routes';
 import { useOnlineStore } from './stores/useOnlineStore.tsx';
 import { useTheme } from './hooks/useTheme.ts';
+import { useScreenshotProtection } from './hooks/useScreenshotProtection';
 
 const AppContent: React.FC = () => {
   const { isLoading, userProfile } = useAccountStore();
@@ -31,8 +31,6 @@ const AppContent: React.FC = () => {
   const [showImport, setShowImport] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
   useProfileLoader();
-  useAppStateRefresh();
-  useResendFailedBlobs();
   const existingAccountInfo = useAccountInfo();
 
   const inviteMatch = useMatch(ROUTES.invite());
@@ -75,6 +73,21 @@ const AppContent: React.FC = () => {
 function App() {
   const { initTheme } = useTheme();
   const { initOnlineStore } = useOnlineStore();
+  useScreenshotProtection();
+
+  const [ready, setReady] = useState(false);
+
+  useLayoutEffect(() => {
+    // Safe area insets are captured in main.tsx before app renders
+    // Here we just initialize theme and online store
+    const init = async () => {
+      await initTheme();
+      await initOnlineStore();
+      setReady(true);
+    };
+
+    init();
+  }, [initTheme, initOnlineStore]);
 
   useEffect(() => {
     let cleanup: (() => void) | undefined;
@@ -98,15 +111,21 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  if (!ready) {
+    return <LoadingScreen />;
+  }
+
   return (
     <BrowserRouter>
       <ErrorBoundary>
-        <AppUrlListener />
-        <AppContent />
-        <DebugConsole />
-        {/* <div className="hidden">
-          <PWABadge />
-        </div> */}
+        <IOSKeyboardWrapper>
+          <AppUrlListener />
+          <AppContent />
+          <DebugConsole />
+          {/* <div className="hidden">
+            <PWABadge />
+          </div> */}
+        </IOSKeyboardWrapper>
         <Toaster position="top-center" toastOptions={toastOptions} />
       </ErrorBoundary>
     </BrowserRouter>

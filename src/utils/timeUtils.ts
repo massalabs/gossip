@@ -119,3 +119,74 @@ export function createTimestamp(date: Date = new Date()): string {
     second: '2-digit',
   });
 }
+
+/**
+ * Format a date for use in date separators (e.g., "Today", "Yesterday", "January 15, 2024")
+ * @param date - The date to format
+ * @returns Formatted date string for separators
+ */
+export function formatDateSeparator(date: Date): string {
+  if (isToday(date)) {
+    return 'Today';
+  }
+
+  if (isYesterday(date)) {
+    return 'Yesterday';
+  }
+
+  const now = new Date();
+  const diff = now.getTime() - date.getTime();
+  // Calculate whole days difference; keep sign so future dates are not treated as past
+  const days = Math.floor(diff / 86400000);
+
+  // For dates within the last week (in the past), show day name
+  // Only apply this logic for past dates (diff >= 0) to avoid misleading future date display
+  if (diff >= 0 && days < 7) {
+    return date.toLocaleDateString('en-US', { weekday: 'long' });
+  }
+
+  // For future dates, show the full date to avoid confusion
+  if (diff < 0) {
+    // Future date - show full date format
+    if (date.getFullYear() === now.getFullYear()) {
+      return date.toLocaleDateString('en-US', {
+        month: 'long',
+        day: 'numeric',
+      });
+    }
+    return date.toLocaleDateString('en-US', {
+      month: 'long',
+      day: 'numeric',
+      year: 'numeric',
+    });
+  }
+
+  // For dates within the current year, show month and day
+  if (date.getFullYear() === now.getFullYear()) {
+    return date.toLocaleDateString('en-US', {
+      month: 'long',
+      day: 'numeric',
+    });
+  }
+
+  // For older dates, show full date
+  return date.toLocaleDateString('en-US', {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  });
+}
+
+/**
+ * Check if two dates are on different days
+ * @param date1 - First date
+ * @param date2 - Second date
+ * @returns True if the dates are on different days
+ */
+export function isDifferentDay(date1: Date, date2: Date): boolean {
+  return (
+    date1.getDate() !== date2.getDate() ||
+    date1.getMonth() !== date2.getMonth() ||
+    date1.getFullYear() !== date2.getFullYear()
+  );
+}

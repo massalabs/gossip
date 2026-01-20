@@ -1,5 +1,13 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { describe, it, expect, beforeEach, vi, beforeAll } from 'vitest';
+import {
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterEach,
+  vi,
+  beforeAll,
+} from 'vitest';
 import { db, Contact, DiscussionStatus } from '../../src/db';
 import {
   initializeDiscussion,
@@ -7,18 +15,17 @@ import {
   renewDiscussion,
 } from '../../src/services/discussion';
 import { announcementService } from '../../src/services/announcement';
-import { encodeUserId } from '../../src/utils/userId';
 
 // Import mock classes after vi.mock calls (due to hoisting)
+import { MockSessionModule } from '../wasm/mock';
 import {
-  MockSessionModule,
-  MockUserPublicKeys,
-  MockUserSecretKeys,
-  mockGenerateUserKeys,
-} from '../../src/wasm/mock';
-import { SessionModule } from '../../src/wasm/session';
-import { SessionStatus } from '../../src/assets/generated/wasm/gossip_wasm';
-import { initSession } from '../utils';
+  SessionStatus,
+  UserPublicKeys,
+  UserSecretKeys,
+  UserKeys,
+} from '../../src/assets/generated/wasm/gossip_wasm';
+import { generateUserKeys } from '../../src/wasm/userKeys';
+import { initSession, initializeSessionMock } from '../utils';
 import { MockMessageProtocol } from '../../src/api/messageProtocol/mock';
 import { createMessageProtocol } from '../../src/api/messageProtocol';
 import { MessageProtocolType } from '../../src/config/protocol';
@@ -26,16 +33,16 @@ import { MessageProtocolType } from '../../src/config/protocol';
 describe('Discussion Service', () => {
   let mockProtocol: MockMessageProtocol;
   // Alice's test data
-  let aliceUserId: string;
   let aliceSession: MockSessionModule;
-  let alicePk: MockUserPublicKeys;
-  let aliceSk: MockUserSecretKeys;
+  let alicePk: UserPublicKeys;
+  let aliceSk: UserSecretKeys;
+  let aliceKeys: UserKeys | null = null;
 
   // Bob's test data
-  let bobUserId: string;
   let bobSession: MockSessionModule;
-  let bobPk: MockUserPublicKeys;
-  let bobSk: MockUserSecretKeys;
+  let bobPk: UserPublicKeys;
+  let bobSk: UserSecretKeys;
+  let bobKeys: UserKeys | null = null;
 
   // Initialize WASM before all tests
   beforeAll(async () => {
@@ -55,31 +62,59 @@ describe('Discussion Service', () => {
     // Reset all mocks
     vi.clearAllMocks();
 
-    // Generate Alice's keys
-    const aliceKeys = mockGenerateUserKeys();
-    aliceUserId = encodeUserId(aliceKeys.publicKeys.user_id);
-    alicePk = aliceKeys.publicKeys;
-    aliceSk = aliceKeys.secretKeys;
+    // Generate Alice's keys using real WASM
+    aliceKeys = await generateUserKeys(
+      `alice-test-passphrase-${Date.now()}-${Math.random()}`
+    );
+    alicePk = aliceKeys.public_keys();
+    aliceSk = aliceKeys.secret_keys();
+    // Free the UserKeys object after extracting keys to prevent memory leaks
+    aliceKeys.free();
+    aliceKeys = null;
+    aliceSession = initializeSessionMock(alicePk, aliceSk);
 
-    // Create Alice's session
-    aliceSession = new MockSessionModule();
+    // Generate Bob's keys using real WASM
+    bobKeys = await generateUserKeys(
+      `bob-test-passphrase-${Date.now()}-${Math.random()}`
+    );
+    bobPk = bobKeys.public_keys();
+    bobSk = bobKeys.secret_keys();
+    // Free the UserKeys object after extracting keys to prevent memory leaks
+    bobKeys.free();
+    bobKeys = null;
+    bobSession = initializeSessionMock(bobPk, bobSk);
+  });
 
-    // Generate Bob's keys
-    const bobKeys = mockGenerateUserKeys();
-    bobUserId = encodeUserId(bobKeys.publicKeys.user_id);
-    bobPk = bobKeys.publicKeys;
-    bobSk = bobKeys.secretKeys;
+  afterEach(async () => {
+    // Free WASM objects to prevent memory leaks
+    if (alicePk) {
+      alicePk.free();
 
-    // Create Bob's session
-    bobSession = new MockSessionModule();
+      alicePk = null as any;
+    }
+    if (aliceSk) {
+      aliceSk.free();
+
+      aliceSk = null as any;
+    }
+    if (bobPk) {
+      bobPk.free();
+
+      bobPk = null as any;
+    }
+    if (bobSk) {
+      bobSk.free();
+
+      bobSk = null as any;
+    }
   });
 
   describe('Discussion Initiation Happy Path', () => {
     it('Alice sends announcement and Bob accepts', async () => {
       // Step 1: Alice creates Bob as a contact (like in NewContact.tsx handleSubmit)
       const aliceBobContact: Omit<Contact, 'id'> = {
-        ownerUserId: aliceUserId,
-        userId: bobUserId,
+        ownerUserId: aliceSession.userIdEncoded,
+        userId: bobSession.userIdEncoded,
         name: 'Bob',
         publicKeys: bobPk.to_bytes(),
         avatar: undefined,
@@ -98,10 +133,7 @@ describe('Discussion Service', () => {
       // Step 2: Alice initializes discussion with Bob
       const { discussionId: aliceDiscussionId } = await initializeDiscussion(
         aliceBobContact,
-        alicePk,
-        aliceSk,
-        aliceSession as unknown as SessionModule,
-        aliceUserId
+        aliceSession as any
       );
 
       // Verify Alice's discussion was created with status PENDING
@@ -120,17 +152,13 @@ describe('Discussion Service', () => {
         user_data: new Uint8Array(0),
       } as any);
 
-      await announcementService.fetchAndProcessAnnouncements(
-        bobPk,
-        bobSk,
-        bobSession as any
-      );
+      await announcementService.fetchAndProcessAnnouncements(bobSession as any);
 
       // Verify Bob's discussion was created with status PENDING (received)
-      const bobDiscussion = await db.discussions
-        .where('[ownerUserId+contactUserId]')
-        .equals([bobUserId, aliceUserId])
-        .first();
+      const bobDiscussion = await db.getDiscussionByOwnerAndContact(
+        bobSession.userIdEncoded,
+        aliceSession.userIdEncoded
+      );
 
       expect(bobDiscussion).toBeDefined();
       expect(bobDiscussion?.status).toBe(DiscussionStatus.PENDING);
@@ -146,12 +174,7 @@ describe('Discussion Service', () => {
         bobAcceptanceAnnouncement
       );
 
-      await acceptDiscussionRequest(
-        bobDiscussion,
-        bobSession as any,
-        bobPk,
-        bobSk
-      );
+      await acceptDiscussionRequest(bobDiscussion, bobSession as any);
 
       // Verify Bob's discussion is now ACTIVE
       const bobDiscussionAfterAccept = await db.discussions.get(
@@ -168,8 +191,6 @@ describe('Discussion Service', () => {
       } as any);
 
       await announcementService.fetchAndProcessAnnouncements(
-        alicePk,
-        aliceSk,
         aliceSession as any
       );
 
@@ -184,8 +205,8 @@ describe('Discussion Service', () => {
     it('Both Alice and Bob send announcement at the same time', async () => {
       // Step 1: Alice creates Bob as a contact
       const aliceBobContact: Omit<Contact, 'id'> = {
-        ownerUserId: aliceUserId,
-        userId: bobUserId,
+        ownerUserId: aliceSession.userIdEncoded,
+        userId: bobSession.userIdEncoded,
         name: 'Bob',
         publicKeys: bobPk.to_bytes(),
         avatar: undefined,
@@ -198,8 +219,8 @@ describe('Discussion Service', () => {
 
       // Step 2: Bob creates Alice as a contact
       const bobAliceContact: Omit<Contact, 'id'> = {
-        ownerUserId: bobUserId,
-        userId: aliceUserId,
+        ownerUserId: bobSession.userIdEncoded,
+        userId: aliceSession.userIdEncoded,
         name: 'Alice',
         publicKeys: alicePk.to_bytes(),
         avatar: undefined,
@@ -222,19 +243,13 @@ describe('Discussion Service', () => {
       // Step 3: Alice initializes discussion with Bob
       const { discussionId: aliceDiscussionId } = await initializeDiscussion(
         aliceBobContact,
-        alicePk,
-        aliceSk,
-        aliceSession as any,
-        aliceUserId
+        aliceSession as any
       );
 
       // Step 4: Bob initializes discussion with Alice (simultaneous)
       const { discussionId: bobDiscussionId } = await initializeDiscussion(
         bobAliceContact,
-        bobPk,
-        bobSk,
-        bobSession as any,
-        bobUserId
+        bobSession as any
       );
 
       // Verify both have PENDING discussions with direction 'initiated'
@@ -254,8 +269,6 @@ describe('Discussion Service', () => {
       } as any);
 
       await announcementService.fetchAndProcessAnnouncements(
-        alicePk,
-        aliceSk,
         aliceSession as any
       );
 
@@ -272,11 +285,7 @@ describe('Discussion Service', () => {
         user_data: new Uint8Array(0),
       } as any);
 
-      await announcementService.fetchAndProcessAnnouncements(
-        bobPk,
-        bobSk,
-        bobSession as any
-      );
+      await announcementService.fetchAndProcessAnnouncements(bobSession as any);
 
       // Bob should now have an ACTIVE discussion (mutual initiation)
       const bobDiscussionAfterFetch = await db.discussions.get(bobDiscussionId);
@@ -288,8 +297,8 @@ describe('Discussion Service', () => {
     it('Alice try to send announcement but session manager error', async () => {
       // Step 1: Alice creates Bob as a contact
       const aliceBobContact: Omit<Contact, 'id'> = {
-        ownerUserId: aliceUserId,
-        userId: bobUserId,
+        ownerUserId: aliceSession.userIdEncoded,
+        userId: bobSession.userIdEncoded,
         name: 'Bob',
         publicKeys: bobPk.to_bytes(),
         avatar: undefined,
@@ -307,13 +316,7 @@ describe('Discussion Service', () => {
 
       // Step 2: Alice tries to initialize discussion with Bob - should throw
       await expect(
-        initializeDiscussion(
-          aliceBobContact,
-          alicePk,
-          aliceSk,
-          aliceSession as any,
-          aliceUserId
-        )
+        initializeDiscussion(aliceBobContact, aliceSession as any)
       ).rejects.toThrow('Discussion initialization failed');
 
       // Verify no discussion was created
@@ -324,8 +327,8 @@ describe('Discussion Service', () => {
     it('Alice sign announcement but could not be sent on network. Resend it with success. Same thing happens to Bob acceptation announcement', async () => {
       // Step 1: Alice creates Bob as a contact
       const aliceBobContact: Omit<Contact, 'id'> = {
-        ownerUserId: aliceUserId,
-        userId: bobUserId,
+        ownerUserId: aliceSession.userIdEncoded,
+        userId: bobSession.userIdEncoded,
         name: 'Bob',
         publicKeys: bobPk.to_bytes(),
         avatar: undefined,
@@ -349,10 +352,7 @@ describe('Discussion Service', () => {
       // Step 2: Alice initializes discussion - network fails
       const { discussionId: aliceDiscussionId } = await initializeDiscussion(
         aliceBobContact,
-        alicePk,
-        aliceSk,
-        aliceSession as any,
-        aliceUserId
+        aliceSession as any
       );
 
       // Verify discussion is in SEND_FAILED status
@@ -374,7 +374,7 @@ describe('Discussion Service', () => {
 
       // Step 4: Bob receives Alice's announcement
       vi.spyOn(mockProtocol, 'fetchAnnouncements').mockResolvedValue([
-        aliceAnnouncement,
+        { counter: '1', data: aliceAnnouncement },
       ]);
       bobSession.feedIncomingAnnouncement.mockReturnValue({
         announcer_public_keys: alicePk,
@@ -382,16 +382,12 @@ describe('Discussion Service', () => {
         user_data: new Uint8Array(0),
       } as any);
 
-      await announcementService.fetchAndProcessAnnouncements(
-        bobPk,
-        bobSk,
-        bobSession as any
-      );
+      await announcementService.fetchAndProcessAnnouncements(bobSession as any);
 
-      const bobDiscussion = await db.discussions
-        .where('[ownerUserId+contactUserId]')
-        .equals([bobUserId, aliceUserId])
-        .first();
+      const bobDiscussion = await db.getDiscussionByOwnerAndContact(
+        bobSession.userIdEncoded,
+        aliceSession.userIdEncoded
+      );
 
       expect(bobDiscussion).toBeDefined();
       expect(bobDiscussion?.status).toBe(DiscussionStatus.PENDING);
@@ -407,12 +403,7 @@ describe('Discussion Service', () => {
         .mockRejectedValueOnce(new Error('Network error'))
         .mockResolvedValue('counter-456');
 
-      await acceptDiscussionRequest(
-        bobDiscussion!,
-        bobSession as any,
-        bobPk,
-        bobSk
-      );
+      await acceptDiscussionRequest(bobDiscussion!, bobSession as any);
 
       let bobDiscussionAfterAccept = await db.discussions.get(
         bobDiscussion!.id!
@@ -438,19 +429,18 @@ describe('Discussion Service', () => {
 
       // Alice fetches incoming announcements (including Bob's acceptance)
       vi.spyOn(mockProtocol, 'fetchAnnouncements').mockResolvedValue([
-        bobAcceptanceAnnouncement,
+        { counter: '2', data: bobAcceptanceAnnouncement },
       ]);
 
       await announcementService.fetchAndProcessAnnouncements(
-        alicePk,
-        aliceSk,
         aliceSession as any
       );
 
-      const aliceDiscussionAfterBobAccept = await db.discussions
-        .where('[ownerUserId+contactUserId]')
-        .equals([aliceUserId, bobUserId])
-        .first();
+      const aliceDiscussionAfterBobAccept =
+        await db.getDiscussionByOwnerAndContact(
+          aliceSession.userIdEncoded,
+          bobSession.userIdEncoded
+        );
 
       expect(aliceDiscussionAfterBobAccept).toBeDefined();
       expect(aliceDiscussionAfterBobAccept?.status).toBe(
@@ -461,8 +451,8 @@ describe('Discussion Service', () => {
     it('Alice sign announcement but could not be sent. Resend fails 3 times and success the 4th time. Bob accept without issue', async () => {
       // Step 1: Alice creates Bob as a contact
       const aliceBobContact: Omit<Contact, 'id'> = {
-        ownerUserId: aliceUserId,
-        userId: bobUserId,
+        ownerUserId: aliceSession.userIdEncoded,
+        userId: bobSession.userIdEncoded,
         name: 'Bob',
         publicKeys: bobPk.to_bytes(),
         avatar: undefined,
@@ -490,10 +480,7 @@ describe('Discussion Service', () => {
       // Step 2: Alice initializes discussion - network fails
       const { discussionId: aliceDiscussionId } = await initializeDiscussion(
         aliceBobContact,
-        alicePk,
-        aliceSk,
-        aliceSession as any,
-        aliceUserId
+        aliceSession as any
       );
 
       let aliceDiscussion = await db.discussions.get(aliceDiscussionId);
@@ -522,7 +509,7 @@ describe('Discussion Service', () => {
 
       // Step 5: Bob receives and accepts without issue
       vi.spyOn(mockProtocol, 'fetchAnnouncements').mockResolvedValue([
-        aliceAnnouncement,
+        { counter: '1', data: aliceAnnouncement },
       ]);
 
       bobSession.feedIncomingAnnouncement.mockReturnValue({
@@ -531,16 +518,12 @@ describe('Discussion Service', () => {
         user_data: new Uint8Array(0),
       } as any);
 
-      await announcementService.fetchAndProcessAnnouncements(
-        bobPk,
-        bobSk,
-        bobSession as any
-      );
+      await announcementService.fetchAndProcessAnnouncements(bobSession as any);
 
-      const bobDiscussion = await db.discussions
-        .where('[ownerUserId+contactUserId]')
-        .equals([bobUserId, aliceUserId])
-        .first();
+      const bobDiscussion = await db.getDiscussionByOwnerAndContact(
+        bobSession.userIdEncoded,
+        aliceSession.userIdEncoded
+      );
 
       const bobAcceptanceAnnouncement = new Uint8Array(200);
       crypto.getRandomValues(bobAcceptanceAnnouncement);
@@ -552,12 +535,7 @@ describe('Discussion Service', () => {
         'counter-456'
       );
 
-      await acceptDiscussionRequest(
-        bobDiscussion!,
-        bobSession as any,
-        bobPk,
-        bobSk
-      );
+      await acceptDiscussionRequest(bobDiscussion!, bobSession as any);
 
       const bobDiscussionAfterAccept = await db.discussions.get(
         bobDiscussion!.id!
@@ -568,8 +546,8 @@ describe('Discussion Service', () => {
     it('Alice sign announcement but could not be sent. Resend fails too many times and session is broken. Renew session and resend. Bob accept.', async () => {
       // Step 1: Alice creates Bob as a contact
       const aliceBobContact: Omit<Contact, 'id'> = {
-        ownerUserId: aliceUserId,
-        userId: bobUserId,
+        ownerUserId: aliceSession.userIdEncoded,
+        userId: bobSession.userIdEncoded,
         name: 'Bob',
         publicKeys: bobPk.to_bytes(),
         avatar: undefined,
@@ -594,10 +572,7 @@ describe('Discussion Service', () => {
       // Step 2: Alice initializes discussion - network fails
       const { discussionId: aliceDiscussionId } = await initializeDiscussion(
         aliceBobContact,
-        alicePk,
-        aliceSk,
-        aliceSession as any,
-        aliceUserId
+        aliceSession as any
       );
 
       let aliceDiscussion = await db.discussions.get(aliceDiscussionId);
@@ -628,13 +603,7 @@ describe('Discussion Service', () => {
       aliceSession.peerSessionStatus.mockReturnValue(
         SessionStatus.SelfRequested
       );
-      await renewDiscussion(
-        aliceUserId,
-        bobUserId,
-        aliceSession as any,
-        alicePk,
-        aliceSk
-      );
+      await renewDiscussion(bobSession.userIdEncoded, aliceSession as any);
 
       aliceDiscussion = await db.discussions.get(aliceDiscussionId);
       expect(aliceDiscussion?.status).toBe(DiscussionStatus.PENDING); // PENDING until network confirms
@@ -642,7 +611,7 @@ describe('Discussion Service', () => {
 
       // Step 6: Bob receives and accepts
       vi.spyOn(mockProtocol, 'fetchAnnouncements').mockResolvedValue([
-        newAliceAnnouncement,
+        { counter: '1', data: newAliceAnnouncement },
       ]);
 
       bobSession.feedIncomingAnnouncement.mockReturnValue({
@@ -651,16 +620,12 @@ describe('Discussion Service', () => {
         user_data: new Uint8Array(0),
       } as any);
 
-      await announcementService.fetchAndProcessAnnouncements(
-        bobPk,
-        bobSk,
-        bobSession as any
-      );
+      await announcementService.fetchAndProcessAnnouncements(bobSession as any);
 
-      const bobDiscussion = await db.discussions
-        .where('[ownerUserId+contactUserId]')
-        .equals([bobUserId, aliceUserId])
-        .first();
+      const bobDiscussion = await db.getDiscussionByOwnerAndContact(
+        bobSession.userIdEncoded,
+        aliceSession.userIdEncoded
+      );
 
       const bobAcceptanceAnnouncement = new Uint8Array(200);
       crypto.getRandomValues(bobAcceptanceAnnouncement);
@@ -668,12 +633,7 @@ describe('Discussion Service', () => {
         bobAcceptanceAnnouncement
       );
 
-      await acceptDiscussionRequest(
-        bobDiscussion!,
-        bobSession as any,
-        bobPk,
-        bobSk
-      );
+      await acceptDiscussionRequest(bobDiscussion!, bobSession as any);
 
       const bobDiscussionAfterAccept = await db.discussions.get(
         bobDiscussion!.id!
@@ -682,7 +642,7 @@ describe('Discussion Service', () => {
 
       // Step 7: Alice fetches Bob's announcement and discussion is ACTIVE
       vi.spyOn(mockProtocol, 'fetchAnnouncements').mockResolvedValue([
-        bobAcceptanceAnnouncement,
+        { counter: '2', data: bobAcceptanceAnnouncement },
       ]);
       aliceSession.feedIncomingAnnouncement.mockReturnValue({
         announcer_public_keys: bobPk,
@@ -691,15 +651,14 @@ describe('Discussion Service', () => {
       } as any);
 
       await announcementService.fetchAndProcessAnnouncements(
-        alicePk,
-        aliceSk,
         aliceSession as any
       );
 
-      const aliceDiscussionAfterBobAccept = await db.discussions
-        .where('[ownerUserId+contactUserId]')
-        .equals([aliceUserId, bobUserId])
-        .first();
+      const aliceDiscussionAfterBobAccept =
+        await db.getDiscussionByOwnerAndContact(
+          aliceSession.userIdEncoded,
+          bobSession.userIdEncoded
+        );
 
       expect(aliceDiscussionAfterBobAccept).toBeDefined();
       expect(aliceDiscussionAfterBobAccept?.status).toBe(
@@ -710,8 +669,8 @@ describe('Discussion Service', () => {
     it('Alice send announcement, bob accept but get session manager error. Retry, sign announcement but could not be sent on network until session broke. Renew session and resend with success', async () => {
       // Step 1: Alice creates Bob and sends announcement successfully
       const aliceBobContact: Omit<Contact, 'id'> = {
-        ownerUserId: aliceUserId,
-        userId: bobUserId,
+        ownerUserId: aliceSession.userIdEncoded,
+        userId: bobSession.userIdEncoded,
         name: 'Bob',
         publicKeys: bobPk.to_bytes(),
         avatar: undefined,
@@ -731,17 +690,11 @@ describe('Discussion Service', () => {
         'counter-123'
       );
 
-      await initializeDiscussion(
-        aliceBobContact,
-        alicePk,
-        aliceSk,
-        aliceSession as any,
-        aliceUserId
-      );
+      await initializeDiscussion(aliceBobContact, aliceSession as any);
 
       // Step 2: Bob receives Alice's announcement
       vi.spyOn(mockProtocol, 'fetchAnnouncements').mockResolvedValue([
-        aliceAnnouncement,
+        { counter: '1', data: aliceAnnouncement },
       ]);
 
       bobSession.feedIncomingAnnouncement.mockReturnValue({
@@ -750,16 +703,12 @@ describe('Discussion Service', () => {
         user_data: new Uint8Array(0),
       } as any);
 
-      await announcementService.fetchAndProcessAnnouncements(
-        bobPk,
-        bobSk,
-        bobSession as any
-      );
+      await announcementService.fetchAndProcessAnnouncements(bobSession as any);
 
-      const bobDiscussion = await db.discussions
-        .where('[ownerUserId+contactUserId]')
-        .equals([bobUserId, aliceUserId])
-        .first();
+      const bobDiscussion = await db.getDiscussionByOwnerAndContact(
+        bobSession.userIdEncoded,
+        aliceSession.userIdEncoded
+      );
 
       // Step 3: Bob tries to accept but session manager error
       bobSession.establishOutgoingSession.mockImplementation(() => {
@@ -767,7 +716,7 @@ describe('Discussion Service', () => {
       });
 
       await expect(
-        acceptDiscussionRequest(bobDiscussion!, bobSession as any, bobPk, bobSk)
+        acceptDiscussionRequest(bobDiscussion!, bobSession as any)
       ).rejects.toThrow('Failed to accept pending discussion');
 
       // Step 4: Bob retries - session works but network fails
@@ -780,12 +729,7 @@ describe('Discussion Service', () => {
         new Error('Network error')
       );
 
-      await acceptDiscussionRequest(
-        bobDiscussion!,
-        bobSession as any,
-        bobPk,
-        bobSk
-      );
+      await acceptDiscussionRequest(bobDiscussion!, bobSession as any);
 
       let bobDiscussionAfterAccept = await db.discussions.get(
         bobDiscussion!.id!
@@ -816,20 +760,14 @@ describe('Discussion Service', () => {
         .mockClear()
         .mockResolvedValue('counter-456');
 
-      await renewDiscussion(
-        bobUserId,
-        aliceUserId,
-        bobSession as any,
-        bobPk,
-        bobSk
-      );
+      await renewDiscussion(aliceSession.userIdEncoded, bobSession as any);
 
       bobDiscussionAfterAccept = await db.discussions.get(bobDiscussion!.id!);
       expect(bobDiscussionAfterAccept?.status).toBe(DiscussionStatus.PENDING); // PENDING until Alice responds
 
       // Step 7: Alice fetches Bob's announcement and discussion is ACTIVE
       vi.spyOn(mockProtocol, 'fetchAnnouncements').mockResolvedValue([
-        bobAcceptanceAnnouncement,
+        { counter: '2', data: bobAcceptanceAnnouncement },
       ]);
       aliceSession.feedIncomingAnnouncement.mockReturnValue({
         announcer_public_keys: bobPk,
@@ -838,15 +776,14 @@ describe('Discussion Service', () => {
       } as any);
 
       await announcementService.fetchAndProcessAnnouncements(
-        alicePk,
-        aliceSk,
         aliceSession as any
       );
 
-      const aliceDiscussionAfterBobAccept = await db.discussions
-        .where('[ownerUserId+contactUserId]')
-        .equals([aliceUserId, bobUserId])
-        .first();
+      const aliceDiscussionAfterBobAccept =
+        await db.getDiscussionByOwnerAndContact(
+          aliceSession.userIdEncoded,
+          bobSession.userIdEncoded
+        );
 
       expect(aliceDiscussionAfterBobAccept).toBeDefined();
       expect(aliceDiscussionAfterBobAccept?.status).toBe(
@@ -857,8 +794,8 @@ describe('Discussion Service', () => {
     it("Alice and Bob both send announcements at the same time. Both have network issue and resend. Alice receive Bob's announcement while resending", async () => {
       /* Step 1: Both create contacts */
       const aliceBobContact: Omit<Contact, 'id'> = {
-        ownerUserId: aliceUserId,
-        userId: bobUserId,
+        ownerUserId: aliceSession.userIdEncoded,
+        userId: bobSession.userIdEncoded,
         name: 'Bob',
         publicKeys: bobPk.to_bytes(),
         avatar: undefined,
@@ -868,8 +805,8 @@ describe('Discussion Service', () => {
       };
 
       const bobAliceContact: Omit<Contact, 'id'> = {
-        ownerUserId: bobUserId,
-        userId: aliceUserId,
+        ownerUserId: bobSession.userIdEncoded,
+        userId: aliceSession.userIdEncoded,
         name: 'Alice',
         publicKeys: alicePk.to_bytes(),
         avatar: undefined,
@@ -898,18 +835,12 @@ describe('Discussion Service', () => {
 
       const { discussionId: aliceDiscussionId } = await initializeDiscussion(
         aliceBobContact,
-        alicePk,
-        aliceSk,
-        aliceSession as any,
-        aliceUserId
+        aliceSession as any
       );
 
       const { discussionId: bobDiscussionId } = await initializeDiscussion(
         bobAliceContact,
-        bobPk,
-        bobSk,
-        bobSession as any,
-        bobUserId
+        bobSession as any
       );
 
       let aliceDiscussion = await db.discussions.get(aliceDiscussionId);
@@ -933,7 +864,7 @@ describe('Discussion Service', () => {
 
       /* Step 4: Alice receives Bob's announcement before she resend */
       vi.spyOn(mockProtocol, 'fetchAnnouncements').mockResolvedValue([
-        bobAnnouncement,
+        { counter: '1', data: bobAnnouncement },
       ]);
 
       aliceSession.feedIncomingAnnouncement.mockReturnValue({
@@ -943,8 +874,6 @@ describe('Discussion Service', () => {
       } as any);
 
       await announcementService.fetchAndProcessAnnouncements(
-        alicePk,
-        aliceSk,
         aliceSession as any
       );
 
@@ -963,7 +892,7 @@ describe('Discussion Service', () => {
 
       /* Step 6: Bob fetches Alice's announcement and discussion is ACTIVE */
       vi.spyOn(mockProtocol, 'fetchAnnouncements').mockResolvedValue([
-        aliceAnnouncement,
+        { counter: '2', data: aliceAnnouncement },
       ]);
       bobSession.feedIncomingAnnouncement.mockReturnValue({
         announcer_public_keys: alicePk,
@@ -971,11 +900,7 @@ describe('Discussion Service', () => {
         user_data: new Uint8Array(0),
       } as any);
 
-      await announcementService.fetchAndProcessAnnouncements(
-        bobPk,
-        bobSk,
-        bobSession as any
-      );
+      await announcementService.fetchAndProcessAnnouncements(bobSession as any);
 
       const bobDiscussionAfterAliceResend =
         await db.discussions.get(bobDiscussionId);
@@ -987,8 +912,8 @@ describe('Discussion Service', () => {
     it("Alice and Bob both send announcement at same time. Bob session is broken because of too much resend. Bob receive Alice's announcement while session is broken.", async () => {
       // Step 1: Both create contacts
       const aliceBobContact: Omit<Contact, 'id'> = {
-        ownerUserId: aliceUserId,
-        userId: bobUserId,
+        ownerUserId: aliceSession.userIdEncoded,
+        userId: bobSession.userIdEncoded,
         name: 'Bob',
         publicKeys: bobPk.to_bytes(),
         avatar: undefined,
@@ -998,8 +923,8 @@ describe('Discussion Service', () => {
       };
 
       const bobAliceContact: Omit<Contact, 'id'> = {
-        ownerUserId: bobUserId,
-        userId: aliceUserId,
+        ownerUserId: bobSession.userIdEncoded,
+        userId: aliceSession.userIdEncoded,
         name: 'Alice',
         publicKeys: alicePk.to_bytes(),
         avatar: undefined,
@@ -1027,18 +952,12 @@ describe('Discussion Service', () => {
 
       const { discussionId: aliceDiscussionId } = await initializeDiscussion(
         aliceBobContact,
-        alicePk,
-        aliceSk,
-        aliceSession as any,
-        aliceUserId
+        aliceSession as any
       );
 
       const { discussionId: bobDiscussionId } = await initializeDiscussion(
         bobAliceContact,
-        bobPk,
-        bobSk,
-        bobSession as any,
-        bobUserId
+        bobSession as any
       );
 
       const aliceDiscussion = await db.discussions.get(aliceDiscussionId);
@@ -1061,7 +980,7 @@ describe('Discussion Service', () => {
 
       // Step 4: Bob receives Alice's announcement while his session is broken
       vi.spyOn(mockProtocol, 'fetchAnnouncements').mockResolvedValue([
-        aliceAnnouncement,
+        { counter: '1', data: aliceAnnouncement },
       ]);
 
       bobSession.feedIncomingAnnouncement.mockReturnValue({
@@ -1070,11 +989,7 @@ describe('Discussion Service', () => {
         user_data: new Uint8Array(0),
       } as any);
 
-      await announcementService.fetchAndProcessAnnouncements(
-        bobPk,
-        bobSk,
-        bobSession as any
-      );
+      await announcementService.fetchAndProcessAnnouncements(bobSession as any);
 
       // Bob's broken discussion should remain BROKEN until it is reinitialized
       bobDiscussion = await db.discussions.get(bobDiscussionId);
@@ -1087,13 +1002,7 @@ describe('Discussion Service', () => {
         'counter-456'
       );
 
-      await renewDiscussion(
-        bobUserId,
-        aliceUserId,
-        bobSession as any,
-        bobPk,
-        bobSk
-      );
+      await renewDiscussion(aliceSession.userIdEncoded, bobSession as any);
 
       bobDiscussion = await db.discussions.get(bobDiscussionId);
       expect(bobDiscussion?.status).toBe(DiscussionStatus.ACTIVE);
@@ -1121,13 +1030,7 @@ describe('Discussion Service', () => {
         new Error('Session manager error')
       );
       await expect(
-        renewDiscussion(
-          aliceUserId,
-          bobUserId,
-          aliceSession as any,
-          alicePk,
-          aliceSk
-        )
+        renewDiscussion(bobSession.userIdEncoded, aliceSession as any)
       ).rejects.toThrow();
       let aliceDiscussion = await db.discussions.get(aliceDiscussionId);
       expect(aliceDiscussion?.status).toBe(DiscussionStatus.BROKEN); // Still broken
@@ -1138,13 +1041,7 @@ describe('Discussion Service', () => {
         new Error('Network down')
       );
 
-      await renewDiscussion(
-        aliceUserId,
-        bobUserId,
-        aliceSession as any,
-        alicePk,
-        aliceSk
-      );
+      await renewDiscussion(bobSession.userIdEncoded, aliceSession as any);
 
       aliceDiscussion = await db.discussions.get(aliceDiscussionId);
       expect(aliceDiscussion?.status).toBe(DiscussionStatus.SEND_FAILED);
@@ -1161,20 +1058,14 @@ describe('Discussion Service', () => {
       );
       aliceSession.peerSessionStatus.mockReturnValue(SessionStatus.Active);
 
-      await renewDiscussion(
-        aliceUserId,
-        bobUserId,
-        aliceSession as any,
-        alicePk,
-        aliceSk
-      );
+      await renewDiscussion(bobSession.userIdEncoded, aliceSession as any);
 
       aliceDiscussion = await db.discussions.get(aliceDiscussionId);
       expect(aliceDiscussion?.status).toBe(DiscussionStatus.ACTIVE);
 
       // Step 6: Bob receives Alice's renewed announcement
       vi.spyOn(mockProtocol, 'fetchAnnouncements').mockResolvedValue([
-        renewedAnnouncement as any,
+        { counter: '1', data: renewedAnnouncement },
       ]);
 
       bobSession.feedIncomingAnnouncement.mockReturnValue({
@@ -1183,11 +1074,7 @@ describe('Discussion Service', () => {
         user_data: new Uint8Array(0),
       } as any);
 
-      await announcementService.fetchAndProcessAnnouncements(
-        bobPk,
-        bobSk,
-        bobSession as any
-      );
+      await announcementService.fetchAndProcessAnnouncements(bobSession as any);
 
       const bobDiscussion = await db.discussions.get(bobDiscussionId);
       expect(bobDiscussion?.status === DiscussionStatus.ACTIVE).toBeTruthy();

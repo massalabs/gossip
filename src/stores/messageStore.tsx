@@ -31,7 +31,8 @@ interface MessageStoreState {
   sendMessage: (
     contactUserId: string,
     content: string,
-    replyToId?: number
+    replyToId?: number,
+    forwardFromMessageId?: number
   ) => Promise<void>;
   getMessagesForContact: (contactUserId: string) => Message[];
   clearMessages: (contactUserId: string) => void;
@@ -88,7 +89,11 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
     set({ isInitializing: true });
     // Set up a single liveQuery for all messages of the owner
     const query = liveQuery(() =>
-      db.messages.where('ownerUserId').equals(ownerUserId).sortBy('id')
+      db.messages
+        .where('ownerUserId')
+        .equals(ownerUserId)
+        .and(m => m.type !== MessageType.KEEP_ALIVE)
+        .sortBy('id')
     );
 
     const subscriptionObj = query.subscribe({
@@ -140,10 +145,12 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
   sendMessage: async (
     contactUserId: string,
     content: string,
-    replyToId?: number
+    replyToId?: number,
+    forwardFromMessageId?: number
   ) => {
     const { userProfile, session } = useAccountStore.getState();
-    if (!userProfile?.userId || !content.trim() || get().isSending || !session)
+    const isForward = !!forwardFromMessageId;
+    if (!userProfile?.userId || (!content.trim() && !isForward) || !session)
       return;
 
     set({ isSending: true });
@@ -160,6 +167,8 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
 
       // Create message with sending status
       let replyTo: Message['replyTo'] = undefined;
+      let forwardOf: Message['forwardOf'] = undefined;
+
       if (replyToId) {
         // Look up the original message to get its seeker
         const originalMessage = await db.messages.get(replyToId);
@@ -176,6 +185,30 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
         };
       }
 
+      if (forwardFromMessageId) {
+        const originalMessage = await db.messages.get(forwardFromMessageId);
+        if (!originalMessage) {
+          console.warn(
+            'Forward target message not found, sending as regular message'
+          );
+        } else if (!originalMessage.seeker) {
+          throw new Error(
+            'Cannot forward a message that has not been sent yet'
+          );
+        } else if (originalMessage.contactUserId === contactUserId) {
+          // Forwarding within the same discussion → treat as a reply
+          replyTo = {
+            originalSeeker: originalMessage.seeker,
+          };
+        } else {
+          // Forwarding to a different discussion → use forward metadata
+          forwardOf = {
+            originalContent: originalMessage.content,
+            originalSeeker: originalMessage.seeker,
+          };
+        }
+      }
+
       const message: Omit<Message, 'id'> = {
         ownerUserId: userProfile.userId,
         contactUserId,
@@ -185,6 +218,7 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
         status: MessageStatus.SENDING,
         timestamp: new Date(),
         replyTo,
+        forwardOf,
       };
 
       // Send via service

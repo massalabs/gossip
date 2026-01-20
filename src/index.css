@@ -2,6 +2,35 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* Self-hosted fonts - privacy-friendly alternative to Google Fonts */
+@font-face {
+  font-family: 'Roboto';
+  src: url('/fonts/Roboto-VariableFont_wdth,wght.ttf') format('truetype');
+  font-weight: 100 900;
+  font-stretch: 75% 100%;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Roboto';
+  src: url('/fonts/Roboto-Italic-VariableFont_wdth,wght.ttf') format('truetype');
+  font-weight: 100 900;
+  font-stretch: 75% 100%;
+  font-style: italic;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Mozilla Headline';
+  src: url('/fonts/MozillaHeadline-VariableFont_wdth,wght.ttf')
+    format('truetype');
+  font-weight: 100 900;
+  font-stretch: 75% 100%;
+  font-style: normal;
+  font-display: swap;
+}
+
 @theme inline {
   /* Map CSS variables to Tailwind theme values */
   --color-background: var(--background);
@@ -50,6 +79,40 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+
+  /* ============================================
+   * SAFE AREA & LAYOUT SPACING
+   * ============================================ */
+  /* Safe area insets (for padding/margin) */
+  --spacing-safe-t: var(--sat);
+  --spacing-safe-b: var(--sab);
+  --spacing-safe-l: var(--sal);
+  --spacing-safe-r: var(--sar);
+
+  /* Layout heights (for padding/margin) */
+  --spacing-header: var(--header-height, 3.5rem);
+  --spacing-bottom-nav: var(--bottom-nav-height, 4rem);
+
+  /* Composite spacing (header/nav + safe area) */
+  --spacing-header-safe: calc(var(--sat) + var(--header-height, 3.5rem));
+  --spacing-nav-safe: calc(var(--sab) + var(--bottom-nav-height, 4rem));
+
+  /* Padding for header and nav */
+  --spacing-header-padding: var(--header-padding, 1.5rem);
+  --spacing-nav-padding: var(--nav-padding, 1.5rem);
+
+  /* Reduced safe area bottom for bottom nav (slightly less padding) */
+  --spacing-nav-bottom-safe: max(0px, calc(var(--sab) - 10px));
+
+  /* ============================================
+   * HEIGHT UTILITIES
+   * ============================================ */
+  --height-header: var(--header-height, 3.5rem);
+  --height-bottom-nav: var(--bottom-nav-height, 4rem);
+  --height-header-safe: calc(var(--sat) + var(--header-height, 3.5rem));
+  --height-nav-safe: calc(var(--sab) + var(--bottom-nav-height, 4rem));
+  --height-safe-t: var(--sat);
+  --height-safe-b: var(--sab);
 }
 
 @import './styles/theme.css';

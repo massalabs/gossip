@@ -32,6 +32,10 @@ export interface Message {
     originalContent?: string;
     originalSeeker: Uint8Array; // Seeker of the original message (required for replies)
   };
+  forwardOf?: {
+    originalContent?: string;
+    originalSeeker: Uint8Array;
+  };
   encryptedMessage?: Uint8Array; // Ciphertext of the message
 }
 
@@ -67,6 +71,7 @@ export interface UserProfile {
   createdAt: Date;
   updatedAt: Date;
   lastPublicKeyPush?: Date;
+  lastBulletinCounter?: string;
 }
 
 // Unified discussion interface combining protocol state and UI metadata
@@ -99,6 +104,7 @@ export enum DiscussionDirection {
 
 export enum MessageType {
   TEXT = 'text',
+  KEEP_ALIVE = 'keep_alive',
   IMAGE = 'image',
   FILE = 'file',
   AUDIO = 'audio',
@@ -141,6 +147,7 @@ export interface PendingAnnouncement {
   id?: number;
   announcement: Uint8Array;
   fetchedAt: Date;
+  counter?: string;
 }
 
 export interface ActiveSeeker {
@@ -255,6 +262,9 @@ export class GossipDatabase extends Dexie {
     ownerUserId: string,
     contactUserId: string
   ): Promise<Discussion | undefined> {
+    if (!ownerUserId || !contactUserId) {
+      return undefined;
+    }
     return await this.discussions
       .where('[ownerUserId+contactUserId]')
       .equals([ownerUserId, contactUserId])
@@ -281,6 +291,7 @@ export class GossipDatabase extends Dexie {
     await this.messages
       .where('[ownerUserId+contactUserId+status]')
       .equals([ownerUserId, contactUserId, MessageStatus.DELIVERED])
+      .and(msg => msg.direction === MessageDirection.INCOMING)
       .modify({ status: MessageStatus.READ });
 
     await this.discussions
@@ -306,10 +317,10 @@ export class GossipDatabase extends Dexie {
     const messageId = await this.messages.add(message);
 
     // Get existing discussion
-    const discussion = await this.discussions
-      .where('[ownerUserId+contactUserId]')
-      .equals([message.ownerUserId, message.contactUserId])
-      .first();
+    const discussion = await this.getDiscussionByOwnerAndContact(
+      message.ownerUserId,
+      message.contactUserId
+    );
 
     if (discussion) {
       await this.discussions.update(discussion.id!, {

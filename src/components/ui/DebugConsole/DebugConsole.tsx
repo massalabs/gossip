@@ -20,9 +20,10 @@ export const DebugConsole: React.FC = () => {
   const logLimit = useDebugLogs(s => s.logLimit);
   const setLogLimit = useDebugLogs(s => s.setLogLimit);
   const showDebugOption = useAppStore(s => s.showDebugOption);
+  const debugOverlayVisible = useAppStore(s => s.debugOverlayVisible);
   const [filter, setFilter] = useState<LogLevelFilter>('all');
   const [search, setSearch] = useState('');
-  const [autoScroll, setAutoScroll] = useState(true);
+  const [autoScroll, setAutoScroll] = useState(false);
   const [expandedLogs, setExpandedLogs] = useState<Set<number>>(new Set());
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -78,16 +79,21 @@ export const DebugConsole: React.FC = () => {
     }
   };
 
+  // Don't render anything if debug options are disabled
   if (!showDebugOption) {
     return null;
   }
 
+  // Show the toggle button only if debugOverlayVisible is enabled
   if (!showDebugConsole) {
+    if (!debugOverlayVisible) {
+      return null;
+    }
     return <ConsoleToggleButton onOpen={() => setShowDebugConsole(true)} />;
   }
 
   return (
-    <div className="fixed inset-0 z-9999 flex flex-col bg-background/95 text-foreground font-sans text-xs">
+    <div className="fixed inset-0 z-9999 flex flex-col bg-background/95 text-foreground font-sans text-xs pt-safe-t pb-safe-b">
       <ConsoleHeader
         logCount={logs.length}
         onClose={() => setShowDebugConsole(false)}

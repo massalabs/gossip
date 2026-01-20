@@ -1,9 +1,8 @@
 import { useCallback } from 'react';
 import { useUiStore } from '../stores/uiStore';
-import { initStatusBar } from './useCapacitorBarColors';
 import { Theme } from '../stores/uiStore';
 import { resolveTheme } from '../utils/themeUtils';
-import { Capacitor } from '@capacitor/core';
+import { initStatusBar } from './useCapacitorBarColors';
 
 // Store the media query listener cleanup function
 let mediaQueryListener: ((event: MediaQueryListEvent) => void) | null = null;
@@ -67,6 +66,9 @@ export function useTheme() {
   const setTheme = useUiStore(s => s.setTheme);
 
   const initTheme = useCallback(async () => {
+    // Initialize status bar style (light/dark icons) based on theme
+    await initStatusBar();
+
     // Clean up existing subscription if it exists
     if (unsubscribeTheme) {
       unsubscribeTheme();
@@ -98,10 +100,6 @@ export function useTheme() {
         }
       }
     });
-
-    if (Capacitor.isNativePlatform()) {
-      await initStatusBar();
-    }
 
     // Return cleanup function
     return () => {

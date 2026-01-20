@@ -1,17 +1,89 @@
 import { db as appDb, Contact } from '../src/db';
 import { initializeDiscussion } from '../src/services/discussion';
 import { encodeUserId } from '../src/utils/userId';
+import { MockSessionModule } from './wasm/mock';
 import {
-  MockSessionModule,
-  MockUserPublicKeys,
-  MockUserSecretKeys,
-} from '../src/wasm/mock';
+  UserPublicKeys,
+  UserSecretKeys,
+} from '../src/assets/generated/wasm/gossip_wasm';
+import { generateUserKeys, UserKeys } from '../src/wasm/userKeys';
 
 interface InitSessionResult {
   aliceDiscussionId: number;
   bobDiscussionId: number;
   aliceAnnouncement: Uint8Array;
   bobAnnouncement: Uint8Array;
+}
+
+/**
+ * Initialize a session mock with provided keys.
+ * This helper:
+ * - Encodes the user ID from public keys
+ * - Creates and configures a MockSessionModule
+ * - Returns the configured session
+ */
+export function initializeSessionMock(
+  publicKeys: UserPublicKeys,
+  secretKeys: UserSecretKeys
+): MockSessionModule {
+  const userIdEncoded = encodeUserId(publicKeys.derive_id());
+  const session = new MockSessionModule(publicKeys, secretKeys);
+  session.userIdEncoded = userIdEncoded;
+
+  return session;
+}
+
+/**
+ * Initialize a session mock, generating keys if not provided.
+ * This helper:
+ * - Generates keys using WASM if not provided
+ * - Encodes the user ID from public keys
+ * - Creates and configures a MockSessionModule
+ * - Returns the configured session
+ */
+export async function initializeSessionMockWithOptionalKeys(
+  publicKeys?: UserPublicKeys,
+  secretKeys?: UserSecretKeys
+): Promise<MockSessionModule> {
+  let finalPublicKeys: UserPublicKeys;
+  let finalSecretKeys: UserSecretKeys;
+
+  if (!publicKeys || !secretKeys) {
+    // Generate keys using WASM
+    const passphrase = `test-passphrase-${Date.now()}-${Math.random()}`;
+    let userKeys: UserKeys | null = null;
+    try {
+      userKeys = await generateUserKeys(passphrase);
+      if (!userKeys) {
+        throw new Error(
+          'Failed to generate user keys for MockSessionModule: userKeys is undefined or null'
+        );
+      }
+      // Extract keys before freeing the parent object
+      // The extracted keys are independent objects
+      finalPublicKeys = userKeys.public_keys();
+      finalSecretKeys = userKeys.secret_keys();
+      if (!finalPublicKeys || !finalSecretKeys) {
+        throw new Error(
+          'Failed to extract user keys for MockSessionModule: extracted keys are undefined or null'
+        );
+      }
+    } finally {
+      // Free the UserKeys object to prevent memory leaks, even if extraction failed
+      if (userKeys) {
+        userKeys.free();
+      }
+    }
+  } else {
+    finalPublicKeys = publicKeys;
+    finalSecretKeys = secretKeys;
+  }
+
+  const userIdEncoded = encodeUserId(finalPublicKeys.derive_id());
+  const session = new MockSessionModule(finalPublicKeys, finalSecretKeys);
+  session.userIdEncoded = userIdEncoded;
+
+  return session;
 }
 
 /**
@@ -23,20 +95,17 @@ interface InitSessionResult {
  * - Mocks announcement sending
  */
 export async function initSession(
-  alicePk: MockUserPublicKeys,
-  aliceSk: MockUserSecretKeys,
-  bobPk: MockUserPublicKeys,
-  bobSk: MockUserSecretKeys,
+  alicePk: UserPublicKeys,
+  aliceSk: UserSecretKeys,
+  bobPk: UserPublicKeys,
+  bobSk: UserSecretKeys,
   db = appDb,
   aliceSession: MockSessionModule,
   bobSession: MockSessionModule
 ): Promise<InitSessionResult> {
-  const aliceUserId = encodeUserId(alicePk.user_id);
-  const bobUserId = encodeUserId(bobPk.user_id);
-
   const aliceBobContact: Omit<Contact, 'id'> = {
-    ownerUserId: aliceUserId,
-    userId: bobUserId,
+    ownerUserId: aliceSession.userIdEncoded,
+    userId: bobSession.userIdEncoded,
     name: 'Bob',
     publicKeys: bobPk.to_bytes(),
     avatar: undefined,
@@ -46,8 +115,8 @@ export async function initSession(
   };
 
   const bobAliceContact: Omit<Contact, 'id'> = {
-    ownerUserId: bobUserId,
-    userId: aliceUserId,
+    ownerUserId: bobSession.userIdEncoded,
+    userId: aliceSession.userIdEncoded,
     name: 'Alice',
     publicKeys: alicePk.to_bytes(),
     avatar: undefined,
@@ -72,19 +141,13 @@ export async function initSession(
   // Initialize discussions
   const { discussionId: aliceDiscussionId } = await initializeDiscussion(
     aliceBobContact,
-    alicePk,
-    aliceSk,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    aliceSession as any,
-    aliceUserId
+    aliceSession as any
   );
   const { discussionId: bobDiscussionId } = await initializeDiscussion(
     bobAliceContact,
-    bobPk,
-    bobSk,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    bobSession as any,
-    bobUserId
+    bobSession as any
   );
 
   return {

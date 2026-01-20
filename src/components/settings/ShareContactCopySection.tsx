@@ -4,40 +4,24 @@ import toast from 'react-hot-toast';
 import Button from '../ui/Button';
 import {
   shareInvitation,
+  shareQRCode,
   canShareInvitationViaOtherApp,
 } from '../../services/shareService';
 
 interface ShareContactCopySectionProps {
-  userId: string;
   deepLinkUrl: string;
+  qrDataUrl: string | null;
 }
 
 const ShareContactCopySection: React.FC<ShareContactCopySectionProps> = ({
-  userId,
   deepLinkUrl,
+  qrDataUrl,
 }) => {
-  const [copiedUserId, setCopiedUserId] = useState(false);
   const [copiedQRUrl, setCopiedQRUrl] = useState(false);
   const [isSharing, setIsSharing] = useState(false);
+  const [isSharingQR, setIsSharingQR] = useState(false);
   const [canShareViaOtherApp, setCanShareViaOtherApp] = useState(false);
-  const userIdTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const qrUrlTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const handleCopyUserId = useCallback(async () => {
-    try {
-      await navigator.clipboard.writeText(userId);
-      setCopiedUserId(true);
-      if (userIdTimeoutRef.current) {
-        clearTimeout(userIdTimeoutRef.current);
-      }
-      userIdTimeoutRef.current = setTimeout(() => {
-        setCopiedUserId(false);
-        userIdTimeoutRef.current = null;
-      }, 2000);
-    } catch (err) {
-      console.error('Failed to copy user ID:', err);
-    }
-  }, [userId]);
 
   const handleCopyQRUrl = useCallback(async () => {
     try {
@@ -69,13 +53,27 @@ const ShareContactCopySection: React.FC<ShareContactCopySectionProps> = ({
     }
   }, [deepLinkUrl]);
 
+  const handleShareQRCode = useCallback(async () => {
+    if (!qrDataUrl) return;
+
+    try {
+      setIsSharingQR(true);
+      await shareQRCode({
+        qrDataUrl,
+        fileName: 'contact-qr-code.png',
+      });
+    } catch (err) {
+      console.error('Failed to share QR code:', err);
+      toast.error('Failed to share QR code. Please try again.');
+    } finally {
+      setIsSharingQR(false);
+    }
+  }, [qrDataUrl]);
+
   useEffect(() => {
     setCanShareViaOtherApp(canShareInvitationViaOtherApp());
 
     return () => {
-      if (userIdTimeoutRef.current) {
-        clearTimeout(userIdTimeoutRef.current);
-      }
       if (qrUrlTimeoutRef.current) {
         clearTimeout(qrUrlTimeoutRef.current);
       }
@@ -88,30 +86,26 @@ const ShareContactCopySection: React.FC<ShareContactCopySectionProps> = ({
         variant="outline"
         size="custom"
         className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0 border-b border-border"
-        onClick={handleShareInvitation}
-        disabled={isSharing || !canShareViaOtherApp}
-        loading={isSharing}
+        onClick={handleShareQRCode}
+        disabled={isSharingQR || !qrDataUrl}
+        loading={isSharingQR}
       >
         <Share2 className="w-5 h-5 mr-4" />
         <span className="text-base font-normal flex-1 text-left">
-          Share Invitation
+          Share QR Code
         </span>
       </Button>
       <Button
         variant="outline"
         size="custom"
         className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0 border-b border-border"
-        onClick={handleCopyUserId}
+        onClick={handleShareInvitation}
+        disabled={isSharing || !canShareViaOtherApp}
+        loading={isSharing}
       >
-        {copiedUserId ? (
-          <Check className="w-5 h-5 mr-4 text-success" />
-        ) : (
-          <Copy className="w-5 h-5 mr-4" />
-        )}
-        <span
-          className={`text-base font-normal flex-1 text-left ${copiedUserId ? 'text-success' : ''}`}
-        >
-          {copiedUserId ? 'User ID Copied!' : 'Copy User ID'}
+        <Share2 className="w-5 h-5 mr-4" />
+        <span className="text-base font-normal flex-1 text-left">
+          Share Invitation Link
         </span>
       </Button>
       <Button

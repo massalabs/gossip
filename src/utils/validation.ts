@@ -55,7 +55,8 @@ export async function validateUsernameAvailability(
 
     const existingProfile = await db.userProfile
       .filter(
-        profile => profile.username.toLowerCase() === value.trim().toLowerCase()
+        profile =>
+          profile.username.trim().toLowerCase() === value.trim().toLowerCase()
       )
       .first();
 

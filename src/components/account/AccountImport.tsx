@@ -5,8 +5,7 @@ import { validateMnemonic } from '../../crypto/bip39';
 import { validatePassword } from '../../utils/validation';
 import Button from '../ui/Button';
 import PageHeader from '../ui/PageHeader';
-import HeaderWrapper from '../ui/HeaderWrapper';
-import ScrollableContent from '../ui/ScrollableContent';
+import PageLayout from '../ui/PageLayout';
 import RoundedInput from '../ui/RoundedInput';
 import TabSwitcher from '../ui/TabSwitcher';
 
@@ -243,19 +242,14 @@ const AccountImport: React.FC<AccountImportProps> = ({
   );
 
   return (
-    <div className="h-full flex flex-col bg-background app-max-w mx-auto">
-      {/* Header */}
-      <HeaderWrapper>
-        <PageHeader title="Import Account" onBack={onBack} />
-      </HeaderWrapper>
-
-      <ScrollableContent className="flex-1 overflow-y-auto">
-        <div className="p-4">
-          {step === 'mnemonic' && renderMnemonicStep()}
-          {step === 'details' && renderDetailsStep()}
-        </div>
-      </ScrollableContent>
-    </div>
+    <PageLayout
+      header={<PageHeader title="Import Account" onBack={onBack} />}
+      className="app-max-w mx-auto"
+      contentClassName="p-4"
+    >
+      {step === 'mnemonic' && renderMnemonicStep()}
+      {step === 'details' && renderDetailsStep()}
+    </PageLayout>
   );
 };
 

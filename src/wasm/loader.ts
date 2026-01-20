@@ -9,6 +9,44 @@
 import init from '../assets/generated/wasm/gossip_wasm';
 
 /**
+ * Check if we're running in Node.js environment
+ */
+function isNodeEnvironment(): boolean {
+  return (
+    typeof process !== 'undefined' &&
+    process.versions != null &&
+    process.versions.node != null
+  );
+}
+
+/**
+ * Load WASM module for Node.js environment using fs.readFileSync
+ */
+async function loadWasmForNode(): Promise<WebAssembly.Module> {
+  // Dynamic import to avoid bundling Node.js modules in browser builds
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const { fileURLToPath } = await import('node:url');
+
+  // Get the directory of the current module
+  const __filename = fileURLToPath(import.meta.url);
+  const __dirname = path.dirname(__filename);
+
+  // Resolve path to WASM file relative to the generated wasm directory
+  const wasmPath = path.resolve(
+    __dirname,
+    '../assets/generated/wasm/gossip_wasm_bg.wasm'
+  );
+
+  // Read WASM file as binary
+  const wasmBuffer = fs.readFileSync(wasmPath);
+
+  // Instantiate WASM module
+  const wasmModule = await WebAssembly.compile(wasmBuffer);
+  return wasmModule;
+}
+
+/**
  * WASM Initialization State
  */
 let isInitializing = false;
@@ -37,7 +75,14 @@ export async function initializeWasm(): Promise<void> {
 
   initializationPromise = (async () => {
     try {
-      await init();
+      // In Node.js environment, load WASM using fs.readFileSync
+      if (isNodeEnvironment()) {
+        const wasmModule = await loadWasmForNode();
+        await init(wasmModule);
+      } else {
+        // In browser/jsdom, use default init (which uses fetch)
+        await init();
+      }
       isInitialized = true;
       isInitializing = false;
     } catch (error) {

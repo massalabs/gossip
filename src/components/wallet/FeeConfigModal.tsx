@@ -48,9 +48,42 @@ const FeeConfigModal: React.FC<FeeConfigModalProps> = ({
   }, []);
 
   const handleConfirm = useCallback(() => {
+    if (
+      config.type === 'custom' &&
+      (!config.customFee || parseFloat(config.customFee) <= 0)
+    ) {
+      return;
+    }
     onConfirm(config);
     onClose();
   }, [config, onConfirm, onClose]);
+
+  const handleCustomFeeKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLInputElement>) => {
+      // Don't submit while composing (IME)
+      if (e.nativeEvent.isComposing) return;
+
+      // Handle Enter key to submit
+      if (
+        e.key === 'Enter' &&
+        !e.shiftKey &&
+        !e.ctrlKey &&
+        !e.altKey &&
+        !e.metaKey
+      ) {
+        e.preventDefault();
+        if (
+          !(
+            config.type === 'custom' &&
+            (!config.customFee || parseFloat(config.customFee) <= 0)
+          )
+        ) {
+          handleConfirm();
+        }
+      }
+    },
+    [config, handleConfirm]
+  );
 
   // Animate on open
   const [mounted, setMounted] = useState(false);
@@ -193,10 +226,12 @@ const FeeConfigModal: React.FC<FeeConfigModalProps> = ({
                     type="number"
                     value={config.customFee || ''}
                     onChange={e => handleCustomFeeChange(e.target.value)}
+                    onKeyDown={handleCustomFeeKeyDown}
                     placeholder="Custom fees"
                     step="0.001"
                     min="0"
                     className="w-full px-4 py-3 bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:text-white placeholder-gray-500 dark:placeholder-gray-400"
+                    enterKeyHint="done"
                   />
                   <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                     Enter fee in MAS

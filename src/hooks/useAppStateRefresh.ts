@@ -3,93 +3,122 @@ import { useAccountStore } from '../stores/accountStore';
 import { defaultSyncConfig } from '../config/sync';
 import { useMessageStore } from '../stores/messageStore.tsx';
 import { useDiscussionStore } from '../stores/discussionStore.tsx';
-import {
-  UserPublicKeys,
-  UserSecretKeys,
-} from '../assets/generated/wasm/gossip_wasm';
 import { SessionModule } from '../wasm/session.ts';
 import { useOnlineStoreBase } from '../stores/useOnlineStore.tsx';
 import { messageService } from '../services/message.ts';
 import { announcementService } from '../services/announcement.ts';
-import { encodeUserId } from '../utils/userId.ts';
 import { useResendFailedBlobs } from './useResendFailedBlobs.ts';
+import { DiscussionStatus } from '../db.ts';
+import { handleSessionRefresh } from '../services/refresh.ts';
+
+const SESSION_REFRESH_EVERY_N_CYCLES = 5;
 
 /**
- * Hook to refresh app state periodically when user is logged in
- * Refreshes announcements, messages, discussions, and contacts
+ * Hook to refresh app state periodically when the user is logged in.
+ * Refreshes announcements, messages, discussions, and contacts.
  */
 export function useAppStateRefresh() {
-  const { userProfile, ourPk, ourSk, session } = useAccountStore();
+  const { userProfile, session } = useAccountStore();
   const isSyncing = useRef(false);
-  const { resendFailedBlobs } = useResendFailedBlobs(true);
-
-  /**
-   * Trigger message sync
-   */
+  const { resendFailedBlobs } = useResendFailedBlobs();
+  const isOnline = useOnlineStoreBase(s => s.isOnline);
+  const refreshInterval = useRef<NodeJS.Timeout | null>(null);
+  const isInitiating = useRef(false);
+  const sessionRefreshCycle = useRef(0);
+  // Trigger synchronization of announcements, messages, and failed blobs
   const triggerSync = useCallback(
-    async (
-      ourPk: UserPublicKeys,
-      ourSk: UserSecretKeys,
-      session: SessionModule
-    ): Promise<void> => {
-      if (isSyncing.current) return;
+    async (session: SessionModule): Promise<void> => {
+      if (!userProfile?.userId) return;
+      if (!isOnline || isSyncing.current) return;
       isSyncing.current = true;
-      const isOnline = useOnlineStoreBase.getState().isOnline;
 
-      if (!isOnline) return;
+      if (resendFailedBlobs) {
+        await resendFailedBlobs();
+      }
+
       try {
         await Promise.all([
-          announcementService.fetchAndProcessAnnouncements(
-            ourPk,
-            ourSk,
-            session
-          ),
-          messageService.fetchMessages(
-            encodeUserId(ourPk.derive_id()),
-            ourSk,
-            session
-          ),
+          announcementService.fetchAndProcessAnnouncements(session),
+          messageService.fetchMessages(session),
         ]);
-        if (resendFailedBlobs) {
-          await resendFailedBlobs();
+
+        // call refresh session of session manager
+        if (
+          sessionRefreshCycle.current % SESSION_REFRESH_EVERY_N_CYCLES ===
+          0
+        ) {
+          await handleSessionRefresh(
+            userProfile.userId,
+            session,
+            useDiscussionStore
+              .getState()
+              .getDiscussionsByStatus([DiscussionStatus.ACTIVE])
+          );
         }
+        sessionRefreshCycle.current++;
       } catch (error) {
-        console.error('Failed to trigger manual sync:', error);
+        console.error(
+          '[useAppStateRefresh] Failed to trigger sync process:',
+          error
+        );
       } finally {
         isSyncing.current = false;
       }
     },
-    [resendFailedBlobs]
+    [resendFailedBlobs, isOnline, userProfile?.userId]
   );
 
-  const initApp = useCallback(
-    async (
-      ourPk: UserPublicKeys,
-      ourSk: UserSecretKeys,
-      session: SessionModule
-    ) => {
+  // Initialize stores, trigger initial sync, and set up refresh interval
+  const init = useCallback(async () => {
+    if (isInitiating.current || !session) {
+      if (!session) {
+        console.warn(
+          'Cannot initialize app state: User keys or session not available'
+        );
+      }
+      return;
+    }
+
+    isInitiating.current = true;
+
+    try {
       useMessageStore.getState().init();
       await useDiscussionStore.getState().init();
-      triggerSync(ourPk, ourSk, session).catch(error => {
-        console.error('Failed to sync messages on login:', error);
-      });
-    },
-    [triggerSync]
-  );
 
-  useEffect(() => {
-    if (userProfile?.userId && ourPk && ourSk && session) {
-      initApp(ourPk, ourSk, session);
-      const refreshInterval = setInterval(() => {
-        triggerSync(ourPk, ourSk, session).catch(error => {
-          console.error('Failed to refresh app state periodically:', error);
-        });
+      await triggerSync(session);
+
+      if (refreshInterval.current) {
+        clearInterval(refreshInterval.current);
+      }
+
+      refreshInterval.current = setInterval(async () => {
+        // Fetch fresh values to avoid stale closures
+        const { session } = useAccountStore.getState();
+        if (session) {
+          await triggerSync(session);
+        }
       }, defaultSyncConfig.activeSyncIntervalMs);
-
-      // Cleanup interval when user logs out or component unmounts
-      return () => {
-        clearInterval(refreshInterval);
-      };
+    } catch (error) {
+      console.error(
+        '[useAppStateRefresh] Failed to initialize app state:',
+        error
+      );
+    } finally {
+      isInitiating.current = false;
     }
-  }, [userProfile?.userId, ourPk, ourSk, session, initApp, triggerSync]);
+  }, [triggerSync, session]);
+
+  // Run init on user login and clean up on unmount or logout
+  useEffect(() => {
+    if (userProfile?.userId) {
+      init();
+    }
+
+    return () => {
+      if (refreshInterval.current) {
+        clearInterval(refreshInterval.current);
+        refreshInterval.current = null;
+      }
+    };
+  }, [userProfile?.userId, init]);
 }

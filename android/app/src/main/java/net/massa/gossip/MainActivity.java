@@ -3,11 +3,14 @@ package net.massa.gossip;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.graphics.Color;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.util.Log;
 import com.getcapacitor.BridgeActivity;
 import org.json.JSONObject;
+import androidx.core.view.WindowCompat;
 
 public class MainActivity extends BridgeActivity {
     // Track the last processed shared content to prevent duplicate processing
@@ -22,6 +25,19 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(BackgroundRunnerStoragePlugin.class);
         
         super.onCreate(savedInstanceState);
+
+        // Set transparent status and navigation bars
+        WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
+        // Set transparent status and navigation bars colors
+        getWindow().setStatusBarColor(Color.TRANSPARENT);
+        getWindow().setNavigationBarColor(Color.TRANSPARENT);
+        
+        // Disable forced contrast (Android 10+)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            getWindow().setNavigationBarContrastEnforced(false);
+            getWindow().setStatusBarContrastEnforced(false);
+        }
+
         
         // Handle shared content from other apps after bridge is ready
         if (getBridge() != null && getBridge().getWebView() != null) {

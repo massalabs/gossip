@@ -44,6 +44,26 @@ const ContactNameModal: React.FC<ContactNameModalProps> = ({
     onConfirm(trimmed.length > 0 ? trimmed : undefined);
   }, [name, allowEmpty, onConfirm]);
 
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLInputElement>) => {
+      // Don't submit while composing (IME)
+      if (e.nativeEvent.isComposing) return;
+
+      // Handle Enter key to submit
+      if (
+        e.key === 'Enter' &&
+        !e.shiftKey &&
+        !e.ctrlKey &&
+        !e.altKey &&
+        !e.metaKey
+      ) {
+        e.preventDefault();
+        handleConfirm();
+      }
+    },
+    [handleConfirm]
+  );
+
   useEffect(() => {
     onEnter(handleConfirm);
   }, [onEnter, handleConfirm]);
@@ -60,8 +80,10 @@ const ContactNameModal: React.FC<ContactNameModalProps> = ({
             autoFocus
             value={name}
             onChange={e => setName(e.target.value)}
+            onKeyDown={handleKeyDown}
             className="w-full h-11 px-3 rounded-lg border border-border bg-card dark:bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
             placeholder="Enter a name"
+            enterKeyHint="done"
           />
           {error && (
             <p className="mt-1 text-xs text-red-600 dark:text-red-400">

@@ -3,16 +3,12 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
 import { parseInvite } from '../utils/qrCodeParser';
 import { useAppStore } from '../stores/appStore';
+import { LANDING_PAGE_URL } from '../constants/links';
 import Button from '../components/ui/Button';
 import PageHeader from '../components/ui/PageHeader';
-import HeaderWrapper from '../components/ui/HeaderWrapper';
+import PageLayout from '../components/ui/PageLayout';
 import { PrivacyGraphic } from '../components/graphics';
-// import {
-//   GOOGLE_PLAY_STORE_URL,
-//   APPLE_APP_STORE_URL,
-//   LAST_APK_GITHUB_URL,
-// } from '../constants/links';
-// import { ChevronRight, GitHub, Smartphone } from 'react-feather';
+
 import toast from 'react-hot-toast';
 
 // Timing constants
@@ -215,68 +211,79 @@ export const InvitePage: React.FC = () => {
   }, []);
 
   return (
-    <div className="min-h-screen bg-background">
-      <HeaderWrapper>
-        <PageHeader title="Invite" onBack={() => navigate('/')} />
-      </HeaderWrapper>
-      <div className="flex flex-col items-center justify-center px-6 py-8 sm:py-12 max-w-lg mx-auto">
-        <div className="w-full space-y-6 animate-fade-in">
-          {/* Hero Section */}
-          <div className="bg-card border border-border rounded-2xl p-8 sm:p-10 text-center shadow-sm">
-            <div className="mb-6 -mx-4 sm:-mx-6">
-              <PrivacyGraphic size={120} className="py-4" />
-            </div>
-            <h2 className="text-2xl sm:text-3xl font-semibold text-foreground mb-3">
-              {appOpened ? 'Opening in App' : "You've been invited!"}
-            </h2>
-            <p className="text-muted-foreground text-base mb-8">
-              {appOpened
-                ? "If the app didn't open, you can continue in the web app instead."
-                : 'Open this invite in the Gossip app to start chatting with your contact.'}
-            </p>
+    <PageLayout
+      header={<PageHeader title="Invite" onBack={() => navigate('/')} />}
+      contentClassName="flex flex-col items-center justify-center px-6 py-8 sm:py-12 max-w-lg mx-auto"
+    >
+      <div className="w-full space-y-6 animate-fade-in">
+        {/* Hero Section */}
+        <div className="bg-card border border-border rounded-2xl p-8 sm:p-10 text-center shadow-sm">
+          <div className="mb-6 -mx-4 sm:-mx-6">
+            <PrivacyGraphic size={120} className="py-4" />
+          </div>
+          <h2 className="text-2xl sm:text-3xl font-semibold text-foreground mb-3">
+            {appOpened ? 'Opening in App' : "You've been invited!"}
+          </h2>
+          <p className="text-muted-foreground text-base mb-8">
+            {appOpened
+              ? "If the app didn't open, you can continue in the web app instead."
+              : 'Open this invite in the Gossip app to start chatting with your contact.'}
+          </p>
 
-            {/* Primary Actions */}
-            <div className="space-y-3 mb-6">
-              {appOpened ? (
+          {/* Primary Actions */}
+          <div className="space-y-3 mb-6">
+            {appOpened ? (
+              <Button
+                onClick={handleContinueInWeb}
+                variant="primary"
+                fullWidth
+                size="lg"
+                className="rounded-full"
+              >
+                Continue in Web App Instead
+              </Button>
+            ) : (
+              <>
+                <Button
+                  onClick={handleOpenInApp}
+                  disabled={isOpeningApp}
+                  loading={isOpeningApp}
+                  variant={appOpenFailed ? 'outline' : 'primary'}
+                  fullWidth
+                  size="lg"
+                  className="font-semibold rounded-full"
+                >
+                  {isOpeningApp ? 'Opening...' : 'Open in App'}
+                </Button>
+
                 <Button
                   onClick={handleContinueInWeb}
-                  variant="primary"
+                  variant={appOpenFailed ? 'primary' : 'outline'}
                   fullWidth
                   size="lg"
                   className="rounded-full"
                 >
-                  Continue in Web App Instead
+                  Continue in Web App
                 </Button>
-              ) : (
-                <>
-                  <Button
-                    onClick={handleOpenInApp}
-                    disabled={isOpeningApp}
-                    loading={isOpeningApp}
-                    variant={appOpenFailed ? 'outline' : 'primary'}
-                    fullWidth
-                    size="lg"
-                    className="font-semibold rounded-full"
-                  >
-                    {isOpeningApp ? 'Opening...' : 'Open in App'}
-                  </Button>
-
-                  <Button
-                    onClick={handleContinueInWeb}
-                    variant={appOpenFailed ? 'primary' : 'outline'}
-                    fullWidth
-                    size="lg"
-                    className="rounded-full"
-                  >
-                    Continue in Web App
-                  </Button>
-                </>
-              )}
-            </div>
+              </>
+            )}
           </div>
+        </div>
 
-          {/* Install Section */}
-          {/* <div className="bg-card border border-border rounded-2xl p-6 sm:p-8 shadow-sm">
+        {/* Landing Page Link */}
+        <div className="text-center">
+          <Button
+            onClick={() => window.open(LANDING_PAGE_URL, '_blank')}
+            variant="outline"
+            size="md"
+            className="rounded-full"
+          >
+            Learn more about Gossip
+          </Button>
+        </div>
+
+        {/* Install Section */}
+        {/* <div className="bg-card border border-border rounded-2xl p-6 sm:p-8 shadow-sm">
             <div className="text-center mb-6">
               <h3 className="text-lg font-semibold text-foreground mb-2">
                 Don't have the app?
@@ -324,8 +331,7 @@ export const InvitePage: React.FC = () => {
               </Button>
             </div>
           </div> */}
-        </div>
       </div>
-    </div>
+    </PageLayout>
   );
 };
