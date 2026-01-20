@@ -92,6 +92,15 @@ import {
   deleteContact,
 } from './contacts';
 import type { UserPublicKeys } from './assets/generated/wasm/gossip_wasm';
+import {
+  SdkEventEmitter,
+  type SdkEventType,
+  type SdkEventHandlers,
+} from './core/SdkEventEmitter';
+import { SdkPolling } from './core/SdkPolling';
+
+// Re-export event types
+export type { SdkEventType, SdkEventHandlers };
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -120,27 +129,6 @@ export interface OpenSessionOptions {
   ) => Promise<void>;
   /** Encryption key for persisting session (required if onPersist is provided) */
   persistEncryptionKey?: EncryptionKey;
-}
-
-export type SdkEventType =
-  | 'message'
-  | 'messageSent'
-  | 'messageFailed'
-  | 'discussionRequest'
-  | 'discussionStatusChanged'
-  | 'sessionBroken'
-  | 'sessionRenewed'
-  | 'error';
-
-export interface SdkEventHandlers {
-  message: (message: Message) => void;
-  messageSent: (message: Message) => void;
-  messageFailed: (message: Message, error: Error) => void;
-  discussionRequest: (discussion: Discussion, contact: Contact) => void;
-  discussionStatusChanged: (discussion: Discussion) => void;
-  sessionBroken: (discussion: Discussion) => void;
-  sessionRenewed: (discussion: Discussion) => void;
-  error: (error: Error, context: string) => void;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -175,42 +163,17 @@ type SdkState =
   | SdkStateInitialized
   | SdkStateSessionOpen;
 
-/** Polling timers state */
-interface PollingState {
-  messagesTimer: ReturnType<typeof setInterval> | null;
-  announcementsTimer: ReturnType<typeof setInterval> | null;
-  sessionRefreshTimer: ReturnType<typeof setInterval> | null;
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // SDK Class
 // ─────────────────────────────────────────────────────────────────────────────
 
 class GossipSdkImpl {
   private state: SdkState = { status: 'uninitialized' };
-  private eventHandlers = {
-    message: new Set<SdkEventHandlers['message']>(),
-    messageSent: new Set<SdkEventHandlers['messageSent']>(),
-    messageFailed: new Set<SdkEventHandlers['messageFailed']>(),
-    discussionRequest: new Set<SdkEventHandlers['discussionRequest']>(),
-    discussionStatusChanged: new Set<
-      SdkEventHandlers['discussionStatusChanged']
-    >(),
-    sessionBroken: new Set<SdkEventHandlers['sessionBroken']>(),
-    sessionRenewed: new Set<SdkEventHandlers['sessionRenewed']>(),
-    error: new Set<SdkEventHandlers['error']>(),
-  };
 
-  // Per-contact queue for serializing message operations
-  // Ensures messages are sent in order per contact
+  // Core components
+  private eventEmitter = new SdkEventEmitter();
+  private pollingManager = new SdkPolling();
   private messageQueues = new QueueManager();
-
-  // Polling state for built-in message/announcement fetching
-  private pollingState: PollingState = {
-    messagesTimer: null,
-    announcementsTimer: null,
-    sessionRefreshTimer: null,
-  };
 
   // Services (created when session opens)
   private _auth: AuthService | null = null;
@@ -218,6 +181,13 @@ class GossipSdkImpl {
   private _discussion: DiscussionService | null = null;
   private _message: MessageService | null = null;
   private _refresh: RefreshService | null = null;
+
+  // Cached service API wrappers (created in openSession)
+  private _messagesAPI: MessageServiceAPI | null = null;
+  private _discussionsAPI: DiscussionServiceAPI | null = null;
+  private _announcementsAPI: AnnouncementServiceAPI | null = null;
+  private _contactsAPI: ContactsAPI | null = null;
+  private _refreshAPI: RefreshServiceAPI | null = null;
 
   // ─────────────────────────────────────────────────────────────────
   // Lifecycle
@@ -334,30 +304,30 @@ class GossipSdkImpl {
     }
 
     // Create event handlers that wire to our event system
-    const events: GossipSdkEvents = {
+    const serviceEvents: GossipSdkEvents = {
       onMessageReceived: (message: Message) => {
-        this.emit('message', message);
+        this.eventEmitter.emit('message', message);
       },
       onMessageSent: (message: Message) => {
-        this.emit('messageSent', message);
+        this.eventEmitter.emit('messageSent', message);
       },
       onMessageFailed: (message: Message, error: Error) => {
-        this.emit('messageFailed', message, error);
+        this.eventEmitter.emit('messageFailed', message, error);
       },
       onDiscussionRequest: (discussion: Discussion, contact: Contact) => {
-        this.emit('discussionRequest', discussion, contact);
+        this.eventEmitter.emit('discussionRequest', discussion, contact);
       },
       onDiscussionStatusChanged: (discussion: Discussion) => {
-        this.emit('discussionStatusChanged', discussion);
+        this.eventEmitter.emit('discussionStatusChanged', discussion);
       },
       onSessionBroken: (discussion: Discussion) => {
-        this.emit('sessionBroken', discussion);
+        this.eventEmitter.emit('sessionBroken', discussion);
       },
       onSessionRenewed: (discussion: Discussion) => {
-        this.emit('sessionRenewed', discussion);
+        this.eventEmitter.emit('sessionRenewed', discussion);
       },
       onError: (error: Error, context: string) => {
-        this.emit('error', error, context);
+        this.eventEmitter.emit('error', error, context);
       },
       // Auto-renewal: when session is lost, automatically renew it
       onSessionRenewalNeeded: (contactUserId: string) => {
@@ -379,23 +349,29 @@ class GossipSdkImpl {
       db,
       messageProtocol,
       session,
-      events,
-      config
-    );
-    this._message = new MessageService(
-      db,
-      messageProtocol,
-      session,
-      events,
+      serviceEvents,
       config
     );
     this._discussion = new DiscussionService(
       db,
       this._announcement,
       session,
-      events
+      serviceEvents
     );
-    this._refresh = new RefreshService(db, this._message, session, events);
+    this._message = new MessageService(
+      db,
+      messageProtocol,
+      session,
+      this._discussion,
+      serviceEvents,
+      config
+    );
+    this._refresh = new RefreshService(
+      db,
+      this._message,
+      session,
+      serviceEvents
+    );
 
     // Reset any messages stuck in SENDING status to FAILED
     // This handles app crash/close during message send
@@ -412,10 +388,79 @@ class GossipSdkImpl {
       onPersist: options.onPersist,
     };
 
+    // Create cached service API wrappers
+    this.createServiceAPIWrappers(db, session);
+
     // Auto-start polling if enabled in config
     if (config.polling.enabled) {
       this.startPolling();
     }
+  }
+
+  /**
+   * Create cached service API wrappers.
+   * Called once during openSession to avoid creating new objects on each getter access.
+   */
+  private createServiceAPIWrappers(
+    db: GossipDatabase,
+    session: SessionModule
+  ): void {
+    this._messagesAPI = {
+      send: message =>
+        this.messageQueues.enqueue(message.contactUserId, () =>
+          this._message!.sendMessage(message)
+        ),
+      fetch: () => this._message!.fetchMessages(),
+      resend: async messages => {
+        const promises: Promise<void>[] = [];
+        for (const [contactId, contactMessages] of messages.entries()) {
+          const singleContactMap = new Map([[contactId, contactMessages]]);
+          promises.push(
+            this.messageQueues.enqueue(contactId, () =>
+              this._message!.resendMessages(singleContactMap)
+            )
+          );
+        }
+        await Promise.all(promises);
+      },
+      findBySeeker: (seeker, ownerUserId) =>
+        this._message!.findMessageBySeeker(seeker, ownerUserId),
+    };
+
+    this._discussionsAPI = {
+      start: (contact, message) =>
+        this._discussion!.initialize(contact, message),
+      accept: discussion => this._discussion!.accept(discussion),
+      renew: contactUserId => this._discussion!.renew(contactUserId),
+      isStable: (ownerUserId, contactUserId) =>
+        this._discussion!.isStableState(ownerUserId, contactUserId),
+      list: ownerUserId => db.getDiscussionsByOwner(ownerUserId),
+      get: (ownerUserId, contactUserId) =>
+        db.getDiscussionByOwnerAndContact(ownerUserId, contactUserId),
+    };
+
+    this._announcementsAPI = {
+      fetch: () => this._announcement!.fetchAndProcessAnnouncements(),
+      resend: failedDiscussions =>
+        this._announcement!.resendAnnouncements(failedDiscussions),
+    };
+
+    this._contactsAPI = {
+      list: ownerUserId => getContacts(ownerUserId, db),
+      get: (ownerUserId, contactUserId) =>
+        getContact(ownerUserId, contactUserId, db),
+      add: (ownerUserId, userId, name, publicKeys) =>
+        addContact(ownerUserId, userId, name, publicKeys, db),
+      updateName: (ownerUserId, contactUserId, newName) =>
+        updateContactName(ownerUserId, contactUserId, newName, db),
+      delete: (ownerUserId, contactUserId) =>
+        deleteContact(ownerUserId, contactUserId, db, session),
+    };
+
+    this._refreshAPI = {
+      handleSessionRefresh: activeDiscussions =>
+        this._refresh!.handleSessionRefresh(activeDiscussions),
+    };
   }
 
   /**
@@ -427,7 +472,7 @@ class GossipSdkImpl {
     }
 
     // Stop polling first
-    this.stopPolling();
+    this.pollingManager.stop();
 
     // Cleanup session
     this.state.session.cleanup();
@@ -437,6 +482,13 @@ class GossipSdkImpl {
     this._discussion = null;
     this._message = null;
     this._refresh = null;
+
+    // Clear cached API wrappers
+    this._messagesAPI = null;
+    this._discussionsAPI = null;
+    this._announcementsAPI = null;
+    this._contactsAPI = null;
+    this._refreshAPI = null;
 
     // Clear message queues
     this.messageQueues.clear();
@@ -534,80 +586,46 @@ class GossipSdkImpl {
   /** Message service */
   get messages(): MessageServiceAPI {
     this.requireSession();
-    return {
-      // Queue sends per contact to ensure ordering
-      send: message =>
-        this.messageQueues.enqueue(message.contactUserId, () =>
-          this._message!.sendMessage(message)
-        ),
-      fetch: () => this._message!.fetchMessages(),
-      // Resend processes messages per contact - queue each contact's batch
-      resend: async messages => {
-        const promises: Promise<void>[] = [];
-        for (const [contactId, contactMessages] of messages.entries()) {
-          const singleContactMap = new Map([[contactId, contactMessages]]);
-          promises.push(
-            this.messageQueues.enqueue(contactId, () =>
-              this._message!.resendMessages(singleContactMap)
-            )
-          );
-        }
-        await Promise.all(promises);
-      },
-      findBySeeker: (seeker, ownerUserId) =>
-        this._message!.findMessageBySeeker(seeker, ownerUserId),
-    };
+    if (!this._messagesAPI) {
+      throw new Error('Messages API not initialized');
+    }
+    return this._messagesAPI;
   }
 
   /** Discussion service */
   get discussions(): DiscussionServiceAPI {
-    const state = this.requireSession();
-    return {
-      start: (contact, message) =>
-        this._discussion!.initialize(contact, message),
-      accept: discussion => this._discussion!.accept(discussion),
-      renew: contactUserId => this._discussion!.renew(contactUserId),
-      isStable: (ownerUserId, contactUserId) =>
-        this._discussion!.isStableState(ownerUserId, contactUserId),
-      list: ownerUserId => state.db.getDiscussionsByOwner(ownerUserId),
-      get: (ownerUserId, contactUserId) =>
-        state.db.getDiscussionByOwnerAndContact(ownerUserId, contactUserId),
-    };
+    this.requireSession();
+    if (!this._discussionsAPI) {
+      throw new Error('Discussions API not initialized');
+    }
+    return this._discussionsAPI;
   }
 
   /** Announcement service */
   get announcements(): AnnouncementServiceAPI {
     this.requireSession();
-    return {
-      fetch: () => this._announcement!.fetchAndProcessAnnouncements(),
-      resend: failedDiscussions =>
-        this._announcement!.resendAnnouncements(failedDiscussions),
-    };
+    if (!this._announcementsAPI) {
+      throw new Error('Announcements API not initialized');
+    }
+    return this._announcementsAPI;
   }
 
   /** Contact management */
   get contacts(): ContactsAPI {
-    const state = this.requireSession();
-    return {
-      list: ownerUserId => getContacts(ownerUserId, state.db),
-      get: (ownerUserId, contactUserId) =>
-        getContact(ownerUserId, contactUserId, state.db),
-      add: (ownerUserId, userId, name, publicKeys) =>
-        addContact(ownerUserId, userId, name, publicKeys, state.db),
-      updateName: (ownerUserId, contactUserId, newName) =>
-        updateContactName(ownerUserId, contactUserId, newName, state.db),
-      delete: (ownerUserId, contactUserId) =>
-        deleteContact(ownerUserId, contactUserId, state.db, state.session),
-    };
+    this.requireSession();
+    if (!this._contactsAPI) {
+      throw new Error('Contacts API not initialized');
+    }
+    return this._contactsAPI;
   }
 
   /** Refresh/sync service */
   get refresh(): RefreshServiceAPI {
     this.requireSession();
-    return {
-      handleSessionRefresh: activeDiscussions =>
-        this._refresh!.handleSessionRefresh(activeDiscussions),
-    };
+    if (!this._refreshAPI) {
+      throw new Error('Refresh API not initialized');
+    }
+    return this._refreshAPI;
   }
 
   /** Utility functions */
@@ -632,8 +650,8 @@ class GossipSdkImpl {
   get polling(): PollingAPI {
     return {
       start: () => this.startPolling(),
-      stop: () => this.stopPolling(),
-      isRunning: this.isPollingRunning(),
+      stop: () => this.pollingManager.stop(),
+      isRunning: this.pollingManager.isRunning(),
     };
   }
 
@@ -651,98 +669,25 @@ class GossipSdkImpl {
       return;
     }
 
-    const { config } = this.state;
+    const { config, db, session } = this.state;
 
-    // Stop any existing timers first
-    this.stopPolling();
-
-    console.log('[GossipSdk] Starting polling', {
-      messagesIntervalMs: config.polling.messagesIntervalMs,
-      announcementsIntervalMs: config.polling.announcementsIntervalMs,
-      sessionRefreshIntervalMs: config.polling.sessionRefreshIntervalMs,
-    });
-
-    // Start message polling
-    this.pollingState.messagesTimer = setInterval(async () => {
-      try {
+    this.pollingManager.start(config, {
+      fetchMessages: async () => {
         await this._message?.fetchMessages();
-      } catch (error) {
-        console.error('[GossipSdk] Message polling error:', error);
-        this.emit(
-          'error',
-          error instanceof Error ? error : new Error(String(error)),
-          'message_polling'
-        );
-      }
-    }, config.polling.messagesIntervalMs);
-
-    // Start announcement polling
-    this.pollingState.announcementsTimer = setInterval(async () => {
-      try {
+      },
+      fetchAnnouncements: async () => {
         await this._announcement?.fetchAndProcessAnnouncements();
-      } catch (error) {
-        console.error('[GossipSdk] Announcement polling error:', error);
-        this.emit(
-          'error',
-          error instanceof Error ? error : new Error(String(error)),
-          'announcement_polling'
-        );
-      }
-    }, config.polling.announcementsIntervalMs);
-
-    // Start session refresh polling
-    this.pollingState.sessionRefreshTimer = setInterval(async () => {
-      try {
-        console.log('[GossipSdk] Session refresh polling', {
-          status: this.state.status,
-        });
-        if (this.state.status !== 'session_open') {
-          return;
-        }
-        const discussions = await this.state.db.getActiveDiscussionsByOwner(
-          this.state.session.userIdEncoded
-        );
-        if (discussions.length > 0) {
-          await this._refresh?.handleSessionRefresh(discussions);
-        }
-      } catch (error) {
-        console.error('[GossipSdk] Session refresh polling error:', error);
-        this.emit(
-          'error',
-          error instanceof Error ? error : new Error(String(error)),
-          'session_refresh_polling'
-        );
-      }
-    }, config.polling.sessionRefreshIntervalMs);
-  }
-
-  /**
-   * Stop all polling timers.
-   */
-  private stopPolling(): void {
-    if (this.pollingState.messagesTimer) {
-      clearInterval(this.pollingState.messagesTimer);
-      this.pollingState.messagesTimer = null;
-    }
-    if (this.pollingState.announcementsTimer) {
-      clearInterval(this.pollingState.announcementsTimer);
-      this.pollingState.announcementsTimer = null;
-    }
-    if (this.pollingState.sessionRefreshTimer) {
-      clearInterval(this.pollingState.sessionRefreshTimer);
-      this.pollingState.sessionRefreshTimer = null;
-    }
-  }
-
-  /**
-   * Check if polling is currently running.
-   */
-  private isPollingRunning(): boolean {
-    return (
-      this.pollingState.messagesTimer !== null ||
-      this.pollingState.announcementsTimer !== null ||
-      this.pollingState.sessionRefreshTimer !== null
-    );
+      },
+      handleSessionRefresh: async discussions => {
+        await this._refresh?.handleSessionRefresh(discussions);
+      },
+      getActiveDiscussions: async () => {
+        return db.getActiveDiscussionsByOwner(session.userIdEncoded);
+      },
+      onError: (error, context) => {
+        this.eventEmitter.emit('error', error, context);
+      },
+    });
   }
 
   // ─────────────────────────────────────────────────────────────────
@@ -753,15 +698,14 @@ class GossipSdkImpl {
    * Register an event handler
    */
   on<K extends SdkEventType>(event: K, handler: SdkEventHandlers[K]): void {
-    // Use type assertion since TypeScript can't narrow generic K at runtime
-    (this.eventHandlers[event] as Set<SdkEventHandlers[K]>).add(handler);
+    this.eventEmitter.on(event, handler);
   }
 
   /**
    * Remove an event handler
    */
   off<K extends SdkEventType>(event: K, handler: SdkEventHandlers[K]): void {
-    (this.eventHandlers[event] as Set<SdkEventHandlers[K]>).delete(handler);
+    this.eventEmitter.off(event, handler);
   }
 
   // ─────────────────────────────────────────────────────────────────
@@ -796,7 +740,7 @@ class GossipSdkImpl {
       }
     } catch (error) {
       console.error('[GossipSdk] Session renewal failed:', error);
-      this.emit(
+      this.eventEmitter.emit(
         'error',
         error instanceof Error ? error : new Error(String(error)),
         'session_renewal'
@@ -841,28 +785,12 @@ class GossipSdkImpl {
       }
     } catch (error) {
       console.error('[GossipSdk] Session accept failed:', error);
-      this.emit(
+      this.eventEmitter.emit(
         'error',
         error instanceof Error ? error : new Error(String(error)),
         'session_accept'
       );
     }
-  }
-
-  private emit<K extends SdkEventType>(
-    event: K,
-    ...args: Parameters<SdkEventHandlers[K]>
-  ): void {
-    const handlers = this.eventHandlers[event] as Set<SdkEventHandlers[K]>;
-    handlers.forEach(handler => {
-      try {
-        (handler as (...args: Parameters<SdkEventHandlers[K]>) => void)(
-          ...args
-        );
-      } catch (error) {
-        console.error(`[GossipSdk] Error in ${event} handler:`, error);
-      }
-    });
   }
 
   private async handleSessionPersist(): Promise<void> {

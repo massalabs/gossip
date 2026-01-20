@@ -36,7 +36,7 @@
 export const SDK_VERSION = '0.0.1';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SDK Singleton - Primary API (NEW)
+// SDK Singleton - Primary API
 // ─────────────────────────────────────────────────────────────────────────────
 export { gossipSdk, GossipSdkImpl } from './gossipSdk';
 export type {
@@ -46,13 +46,8 @@ export type {
   SdkEventHandlers,
 } from './gossipSdk';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// SDK Factory - For testing multi-user scenarios
-// Use gossipSdk singleton for production app code
-// @deprecated Prefer `gossipSdk` singleton for app integrations
-// ─────────────────────────────────────────────────────────────────────────────
-export { createGossipSdk } from './sdk';
-export type { GossipSdk, SdkUtils, GossipSdkEvents } from './sdk';
+// SDK Events
+export type { GossipSdkEvents } from './types/events';
 
 // Services - class-based with dependency injection
 export { AuthService } from './services/auth';

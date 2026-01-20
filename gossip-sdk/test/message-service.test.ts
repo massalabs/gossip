@@ -4,6 +4,7 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { MessageService } from '../src/services/message';
+import { DiscussionService } from '../src/services/discussion';
 import {
   db,
   MessageStatus,
@@ -52,6 +53,14 @@ function createMockSession(
 
 const fakeSession = {} as SessionModule;
 
+function createMockDiscussionService(
+  isStable: boolean = true
+): DiscussionService {
+  return {
+    isStableState: vi.fn().mockResolvedValue(isStable),
+  } as unknown as DiscussionService;
+}
+
 describe('MessageService', () => {
   beforeEach(async () => {
     if (!db.isOpen()) {
@@ -73,7 +82,12 @@ describe('MessageService', () => {
       seeker,
     });
 
-    const service = new MessageService(db, createMockProtocol(), fakeSession);
+    const service = new MessageService(
+      db,
+      createMockProtocol(),
+      fakeSession,
+      createMockDiscussionService()
+    );
     const message = await service.findMessageBySeeker(seeker, OWNER_USER_ID);
 
     expect(message).toBeDefined();
@@ -83,7 +97,12 @@ describe('MessageService', () => {
   it('returns undefined for missing seeker', async () => {
     const seeker = new Uint8Array(32).fill(9);
 
-    const service = new MessageService(db, createMockProtocol(), fakeSession);
+    const service = new MessageService(
+      db,
+      createMockProtocol(),
+      fakeSession,
+      createMockDiscussionService()
+    );
     const message = await service.findMessageBySeeker(seeker, OWNER_USER_ID);
 
     expect(message).toBeUndefined();
@@ -105,7 +124,12 @@ describe('MessageService', () => {
 
     it('should queue message as WAITING_SESSION when session is NoSession', async () => {
       const mockSession = createMockSession(SessionStatus.NoSession);
-      const service = new MessageService(db, createMockProtocol(), mockSession);
+      const service = new MessageService(
+        db,
+        createMockProtocol(),
+        mockSession,
+        createMockDiscussionService()
+      );
 
       const message = {
         ownerUserId: OWNER_USER_ID,
@@ -133,7 +157,12 @@ describe('MessageService', () => {
 
     it('should queue message as WAITING_SESSION when session is UnknownPeer', async () => {
       const mockSession = createMockSession(SessionStatus.UnknownPeer);
-      const service = new MessageService(db, createMockProtocol(), mockSession);
+      const service = new MessageService(
+        db,
+        createMockProtocol(),
+        mockSession,
+        createMockDiscussionService()
+      );
 
       const message = {
         ownerUserId: OWNER_USER_ID,
@@ -161,7 +190,12 @@ describe('MessageService', () => {
 
     it('should queue message as WAITING_SESSION when session is Killed', async () => {
       const mockSession = createMockSession(SessionStatus.Killed);
-      const service = new MessageService(db, createMockProtocol(), mockSession);
+      const service = new MessageService(
+        db,
+        createMockProtocol(),
+        mockSession,
+        createMockDiscussionService()
+      );
 
       const message = {
         ownerUserId: OWNER_USER_ID,
@@ -182,7 +216,12 @@ describe('MessageService', () => {
 
     it('should NOT mark discussion as BROKEN when session is lost (auto-renewal)', async () => {
       const mockSession = createMockSession(SessionStatus.NoSession);
-      const service = new MessageService(db, createMockProtocol(), mockSession);
+      const service = new MessageService(
+        db,
+        createMockProtocol(),
+        mockSession,
+        createMockDiscussionService()
+      );
 
       const message = {
         ownerUserId: OWNER_USER_ID,
@@ -211,6 +250,7 @@ describe('MessageService', () => {
         db,
         createMockProtocol(),
         mockSession,
+        createMockDiscussionService(),
         { onSessionRenewalNeeded }
       );
 
@@ -239,6 +279,7 @@ describe('MessageService', () => {
         db,
         createMockProtocol(),
         mockSession,
+        createMockDiscussionService(),
         { onSessionAcceptNeeded, onSessionRenewalNeeded }
       );
 
@@ -271,7 +312,12 @@ describe('MessageService', () => {
 
     it('should queue message as WAITING_SESSION when session is SelfRequested', async () => {
       const mockSession = createMockSession(SessionStatus.SelfRequested);
-      const service = new MessageService(db, createMockProtocol(), mockSession);
+      const service = new MessageService(
+        db,
+        createMockProtocol(),
+        mockSession,
+        createMockDiscussionService()
+      );
 
       const message = {
         ownerUserId: OWNER_USER_ID,

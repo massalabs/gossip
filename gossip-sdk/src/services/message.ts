@@ -29,7 +29,7 @@ import {
 } from '../utils/messageSerialization';
 import { encodeToBase64 } from '../utils/base64';
 import { Result } from '../utils/type';
-import { isDiscussionStableState } from './discussion';
+import { DiscussionService } from './discussion';
 import { sessionStatusToString } from '../wasm/session';
 import { Logger } from '../utils/logs';
 import { GossipSdkEvents } from '../types/events';
@@ -72,6 +72,7 @@ export class MessageService {
   private db: GossipDatabase;
   private messageProtocol: IMessageProtocol;
   private session: SessionModule;
+  private discussionService: DiscussionService;
   private events: GossipSdkEvents;
   private config: SdkConfig;
 
@@ -79,12 +80,14 @@ export class MessageService {
     db: GossipDatabase,
     messageProtocol: IMessageProtocol,
     session: SessionModule,
+    discussionService: DiscussionService,
     events: GossipSdkEvents = {},
     config: SdkConfig = defaultSdkConfig
   ) {
     this.db = db;
     this.messageProtocol = messageProtocol;
     this.session = session;
+    this.discussionService = discussionService;
     this.events = events;
     this.config = config;
   }
@@ -491,10 +494,9 @@ export class MessageService {
     message.serializedContent = serializeMessageResult.data;
 
     // Check if we can send messages on this discussion
-    const isUnstable = !(await isDiscussionStableState(
+    const isUnstable = !(await this.discussionService.isStableState(
       message.ownerUserId,
-      message.contactUserId,
-      this.db
+      message.contactUserId
     ));
     const isSelfRequested = sessionStatus === SessionStatus.SelfRequested;
 
