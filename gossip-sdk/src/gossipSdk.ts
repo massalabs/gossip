@@ -815,16 +815,33 @@ class GossipSdkImpl {
    * This handles the case where the app crashed or was closed during message send.
    * Per spec: SENDING should never be persisted - if we find it on startup, it failed.
    */
+  /**
+   * Reset messages stuck in SENDING status to WAITING_SESSION.
+   *
+   * Per spec: SENDING is a transient state that should never be persisted.
+   * If the app crashes/closes during a send, the message would be stuck forever.
+   *
+   * By resetting to WAITING_SESSION:
+   * - Message will be re-encrypted with current session keys
+   * - Message will be automatically sent when session is active
+   * - No manual user intervention required
+   *
+   * We also clear encryptedMessage and seeker since they may be stale.
+   */
   private async resetStuckSendingMessages(db: GossipDatabase): Promise<void> {
     try {
       const count = await db.messages
         .where('status')
         .equals(MessageStatus.SENDING)
-        .modify({ status: MessageStatus.FAILED });
+        .modify({
+          status: MessageStatus.WAITING_SESSION,
+          encryptedMessage: undefined,
+          seeker: undefined,
+        });
 
       if (count > 0) {
         console.log(
-          `[GossipSdk] Reset ${count} stuck SENDING message(s) to FAILED`
+          `[GossipSdk] Reset ${count} stuck SENDING message(s) to WAITING_SESSION for auto-retry`
         );
       }
     } catch (error) {

@@ -269,6 +269,25 @@ export class MessageService {
         continue;
       }
 
+      // Check for duplicate message (same content + similar timestamp from same sender)
+      // This handles edge case: app crashes after network send but before DB update,
+      // message gets re-sent on restart, peer receives duplicate
+      const isDuplicate = await this.isDuplicateMessage(
+        ownerUserId,
+        message.senderId,
+        message.content,
+        message.sentAt
+      );
+
+      if (isDuplicate) {
+        log.info('skipping duplicate message', {
+          senderId: message.senderId,
+          preview: message.content.slice(0, 30),
+          timestamp: message.sentAt.toISOString(),
+        });
+        continue;
+      }
+
       let replyToMessageId: number | undefined;
       if (message.replyTo?.originalSeeker) {
         const original = await this.findMessageBySeeker(
@@ -354,6 +373,53 @@ export class MessageService {
       .where('[ownerUserId+seeker]')
       .equals([ownerUserId, seeker])
       .first();
+  }
+
+  /**
+   * Check if a message is a duplicate based on content and timestamp.
+   *
+   * A message is considered duplicate if:
+   * - Same sender (contactUserId)
+   * - Same content
+   * - Incoming direction
+   * - Timestamp within deduplication window (default 30 seconds)
+   *
+   * This handles the edge case where:
+   * 1. Sender sends message successfully to network
+   * 2. Sender app crashes before updating DB status to SENT
+   * 3. On restart, message is reset to WAITING_SESSION and re-sent
+   * 4. Receiver gets the same message twice with different seekers
+   *
+   * @param ownerUserId - The owner's user ID
+   * @param contactUserId - The sender's user ID
+   * @param content - The message content
+   * @param timestamp - The message timestamp
+   * @returns true if a duplicate exists
+   */
+  private async isDuplicateMessage(
+    ownerUserId: string,
+    contactUserId: string,
+    content: string,
+    timestamp: Date
+  ): Promise<boolean> {
+    const windowMs = this.config.messages.deduplicationWindowMs;
+    const windowStart = new Date(timestamp.getTime() - windowMs);
+    const windowEnd = new Date(timestamp.getTime() + windowMs);
+
+    // Query for messages from same sender with same content within time window
+    const existing = await this.db.messages
+      .where('[ownerUserId+contactUserId]')
+      .equals([ownerUserId, contactUserId])
+      .and(
+        msg =>
+          msg.direction === MessageDirection.INCOMING &&
+          msg.content === content &&
+          msg.timestamp >= windowStart &&
+          msg.timestamp <= windowEnd
+      )
+      .first();
+
+    return existing !== undefined;
   }
 
   private async acknowledgeMessages(

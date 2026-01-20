@@ -39,6 +39,13 @@ export interface MessagesConfig {
   fetchDelayMs: number;
   /** Maximum number of fetch iterations per call (default: 30) */
   maxFetchIterations: number;
+  /**
+   * Time window in milliseconds for duplicate detection (default: 30000 = 30 seconds).
+   * Messages with same content from same sender within this window are considered duplicates.
+   * This handles edge case where app crashes after network send but before DB update,
+   * resulting in message being re-sent on restart.
+   */
+  deduplicationWindowMs: number;
 }
 
 /**
@@ -82,6 +89,7 @@ export const defaultSdkConfig: SdkConfig = {
   messages: {
     fetchDelayMs: 100,
     maxFetchIterations: 30,
+    deduplicationWindowMs: 30000, // 30 seconds
   },
   announcements: {
     fetchLimit: 500,
