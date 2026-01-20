@@ -13,7 +13,10 @@ import {
   MessageStatus,
   DiscussionDirection,
 } from '../db';
-import { UserPublicKeys } from '../assets/generated/wasm/gossip_wasm';
+import {
+  UserPublicKeys,
+  SessionStatus,
+} from '../assets/generated/wasm/gossip_wasm';
 import { AnnouncementService, EstablishSessionError } from './announcement';
 import { SessionModule, sessionStatusToString } from '../wasm/session';
 import { decodeUserId } from '../utils/userId';
@@ -230,13 +233,24 @@ export class DiscussionService {
       `session status for discussion between ${ownerUserId} and ${contactUserId} after reinitiation is ${sessionStatusToString(sessionStatus)}`
     );
 
-    // For renewals, keep discussion ACTIVE unless send actually failed.
-    // SelfRequested means we're waiting for peer to respond - that's expected for renewal.
-    // We don't want to show "waiting for approval" for session recovery.
-    // PENDING should only be used for FIRST TIME contact requests, not renewals.
-    const status: DiscussionStatus = !result.success
-      ? DiscussionStatus.SEND_FAILED
-      : DiscussionStatus.ACTIVE;
+    // Determine discussion status based on send result and session state:
+    // - SEND_FAILED: announcement couldn't be sent
+    // - ACTIVE: session fully established (peer responded)
+    // - RECONNECTING: true renewal, waiting for peer's response
+    // - PENDING: first contact retry, waiting for peer's response
+    let status: DiscussionStatus;
+    if (!result.success) {
+      status = DiscussionStatus.SEND_FAILED;
+    } else if (sessionStatus === SessionStatus.Active) {
+      // Session fully established (peer already responded)
+      status = DiscussionStatus.ACTIVE;
+    } else if (existingDiscussion.status === DiscussionStatus.ACTIVE) {
+      // True renewal: had working session before, now recovering
+      status = DiscussionStatus.RECONNECTING;
+    } else {
+      // First contact retry: never had working session
+      status = DiscussionStatus.PENDING;
+    }
 
     await this.db.transaction(
       'rw',

@@ -91,11 +91,15 @@ describe('Auto-Accept Logic', () => {
 
 describe('Discussion Status After Renewal', () => {
   /**
-   * When renewing a discussion (session recovery), the discussion should stay ACTIVE.
-   * It should NOT go to PENDING status because:
-   * 1. PENDING shows "waiting for approval" to the user
-   * 2. Renewal is NOT a new contact request - it's recovering an existing session
-   * 3. The user has already established the connection before
+   * Discussion status after renew() depends on:
+   * 1. Whether the send succeeded
+   * 2. The session status (Active vs SelfRequested)
+   * 3. The previous discussion status (was it ACTIVE before?)
+   *
+   * - SEND_FAILED: announcement couldn't be sent
+   * - ACTIVE: session fully established (peer responded)
+   * - RECONNECTING: true renewal (was ACTIVE), waiting for peer
+   * - PENDING: first contact retry (was not ACTIVE), waiting for peer
    */
 
   enum DiscussionStatus {
@@ -103,66 +107,105 @@ describe('Discussion Status After Renewal', () => {
     ACTIVE = 'active',
     BROKEN = 'broken',
     SEND_FAILED = 'send_failed',
+    RECONNECTING = 'reconnecting',
   }
 
   interface RenewResult {
     success: boolean;
     sessionStatus: SessionStatus;
+    previousDiscussionStatus: DiscussionStatus;
   }
 
   function getStatusAfterRenewal(result: RenewResult): DiscussionStatus {
-    // For renewals, keep discussion ACTIVE unless send actually failed.
-    // SelfRequested means we're waiting for peer to respond - that's expected for renewal.
-    // PENDING should only be used for FIRST TIME contact requests, not renewals.
-    return !result.success
-      ? DiscussionStatus.SEND_FAILED
-      : DiscussionStatus.ACTIVE;
+    if (!result.success) {
+      return DiscussionStatus.SEND_FAILED;
+    } else if (result.sessionStatus === SessionStatus.Active) {
+      // Session fully established (peer already responded)
+      return DiscussionStatus.ACTIVE;
+    } else if (result.previousDiscussionStatus === DiscussionStatus.ACTIVE) {
+      // True renewal: had working session before, now recovering
+      return DiscussionStatus.RECONNECTING;
+    } else {
+      // First contact retry: never had working session
+      return DiscussionStatus.PENDING;
+    }
   }
 
-  it('should keep discussion ACTIVE after successful renewal with SelfRequested', () => {
-    const status = getStatusAfterRenewal({
-      success: true,
-      sessionStatus: SessionStatus.SelfRequested,
-    });
-    expect(status).toBe(DiscussionStatus.ACTIVE);
-  });
-
-  it('should keep discussion ACTIVE after successful renewal with Active', () => {
-    const status = getStatusAfterRenewal({
-      success: true,
-      sessionStatus: SessionStatus.Active,
-    });
-    expect(status).toBe(DiscussionStatus.ACTIVE);
-  });
-
-  it('should set SEND_FAILED if renewal send fails', () => {
-    const status = getStatusAfterRenewal({
-      success: false,
-      sessionStatus: SessionStatus.SelfRequested,
-    });
-    expect(status).toBe(DiscussionStatus.SEND_FAILED);
-  });
-
-  it('should NEVER set PENDING for renewals (no waiting for approval)', () => {
-    // Test all possible session statuses after renewal
-    const statuses = [
-      SessionStatus.Active,
-      SessionStatus.SelfRequested,
-      SessionStatus.PeerRequested,
-      SessionStatus.NoSession,
-      SessionStatus.UnknownPeer,
-      SessionStatus.Killed,
-      SessionStatus.Saturated,
-    ];
-
-    for (const sessionStatus of statuses) {
-      const result = getStatusAfterRenewal({
+  describe('True renewal (previously ACTIVE discussion)', () => {
+    it('should set RECONNECTING when session is SelfRequested', () => {
+      const status = getStatusAfterRenewal({
         success: true,
-        sessionStatus,
+        sessionStatus: SessionStatus.SelfRequested,
+        previousDiscussionStatus: DiscussionStatus.ACTIVE,
       });
-      // Result should be ACTIVE, never PENDING
-      expect(result).toBe(DiscussionStatus.ACTIVE);
-      expect(result).not.toBe(DiscussionStatus.PENDING);
-    }
+      expect(status).toBe(DiscussionStatus.RECONNECTING);
+    });
+
+    it('should set ACTIVE when session is already Active', () => {
+      const status = getStatusAfterRenewal({
+        success: true,
+        sessionStatus: SessionStatus.Active,
+        previousDiscussionStatus: DiscussionStatus.ACTIVE,
+      });
+      expect(status).toBe(DiscussionStatus.ACTIVE);
+    });
+
+    it('should set SEND_FAILED if send fails', () => {
+      const status = getStatusAfterRenewal({
+        success: false,
+        sessionStatus: SessionStatus.SelfRequested,
+        previousDiscussionStatus: DiscussionStatus.ACTIVE,
+      });
+      expect(status).toBe(DiscussionStatus.SEND_FAILED);
+    });
+  });
+
+  describe('First contact retry (previously PENDING/SEND_FAILED discussion)', () => {
+    it('should set PENDING when session is SelfRequested (from PENDING)', () => {
+      const status = getStatusAfterRenewal({
+        success: true,
+        sessionStatus: SessionStatus.SelfRequested,
+        previousDiscussionStatus: DiscussionStatus.PENDING,
+      });
+      expect(status).toBe(DiscussionStatus.PENDING);
+    });
+
+    it('should set PENDING when session is SelfRequested (from SEND_FAILED)', () => {
+      const status = getStatusAfterRenewal({
+        success: true,
+        sessionStatus: SessionStatus.SelfRequested,
+        previousDiscussionStatus: DiscussionStatus.SEND_FAILED,
+      });
+      expect(status).toBe(DiscussionStatus.PENDING);
+    });
+
+    it('should set ACTIVE when session is already Active (peer responded)', () => {
+      const status = getStatusAfterRenewal({
+        success: true,
+        sessionStatus: SessionStatus.Active,
+        previousDiscussionStatus: DiscussionStatus.PENDING,
+      });
+      expect(status).toBe(DiscussionStatus.ACTIVE);
+    });
+
+    it('should set SEND_FAILED if send fails', () => {
+      const status = getStatusAfterRenewal({
+        success: false,
+        sessionStatus: SessionStatus.SelfRequested,
+        previousDiscussionStatus: DiscussionStatus.PENDING,
+      });
+      expect(status).toBe(DiscussionStatus.SEND_FAILED);
+    });
+  });
+
+  describe('Edge case: renewal from BROKEN status', () => {
+    it('should set PENDING when renewing from BROKEN (no previous active session)', () => {
+      const status = getStatusAfterRenewal({
+        success: true,
+        sessionStatus: SessionStatus.SelfRequested,
+        previousDiscussionStatus: DiscussionStatus.BROKEN,
+      });
+      expect(status).toBe(DiscussionStatus.PENDING);
+    });
   });
 });
