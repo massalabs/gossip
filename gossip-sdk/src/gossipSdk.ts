@@ -339,6 +339,11 @@ class GossipSdkImpl {
         console.log('[GossipSdk] Session accept needed for', contactUserId);
         this.handleSessionAccept(contactUserId);
       },
+      // Session became active: peer accepted our announcement, process waiting messages
+      onSessionBecameActive: (contactUserId: string) => {
+        console.log('[GossipSdk] Session became active for', contactUserId);
+        this.handleSessionBecameActive(contactUserId);
+      },
     };
 
     // Get config from initialized state
@@ -789,6 +794,38 @@ class GossipSdkImpl {
         'error',
         error instanceof Error ? error : new Error(String(error)),
         'session_accept'
+      );
+    }
+  }
+
+  /**
+   * Handle session becoming Active after peer accepts our announcement.
+   * Called by onSessionBecameActive event.
+   *
+   * This is different from handleSessionAccept:
+   * - handleSessionAccept: WE accept a session (peer initiated)
+   * - handleSessionBecameActive: PEER accepts our session (we initiated)
+   */
+  private async handleSessionBecameActive(
+    contactUserId: string
+  ): Promise<void> {
+    if (this.state.status !== 'session_open') return;
+
+    try {
+      // Process any messages that were queued as WAITING_SESSION
+      const sentCount =
+        await this._message!.processWaitingMessages(contactUserId);
+      if (sentCount > 0) {
+        console.log(
+          `[GossipSdk] Sent ${sentCount} waiting messages after session became active`
+        );
+      }
+    } catch (error) {
+      console.error('[GossipSdk] Processing waiting messages failed:', error);
+      this.eventEmitter.emit(
+        'error',
+        error instanceof Error ? error : new Error(String(error)),
+        'session_became_active'
       );
     }
   }

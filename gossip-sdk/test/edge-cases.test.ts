@@ -39,13 +39,13 @@ function createMockSession(
 ): SessionModule {
   return {
     peerSessionStatus: vi.fn().mockReturnValue(status),
-    sendMessage: vi.fn().mockReturnValue({
+    sendMessage: vi.fn().mockResolvedValue({
       seeker: new Uint8Array(SEEKER_SIZE).fill(1),
       data: new Uint8Array([1, 2, 3, 4]),
     }),
-    receiveMessage: vi.fn(),
+    feedIncomingMessageBoardRead: vi.fn(),
     refresh: vi.fn().mockResolvedValue([]),
-    receiveAnnouncement: vi.fn(),
+    feedIncomingAnnouncement: vi.fn(),
     establishOutgoingSession: vi
       .fn()
       .mockResolvedValue(new Uint8Array([1, 2, 3])),
@@ -397,38 +397,36 @@ describe('Invalid contactUserId Validation', () => {
 // ============================================================================
 
 describe('Decryption Failure Handling', () => {
-  it('should handle null return from receiveMessage gracefully', () => {
+  it('should handle undefined return from feedIncomingMessageBoardRead gracefully', async () => {
     const mockSession = createMockSession();
 
-    // Mock receiveMessage returning null (decryption failed)
-    (mockSession.receiveMessage as ReturnType<typeof vi.fn>).mockReturnValue(
-      null
-    );
+    // Mock feedIncomingMessageBoardRead returning undefined (decryption failed)
+    (
+      mockSession.feedIncomingMessageBoardRead as ReturnType<typeof vi.fn>
+    ).mockResolvedValue(undefined);
 
-    const result = mockSession.receiveMessage(
+    const result = await mockSession.feedIncomingMessageBoardRead(
       new Uint8Array(32), // peerId
       new Uint8Array(100) // ciphertext
     );
 
-    expect(result).toBeNull();
+    expect(result).toBeUndefined();
     // In actual code, this is logged and skipped - message is not stored
   });
 
-  it('should handle receiveMessage throwing error', () => {
+  it('should handle feedIncomingMessageBoardRead throwing error', async () => {
     const mockSession = createMockSession();
 
-    // Mock receiveMessage throwing
-    (mockSession.receiveMessage as ReturnType<typeof vi.fn>).mockImplementation(
-      () => {
-        throw new Error('Decryption failed: invalid ciphertext');
-      }
-    );
+    // Mock feedIncomingMessageBoardRead throwing
+    (
+      mockSession.feedIncomingMessageBoardRead as ReturnType<typeof vi.fn>
+    ).mockRejectedValue(new Error('Decryption failed: invalid ciphertext'));
 
-    expect(() => {
-      mockSession.receiveMessage(
+    await expect(
+      mockSession.feedIncomingMessageBoardRead(
         new Uint8Array(32), // peerId
         new Uint8Array(100) // ciphertext
-      );
-    }).toThrow('Decryption failed');
+      )
+    ).rejects.toThrow('Decryption failed');
   });
 });

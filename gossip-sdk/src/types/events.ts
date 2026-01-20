@@ -85,6 +85,14 @@ export interface GossipSdkEvents {
    */
   onSessionAcceptNeeded?: (contactUserId: string) => void;
 
+  /**
+   * Called when a session becomes Active after peer accepts our announcement.
+   * This happens when we initiated a session (SelfRequested) and the peer
+   * accepted it by sending their announcement back.
+   * Use this to process any messages that were queued as WAITING_SESSION.
+   */
+  onSessionBecameActive?: (contactUserId: string) => void;
+
   // ─────────────────────────────────────────────────────────────────
   // Error Events
   // ─────────────────────────────────────────────────────────────────

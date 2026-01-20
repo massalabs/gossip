@@ -537,6 +537,17 @@ export class AnnouncementService {
       );
     }
 
+    // When session becomes Active after peer accepts our announcement,
+    // trigger processing of WAITING_SESSION messages.
+    // This happens when we initiated (SelfRequested) and peer accepted.
+    if (sessionStatus === SessionStatus.Active) {
+      log.info(
+        'session is now Active, triggering WAITING_SESSION message processing',
+        { contactUserId }
+      );
+      this.events.onSessionBecameActive?.(contactUserId);
+    }
+
     return {
       success: true,
       discussionId,
