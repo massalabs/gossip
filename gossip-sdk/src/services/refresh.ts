@@ -159,22 +159,33 @@ export class RefreshService {
           continue;
         }
 
-        // PeerRequested: peer sent us an announcement but we haven't accepted yet
-        // This can happen if app crashed/refreshed before accept completed
+        // PeerRequested for an active discussion is a state inconsistency:
+        // - DB says discussion is ACTIVE (we accepted)
+        // - Session manager says PeerRequested (we haven't accepted)
+        // This should not happen - throw to surface the bug rather than hide it
         if (status === SessionStatus.PeerRequested) {
-          log.info('session is PeerRequested, triggering auto-accept', {
-            ownerUserId: discussion.ownerUserId,
-            contactUserId: discussion.contactUserId,
+          const error = new Error(
+            `Unexpected PeerRequested status for active discussion with ${discussion.contactUserId}. ` +
+              `This indicates a state inconsistency between the database and session manager.`
+          );
+          log.error('state inconsistency detected', {
+            error,
+            discussionId: discussion.id,
           });
-
-          this.events.onSessionAcceptNeeded?.(discussion.contactUserId);
-          continue;
+          throw error;
         }
       } catch (error) {
         log.error('error while processing discussion', {
           error: error,
           discussionId: discussion.id,
         });
+        // Re-throw state inconsistency errors - they should surface
+        if (
+          error instanceof Error &&
+          error.message.includes('state inconsistency')
+        ) {
+          throw error;
+        }
         continue;
       }
 

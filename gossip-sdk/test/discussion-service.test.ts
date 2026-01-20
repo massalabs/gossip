@@ -24,6 +24,9 @@ const CONTACT_USER_ID = encodeUserId(new Uint8Array(32).fill(12));
  * This simulates the exact database query used in DiscussionService.renew()
  * to reset messages. This allows us to test the query behavior without
  * needing to mock WASM dependencies.
+ *
+ * Resets all unacknowledged messages (SENDING, FAILED, SENT) to WAITING_SESSION.
+ * Only DELIVERED and READ messages are preserved (acknowledged by peer).
  */
 async function simulateRenewMessageReset(
   ownerUserId: string,
@@ -36,7 +39,8 @@ async function simulateRenewMessageReset(
       message =>
         message.direction === MessageDirection.OUTGOING &&
         (message.status === MessageStatus.SENDING ||
-          message.status === MessageStatus.FAILED)
+          message.status === MessageStatus.FAILED ||
+          message.status === MessageStatus.SENT)
     )
     .modify({
       status: MessageStatus.WAITING_SESSION,
@@ -64,8 +68,8 @@ describe('DiscussionService renew message reset behavior', () => {
     });
   });
 
-  it('should NOT reset SENT messages when renewing session', async () => {
-    // Add a SENT message (already on the network)
+  it('should reset SENT messages to WAITING_SESSION when renewing session', async () => {
+    // Add a SENT message (on network but not acknowledged by peer)
     const sentMessageId = await db.messages.add({
       ownerUserId: OWNER_USER_ID,
       contactUserId: CONTACT_USER_ID,
@@ -80,11 +84,11 @@ describe('DiscussionService renew message reset behavior', () => {
 
     await simulateRenewMessageReset(OWNER_USER_ID, CONTACT_USER_ID);
 
-    // Verify SENT message was NOT reset
+    // Verify SENT message WAS reset (not acknowledged = needs resend)
     const sentMessage = await db.messages.get(sentMessageId);
-    expect(sentMessage?.status).toBe(MessageStatus.SENT);
-    expect(sentMessage?.seeker).toBeDefined();
-    expect(sentMessage?.encryptedMessage).toBeDefined();
+    expect(sentMessage?.status).toBe(MessageStatus.WAITING_SESSION);
+    expect(sentMessage?.seeker).toBeUndefined();
+    expect(sentMessage?.encryptedMessage).toBeUndefined();
   });
 
   it('should NOT reset DELIVERED messages when renewing session', async () => {
@@ -253,10 +257,10 @@ describe('DiscussionService renew message reset behavior', () => {
 
     await simulateRenewMessageReset(OWNER_USER_ID, CONTACT_USER_ID);
 
-    // SENT - should be unchanged
+    // SENT - should be reset to WAITING_SESSION (not acknowledged)
     const sent = await db.messages.get(sentId);
-    expect(sent?.status).toBe(MessageStatus.SENT);
-    expect(sent?.seeker).toBeDefined();
+    expect(sent?.status).toBe(MessageStatus.WAITING_SESSION);
+    expect(sent?.seeker).toBeUndefined();
 
     // SENDING - should be reset to WAITING_SESSION
     const sending = await db.messages.get(sendingId);

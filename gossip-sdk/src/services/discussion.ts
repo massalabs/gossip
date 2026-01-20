@@ -251,18 +251,17 @@ export class DiscussionService {
 
         log.info(`discussion updated with status: ${status}`);
 
-        /* Reset outgoing messages that haven't been sent to the network yet.
-         * SENT messages are already on the bulletin board - leave them alone.
-         * They'll be acknowledged when the peer reads them with the new session.
+        /* Reset outgoing messages that haven't been acknowledged by the peer.
+         * When session is renewed, messages encrypted with the old session
+         * may not be decryptable by the peer with the new session.
          *
-         * Messages to reset:
+         * Messages to reset (not acknowledged):
          * - SENDING: Was in progress, needs re-encryption with new session
          * - FAILED: Previous send failed, needs re-encryption
-         * - WAITING_SESSION: Waiting for session, will be sent with new session
+         * - SENT: On network but not acknowledged - peer may not have received
          *
-         * Messages to keep:
-         * - SENT: Already on network, waiting for ack
-         * - DELIVERED: Peer received it
+         * Messages to keep (acknowledged by peer):
+         * - DELIVERED: Peer confirmed receipt
          * - READ: Peer read it
          */
         const messagesToReset = await this.db.messages
@@ -272,7 +271,8 @@ export class DiscussionService {
             message =>
               message.direction === MessageDirection.OUTGOING &&
               (message.status === MessageStatus.SENDING ||
-                message.status === MessageStatus.FAILED)
+                message.status === MessageStatus.FAILED ||
+                message.status === MessageStatus.SENT)
           )
           .modify({
             status: MessageStatus.WAITING_SESSION,
