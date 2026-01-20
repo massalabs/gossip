@@ -10,8 +10,7 @@ import {
   SessionModule,
   type GossipSdk,
 } from 'gossip-sdk';
-import { createMessageProtocol } from '../src/api/messageProtocol';
-import { MessageProtocolType } from '../src/config/protocol';
+import { MockMessageProtocol } from './mocks/mockMessageProtocol';
 
 interface InitSessionResult {
   aliceDiscussionId: number;
@@ -99,7 +98,7 @@ export function createTestSdk(
   session: MockSessionModule,
   appDb = localAppDb
 ): GossipSdk {
-  const mockProtocol = createMessageProtocol(MessageProtocolType.MOCK);
+  const mockProtocol = new MockMessageProtocol();
   return createGossipSdk(
     appDb,
     mockProtocol,
