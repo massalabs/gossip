@@ -7,7 +7,7 @@ import {
 } from '../../db';
 import ContactAvatar from '../avatar/ContactAvatar';
 import { formatRelativeTime } from '../../utils/timeUtils';
-import { formatUserId } from '../../utils/userId';
+import { formatUserId } from 'gossip-sdk';
 import BaseModal from '../ui/BaseModal';
 import ContactNameModal from '../ui/ContactNameModal';
 import Button from '../ui/Button';

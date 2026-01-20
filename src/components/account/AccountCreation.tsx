@@ -7,7 +7,8 @@ import {
   validatePassword,
   validateUsernameFormat,
   validateUsernameFormatAndAvailability,
-} from '../../utils/validation';
+  db,
+} from 'gossip-sdk';
 import PageHeader from '../ui/PageHeader';
 import PageLayout from '../ui/PageLayout';
 import TabSwitcher from '../ui/TabSwitcher';
@@ -109,8 +110,10 @@ const AccountCreation: React.FC<AccountCreationProps> = ({
     e.stopPropagation();
 
     // Handle when user presses enter without triggering blur event
-    const usernameResult =
-      await validateUsernameFormatAndAvailability(username);
+    const usernameResult = await validateUsernameFormatAndAvailability(
+      username,
+      db
+    );
 
     if (!usernameResult.valid) {
       setIsUsernameValid(false);

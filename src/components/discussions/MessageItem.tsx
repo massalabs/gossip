@@ -13,7 +13,7 @@ import {
 } from 'react-feather';
 import { Message, MessageDirection, MessageStatus } from '../../db';
 import { formatTime } from '../../utils/timeUtils';
-import { messageService } from '../../services/message';
+import { gossipSdk } from 'gossip-sdk';
 import { parseLinks, openUrl } from '../../utils/linkUtils';
 import { useMarkMessageAsRead } from '../../hooks/useMarkMessageAsRead';
 
@@ -79,13 +79,13 @@ const MessageItem: React.FC<MessageItemProps> = ({
     const seekerForContext =
       message.replyTo?.originalSeeker || message.forwardOf?.originalSeeker;
 
-    if (seekerForContext) {
+    if (seekerForContext && gossipSdk.isSessionOpen) {
       setIsLoadingOriginal(true);
       setOriginalNotFound(false);
 
       const findMessage = async () => {
         try {
-          const msg = await messageService.findMessageBySeeker(
+          const msg = await gossipSdk.messages.findBySeeker(
             seekerForContext,
             message.ownerUserId
           );

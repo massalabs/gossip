@@ -1,30 +1,27 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { liveQuery, Subscription } from 'dexie';
 import { useAccountStore } from '../stores/accountStore';
-import { announcementService } from '../services/announcement';
+import { restMessageProtocol, gossipSdk } from 'gossip-sdk';
 import {
   Discussion,
   DiscussionStatus,
-  db,
+  db as appDb,
   MessageStatus,
   Message,
 } from '../db';
-import { renewDiscussion } from '../services/discussion';
-import { messageService } from '../services/message';
-import { restMessageProtocol } from '../api/messageProtocol';
 
 /**
  * Hook to manually renew a discussion (e.g., from settings page).
  * Changes node and re-initiates the discussion.
  */
 export function useManualRenewDiscussion() {
-  const { userProfile, session } = useAccountStore();
+  const userProfile = useAccountStore(s => s.userProfile);
 
   return useCallback(
     async (contactUserId: string): Promise<void> => {
-      if (!userProfile?.userId || !session) {
+      if (!userProfile?.userId || !gossipSdk.isSessionOpen) {
         console.warn(
-          'Cannot renew discussion: WASM keys or session unavailable'
+          'Cannot renew discussion: Services or session unavailable'
         );
         return;
       }
@@ -36,7 +33,7 @@ export function useManualRenewDiscussion() {
       }
 
       try {
-        await renewDiscussion(contactUserId, session);
+        await gossipSdk.discussions.renew(contactUserId);
       } catch (error) {
         console.error(
           `Failed to renew discussion with ${contactUserId}:`,
@@ -44,7 +41,7 @@ export function useManualRenewDiscussion() {
         );
       }
     },
-    [userProfile?.userId, session]
+    [userProfile?.userId]
   );
 }
 
@@ -53,7 +50,7 @@ export function useManualRenewDiscussion() {
  * Used by useAppStateRefresh for automatic retry logic.
  */
 export function useResendFailedBlobs() {
-  const { userProfile, session } = useAccountStore();
+  const userProfile = useAccountStore(s => s.userProfile);
   const isResending = useRef(false);
 
   // Use refs to store the latest values from liveQuery
@@ -76,19 +73,23 @@ export function useResendFailedBlobs() {
 
     // Failed messages and broken discussions
     const failedSub = liveQuery(async () => {
-      return db.transaction('r', [db.messages, db.discussions], async () => {
-        const [failedMessages, broken] = await Promise.all([
-          db.messages
-            .where('[ownerUserId+status]')
-            .equals([userProfile.userId, MessageStatus.FAILED])
-            .toArray(),
-          db.discussions
-            .where('[ownerUserId+status]')
-            .equals([userProfile.userId, DiscussionStatus.BROKEN])
-            .toArray(),
-        ]);
-        return { failedMessages, broken };
-      });
+      return appDb.transaction(
+        'r',
+        [appDb.messages, appDb.discussions],
+        async () => {
+          const [failedMessages, broken] = await Promise.all([
+            appDb.messages
+              .where('[ownerUserId+status]')
+              .equals([userProfile.userId, MessageStatus.FAILED])
+              .toArray(),
+            appDb.discussions
+              .where('[ownerUserId+status]')
+              .equals([userProfile.userId, DiscussionStatus.BROKEN])
+              .toArray(),
+          ]);
+          return { failedMessages, broken };
+        }
+      );
     }).subscribe({
       next: ({ failedMessages, broken }) => {
         // Update refs directly - no need for state since we only use refs
@@ -111,7 +112,7 @@ export function useResendFailedBlobs() {
 
     // Send-failed discussions (announcement failed to send)
     const sendFailedSub = liveQuery(() =>
-      db.discussions
+      appDb.discussions
         .where('[ownerUserId+status]')
         .equals([userProfile.userId, DiscussionStatus.SEND_FAILED])
         .toArray()
@@ -131,7 +132,7 @@ export function useResendFailedBlobs() {
   // Resend all failed items
   const resendFailedBlobs = useCallback(async () => {
     if (isResending.current) return;
-    if (!session || !userProfile?.userId) return;
+    if (!gossipSdk.isSessionOpen || !userProfile?.userId) return;
 
     isResending.current = true;
     try {
@@ -140,7 +141,7 @@ export function useResendFailedBlobs() {
       const currentBrokenDiscussions = brokenDiscussionsRef.current;
       for (const discussion of currentBrokenDiscussions) {
         try {
-          await renewDiscussion(discussion.contactUserId, session);
+          await gossipSdk.discussions.renew(discussion.contactUserId);
         } catch (err) {
           console.error(
             `Failed to reinitiate discussion ${discussion.contactUserId}:`,
@@ -153,10 +154,7 @@ export function useResendFailedBlobs() {
       const currentSendFailedDiscussions = sendFailedDiscussionsRef.current;
       if (currentSendFailedDiscussions.length > 0) {
         try {
-          await announcementService.resendAnnouncements(
-            currentSendFailedDiscussions,
-            session
-          );
+          await gossipSdk.announcements.resend(currentSendFailedDiscussions);
         } catch (err) {
           console.error('Failed to resend announcements:', err);
         }
@@ -171,7 +169,7 @@ export function useResendFailedBlobs() {
           currentRetryMessages
         );
         try {
-          await messageService.resendMessages(currentRetryMessages, session);
+          await gossipSdk.messages.resend(currentRetryMessages);
         } catch (err) {
           console.error('Failed to resend messages:', err);
         }
@@ -179,7 +177,7 @@ export function useResendFailedBlobs() {
     } finally {
       isResending.current = false;
     }
-  }, [session, userProfile?.userId]);
+  }, [userProfile?.userId]);
 
   return { resendFailedBlobs };
 }

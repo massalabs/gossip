@@ -16,18 +16,18 @@ import {
   FAILED_TO_FETCH_ERROR,
   FAILED_TO_FETCH_MESSAGE,
   FAILED_TO_RETRIEVE_CONTACT_PUBLIC_KEY_ERROR,
-} from '../../src/services/auth';
-import { IMessageProtocol } from '../../src/api/messageProtocol/types';
-import { encodeUserId } from '../../src/utils/userId';
-import { encodeToBase64, decodeFromBase64 } from '../../src/utils/base64';
-import { db } from '../../src/db';
-import { userProfile } from '../helpers/factories/userProfile';
-import {
+  encodeUserId,
+  IMessageProtocol,
+  encodeToBase64,
+  decodeFromBase64,
   UserPublicKeys,
   UserKeys,
+  ensureWasmInitialized,
   generate_user_keys,
-} from '../../src/assets/generated/wasm/gossip_wasm';
-import { ensureWasmInitialized } from '../../src/wasm/loader';
+} from 'gossip-sdk';
+
+import { db } from '../../src/db';
+import { userProfile } from '../helpers/factories/userProfile';
 
 describe('getPublicKeyErrorMessage', () => {
   it('should return specific message for "Public key not found" error', () => {
@@ -100,7 +100,7 @@ describe('AuthService', () => {
       changeNode: vi.fn(),
     };
 
-    authService = new AuthService(mockMessageProtocol);
+    authService = new AuthService(db, mockMessageProtocol);
 
     // Clear database before each test
     await db.userProfile.clear();

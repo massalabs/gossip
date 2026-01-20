@@ -8,7 +8,7 @@ import {
 } from '../db';
 import { createSelectors } from './utils/createSelectors';
 import { useAccountStore } from './accountStore';
-import { messageService } from '../services/message';
+import { gossipSdk } from 'gossip-sdk';
 import { liveQuery, Subscription } from 'dexie';
 
 interface MessageStoreState {
@@ -148,9 +148,13 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
     replyToId?: number,
     forwardFromMessageId?: number
   ) => {
-    const { userProfile, session } = useAccountStore.getState();
+    const { userProfile } = useAccountStore.getState();
     const isForward = !!forwardFromMessageId;
-    if (!userProfile?.userId || (!content.trim() && !isForward) || !session)
+    if (
+      !userProfile?.userId ||
+      (!content.trim() && !isForward) ||
+      !gossipSdk.isSessionOpen
+    )
       return;
 
     set({ isSending: true });
@@ -222,7 +226,7 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
       };
 
       // Send via service
-      const result = await messageService.sendMessage(message, session);
+      const result = await gossipSdk.messages.send(message);
       if (!result.success) {
         if (result.message) {
           console.warn(

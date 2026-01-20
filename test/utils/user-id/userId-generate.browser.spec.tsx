@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import {
-  generate,
+  generateUserId as generate,
   isValidUserId,
   decodeUserId,
-} from '../../../src/utils/userId';
+} from 'gossip-sdk';
 
 describe('utils/userId.ts - generate() (requires WASM)', () => {
   describe('generate()', () => {

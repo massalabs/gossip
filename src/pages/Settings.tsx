@@ -3,6 +3,7 @@ import BaseModal from '../components/ui/BaseModal';
 import PageLayout from '../components/ui/PageLayout';
 import PageHeader from '../components/ui/PageHeader';
 import { useAccountStore } from '../stores/accountStore';
+import { gossipSdk } from 'gossip-sdk';
 import Button from '../components/ui/Button';
 import UserIdDisplay from '../components/ui/UserIdDisplay';
 import CopyClipboard from '../components/ui/CopyClipboard';
@@ -45,7 +46,6 @@ const Settings = (): React.ReactElement => {
     logout,
     resetAccount,
     updateUsername,
-    session,
   } = useAccountStore();
 
   const showDebugOption = useAppStore(s => s.showDebugOption);
@@ -149,7 +149,7 @@ const Settings = (): React.ReactElement => {
         onBack={handleBack}
         userId={userProfile!.userId}
         userName={userProfile!.username}
-        publicKey={session!.ourPk}
+        publicKey={gossipSdk.publicKeys}
         mnsDomains={
           mnsEnabled && mnsDomains.length > 0 ? mnsDomains : undefined
         }

@@ -7,7 +7,7 @@ import React, {
 } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useDiscussionStore } from '../stores/discussionStore';
-import { updateDiscussionName } from '../utils';
+import { updateDiscussionName, db } from '../utils';
 import ContactAvatar from '../components/avatar/ContactAvatar';
 import ContactNameModal from '../components/ui/ContactNameModal';
 import Button from '../components/ui/Button';
@@ -93,8 +93,8 @@ const DiscussionSettings: React.FC = () => {
     async (name?: string) => {
       if (!discussion?.id) return;
 
-      const result = await updateDiscussionName(discussion.id, name);
-      if (!result.ok) {
+      const result = await updateDiscussionName(discussion.id, name, db);
+      if (!result.success) {
         setNameError(result.message);
         return;
       }
