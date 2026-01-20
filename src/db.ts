@@ -82,6 +82,7 @@ export enum DiscussionStatus {
   CLOSED = 'closed', // closed by the user
   BROKEN = 'broken', // The session is killed. Need to be reinitiated
   SEND_FAILED = 'sendFailed', // The discussion was initiated by the session manager but could not be broadcasted on network
+  RECONNECTING = 'reconnecting', // Session recovery in progress, waiting for peer's response
 }
 
 export enum MessageDirection {
@@ -95,6 +96,7 @@ export enum MessageStatus {
   DELIVERED = 'delivered',
   READ = 'read',
   FAILED = 'failed',
+  WAITING_SESSION = 'waiting_session',
 }
 
 export enum DiscussionDirection {

@@ -59,16 +59,35 @@ npm run build
 
 The built files will be in the `dist` directory, ready for deployment.
 
-### message transfer protocol
+### SDK Integration
 
-To config message transfer protocol setting:
+The React app configures the SDK at startup via `configureSdk` to inject the
+runtime adapters (stores, db, preferences, notification handler). It also
+sets the protocol base URL via `setProtocolBaseUrl`.
+
+### WASM Bindings
+
+WASM bindings are generated via the root script:
+
+```bash
+npm run wasm:build
+```
+
+Output is written to `gossip-sdk/src/assets/generated/wasm` and consumed by
+both the SDK and the React app. The React app now imports WASM wrappers from
+`gossip-sdk/src/wasm`.
+
+### Message Transfer Protocol
+
+To configure the message transfer protocol setting:
 
 ```bash
 mv .env.example .env
 ```
 
-Set the VITE_GOSSIP_API_URL env var to the api url used for message transfer.
-For now message transfer is handled via a classic api backend. More decentralized approach is expected soon.
+Set `VITE_GOSSIP_API_URL` to the API base URL used for message transfer.
+The SDK defaults to `https://api.usegossip.com` and the app overrides it at
+runtime via `setProtocolBaseUrl` during startup.
 
 ## Project Structure
 
@@ -83,7 +102,7 @@ src/
 │   └── accountStore.tsx
 ├── db.ts              # Database schema and operations
 ├── App.tsx            # Main application component
-└── main.tsx           # Application entry point
+└── main.tsx           # Application entry point (configures SDK adapters)
 ```
 
 ## Database Schema

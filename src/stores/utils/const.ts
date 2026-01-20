@@ -1,4 +1,4 @@
-import { TokenState } from '../walletStore';
+import type { TokenState } from 'gossip-sdk';
 import masIcon from '../../assets/MAS.svg';
 
 export const initialTokens: TokenState[] = [

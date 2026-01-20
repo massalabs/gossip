@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { updateContactName, deleteContact } from '../utils';
+import { updateContactName, db } from '../utils';
 import { useDiscussionStore } from '../stores/discussionStore';
 import { useMessageStore } from '../stores/messageStore';
 import ContactAvatar from '../components/avatar/ContactAvatar';
@@ -12,7 +12,7 @@ import PageLayout from '../components/ui/PageLayout';
 import UserIdDisplay from '../components/ui/UserIdDisplay';
 import BaseModal from '../components/ui/BaseModal';
 import { Check, Edit2, Trash2 } from 'react-feather';
-import { UserPublicKeys } from '../assets/generated/wasm/gossip_wasm';
+import { UserPublicKeys, gossipSdk } from 'gossip-sdk';
 import { DiscussionStatus } from '../db';
 import { ROUTES } from '../constants/routes';
 
@@ -67,8 +67,13 @@ const Contact: React.FC = () => {
   const handleSaveName = useCallback(
     async (name: string) => {
       if (!ownerUserId || !contact) return;
-      const result = await updateContactName(ownerUserId, contact.userId, name);
-      if (!result.ok) {
+      const result = await updateContactName(
+        ownerUserId,
+        contact.userId,
+        name,
+        db
+      );
+      if (!result.success) {
         setNameError(result.message);
         return;
       }
@@ -90,14 +95,17 @@ const Contact: React.FC = () => {
   }, [showSuccessCheck]);
 
   const handleDeleteContact = useCallback(async () => {
-    if (!ownerUserId || !contact) return;
+    if (!ownerUserId || !contact || !gossipSdk.isSessionOpen) return;
 
     setIsDeleting(true);
     setDeleteError(null);
 
     try {
-      const result = await deleteContact(ownerUserId, contact.userId);
-      if (!result.ok) {
+      const result = await gossipSdk.contacts.delete(
+        ownerUserId,
+        contact.userId
+      );
+      if (!result.success) {
         setDeleteError(result.message);
         setIsDeleting(false);
         return;

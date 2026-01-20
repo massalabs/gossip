@@ -25,7 +25,7 @@ export default defineConfig({
         '**/*.d.ts',
         '**/*.config.*',
         '**/mockData',
-        'src/assets/generated/wasm/**',
+        'gossip-sdk/src/assets/generated/wasm/**',
       ],
     },
   },

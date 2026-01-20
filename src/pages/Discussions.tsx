@@ -20,11 +20,12 @@ import UserProfileAvatar from '../components/avatar/UserProfileAvatar';
 import QrCodeIcon from '../components/ui/customIcons/QrCodeIcon';
 import { ROUTES } from '../constants/routes';
 import { useDiscussionStore } from '../stores/discussionStore';
+import { gossipSdk } from 'gossip-sdk';
 import { DiscussionStatus } from '../db';
 
 const Discussions: React.FC = () => {
   const navigate = useNavigate();
-  const { session, isLoading } = useAccountStore();
+  const isLoading = useAccountStore(s => s.isLoading);
   const pendingSharedContent = useAppStore(s => s.pendingSharedContent);
   const setPendingSharedContent = useAppStore(s => s.setPendingSharedContent);
   const pendingForwardMessageId = useAppStore(s => s.pendingForwardMessageId);
@@ -106,7 +107,7 @@ const Discussions: React.FC = () => {
     return { all: allCount, unread: unreadCount, pending: pendingCount };
   }, [discussions]);
 
-  if (isLoading || !session) {
+  if (isLoading || !gossipSdk.isSessionOpen) {
     return (
       <div className="bg-background flex items-center justify-center h-full">
         <PrivacyGraphic size={120} loading={true} />

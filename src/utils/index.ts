@@ -1,8 +1,28 @@
 export * from './addressUtils';
-export * from './base64';
-export * from './contacts';
-export * from './discussions';
+export {
+  encodeToBase64,
+  decodeFromBase64,
+  encodeToBase64Url,
+  decodeFromBase64Url,
+  encodeUserId,
+  decodeUserId,
+  isValidUserId,
+  formatUserId,
+  validateUsernameFormat,
+  validatePassword,
+  validateUserIdFormat,
+  validateUsernameAvailability,
+  validateUsernameFormatAndAvailability,
+  updateContactName,
+  deleteContact,
+  updateDiscussionName,
+  db,
+} from 'gossip-sdk';
+export type {
+  ValidationResult,
+  UpdateContactNameResult,
+  DeleteContactResult,
+  UpdateDiscussionNameResult,
+} from 'gossip-sdk';
 export * from './fetchPrice';
 export * from './timeUtils';
-export * from './userId';
-export * from './validation';

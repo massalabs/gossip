@@ -1,20 +1,21 @@
 import { useCallback, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Contact, db } from '../db';
+import { Contact, db as appDb } from '../db';
 import { useAccountStore } from '../stores/accountStore';
 import { useAppStore } from '../stores/appStore';
 import {
-  encodeUserId,
-  validateUsernameFormat,
   validateUserIdFormat,
-} from '../utils';
-import { UserPublicKeys } from '../assets/generated/wasm/gossip_wasm';
+  validateUsernameFormat,
+  encodeUserId,
+  UserPublicKeys,
+  gossipSdk,
+  type PublicKeyResult,
+} from 'gossip-sdk';
+import { authService } from '../services';
 import { useFileShareContact } from './useFileShareContact';
-import { authService, PublicKeyResult } from '../services/auth';
 import { mnsService, isMnsDomain } from '../services/mns';
 import toast from 'react-hot-toast';
 import { ROUTES } from '../constants/routes';
-import { initializeDiscussion } from '../services/discussion';
 
 type FieldState = {
   value: string;
@@ -33,7 +34,7 @@ type MnsState = {
 
 export function useContactForm() {
   const navigate = useNavigate();
-  const { userProfile, session } = useAccountStore();
+  const userProfile = useAccountStore(s => s.userProfile);
   const mnsEnabled = useAppStore(s => s.mnsEnabled);
   const { importFileContact, fileState } = useFileShareContact();
 
@@ -250,7 +251,7 @@ export function useContactForm() {
       }
 
       // check here if user already exists in contacts
-      const contact = await db.getContactByOwnerAndUserId(
+      const contact = await appDb.getContactByOwnerAndUserId(
         userProfile.userId,
         derivedUserId
       );
@@ -319,7 +320,12 @@ export function useContactForm() {
       return;
     }
 
-    if (!canSubmit || !userProfile?.userId || !publicKeys || !session) {
+    if (
+      !canSubmit ||
+      !userProfile?.userId ||
+      !publicKeys ||
+      !gossipSdk.isSessionOpen
+    ) {
       return;
     }
 
@@ -328,7 +334,7 @@ export function useContactForm() {
 
     try {
       // Duplicate checks
-      const contacts = await db.getContactsByOwner(userProfile.userId);
+      const contacts = await appDb.getContactsByOwner(userProfile.userId);
       const nameTaken = contacts.some(
         c => c.name.toLowerCase() === trimmedName.toLowerCase()
       );
@@ -341,7 +347,7 @@ export function useContactForm() {
         return;
       }
 
-      const existing = await db.getContactByOwnerAndUserId(
+      const existing = await appDb.getContactByOwnerAndUserId(
         userProfile.userId,
         effectiveUserId
       );
@@ -365,11 +371,11 @@ export function useContactForm() {
         createdAt: new Date(),
       };
 
-      await db.contacts.add(contact);
+      await appDb.contacts.add(contact);
 
       const announcementMessage = message.value.trim() || undefined;
       try {
-        await initializeDiscussion(contact, session, announcementMessage);
+        await gossipSdk.discussions.start(contact, announcementMessage);
       } catch (e) {
         console.error(
           'Failed to initialize discussion after contact creation:',
@@ -394,7 +400,6 @@ export function useContactForm() {
     userId.loading,
     mnsState.resolvedGossipId,
     navigate,
-    session,
   ]);
 
   return {

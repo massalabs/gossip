@@ -7,8 +7,10 @@ import { enableDebugLogger } from './utils/logger.ts';
 // Polyfill for Buffer
 import { Buffer } from 'buffer';
 
-// WASM initialization service
-import { startWasmInitialization } from './wasm';
+// SDK configuration
+import { gossipSdk } from 'gossip-sdk';
+import { protocolConfig } from './config/protocol';
+import { db } from './db';
 
 // Setup SHA-512 for @noble/ed25519 (required for massa-web3)
 import { sha512 } from '@noble/hashes/sha2';
@@ -85,8 +87,11 @@ window.addEventListener('load', () => {
   }
 });
 
-// Start WASM initialization in the background (non-blocking)
-startWasmInitialization();
+// Initialize SDK (also starts WASM initialization in background)
+gossipSdk.init({
+  db,
+  protocolBaseUrl: protocolConfig.baseUrl,
+});
 
 // Only enable the debug logger in development to avoid persisting
 // potentially sensitive console output in production builds.

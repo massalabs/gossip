@@ -1,6 +1,7 @@
 import React from 'react';
 import { useLocation } from 'react-router-dom';
 import BottomNavigation from './BottomNavigation';
+import ConnectionMonitor from './ConnectionMonitor';
 import { shouldShowBottomNav } from '../../constants/pageConfig';
 import { useKeyboardVisible } from '../../hooks/useKeyboardVisible';
 
@@ -58,6 +59,7 @@ const MainLayout: React.FC<MainLayoutProps> = ({
         {children}
       </div>
       {showBottomNav && <BottomNavigation />}
+      <ConnectionMonitor />
     </div>
   );
 };

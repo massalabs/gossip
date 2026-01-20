@@ -1,12 +1,16 @@
-import { db as appDb, Contact } from '../src/db';
-import { initializeDiscussion } from '../src/services/discussion';
-import { encodeUserId } from '../src/utils/userId';
+import { Contact, db as localAppDb } from '../src/db';
 import { MockSessionModule } from './wasm/mock';
 import {
   UserPublicKeys,
   UserSecretKeys,
-} from '../src/assets/generated/wasm/gossip_wasm';
-import { generateUserKeys, UserKeys } from '../src/wasm/userKeys';
+  generateUserKeys,
+  UserKeys,
+  encodeUserId,
+  createGossipSdk,
+  SessionModule,
+  type GossipSdk,
+} from 'gossip-sdk';
+import { MockMessageProtocol } from './mocks/mockMessageProtocol';
 
 interface InitSessionResult {
   aliceDiscussionId: number;
@@ -87,6 +91,22 @@ export async function initializeSessionMockWithOptionalKeys(
 }
 
 /**
+ * Create a GossipSdk instance for testing with a mock session.
+ * This is the recommended way to set up services for tests.
+ */
+export function createTestSdk(
+  session: MockSessionModule,
+  appDb = localAppDb
+): GossipSdk {
+  const mockProtocol = new MockMessageProtocol();
+  return createGossipSdk(
+    appDb,
+    mockProtocol,
+    session as unknown as SessionModule
+  );
+}
+
+/**
  * Initialize an active discussion session between Alice and Bob for message tests.
  * This helper:
  * - Creates reciprocal contacts
@@ -99,10 +119,14 @@ export async function initSession(
   aliceSk: UserSecretKeys,
   bobPk: UserPublicKeys,
   bobSk: UserSecretKeys,
-  db = appDb,
+  appDb = localAppDb,
   aliceSession: MockSessionModule,
   bobSession: MockSessionModule
 ): Promise<InitSessionResult> {
+  // Create SDK instances for each user
+  const aliceSdk = createTestSdk(aliceSession, appDb);
+  const bobSdk = createTestSdk(bobSession, appDb);
+
   const aliceBobContact: Omit<Contact, 'id'> = {
     ownerUserId: aliceSession.userIdEncoded,
     userId: bobSession.userIdEncoded,
@@ -126,8 +150,8 @@ export async function initSession(
   };
 
   // Add contacts
-  await db.contacts.add(aliceBobContact);
-  await db.contacts.add(bobAliceContact);
+  await appDb.contacts.add(aliceBobContact);
+  await appDb.contacts.add(bobAliceContact);
 
   // Mock announcements
   const aliceAnnouncement = new Uint8Array(200);
@@ -138,17 +162,11 @@ export async function initSession(
   crypto.getRandomValues(bobAnnouncement);
   bobSession.establishOutgoingSession.mockReturnValue(bobAnnouncement);
 
-  // Initialize discussions
-  const { discussionId: aliceDiscussionId } = await initializeDiscussion(
-    aliceBobContact,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    aliceSession as any
-  );
-  const { discussionId: bobDiscussionId } = await initializeDiscussion(
-    bobAliceContact,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    bobSession as any
-  );
+  // Initialize discussions - each user uses their own SDK
+  const { discussionId: aliceDiscussionId } =
+    await aliceSdk.discussion.initialize(aliceBobContact);
+  const { discussionId: bobDiscussionId } =
+    await bobSdk.discussion.initialize(bobAliceContact);
 
   return {
     aliceDiscussionId,

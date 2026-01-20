@@ -16,8 +16,9 @@ import {
   EncryptionKey,
   encryptionKeyFromBytes,
   generateEncryptionKey,
-} from '../wasm';
-import { encodeToBase64, decodeFromBase64, encodeUserId } from '../utils';
+  encodeUserId,
+} from 'gossip-sdk';
+import { encodeToBase64, decodeFromBase64 } from '../utils';
 
 export interface BiometricAvailability {
   available: boolean;
