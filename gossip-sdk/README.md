@@ -1,6 +1,6 @@
 # Gossip SDK
 
-A platform-agnostic SDK for the Gossip messenger app. This SDK enables automation, chatbot integrations, and programmatic access to Gossip functionality outside the React UI.
+A platform-agnostic SDK for the Gossip messenger app. This SDK enables automation, chatbot integrations, and programmatic access to Gossip functionality.
 
 ## Overview
 
@@ -11,11 +11,9 @@ The Gossip SDK provides a clean, typed interface for:
 - **Discussion Management** - Initialize and manage encrypted discussions
 - **Message Operations** - Send and receive encrypted messages
 - **Announcement Handling** - Process protocol announcements
-- **Wallet Operations** - Interact with the Massa blockchain
+- **Session Management** - Automatic session renewal and persistence
 
 ## Installation
-
-The SDK is designed to be used alongside the main Gossip application. It shares dependencies with host apps via peer dependencies.
 
 ```bash
 cd gossip-sdk
@@ -27,143 +25,171 @@ npm install
 The SDK requires these peer dependencies (provided by the host project):
 
 - `dexie` ^4.0.0 - IndexedDB wrapper for local storage
-- `zustand` ^5.0.0 - State management (for app adapters)
 
-## Usage
+## Quick Start
 
-### Basic Example
-
-Before using the SDK, call `configureSdk` to inject the runtime adapters
-(account store, wallet store, database, preferences, notification handler).
-Use `setProtocolBaseUrl` if you need to override the default REST endpoint; call it before network operations.
+The SDK uses a singleton pattern with a simple lifecycle:
 
 ```typescript
-import {
-  configureSdk,
-  getSession,
-  initializeAccount,
-  addContact,
-  initializeDiscussion,
-  sendMessage,
-} from 'gossip-sdk';
+import { gossipSdk, GossipDatabase } from 'gossip-sdk';
 
-configureSdk({
-  accountStore,
-  walletStore,
+// 1. Initialize once at app startup
+const db = new GossipDatabase();
+await db.open();
+
+await gossipSdk.init({
   db,
-  preferences,
-  notificationHandler,
+  protocolBaseUrl: 'https://api.example.com',
 });
 
-// Create a new account
-const accountResult = await initializeAccount('alice', 'secure-password');
-if (!accountResult.success) {
-  console.error('Failed to create account:', accountResult.error);
-  return;
-}
-
-console.log('Account created:', accountResult.userProfile?.username);
-
-// Add a contact (requires their public key)
-const contactResult = await addContact(
-  accountResult.userProfile.userId,
-  'bob-user-id',
-  'Bob',
-  bobPublicKeys
-);
-
-if (contactResult.success) {
-  console.log('Contact added:', contactResult.contact?.name);
-}
-
-// Start a discussion with the contact
-const session = getSession();
-if (contactResult.success && session) {
-  const discussionResult = await initializeDiscussion(
-    contactResult.contact,
-    session,
-    'Hello Bob!'
-  );
-
-  console.log('Discussion started, ID:', discussionResult.discussionId);
-}
-```
-
-### Account Management
-
-Account operations require the configured account store adapter and a configured database instance.
-
-```typescript
-import {
-  configureSdk,
-  initializeAccount,
-  loadAccount,
-  restoreAccountFromMnemonic,
-  logout,
-  resetAccount,
-  showBackup,
-  getAllAccounts,
-  hasExistingAccount,
-  getCurrentAccount,
-} from 'gossip-sdk';
-
-configureSdk({
-  accountStore,
-  walletStore,
-  db,
-  preferences,
-  notificationHandler,
+// 2. Open session (login)
+await gossipSdk.openSession({
+  mnemonic: 'word1 word2 word3 ... word12',
+  // For existing session:
+  encryptedSession: savedBlob,
+  encryptionKey: savedKey,
+  // For persistence:
+  persistEncryptionKey: encryptionKey,
+  onPersist: async (blob, key) => {
+    await saveToStorage(blob, key);
+  },
 });
 
-// Create a new account with username and password
-const result = await initializeAccount('username', 'password');
+// 3. Use the SDK
+const contacts = await gossipSdk.contacts.list(gossipSdk.userId);
+await gossipSdk.discussions.start(contact, 'Hello!');
+await gossipSdk.messages.send(message);
 
-// Load an existing account
-const loadResult = await loadAccount('password', optionalUserId);
+// 4. Listen to events
+gossipSdk.on('message', msg => {
+  console.log('New message:', msg.content);
+});
 
-// Restore account from mnemonic phrase
-const restoreResult = await restoreAccountFromMnemonic(
-  'username',
-  'word1 word2 word3 ... word12',
-  'password'
-);
-
-// Get mnemonic backup for current account
-const backup = await showBackup('password');
-console.log('Mnemonic:', backup.mnemonic);
-
-// Check if any accounts exist
-const hasAccount = await hasExistingAccount();
-
-// Get current logged-in account
-const current = getCurrentAccount();
-
-// Logout (keeps data, clears session)
-await logout();
-
-// Reset account (deletes all data)
-await resetAccount();
+// 5. Logout
+await gossipSdk.closeSession();
 ```
 
-### Contact Management
+## Lifecycle
+
+### 1. Initialize
+
+Call `init()` once at app startup to configure the database and protocol:
 
 ```typescript
-import {
-  getContacts,
-  getContact,
-  addContact,
-  updateContactName,
-  deleteContact,
-} from 'gossip-sdk';
+await gossipSdk.init({
+  // Required: Database instance
+  db: new GossipDatabase(),
 
-// Get all contacts for current user
-const contacts = await getContacts(userId);
+  // Optional: API base URL (uses default if not provided)
+  protocolBaseUrl: 'https://api.usegossip.net',
+
+  // Optional: Configuration overrides
+  config: {
+    polling: {
+      enabled: true,
+      messagesIntervalMs: 3000,
+    },
+  },
+});
+```
+
+### 2. Open Session (Login)
+
+Call `openSession()` to authenticate and create a cryptographic session:
+
+```typescript
+// New account (no existing session)
+await gossipSdk.openSession({
+  mnemonic: 'word1 word2 word3 ... word12',
+});
+
+// Restore existing session
+await gossipSdk.openSession({
+  mnemonic: 'word1 word2 word3 ... word12',
+  encryptedSession: savedBlob,
+  encryptionKey: savedKey,
+});
+
+// With persistence (saves session on changes)
+await gossipSdk.openSession({
+  mnemonic: 'word1 word2 word3 ... word12',
+  persistEncryptionKey: encryptionKey,
+  onPersist: async (blob, key) => {
+    await db.userProfile.update(userId, { session: blob });
+  },
+});
+```
+
+### 3. Close Session (Logout)
+
+```typescript
+await gossipSdk.closeSession();
+```
+
+## Service APIs
+
+All services are available after `openSession()` is called.
+
+### Messages
+
+```typescript
+// Send a message
+const result = await gossipSdk.messages.send({
+  ownerUserId: gossipSdk.userId,
+  contactUserId: contactId,
+  content: 'Hello!',
+  type: MessageType.TEXT,
+  direction: MessageDirection.OUTGOING,
+  status: MessageStatus.SENDING,
+  timestamp: new Date(),
+});
+
+// Fetch new messages from server
+const fetchResult = await gossipSdk.messages.fetch();
+
+// Resend failed messages
+await gossipSdk.messages.resend(failedMessagesMap);
+
+// Find message by seeker
+const msg = await gossipSdk.messages.findBySeeker(seeker, ownerUserId);
+```
+
+### Discussions
+
+```typescript
+// Start a new discussion
+const { discussionId } = await gossipSdk.discussions.start(contact, 'Hello!');
+
+// Accept an incoming discussion request
+await gossipSdk.discussions.accept(discussion);
+
+// Renew a broken session
+await gossipSdk.discussions.renew(contactUserId);
+
+// Check if discussion can send messages
+const canSend = await gossipSdk.discussions.isStable(
+  ownerUserId,
+  contactUserId
+);
+
+// List all discussions
+const discussions = await gossipSdk.discussions.list(ownerUserId);
+
+// Get a specific discussion
+const discussion = await gossipSdk.discussions.get(ownerUserId, contactUserId);
+```
+
+### Contacts
+
+```typescript
+// List all contacts
+const contacts = await gossipSdk.contacts.list(ownerUserId);
 
 // Get a specific contact
-const contact = await getContact(ownerUserId, contactUserId);
+const contact = await gossipSdk.contacts.get(ownerUserId, contactUserId);
 
 // Add a new contact
-const result = await addContact(
+const result = await gossipSdk.contacts.add(
   ownerUserId,
   contactUserId,
   'Alice',
@@ -171,82 +197,231 @@ const result = await addContact(
 );
 
 // Update contact name
-await updateContactName(ownerUserId, contactUserId, 'Alice Smith');
+await gossipSdk.contacts.updateName(ownerUserId, contactUserId, 'Alice Smith');
 
 // Delete contact and all associated data
-await deleteContact(ownerUserId, contactUserId);
+await gossipSdk.contacts.delete(ownerUserId, contactUserId);
 ```
 
-### Discussion Management
+### Announcements
 
 ```typescript
-import {
-  getDiscussions,
-  getDiscussion,
-  initializeDiscussion,
-  acceptDiscussionRequest,
-  renewDiscussion,
-  updateDiscussionName,
-  isDiscussionStableState,
-} from 'gossip-sdk';
+// Fetch and process announcements from server
+const result = await gossipSdk.announcements.fetch();
 
-// Get all discussions
-const discussions = await getDiscussions(ownerUserId);
-
-// Initialize a new discussion
-const result = await initializeDiscussion(contact, session, 'Initial message');
-
-// Accept incoming discussion request
-await acceptDiscussionRequest(discussion, session);
-
-// Check if discussion can send messages
-const canSend = await isDiscussionStableState(ownerUserId, contactUserId);
-
-// Renew a broken discussion
-await renewDiscussion(contactUserId, session);
+// Resend failed announcements
+await gossipSdk.announcements.resend(failedDiscussions);
 ```
 
-### Message Operations
+### Auth (Available before session)
 
 ```typescript
-import {
-  getMessages,
-  getMessage,
-  sendMessage,
-  fetchMessages,
-  resendMessages,
-} from 'gossip-sdk';
+// Create a new account
+const result = await gossipSdk.auth.createAccount(
+  username,
+  mnemonic,
+  encryptionKey
+);
 
-// Get messages for a discussion
-const messages = await getMessages(ownerUserId, contactUserId);
-
-// Send a message
-const result = await sendMessage(message, session);
-
-// Fetch new messages from server
-const fetchResult = await fetchMessages(session);
-
-// Resend failed messages
-await resendMessages(failedMessagesMap, session);
+// Restore account from mnemonic
+const result = await gossipSdk.auth.restoreAccount(
+  username,
+  mnemonic,
+  encryptionKey
+);
 ```
 
-## API Reference
-
-### Result Types
-
-Most SDK functions return result objects with a consistent structure:
+### Refresh
 
 ```typescript
-interface Result<T> {
-  success: boolean;
-  error?: string; // Present when success is false
-  data?: T; // Present when success is true
-}
+// Handle session refresh for active discussions
+await gossipSdk.refresh.handleSessionRefresh(activeDiscussions);
 ```
 
-### Types
+## Events
 
-The SDK exports shared types (database entities and enums):
+Subscribe to SDK events for real-time updates:
+
+```typescript
+// Message events
+gossipSdk.on('message', message => {
+  // New message received
+});
+
+gossipSdk.on('messageSent', message => {
+  // Message sent successfully
+});
+
+gossipSdk.on('messageFailed', (message, error) => {
+  // Message failed to send
+});
+
+// Discussion events
+gossipSdk.on('discussionRequest', (discussion, contact) => {
+  // Incoming discussion request
+});
+
+gossipSdk.on('discussionStatusChanged', discussion => {
+  // Discussion status changed
+});
+
+// Session events
+gossipSdk.on('sessionBroken', discussion => {
+  // Session broken (deprecated - use auto-renewal)
+});
+
+gossipSdk.on('sessionRenewed', discussion => {
+  // Session successfully renewed
+});
+
+// Error handling
+gossipSdk.on('error', (error, context) => {
+  console.error(`Error in ${context}:`, error);
+});
+
+// Unsubscribe
+gossipSdk.off('message', handler);
+```
+
+## Polling
+
+The SDK can automatically poll for messages, announcements, and session refresh:
+
+```typescript
+// Enable via config
+await gossipSdk.init({
+  db,
+  config: {
+    polling: {
+      enabled: true,
+      messagesIntervalMs: 5000,
+      announcementsIntervalMs: 10000,
+      sessionRefreshIntervalMs: 30000,
+    },
+  },
+});
+
+// Or control manually
+gossipSdk.polling.start();
+gossipSdk.polling.stop();
+console.log(gossipSdk.polling.isRunning);
+```
+
+## Session Info
+
+Access session information after `openSession()`:
+
+```typescript
+// User ID (encoded string)
+const userId = gossipSdk.userId;
+
+// User ID (raw bytes)
+const userIdBytes = gossipSdk.userIdBytes;
+
+// Public keys
+const publicKeys = gossipSdk.publicKeys;
+
+// Check session state
+console.log(gossipSdk.isInitialized); // true after init()
+console.log(gossipSdk.isSessionOpen); // true after openSession()
+
+// Get encrypted session for manual persistence
+const blob = gossipSdk.getEncryptedSession(encryptionKey);
+```
+
+## Configuration
+
+Full configuration options with defaults:
+
+```typescript
+await gossipSdk.init({
+  db,
+  config: {
+    // Network settings
+    protocol: {
+      baseUrl: 'https://api.usegossip.net', // API endpoint
+      timeout: 10000, // Request timeout (ms)
+      retryAttempts: 3, // Retry count
+    },
+
+    // Polling settings
+    polling: {
+      enabled: false, // Auto-start polling
+      messagesIntervalMs: 5000, // Message fetch interval
+      announcementsIntervalMs: 10000, // Announcement fetch interval
+      sessionRefreshIntervalMs: 30000, // Session refresh interval
+    },
+
+    // Message settings
+    messages: {
+      fetchDelayMs: 100, // Delay between fetch iterations
+      maxFetchIterations: 30, // Max iterations per fetch call
+      deduplicationWindowMs: 30000, // Duplicate detection window
+    },
+
+    // Announcement settings
+    announcements: {
+      fetchLimit: 500, // Max announcements per request
+      brokenThresholdMs: 3600000, // Time before marking broken (1 hour)
+    },
+  },
+});
+```
+
+## Utilities
+
+```typescript
+const utils = gossipSdk.utils;
+
+// Validate user ID format
+const result = utils.validateUserId(userId);
+if (!result.valid) console.error(result.error);
+
+// Validate username format
+const result = utils.validateUsername(username);
+
+// Encode/decode user IDs
+const encoded = utils.encodeUserId(rawBytes);
+const decoded = utils.decodeUserId(encodedString);
+```
+
+## Session Persistence
+
+For restoring sessions across app restarts:
+
+```typescript
+// Option 1: Provide persistence config in openSession
+await gossipSdk.openSession({
+  mnemonic,
+  persistEncryptionKey: key,
+  onPersist: async (blob, key) => {
+    // Save blob to your storage
+    await db.userProfile.update(userId, { session: blob });
+  },
+});
+
+// Option 2: Configure persistence after account creation
+await gossipSdk.openSession({ mnemonic });
+// ... create account, get encryption key ...
+gossipSdk.configurePersistence(encryptionKey, async (blob, key) => {
+  await db.userProfile.update(userId, { session: blob });
+});
+```
+
+## Auto-Renewal Behavior
+
+The SDK automatically handles session recovery:
+
+1. **Session Lost** - When a session is killed/lost, messages are queued as `WAITING_SESSION`
+2. **Auto-Renewal** - SDK emits `onSessionRenewalNeeded` and attempts renewal
+3. **Auto-Accept** - When peer sends announcement, SDK auto-accepts for existing contacts
+4. **Message Processing** - After session becomes active, queued messages are sent automatically
+
+See [STATUS-REFERENCE.md](./docs/STATUS-REFERENCE.md) for detailed status documentation.
+
+## Types
+
+Import types from the SDK:
 
 ```typescript
 import type {
@@ -255,6 +430,7 @@ import type {
   Discussion,
   Message,
   DiscussionStatus,
+  DiscussionDirection,
   MessageStatus,
   MessageDirection,
   MessageType,
@@ -263,108 +439,45 @@ import type {
 
 ## Testing
 
-Run SDK tests:
-
 ```bash
 npm test           # Watch mode
 npm run test:run   # Single run
 npm run test:coverage  # With coverage report
 ```
 
-WASM bindings are generated into `gossip-sdk/src/assets/generated/wasm` by the root `wasm:build` script.
-
 Tests use `fake-indexeddb` to simulate IndexedDB in Node.js environment.
 
 ## Architecture
 
-The SDK provides platform-agnostic wrappers around shared Gossip logic, with:
-
-1. **Stable Interface** - Functions with consistent signatures across versions
-2. **Error Handling** - All async operations return result objects with error info
-3. **Type Safety** - Full TypeScript support with exported types
-4. **Runtime Adapters** - Inject account/wallet stores, DB, and preferences
-
-### Path Aliases
-
-The SDK uses path aliases for local imports:
-
-- `@/*` resolves to `gossip-sdk/src/*`
-- `@/assets/generated/wasm/*` resolves within the SDK output
-
-## Development
-
-### Project Structure
-
 ```
 gossip-sdk/
 ├── src/
-│   ├── index.ts          # Main exports
-│   ├── account.ts        # Account management wrapper
-│   ├── auth.ts           # Authentication wrapper
-│   ├── contacts.ts       # Contact operations wrapper
-│   ├── discussions.ts    # Discussion management wrapper
-│   ├── messages.ts       # Message operations wrapper
-│   ├── announcements.ts  # Announcement handling wrapper
-│   ├── wallet.ts         # Wallet operations wrapper
-│   ├── types.ts          # Type re-exports
-│   ├── utils.ts          # Utility functions
+│   ├── gossipSdk.ts      # Main singleton SDK class
 │   ├── db.ts             # Database (Dexie) implementation
+│   ├── contacts.ts       # Contact operations
 │   ├── api/
-│   │   └── messageProtocol/  # REST and mock protocol implementations
+│   │   └── messageProtocol/  # REST protocol implementation
 │   ├── config/
-│   │   └── protocol.ts   # API configuration with runtime override
-│   ├── crypto/           # Encryption and BIP39 utilities
-│   ├── services/         # Core service implementations
+│   │   ├── protocol.ts   # API configuration
+│   │   └── sdk.ts        # SDK configuration
+│   ├── core/
+│   │   ├── SdkEventEmitter.ts  # Event system
+│   │   └── SdkPolling.ts       # Polling manager
+│   ├── services/
 │   │   ├── auth.ts       # Auth service
 │   │   ├── message.ts    # Message service
 │   │   ├── discussion.ts # Discussion service
-│   │   └── announcement.ts # Announcement service
+│   │   ├── announcement.ts # Announcement service
+│   │   └── refresh.ts    # Session refresh service
+│   ├── types/
+│   │   └── events.ts     # Event type definitions
 │   ├── utils/            # Utility modules
-│   │   ├── userId.ts     # User ID encoding/decoding
-│   │   ├── base64.ts     # Base64 encoding
-│   │   ├── logs.ts       # Logging utility
-│   │   └── ...           # Other utilities
 │   └── wasm/             # WASM module wrappers
-│       ├── loader.ts     # WASM initialization
-│       ├── session.ts    # Session management
-│       └── ...           # Other WASM utilities
-├── test/
-│   ├── setup.ts          # Test environment setup
-│   ├── helpers.ts        # Test utilities
-│   └── *.test.ts         # Test files
-├── package.json
-├── tsconfig.json
-├── vitest.config.ts
+├── test/                 # Test files
+├── docs/
+│   └── STATUS-REFERENCE.md  # Status documentation
 └── README.md
 ```
-
-### Adding New Functions
-
-1. Identify the source function in `src/` (stores, services, utils)
-2. Create a wrapper function with proper error handling
-3. Add JSDoc documentation with examples
-4. Export from module file and `index.ts`
-5. Add corresponding tests
-
-## Known Limitations & TODOs
-
-### Store Coupling in deleteContact
-
-The `deleteContact` function (`src/utils/contacts.ts`) still reads the current session from the configured account store adapter. This keeps a dependency on application-provided state.
-
-**Impact:** `deleteContact` requires `configureSdk({ accountStore })` to be called in non-React environments.
-
-**Future Solution:** Pass the session explicitly as a parameter to `deleteContact`, making it fully independent of store adapters.
-
-### Workspace Setup for Imports
-
-Host apps currently import from the SDK using relative paths like `../../gossip-sdk/src`. This works but is verbose.
-
-**Future Solution:** Set up npm workspaces or TypeScript project references for cleaner imports like `import { authService } from 'gossip-sdk'`.
-
-### Announcement Service Notifications
-
-The SDK's `AnnouncementService` uses an injectable `NotificationHandler` for platform-agnostic notification support. Host apps should inject their notification handler via `configureSdk` during startup.
 
 ## License
 
