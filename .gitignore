@@ -2,6 +2,9 @@
 target/
 wasm/target
 
+# coverage
+coverage/
+
 # Logs
 logs
 *.log

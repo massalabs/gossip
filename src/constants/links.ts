@@ -11,3 +11,5 @@ export const LAST_APK_GITHUB_URL =
   'https://github.com/massa-network/gossip-android/releases/download/v1.0.0/gossip-android-1.0.0.apk';
 
 export const DEWEB_DEV_INVITE_DOMAIN = 'https://dev-gossip.build.half-red.net';
+
+export const LANDING_PAGE_URL = 'https://usegossip.massa.network/';

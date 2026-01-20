@@ -1,9 +1,11 @@
 import { create } from 'zustand';
 import { Subscription } from 'dexie';
 import { liveQuery } from 'dexie';
-import { Discussion, Contact, db } from '../db';
+import { Discussion, Contact, db, DiscussionStatus } from '../db';
 import { createSelectors } from './utils/createSelectors';
 import { useAccountStore } from './accountStore';
+
+export type DiscussionFilter = 'all' | 'unread' | 'pending';
 
 interface DiscussionStoreState {
   discussions: Discussion[];
@@ -13,13 +15,15 @@ interface DiscussionStoreState {
   subscriptionDiscussions: Subscription | null;
   subscriptionContacts: Subscription | null;
   isInitializing: boolean;
+  filter: DiscussionFilter;
 
   init: () => void;
   getDiscussionsForContact: (contactUserId: string) => Discussion[];
-
+  getDiscussionsByStatus: (status: DiscussionStatus[]) => Discussion[];
   cleanup: () => void;
   setModalOpen: (discussionId: number, isOpen: boolean) => void;
   isModalOpen: (discussionId: number) => boolean;
+  setFilter: (filter: DiscussionFilter) => void;
 }
 
 const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
@@ -30,6 +34,7 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
   subscriptionDiscussions: null,
   subscriptionContacts: null,
   isInitializing: false,
+  filter: 'all',
 
   init: () => {
     const ownerUserId = useAccountStore.getState().userProfile?.userId;
@@ -50,17 +55,43 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
 
     const subscriptionDiscussions = discussionsQuery.subscribe({
       next: async discussionsList => {
-        // Sort discussions as in original
-        const sortedDiscussions = discussionsList.sort((a, b) => {
-          if (a.lastMessageTimestamp && b.lastMessageTimestamp) {
-            return (
-              b.lastMessageTimestamp.getTime() -
-              a.lastMessageTimestamp.getTime()
-            );
+        // Sort discussions: new requests (PENDING) first, then active discussions
+        // Within each group, sort by most recent activity
+        const getActivityTime = (discussion: Discussion): number => {
+          // New messages always bubble to top within their group
+          if (discussion.lastMessageTimestamp) {
+            return discussion.lastMessageTimestamp.getTime();
           }
-          if (a.lastMessageTimestamp) return -1;
-          if (b.lastMessageTimestamp) return 1;
-          return b.createdAt.getTime() - a.createdAt.getTime();
+
+          // For pending requests, use updatedAt
+          if (
+            discussion.status === DiscussionStatus.PENDING &&
+            discussion.updatedAt
+          ) {
+            return discussion.updatedAt.getTime();
+          }
+
+          // Fallback to creation time for all other cases
+          return discussion.createdAt.getTime();
+        };
+
+        const getStatusPriority = (status: DiscussionStatus): number => {
+          // PENDING (new requests) = highest priority (0)
+          if (status === DiscussionStatus.PENDING) return 0;
+          // ACTIVE (ongoing discussions) = medium priority (1)
+          if (status === DiscussionStatus.ACTIVE) return 1;
+          // All other statuses = lowest priority (2)
+          return 2;
+        };
+
+        const sortedDiscussions = discussionsList.sort((a, b) => {
+          // First, separate by status: PENDING first, then ACTIVE, then others
+          const statusDiff =
+            getStatusPriority(a.status) - getStatusPriority(b.status);
+          if (statusDiff !== 0) return statusDiff;
+
+          // Within the same status group, sort by activity time
+          return getActivityTime(b) - getActivityTime(a);
         });
 
         // Derive lastMessages
@@ -116,6 +147,14 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
     );
   },
 
+  getDiscussionsByStatus: (status: DiscussionStatus[]) => {
+    const ownerUserId = useAccountStore.getState().userProfile?.userId;
+    if (!ownerUserId) return [];
+    return get().discussions.filter(discussion =>
+      status.includes(discussion.status)
+    );
+  },
+
   cleanup: () => {
     const subDisc = get().subscriptionDiscussions;
     if (subDisc) subDisc.unsubscribe();
@@ -147,6 +186,10 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
 
   isModalOpen: (discussionId: number) => {
     return get().openNameModals.has(discussionId);
+  },
+
+  setFilter: (filter: DiscussionFilter) => {
+    set({ filter });
   },
 }));
 

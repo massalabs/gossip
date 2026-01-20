@@ -8,15 +8,6 @@ on:
         required: false
         default: true
         type: boolean
-      android_build_type:
-        description: 'Android Build Type'
-        required: false
-        default: 'both'
-        type: choice
-        options:
-          - both
-          - release
-          - debug
       upload_to_play_store:
         description: 'Upload Android to Google Play'
         required: false
@@ -42,16 +33,9 @@ on:
         default: true
         type: boolean
 
-  push:
-    branches:
-      - main
-    paths:
-      - 'src/**'
-      - 'android/**'
-      - 'ios/**'
-      - 'capacitor.config.ts'
-      - 'package.json'
-      - '.github/workflows/build-and-deploy.yml'
+  release:
+    types:
+      - created
 
 jobs:
   build-web:
@@ -68,6 +52,21 @@ jobs:
         with:
           node-version: '24'
           cache: 'npm'
+          cache-dependency-path: 'package-lock.json'
+
+      - name: Check release tag matches package.json version
+        if: github.event_name == 'release'
+        run: |
+          TAG="${{ github.event.release.tag_name }}"
+          PKG_VERSION=$(node -p "require('./package.json').version")
+
+          echo "🔖 Releasing version $TAG"
+
+          if [ "$TAG" != "$PKG_VERSION" ]; then
+            echo "❌ Tag '$TAG' does not match expected '$PKG_VERSION' from package.json"
+            exit 1
+          fi
+          echo "✅ Tag matches package.json version"
 
       - name: Install dependencies
         run: npm ci
@@ -88,7 +87,7 @@ jobs:
   # Job 2a : Build Android AAB
   build-android:
     needs: build-web
-    if: (github.event_name == 'push') || (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_android == 'true')
+    if: (github.event_name == 'release') || ( github.event.inputs.deploy_android == 'true')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -105,6 +104,7 @@ jobs:
         with:
           node-version: '24'
           cache: 'npm'
+          cache-dependency-path: 'package-lock.json'
 
       - name: Install dependencies (for Capacitor CLI)
         run: npm ci
@@ -128,31 +128,16 @@ jobs:
 
       - name: Display build info
         run: |
-          # Determine build type
-          if [ "${{ github.event_name }}" == "push" ]; then
-            BUILD_TYPE="release"
-            echo "🚀 Triggered by push to ${{ github.ref_name }}"
-            echo "📦 Building: AAB Release (for Play Store)"
-          else
-            BUILD_TYPE="${{ github.event.inputs.android_build_type }}"
-            echo "🎯 Manual build triggered"
-            if [ "$BUILD_TYPE" == "debug" ]; then
-              echo "📦 Building: APK Debug (with sourcemaps)"
-            elif [ "$BUILD_TYPE" == "both" ]; then
-              echo "📦 Building: Both APK Debug (with sourcemaps) and AAB Release (for Play Store)"
-            else
-              echo "📦 Building: AAB Release (for Play Store)"
-            fi
-          fi
+          echo "📦 Building Android artifacts:"
+          echo "  • APK Debug (with sourcemaps)"
+          echo "  • AAB Release (for Play Store)"
 
       - name: Create keystore from secrets (Release only)
-        if: (github.event_name == 'push') || (github.event_name == 'workflow_dispatch' && (github.event.inputs.android_build_type == 'release' || github.event.inputs.android_build_type == 'both'))
         run: |
           echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > ${{ github.workspace }}/android/app/keystore.jks
           echo "ANDROID_KEYSTORE_FILE=${{ github.workspace }}/android/app/keystore.jks" >> $GITHUB_ENV
 
       - name: Build Android Release (AAB)
-        if: (github.event_name == 'push') || (github.event_name == 'workflow_dispatch' && (github.event.inputs.android_build_type == 'release' || github.event.inputs.android_build_type == 'both'))
         env:
           ANDROID_KEYSTORE_FILE: ${{ env.ANDROID_KEYSTORE_FILE }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -164,7 +149,6 @@ jobs:
           bundle exec fastlane build
 
       - name: Build Android Debug (APK)
-        if: github.event_name == 'workflow_dispatch' && (github.event.inputs.android_build_type == 'debug' || github.event.inputs.android_build_type == 'both')
         working-directory: android
         run: |
           echo "📦 Building Android APK (Debug with sourcemaps)..."
@@ -173,72 +157,66 @@ jobs:
       - name: Build status
         if: always()
         run: |
-          AAB_EXISTS=false
-          APK_EXISTS=false
-
           # Check for Release AAB
           if [ -f "android/app/build/outputs/bundle/release/app-release.aab" ]; then
-            AAB_EXISTS=true
             echo "✅ Android AAB (Release) built successfully!"
             echo "📦 File: android/app/build/outputs/bundle/release/app-release.aab"
             ls -lh android/app/build/outputs/bundle/release/app-release.aab
+          else
+            echo "❌ Expected Android AAB (Release) not found at android/app/build/outputs/bundle/release/app-release.aab"
+            exit 1
           fi
 
           # Check for Debug APK
           if [ -f "android/app/build/outputs/apk/debug/app-debug.apk" ]; then
-            APK_EXISTS=true
             echo "✅ Android APK (Debug) built successfully!"
             echo "📦 File: android/app/build/outputs/apk/debug/app-debug.apk"
             ls -lh android/app/build/outputs/apk/debug/app-debug.apk
             echo "🔍 Sourcemaps included in web build"
-          fi
-
-          # Determine expected outputs based on build type
-          if [ "${{ github.event_name }}" == "push" ]; then
-            EXPECTED_AAB=true
-            EXPECTED_APK=false
-          elif [ "${{ github.event.inputs.android_build_type }}" == "both" ]; then
-            EXPECTED_AAB=true
-            EXPECTED_APK=true
-          elif [ "${{ github.event.inputs.android_build_type }}" == "debug" ]; then
-            EXPECTED_AAB=false
-            EXPECTED_APK=true
           else
-            EXPECTED_AAB=true
-            EXPECTED_APK=false
-          fi
-
-          # Verify expected outputs exist
-          if [ "$EXPECTED_AAB" == "true" ] && [ "$AAB_EXISTS" == "false" ]; then
-            echo "❌ Expected AAB not found"
+            echo "❌ Expected Android APK (Debug) not found at android/app/build/outputs/apk/debug/app-debug.apk"
             exit 1
           fi
 
-          if [ "$EXPECTED_APK" == "true" ] && [ "$APK_EXISTS" == "false" ]; then
-            echo "❌ Expected APK not found"
-            exit 1
+      - name: Prepare versioned Android artifacts
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          SUFFIX=""
+          if [ "${{ github.event_name }}" != "release" ]; then
+            SUFFIX="-dev"
           fi
 
-          if [ "$AAB_EXISTS" == "false" ] && [ "$APK_EXISTS" == "false" ]; then
-            echo "❌ No build output found"
-            exit 1
+          echo "📦 Using version ${VERSION}${SUFFIX} for artifact names"
+
+          # Copy APK with versioned name
+          if [ -f "android/app/build/outputs/apk/debug/app-debug.apk" ]; then
+            cp android/app/build/outputs/apk/debug/app-debug.apk \
+               android/app/build/outputs/apk/debug/gossip-android-apk-${VERSION}${SUFFIX}.apk
+            echo "✅ Created android/app/build/outputs/apk/debug/gossip-android-apk-${VERSION}${SUFFIX}.apk"
+          fi
+
+          # Copy AAB with versioned name
+          if [ -f "android/app/build/outputs/bundle/release/app-release.aab" ]; then
+            cp android/app/build/outputs/bundle/release/app-release.aab \
+               android/app/build/outputs/bundle/release/gossip-android-aab-${VERSION}${SUFFIX}.aab
+            echo "✅ Created android/app/build/outputs/bundle/release/gossip-android-aab-${VERSION}${SUFFIX}.aab"
           fi
 
       - name: Upload AAB artifact (Release)
-        if: (github.event_name == 'push') || (github.event_name == 'workflow_dispatch' && (github.event.inputs.android_build_type == 'release' || github.event.inputs.android_build_type == 'both'))
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: android-aab-release-${{ github.run_number }}
-          path: android/app/build/outputs/bundle/release/*.aab
+          name: gossip-android-aab
+          path: android/app/build/outputs/bundle/release/gossip-android-aab-*.aab
           if-no-files-found: error
           retention-days: 30
 
       - name: Upload APK artifact (Debug)
-        if: github.event_name == 'workflow_dispatch' && (github.event.inputs.android_build_type == 'debug' || github.event.inputs.android_build_type == 'both')
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: android-apk-debug-${{ github.run_number }}
-          path: android/app/build/outputs/apk/debug/*.apk
+          name: gossip-android-apk
+          path: android/app/build/outputs/apk/debug/gossip-android-apk-*.apk
           if-no-files-found: error
           retention-days: 14
 
@@ -249,11 +227,7 @@ jobs:
   # Job 2b : Upload Android to Google Play Store (Release only)
   upload-android:
     needs: build-android
-    if: |
-      (github.event_name == 'push') || 
-      (github.event_name == 'workflow_dispatch' && 
-       github.event.inputs.upload_to_play_store == 'true' && 
-       (github.event.inputs.android_build_type == 'release' || github.event.inputs.android_build_type == 'both'))
+    if: (github.event_name == 'release') || (github.event.inputs.upload_to_play_store == 'true')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -269,16 +243,27 @@ jobs:
       - name: Download AAB artifact
         uses: actions/download-artifact@v4
         with:
-          name: android-aab-release-${{ github.run_number }}
+          name: gossip-android-aab
           path: android/app/build/outputs/bundle/release/
 
-      - name: Display upload info
+      - name: Normalize AAB filename for Fastlane
         run: |
-          if [ "${{ github.event_name }}" == "push" ]; then
-            echo "📤 Uploading to Google Play Store: Internal Testing"
-          else
-            echo "📤 Uploading to Google Play Store: ${{ github.event.inputs.play_store_track }} track"
+          AAB_PATH=$(ls android/app/build/outputs/bundle/release/*.aab 2>/dev/null | head -n 1)
+          if [ -z "$AAB_PATH" ]; then
+            echo "❌ No AAB file found after artifact download"
+            ls -R
+            exit 1
           fi
+
+          echo "📦 Using AAB file: $AAB_PATH"
+          cp "$AAB_PATH" android/app/build/outputs/bundle/release/app-release.aab
+          echo "✅ Copied to android/app/build/outputs/bundle/release/app-release.aab for Fastlane"
+
+      - name: Display upload info
+        env:
+          PLAY_STORE_TRACK: ${{ github.event.inputs.play_store_track || 'internal' }}
+        run: |
+          echo "📤 Uploading to Google Play Store: $PLAY_STORE_TRACK track"
           echo "📦 AAB file:"
           ls -lh android/app/build/outputs/bundle/release/
 
@@ -286,15 +271,10 @@ jobs:
         id: play_store_upload
         env:
           PLAY_STORE_JSON_KEY: ${{ secrets.PLAY_STORE_JSON_KEY }}
+          PLAY_STORE_TRACK: ${{ github.event.inputs.play_store_track || 'internal' }}
         working-directory: android
         run: |
-          # Determine track
-          if [ "${{ github.event_name }}" == "push" ]; then
-            TRACK="internal"
-          else
-            TRACK="${{ github.event.inputs.play_store_track }}"
-          fi
-
+          TRACK="$PLAY_STORE_TRACK"
           echo "📤 Uploading to $TRACK track..."
           echo "🔍 Debug: TRACK variable is set to: '$TRACK'"
 
@@ -342,9 +322,17 @@ jobs:
             echo "💡 AAB is still available as artifact from build-android job"
           fi
 
+      - name: Attach Android assets to GitHub Release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            android/app/build/outputs/bundle/release/gossip-android-aab-*.aab
+            android/app/build/outputs/apk/debug/gossip-android-apk-*.apk
+
   build-ios:
     needs: build-web
-    if: (github.event_name == 'push') || (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_ios == 'true')
+    if: (github.event_name == 'release') || ( github.event.inputs.deploy_ios == 'true')
     runs-on: macos-latest
     steps:
       - name: Checkout repository
@@ -361,6 +349,7 @@ jobs:
         with:
           node-version: '24'
           cache: 'npm'
+          cache-dependency-path: 'package-lock.json'
 
       - name: Install dependencies (for Capacitor CLI)
         run: npm ci
@@ -416,21 +405,17 @@ jobs:
           bundle exec fastlane lanes
 
       - name: Display deployment info
+        env:
+          UPLOAD_TESTFLIGHT: ${{ github.event.inputs.ios_upload_testflight || 'true' }}
         run: |
-          if [ "${{ github.event_name }}" == "push" ]; then
-            echo "🚀 Automatic iOS deployment triggered by push to ${{ github.ref_name }}"
+          if [ "$UPLOAD_TESTFLIGHT" == "true" ]; then
             echo "📱 Target: TestFlight"
           else
-            echo "🎯 Manual iOS deployment triggered"
-            if [ "${{ github.event.inputs.ios_upload_testflight }}" == "true" ]; then
-              echo "📱 Target: TestFlight"
-            else
-              echo "📱 Build only (no upload)"
-            fi
+            echo "📱 Build only (no upload)"
           fi
 
       - name: Build and Upload to TestFlight
-        if: (github.event_name == 'push') || (github.event_name == 'workflow_dispatch' && github.event.inputs.ios_upload_testflight == 'true')
+        if: (github.event_name == 'release') || (github.event.inputs.ios_upload_testflight == 'true')
         env:
           APP_STORE_CONNECT_API_KEY_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_KEY_ID }}
           APP_STORE_CONNECT_API_KEY_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ISSUER_ID }}
@@ -443,7 +428,7 @@ jobs:
         run: bundle exec fastlane beta
 
       - name: Build Only (No Upload)
-        if: github.event_name == 'workflow_dispatch' && github.event.inputs.ios_upload_testflight != 'true'
+        if: github.event.inputs.ios_upload_testflight == 'false'
         env:
           APP_STORE_CONNECT_API_KEY_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_KEY_ID }}
           APP_STORE_CONNECT_API_KEY_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ISSUER_ID }}
@@ -454,10 +439,40 @@ jobs:
         working-directory: ios/App
         run: bundle exec fastlane build
 
+      - name: Prepare versioned iOS IPA
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          SUFFIX=""
+          if [ "${{ github.event_name }}" != "release" ]; then
+            SUFFIX="-dev"
+          fi
+
+          echo "📦 Using version ${VERSION}${SUFFIX} for iOS IPA name"
+
+          IPA_PATH=$(ls ios/App/fastlane/build/*.ipa 2>/dev/null | head -n 1)
+          if [ -z "$IPA_PATH" ]; then
+            echo "⚠️ No IPA found in ios/App/fastlane/build"
+            if [ "${{ github.event_name }}" = "release" ]; then
+              echo "❌ Failing workflow because no IPA was produced for release event."
+              exit 1
+            fi
+            exit 0
+          fi
+
+          DEST="ios/App/fastlane/build/gossip-ios-ipa-${VERSION}${SUFFIX}.ipa"
+          cp "$IPA_PATH" "$DEST"
+          echo "✅ Created $DEST"
+
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ios-app-${{ github.run_number }}
-          path: ios/App/fastlane/build/*.ipa
+          name: gossip-ios-ipa
+          path: ios/App/fastlane/build/gossip-ios-ipa-*.ipa
           if-no-files-found: warn
           retention-days: 7
+
+      - name: Attach iOS IPA to GitHub Release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ios/App/fastlane/build/gossip-ios-ipa-*.ipa

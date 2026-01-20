@@ -1,9 +1,8 @@
 import React, { useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
-import HeaderWrapper from '../../components/ui/HeaderWrapper';
+import PageLayout from '../../components/ui/PageLayout';
 import PageHeader from '../../components/ui/PageHeader';
-import ScrollableContent from '../../components/ui/ScrollableContent';
 import Button from '../../components/ui/Button';
 import Toggle from '../../components/ui/Toggle';
 import BackgroundSyncSettings from '../../components/settings/BackgroundSyncSettings';
@@ -45,92 +44,90 @@ const NotificationsSettings: React.FC = () => {
 
   if (!notificationService.isSupported()) {
     return (
-      <div className="h-full flex flex-col bg-background app-max-w mx-auto">
-        <HeaderWrapper>
-          <PageHeader title="Notifications" onBack={handleBack} />
-        </HeaderWrapper>
-        <ScrollableContent className="flex-1 overflow-y-auto px-6 py-6">
-          <div className="bg-card rounded-xl border border-border p-4">
-            <p className="text-sm text-muted-foreground">
-              Notifications are not supported on this device.
-            </p>
-          </div>
-        </ScrollableContent>
-      </div>
+      <PageLayout
+        header={<PageHeader title="Notifications" onBack={handleBack} />}
+        className="app-max-w mx-auto"
+        contentClassName="px-6 py-6"
+      >
+        <div className="bg-card rounded-xl border border-border p-4">
+          <p className="text-sm text-muted-foreground">
+            Notifications are not supported on this device.
+          </p>
+        </div>
+      </PageLayout>
     );
   }
 
   return (
-    <div className="h-full flex flex-col bg-background app-max-w mx-auto">
-      <HeaderWrapper>
-        <PageHeader title="Notifications" onBack={handleBack} />
-      </HeaderWrapper>
-      <ScrollableContent className="flex-1 overflow-y-auto px-6 py-6">
-        <div className="bg-card border border-border rounded-xl overflow-hidden">
-          <div className="h-[54px] flex items-center px-4 justify-start w-full border-b border-border">
-            <Bell className="text-foreground mr-4" />
-            <span className="text-base font-medium text-foreground flex-1 text-left">
-              Notifications
-            </span>
-            {notificationPrefs.permission.granted ? (
-              <Toggle
-                checked={notificationPrefs.enabled}
-                onChange={handleNotificationToggle}
-                ariaLabel="Toggle notifications"
-              />
-            ) : notificationPrefs.permission.denied ? (
-              <span className="text-xs text-muted-foreground">Blocked</span>
-            ) : (
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={handleRequestNotificationPermission}
-                disabled={isRequestingPermission}
-              >
-                {isRequestingPermission ? 'Requesting...' : 'Enable'}
-              </Button>
-            )}
-          </div>
-          {notificationPrefs.permission.denied && (
-            <div className="px-4 py-4">
-              <p className="text-xs text-muted-foreground">
-                Notifications are blocked. Please enable them in your browser
-                settings.
-              </p>
-            </div>
+    <PageLayout
+      header={<PageHeader title="Notifications" onBack={handleBack} />}
+      className="app-max-w mx-auto"
+      contentClassName="px-6 py-6"
+    >
+      <div className="bg-card border border-border rounded-xl overflow-hidden">
+        <div className="h-[54px] flex items-center px-4 justify-start w-full border-b border-border">
+          <Bell className="text-foreground mr-4" />
+          <span className="text-base font-medium text-foreground flex-1 text-left">
+            Notifications
+          </span>
+          {notificationPrefs.permission.granted ? (
+            <Toggle
+              checked={notificationPrefs.enabled}
+              onChange={handleNotificationToggle}
+              ariaLabel="Toggle notifications"
+            />
+          ) : notificationPrefs.permission.denied ? (
+            <span className="text-xs text-muted-foreground">Blocked</span>
+          ) : (
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={handleRequestNotificationPermission}
+              disabled={isRequestingPermission}
+            >
+              {isRequestingPermission ? 'Requesting...' : 'Enable'}
+            </Button>
           )}
-          {/* Test Notification - Only show when debug mode is enabled */}
-          {showDebugOption &&
-            notificationPrefs.permission.granted &&
-            notificationPrefs.enabled && (
-              <Button
-                variant="outline"
-                size="custom"
-                className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0 border-t border-border"
-                onClick={async () => {
-                  await notificationService.showDiscussionNotification(
-                    'Test User',
-                    'Test Message',
-                    'test-user-id'
-                  );
-                }}
-              >
-                <Bell className="mr-4" />
-                <span className="text-base font-medium flex-1 text-left">
-                  Test Notification
-                </span>
-              </Button>
-            )}
         </div>
-
-        {/* Background Sync Settings (Battery Optimization) - Only on native platforms */}
-        {Capacitor.isNativePlatform() && (
-          <div className="mt-6">
-            <BackgroundSyncSettings showDebugInfo={showDebugOption} />
+        {notificationPrefs.permission.denied && (
+          <div className="px-4 py-4">
+            <p className="text-xs text-muted-foreground">
+              Notifications are blocked. Please enable them in your browser
+              settings.
+            </p>
           </div>
         )}
-      </ScrollableContent>
-    </div>
+        {/* Test Notification - Only show when debug mode is enabled */}
+        {showDebugOption &&
+          notificationPrefs.permission.granted &&
+          notificationPrefs.enabled && (
+            <Button
+              variant="outline"
+              size="custom"
+              className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0 border-t border-border"
+              onClick={async () => {
+                await notificationService.showDiscussionNotification(
+                  'Test User',
+                  'Test Message',
+                  'test-user-id'
+                );
+              }}
+            >
+              <Bell className="mr-4" />
+              <span className="text-base font-medium flex-1 text-left">
+                Test Notification
+              </span>
+            </Button>
+          )}
+      </div>
+
+      {/* Background Sync Settings (Battery Optimization) - Only on native platforms */}
+      {Capacitor.isNativePlatform() && (
+        <div className="mt-6">
+          <BackgroundSyncSettings showDebugInfo={showDebugOption} />
+        </div>
+      )}
+    </PageLayout>
   );
 };
 

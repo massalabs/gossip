@@ -1,38 +1,23 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { Preferences } from '@capacitor/preferences';
+import { Capacitor } from '@capacitor/core';
+import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
+import { Share } from '@capacitor/share';
 import { toast } from 'react-hot-toast';
+import {
+  LOG_LIMIT_OPTIONS,
+  type LogLimit,
+  type LogLevel,
+  type ErrorLogData,
+  type LogData,
+  type LogEntry,
+} from './useDebugLogs.types';
 
 const LOG_STORAGE_KEY = 'debug-logs';
 const LOG_STORAGE_VERSION = 1;
 const LOG_STORAGE_KEY_PREFIX = `${LOG_STORAGE_KEY}-v${LOG_STORAGE_VERSION}`;
-export const LOG_LIMIT_OPTIONS = [20, 50, 100, 200, 500] as const;
-export type LogLimit = (typeof LOG_LIMIT_OPTIONS)[number];
 const DEFAULT_LOG_STORAGE_LIMIT: LogLimit = 200;
-export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
-
-export interface ErrorLogData {
-  name: string;
-  message: string;
-  stack?: string;
-  args: unknown[];
-}
-
-export type LogData =
-  | ErrorLogData
-  | string
-  | undefined
-  | Record<string, unknown>
-  | unknown[];
-
-export interface LogEntry {
-  id: number;
-  ts: string;
-  level: LogLevel;
-  msg: string;
-  data?: LogData;
-  repeatCount?: number; // Number of times this log was repeated consecutively
-}
 
 interface DebugStore {
   logs: LogEntry[];
@@ -211,13 +196,39 @@ export const useDebugLogs = create<DebugStore>()(
 
       share: async () => {
         const logs = get().logs;
-        const text = logs
-          .map(l => {
-            const baseLine = `${l.ts.split('T')[1].slice(0, 12)} [${l.level.toUpperCase()}] ${l.msg}`;
-            const repeatCount = l.repeatCount || 1;
-            return repeatCount > 1 ? `${baseLine} (×${repeatCount})` : baseLine;
-          })
-          .join('\n');
+
+        // Build detailed log content with data for better debugging
+        const lines = logs.map(l => {
+          const time = l.ts.split('T')[1].slice(0, 12);
+          const level = l.level.toUpperCase().padEnd(5);
+          const repeatSuffix =
+            (l.repeatCount || 1) > 1 ? ` (×${l.repeatCount})` : '';
+          let line = `${time} [${level}] ${l.msg}${repeatSuffix}`;
+
+          // Include data if present
+          if (l.data !== undefined) {
+            try {
+              const dataStr = JSON.stringify(l.data, null, 2);
+              // Indent data lines for readability
+              const indentedData = dataStr
+                .split('\n')
+                .map(dl => `    ${dl}`)
+                .join('\n');
+              line += `\n${indentedData}`;
+            } catch {
+              line += `\n    [Data could not be serialized]`;
+            }
+          }
+
+          return line;
+        });
+
+        const text = lines.join('\n\n');
+
+        // Generate filename with timestamp
+        const now = new Date();
+        const timestamp = now.toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        const filename = `gossip-debug-logs-${timestamp}.txt`;
 
         const copyToClipboard = async () => {
           if (!navigator.clipboard) {
@@ -227,11 +238,102 @@ export const useDebugLogs = create<DebugStore>()(
           toast.success('Logs copied to clipboard!');
         };
 
-        try {
-          if (navigator.share) {
-            await navigator.share({ title: 'Debug Logs', text });
+        // Share using native Capacitor plugins on mobile
+        const tryNativeShare = async (): Promise<boolean> => {
+          if (!Capacitor.isNativePlatform()) {
+            return false;
+          }
+
+          try {
+            // Write the file to the cache directory
+            // Note: We don't delete the file manually - it's in the Cache directory
+            // so the OS will clean it up automatically when space is needed
+            const result = await Filesystem.writeFile({
+              path: filename,
+              data: text,
+              directory: Directory.Cache,
+              encoding: Encoding.UTF8,
+            });
+
+            // Share the file using native share sheet
+            await Share.share({
+              title: 'Gossip Debug Logs',
+              files: [result.uri],
+              dialogTitle: 'Share Debug Logs',
+            });
+
+            return true;
+          } catch (error) {
+            // User cancelled - this is expected behavior
+            if (
+              error instanceof Error &&
+              (error.message.includes('cancel') ||
+                error.message.includes('User cancelled'))
+            ) {
+              return true; // Consider cancelled as "handled"
+            }
+            console.error('Native share failed:', error);
+            return false;
+          }
+        };
+
+        // Try to share as file using Web Share API (for web platforms)
+        const tryWebShareAsFile = async (): Promise<boolean> => {
+          try {
+            type ShareData = {
+              files?: File[];
+              title?: string;
+              text?: string;
+            };
+            const nav = navigator as Navigator & {
+              canShare?: (data?: ShareData) => boolean;
+              share?: (data: ShareData) => Promise<void>;
+            };
+
+            if (
+              typeof nav.canShare !== 'function' ||
+              typeof nav.share !== 'function'
+            ) {
+              return false;
+            }
+
+            const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+            const shareFile = new File([blob], filename, {
+              type: 'text/plain',
+            });
+
+            const canShareFiles = nav.canShare({ files: [shareFile] });
+            if (!canShareFiles) {
+              return false;
+            }
+
+            await nav.share({
+              files: [shareFile],
+              title: 'Gossip Debug Logs',
+            });
             toast.success('Logs shared!');
-          } else {
+            return true;
+          } catch (error) {
+            // User cancelled - this is expected behavior
+            if (
+              error instanceof Error &&
+              (error.name === 'AbortError' || error.message.includes('cancel'))
+            ) {
+              return true; // Consider cancelled as "handled"
+            }
+            return false;
+          }
+        };
+
+        try {
+          // Try native share first (for mobile)
+          let shared = await tryNativeShare();
+          if (!shared) {
+            // Try web share API
+            shared = await tryWebShareAsFile();
+          }
+          if (!shared) {
+            // Fallback to clipboard
             await copyToClipboard();
           }
         } catch {

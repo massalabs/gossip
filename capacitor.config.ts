@@ -1,4 +1,5 @@
 import type { CapacitorConfig } from '@capacitor/cli';
+import { KeyboardResize } from '@capacitor/keyboard';
 
 const config: CapacitorConfig = {
   appId: 'net.massa.gossip',
@@ -8,14 +9,14 @@ const config: CapacitorConfig = {
     scheme: 'Gossip',
     contentInset: 'automatic',
     backgroundColor: '#000000',
-    scrollEnabled: true,
+    scrollEnabled: false, // Disable webview scrolling - we handle scrolling in app content
     allowsLinkPreview: false,
   },
   plugins: {
-    SystemBars: {
-      insetsHandling: 'css',
+    // Keyboard plugin configuration
+    Keyboard: {
+      resize: KeyboardResize.Body,
     },
-
     LocalNotifications: {
       smallIcon: 'ic_notification',
       iconColor: '#488AFF',

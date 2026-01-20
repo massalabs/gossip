@@ -9,8 +9,7 @@ import {
   validateUsernameFormatAndAvailability,
 } from '../../utils/validation';
 import PageHeader from '../ui/PageHeader';
-import HeaderWrapper from '../ui/HeaderWrapper';
-import ScrollableContent from '../ui/ScrollableContent';
+import PageLayout from '../ui/PageLayout';
 import TabSwitcher from '../ui/TabSwitcher';
 import Button from '../ui/Button';
 import RoundedInput from '../ui/RoundedInput';
@@ -140,143 +139,135 @@ const AccountCreation: React.FC<AccountCreationProps> = ({
   };
 
   return (
-    <div className="h-full flex flex-col app-max-w mx-auto">
-      {/* Header */}
-      <HeaderWrapper>
-        <PageHeader title="Create Account" onBack={onBack} />
-      </HeaderWrapper>
-
-      <ScrollableContent className="flex-1 overflow-y-auto">
-        <div className="p-4">
-          {/* Authentication Method Toggle */}
-          {biometricAvailable && (
-            <div className="mb-6">
-              <p className="text-xl font-medium text-black dark:text-white mb-4">
-                Authentication Method
-              </p>
-              <TabSwitcher
-                options={[
-                  {
-                    value: 'biometrics',
-                    label: 'Biometrics',
-                    icon: <Shield className="w-4 h-4" />,
-                  },
-                  {
-                    value: 'password',
-                    label: 'Password',
-                    icon: <Lock className="w-4 h-4" />,
-                  },
-                ]}
-                value={usePassword ? 'password' : 'biometrics'}
-                onChange={value => setUsePassword(value === 'password')}
-              />
-            </div>
-          )}
-          {/* WebAuthn Support Check */}
-          {!biometricAvailable && (
-            <div className="bg-white dark:bg-gray-800 rounded-lg p-4 mb-4 border border-blue-200 dark:border-blue-800">
-              <p className="text-blue-600 dark:text-blue-400 text-sm">
-                Biometric authentication is not supported on this device. Using
-                password authentication instead.
-              </p>
-            </div>
-          )}
-          {/* Account Form */}
-          <div className="bg-background rounded-lg p-6 space-y-6">
-            <form onSubmit={handleSubmit} className="space-y-6">
-              <div>
-                <label className="block text-xl font-medium text-black dark:text-white mb-3">
-                  Username
-                </label>
-                <RoundedInput
-                  type="text"
-                  value={username}
-                  onChange={handleUsernameChange}
-                  placeholder="Enter username"
-                  error={!!usernameError}
-                  maxLength={20}
-                  disabled={isCreating}
-                />
-                {usernameError && (
-                  <p className="text-red-500 dark:text-red-400 text-xs mt-1">
-                    {usernameError}
-                  </p>
-                )}
-              </div>
-
-              {/* Password field - only show when using password authentication */}
-              {usePassword && (
-                <div>
-                  <label className="block text-xl font-medium text-black dark:text-white mb-3">
-                    Password
-                  </label>
-                  <RoundedInput
-                    type="password"
-                    value={password}
-                    onChange={handlePasswordChange}
-                    placeholder="Enter password"
-                    error={!!passwordError}
-                    disabled={isCreating}
-                  />
-                  {passwordError && (
-                    <p className="text-red-500 dark:text-red-400 text-xs mt-1">
-                      {passwordError}
-                    </p>
-                  )}
-                </div>
-              )}
-
-              {/* Authentication Info */}
-              <div className="p-4 border rounded-lg bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800">
-                <div className="flex items-start gap-3">
-                  <div className="shrink-0 mt-0.5">
-                    <CheckCircle className="h-5 w-5 text-green-500" />
-                  </div>
-                  <div>
-                    <p className="text-sm text-green-700 dark:text-green-300 leading-relaxed">
-                      {usePassword
-                        ? 'Your account will be secured using a password. Make sure to choose a strong password.'
-                        : 'Your account will be secured using biometric authentication (fingerprint, face ID, or Windows Hello).'}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {error && (
-                <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
-                  <p className="text-red-600 dark:text-red-400 text-sm">
-                    {error}
-                  </p>
-                </div>
-              )}
-
-              <Button
-                type="submit"
-                disabled={!canSubmit || isCreating || accountCreationStarted}
-                loading={isCreating || accountCreationStarted}
-                variant="primary"
-                size="custom"
-                fullWidth
-                className="h-11 rounded-full text-sm font-medium flex items-center justify-center gap-2"
-              >
-                {!(isCreating || accountCreationStarted) && (
-                  <>
-                    <Zap className="w-5 h-5" />
-                    <span>Create Account</span>
-                  </>
-                )}
-              </Button>
-            </form>
-          </div>
+    <PageLayout
+      header={<PageHeader title="Create Account" onBack={onBack} />}
+      className="app-max-w mx-auto"
+      contentClassName="p-4"
+    >
+      {/* Authentication Method Toggle */}
+      {biometricAvailable && (
+        <div className="mb-6">
+          <p className="text-xl font-medium text-black dark:text-white mb-4">
+            Authentication Method
+          </p>
+          <TabSwitcher
+            options={[
+              {
+                value: 'biometrics',
+                label: 'Biometrics',
+                icon: <Shield className="w-4 h-4" />,
+              },
+              {
+                value: 'password',
+                label: 'Password',
+                icon: <Lock className="w-4 h-4" />,
+              },
+            ]}
+            value={usePassword ? 'password' : 'biometrics'}
+            onChange={value => setUsePassword(value === 'password')}
+          />
         </div>
-      </ScrollableContent>
+      )}
+      {/* WebAuthn Support Check */}
+      {!biometricAvailable && (
+        <div className="bg-white dark:bg-gray-800 rounded-lg p-4 mb-4 border border-blue-200 dark:border-blue-800">
+          <p className="text-blue-600 dark:text-blue-400 text-sm">
+            Biometric authentication is not supported on this device. Using
+            password authentication instead.
+          </p>
+        </div>
+      )}
+      {/* Account Form */}
+      <div className="bg-background rounded-lg p-6 space-y-6">
+        <form onSubmit={handleSubmit} className="space-y-6">
+          <div>
+            <label className="block text-xl font-medium text-black dark:text-white mb-3">
+              Username
+            </label>
+            <RoundedInput
+              type="text"
+              value={username}
+              onChange={handleUsernameChange}
+              placeholder="Enter username"
+              error={!!usernameError}
+              maxLength={20}
+              disabled={isCreating}
+            />
+            {usernameError && (
+              <p className="text-red-500 dark:text-red-400 text-xs mt-1">
+                {usernameError}
+              </p>
+            )}
+          </div>
 
+          {/* Password field - only show when using password authentication */}
+          {usePassword && (
+            <div>
+              <label className="block text-xl font-medium text-black dark:text-white mb-3">
+                Password
+              </label>
+              <RoundedInput
+                type="password"
+                value={password}
+                onChange={handlePasswordChange}
+                placeholder="Enter password"
+                error={!!passwordError}
+                disabled={isCreating}
+              />
+              {passwordError && (
+                <p className="text-red-500 dark:text-red-400 text-xs mt-1">
+                  {passwordError}
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Authentication Info */}
+          <div className="p-4 border rounded-lg bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800">
+            <div className="flex items-start gap-3">
+              <div className="shrink-0 mt-0.5">
+                <CheckCircle className="h-5 w-5 text-green-500" />
+              </div>
+              <div>
+                <p className="text-sm text-green-700 dark:text-green-300 leading-relaxed">
+                  {usePassword
+                    ? 'Your account will be secured using a password. Make sure to choose a strong password.'
+                    : 'Your account will be secured using biometric authentication (fingerprint, face ID, or Windows Hello).'}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {error && (
+            <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+              <p className="text-red-600 dark:text-red-400 text-sm">{error}</p>
+            </div>
+          )}
+
+          <Button
+            type="submit"
+            disabled={!canSubmit || isCreating || accountCreationStarted}
+            loading={isCreating || accountCreationStarted}
+            variant="primary"
+            size="custom"
+            fullWidth
+            className="h-11 rounded-full text-sm font-medium flex items-center justify-center gap-2"
+          >
+            {!(isCreating || accountCreationStarted) && (
+              <>
+                <Zap className="w-5 h-5" />
+                <span>Create Account</span>
+              </>
+            )}
+          </Button>
+        </form>
+      </div>
       <ICloudSyncModal
         isOpen={showICloudModal}
         onClose={() => setShowICloudModal(false)}
         onConfirm={handleICloudSyncChoice}
       />
-    </div>
+    </PageLayout>
   );
 };
 

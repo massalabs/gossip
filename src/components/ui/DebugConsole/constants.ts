@@ -1,4 +1,4 @@
-import { LogLevel } from '../../../stores/useDebugLogs';
+import { LogLevel } from '../../../stores/useDebugLogs.types';
 
 export const levelColor: Record<LogLevel, string> = {
   debug: 'var(--color-muted-foreground)',

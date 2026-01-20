@@ -5,6 +5,7 @@ import NavButton from './NavButton';
 import GossipIcon from './customIcons/gossip-icon';
 import { ROUTES } from '../../constants/routes';
 import { useUiStore } from '../../stores/uiStore';
+import { useKeyboardVisible } from '../../hooks/useKeyboardVisible';
 
 type BottomNavigationTab = 'discussions' | 'settings';
 
@@ -12,13 +13,11 @@ const BottomNavigation: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const setBottomNavVisible = useUiStore(s => s.setBottomNavVisible);
+  const { isKeyboardVisible } = useKeyboardVisible();
 
-  // Declare bottom navigation presence
   useEffect(() => {
     setBottomNavVisible(true);
-    return () => {
-      setBottomNavVisible(false);
-    };
+    return () => setBottomNavVisible(false);
   }, [setBottomNavVisible]);
 
   const activeTab: BottomNavigationTab = matchPath(
@@ -43,22 +42,28 @@ const BottomNavigation: React.FC = () => {
     },
   ];
 
+  // Hide bottom nav when keyboard is visible
+  if (isKeyboardVisible) {
+    return null;
+  }
+
   return (
-    <div className="fixed bottom-0 left-0 right-0 bg-muted dark:bg-muted mx-auto h-(--bottom-nav-height) app-max-w flex items-center justify-center shadow-2xl z-50">
-      <div className="flex items-center justify-center gap-8">
-        {navItems.map((item, index) => (
-          <NavButton
-            key={item.id}
-            onClick={() => navigate(item.path)}
-            isActive={activeTab === item.id}
-            title={item.title}
-            icon={item.icon}
-            animationVariant={index === 0 ? 'default' : 'alt'}
-          />
-        ))}
+    <div className="bg-muted pb-safe-b">
+      <div className="mx-auto app-max-w flex items-center justify-center h-bottom-nav px-nav-padding">
+        <div className="flex items-center justify-center gap-8">
+          {navItems.map((item, index) => (
+            <NavButton
+              key={item.id}
+              onClick={() => navigate(item.path)}
+              isActive={activeTab === item.id}
+              title={item.title}
+              icon={item.icon}
+              animationVariant={index === 0 ? 'default' : 'alt'}
+            />
+          ))}
+        </div>
       </div>
     </div>
   );
 };
-
 export default BottomNavigation;

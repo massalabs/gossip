@@ -2,6 +2,11 @@
  * Message Protocol Types and Interfaces
  */
 
+export type BulletinItem = {
+  counter: string;
+  data: Uint8Array;
+};
+
 export interface EncryptedMessage {
   seeker: Uint8Array;
   ciphertext: Uint8Array;
@@ -32,12 +37,13 @@ export interface IMessageProtocol {
    * Returns the bulletin counter provided by the API.
    */
   sendAnnouncement(announcement: Uint8Array): Promise<string>;
-
   /**
    * Fetch incoming discussion announcements from the bulletin storage.
    * Returns raw announcement bytes as provided by the API.
+   * @param limit - Maximum number of announcements to fetch (default: 20)
+   * @param cursor - Optional cursor (counter) to fetch announcements after this value
    */
-  fetchAnnouncements(): Promise<Uint8Array[]>;
+  fetchAnnouncements(limit?: number, cursor?: string): Promise<BulletinItem[]>;
 
   /**
    * Fetch public key by userId hash (base64 string)

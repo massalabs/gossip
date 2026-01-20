@@ -36,22 +36,6 @@ vi.mock('../src/services/notifications', () => ({
   },
 }));
 
-// Mock the WASM module - must be inline, not imported, due to hoisting
-vi.mock('../src/assets/generated/wasm/gossip_wasm', async importOriginal => {
-  const actual =
-    await importOriginal<
-      typeof import('../src/assets/generated/wasm/gossip_wasm')
-    >();
-  const { MockUserPublicKeys, MockUserSecretKeys } = await import(
-    '../src/wasm/mock'
-  );
-  return {
-    ...actual,
-    UserPublicKeys: MockUserPublicKeys,
-    UserSecretKeys: MockUserSecretKeys,
-  };
-});
-
 // Mock the message protocol factory to always return mock protocol
 vi.mock('../src/api/messageProtocol', async importOriginal => {
   const actual =

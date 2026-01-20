@@ -11,6 +11,7 @@ import {
   IMessageProtocol,
   EncryptedMessage,
   MessageProtocolResponse,
+  BulletinItem,
 } from './types';
 
 export class MockMessageProtocol implements IMessageProtocol {
@@ -66,15 +67,34 @@ export class MockMessageProtocol implements IMessageProtocol {
     return String(this.bulletinCounter);
   }
 
-  async fetchAnnouncements(): Promise<Uint8Array[]> {
-    console.log('Mock: Fetching announcements');
+  async fetchAnnouncements(
+    limit: number = 20,
+    cursor?: string
+  ): Promise<BulletinItem[]> {
+    console.log(
+      `Mock: Fetching announcements with limit ${limit}${cursor ? `, cursor: ${cursor}` : ''}`
+    );
 
     // Simulate network delay
     await new Promise(resolve => setTimeout(resolve, 150));
 
-    // Return empty array for now - in a real implementation, this would
-    // simulate fetching from a global announcement channel
-    return this.mockAnnouncements;
+    // Simulate pagination by returning announcements after cursor, limited by limit
+    // In a real implementation, cursor would filter announcements
+    let startIndex = 0;
+    if (cursor) {
+      const cursorNum = parseInt(cursor, 10);
+      startIndex = Math.max(0, cursorNum);
+    }
+
+    // Return announcements starting from the cursor position, up to the limit
+    const announcementsToReturn = this.mockAnnouncements
+      .slice(startIndex, startIndex + limit)
+      .map((data, index) => ({
+        counter: String(startIndex + index + 1),
+        data,
+      }));
+
+    return announcementsToReturn;
   }
 
   async fetchPublicKeyByUserId(userId: Uint8Array): Promise<string> {
@@ -123,5 +143,6 @@ export class MockMessageProtocol implements IMessageProtocol {
   clearMockData(): void {
     this.mockMessages.clear();
     this.mockAnnouncements = [];
+    this.bulletinCounter = 0;
   }
 }

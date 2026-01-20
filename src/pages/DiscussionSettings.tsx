@@ -12,11 +12,11 @@ import ContactAvatar from '../components/avatar/ContactAvatar';
 import ContactNameModal from '../components/ui/ContactNameModal';
 import Button from '../components/ui/Button';
 import PageHeader from '../components/ui/PageHeader';
-import HeaderWrapper from '../components/ui/HeaderWrapper';
+import PageLayout from '../components/ui/PageLayout';
 import { Check, Edit2, ChevronRight, RotateCw } from 'react-feather';
 import { Contact } from '../db';
 import { ROUTES } from '../constants/routes';
-import { useResendFailedBlobs } from '../hooks/useResendFailedBlobs';
+import { useManualRenewDiscussion } from '../hooks/useResendFailedBlobs';
 
 const DiscussionSettings: React.FC = () => {
   const { discussionId } = useParams();
@@ -24,7 +24,7 @@ const DiscussionSettings: React.FC = () => {
 
   const discussions = useDiscussionStore(s => s.discussions);
   const contacts = useDiscussionStore(s => s.contacts);
-  const { manualRenewDiscussion } = useResendFailedBlobs(false);
+  const manualRenewDiscussion = useManualRenewDiscussion();
 
   const discussion = useMemo(() => {
     if (!discussionId) return undefined;
@@ -146,97 +146,95 @@ const DiscussionSettings: React.FC = () => {
   }
 
   return (
-    <div className="bg-background h-full overflow-auto app-max-w mx-auto">
-      <HeaderWrapper>
+    <PageLayout
+      header={
         <PageHeader title="Discussion Settings" onBack={() => navigate(-1)} />
-      </HeaderWrapper>
-
-      <div className="flex-1 pt-4 px-6 pb-6">
-        {/* Discussion Name Section */}
-        <div className="mb-6">
-          <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
-            Discussion Name
-          </h2>
-          <div className="bg-background border border-border rounded-xl p-4">
-            <div className="flex items-center justify-between">
-              <div className="flex-1 min-w-0">
-                <p className="text-base font-semibold text-foreground truncate">
-                  {displayName}
-                </p>
-              </div>
-              <div className="flex items-center gap-2 ml-3">
-                {showSuccessCheck && (
-                  <Check className="w-4 h-4 text-success transition-opacity duration-200" />
-                )}
-                <Button
-                  onClick={handleOpenEditName}
-                  variant="ghost"
-                  size="custom"
-                  className="p-2 hover:bg-muted rounded-lg transition-colors"
-                  title="Edit discussion name"
-                >
-                  <Edit2 className="w-4 h-4 text-muted-foreground" />
-                </Button>
-              </div>
+      }
+      className="app-max-w mx-auto"
+      contentClassName="pt-4 px-6 pb-6"
+    >
+      {/* Discussion Name Section */}
+      <div className="mb-6">
+        <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
+          Discussion Name
+        </h2>
+        <div className="bg-background border border-border rounded-xl p-4">
+          <div className="flex items-center justify-between">
+            <div className="flex-1 min-w-0">
+              <p className="text-base font-semibold text-foreground truncate">
+                {displayName}
+              </p>
             </div>
-          </div>
-        </div>
-
-        {/* Reset Connection Section */}
-        <div className="mb-6">
-          <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
-            Reset Connection
-          </h2>
-          <div className="bg-background rounded-xl p-4">
-            <p className="text-sm text-muted-foreground mb-4">
-              If you think you're disconnected from your peer, you can reset
-              connection. Don't worry, some messages may be sent again but you
-              will NOT lose your message history.
-            </p>
-            <div className="flex justify-center">
+            <div className="flex items-center gap-2 ml-3">
+              {showSuccessCheck && (
+                <Check className="w-4 h-4 text-success transition-opacity duration-200" />
+              )}
               <Button
-                onClick={handleResetConnection}
-                variant="primary"
-                className="bg-success hover:bg-success/90 text-success-foreground"
+                onClick={handleOpenEditName}
+                variant="ghost"
+                size="custom"
+                className="p-2 hover:bg-muted rounded-lg transition-colors"
+                title="Edit discussion name"
               >
-                {reconnectSuccess ? (
-                  <Check className="w-4 h-4 mr-2" />
-                ) : (
-                  <RotateCw className="w-4 h-4 mr-2" />
-                )}
-                {reconnectSuccess ? 'Reconnected!' : 'Reconnect'}
+                <Edit2 className="w-4 h-4 text-muted-foreground" />
               </Button>
             </div>
           </div>
         </div>
+      </div>
 
-        {/* Participants Section */}
-        <div>
-          <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
-            Participants
-          </h2>
-          <div className="bg-background border border-border rounded-xl divide-y divide-border">
-            {participants.map(contact => (
-              <button
-                key={contact.userId}
-                onClick={() => handleNavigateToContact(contact)}
-                className="w-full flex items-center gap-3 p-4 hover:bg-muted/50 transition-colors first:rounded-t-xl last:rounded-b-xl"
-              >
-                <ContactAvatar contact={contact} size={10} />
-                <div className="flex-1 min-w-0 text-left">
-                  <p className="text-sm font-medium text-foreground truncate">
-                    {contact.name}
-                  </p>
-                </div>
-                <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
-              </button>
-            ))}
-            {participants.length === 0 && (
-              <div className="p-4 text-center text-sm text-muted-foreground">
-                No participants found
-              </div>
+      {/* Reset Connection Section */}
+      <div className="mb-6">
+        <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
+          Reset Connection
+        </h2>
+        <div className="bg-background border border-border rounded-xl p-4">
+          <p className="text-sm text-muted-foreground mb-3">
+            If you think you're disconnected from your peer, you can reset the
+            connection. Some messages may be resent but your history will be
+            preserved.
+          </p>
+          <Button
+            onClick={handleResetConnection}
+            variant="secondary"
+            className="w-full"
+          >
+            {reconnectSuccess ? (
+              <Check className="w-4 h-4 mr-2" />
+            ) : (
+              <RotateCw className="w-4 h-4 mr-2" />
             )}
-          </div>
+            {reconnectSuccess ? 'Reconnected!' : 'Reset Connection'}
+          </Button>
+        </div>
+      </div>
+
+      {/* Participants Section */}
+      <div>
+        <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
+          Participants
+        </h2>
+        <div className="bg-background border border-border rounded-xl divide-y divide-border">
+          {participants.map(contact => (
+            <button
+              key={contact.userId}
+              onClick={() => handleNavigateToContact(contact)}
+              className="w-full flex items-center gap-3 p-4 hover:bg-muted/50 transition-colors first:rounded-t-xl last:rounded-b-xl"
+            >
+              <ContactAvatar contact={contact} size={10} />
+              <div className="flex-1 min-w-0 text-left">
+                <p className="text-sm font-medium text-foreground truncate">
+                  {contact.name}
+                </p>
+              </div>
+              <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
+            </button>
+          ))}
+          {participants.length === 0 && (
+            <div className="p-4 text-center text-sm text-muted-foreground">
+              No participants found
+            </div>
+          )}
         </div>
       </div>
 
@@ -252,7 +250,7 @@ const DiscussionSettings: React.FC = () => {
           await handleSaveName(name);
         }}
       />
-    </div>
+    </PageLayout>
   );
 };
 

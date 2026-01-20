@@ -59,13 +59,22 @@ export const AppUrlListener: React.FC = () => {
   /**
    * Set up native notification action listener (Capacitor LocalNotifications)
    * Handles taps on native notifications and navigates to the appropriate view.
+   * Also dismisses the notification when clicked.
    */
   const setupNativeNotificationListener = useCallback(async () => {
     try {
       const handle = await LocalNotifications.addListener(
         'localNotificationActionPerformed',
-        event => {
+        async event => {
           try {
+            // Dismiss the notification when clicked
+            const notificationId = event.notification.id;
+            if (notificationId !== undefined && notificationId !== null) {
+              await LocalNotifications.cancel({
+                notifications: [{ id: notificationId }],
+              });
+            }
+
             const extra = event.notification.extra as
               | { url?: string; contactUserId?: string }
               | undefined;

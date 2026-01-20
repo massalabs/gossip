@@ -65,6 +65,7 @@ export default {
           ring: 'var(--color-sidebar-ring)',
         },
       },
+
       // Border radius
       borderRadius: {
         sm: 'var(--radius-sm)',
@@ -73,6 +74,7 @@ export default {
         lg: 'var(--radius-lg)',
         xl: 'var(--radius-xl)',
       },
+
       // Font family
       fontFamily: {
         sans: [
@@ -85,25 +87,68 @@ export default {
           'sans-serif',
         ],
       },
-      // Spacing
+
+      // ============================================
+      // SAFE AREA & LAYOUT SYSTEM
+      // ============================================
       spacing: {
-        'bottom-nav': 'var(--bottom-nav-height)',
+        'safe-t': 'var(--sat)',
+        'safe-b': 'var(--sab)',
+        'safe-l': 'var(--sal)',
+        'safe-r': 'var(--sar)',
+        // Composites utiles
+        header: 'var(--header-height, 3.5rem)',
+        'bottom-nav': 'var(--bottom-nav-height, 4rem)',
+        // Header + safe area
+        'header-safe': 'calc(var(--sat) + var(--header-height, 3.5rem))',
+        // Bottom nav + safe area
+        'nav-safe': 'calc(var(--sab) + var(--bottom-nav-height, 4rem))',
+        // Padding pour header et bottom nav
+        'header-padding': 'var(--header-padding, 1.5rem)',
+        'nav-padding': 'var(--nav-padding, 1.5rem)',
       },
-      // Animations
+
+      // Pour top/bottom/left/right (fixed positioning)
+      inset: {
+        'safe-t': 'var(--sat)',
+        'safe-b': 'var(--sab)',
+        'safe-l': 'var(--sal)',
+        'safe-r': 'var(--sar)',
+      },
+
+      // Pour min-height, height
+      height: {
+        'safe-t': 'var(--sat)',
+        'safe-b': 'var(--sab)',
+        // Hauteur écran moins les safe areas
+        'screen-safe': 'calc(100dvh - var(--sat) - var(--sab))',
+        'bottom-nav': 'var(--bottom-nav-height, 4rem)',
+        header: 'var(--header-height, 3.5rem)',
+      },
+
+      minHeight: {
+        'screen-safe': 'calc(100dvh - var(--sat) - var(--sab))',
+      },
+
+      maxHeight: {
+        'screen-safe': 'calc(100dvh - var(--sat) - var(--sab))',
+      },
+
+      // ============================================
+      // ANIMATIONS (inchangé)
+      // ============================================
       keyframes: {
         'spin-reverse': {
           from: { transform: 'rotate(0deg)' },
           to: { transform: 'rotate(-360deg)' },
         },
         'fade-in': {
-          from: {
-            opacity: '0',
-            transform: 'translateY(-10px)',
-          },
-          to: {
-            opacity: '1',
-            transform: 'translateY(0)',
-          },
+          from: { opacity: '0', transform: 'translateY(-10px)' },
+          to: { opacity: '1', transform: 'translateY(0)' },
+        },
+        'fade-in-up': {
+          from: { opacity: '0', transform: 'translateY(10px)' },
+          to: { opacity: '1', transform: 'translateY(0)' },
         },
         'spin-slow': {
           from: { transform: 'rotate(0deg)' },
@@ -138,24 +183,12 @@ export default {
           '92.5%': { transform: 'scaleY(0.1)' },
         },
         'pulse-loading': {
-          '0%, 100%': {
-            opacity: '0.6',
-            transform: 'scale(1)',
-          },
-          '50%': {
-            opacity: '1',
-            transform: 'scale(1.05)',
-          },
+          '0%, 100%': { opacity: '0.6', transform: 'scale(1)' },
+          '50%': { opacity: '1', transform: 'scale(1.05)' },
         },
         'bubble-in': {
-          from: {
-            opacity: '0',
-            transform: 'translateY(8px) scale(0.96)',
-          },
-          to: {
-            opacity: '1',
-            transform: 'translateY(0) scale(1)',
-          },
+          from: { opacity: '0', transform: 'translateY(8px) scale(0.96)' },
+          to: { opacity: '1', transform: 'translateY(0) scale(1)' },
         },
         'fade-out': {
           from: { opacity: '1' },
@@ -169,10 +202,19 @@ export default {
           },
           '100%': { backgroundColor: 'transparent' },
         },
+        'slide-in-right': {
+          from: { transform: 'translateX(100%)' },
+          to: { transform: 'translateX(0)' },
+        },
+        'slide-out-right': {
+          from: { transform: 'translateX(0)' },
+          to: { transform: 'translateX(100%)' },
+        },
       },
       animation: {
         'spin-reverse': 'spin-reverse 1s linear infinite',
         'fade-in': 'fade-in 0.6s ease-out',
+        'fade-in-up': 'fade-in-up 0.3s ease-out',
         'spin-slow': 'spin-slow 20s linear infinite',
         'pulse-slow': 'pulse-slow 3s ease-in-out infinite',
         'pulse-loading': 'pulse-loading 2s ease-in-out infinite',
@@ -185,30 +227,10 @@ export default {
         'bubble-in': 'bubble-in 0.22s ease-out',
         'fade-out': 'fade-out 0.3s ease-out',
         'highlight-message': 'highlight-message 2s ease-out',
+        'slide-in-right': 'slide-in-right 0.3s ease-out',
+        'slide-out-right': 'slide-out-right 0.3s ease-out',
       },
     },
   },
-  plugins: [
-    function ({ addUtilities }) {
-      addUtilities({
-        // Reverse spin animation
-        '.-animate-spin': {
-          animation: 'spin-reverse 1s linear infinite',
-        },
-        // Safe area support for mobile browsers
-        '.pb-safe': {
-          'padding-bottom': 'env(safe-area-inset-bottom)',
-        },
-        '.pt-safe': {
-          'padding-top': 'env(safe-area-inset-top)',
-        },
-        '.pl-safe': {
-          'padding-left': 'env(safe-area-inset-left)',
-        },
-        '.pr-safe': {
-          'padding-right': 'env(safe-area-inset-right)',
-        },
-      });
-    },
-  ],
+  plugins: [],
 };

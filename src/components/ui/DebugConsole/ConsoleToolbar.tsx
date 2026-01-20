@@ -1,5 +1,8 @@
 import React from 'react';
-import { LOG_LIMIT_OPTIONS, LogLimit } from '../../../stores/useDebugLogs';
+import {
+  LOG_LIMIT_OPTIONS,
+  LogLimit,
+} from '../../../stores/useDebugLogs.types';
 import { LogLevelFilter } from './constants';
 
 interface ConsoleToolbarProps {

@@ -18,6 +18,18 @@
       'Mozilla Headline', system-ui, -apple-system, BlinkMacSystemFont,
       'Segoe UI', sans-serif;
 
+    /* Safe area insets - defaults use env() for web/iOS Safari.
+       On native platforms (Android/iOS), these are overridden by JavaScript
+       in main.tsx using capacitor-plugin-safe-area for accurate values. */
+    --sat: env(safe-area-inset-top, 0px);
+    --sab: env(safe-area-inset-bottom, 0px);
+    --sal: env(safe-area-inset-left, 0px);
+    --sar: env(safe-area-inset-right, 0px);
+    --header-height: 3.5rem;
+    --bottom-nav-height: 4rem;
+    --header-padding: 1.5rem;
+    --nav-padding: 1.5rem;
+
     font-family: var(--font-body);
     line-height: 1.5;
     font-weight: 400;
@@ -36,14 +48,29 @@
     font-family: var(--font-heading);
   }
 
+  html {
+    height: 100%;
+    width: 100%;
+    /* Prevent iOS bounce scrolling on html */
+    overscroll-behavior: none;
+    /* Prevent scrolling on html element */
+    overflow: hidden;
+  }
+
   body {
     @apply bg-background text-foreground;
     margin: 0;
     min-width: 20rem; /* min-w-80 */
-    /* Disable pull-to-refresh on mobile */
-    overscroll-behavior-y: contain;
+    /* Disable pull-to-refresh and bounce scrolling on mobile */
+    overscroll-behavior-y: none;
+    overscroll-behavior-x: none;
     -webkit-overflow-scrolling: touch;
-
+    /* Prevent body scrolling - app content handles its own scrolling */
+    overflow: hidden;
+    width: 100%;
+    height: 100%;
+    /* Use 100vh for iOS compatibility, 100dvh for modern browsers */
+    height: 100vh;
     height: 100dvh;
   }
 
@@ -53,6 +80,11 @@
 
   #root {
     height: 100%;
+    width: 100%;
+    overflow: hidden;
+    position: relative;
+    padding-left: var(--sal);
+    padding-right: var(--sar);
   }
 
   /* Utility class for content that comes after fixed HeaderWrapper */
@@ -167,15 +199,11 @@
   }
 
   /* Prevent layout shift when vertical scrollbar appears */
-  html {
-    /* Reserve space only on scrollbar side to prevent layout shift without creating both-side gutters */
-    scrollbar-gutter: stable;
-  }
-
-  /* Fallback for browsers without scrollbar-gutter support */
-  @supports not (scrollbar-gutter: stable) {
-    body {
-      overflow-y: scroll;
+  /* Note: We don't use scrollbar-gutter on mobile to prevent body scrolling */
+  @media (min-width: 769px) {
+    html {
+      /* Reserve space only on scrollbar side to prevent layout shift without creating both-side gutters */
+      scrollbar-gutter: stable;
     }
   }
 

@@ -1,6 +1,6 @@
 require_relative '../../node_modules/@capacitor/ios/scripts/pods_helpers'
 
-platform :ios, '14.0'
+platform :ios, '15.0'
 use_frameworks!
 
 # workaround to avoid Xcode caching of Pods that requires
@@ -13,15 +13,19 @@ def capacitor_pods
   pod 'CapacitorCordova', :path => '../../node_modules/@capacitor/ios'
   pod 'AparajitaCapacitorBiometricAuth', :path => '../../node_modules/@aparajita/capacitor-biometric-auth'
   pod 'AparajitaCapacitorSecureStorage', :path => '../../node_modules/@aparajita/capacitor-secure-storage'
+  pod 'CapacitorCommunityPrivacyScreen', :path => '../../node_modules/@capacitor-community/privacy-screen'
   pod 'CapacitorApp', :path => '../../node_modules/@capacitor/app'
   pod 'CapacitorBackgroundRunner', :path => '../../node_modules/@capacitor/background-runner'
   pod 'CapacitorBarcodeScanner', :path => '../../node_modules/@capacitor/barcode-scanner'
   pod 'CapacitorDevice', :path => '../../node_modules/@capacitor/device'
+  pod 'CapacitorFilesystem', :path => '../../node_modules/@capacitor/filesystem'
+  pod 'CapacitorKeyboard', :path => '../../node_modules/@capacitor/keyboard'
   pod 'CapacitorLocalNotifications', :path => '../../node_modules/@capacitor/local-notifications'
   pod 'CapacitorNetwork', :path => '../../node_modules/@capacitor/network'
   pod 'CapacitorPreferences', :path => '../../node_modules/@capacitor/preferences'
   pod 'CapacitorShare', :path => '../../node_modules/@capacitor/share'
   pod 'CapacitorStatusBar', :path => '../../node_modules/@capacitor/status-bar'
+  pod 'CapacitorPluginSafeArea', :path => '../../node_modules/capacitor-plugin-safe-area'
 end
 
 target 'Gossip' do

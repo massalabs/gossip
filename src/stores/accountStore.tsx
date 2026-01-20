@@ -5,7 +5,14 @@ import { encrypt, deriveKey } from '../crypto/encryption';
 import { isWebAuthnSupported } from '../crypto/webauthn';
 import { biometricService } from '../services/biometricService';
 import { generateMnemonic, validateMnemonic } from '../crypto/bip39';
-import { Provider, Account, PrivateKey } from '@massalabs/massa-web3';
+import {
+  Provider,
+  Account,
+  PrivateKey,
+  JsonRpcProvider,
+  PublicApiUrl,
+  NetworkName,
+} from '@massalabs/massa-web3';
 import { useAppStore } from './appStore';
 import { createSelectors } from './utils/createSelectors';
 import {
@@ -14,17 +21,13 @@ import {
   generateNonce,
   SessionModule,
 } from '../wasm';
-import {
-  UserPublicKeys,
-  UserSecretKeys,
-} from '../assets/generated/wasm/gossip_wasm';
-import { encodeUserId } from '../utils/userId';
 import { getActiveOrFirstProfile } from './utils/getAccount';
 import { ensureWasmInitialized } from '../wasm/loader';
 import { auth } from './utils/auth';
 import { useDiscussionStore } from './discussionStore';
 import { useMessageStore } from './messageStore';
 import { authService } from '../services/auth';
+import { validateUsernameFormat } from '../utils/validation';
 
 async function createProfileFromAccount(
   username: string,
@@ -74,7 +77,6 @@ async function createProfileFromAccount(
 
 async function provisionAccount(
   username: string,
-  userId: Uint8Array,
   mnemonic: string | undefined,
   opts: { useBiometrics: boolean; password?: string; iCloudSync?: boolean },
   session: SessionModule
@@ -87,7 +89,7 @@ async function provisionAccount(
     built = await buildSecurityFromBiometrics(
       mnemonic,
       username,
-      userId,
+      session.userId,
       opts.iCloudSync ?? false
     );
   } else {
@@ -103,7 +105,7 @@ async function provisionAccount(
 
   const profile = await createProfileFromAccount(
     username,
-    encodeUserId(userId),
+    session.userIdEncoded,
     built.security,
     sessionBlob
   );
@@ -207,9 +209,6 @@ interface AccountState {
   platformAuthenticatorAvailable: boolean;
   account: Account | null;
   provider: Provider | null;
-  // In-memory WASM keys (not persisted)
-  ourPk?: UserPublicKeys | null;
-  ourSk?: UserSecretKeys | null;
   // WASM session module
   session: SessionModule | null;
   initializeAccountWithBiometrics: (
@@ -242,6 +241,9 @@ interface AccountState {
 
   // Session persistence
   persistSession: () => Promise<void>;
+
+  // Username update
+  updateUsername: (newUsername: string) => Promise<void>;
 }
 
 const useAccountStoreBase = create<AccountState>((set, get) => {
@@ -259,11 +261,25 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       account: null,
       userProfile: null,
       encryptionKey: null,
-      ourPk: null,
-      ourSk: null,
       session: null,
       isLoading: false,
     };
+  };
+
+  // Helper function to fetch MNS domains if MNS is enabled
+  const fetchMnsDomainsIfEnabled = (profile: UserProfile) => {
+    const { mnsEnabled } = useAppStore.getState();
+    if (!mnsEnabled) return;
+
+    const state = get();
+    if (!state.provider) return;
+
+    useAppStore
+      .getState()
+      .fetchMnsDomains(profile, state.provider)
+      .catch(error => {
+        console.error('Error fetching MNS domains:', error);
+      });
   };
 
   return {
@@ -275,8 +291,6 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
     platformAuthenticatorAvailable: false,
     account: null,
     provider: null,
-    ourPk: null,
-    ourSk: null,
     session: null,
     // Actions
     initializeAccount: async (username: string, password: string) => {
@@ -285,9 +299,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
 
         const mnemonic = generateMnemonic(256);
         const keys = await generateUserKeys(mnemonic);
-        const userPublicKeys = keys.public_keys();
         const userSecretKeys = keys.secret_keys();
-        const userId = userPublicKeys.derive_id();
 
         const account = await Account.fromPrivateKey(
           PrivateKey.fromBytes(userSecretKeys.massa_secret_key)
@@ -295,13 +307,12 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
 
         // Initialize WASM and create session
         await ensureWasmInitialized();
-        const session = new SessionModule(() => {
+        const session = new SessionModule(keys, () => {
           get().persistSession();
         });
 
         const { profile, encryptionKey } = await provisionAccount(
           username,
-          userId,
           mnemonic,
           {
             useBiometrics: false,
@@ -315,11 +326,12 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           userProfile: profile,
           encryptionKey,
           account,
-          ourPk: userPublicKeys,
-          ourSk: userSecretKeys,
           session,
           isLoading: false,
         });
+
+        // Fetch MNS domains if MNS is enabled
+        fetchMnsDomainsIfEnabled(profile);
       } catch (error) {
         console.error('Error creating user profile:', error);
         set({ isLoading: false });
@@ -341,9 +353,6 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         }
 
         const keys = await generateUserKeys(mnemonic);
-        const userPublicKeys = keys.public_keys();
-        const userSecretKeys = keys.secret_keys();
-        const userId = userPublicKeys.derive_id();
 
         const massaSecretKey = keys.secret_keys().massa_secret_key;
         const account = await Account.fromPrivateKey(
@@ -352,13 +361,12 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
 
         // Initialize WASM and create session
         await ensureWasmInitialized();
-        const session = new SessionModule(() => {
+        const session = new SessionModule(keys, () => {
           get().persistSession();
         });
 
         const { profile, encryptionKey } = await provisionAccount(
           username,
-          userId,
           mnemonic,
           opts,
           session
@@ -369,11 +377,12 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           account,
           userProfile: profile,
           encryptionKey,
-          ourPk: userPublicKeys,
-          ourSk: userSecretKeys,
           session,
           isLoading: false,
         });
+
+        // Fetch MNS domains if MNS is enabled
+        fetchMnsDomainsIfEnabled(profile);
       } catch (error) {
         console.error('Error restoring account from mnemonic:', error);
         set({ isLoading: false });
@@ -400,17 +409,16 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         const { mnemonic, encryptionKey } = await auth(profile, password);
 
         const keys = await generateUserKeys(mnemonic);
-        const ourPk = keys.public_keys();
-        const ourSk = keys.secret_keys();
-        const account = await Account.fromPrivateKey(
-          PrivateKey.fromBytes(ourSk.massa_secret_key)
-        );
 
         // Initialize WASM and load session from profile
         await ensureWasmInitialized();
-        const session = new SessionModule(() => {
+        const session = new SessionModule(keys, () => {
           get().persistSession();
         });
+
+        const account = await Account.fromPrivateKey(
+          PrivateKey.fromBytes(session.ourSk.massa_secret_key)
+        );
 
         session.load(profile, encryptionKey);
 
@@ -427,11 +435,12 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           userProfile: updatedProfile,
           account,
           encryptionKey,
-          ourPk,
-          ourSk,
           session,
           isLoading: false,
         });
+
+        // Fetch MNS domains if MNS is enabled
+        fetchMnsDomainsIfEnabled(updatedProfile);
 
         try {
           session.refresh();
@@ -511,8 +520,6 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         // Generate a BIP39 mnemonic and create account from it
         const mnemonic = generateMnemonic(256);
         const keys = await generateUserKeys(mnemonic);
-        const userPublicKeys = keys.public_keys();
-        const userId = userPublicKeys.derive_id();
 
         const account = await Account.fromPrivateKey(
           PrivateKey.fromBytes(keys.secret_keys().massa_secret_key)
@@ -520,13 +527,12 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
 
         // Initialize WASM and create session
         await ensureWasmInitialized();
-        const session = new SessionModule(() => {
+        const session = new SessionModule(keys, () => {
           get().persistSession();
         });
 
         const { profile, encryptionKey } = await provisionAccount(
           username,
-          userId,
           mnemonic,
           {
             useBiometrics: true,
@@ -540,12 +546,13 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           userProfile: profile,
           encryptionKey,
           account,
-          ourPk: userPublicKeys,
-          ourSk: keys.secret_keys(),
           session,
           isLoading: false,
           platformAuthenticatorAvailable: availability.available,
         });
+
+        // Fetch MNS domains if MNS is enabled
+        fetchMnsDomainsIfEnabled(profile);
       } catch (error) {
         console.error('Error creating user profile with biometrics:', error);
         set({ isLoading: false });
@@ -562,14 +569,13 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       try {
         const state = get();
         const profile = state.userProfile;
-        const ourSk = state.ourSk;
-        if (!profile || !ourSk) {
+        if (!profile || !state.session) {
           throw new Error('No authenticated user');
         }
 
         const { mnemonic } = await auth(profile, password);
 
-        const massaSecretKey = ourSk.massa_secret_key;
+        const massaSecretKey = state.session.ourSk.massa_secret_key;
         const account = await Account.fromPrivateKey(
           PrivateKey.fromBytes(massaSecretKey)
         );
@@ -689,6 +695,39 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         // Don't throw - persistence failures shouldn't break the app
       }
     },
+
+    updateUsername: async (newUsername: string) => {
+      try {
+        const state = get();
+        const profile = state.userProfile;
+
+        if (!profile) {
+          throw new Error('No user profile found');
+        }
+
+        const trimmedUsername = newUsername.trim();
+
+        // Validate username format (consistency with account creation)
+        const formatResult = validateUsernameFormat(trimmedUsername);
+        if (!formatResult.valid) {
+          throw new Error(formatResult.error || 'Invalid username format');
+        }
+
+        const updatedProfile = {
+          ...profile,
+          username: trimmedUsername,
+          updatedAt: new Date(),
+        };
+
+        await db.userProfile.update(profile.userId, updatedProfile);
+
+        // Update the store with the new profile
+        set({ userProfile: updatedProfile });
+      } catch (error) {
+        console.error('Error updating username:', error);
+        throw error;
+      }
+    },
   };
 });
 
@@ -696,15 +735,77 @@ useAccountStoreBase.subscribe(async (state, prevState) => {
   const current = state.userProfile;
   const previous = prevState.userProfile;
 
-  if (!current || !state.ourPk) return;
+  if (!current || !state.session) return;
   if (current === previous) return;
   if (previous && current.userId === previous.userId) return;
 
   try {
-    await authService.ensurePublicKeyPublished(state.ourPk, current.userId);
+    await authService.ensurePublicKeyPublished(
+      state.session.ourPk,
+      current.userId
+    );
   } catch (error) {
     console.error('Error publishing public key:', error);
   }
 });
+
+// Subscribe to account changes to initialize provider
+useAccountStoreBase.subscribe(async (state, prevState) => {
+  // Compare account addresses to detect actual account changes
+  const currentAddress = state.account?.address?.toString();
+  const prevAddress = prevState.account?.address?.toString();
+
+  // Only proceed if account address actually changed
+  if (currentAddress === prevAddress) return;
+
+  try {
+    const networkName = useAppStore.getState().networkName;
+    const publicApiUrl =
+      networkName === NetworkName.Buildnet
+        ? PublicApiUrl.Buildnet
+        : PublicApiUrl.Mainnet;
+
+    if (state.account) {
+      const provider = await JsonRpcProvider.fromRPCUrl(
+        publicApiUrl,
+        state.account
+      );
+
+      useAccountStoreBase.setState({ provider });
+    } else {
+      useAccountStoreBase.setState({ provider: null });
+    }
+  } catch (error) {
+    console.error('Error initializing provider:', error);
+  }
+});
+
+// Subscribe to provider changes to fetch MNS domains when provider becomes available
+useAccountStoreBase.subscribe(async (state, prevState) => {
+  // Only proceed if provider actually changed (became available)
+  if (state.provider === prevState.provider) return;
+
+  // Fetch MNS domains if provider is available and user profile exists
+  if (state.provider && state.userProfile) {
+    fetchMnsDomainsIfEnabled(state.userProfile, state.provider);
+  }
+});
+
+// Helper function to fetch MNS domains if MNS is enabled
+// Used in subscriptions where we have explicit provider
+function fetchMnsDomainsIfEnabled(
+  profile: UserProfile,
+  provider: Provider
+): void {
+  const { mnsEnabled } = useAppStore.getState();
+  if (!mnsEnabled) return;
+
+  useAppStore
+    .getState()
+    .fetchMnsDomains(profile, provider)
+    .catch(error => {
+      console.error('Error fetching MNS domains:', error);
+    });
+}
 
 export const useAccountStore = createSelectors(useAccountStoreBase);
