@@ -105,6 +105,24 @@ export class DiscussionService {
         );
       }
 
+      // Parse announcement message to extract only the actual message content.
+      // The message parameter may be JSON format: {"u":"username","m":"message"}
+      // We only want to store the "m" (message) field, not the full JSON.
+      let parsedAnnouncementMessage: string | undefined;
+      if (message) {
+        if (message.startsWith('{')) {
+          try {
+            const parsed = JSON.parse(message) as { u?: string; m?: string };
+            parsedAnnouncementMessage = parsed.m?.trim() || undefined;
+          } catch {
+            // Invalid JSON, treat as plain text
+            parsedAnnouncementMessage = message;
+          }
+        } else {
+          parsedAnnouncementMessage = message;
+        }
+      }
+
       // Persist discussion immediately with the announcement for reliable retry
       const discussionId = await this.db.discussions.add({
         ownerUserId: userId,
@@ -113,7 +131,7 @@ export class DiscussionService {
         status: status,
         nextSeeker: undefined,
         initiationAnnouncement: result.announcement,
-        announcementMessage: message,
+        announcementMessage: parsedAnnouncementMessage,
         unreadCount: 0,
         createdAt: new Date(),
         updatedAt: new Date(),

@@ -9,7 +9,7 @@
  * Protocol configuration for network requests
  */
 export interface ProtocolConfig {
-  /** API base URL (default: from environment or https://api.usegossip.net) */
+  /** API base URL (default: from environment or https://api.usegossip.com) */
   baseUrl?: string;
   /** Request timeout in milliseconds (default: 10000) */
   timeout: number;
