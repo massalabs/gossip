@@ -451,12 +451,29 @@ export class AnnouncementService {
 
     log.info('announcement intended for us — decrypting');
 
-    let announcementMessage: string | undefined;
+    let rawMessage: string | undefined;
     if (result.user_data?.length > 0) {
       try {
-        announcementMessage = new TextDecoder().decode(result.user_data);
+        rawMessage = new TextDecoder().decode(result.user_data);
       } catch (error) {
         log.error('failed to decode user data', error);
+      }
+    }
+
+    // Parse username:message format
+    let extractedUsername: string | undefined;
+    let announcementMessage: string | undefined;
+
+    if (rawMessage) {
+      const colonIndex = rawMessage.indexOf(':');
+      if (colonIndex !== -1) {
+        // New format: username:message
+        extractedUsername = rawMessage.slice(0, colonIndex).trim() || undefined;
+        announcementMessage =
+          rawMessage.slice(colonIndex + 1).trim() || undefined;
+      } else {
+        // Backwards compatibility: no colon means old format (just message)
+        announcementMessage = rawMessage;
       }
     }
 
@@ -481,9 +498,10 @@ export class AnnouncementService {
     const isNewContact = !contact;
 
     if (isNewContact) {
-      const name = await this._generateTemporaryContactName(
-        this.session.userIdEncoded
-      );
+      // Use extracted username if present, otherwise generate temporary name
+      const name =
+        extractedUsername ||
+        (await this._generateTemporaryContactName(this.session.userIdEncoded));
       await this.db.contacts.add({
         ownerUserId: this.session.userIdEncoded,
         userId: contactUserId,

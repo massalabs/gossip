@@ -28,6 +28,8 @@ const NewContact: React.FC = () => {
     userId,
     message,
     mnsState,
+    shareUsername,
+    customUsername,
     isSubmitting,
     canSubmit,
     hasUnsavedChanges,
@@ -36,6 +38,8 @@ const NewContact: React.FC = () => {
     handleNameChange,
     handleUserIdChange,
     handleMessageChange,
+    handleShareUsernameChange,
+    handleCustomUsernameChange,
     handleSubmit,
   } = useContactForm();
 
@@ -266,6 +270,36 @@ const NewContact: React.FC = () => {
             <span className="text-xs text-muted-foreground">
               {message.value.length}/500
             </span>
+          </div>
+        )}
+      </div>
+
+      {/* Share Username Section */}
+      <div className="bg-card rounded-xl border border-border p-4 mb-6">
+        <label className="flex items-center gap-3 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={shareUsername}
+            onChange={e => handleShareUsernameChange(e.target.checked)}
+            className="w-5 h-5 rounded border-border text-primary focus:ring-primary"
+          />
+          <span className="text-sm font-medium text-foreground">
+            Share my username
+          </span>
+        </label>
+        <p className="text-xs text-muted-foreground mt-1 ml-8">
+          The recipient will see this name when they receive your request
+        </p>
+        {shareUsername && (
+          <div className="mt-3">
+            <input
+              type="text"
+              value={customUsername}
+              onChange={e => handleCustomUsernameChange(e.target.value)}
+              placeholder="Enter username to share"
+              className="w-full bg-muted/50 text-foreground placeholder-muted-foreground focus:outline-none rounded-lg px-3 py-2 text-sm"
+              aria-label="Username to share with contact"
+            />
           </div>
         )}
       </div>
