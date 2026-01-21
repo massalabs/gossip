@@ -460,19 +460,23 @@ export class AnnouncementService {
       }
     }
 
-    // Parse username:message format
+    // Parse announcement message format:
+    // - New format with username: "username:message" (colon-separated)
+    // - New format without username: "message" (no colon, user opted out of sharing)
+    // - Old format (backwards compat): "message" (no colon, from older clients)
+    // The username is used as the initial contact name if present.
     let extractedUsername: string | undefined;
     let announcementMessage: string | undefined;
 
     if (rawMessage) {
       const colonIndex = rawMessage.indexOf(':');
       if (colonIndex !== -1) {
-        // New format: username:message
+        // New format with username: extract username before first colon
         extractedUsername = rawMessage.slice(0, colonIndex).trim() || undefined;
         announcementMessage =
           rawMessage.slice(colonIndex + 1).trim() || undefined;
       } else {
-        // Backwards compatibility: no colon means old format (just message)
+        // No colon: either user opted out of sharing username, or old format
         announcementMessage = rawMessage;
       }
     }

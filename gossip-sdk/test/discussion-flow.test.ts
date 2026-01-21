@@ -170,11 +170,12 @@ describe('Discussion Flow', () => {
       );
     });
 
-    it('Bob receives announcement without username (empty before colon)', async () => {
+    it('Bob receives legacy format announcement with empty username (colon prefix)', async () => {
       const aliceAnnouncement = new Uint8Array(200);
       crypto.getRandomValues(aliceAnnouncement);
 
-      // No username, just message (starts with colon)
+      // Legacy format: colon with no username before it
+      // This could come from older clients that always included the colon
       const usernameMessage = ':Hello without username';
       const encodedUserData = new TextEncoder().encode(usernameMessage);
 
@@ -246,11 +247,12 @@ describe('Discussion Flow', () => {
       expect(bobDiscussion?.announcementMessage).toBeUndefined();
     });
 
-    it('Bob receives old format announcement without colon (backwards compatibility)', async () => {
+    it('Bob receives announcement without username (no colon in message)', async () => {
       const aliceAnnouncement = new Uint8Array(200);
       crypto.getRandomValues(aliceAnnouncement);
 
-      // Old format: just a message without colon
+      // New format when user opts out of sharing username, or old client format
+      // Just a message without any colon - no username to extract
       const oldFormatMessage = 'Hi, this is an old format message';
       const encodedUserData = new TextEncoder().encode(oldFormatMessage);
 

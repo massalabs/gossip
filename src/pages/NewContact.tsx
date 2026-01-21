@@ -299,6 +299,7 @@ const NewContact: React.FC = () => {
               placeholder="Enter username to share"
               className="w-full bg-muted/50 text-foreground placeholder-muted-foreground focus:outline-none rounded-lg px-3 py-2 text-sm"
               aria-label="Username to share with contact"
+              maxLength={50}
             />
           </div>
         )}
