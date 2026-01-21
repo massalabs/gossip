@@ -451,12 +451,47 @@ export class AnnouncementService {
 
     log.info('announcement intended for us — decrypting');
 
-    let announcementMessage: string | undefined;
+    let rawMessage: string | undefined;
     if (result.user_data?.length > 0) {
       try {
-        announcementMessage = new TextDecoder().decode(result.user_data);
+        rawMessage = new TextDecoder().decode(result.user_data);
       } catch (error) {
         log.error('failed to decode user data', error);
+      }
+    }
+
+    // Parse announcement message format:
+    // - JSON format: {"u":"username","m":"message"} (current)
+    // - Legacy colon format: "username:message" (backwards compat)
+    // - Plain text: "message" (oldest format)
+    // The username is used as the initial contact name if present.
+    // TODO: Remove legacy colon and plain text format support once all clients are updated
+    let extractedUsername: string | undefined;
+    let announcementMessage: string | undefined;
+
+    if (rawMessage) {
+      // Try JSON format first (starts with '{')
+      if (rawMessage.startsWith('{')) {
+        try {
+          const parsed = JSON.parse(rawMessage) as { u?: string; m?: string };
+          extractedUsername = parsed.u?.trim() || undefined;
+          announcementMessage = parsed.m?.trim() || undefined;
+        } catch {
+          // Invalid JSON, treat as plain text
+          announcementMessage = rawMessage;
+        }
+      } else {
+        // Legacy format: check for colon separator
+        const colonIndex = rawMessage.indexOf(':');
+        if (colonIndex !== -1) {
+          extractedUsername =
+            rawMessage.slice(0, colonIndex).trim() || undefined;
+          announcementMessage =
+            rawMessage.slice(colonIndex + 1).trim() || undefined;
+        } else {
+          // Plain text (oldest format)
+          announcementMessage = rawMessage;
+        }
       }
     }
 
@@ -481,9 +516,10 @@ export class AnnouncementService {
     const isNewContact = !contact;
 
     if (isNewContact) {
-      const name = await this._generateTemporaryContactName(
-        this.session.userIdEncoded
-      );
+      // Use extracted username if present, otherwise generate temporary name
+      const name =
+        extractedUsername ||
+        (await this._generateTemporaryContactName(this.session.userIdEncoded));
       await this.db.contacts.add({
         ownerUserId: this.session.userIdEncoded,
         userId: contactUserId,
