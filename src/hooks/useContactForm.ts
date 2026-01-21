@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Contact, db as appDb } from '../db';
 import { useAccountStore } from '../stores/accountStore';
@@ -52,6 +52,18 @@ export function useContactForm() {
     value: '',
     loading: false,
   });
+
+  const [shareUsername, setShareUsername] = useState(true);
+  const [customUsername, setCustomUsername] = useState(
+    userProfile?.username || ''
+  );
+
+  // Sync customUsername with profile username when it becomes available
+  useEffect(() => {
+    if (userProfile?.username && !customUsername) {
+      setCustomUsername(userProfile.username);
+    }
+  }, [userProfile?.username, customUsername]);
 
   const [publicKeys, setPublicKeys] = useState<UserPublicKeys | null>(null);
 
@@ -232,6 +244,14 @@ export function useContactForm() {
     setMessage({ value, loading: false });
   }, []);
 
+  const handleShareUsernameChange = useCallback((value: boolean) => {
+    setShareUsername(value);
+  }, []);
+
+  const handleCustomUsernameChange = useCallback((value: string) => {
+    setCustomUsername(value);
+  }, []);
+
   const handleFileImport = useCallback(
     async (event: React.ChangeEvent<HTMLInputElement>) => {
       if (!userProfile?.userId) return;
@@ -373,7 +393,15 @@ export function useContactForm() {
 
       await appDb.contacts.add(contact);
 
-      const announcementMessage = message.value.trim() || undefined;
+      // Construct announcement message as JSON
+      // Format: {"u":"username","m":"message"} - fields omitted if empty
+      const usernameToShare = shareUsername ? customUsername.trim() : '';
+      const messageContent = message.value.trim();
+      const payload: { u?: string; m?: string } = {};
+      if (usernameToShare) payload.u = usernameToShare;
+      if (messageContent) payload.m = messageContent;
+      const announcementMessage =
+        Object.keys(payload).length > 0 ? JSON.stringify(payload) : undefined;
       try {
         await gossipSdk.discussions.start(contact, announcementMessage);
       } catch (e) {
@@ -400,6 +428,8 @@ export function useContactForm() {
     userId.loading,
     mnsState.resolvedGossipId,
     navigate,
+    shareUsername,
+    customUsername,
   ]);
 
   return {
@@ -407,6 +437,8 @@ export function useContactForm() {
     userId,
     message,
     mnsState,
+    shareUsername,
+    customUsername,
 
     generalError,
     isSubmitting,
@@ -418,6 +450,8 @@ export function useContactForm() {
     handleNameChange,
     handleUserIdChange,
     handleMessageChange,
+    handleShareUsernameChange,
+    handleCustomUsernameChange,
     handleFileImport,
     handleSubmit,
   };
