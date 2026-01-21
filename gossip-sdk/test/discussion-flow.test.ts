@@ -128,14 +128,17 @@ describe('Discussion Flow', () => {
 
   describe('Announcement Username Parsing', () => {
     it('Bob receives announcement with username and uses it as contact name', async () => {
-      // Alice sends announcement with username:message format
+      // Alice sends announcement with JSON format
       const aliceAnnouncement = new Uint8Array(200);
       crypto.getRandomValues(aliceAnnouncement);
       aliceSession.establishOutgoingSession.mockReturnValue(aliceAnnouncement);
 
-      // Mock Bob receiving announcement with username in user_data
-      const usernameMessage = 'Alice:Hi, I would like to connect!';
-      const encodedUserData = new TextEncoder().encode(usernameMessage);
+      // Mock Bob receiving announcement with JSON payload
+      const jsonPayload = JSON.stringify({
+        u: 'Alice',
+        m: 'Hi, I would like to connect!',
+      });
+      const encodedUserData = new TextEncoder().encode(jsonPayload);
 
       bobSession.feedIncomingAnnouncement.mockReturnValue({
         announcer_public_keys: alicePk,
@@ -170,14 +173,13 @@ describe('Discussion Flow', () => {
       );
     });
 
-    it('Bob receives legacy format announcement with empty username (colon prefix)', async () => {
+    it('Bob receives JSON announcement without username (message only)', async () => {
       const aliceAnnouncement = new Uint8Array(200);
       crypto.getRandomValues(aliceAnnouncement);
 
-      // Legacy format: colon with no username before it
-      // This could come from older clients that always included the colon
-      const usernameMessage = ':Hello without username';
-      const encodedUserData = new TextEncoder().encode(usernameMessage);
+      // JSON format with message only, no username
+      const jsonPayload = JSON.stringify({ m: 'Hello without username' });
+      const encodedUserData = new TextEncoder().encode(jsonPayload);
 
       bobSession.feedIncomingAnnouncement.mockReturnValue({
         announcer_public_keys: alicePk,
@@ -213,9 +215,9 @@ describe('Discussion Flow', () => {
       const aliceAnnouncement = new Uint8Array(200);
       crypto.getRandomValues(aliceAnnouncement);
 
-      // Username only, no message
-      const usernameMessage = 'AliceUser:';
-      const encodedUserData = new TextEncoder().encode(usernameMessage);
+      // JSON format with username only, no message
+      const jsonPayload = JSON.stringify({ u: 'AliceUser' });
+      const encodedUserData = new TextEncoder().encode(jsonPayload);
 
       bobSession.feedIncomingAnnouncement.mockReturnValue({
         announcer_public_keys: alicePk,
@@ -286,13 +288,16 @@ describe('Discussion Flow', () => {
       expect(bobDiscussion?.announcementMessage).toBe(oldFormatMessage);
     });
 
-    it('Bob receives announcement with username containing special characters', async () => {
+    it('Bob receives JSON announcement with special characters (colons in message)', async () => {
       const aliceAnnouncement = new Uint8Array(200);
       crypto.getRandomValues(aliceAnnouncement);
 
-      // Username with spaces and special chars, message with colon
-      const usernameMessage = 'Alice Smith:Hello: how are you?';
-      const encodedUserData = new TextEncoder().encode(usernameMessage);
+      // JSON handles colons in both username and message properly
+      const jsonPayload = JSON.stringify({
+        u: 'Alice:Smith',
+        m: 'Hello: how are you?',
+      });
+      const encodedUserData = new TextEncoder().encode(jsonPayload);
 
       bobSession.feedIncomingAnnouncement.mockReturnValue({
         announcer_public_keys: alicePk,
@@ -306,22 +311,57 @@ describe('Discussion Flow', () => {
 
       await bobAnnouncementService.fetchAndProcessAnnouncements();
 
-      // Verify contact uses text before first colon
+      // Verify contact uses full username including colon
       const bobContact = await db.getContactByOwnerAndUserId(
         bobSession.userIdEncoded,
         aliceSession.userIdEncoded
       );
 
       expect(bobContact).toBeDefined();
-      expect(bobContact?.name).toBe('Alice Smith');
+      expect(bobContact?.name).toBe('Alice:Smith');
 
-      // Verify message includes everything after first colon
+      // Verify message is preserved exactly
       const bobDiscussion = await db.getDiscussionByOwnerAndContact(
         bobSession.userIdEncoded,
         aliceSession.userIdEncoded
       );
 
       expect(bobDiscussion?.announcementMessage).toBe('Hello: how are you?');
+    });
+
+    it('Bob receives legacy colon format (backwards compatibility)', async () => {
+      const aliceAnnouncement = new Uint8Array(200);
+      crypto.getRandomValues(aliceAnnouncement);
+
+      // Legacy format: username:message (from older clients)
+      const legacyMessage = 'OldAlice:Hello from old client';
+      const encodedUserData = new TextEncoder().encode(legacyMessage);
+
+      bobSession.feedIncomingAnnouncement.mockReturnValue({
+        announcer_public_keys: alicePk,
+        timestamp: Date.now(),
+        user_data: encodedUserData,
+      } as any);
+
+      vi.spyOn(mockProtocol, 'fetchAnnouncements').mockResolvedValue([
+        { counter: '1', data: aliceAnnouncement },
+      ]);
+
+      await bobAnnouncementService.fetchAndProcessAnnouncements();
+
+      const bobContact = await db.getContactByOwnerAndUserId(
+        bobSession.userIdEncoded,
+        aliceSession.userIdEncoded
+      );
+
+      expect(bobContact?.name).toBe('OldAlice');
+
+      const bobDiscussion = await db.getDiscussionByOwnerAndContact(
+        bobSession.userIdEncoded,
+        aliceSession.userIdEncoded
+      );
+
+      expect(bobDiscussion?.announcementMessage).toBe('Hello from old client');
     });
   });
 

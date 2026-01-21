@@ -249,8 +249,7 @@ export function useContactForm() {
   }, []);
 
   const handleCustomUsernameChange = useCallback((value: string) => {
-    // Strip colons to prevent parsing issues with username:message format
-    setCustomUsername(value.replace(/:/g, ''));
+    setCustomUsername(value);
   }, []);
 
   const handleFileImport = useCallback(
@@ -394,13 +393,15 @@ export function useContactForm() {
 
       await appDb.contacts.add(contact);
 
-      // Construct announcement message with optional username prefix
-      // Format: "username:message" when username is shared, or just "message" otherwise
+      // Construct announcement message as JSON
+      // Format: {"u":"username","m":"message"} - fields omitted if empty
       const usernameToShare = shareUsername ? customUsername.trim() : '';
       const messageContent = message.value.trim();
-      const announcementMessage = usernameToShare
-        ? `${usernameToShare}:${messageContent}`
-        : messageContent || undefined;
+      const payload: { u?: string; m?: string } = {};
+      if (usernameToShare) payload.u = usernameToShare;
+      if (messageContent) payload.m = messageContent;
+      const announcementMessage =
+        Object.keys(payload).length > 0 ? JSON.stringify(payload) : undefined;
       try {
         await gossipSdk.discussions.start(contact, announcementMessage);
       } catch (e) {

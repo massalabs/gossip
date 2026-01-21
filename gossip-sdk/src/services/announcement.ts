@@ -461,23 +461,37 @@ export class AnnouncementService {
     }
 
     // Parse announcement message format:
-    // - New format with username: "username:message" (colon-separated)
-    // - New format without username: "message" (no colon, user opted out of sharing)
-    // - Old format (backwards compat): "message" (no colon, from older clients)
+    // - JSON format: {"u":"username","m":"message"} (current)
+    // - Legacy colon format: "username:message" (backwards compat)
+    // - Plain text: "message" (oldest format)
     // The username is used as the initial contact name if present.
+    // TODO: Remove legacy colon and plain text format support once all clients are updated
     let extractedUsername: string | undefined;
     let announcementMessage: string | undefined;
 
     if (rawMessage) {
-      const colonIndex = rawMessage.indexOf(':');
-      if (colonIndex !== -1) {
-        // New format with username: extract username before first colon
-        extractedUsername = rawMessage.slice(0, colonIndex).trim() || undefined;
-        announcementMessage =
-          rawMessage.slice(colonIndex + 1).trim() || undefined;
+      // Try JSON format first (starts with '{')
+      if (rawMessage.startsWith('{')) {
+        try {
+          const parsed = JSON.parse(rawMessage) as { u?: string; m?: string };
+          extractedUsername = parsed.u?.trim() || undefined;
+          announcementMessage = parsed.m?.trim() || undefined;
+        } catch {
+          // Invalid JSON, treat as plain text
+          announcementMessage = rawMessage;
+        }
       } else {
-        // No colon: either user opted out of sharing username, or old format
-        announcementMessage = rawMessage;
+        // Legacy format: check for colon separator
+        const colonIndex = rawMessage.indexOf(':');
+        if (colonIndex !== -1) {
+          extractedUsername =
+            rawMessage.slice(0, colonIndex).trim() || undefined;
+          announcementMessage =
+            rawMessage.slice(colonIndex + 1).trim() || undefined;
+        } else {
+          // Plain text (oldest format)
+          announcementMessage = rawMessage;
+        }
       }
     }
 
