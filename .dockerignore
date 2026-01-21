@@ -1,0 +1,53 @@
+# Dependencies (will be installed in container)
+node_modules
+*/node_modules
+
+# Build outputs
+dist
+*/dist
+*.tsbuildinfo
+
+# Environment files
+.env
+.env.local
+.env.*.local
+*/.env
+*/.env.local
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git
+.git
+.gitignore
+
+# Logs
+*.log
+npm-debug.log*
+
+# Test
+coverage
+.nyc_output
+
+# Mobile/Native (not needed for bot)
+android
+ios
+capacitor.config.ts
+
+# Wasm source (only need compiled output)
+wasm
+
+# Documentation and scripts
+scripts
+*.md
+!bot/README.md
+
+# Public assets (not needed for bot)
+public

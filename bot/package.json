@@ -1,0 +1,23 @@
+{
+  "name": "gossip-bot",
+  "version": "0.0.1",
+  "description": "AI bot using the Gossip SDK",
+  "type": "module",
+  "main": "./src/index.ts",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "dev": "tsx watch src/index.ts",
+    "get-user-id": "tsx src/get-user-id.ts"
+  },
+  "dependencies": {
+    "gossip-sdk": "*",
+    "dexie": "^4.2.0",
+    "dotenv": "^16.4.5",
+    "fake-indexeddb": "^6.2.5"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "typescript": "^5.9.3",
+    "@types/node": "^24.10.1"
+  }
+}

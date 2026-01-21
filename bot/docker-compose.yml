@@ -1,0 +1,65 @@
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: gossip-ollama
+    ports:
+      - '11434:11434'
+    volumes:
+      - ollama_data:/root/.ollama
+    # Uncomment for GPU support (NVIDIA)
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+    healthcheck:
+      test: ['CMD', 'ollama', 'list']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  ollama-pull:
+    image: ollama/ollama:latest
+    container_name: gossip-ollama-pull
+    depends_on:
+      ollama:
+        condition: service_healthy
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_HOST=ollama:11434
+    entrypoint: ['/bin/sh', '-c']
+    command:
+      - |
+        echo "Pulling model ${OLLAMA_MODEL:-llama3.2}..."
+        ollama pull ${OLLAMA_MODEL:-llama3.2}
+        echo "Model ready!"
+    restart: 'no'
+
+  bot:
+    build:
+      context: ..
+      dockerfile: bot/Dockerfile
+    container_name: gossip-bot
+    network_mode: host
+    depends_on:
+      ollama:
+        condition: service_healthy
+      ollama-pull:
+        condition: service_completed_successfully
+    environment:
+      - BOT_MNEMONIC=${BOT_MNEMONIC}
+      - PROTOCOL_URL=${PROTOCOL_URL:-https://api.usegossip.com/api}
+      - POLLING_INTERVAL_MS=${POLLING_INTERVAL_MS:-5000}
+      - AI_PROVIDER=${AI_PROVIDER:-ollama}
+      - OLLAMA_URL=http://localhost:11434
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-claude-sonnet-4-20250514}
+    restart: unless-stopped
+
+volumes:
+  ollama_data:

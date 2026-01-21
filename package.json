@@ -4,7 +4,8 @@
   "version": "0.0.5",
   "type": "module",
   "workspaces": [
-    "gossip-sdk"
+    "gossip-sdk",
+    "bot"
   ],
   "scripts": {
     "dev": "vite",

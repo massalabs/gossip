@@ -118,6 +118,8 @@ export interface GossipSdkInitOptions {
 export interface OpenSessionOptions {
   /** BIP39 mnemonic phrase */
   mnemonic: string;
+  /** Username for headless/bot mode (optional, defaults to 'user') */
+  username?: string;
   /** Existing encrypted session blob (for restoring session) */
   encryptedSession?: Uint8Array;
   /** Encryption key for decrypting session */
@@ -381,6 +383,34 @@ class GossipSdkImpl {
     // Reset any messages stuck in SENDING status to FAILED
     // This handles app crash/close during message send
     await this.resetStuckSendingMessages(db);
+
+    // Ensure user profile exists (required for headless/bot mode where app
+    // layer doesn't create profile during onboarding)
+    const existingProfile = await db.userProfile.get(session.userIdEncoded);
+    if (!existingProfile) {
+      const username = options.username || 'user';
+      console.log(
+        `[GossipSdk] Creating user profile for headless mode: ${username}`
+      );
+      await db.userProfile.add({
+        userId: session.userIdEncoded,
+        username,
+        status: 'online',
+        lastSeen: new Date(),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        security: {
+          encKeySalt: new Uint8Array(),
+          authMethod: 'password',
+          mnemonicBackup: {
+            encryptedMnemonic: new Uint8Array(),
+            createdAt: new Date(),
+            backedUp: true,
+          },
+        },
+        session: new Uint8Array(),
+      });
+    }
 
     this.state = {
       status: 'session_open',
