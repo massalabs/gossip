@@ -81,7 +81,7 @@ await gossipSdk.init({
   db: new GossipDatabase(),
 
   // Optional: API base URL (uses default if not provided)
-  protocolBaseUrl: 'https://api.usegossip.net',
+  protocolBaseUrl: 'https://api.usegossip.com',
 
   // Optional: Configuration overrides
   config: {
@@ -339,7 +339,7 @@ await gossipSdk.init({
   config: {
     // Network settings
     protocol: {
-      baseUrl: 'https://api.usegossip.net', // API endpoint
+      baseUrl: 'https://api.usegossip.com', // API endpoint
       timeout: 10000, // Request timeout (ms)
       retryAttempts: 3, // Retry count
     },
