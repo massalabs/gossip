@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import PageLayout from '../../components/ui/PageLayout';
 import PageHeader from '../../components/ui/PageHeader';
@@ -7,6 +7,8 @@ import { useAppStore } from '../../stores/appStore';
 import { useAccountStore } from '../../stores/accountStore';
 import { ROUTES } from '../../constants/routes';
 import { Globe, AlertCircle } from 'react-feather';
+import { resolveDeweb } from '@massalabs/massa-web3';
+import { openUrl } from '../../utils/linkUtils';
 
 const Web3Settings: React.FC = () => {
   const navigate = useNavigate();
@@ -14,6 +16,19 @@ const Web3Settings: React.FC = () => {
   const setMnsEnabled = useAppStore(s => s.setMnsEnabled);
   const fetchMnsDomains = useAppStore(s => s.fetchMnsDomains);
   const { userProfile, provider } = useAccountStore();
+  const [mnsUrl, setMnsUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    const resolveMnsLink = async () => {
+      try {
+        const url = await resolveDeweb('mns.massa');
+        setMnsUrl(url);
+      } catch (error) {
+        console.error('Failed to resolve mns.massa:', error);
+      }
+    };
+    resolveMnsLink();
+  }, []);
 
   const handleBack = () => {
     navigate(ROUTES.settings());
@@ -46,6 +61,24 @@ const Web3Settings: React.FC = () => {
           />
         </div>
         <div className="px-4 py-4 space-y-3">
+          <p className="text-sm text-muted-foreground">
+            MNS (Massa Name System) is a decentralized naming service that maps
+            human-readable domain names (like "alice.massa") to any data like
+            gossip IDs. When enabled, you can use MNS domains to identify and
+            contact other users. Create and manage your MNS here:{' '}
+            <a
+              href={mnsUrl || 'https://mns.massa.network/'}
+              onClick={e => {
+                e.preventDefault();
+                openUrl(mnsUrl || 'https://mns.massa.network/');
+              }}
+              className="text-primary underline hover:text-primary/80"
+              aria-label="https://mns.massa (opens in a new tab)"
+            >
+              https://mns.massa
+            </a>
+            .
+          </p>
           <div className="flex items-start gap-3 bg-muted/30 rounded-lg p-3 border border-border">
             <AlertCircle className="w-4 h-4 text-muted-foreground shrink-0 mt-0.5" />
             <div className="flex-1 space-y-2">
