@@ -7,7 +7,7 @@
 
 import { Capacitor } from '@capacitor/core';
 import { Preferences } from '@capacitor/preferences';
-import { encodeToBase64 } from 'gossip-sdk';
+import { encodeToBase64 } from '.';
 import { isAppInForeground } from './appState';
 
 // Preferences keys

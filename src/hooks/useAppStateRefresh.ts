@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { useAccountStore } from '../stores/accountStore';
-import { gossipSdk } from 'gossip-sdk';
+import { gossipSdk } from '@massalabs/gossip-sdk';
 import { defaultSyncConfig } from '../config/sync';
 import { useMessageStore } from '../stores/messageStore.tsx';
 import { useDiscussionStore } from '../stores/discussionStore.tsx';

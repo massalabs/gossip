@@ -11,7 +11,7 @@ import {
   EncryptionKey,
   generateNonce,
   validateUsernameFormat,
-} from 'gossip-sdk';
+} from '@massalabs/gossip-sdk';
 import { isWebAuthnSupported } from '../crypto/webauthn';
 import { biometricService } from '../services/biometricService';
 import {

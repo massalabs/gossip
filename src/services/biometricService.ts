@@ -17,7 +17,7 @@ import {
   encryptionKeyFromBytes,
   generateEncryptionKey,
   encodeUserId,
-} from 'gossip-sdk';
+} from '@massalabs/gossip-sdk';
 import { encodeToBase64, decodeFromBase64 } from '../utils';
 
 export interface BiometricAvailability {

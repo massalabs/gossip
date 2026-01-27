@@ -9,7 +9,7 @@ import type {
   IMessageProtocol,
   EncryptedMessage,
   BulletinItem,
-} from 'gossip-sdk';
+} from '@massalabs/gossip-sdk';
 
 export class MockMessageProtocol implements IMessageProtocol {
   private messages: Map<string, Uint8Array> = new Map();

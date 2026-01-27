@@ -10,7 +10,7 @@ import {
   UserPublicKeys,
   gossipSdk,
   type PublicKeyResult,
-} from 'gossip-sdk';
+} from '@massalabs/gossip-sdk';
 import { authService } from '../services';
 import { useFileShareContact } from './useFileShareContact';
 import { mnsService, isMnsDomain } from '../services/mns';

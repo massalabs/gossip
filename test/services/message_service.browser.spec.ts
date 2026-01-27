@@ -34,7 +34,7 @@ import {
   serializeReplyMessage,
   MESSAGE_TYPE_KEEP_ALIVE,
   Result,
-} from 'gossip-sdk';
+} from '@massalabs/gossip-sdk';
 import { MockMessageProtocol } from '../mocks/mockMessageProtocol';
 
 function getFailedOutgoingMessagesForContact(

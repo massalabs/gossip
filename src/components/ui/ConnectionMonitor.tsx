@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Move } from 'react-feather';
-import { gossipSdk } from 'gossip-sdk';
+import { gossipSdk } from '@massalabs/gossip-sdk';
 import { useOnlineStoreBase } from '../../stores/useOnlineStore';
 import { useDiscussionStore } from '../../stores/discussionStore';
 import { useAppStore } from '../../stores/appStore';

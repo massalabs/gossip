@@ -5,7 +5,11 @@
  * The SDK singleton (gossipSdk) handles all session-scoped services.
  */
 
-import { AuthService, createMessageProtocol, gossipSdk } from 'gossip-sdk';
+import {
+  AuthService,
+  createMessageProtocol,
+  gossipSdk,
+} from '@massalabs/gossip-sdk';
 import { notificationService } from './notifications';
 import { isAppInForeground } from '../utils/appState';
 import { db } from '../db';

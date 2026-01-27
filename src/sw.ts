@@ -8,7 +8,10 @@ import { clientsClaim, setCacheNameDetails } from 'workbox-core';
 import { NavigationRoute, registerRoute } from 'workbox-routing';
 import { protocolConfig } from './config/protocol';
 import { defaultSyncConfig } from './config/sync';
-import { RestMessageProtocol, type EncryptedMessage } from 'gossip-sdk';
+import {
+  RestMessageProtocol,
+  type EncryptedMessage,
+} from '@massalabs/gossip-sdk';
 import { db } from './db';
 import {
   getLastSyncTimestamp,

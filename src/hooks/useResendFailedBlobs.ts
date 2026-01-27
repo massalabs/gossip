@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { liveQuery, Subscription } from 'dexie';
 import { useAccountStore } from '../stores/accountStore';
-import { restMessageProtocol, gossipSdk } from 'gossip-sdk';
+import { restMessageProtocol, gossipSdk } from '@massalabs/gossip-sdk';
 import {
   Discussion,
   DiscussionStatus,

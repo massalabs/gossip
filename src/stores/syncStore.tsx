@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { createSelectors } from './utils/createSelectors';
-import { Result } from 'gossip-sdk';
+import { Result } from '@massalabs/gossip-sdk';
 
 export enum SyncKey {
   RESEND_ANNOUNCEMENT = 'resend announcement',
