@@ -17,7 +17,9 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["gossip-sdk/src/*"],
-      "@/assets/generated/wasm/*": ["gossip-sdk/src/assets/generated/wasm/*"]
+      "@/assets/generated/wasm/*": ["gossip-sdk/src/assets/generated/wasm/*"],
+      "@massalabs/gossip-sdk": ["gossip-sdk/src/index.ts"],
+      "@massalabs/gossip-sdk/*": ["gossip-sdk/src/*"]
     },
 
     /* Linting */

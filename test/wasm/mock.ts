@@ -13,7 +13,7 @@ import {
   SendMessageOutput,
   ReceiveMessageOutput,
   EncryptionKey,
-} from 'gossip-sdk';
+} from '@massalabs/gossip-sdk';
 import type { UserProfile } from '../../src/db';
 
 /**

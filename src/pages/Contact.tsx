@@ -12,7 +12,7 @@ import PageLayout from '../components/ui/PageLayout';
 import UserIdDisplay from '../components/ui/UserIdDisplay';
 import BaseModal from '../components/ui/BaseModal';
 import { Check, Edit2, Trash2 } from 'react-feather';
-import { UserPublicKeys, gossipSdk } from 'gossip-sdk';
+import { UserPublicKeys, gossipSdk } from '@massalabs/gossip-sdk';
 import { DiscussionStatus } from '../db';
 import { ROUTES } from '../constants/routes';
 

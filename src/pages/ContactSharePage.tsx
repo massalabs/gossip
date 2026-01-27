@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import ShareContact from '../components/settings/ShareContact';
 import { useDiscussionStore } from '../stores/discussionStore';
 import { ROUTES } from '../constants/routes';
-import { UserPublicKeys } from 'gossip-sdk';
+import { UserPublicKeys } from '@massalabs/gossip-sdk';
 
 const ContactSharePage: React.FC = () => {
   const { userId } = useParams<{ userId: string }>();

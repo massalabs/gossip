@@ -8,7 +8,7 @@ import {
   validateUsernameFormat,
   validateUsernameFormatAndAvailability,
   db,
-} from 'gossip-sdk';
+} from '@massalabs/gossip-sdk';
 import PageHeader from '../ui/PageHeader';
 import PageLayout from '../ui/PageLayout';
 import TabSwitcher from '../ui/TabSwitcher';

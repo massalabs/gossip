@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { AppRoute } from '../../src/constants/routes';
 import { extractInvitePath, parseInvite } from '../../src/utils/qrCodeParser';
-import * as validationModule from 'gossip-sdk';
+import * as validationModule from '@massalabs/gossip-sdk';
 
 describe('qrCodeParser - extractInvitePath', () => {
   it('returns path when given a bare invite path', () => {

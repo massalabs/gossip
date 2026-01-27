@@ -6,10 +6,8 @@ import {
   generateUserKeys,
   UserKeys,
   encodeUserId,
-  createGossipSdk,
   SessionModule,
-  type GossipSdk,
-} from 'gossip-sdk';
+} from '@massalabs/gossip-sdk';
 import { MockMessageProtocol } from './mocks/mockMessageProtocol';
 
 interface InitSessionResult {

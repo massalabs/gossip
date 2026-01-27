@@ -9,7 +9,8 @@
   "scripts": {
     "dev": "vite",
     "dev:host": "vite --host",
-    "build": "tsc -b && vite build",
+    "build:sdk": "cd gossip-sdk && npm run build",
+    "build": "npm run build:sdk && tsc -b && vite build",
     "test": "vitest -c vite.config.ts --silent='passed-only'",
     "test:ui": "vitest -c vite.config.ts --ui",
     "test:run": "vitest -c vite.config.ts run",
@@ -48,6 +49,7 @@
     "release": "node scripts/release.mjs"
   },
   "dependencies": {
+    "@massalabs/gossip-sdk": "workspace:*",
     "@aparajita/capacitor-biometric-auth": "^9.1.2",
     "@aparajita/capacitor-secure-storage": "^7.1.6",
     "@capacitor-community/privacy-screen": "^6.0.0",

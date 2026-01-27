@@ -4,7 +4,7 @@ import PageHeader from '../ui/PageHeader';
 import PageLayout from '../ui/PageLayout';
 import TabSwitcher from '../ui/TabSwitcher';
 import { generateDeepLinkUrl } from '../../utils/inviteUrl';
-import { UserPublicKeys } from 'gossip-sdk';
+import { UserPublicKeys } from '@massalabs/gossip-sdk';
 import ShareContactQR from './ShareContactQR';
 import ShareContactCopySection from './ShareContactCopySection';
 import ShareContactFileSection from './ShareContactFileSection';
