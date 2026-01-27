@@ -13,7 +13,7 @@ import {
 } from 'react-feather';
 import { Message, MessageDirection, MessageStatus } from '../../db';
 import { formatTime } from '../../utils/timeUtils';
-import { gossipSdk } from 'gossip-sdk';
+import { gossipSdk } from '@massalabs/gossip-sdk';
 import { parseLinks, openUrl } from '../../utils/linkUtils';
 import { useMarkMessageAsRead } from '../../hooks/useMarkMessageAsRead';
 

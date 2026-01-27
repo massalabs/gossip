@@ -17,12 +17,12 @@ export {
   deleteContact,
   updateDiscussionName,
   db,
-} from 'gossip-sdk';
+} from '@massalabs/gossip-sdk';
 export type {
   ValidationResult,
   UpdateContactNameResult,
   DeleteContactResult,
   UpdateDiscussionNameResult,
-} from 'gossip-sdk';
+} from '@massalabs/gossip-sdk';
 export * from './fetchPrice';
 export * from './timeUtils';

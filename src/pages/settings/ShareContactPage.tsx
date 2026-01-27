@@ -4,7 +4,7 @@ import ShareContact from '../../components/settings/ShareContact';
 import { useAccountStore } from '../../stores/accountStore';
 import { useAppStore } from '../../stores/appStore';
 import { ROUTES } from '../../constants/routes';
-import { gossipSdk } from 'gossip-sdk';
+import { gossipSdk } from '@massalabs/gossip-sdk';
 
 const ShareContactPage: React.FC = () => {
   const navigate = useNavigate();

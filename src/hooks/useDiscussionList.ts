@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
 import { useAccountStore } from '../stores/accountStore';
-import { gossipSdk } from 'gossip-sdk';
+import { gossipSdk } from '@massalabs/gossip-sdk';
 import { Discussion, db as appDb, DiscussionStatus } from '../db';
 
 export const useDiscussionList = () => {

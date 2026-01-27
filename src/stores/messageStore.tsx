@@ -8,7 +8,7 @@ import {
 } from '../db';
 import { createSelectors } from './utils/createSelectors';
 import { useAccountStore } from './accountStore';
-import { gossipSdk } from 'gossip-sdk';
+import { gossipSdk } from '@massalabs/gossip-sdk';
 import { liveQuery, Subscription } from 'dexie';
 
 interface MessageStoreState {

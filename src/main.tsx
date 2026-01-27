@@ -8,7 +8,7 @@ import { enableDebugLogger } from './utils/logger.ts';
 import { Buffer } from 'buffer';
 
 // SDK configuration
-import { gossipSdk } from 'gossip-sdk';
+import { gossipSdk } from '@massalabs/gossip-sdk';
 import { protocolConfig } from './config/protocol';
 import { db } from './db';
 
