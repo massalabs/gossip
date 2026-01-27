@@ -27,7 +27,9 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Run tests
-        run: npm run test:run
+        run: |
+          npm run build
+          npm run test:run
 
       - name: Run gossip-sdk tests
         run: npm --workspace gossip-sdk test

@@ -4,7 +4,7 @@ import {
   validateUsernameFormatAndAvailability,
   setDb,
   db,
-} from 'gossip-sdk';
+} from '@massalabs/gossip-sdk';
 import { db as appDb } from '../../../src/db';
 import { userProfile } from '../../helpers';
 import { Dexie, PromiseExtended } from 'dexie';

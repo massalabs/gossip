@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
 import * as yaml from 'js-yaml';
 
-import { decodeFromBase64, encodeToBase64 } from 'gossip-sdk';
+import { decodeFromBase64, encodeToBase64 } from '@massalabs/gossip-sdk';
 
 export interface FileContact {
   userPubKeys: Uint8Array;

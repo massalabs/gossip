@@ -3,7 +3,7 @@ import {
   validateMnemonic,
   decrypt,
   deriveKey,
-} from 'gossip-sdk';
+} from '@massalabs/gossip-sdk';
 import { biometricService } from '../../services/biometricService';
 import { UserProfile } from '../../db';
 

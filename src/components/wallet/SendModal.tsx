@@ -6,7 +6,7 @@ import Button from '../ui/Button';
 import BaseModal from '../ui/BaseModal';
 import ConfirmTransactionDialog from './ConfirmTransactionDialog';
 import FeeConfigModal from './FeeConfigModal';
-import type { FeeConfig } from 'gossip-sdk';
+import type { FeeConfig } from '@massalabs/gossip-sdk';
 import { useAccountStore } from '../../stores/accountStore';
 import TokenSelect from './TokenSelect';
 import { useSend } from '../../hooks/temp/useSend';

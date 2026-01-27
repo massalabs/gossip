@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { ROUTES } from '../../src/constants/routes';
-import { encodeUserId, formatUserId } from 'gossip-sdk';
+import { encodeUserId, formatUserId } from '@massalabs/gossip-sdk';
 
 describe('App jsdom example', () => {
   it('runs in jsdom by default', () => {
