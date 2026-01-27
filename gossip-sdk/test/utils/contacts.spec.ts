@@ -1,29 +1,29 @@
 /**
- * Contacts Utilities Tests
+ * Contacts utilities tests
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { addContact, getContact, getContacts } from '../src/contacts';
-import { updateContactName, deleteContact } from '../src/utils/contacts';
 import {
   db,
   DiscussionDirection,
   DiscussionStatus,
+  MessageType,
   MessageDirection,
   MessageStatus,
-  MessageType,
-} from '../src/db';
-import { encodeUserId } from '../src/utils/userId';
-import type { UserPublicKeys } from '../src/assets/generated/wasm/gossip_wasm';
-import type { SessionModule } from '../src/wasm/session';
+} from '../../src/db';
+import { encodeUserId } from '../../src/utils/userId';
+import { addContact, getContact, getContacts } from '../../src/contacts';
+import { updateContactName, deleteContact } from '../../src/utils/contacts';
+import type { SessionModule } from '../../src/wasm/session';
+import type { UserPublicKeys as UserPublicKeysType } from '../../src/assets/generated/wasm/gossip_wasm';
 
-const OWNER_USER_ID = encodeUserId(new Uint8Array(32).fill(1));
-const CONTACT_USER_ID = encodeUserId(new Uint8Array(32).fill(2));
-const CONTACT_USER_ID_2 = encodeUserId(new Uint8Array(32).fill(3));
+const CONTACTS_OWNER_USER_ID = encodeUserId(new Uint8Array(32).fill(1));
+const CONTACTS_CONTACT_USER_ID = encodeUserId(new Uint8Array(32).fill(2));
+const CONTACTS_CONTACT_USER_ID_2 = encodeUserId(new Uint8Array(32).fill(3));
 
 const publicKeys = {
   to_bytes: () => new Uint8Array([1, 2, 3]),
-} as unknown as UserPublicKeys;
+} as unknown as UserPublicKeysType;
 
 const fakeSession = {
   peerDiscard: vi.fn(),
@@ -39,23 +39,33 @@ describe('Contacts utilities', () => {
 
   it('adds and fetches a contact', async () => {
     const result = await addContact(
-      OWNER_USER_ID,
-      CONTACT_USER_ID,
+      CONTACTS_OWNER_USER_ID,
+      CONTACTS_CONTACT_USER_ID,
       'Alice',
       publicKeys,
       db
     );
     expect(result.success).toBe(true);
 
-    const contact = await getContact(OWNER_USER_ID, CONTACT_USER_ID, db);
+    const contact = await getContact(
+      CONTACTS_OWNER_USER_ID,
+      CONTACTS_CONTACT_USER_ID,
+      db
+    );
     expect(contact?.name).toBe('Alice');
   });
 
   it('returns error when contact already exists', async () => {
-    await addContact(OWNER_USER_ID, CONTACT_USER_ID, 'Alice', publicKeys, db);
+    await addContact(
+      CONTACTS_OWNER_USER_ID,
+      CONTACTS_CONTACT_USER_ID,
+      'Alice',
+      publicKeys,
+      db
+    );
     const result = await addContact(
-      OWNER_USER_ID,
-      CONTACT_USER_ID,
+      CONTACTS_OWNER_USER_ID,
+      CONTACTS_CONTACT_USER_ID,
       'Alice 2',
       publicKeys,
       db
@@ -66,20 +76,32 @@ describe('Contacts utilities', () => {
   });
 
   it('updates contact name and rejects duplicates', async () => {
-    await addContact(OWNER_USER_ID, CONTACT_USER_ID, 'Alice', publicKeys, db);
-    await addContact(OWNER_USER_ID, CONTACT_USER_ID_2, 'Bob', publicKeys, db);
+    await addContact(
+      CONTACTS_OWNER_USER_ID,
+      CONTACTS_CONTACT_USER_ID,
+      'Alice',
+      publicKeys,
+      db
+    );
+    await addContact(
+      CONTACTS_OWNER_USER_ID,
+      CONTACTS_CONTACT_USER_ID_2,
+      'Bob',
+      publicKeys,
+      db
+    );
 
     const updateResult = await updateContactName(
-      OWNER_USER_ID,
-      CONTACT_USER_ID,
+      CONTACTS_OWNER_USER_ID,
+      CONTACTS_CONTACT_USER_ID,
       'Alice Updated',
       db
     );
     expect(updateResult.success).toBe(true);
 
     const duplicateResult = await updateContactName(
-      OWNER_USER_ID,
-      CONTACT_USER_ID,
+      CONTACTS_OWNER_USER_ID,
+      CONTACTS_CONTACT_USER_ID,
       'Bob',
       db
     );
@@ -90,11 +112,17 @@ describe('Contacts utilities', () => {
   });
 
   it('deletes contact and related data', async () => {
-    await addContact(OWNER_USER_ID, CONTACT_USER_ID, 'Alice', publicKeys, db);
+    await addContact(
+      CONTACTS_OWNER_USER_ID,
+      CONTACTS_CONTACT_USER_ID,
+      'Alice',
+      publicKeys,
+      db
+    );
 
     await db.discussions.add({
-      ownerUserId: OWNER_USER_ID,
-      contactUserId: CONTACT_USER_ID,
+      ownerUserId: CONTACTS_OWNER_USER_ID,
+      contactUserId: CONTACTS_CONTACT_USER_ID,
       direction: DiscussionDirection.INITIATED,
       status: DiscussionStatus.ACTIVE,
       unreadCount: 0,
@@ -103,8 +131,8 @@ describe('Contacts utilities', () => {
     });
 
     await db.messages.add({
-      ownerUserId: OWNER_USER_ID,
-      contactUserId: CONTACT_USER_ID,
+      ownerUserId: CONTACTS_OWNER_USER_ID,
+      contactUserId: CONTACTS_CONTACT_USER_ID,
       content: 'Hello',
       type: MessageType.TEXT,
       direction: MessageDirection.OUTGOING,
@@ -113,8 +141,8 @@ describe('Contacts utilities', () => {
     });
 
     const result = await deleteContact(
-      OWNER_USER_ID,
-      CONTACT_USER_ID,
+      CONTACTS_OWNER_USER_ID,
+      CONTACTS_CONTACT_USER_ID,
       db,
       fakeSession
     );
@@ -122,7 +150,7 @@ describe('Contacts utilities', () => {
     expect(result.success).toBe(true);
     expect(fakeSession.peerDiscard).toHaveBeenCalled();
 
-    const contacts = await getContacts(OWNER_USER_ID, db);
+    const contacts = await getContacts(CONTACTS_OWNER_USER_ID, db);
     expect(contacts.length).toBe(0);
   });
 });

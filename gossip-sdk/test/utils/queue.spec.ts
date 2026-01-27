@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { PromiseQueue, QueueManager } from '../src/utils/queue';
+import { PromiseQueue, QueueManager } from '../../src/utils/queue';
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
