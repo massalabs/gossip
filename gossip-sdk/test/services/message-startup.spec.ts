@@ -4,7 +4,7 @@
  * SENDING reset on startup, messages from unknown peers, seeker stabilization.
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import {
   GossipDatabase,
   MessageStatus,
@@ -13,9 +13,7 @@ import {
   DiscussionStatus,
   DiscussionDirection,
 } from '../../src/db';
-import type { SessionModule } from '../../src/wasm/session';
 import { encodeUserId } from '../../src/utils/userId';
-import { SessionStatus } from '../../src/assets/generated/wasm/gossip_wasm';
 import { defaultSdkConfig } from '../../src/config/sdk';
 
 // ============================================================================
@@ -329,67 +327,5 @@ describe('Seeker Stabilization Logic', () => {
     }
 
     expect(loopCount).toBe(maxIterations);
-  });
-});
-
-// ============================================================================
-// Decryption Failure Handling
-// ============================================================================
-
-const EDGE_SEEKER_SIZE = 34;
-
-function createEdgeSession(
-  status: SessionStatus = SessionStatus.Active
-): SessionModule {
-  return {
-    peerSessionStatus: vi.fn().mockReturnValue(status),
-    sendMessage: vi.fn().mockResolvedValue({
-      seeker: new Uint8Array(EDGE_SEEKER_SIZE).fill(1),
-      data: new Uint8Array([1, 2, 3, 4]),
-    }),
-    feedIncomingMessageBoardRead: vi.fn(),
-    refresh: vi.fn().mockResolvedValue([]),
-    feedIncomingAnnouncement: vi.fn(),
-    establishOutgoingSession: vi
-      .fn()
-      .mockResolvedValue(new Uint8Array([1, 2, 3])),
-    toEncryptedBlob: vi.fn(),
-    userIdEncoded: EDGE_OWNER_USER_ID,
-    userIdRaw: new Uint8Array(32).fill(1),
-    userId: new Uint8Array(32).fill(1),
-    getMessageBoardReadKeys: vi.fn().mockReturnValue([]),
-    cleanup: vi.fn(),
-  } as unknown as SessionModule;
-}
-
-describe('Decryption Failure Handling', () => {
-  it('should handle undefined return from feedIncomingMessageBoardRead gracefully', async () => {
-    const mockSession = createEdgeSession();
-
-    (
-      mockSession.feedIncomingMessageBoardRead as ReturnType<typeof vi.fn>
-    ).mockResolvedValue(undefined);
-
-    const result = await mockSession.feedIncomingMessageBoardRead(
-      new Uint8Array(32),
-      new Uint8Array(100)
-    );
-
-    expect(result).toBeUndefined();
-  });
-
-  it('should handle feedIncomingMessageBoardRead throwing error', async () => {
-    const mockSession = createEdgeSession();
-
-    (
-      mockSession.feedIncomingMessageBoardRead as ReturnType<typeof vi.fn>
-    ).mockRejectedValue(new Error('Decryption failed: invalid ciphertext'));
-
-    await expect(
-      mockSession.feedIncomingMessageBoardRead(
-        new Uint8Array(32),
-        new Uint8Array(100)
-      )
-    ).rejects.toThrow('Decryption failed');
   });
 });
