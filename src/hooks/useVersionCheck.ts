@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { db } from '../db';
+import { db } from 'gossip-sdk';
 import { STORAGE_KEYS, clearAppStorage } from '../utils/localStorage';
 import { useLocalStorage } from './useLocalStorage';
 import { APP_BUILD_ID } from '../config/version';

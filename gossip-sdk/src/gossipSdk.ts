@@ -45,7 +45,6 @@ import {
   type Discussion,
   type Message,
   type UserProfile,
-  MessageStatus,
 } from './db';
 import { setDb } from './db';
 import { IMessageProtocol, createMessageProtocol } from './api/messageProtocol';
@@ -59,12 +58,16 @@ import {
 import { startWasmInitialization, ensureWasmInitialized } from './wasm/loader';
 import { generateUserKeys, UserKeys } from './wasm/userKeys';
 import { SessionModule } from './wasm/session';
+import { SessionStatus } from './assets/generated/wasm/gossip_wasm';
 import { EncryptionKey } from './wasm/encryption';
 import {
   AnnouncementService,
   type AnnouncementReceptionResult,
 } from './services/announcement';
-import { DiscussionService } from './services/discussion';
+import {
+  discussionInitializationResult,
+  DiscussionService,
+} from './services/discussion';
 import {
   MessageService,
   type MessageResult,
@@ -83,7 +86,6 @@ import {
 } from './utils/validation';
 import { QueueManager } from './utils/queue';
 import { encodeUserId, decodeUserId } from './utils/userId';
-import type { GossipSdkEvents } from './types/events';
 import {
   getContacts,
   getContact,
@@ -94,18 +96,26 @@ import {
 import type { UserPublicKeys } from './wasm/bindings';
 import {
   SdkEventEmitter,
-  type SdkEventType,
+  SdkEventType,
   type SdkEventHandlers,
 } from './core/SdkEventEmitter';
 import { SdkPolling } from './core/SdkPolling';
 import { AnnouncementPayload } from './utils/announcementPayload';
+import { Result } from './utils/type';
 
 // Re-export event types
-export type { SdkEventType, SdkEventHandlers };
+export type { SdkEventHandlers };
+export { SdkEventType };
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
+
+export enum SdkStatus {
+  UNINITIALIZED = 'uninitialized',
+  INITIALIZED = 'initialized',
+  SESSION_OPEN = 'session_open',
+}
 
 export interface GossipSdkInitOptions {
   /** Database instance */
@@ -136,17 +146,17 @@ export interface OpenSessionOptions {
 // SDK State
 // ─────────────────────────────────────────────────────────────────────────────
 
-type SdkStateUninitialized = { status: 'uninitialized' };
+type SdkStateUninitialized = { status: SdkStatus.UNINITIALIZED };
 
 type SdkStateInitialized = {
-  status: 'initialized';
+  status: SdkStatus.INITIALIZED;
   db: GossipDatabase;
   messageProtocol: IMessageProtocol;
   config: SdkConfig;
 };
 
 type SdkStateSessionOpen = {
-  status: 'session_open';
+  status: SdkStatus.SESSION_OPEN;
   db: GossipDatabase;
   messageProtocol: IMessageProtocol;
   config: SdkConfig;
@@ -169,7 +179,7 @@ type SdkState =
 // ─────────────────────────────────────────────────────────────────────────────
 
 class GossipSdkImpl {
-  private state: SdkState = { status: 'uninitialized' };
+  private state: SdkState = { status: SdkStatus.UNINITIALIZED };
 
   // Core components
   private eventEmitter = new SdkEventEmitter();
@@ -198,7 +208,7 @@ class GossipSdkImpl {
    * Initialize the SDK. Call once at app startup.
    */
   async init(options: GossipSdkInitOptions): Promise<void> {
-    if (this.state.status !== 'uninitialized') {
+    if (this.state.status !== SdkStatus.UNINITIALIZED) {
       console.warn('[GossipSdk] Already initialized');
       return;
     }
@@ -225,7 +235,7 @@ class GossipSdkImpl {
     this._auth = new AuthService(options.db, messageProtocol);
 
     this.state = {
-      status: 'initialized',
+      status: SdkStatus.INITIALIZED,
       db: options.db,
       messageProtocol,
       config,
@@ -237,11 +247,11 @@ class GossipSdkImpl {
    * Generates keys from mnemonic and initializes session.
    */
   async openSession(options: OpenSessionOptions): Promise<void> {
-    if (this.state.status === 'uninitialized') {
+    if (this.state.status === SdkStatus.UNINITIALIZED) {
       throw new Error('SDK not initialized. Call init() first.');
     }
 
-    if (this.state.status === 'session_open') {
+    if (this.state.status === SdkStatus.SESSION_OPEN) {
       throw new Error('Session already open. Call closeSession() first.');
     }
 
@@ -304,79 +314,41 @@ class GossipSdkImpl {
       session.load(profileForLoad, options.encryptionKey);
     }
 
-    // Create event handlers that wire to our event system
-    const serviceEvents: GossipSdkEvents = {
-      onMessageReceived: (message: Message) => {
-        this.eventEmitter.emit('message', message);
-      },
-      onMessageSent: (message: Message) => {
-        this.eventEmitter.emit('messageSent', message);
-      },
-      onMessageFailed: (message: Message, error: Error) => {
-        this.eventEmitter.emit('messageFailed', message, error);
-      },
-      onDiscussionRequest: (discussion: Discussion, contact: Contact) => {
-        this.eventEmitter.emit('discussionRequest', discussion, contact);
-      },
-      onDiscussionStatusChanged: (discussion: Discussion) => {
-        this.eventEmitter.emit('discussionStatusChanged', discussion);
-      },
-      onSessionBroken: (discussion: Discussion) => {
-        this.eventEmitter.emit('sessionBroken', discussion);
-      },
-      onSessionRenewed: (discussion: Discussion) => {
-        this.eventEmitter.emit('sessionRenewed', discussion);
-      },
-      onError: (error: Error, context: string) => {
-        this.eventEmitter.emit('error', error, context);
-      },
-      // Auto-renewal: when session is lost, automatically renew it
-      onSessionRenewalNeeded: (contactUserId: string) => {
-        console.log('[GossipSdk] Session renewal needed for', contactUserId);
-        this.handleSessionRenewal(contactUserId);
-      },
-      // Auto-accept: when peer sent us an announcement, accept/respond to establish session
-      onSessionAcceptNeeded: (contactUserId: string) => {
-        console.log('[GossipSdk] Session accept needed for', contactUserId);
-        this.handleSessionAccept(contactUserId);
-      },
-      // Session became active: peer accepted our announcement, process waiting messages
-      onSessionBecameActive: (contactUserId: string) => {
-        console.log('[GossipSdk] Session became active for', contactUserId);
-        this.handleSessionBecameActive(contactUserId);
-      },
-    };
-
     // Get config from initialized state
     const { config } = this.state;
 
-    // Create services with config
+    // Create services with config (refreshService will be set after creation)
     this._announcement = new AnnouncementService(
       db,
       messageProtocol,
       session,
-      serviceEvents,
+      this.eventEmitter,
       config
     );
+
     this._discussion = new DiscussionService(
       db,
       this._announcement,
       session,
-      serviceEvents
+      this.eventEmitter
     );
+
     this._message = new MessageService(
       db,
       messageProtocol,
       session,
       this._discussion,
-      serviceEvents,
+      this.eventEmitter,
       config
     );
+
     this._refresh = new RefreshService(
       db,
       this._message,
+      this._discussion,
+      this._announcement,
       session,
-      serviceEvents
+      this.eventEmitter
     );
 
     // Publish gossip ID (public key) on messageProtocol so the user is discoverable
@@ -384,13 +356,18 @@ class GossipSdkImpl {
       session.ourPk,
       session.userIdEncoded
     );
+    // Now set refreshService on other services
+    this._announcement.setRefreshService(this._refresh);
+    this._discussion.setRefreshService(this._refresh);
+    this._message.setRefreshService(this._refresh);
 
     // Reset any messages stuck in SENDING status to FAILED
     // This handles app crash/close during message send
     await this.resetStuckSendingMessages(db);
+    await this.resetStuckSendingAnnouncements(db);
 
     this.state = {
-      status: 'session_open',
+      status: SdkStatus.SESSION_OPEN,
       db,
       messageProtocol,
       config,
@@ -418,34 +395,36 @@ class GossipSdkImpl {
     session: SessionModule
   ): void {
     this._messagesAPI = {
+      get: id => db.messages.get(id),
       send: message =>
         this.messageQueues.enqueue(message.contactUserId, () =>
           this._message!.sendMessage(message)
         ),
       fetch: () => this._message!.fetchMessages(),
-      resend: async messages => {
-        const promises: Promise<void>[] = [];
-        for (const [contactId, contactMessages] of messages.entries()) {
-          const singleContactMap = new Map([[contactId, contactMessages]]);
-          promises.push(
-            this.messageQueues.enqueue(contactId, () =>
-              this._message!.resendMessages(singleContactMap)
-            )
-          );
-        }
-        await Promise.all(promises);
-      },
       findBySeeker: (seeker, ownerUserId) =>
         this._message!.findMessageBySeeker(seeker, ownerUserId),
+      markAsRead: id => this._message!.markAsRead(id),
     };
 
     this._discussionsAPI = {
-      start: (contact, payload?: AnnouncementPayload) =>
+      start: (contact, payload?: AnnouncementPayload): Promise<Result<discussionInitializationResult, Error>> =>
         this._discussion!.initialize(contact, payload),
-      accept: discussion => this._discussion!.accept(discussion),
-      renew: contactUserId => this._discussion!.renew(contactUserId),
-      isStable: (ownerUserId, contactUserId) =>
-        this._discussion!.isStableState(ownerUserId, contactUserId),
+      accept: (discussion : Discussion): Promise<Result<Uint8Array, Error>> => this._discussion!.accept(discussion),
+      renew: async (
+        contactUserId: string
+      ): Promise<Result<Uint8Array, Error>> => {
+        return await this._discussion!.createSessionForContact(
+          contactUserId,
+          new Uint8Array(0)
+        );
+      },
+      getStatus: (contactUserId: string): SessionStatus => {
+        if (this.state.status !== SdkStatus.SESSION_OPEN)
+          throw new Error('No session open. Call openSession() first.');
+        return this.state.session.peerSessionStatus(
+          decodeUserId(contactUserId)
+        );
+      },
       list: ownerUserId => db.getDiscussionsByOwner(ownerUserId),
       get: (ownerUserId, contactUserId) =>
         db.getDiscussionByOwnerAndContact(ownerUserId, contactUserId),
@@ -453,8 +432,6 @@ class GossipSdkImpl {
 
     this._announcementsAPI = {
       fetch: () => this._announcement!.fetchAndProcessAnnouncements(),
-      resend: failedDiscussions =>
-        this._announcement!.resendAnnouncements(failedDiscussions),
     };
 
     this._contactsAPI = {
@@ -470,8 +447,7 @@ class GossipSdkImpl {
     };
 
     this._refreshAPI = {
-      handleSessionRefresh: activeDiscussions =>
-        this._refresh!.handleSessionRefresh(activeDiscussions),
+      handleSessionRefresh: () => this._refresh!.stateUpdate(),
     };
   }
 
@@ -479,7 +455,7 @@ class GossipSdkImpl {
    * Close the current session (logout).
    */
   async closeSession(): Promise<void> {
-    if (this.state.status !== 'session_open') {
+    if (this.state.status !== SdkStatus.SESSION_OPEN) {
       return;
     }
 
@@ -507,7 +483,7 @@ class GossipSdkImpl {
 
     // Reset to initialized state
     this.state = {
-      status: 'initialized',
+      status: SdkStatus.INITIALIZED,
       db: this.state.db,
       messageProtocol: this.state.messageProtocol,
       config: this.state.config,
@@ -538,12 +514,12 @@ class GossipSdkImpl {
 
   /** Whether a session is currently open */
   get isSessionOpen(): boolean {
-    return this.state.status === 'session_open';
+    return this.state.status === SdkStatus.SESSION_OPEN;
   }
 
   /** Whether SDK is initialized */
   get isInitialized(): boolean {
-    return this.state.status !== 'uninitialized';
+    return this.state.status !== SdkStatus.UNINITIALIZED;
   }
 
   /**
@@ -569,7 +545,7 @@ class GossipSdkImpl {
       encryptionKey: EncryptionKey
     ) => Promise<void>
   ): void {
-    if (this.state.status !== 'session_open') {
+    if (this.state.status !== SdkStatus.SESSION_OPEN) {
       throw new Error('No session open. Call openSession() first.');
     }
 
@@ -652,7 +628,7 @@ class GossipSdkImpl {
 
   /** Current SDK configuration (read-only) */
   get config(): SdkConfig {
-    if (this.state.status === 'uninitialized') {
+    if (this.state.status === SdkStatus.UNINITIALIZED) {
       return defaultSdkConfig;
     }
     return this.state.config;
@@ -676,7 +652,7 @@ class GossipSdkImpl {
    * Uses intervals from config.polling.
    */
   private startPolling(): void {
-    if (this.state.status !== 'session_open') {
+    if (this.state.status !== SdkStatus.SESSION_OPEN) {
       console.warn('[GossipSdk] Cannot start polling - no session open');
       return;
     }
@@ -690,14 +666,14 @@ class GossipSdkImpl {
       fetchAnnouncements: async () => {
         await this._announcement?.fetchAndProcessAnnouncements();
       },
-      handleSessionRefresh: async discussions => {
-        await this._refresh?.handleSessionRefresh(discussions);
+      handleSessionRefresh: async () => {
+        await this._refresh?.stateUpdate();
       },
       getActiveDiscussions: async () => {
-        return db.getActiveDiscussionsByOwner(session.userIdEncoded);
+        return db.getDiscussionsByOwner(session.userIdEncoded);
       },
       onError: (error, context) => {
-        this.eventEmitter.emit('error', error, context);
+        this.eventEmitter.emit(SdkEventType.ERROR, error, context);
       },
     });
   }
@@ -725,120 +701,14 @@ class GossipSdkImpl {
   // ─────────────────────────────────────────────────────────────────
 
   private requireSession(): SdkStateSessionOpen {
-    if (this.state.status !== 'session_open') {
+    if (this.state.status !== SdkStatus.SESSION_OPEN) {
       throw new Error('No session open. Call openSession() first.');
     }
     return this.state;
   }
 
-  /**
-   * Handle automatic session renewal when session is lost.
-   * Called by onSessionRenewalNeeded event.
-   */
-  private async handleSessionRenewal(contactUserId: string): Promise<void> {
-    if (this.state.status !== 'session_open') return;
-
-    try {
-      await this._discussion!.renew(contactUserId);
-      console.log('[GossipSdk] Session renewed for', contactUserId);
-
-      // After successful renewal, process any waiting messages
-      const sentCount =
-        await this._message!.processWaitingMessages(contactUserId);
-      if (sentCount > 0) {
-        console.log(
-          `[GossipSdk] Sent ${sentCount} waiting messages after renewal`
-        );
-      }
-    } catch (error) {
-      console.error('[GossipSdk] Session renewal failed:', error);
-      this.eventEmitter.emit(
-        'error',
-        error instanceof Error ? error : new Error(String(error)),
-        'session_renewal'
-      );
-    }
-  }
-
-  /**
-   * Handle automatic session accept when peer has sent us an announcement.
-   * Called by onSessionAcceptNeeded event.
-   * This is different from renewal - we respond to their session request.
-   */
-  private async handleSessionAccept(contactUserId: string): Promise<void> {
-    if (this.state.status !== 'session_open') return;
-
-    try {
-      const ownerUserId = this.state.session.userIdEncoded;
-      const discussion = await this.state.db.getDiscussionByOwnerAndContact(
-        ownerUserId,
-        contactUserId
-      );
-
-      if (!discussion) {
-        console.warn(
-          '[GossipSdk] No discussion found for accept, contactUserId:',
-          contactUserId
-        );
-        return;
-      }
-
-      // Accept the discussion (sends our announcement back to establish session)
-      await this._discussion!.accept(discussion);
-      console.log('[GossipSdk] Session accepted for', contactUserId);
-
-      // After successful accept, process any waiting messages
-      const sentCount =
-        await this._message!.processWaitingMessages(contactUserId);
-      if (sentCount > 0) {
-        console.log(
-          `[GossipSdk] Sent ${sentCount} waiting messages after accept`
-        );
-      }
-    } catch (error) {
-      console.error('[GossipSdk] Session accept failed:', error);
-      this.eventEmitter.emit(
-        'error',
-        error instanceof Error ? error : new Error(String(error)),
-        'session_accept'
-      );
-    }
-  }
-
-  /**
-   * Handle session becoming Active after peer accepts our announcement.
-   * Called by onSessionBecameActive event.
-   *
-   * This is different from handleSessionAccept:
-   * - handleSessionAccept: WE accept a session (peer initiated)
-   * - handleSessionBecameActive: PEER accepts our session (we initiated)
-   */
-  private async handleSessionBecameActive(
-    contactUserId: string
-  ): Promise<void> {
-    if (this.state.status !== 'session_open') return;
-
-    try {
-      // Process any messages that were queued as WAITING_SESSION
-      const sentCount =
-        await this._message!.processWaitingMessages(contactUserId);
-      if (sentCount > 0) {
-        console.log(
-          `[GossipSdk] Sent ${sentCount} waiting messages after session became active`
-        );
-      }
-    } catch (error) {
-      console.error('[GossipSdk] Processing waiting messages failed:', error);
-      this.eventEmitter.emit(
-        'error',
-        error instanceof Error ? error : new Error(String(error)),
-        'session_became_active'
-      );
-    }
-  }
-
   private async handleSessionPersist(): Promise<void> {
-    if (this.state.status !== 'session_open') return;
+    if (this.state.status !== SdkStatus.SESSION_OPEN) return;
 
     const { onPersist, persistEncryptionKey, session } = this.state;
     if (!onPersist || !persistEncryptionKey) return;
@@ -850,7 +720,11 @@ class GossipSdkImpl {
       );
       await onPersist(blob, persistEncryptionKey);
     } catch (error) {
-      console.error('[GossipSdk] Session persistence failed:', error);
+      this.eventEmitter.emit(
+        SdkEventType.ERROR,
+        error instanceof Error ? error : new Error(String(error)),
+        'session_persist'
+      );
     }
   }
 
@@ -872,25 +746,17 @@ class GossipSdkImpl {
    *
    * We also clear encryptedMessage and seeker since they may be stale.
    */
-  private async resetStuckSendingMessages(db: GossipDatabase): Promise<void> {
-    try {
-      const count = await db.messages
-        .where('status')
-        .equals(MessageStatus.SENDING)
-        .modify({
-          status: MessageStatus.WAITING_SESSION,
-          encryptedMessage: undefined,
-          seeker: undefined,
-        });
+  // With SENDING removed from MessageStatus and sendAnnouncement now a nullable payload,
+  // there is no longer a persisted "sending" state to recover from on startup.
+  // These helpers are kept for backward compatibility but are now no-ops.
+  private async resetStuckSendingMessages(_db: GossipDatabase): Promise<void> {
+    return;
+  }
 
-      if (count > 0) {
-        console.log(
-          `[GossipSdk] Reset ${count} stuck SENDING message(s) to WAITING_SESSION for auto-retry`
-        );
-      }
-    } catch (error) {
-      console.error('[GossipSdk] Failed to reset stuck messages:', error);
-    }
+  private async resetStuckSendingAnnouncements(
+    _db: GossipDatabase
+  ): Promise<void> {
+    return;
   }
 }
 
@@ -899,17 +765,19 @@ class GossipSdkImpl {
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface MessageServiceAPI {
+  /** Get a message by its ID */
+  get(id: number): Promise<Message | undefined>;
   /** Send a message */
   send(message: Omit<Message, 'id'>): Promise<SendMessageResult>;
   /** Fetch and decrypt messages from the protocol */
   fetch(): Promise<MessageResult>;
-  /** Resend failed messages */
-  resend(messages: Map<string, Message[]>): Promise<void>;
   /** Find a message by its seeker */
   findBySeeker(
     seeker: Uint8Array,
     ownerUserId: string
   ): Promise<Message | undefined>;
+  /** Mark a message as read */
+  markAsRead(id: number): Promise<boolean>;
 }
 
 interface DiscussionServiceAPI {
@@ -917,13 +785,13 @@ interface DiscussionServiceAPI {
   start(
     contact: Contact,
     payload: AnnouncementPayload
-  ): Promise<{ discussionId: number; announcement: Uint8Array }>;
+  ): Promise<Result<discussionInitializationResult, Error>>;
   /** Accept an incoming discussion request */
-  accept(discussion: Discussion): Promise<void>;
+  accept(discussion: Discussion): Promise<Result<Uint8Array, Error>>;
   /** Renew a broken discussion */
-  renew(contactUserId: string): Promise<void>;
-  /** Check if a discussion is in a stable state */
-  isStable(ownerUserId: string, contactUserId: string): Promise<boolean>;
+  renew(contactUserId: string): Promise<Result<Uint8Array, Error>>;
+  /** Get the status of a discussion */
+  getStatus(contactUserId: string): SessionStatus;
   /** List all discussions for the owner */
   list(ownerUserId: string): Promise<Discussion[]>;
   /** Get a specific discussion */
@@ -936,8 +804,6 @@ interface DiscussionServiceAPI {
 interface AnnouncementServiceAPI {
   /** Fetch and process announcements from the protocol */
   fetch(): Promise<AnnouncementReceptionResult>;
-  /** Resend failed announcements */
-  resend(failedDiscussions: Discussion[]): Promise<void>;
 }
 
 interface ContactsAPI {
@@ -966,7 +832,7 @@ interface ContactsAPI {
 }
 
 interface RefreshServiceAPI {
-  /** Handle session refresh (keep-alive, broken sessions, etc.) */
+  /** Update state for all discussions (keep-alive, broken sessions, etc.) */
   handleSessionRefresh(activeDiscussions: Discussion[]): Promise<void>;
 }
 

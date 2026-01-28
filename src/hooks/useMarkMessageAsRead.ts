@@ -1,6 +1,11 @@
 import { useEffect, useRef } from 'react';
-import { Message, MessageDirection, MessageStatus, db } from '../db';
 import { useAccountStore } from '../stores/accountStore';
+import {
+  Message,
+  MessageStatus,
+  MessageDirection,
+  gossipSdk,
+} from 'gossip-sdk';
 
 // IntersectionObserver configuration constants
 // Use a lower threshold to handle very long messages that are taller than the viewport
@@ -40,57 +45,33 @@ export function useMarkMessageAsRead(message: Message) {
 
     const observer = new IntersectionObserver(
       entries => {
-        entries.forEach(entry => {
-          // Check if message should be marked as read:
-          // 1. Message is intersecting (partially visible) with enough visibility threshold
-          // 2. OR message has been scrolled past (bottom edge is above viewport top)
-          //    This handles very long messages that are taller than the viewport
-          const isIntersectingWithThreshold =
+        entries.forEach(async entry => {
+          try {
+            // Check if message should be marked as read:
+            // 1. Message is intersecting (partially visible) with enough visibility threshold
+            // 2. OR message has been scrolled past (bottom edge is above viewport top)
+            //    This handles very long messages that are taller than the viewport
+            const isIntersectingWithThreshold =
             entry.isIntersecting &&
             entry.intersectionRatio >= MESSAGE_READ_VISIBILITY_THRESHOLD;
-          // If bottom of message is above viewport top (negative), it's been scrolled past
-          const hasBeenScrolledPast = entry.boundingClientRect.bottom < 0;
-          const shouldMarkAsRead =
-            isIntersectingWithThreshold || hasBeenScrolledPast;
-
-          if (
-            shouldMarkAsRead &&
-            message.status === MessageStatus.DELIVERED &&
-            !hasBeenMarkedAsReadRef.current
-          ) {
-            // Mark this specific message as read
-            hasBeenMarkedAsReadRef.current = true;
-            db.transaction('rw', [db.messages, db.discussions], async () => {
-              // Check current message status from DB to avoid race conditions
-              const currentMessage = await db.messages.get(message.id!);
+            // If bottom of message is above viewport top (negative), it's been scrolled past
+            const hasBeenScrolledPast = entry.boundingClientRect.bottom < 0;
+            const shouldMarkAsRead =
+              isIntersectingWithThreshold || hasBeenScrolledPast;
+            
               if (
-                !currentMessage ||
-                currentMessage.status !== MessageStatus.DELIVERED
-              ) {
-                // Message was already marked as read or doesn't exist
-                hasBeenMarkedAsReadRef.current = false;
-                return;
-              }
-
-              // Update message status
-              await db.messages.update(message.id!, {
-                status: MessageStatus.READ,
-              });
-
-              // Decrement discussion unread count
-              await db.discussions
-                .where('[ownerUserId+contactUserId]')
-                .equals([message.ownerUserId, message.contactUserId])
-                .modify(discussion => {
-                  if (discussion.unreadCount > 0) {
-                    discussion.unreadCount -= 1;
-                  }
-                });
-            }).catch(error => {
-              console.error('Failed to mark message as read:', error);
-              // Reset flag on error so it can be retried
-              hasBeenMarkedAsReadRef.current = false;
-            });
+              shouldMarkAsRead &&
+              message.status === MessageStatus.DELIVERED &&
+              !hasBeenMarkedAsReadRef.current
+            ) {
+              // Mark this specific message as read
+              hasBeenMarkedAsReadRef.current =
+                await gossipSdk.messages.markAsRead(message.id!);
+            }
+          } catch (error) {
+            console.error('Failed to mark message as read:', error);
+            // Reset flag on error so it can be retried
+            hasBeenMarkedAsReadRef.current = false;
           }
         });
       },

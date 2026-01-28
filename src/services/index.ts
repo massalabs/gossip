@@ -6,19 +6,13 @@
  */
 
 import {
-  AuthService,
-  createMessageProtocol,
   gossipSdk,
+  SdkEventType,
+  type Discussion,
+  type Contact,
 } from '@massalabs/gossip-sdk';
 import { notificationService } from './notifications';
 import { isAppInForeground } from '../utils/appState';
-import { db } from '../db';
-
-// Create message protocol instance (app-scoped)
-const messageProtocol = createMessageProtocol();
-
-// AuthService doesn't need session - app-scoped
-export const authService = new AuthService(db, messageProtocol);
 
 /**
  * Wire up SDK events to app behaviors like notifications.
@@ -29,29 +23,30 @@ export const authService = new AuthService(db, messageProtocol);
  */
 function setupSdkEventHandlers(): void {
   // Show notification for new discussion requests when app is in background
-  gossipSdk.on('discussionRequest', async (discussion, contact) => {
-    const foreground = await isAppInForeground();
-    if (!foreground) {
-      try {
-        await notificationService.showNewDiscussionNotification(
-          discussion.announcementMessage
-        );
-        console.log('[SDK Event] New discussion request notification shown', {
-          contactUserId: contact.userId,
-        });
-      } catch (error) {
-        console.error('[SDK Event] Failed to show notification:', error);
+  gossipSdk.on(
+    SdkEventType.SESSION_REQUESTED,
+    async (discussion: Discussion, contact: Contact) => {
+      const foreground = await isAppInForeground();
+      if (!foreground) {
+        try {
+          await notificationService.showNewDiscussionNotification(
+            discussion.lastAnnouncementMessage
+          );
+          console.log('[SDK Event] New discussion request notification shown', {
+            contactUserId: contact.userId,
+          });
+        } catch (error) {
+          console.error('[SDK Event] Failed to show notification:', error);
+        }
       }
     }
-  });
+  );
 
   // Log errors for debugging
-  gossipSdk.on('error', (error, context) => {
+  gossipSdk.on(SdkEventType.ERROR, (error: Error, context: string) => {
     console.error(`[SDK Error:${context}]`, error);
   });
 }
 
 // Set up event handlers (will be ready when SDK initializes)
 setupSdkEventHandlers();
-
-export { AuthService };

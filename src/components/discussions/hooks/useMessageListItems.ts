@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { Message, Discussion, DiscussionDirection } from '../../../db';
+import { Message, Discussion, DiscussionDirection } from 'gossip-sdk';
 import { isDifferentDay } from '../../../utils/timeUtils';
 import {
   calculateMessageGroups,
@@ -88,10 +88,10 @@ export function useVirtualItems(
     const items: VirtualItem[] = [];
 
     // Add announcement message as the first item if it exists
-    if (discussion?.announcementMessage && discussion.createdAt) {
+    if (discussion?.lastAnnouncementMessage && discussion.createdAt) {
       items.push({
         type: 'announcement',
-        content: discussion.announcementMessage,
+        content: discussion.lastAnnouncementMessage,
         direction: discussion.direction,
       });
     }
@@ -134,7 +134,7 @@ export function useVirtualItems(
   }, [
     messages,
     messageGroups,
-    discussion?.announcementMessage,
+    discussion?.lastAnnouncementMessage,
     discussion?.createdAt,
     discussion?.direction,
   ]);

@@ -5,7 +5,7 @@ import {
   deriveKey,
 } from '@massalabs/gossip-sdk';
 import { biometricService } from '../../services/biometricService';
-import { UserProfile } from '../../db';
+import { UserProfile } from 'gossip-sdk';
 
 export interface AuthResult {
   mnemonic: string;

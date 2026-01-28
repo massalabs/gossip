@@ -12,7 +12,7 @@ import MessageList, {
 } from '../components/discussions/MessageList';
 import MessageInput from '../components/discussions/MessageInput';
 import ScrollToBottomButton from '../components/discussions/ScrollToBottomButton';
-import { Message, db } from '../db';
+import { Message, gossipSdk } from 'gossip-sdk';
 import { isDifferentDay } from '../utils/timeUtils';
 import { useUiStore } from '../stores/uiStore';
 
@@ -295,7 +295,7 @@ const Discussion: React.FC = () => {
     (messageId: number) => {
       (async () => {
         // Look up the message to determine which discussion it belongs to
-        const target = await db.messages.get(messageId);
+        const target = await gossipSdk.messages.get(messageId);
         if (!target) {
           console.warn(`Message with id ${messageId} not found in database`);
           return;
@@ -323,7 +323,7 @@ const Discussion: React.FC = () => {
         let virtualIndex = 0;
 
         // Add announcement if exists
-        if (discussion?.announcementMessage && discussion.createdAt) {
+        if (discussion?.lastAnnouncementMessage && discussion.createdAt) {
           virtualIndex++;
         }
 
@@ -385,7 +385,7 @@ const Discussion: React.FC = () => {
       navigate,
       messages,
       messageListRef,
-      discussion?.announcementMessage,
+      discussion?.lastAnnouncementMessage,
       discussion?.createdAt,
     ]
   );
@@ -401,7 +401,7 @@ const Discussion: React.FC = () => {
         return;
       }
 
-      const original = await db.messages.get(forwardFromMessageId);
+      const original = await gossipSdk.messages.get(forwardFromMessageId);
       if (!cancelled) {
         setForwardPreviewText(original?.content ?? null);
         if (original && contact && original.contactUserId === contact.userId) {

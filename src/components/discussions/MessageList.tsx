@@ -1,7 +1,6 @@
 import React, { useRef, useCallback, useEffect } from 'react';
-import { MessageDirection } from '../../db';
+import { MessageDirection, Message, Discussion } from 'gossip-sdk';
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
-import { Message, Discussion } from '../../db';
 
 import LoadingState from './LoadingState';
 import EmptyState from './EmptyState';
@@ -242,7 +241,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
     }
 
     // Empty state - only show if no messages AND no announcement
-    if (messages.length === 0 && !discussion?.announcementMessage) {
+    if (messages.length === 0 && !discussion?.lastAnnouncementMessage) {
       return (
         <div className="px-4 md:px-6 lg:px-8 py-6">
           <EmptyState />

@@ -8,9 +8,11 @@ import { enableDebugLogger } from './utils/logger.ts';
 import { Buffer } from 'buffer';
 
 // SDK configuration
-import { gossipSdk } from '@massalabs/gossip-sdk';
+import { gossipSdk, GossipDatabase } from 'gossip-sdk';
 import { protocolConfig } from './config/protocol';
-import { db } from './db';
+
+// Create database instance using SDK's class
+const db = new GossipDatabase();
 
 // Setup SHA-512 for @noble/ed25519 (required for massa-web3)
 import { sha512 } from '@noble/hashes/sha2';

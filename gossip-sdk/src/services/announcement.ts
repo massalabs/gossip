@@ -8,8 +8,10 @@ import {
   type Discussion,
   type GossipDatabase,
   type UserProfile,
-  DiscussionStatus,
   DiscussionDirection,
+  MessageDirection,
+  MessageStatus,
+  MessageType,
 } from '../db';
 import { decodeUserId, encodeUserId } from '../utils/userId';
 import { IMessageProtocol } from '../api/messageProtocol';
@@ -17,11 +19,15 @@ import { UserPublicKeys, SessionStatus } from '../wasm/bindings';
 import { SessionModule, sessionStatusToString } from '../wasm/session';
 import { Logger } from '../utils/logs';
 import { BulletinItem } from '../api/messageProtocol/types';
-import { GossipSdkEvents } from '../types/events';
 import { SdkConfig, defaultSdkConfig } from '../config/sdk';
 import { decodeAnnouncementPayload } from '../utils/announcementPayload';
+import { RefreshService } from './refresh';
+import { Result } from '../utils/type';
+import { resetSendQueue } from './discussion';
+import { SdkEventEmitter, SdkEventType } from '../core/SdkEventEmitter';
 
 const logger = new Logger('AnnouncementService');
+const ANNOUNCEMENT_RETRY_DELAY_MS = 15000;
 
 export interface AnnouncementReceptionResult {
   success: boolean;
@@ -37,25 +43,32 @@ export class AnnouncementService {
   private messageProtocol: IMessageProtocol;
   private session: SessionModule;
   private isProcessingAnnouncements = false;
-  private events: GossipSdkEvents;
+  private eventEmitter: SdkEventEmitter;
   private config: SdkConfig;
+  private refreshService?: RefreshService;
 
   constructor(
     db: GossipDatabase,
     messageProtocol: IMessageProtocol,
     session: SessionModule,
-    events: GossipSdkEvents = {},
-    config: SdkConfig = defaultSdkConfig
+    eventEmitter: SdkEventEmitter,
+    config: SdkConfig = defaultSdkConfig,
+    refreshService?: RefreshService
   ) {
     this.db = db;
     this.messageProtocol = messageProtocol;
     this.session = session;
-    this.events = events;
+    this.eventEmitter = eventEmitter;
     this.config = config;
+    this.refreshService = refreshService;
   }
 
   setMessageProtocol(messageProtocol: IMessageProtocol): void {
     this.messageProtocol = messageProtocol;
+  }
+
+  setRefreshService(refreshService: RefreshService): void {
+    this.refreshService = refreshService;
   }
 
   async sendAnnouncement(announcement: Uint8Array): Promise<{
@@ -80,17 +93,13 @@ export class AnnouncementService {
 
   async establishSession(
     contactPublicKeys: UserPublicKeys,
-    payloadBytes?: Uint8Array
-  ): Promise<{
-    success: boolean;
-    error?: string;
-    announcement: Uint8Array;
-  }> {
+    userData?: Uint8Array
+  ): Promise<Result<Uint8Array, Error>> {
     const log = logger.forMethod('establishSession');
 
     const contactUserId = encodeUserId(contactPublicKeys.derive_id());
 
-    // CRITICAL: await to ensure session state is persisted before sending
+    // CRITICAL: await to ensure session state is persisted before returning
     const announcement = await this.session.establishOutgoingSession(
       contactPublicKeys,
       payloadBytes
@@ -100,26 +109,67 @@ export class AnnouncementService {
       log.error('empty announcement returned', { contactUserId });
       return {
         success: false,
-        error: EstablishSessionError,
-        announcement,
+        error: new Error(EstablishSessionError),
       };
     }
 
-    const result = await this.sendAnnouncement(announcement);
-    if (!result.success) {
-      log.error('failed to broadcast announcement', {
-        contactUserId,
-        error: result.error,
+    log.info('announcement prepared for outgoing session', {
+      contactUserId,
+      bytes: announcement.length,
+    });
+    return { success: true, data: announcement };
+  }
+
+  async processOutgoingAnnouncements(discussions: Discussion[]): Promise<void> {
+    const log = logger.forMethod('processOutgoingAnnouncements');
+    const now = Date.now();
+
+    for (const discussion of discussions) {
+      if (!discussion.id) continue;
+
+      // ensure the announcement is not null
+      if (discussion.sendAnnouncement === null) return;
+
+      const { announcement_bytes, when_to_send } = discussion.sendAnnouncement;
+      if (announcement_bytes.length === 0) {
+        log.warn('skipping empty announcement bytes', {
+          discussionId: discussion.id,
+          contactUserId: discussion.contactUserId,
+        });
+        await this.db.discussions.update(discussion.id, {
+          sendAnnouncement: null,
+          updatedAt: new Date(),
+        });
+        return;
+      }
+
+      if (when_to_send.getTime() > now) return;
+
+      // Send the announcement and handle updates after transaction
+      const result = await this.sendAnnouncement(announcement_bytes);
+
+      // update discussion state after sending, inside a new transaction
+      await this.db.transaction('rw', [this.db.discussions], async () => {
+        const latest = await this.db.discussions.get(discussion.id);
+        if (!latest || latest.sendAnnouncement === null) {
+          return;
+        }
+        if (result.success) {
+          await this.db.discussions.update(discussion.id, {
+            sendAnnouncement: null,
+            updatedAt: new Date(),
+          });
+        } else {
+          await this.db.discussions.update(discussion.id, {
+            sendAnnouncement: {
+              announcement_bytes,
+              when_to_send: new Date(Date.now() + ANNOUNCEMENT_RETRY_DELAY_MS),
+            },
+            updatedAt: new Date(),
+          });
+        }
       });
-      return {
-        success: false,
-        error: result.error,
-        announcement,
-      };
     }
-
-    log.info('announcement sent successfully', { contactUserId });
-    return { success: true, announcement };
   }
 
   async fetchAndProcessAnnouncements(): Promise<AnnouncementReceptionResult> {
@@ -210,6 +260,7 @@ export class AnnouncementService {
       const cursor = (await this.db.userProfile.get(this.session.userIdEncoded))
         ?.lastBulletinCounter;
 
+      // fetch from node all announcements since the last retrieved announcement
       const fetched = await this._fetchAnnouncements(cursor);
       announcements = fetched.map(a => a.data);
       fetchedCounters = fetched.map(a => a.counter);
@@ -264,136 +315,6 @@ export class AnnouncementService {
     } finally {
       this.isProcessingAnnouncements = false;
     }
-  }
-
-  async resendAnnouncements(failedDiscussions: Discussion[]): Promise<void> {
-    const log = logger.forMethod('resendAnnouncements');
-
-    if (!failedDiscussions.length) {
-      log.info('no failed discussions to resend');
-      return;
-    }
-
-    log.info(
-      `starting resend for ${failedDiscussions.length} failed discussions`
-    );
-
-    const sentDiscussions: Discussion[] = [];
-    const brokenDiscussions: number[] = [];
-
-    for (const discussion of failedDiscussions) {
-      const { ownerUserId, contactUserId } = discussion;
-
-      try {
-        const result = await this.sendAnnouncement(
-          discussion.initiationAnnouncement!
-        );
-
-        if (result.success) {
-          log.info('resent successfully', { ownerUserId, contactUserId });
-          sentDiscussions.push(discussion);
-          continue;
-        }
-
-        log.info('network send failed (retry)', { ownerUserId, contactUserId });
-
-        const ageMs = Date.now() - (discussion.updatedAt.getTime() ?? 0);
-        if (ageMs > this.config.announcements.brokenThresholdMs) {
-          log.info(
-            `marking as broken (too old: ${Math.round(ageMs / 60000)}min)`,
-            {
-              ownerUserId,
-              contactUserId,
-            }
-          );
-          brokenDiscussions.push(discussion.id!);
-        }
-      } catch (error) {
-        log.error('exception during resend', {
-          error: error instanceof Error ? error.message : 'Unknown error',
-          ownerUserId,
-          contactUserId,
-        });
-      }
-    }
-
-    if (sentDiscussions.length > 0 || brokenDiscussions.length > 0) {
-      await this.db.transaction('rw', this.db.discussions, async () => {
-        const now = new Date();
-
-        if (sentDiscussions.length > 0) {
-          await Promise.all(
-            sentDiscussions.map(async discussion => {
-              const status = this.session.peerSessionStatus(
-                decodeUserId(discussion.contactUserId)
-              );
-              const statusStr = sessionStatusToString(status);
-
-              if (
-                status !== SessionStatus.Active &&
-                status !== SessionStatus.SelfRequested
-              ) {
-                log.info('skipping DB update - session not ready', {
-                  contactUserId: discussion.contactUserId,
-                  status: statusStr,
-                });
-                return;
-              }
-
-              const newStatus =
-                status === SessionStatus.Active
-                  ? DiscussionStatus.ACTIVE
-                  : DiscussionStatus.PENDING;
-
-              await this.db.discussions.update(discussion.id!, {
-                status: newStatus,
-                updatedAt: now,
-              });
-
-              log.info('updated discussion status in DB', {
-                contactUserId: discussion.contactUserId,
-                newStatus,
-              });
-
-              // Emit status change event
-              const updatedDiscussion = await this.db.discussions.get(
-                discussion.id!
-              );
-              if (updatedDiscussion) {
-                this.events.onDiscussionStatusChanged?.(updatedDiscussion);
-              }
-            })
-          );
-        }
-
-        if (brokenDiscussions.length > 0) {
-          // Per spec: announcement failures should trigger session renewal, not BROKEN status
-          // Clear the failed announcement and trigger renewal
-          log.info(
-            `${brokenDiscussions.length} announcements timed out, triggering renewal`
-          );
-          await Promise.all(
-            brokenDiscussions.map(async id => {
-              await this.db.discussions.update(id, {
-                initiationAnnouncement: undefined,
-                updatedAt: now,
-              });
-
-              // Emit renewal needed event
-              const discussion = await this.db.discussions.get(id);
-              if (discussion) {
-                this.events.onSessionRenewalNeeded?.(discussion.contactUserId);
-              }
-            })
-          );
-        }
-      });
-    }
-
-    log.info('resend completed', {
-      sent: sentDiscussions.length,
-      broken: brokenDiscussions.length,
-    });
   }
 
   /**
@@ -472,9 +393,11 @@ export class AnnouncementService {
   }> {
     const log = logger.forMethod('_processIncomingAnnouncement');
 
+    // feed incoming announcement to session manager to decrypt and get the announcement result (we are the recipient of the announcement)
     const result =
       await this.session.feedIncomingAnnouncement(announcementData);
 
+    // if the result is null, it means the announcement is not intended for us. It's not an error
     if (!result) {
       return { success: true };
     }
@@ -538,40 +461,39 @@ export class AnnouncementService {
       message
     );
 
-    // Emit event for new discussion request
-    if (this.events.onDiscussionRequest) {
-      const discussion = await this.db.discussions.get(discussionId);
-      if (discussion && contact) {
-        this.events.onDiscussionRequest(discussion, contact);
+    // Store announcement message as an incoming message if present
+    if (announcementMessage) {
+      const timestamp = new Date(result.timestamp);
+      const windowStart = new Date(timestamp.getTime() - 1000);
+      const windowEnd = new Date(timestamp.getTime() + 1000);
+
+      const existing = await this.db.messages
+        .where('[ownerUserId+contactUserId]')
+        .equals([this.session.userIdEncoded, contactUserId])
+        .and(
+          msg =>
+            msg.direction === MessageDirection.INCOMING &&
+            msg.type === MessageType.ANNOUNCEMENT &&
+            msg.content === announcementMessage &&
+            msg.timestamp >= windowStart &&
+            msg.timestamp <= windowEnd
+        )
+        .first();
+
+      if (!existing) {
+        await this.db.addMessage({
+          ownerUserId: this.session.userIdEncoded,
+          contactUserId,
+          content: announcementMessage,
+          type: MessageType.ANNOUNCEMENT,
+          direction: MessageDirection.INCOMING,
+          status: MessageStatus.DELIVERED,
+          timestamp,
+        });
       }
     }
 
-    // Auto-accept ONLY for existing contacts (session recovery scenario).
-    // For NEW contacts, the user must manually accept the discussion request.
-    // This completes the handshake by sending our announcement back.
-    if (sessionStatus === SessionStatus.PeerRequested && !isNewContact) {
-      log.info(
-        'session is PeerRequested for existing contact, triggering auto-accept',
-        { contactUserId }
-      );
-      this.events.onSessionAcceptNeeded?.(contactUserId);
-    } else if (sessionStatus === SessionStatus.PeerRequested && isNewContact) {
-      log.info(
-        'session is PeerRequested for NEW contact, waiting for manual accept',
-        { contactUserId }
-      );
-    }
-
-    // When session becomes Active after peer accepts our announcement,
-    // trigger processing of WAITING_SESSION messages.
-    // This happens when we initiated (SelfRequested) and peer accepted.
-    if (sessionStatus === SessionStatus.Active) {
-      log.info(
-        'session is now Active, triggering WAITING_SESSION message processing',
-        { contactUserId }
-      );
-      this.events.onSessionBecameActive?.(contactUserId);
-    }
+    await this.refreshService?.stateUpdate();
 
     return {
       success: true,
@@ -599,43 +521,76 @@ export class AnnouncementService {
         if (existing) {
           const updateData: Partial<Discussion> = { updatedAt: new Date() };
           if (announcementMessage)
-            updateData.announcementMessage = announcementMessage;
+            updateData.lastAnnouncementMessage = announcementMessage;
 
+          log.info('updating existing discussion', {
+            discussionId: existing.id,
+            contactUserId,
+          });
+
+          // Group update and queue reset in the same transaction to ensure atomicity
+          await this.db.transaction(
+            'rw',
+            this.db.discussions,
+            this.db.messages,
+            async () => {
+              await this.db.discussions.update(existing.id!, updateData);
+              // reset all messages in send queue to WAITING_SESSION for this contact
+              await resetSendQueue(
+                this.db,
+                this.session.userIdEncoded,
+                contactUserId
+              );
+            }
+          );
+
+          const newDiscussion = await this.db.discussions.get(existing.id!);
+          const contact = await this.db.getContactByOwnerAndUserId(
+            ownerUserId,
+            contactUserId
+          );
           if (
-            existing.status === DiscussionStatus.PENDING &&
-            existing.direction === DiscussionDirection.INITIATED
+            newDiscussion &&
+            contact &&
+            this.session.peerSessionStatus(decodeUserId(contactUserId)) ===
+              SessionStatus.PeerRequested
           ) {
-            updateData.status = DiscussionStatus.ACTIVE;
-            log.info('transitioning to ACTIVE', {
-              discussionId: existing.id,
-              contactUserId,
-            });
-          } else {
-            log.info('updating existing discussion', {
-              discussionId: existing.id,
-              status: existing.status,
-              direction: existing.direction,
-            });
+            this.eventEmitter.emit(
+              SdkEventType.SESSION_REQUESTED,
+              newDiscussion,
+              contact
+            );
           }
-
-          await this.db.discussions.update(existing.id!, updateData);
           return existing.id!;
         }
 
-        log.info('creating new RECEIVED/PENDING discussion', { contactUserId });
+        log.info('creating new discussion', { contactUserId });
         return await this.db.discussions.add({
           ownerUserId,
           contactUserId,
+          weAccepted: false,
+          sendAnnouncement: null,
           direction: DiscussionDirection.RECEIVED,
-          status: DiscussionStatus.PENDING,
-          nextSeeker: undefined,
-          announcementMessage,
+          lastAnnouncementMessage: announcementMessage,
           unreadCount: 0,
           createdAt: new Date(),
           updatedAt: new Date(),
         });
       }
     );
+
+    const discussion = await this.db.discussions.get(discussionId);
+    const contact = await this.db.getContactByOwnerAndUserId(
+      ownerUserId,
+      contactUserId
+    );
+    if (discussion && contact) {
+      this.eventEmitter.emit(
+        SdkEventType.SESSION_REQUESTED,
+        discussion,
+        contact
+      );
+    }
 
     return { discussionId };
   }
