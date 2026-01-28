@@ -8,6 +8,8 @@ npm pkg delete scripts.prepare
 npm ci
 npm run build
 
+cd gossip-sdk
+
 # Get the package name and current version from package.json
 PACKAGE_NAME=$(jq -r '.name' package.json)
 NEW_VERSION=$(jq -r '.version' package.json)
