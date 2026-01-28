@@ -12,6 +12,9 @@
     "build:sdk": "cd gossip-sdk && npm run build",
     "build": "npm run build:sdk && tsc -b && vite build",
     "test": "vitest -c vite.config.ts --silent='passed-only'",
+    "test:storage": "npm test --prefix gossip-storage/ts",
+    "test:wasm": "RUSTC_BOOTSTRAP=1 cargo test --features test-constants --manifest-path gossip-storage/rust/Cargo.toml -- --test-threads=1 -Z unstable-options --report-time",
+    "test:all": "npm run test:run && npm run test:storage -- run && npm run test:wasm",
     "test:ui": "vitest -c vite.config.ts --ui",
     "test:run": "vitest -c vite.config.ts run",
     "test:coverage": "vitest -c vite.config.ts run --coverage",
@@ -80,6 +83,7 @@
     "currency.js": "^2.0.4-8d9f8632",
     "dexie": "^4.2.0",
     "dexie-react-hooks": "^4.2.0",
+    "drizzle-orm": "^0.45.1",
     "js-yaml": "^4.1.1",
     "pbkdf2": "^3.1.5",
     "qr-code-styling": "^1.9.2",
@@ -90,6 +94,7 @@
     "react-router-dom": "^7.9.6",
     "react-virtuoso": "^4.17.0",
     "varint": "^6.0.0",
+    "wa-sqlite": "^1.0.0",
     "zustand": "^5.0.8"
   },
   "devDependencies": {

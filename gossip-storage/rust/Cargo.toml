@@ -1,0 +1,40 @@
+[package]
+name = "gossip-storage"
+version = "0.1.0"
+edition = "2021"
+description = "Plausible deniability storage layer for Gossip"
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = []
+wasm = ["wasm-bindgen", "console_error_panic_hook"]
+wasi = []
+# Use smaller constants for faster tests (1KB-10KB instead of 5MB-600MB)
+test-constants = []
+
+[dependencies]
+# Core
+thiserror = "1.0"
+
+# Crypto - reuse from wasm workspace
+crypto-password-kdf = { path = "../../wasm/crypto-password-kdf" }
+crypto-kdf = { path = "../../wasm/crypto-kdf" }
+crypto-aead = { path = "../../wasm/crypto-aead" }
+crypto-rng = { path = "../../wasm/crypto-rng" }
+zeroize = { version = "1.8", features = ["derive"] }
+
+# WASM bindings
+wasm-bindgen = { version = "0.2", optional = true }
+console_error_panic_hook = { version = "0.1", optional = true }
+
+[dev-dependencies]
+hex = "0.4"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
