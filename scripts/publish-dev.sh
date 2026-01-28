@@ -8,6 +8,8 @@ npm pkg delete scripts.prepare
 npm ci
 npm run build
 
+cd gossip-sdk
+
 # Update the version with a prepatch, preid dev, no git tag, and no commit hooks
 npm version --preid dev --no-git-tag-version --no-commit-hooks prepatch
 
