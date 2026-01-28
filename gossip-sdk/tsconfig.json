@@ -12,6 +12,10 @@
     "declaration": true,
     "outDir": "dist",
     "rootDir": "src",
+    "baseUrl": ".",
+    "paths": {
+      "#wasm": ["./src/assets/generated/wasm/gossip_wasm"]
+    },
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,

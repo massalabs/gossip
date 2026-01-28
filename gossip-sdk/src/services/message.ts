@@ -15,10 +15,7 @@ import {
 } from '../db';
 import { decodeUserId, encodeUserId } from '../utils/userId';
 import { IMessageProtocol, EncryptedMessage } from '../api/messageProtocol';
-import {
-  SessionStatus,
-  SendMessageOutput,
-} from '../assets/generated/wasm/gossip_wasm';
+import { SessionStatus, SendMessageOutput } from '#wasm';
 import { SessionModule } from '../wasm';
 import {
   serializeRegularMessage,

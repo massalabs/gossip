@@ -9,6 +9,12 @@
     "dist",
     "README.md"
   ],
+  "imports": {
+    "#wasm": {
+      "browser": "./dist/assets/generated/wasm/gossip_wasm.js",
+      "default": "./dist/assets/generated/wasm-node/gossip_wasm.js"
+    }
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -20,7 +26,9 @@
     }
   },
   "scripts": {
-    "build": "tsc && mkdir -p dist/assets/generated/wasm && cp -R src/assets/generated/wasm/* dist/assets/generated/wasm/",
+    "prebuild": "rimraf dist",
+    "build": "tsc && npm run copy:wasm",
+    "copy:wasm": "mkdir -p dist/assets/generated/wasm dist/assets/generated/wasm-node && cp -R src/assets/generated/wasm/* dist/assets/generated/wasm/ && cp -R src/assets/generated/wasm-node/* dist/assets/generated/wasm-node/",
     "test": "vitest",
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage"
@@ -35,6 +43,7 @@
   "license": "MIT",
   "devDependencies": {
     "fake-indexeddb": "^6.2.5",
+    "rimraf": "^6.1.2",
     "typescript": "^5.9.3",
     "vitest": "^4.0.17"
   },

@@ -8,7 +8,7 @@ import { MessageService } from '../../src/services/message';
 import { db, MessageType, DiscussionDirection } from '../../src/db';
 import type { SessionModule } from '../../src/wasm/session';
 import { encodeUserId, decodeUserId } from '../../src/utils/userId';
-import { SessionStatus } from '../../src/assets/generated/wasm/gossip_wasm';
+import { SessionStatus } from '#wasm';
 import { DiscussionStatus } from '../../src/db';
 
 const REFRESH_OWNER_USER_ID = encodeUserId(new Uint8Array(32).fill(11));
