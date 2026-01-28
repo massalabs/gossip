@@ -18,25 +18,32 @@ const DEFAULT_API_URL = 'https://api.usegossip.com';
 // Mutable config that can be updated at runtime
 let currentBaseUrl: string | null = null;
 
+/**
+ * Safely get Vite environment variable without causing parse-time errors.
+ * Uses dynamic Function evaluation to avoid import.meta syntax errors
+ * in environments that don't support ESM (like jiti).
+ */
+function getViteEnvUrl(): string | undefined {
+  try {
+    // Use Function constructor to evaluate import.meta at runtime
+    // This avoids parse-time syntax errors in non-ESM environments
+    const fn = new Function(
+      'return typeof import.meta !== "undefined" && import.meta.env && import.meta.env.VITE_GOSSIP_API_URL'
+    );
+    return fn() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function buildProtocolApiBaseUrl(): string {
   // If runtime override is set, use it
   if (currentBaseUrl !== null) {
     return currentBaseUrl;
   }
 
-  // Try to get from environment variable (Vite)
-  let apiUrl: string | undefined;
-  try {
-    // Check if import.meta.env is available (Vite environment)
-    if (
-      typeof import.meta !== 'undefined' &&
-      import.meta.env?.VITE_GOSSIP_API_URL
-    ) {
-      apiUrl = import.meta.env.VITE_GOSSIP_API_URL;
-    }
-  } catch {
-    // import.meta.env not available (Node.js without Vite)
-  }
+  // Try to get from Vite environment variable
+  let apiUrl: string | undefined = getViteEnvUrl();
 
   // Check process.env for Node.js environment
   if (
