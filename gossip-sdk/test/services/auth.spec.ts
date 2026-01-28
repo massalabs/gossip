@@ -1,7 +1,5 @@
 /**
- * AuthService Tests
- *
- * Tests for the AuthService class and related utilities.
+ * AuthService tests
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -13,17 +11,17 @@ import {
   FAILED_TO_FETCH_ERROR,
   FAILED_TO_FETCH_MESSAGE,
   FAILED_TO_RETRIEVE_CONTACT_PUBLIC_KEY_ERROR,
-} from '../src/services/auth';
-import { db, UserProfile } from '../src/db';
-import type { IMessageProtocol } from '../src/api/messageProtocol/types';
+} from '../../src/services/auth';
+import { db, UserProfile } from '../../src/db';
+import type { IMessageProtocol } from '../../src/api/messageProtocol/types';
 import {
   UserPublicKeys,
   UserKeys,
   generate_user_keys,
-} from '../src/assets/generated/wasm/gossip_wasm';
-import { encodeUserId } from '../src/utils/userId';
-import { encodeToBase64, decodeFromBase64 } from '../src/utils/base64';
-import { ensureWasmInitialized } from '../src/wasm';
+} from '../../src/assets/generated/wasm/gossip_wasm';
+import { encodeUserId } from '../../src/utils/userId';
+import { encodeToBase64, decodeFromBase64 } from '../../src/utils/base64';
+import { ensureWasmInitialized } from '../../src/wasm';
 
 function createMockProtocol(
   overrides: Partial<IMessageProtocol> = {}
@@ -109,30 +107,24 @@ describe('AuthService', () => {
   let userKeys: UserKeys | null = null;
 
   beforeEach(async () => {
-    // Ensure WASM is initialized
     await ensureWasmInitialized();
 
-    // Ensure database is open
     if (!db.isOpen()) {
       await db.open();
     }
     await Promise.all(db.tables.map(table => table.clear()));
 
-    // Create test userId
     testUserIdBytes = new Uint8Array(32).fill(42);
     testUserId = encodeUserId(testUserIdBytes);
 
-    // Generate real public keys using WASM
     userKeys = generate_user_keys('test-passphrase-' + Date.now());
     testPublicKeys = userKeys.public_keys();
 
-    // Create mock message protocol
     mockMessageProtocol = createMockProtocol();
     authService = new AuthService(db, mockMessageProtocol);
   });
 
   afterEach(async () => {
-    // Free WASM objects to prevent memory leaks
     if (testPublicKeys) {
       testPublicKeys.free();
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -226,7 +218,7 @@ describe('AuthService', () => {
   describe('ensurePublicKeyPublished', () => {
     it('should not publish if last push was less than one week ago', async () => {
       const profile = createUserProfile(testUserId, {
-        lastPublicKeyPush: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000), // 3 days ago
+        lastPublicKeyPush: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000),
       });
 
       await db.userProfile.add(profile);
@@ -238,7 +230,7 @@ describe('AuthService', () => {
 
     it('should publish if last push was more than one week ago', async () => {
       const profile = createUserProfile(testUserId, {
-        lastPublicKeyPush: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000), // 8 days ago
+        lastPublicKeyPush: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000),
       });
 
       await db.userProfile.add(profile);
@@ -252,7 +244,6 @@ describe('AuthService', () => {
         .calls[0][0];
       expect(calledWith).toBe(encodeToBase64(testPublicKeys.to_bytes()));
 
-      // Verify lastPublicKeyPush was updated
       const updatedProfile = await db.userProfile.get(testUserId);
       expect(updatedProfile?.lastPublicKeyPush).toBeDefined();
       expect(updatedProfile?.lastPublicKeyPush?.getTime()).toBeGreaterThan(
@@ -271,7 +262,6 @@ describe('AuthService', () => {
 
       expect(mockMessageProtocol.postPublicKey).toHaveBeenCalledTimes(1);
 
-      // Verify lastPublicKeyPush was set
       const updatedProfile = await db.userProfile.get(testUserId);
       expect(updatedProfile?.lastPublicKeyPush).toBeDefined();
     });
@@ -288,7 +278,6 @@ describe('AuthService', () => {
 
       await authService.ensurePublicKeyPublished(testPublicKeys, testUserId);
 
-      // Exactly one week should trigger a push
       expect(mockMessageProtocol.postPublicKey).toHaveBeenCalledTimes(1);
     });
 
