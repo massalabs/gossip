@@ -1,14 +1,14 @@
 /**
- * Discussion Utilities Tests
+ * Discussion utilities tests
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { updateDiscussionName } from '../src/utils/discussions';
-import { db, DiscussionStatus, DiscussionDirection } from '../src/db';
-import { encodeUserId } from '../src/utils/userId';
+import { db, DiscussionDirection, DiscussionStatus } from '../../src/db';
+import { encodeUserId } from '../../src/utils/userId';
+import { updateDiscussionName } from '../../src/utils/discussions';
 
-const OWNER_USER_ID = encodeUserId(new Uint8Array(32).fill(4));
-const CONTACT_USER_ID = encodeUserId(new Uint8Array(32).fill(5));
+const OWNER_USER_ID = encodeUserId(new Uint8Array(32).fill(6));
+const CONTACT_USER_ID = encodeUserId(new Uint8Array(32).fill(7));
 
 describe('Discussion utilities', () => {
   beforeEach(async () => {

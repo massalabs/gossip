@@ -1,16 +1,17 @@
 /**
- * SDK Test Helpers
+ * SDK Test Utilities
  *
  * Helper functions for creating test data and utilities.
+ * Uses real WASM SessionModule - no mocks needed.
  */
 
 import type { Contact, Discussion, Message, UserProfile } from '../src/db';
 import {
   UserPublicKeys,
-  UserSecretKeys,
   UserKeys,
 } from '../src/assets/generated/wasm/gossip_wasm';
 import { generateUserKeys } from '../src/wasm/userKeys';
+import { SessionModule } from '../src/wasm/session';
 import {
   MessageType,
   MessageDirection,
@@ -18,8 +19,6 @@ import {
   DiscussionStatus,
   DiscussionDirection,
 } from '../src/db';
-import { encodeUserId } from '../src/utils/userId';
-import { MockSessionModule } from './mocks';
 
 /**
  * Create a test contact object (without id).
@@ -139,72 +138,75 @@ export function sleep(ms: number): Promise<void> {
 }
 
 /**
- * Initialize a session mock with provided keys.
- * This helper:
- * - Encodes the user ID from public keys
- * - Creates and configures a MockSessionModule
- * - Returns the configured session
+ * Test session data structure returned by createTestSession.
  */
-export function initializeSessionMock(
-  publicKeys: UserPublicKeys,
-  secretKeys: UserSecretKeys
-): MockSessionModule {
-  const userIdEncoded = encodeUserId(publicKeys.derive_id());
-  const session = new MockSessionModule(publicKeys, secretKeys);
-  session.userIdEncoded = userIdEncoded;
-
-  return session;
+export interface TestSessionData {
+  session: SessionModule;
+  userKeys: UserKeys;
 }
 
 /**
- * Initialize a session mock, generating keys if not provided.
- * This helper:
- * - Generates keys using WASM if not provided
- * - Encodes the user ID from public keys
- * - Creates and configures a MockSessionModule
- * - Returns the configured session
+ * Create a real SessionModule using WASM.
+ * This creates a fully functional session with real crypto.
+ *
+ * @param passphrase - Optional passphrase for key generation (defaults to random)
+ * @param onPersist - Optional persistence callback
+ * @returns Object containing session and userKeys (remember to call cleanupTestSession when done)
  */
-export async function initializeSessionMockWithOptionalKeys(
-  publicKeys?: UserPublicKeys,
-  secretKeys?: UserSecretKeys
-): Promise<MockSessionModule> {
-  let finalPublicKeys: UserPublicKeys;
-  let finalSecretKeys: UserSecretKeys;
+export async function createTestSession(
+  passphrase?: string,
+  onPersist?: () => Promise<void>
+): Promise<TestSessionData> {
+  const finalPassphrase =
+    passphrase ?? `test-passphrase-${Date.now()}-${Math.random()}`;
+  const userKeys = await generateUserKeys(finalPassphrase);
 
-  if (!publicKeys || !secretKeys) {
-    // Generate keys using WASM
-    const passphrase = `test-passphrase-${Date.now()}-${Math.random()}`;
-    let userKeys: UserKeys | null = null;
-    try {
-      userKeys = await generateUserKeys(passphrase);
-      if (!userKeys) {
-        throw new Error(
-          'Failed to generate user keys for MockSessionModule: userKeys is undefined or null'
-        );
-      }
-      // Extract keys before freeing the parent object
-      // The extracted keys are independent objects
-      finalPublicKeys = userKeys.public_keys();
-      finalSecretKeys = userKeys.secret_keys();
-      if (!finalPublicKeys || !finalSecretKeys) {
-        throw new Error(
-          'Failed to extract user keys for MockSessionModule: extracted keys are undefined or null'
-        );
-      }
-    } finally {
-      // Free the UserKeys object to prevent memory leaks, even if extraction failed
-      if (userKeys) {
-        userKeys.free();
-      }
-    }
-  } else {
-    finalPublicKeys = publicKeys;
-    finalSecretKeys = secretKeys;
+  if (!userKeys) {
+    throw new Error('Failed to generate user keys for test session');
   }
 
-  const userIdEncoded = encodeUserId(finalPublicKeys.derive_id());
-  const session = new MockSessionModule(finalPublicKeys, finalSecretKeys);
-  session.userIdEncoded = userIdEncoded;
+  const session = new SessionModule(userKeys, onPersist);
+  return { session, userKeys };
+}
 
-  return session;
+/**
+ * Create a pair of test sessions (e.g., Alice and Bob) for e2e testing.
+ * Both sessions use real WASM crypto.
+ *
+ * @returns Object containing both sessions and their keys
+ */
+export async function createTestSessionPair(): Promise<{
+  alice: TestSessionData;
+  bob: TestSessionData;
+}> {
+  const [alice, bob] = await Promise.all([
+    createTestSession(`alice-test-key-${Date.now()}`),
+    createTestSession(`bob-test-key-${Date.now()}`),
+  ]);
+
+  return { alice, bob };
+}
+
+/**
+ * Helper to cleanup test sessions and free WASM memory.
+ * Call this in afterEach/afterAll.
+ */
+export function cleanupTestSession(sessionData: TestSessionData): void {
+  try {
+    sessionData.session.cleanup();
+  } catch {
+    // Session might already be cleaned up
+  }
+  try {
+    sessionData.userKeys.free();
+  } catch {
+    // Keys might already be freed
+  }
+}
+
+/**
+ * Helper to cleanup multiple test sessions.
+ */
+export function cleanupTestSessions(sessions: TestSessionData[]): void {
+  sessions.forEach(cleanupTestSession);
 }

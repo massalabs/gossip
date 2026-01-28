@@ -1,8 +1,7 @@
 /**
- * SENDING Reset on Startup Tests
+ * Message startup behavior tests
  *
- * Per spec: SENDING is a transient state that should never persist across app restarts.
- * If app crashes during send, messages stuck in SENDING should be reset to WAITING_SESSION.
+ * SENDING reset on startup, messages from unknown peers, seeker stabilization.
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
@@ -11,11 +10,18 @@ import {
   MessageStatus,
   MessageDirection,
   MessageType,
-} from '../src/db';
-import { encodeUserId } from '../src/utils/userId';
+  DiscussionStatus,
+  DiscussionDirection,
+} from '../../src/db';
+import { encodeUserId } from '../../src/utils/userId';
+import { defaultSdkConfig } from '../../src/config/sdk';
 
-const OWNER_USER_ID = encodeUserId(new Uint8Array(32).fill(1));
-const CONTACT_USER_ID = encodeUserId(new Uint8Array(32).fill(2));
+// ============================================================================
+// SENDING reset on startup
+// ============================================================================
+
+const RESET_OWNER_USER_ID = encodeUserId(new Uint8Array(32).fill(1));
+const RESET_CONTACT_USER_ID = encodeUserId(new Uint8Array(32).fill(2));
 
 describe('SENDING Reset on Startup', () => {
   let testDb: GossipDatabase;
@@ -29,10 +35,6 @@ describe('SENDING Reset on Startup', () => {
   });
 
   describe('resetStuckSendingMessages behavior', () => {
-    /**
-     * Simulates what GossipSdk.resetStuckSendingMessages does.
-     * This is extracted for testing since the actual method is private.
-     */
     async function resetStuckSendingMessages(): Promise<number> {
       return await testDb.messages
         .where('status')
@@ -45,10 +47,9 @@ describe('SENDING Reset on Startup', () => {
     }
 
     it('should reset SENDING messages to WAITING_SESSION', async () => {
-      // Create a message stuck in SENDING (simulates app crash during send)
       const messageId = await testDb.messages.add({
-        ownerUserId: OWNER_USER_ID,
-        contactUserId: CONTACT_USER_ID,
+        ownerUserId: RESET_OWNER_USER_ID,
+        contactUserId: RESET_CONTACT_USER_ID,
         content: 'Test message',
         type: MessageType.TEXT,
         direction: MessageDirection.OUTGOING,
@@ -58,12 +59,10 @@ describe('SENDING Reset on Startup', () => {
         seeker: new Uint8Array([4, 5, 6]),
       });
 
-      // Simulate app restart - reset stuck messages
       const count = await resetStuckSendingMessages();
 
       expect(count).toBe(1);
 
-      // Verify message was reset
       const message = await testDb.messages.get(messageId);
       expect(message?.status).toBe(MessageStatus.WAITING_SESSION);
       expect(message?.encryptedMessage).toBeUndefined();
@@ -75,8 +74,8 @@ describe('SENDING Reset on Startup', () => {
       const originalSeeker = new Uint8Array([50, 60, 70, 80]);
 
       const messageId = await testDb.messages.add({
-        ownerUserId: OWNER_USER_ID,
-        contactUserId: CONTACT_USER_ID,
+        ownerUserId: RESET_OWNER_USER_ID,
+        contactUserId: RESET_CONTACT_USER_ID,
         content: 'Message with encryption data',
         type: MessageType.TEXT,
         direction: MessageDirection.OUTGOING,
@@ -90,17 +89,15 @@ describe('SENDING Reset on Startup', () => {
 
       const message = await testDb.messages.get(messageId);
 
-      // Both should be cleared so message can be re-encrypted with fresh session
       expect(message?.encryptedMessage).toBeUndefined();
       expect(message?.seeker).toBeUndefined();
-      expect(message?.content).toBe('Message with encryption data'); // Content preserved
+      expect(message?.content).toBe('Message with encryption data');
     });
 
     it('should NOT affect messages in other statuses', async () => {
-      // Create messages in various statuses
       const waitingId = await testDb.messages.add({
-        ownerUserId: OWNER_USER_ID,
-        contactUserId: CONTACT_USER_ID,
+        ownerUserId: RESET_OWNER_USER_ID,
+        contactUserId: RESET_CONTACT_USER_ID,
         content: 'Waiting',
         type: MessageType.TEXT,
         direction: MessageDirection.OUTGOING,
@@ -109,8 +106,8 @@ describe('SENDING Reset on Startup', () => {
       });
 
       const sentId = await testDb.messages.add({
-        ownerUserId: OWNER_USER_ID,
-        contactUserId: CONTACT_USER_ID,
+        ownerUserId: RESET_OWNER_USER_ID,
+        contactUserId: RESET_CONTACT_USER_ID,
         content: 'Sent',
         type: MessageType.TEXT,
         direction: MessageDirection.OUTGOING,
@@ -120,8 +117,8 @@ describe('SENDING Reset on Startup', () => {
       });
 
       const deliveredId = await testDb.messages.add({
-        ownerUserId: OWNER_USER_ID,
-        contactUserId: CONTACT_USER_ID,
+        ownerUserId: RESET_OWNER_USER_ID,
+        contactUserId: RESET_CONTACT_USER_ID,
         content: 'Delivered',
         type: MessageType.TEXT,
         direction: MessageDirection.OUTGOING,
@@ -131,8 +128,8 @@ describe('SENDING Reset on Startup', () => {
       });
 
       const failedId = await testDb.messages.add({
-        ownerUserId: OWNER_USER_ID,
-        contactUserId: CONTACT_USER_ID,
+        ownerUserId: RESET_OWNER_USER_ID,
+        contactUserId: RESET_CONTACT_USER_ID,
         content: 'Failed',
         type: MessageType.TEXT,
         direction: MessageDirection.OUTGOING,
@@ -140,12 +137,9 @@ describe('SENDING Reset on Startup', () => {
         timestamp: new Date(),
       });
 
-      // Reset stuck messages
       const count = await resetStuckSendingMessages();
 
-      expect(count).toBe(0); // No SENDING messages to reset
-
-      // Verify all messages unchanged
+      expect(count).toBe(0);
       expect((await testDb.messages.get(waitingId))?.status).toBe(
         MessageStatus.WAITING_SESSION
       );
@@ -161,11 +155,10 @@ describe('SENDING Reset on Startup', () => {
     });
 
     it('should reset multiple SENDING messages', async () => {
-      // Create 3 messages stuck in SENDING
       await testDb.messages.bulkAdd([
         {
-          ownerUserId: OWNER_USER_ID,
-          contactUserId: CONTACT_USER_ID,
+          ownerUserId: RESET_OWNER_USER_ID,
+          contactUserId: RESET_CONTACT_USER_ID,
           content: 'Message 1',
           type: MessageType.TEXT,
           direction: MessageDirection.OUTGOING,
@@ -175,8 +168,8 @@ describe('SENDING Reset on Startup', () => {
           seeker: new Uint8Array([1]),
         },
         {
-          ownerUserId: OWNER_USER_ID,
-          contactUserId: CONTACT_USER_ID,
+          ownerUserId: RESET_OWNER_USER_ID,
+          contactUserId: RESET_CONTACT_USER_ID,
           content: 'Message 2',
           type: MessageType.TEXT,
           direction: MessageDirection.OUTGOING,
@@ -186,8 +179,8 @@ describe('SENDING Reset on Startup', () => {
           seeker: new Uint8Array([2]),
         },
         {
-          ownerUserId: OWNER_USER_ID,
-          contactUserId: CONTACT_USER_ID,
+          ownerUserId: RESET_OWNER_USER_ID,
+          contactUserId: RESET_CONTACT_USER_ID,
           content: 'Message 3',
           type: MessageType.TEXT,
           direction: MessageDirection.OUTGOING,
@@ -202,7 +195,6 @@ describe('SENDING Reset on Startup', () => {
 
       expect(count).toBe(3);
 
-      // Verify all are now WAITING_SESSION
       const messages = await testDb.messages.toArray();
       expect(
         messages.every(m => m.status === MessageStatus.WAITING_SESSION)
@@ -215,5 +207,125 @@ describe('SENDING Reset on Startup', () => {
       const count = await resetStuckSendingMessages();
       expect(count).toBe(0);
     });
+  });
+});
+
+// ============================================================================
+// Messages from Unknown Peer
+// ============================================================================
+
+const EDGE_OWNER_USER_ID = encodeUserId(new Uint8Array(32).fill(1));
+const EDGE_CONTACT_USER_ID = encodeUserId(new Uint8Array(32).fill(2));
+const EDGE_UNKNOWN_USER_ID = encodeUserId(new Uint8Array(32).fill(99));
+
+describe('Messages from Unknown Peer', () => {
+  let testDb: GossipDatabase;
+
+  beforeEach(async () => {
+    testDb = new GossipDatabase();
+    await testDb.open();
+    await Promise.all(testDb.tables.map(table => table.clear()));
+
+    await testDb.discussions.add({
+      ownerUserId: EDGE_OWNER_USER_ID,
+      contactUserId: EDGE_CONTACT_USER_ID,
+      direction: DiscussionDirection.RECEIVED,
+      status: DiscussionStatus.ACTIVE,
+      unreadCount: 0,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+  });
+
+  it('should not have discussion for unknown peer', async () => {
+    const discussion = await testDb.getDiscussionByOwnerAndContact(
+      EDGE_OWNER_USER_ID,
+      EDGE_UNKNOWN_USER_ID
+    );
+
+    expect(discussion).toBeUndefined();
+  });
+
+  it('should have discussion for known peer', async () => {
+    const discussion = await testDb.getDiscussionByOwnerAndContact(
+      EDGE_OWNER_USER_ID,
+      EDGE_CONTACT_USER_ID
+    );
+
+    expect(discussion).toBeDefined();
+    expect(discussion?.contactUserId).toBe(EDGE_CONTACT_USER_ID);
+  });
+});
+
+// ============================================================================
+// Seeker Stabilization Logic
+// ============================================================================
+
+describe('Seeker Stabilization Logic', () => {
+  it('should detect when seekers are the same (stabilized)', () => {
+    const seekers1 = new Set(['seeker1', 'seeker2', 'seeker3']);
+    const seekers2 = new Set(['seeker1', 'seeker2', 'seeker3']);
+
+    const areSame =
+      seekers1.size === seekers2.size &&
+      [...seekers1].every(s => seekers2.has(s));
+
+    expect(areSame).toBe(true);
+  });
+
+  it('should detect when seekers changed (not stabilized)', () => {
+    const seekers1 = new Set(['seeker1', 'seeker2']);
+    const seekers2 = new Set(['seeker1', 'seeker2', 'seeker3']);
+
+    const areSame =
+      seekers1.size === seekers2.size &&
+      [...seekers1].every(s => seekers2.has(s));
+
+    expect(areSame).toBe(false);
+  });
+
+  it('should detect when seekers reduced', () => {
+    const seekers1 = new Set(['seeker1', 'seeker2', 'seeker3']);
+    const seekers2 = new Set(['seeker1', 'seeker2']);
+
+    const areSame =
+      seekers1.size === seekers2.size &&
+      [...seekers1].every(s => seekers2.has(s));
+
+    expect(areSame).toBe(false);
+  });
+
+  it('should handle empty seeker sets', () => {
+    const seekers1 = new Set<string>();
+    const seekers2 = new Set<string>();
+
+    const areSame =
+      seekers1.size === seekers2.size &&
+      [...seekers1].every(s => seekers2.has(s));
+
+    expect(areSame).toBe(true);
+  });
+
+  it('should respect maxFetchIterations limit', () => {
+    const maxIterations = defaultSdkConfig.messages.maxFetchIterations;
+    let iterations = 0;
+    const seekersNeverStabilize = () => new Set([`seeker${iterations++}`]);
+
+    let previousSeekers = new Set<string>();
+    let loopCount = 0;
+
+    while (loopCount < maxIterations) {
+      const currentSeekers = seekersNeverStabilize();
+      const stabilized =
+        previousSeekers.size === currentSeekers.size &&
+        [...previousSeekers].every(s => currentSeekers.has(s));
+
+      if (stabilized) break;
+
+      previousSeekers = currentSeekers;
+      loopCount++;
+    }
+
+    expect(loopCount).toBe(maxIterations);
   });
 });

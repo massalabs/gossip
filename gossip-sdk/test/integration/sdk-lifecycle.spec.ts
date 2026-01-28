@@ -3,8 +3,8 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { GossipDatabase } from '../src/db';
-import type { EncryptionKey } from '../src/wasm/encryption';
+import { GossipDatabase } from '../../src/db';
+import type { EncryptionKey } from '../../src/wasm/encryption';
 
 const protocolMock = vi.hoisted(() => ({
   createMessageProtocolMock: vi.fn(),
@@ -45,32 +45,32 @@ const sessionMock = vi.hoisted(() => {
   return { MockSession, state, userIdBytes, userIdEncoded };
 });
 
-vi.mock('../src/api/messageProtocol', () => ({
+vi.mock('../../src/api/messageProtocol', () => ({
   createMessageProtocol: () => protocolMock.createMessageProtocolMock(),
 }));
 
-vi.mock('../src/wasm/loader', () => ({
+vi.mock('../../src/wasm/loader', () => ({
   startWasmInitialization: vi.fn(),
   ensureWasmInitialized: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock('../src/wasm/userKeys', () => ({
+vi.mock('../../src/wasm/userKeys', () => ({
   generateUserKeys: vi.fn().mockResolvedValue({}),
 }));
 
-vi.mock('../src/wasm/session', async () => {
+vi.mock('../../src/wasm/session', async () => {
   return {
     SessionModule: sessionMock.MockSession,
   };
 });
 
-vi.mock('../src/services/auth', () => ({
+vi.mock('../../src/services/auth', () => ({
   AuthService: class {
     constructor() {}
   },
 }));
 
-vi.mock('../src/services/announcement', () => ({
+vi.mock('../../src/services/announcement', () => ({
   AnnouncementService: class {
     constructor(
       _db: unknown,
@@ -83,7 +83,7 @@ vi.mock('../src/services/announcement', () => ({
   },
 }));
 
-vi.mock('../src/services/message', () => ({
+vi.mock('../../src/services/message', () => ({
   MessageService: class {
     sendMessage = vi.fn();
     fetchMessages = vi.fn();
@@ -101,7 +101,7 @@ vi.mock('../src/services/message', () => ({
   },
 }));
 
-vi.mock('../src/services/discussion', () => ({
+vi.mock('../../src/services/discussion', () => ({
   DiscussionService: class {
     initialize = vi.fn();
     accept = vi.fn();
@@ -118,7 +118,7 @@ vi.mock('../src/services/discussion', () => ({
   },
 }));
 
-vi.mock('../src/services/refresh', () => ({
+vi.mock('../../src/services/refresh', () => ({
   RefreshService: class {
     handleSessionRefresh = vi.fn();
     constructor(
@@ -149,7 +149,7 @@ describe('GossipSdkImpl lifecycle', () => {
   });
 
   it('initializes once and exposes auth service', async () => {
-    const { GossipSdkImpl } = await import('../src/gossipSdk');
+    const { GossipSdkImpl } = await import('../../src/gossipSdk');
     const sdk = new GossipSdkImpl();
 
     await sdk.init({ db: new GossipDatabase() });
@@ -162,7 +162,7 @@ describe('GossipSdkImpl lifecycle', () => {
   });
 
   it('throws on openSession before init', async () => {
-    const { GossipSdkImpl } = await import('../src/gossipSdk');
+    const { GossipSdkImpl } = await import('../../src/gossipSdk');
     const sdk = new GossipSdkImpl();
 
     await expect(sdk.openSession({ mnemonic: 'test words' })).rejects.toThrow(
@@ -171,7 +171,7 @@ describe('GossipSdkImpl lifecycle', () => {
   });
 
   it('opens and closes session with getters wired', async () => {
-    const { GossipSdkImpl } = await import('../src/gossipSdk');
+    const { GossipSdkImpl } = await import('../../src/gossipSdk');
     const sdk = new GossipSdkImpl();
 
     await sdk.init({ db: new GossipDatabase() });
@@ -189,7 +189,7 @@ describe('GossipSdkImpl lifecycle', () => {
   });
 
   it('restores encrypted session when provided', async () => {
-    const { GossipSdkImpl } = await import('../src/gossipSdk');
+    const { GossipSdkImpl } = await import('../../src/gossipSdk');
     const sdk = new GossipSdkImpl();
     const encryptedSession = new Uint8Array([1, 2, 3]);
     const encryptionKey = {} as EncryptionKey;
@@ -205,7 +205,7 @@ describe('GossipSdkImpl lifecycle', () => {
   });
 
   it('persists session via onPersist callback', async () => {
-    const { GossipSdkImpl } = await import('../src/gossipSdk');
+    const { GossipSdkImpl } = await import('../../src/gossipSdk');
     const sdk = new GossipSdkImpl();
     const onPersist = vi.fn().mockResolvedValue(undefined);
     const persistEncryptionKey = {} as EncryptionKey;
@@ -225,7 +225,7 @@ describe('GossipSdkImpl lifecycle', () => {
   });
 
   it('bridges message events to sdk.on handlers', async () => {
-    const { GossipSdkImpl } = await import('../src/gossipSdk');
+    const { GossipSdkImpl } = await import('../../src/gossipSdk');
     const sdk = new GossipSdkImpl();
     const handler = vi.fn();
 
@@ -238,17 +238,6 @@ describe('GossipSdkImpl lifecycle', () => {
   });
 });
 
-/**
- * Tests for configurePersistence method
- *
- * CRITICAL: These tests ensure session persistence can be configured AFTER
- * openSession() is called. This is essential for account creation flows where
- * we need to create the user profile before we can set up persistence.
- *
- * Bug prevented: Without configurePersistence, new accounts created with
- * openSession() (without onPersist) would never persist session state,
- * causing WAITING_SESSION issues after page reload.
- */
 describe('GossipSdkImpl.configurePersistence', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -266,42 +255,37 @@ describe('GossipSdkImpl.configurePersistence', () => {
   });
 
   it('throws if called before session is opened', async () => {
-    const { GossipSdkImpl } = await import('../src/gossipSdk');
+    const { GossipSdkImpl } = await import('../../src/gossipSdk');
     const sdk = new GossipSdkImpl();
     const onPersist = vi.fn();
     const encryptionKey = {} as EncryptionKey;
 
     await sdk.init({ db: new GossipDatabase() });
 
-    // Session not opened yet - should throw
     expect(() => sdk.configurePersistence(encryptionKey, onPersist)).toThrow(
       'No session open'
     );
   });
 
   it('configures persistence after session is opened without initial onPersist', async () => {
-    const { GossipSdkImpl } = await import('../src/gossipSdk');
+    const { GossipSdkImpl } = await import('../../src/gossipSdk');
     const sdk = new GossipSdkImpl();
     const onPersist = vi.fn().mockResolvedValue(undefined);
     const encryptionKey = {} as EncryptionKey;
 
     await sdk.init({ db: new GossipDatabase() });
 
-    // Open session WITHOUT onPersist (simulates account creation flow)
     await sdk.openSession({ mnemonic: 'test words' });
 
-    // Configure persistence after profile is created
     sdk.configurePersistence(encryptionKey, onPersist);
 
-    // Trigger persist event from session
     sessionMock.state.lastSessionInstance?.emitPersist();
 
-    // Should have called the newly configured onPersist
     expect(onPersist).toHaveBeenCalledWith(new Uint8Array([9]), encryptionKey);
   });
 
   it('replaces existing onPersist callback when reconfigured', async () => {
-    const { GossipSdkImpl } = await import('../src/gossipSdk');
+    const { GossipSdkImpl } = await import('../../src/gossipSdk');
     const sdk = new GossipSdkImpl();
     const originalOnPersist = vi.fn().mockResolvedValue(undefined);
     const newOnPersist = vi.fn().mockResolvedValue(undefined);
@@ -310,26 +294,22 @@ describe('GossipSdkImpl.configurePersistence', () => {
 
     await sdk.init({ db: new GossipDatabase() });
 
-    // Open session with initial persistence
     await sdk.openSession({
       mnemonic: 'test words',
       onPersist: originalOnPersist,
       persistEncryptionKey: originalKey,
     });
 
-    // Reconfigure with new callback
     sdk.configurePersistence(newKey, newOnPersist);
 
-    // Trigger persist
     sessionMock.state.lastSessionInstance?.emitPersist();
 
-    // Only the new callback should be called
     expect(originalOnPersist).not.toHaveBeenCalled();
     expect(newOnPersist).toHaveBeenCalledWith(new Uint8Array([9]), newKey);
   });
 
   it('ensures persistence is called with correct encryption key', async () => {
-    const { GossipSdkImpl } = await import('../src/gossipSdk');
+    const { GossipSdkImpl } = await import('../../src/gossipSdk');
     const sdk = new GossipSdkImpl();
     const onPersist = vi.fn().mockResolvedValue(undefined);
     const specificKey = { keyId: 'test-key-123' } as unknown as EncryptionKey;
@@ -340,7 +320,6 @@ describe('GossipSdkImpl.configurePersistence', () => {
     sdk.configurePersistence(specificKey, onPersist);
     sessionMock.state.lastSessionInstance?.emitPersist();
 
-    // Verify the specific encryption key is passed
     expect(onPersist).toHaveBeenCalledWith(expect.any(Uint8Array), specificKey);
   });
 });

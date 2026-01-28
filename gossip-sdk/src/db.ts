@@ -427,8 +427,6 @@ let _warnedGlobalDbAccess = false;
 /**
  * Get the database instance.
  * Creates a default instance if none was set via setDb().
- *
- * @deprecated Use createGossipSdk() factory instead of global db access
  */
 export function getDb(): GossipDatabase {
   if (!_db) {
@@ -440,16 +438,14 @@ export function getDb(): GossipDatabase {
 /**
  * Set the database instance.
  * Call this before using any SDK functions if you need a custom db instance.
- *
- * @deprecated Use createGossipSdk() factory instead
  */
 export function setDb(database: GossipDatabase): void {
   _db = database;
 }
 
 /**
- * @deprecated Use getDb() or createGossipSdk() factory instead.
- * This getter exists for backward compatibility during migration.
+ * Get the database instance.
+ * Creates a default instance if none was set via setDb().
  */
 export const db: GossipDatabase = new Proxy({} as GossipDatabase, {
   get(_target, prop) {

@@ -1,7 +1,5 @@
 /**
- * SDK Configuration Tests
- *
- * Tests for config merging and default values.
+ * SDK Config tests
  */
 
 import { describe, it, expect } from 'vitest';
@@ -10,7 +8,7 @@ import {
   mergeConfig,
   type SdkConfig,
   type DeepPartial,
-} from '../src/config/sdk';
+} from '../../src/config/sdk';
 
 describe('SDK Config', () => {
   describe('defaultSdkConfig', () => {
@@ -36,7 +34,7 @@ describe('SDK Config', () => {
       expect(defaultSdkConfig.announcements.fetchLimit).toBe(500);
       expect(defaultSdkConfig.announcements.brokenThresholdMs).toBe(
         60 * 60 * 1000
-      ); // 1 hour
+      );
     });
   });
 
@@ -61,8 +59,8 @@ describe('SDK Config', () => {
       const config = mergeConfig(partial);
 
       expect(config.protocol.timeout).toBe(5000);
-      expect(config.protocol.retryAttempts).toBe(3); // default
-      expect(config.polling.enabled).toBe(false); // default
+      expect(config.protocol.retryAttempts).toBe(3);
+      expect(config.polling.enabled).toBe(false);
     });
 
     it('should merge partial polling config', () => {
@@ -77,8 +75,8 @@ describe('SDK Config', () => {
 
       expect(config.polling.enabled).toBe(true);
       expect(config.polling.messagesIntervalMs).toBe(2000);
-      expect(config.polling.announcementsIntervalMs).toBe(10000); // default
-      expect(config.polling.sessionRefreshIntervalMs).toBe(30000); // default
+      expect(config.polling.announcementsIntervalMs).toBe(10000);
+      expect(config.polling.sessionRefreshIntervalMs).toBe(30000);
     });
 
     it('should merge partial messages config', () => {
@@ -91,20 +89,20 @@ describe('SDK Config', () => {
       const config = mergeConfig(partial);
 
       expect(config.messages.maxFetchIterations).toBe(50);
-      expect(config.messages.fetchDelayMs).toBe(100); // default
+      expect(config.messages.fetchDelayMs).toBe(100);
     });
 
     it('should merge partial announcements config', () => {
       const partial: DeepPartial<SdkConfig> = {
         announcements: {
-          brokenThresholdMs: 30 * 60 * 1000, // 30 minutes
+          brokenThresholdMs: 30 * 60 * 1000,
         },
       };
 
       const config = mergeConfig(partial);
 
       expect(config.announcements.brokenThresholdMs).toBe(30 * 60 * 1000);
-      expect(config.announcements.fetchLimit).toBe(500); // default
+      expect(config.announcements.fetchLimit).toBe(500);
     });
 
     it('should merge multiple sections at once', () => {
@@ -129,7 +127,6 @@ describe('SDK Config', () => {
       expect(config.polling.enabled).toBe(true);
       expect(config.messages.fetchDelayMs).toBe(50);
       expect(config.announcements.fetchLimit).toBe(1000);
-      // Verify other defaults are preserved
       expect(config.protocol.timeout).toBe(10000);
       expect(config.polling.messagesIntervalMs).toBe(5000);
     });
@@ -143,5 +140,24 @@ describe('SDK Config', () => {
 
       expect(defaultSdkConfig.protocol.timeout).toBe(originalTimeout);
     });
+  });
+});
+
+describe('Max Fetch Iterations Limit', () => {
+  it('should respect maxFetchIterations config', async () => {
+    const config: SdkConfig = {
+      ...defaultSdkConfig,
+      messages: {
+        ...defaultSdkConfig.messages,
+        maxFetchIterations: 5,
+        fetchDelayMs: 0,
+      },
+    };
+
+    expect(config.messages.maxFetchIterations).toBe(5);
+  });
+
+  it('should have default maxFetchIterations of 30', () => {
+    expect(defaultSdkConfig.messages.maxFetchIterations).toBe(30);
   });
 });

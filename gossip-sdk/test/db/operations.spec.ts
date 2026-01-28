@@ -1,10 +1,7 @@
 /**
- * Simple Database Operations Tests
- *
- * Minimal test to verify database operations work.
+ * Database operations tests
  */
 
-import 'fake-indexeddb/auto';
 import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import {
   GossipDatabase,
@@ -13,12 +10,11 @@ import {
   MessageDirection,
   MessageStatus,
   MessageType,
-} from '../src/db';
+} from '../../src/db';
 
 const TEST_OWNER_USER_ID = 'gossip1testowner';
 const TEST_CONTACT_USER_ID = 'gossip1testcontact';
 
-// Create a fresh database for these tests
 const testDb = new GossipDatabase();
 
 describe('Simple Database Tests', () => {
@@ -26,7 +22,6 @@ describe('Simple Database Tests', () => {
     if (!testDb.isOpen()) {
       await testDb.open();
     }
-    // Clear relevant tables
     await testDb.discussions.clear();
     await testDb.messages.clear();
     await testDb.contacts.clear();
