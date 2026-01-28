@@ -5,7 +5,7 @@ import { useAppStore } from '../stores/appStore';
 import Login from '../pages/Login';
 import AccountCreation from '../components/account/AccountCreation';
 import { InvitePage } from '../pages/InvitePage';
-import { UserProfile } from '../db';
+import { UserProfile } from 'gossip-sdk';
 import { ROUTES } from '../constants/routes';
 import MainLayout from '../components/ui/MainLayout';
 

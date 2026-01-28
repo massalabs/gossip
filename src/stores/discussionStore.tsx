@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { Subscription } from 'dexie';
 import { liveQuery } from 'dexie';
-import { Discussion, Contact, db, DiscussionStatus } from '../db';
+import { Discussion, Contact, db, gossipSdk, SessionStatus } from 'gossip-sdk';
 import { createSelectors } from './utils/createSelectors';
 import { useAccountStore } from './accountStore';
 
@@ -19,7 +19,7 @@ interface DiscussionStoreState {
 
   init: () => void;
   getDiscussionsForContact: (contactUserId: string) => Discussion[];
-  getDiscussionsByStatus: (status: DiscussionStatus[]) => Discussion[];
+  getDiscussionsByStatus: (status: SessionStatus[]) => Discussion[];
   cleanup: () => void;
   setModalOpen: (discussionId: number, isOpen: boolean) => void;
   isModalOpen: (discussionId: number) => boolean;
@@ -65,7 +65,9 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
 
           // For pending requests, use updatedAt
           if (
-            discussion.status === DiscussionStatus.PENDING &&
+            [SessionStatus.SelfRequested, SessionStatus.PeerRequested].includes(
+              gossipSdk.discussions.getStatus(discussion.contactUserId)
+            ) &&
             discussion.updatedAt
           ) {
             return discussion.updatedAt.getTime();
@@ -75,11 +77,16 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
           return discussion.createdAt.getTime();
         };
 
-        const getStatusPriority = (status: DiscussionStatus): number => {
+        const getStatusPriority = (status: SessionStatus): number => {
           // PENDING (new requests) = highest priority (0)
-          if (status === DiscussionStatus.PENDING) return 0;
+          if (
+            [SessionStatus.SelfRequested, SessionStatus.PeerRequested].includes(
+              status
+            )
+          )
+            return 0;
           // ACTIVE (ongoing discussions) = medium priority (1)
-          if (status === DiscussionStatus.ACTIVE) return 1;
+          if (status === SessionStatus.Active) return 1;
           // All other statuses = lowest priority (2)
           return 2;
         };
@@ -87,7 +94,10 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
         const sortedDiscussions = discussionsList.sort((a, b) => {
           // First, separate by status: PENDING first, then ACTIVE, then others
           const statusDiff =
-            getStatusPriority(a.status) - getStatusPriority(b.status);
+            getStatusPriority(
+              gossipSdk.discussions.getStatus(a.contactUserId)
+            ) -
+            getStatusPriority(gossipSdk.discussions.getStatus(b.contactUserId));
           if (statusDiff !== 0) return statusDiff;
 
           // Within the same status group, sort by activity time
@@ -147,12 +157,14 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
     );
   },
 
-  getDiscussionsByStatus: (status: DiscussionStatus[]) => {
+  getDiscussionsByStatus: (status: SessionStatus[]) => {
     const ownerUserId = useAccountStore.getState().userProfile?.userId;
     if (!ownerUserId) return [];
-    return get().discussions.filter(discussion =>
-      status.includes(discussion.status)
-    );
+    return get().discussions.filter(discussion => {
+      return status.includes(
+        gossipSdk.discussions.getStatus(discussion.contactUserId)
+      );
+    });
   },
 
   cleanup: () => {

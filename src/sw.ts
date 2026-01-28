@@ -11,8 +11,11 @@ import { defaultSyncConfig } from './config/sync';
 import {
   RestMessageProtocol,
   type EncryptedMessage,
-} from '@massalabs/gossip-sdk';
-import { db } from './db';
+  GossipDatabase,
+} from 'gossip-sdk';
+
+// Create database instance for service worker
+const db = new GossipDatabase();
 import {
   getLastSyncTimestamp,
   setLastSyncTimestamp,

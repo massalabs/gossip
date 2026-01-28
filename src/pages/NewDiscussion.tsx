@@ -3,7 +3,7 @@ import { Edit2, Plus, Users, User } from 'react-feather';
 import { useAccountStore } from '../stores/accountStore';
 import Button from '../components/ui/Button';
 import { useEffect, useMemo, useState } from 'react';
-import { Contact, DiscussionStatus, db } from '../db';
+import { Contact, gossipSdk, SessionStatus } from 'gossip-sdk';
 import ContactAvatar from '../components/avatar/ContactAvatar';
 import UserIdDisplay from '../components/ui/UserIdDisplay';
 import PageHeader from '../components/ui/PageHeader';
@@ -30,13 +30,11 @@ const NewDiscussion: React.FC = () => {
       try {
         setIsLoading(true);
         const list = userProfile?.userId
-          ? await db
-              .getContactsByOwner(userProfile.userId)
+          ? await gossipSdk.contacts
+              .list(userProfile.userId)
               .then(arr => arr.sort((a, b) => a.name.localeCompare(b.name)))
           : [];
-        if (isMounted) {
-          setContacts(list);
-        }
+        if (isMounted) setContacts(list);
       } finally {
         if (isMounted) setIsLoading(false);
       }
@@ -62,11 +60,14 @@ const NewDiscussion: React.FC = () => {
 
   const onSelectContact = async (contact: Contact) => {
     if (!userProfile?.userId) return;
-    const discussion = await db.getDiscussionByOwnerAndContact(
+    const discussion = await gossipSdk.discussions.get(
       userProfile.userId,
       contact.userId
     );
-    if (discussion && discussion.status === DiscussionStatus.ACTIVE) {
+    if (
+      discussion &&
+      gossipSdk.discussions.getStatus(contact.userId) === SessionStatus.Active
+    ) {
       navigate(ROUTES.discussion({ userId: contact.userId }));
     }
   };

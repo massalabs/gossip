@@ -19,7 +19,7 @@ import ContactSharePage from '../pages/ContactSharePage';
 import { InvitePage } from '../pages/InvitePage';
 import { usePendingDeepLink } from '../hooks/usePendingDeepLink';
 import { usePendingSharedContent } from '../hooks/usePendingSharedContent';
-import { useAppStateRefresh } from '../hooks/useAppStateRefresh';
+// import { useAppStateRefresh } from '../hooks/useAppStateRefresh';
 import { ROUTES } from '../constants/routes';
 import MainLayout from '../components/ui/MainLayout';
 
@@ -30,7 +30,7 @@ import MainLayout from '../components/ui/MainLayout';
  * Configure which routes show bottom nav in `src/constants/pageConfig.ts`
  */
 export const AuthenticatedRoutes: React.FC = () => {
-  useAppStateRefresh();
+  // useAppStateRefresh();
   usePendingDeepLink();
   usePendingSharedContent();
 

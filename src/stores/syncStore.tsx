@@ -51,13 +51,13 @@ const useSyncStoreBase = create<SyncStoreState>((set, get) => ({
   },
 
   executeIfLockFree: async <T,>(
-    acquireSyncKeys: SyncKey[],
+    lockSyncKeys: SyncKey[],
     notRunningSyncKeys: SyncKey[],
     fn: () => Promise<T>
   ): Promise<Result<T, Error>> => {
     const { isRunning } = get();
 
-    // Check if any of the keys are not running
+    // Check if any of the notRunningSyncKeys are currently used
     if (notRunningSyncKeys.some(key => isRunning[key])) {
       return {
         success: false,
@@ -68,7 +68,7 @@ const useSyncStoreBase = create<SyncStoreState>((set, get) => ({
     // Acquire locks for all keys
     set(state => {
       const newIsRunning = { ...state.isRunning };
-      acquireSyncKeys.forEach(key => {
+      lockSyncKeys.forEach(key => {
         newIsRunning[key] = true;
       });
       return { isRunning: newIsRunning };
@@ -90,7 +90,7 @@ const useSyncStoreBase = create<SyncStoreState>((set, get) => ({
       // Release locks for all keys (always executes, even if function throws or returns)
       set(state => {
         const newIsRunning = { ...state.isRunning };
-        acquireSyncKeys.forEach(key => {
+        lockSyncKeys.forEach(key => {
           newIsRunning[key] = false;
         });
         return { isRunning: newIsRunning };

@@ -1,8 +1,6 @@
 import { useCallback } from 'react';
 import { useAccountStore } from '../stores/accountStore';
-import { gossipSdk } from '@massalabs/gossip-sdk';
-import { Discussion, db as appDb, DiscussionStatus } from '../db';
-
+import { gossipSdk, Discussion } from '@massalabs/gossip-sdk';
 export const useDiscussionList = () => {
   const userProfile = useAccountStore(s => s.userProfile);
 
@@ -14,10 +12,11 @@ export const useDiscussionList = () => {
         // If the user provided a new contact name, update it first
         if (newName && userProfile?.userId) {
           try {
-            await appDb.contacts
-              .where('[ownerUserId+userId]')
-              .equals([userProfile.userId, discussion.contactUserId])
-              .modify({ name: newName });
+            await gossipSdk.contacts.updateName(
+              userProfile.userId,
+              discussion.contactUserId,
+              newName
+            );
           } catch (e) {
             console.error('Failed to update contact name:', e);
           }
@@ -33,17 +32,16 @@ export const useDiscussionList = () => {
   const handleRefuseDiscussionRequest = useCallback(
     async (discussion: Discussion) => {
       try {
-        if (discussion.id == null) return;
-        await appDb.discussions.update(discussion.id, {
-          status: DiscussionStatus.CLOSED,
-          unreadCount: 0,
-          updatedAt: new Date(),
-        });
+        if (userProfile?.userId == null) return;
+        await gossipSdk.contacts.delete(
+          userProfile.userId,
+          discussion.contactUserId
+        );
       } catch (error) {
         console.error('Failed to refuse discussion:', error);
       }
     },
-    []
+    [userProfile?.userId]
   );
 
   // Only return handlers that are actually used - state and selectors should be accessed directly from stores

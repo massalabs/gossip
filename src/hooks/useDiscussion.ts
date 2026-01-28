@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { Contact, Discussion, DiscussionStatus } from '../db';
+import { Contact, Discussion, SessionStatus, gossipSdk } from 'gossip-sdk';
 import { useDiscussionStore } from '../stores/discussionStore';
 
 interface UseDiscussionProps {
@@ -30,11 +30,12 @@ export const useDiscussion = ({ contact }: UseDiscussionProps) => {
 
       // Get the most recent discussion (active or pending)
       const latestDiscussion = discussions
-        .filter(
-          d =>
-            d.status === DiscussionStatus.ACTIVE ||
-            d.status === DiscussionStatus.PENDING ||
-            d.status === DiscussionStatus.SEND_FAILED
+        .filter(d =>
+          [
+            SessionStatus.Active,
+            SessionStatus.SelfRequested,
+            SessionStatus.PeerRequested,
+          ].includes(gossipSdk.discussions.getStatus(d.contactUserId))
         )
         .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
 

@@ -1,7 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { Send, X } from 'react-feather';
 import { Capacitor } from '@capacitor/core';
-import { Message } from '../../db';
+import { Message } from 'gossip-sdk';
 
 interface MessageInputProps {
   onSend: (message: string, replyToId?: number) => void;

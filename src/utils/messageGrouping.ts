@@ -1,4 +1,4 @@
-import { Message } from '../db';
+import { Message } from 'gossip-sdk';
 
 /**
  * Maximum time gap (in minutes) between messages to consider them part of the same group

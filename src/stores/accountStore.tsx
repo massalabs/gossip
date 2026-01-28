@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { db, UserProfile } from '../db';
+import { db, UserProfile } from 'gossip-sdk';
 
 import {
   encrypt,
@@ -7,9 +7,6 @@ import {
   generateMnemonic,
   validateMnemonic,
   gossipSdk,
-  generateUserKeys,
-  EncryptionKey,
-  generateNonce,
   validateUsernameFormat,
 } from '@massalabs/gossip-sdk';
 import { isWebAuthnSupported } from '../crypto/webauthn';
@@ -24,7 +21,8 @@ import {
 } from '@massalabs/massa-web3';
 import { useAppStore } from './appStore';
 import { createSelectors } from './utils/createSelectors';
-import { authService } from '../services';
+import { generateUserKeys, EncryptionKey, generateNonce } from 'gossip-sdk';
+// import { SessionConfig } from '../assets/generated/wasm/gossip_wasm';
 import { getActiveOrFirstProfile } from './utils/getAccount';
 import { auth } from './utils/auth';
 import { useDiscussionStore } from './discussionStore';
@@ -794,7 +792,7 @@ useAccountStoreBase.subscribe(async (state, prevState) => {
   if (previous && current.userId === previous.userId) return;
 
   try {
-    await authService.ensurePublicKeyPublished(
+    await gossipSdk.auth.ensurePublicKeyPublished(
       gossipSdk.publicKeys,
       current.userId
     );

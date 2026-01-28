@@ -5,7 +5,7 @@ import { createSelectors } from './utils/createSelectors';
 import { STORAGE_KEYS } from '../utils/localStorage';
 import { ParsedInvite } from '../utils/qrCodeParser';
 import { mnsService } from '../services/mns';
-import { UserProfile } from '../db';
+import { UserProfile } from 'gossip-sdk';
 
 // Debug console button position
 interface DebugButtonPosition {
