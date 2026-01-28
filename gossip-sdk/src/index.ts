@@ -2,38 +2,23 @@
  * Gossip SDK
  *
  * Main entry point for the Gossip SDK.
- * Provides a platform-agnostic interface for automation, chatbot,
- * and integration use cases with the Gossip messenger.
+ * Works in both browser and Node.js environments.
+ *
+ * WASM is loaded via the #wasm subpath import which resolves conditionally:
+ * - Browser: web target (uses import.meta.url)
+ * - Node: nodejs target (uses fs, no import.meta.url)
  *
  * @example
  * ```typescript
- * import { gossipSdk } from 'gossip-sdk';
+ * import { gossipSdk } from '@massalabs/gossip-sdk';
  *
- * // Initialize once at app startup
- * await gossipSdk.init({
- *   db,
- *   protocolBaseUrl: 'https://api.example.com',
- * });
- *
- * // Open session (login)
+ * await gossipSdk.init({ db, protocolBaseUrl: 'https://api.example.com' });
  * await gossipSdk.openSession({ mnemonic: '...' });
- *
- * // Use clean API
  * await gossipSdk.messages.send(contactId, 'Hello!');
- * await gossipSdk.discussions.start(contact);
- *
- * // Events
- * gossipSdk.on('message', (msg) => { ... });
- *
- * // Logout
- * await gossipSdk.closeSession();
  * ```
  *
  * @packageDocumentation
  */
-
-// SDK version - matches package.json
-export const SDK_VERSION = '0.0.1';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SDK Singleton - Primary API
@@ -49,7 +34,7 @@ export type {
 // SDK Events
 export type { GossipSdkEvents } from './types/events';
 
-// Services - class-based with dependency injection
+// Services
 export { AuthService } from './services/auth';
 export type { PublicKeyResult } from './services/auth';
 export {
@@ -74,7 +59,7 @@ export { DiscussionService } from './services/discussion';
 
 export { RefreshService } from './services/refresh';
 
-// Contact Management (utility functions)
+// Contact Management
 export {
   getContacts,
   getContact,
@@ -91,10 +76,10 @@ export type {
 export { updateDiscussionName } from './utils/discussions';
 export type { UpdateDiscussionNameResult } from './utils/discussions';
 
-// Types - re-export all types from the types module
+// Types
 export * from './types';
 
-// Message Protocol - for direct use by host apps
+// Message Protocol
 export {
   createMessageProtocol,
   restMessageProtocol,
@@ -108,7 +93,7 @@ export type {
   BulletinItem,
 } from './api/messageProtocol';
 
-// Config - for runtime configuration
+// Config
 export {
   setProtocolBaseUrl,
   resetProtocolBaseUrl,
@@ -117,7 +102,6 @@ export {
 } from './config/protocol';
 export type { ProtocolConfig } from './config/protocol';
 
-// SDK Config - for SDK initialization options
 export { defaultSdkConfig, mergeConfig } from './config/sdk';
 export type {
   SdkConfig,
@@ -127,10 +111,10 @@ export type {
   DeepPartial,
 } from './config/sdk';
 
-// Database - for direct access by host apps
+// Database
 export { setDb, getDb, db, GossipDatabase } from './db';
 
-// WASM utilities - for session management
+// WASM utilities
 export { SessionModule, sessionStatusToString } from './wasm/session';
 export {
   initializeWasm,
@@ -148,9 +132,9 @@ export {
   encryptAead,
   decryptAead,
 } from './wasm/encryption';
-export { generateUserKeys } from './wasm/userKeys';
+export { generateUserKeys, UserKeys } from './wasm/userKeys';
 
-// Utility functions - for direct use
+// Utility functions
 export {
   encodeUserId,
   decodeUserId,
@@ -174,7 +158,7 @@ export {
 } from './utils/base64';
 export type { Result } from './utils/type';
 
-// Message serialization utilities
+// Message serialization
 export {
   MESSAGE_TYPE_KEEP_ALIVE,
   serializeKeepAliveMessage,
@@ -195,7 +179,7 @@ export {
 } from './crypto/bip39';
 export { encrypt, decrypt, deriveKey } from './crypto/encryption';
 
-// WASM types and functions re-exported for convenience
+// WASM types re-exported for convenience
 export {
   UserPublicKeys,
   UserSecretKeys,
@@ -206,6 +190,4 @@ export {
   ReceiveMessageOutput,
   AnnouncementResult,
   generate_user_keys,
-} from './assets/generated/wasm/gossip_wasm';
-
-export { UserKeys } from './wasm/userKeys';
+} from '#wasm';

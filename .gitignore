@@ -48,6 +48,7 @@ ios/App/fastlane/report.xml
 ios/App/fastlane/Preview.html
 ios/App/fastlane/test_output/
 ios/App/Gemfile.lock
+ios/App/plugins/App/public/assets
 
 # Android build artifacts
 android/.gradle/
@@ -61,7 +62,6 @@ android/captured_assets/
 # PWA generated assets
 icons/
 public/manifest.webmanifest
-assets/
 
 # Android generated resources (night mode, additional density variants)
 android/app/src/main/res/drawable-night/

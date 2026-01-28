@@ -13,10 +13,7 @@ import {
   MessageStatus,
   DiscussionDirection,
 } from '../db';
-import {
-  UserPublicKeys,
-  SessionStatus,
-} from '../assets/generated/wasm/gossip_wasm';
+import { UserPublicKeys, SessionStatus } from '#wasm';
 import { AnnouncementService, EstablishSessionError } from './announcement';
 import { SessionModule, sessionStatusToString } from '../wasm/session';
 import { decodeUserId } from '../utils/userId';

@@ -1,6 +1,5 @@
 {
   "name": "gossip-wasm",
-  "type": "module",
   "version": "0.1.0",
   "files": [
     "gossip_wasm_bg.wasm",
@@ -8,8 +7,5 @@
     "gossip_wasm.d.ts"
   ],
   "main": "gossip_wasm.js",
-  "types": "gossip_wasm.d.ts",
-  "sideEffects": [
-    "./snippets/*"
-  ]
+  "types": "gossip_wasm.d.ts"
 }

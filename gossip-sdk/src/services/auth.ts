@@ -4,7 +4,7 @@
  * Handles storing and retrieving public keys by userId hash via the auth API.
  */
 
-import { UserPublicKeys } from '../assets/generated/wasm/gossip_wasm';
+import { UserPublicKeys } from '#wasm';
 import { decodeUserId } from '../utils/userId';
 import { encodeToBase64, decodeFromBase64 } from '../utils/base64';
 import { IMessageProtocol } from '../api/messageProtocol/types';
