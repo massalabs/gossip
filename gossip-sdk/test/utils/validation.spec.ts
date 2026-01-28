@@ -1,19 +1,19 @@
 /**
- * Validation utility tests
+ * Validation utilities tests
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
+import { db } from '../../src/db';
+import { encodeUserId } from '../../src/utils/userId';
 import {
   validatePassword,
   validateUsernameFormat,
   validateUsernameAvailability,
   validateUsernameFormatAndAvailability,
   validateUserIdFormat,
-} from '../src/utils/validation';
-import { db } from '../src/db';
-import { encodeUserId } from '../src/utils/userId';
+} from '../../src/utils/validation';
 
-const ownerUserId = encodeUserId(new Uint8Array(32).fill(13));
+const VALIDATION_OWNER_USER_ID = encodeUserId(new Uint8Array(32).fill(13));
 
 describe('validation utilities', () => {
   beforeEach(async () => {
@@ -132,7 +132,7 @@ describe('validation utilities', () => {
   describe('validateUsernameAvailability', () => {
     it('checks username availability case-insensitively', async () => {
       await db.userProfile.put({
-        userId: ownerUserId,
+        userId: VALIDATION_OWNER_USER_ID,
         username: 'Alice',
         security: {
           encKeySalt: new Uint8Array(),

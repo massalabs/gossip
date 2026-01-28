@@ -1,22 +1,19 @@
 /**
- * Database Operations Tests
+ * Database state transitions tests
  *
- * Tests for database state transitions including:
- * - Discussion state transitions
- * - Message status transitions
- * - Announcement handling
- * - Contact deletion cleanup
+ * Tests for discussion and message state transitions, stability detection,
+ * pending announcements, and contact deletion cleanup.
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
   db,
-  DiscussionStatus,
   DiscussionDirection,
+  DiscussionStatus,
   MessageDirection,
   MessageStatus,
   MessageType,
-} from '../src/db';
+} from '../../src/db';
 
 const TEST_OWNER_USER_ID = 'gossip1testowner';
 const TEST_CONTACT_USER_ID = 'gossip1testcontact';
@@ -26,7 +23,6 @@ describe('Discussion State Transitions', () => {
     if (!db.isOpen()) {
       await db.open();
     }
-    // Clear relevant tables
     await db.discussions.clear();
     await db.messages.clear();
     await db.contacts.clear();
@@ -296,7 +292,6 @@ describe('Discussion Stability Detection', () => {
       direction: MessageDirection.OUTGOING,
       status: MessageStatus.FAILED,
       timestamp: new Date(),
-      // No encryptedMessage - indicates it was never encrypted
     });
 
     const messages = await db.messages
