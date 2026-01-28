@@ -1,6 +1,9 @@
 #!/bin/bash
 set -e
 
+# Disable Husky
+npm pkg delete scripts.prepare
+
 # Install dependencies and build the project
 npm ci
 npm run build
