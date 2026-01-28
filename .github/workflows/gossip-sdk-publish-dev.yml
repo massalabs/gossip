@@ -1,6 +1,7 @@
 name: Publish gossip-sdk (dev)
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - dev
@@ -8,9 +9,6 @@ on:
 jobs:
   publish-dev:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: gossip-sdk
 
     steps:
       - name: Checkout repository
@@ -25,6 +23,6 @@ jobs:
           cache-dependency-path: 'gossip-sdk/package-lock.json'
 
       - name: Publish gossip-sdk with dev dist-tag (script)
-        run: ../scripts/publish-dev.sh
+        run: scripts/publish-dev.sh
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
