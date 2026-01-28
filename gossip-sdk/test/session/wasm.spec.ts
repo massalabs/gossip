@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
-import { SessionStatus } from '../../src/assets/generated/wasm/gossip_wasm';
+import { SessionStatus } from '#wasm';
 import {
   createTestSession,
   createTestSessionPair,

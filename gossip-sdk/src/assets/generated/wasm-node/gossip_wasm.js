@@ -1,4 +1,5 @@
-let wasm;
+let imports = {};
+imports['__wbindgen_placeholder__'] = module.exports;
 
 function addToExternrefTable0(obj) {
   const idx = wasm.__externref_table_alloc();
@@ -34,18 +35,7 @@ let cachedTextDecoder = new TextDecoder('utf-8', {
 
 cachedTextDecoder.decode();
 
-const MAX_SAFARI_DECODE_BYTES = 2146435072;
-let numBytesDecoded = 0;
 function decodeText(ptr, len) {
-  numBytesDecoded += len;
-  if (numBytesDecoded >= MAX_SAFARI_DECODE_BYTES) {
-    cachedTextDecoder = new TextDecoder('utf-8', {
-      ignoreBOM: true,
-      fatal: true,
-    });
-    cachedTextDecoder.decode();
-    numBytesDecoded = len;
-  }
   return cachedTextDecoder.decode(
     getUint8ArrayMemory0().subarray(ptr, ptr + len)
   );
@@ -147,9 +137,9 @@ function takeFromExternrefTable0(idx) {
   return value;
 }
 
-export function start() {
+exports.start = function () {
   wasm.start();
-}
+};
 
 function _assertClass(instance, klass) {
   if (!(instance instanceof klass)) {
@@ -194,7 +184,7 @@ function _assertClass(instance, klass) {
  * @param {Uint8Array} aad
  * @returns {Uint8Array | undefined}
  */
-export function aead_decrypt(key, nonce, ciphertext, aad) {
+exports.aead_decrypt = function (key, nonce, ciphertext, aad) {
   _assertClass(key, EncryptionKey);
   _assertClass(nonce, Nonce);
   const ptr0 = passArray8ToWasm0(ciphertext, wasm.__wbindgen_malloc);
@@ -215,7 +205,7 @@ export function aead_decrypt(key, nonce, ciphertext, aad) {
     wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
   }
   return v3;
-}
+};
 
 /**
  * Encrypts data using AES-256-SIV authenticated encryption.
@@ -254,7 +244,7 @@ export function aead_decrypt(key, nonce, ciphertext, aad) {
  * @param {Uint8Array} aad
  * @returns {Uint8Array}
  */
-export function aead_encrypt(key, nonce, plaintext, aad) {
+exports.aead_encrypt = function (key, nonce, plaintext, aad) {
   _assertClass(key, EncryptionKey);
   _assertClass(nonce, Nonce);
   const ptr0 = passArray8ToWasm0(plaintext, wasm.__wbindgen_malloc);
@@ -272,14 +262,14 @@ export function aead_encrypt(key, nonce, plaintext, aad) {
   var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
   wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
   return v3;
-}
+};
 
 /**
  * Generates user keys from a passphrase using password-based key derivation.
  * @param {string} passphrase
  * @returns {UserKeys}
  */
-export function generate_user_keys(passphrase) {
+exports.generate_user_keys = function (passphrase) {
   const ptr0 = passStringToWasm0(
     passphrase,
     wasm.__wbindgen_malloc,
@@ -291,13 +281,13 @@ export function generate_user_keys(passphrase) {
     throw takeFromExternrefTable0(ret[1]);
   }
   return UserKeys.__wrap(ret[0]);
-}
+};
 
 /**
  * Session status indicating the state of a peer session.
  * @enum {0 | 1 | 2 | 3 | 4 | 5 | 6}
  */
-export const SessionStatus = Object.freeze({
+exports.SessionStatus = Object.freeze({
   Active: 0,
   0: 'Active',
   UnknownPeer: 1,
@@ -323,7 +313,7 @@ const AnnouncementResultFinalization =
 /**
  * Result from feeding an incoming announcement.
  */
-export class AnnouncementResult {
+class AnnouncementResult {
   static __wrap(ptr) {
     ptr = ptr >>> 0;
     const obj = Object.create(AnnouncementResult.prototype);
@@ -374,6 +364,8 @@ if (Symbol.dispose)
   AnnouncementResult.prototype[Symbol.dispose] =
     AnnouncementResult.prototype.free;
 
+exports.AnnouncementResult = AnnouncementResult;
+
 const EncryptionKeyFinalization =
   typeof FinalizationRegistry === 'undefined'
     ? { register: () => {}, unregister: () => {} }
@@ -385,7 +377,7 @@ const EncryptionKeyFinalization =
  *
  * AES-256-SIV uses a 64-byte (512-bit) key: two 256-bit keys for encryption and MAC.
  */
-export class EncryptionKey {
+class EncryptionKey {
   static __wrap(ptr) {
     ptr = ptr >>> 0;
     const obj = Object.create(EncryptionKey.prototype);
@@ -468,6 +460,8 @@ export class EncryptionKey {
 if (Symbol.dispose)
   EncryptionKey.prototype[Symbol.dispose] = EncryptionKey.prototype.free;
 
+exports.EncryptionKey = EncryptionKey;
+
 const NonceFinalization =
   typeof FinalizationRegistry === 'undefined'
     ? { register: () => {}, unregister: () => {} }
@@ -478,7 +472,7 @@ const NonceFinalization =
  * AES-256-SIV uses a 16-byte (128-bit) nonce. The nonce should be unique
  * per encryption for maximum security, though SIV mode is nonce-misuse resistant.
  */
-export class Nonce {
+class Nonce {
   static __wrap(ptr) {
     ptr = ptr >>> 0;
     const obj = Object.create(Nonce.prototype);
@@ -533,6 +527,8 @@ export class Nonce {
 }
 if (Symbol.dispose) Nonce.prototype[Symbol.dispose] = Nonce.prototype.free;
 
+exports.Nonce = Nonce;
+
 const ReceiveMessageOutputFinalization =
   typeof FinalizationRegistry === 'undefined'
     ? { register: () => {}, unregister: () => {} }
@@ -542,7 +538,7 @@ const ReceiveMessageOutputFinalization =
 /**
  * Output from receiving a message.
  */
-export class ReceiveMessageOutput {
+class ReceiveMessageOutput {
   static __wrap(ptr) {
     ptr = ptr >>> 0;
     const obj = Object.create(ReceiveMessageOutput.prototype);
@@ -603,6 +599,8 @@ if (Symbol.dispose)
   ReceiveMessageOutput.prototype[Symbol.dispose] =
     ReceiveMessageOutput.prototype.free;
 
+exports.ReceiveMessageOutput = ReceiveMessageOutput;
+
 const SendMessageOutputFinalization =
   typeof FinalizationRegistry === 'undefined'
     ? { register: () => {}, unregister: () => {} }
@@ -612,7 +610,7 @@ const SendMessageOutputFinalization =
 /**
  * Output from sending a message.
  */
-export class SendMessageOutput {
+class SendMessageOutput {
   static __wrap(ptr) {
     ptr = ptr >>> 0;
     const obj = Object.create(SendMessageOutput.prototype);
@@ -657,6 +655,8 @@ if (Symbol.dispose)
   SendMessageOutput.prototype[Symbol.dispose] =
     SendMessageOutput.prototype.free;
 
+exports.SendMessageOutput = SendMessageOutput;
+
 const SessionConfigFinalization =
   typeof FinalizationRegistry === 'undefined'
     ? { register: () => {}, unregister: () => {} }
@@ -666,7 +666,7 @@ const SessionConfigFinalization =
 /**
  * Session manager configuration for controlling session behavior.
  */
-export class SessionConfig {
+class SessionConfig {
   static __wrap(ptr) {
     ptr = ptr >>> 0;
     const obj = Object.create(SessionConfig.prototype);
@@ -737,6 +737,8 @@ export class SessionConfig {
 if (Symbol.dispose)
   SessionConfig.prototype[Symbol.dispose] = SessionConfig.prototype.free;
 
+exports.SessionConfig = SessionConfig;
+
 const SessionManagerWrapperFinalization =
   typeof FinalizationRegistry === 'undefined'
     ? { register: () => {}, unregister: () => {} }
@@ -746,7 +748,7 @@ const SessionManagerWrapperFinalization =
 /**
  * Session manager wrapper for WebAssembly.
  */
-export class SessionManagerWrapper {
+class SessionManagerWrapper {
   static __wrap(ptr) {
     ptr = ptr >>> 0;
     const obj = Object.create(SessionManagerWrapper.prototype);
@@ -1026,6 +1028,8 @@ if (Symbol.dispose)
   SessionManagerWrapper.prototype[Symbol.dispose] =
     SessionManagerWrapper.prototype.free;
 
+exports.SessionManagerWrapper = SessionManagerWrapper;
+
 const UserKeysFinalization =
   typeof FinalizationRegistry === 'undefined'
     ? { register: () => {}, unregister: () => {} }
@@ -1033,7 +1037,7 @@ const UserKeysFinalization =
 /**
  * User keypair containing both public and secret keys.
  */
-export class UserKeys {
+class UserKeys {
   static __wrap(ptr) {
     ptr = ptr >>> 0;
     const obj = Object.create(UserKeys.prototype);
@@ -1079,6 +1083,8 @@ export class UserKeys {
 if (Symbol.dispose)
   UserKeys.prototype[Symbol.dispose] = UserKeys.prototype.free;
 
+exports.UserKeys = UserKeys;
+
 const UserPublicKeysFinalization =
   typeof FinalizationRegistry === 'undefined'
     ? { register: () => {}, unregister: () => {} }
@@ -1088,7 +1094,7 @@ const UserPublicKeysFinalization =
 /**
  * User public keys for authentication and encryption.
  */
-export class UserPublicKeys {
+class UserPublicKeys {
   static __wrap(ptr) {
     ptr = ptr >>> 0;
     const obj = Object.create(UserPublicKeys.prototype);
@@ -1179,6 +1185,8 @@ export class UserPublicKeys {
 if (Symbol.dispose)
   UserPublicKeys.prototype[Symbol.dispose] = UserPublicKeys.prototype.free;
 
+exports.UserPublicKeys = UserPublicKeys;
+
 const UserSecretKeysFinalization =
   typeof FinalizationRegistry === 'undefined'
     ? { register: () => {}, unregister: () => {} }
@@ -1188,7 +1196,7 @@ const UserSecretKeysFinalization =
 /**
  * User secret keys for signing and decryption.
  */
-export class UserSecretKeys {
+class UserSecretKeys {
   static __wrap(ptr) {
     ptr = ptr >>> 0;
     const obj = Object.create(UserSecretKeys.prototype);
@@ -1269,289 +1277,212 @@ export class UserSecretKeys {
 if (Symbol.dispose)
   UserSecretKeys.prototype[Symbol.dispose] = UserSecretKeys.prototype.free;
 
-const EXPECTED_RESPONSE_TYPES = new Set(['basic', 'cors', 'default']);
+exports.UserSecretKeys = UserSecretKeys;
 
-async function __wbg_load(module, imports) {
-  if (typeof Response === 'function' && module instanceof Response) {
-    if (typeof WebAssembly.instantiateStreaming === 'function') {
-      try {
-        return await WebAssembly.instantiateStreaming(module, imports);
-      } catch (e) {
-        const validResponse =
-          module.ok && EXPECTED_RESPONSE_TYPES.has(module.type);
+exports.__wbg_call_13410aac570ffff7 = function () {
+  return handleError(function (arg0, arg1) {
+    const ret = arg0.call(arg1);
+    return ret;
+  }, arguments);
+};
 
-        if (
-          validResponse &&
-          module.headers.get('Content-Type') !== 'application/wasm'
-        ) {
-          console.warn(
-            '`WebAssembly.instantiateStreaming` failed because your server does not serve Wasm with `application/wasm` MIME type. Falling back to `WebAssembly.instantiate` which is slower. Original error:\n',
-            e
-          );
-        } else {
-          throw e;
-        }
-      }
-    }
+exports.__wbg_call_a5400b25a865cfd8 = function () {
+  return handleError(function (arg0, arg1, arg2) {
+    const ret = arg0.call(arg1, arg2);
+    return ret;
+  }, arguments);
+};
 
-    const bytes = await module.arrayBuffer();
-    return await WebAssembly.instantiate(bytes, imports);
-  } else {
-    const instance = await WebAssembly.instantiate(module, imports);
+exports.__wbg_crypto_574e78ad8b13b65f = function (arg0) {
+  const ret = arg0.crypto;
+  return ret;
+};
 
-    if (instance instanceof WebAssembly.Instance) {
-      return { instance, module };
-    } else {
-      return instance;
-    }
+exports.__wbg_error_7534b8e9a36f1ab4 = function (arg0, arg1) {
+  let deferred0_0;
+  let deferred0_1;
+  try {
+    deferred0_0 = arg0;
+    deferred0_1 = arg1;
+    console.error(getStringFromWasm0(arg0, arg1));
+  } finally {
+    wasm.__wbindgen_free(deferred0_0, deferred0_1, 1);
   }
-}
+};
 
-function __wbg_get_imports() {
-  const imports = {};
-  imports.wbg = {};
-  imports.wbg.__wbg_call_13410aac570ffff7 = function () {
-    return handleError(function (arg0, arg1) {
-      const ret = arg0.call(arg1);
-      return ret;
-    }, arguments);
-  };
-  imports.wbg.__wbg_call_a5400b25a865cfd8 = function () {
-    return handleError(function (arg0, arg1, arg2) {
-      const ret = arg0.call(arg1, arg2);
-      return ret;
-    }, arguments);
-  };
-  imports.wbg.__wbg_crypto_574e78ad8b13b65f = function (arg0) {
-    const ret = arg0.crypto;
-    return ret;
-  };
-  imports.wbg.__wbg_error_7534b8e9a36f1ab4 = function (arg0, arg1) {
-    let deferred0_0;
-    let deferred0_1;
-    try {
-      deferred0_0 = arg0;
-      deferred0_1 = arg1;
-      console.error(getStringFromWasm0(arg0, arg1));
-    } finally {
-      wasm.__wbindgen_free(deferred0_0, deferred0_1, 1);
-    }
-  };
-  imports.wbg.__wbg_getRandomValues_b8f5dbd5f3995a9e = function () {
-    return handleError(function (arg0, arg1) {
-      arg0.getRandomValues(arg1);
-    }, arguments);
-  };
-  imports.wbg.__wbg_length_6bb7e81f9d7713e4 = function (arg0) {
-    const ret = arg0.length;
-    return ret;
-  };
-  imports.wbg.__wbg_msCrypto_a61aeb35a24c1329 = function (arg0) {
-    const ret = arg0.msCrypto;
-    return ret;
-  };
-  imports.wbg.__wbg_new_1f3a344cf3123716 = function () {
-    const ret = new Array();
-    return ret;
-  };
-  imports.wbg.__wbg_new_8a6f238a6ece86ea = function () {
-    const ret = new Error();
-    return ret;
-  };
-  imports.wbg.__wbg_newfromslice_074c56947bd43469 = function (arg0, arg1) {
-    const ret = new Uint8Array(getArrayU8FromWasm0(arg0, arg1));
-    return ret;
-  };
-  imports.wbg.__wbg_newnoargs_254190557c45b4ec = function (arg0, arg1) {
-    const ret = new Function(getStringFromWasm0(arg0, arg1));
-    return ret;
-  };
-  imports.wbg.__wbg_newwithlength_a167dcc7aaa3ba77 = function (arg0) {
-    const ret = new Uint8Array(arg0 >>> 0);
-    return ret;
-  };
-  imports.wbg.__wbg_node_905d3e251edff8a2 = function (arg0) {
-    const ret = arg0.node;
-    return ret;
-  };
-  imports.wbg.__wbg_now_1e80617bcee43265 = function () {
-    const ret = Date.now();
-    return ret;
-  };
-  imports.wbg.__wbg_process_dc0fbacc7c1c06f7 = function (arg0) {
-    const ret = arg0.process;
-    return ret;
-  };
-  imports.wbg.__wbg_prototypesetcall_3d4a26c1ed734349 = function (
-    arg0,
-    arg1,
-    arg2
-  ) {
-    Uint8Array.prototype.set.call(getArrayU8FromWasm0(arg0, arg1), arg2);
-  };
-  imports.wbg.__wbg_push_330b2eb93e4e1212 = function (arg0, arg1) {
-    const ret = arg0.push(arg1);
-    return ret;
-  };
-  imports.wbg.__wbg_randomFillSync_ac0988aba3254290 = function () {
-    return handleError(function (arg0, arg1) {
-      arg0.randomFillSync(arg1);
-    }, arguments);
-  };
-  imports.wbg.__wbg_require_60cc747a6bc5215a = function () {
-    return handleError(function () {
-      const ret = module.require;
-      return ret;
-    }, arguments);
-  };
-  imports.wbg.__wbg_stack_0ed75d68575b0f3c = function (arg0, arg1) {
-    const ret = arg1.stack;
-    const ptr1 = passStringToWasm0(
-      ret,
-      wasm.__wbindgen_malloc,
-      wasm.__wbindgen_realloc
-    );
-    const len1 = WASM_VECTOR_LEN;
-    getDataViewMemory0().setInt32(arg0 + 4 * 1, len1, true);
-    getDataViewMemory0().setInt32(arg0 + 4 * 0, ptr1, true);
-  };
-  imports.wbg.__wbg_static_accessor_GLOBAL_8921f820c2ce3f12 = function () {
-    const ret = typeof global === 'undefined' ? null : global;
-    return isLikeNone(ret) ? 0 : addToExternrefTable0(ret);
-  };
-  imports.wbg.__wbg_static_accessor_GLOBAL_THIS_f0a4409105898184 = function () {
-    const ret = typeof globalThis === 'undefined' ? null : globalThis;
-    return isLikeNone(ret) ? 0 : addToExternrefTable0(ret);
-  };
-  imports.wbg.__wbg_static_accessor_SELF_995b214ae681ff99 = function () {
-    const ret = typeof self === 'undefined' ? null : self;
-    return isLikeNone(ret) ? 0 : addToExternrefTable0(ret);
-  };
-  imports.wbg.__wbg_static_accessor_WINDOW_cde3890479c675ea = function () {
-    const ret = typeof window === 'undefined' ? null : window;
-    return isLikeNone(ret) ? 0 : addToExternrefTable0(ret);
-  };
-  imports.wbg.__wbg_subarray_70fd07feefe14294 = function (arg0, arg1, arg2) {
-    const ret = arg0.subarray(arg1 >>> 0, arg2 >>> 0);
-    return ret;
-  };
-  imports.wbg.__wbg_versions_c01dfd4722a88165 = function (arg0) {
-    const ret = arg0.versions;
-    return ret;
-  };
-  imports.wbg.__wbg_wbindgenisfunction_8cee7dce3725ae74 = function (arg0) {
-    const ret = typeof arg0 === 'function';
-    return ret;
-  };
-  imports.wbg.__wbg_wbindgenisobject_307a53c6bd97fbf8 = function (arg0) {
-    const val = arg0;
-    const ret = typeof val === 'object' && val !== null;
-    return ret;
-  };
-  imports.wbg.__wbg_wbindgenisstring_d4fa939789f003b0 = function (arg0) {
-    const ret = typeof arg0 === 'string';
-    return ret;
-  };
-  imports.wbg.__wbg_wbindgenisundefined_c4b71d073b92f3c5 = function (arg0) {
-    const ret = arg0 === undefined;
-    return ret;
-  };
-  imports.wbg.__wbg_wbindgenthrow_451ec1a8469d7eb6 = function (arg0, arg1) {
-    throw new Error(getStringFromWasm0(arg0, arg1));
-  };
-  imports.wbg.__wbindgen_cast_2241b6af4c4b2941 = function (arg0, arg1) {
-    // Cast intrinsic for `Ref(String) -> Externref`.
-    const ret = getStringFromWasm0(arg0, arg1);
-    return ret;
-  };
-  imports.wbg.__wbindgen_cast_cb9088102bce6b30 = function (arg0, arg1) {
-    // Cast intrinsic for `Ref(Slice(U8)) -> NamedExternref("Uint8Array")`.
-    const ret = getArrayU8FromWasm0(arg0, arg1);
-    return ret;
-  };
-  imports.wbg.__wbindgen_init_externref_table = function () {
-    const table = wasm.__wbindgen_export_2;
-    const offset = table.grow(4);
-    table.set(0, undefined);
-    table.set(offset + 0, undefined);
-    table.set(offset + 1, null);
-    table.set(offset + 2, true);
-    table.set(offset + 3, false);
-  };
+exports.__wbg_getRandomValues_b8f5dbd5f3995a9e = function () {
+  return handleError(function (arg0, arg1) {
+    arg0.getRandomValues(arg1);
+  }, arguments);
+};
 
-  return imports;
-}
+exports.__wbg_length_6bb7e81f9d7713e4 = function (arg0) {
+  const ret = arg0.length;
+  return ret;
+};
 
-function __wbg_init_memory(imports, memory) {}
+exports.__wbg_msCrypto_a61aeb35a24c1329 = function (arg0) {
+  const ret = arg0.msCrypto;
+  return ret;
+};
 
-function __wbg_finalize_init(instance, module) {
-  wasm = instance.exports;
-  __wbg_init.__wbindgen_wasm_module = module;
-  cachedDataViewMemory0 = null;
-  cachedUint8ArrayMemory0 = null;
+exports.__wbg_new_1f3a344cf3123716 = function () {
+  const ret = new Array();
+  return ret;
+};
 
-  wasm.__wbindgen_start();
-  return wasm;
-}
+exports.__wbg_new_8a6f238a6ece86ea = function () {
+  const ret = new Error();
+  return ret;
+};
 
-function initSync(module) {
-  if (wasm !== undefined) return wasm;
+exports.__wbg_newfromslice_074c56947bd43469 = function (arg0, arg1) {
+  const ret = new Uint8Array(getArrayU8FromWasm0(arg0, arg1));
+  return ret;
+};
 
-  if (typeof module !== 'undefined') {
-    if (Object.getPrototypeOf(module) === Object.prototype) {
-      ({ module } = module);
-    } else {
-      console.warn(
-        'using deprecated parameters for `initSync()`; pass a single object instead'
-      );
-    }
-  }
+exports.__wbg_newnoargs_254190557c45b4ec = function (arg0, arg1) {
+  const ret = new Function(getStringFromWasm0(arg0, arg1));
+  return ret;
+};
 
-  const imports = __wbg_get_imports();
+exports.__wbg_newwithlength_a167dcc7aaa3ba77 = function (arg0) {
+  const ret = new Uint8Array(arg0 >>> 0);
+  return ret;
+};
 
-  __wbg_init_memory(imports);
+exports.__wbg_node_905d3e251edff8a2 = function (arg0) {
+  const ret = arg0.node;
+  return ret;
+};
 
-  if (!(module instanceof WebAssembly.Module)) {
-    module = new WebAssembly.Module(module);
-  }
+exports.__wbg_now_1e80617bcee43265 = function () {
+  const ret = Date.now();
+  return ret;
+};
 
-  const instance = new WebAssembly.Instance(module, imports);
+exports.__wbg_process_dc0fbacc7c1c06f7 = function (arg0) {
+  const ret = arg0.process;
+  return ret;
+};
 
-  return __wbg_finalize_init(instance, module);
-}
+exports.__wbg_prototypesetcall_3d4a26c1ed734349 = function (arg0, arg1, arg2) {
+  Uint8Array.prototype.set.call(getArrayU8FromWasm0(arg0, arg1), arg2);
+};
 
-async function __wbg_init(module_or_path) {
-  if (wasm !== undefined) return wasm;
+exports.__wbg_push_330b2eb93e4e1212 = function (arg0, arg1) {
+  const ret = arg0.push(arg1);
+  return ret;
+};
 
-  if (typeof module_or_path !== 'undefined') {
-    if (Object.getPrototypeOf(module_or_path) === Object.prototype) {
-      ({ module_or_path } = module_or_path);
-    } else {
-      console.warn(
-        'using deprecated parameters for the initialization function; pass a single object instead'
-      );
-    }
-  }
+exports.__wbg_randomFillSync_ac0988aba3254290 = function () {
+  return handleError(function (arg0, arg1) {
+    arg0.randomFillSync(arg1);
+  }, arguments);
+};
 
-  if (typeof module_or_path === 'undefined') {
-    module_or_path = new URL('gossip_wasm_bg.wasm', import.meta.url);
-  }
-  const imports = __wbg_get_imports();
+exports.__wbg_require_60cc747a6bc5215a = function () {
+  return handleError(function () {
+    const ret = module.require;
+    return ret;
+  }, arguments);
+};
 
-  if (
-    typeof module_or_path === 'string' ||
-    (typeof Request === 'function' && module_or_path instanceof Request) ||
-    (typeof URL === 'function' && module_or_path instanceof URL)
-  ) {
-    module_or_path = fetch(module_or_path);
-  }
+exports.__wbg_stack_0ed75d68575b0f3c = function (arg0, arg1) {
+  const ret = arg1.stack;
+  const ptr1 = passStringToWasm0(
+    ret,
+    wasm.__wbindgen_malloc,
+    wasm.__wbindgen_realloc
+  );
+  const len1 = WASM_VECTOR_LEN;
+  getDataViewMemory0().setInt32(arg0 + 4 * 1, len1, true);
+  getDataViewMemory0().setInt32(arg0 + 4 * 0, ptr1, true);
+};
 
-  __wbg_init_memory(imports);
+exports.__wbg_static_accessor_GLOBAL_8921f820c2ce3f12 = function () {
+  const ret = typeof global === 'undefined' ? null : global;
+  return isLikeNone(ret) ? 0 : addToExternrefTable0(ret);
+};
 
-  const { instance, module } = await __wbg_load(await module_or_path, imports);
+exports.__wbg_static_accessor_GLOBAL_THIS_f0a4409105898184 = function () {
+  const ret = typeof globalThis === 'undefined' ? null : globalThis;
+  return isLikeNone(ret) ? 0 : addToExternrefTable0(ret);
+};
 
-  return __wbg_finalize_init(instance, module);
-}
+exports.__wbg_static_accessor_SELF_995b214ae681ff99 = function () {
+  const ret = typeof self === 'undefined' ? null : self;
+  return isLikeNone(ret) ? 0 : addToExternrefTable0(ret);
+};
 
-export { initSync };
-export default __wbg_init;
+exports.__wbg_static_accessor_WINDOW_cde3890479c675ea = function () {
+  const ret = typeof window === 'undefined' ? null : window;
+  return isLikeNone(ret) ? 0 : addToExternrefTable0(ret);
+};
+
+exports.__wbg_subarray_70fd07feefe14294 = function (arg0, arg1, arg2) {
+  const ret = arg0.subarray(arg1 >>> 0, arg2 >>> 0);
+  return ret;
+};
+
+exports.__wbg_versions_c01dfd4722a88165 = function (arg0) {
+  const ret = arg0.versions;
+  return ret;
+};
+
+exports.__wbg_wbindgenisfunction_8cee7dce3725ae74 = function (arg0) {
+  const ret = typeof arg0 === 'function';
+  return ret;
+};
+
+exports.__wbg_wbindgenisobject_307a53c6bd97fbf8 = function (arg0) {
+  const val = arg0;
+  const ret = typeof val === 'object' && val !== null;
+  return ret;
+};
+
+exports.__wbg_wbindgenisstring_d4fa939789f003b0 = function (arg0) {
+  const ret = typeof arg0 === 'string';
+  return ret;
+};
+
+exports.__wbg_wbindgenisundefined_c4b71d073b92f3c5 = function (arg0) {
+  const ret = arg0 === undefined;
+  return ret;
+};
+
+exports.__wbg_wbindgenthrow_451ec1a8469d7eb6 = function (arg0, arg1) {
+  throw new Error(getStringFromWasm0(arg0, arg1));
+};
+
+exports.__wbindgen_cast_2241b6af4c4b2941 = function (arg0, arg1) {
+  // Cast intrinsic for `Ref(String) -> Externref`.
+  const ret = getStringFromWasm0(arg0, arg1);
+  return ret;
+};
+
+exports.__wbindgen_cast_cb9088102bce6b30 = function (arg0, arg1) {
+  // Cast intrinsic for `Ref(Slice(U8)) -> NamedExternref("Uint8Array")`.
+  const ret = getArrayU8FromWasm0(arg0, arg1);
+  return ret;
+};
+
+exports.__wbindgen_init_externref_table = function () {
+  const table = wasm.__wbindgen_export_2;
+  const offset = table.grow(4);
+  table.set(0, undefined);
+  table.set(offset + 0, undefined);
+  table.set(offset + 1, null);
+  table.set(offset + 2, true);
+  table.set(offset + 3, false);
+};
+
+const wasmPath = `${__dirname}/gossip_wasm_bg.wasm`;
+const wasmBytes = require('fs').readFileSync(wasmPath);
+const wasmModule = new WebAssembly.Module(wasmBytes);
+const wasm = (exports.__wasm = new WebAssembly.Instance(
+  wasmModule,
+  imports
+).exports);
+
+wasm.__wbindgen_start();

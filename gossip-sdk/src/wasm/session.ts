@@ -16,7 +16,7 @@ import {
   SessionConfig,
   AnnouncementResult,
   UserKeys,
-} from '../assets/generated/wasm/gossip_wasm';
+} from '#wasm';
 import { UserProfile } from '../db';
 import { encodeUserId } from '../utils/userId';
 

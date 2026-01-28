@@ -91,7 +91,7 @@ import {
   updateContactName,
   deleteContact,
 } from './contacts';
-import type { UserPublicKeys } from './assets/generated/wasm/gossip_wasm';
+import type { UserPublicKeys } from '#wasm';
 import {
   SdkEventEmitter,
   type SdkEventType,
