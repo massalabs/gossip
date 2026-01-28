@@ -1,0 +1,40 @@
+{
+  "name": "@gossip/storage",
+  "version": "0.1.0",
+  "description": "Plausible deniability storage layer for Gossip",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "spike:opfs": "vite serve spike --open",
+    "lint": "eslint src",
+    "test:rust": "cd ../rust && cargo test --features test-constants -- --test-threads=1",
+    "test:rust:scenarios": "cd ../rust && cargo test --features test-constants --test chat_app_scenarios -- --test-threads=1",
+    "test:rust:spec": "cd ../rust && cargo test --features test-constants --test spec_tests -- --test-threads=1",
+    "test:rust:prod": "cd ../rust && cargo test --release -- --ignored --nocapture --test-threads=1",
+    "test:all": "npm run test:run && npm run test:rust"
+  },
+  "dependencies": {
+    "wa-sqlite": "^1.0.0"
+  },
+  "devDependencies": {
+    "drizzle-orm": "^0.45.1",
+    "typescript": "^5.9.3",
+    "vite": "^6.0.11",
+    "vitest": "^4.0.14"
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  }
+}
