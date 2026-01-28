@@ -1,15 +1,11 @@
 name: Publish gossip-sdk (release)
 
 on:
-  release:
-    types: [published]
+  workflow_dispatch:
 
 jobs:
   publish-release:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: gossip-sdk
 
     steps:
       - name: Checkout repository
@@ -24,6 +20,6 @@ jobs:
           cache-dependency-path: 'gossip-sdk/package-lock.json'
 
       - name: Publish gossip-sdk to npm (script)
-        run: ../scripts/publish.sh
+        run: scripts/publish.sh
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
