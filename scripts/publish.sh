@@ -2,11 +2,11 @@
 set -e
 
 # Disable Husky
-npm pkg delete scripts.prepare
+npm pkg delete scripts.prepare || true
 
 # Install dependencies and build the project
 npm ci
-npm run build
+npm run build:sdk
 
 cd gossip-sdk
 
