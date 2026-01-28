@@ -15,7 +15,7 @@ import { encodeUserId } from '../../src/utils/userId';
 import { addContact, getContact, getContacts } from '../../src/contacts';
 import { updateContactName, deleteContact } from '../../src/utils/contacts';
 import type { SessionModule } from '../../src/wasm/session';
-import type { UserPublicKeys as UserPublicKeysType } from '../../src/assets/generated/wasm/gossip_wasm';
+import type { UserPublicKeys as UserPublicKeysType } from '#wasm';
 
 const CONTACTS_OWNER_USER_ID = encodeUserId(new Uint8Array(32).fill(1));
 const CONTACTS_CONTACT_USER_ID = encodeUserId(new Uint8Array(32).fill(2));

@@ -15,7 +15,7 @@ import {
   DiscussionDirection,
 } from '../../src/db';
 import { encodeUserId } from '../../src/utils/userId';
-import { SessionStatus } from '../../src/assets/generated/wasm/gossip_wasm';
+import { SessionStatus } from '#wasm';
 
 // ============================================================================
 // Auto-accept + renew status logic

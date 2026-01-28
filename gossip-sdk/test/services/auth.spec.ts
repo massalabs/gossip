@@ -14,11 +14,7 @@ import {
 } from '../../src/services/auth';
 import { db, UserProfile } from '../../src/db';
 import type { IMessageProtocol } from '../../src/api/messageProtocol/types';
-import {
-  UserPublicKeys,
-  UserKeys,
-  generate_user_keys,
-} from '../../src/assets/generated/wasm/gossip_wasm';
+import { UserPublicKeys, UserKeys, generate_user_keys } from '#wasm';
 import { encodeUserId } from '../../src/utils/userId';
 import { encodeToBase64, decodeFromBase64 } from '../../src/utils/base64';
 import { ensureWasmInitialized } from '../../src/wasm';

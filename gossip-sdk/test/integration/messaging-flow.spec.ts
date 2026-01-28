@@ -17,7 +17,7 @@ import {
   MessageDirection,
   MessageType,
 } from '../../src/db';
-import { SessionStatus } from '../../src/assets/generated/wasm/gossip_wasm';
+import { SessionStatus } from '#wasm';
 import { MockMessageProtocol } from '../mocks';
 import {
   createTestSession,
