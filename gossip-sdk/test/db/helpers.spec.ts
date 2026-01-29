@@ -6,7 +6,6 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import {
   db,
   DiscussionDirection,
-  DiscussionStatus,
   MessageDirection,
   MessageStatus,
   MessageType,
@@ -29,7 +28,8 @@ describe('Database helper methods', () => {
       ownerUserId: OWNER_USER_ID,
       contactUserId: CONTACT_USER_ID,
       direction: DiscussionDirection.INITIATED,
-      status: DiscussionStatus.ACTIVE,
+      weAccepted: true,
+      sendAnnouncement: null,
       unreadCount: 0,
       lastMessageTimestamp: new Date('2024-01-01'),
       createdAt: new Date('2024-01-01'),
@@ -40,7 +40,8 @@ describe('Database helper methods', () => {
       ownerUserId: OWNER_USER_ID,
       contactUserId: encodeUserId(new Uint8Array(32).fill(8)),
       direction: DiscussionDirection.INITIATED,
-      status: DiscussionStatus.ACTIVE,
+      weAccepted: true,
+      sendAnnouncement: null,
       unreadCount: 0,
       lastMessageTimestamp: new Date('2024-02-01'),
       createdAt: new Date('2024-02-01'),
@@ -53,12 +54,13 @@ describe('Database helper methods', () => {
     );
   });
 
-  it('returns active discussions only', async () => {
+  it('returns accepted discussions (weAccepted: true) only', async () => {
     await db.discussions.add({
       ownerUserId: OWNER_USER_ID,
       contactUserId: CONTACT_USER_ID,
       direction: DiscussionDirection.INITIATED,
-      status: DiscussionStatus.ACTIVE,
+      weAccepted: true,
+      sendAnnouncement: null,
       unreadCount: 0,
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -68,15 +70,17 @@ describe('Database helper methods', () => {
       ownerUserId: OWNER_USER_ID,
       contactUserId: encodeUserId(new Uint8Array(32).fill(9)),
       direction: DiscussionDirection.RECEIVED,
-      status: DiscussionStatus.PENDING,
+      weAccepted: false,
+      sendAnnouncement: null,
       unreadCount: 0,
       createdAt: new Date(),
       updatedAt: new Date(),
     });
 
-    const active = await db.getActiveDiscussionsByOwner(OWNER_USER_ID);
-    expect(active.length).toBe(1);
-    expect(active[0].status).toBe(DiscussionStatus.ACTIVE);
+    const all = await db.getDiscussionsByOwner(OWNER_USER_ID);
+    const accepted = all.filter(d => d.weAccepted);
+    expect(accepted.length).toBe(1);
+    expect(accepted[0].weAccepted).toBe(true);
   });
 
   it('aggregates unread counts across discussions', async () => {
@@ -84,7 +88,8 @@ describe('Database helper methods', () => {
       ownerUserId: OWNER_USER_ID,
       contactUserId: CONTACT_USER_ID,
       direction: DiscussionDirection.INITIATED,
-      status: DiscussionStatus.ACTIVE,
+      weAccepted: true,
+      sendAnnouncement: null,
       unreadCount: 2,
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -94,7 +99,8 @@ describe('Database helper methods', () => {
       ownerUserId: OWNER_USER_ID,
       contactUserId: encodeUserId(new Uint8Array(32).fill(10)),
       direction: DiscussionDirection.RECEIVED,
-      status: DiscussionStatus.ACTIVE,
+      weAccepted: true,
+      sendAnnouncement: null,
       unreadCount: 3,
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -109,7 +115,8 @@ describe('Database helper methods', () => {
       ownerUserId: OWNER_USER_ID,
       contactUserId: CONTACT_USER_ID,
       direction: DiscussionDirection.INITIATED,
-      status: DiscussionStatus.ACTIVE,
+      weAccepted: true,
+      sendAnnouncement: null,
       unreadCount: 1,
       createdAt: new Date(),
       updatedAt: new Date(),

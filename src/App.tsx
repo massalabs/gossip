@@ -10,6 +10,7 @@ import { Toaster } from 'react-hot-toast';
 // Hooks
 import { useProfileLoader } from './hooks/useProfileLoader';
 import { useAccountInfo } from './hooks/useAccountInfo';
+import { useStoreInit } from './hooks/useStoreInit.ts';
 import { setupServiceWorker } from './services/serviceWorkerSetup';
 
 // Route components
@@ -31,6 +32,7 @@ const AppContent: React.FC = () => {
   const [showImport, setShowImport] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
   useProfileLoader();
+  useStoreInit(); // Initialize all stores when user profile is available
   const existingAccountInfo = useAccountInfo();
 
   const inviteMatch = useMatch(ROUTES.invite());

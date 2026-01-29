@@ -1,7 +1,13 @@
 import { create } from 'zustand';
 import { Subscription } from 'dexie';
 import { liveQuery } from 'dexie';
-import { Discussion, Contact, db, gossipSdk, SessionStatus } from 'gossip-sdk';
+import {
+  Discussion,
+  Contact,
+  db,
+  gossipSdk,
+  SessionStatus,
+} from '@massalabs/gossip-sdk';
 import { createSelectors } from './utils/createSelectors';
 import { useAccountStore } from './accountStore';
 
@@ -76,6 +82,8 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
           // Fallback to creation time for all other cases
           return discussion.createdAt.getTime();
         };
+
+        console.log('discussionsList', discussionsList);
 
         const getStatusPriority = (status: SessionStatus): number => {
           // PENDING (new requests) = highest priority (0)

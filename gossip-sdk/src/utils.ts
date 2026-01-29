@@ -5,7 +5,7 @@
  *
  * @example
  * ```typescript
- * import { configureSdk } from 'gossip-sdk';
+ * import { configureSdk } from '@massalabs/gossip-sdk';
  *
  * configureSdk({
  *   db,

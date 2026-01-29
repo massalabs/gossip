@@ -1,4 +1,4 @@
-import { Message, MessageStatus, MessageDirection } from 'gossip-sdk';
+import { Message, MessageStatus, MessageDirection } from '@massalabs/gossip-sdk'
 
 /**
  * Find the first unread message in a list of messages

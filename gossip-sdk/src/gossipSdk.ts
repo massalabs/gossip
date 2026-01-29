@@ -3,7 +3,7 @@
  *
  * @example
  * ```typescript
- * import { gossipSdk } from 'gossip-sdk';
+ * import { gossipSdk } from '@massalabs/gossip-sdk';
  *
  * // Initialize once at app startup
  * await gossipSdk.init({
@@ -197,7 +197,6 @@ class GossipSdkImpl {
   private _discussionsAPI: DiscussionServiceAPI | null = null;
   private _announcementsAPI: AnnouncementServiceAPI | null = null;
   private _contactsAPI: ContactsAPI | null = null;
-  private _refreshAPI: RefreshServiceAPI | null = null;
 
   // ─────────────────────────────────────────────────────────────────
   // Lifecycle
@@ -217,6 +216,14 @@ class GossipSdkImpl {
 
     // Configure database
     setDb(options.db);
+    // // Get the actual database instance (not the Proxy) to ensure services use the same opened instance
+    // // This will reuse the existing _db if it was already created (e.g., by db.open())
+    // const actualDb = getDb();
+    
+    // // Ensure the database is opened if it hasn't been already
+    // if (!actualDb.isOpen()) {
+    //   await actualDb.open();
+    // }
 
     // Configure protocol URL (prefer explicit option, then config)
     const baseUrl = options.protocolBaseUrl ?? config.protocol.baseUrl;
@@ -230,7 +237,7 @@ class GossipSdkImpl {
     // Create message protocol
     const messageProtocol = createMessageProtocol();
 
-    // Create auth service (doesn't need session)
+    // Create auth service (doesn't need session) - use actualDb to ensure same instance
     this._auth = new AuthService(options.db, messageProtocol);
 
     this.state = {
@@ -360,11 +367,6 @@ class GossipSdkImpl {
     this._discussion.setRefreshService(this._refresh);
     this._message.setRefreshService(this._refresh);
 
-    // Reset any messages stuck in SENDING status to FAILED
-    // This handles app crash/close during message send
-    await this.resetStuckSendingMessages(db);
-    await this.resetStuckSendingAnnouncements(db);
-
     this.state = {
       status: SdkStatus.SESSION_OPEN,
       db,
@@ -453,10 +455,6 @@ class GossipSdkImpl {
       delete: (ownerUserId, contactUserId) =>
         deleteContact(ownerUserId, contactUserId, db, session),
     };
-
-    this._refreshAPI = {
-      handleSessionRefresh: () => this._refresh!.stateUpdate(),
-    };
   }
 
   /**
@@ -484,7 +482,6 @@ class GossipSdkImpl {
     this._discussionsAPI = null;
     this._announcementsAPI = null;
     this._contactsAPI = null;
-    this._refreshAPI = null;
 
     // Clear message queues
     this.messageQueues.clear();
@@ -615,13 +612,19 @@ class GossipSdkImpl {
     return this._contactsAPI;
   }
 
-  /** Refresh/sync service */
-  get refresh(): RefreshServiceAPI {
+  /**
+   * Update state for all discussions:
+   * - Cleanup orphaned peers
+   * - Refresh sessions and trigger create_session for lost sessions
+   * - Send queued announcements
+   * - Send queued messages and keep-alives
+   */
+  async updateState(): Promise<void> {
     this.requireSession();
-    if (!this._refreshAPI) {
-      throw new Error('Refresh API not initialized');
+    if (!this._refresh) {
+      throw new Error('Refresh service not initialized');
     }
-    return this._refreshAPI;
+    await this._refresh.stateUpdate();
   }
 
   /** Utility functions */
@@ -675,15 +678,12 @@ class GossipSdkImpl {
         await this._announcement?.fetchAndProcessAnnouncements();
       },
       handleSessionRefresh: async () => {
-        await this._refresh?.stateUpdate();
+        await this.updateState();
       },
       getActiveDiscussions: async () => {
         return db.getDiscussionsByOwner(session.userIdEncoded);
       },
-      onError: (error, context) => {
-        this.eventEmitter.emit(SdkEventType.ERROR, error, context);
-      },
-    });
+    }, this.eventEmitter);
   }
 
   // ─────────────────────────────────────────────────────────────────
@@ -735,37 +735,7 @@ class GossipSdkImpl {
       );
     }
   }
-
-  /**
-   * Reset any messages stuck in SENDING status to FAILED.
-   * This handles the case where the app crashed or was closed during message send.
-   * Per spec: SENDING should never be persisted - if we find it on startup, it failed.
-   */
-  /**
-   * Reset messages stuck in SENDING status to WAITING_SESSION.
-   *
-   * Per spec: SENDING is a transient state that should never be persisted.
-   * If the app crashes/closes during a send, the message would be stuck forever.
-   *
-   * By resetting to WAITING_SESSION:
-   * - Message will be re-encrypted with current session keys
-   * - Message will be automatically sent when session is active
-   * - No manual user intervention required
-   *
-   * We also clear encryptedMessage and seeker since they may be stale.
-   */
-  // With SENDING removed from MessageStatus and sendAnnouncement now a nullable payload,
-  // there is no longer a persisted "sending" state to recover from on startup.
-  // These helpers are kept for backward compatibility but are now no-ops.
-  private async resetStuckSendingMessages(_db: GossipDatabase): Promise<void> {
-    return;
-  }
-
-  private async resetStuckSendingAnnouncements(
-    _db: GossipDatabase
-  ): Promise<void> {
-    return;
-  }
+   
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -837,11 +807,6 @@ interface ContactsAPI {
     ownerUserId: string,
     contactUserId: string
   ): Promise<DeleteContactResult>;
-}
-
-interface RefreshServiceAPI {
-  /** Update state for all discussions (keep-alive, broken sessions, etc.) */
-  handleSessionRefresh(activeDiscussions: Discussion[]): Promise<void>;
 }
 
 interface SdkUtils {

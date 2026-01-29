@@ -5,7 +5,7 @@
  *
  * @example
  * ```typescript
- * import { getContacts, addContact, deleteContact } from 'gossip-sdk';
+ * import { getContacts, addContact, deleteContact } from '@massalabs/gossip-sdk';
  *
  * // Get all contacts
  * const contacts = await getContacts(userId);

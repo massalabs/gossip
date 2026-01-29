@@ -9,6 +9,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { GossipDatabase } from '../../src/db';
 import type { EncryptionKey } from '../../src/wasm/encryption';
+import { SdkEventType } from '../../src/gossipSdk';
 
 const protocolMock = vi.hoisted(() => ({
   createMessageProtocolMock: vi.fn(),
@@ -125,7 +126,7 @@ vi.mock('../../src/services/discussion', () => ({
 
 vi.mock('../../src/services/refresh', () => ({
   RefreshService: class {
-    handleSessionRefresh = vi.fn();
+    stateUpdate = vi.fn();
     constructor(
       _db: unknown,
       _message: unknown,
@@ -236,7 +237,7 @@ describe('GossipSdkImpl lifecycle', () => {
     const handler = vi.fn();
 
     await sdk.init({ db: new GossipDatabase() });
-    sdk.on('message', handler);
+    sdk.on(SdkEventType.MESSAGE_RECEIVED, handler);
     await sdk.openSession({ mnemonic: 'test words' });
 
     eventState.lastEvents?.onMessageReceived?.({ id: 1 });
