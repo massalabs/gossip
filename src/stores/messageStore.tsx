@@ -5,7 +5,7 @@ import {
   MessageDirection,
   MessageStatus,
   MessageType,
-} from 'gossip-sdk';
+} from '@massalabs/gossip-sdk'
 import { createSelectors } from './utils/createSelectors';
 import { useAccountStore } from './accountStore';
 import { gossipSdk } from '@massalabs/gossip-sdk';

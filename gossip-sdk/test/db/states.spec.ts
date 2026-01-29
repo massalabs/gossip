@@ -9,7 +9,6 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import {
   db,
   DiscussionDirection,
-  DiscussionStatus,
   MessageDirection,
   MessageStatus,
   MessageType,
@@ -17,112 +16,6 @@ import {
 
 const TEST_OWNER_USER_ID = 'gossip1testowner';
 const TEST_CONTACT_USER_ID = 'gossip1testcontact';
-
-describe('Discussion State Transitions', () => {
-  beforeEach(async () => {
-    if (!db.isOpen()) {
-      await db.open();
-    }
-    await db.discussions.clear();
-    await db.messages.clear();
-    await db.contacts.clear();
-  });
-
-  describe('Discussion Direction', () => {
-    it('should track INITIATED direction when we start discussion', async () => {
-      const discussionId = await db.discussions.add({
-        ownerUserId: TEST_OWNER_USER_ID,
-        contactUserId: TEST_CONTACT_USER_ID,
-        direction: DiscussionDirection.INITIATED,
-        status: DiscussionStatus.PENDING,
-        unreadCount: 0,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      });
-
-      const discussion = await db.discussions.get(discussionId);
-      expect(discussion?.direction).toBe(DiscussionDirection.INITIATED);
-    });
-
-    it('should track RECEIVED direction when peer starts discussion', async () => {
-      const discussionId = await db.discussions.add({
-        ownerUserId: TEST_OWNER_USER_ID,
-        contactUserId: TEST_CONTACT_USER_ID,
-        direction: DiscussionDirection.RECEIVED,
-        status: DiscussionStatus.PENDING,
-        unreadCount: 0,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      });
-
-      const discussion = await db.discussions.get(discussionId);
-      expect(discussion?.direction).toBe(DiscussionDirection.RECEIVED);
-    });
-  });
-
-  describe('Status Transitions', () => {
-    it('should allow PENDING -> ACTIVE transition', async () => {
-      const discussionId = await db.discussions.add({
-        ownerUserId: TEST_OWNER_USER_ID,
-        contactUserId: TEST_CONTACT_USER_ID,
-        direction: DiscussionDirection.INITIATED,
-        status: DiscussionStatus.PENDING,
-        unreadCount: 0,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      });
-
-      await db.discussions.update(discussionId, {
-        status: DiscussionStatus.ACTIVE,
-        updatedAt: new Date(),
-      });
-
-      const discussion = await db.discussions.get(discussionId);
-      expect(discussion?.status).toBe(DiscussionStatus.ACTIVE);
-    });
-
-    it('should allow SEND_FAILED -> PENDING on successful retry', async () => {
-      const discussionId = await db.discussions.add({
-        ownerUserId: TEST_OWNER_USER_ID,
-        contactUserId: TEST_CONTACT_USER_ID,
-        direction: DiscussionDirection.INITIATED,
-        status: DiscussionStatus.SEND_FAILED,
-        initiationAnnouncement: new Uint8Array([1, 2, 3]),
-        unreadCount: 0,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      });
-
-      await db.discussions.update(discussionId, {
-        status: DiscussionStatus.PENDING,
-        updatedAt: new Date(),
-      });
-
-      const discussion = await db.discussions.get(discussionId);
-      expect(discussion?.status).toBe(DiscussionStatus.PENDING);
-    });
-
-    it('should allow ACTIVE -> BROKEN on session killed', async () => {
-      const discussionId = await db.discussions.add({
-        ownerUserId: TEST_OWNER_USER_ID,
-        contactUserId: TEST_CONTACT_USER_ID,
-        direction: DiscussionDirection.INITIATED,
-        status: DiscussionStatus.ACTIVE,
-        unreadCount: 0,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      });
-
-      await db.discussions.update(discussionId, {
-        status: DiscussionStatus.BROKEN,
-        updatedAt: new Date(),
-      });
-
-      const discussion = await db.discussions.get(discussionId);
-      expect(discussion?.status).toBe(DiscussionStatus.BROKEN);
-    });
-  });
-});
 
 describe('Announcement Storage for Retry', () => {
   beforeEach(async () => {
@@ -133,68 +26,37 @@ describe('Announcement Storage for Retry', () => {
     await db.pendingAnnouncements.clear();
   });
 
-  it('should persist announcement bytes for retry on SEND_FAILED', async () => {
-    const announcement = new Uint8Array([1, 2, 3, 4, 5]);
-    const discussionId = await db.discussions.add({
-      ownerUserId: TEST_OWNER_USER_ID,
-      contactUserId: TEST_CONTACT_USER_ID,
-      direction: DiscussionDirection.INITIATED,
-      status: DiscussionStatus.SEND_FAILED,
-      initiationAnnouncement: announcement,
-      unreadCount: 0,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
-
-    const discussion = await db.discussions.get(discussionId);
-    expect(discussion?.initiationAnnouncement).toBeDefined();
-    expect(discussion?.initiationAnnouncement?.length).toBe(5);
-  });
-
-  it('should find discussions needing retry', async () => {
+  it('should find discussions needing retry (Ready to send)', async () => {
     const announcement = new Uint8Array([10, 20, 30]);
     await db.discussions.add({
       ownerUserId: TEST_OWNER_USER_ID,
       contactUserId: TEST_CONTACT_USER_ID,
       direction: DiscussionDirection.INITIATED,
-      status: DiscussionStatus.SEND_FAILED,
-      initiationAnnouncement: announcement,
+      weAccepted: true,
+      sendAnnouncement: {
+        announcement_bytes: announcement,
+        when_to_send: new Date(),
+      },
       unreadCount: 0,
       createdAt: new Date(),
       updatedAt: new Date(),
     });
 
-    const failedDiscussions = await db.discussions
-      .where('status')
-      .equals(DiscussionStatus.SEND_FAILED)
-      .filter(d => d.initiationAnnouncement !== undefined)
+    const now = new Date();
+    const retryDiscussions = await db.discussions
+      .where('ownerUserId')
+      .equals(TEST_OWNER_USER_ID)
+      .filter(
+        d =>
+          d.sendAnnouncement !== null && d.sendAnnouncement!.when_to_send <= now
+      )
       .toArray();
 
-    expect(failedDiscussions.length).toBe(1);
-    expect(failedDiscussions[0].initiationAnnouncement).toBeDefined();
-  });
-
-  it('should clear initiationAnnouncement when marked BROKEN', async () => {
-    const discussionId = await db.discussions.add({
-      ownerUserId: TEST_OWNER_USER_ID,
-      contactUserId: TEST_CONTACT_USER_ID,
-      direction: DiscussionDirection.INITIATED,
-      status: DiscussionStatus.SEND_FAILED,
-      initiationAnnouncement: new Uint8Array([1, 2, 3]),
-      unreadCount: 0,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
-
-    await db.discussions.update(discussionId, {
-      status: DiscussionStatus.BROKEN,
-      initiationAnnouncement: undefined,
-      updatedAt: new Date(),
-    });
-
-    const discussion = await db.discussions.get(discussionId);
-    expect(discussion?.status).toBe(DiscussionStatus.BROKEN);
-    expect(discussion?.initiationAnnouncement).toBeUndefined();
+    expect(retryDiscussions.length).toBe(1);
+    expect(retryDiscussions[0].sendAnnouncement).toBeDefined();
+    expect(
+      retryDiscussions[0].sendAnnouncement?.announcement_bytes
+    ).toBeDefined();
   });
 });
 
@@ -206,14 +68,14 @@ describe('Message Status Transitions', () => {
     await db.messages.clear();
   });
 
-  it('should transition SENDING -> SENT on successful send', async () => {
+  it('should transition READY -> SENT on successful send', async () => {
     const messageId = await db.messages.add({
       ownerUserId: TEST_OWNER_USER_ID,
       contactUserId: TEST_CONTACT_USER_ID,
       content: 'Test message',
       type: MessageType.TEXT,
       direction: MessageDirection.OUTGOING,
-      status: MessageStatus.SENDING,
+      status: MessageStatus.READY,
       timestamp: new Date(),
     });
 
@@ -225,23 +87,57 @@ describe('Message Status Transitions', () => {
     expect(message?.status).toBe(MessageStatus.SENT);
   });
 
-  it('should transition SENDING -> FAILED on send failure', async () => {
+  it('should transition READY -> WAITING_SESSION on send failure', async () => {
     const messageId = await db.messages.add({
       ownerUserId: TEST_OWNER_USER_ID,
       contactUserId: TEST_CONTACT_USER_ID,
       content: 'Test message',
       type: MessageType.TEXT,
       direction: MessageDirection.OUTGOING,
-      status: MessageStatus.SENDING,
+      status: MessageStatus.READY,
+      whenToSend: new Date(),
+      seeker: new Uint8Array([1, 2, 3]),
+      encryptedMessage: new Uint8Array([1, 2, 3]),
       timestamp: new Date(),
     });
 
     await db.messages.update(messageId, {
-      status: MessageStatus.FAILED,
+      status: MessageStatus.WAITING_SESSION,
+      whenToSend: undefined,
+      seeker: undefined,
+      encryptedMessage: undefined,
     });
 
     const message = await db.messages.get(messageId);
-    expect(message?.status).toBe(MessageStatus.FAILED);
+    expect(message?.status).toBe(MessageStatus.WAITING_SESSION);
+    expect(message?.whenToSend).toBeUndefined();
+    expect(message?.seeker).toBeUndefined();
+    expect(message?.encryptedMessage).toBeUndefined();
+  });
+
+  it('should transition SENT -> WAITING_SESSION on send failure', async () => {
+    const messageId = await db.messages.add({
+      ownerUserId: TEST_OWNER_USER_ID,
+      contactUserId: TEST_CONTACT_USER_ID,
+      content: 'Test message',
+      type: MessageType.TEXT,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.SENT,
+      timestamp: new Date(),
+    });
+
+    await db.messages.update(messageId, {
+      status: MessageStatus.WAITING_SESSION,
+      whenToSend: undefined,
+      seeker: undefined,
+      encryptedMessage: undefined,
+    });
+
+    const message = await db.messages.get(messageId);
+    expect(message?.status).toBe(MessageStatus.WAITING_SESSION);
+    expect(message?.whenToSend).toBeUndefined();
+    expect(message?.seeker).toBeUndefined();
+    expect(message?.encryptedMessage).toBeUndefined();
   });
 
   it('should transition SENT -> DELIVERED on acknowledgment', async () => {
@@ -261,111 +157,6 @@ describe('Message Status Transitions', () => {
 
     const message = await db.messages.get(messageId);
     expect(message?.status).toBe(MessageStatus.DELIVERED);
-  });
-});
-
-describe('Discussion Stability Detection', () => {
-  beforeEach(async () => {
-    if (!db.isOpen()) {
-      await db.open();
-    }
-    await db.discussions.clear();
-    await db.messages.clear();
-  });
-
-  it('should detect unstable state when FAILED messages exist without encryptedMessage', async () => {
-    await db.discussions.add({
-      ownerUserId: TEST_OWNER_USER_ID,
-      contactUserId: TEST_CONTACT_USER_ID,
-      direction: DiscussionDirection.INITIATED,
-      status: DiscussionStatus.ACTIVE,
-      unreadCount: 0,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
-
-    await db.messages.add({
-      ownerUserId: TEST_OWNER_USER_ID,
-      contactUserId: TEST_CONTACT_USER_ID,
-      content: 'Test message',
-      type: MessageType.TEXT,
-      direction: MessageDirection.OUTGOING,
-      status: MessageStatus.FAILED,
-      timestamp: new Date(),
-    });
-
-    const messages = await db.messages
-      .where('[ownerUserId+contactUserId+direction]')
-      .equals([
-        TEST_OWNER_USER_ID,
-        TEST_CONTACT_USER_ID,
-        MessageDirection.OUTGOING,
-      ])
-      .sortBy('id');
-
-    const lastMessage = messages[messages.length - 1];
-    const isUnstable =
-      lastMessage?.status === MessageStatus.FAILED &&
-      !lastMessage?.encryptedMessage;
-
-    expect(isUnstable).toBe(true);
-  });
-
-  it('should detect stable state when failed messages have encryptedMessage', async () => {
-    await db.discussions.add({
-      ownerUserId: TEST_OWNER_USER_ID,
-      contactUserId: TEST_CONTACT_USER_ID,
-      direction: DiscussionDirection.INITIATED,
-      status: DiscussionStatus.ACTIVE,
-      unreadCount: 0,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
-
-    await db.messages.add({
-      ownerUserId: TEST_OWNER_USER_ID,
-      contactUserId: TEST_CONTACT_USER_ID,
-      content: 'Test message',
-      type: MessageType.TEXT,
-      direction: MessageDirection.OUTGOING,
-      status: MessageStatus.FAILED,
-      encryptedMessage: new Uint8Array([1, 2, 3]),
-      timestamp: new Date(),
-    });
-
-    const messages = await db.messages
-      .where('[ownerUserId+contactUserId+direction]')
-      .equals([
-        TEST_OWNER_USER_ID,
-        TEST_CONTACT_USER_ID,
-        MessageDirection.OUTGOING,
-      ])
-      .sortBy('id');
-
-    const lastMessage = messages[messages.length - 1];
-    const isUnstable =
-      lastMessage?.status === MessageStatus.FAILED &&
-      !lastMessage?.encryptedMessage;
-
-    expect(isUnstable).toBe(false);
-  });
-
-  it('should identify BROKEN discussion status', async () => {
-    await db.discussions.add({
-      ownerUserId: TEST_OWNER_USER_ID,
-      contactUserId: TEST_CONTACT_USER_ID,
-      direction: DiscussionDirection.INITIATED,
-      status: DiscussionStatus.BROKEN,
-      unreadCount: 0,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
-
-    const discussion = await db.getDiscussionByOwnerAndContact(
-      TEST_OWNER_USER_ID,
-      TEST_CONTACT_USER_ID
-    );
-    expect(discussion?.status).toBe(DiscussionStatus.BROKEN);
   });
 });
 
@@ -446,7 +237,8 @@ describe('Contact Deletion Cleanup', () => {
       ownerUserId: TEST_OWNER_USER_ID,
       contactUserId: TEST_CONTACT_USER_ID,
       direction: DiscussionDirection.INITIATED,
-      status: DiscussionStatus.ACTIVE,
+      weAccepted: true,
+      sendAnnouncement: null,
       unreadCount: 0,
       createdAt: new Date(),
       updatedAt: new Date(),

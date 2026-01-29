@@ -123,14 +123,16 @@ export interface Discussion {
   contactUserId: string; // Reference to Contact.userId - unique per contact
 
   // Protocol/Encryption fields
-  weAccepted: boolean; // Whether the user has expressed the will to communicate with the peer.
+  /*weAccepted: Whether the user has expressed the will to communicate with the peer 
+  i.e. the user has initiated a new discussion or it accepted the discussion initiated by the peer. */
+  weAccepted: boolean; 
   sendAnnouncement: SendAnnouncement;
   direction: DiscussionDirection;
-  lastAnnouncementMessage?: string; // Optional message from incoming announcement (user_data)
   lastSyncTimestamp?: Date; // Last time messages were synced from protocol
 
   // UI/Display fields
   customName?: string; // Optional custom name for the discussion (overrides contact name)
+  lastAnnouncementMessage?: string; // ptional message from incoming announcement (the last one the user received)
   lastMessageId?: number;
   lastMessageContent?: string;
   lastMessageTimestamp?: Date;
@@ -399,13 +401,16 @@ export class GossipDatabase extends Dexie {
 // Database instance - initialized lazily or via setDb()
 let _db: GossipDatabase | null = null;
 let _warnedGlobalDbAccess = false;
+// Store a reference to the Proxy to detect it
+let _proxyDb: GossipDatabase | null = null;
 
 /**
  * Get the database instance.
  * Creates a default instance if none was set via setDb().
  */
 export function getDb(): GossipDatabase {
-  if (!_db) {
+  // Prevent infinite recursion: if _db is the Proxy itself or not a real instance, create a new instance
+  if (!_db || _db === _proxyDb || !(_db instanceof GossipDatabase)) {
     _db = new GossipDatabase();
   }
   return _db;
@@ -416,14 +421,24 @@ export function getDb(): GossipDatabase {
  * Call this before using any SDK functions if you need a custom db instance.
  */
 export function setDb(database: GossipDatabase): void {
+  // Prevent setting the Proxy itself to avoid infinite recursion
+  // The Proxy is not an instance of GossipDatabase, so we can detect it that way
+  if (!(database instanceof GossipDatabase) || database === _proxyDb) {
+    // If Proxy is passed, ensure _db exists by calling getDb()
+    // This will reuse existing _db if it was already created (e.g., by db.open())
+    // or create a new one if needed. This ensures we always use the same instance.
+    getDb();
+    // Don't overwrite _db - just ensure it exists and is consistent
+  } else {
   _db = database;
+  }
 }
 
 /**
  * Get the database instance.
  * Creates a default instance if none was set via setDb().
  */
-export const db: GossipDatabase = new Proxy({} as GossipDatabase, {
+export const db: GossipDatabase = (_proxyDb = new Proxy({} as GossipDatabase, {
   get(_target, prop) {
     if (!_warnedGlobalDbAccess) {
       _warnedGlobalDbAccess = true;
@@ -438,4 +453,4 @@ export const db: GossipDatabase = new Proxy({} as GossipDatabase, {
     }
     return value;
   },
-});
+})) as GossipDatabase;

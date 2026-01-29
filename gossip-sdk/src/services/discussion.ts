@@ -248,7 +248,7 @@ export class DiscussionService {
 
     const result: Result<Uint8Array, Error> = await this.db.transaction(
       'rw',
-      [this.db.discussions, this.db.messages],
+      [this.db.discussions, this.db.messages, this.db.contacts],
       async () => {
         const discussion = await this.db.getDiscussionByOwnerAndContact(
           ownerUserId,

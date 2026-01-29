@@ -665,7 +665,7 @@ export class MessageService {
         ownerUserId,
         contactUserId
       );
-      const weAccepted = discussion?.weAccepted ?? false;
+      const weAccepted = discussion?.weAccepted;
       if (!discussion || !weAccepted) {
         return {
           success: false,
@@ -677,12 +677,19 @@ export class MessageService {
 
       const peerId = decodeUserId(contactUserId);
       const sessionStatus = this.session.peerSessionStatus(peerId);
-      if (sessionStatus !== SessionStatus.Active) {
-        log.info('session not active, skipping send queue', {
+      if (
+        ![SessionStatus.Active, SessionStatus.SelfRequested].includes(
+          sessionStatus
+        )
+      ) {
+        log.info('session not active or self requested, skipping send queue', {
           contactUserId,
           sessionStatus: sessionStatusToString(sessionStatus),
         });
-        return { success: false, error: new Error('Session not active') };
+        return {
+          success: false,
+          error: new Error('Session not active or self requested'),
+        };
       }
 
       // retrieve all message in send queue that need to be updated for this contact

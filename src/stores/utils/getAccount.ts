@@ -1,4 +1,4 @@
-import { db, UserProfile } from 'gossip-sdk';
+import { db, UserProfile } from '@massalabs/gossip-sdk'
 import { useAccountStore } from '../accountStore';
 
 // Prefer the active profile in state; otherwise read the last logged in user from DB (by lastSeen)

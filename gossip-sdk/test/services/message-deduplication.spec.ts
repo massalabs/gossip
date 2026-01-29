@@ -8,7 +8,6 @@ import {
   MessageStatus,
   MessageDirection,
   MessageType,
-  DiscussionStatus,
   DiscussionDirection,
 } from '../../src/db';
 import { encodeUserId } from '../../src/utils/userId';
@@ -31,7 +30,8 @@ describe('Message Deduplication', () => {
       ownerUserId: DEDUP_OWNER_USER_ID,
       contactUserId: DEDUP_CONTACT_USER_ID,
       direction: DiscussionDirection.RECEIVED,
-      status: DiscussionStatus.ACTIVE,
+      weAccepted: true,
+      sendAnnouncement: null,
       unreadCount: 0,
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -260,7 +260,8 @@ describe('Message Deduplication', () => {
         ownerUserId: DEDUP_OWNER_USER_ID,
         contactUserId: CONTACT_2_USER_ID,
         direction: DiscussionDirection.RECEIVED,
-        status: DiscussionStatus.ACTIVE,
+        weAccepted: true,
+        sendAnnouncement: null,
         unreadCount: 0,
         createdAt: new Date(),
         updatedAt: new Date(),

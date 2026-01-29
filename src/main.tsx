@@ -8,7 +8,7 @@ import { enableDebugLogger } from './utils/logger.ts';
 import { Buffer } from 'buffer';
 
 // SDK configuration
-import { gossipSdk, GossipDatabase } from 'gossip-sdk';
+import { gossipSdk, GossipDatabase } from '@massalabs/gossip-sdk';
 import { protocolConfig } from './config/protocol';
 
 // Create database instance using SDK's class
@@ -93,6 +93,11 @@ window.addEventListener('load', () => {
 gossipSdk.init({
   db,
   protocolBaseUrl: protocolConfig.baseUrl,
+  config: {
+    polling: {
+      enabled: true,
+    },
+  },
 });
 
 // Only enable the debug logger in development to avoid persisting

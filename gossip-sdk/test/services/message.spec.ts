@@ -11,7 +11,6 @@ import {
   MessageStatus,
   MessageDirection,
   MessageType,
-  DiscussionStatus,
   DiscussionDirection,
 } from '../../src/db';
 import type { IMessageProtocol } from '../../src/api/messageProtocol/types';

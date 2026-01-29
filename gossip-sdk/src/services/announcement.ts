@@ -27,7 +27,6 @@ import { resetSendQueue } from './discussion';
 import { SdkEventEmitter, SdkEventType } from '../core/SdkEventEmitter';
 
 const logger = new Logger('AnnouncementService');
-const ANNOUNCEMENT_RETRY_DELAY_MS = 15000;
 
 export interface AnnouncementReceptionResult {
   success: boolean;
@@ -163,7 +162,7 @@ export class AnnouncementService {
           await this.db.discussions.update(discussion.id, {
             sendAnnouncement: {
               announcement_bytes,
-              when_to_send: new Date(Date.now() + ANNOUNCEMENT_RETRY_DELAY_MS),
+              when_to_send: new Date(Date.now() + this.config.announcements.retryDelayMs),
             },
             updatedAt: new Date(),
           });

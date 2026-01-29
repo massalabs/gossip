@@ -12,7 +12,7 @@ import {
   RestMessageProtocol,
   type EncryptedMessage,
   GossipDatabase,
-} from 'gossip-sdk';
+} from '@massalabs/gossip-sdk';
 
 // Create database instance for service worker
 const db = new GossipDatabase();

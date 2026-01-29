@@ -12,7 +12,7 @@ import MessageList, {
 } from '../components/discussions/MessageList';
 import MessageInput from '../components/discussions/MessageInput';
 import ScrollToBottomButton from '../components/discussions/ScrollToBottomButton';
-import { Message, gossipSdk } from 'gossip-sdk';
+import { Message, gossipSdk } from '@massalabs/gossip-sdk'
 import { isDifferentDay } from '../utils/timeUtils';
 import { useUiStore } from '../stores/uiStore';
 
