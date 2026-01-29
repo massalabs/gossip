@@ -66,6 +66,7 @@ vi.mock('../../src/wasm/session', async () => {
 
 vi.mock('../../src/services/auth', () => ({
   AuthService: class {
+    ensurePublicKeyPublished = vi.fn().mockResolvedValue(undefined);
     constructor() {}
   },
 }));

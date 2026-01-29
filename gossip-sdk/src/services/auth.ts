@@ -41,7 +41,8 @@ export class AuthService {
   }
 
   /**
-   * Ensure public key is published (check first, then publish if needed)
+   * Ensure public key is published (check first, then publish if needed).
+   * If no user profile exists, the key is still published so the gossip ID is discoverable.
    * @param publicKeys - UserPublicKeys instance
    * @param userId - Bech32-encoded userId (e.g., "gossip1...")
    */
@@ -50,19 +51,23 @@ export class AuthService {
     userId: string
   ): Promise<void> {
     const profile = await this.db.userProfile.get(userId);
-    if (!profile) throw new Error('User profile not found');
 
-    const lastPush = profile.lastPublicKeyPush;
-
-    if (lastPush && !moreThanOneWeekAgo(lastPush)) {
-      return;
+    if (profile) {
+      const lastPush = profile.lastPublicKeyPush;
+      if (lastPush && !moreThanOneWeekAgo(lastPush)) {
+        return;
+      }
     }
 
     await this.messageProtocol.postPublicKey(
       encodeToBase64(publicKeys.to_bytes())
     );
 
-    await this.db.userProfile.update(userId, { lastPublicKeyPush: new Date() });
+    if (profile) {
+      await this.db.userProfile.update(userId, {
+        lastPublicKeyPush: new Date(),
+      });
+    }
   }
 }
 
