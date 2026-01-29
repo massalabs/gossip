@@ -14,7 +14,7 @@ import {
 } from '../db';
 import { sessionStatusToString } from '../wasm/session';
 import type { SessionModule } from '../wasm/session';
-import { SessionStatus } from '#wasm';
+import { SessionStatus } from '../wasm/bindings';
 import { decodeUserId, encodeUserId } from '../utils/userId';
 import { MessageService } from './message';
 import { Logger } from '../utils/logs';

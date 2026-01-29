@@ -4,14 +4,15 @@
  * Handles storing and retrieving public keys by userId hash via the auth API.
  */
 
-import { UserPublicKeys } from '#wasm';
+import { UserPublicKeys } from '../wasm/bindings';
+import type { UserPublicKeys as UserPublicKeysType } from '#wasm';
 import { decodeUserId } from '../utils/userId';
 import { encodeToBase64, decodeFromBase64 } from '../utils/base64';
 import { IMessageProtocol } from '../api/messageProtocol/types';
 import { type GossipDatabase } from '../db';
 
 export type PublicKeyResult =
-  | { publicKey: UserPublicKeys; error?: never }
+  | { publicKey: UserPublicKeysType; error?: never }
   | { publicKey?: never; error: string };
 
 export class AuthService {
@@ -46,7 +47,7 @@ export class AuthService {
    * @param userId - Bech32-encoded userId (e.g., "gossip1...")
    */
   async ensurePublicKeyPublished(
-    publicKeys: UserPublicKeys,
+    publicKeys: UserPublicKeysType,
     userId: string
   ): Promise<void> {
     const profile = await this.db.userProfile.get(userId);

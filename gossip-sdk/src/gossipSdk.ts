@@ -57,9 +57,8 @@ import {
   mergeConfig,
 } from './config/sdk';
 import { startWasmInitialization, ensureWasmInitialized } from './wasm/loader';
-import { generateUserKeys, UserKeys } from './wasm/userKeys';
+import { generateUserKeys } from './wasm/userKeys';
 import { SessionModule } from './wasm/session';
-import { EncryptionKey } from './wasm/encryption';
 import {
   AnnouncementService,
   type AnnouncementReceptionResult,
@@ -91,7 +90,11 @@ import {
   updateContactName,
   deleteContact,
 } from './contacts';
-import type { UserPublicKeys } from '#wasm';
+import type {
+  EncryptionKey as EncryptionKeyType,
+  UserKeys as UserKeysType,
+  UserPublicKeys as UserPublicKeysType,
+} from '#wasm';
 import {
   SdkEventEmitter,
   type SdkEventType,
@@ -121,14 +124,14 @@ export interface OpenSessionOptions {
   /** Existing encrypted session blob (for restoring session) */
   encryptedSession?: Uint8Array;
   /** Encryption key for decrypting session */
-  encryptionKey?: EncryptionKey;
+  encryptionKey?: EncryptionKeyType;
   /** Callback when session state changes (for persistence) */
   onPersist?: (
     encryptedBlob: Uint8Array,
-    encryptionKey: EncryptionKey
+    encryptionKey: EncryptionKeyType
   ) => Promise<void>;
   /** Encryption key for persisting session (required if onPersist is provided) */
-  persistEncryptionKey?: EncryptionKey;
+  persistEncryptionKey?: EncryptionKeyType;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -150,11 +153,11 @@ type SdkStateSessionOpen = {
   messageProtocol: IMessageProtocol;
   config: SdkConfig;
   session: SessionModule;
-  userKeys: UserKeys;
-  persistEncryptionKey?: EncryptionKey;
+  userKeys: UserKeysType;
+  persistEncryptionKey?: EncryptionKeyType;
   onPersist?: (
     encryptedBlob: Uint8Array,
-    encryptionKey: EncryptionKey
+    encryptionKey: EncryptionKeyType
   ) => Promise<void>;
 };
 
@@ -524,7 +527,7 @@ class GossipSdkImpl {
   }
 
   /** User's public keys. Throws if no session is open. */
-  get publicKeys(): UserPublicKeys {
+  get publicKeys(): UserPublicKeysType {
     const state = this.requireSession();
     return state.session.ourPk;
   }
@@ -543,7 +546,7 @@ class GossipSdkImpl {
    * Get encrypted session blob for persistence.
    * Throws if no session is open.
    */
-  getEncryptedSession(encryptionKey: EncryptionKey): Uint8Array {
+  getEncryptedSession(encryptionKey: EncryptionKeyType): Uint8Array {
     const state = this.requireSession();
     return state.session.toEncryptedBlob(encryptionKey);
   }
@@ -556,10 +559,10 @@ class GossipSdkImpl {
    * @param onPersist - Callback to save encrypted session blob
    */
   configurePersistence(
-    encryptionKey: EncryptionKey,
+    encryptionKey: EncryptionKeyType,
     onPersist: (
       encryptedBlob: Uint8Array,
-      encryptionKey: EncryptionKey
+      encryptionKey: EncryptionKeyType
     ) => Promise<void>
   ): void {
     if (this.state.status !== 'session_open') {
@@ -943,7 +946,7 @@ interface ContactsAPI {
     ownerUserId: string,
     userId: string,
     name: string,
-    publicKeys: UserPublicKeys
+    publicKeys: UserPublicKeysType
   ): Promise<{ success: boolean; error?: string; contact?: Contact }>;
   /** Update a contact's name */
   updateName(

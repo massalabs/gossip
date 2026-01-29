@@ -12,6 +12,10 @@ import {
   Nonce,
   aead_encrypt as _aead_encrypt,
   aead_decrypt as _aead_decrypt,
+} from './bindings';
+import type {
+  EncryptionKey as EncryptionKeyType,
+  Nonce as NonceType,
 } from '#wasm';
 
 // Re-export classes
@@ -21,7 +25,7 @@ export { EncryptionKey, Nonce };
  * Generate a new random encryption key (64 bytes)
  * This ensures WASM is initialized before calling
  */
-export async function generateEncryptionKey(): Promise<EncryptionKey> {
+export async function generateEncryptionKey(): Promise<EncryptionKeyType> {
   await ensureWasmInitialized();
   return EncryptionKey.generate();
 }
@@ -33,7 +37,7 @@ export async function generateEncryptionKey(): Promise<EncryptionKey> {
 export async function generateEncryptionKeyFromSeed(
   seed: string,
   salt: Uint8Array
-): Promise<EncryptionKey> {
+): Promise<EncryptionKeyType> {
   await ensureWasmInitialized();
   return EncryptionKey.from_seed(seed, salt);
 }
@@ -44,7 +48,7 @@ export async function generateEncryptionKeyFromSeed(
  */
 export async function encryptionKeyFromBytes(
   bytes: Uint8Array
-): Promise<EncryptionKey> {
+): Promise<EncryptionKeyType> {
   await ensureWasmInitialized();
   return EncryptionKey.from_bytes(bytes);
 }
@@ -53,7 +57,7 @@ export async function encryptionKeyFromBytes(
  * Generate a new random nonce (16 bytes)
  * This ensures WASM is initialized before calling
  */
-export async function generateNonce(): Promise<Nonce> {
+export async function generateNonce(): Promise<NonceType> {
   await ensureWasmInitialized();
   return Nonce.generate();
 }
@@ -62,7 +66,7 @@ export async function generateNonce(): Promise<Nonce> {
  * Create a nonce from raw bytes (must be 16 bytes)
  * This ensures WASM is initialized before calling
  */
-export async function nonceFromBytes(bytes: Uint8Array): Promise<Nonce> {
+export async function nonceFromBytes(bytes: Uint8Array): Promise<NonceType> {
   await ensureWasmInitialized();
   return Nonce.from_bytes(bytes);
 }
@@ -78,8 +82,8 @@ export async function nonceFromBytes(bytes: Uint8Array): Promise<Nonce> {
  * @returns The ciphertext with authentication tag appended
  */
 export async function encryptAead(
-  key: EncryptionKey,
-  nonce: Nonce,
+  key: EncryptionKeyType,
+  nonce: NonceType,
   plaintext: Uint8Array,
   aad: Uint8Array
 ): Promise<Uint8Array> {
@@ -98,8 +102,8 @@ export async function encryptAead(
  * @returns The decrypted plaintext, or undefined if authentication fails
  */
 export async function decryptAead(
-  key: EncryptionKey,
-  nonce: Nonce,
+  key: EncryptionKeyType,
+  nonce: NonceType,
   ciphertext: Uint8Array,
   aad: Uint8Array
 ): Promise<Uint8Array | undefined> {

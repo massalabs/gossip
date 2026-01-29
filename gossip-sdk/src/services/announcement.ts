@@ -12,7 +12,8 @@ import {
 } from '../db';
 import { decodeUserId, encodeUserId } from '../utils/userId';
 import { IMessageProtocol } from '../api/messageProtocol';
-import { UserPublicKeys, SessionStatus } from '#wasm';
+import { SessionStatus } from '../wasm/bindings';
+import type { UserPublicKeys as UserPublicKeysType } from '#wasm';
 import { SessionModule, sessionStatusToString } from '../wasm/session';
 import { Logger } from '../utils/logs';
 import { BulletinItem } from '../api/messageProtocol/types';
@@ -77,7 +78,7 @@ export class AnnouncementService {
   }
 
   async establishSession(
-    contactPublicKeys: UserPublicKeys,
+    contactPublicKeys: UserPublicKeysType,
     userData?: Uint8Array
   ): Promise<{
     success: boolean;

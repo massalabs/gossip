@@ -8,7 +8,9 @@ build/
 # Generated files
 *.min.js
 *.min.css
-src/assets/generated
+
+gossip-sdk/src/assets/generated
+android/app/src/main/assets
 
 # Package manager files
 package-lock.json

@@ -7,31 +7,36 @@
 
 import {
   SessionManagerWrapper,
-  UserPublicKeys,
-  UserSecretKeys,
-  ReceiveMessageOutput,
-  SendMessageOutput,
   SessionStatus,
-  EncryptionKey,
   SessionConfig,
-  AnnouncementResult,
-  UserKeys,
+} from './bindings';
+import type {
+  SessionManagerWrapper as SessionManagerWrapperType,
+  UserPublicKeys as UserPublicKeysType,
+  UserSecretKeys as UserSecretKeysType,
+  ReceiveMessageOutput as ReceiveMessageOutputType,
+  SendMessageOutput as SendMessageOutputType,
+  SessionStatus as SessionStatusType,
+  EncryptionKey as EncryptionKeyType,
+  SessionConfig as SessionConfigType,
+  AnnouncementResult as AnnouncementResultType,
+  UserKeys as UserKeysType,
 } from '#wasm';
 import { UserProfile } from '../db';
 import { encodeUserId } from '../utils/userId';
 
 export class SessionModule {
-  private sessionManager: SessionManagerWrapper | null = null;
+  private sessionManager: SessionManagerWrapperType | null = null;
   private onPersist?: () => Promise<void>; // Async callback for persistence
-  public ourPk: UserPublicKeys;
-  public ourSk: UserSecretKeys;
+  public ourPk: UserPublicKeysType;
+  public ourSk: UserSecretKeysType;
   public userId: Uint8Array;
   public userIdEncoded: string;
 
   constructor(
-    userKeys: UserKeys,
+    userKeys: UserKeysType,
     onPersist?: () => Promise<void>,
-    config?: SessionConfig
+    config?: SessionConfigType
   ) {
     this.ourPk = userKeys.public_keys();
     this.ourSk = userKeys.secret_keys();
@@ -73,7 +78,7 @@ export class SessionModule {
   /**
    * Initialize session from an encrypted blob
    */
-  load(profile: UserProfile, encryptionKey: EncryptionKey): void {
+  load(profile: UserProfile, encryptionKey: EncryptionKeyType): void {
     // Clean up existing session if any
     this.cleanup();
 
@@ -86,7 +91,7 @@ export class SessionModule {
   /**
    * Serialize session to an encrypted blob
    */
-  toEncryptedBlob(key: EncryptionKey): Uint8Array {
+  toEncryptedBlob(key: EncryptionKeyType): Uint8Array {
     if (!this.sessionManager) {
       throw new Error('Session manager is not initialized');
     }
@@ -106,7 +111,7 @@ export class SessionModule {
    * @returns The announcement bytes to publish
    */
   async establishOutgoingSession(
-    peerPk: UserPublicKeys,
+    peerPk: UserPublicKeysType,
     userData?: Uint8Array
   ): Promise<Uint8Array> {
     if (!this.sessionManager) {
@@ -137,7 +142,7 @@ export class SessionModule {
    */
   async feedIncomingAnnouncement(
     announcementBytes: Uint8Array
-  ): Promise<AnnouncementResult | undefined> {
+  ): Promise<AnnouncementResultType | undefined> {
     if (!this.sessionManager) {
       throw new Error('Session manager is not initialized');
     }
@@ -171,7 +176,7 @@ export class SessionModule {
   async feedIncomingMessageBoardRead(
     seeker: Uint8Array,
     ciphertext: Uint8Array
-  ): Promise<ReceiveMessageOutput | undefined> {
+  ): Promise<ReceiveMessageOutputType | undefined> {
     if (!this.sessionManager) {
       throw new Error('Session manager is not initialized');
     }
@@ -194,7 +199,7 @@ export class SessionModule {
   async sendMessage(
     peerId: Uint8Array,
     message: Uint8Array
-  ): Promise<SendMessageOutput | undefined> {
+  ): Promise<SendMessageOutputType | undefined> {
     if (!this.sessionManager) {
       throw new Error('Session manager is not initialized');
     }
@@ -220,7 +225,7 @@ export class SessionModule {
   /**
    * Get the session status for a peer
    */
-  peerSessionStatus(peerId: Uint8Array): SessionStatus {
+  peerSessionStatus(peerId: Uint8Array): SessionStatusType {
     if (!this.sessionManager) {
       throw new Error('Session manager is not initialized');
     }
@@ -254,7 +259,7 @@ export class SessionModule {
   }
 }
 
-export function sessionStatusToString(status: SessionStatus): string {
+export function sessionStatusToString(status: SessionStatusType): string {
   switch (status) {
     case SessionStatus.Active:
       return 'Active';

@@ -2,12 +2,13 @@
  * WASM Module Loader and Initialization Service
  *
  * This file handles WASM initialization. The actual wasm module is resolved
- * via the #wasm import which conditionally loads the correct target:
+ * via the unified `bindings` module which dynamically selects the correct
+ * target at runtime:
  * - Browser: web target (has init function, uses import.meta.url + fetch)
  * - Node: nodejs target (auto-initializes, no init function needed)
  */
 
-import * as wasmModule from '#wasm';
+import * as wasmModule from './bindings';
 
 // The web target has a default export (init function), nodejs target doesn't
 const init = (wasmModule as { default?: (input?: unknown) => Promise<unknown> })

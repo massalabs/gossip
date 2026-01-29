@@ -190,4 +190,4 @@ export {
   ReceiveMessageOutput,
   AnnouncementResult,
   generate_user_keys,
-} from '#wasm';
+} from './wasm/bindings';
