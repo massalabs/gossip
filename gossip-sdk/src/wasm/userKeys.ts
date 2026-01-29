@@ -6,9 +6,13 @@
  */
 
 import { ensureWasmInitialized } from './loader';
-import { generate_user_keys as _generate_user_keys, UserKeys } from '#wasm';
+import {
+  generate_user_keys as _generate_user_keys,
+  UserKeys,
+} from './bindings';
+import type { UserKeys as UserKeysType } from '#wasm';
 
-// Re-export classes
+// Re-export runtime class; type comes from '#wasm'
 export { UserKeys };
 
 /**
@@ -19,7 +23,9 @@ export { UserKeys };
  * @param secondaryKey - A 32-byte secondary public key
  * @returns UserKeys object containing public and secret keys
  */
-export async function generateUserKeys(passphrase: string): Promise<UserKeys> {
+export async function generateUserKeys(
+  passphrase: string
+): Promise<UserKeysType> {
   await ensureWasmInitialized();
   // The actual WASM function is synchronous, so we can call it directly
   const keys = _generate_user_keys(passphrase);

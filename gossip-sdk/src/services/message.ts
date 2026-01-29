@@ -15,7 +15,11 @@ import {
 } from '../db';
 import { decodeUserId, encodeUserId } from '../utils/userId';
 import { IMessageProtocol, EncryptedMessage } from '../api/messageProtocol';
-import { SessionStatus, SendMessageOutput } from '#wasm';
+import { SessionStatus } from '../wasm/bindings';
+import type {
+  SessionStatus as SessionStatusType,
+  SendMessageOutput as SendMessageOutputType,
+} from '#wasm';
 import { SessionModule } from '../wasm';
 import {
   serializeRegularMessage,
@@ -480,7 +484,7 @@ export class MessageService {
 
     // Check for session states that require renewal (session is truly lost)
     // Per spec: when session is lost, queue message as WAITING_SESSION and trigger auto-renewal
-    const needsRenewalStatuses = [
+    const needsRenewalStatuses: SessionStatusType[] = [
       SessionStatus.UnknownPeer,
       SessionStatus.NoSession,
       SessionStatus.Killed,
@@ -596,7 +600,7 @@ export class MessageService {
       status: MessageStatus.SENDING,
     });
 
-    let sendOutput: SendMessageOutput | undefined;
+    let sendOutput: SendMessageOutputType | undefined;
     try {
       if (sessionStatus !== SessionStatus.Active) {
         throw new Error(

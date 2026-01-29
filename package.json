@@ -10,7 +10,7 @@
     "dev": "vite",
     "dev:host": "vite --host",
     "build:sdk": "cd gossip-sdk && npm run build",
-    "build": "npm run build:sdk && tsc -b && vite build",
+    "build": "npm run build:sdk && vite build",
     "test": "vitest -c vite.config.ts --silent='passed-only'",
     "test:ui": "vitest -c vite.config.ts --ui",
     "test:run": "vitest -c vite.config.ts run",

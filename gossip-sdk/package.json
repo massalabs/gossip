@@ -9,12 +9,6 @@
     "dist",
     "README.md"
   ],
-  "imports": {
-    "#wasm": {
-      "browser": "./dist/assets/generated/wasm/gossip_wasm.js",
-      "default": "./dist/assets/generated/wasm-node/gossip_wasm.js"
-    }
-  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
