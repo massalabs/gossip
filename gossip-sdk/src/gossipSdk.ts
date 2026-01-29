@@ -378,6 +378,12 @@ class GossipSdkImpl {
       serviceEvents
     );
 
+    // Publish gossip ID (public key) on messageProtocol so the user is discoverable
+    await this._auth!.ensurePublicKeyPublished(
+      session.ourPk,
+      session.userIdEncoded
+    );
+
     // Reset any messages stuck in SENDING status to FAILED
     // This handles app crash/close during message send
     await this.resetStuckSendingMessages(db);
