@@ -277,12 +277,15 @@ describe('AuthService', () => {
       expect(mockMessageProtocol.postPublicKey).toHaveBeenCalledTimes(1);
     });
 
-    it('should throw error if user profile not found', async () => {
-      await expect(
-        authService.ensurePublicKeyPublished(testPublicKeys, testUserId)
-      ).rejects.toThrow('User profile not found');
+    it('should publish key when user profile not found (gossip ID still discoverable)', async () => {
+      vi.mocked(mockMessageProtocol.postPublicKey).mockResolvedValue('hash123');
 
-      expect(mockMessageProtocol.postPublicKey).not.toHaveBeenCalled();
+      await authService.ensurePublicKeyPublished(testPublicKeys, testUserId);
+
+      expect(mockMessageProtocol.postPublicKey).toHaveBeenCalledTimes(1);
+      expect(mockMessageProtocol.postPublicKey).toHaveBeenCalledWith(
+        encodeToBase64(testPublicKeys.to_bytes())
+      );
     });
 
     it('should encode public keys to base64 before posting', async () => {
