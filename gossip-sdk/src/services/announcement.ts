@@ -237,10 +237,18 @@ export class AnnouncementService {
         const highestCounter = fetchedCounters.reduce((a, b) =>
           Number(a) > Number(b) ? a : b
         );
+        const cursorNum = cursor !== undefined ? Number(cursor) : 0;
+        const highestNum = Number(highestCounter);
+        // If API returned a batch with max <= cursor (same or older page), advance past it
+        // so we don't re-fetch the same page forever (e.g. API returning "latest" regardless of after)
+        const nextCounter =
+          highestNum <= cursorNum ? String(cursorNum + 1) : highestCounter;
         await this.db.userProfile.update(this.session.userIdEncoded, {
-          lastBulletinCounter: highestCounter,
+          lastBulletinCounter: nextCounter,
         });
-        log.info('updated lastBulletinCounter', { highestCounter });
+        log.info('updated lastBulletinCounter', {
+          lastBulletinCounter: nextCounter,
+        });
       }
 
       return {
