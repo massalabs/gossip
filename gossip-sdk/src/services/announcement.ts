@@ -7,6 +7,7 @@
 import {
   type Discussion,
   type GossipDatabase,
+  type UserProfile,
   DiscussionStatus,
   DiscussionDirection,
 } from '../db';
@@ -193,9 +194,7 @@ export class AnnouncementService {
           const highestCounter = fetchedCounters.reduce((a, b) =>
             Number(a) > Number(b) ? a : b
           );
-          await this.db.userProfile.update(this.session.userIdEncoded, {
-            lastBulletinCounter: highestCounter,
-          });
+          await this._upsertLastBulletinCounter(highestCounter);
           log.info('updated lastBulletinCounter', { highestCounter });
         }
 
@@ -243,9 +242,7 @@ export class AnnouncementService {
         // so we don't re-fetch the same page forever (e.g. API returning "latest" regardless of after)
         const nextCounter =
           highestNum <= cursorNum ? String(cursorNum + 1) : highestCounter;
-        await this.db.userProfile.update(this.session.userIdEncoded, {
-          lastBulletinCounter: nextCounter,
-        });
+        await this._upsertLastBulletinCounter(nextCounter);
         log.info('updated lastBulletinCounter', {
           lastBulletinCounter: nextCounter,
         });
@@ -396,6 +393,33 @@ export class AnnouncementService {
       sent: sentDiscussions.length,
       broken: brokenDiscussions.length,
     });
+  }
+
+  /**
+   * Persist lastBulletinCounter for the current user.
+   * Uses put() so the cursor is saved even when no profile row exists yet
+   * (e.g. headless bot that never created a profile via app UI).
+   */
+  private async _upsertLastBulletinCounter(nextCounter: string): Promise<void> {
+    const userId = this.session.userIdEncoded;
+    const existing = await this.db.userProfile.get(userId);
+    if (existing) {
+      await this.db.userProfile.update(userId, {
+        lastBulletinCounter: nextCounter,
+        updatedAt: new Date(),
+      });
+      return;
+    }
+    // Minimal profile so cursor persists; headless bots may never create a full profile
+    await this.db.userProfile.put({
+      userId,
+      username: '',
+      status: 'offline',
+      lastSeen: new Date(),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      lastBulletinCounter: nextCounter,
+    } as UserProfile);
   }
 
   private async _fetchAnnouncements(
