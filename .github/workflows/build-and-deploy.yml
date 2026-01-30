@@ -322,6 +322,13 @@ jobs:
             echo "💡 AAB is still available as artifact from build-android job"
           fi
 
+      - name: Download APK artifact (for GitHub Release)
+        if: github.event_name == 'release'
+        uses: actions/download-artifact@v4
+        with:
+          name: gossip-android-apk
+          path: android/app/build/outputs/apk/debug/
+
       - name: Attach Android assets to GitHub Release
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
