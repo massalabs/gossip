@@ -11,7 +11,7 @@
 import 'fake-indexeddb/auto';
 import { IDBKeyRange } from 'fake-indexeddb';
 import { afterAll, beforeAll, beforeEach } from 'vitest';
-import { db } from '../src/db';
+import { getDb } from '../src/db';
 import { initializeWasm } from '../src/wasm/loader';
 
 if (typeof process !== 'undefined') {
@@ -25,6 +25,7 @@ if (typeof globalThis.IDBKeyRange === 'undefined') {
 }
 
 async function clearDatabase(): Promise<void> {
+  const db = getDb();
   await Promise.all(db.tables.map(table => table.clear()));
 }
 
@@ -32,6 +33,7 @@ beforeAll(async () => {
   // Initialize WASM before any tests run
   await initializeWasm();
 
+  const db = getDb();
   if (!db.isOpen()) {
     await db.open();
   }
@@ -39,6 +41,7 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
+  const db = getDb();
   if (!db.isOpen()) {
     await db.open();
   }
@@ -48,7 +51,7 @@ beforeEach(async () => {
 afterAll(async () => {
   try {
     await clearDatabase();
-    await db.close();
+    await getDb().close();
   } catch (_) {
     // Ignore errors - database might already be closed
   }

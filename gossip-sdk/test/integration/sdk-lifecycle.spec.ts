@@ -1,5 +1,9 @@
 /**
  * GossipSdk lifecycle and event wiring tests
+ *
+ * Uses vi.mock() for SDK dependencies. When run after other test files,
+ * the gossipSdk module may be cached with real implementations, so we
+ * call vi.resetModules() in beforeEach to force a fresh import with mocks.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -135,6 +139,7 @@ vi.mock('../../src/services/refresh', () => ({
 
 describe('GossipSdkImpl lifecycle', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
     protocolMock.createMessageProtocolMock.mockReturnValue({
       fetchMessages: vi.fn(),
@@ -241,6 +246,7 @@ describe('GossipSdkImpl lifecycle', () => {
 
 describe('GossipSdkImpl.configurePersistence', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
     protocolMock.createMessageProtocolMock.mockReturnValue({
       fetchMessages: vi.fn(),
