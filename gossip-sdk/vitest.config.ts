@@ -10,9 +10,10 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     setupFiles: [resolve(__dirname, 'test/setup.ts')],
-    include: ['test/**/*.{test,spec}.{js,ts}'],
+    include: ['test/**/*.{test,spec}.{js,ts}', 'test/**/*.e2e.{js,ts}'],
+    // Isolate each file so sdk-lifecycle.spec.ts mocks don't leak into other files
+    isolate: true,
     // Run tests sequentially to avoid database conflicts
-    isolate: false,
     fileParallelism: false,
     coverage: {
       provider: 'v8',
