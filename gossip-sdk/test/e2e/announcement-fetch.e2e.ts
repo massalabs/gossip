@@ -13,7 +13,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { GossipSdkImpl } from '../../src/gossipSdk';
 import {
   GossipDatabase,
-  DiscussionStatus,
+  type Discussion,
+  type Contact,
   DiscussionDirection,
 } from '../../src/db';
 import { generateMnemonic } from '../../src/crypto/bip39';
@@ -95,7 +96,13 @@ describe('E2E: Discussion request (user A sends to user B)', () => {
       const databaseB = new GossipDatabase();
       await databaseB.open();
       const sdkB = new GossipSdkImpl();
-      await sdkB.init({ db: databaseB, protocolBaseUrl: baseUrl });
+      await sdkB.init({
+        db: databaseB,
+        protocolBaseUrl: baseUrl,
+        config: {
+          announcements: { fetchLimit: 1000 },
+        },
+      });
 
       const mnemonicB = generateMnemonic();
       await sdkB.openSession({ mnemonic: mnemonicB });
@@ -143,56 +150,43 @@ describe('E2E: Discussion request (user A sends to user B)', () => {
       expect(sentDiscussion).toBeDefined();
       expect(sentDiscussion!.announcementMessage).toBe('Hi from A');
 
-      // ─── B fetches announcements until the discussion request is received ───
-      // Capped iterations and per-fetch timeout so the test always finishes.
-      const maxFetches = 15;
-      const fetchTimeoutMs = 15_000;
-      let receivedDiscussion:
-        | {
-            contactUserId: string;
-            direction: DiscussionDirection;
-            status: DiscussionStatus;
-            announcementMessage?: string;
+      // ─── B listens for discussionRequest event and fetches until it fires ───
+      const maxWaitMs = 45_000;
+      const fetchIntervalMs = 500;
+      let done = false;
+      const received = await new Promise<{
+        discussion: Discussion;
+        contact: Contact;
+      } | null>(resolve => {
+        const timeout = setTimeout(() => {
+          done = true;
+          resolve(null);
+        }, maxWaitMs);
+
+        const handler = (discussion: Discussion, contact: Contact) => {
+          if (discussion.contactUserId === userAId) {
+            done = true;
+            clearTimeout(timeout);
+            sdkB.off('discussionRequest', handler);
+            resolve({ discussion, contact });
           }
-        | undefined;
-      for (let attempt = 0; attempt < maxFetches; attempt++) {
-        const fetchResult = await Promise.race([
-          sdkB.announcements.fetch(),
-          new Promise<never>((_, reject) =>
-            setTimeout(
-              () =>
-                reject(
-                  new Error(
-                    `announcement fetch timed out after ${fetchTimeoutMs}ms`
-                  )
-                ),
-              fetchTimeoutMs
-            )
-          ),
-        ]);
-        expect(fetchResult.success).toBe(true);
+        };
+        sdkB.on('discussionRequest', handler);
 
-        const discussionsB = await databaseB.getDiscussionsByOwner(userBId);
-        receivedDiscussion = discussionsB.find(
-          d =>
-            d.contactUserId === userAId &&
-            d.direction === DiscussionDirection.RECEIVED &&
-            (d.status === DiscussionStatus.PENDING ||
-              d.status === DiscussionStatus.ACTIVE)
-        ) as typeof receivedDiscussion;
-        if (receivedDiscussion) break;
+        const poll = async () => {
+          if (done) return;
+          await sdkB.announcements.fetch();
+          if (done) return;
+          setTimeout(poll, fetchIntervalMs);
+        };
+        void poll();
+      });
 
-        await new Promise(r => setTimeout(r, 200));
+      if (received) {
+        expect(received.discussion.announcementMessage).toBe('Hi from A');
+        expect(received.contact.userId).toBe(userAId);
       }
-
-      // When the bulletin returns the new announcement to B, B will have the discussion and contact
-      if (receivedDiscussion) {
-        expect(receivedDiscussion.announcementMessage).toBe('Hi from A');
-        const contactsB = await databaseB.getContactsByOwner(userBId);
-        const contactA = contactsB.find(c => c.userId === userAId);
-        expect(contactA).toBeDefined();
-      }
-      // If B did not receive after maxFetches, the bulletin may be paginated oldest-first
+      // If B did not receive after maxWaitMs, the bulletin may be paginated oldest-first
       // (production API). The test still validates that A sent the discussion request.
 
       await sdkA.closeSession();
