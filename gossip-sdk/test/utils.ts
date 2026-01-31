@@ -6,7 +6,10 @@
  */
 
 import type { Contact, Message, UserProfile } from '../src/db';
-import { UserPublicKeys, UserKeys } from '#wasm';
+import {
+  UserPublicKeys,
+  UserKeys,
+} from '../src/assets/generated/wasm/gossip_wasm';
 import { generateUserKeys } from '../src/wasm/userKeys';
 import { SessionModule } from '../src/wasm/session';
 import { MessageType, MessageDirection, MessageStatus } from '../src/db';
@@ -203,30 +206,32 @@ export async function setupSession(
   announcementMessage?: string
 ): Promise<void> {
   // Create contacts for both sides
-  const initiatorContact: Omit<Contact, 'id'> = {
-    ownerUserId: initiatorSdk.userId,
-    userId: acceptorSdk.userId,
-    name: initiatorContactName,
-    publicKeys: acceptorSdk.publicKeys.to_bytes(),
-    avatar: undefined,
-    isOnline: false,
-    lastSeen: new Date(),
-    createdAt: new Date(),
-  };
-  await db.contacts.add(initiatorContact);
-
-  const acceptorContact: Omit<Contact, 'id'> = {
-    ownerUserId: acceptorSdk.userId,
-    userId: initiatorSdk.userId,
-    name: acceptorContactName,
-    publicKeys: initiatorSdk.publicKeys.to_bytes(),
-    avatar: undefined,
-    isOnline: false,
-    lastSeen: new Date(),
-    createdAt: new Date(),
-  };
-  await db.contacts.add(acceptorContact);
-
+  await initiatorSdk.contacts.add(
+    initiatorSdk.userId,
+    acceptorSdk.userId,
+    initiatorContactName,
+    acceptorSdk.publicKeys
+  );
+  const initiatorContact = await initiatorSdk.contacts.get(
+    initiatorSdk.userId,
+    acceptorSdk.userId
+  );
+  if (!initiatorContact) {
+    throw new Error('Initiator contact not found');
+  }
+  await acceptorSdk.contacts.add(
+    acceptorSdk.userId,
+    initiatorSdk.userId,
+    acceptorContactName,
+    initiatorSdk.publicKeys
+  );
+  const acceptorContact = await acceptorSdk.contacts.get(
+    acceptorSdk.userId,
+    initiatorSdk.userId
+  );
+  if (!acceptorContact) {
+    throw new Error('Acceptor contact not found');
+  }
   // Initiator starts the discussion
   const startResult = announcementMessage
     ? await initiatorSdk.discussions.start(
