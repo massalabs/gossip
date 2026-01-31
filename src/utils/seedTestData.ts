@@ -10,12 +10,11 @@ import {
   Contact,
   Discussion,
   Message,
-  DiscussionStatus,
   DiscussionDirection,
   MessageDirection,
   MessageStatus,
   MessageType,
-} from '../db';
+} from '@massalabs/gossip-sdk';
 import { bech32 } from '@scure/base';
 
 const GOSSIP_PREFIX = 'gossip';
@@ -319,14 +318,15 @@ export async function seedTestData(
       Math.random() > 0.7 ? Math.floor(Math.random() * 10) : 0;
 
     // Create discussion
+    const isInitiated = Math.random() > 0.5;
     discussions.push({
       ownerUserId,
       contactUserId,
-      direction:
-        Math.random() > 0.5
-          ? DiscussionDirection.INITIATED
-          : DiscussionDirection.RECEIVED,
-      status: DiscussionStatus.ACTIVE,
+      direction: isInitiated
+        ? DiscussionDirection.INITIATED
+        : DiscussionDirection.RECEIVED,
+      weAccepted: isInitiated,
+      sendAnnouncement: null,
       lastMessageContent: lastMessage?.content,
       lastMessageTimestamp: lastMessage?.timestamp,
       unreadCount,

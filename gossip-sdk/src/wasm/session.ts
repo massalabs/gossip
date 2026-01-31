@@ -58,7 +58,7 @@ export class SessionModule {
    */
   private async persistIfNeeded(): Promise<void> {
     if (this.onPersist) {
-      await this.onPersist();
+      await this.onPersist!();
     }
   }
 

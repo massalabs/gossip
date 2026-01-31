@@ -5,7 +5,6 @@
 import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import {
   GossipDatabase,
-  DiscussionStatus,
   DiscussionDirection,
   MessageDirection,
   MessageStatus,
@@ -37,7 +36,8 @@ describe('Simple Database Tests', () => {
       ownerUserId: TEST_OWNER_USER_ID,
       contactUserId: TEST_CONTACT_USER_ID,
       direction: DiscussionDirection.INITIATED,
-      status: DiscussionStatus.PENDING,
+      weAccepted: true,
+      sendAnnouncement: null,
       unreadCount: 0,
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -45,26 +45,36 @@ describe('Simple Database Tests', () => {
 
     const discussion = await testDb.discussions.get(discussionId);
     expect(discussion?.direction).toBe(DiscussionDirection.INITIATED);
-    expect(discussion?.status).toBe(DiscussionStatus.PENDING);
+    expect(discussion?.weAccepted).toBe(true);
+    expect(discussion?.ownerUserId).toBe(TEST_OWNER_USER_ID);
+    expect(discussion?.contactUserId).toBe(TEST_CONTACT_USER_ID);
   });
 
-  it('should update discussion status', async () => {
+  it('should update discussion weAccepted and sendAnnouncement', async () => {
     const discussionId = await testDb.discussions.add({
       ownerUserId: TEST_OWNER_USER_ID,
       contactUserId: TEST_CONTACT_USER_ID,
       direction: DiscussionDirection.INITIATED,
-      status: DiscussionStatus.PENDING,
+      weAccepted: false,
+      sendAnnouncement: null,
       unreadCount: 0,
       createdAt: new Date(),
       updatedAt: new Date(),
     });
 
     await testDb.discussions.update(discussionId, {
-      status: DiscussionStatus.ACTIVE,
+      weAccepted: true,
+      sendAnnouncement: {
+        announcement_bytes: new Uint8Array([1, 2, 3, 4, 5]),
+        when_to_send: new Date(),
+      },
     });
 
     const discussion = await testDb.discussions.get(discussionId);
-    expect(discussion?.status).toBe(DiscussionStatus.ACTIVE);
+    expect(discussion?.weAccepted).toBe(true);
+    expect(discussion?.sendAnnouncement).toBeDefined();
+    expect(discussion?.sendAnnouncement?.announcement_bytes.length).toBe(5);
+    expect(discussion?.sendAnnouncement?.when_to_send).toBeDefined();
   });
 
   it('should create and retrieve a message', async () => {
@@ -74,38 +84,13 @@ describe('Simple Database Tests', () => {
       content: 'Test message',
       type: MessageType.TEXT,
       direction: MessageDirection.OUTGOING,
-      status: MessageStatus.SENDING,
+      status: MessageStatus.READY,
       timestamp: new Date(),
     });
 
     const message = await testDb.messages.get(messageId);
     expect(message?.content).toBe('Test message');
-    expect(message?.status).toBe(MessageStatus.SENDING);
-  });
-
-  it('should reset SENDING messages to FAILED', async () => {
-    await testDb.messages.add({
-      ownerUserId: TEST_OWNER_USER_ID,
-      contactUserId: TEST_CONTACT_USER_ID,
-      content: 'Stuck message',
-      type: MessageType.TEXT,
-      direction: MessageDirection.OUTGOING,
-      status: MessageStatus.SENDING,
-      timestamp: new Date(),
-    });
-
-    const count = await testDb.messages
-      .where('status')
-      .equals(MessageStatus.SENDING)
-      .modify({ status: MessageStatus.FAILED });
-
-    expect(count).toBe(1);
-
-    const messages = await testDb.messages
-      .where('status')
-      .equals(MessageStatus.FAILED)
-      .toArray();
-    expect(messages.length).toBe(1);
+    expect(message?.status).toBe(MessageStatus.READY);
   });
 
   it('should store announcement bytes for retry', async () => {
@@ -114,15 +99,18 @@ describe('Simple Database Tests', () => {
       ownerUserId: TEST_OWNER_USER_ID,
       contactUserId: TEST_CONTACT_USER_ID,
       direction: DiscussionDirection.INITIATED,
-      status: DiscussionStatus.SEND_FAILED,
-      initiationAnnouncement: announcement,
+      weAccepted: true,
+      sendAnnouncement: {
+        announcement_bytes: announcement,
+        when_to_send: new Date(),
+      },
       unreadCount: 0,
       createdAt: new Date(),
       updatedAt: new Date(),
     });
 
     const discussion = await testDb.discussions.get(discussionId);
-    expect(discussion?.initiationAnnouncement).toBeDefined();
-    expect(discussion?.initiationAnnouncement?.length).toBe(5);
+    expect(discussion?.sendAnnouncement).toBeDefined();
+    expect(discussion?.sendAnnouncement?.announcement_bytes.length).toBe(5);
   });
 });

@@ -20,8 +20,7 @@ import UserProfileAvatar from '../components/avatar/UserProfileAvatar';
 import QrCodeIcon from '../components/ui/customIcons/QrCodeIcon';
 import { ROUTES } from '../constants/routes';
 import { useDiscussionStore } from '../stores/discussionStore';
-import { gossipSdk } from '@massalabs/gossip-sdk';
-import { DiscussionStatus } from '../db';
+import { gossipSdk, SessionStatus } from '@massalabs/gossip-sdk';
 
 const Discussions: React.FC = () => {
   const navigate = useNavigate();
@@ -94,14 +93,16 @@ const Discussions: React.FC = () => {
 
   // Calculate filter counts
   const filterCounts = useMemo(() => {
-    const allCount = discussions.filter(
-      d => d.status !== DiscussionStatus.CLOSED
-    ).length;
+    const allCount = discussions.length;
     const unreadCount = discussions.filter(
-      d => d.status === DiscussionStatus.ACTIVE && d.unreadCount > 0
+      d =>
+        gossipSdk.discussions.getStatus(d.contactUserId) ===
+          SessionStatus.Active && d.unreadCount > 0
     ).length;
-    const pendingCount = discussions.filter(
-      d => d.status === DiscussionStatus.PENDING
+    const pendingCount = discussions.filter(d =>
+      [SessionStatus.PeerRequested, SessionStatus.SelfRequested].includes(
+        gossipSdk.discussions.getStatus(d.contactUserId)
+      )
     ).length;
 
     return { all: allCount, unread: unreadCount, pending: pendingCount };

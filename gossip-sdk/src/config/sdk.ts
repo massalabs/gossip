@@ -46,6 +46,8 @@ export interface MessagesConfig {
    * resulting in message being re-sent on restart.
    */
   deduplicationWindowMs: number;
+  /** Delay before retrying a failed message send in ms (default: 5000 = 5 seconds) */
+  retryDelayMs: number;
 }
 
 /**
@@ -56,6 +58,8 @@ export interface AnnouncementsConfig {
   fetchLimit: number;
   /** Time before marking failed announcements as broken in ms (default: 3600000 = 1 hour) */
   brokenThresholdMs: number;
+  /** Delay before retrying a failed announcement send in ms (default: 15000 = 15 seconds) */
+  retryDelayMs: number;
 }
 
 /**
@@ -84,16 +88,18 @@ export const defaultSdkConfig: SdkConfig = {
     enabled: false,
     messagesIntervalMs: 5000,
     announcementsIntervalMs: 10000,
-    sessionRefreshIntervalMs: 30000,
+    sessionRefreshIntervalMs: 10000, //30000,
   },
   messages: {
     fetchDelayMs: 100,
     maxFetchIterations: 30,
     deduplicationWindowMs: 30000, // 30 seconds
+    retryDelayMs: 5000, // 5 seconds
   },
   announcements: {
     fetchLimit: 500,
     brokenThresholdMs: 60 * 60 * 1000, // 1 hour
+    retryDelayMs: 15000, // 15 seconds
   },
 };
 

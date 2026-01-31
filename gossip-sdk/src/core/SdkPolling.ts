@@ -6,6 +6,7 @@
 
 import type { SdkConfig } from '../config/sdk';
 import type { Discussion } from '../db';
+import { SdkEventEmitter, SdkEventType } from './SdkEventEmitter';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -20,8 +21,6 @@ export interface PollingCallbacks {
   handleSessionRefresh: (discussions: Discussion[]) => Promise<void>;
   /** Get active discussions for session refresh */
   getActiveDiscussions: () => Promise<Discussion[]>;
-  /** Called when a polling error occurs */
-  onError: (error: Error, context: string) => void;
 }
 
 interface PollingTimers {
@@ -42,15 +41,21 @@ export class SdkPolling {
   };
 
   private callbacks: PollingCallbacks | null = null;
+  private eventEmitter: SdkEventEmitter | null = null;
 
   /**
    * Start polling with the given configuration and callbacks.
    */
-  start(config: SdkConfig, callbacks: PollingCallbacks): void {
+  start(
+    config: SdkConfig,
+    callbacks: PollingCallbacks,
+    eventEmitter: SdkEventEmitter
+  ): void {
     // Stop any existing timers first
     this.stop();
 
     this.callbacks = callbacks;
+    this.eventEmitter = eventEmitter;
 
     console.log('[SdkPolling] Starting polling', {
       messagesIntervalMs: config.polling.messagesIntervalMs,
@@ -63,11 +68,8 @@ export class SdkPolling {
       try {
         await this.callbacks?.fetchMessages();
       } catch (error) {
-        console.error('[SdkPolling] Message polling error:', error);
-        this.callbacks?.onError(
-          error instanceof Error ? error : new Error(String(error)),
-          'message_polling'
-        );
+        const err = error instanceof Error ? error : new Error(String(error));
+        this.eventEmitter?.emit(SdkEventType.ERROR, err, 'message_polling');
       }
     }, config.polling.messagesIntervalMs);
 
@@ -76,9 +78,10 @@ export class SdkPolling {
       try {
         await this.callbacks?.fetchAnnouncements();
       } catch (error) {
-        console.error('[SdkPolling] Announcement polling error:', error);
-        this.callbacks?.onError(
-          error instanceof Error ? error : new Error(String(error)),
+        const err = error instanceof Error ? error : new Error(String(error));
+        this.eventEmitter?.emit(
+          SdkEventType.ERROR,
+          err,
           'announcement_polling'
         );
       }
@@ -92,11 +95,8 @@ export class SdkPolling {
           await this.callbacks?.handleSessionRefresh(discussions);
         }
       } catch (error) {
-        console.error('[SdkPolling] Session refresh polling error:', error);
-        this.callbacks?.onError(
-          error instanceof Error ? error : new Error(String(error)),
-          'session_refresh_polling'
-        );
+        const err = error instanceof Error ? error : new Error(String(error));
+        this.eventEmitter?.emit(SdkEventType.ERROR, err, 'session_update');
       }
     }, config.polling.sessionRefreshIntervalMs);
   }
@@ -119,6 +119,7 @@ export class SdkPolling {
     }
 
     this.callbacks = null;
+    this.eventEmitter = null;
   }
 
   /**

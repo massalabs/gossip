@@ -4,9 +4,9 @@ import { ChevronLeft } from 'react-feather';
 import {
   Contact,
   Discussion,
-  DiscussionStatus,
-  DiscussionDirection,
-} from '../../db';
+  gossipSdk,
+  SessionStatus,
+} from '@massalabs/gossip-sdk';
 import ContactAvatar from '../avatar/ContactAvatar';
 import Button from '../ui/Button';
 import BackButton from '../ui/BackButton';
@@ -59,8 +59,9 @@ const DiscussionHeader: React.FC<DiscussionHeaderProps> = ({
 
   // Check if discussion is pending outgoing (waiting for approval)
   const isPendingOutgoing =
-    discussion?.status === DiscussionStatus.PENDING &&
-    discussion?.direction === DiscussionDirection.INITIATED;
+    !!discussion &&
+    gossipSdk.discussions.getStatus(discussion.contactUserId) ===
+      SessionStatus.SelfRequested;
 
   // Navigate to discussion settings if discussion exists, otherwise contact page
   const handleHeaderClick = () => {

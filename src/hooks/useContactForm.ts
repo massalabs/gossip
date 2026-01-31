@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Contact, db as appDb } from '../db';
+import { Contact } from '@massalabs/gossip-sdk';
 import { useAccountStore } from '../stores/accountStore';
 import { useAppStore } from '../stores/appStore';
 import {
@@ -11,7 +11,6 @@ import {
   gossipSdk,
   type PublicKeyResult,
 } from '@massalabs/gossip-sdk';
-import { authService } from '../services';
 import { useFileShareContact } from './useFileShareContact';
 import { mnsService, isMnsDomain } from '../services/mns';
 import toast from 'react-hot-toast';
@@ -84,7 +83,7 @@ export function useContactForm() {
         return { publicKey: cached };
       }
 
-      const result = await authService.fetchPublicKeyByUserId(uid);
+      const result = await gossipSdk.auth.fetchPublicKeyByUserId(uid);
 
       if (result.publicKey) {
         publicKeysCache.current.set(uid, result.publicKey);
@@ -271,7 +270,7 @@ export function useContactForm() {
       }
 
       // check here if user already exists in contacts
-      const contact = await appDb.getContactByOwnerAndUserId(
+      const contact = await gossipSdk.contacts.get(
         userProfile.userId,
         derivedUserId
       );
@@ -354,7 +353,7 @@ export function useContactForm() {
 
     try {
       // Duplicate checks
-      const contacts = await appDb.getContactsByOwner(userProfile.userId);
+      const contacts = await gossipSdk.contacts.list(userProfile.userId);
       const nameTaken = contacts.some(
         c => c.name.toLowerCase() === trimmedName.toLowerCase()
       );
@@ -367,7 +366,7 @@ export function useContactForm() {
         return;
       }
 
-      const existing = await appDb.getContactByOwnerAndUserId(
+      const existing = await gossipSdk.contacts.get(
         userProfile.userId,
         effectiveUserId
       );
@@ -391,7 +390,16 @@ export function useContactForm() {
         createdAt: new Date(),
       };
 
-      await appDb.contacts.add(contact);
+      const result = await gossipSdk.contacts.add(
+        userProfile.userId,
+        effectiveUserId,
+        trimmedName,
+        publicKeys
+      );
+      if (!result.success && result.error) {
+        setGeneralError(result.error);
+        return;
+      }
 
       // Construct announcement message as JSON
       // Format: {"u":"username","m":"message"} - fields omitted if empty

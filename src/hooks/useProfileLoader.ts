@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { useAccountStore } from '../stores/accountStore';
 import { useAppStore } from '../stores/appStore';
-import { db } from '../db';
+import { db } from '@massalabs/gossip-sdk';
 
 const PROFILE_LOAD_DELAY_MS = 100;
 

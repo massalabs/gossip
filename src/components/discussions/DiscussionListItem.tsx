@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import {
   Discussion,
-  DiscussionStatus,
   Contact,
-  DiscussionDirection,
-} from '../../db';
+  gossipSdk,
+  SessionStatus,
+} from '@massalabs/gossip-sdk';
 import ContactAvatar from '../avatar/ContactAvatar';
 import { formatRelativeTime } from '../../utils/timeUtils';
 import { formatUserId } from '@massalabs/gossip-sdk';
@@ -59,8 +59,8 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
   // Effect 1: Close the modal if the discussion is no longer pending
   useEffect(() => {
     const isPendingIncomingCheck =
-      discussion.status === DiscussionStatus.PENDING &&
-      discussion.direction === DiscussionDirection.RECEIVED;
+      gossipSdk.discussions.getStatus(discussion.contactUserId) ===
+      SessionStatus.PeerRequested;
 
     if (!isPendingIncomingCheck) {
       // Use functional update to avoid dependency on isNameModalOpen
@@ -74,13 +74,13 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
         return prev;
       });
     }
-  }, [discussion.status, discussion.direction, discussion.id, setModalOpen]);
+  }, [discussion.contactUserId, discussion.id, setModalOpen]);
 
   // Effect 2: Open the modal if the store says it should be open and discussion is pending
   useEffect(() => {
     const isPendingIncomingCheck =
-      discussion.status === DiscussionStatus.PENDING &&
-      discussion.direction === DiscussionDirection.RECEIVED;
+      gossipSdk.discussions.getStatus(discussion.contactUserId) ===
+      SessionStatus.PeerRequested;
 
     if (!isPendingIncomingCheck) {
       return;
@@ -98,20 +98,14 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
       }
       return prev;
     });
-  }, [
-    discussion.status,
-    discussion.direction,
-    discussion.id,
-    openNameModals,
-    contact.name,
-  ]);
+  }, [discussion.contactUserId, discussion.id, openNameModals, contact.name]);
 
   const isPendingIncoming =
-    discussion.status === DiscussionStatus.PENDING &&
-    discussion.direction === DiscussionDirection.RECEIVED;
+    gossipSdk.discussions.getStatus(discussion.contactUserId) ===
+    SessionStatus.PeerRequested;
   const isPendingOutgoing =
-    discussion.status === DiscussionStatus.PENDING &&
-    discussion.direction === DiscussionDirection.INITIATED;
+    gossipSdk.discussions.getStatus(discussion.contactUserId) ===
+    SessionStatus.SelfRequested;
 
   return (
     <div
@@ -152,10 +146,10 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
             </div>
             {isPendingIncoming ? (
               <>
-                {discussion.announcementMessage && (
+                {discussion.lastAnnouncementMessage && (
                   <div className="mt-2 p-2.5 bg-muted/50 border border-border rounded-lg">
                     <p className="text-sm text-foreground whitespace-pre-wrap wrap-break-word">
-                      {discussion.announcementMessage}
+                      {discussion.lastAnnouncementMessage}
                     </p>
                   </div>
                 )}

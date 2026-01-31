@@ -29,6 +29,8 @@ export interface Message {
   contactUserId: string; // Reference to Contact.userId
   content: string;
   serializedContent?: Uint8Array; // Serialized message content
+  encryptedMessage?: Uint8Array; // Ciphertext of the message
+  whenToSend?: Date;
   type: MessageType;
   direction: MessageDirection;
   status: MessageStatus;
@@ -43,7 +45,6 @@ export interface Message {
     originalContent?: string;
     originalSeeker: Uint8Array;
   };
-  encryptedMessage?: Uint8Array; // Ciphertext of the message
 }
 
 export interface UserProfile {
@@ -81,15 +82,9 @@ export interface UserProfile {
   lastBulletinCounter?: string;
 }
 
-// Unified discussion interface combining protocol state and UI metadata
-
-export enum DiscussionStatus {
-  PENDING = 'pending',
-  ACTIVE = 'active',
-  CLOSED = 'closed', // closed by the user
-  BROKEN = 'broken', // The session is killed. Need to be reinitiated
-  SEND_FAILED = 'sendFailed', // The discussion was initiated by the session manager but could not be broadcasted on network
-  RECONNECTING = 'reconnecting', // Session recovery in progress, waiting for peer's response
+export enum DiscussionDirection {
+  RECEIVED = 'received',
+  INITIATED = 'initiated',
 }
 
 export enum MessageDirection {
@@ -99,20 +94,15 @@ export enum MessageDirection {
 
 export enum MessageStatus {
   WAITING_SESSION = 'waiting_session', // Waiting for active session with peer
-  SENDING = 'sending',
+  READY = 'ready',
   SENT = 'sent',
   DELIVERED = 'delivered',
   READ = 'read',
-  FAILED = 'failed', // Only for unrecoverable errors (network down, blocked, etc.)
-}
-
-export enum DiscussionDirection {
-  INITIATED = 'initiated',
-  RECEIVED = 'received',
 }
 
 export enum MessageType {
   TEXT = 'text',
+  ANNOUNCEMENT = 'announcement',
   KEEP_ALIVE = 'keep_alive',
   IMAGE = 'image',
   FILE = 'file',
@@ -120,21 +110,29 @@ export enum MessageType {
   VIDEO = 'video',
 }
 
+export interface readyAnnouncement {
+  announcement_bytes: Uint8Array;
+  when_to_send: Date;
+}
+
+export type SendAnnouncement = null | readyAnnouncement;
+
 export interface Discussion {
   id?: number;
   ownerUserId: string; // The current user's userId owning this discussion
   contactUserId: string; // Reference to Contact.userId - unique per contact
 
   // Protocol/Encryption fields
-  direction: DiscussionDirection; // Whether this user initiated or received the discussion
-  status: DiscussionStatus;
-  nextSeeker?: Uint8Array; // The next seeker for sending messages (from SendMessageOutput)
-  initiationAnnouncement?: Uint8Array; // Outgoing announcement bytes when we initiate
-  announcementMessage?: string; // Optional message from incoming announcement (user_data)
+  /*weAccepted: Whether the user has expressed the will to communicate with the peer 
+  i.e. the user has initiated a new discussion or it accepted the discussion initiated by the peer. */
+  weAccepted: boolean;
+  sendAnnouncement: SendAnnouncement;
+  direction: DiscussionDirection;
   lastSyncTimestamp?: Date; // Last time messages were synced from protocol
 
   // UI/Display fields
   customName?: string; // Optional custom name for the discussion (overrides contact name)
+  lastAnnouncementMessage?: string; // ptional message from incoming announcement (the last one the user received)
   lastMessageId?: number;
   lastMessageContent?: string;
   lastMessageTimestamp?: Date;
@@ -280,19 +278,6 @@ export class GossipDatabase extends Dexie {
       .first();
   }
 
-  /**
-   * Get all active discussions with their sync status
-   * @returns Array of active discussions
-   */
-  async getActiveDiscussionsByOwner(
-    ownerUserId: string
-  ): Promise<Discussion[]> {
-    return await this.discussions
-      .where('[ownerUserId+status]')
-      .equals([ownerUserId, DiscussionStatus.ACTIVE])
-      .toArray();
-  }
-
   async markMessagesAsRead(
     ownerUserId: string,
     contactUserId: string
@@ -352,19 +337,12 @@ export class GossipDatabase extends Dexie {
       await this.discussions.put({
         ownerUserId: message.ownerUserId,
         contactUserId: message.contactUserId,
-        direction:
-          message.direction === MessageDirection.INCOMING
-            ? DiscussionDirection.RECEIVED
-            : DiscussionDirection.INITIATED,
-        status: DiscussionStatus.PENDING,
-        nextSeeker: undefined,
         lastMessageId: messageId,
         lastMessageContent: message.content,
         lastMessageTimestamp: message.timestamp,
         unreadCount: message.direction === MessageDirection.INCOMING ? 1 : 0,
-        createdAt: new Date(),
         updatedAt: new Date(),
-      });
+      } as Discussion);
     }
 
     return messageId;
@@ -423,13 +401,16 @@ export class GossipDatabase extends Dexie {
 // Database instance - initialized lazily or via setDb()
 let _db: GossipDatabase | null = null;
 let _warnedGlobalDbAccess = false;
+// Store a reference to the Proxy to detect it
+let _proxyDb: GossipDatabase | null = null;
 
 /**
  * Get the database instance.
  * Creates a default instance if none was set via setDb().
  */
 export function getDb(): GossipDatabase {
-  if (!_db) {
+  // Prevent infinite recursion: if _db is the Proxy itself or not a real instance, create a new instance
+  if (!_db || _db === _proxyDb || !(_db instanceof GossipDatabase)) {
     _db = new GossipDatabase();
   }
   return _db;
@@ -440,14 +421,24 @@ export function getDb(): GossipDatabase {
  * Call this before using any SDK functions if you need a custom db instance.
  */
 export function setDb(database: GossipDatabase): void {
-  _db = database;
+  // Prevent setting the Proxy itself to avoid infinite recursion
+  // The Proxy is not an instance of GossipDatabase, so we can detect it that way
+  if (!(database instanceof GossipDatabase) || database === _proxyDb) {
+    // If Proxy is passed, ensure _db exists by calling getDb()
+    // This will reuse existing _db if it was already created (e.g., by db.open())
+    // or create a new one if needed. This ensures we always use the same instance.
+    getDb();
+    // Don't overwrite _db - just ensure it exists and is consistent
+  } else {
+    _db = database;
+  }
 }
 
 /**
  * Get the database instance.
  * Creates a default instance if none was set via setDb().
  */
-export const db: GossipDatabase = new Proxy({} as GossipDatabase, {
+export const db: GossipDatabase = (_proxyDb = new Proxy({} as GossipDatabase, {
   get(_target, prop) {
     if (!_warnedGlobalDbAccess) {
       _warnedGlobalDbAccess = true;
@@ -462,4 +453,4 @@ export const db: GossipDatabase = new Proxy({} as GossipDatabase, {
     }
     return value;
   },
-});
+})) as GossipDatabase;

@@ -18,7 +18,6 @@ export type {
 
 // Database enums
 export {
-  DiscussionStatus,
   MessageDirection,
   MessageStatus,
   DiscussionDirection,

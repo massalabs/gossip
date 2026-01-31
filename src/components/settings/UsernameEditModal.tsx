@@ -3,7 +3,7 @@ import BaseModal from '../ui/BaseModal';
 import Button from '../ui/Button';
 import { useKeyDown } from '../../hooks/useKeyDown';
 import { validateUsernameFormat } from '@massalabs/gossip-sdk';
-import { db } from '../../db';
+import { db } from '@massalabs/gossip-sdk';
 
 interface UsernameEditModalProps {
   isOpen: boolean;

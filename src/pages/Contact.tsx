@@ -12,8 +12,11 @@ import PageLayout from '../components/ui/PageLayout';
 import UserIdDisplay from '../components/ui/UserIdDisplay';
 import BaseModal from '../components/ui/BaseModal';
 import { Check, Edit2, Trash2 } from 'react-feather';
-import { UserPublicKeys, gossipSdk } from '@massalabs/gossip-sdk';
-import { DiscussionStatus } from '../db';
+import {
+  UserPublicKeys,
+  gossipSdk,
+  SessionStatus,
+} from '@massalabs/gossip-sdk';
 import { ROUTES } from '../constants/routes';
 
 const Contact: React.FC = () => {
@@ -135,7 +138,8 @@ const Contact: React.FC = () => {
   }
 
   const canStart = discussion
-    ? discussion.status === DiscussionStatus.ACTIVE
+    ? gossipSdk.discussions.getStatus(discussion.contactUserId) ===
+      SessionStatus.Active
     : true;
 
   return (
@@ -191,11 +195,14 @@ const Contact: React.FC = () => {
         >
           Share contact
         </Button>
-        {!canStart && (
+        {!canStart && discussion && (
           <p className="text-xs text-muted-foreground">
-            {discussion?.status === 'pending' &&
-              'Connection pending. You cannot chat yet.'}
-            {discussion?.status === 'closed' && 'This discussion is closed.'}
+            {[
+              SessionStatus.PeerRequested,
+              SessionStatus.SelfRequested,
+            ].includes(
+              gossipSdk.discussions.getStatus(discussion.contactUserId)
+            ) && 'Connection pending. You cannot chat yet.'}
           </p>
         )}
         <Button
