@@ -1,5 +1,5 @@
 import React from 'react';
-import { Contact } from 'gossip-sdk';
+import { Contact } from '@massalabs/gossip-sdk';
 
 interface ContactAvatarProps {
   contact: Pick<Contact, 'name' | 'avatar'>;

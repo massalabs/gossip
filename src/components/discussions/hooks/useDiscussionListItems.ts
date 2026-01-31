@@ -5,7 +5,7 @@ import {
   DiscussionDirection,
   SessionStatus,
   gossipSdk,
-} from 'gossip-sdk';
+} from '@massalabs/gossip-sdk';
 import { LastMessageInfo } from '../DiscussionListItem';
 import { DiscussionFilter } from '../../../stores/discussionStore';
 

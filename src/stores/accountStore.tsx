@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { db, UserProfile } from 'gossip-sdk';
+import { db, UserProfile } from '@massalabs/gossip-sdk';
 
 import {
   encrypt,
@@ -21,7 +21,11 @@ import {
 } from '@massalabs/massa-web3';
 import { useAppStore } from './appStore';
 import { createSelectors } from './utils/createSelectors';
-import { generateUserKeys, EncryptionKey, generateNonce } from 'gossip-sdk';
+import {
+  generateUserKeys,
+  EncryptionKey,
+  generateNonce,
+} from '@massalabs/gossip-sdk';
 // import { SessionConfig } from '../assets/generated/wasm/gossip_wasm';
 import { getActiveOrFirstProfile } from './utils/getAccount';
 import { auth } from './utils/auth';

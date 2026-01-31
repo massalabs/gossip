@@ -1,5 +1,10 @@
 import { useMemo } from 'react';
-import { Message, Discussion, DiscussionDirection } from 'gossip-sdk';
+import {
+  Message,
+  Discussion,
+  DiscussionDirection,
+  MessageType,
+} from '@massalabs/gossip-sdk';
 import { isDifferentDay } from '../../../utils/timeUtils';
 import {
   calculateMessageGroups,
@@ -87,15 +92,6 @@ export function useVirtualItems(
   return useMemo(() => {
     const items: VirtualItem[] = [];
 
-    // Add announcement message as the first item if it exists
-    if (discussion?.lastAnnouncementMessage && discussion.createdAt) {
-      items.push({
-        type: 'announcement',
-        content: discussion.lastAnnouncementMessage,
-        direction: discussion.direction,
-      });
-    }
-
     messages.forEach((message, index) => {
       const prevMessage = index > 0 ? messages[index - 1] : null;
       const nextMessage =
@@ -119,23 +115,29 @@ export function useVirtualItems(
         });
       }
 
-      items.push({
-        type: 'message',
-        message,
-        showTimestamp: shouldShowTimestamp(message, nextMessage, isLastMessage),
-        groupInfo,
-      });
+      if (message.type === MessageType.ANNOUNCEMENT && discussion?.direction) {
+        items.push({
+          type: 'announcement',
+          content: message.content,
+          direction: discussion?.direction,
+        });
+      } else {
+        items.push({
+          type: 'message',
+          message,
+          showTimestamp: shouldShowTimestamp(
+            message,
+            nextMessage,
+            isLastMessage
+          ),
+          groupInfo,
+        });
+      }
     });
 
     // Add spacer at the end for safe space above the input
     items.push({ type: 'spacer' });
 
     return items;
-  }, [
-    messages,
-    messageGroups,
-    discussion?.lastAnnouncementMessage,
-    discussion?.createdAt,
-    discussion?.direction,
-  ]);
+  }, [messages, messageGroups, discussion?.direction]);
 }

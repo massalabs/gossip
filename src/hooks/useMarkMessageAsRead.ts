@@ -5,7 +5,7 @@ import {
   MessageStatus,
   MessageDirection,
   gossipSdk,
-} from 'gossip-sdk';
+} from '@massalabs/gossip-sdk';
 
 // IntersectionObserver configuration constants
 // Use a lower threshold to handle very long messages that are taller than the viewport
@@ -52,14 +52,14 @@ export function useMarkMessageAsRead(message: Message) {
             // 2. OR message has been scrolled past (bottom edge is above viewport top)
             //    This handles very long messages that are taller than the viewport
             const isIntersectingWithThreshold =
-            entry.isIntersecting &&
-            entry.intersectionRatio >= MESSAGE_READ_VISIBILITY_THRESHOLD;
+              entry.isIntersecting &&
+              entry.intersectionRatio >= MESSAGE_READ_VISIBILITY_THRESHOLD;
             // If bottom of message is above viewport top (negative), it's been scrolled past
             const hasBeenScrolledPast = entry.boundingClientRect.bottom < 0;
             const shouldMarkAsRead =
               isIntersectingWithThreshold || hasBeenScrolledPast;
-            
-              if (
+
+            if (
               shouldMarkAsRead &&
               message.status === MessageStatus.DELIVERED &&
               !hasBeenMarkedAsReadRef.current

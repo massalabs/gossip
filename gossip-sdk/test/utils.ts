@@ -9,13 +9,9 @@ import type { Contact, Discussion, Message, UserProfile } from '../src/db';
 import { UserPublicKeys, UserKeys } from '../src/wasm/bindings';
 import { generateUserKeys } from '../src/wasm/userKeys';
 import { SessionModule } from '../src/wasm/session';
-import {
-  MessageType,
-  MessageDirection,
-  MessageStatus,
-  DiscussionStatus,
-  DiscussionDirection,
-} from '../src/db';
+import { MessageType, MessageDirection, MessageStatus } from '../src/db';
+import { GossipSdkImpl } from '../src/gossipSdk';
+import { SessionStatus } from '../src/assets/generated/wasm/gossip_wasm';
 
 /**
  * Create a test contact object (without id).
@@ -34,26 +30,6 @@ export function createTestContact(
     isOnline: false,
     lastSeen: new Date(),
     createdAt: new Date(),
-  };
-}
-
-/**
- * Create a test discussion object (without id).
- */
-export function createTestDiscussion(
-  ownerUserId: string,
-  contactUserId: string,
-  status: DiscussionStatus = DiscussionStatus.ACTIVE,
-  direction: DiscussionDirection = DiscussionDirection.INITIATED
-): Omit<Discussion, 'id'> {
-  return {
-    ownerUserId,
-    contactUserId,
-    direction,
-    status,
-    unreadCount: 0,
-    createdAt: new Date(),
-    updatedAt: new Date(),
   };
 }
 
@@ -206,4 +182,97 @@ export function cleanupTestSession(sessionData: TestSessionData): void {
  */
 export function cleanupTestSessions(sessions: TestSessionData[]): void {
   sessions.forEach(cleanupTestSession);
+}
+
+/**
+ * Setup a discussion session between two SDK instances.
+ * The first SDK initiates the discussion, the second accepts it.
+ *
+ * @param initiatorSdk - SDK instance that will start the discussion
+ * @param acceptorSdk - SDK instance that will accept the discussion
+ * @param initiatorContactName - Name for the contact from initiator's perspective (default: 'Contact')
+ * @param acceptorContactName - Name for the contact from acceptor's perspective (default: 'Contact')
+ * @param announcementMessage - Optional message to include in the announcement
+ * @returns Promise that resolves when the session is fully established
+ */
+export async function setupSession(
+  initiatorSdk: GossipSdkImpl,
+  acceptorSdk: GossipSdkImpl,
+  initiatorContactName: string = 'Contact 1',
+  acceptorContactName: string = 'Contact 2',
+  announcementMessage?: string
+): Promise<void> {
+  // Create contacts for both sides
+  const initiatorContact: Omit<Contact, 'id'> = {
+    ownerUserId: initiatorSdk.userId,
+    userId: acceptorSdk.userId,
+    name: initiatorContactName,
+    publicKeys: acceptorSdk.publicKeys.to_bytes(),
+    avatar: undefined,
+    isOnline: false,
+    lastSeen: new Date(),
+    createdAt: new Date(),
+  };
+  await db.contacts.add(initiatorContact);
+
+  const acceptorContact: Omit<Contact, 'id'> = {
+    ownerUserId: acceptorSdk.userId,
+    userId: initiatorSdk.userId,
+    name: acceptorContactName,
+    publicKeys: initiatorSdk.publicKeys.to_bytes(),
+    avatar: undefined,
+    isOnline: false,
+    lastSeen: new Date(),
+    createdAt: new Date(),
+  };
+  await db.contacts.add(acceptorContact);
+
+  // Initiator starts the discussion
+  const startResult = announcementMessage
+    ? await initiatorSdk.discussions.start(
+        initiatorContact,
+        announcementMessage
+      )
+    : await initiatorSdk.discussions.start(initiatorContact);
+
+  if (!startResult.success) {
+    throw new Error(`Failed to start discussion: ${startResult.error}`);
+  }
+
+  // Acceptor fetches announcements and accepts
+  await acceptorSdk.announcements.fetch();
+  const acceptorDiscussion = await acceptorSdk.discussions.get(
+    acceptorSdk.userId,
+    initiatorSdk.userId
+  );
+
+  if (!acceptorDiscussion) {
+    throw new Error('Acceptor discussion not found');
+  }
+
+  const acceptResult = await acceptorSdk.discussions.accept(acceptorDiscussion);
+  if (!acceptResult.success) {
+    throw new Error(`Failed to accept discussion: ${acceptResult.error}`);
+  }
+
+  // Initiator fetches acceptor's acceptance
+  await initiatorSdk.announcements.fetch();
+
+  // Verify session is active on both sides
+  if (
+    initiatorSdk.discussions.getStatus(acceptorSdk.userId) !==
+    SessionStatus.Active
+  ) {
+    throw new Error(
+      `Initiator session is not active. Status: ${initiatorSdk.discussions.getStatus(acceptorSdk.userId)}`
+    );
+  }
+  if (
+    acceptorSdk.discussions.getStatus(initiatorSdk.userId) !==
+    SessionStatus.Active
+  ) {
+    throw new Error(
+      `Acceptor session is not active. Status: ${acceptorSdk.discussions.getStatus(initiatorSdk.userId)}`
+    );
+  }
 }

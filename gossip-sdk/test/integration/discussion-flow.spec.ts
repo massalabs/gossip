@@ -27,6 +27,9 @@ import { ensureWasmInitialized } from '../../src/wasm/loader';
 import { generateMnemonic } from '../../src/crypto/bip39';
 import { generateEncryptionKey } from '../../src/wasm/encryption';
 import { SessionStatus } from '../../src/assets/generated/wasm/gossip_wasm';
+import { AnnouncementService } from '../../src/services/announcement';
+import { MessageService } from '../../src/services/message';
+import { UserPublicKeys } from '../../src/assets/generated/wasm/gossip_wasm';
 
 /**
  * Utility function to check if a session is fully up and active.
@@ -35,14 +38,11 @@ import { SessionStatus } from '../../src/assets/generated/wasm/gossip_wasm';
  * - Discussion weAccepted is true
  * - sendAnnouncement is null (no pending announcements)
  */
-async function isSessionUp(
+async function isLocalSessionUp(
   sdk: GossipSdkImpl,
   contactUserId: string
 ): Promise<boolean> {
-  const discussion = await db.getDiscussionByOwnerAndContact(
-    sdk.userId,
-    contactUserId
-  );
+  const discussion = await sdk.discussions.get(sdk.userId, contactUserId);
   if (!discussion) return false;
 
   const status = sdk.discussions.getStatus(contactUserId);
@@ -50,6 +50,16 @@ async function isSessionUp(
     status === SessionStatus.Active &&
     discussion.weAccepted === true &&
     discussion.sendAnnouncement === null
+  );
+}
+
+async function isSessionUp(
+  aliceSdk: GossipSdkImpl,
+  bobSdk: GossipSdkImpl
+): Promise<boolean> {
+  return (
+    (await isLocalSessionUp(aliceSdk, bobSdk.userId)) &&
+    (await isLocalSessionUp(bobSdk, aliceSdk.userId))
   );
 }
 
@@ -97,8 +107,12 @@ describe('Discussion Flow', () => {
       persistEncryptionKey: aliceEncryptionKey,
     });
     // Replace protocol with mock for testing
-    (aliceSdk as any)._announcement.setMessageProtocol(mockProtocol);
-    (aliceSdk as any)._message['messageProtocol'] = mockProtocol;
+    (
+      aliceSdk as unknown as { _announcement: AnnouncementService }
+    )._announcement.setMessageProtocol(mockProtocol);
+    (aliceSdk as unknown as { _message: MessageService })._message[
+      'messageProtocol'
+    ] = mockProtocol;
 
     bobSdk = new GossipSdkImpl();
     await bobSdk.init({
@@ -110,11 +124,18 @@ describe('Discussion Flow', () => {
       persistEncryptionKey: bobEncryptionKey,
     });
     // Replace protocol with mock for testing
-    (bobSdk as any)._announcement.setMessageProtocol(mockProtocol);
-    (bobSdk as any)._message['messageProtocol'] = mockProtocol;
+    (
+      bobSdk as unknown as { _announcement: AnnouncementService }
+    )._announcement.setMessageProtocol(mockProtocol);
+    (bobSdk as unknown as { _message: MessageService })._message[
+      'messageProtocol'
+    ] = mockProtocol;
   });
 
   afterEach(async () => {
+    // Restore all mocks to their original implementations
+    vi.restoreAllMocks();
+
     await aliceSdk.closeSession();
     await bobSdk.closeSession();
     cleanupTestSession(alice);
@@ -194,7 +215,9 @@ describe('Discussion Flow', () => {
         alice.session.userIdEncoded
       );
 
-      expect(bobDiscussion?.lastAnnouncementMessage).toBe('Hello without username');
+      expect(bobDiscussion?.lastAnnouncementMessage).toBe(
+        'Hello without username'
+      );
     });
 
     it('Bob receives announcement with username only (no message)', async () => {
@@ -283,7 +306,9 @@ describe('Discussion Flow', () => {
         alice.session.userIdEncoded
       );
 
-      expect(bobDiscussion?.lastAnnouncementMessage).toBe('Hello: how are you?');
+      expect(bobDiscussion?.lastAnnouncementMessage).toBe(
+        'Hello: how are you?'
+      );
     });
 
     it('Bob receives legacy colon format (backwards compatibility)', async () => {
@@ -310,7 +335,9 @@ describe('Discussion Flow', () => {
         alice.session.userIdEncoded
       );
 
-      expect(bobDiscussion?.lastAnnouncementMessage).toBe('Hello from old client');
+      expect(bobDiscussion?.lastAnnouncementMessage).toBe(
+        'Hello from old client'
+      );
     });
   });
 
@@ -340,7 +367,9 @@ describe('Discussion Flow', () => {
       expect(aliceDiscussion?.weAccepted).toBe(true);
       expect(aliceDiscussion?.direction).toBe(DiscussionDirection.INITIATED);
       expect(aliceDiscussion?.sendAnnouncement).toBeDefined();
-      expect(aliceSdk.discussions.getStatus(bobSdk.userId)).toBe(SessionStatus.SelfRequested);
+      expect(aliceSdk.discussions.getStatus(bobSdk.userId)).toBe(
+        SessionStatus.SelfRequested
+      );
 
       // Bob fetches announcements and sees Alice's request
       await bobSdk.announcements.fetch();
@@ -353,8 +382,9 @@ describe('Discussion Flow', () => {
       expect(bobDiscussion).toBeDefined();
       expect(bobDiscussion?.weAccepted).toBe(false);
       expect(bobDiscussion?.direction).toBe(DiscussionDirection.RECEIVED);
-      expect(bobSdk.discussions.getStatus(aliceSdk.userId)).toBe(SessionStatus.PeerRequested);
-
+      expect(bobSdk.discussions.getStatus(aliceSdk.userId)).toBe(
+        SessionStatus.PeerRequested
+      );
 
       if (!bobDiscussion) throw new Error('Bob discussion not found');
 
@@ -366,14 +396,16 @@ describe('Discussion Flow', () => {
       );
       expect(bobDiscussionAfterAccept?.weAccepted).toBe(true);
       expect(bobDiscussionAfterAccept?.sendAnnouncement).toBeDefined();
-      expect(bobSdk.discussions.getStatus(aliceSdk.userId)).toBe(SessionStatus.Active);
+      expect(bobSdk.discussions.getStatus(aliceSdk.userId)).toBe(
+        SessionStatus.Active
+      );
 
       // Alice fetches announcements and sees Bob's acceptance
       await aliceSdk.announcements.fetch();
 
       // Verify both sides have active sessions
-      expect(await isSessionUp(aliceSdk, bobSdk.userId)).toBe(true);
-      expect(await isSessionUp(bobSdk, aliceSdk.userId)).toBe(true);
+      expect(await isLocalSessionUp(aliceSdk, bobSdk.userId)).toBe(true);
+      expect(await isLocalSessionUp(bobSdk, aliceSdk.userId)).toBe(true);
     });
 
     it('Both Alice and Bob send announcement at the same time', async () => {
@@ -440,8 +472,8 @@ describe('Discussion Flow', () => {
       await bobSdk.announcements.fetch();
 
       // Verify both sides have active sessions
-      expect(await isSessionUp(aliceSdk, bobSdk.userId)).toBe(true);
-      expect(await isSessionUp(bobSdk, aliceSdk.userId)).toBe(true);
+      expect(await isLocalSessionUp(aliceSdk, bobSdk.userId)).toBe(true);
+      expect(await isLocalSessionUp(bobSdk, aliceSdk.userId)).toBe(true);
     });
 
     it('Alice send announcement but Bob refuse', async () => {
@@ -468,7 +500,9 @@ describe('Discussion Flow', () => {
       expect(aliceDiscussion).toBeDefined();
       expect(aliceDiscussion?.weAccepted).toBe(true);
       expect(aliceDiscussion?.direction).toBe(DiscussionDirection.INITIATED);
-      expect(aliceSdk.discussions.getStatus(bobSdk.userId)).toBe(SessionStatus.SelfRequested);
+      expect(aliceSdk.discussions.getStatus(bobSdk.userId)).toBe(
+        SessionStatus.SelfRequested
+      );
 
       // Bob fetches announcements and sees Alice's request
       await bobSdk.announcements.fetch();
@@ -481,7 +515,9 @@ describe('Discussion Flow', () => {
       expect(bobDiscussion).toBeDefined();
       expect(bobDiscussion?.weAccepted).toBe(false);
       expect(bobDiscussion?.direction).toBe(DiscussionDirection.RECEIVED);
-      expect(bobSdk.discussions.getStatus(aliceSdk.userId)).toBe(SessionStatus.PeerRequested);
+      expect(bobSdk.discussions.getStatus(aliceSdk.userId)).toBe(
+        SessionStatus.PeerRequested
+      );
 
       // Bob refuses by deleting the contact (which also deletes the discussion)
       await bobSdk.contacts.delete(bobSdk.userId, aliceSdk.userId);
@@ -500,11 +536,16 @@ describe('Discussion Flow', () => {
       expect(bobContactAfterRefuse).toBeUndefined();
 
       // On Alice's side: discussion should remain pending
-      const aliceDiscussionAfterRefuse = await db.discussions.get(aliceDiscussionId);
+      const aliceDiscussionAfterRefuse =
+        await db.discussions.get(aliceDiscussionId);
       expect(aliceDiscussionAfterRefuse).toBeDefined();
       expect(aliceDiscussionAfterRefuse?.weAccepted).toBe(true);
-      expect(aliceDiscussionAfterRefuse?.direction).toBe(DiscussionDirection.INITIATED);
-      expect(aliceSdk.discussions.getStatus(bobSdk.userId)).toBe(SessionStatus.SelfRequested);
+      expect(aliceDiscussionAfterRefuse?.direction).toBe(
+        DiscussionDirection.INITIATED
+      );
+      expect(aliceSdk.discussions.getStatus(bobSdk.userId)).toBe(
+        SessionStatus.SelfRequested
+      );
     });
 
     it('Alice send announcement, bob refuse first then he init another announcement to Alice', async () => {
@@ -567,7 +608,9 @@ describe('Discussion Flow', () => {
       expect(bobNewDiscussion).toBeDefined();
       expect(bobNewDiscussion?.weAccepted).toBe(true);
       expect(bobNewDiscussion?.direction).toBe(DiscussionDirection.INITIATED);
-      expect(bobSdk.discussions.getStatus(aliceSdk.userId)).toBe(SessionStatus.SelfRequested);
+      expect(bobSdk.discussions.getStatus(aliceSdk.userId)).toBe(
+        SessionStatus.SelfRequested
+      );
 
       // Alice fetches announcements and sees Bob's new request
       // Note: Alice already has a discussion from when she initiated, so Bob's announcement
@@ -583,9 +626,13 @@ describe('Discussion Flow', () => {
       // When Bob starts after refusing, Alice receives the announcement which updates her existing discussion
       // Since both parties have now initiated, the session should become Active
       expect(aliceDiscussionFromBob?.weAccepted).toBe(true);
-      expect(aliceDiscussionFromBob?.direction).toBe(DiscussionDirection.INITIATED);
+      expect(aliceDiscussionFromBob?.direction).toBe(
+        DiscussionDirection.INITIATED
+      );
       // When both parties send announcements, the session becomes Active
-      expect(aliceSdk.discussions.getStatus(bobSdk.userId)).toBe(SessionStatus.Active);
+      expect(aliceSdk.discussions.getStatus(bobSdk.userId)).toBe(
+        SessionStatus.Active
+      );
     });
 
     it('Alice send announcement, Bob accept, then bob renew session', async () => {
@@ -606,7 +653,6 @@ describe('Discussion Flow', () => {
       // Alice initiates discussion with Bob
       const result = await aliceSdk.discussions.start(aliceBobContact);
       if (!result.success) throw result.error;
-      const aliceDiscussionId = result.data.discussionId;
 
       // Bob fetches announcements and sees Alice's request
       await bobSdk.announcements.fetch();
@@ -618,39 +664,49 @@ describe('Discussion Flow', () => {
 
       expect(bobDiscussion).toBeDefined();
       expect(bobDiscussion?.weAccepted).toBe(false);
-      expect(bobSdk.discussions.getStatus(aliceSdk.userId)).toBe(SessionStatus.PeerRequested);
+      expect(bobSdk.discussions.getStatus(aliceSdk.userId)).toBe(
+        SessionStatus.PeerRequested
+      );
 
       if (!bobDiscussion) throw new Error('Bob discussion not found');
 
       // Bob accepts the discussion
       await bobSdk.discussions.accept(bobDiscussion);
 
-      const bobDiscussionAfterAccept = await db.discussions.get(bobDiscussion.id!);
+      const bobDiscussionAfterAccept = await db.discussions.get(
+        bobDiscussion.id!
+      );
       expect(bobDiscussionAfterAccept?.weAccepted).toBe(true);
-      expect(bobSdk.discussions.getStatus(aliceSdk.userId)).toBe(SessionStatus.Active);
+      expect(bobSdk.discussions.getStatus(aliceSdk.userId)).toBe(
+        SessionStatus.Active
+      );
 
       // Alice fetches announcements and sees Bob's acceptance
       await aliceSdk.announcements.fetch();
 
       // Verify both sides have active sessions before renewal
-      expect(await isSessionUp(aliceSdk, bobSdk.userId)).toBe(true);
-      expect(await isSessionUp(bobSdk, aliceSdk.userId)).toBe(true);
+      expect(await isLocalSessionUp(aliceSdk, bobSdk.userId)).toBe(true);
+      expect(await isLocalSessionUp(bobSdk, aliceSdk.userId)).toBe(true);
 
       // Bob renews the session
       const renewResult = await bobSdk.discussions.renew(aliceSdk.userId);
       expect(renewResult.success).toBe(true);
       if (!renewResult.success) throw renewResult.error;
 
-      const bobDiscussionAfterRenew = await db.discussions.get(bobDiscussion.id!);
+      const bobDiscussionAfterRenew = await db.discussions.get(
+        bobDiscussion.id!
+      );
       expect(bobDiscussionAfterRenew?.sendAnnouncement).toBeDefined();
-      expect(bobSdk.discussions.getStatus(aliceSdk.userId)).toBe(SessionStatus.Active);
+      expect(bobSdk.discussions.getStatus(aliceSdk.userId)).toBe(
+        SessionStatus.Active
+      );
 
       // Alice fetches announcements and sees Bob's renewal
       await aliceSdk.announcements.fetch();
 
       // Verify both sides have active sessions after renewal
-      expect(await isSessionUp(aliceSdk, bobSdk.userId)).toBe(true);
-      expect(await isSessionUp(bobSdk, aliceSdk.userId)).toBe(true);
+      expect(await isLocalSessionUp(aliceSdk, bobSdk.userId)).toBe(true);
+      expect(await isLocalSessionUp(bobSdk, aliceSdk.userId)).toBe(true);
     });
 
     it('Alice send announcement then renew, Bob accept after the renewal', async () => {
@@ -668,8 +724,12 @@ describe('Discussion Flow', () => {
 
       await db.contacts.add(aliceBobContact);
 
+      const announcementMsg = 'Hello Bob!';
       // Alice sends initial announcement (starts discussion)
-      const startResult = await aliceSdk.discussions.start(aliceBobContact, 'Hello Bob!');
+      const startResult = await aliceSdk.discussions.start(
+        aliceBobContact,
+        announcementMsg
+      );
       if (!startResult.success) throw startResult.error;
       const aliceDiscussionId = startResult.data.discussionId;
 
@@ -678,7 +738,9 @@ describe('Discussion Flow', () => {
       expect(aliceDiscussion?.weAccepted).toBe(true);
       expect(aliceDiscussion?.direction).toBe(DiscussionDirection.INITIATED);
       expect(aliceDiscussion?.sendAnnouncement).toBeDefined();
-      expect(aliceSdk.discussions.getStatus(bobSdk.userId)).toBe(SessionStatus.SelfRequested);
+      expect(aliceSdk.discussions.getStatus(bobSdk.userId)).toBe(
+        SessionStatus.SelfRequested
+      );
 
       // Bob fetches announcements and sees Alice's initial request
       await bobSdk.announcements.fetch();
@@ -690,18 +752,23 @@ describe('Discussion Flow', () => {
       expect(bobDiscussion).toBeDefined();
       expect(bobDiscussion?.weAccepted).toBe(false);
       expect(bobDiscussion?.direction).toBe(DiscussionDirection.RECEIVED);
-      expect(bobSdk.discussions.getStatus(aliceSdk.userId)).toBe(SessionStatus.PeerRequested);
+      expect(bobSdk.discussions.getStatus(aliceSdk.userId)).toBe(
+        SessionStatus.PeerRequested
+      );
 
       // Alice renews the session (sends a renewal announcement)
       const renewResult = await aliceSdk.discussions.renew(bobSdk.userId);
       expect(renewResult.success).toBe(true);
       if (!renewResult.success) throw renewResult.error;
 
-      const aliceDiscussionAfterRenew = await db.discussions.get(aliceDiscussionId);
+      const aliceDiscussionAfterRenew =
+        await db.discussions.get(aliceDiscussionId);
       expect(aliceDiscussionAfterRenew).toBeDefined();
       expect(aliceDiscussionAfterRenew?.weAccepted).toBe(true);
       expect(aliceDiscussionAfterRenew?.sendAnnouncement).toBeDefined();
-      expect(aliceSdk.discussions.getStatus(bobSdk.userId)).toBe(SessionStatus.SelfRequested);
+      expect(aliceSdk.discussions.getStatus(bobSdk.userId)).toBe(
+        SessionStatus.SelfRequested
+      );
 
       // Bob fetches announcements and sees Alice's renewal
       await bobSdk.announcements.fetch();
@@ -713,24 +780,31 @@ describe('Discussion Flow', () => {
       expect(bobDiscussion).toBeDefined();
       expect(bobDiscussion?.weAccepted).toBe(false);
       expect(bobDiscussion?.direction).toBe(DiscussionDirection.RECEIVED);
-      expect(bobSdk.discussions.getStatus(aliceSdk.userId)).toBe(SessionStatus.PeerRequested);
+      expect(bobDiscussion?.lastAnnouncementMessage).toEqual(announcementMsg);
+      expect(bobSdk.discussions.getStatus(aliceSdk.userId)).toBe(
+        SessionStatus.PeerRequested
+      );
 
       if (!bobDiscussion) throw new Error('Bob discussion not found');
 
       // Bob accepts the discussion after receiving the renewal
       await bobSdk.discussions.accept(bobDiscussion);
 
-      const bobDiscussionAfterAccept = await db.discussions.get(bobDiscussion.id!);
+      const bobDiscussionAfterAccept = await db.discussions.get(
+        bobDiscussion.id!
+      );
       expect(bobDiscussionAfterAccept?.weAccepted).toBe(true);
       expect(bobDiscussionAfterAccept?.sendAnnouncement).toBeDefined();
-      expect(bobSdk.discussions.getStatus(aliceSdk.userId)).toBe(SessionStatus.Active);
+      expect(bobSdk.discussions.getStatus(aliceSdk.userId)).toBe(
+        SessionStatus.Active
+      );
 
       // Alice fetches announcements and sees Bob's acceptance
       await aliceSdk.announcements.fetch();
 
       // Verify both sides have active sessions
-      expect(await isSessionUp(aliceSdk, bobSdk.userId)).toBe(true);
-      expect(await isSessionUp(bobSdk, aliceSdk.userId)).toBe(true);
+      expect(await isLocalSessionUp(aliceSdk, bobSdk.userId)).toBe(true);
+      expect(await isLocalSessionUp(bobSdk, aliceSdk.userId)).toBe(true);
     });
   });
 
@@ -755,9 +829,20 @@ describe('Discussion Flow', () => {
       aliceSdk.config.announcements.retryDelayMs = 100;
 
       // Make network fail on first attempt
-      vi.spyOn(mockProtocol, 'sendAnnouncement')
-        .mockRejectedValueOnce(new Error('Network error'))
-        .mockResolvedValue('counter-123');
+      const originalSendAnnouncement =
+        MockMessageProtocol.prototype.sendAnnouncement;
+      let sendCallCount = 0;
+      vi.spyOn(mockProtocol, 'sendAnnouncement').mockImplementation(
+        async (announcement: Uint8Array) => {
+          sendCallCount++;
+          if (sendCallCount === 1) {
+            // First call fails with network error
+            throw new Error('Network error');
+          }
+          // Subsequent calls succeed - call the original implementation
+          return originalSendAnnouncement.call(mockProtocol, announcement);
+        }
+      );
 
       const result = await aliceSdk.discussions.start(aliceBobContact);
       if (!result.success) throw result.error;
@@ -767,22 +852,51 @@ describe('Discussion Flow', () => {
       // After network failure, sendAnnouncement should still be set (ready to retry)
       expect(aliceDiscussion?.sendAnnouncement).not.toBeNull();
 
-      await new Promise(resolve => setTimeout(resolve, aliceSdk.config.announcements.retryDelayMs));
+      await new Promise(resolve =>
+        setTimeout(resolve, aliceSdk.config.announcements.retryDelayMs)
+      );
 
       // Resend should succeed
       await expect(aliceSdk.updateState()).resolves.not.toThrow();
 
       aliceDiscussion = await db.discussions.get(aliceDiscussionId);
-      
+
       // After resend, sendAnnouncement should be cleared if successful
       expect(aliceDiscussion?.sendAnnouncement).toBeNull();
-      expect(aliceSdk.discussions.getStatus(bobSdk.userId)).toBe(SessionStatus.SelfRequested);
+      expect(aliceSdk.discussions.getStatus(bobSdk.userId)).toBe(
+        SessionStatus.SelfRequested
+      );
 
       // Restore original retry delay
       aliceSdk.config.announcements.retryDelayMs = originalRetryDelay;
     });
 
     it('Alice send announcement, bob accept but he get network failure. Then he resend and success', async () => {
+      // PREPARATION
+      // Set short retry delay for this test
+      const originalRetryDelay = bobSdk.config.announcements.retryDelayMs;
+      bobSdk.config.announcements.retryDelayMs = 100;
+
+      // Set up spy to count calls - Alice's announcement (call 1) should succeed, Bob's (call 2) should fail
+      const originalSendAnnouncement =
+        MockMessageProtocol.prototype.sendAnnouncement;
+      let callCount = 0;
+      vi.spyOn(mockProtocol, 'sendAnnouncement').mockImplementation(
+        async (announcement: Uint8Array) => {
+          callCount++;
+          // Bob's acceptance announcement (second call) should fail
+          if (callCount === 2) {
+            throw new Error('Network error');
+          }
+          // For other calls (Alice's announcement), call the original implementation
+          return await originalSendAnnouncement.call(
+            mockProtocol,
+            announcement
+          );
+        }
+      );
+
+      // STEP 1: Alice initiates discussion with Bob (announcement succeeds - call 1)
       const aliceBobContact: Omit<Contact, 'id'> = {
         ownerUserId: aliceSdk.userId,
         userId: bobSdk.userId,
@@ -796,30 +910,11 @@ describe('Discussion Flow', () => {
 
       await db.contacts.add(aliceBobContact);
 
-      // Set short retry delay for this test
-      const originalRetryDelay = bobSdk.config.announcements.retryDelayMs;
-      bobSdk.config.announcements.retryDelayMs = 100;
-
-      // Set up spy to count calls - Alice's announcement (call 1) should succeed, Bob's (call 2) should fail
-      let callCount = 0;
-      vi.spyOn(mockProtocol, 'sendAnnouncement').mockImplementation(async (announcement: Uint8Array) => {
-        callCount++;
-        // Bob's acceptance announcement (second call) should fail
-        if (callCount === 2) {
-          throw new Error('Network error');
-        }
-        // For other calls (Alice's announcement), store directly to avoid recursion
-        const counter = String(++mockProtocol['announcementCounter']);
-        mockProtocol['announcements'].push({ counter, data: announcement });
-        return counter;
-      });
-
       // Alice initiates discussion with Bob (announcement succeeds - call 1)
       const result = await aliceSdk.discussions.start(aliceBobContact);
       if (!result.success) throw result.error;
-      const aliceDiscussionId = result.data.discussionId;
 
-      // Bob fetches announcements and sees Alice's request
+      // STEP 2: Bob fetches announcements and sees Alice's request
       await bobSdk.announcements.fetch();
 
       const bobDiscussion = await db.getDiscussionByOwnerAndContact(
@@ -831,34 +926,60 @@ describe('Discussion Flow', () => {
 
       if (!bobDiscussion) throw new Error('Bob discussion not found');
 
-      // Bob accepts but network fails
+      // STEP 3: Bob accepts but network fails
       await bobSdk.discussions.accept(bobDiscussion);
 
-      let bobDiscussionAfterAccept = await db.discussions.get(bobDiscussion.id!);
+      let bobDiscussionAfterAccept = await db.discussions.get(
+        bobDiscussion.id!
+      );
       expect(bobDiscussionAfterAccept?.weAccepted).toBe(true);
       expect(bobDiscussionAfterAccept?.sendAnnouncement).not.toBeNull();
 
       // Wait for retry delay
-      await new Promise(resolve => setTimeout(resolve, bobSdk.config.announcements.retryDelayMs + 50));
+      await new Promise(resolve =>
+        setTimeout(resolve, bobSdk.config.announcements.retryDelayMs + 50)
+      );
 
-      // Bob resends and succeeds
+      // STEP 4: Bob resends and succeeds
       await expect(bobSdk.updateState()).resolves.not.toThrow();
 
       bobDiscussionAfterAccept = await db.discussions.get(bobDiscussion.id!);
       expect(bobDiscussionAfterAccept?.sendAnnouncement).toBeNull();
 
-      // Alice fetches announcements and sees Bob's acceptance
+      // STEP 5: Alice fetches announcements and sees Bob's acceptance
       await aliceSdk.announcements.fetch();
 
       // Verify both sides have active sessions
-      expect(await isSessionUp(aliceSdk, bobSdk.userId)).toBe(true);
-      expect(await isSessionUp(bobSdk, aliceSdk.userId)).toBe(true);
+      expect(await isLocalSessionUp(aliceSdk, bobSdk.userId)).toBe(true);
+      expect(await isLocalSessionUp(bobSdk, aliceSdk.userId)).toBe(true);
 
       // Restore original retry delay
       bobSdk.config.announcements.retryDelayMs = originalRetryDelay;
     });
 
     it('Alice send announcement but network fails, she receive announcement from bob before resending', async () => {
+      // PREPARATION
+      // Set short retry delay for this test
+      const originalRetryDelay = aliceSdk.config.announcements.retryDelayMs;
+      aliceSdk.config.announcements.retryDelayMs = 100;
+
+      // Make network fail when Alice tries to send announcement
+      const originalSendAnnouncement =
+        MockMessageProtocol.prototype.sendAnnouncement;
+      let sendCallCount = 0;
+      vi.spyOn(mockProtocol, 'sendAnnouncement').mockImplementation(
+        async (announcement: Uint8Array) => {
+          sendCallCount++;
+          if (sendCallCount === 1) {
+            // First call (Alice) fails with network error
+            throw new Error('Network error');
+          }
+          // Subsequent calls (Bob and retries) succeed - call the original implementation
+          return originalSendAnnouncement.call(mockProtocol, announcement);
+        }
+      );
+
+      // STEP 1: Alice initiates discussion but network fails
       const aliceBobContact: Omit<Contact, 'id'> = {
         ownerUserId: aliceSdk.userId,
         userId: bobSdk.userId,
@@ -872,15 +993,6 @@ describe('Discussion Flow', () => {
 
       await db.contacts.add(aliceBobContact);
 
-      // Set short retry delay for this test
-      const originalRetryDelay = aliceSdk.config.announcements.retryDelayMs;
-      aliceSdk.config.announcements.retryDelayMs = 100;
-
-      // Make network fail when Alice tries to send announcement
-      vi.spyOn(mockProtocol, 'sendAnnouncement')
-        .mockRejectedValueOnce(new Error('Network error'))
-        .mockResolvedValue('counter-123');
-
       // Alice initiates discussion but network fails
       const result = await aliceSdk.discussions.start(aliceBobContact);
       if (!result.success) throw result.error;
@@ -889,7 +1001,7 @@ describe('Discussion Flow', () => {
       let aliceDiscussion = await db.discussions.get(aliceDiscussionId);
       expect(aliceDiscussion?.sendAnnouncement).not.toBeNull();
 
-      // Bob adds Alice as contact and initiates discussion
+      // STEP 2: Bob adds Alice as contact and initiates discussion
       const bobAliceContact: Omit<Contact, 'id'> = {
         ownerUserId: bobSdk.userId,
         userId: aliceSdk.userId,
@@ -904,70 +1016,86 @@ describe('Discussion Flow', () => {
       await db.contacts.add(bobAliceContact);
       await bobSdk.discussions.start(bobAliceContact);
 
-      // Alice receives Bob's announcement before resending her own
-      await aliceSdk.announcements.fetch();
+      // STEP 3: Alice receives Bob's announcement before resending her own
+      const res = await aliceSdk.announcements.fetch();
+      expect(res.success).toBe(true);
 
       aliceDiscussion = await db.discussions.get(aliceDiscussionId);
       // When Alice receives Bob's announcement, the session should become Active
       // But sendAnnouncement is still not null (pending retry of Alice's failed announcement)
-      // Note: If Alice's announcement failed to send, the WASM session might not be fully initialized,
-      // so we check that weAccepted is true and sendAnnouncement is not null
       expect(aliceDiscussion?.weAccepted).toBe(true);
       expect(aliceDiscussion?.sendAnnouncement).not.toBeNull();
-      // The session status might be Active or in another state depending on WASM session initialization
-      // We'll verify it becomes Active after Alice resends successfully
+      expect(aliceSdk.discussions.getStatus(bobSdk.userId)).toBe(
+        SessionStatus.Active
+      );
 
+      // STEP 4: Alice resends and succeeds
       // Wait for retry delay
-      await new Promise(resolve => setTimeout(resolve, aliceSdk.config.announcements.retryDelayMs + 50));
+      await new Promise(resolve =>
+        setTimeout(resolve, aliceSdk.config.announcements.retryDelayMs + 50)
+      );
 
-      // Alice resends and succeeds
       await expect(aliceSdk.updateState()).resolves.not.toThrow();
 
       aliceDiscussion = await db.discussions.get(aliceDiscussionId);
       expect(aliceDiscussion?.sendAnnouncement).toBeNull();
 
-      // Bob fetches and sees Alice's announcement
+      // STEP 5: Bob fetches and sees Alice's announcement
       const bobFetchResult = await bobSdk.announcements.fetch();
       expect(bobFetchResult.success).toBe(true);
 
-      // Update state on both sides to ensure session status is synchronized
-      await expect(aliceSdk.updateState()).resolves.not.toThrow();
-      await expect(bobSdk.updateState()).resolves.not.toThrow();
-
-      // Both sides should now have active sessions
-      const aliceDiscussionFinal = await db.discussions.get(aliceDiscussionId);
-      const bobDiscussionFinal = await db.getDiscussionByOwnerAndContact(
-        bobSdk.userId,
-        aliceSdk.userId
-      );
-      
-      // Verify discussion states
-      expect(aliceDiscussionFinal?.weAccepted).toBe(true);
-      expect(aliceDiscussionFinal?.sendAnnouncement).toBeNull();
-      expect(bobDiscussionFinal?.weAccepted).toBe(true);
-      expect(bobDiscussionFinal?.sendAnnouncement).toBeNull();
-      
-      // Verify session statuses - in bidirectional announcement scenarios (both sides initiated),
-      // sessions may stay in SelfRequested until actual messages are exchanged.
-      // After processing announcements, at least one side should have an Active session.
-      const aliceStatus = aliceSdk.discussions.getStatus(bobSdk.userId);
-      const bobStatus = bobSdk.discussions.getStatus(aliceSdk.userId);
-      
-      // At least one should be Active, or both could be SelfRequested in race conditions
-      const hasActiveSession = aliceStatus === SessionStatus.Active || bobStatus === SessionStatus.Active ||
-        (aliceStatus === SessionStatus.SelfRequested && bobStatus === SessionStatus.SelfRequested);
-      expect(hasActiveSession).toBe(true);
-      
-      // Verify both discussions have correct state (weAccepted true, sendAnnouncement null)
-      // Note: isSessionUp requires Active status, so we check individual properties instead
-      expect(aliceDiscussionFinal?.weAccepted).toBe(true);
-      expect(bobDiscussionFinal?.weAccepted).toBe(true);
+      // Verify both sides have active sessions
+      expect(await isSessionUp(aliceSdk, bobSdk)).toBe(true);
 
       // Restore original retry delay
       aliceSdk.config.announcements.retryDelayMs = originalRetryDelay;
     });
 
-    it('Alice init discussion but get error while signing announcement. Retry and success', async () => {
+    it('Alice init discussion but get error while signing announcement. Retry and get network error. Retry 2nd time and success', async () => {
+      // PREPARATION
+
+      // Set short retry delay for this test
+      const originalRetryDelay = aliceSdk.config.announcements.retryDelayMs;
+      aliceSdk.config.announcements.retryDelayMs = 100;
+
+      // Mock establishSession to fail on first call (simulating signing error)
+      // But we need to handle the case where the discussion might be deleted
+      const announcementService = (
+        aliceSdk as unknown as { _announcement: AnnouncementService }
+      )._announcement;
+      const originalEstablishSession =
+        announcementService.establishSession.bind(announcementService);
+      let establishCallCount = 0;
+      vi.spyOn(announcementService, 'establishSession').mockImplementation(
+        async (contactPublicKeys: UserPublicKeys, userData?: Uint8Array) => {
+          establishCallCount++;
+          if (establishCallCount === 1) {
+            return { success: false, error: new Error('Signing error') };
+          }
+          return originalEstablishSession(contactPublicKeys, userData);
+        }
+      );
+
+      // Make network fail on first attempt (this happens after establishSession succeeds on retry)
+      let sendCallCount = 0;
+      // Store the original implementation before spying
+      const originalSendAnnouncementImpl =
+        MockMessageProtocol.prototype.sendAnnouncement;
+      vi.spyOn(mockProtocol, 'sendAnnouncement').mockImplementation(
+        async (announcement: Uint8Array) => {
+          sendCallCount++;
+          if (sendCallCount === 1) {
+            throw new Error('Network error');
+          }
+          // For subsequent calls, call the original implementation
+          return await originalSendAnnouncementImpl.call(
+            mockProtocol,
+            announcement
+          );
+        }
+      );
+
+      // STEP 1: Alice tries to start discussion but gets signing error on first attempt
       const aliceBobContact: Omit<Contact, 'id'> = {
         ownerUserId: aliceSdk.userId,
         userId: bobSdk.userId,
@@ -981,76 +1109,45 @@ describe('Discussion Flow', () => {
 
       await db.contacts.add(aliceBobContact);
 
-      // Set short retry delay for this test
-      const originalRetryDelay = aliceSdk.config.announcements.retryDelayMs;
-      aliceSdk.config.announcements.retryDelayMs = 100;
-
-      // Mock establishSession to fail on first call (simulating signing error)
-      // But we need to handle the case where the discussion might be deleted
-      const originalEstablishSession = (aliceSdk as any)._announcement.establishSession;
-      let establishCallCount = 0;
-      vi.spyOn((aliceSdk as any)._announcement, 'establishSession').mockImplementation(
-        async (...args: any[]) => {
-          establishCallCount++;
-          if (establishCallCount === 1) {
-            throw new Error('Signing error');
-          }
-          return originalEstablishSession.apply((aliceSdk as any)._announcement, args);
-        }
-      );
-
-      // Make network fail on first attempt (this happens after establishSession succeeds on retry)
-      let sendCallCount = 0;
-      // Store the original implementation before spying
-      const originalSendAnnouncementImpl = MockMessageProtocol.prototype.sendAnnouncement;
-      vi.spyOn(mockProtocol, 'sendAnnouncement').mockImplementation(async (announcement: Uint8Array) => {
-        sendCallCount++;
-        if (sendCallCount === 1) {
-          throw new Error('Network error');
-        }
-        // For subsequent calls, use the original implementation directly
-        const counter = String(++mockProtocol['announcementCounter']);
-        mockProtocol['announcements'].push({ counter, data: announcement });
-        return counter;
-      });
-
-      // Alice tries to start discussion but gets signing error on first attempt
-      // The discussion will be deleted, so we need to retry the start
       let result = await aliceSdk.discussions.start(aliceBobContact);
-      if (!result.success) {
-        // Discussion was deleted due to signing error, check if it still exists and delete if needed
-        const existingDiscussion = await db.getDiscussionByOwnerAndContact(
-          aliceSdk.userId,
-          bobSdk.userId
-        );
-        if (existingDiscussion?.id) {
-          await db.discussions.delete(existingDiscussion.id);
-        }
-        // Retry start (establishSession will work now)
-        result = await aliceSdk.discussions.start(aliceBobContact);
-        if (!result.success) throw result.error;
-      }
+      expect(result.success).toBe(false);
+      console.log(
+        'await aliceSdk.discussions.get(aliceSdk.userId, bobSdk.userId): ',
+        await aliceSdk.discussions.get(aliceSdk.userId, bobSdk.userId)
+      );
+      expect(
+        await aliceSdk.discussions.get(aliceSdk.userId, bobSdk.userId)
+      ).toBeUndefined();
+
+      // STEP 2: Retry start (establishSession will work now) but network error
+      result = await aliceSdk.discussions.start(aliceBobContact);
+      if (!result.success) throw result.error;
       const aliceDiscussionId = result.data.discussionId;
 
       let aliceDiscussion = await db.discussions.get(aliceDiscussionId);
       // After network failure, sendAnnouncement should be set for retry
       expect(aliceDiscussion?.sendAnnouncement).not.toBeNull();
 
+      // STEP 3: retry send on network should succeed
       // Wait for retry delay
-      await new Promise(resolve => setTimeout(resolve, aliceSdk.config.announcements.retryDelayMs + 50));
+      await new Promise(resolve =>
+        setTimeout(resolve, aliceSdk.config.announcements.retryDelayMs + 50)
+      );
 
-      // Retry should succeed (establishSession will work on second call)
       await expect(aliceSdk.updateState()).resolves.not.toThrow();
 
       aliceDiscussion = await db.discussions.get(aliceDiscussionId);
       expect(aliceDiscussion?.sendAnnouncement).toBeNull();
-      expect(aliceSdk.discussions.getStatus(bobSdk.userId)).toBe(SessionStatus.SelfRequested);
+      expect(aliceSdk.discussions.getStatus(bobSdk.userId)).toBe(
+        SessionStatus.SelfRequested
+      );
 
       // Restore original retry delay
       aliceSdk.config.announcements.retryDelayMs = originalRetryDelay;
     });
 
-    it('Bob receive announcement from alice. He accept but get error while signing', async () => {
+    it('Bob receive announcement from alice. He accept but get error while signing. Network issue on 2nd attempt. Success on 3rd attempt', async () => {
+      // STEP 1: Alice initiates discussion with Bob
       const aliceBobContact: Omit<Contact, 'id'> = {
         ownerUserId: aliceSdk.userId,
         userId: bobSdk.userId,
@@ -1071,85 +1168,104 @@ describe('Discussion Flow', () => {
       // Alice initiates discussion with Bob
       const result = await aliceSdk.discussions.start(aliceBobContact);
       if (!result.success) throw result.error;
-      const aliceDiscussionId = result.data.discussionId;
 
-      // Bob fetches announcements and sees Alice's request
-      await bobSdk.announcements.fetch();
+      // STEP 2: Bob fetches announcements and sees Alice's request
+      const res = await bobSdk.announcements.fetch();
+      console.log('res of bobSdk.announcements.fetch', res);
+      expect(res.success).toBe(true);
 
-      const bobDiscussion = await db.getDiscussionByOwnerAndContact(
+      const bobDiscussion = await bobSdk.discussions.get(
         bobSdk.userId,
         aliceSdk.userId
       );
-      expect(bobDiscussion).toBeDefined();
-      expect(bobDiscussion?.weAccepted).toBe(false);
-
       if (!bobDiscussion) throw new Error('Bob discussion not found');
 
+      expect(bobDiscussion.weAccepted).toBe(false);
+      expect(bobDiscussion.sendAnnouncement).toBeNull();
+      expect(bobSdk.discussions.getStatus(aliceSdk.userId)).toBe(
+        SessionStatus.PeerRequested
+      );
+
+      // STEP 3: Bob accepts but gets signing error on first attempt
       // Mock establishSession to fail on first call (simulating signing error)
-      const originalEstablishSession = (bobSdk as any)._announcement.establishSession;
+      const bobAnnouncementService = (
+        bobSdk as unknown as { _announcement: AnnouncementService }
+      )._announcement;
+      const originalEstablishSession =
+        bobAnnouncementService.establishSession.bind(bobAnnouncementService);
       let establishCallCount = 0;
-      vi.spyOn((bobSdk as any)._announcement, 'establishSession').mockImplementation(
-        async (...args: any[]) => {
+      vi.spyOn(bobAnnouncementService, 'establishSession').mockImplementation(
+        async (contactPublicKeys: UserPublicKeys, userData?: Uint8Array) => {
           establishCallCount++;
           if (establishCallCount === 1) {
             throw new Error('Signing error');
           }
-          return originalEstablishSession.apply((bobSdk as any)._announcement, args);
+          return originalEstablishSession(contactPublicKeys, userData);
         }
       );
 
       // Make network fail on first attempt (after establishSession succeeds on retry)
+      const originalSendAnnouncement =
+        MockMessageProtocol.prototype.sendAnnouncement;
       let sendCallCount = 0;
-      vi.spyOn(mockProtocol, 'sendAnnouncement').mockImplementation(async (announcement: Uint8Array) => {
-        sendCallCount++;
-        if (sendCallCount === 1) {
-          throw new Error('Network error');
+      vi.spyOn(mockProtocol, 'sendAnnouncement').mockImplementation(
+        async (announcement: Uint8Array) => {
+          sendCallCount++;
+          if (sendCallCount === 1) {
+            throw new Error('Network error');
+          }
+          // For subsequent calls, call the original implementation
+          return await originalSendAnnouncement.call(
+            mockProtocol,
+            announcement
+          );
         }
-        // For subsequent calls, store directly to avoid recursion
-        const counter = String(++mockProtocol['announcementCounter']);
-        mockProtocol['announcements'].push({ counter, data: announcement });
-        return counter;
-      });
+      );
 
       // Bob accepts but gets signing error on first attempt
-      try {
-        await bobSdk.discussions.accept(bobDiscussion);
-      } catch (error) {
-        // Accept might fail due to signing error, retry accept (establishSession will work now)
-        await bobSdk.discussions.accept(bobDiscussion);
-      }
+      const res1 = await bobSdk.discussions.accept(bobDiscussion);
+      const bobDiscussionSignError = await bobSdk.discussions.get(
+        bobSdk.userId,
+        aliceSdk.userId
+      );
+      expect(res1.success).toBe(false);
+      expect(bobSdk.discussions.getStatus(aliceSdk.userId)).toBe(
+        SessionStatus.PeerRequested
+      );
+      // When signing fails, no announcement is created, so sendAnnouncement should be null
+      expect(bobDiscussionSignError?.sendAnnouncement).toBeNull();
+      expect(bobDiscussionSignError?.weAccepted).toBe(false);
 
-      let bobDiscussionAfterAccept = await db.discussions.get(bobDiscussion.id!);
-      // After network failure, sendAnnouncement should be set for retry
-      expect(bobDiscussionAfterAccept?.weAccepted).toBe(true);
+      // STEP 4: Retry accept (establishSession will work now) but network issue on 2nd attempt
+      const res2 = await bobSdk.discussions.accept(bobDiscussion);
+      expect(res2.success).toBe(true);
+      const bobDiscussionAfterAccept = await bobSdk.discussions.get(
+        bobSdk.userId,
+        aliceSdk.userId
+      );
+      expect(bobSdk.discussions.getStatus(aliceSdk.userId)).toBe(
+        SessionStatus.Active
+      );
       expect(bobDiscussionAfterAccept?.sendAnnouncement).not.toBeNull();
+      expect(bobDiscussionAfterAccept?.weAccepted).toBe(true);
 
+      // STEP 5: Retry send on network should succeed
       // Wait for retry delay
-      await new Promise(resolve => setTimeout(resolve, bobSdk.config.announcements.retryDelayMs + 50));
+      await new Promise(resolve =>
+        setTimeout(resolve, bobSdk.config.announcements.retryDelayMs + 50)
+      );
 
       // Retry should succeed
       await expect(bobSdk.updateState()).resolves.not.toThrow();
 
-      bobDiscussionAfterAccept = await db.discussions.get(bobDiscussion.id!);
-      expect(bobDiscussionAfterAccept?.sendAnnouncement).toBeNull();
+      expect(await isLocalSessionUp(bobSdk, aliceSdk.userId)).toBe(true);
 
-      // Alice fetches announcements and sees Bob's acceptance
+      // STEP 6: Alice fetches announcements and sees Bob's acceptance
       const fetchResult = await aliceSdk.announcements.fetch();
-      // Note: fetchResult.success might be false if there were any errors during processing,
-      // even if some announcements were successfully processed. What matters is that
-      // the session state is correct after the fetch.
+      expect(fetchResult.success).toBe(true);
 
       // Verify session states
-      const aliceDiscussionFinal = await db.discussions.get(aliceDiscussionId);
-      expect(aliceDiscussionFinal?.weAccepted).toBe(true);
-      
-      // Verify Bob's session is up
-      expect(await isSessionUp(bobSdk, aliceSdk.userId)).toBe(true);
-      
-      // Alice's session might not show as "Active" immediately in cross-announcement scenarios
-      // but weAccepted should be true and the discussion should exist
-      const aliceStatus = aliceSdk.discussions.getStatus(bobSdk.userId);
-      expect([SessionStatus.Active, SessionStatus.SelfRequested]).toContain(aliceStatus);
+      expect(await isSessionUp(aliceSdk, bobSdk)).toBe(true);
 
       // Restore original retry delay
       bobSdk.config.announcements.retryDelayMs = originalRetryDelay;

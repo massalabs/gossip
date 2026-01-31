@@ -1,6 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Move } from 'react-feather';
-import { gossipSdk, SdkEventType, Discussion, SessionStatus } from 'gossip-sdk';
+import {
+  gossipSdk,
+  SdkEventType,
+  Discussion,
+  SessionStatus,
+} from '@massalabs/gossip-sdk';
 import { useOnlineStoreBase } from '../../stores/useOnlineStore';
 import { useDiscussionStore } from '../../stores/discussionStore';
 import { useAppStore } from '../../stores/appStore';

@@ -1,5 +1,5 @@
 import React, { useMemo, useCallback } from 'react';
-import { Message, DiscussionDirection } from 'gossip-sdk';
+import { Message, DiscussionDirection } from '@massalabs/gossip-sdk';
 import { MessageGroupInfo } from '../../../utils/messageGrouping';
 import MessageItem from '../MessageItem';
 import DateSeparator from '../DateSeparator';

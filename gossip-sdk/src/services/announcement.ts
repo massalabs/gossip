@@ -142,7 +142,15 @@ export class AnnouncementService {
         return;
       }
 
-      if (when_to_send.getTime() > now) return;
+      if (when_to_send.getTime() > now) {
+        log.debug('skipping announcement, not yet time to send', {
+          discussionId: discussion.id,
+          contactUserId: discussion.contactUserId,
+          when_to_send: when_to_send.toISOString(),
+          now: new Date().toISOString(),
+        });
+        continue;
+      }
 
       // Send the announcement and handle updates after transaction
       const result = await this.sendAnnouncement(announcement_bytes);
@@ -162,7 +170,9 @@ export class AnnouncementService {
           await this.db.discussions.update(discussion.id, {
             sendAnnouncement: {
               announcement_bytes,
-              when_to_send: new Date(Date.now() + this.config.announcements.retryDelayMs),
+              when_to_send: new Date(
+                Date.now() + this.config.announcements.retryDelayMs
+              ),
             },
             updatedAt: new Date(),
           });
@@ -511,6 +521,8 @@ export class AnnouncementService {
     const discussionId = await this.db.transaction(
       'rw',
       this.db.discussions,
+      this.db.messages,
+      this.db.contacts,
       async () => {
         const existing = await this.db.getDiscussionByOwnerAndContact(
           ownerUserId,
@@ -528,19 +540,13 @@ export class AnnouncementService {
           });
 
           // Group update and queue reset in the same transaction to ensure atomicity
-          await this.db.transaction(
-            'rw',
-            this.db.discussions,
-            this.db.messages,
-            async () => {
-              await this.db.discussions.update(existing.id!, updateData);
-              // reset all messages in send queue to WAITING_SESSION for this contact
-              await resetSendQueue(
-                this.db,
-                this.session.userIdEncoded,
-                contactUserId
-              );
-            }
+
+          await this.db.discussions.update(existing.id!, updateData);
+          // reset all messages in send queue to WAITING_SESSION for this contact
+          await resetSendQueue(
+            this.db,
+            this.session.userIdEncoded,
+            contactUserId
           );
 
           const newDiscussion = await this.db.discussions.get(existing.id!);

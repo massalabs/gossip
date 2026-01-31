@@ -12,7 +12,11 @@ import PageLayout from '../components/ui/PageLayout';
 import UserIdDisplay from '../components/ui/UserIdDisplay';
 import BaseModal from '../components/ui/BaseModal';
 import { Check, Edit2, Trash2 } from 'react-feather';
-import { UserPublicKeys, gossipSdk, SessionStatus } from '@massalabs/gossip-sdk';
+import {
+  UserPublicKeys,
+  gossipSdk,
+  SessionStatus,
+} from '@massalabs/gossip-sdk';
 import { ROUTES } from '../constants/routes';
 
 const Contact: React.FC = () => {

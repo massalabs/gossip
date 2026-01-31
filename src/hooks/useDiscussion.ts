@@ -1,5 +1,10 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { Contact, Discussion, SessionStatus, gossipSdk } from 'gossip-sdk';
+import {
+  Contact,
+  Discussion,
+  SessionStatus,
+  gossipSdk,
+} from '@massalabs/gossip-sdk';
 import { useDiscussionStore } from '../stores/discussionStore';
 
 interface UseDiscussionProps {

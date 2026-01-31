@@ -1,5 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Discussion, Contact, gossipSdk, SessionStatus } from 'gossip-sdk';
+import {
+  Discussion,
+  Contact,
+  gossipSdk,
+  SessionStatus,
+} from '@massalabs/gossip-sdk';
 import ContactAvatar from '../avatar/ContactAvatar';
 import { formatRelativeTime } from '../../utils/timeUtils';
 import { formatUserId } from '@massalabs/gossip-sdk';
