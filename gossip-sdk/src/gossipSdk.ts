@@ -216,14 +216,6 @@ class GossipSdkImpl {
 
     // Configure database
     setDb(options.db);
-    // // Get the actual database instance (not the Proxy) to ensure services use the same opened instance
-    // // This will reuse the existing _db if it was already created (e.g., by db.open())
-    // const actualDb = getDb();
-    
-    // // Ensure the database is opened if it hasn't been already
-    // if (!actualDb.isOpen()) {
-    //   await actualDb.open();
-    // }
 
     // Configure protocol URL (prefer explicit option, then config)
     const baseUrl = options.protocolBaseUrl ?? config.protocol.baseUrl;
@@ -237,7 +229,7 @@ class GossipSdkImpl {
     // Create message protocol
     const messageProtocol = createMessageProtocol();
 
-    // Create auth service (doesn't need session) - use actualDb to ensure same instance
+    // Create auth service (doesn't need session)
     this._auth = new AuthService(options.db, messageProtocol);
 
     this.state = {
@@ -397,6 +389,13 @@ class GossipSdkImpl {
   ): void {
     this._messagesAPI = {
       get: id => db.messages.get(id),
+      getMessages: async contactUserId => {
+        const state = this.requireSession();
+        return await db.messages
+          .where('[ownerUserId+contactUserId]')
+          .equals([state.session.userIdEncoded, contactUserId])
+          .toArray();
+      },
       send: message =>
         this.messageQueues.enqueue(message.contactUserId, () =>
           this._message!.sendMessage(message)
@@ -414,11 +413,10 @@ class GossipSdkImpl {
       ): Promise<Result<discussionInitializationResult, Error>> => {
         return await this._discussion!.initialize(contact, message);
       },
-      accept: async discussion => {
-        const result = await this._discussion!.accept(discussion);
-        if (!result.success) {
-          throw result.error;
-        }
+      accept: async (
+        discussion: Discussion
+      ): Promise<Result<Uint8Array, Error>> => {
+        return await this._discussion!.accept(discussion);
       },
       renew: async (
         contactUserId: string
@@ -670,20 +668,24 @@ class GossipSdkImpl {
 
     const { config, db, session } = this.state;
 
-    this.pollingManager.start(config, {
-      fetchMessages: async () => {
-        await this._message?.fetchMessages();
+    this.pollingManager.start(
+      config,
+      {
+        fetchMessages: async () => {
+          await this._message?.fetchMessages();
+        },
+        fetchAnnouncements: async () => {
+          await this._announcement?.fetchAndProcessAnnouncements();
+        },
+        handleSessionRefresh: async () => {
+          await this.updateState();
+        },
+        getActiveDiscussions: async () => {
+          return db.getDiscussionsByOwner(session.userIdEncoded);
+        },
       },
-      fetchAnnouncements: async () => {
-        await this._announcement?.fetchAndProcessAnnouncements();
-      },
-      handleSessionRefresh: async () => {
-        await this.updateState();
-      },
-      getActiveDiscussions: async () => {
-        return db.getDiscussionsByOwner(session.userIdEncoded);
-      },
-    }, this.eventEmitter);
+      this.eventEmitter
+    );
   }
 
   // ─────────────────────────────────────────────────────────────────
@@ -735,7 +737,6 @@ class GossipSdkImpl {
       );
     }
   }
-   
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -745,6 +746,8 @@ class GossipSdkImpl {
 interface MessageServiceAPI {
   /** Get a message by its ID */
   get(id: number): Promise<Message | undefined>;
+  /** Get all messages for a contact */
+  getMessages(contactUserId: string): Promise<Message[]>;
   /** Send a message */
   send(message: Omit<Message, 'id'>): Promise<SendMessageResult>;
   /** Fetch and decrypt messages from the protocol */
@@ -765,7 +768,7 @@ interface DiscussionServiceAPI {
     message?: string
   ): Promise<Result<discussionInitializationResult, Error>>;
   /** Accept an incoming discussion request */
-  accept(discussion: Discussion): Promise<void>;
+  accept(discussion: Discussion): Promise<Result<Uint8Array, Error>>;
   /** Renew a broken discussion */
   renew(contactUserId: string): Promise<Result<Uint8Array, Error>>;
   /** Get the status of a discussion */

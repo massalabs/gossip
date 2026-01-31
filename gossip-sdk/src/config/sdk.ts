@@ -46,6 +46,8 @@ export interface MessagesConfig {
    * resulting in message being re-sent on restart.
    */
   deduplicationWindowMs: number;
+  /** Delay before retrying a failed message send in ms (default: 5000 = 5 seconds) */
+  retryDelayMs: number;
 }
 
 /**
@@ -92,6 +94,7 @@ export const defaultSdkConfig: SdkConfig = {
     fetchDelayMs: 100,
     maxFetchIterations: 30,
     deduplicationWindowMs: 30000, // 30 seconds
+    retryDelayMs: 5000, // 5 seconds
   },
   announcements: {
     fetchLimit: 500,

@@ -2,8 +2,8 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import BaseModal from '../ui/BaseModal';
 import Button from '../ui/Button';
 import { useKeyDown } from '../../hooks/useKeyDown';
-import { validateUsernameFormat } from 'gossip-sdk';
-import { db } from 'gossip-sdk';
+import { validateUsernameFormat } from '@massalabs/gossip-sdk';
+import { db } from '@massalabs/gossip-sdk';
 
 interface UsernameEditModalProps {
   isOpen: boolean;

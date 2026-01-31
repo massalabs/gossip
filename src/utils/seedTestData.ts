@@ -14,7 +14,7 @@ import {
   MessageDirection,
   MessageStatus,
   MessageType,
-} from '@massalabs/gossip-sdk'
+} from '@massalabs/gossip-sdk';
 import { bech32 } from '@scure/base';
 
 const GOSSIP_PREFIX = 'gossip';

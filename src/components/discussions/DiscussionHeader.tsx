@@ -1,7 +1,12 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ChevronLeft } from 'react-feather';
-import { Contact, Discussion, gossipSdk, SessionStatus } from 'gossip-sdk';
+import {
+  Contact,
+  Discussion,
+  gossipSdk,
+  SessionStatus,
+} from '@massalabs/gossip-sdk';
 import ContactAvatar from '../avatar/ContactAvatar';
 import Button from '../ui/Button';
 import BackButton from '../ui/BackButton';

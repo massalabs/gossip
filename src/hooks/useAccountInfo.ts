@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useAccountStore } from '../stores/accountStore';
 import { useAppStore } from '../stores/appStore';
-import { UserProfile } from 'gossip-sdk';
+import { UserProfile } from '@massalabs/gossip-sdk';
 
 /**
  * Hook to load existing account info to show username in WelcomeBack when unauthenticated

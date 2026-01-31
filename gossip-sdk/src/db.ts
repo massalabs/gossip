@@ -125,7 +125,7 @@ export interface Discussion {
   // Protocol/Encryption fields
   /*weAccepted: Whether the user has expressed the will to communicate with the peer 
   i.e. the user has initiated a new discussion or it accepted the discussion initiated by the peer. */
-  weAccepted: boolean; 
+  weAccepted: boolean;
   sendAnnouncement: SendAnnouncement;
   direction: DiscussionDirection;
   lastSyncTimestamp?: Date; // Last time messages were synced from protocol
@@ -430,7 +430,7 @@ export function setDb(database: GossipDatabase): void {
     getDb();
     // Don't overwrite _db - just ensure it exists and is consistent
   } else {
-  _db = database;
+    _db = database;
   }
 }
 

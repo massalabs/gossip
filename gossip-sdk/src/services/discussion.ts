@@ -133,7 +133,7 @@ export class DiscussionService {
           content: message,
           type: MessageType.ANNOUNCEMENT,
           direction: MessageDirection.OUTGOING,
-          status: MessageStatus.DELIVERED,
+          status: MessageStatus.SENT,
           timestamp: new Date(),
         });
       }
@@ -145,6 +145,12 @@ export class DiscussionService {
       }
 
       return {
+        success: true,
+        data: { discussionId, announcement: result.data },
+      };
+    } catch (error) {
+      return {
+        success: false,
         error: new Error('Discussion initialization failed, error: ' + error),
       };
     }
@@ -213,67 +219,81 @@ export class DiscussionService {
     const log = logger.forMethod('createSessionForContact');
     const ownerUserId = this.session.userIdEncoded;
 
-    const result: Result<Uint8Array, Error> = await this.db.transaction(
+    const discussion = await this.db.getDiscussionByOwnerAndContact(
+      ownerUserId,
+      contactUserId
+    );
+    if (!discussion) {
+      return { success: false, error: new Error('Discussion not found') };
+    }
+
+    const contact = await this.db.getContactByOwnerAndUserId(
+      ownerUserId,
+      contactUserId
+    );
+    if (!contact) {
+      return { success: false, error: new Error('Contact not found') };
+    }
+
+    // Establish a new outgoing encrypted session with the peer
+    const sessionResult = await this.announcementService.establishSession(
+      UserPublicKeys.from_bytes(contact.publicKeys),
+      userData
+    );
+
+    if (!sessionResult.success) {
+      log.error('failed to establish outgoing session', {
+        contactUserId,
+        error: sessionResult.error,
+      });
+      return sessionResult;
+    }
+
+    const now = new Date();
+
+    // Wrap discussion update and queue reset in a transaction for atomicity
+    const err = await this.db.transaction(
       'rw',
-      [this.db.discussions, this.db.messages, this.db.contacts],
+      this.db.discussions,
+      this.db.messages,
       async () => {
-        const discussion = await this.db.getDiscussionByOwnerAndContact(
-          ownerUserId,
-          contactUserId
-        );
-        if (!discussion) {
-          return { success: false, error: new Error('Discussion not found') };
-        }
-
-        const contact = await this.db.getContactByOwnerAndUserId(
-          ownerUserId,
-          contactUserId
-        );
-        if (!contact) {
-          return { success: false, error: new Error('Contact not found') };
-        }
-
-        // Establish a new outgoing encrypted session with the peer
-        const sessionResult = await this.announcementService.establishSession(
-          UserPublicKeys.from_bytes(contact.publicKeys),
-          userData
-        );
-
-        if (!sessionResult.success) {
-          log.error('failed to establish outgoing session', {
-            contactUserId,
-            error: sessionResult.error,
+        try {
+          // add the new announcement to the discussion
+          await this.db.discussions.update(discussion.id!, {
+            weAccepted: true,
+            sendAnnouncement: {
+              announcement_bytes: sessionResult.data,
+              when_to_send: now,
+            },
+            updatedAt: now,
           });
-          return sessionResult;
+
+          // reset all messages in send queue to WAITING_SESSION for this contact
+          await resetSendQueue(this.db, ownerUserId, contactUserId);
+          return undefined;
+        } catch (error) {
+          return new Error('Failed to update discussion: ' + error);
         }
-
-        const now = new Date();
-
-        // add the new announcement to the discussion
-        await this.db.discussions.update(discussion.id!, {
-          weAccepted: true,
-          sendAnnouncement: {
-            announcement_bytes: sessionResult.data,
-            when_to_send: now,
-          },
-          updatedAt: now,
-        });
-
-        // reset all messages in send queue to WAITING_SESSION for this contact
-        await resetSendQueue(this.db, ownerUserId, contactUserId);
-
-        return { success: true, data: sessionResult.data };
       }
     );
 
-    if (result.success) {
-      /* trigger a state update to send the new announcement
-      If the stateUpdate function is already running, it will be skipped.
-      */
-      await this.refreshService?.stateUpdate();
+    if (!err) {
+      try {
+        /* trigger a state update to send the new announcement
+        If the stateUpdate function is already running, it will be skipped.
+        */
+        await this.refreshService?.stateUpdate();
+      } catch (error) {
+        return {
+          success: false,
+          error: new Error('Failed to trigger state update: ' + error),
+        };
+      }
+    } else {
+      return { success: false, error: err };
     }
 
-    return result;
+    return { success: true, data: sessionResult.data };
   }
 }
 

@@ -64,7 +64,6 @@ interface Decrypted {
 const sleep = (ms: number) => new Promise(res => setTimeout(res, ms));
 
 const logger = new Logger('MessageService');
-const MESSAGE_RETRY_DELAY_MS = 5000;
 export class MessageService {
   private db: GossipDatabase;
   private messageProtocol: IMessageProtocol;
@@ -338,7 +337,6 @@ export class MessageService {
             timestamp: message.sentAt,
             metadata: {},
             seeker: message.seeker, // Store the seeker of the incoming message
-            encryptedMessage: message.encryptedMessage, // Store the ciphertext of the incoming message
             replyTo: message.replyTo
               ? {
                   // Store the original content as a fallback only if we couldn't find
@@ -466,7 +464,11 @@ export class MessageService {
               message.seeker !== undefined &&
               seekers.has(encodeToBase64(message.seeker))
           )
-          .modify({ status: MessageStatus.DELIVERED });
+          .modify({
+            status: MessageStatus.DELIVERED,
+            encryptedMessage: undefined,
+            whenToSend: undefined,
+          });
 
         // After marking as DELIVERED, clean up DELIVERED keep-alive messages
         await this.db.messages
@@ -705,6 +707,17 @@ export class MessageService {
         )
         .sortBy('timestamp');
 
+      log.debug('pending messages', {
+        pendingMessages: pendingMessages.map(msg => ({
+          id: msg.id,
+          status: msg.status,
+          timestamp: msg.timestamp,
+          content: msg.content,
+          type: msg.type,
+          direction: msg.direction,
+        })),
+      });
+
       if (pendingMessages.length === 0) {
         return { success: true, data: 0 };
       }
@@ -733,6 +746,7 @@ export class MessageService {
             serializedContent = serializeResult.data;
           }
 
+          /* Encrypt message*/
           const sendOutput = await this.session.sendMessage(
             peerId,
             serializedContent
@@ -741,8 +755,12 @@ export class MessageService {
             log.warn('session manager returned null for queued message', {
               messageId: msg.id,
             });
-            // Preserve ordering: stop processing this queue for now.
-            break;
+            return {
+              success: false,
+              error: new Error(
+                'Session manager returned null for queued message'
+              ),
+            };
           }
 
           encryptedMessage = sendOutput.data;
@@ -757,11 +775,26 @@ export class MessageService {
             serializedContent,
           });
           currentStatus = MessageStatus.READY;
+          log.debug('message updated to READY', {
+            messageId: msg.id,
+            status: currentStatus,
+            content: msg.content,
+            type: msg.type,
+            direction: msg.direction,
+          });
         }
 
         if (currentStatus === MessageStatus.READY) {
           const sendAt = whenToSend ?? new Date();
           if (sendAt.getTime() > Date.now()) {
+            log.debug('message not ready to send, skipping', {
+              messageId: msg.id,
+              status: currentStatus,
+              content: msg.content,
+              type: msg.type,
+              direction: msg.direction,
+              whenToSend: sendAt,
+            });
             continue;
           }
 
@@ -772,15 +805,30 @@ export class MessageService {
               seeker: undefined,
               whenToSend: undefined,
             });
+            log.debug(
+              'message has no encryptedMessage or seeker, updated to WAITING_SESSION',
+              {
+                messageId: msg.id,
+                status: currentStatus,
+                content: msg.content,
+                type: msg.type,
+                direction: msg.direction,
+                whenToSend: whenToSend,
+                encryptedMessage: encryptedMessage,
+                seeker: seeker,
+              }
+            );
             continue;
           }
 
+          /* Sending on network */
           try {
             await this.messageProtocol.sendMessage({
               seeker,
               ciphertext: encryptedMessage,
             });
 
+            // update the db
             const sent = await this.db.transaction(
               'rw',
               this.db.messages,
@@ -808,6 +856,13 @@ export class MessageService {
             );
             if (sent) {
               sentCount++;
+              log.debug('message sent', {
+                messageId: msg.id,
+                status: MessageStatus.SENT,
+                content: msg.content,
+                type: msg.type,
+                direction: msg.direction,
+              });
               try {
                 this.eventEmitter.emit(SdkEventType.MESSAGE_SENT, {
                   ...msg,
@@ -832,7 +887,9 @@ export class MessageService {
                 latest.status === MessageStatus.READY // ensure the discussion has not been reset with all pending messages reset to WAITING_SESSION
               ) {
                 await this.db.messages.update(msg.id, {
-                  whenToSend: new Date(Date.now() + MESSAGE_RETRY_DELAY_MS),
+                  whenToSend: new Date(
+                    Date.now() + this.config.messages.retryDelayMs
+                  ),
                 });
               }
             });

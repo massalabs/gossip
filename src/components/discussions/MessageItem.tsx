@@ -17,7 +17,7 @@ import {
   Message,
   MessageStatus,
   MessageDirection,
-} from 'gossip-sdk';
+} from '@massalabs/gossip-sdk';
 import { parseLinks, openUrl } from '../../utils/linkUtils';
 import { useMarkMessageAsRead } from '../../hooks/useMarkMessageAsRead';
 

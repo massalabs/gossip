@@ -149,11 +149,22 @@ export class RefreshService {
       }
 
       // Step 2: send announcements
-      await this.announcementService.processOutgoingAnnouncements(discussions);
+      const activePendingDiscussions = discussions.filter(discussion => {
+        const status = this.session.peerSessionStatus(
+          decodeUserId(discussion.contactUserId)
+        );
+        console.log('update state: status', status);
+        return [SessionStatus.Active, SessionStatus.SelfRequested].includes(
+          status
+        );
+      });
+      await this.announcementService.processOutgoingAnnouncements(
+        activePendingDiscussions
+      );
 
       // Step 3: send queued messages and keep-alives
       const keepAliveSet = new Set(keepAlivePeerIds);
-      for (const discussion of discussions) {
+      for (const discussion of activePendingDiscussions) {
         if (!discussion.weAccepted) continue;
 
         // Send keep alive message if needed
@@ -173,10 +184,11 @@ export class RefreshService {
               timestamp: new Date(),
             });
             if (!result.success) {
-              log.error('failed to send keep alive message', {
-                contactUserId: discussion.contactUserId,
-                error: result.error,
-              });
+              this.eventEmitter.emit(
+                SdkEventType.ERROR,
+                new Error(result.error || 'Unknown error'),
+                'keep_alive_message'
+              );
             }
           }
         }

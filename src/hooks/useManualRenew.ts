@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
 import { useAccountStore } from '../stores/accountStore';
-import { restMessageProtocol, gossipSdk } from 'gossip-sdk';
+import { restMessageProtocol, gossipSdk } from '@massalabs/gossip-sdk';
 
 /**
  * Hook to manually renew a discussion (e.g., from settings page).
