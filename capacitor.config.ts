@@ -1,10 +1,17 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 import { KeyboardResize } from '@capacitor/keyboard';
 
+// Enable HTTPS live reload: LIVE_RELOAD=true DEV_HOST=192.168.x.x npx cap run ios
+const devServer =
+  process.env.LIVE_RELOAD === 'true'
+    ? { url: `https://${process.env.DEV_HOST || 'localhost'}:5173` }
+    : undefined;
+
 const config: CapacitorConfig = {
   appId: 'net.massa.gossip',
   appName: 'Gossip',
   webDir: 'dist',
+  server: devServer,
   ios: {
     scheme: 'Gossip',
     contentInset: 'automatic',
