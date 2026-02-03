@@ -112,9 +112,6 @@ export class DiscussionService {
         };
       }
 
-      log.info(
-        `${userId} is establishing session with contact ${contact.name}`
-      );
       const discussionId = await this.db.discussions.add({
         ownerUserId: userId,
         contactUserId: contact.userId,
