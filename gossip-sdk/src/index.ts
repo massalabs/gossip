@@ -76,6 +76,13 @@ export type {
 export { updateDiscussionName } from './utils/discussions';
 export type { UpdateDiscussionNameResult } from './utils/discussions';
 
+// Announcement payload helpers
+export {
+  encodeAnnouncementPayload,
+  decodeAnnouncementPayload,
+} from './utils/announcementPayload';
+export type { AnnouncementPayload } from './utils/announcementPayload';
+
 // Types
 export * from './types';
 

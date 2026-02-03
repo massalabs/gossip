@@ -19,6 +19,7 @@ import { Logger } from '../utils/logs';
 import { BulletinItem } from '../api/messageProtocol/types';
 import { GossipSdkEvents } from '../types/events';
 import { SdkConfig, defaultSdkConfig } from '../config/sdk';
+import { decodeAnnouncementPayload } from '../utils/announcementPayload';
 
 const logger = new Logger('AnnouncementService');
 
@@ -79,7 +80,7 @@ export class AnnouncementService {
 
   async establishSession(
     contactPublicKeys: UserPublicKeys,
-    userData?: Uint8Array
+    payloadBytes?: Uint8Array
   ): Promise<{
     success: boolean;
     error?: string;
@@ -92,7 +93,7 @@ export class AnnouncementService {
     // CRITICAL: await to ensure session state is persisted before sending
     const announcement = await this.session.establishOutgoingSession(
       contactPublicKeys,
-      userData
+      payloadBytes
     );
 
     if (announcement.length === 0) {
@@ -480,49 +481,7 @@ export class AnnouncementService {
 
     log.info('announcement intended for us — decrypting');
 
-    let rawMessage: string | undefined;
-    if (result.user_data?.length > 0) {
-      try {
-        rawMessage = new TextDecoder().decode(result.user_data);
-      } catch (error) {
-        log.error('failed to decode user data', error);
-      }
-    }
-
-    // Parse announcement message format:
-    // - JSON format: {"u":"username","m":"message"} (current)
-    // - Legacy colon format: "username:message" (backwards compat)
-    // - Plain text: "message" (oldest format)
-    // The username is used as the initial contact name if present.
-    // TODO: Remove legacy colon and plain text format support once all clients are updated
-    let extractedUsername: string | undefined;
-    let announcementMessage: string | undefined;
-
-    if (rawMessage) {
-      // Try JSON format first (starts with '{')
-      if (rawMessage.startsWith('{')) {
-        try {
-          const parsed = JSON.parse(rawMessage) as { u?: string; m?: string };
-          extractedUsername = parsed.u?.trim() || undefined;
-          announcementMessage = parsed.m?.trim() || undefined;
-        } catch {
-          // Invalid JSON, treat as plain text
-          announcementMessage = rawMessage;
-        }
-      } else {
-        // Legacy format: check for colon separator
-        const colonIndex = rawMessage.indexOf(':');
-        if (colonIndex !== -1) {
-          extractedUsername =
-            rawMessage.slice(0, colonIndex).trim() || undefined;
-          announcementMessage =
-            rawMessage.slice(colonIndex + 1).trim() || undefined;
-        } else {
-          // Plain text (oldest format)
-          announcementMessage = rawMessage;
-        }
-      }
-    }
+    const { username, message } = decodeAnnouncementPayload(result.user_data);
 
     const announcerPkeys = result.announcer_public_keys;
     const contactUserIdRaw = announcerPkeys.derive_id();
@@ -547,8 +506,9 @@ export class AnnouncementService {
     if (isNewContact) {
       // Use extracted username if present, otherwise generate temporary name
       const name =
-        extractedUsername ||
+        username ||
         (await this._generateTemporaryContactName(this.session.userIdEncoded));
+
       await this.db.contacts.add({
         ownerUserId: this.session.userIdEncoded,
         userId: contactUserId,
@@ -575,7 +535,7 @@ export class AnnouncementService {
     const { discussionId } = await this._handleReceivedDiscussion(
       this.session.userIdEncoded,
       contactUserId,
-      announcementMessage
+      message
     );
 
     // Emit event for new discussion request
