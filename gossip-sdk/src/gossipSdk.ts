@@ -98,6 +98,7 @@ import {
   type SdkEventHandlers,
 } from './core/SdkEventEmitter';
 import { SdkPolling } from './core/SdkPolling';
+import { AnnouncementPayload } from './utils/announcementPayload';
 
 // Re-export event types
 export type { SdkEventType, SdkEventHandlers };
@@ -439,8 +440,8 @@ class GossipSdkImpl {
     };
 
     this._discussionsAPI = {
-      start: (contact, message) =>
-        this._discussion!.initialize(contact, message),
+      start: (contact, payload: AnnouncementPayload) =>
+        this._discussion!.initialize(contact, payload),
       accept: discussion => this._discussion!.accept(discussion),
       renew: contactUserId => this._discussion!.renew(contactUserId),
       isStable: (ownerUserId, contactUserId) =>
@@ -915,7 +916,7 @@ interface DiscussionServiceAPI {
   /** Start a new discussion with a contact */
   start(
     contact: Contact,
-    message?: string
+    payload: AnnouncementPayload
   ): Promise<{ discussionId: number; announcement: Uint8Array }>;
   /** Accept an incoming discussion request */
   accept(discussion: Discussion): Promise<void>;

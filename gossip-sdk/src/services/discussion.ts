@@ -17,6 +17,10 @@ import { UserPublicKeys, SessionStatus } from '../wasm/bindings';
 import { AnnouncementService, EstablishSessionError } from './announcement';
 import { SessionModule, sessionStatusToString } from '../wasm/session';
 import { decodeUserId } from '../utils/userId';
+import {
+  AnnouncementPayload,
+  encodeAnnouncementPayload,
+} from '../utils/announcementPayload';
 import { Logger } from '../utils/logs';
 import { GossipSdkEvents } from '../types/events';
 
@@ -65,25 +69,24 @@ export class DiscussionService {
    */
   async initialize(
     contact: Contact,
-    message?: string
+    payload: AnnouncementPayload
   ): Promise<{
     discussionId: number;
     announcement: Uint8Array;
   }> {
     const log = logger.forMethod('initialize');
+
     try {
       const userId = this.session.userIdEncoded;
-      // Encode message as UTF-8 if provided
-      const userData = message
-        ? new TextEncoder().encode(message)
-        : new Uint8Array(0);
 
-      log.info(
-        `${userId} is establishing session with contact ${contact.name}`
+      const payloadBytes = encodeAnnouncementPayload(
+        payload.username,
+        payload.message
       );
+
       const result = await this.announcementService.establishSession(
         UserPublicKeys.from_bytes(contact.publicKeys),
-        userData
+        payloadBytes
       );
 
       let status: DiscussionStatus = DiscussionStatus.PENDING;
@@ -102,24 +105,6 @@ export class DiscussionService {
         );
       }
 
-      // Parse announcement message to extract only the actual message content.
-      // The message parameter may be JSON format: {"u":"username","m":"message"}
-      // We only want to store the "m" (message) field, not the full JSON.
-      let parsedAnnouncementMessage: string | undefined;
-      if (message) {
-        if (message.startsWith('{')) {
-          try {
-            const parsed = JSON.parse(message) as { u?: string; m?: string };
-            parsedAnnouncementMessage = parsed.m?.trim() || undefined;
-          } catch {
-            // Invalid JSON, treat as plain text
-            parsedAnnouncementMessage = message;
-          }
-        } else {
-          parsedAnnouncementMessage = message;
-        }
-      }
-
       // Persist discussion immediately with the announcement for reliable retry
       const discussionId = await this.db.discussions.add({
         ownerUserId: userId,
@@ -128,7 +113,7 @@ export class DiscussionService {
         status: status,
         nextSeeker: undefined,
         initiationAnnouncement: result.announcement,
-        announcementMessage: parsedAnnouncementMessage,
+        announcementMessage: payload.message,
         unreadCount: 0,
         createdAt: new Date(),
         updatedAt: new Date(),
