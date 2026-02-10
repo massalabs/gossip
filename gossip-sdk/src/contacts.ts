@@ -27,7 +27,7 @@ import type {
   UpdateContactNameResult,
   DeleteContactResult,
 } from './utils/contacts';
-import type { UserPublicKeys } from '#wasm';
+import type { UserPublicKeys } from './wasm/bindings';
 import type { SessionModule } from './wasm/session';
 
 // Re-export result types

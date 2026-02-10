@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
-import { SessionStatus } from '#wasm';
+import { SessionStatus } from '../../src/wasm/bindings';
 import {
   createTestSession,
   createTestSessionPair,

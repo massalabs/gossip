@@ -17,7 +17,7 @@ import {
 import type { IMessageProtocol } from '../../src/api/messageProtocol/types';
 import type { SessionModule } from '../../src/wasm/session';
 import { encodeUserId } from '../../src/utils/userId';
-import { SessionStatus } from '#wasm';
+import { SessionStatus } from '../../src/wasm/bindings';
 import { defaultSdkConfig } from '../../src/config/sdk';
 
 const MESSAGE_OWNER_USER_ID = encodeUserId(new Uint8Array(32).fill(11));

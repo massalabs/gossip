@@ -10,6 +10,9 @@ build/
 *.min.css
 src/assets/generated
 
+# Android assets
+android/app/src/main/assets
+
 # Package manager files
 package-lock.json
 yarn.lock

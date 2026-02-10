@@ -4,9 +4,9 @@
  * Main entry point for the Gossip SDK.
  * Works in both browser and Node.js environments.
  *
- * WASM is loaded via the #wasm subpath import which resolves conditionally:
- * - Browser: web target (uses import.meta.url)
- * - Node: nodejs target (uses fs, no import.meta.url)
+ * WASM is loaded via the web target build with runtime detection:
+ * - Browser: init() uses import.meta.url + fetch
+ * - Node.js / Jiti: init(bytes) reads the .wasm file from disk
  *
  * @example
  * ```typescript
@@ -190,4 +190,4 @@ export {
   ReceiveMessageOutput,
   AnnouncementResult,
   generate_user_keys,
-} from '#wasm';
+} from './wasm/bindings';

@@ -16,7 +16,7 @@ import {
   SessionConfig,
   AnnouncementResult,
   UserKeys,
-} from '#wasm';
+} from './bindings';
 import { UserProfile } from '../db';
 import { encodeUserId } from '../utils/userId';
 
