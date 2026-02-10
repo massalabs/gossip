@@ -6,7 +6,7 @@
  */
 
 import type { Contact, Discussion, Message, UserProfile } from '../src/db';
-import { UserPublicKeys, UserKeys } from '#wasm';
+import { UserPublicKeys, UserKeys } from '../src/wasm/bindings';
 import { generateUserKeys } from '../src/wasm/userKeys';
 import { SessionModule } from '../src/wasm/session';
 import {

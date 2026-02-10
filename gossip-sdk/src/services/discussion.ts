@@ -13,7 +13,7 @@ import {
   MessageStatus,
   DiscussionDirection,
 } from '../db';
-import { UserPublicKeys, SessionStatus } from '#wasm';
+import { UserPublicKeys, SessionStatus } from '../wasm/bindings';
 import { AnnouncementService, EstablishSessionError } from './announcement';
 import { SessionModule, sessionStatusToString } from '../wasm/session';
 import { decodeUserId } from '../utils/userId';

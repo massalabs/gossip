@@ -91,7 +91,7 @@ import {
   updateContactName,
   deleteContact,
 } from './contacts';
-import type { UserPublicKeys } from '#wasm';
+import type { UserPublicKeys } from './wasm/bindings';
 import {
   SdkEventEmitter,
   type SdkEventType,

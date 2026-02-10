@@ -6,7 +6,10 @@
  */
 
 import { ensureWasmInitialized } from './loader';
-import { generate_user_keys as _generate_user_keys, UserKeys } from '#wasm';
+import {
+  generate_user_keys as _generate_user_keys,
+  UserKeys,
+} from './bindings';
 
 // Re-export classes
 export { UserKeys };
