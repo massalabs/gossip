@@ -9,12 +9,6 @@
     "dist",
     "README.md"
   ],
-  "imports": {
-    "#wasm": {
-      "browser": "./dist/assets/generated/wasm/gossip_wasm.js",
-      "default": "./dist/assets/generated/wasm-node/gossip_wasm.js"
-    }
-  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -28,11 +22,13 @@
   "scripts": {
     "prebuild": "rimraf dist",
     "build": "tsc && npm run copy:wasm",
-    "copy:wasm": "mkdir -p dist/assets/generated/wasm dist/assets/generated/wasm-node && cp -R src/assets/generated/wasm/* dist/assets/generated/wasm/ && cp -R src/assets/generated/wasm-node/* dist/assets/generated/wasm-node/",
+    "copy:wasm": "mkdir -p dist/assets/generated/wasm && cp -R src/assets/generated/wasm/* dist/assets/generated/wasm/",
     "test": "vitest",
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "test:e2e": "vitest run test/e2e/"
+    "test:e2e": "vitest run test/e2e/",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix"
   },
   "keywords": [
     "gossip",

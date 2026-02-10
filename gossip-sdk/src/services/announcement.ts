@@ -13,7 +13,7 @@ import {
 } from '../db';
 import { decodeUserId, encodeUserId } from '../utils/userId';
 import { IMessageProtocol } from '../api/messageProtocol';
-import { UserPublicKeys, SessionStatus } from '#wasm';
+import { UserPublicKeys, SessionStatus } from '../wasm/bindings';
 import { SessionModule, sessionStatusToString } from '../wasm/session';
 import { Logger } from '../utils/logs';
 import { BulletinItem } from '../api/messageProtocol/types';
