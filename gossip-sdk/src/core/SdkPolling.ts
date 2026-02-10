@@ -4,8 +4,8 @@
  * Manages polling timers for messages, announcements, and session refresh.
  */
 
-import type { SdkConfig } from '../config/sdk';
-import type { Discussion } from '../db';
+import type { SdkConfig } from '../config/sdk.js';
+import type { Discussion } from '../db.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types

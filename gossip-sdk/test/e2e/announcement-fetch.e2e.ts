@@ -10,15 +10,15 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { GossipSdkImpl } from '../../src/gossipSdk';
+import { GossipSdkImpl } from '../../src/gossipSdk.js';
 import {
   GossipDatabase,
   type Discussion,
   type Contact,
   DiscussionDirection,
-} from '../../src/db';
-import { generateMnemonic } from '../../src/crypto/bip39';
-import { protocolConfig } from '../../src/config/protocol';
+} from '../../src/db.js';
+import { generateMnemonic } from '../../src/crypto/bip39.js';
+import { protocolConfig } from '../../src/config/protocol.js';
 
 describe('E2E: Announcement fetch (real API, real account)', () => {
   let sdk: GossipSdkImpl;

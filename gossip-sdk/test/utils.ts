@@ -5,17 +5,17 @@
  * Uses real WASM SessionModule - no mocks needed.
  */
 
-import type { Contact, Discussion, Message, UserProfile } from '../src/db';
-import { UserPublicKeys, UserKeys } from '#wasm';
-import { generateUserKeys } from '../src/wasm/userKeys';
-import { SessionModule } from '../src/wasm/session';
+import type { Contact, Discussion, Message, UserProfile } from '../src/db.js';
+import { UserPublicKeys, UserKeys } from '../src/wasm/bindings.js';
+import { generateUserKeys } from '../src/wasm/userKeys.js';
+import { SessionModule } from '../src/wasm/session.js';
 import {
   MessageType,
   MessageDirection,
   MessageStatus,
   DiscussionStatus,
   DiscussionDirection,
-} from '../src/db';
+} from '../src/db.js';
 
 /**
  * Create a test contact object (without id).

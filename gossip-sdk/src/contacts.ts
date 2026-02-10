@@ -21,14 +21,14 @@
 import {
   updateContactName as updateContactNameUtil,
   deleteContact as deleteContactUtil,
-} from './utils/contacts';
-import { type Contact, type GossipDatabase } from './db';
+} from './utils/contacts.js';
+import { type Contact, type GossipDatabase } from './db.js';
 import type {
   UpdateContactNameResult,
   DeleteContactResult,
-} from './utils/contacts';
-import type { UserPublicKeys } from '#wasm';
-import type { SessionModule } from './wasm/session';
+} from './utils/contacts.js';
+import type { UserPublicKeys } from './wasm/bindings.js';
+import type { SessionModule } from './wasm/session.js';
 
 // Re-export result types
 export type { UpdateContactNameResult, DeleteContactResult };

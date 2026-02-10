@@ -10,12 +10,12 @@ import {
   MessageType,
   MessageDirection,
   MessageStatus,
-} from '../../src/db';
-import { encodeUserId } from '../../src/utils/userId';
-import { addContact, getContact, getContacts } from '../../src/contacts';
-import { updateContactName, deleteContact } from '../../src/utils/contacts';
-import type { SessionModule } from '../../src/wasm/session';
-import type { UserPublicKeys as UserPublicKeysType } from '#wasm';
+} from '../../src/db.js';
+import { encodeUserId } from '../../src/utils/userId.js';
+import { addContact, getContact, getContacts } from '../../src/contacts.js';
+import { updateContactName, deleteContact } from '../../src/utils/contacts.js';
+import type { SessionModule } from '../../src/wasm/session.js';
+import type { UserPublicKeys as UserPublicKeysType } from '../../src/wasm/bindings.js';
 
 const CONTACTS_OWNER_USER_ID = encodeUserId(new Uint8Array(32).fill(1));
 const CONTACTS_CONTACT_USER_ID = encodeUserId(new Uint8Array(32).fill(2));

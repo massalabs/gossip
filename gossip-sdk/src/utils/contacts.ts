@@ -4,9 +4,9 @@
  * Functions for managing contacts including updating names and deleting contacts.
  */
 
-import { type GossipDatabase } from '../db';
-import { decodeUserId } from './userId';
-import type { SessionModule } from '../wasm/session';
+import { type GossipDatabase } from '../db.js';
+import { decodeUserId } from './userId.js';
+import type { SessionModule } from '../wasm/session.js';
 
 export type UpdateContactNameResult =
   | { success: true; trimmedName: string }

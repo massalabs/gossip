@@ -6,9 +6,9 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { AnnouncementService } from '../../src/services/announcement';
-import { DiscussionService } from '../../src/services/discussion';
-import { MessageService } from '../../src/services/message';
+import { AnnouncementService } from '../../src/services/announcement.js';
+import { DiscussionService } from '../../src/services/discussion.js';
+import { MessageService } from '../../src/services/message.js';
 import {
   db,
   DiscussionStatus,
@@ -16,15 +16,15 @@ import {
   MessageStatus,
   MessageDirection,
   MessageType,
-} from '../../src/db';
-import { SessionStatus } from '#wasm';
-import { MockMessageProtocol } from '../mocks';
+} from '../../src/db.js';
+import { SessionStatus } from '../../src/wasm/bindings.js';
+import { MockMessageProtocol } from '../mocks/index.js';
 import {
   createTestSession,
   cleanupTestSession,
   TestSessionData,
-} from '../utils';
-import type { GossipSdkEvents } from '../../src/types/events';
+} from '../utils.js';
+import type { GossipSdkEvents } from '../../src/types/events.js';
 
 // ============================================================================
 // Session renewal resends unacknowledged messages

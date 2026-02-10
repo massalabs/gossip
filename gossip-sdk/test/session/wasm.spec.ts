@@ -6,13 +6,13 @@
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
-import { SessionStatus } from '#wasm';
+import { SessionStatus } from '../../src/wasm/bindings.js';
 import {
   createTestSession,
   createTestSessionPair,
   cleanupTestSession,
   TestSessionData,
-} from '../utils';
+} from '../utils.js';
 
 describe('Real WASM Session', () => {
   const sessionsToCleanup: TestSessionData[] = [];

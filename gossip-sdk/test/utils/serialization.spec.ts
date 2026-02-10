@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { MessageType } from '../../src/db';
+import { MessageType } from '../../src/db.js';
 import {
   serializeRegularMessage,
   serializeReplyMessage,
@@ -11,7 +11,7 @@ import {
   serializeKeepAliveMessage,
   deserializeMessage,
   MESSAGE_TYPE_KEEP_ALIVE,
-} from '../../src/utils/messageSerialization';
+} from '../../src/utils/messageSerialization.js';
 
 const serializationSeeker = new Uint8Array(34).fill(4);
 

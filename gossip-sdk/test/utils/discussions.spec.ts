@@ -3,9 +3,9 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { db, DiscussionDirection, DiscussionStatus } from '../../src/db';
-import { encodeUserId } from '../../src/utils/userId';
-import { updateDiscussionName } from '../../src/utils/discussions';
+import { db, DiscussionDirection, DiscussionStatus } from '../../src/db.js';
+import { encodeUserId } from '../../src/utils/userId.js';
+import { updateDiscussionName } from '../../src/utils/discussions.js';
 
 const OWNER_USER_ID = encodeUserId(new Uint8Array(32).fill(6));
 const CONTACT_USER_ID = encodeUserId(new Uint8Array(32).fill(7));

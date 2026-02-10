@@ -10,15 +10,15 @@ import {
   type UserProfile,
   DiscussionStatus,
   DiscussionDirection,
-} from '../db';
-import { decodeUserId, encodeUserId } from '../utils/userId';
-import { IMessageProtocol } from '../api/messageProtocol';
-import { UserPublicKeys, SessionStatus } from '#wasm';
-import { SessionModule, sessionStatusToString } from '../wasm/session';
-import { Logger } from '../utils/logs';
-import { BulletinItem } from '../api/messageProtocol/types';
-import { GossipSdkEvents } from '../types/events';
-import { SdkConfig, defaultSdkConfig } from '../config/sdk';
+} from '../db.js';
+import { decodeUserId, encodeUserId } from '../utils/userId.js';
+import { IMessageProtocol } from '../api/messageProtocol/index.js';
+import { UserPublicKeys, SessionStatus } from '../wasm/bindings.js';
+import { SessionModule, sessionStatusToString } from '../wasm/session.js';
+import { Logger } from '../utils/logs.js';
+import { BulletinItem } from '../api/messageProtocol/types.js';
+import { GossipSdkEvents } from '../types/events.js';
+import { SdkConfig, defaultSdkConfig } from '../config/sdk.js';
 
 const logger = new Logger('AnnouncementService');
 

@@ -13,7 +13,7 @@ import {
   MessageDirection,
   MessageStatus,
   MessageType,
-} from '../../src/db';
+} from '../../src/db.js';
 
 const TEST_OWNER_USER_ID = 'gossip1testowner';
 const TEST_CONTACT_USER_ID = 'gossip1testcontact';

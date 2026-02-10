@@ -4,8 +4,8 @@
  * Functions for validating user input like usernames, passwords, and user IDs.
  */
 
-import { type UserProfile, type GossipDatabase } from '../db';
-import { isValidUserId } from './userId';
+import { type UserProfile, type GossipDatabase } from '../db.js';
+import { isValidUserId } from './userId.js';
 
 export type ValidationResult =
   | { valid: true; error?: never }

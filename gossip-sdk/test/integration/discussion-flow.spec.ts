@@ -14,15 +14,15 @@ import {
   vi,
   beforeAll,
 } from 'vitest';
-import { AnnouncementService } from '../../src/services/announcement';
-import { DiscussionService } from '../../src/services/discussion';
-import { db, Contact, DiscussionStatus } from '../../src/db';
-import { MockMessageProtocol } from '../mocks';
+import { AnnouncementService } from '../../src/services/announcement.js';
+import { DiscussionService } from '../../src/services/discussion.js';
+import { db, Contact, DiscussionStatus } from '../../src/db.js';
+import { MockMessageProtocol } from '../mocks/index.js';
 import {
   createTestSession,
   cleanupTestSession,
   TestSessionData,
-} from '../utils';
+} from '../utils.js';
 
 describe('Discussion Flow', () => {
   let mockProtocol: MockMessageProtocol;

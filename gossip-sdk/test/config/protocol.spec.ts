@@ -7,7 +7,7 @@ import {
   protocolConfig,
   setProtocolBaseUrl,
   resetProtocolBaseUrl,
-} from '../../src/config/protocol';
+} from '../../src/config/protocol.js';
 
 describe('protocol config', () => {
   beforeEach(() => {

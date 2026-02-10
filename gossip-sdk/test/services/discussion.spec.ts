@@ -12,8 +12,8 @@ import {
   MessageType,
   DiscussionStatus,
   DiscussionDirection,
-} from '../../src/db';
-import { encodeUserId } from '../../src/utils/userId';
+} from '../../src/db.js';
+import { encodeUserId } from '../../src/utils/userId.js';
 
 // ============================================================================
 // DiscussionService renew message reset behavior

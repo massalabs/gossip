@@ -7,8 +7,8 @@ import {
   EncryptedMessage,
   IMessageProtocol,
   MessageProtocolResponse,
-} from './types';
-import { encodeToBase64, decodeFromBase64 } from '../../utils/base64';
+} from './types.js';
+import { encodeToBase64, decodeFromBase64 } from '../../utils/base64.js';
 
 const BULLETIN_ENDPOINT = '/bulletin';
 const MESSAGES_ENDPOINT = '/messages';

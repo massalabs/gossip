@@ -9,9 +9,9 @@ import {
   isValidUserId,
   formatUserId,
   generate as generateUserId,
-} from '../../src/utils/userId';
+} from '../../src/utils/userId.js';
 import { bech32 } from '@scure/base';
-import { ensureWasmInitialized } from '../../src/wasm/loader';
+import { ensureWasmInitialized } from '../../src/wasm/loader.js';
 
 describe('userId utils', () => {
   describe('encodeUserId / decodeUserId', () => {

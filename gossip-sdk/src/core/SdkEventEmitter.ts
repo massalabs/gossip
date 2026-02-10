@@ -4,7 +4,7 @@
  * Type-safe event emitter for SDK events.
  */
 
-import type { Message, Discussion, Contact } from '../db';
+import type { Message, Discussion, Contact } from '../db.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Event Types

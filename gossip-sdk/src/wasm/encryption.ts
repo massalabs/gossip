@@ -6,13 +6,13 @@
  * ensuring proper initialization before calling any WASM functions.
  */
 
-import { ensureWasmInitialized } from './loader';
+import { ensureWasmInitialized } from './loader.js';
 import {
   EncryptionKey,
   Nonce,
   aead_encrypt as _aead_encrypt,
   aead_decrypt as _aead_decrypt,
-} from '#wasm';
+} from './bindings.js';
 
 // Re-export classes
 export { EncryptionKey, Nonce };

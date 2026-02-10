@@ -9,19 +9,19 @@ export type {
   IMessageProtocol,
   MessageProtocolResponse,
   BulletinItem,
-} from './types';
-export { RestMessageProtocol } from './rest';
-export { MessageProtocol } from './mock';
+} from './types.js';
+export { RestMessageProtocol } from './rest.js';
+export { MessageProtocol } from './mock.js';
 
-import type { IMessageProtocol } from './types';
+import type { IMessageProtocol } from './types.js';
 import {
   defaultMessageProtocol,
   protocolConfig,
   type MessageProtocolType,
-} from '../../config/protocol';
+} from '../../config/protocol.js';
 
-import { RestMessageProtocol } from './rest';
-import { MessageProtocol } from './mock';
+import { RestMessageProtocol } from './rest.js';
+import { MessageProtocol } from './mock.js';
 
 /**
  * Factory function to create message protocol instances

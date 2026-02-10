@@ -3,15 +3,15 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { db } from '../../src/db';
-import { encodeUserId } from '../../src/utils/userId';
+import { db } from '../../src/db.js';
+import { encodeUserId } from '../../src/utils/userId.js';
 import {
   validatePassword,
   validateUsernameFormat,
   validateUsernameAvailability,
   validateUsernameFormatAndAvailability,
   validateUserIdFormat,
-} from '../../src/utils/validation';
+} from '../../src/utils/validation.js';
 
 const VALIDATION_OWNER_USER_ID = encodeUserId(new Uint8Array(32).fill(13));
 

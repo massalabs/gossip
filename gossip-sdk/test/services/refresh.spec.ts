@@ -3,13 +3,13 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { RefreshService } from '../../src/services/refresh';
-import { MessageService } from '../../src/services/message';
-import { db, MessageType, DiscussionDirection } from '../../src/db';
-import type { SessionModule } from '../../src/wasm/session';
-import { encodeUserId, decodeUserId } from '../../src/utils/userId';
-import { SessionStatus } from '#wasm';
-import { DiscussionStatus } from '../../src/db';
+import { RefreshService } from '../../src/services/refresh.js';
+import { MessageService } from '../../src/services/message.js';
+import { db, MessageType, DiscussionDirection } from '../../src/db.js';
+import type { SessionModule } from '../../src/wasm/session.js';
+import { encodeUserId, decodeUserId } from '../../src/utils/userId.js';
+import { SessionStatus } from '../../src/wasm/bindings.js';
+import { DiscussionStatus } from '../../src/db.js';
 
 const REFRESH_OWNER_USER_ID = encodeUserId(new Uint8Array(32).fill(11));
 const REFRESH_CONTACT_USER_ID = encodeUserId(new Uint8Array(32).fill(12));

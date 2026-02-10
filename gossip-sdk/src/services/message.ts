@@ -12,25 +12,28 @@ import {
   MessageDirection,
   MessageStatus,
   MessageType,
-} from '../db';
-import { decodeUserId, encodeUserId } from '../utils/userId';
-import { IMessageProtocol, EncryptedMessage } from '../api/messageProtocol';
-import { SessionStatus, SendMessageOutput } from '#wasm';
-import { SessionModule } from '../wasm';
+} from '../db.js';
+import { decodeUserId, encodeUserId } from '../utils/userId.js';
+import {
+  IMessageProtocol,
+  EncryptedMessage,
+} from '../api/messageProtocol/index.js';
+import { SessionStatus, SendMessageOutput } from '../wasm/bindings.js';
+import { SessionModule } from '../wasm/index.js';
 import {
   serializeRegularMessage,
   serializeReplyMessage,
   serializeForwardMessage,
   serializeKeepAliveMessage,
   deserializeMessage,
-} from '../utils/messageSerialization';
-import { encodeToBase64 } from '../utils/base64';
-import { Result } from '../utils/type';
-import { DiscussionService } from './discussion';
-import { sessionStatusToString } from '../wasm/session';
-import { Logger } from '../utils/logs';
-import { GossipSdkEvents } from '../types/events';
-import { SdkConfig, defaultSdkConfig } from '../config/sdk';
+} from '../utils/messageSerialization.js';
+import { encodeToBase64 } from '../utils/base64.js';
+import { Result } from '../utils/type.js';
+import { DiscussionService } from './discussion.js';
+import { sessionStatusToString } from '../wasm/session.js';
+import { Logger } from '../utils/logs.js';
+import { GossipSdkEvents } from '../types/events.js';
+import { SdkConfig, defaultSdkConfig } from '../config/sdk.js';
 
 export interface MessageResult {
   success: boolean;

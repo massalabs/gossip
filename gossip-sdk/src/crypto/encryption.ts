@@ -11,7 +11,7 @@ import {
   EncryptionKey,
   generateNonce,
   Nonce,
-} from '../wasm/encryption';
+} from '../wasm/encryption.js';
 
 /**
  * Encrypt a plaintext string using AES-256-SIV

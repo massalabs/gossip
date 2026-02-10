@@ -5,7 +5,7 @@
  * the host application about state changes.
  */
 
-import { Message, Discussion, Contact } from '../db';
+import { Message, Discussion, Contact } from '../db.js';
 
 /**
  * Event handlers for SDK events.

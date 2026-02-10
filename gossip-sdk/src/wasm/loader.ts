@@ -1,17 +1,13 @@
 /**
  * WASM Module Loader and Initialization Service
  *
- * This file handles WASM initialization. The actual wasm module is resolved
- * via the #wasm import which conditionally loads the correct target:
- * - Browser: web target (has init function, uses import.meta.url + fetch)
- * - Node: nodejs target (auto-initializes, no init function needed)
+ * This file handles WASM initialization. It uses a single web-target build
+ * and detects the runtime to load the WASM binary appropriately:
+ * - Browser: init() with no args (uses import.meta.url + fetch internally)
+ * - Node.js / Jiti: init(bytes) with WASM bytes read from the filesystem
  */
 
-import * as wasmModule from '#wasm';
-
-// The web target has a default export (init function), nodejs target doesn't
-const init = (wasmModule as { default?: (input?: unknown) => Promise<unknown> })
-  .default;
+import { init } from './bindings.js';
 
 /**
  * WASM Initialization State
@@ -20,6 +16,17 @@ let isInitializing = false;
 let isInitialized = false;
 let initializationPromise: Promise<void> | null = null;
 let initError: Error | null = null;
+
+/**
+ * Detect if running in a Node.js-like environment (Node, Bun, Jiti, etc.)
+ */
+function isNodeRuntime(): boolean {
+  return (
+    typeof process !== 'undefined' &&
+    process.versions != null &&
+    process.versions.node != null
+  );
+}
 
 /**
  * Initialize WASM modules if not already initialized
@@ -42,13 +49,25 @@ export async function initializeWasm(): Promise<void> {
 
   initializationPromise = (async () => {
     try {
-      // The #wasm import resolves to the correct target based on environment:
-      // - Browser (web target): has init() function that needs to be called
-      // - Node (nodejs target): auto-initializes on import, no init needed
-      if (typeof init === 'function') {
+      if (isNodeRuntime()) {
+        // Node.js / Jiti: read WASM bytes from filesystem and pass to init()
+        // Dynamic imports ensure these Node.js modules are tree-shaken in browser builds
+        const fs = await import('node:fs');
+        const url = await import('node:url');
+        const path = await import('node:path');
+
+        const currentDir = path.dirname(url.fileURLToPath(import.meta.url));
+        const wasmPath = path.resolve(
+          currentDir,
+          '../assets/generated/wasm/gossip_wasm_bg.wasm'
+        );
+        const wasmBytes = fs.readFileSync(wasmPath);
+        await init(wasmBytes);
+      } else {
+        // Browser: use default loading (import.meta.url + fetch internally)
         await init();
       }
-      // For nodejs target, wasm is already initialized on import
+
       isInitialized = true;
       isInitializing = false;
     } catch (error) {

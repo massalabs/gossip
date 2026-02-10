@@ -4,11 +4,11 @@
  * Handles storing and retrieving public keys by userId hash via the auth API.
  */
 
-import { UserPublicKeys } from '#wasm';
-import { decodeUserId } from '../utils/userId';
-import { encodeToBase64, decodeFromBase64 } from '../utils/base64';
-import { IMessageProtocol } from '../api/messageProtocol/types';
-import { type GossipDatabase } from '../db';
+import { UserPublicKeys } from '../wasm/bindings.js';
+import { decodeUserId } from '../utils/userId.js';
+import { encodeToBase64, decodeFromBase64 } from '../utils/base64.js';
+import { IMessageProtocol } from '../api/messageProtocol/types.js';
+import { type GossipDatabase } from '../db.js';
 
 export type PublicKeyResult =
   | { publicKey: UserPublicKeys; error?: never }

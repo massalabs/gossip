@@ -11,14 +11,14 @@ import {
   MessageDirection,
   MessageStatus,
   MessageType,
-} from '../db';
-import { sessionStatusToString } from '../wasm/session';
-import type { SessionModule } from '../wasm/session';
-import { SessionStatus } from '#wasm';
-import { decodeUserId, encodeUserId } from '../utils/userId';
-import { MessageService } from './message';
-import { Logger } from '../utils/logs';
-import { GossipSdkEvents } from '../types/events';
+} from '../db.js';
+import { sessionStatusToString } from '../wasm/session.js';
+import type { SessionModule } from '../wasm/session.js';
+import { SessionStatus } from '../wasm/bindings.js';
+import { decodeUserId, encodeUserId } from '../utils/userId.js';
+import { MessageService } from './message.js';
+import { Logger } from '../utils/logs.js';
+import { GossipSdkEvents } from '../types/events.js';
 
 const logger = new Logger('RefreshService');
 

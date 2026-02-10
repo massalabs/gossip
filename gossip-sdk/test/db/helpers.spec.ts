@@ -10,8 +10,8 @@ import {
   MessageDirection,
   MessageStatus,
   MessageType,
-} from '../../src/db';
-import { encodeUserId } from '../../src/utils/userId';
+} from '../../src/db.js';
+import { encodeUserId } from '../../src/utils/userId.js';
 
 const OWNER_USER_ID = encodeUserId(new Uint8Array(32).fill(6));
 const CONTACT_USER_ID = encodeUserId(new Uint8Array(32).fill(7));

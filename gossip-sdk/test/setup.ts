@@ -11,8 +11,8 @@
 import 'fake-indexeddb/auto';
 import { IDBKeyRange } from 'fake-indexeddb';
 import { afterAll, beforeAll, beforeEach } from 'vitest';
-import { getDb } from '../src/db';
-import { initializeWasm } from '../src/wasm/loader';
+import { getDb } from '../src/db.js';
+import { initializeWasm } from '../src/wasm/loader.js';
 
 if (typeof process !== 'undefined') {
   process.env.GOSSIP_API_URL = 'https://api.usegossip.com';

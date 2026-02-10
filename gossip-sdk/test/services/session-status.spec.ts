@@ -13,9 +13,9 @@ import {
   MessageStatus,
   DiscussionStatus,
   DiscussionDirection,
-} from '../../src/db';
-import { encodeUserId } from '../../src/utils/userId';
-import { SessionStatus } from '#wasm';
+} from '../../src/db.js';
+import { encodeUserId } from '../../src/utils/userId.js';
+import { SessionStatus } from '../../src/wasm/bindings.js';
 
 // ============================================================================
 // Auto-accept + renew status logic

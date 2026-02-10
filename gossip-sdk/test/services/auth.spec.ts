@@ -11,13 +11,17 @@ import {
   FAILED_TO_FETCH_ERROR,
   FAILED_TO_FETCH_MESSAGE,
   FAILED_TO_RETRIEVE_CONTACT_PUBLIC_KEY_ERROR,
-} from '../../src/services/auth';
-import { db, UserProfile } from '../../src/db';
-import type { IMessageProtocol } from '../../src/api/messageProtocol/types';
-import { UserPublicKeys, UserKeys, generate_user_keys } from '#wasm';
-import { encodeUserId } from '../../src/utils/userId';
-import { encodeToBase64, decodeFromBase64 } from '../../src/utils/base64';
-import { ensureWasmInitialized } from '../../src/wasm';
+} from '../../src/services/auth.js';
+import { db, UserProfile } from '../../src/db.js';
+import type { IMessageProtocol } from '../../src/api/messageProtocol/types.js';
+import {
+  UserPublicKeys,
+  UserKeys,
+  generate_user_keys,
+} from '../../src/wasm/bindings.js';
+import { encodeUserId } from '../../src/utils/userId.js';
+import { encodeToBase64, decodeFromBase64 } from '../../src/utils/base64.js';
+import { ensureWasmInitialized } from '../../src/wasm/index.js';
 
 function createMockProtocol(
   overrides: Partial<IMessageProtocol> = {}

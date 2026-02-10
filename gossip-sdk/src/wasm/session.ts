@@ -16,9 +16,9 @@ import {
   SessionConfig,
   AnnouncementResult,
   UserKeys,
-} from '#wasm';
-import { UserProfile } from '../db';
-import { encodeUserId } from '../utils/userId';
+} from './bindings.js';
+import { UserProfile } from '../db.js';
+import { encodeUserId } from '../utils/userId.js';
 
 export class SessionModule {
   private sessionManager: SessionManagerWrapper | null = null;

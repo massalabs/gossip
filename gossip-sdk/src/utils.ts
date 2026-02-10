@@ -14,10 +14,10 @@
  * ```
  */
 
-import type { GossipDatabase } from './db';
-import { setDb } from './db';
-import { startWasmInitialization } from './wasm/loader';
-import { setProtocolBaseUrl } from './config/protocol';
+import type { GossipDatabase } from './db.js';
+import { setDb } from './db.js';
+import { startWasmInitialization } from './wasm/loader.js';
+import { setProtocolBaseUrl } from './config/protocol.js';
 
 export interface SdkRuntimeConfig {
   db?: GossipDatabase;

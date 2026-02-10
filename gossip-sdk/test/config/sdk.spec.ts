@@ -8,7 +8,7 @@ import {
   mergeConfig,
   type SdkConfig,
   type DeepPartial,
-} from '../../src/config/sdk';
+} from '../../src/config/sdk.js';
 
 describe('SDK Config', () => {
   describe('defaultSdkConfig', () => {

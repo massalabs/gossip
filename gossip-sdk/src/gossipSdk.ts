@@ -46,58 +46,64 @@ import {
   type Message,
   type UserProfile,
   MessageStatus,
-} from './db';
-import { setDb } from './db';
-import { IMessageProtocol, createMessageProtocol } from './api/messageProtocol';
-import { setProtocolBaseUrl } from './config/protocol';
+} from './db.js';
+import { setDb } from './db.js';
+import {
+  IMessageProtocol,
+  createMessageProtocol,
+} from './api/messageProtocol/index.js';
+import { setProtocolBaseUrl } from './config/protocol.js';
 import {
   type SdkConfig,
   type DeepPartial,
   defaultSdkConfig,
   mergeConfig,
-} from './config/sdk';
-import { startWasmInitialization, ensureWasmInitialized } from './wasm/loader';
-import { generateUserKeys, UserKeys } from './wasm/userKeys';
-import { SessionModule } from './wasm/session';
-import { EncryptionKey } from './wasm/encryption';
+} from './config/sdk.js';
+import {
+  startWasmInitialization,
+  ensureWasmInitialized,
+} from './wasm/loader.js';
+import { generateUserKeys, UserKeys } from './wasm/userKeys.js';
+import { SessionModule } from './wasm/session.js';
+import { EncryptionKey } from './wasm/encryption.js';
 import {
   AnnouncementService,
   type AnnouncementReceptionResult,
-} from './services/announcement';
-import { DiscussionService } from './services/discussion';
+} from './services/announcement.js';
+import { DiscussionService } from './services/discussion.js';
 import {
   MessageService,
   type MessageResult,
   type SendMessageResult,
-} from './services/message';
-import { RefreshService } from './services/refresh';
-import { AuthService } from './services/auth';
+} from './services/message.js';
+import { RefreshService } from './services/refresh.js';
+import { AuthService } from './services/auth.js';
 import type {
   DeleteContactResult,
   UpdateContactNameResult,
-} from './utils/contacts';
+} from './utils/contacts.js';
 import {
   validateUserIdFormat,
   validateUsernameFormat,
   type ValidationResult,
-} from './utils/validation';
-import { QueueManager } from './utils/queue';
-import { encodeUserId, decodeUserId } from './utils/userId';
-import type { GossipSdkEvents } from './types/events';
+} from './utils/validation.js';
+import { QueueManager } from './utils/queue.js';
+import { encodeUserId, decodeUserId } from './utils/userId.js';
+import type { GossipSdkEvents } from './types/events.js';
 import {
   getContacts,
   getContact,
   addContact,
   updateContactName,
   deleteContact,
-} from './contacts';
-import type { UserPublicKeys } from '#wasm';
+} from './contacts.js';
+import type { UserPublicKeys } from './wasm/bindings.js';
 import {
   SdkEventEmitter,
   type SdkEventType,
   type SdkEventHandlers,
-} from './core/SdkEventEmitter';
-import { SdkPolling } from './core/SdkPolling';
+} from './core/SdkEventEmitter.js';
+import { SdkPolling } from './core/SdkPolling.js';
 
 // Re-export event types
 export type { SdkEventType, SdkEventHandlers };

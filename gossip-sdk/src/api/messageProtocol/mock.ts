@@ -5,7 +5,7 @@
  * This uses the real Gossip API rather than a mock transport.
  */
 
-import { RestMessageProtocol } from './rest';
+import { RestMessageProtocol } from './rest.js';
 
 /**
  * Create a MessageProtocol instance backed by REST.

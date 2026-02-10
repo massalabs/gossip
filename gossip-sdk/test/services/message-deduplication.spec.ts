@@ -10,9 +10,9 @@ import {
   MessageType,
   DiscussionStatus,
   DiscussionDirection,
-} from '../../src/db';
-import { encodeUserId } from '../../src/utils/userId';
-import { defaultSdkConfig, type SdkConfig } from '../../src/config/sdk';
+} from '../../src/db.js';
+import { encodeUserId } from '../../src/utils/userId.js';
+import { defaultSdkConfig, type SdkConfig } from '../../src/config/sdk.js';
 
 const DEDUP_OWNER_USER_ID = encodeUserId(new Uint8Array(32).fill(1));
 const DEDUP_CONTACT_USER_ID = encodeUserId(new Uint8Array(32).fill(2));

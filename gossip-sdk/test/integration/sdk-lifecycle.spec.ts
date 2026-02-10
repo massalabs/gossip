@@ -7,8 +7,8 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { GossipDatabase } from '../../src/db';
-import type { EncryptionKey } from '../../src/wasm/encryption';
+import { GossipDatabase } from '../../src/db.js';
+import type { EncryptionKey } from '../../src/wasm/encryption.js';
 
 const protocolMock = vi.hoisted(() => ({
   createMessageProtocolMock: vi.fn(),
@@ -155,7 +155,7 @@ describe('GossipSdkImpl lifecycle', () => {
   });
 
   it('initializes once and exposes auth service', async () => {
-    const { GossipSdkImpl } = await import('../../src/gossipSdk');
+    const { GossipSdkImpl } = await import('../../src/gossipSdk.js');
     const sdk = new GossipSdkImpl();
 
     await sdk.init({ db: new GossipDatabase() });
@@ -168,7 +168,7 @@ describe('GossipSdkImpl lifecycle', () => {
   });
 
   it('throws on openSession before init', async () => {
-    const { GossipSdkImpl } = await import('../../src/gossipSdk');
+    const { GossipSdkImpl } = await import('../../src/gossipSdk.js');
     const sdk = new GossipSdkImpl();
 
     await expect(sdk.openSession({ mnemonic: 'test words' })).rejects.toThrow(
@@ -177,7 +177,7 @@ describe('GossipSdkImpl lifecycle', () => {
   });
 
   it('opens and closes session with getters wired', async () => {
-    const { GossipSdkImpl } = await import('../../src/gossipSdk');
+    const { GossipSdkImpl } = await import('../../src/gossipSdk.js');
     const sdk = new GossipSdkImpl();
 
     await sdk.init({ db: new GossipDatabase() });
@@ -195,7 +195,7 @@ describe('GossipSdkImpl lifecycle', () => {
   });
 
   it('restores encrypted session when provided', async () => {
-    const { GossipSdkImpl } = await import('../../src/gossipSdk');
+    const { GossipSdkImpl } = await import('../../src/gossipSdk.js');
     const sdk = new GossipSdkImpl();
     const encryptedSession = new Uint8Array([1, 2, 3]);
     const encryptionKey = {} as EncryptionKey;
@@ -211,7 +211,7 @@ describe('GossipSdkImpl lifecycle', () => {
   });
 
   it('persists session via onPersist callback', async () => {
-    const { GossipSdkImpl } = await import('../../src/gossipSdk');
+    const { GossipSdkImpl } = await import('../../src/gossipSdk.js');
     const sdk = new GossipSdkImpl();
     const onPersist = vi.fn().mockResolvedValue(undefined);
     const persistEncryptionKey = {} as EncryptionKey;
@@ -231,7 +231,7 @@ describe('GossipSdkImpl lifecycle', () => {
   });
 
   it('bridges message events to sdk.on handlers', async () => {
-    const { GossipSdkImpl } = await import('../../src/gossipSdk');
+    const { GossipSdkImpl } = await import('../../src/gossipSdk.js');
     const sdk = new GossipSdkImpl();
     const handler = vi.fn();
 
@@ -262,7 +262,7 @@ describe('GossipSdkImpl.configurePersistence', () => {
   });
 
   it('throws if called before session is opened', async () => {
-    const { GossipSdkImpl } = await import('../../src/gossipSdk');
+    const { GossipSdkImpl } = await import('../../src/gossipSdk.js');
     const sdk = new GossipSdkImpl();
     const onPersist = vi.fn();
     const encryptionKey = {} as EncryptionKey;
@@ -275,7 +275,7 @@ describe('GossipSdkImpl.configurePersistence', () => {
   });
 
   it('configures persistence after session is opened without initial onPersist', async () => {
-    const { GossipSdkImpl } = await import('../../src/gossipSdk');
+    const { GossipSdkImpl } = await import('../../src/gossipSdk.js');
     const sdk = new GossipSdkImpl();
     const onPersist = vi.fn().mockResolvedValue(undefined);
     const encryptionKey = {} as EncryptionKey;
@@ -292,7 +292,7 @@ describe('GossipSdkImpl.configurePersistence', () => {
   });
 
   it('replaces existing onPersist callback when reconfigured', async () => {
-    const { GossipSdkImpl } = await import('../../src/gossipSdk');
+    const { GossipSdkImpl } = await import('../../src/gossipSdk.js');
     const sdk = new GossipSdkImpl();
     const originalOnPersist = vi.fn().mockResolvedValue(undefined);
     const newOnPersist = vi.fn().mockResolvedValue(undefined);
@@ -316,7 +316,7 @@ describe('GossipSdkImpl.configurePersistence', () => {
   });
 
   it('ensures persistence is called with correct encryption key', async () => {
-    const { GossipSdkImpl } = await import('../../src/gossipSdk');
+    const { GossipSdkImpl } = await import('../../src/gossipSdk.js');
     const sdk = new GossipSdkImpl();
     const onPersist = vi.fn().mockResolvedValue(undefined);
     const specificKey = { keyId: 'test-key-123' } as unknown as EncryptionKey;

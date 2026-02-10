@@ -5,11 +5,11 @@
  * allowing tests to verify messaging flows without network calls.
  */
 
-import type { IMessageProtocol } from '../../src/api/messageProtocol/types';
+import type { IMessageProtocol } from '../../src/api/messageProtocol/types.js';
 import type {
   EncryptedMessage,
   BulletinItem,
-} from '../../src/api/messageProtocol/types';
+} from '../../src/api/messageProtocol/types.js';
 
 export class MockMessageProtocol implements IMessageProtocol {
   private messages: Map<string, Uint8Array> = new Map();

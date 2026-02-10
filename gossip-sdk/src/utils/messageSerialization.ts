@@ -6,7 +6,7 @@
  */
 
 import { strToBytes, bytesToStr, U32 } from '@massalabs/massa-web3';
-import { MessageType } from '../db';
+import { MessageType } from '../db.js';
 
 // Message type constants (protocol-level)
 const MESSAGE_TYPE_REGULAR = 0x00;

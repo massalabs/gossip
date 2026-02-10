@@ -3,9 +3,18 @@ import globals from 'globals';
 import reactHooks from 'eslint-plugin-react-hooks';
 import reactRefresh from 'eslint-plugin-react-refresh';
 import tseslint from 'typescript-eslint';
+import importX from 'eslint-plugin-import-x';
 
 export default tseslint.config(
-  { ignores: ['dist', 'src/assets/generated', 'android/**', 'ios/**'] },
+  {
+    ignores: [
+      'dist',
+      'src/assets/generated',
+      'gossip-sdk/src/assets/generated',
+      'android/**',
+      'ios/**',
+    ],
+  },
   {
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     files: ['**/*.{ts,tsx}'],
@@ -32,6 +41,19 @@ export default tseslint.config(
           caughtErrorsIgnorePattern: '^_',
         },
       ],
+    },
+  },
+  // gossip-sdk: enforce .js extensions on relative imports (required for Node.js ESM / Jiti)
+  {
+    files: ['gossip-sdk/**/*.ts'],
+    plugins: {
+      'import-x': importX,
+    },
+    rules: {
+      'import-x/extensions': ['error', 'always', { ignorePackages: true }],
+      // Disable React rules that don't apply to the SDK
+      'react-hooks/exhaustive-deps': 'off',
+      'react-refresh/only-export-components': 'off',
     },
   }
 );

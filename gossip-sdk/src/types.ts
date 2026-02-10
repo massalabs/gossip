@@ -14,7 +14,7 @@ export type {
   PendingAnnouncement,
   ActiveSeeker,
   AuthMethod,
-} from './db';
+} from './db.js';
 
 // Database enums
 export {
@@ -23,19 +23,19 @@ export {
   MessageStatus,
   DiscussionDirection,
   MessageType,
-} from './db';
+} from './db.js';
 
 // Service result types
-export type { PublicKeyResult } from './services/auth';
-export type { MessageResult, SendMessageResult } from './services/message';
-export type { AnnouncementReceptionResult } from './services/announcement';
+export type { PublicKeyResult } from './services/auth.js';
+export type { MessageResult, SendMessageResult } from './services/message.js';
+export type { AnnouncementReceptionResult } from './services/announcement.js';
 
 // Utility result types
 export type {
   UpdateContactNameResult,
   DeleteContactResult,
-} from './utils/contacts';
-export type { UpdateDiscussionNameResult } from './utils/discussions';
+} from './utils/contacts.js';
+export type { UpdateDiscussionNameResult } from './utils/discussions.js';
 
 // API types
 export type {
@@ -43,7 +43,7 @@ export type {
   EncryptedMessage,
   MessageProtocolResponse,
   BulletinItem,
-} from './api/messageProtocol/types';
+} from './api/messageProtocol/types.js';
 
 // Wallet types (pure TypeScript types for the app to use)
 export type Ticker = string;

@@ -3,8 +3,8 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { DiscussionService } from '../../src/services/discussion';
-import { MessageService } from '../../src/services/message';
+import { DiscussionService } from '../../src/services/discussion.js';
+import { MessageService } from '../../src/services/message.js';
 import {
   GossipDatabase,
   db,
@@ -13,12 +13,12 @@ import {
   MessageType,
   DiscussionStatus,
   DiscussionDirection,
-} from '../../src/db';
-import type { IMessageProtocol } from '../../src/api/messageProtocol/types';
-import type { SessionModule } from '../../src/wasm/session';
-import { encodeUserId } from '../../src/utils/userId';
-import { SessionStatus } from '#wasm';
-import { defaultSdkConfig } from '../../src/config/sdk';
+} from '../../src/db.js';
+import type { IMessageProtocol } from '../../src/api/messageProtocol/types.js';
+import type { SessionModule } from '../../src/wasm/session.js';
+import { encodeUserId } from '../../src/utils/userId.js';
+import { SessionStatus } from '../../src/wasm/bindings.js';
+import { defaultSdkConfig } from '../../src/config/sdk.js';
 
 const MESSAGE_OWNER_USER_ID = encodeUserId(new Uint8Array(32).fill(11));
 const MESSAGE_CONTACT_USER_ID = encodeUserId(new Uint8Array(32).fill(12));

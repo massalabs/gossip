@@ -12,9 +12,9 @@ import {
   MessageType,
   DiscussionStatus,
   DiscussionDirection,
-} from '../../src/db';
-import { encodeUserId } from '../../src/utils/userId';
-import { defaultSdkConfig } from '../../src/config/sdk';
+} from '../../src/db.js';
+import { encodeUserId } from '../../src/utils/userId.js';
+import { defaultSdkConfig } from '../../src/config/sdk.js';
 
 // ============================================================================
 // SENDING reset on startup

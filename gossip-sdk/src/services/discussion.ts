@@ -12,13 +12,13 @@ import {
   MessageDirection,
   MessageStatus,
   DiscussionDirection,
-} from '../db';
-import { UserPublicKeys, SessionStatus } from '#wasm';
-import { AnnouncementService, EstablishSessionError } from './announcement';
-import { SessionModule, sessionStatusToString } from '../wasm/session';
-import { decodeUserId } from '../utils/userId';
-import { Logger } from '../utils/logs';
-import { GossipSdkEvents } from '../types/events';
+} from '../db.js';
+import { UserPublicKeys, SessionStatus } from '../wasm/bindings.js';
+import { AnnouncementService, EstablishSessionError } from './announcement.js';
+import { SessionModule, sessionStatusToString } from '../wasm/session.js';
+import { decodeUserId } from '../utils/userId.js';
+import { Logger } from '../utils/logs.js';
+import { GossipSdkEvents } from '../types/events.js';
 
 const logger = new Logger('DiscussionService');
 

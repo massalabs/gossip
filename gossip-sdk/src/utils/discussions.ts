@@ -4,7 +4,7 @@
  * Functions for managing discussion metadata.
  */
 
-import { type GossipDatabase } from '../db';
+import { type GossipDatabase } from '../db.js';
 
 export type UpdateDiscussionNameResult =
   | { success: true; trimmedName: string | undefined }
