@@ -12,7 +12,7 @@ import {
   Nonce,
   aead_encrypt as _aead_encrypt,
   aead_decrypt as _aead_decrypt,
-} from '#wasm';
+} from './bindings';
 
 // Re-export classes
 export { EncryptionKey, Nonce };

@@ -17,7 +17,7 @@ import {
   MessageDirection,
   MessageType,
 } from '../../src/db';
-import { SessionStatus } from '#wasm';
+import { SessionStatus } from '../../src/wasm/bindings';
 import { MockMessageProtocol } from '../mocks';
 import {
   createTestSession,

@@ -24,11 +24,6 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': resolve(__dirname, 'src'),
-      // Use nodejs wasm target for tests (Node environment)
-      '#wasm': resolve(
-        __dirname,
-        'src/assets/generated/wasm-node/gossip_wasm.js'
-      ),
     },
   },
 });
