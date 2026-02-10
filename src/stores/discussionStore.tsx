@@ -61,6 +61,9 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
 
     const subscriptionDiscussions = discussionsQuery.subscribe({
       next: async discussionsList => {
+        // Check if SDK session is open before attempting to get status
+        const isSessionOpen = gossipSdk.isSessionOpen;
+
         // Sort discussions: new requests (PENDING) first, then active discussions
         // Within each group, sort by most recent activity
         const getActivityTime = (discussion: Discussion): number => {
@@ -69,21 +72,25 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
             return discussion.lastMessageTimestamp.getTime();
           }
 
-          // For pending requests, use updatedAt
-          if (
-            [SessionStatus.SelfRequested, SessionStatus.PeerRequested].includes(
-              gossipSdk.discussions.getStatus(discussion.contactUserId)
-            ) &&
-            discussion.updatedAt
-          ) {
-            return discussion.updatedAt.getTime();
+          // For pending requests, use updatedAt (only if session is open)
+          if (isSessionOpen) {
+            const status = gossipSdk.discussions.getStatus(
+              discussion.contactUserId
+            );
+            if (
+              [
+                SessionStatus.SelfRequested,
+                SessionStatus.PeerRequested,
+              ].includes(status) &&
+              discussion.updatedAt
+            ) {
+              return discussion.updatedAt.getTime();
+            }
           }
 
           // Fallback to creation time for all other cases
           return discussion.createdAt.getTime();
         };
-
-        console.log('discussionsList', discussionsList);
 
         const getStatusPriority = (status: SessionStatus): number => {
           // PENDING (new requests) = highest priority (0)
@@ -100,15 +107,16 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
         };
 
         const sortedDiscussions = discussionsList.sort((a, b) => {
-          // First, separate by status: PENDING first, then ACTIVE, then others
-          const statusDiff =
-            getStatusPriority(
-              gossipSdk.discussions.getStatus(a.contactUserId)
-            ) -
-            getStatusPriority(gossipSdk.discussions.getStatus(b.contactUserId));
-          if (statusDiff !== 0) return statusDiff;
+          // If session is open, separate by status: PENDING first, then ACTIVE, then others
+          if (isSessionOpen) {
+            const aStatus = gossipSdk.discussions.getStatus(a.contactUserId);
+            const bStatus = gossipSdk.discussions.getStatus(b.contactUserId);
+            const statusDiff =
+              getStatusPriority(aStatus) - getStatusPriority(bStatus);
+            if (statusDiff !== 0) return statusDiff;
+          }
 
-          // Within the same status group, sort by activity time
+          // Within the same status group (or when session is closed), sort by activity time
           return getActivityTime(b) - getActivityTime(a);
         });
 
@@ -168,6 +176,8 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
   getDiscussionsByStatus: (status: SessionStatus[]) => {
     const ownerUserId = useAccountStore.getState().userProfile?.userId;
     if (!ownerUserId) return [];
+    // Return empty array if session is not open (cannot get status)
+    if (!gossipSdk.isSessionOpen) return [];
     return get().discussions.filter(discussion => {
       return status.includes(
         gossipSdk.discussions.getStatus(discussion.contactUserId)

@@ -14,22 +14,30 @@ import {
   vi,
   beforeAll,
 } from 'vitest';
-import { db, Contact, DiscussionDirection } from '../../src/db';
+import {
+  db,
+  Contact,
+  DiscussionDirection,
+  MessageType,
+  MessageDirection,
+  MessageStatus,
+} from '../../src/db';
 import { MockMessageProtocol } from '../mocks';
 import {
   createTestSession,
   cleanupTestSession,
   TestSessionData,
+  setupSession,
 } from '../utils';
 import { encodeAnnouncementPayload } from '../../src/utils/announcementPayload';
 import { GossipSdkImpl } from '../../src/gossipSdk';
 import { ensureWasmInitialized } from '../../src/wasm/loader';
 import { generateMnemonic } from '../../src/crypto/bip39';
 import { generateEncryptionKey } from '../../src/wasm/encryption';
-import { SessionStatus } from '../../src/assets/generated/wasm/gossip_wasm';
+// @ts-expect-error - #wasm is a subpath import alias that works at runtime
+import { SessionStatus, SessionConfig, UserPublicKeys } from '#wasm';
 import { AnnouncementService } from '../../src/services/announcement';
 import { MessageService } from '../../src/services/message';
-import { UserPublicKeys } from '../../src/assets/generated/wasm/gossip_wasm';
 
 /**
  * Utility function to check if a session is fully up and active.
@@ -174,7 +182,7 @@ describe('Discussion Flow', () => {
       expect(bobContact).toBeDefined();
       expect(bobContact?.name).toBe('Alice');
 
-      const bobDiscussion = await db.getDiscussionByOwnerAndContact(
+      const bobDiscussion = await bobSdk.discussions.get(
         bobSdk.userId,
         alice.session.userIdEncoded
       );
@@ -210,7 +218,7 @@ describe('Discussion Flow', () => {
       expect(bobContact).toBeDefined();
       expect(bobContact?.name).toMatch(/^New Request \d+$/);
 
-      const bobDiscussion = await db.getDiscussionByOwnerAndContact(
+      const bobDiscussion = await bobSdk.discussions.get(
         bobSdk.userId,
         alice.session.userIdEncoded
       );
@@ -242,7 +250,7 @@ describe('Discussion Flow', () => {
       expect(bobContact).toBeDefined();
       expect(bobContact?.name).toBe('AliceUser');
 
-      const bobDiscussion = await db.getDiscussionByOwnerAndContact(
+      const bobDiscussion = await bobSdk.discussions.get(
         bobSdk.userId,
         alice.session.userIdEncoded
       );
@@ -270,7 +278,7 @@ describe('Discussion Flow', () => {
       expect(bobContact).toBeDefined();
       expect(bobContact?.name).toMatch(/^New Request \d+$/);
 
-      const bobDiscussion = await db.getDiscussionByOwnerAndContact(
+      const bobDiscussion = await bobSdk.discussions.get(
         bobSdk.userId,
         alice.session.userIdEncoded
       );
@@ -301,7 +309,7 @@ describe('Discussion Flow', () => {
       expect(bobContact).toBeDefined();
       expect(bobContact?.name).toBe('Alice:Smith');
 
-      const bobDiscussion = await db.getDiscussionByOwnerAndContact(
+      const bobDiscussion = await bobSdk.discussions.get(
         bobSdk.userId,
         alice.session.userIdEncoded
       );
@@ -330,7 +338,7 @@ describe('Discussion Flow', () => {
 
       expect(bobContact?.name).toBe('OldAlice');
 
-      const bobDiscussion = await db.getDiscussionByOwnerAndContact(
+      const bobDiscussion = await bobSdk.discussions.get(
         bobSdk.userId,
         alice.session.userIdEncoded
       );
@@ -374,7 +382,7 @@ describe('Discussion Flow', () => {
       // Bob fetches announcements and sees Alice's request
       await bobSdk.announcements.fetch();
 
-      const bobDiscussion = await db.getDiscussionByOwnerAndContact(
+      const bobDiscussion = await bobSdk.discussions.get(
         bobSdk.userId,
         aliceSdk.userId
       );
@@ -507,7 +515,7 @@ describe('Discussion Flow', () => {
       // Bob fetches announcements and sees Alice's request
       await bobSdk.announcements.fetch();
 
-      const bobDiscussion = await db.getDiscussionByOwnerAndContact(
+      const bobDiscussion = await bobSdk.discussions.get(
         bobSdk.userId,
         aliceSdk.userId
       );
@@ -523,7 +531,7 @@ describe('Discussion Flow', () => {
       await bobSdk.contacts.delete(bobSdk.userId, aliceSdk.userId);
 
       // On Bob's side: discussion and contact should be deleted
-      const bobDiscussionAfterRefuse = await db.getDiscussionByOwnerAndContact(
+      const bobDiscussionAfterRefuse = await bobSdk.discussions.get(
         bobSdk.userId,
         aliceSdk.userId
       );
@@ -570,7 +578,7 @@ describe('Discussion Flow', () => {
       // Bob fetches announcements and sees Alice's request
       await bobSdk.announcements.fetch();
 
-      const bobDiscussion = await db.getDiscussionByOwnerAndContact(
+      const bobDiscussion = await bobSdk.discussions.get(
         bobSdk.userId,
         aliceSdk.userId
       );
@@ -580,7 +588,7 @@ describe('Discussion Flow', () => {
       await bobSdk.contacts.delete(bobSdk.userId, aliceSdk.userId);
 
       // Verify Bob's side is cleaned up
-      const bobDiscussionAfterRefuse = await db.getDiscussionByOwnerAndContact(
+      const bobDiscussionAfterRefuse = await bobSdk.discussions.get(
         bobSdk.userId,
         aliceSdk.userId
       );
@@ -617,7 +625,7 @@ describe('Discussion Flow', () => {
       // will update the existing discussion rather than create a new one
       await aliceSdk.announcements.fetch();
 
-      const aliceDiscussionFromBob = await db.getDiscussionByOwnerAndContact(
+      const aliceDiscussionFromBob = await aliceSdk.discussions.get(
         aliceSdk.userId,
         bobSdk.userId
       );
@@ -657,7 +665,7 @@ describe('Discussion Flow', () => {
       // Bob fetches announcements and sees Alice's request
       await bobSdk.announcements.fetch();
 
-      const bobDiscussion = await db.getDiscussionByOwnerAndContact(
+      const bobDiscussion = await bobSdk.discussions.get(
         bobSdk.userId,
         aliceSdk.userId
       );
@@ -745,7 +753,7 @@ describe('Discussion Flow', () => {
       // Bob fetches announcements and sees Alice's initial request
       await bobSdk.announcements.fetch();
 
-      let bobDiscussion = await db.getDiscussionByOwnerAndContact(
+      let bobDiscussion = await bobSdk.discussions.get(
         bobSdk.userId,
         aliceSdk.userId
       );
@@ -773,7 +781,7 @@ describe('Discussion Flow', () => {
       // Bob fetches announcements and sees Alice's renewal
       await bobSdk.announcements.fetch();
 
-      bobDiscussion = await db.getDiscussionByOwnerAndContact(
+      bobDiscussion = await bobSdk.discussions.get(
         bobSdk.userId,
         aliceSdk.userId
       );
@@ -917,7 +925,7 @@ describe('Discussion Flow', () => {
       // STEP 2: Bob fetches announcements and sees Alice's request
       await bobSdk.announcements.fetch();
 
-      const bobDiscussion = await db.getDiscussionByOwnerAndContact(
+      const bobDiscussion = await bobSdk.discussions.get(
         bobSdk.userId,
         aliceSdk.userId
       );
@@ -1270,5 +1278,684 @@ describe('Discussion Flow', () => {
       // Restore original retry delay
       bobSdk.config.announcements.retryDelayMs = originalRetryDelay;
     });
+  });
+
+  describe('remove contact', () => {
+    /**
+     * Helper function to verify that contact deletion was successful
+     */
+    async function checkDeleted(
+      userSdk: GossipSdkImpl,
+      contactUserId: string,
+      database: typeof db
+    ): Promise<void> {
+      // Verify contact is deleted
+      const contact = await database.getContactByOwnerAndUserId(
+        userSdk.userId,
+        contactUserId
+      );
+      expect(contact).toBeUndefined();
+
+      // Verify discussion is deleted
+      const discussion = await userSdk.discussions.get(
+        userSdk.userId,
+        contactUserId
+      );
+      expect(discussion).toBeUndefined();
+
+      // Verify all messages are deleted
+      const messages = await database.messages
+        .where('[ownerUserId+contactUserId]')
+        .equals([userSdk.userId, contactUserId])
+        .toArray();
+      expect(messages.length).toBe(0);
+
+      // Verify session status is UnknownPeer
+      expect(userSdk.discussions.getStatus(contactUserId)).toBe(
+        SessionStatus.UnknownPeer
+      );
+    }
+
+    it('Alice delete Bob contact', async () => {
+      // Setup: Alice and Bob establish a session
+      await setupSession(aliceSdk, bobSdk, 'Bob', 'Alice');
+
+      // Verify session is active
+      expect(await isLocalSessionUp(aliceSdk, bobSdk.userId)).toBe(true);
+
+      // Alice deletes Bob contact
+      await aliceSdk.contacts.delete(aliceSdk.userId, bobSdk.userId);
+
+      // Verify deletion was successful
+      await checkDeleted(aliceSdk, bobSdk.userId, db);
+    });
+
+    it('Alice send an announcement with msg to bob but bob delete alice contact', async () => {
+      const aliceBobContact: Omit<Contact, 'id'> = {
+        ownerUserId: aliceSdk.userId,
+        userId: bobSdk.userId,
+        name: 'Bob',
+        publicKeys: bobSdk.publicKeys.to_bytes(),
+        avatar: undefined,
+        isOnline: false,
+        lastSeen: new Date(),
+        createdAt: new Date(),
+      };
+
+      await db.contacts.add(aliceBobContact);
+
+      // Alice sends announcement with message
+      const announcementMsg = "Hello Bob, let's connect!";
+      const result = await aliceSdk.discussions.start(
+        aliceBobContact,
+        announcementMsg
+      );
+      if (!result.success) throw result.error;
+
+      // Bob fetches Alice's announcement
+      await bobSdk.announcements.fetch();
+
+      // Verify Bob has Alice's contact
+      const bobAliceContact = await db.getContactByOwnerAndUserId(
+        bobSdk.userId,
+        aliceSdk.userId
+      );
+      expect(bobAliceContact).toBeDefined();
+
+      // Verify Bob has discussion with Alice
+      const bobDiscussion = await bobSdk.discussions.get(
+        bobSdk.userId,
+        aliceSdk.userId
+      );
+      expect(bobDiscussion).toBeDefined();
+      expect(bobDiscussion?.lastAnnouncementMessage).toBe(announcementMsg);
+      expect(bobDiscussion?.weAccepted).toBe(false);
+
+      // Bob deletes Alice's contact
+      await bobSdk.contacts.delete(bobSdk.userId, aliceSdk.userId);
+
+      // Verify deletion was successful
+      await checkDeleted(bobSdk, aliceSdk.userId, db);
+
+      // Verify Alice has still a pending discussion with Bob
+      const aliceDiscussion = await aliceSdk.discussions.get(
+        aliceSdk.userId,
+        bobSdk.userId
+      );
+      expect(aliceDiscussion).toBeDefined();
+      // Alice initiated the discussion, so weAccepted stays true but the session is still pending on Bob's side
+      expect(aliceDiscussion?.weAccepted).toBe(true);
+      expect(aliceDiscussion?.direction).toBe(DiscussionDirection.INITIATED);
+      expect(aliceSdk.discussions.getStatus(bobSdk.userId)).toBe(
+        SessionStatus.SelfRequested
+      );
+    });
+
+    it('Alice Send announcement to Bob. Alice delete Bob before he accept', async () => {
+      const aliceBobContact: Omit<Contact, 'id'> = {
+        ownerUserId: aliceSdk.userId,
+        userId: bobSdk.userId,
+        name: 'Bob',
+        publicKeys: bobSdk.publicKeys.to_bytes(),
+        avatar: undefined,
+        isOnline: false,
+        lastSeen: new Date(),
+        createdAt: new Date(),
+      };
+
+      await db.contacts.add(aliceBobContact);
+
+      // Alice sends announcement with message
+      const announcementMsg = 'Hello Bob!';
+      const result = await aliceSdk.discussions.start(
+        aliceBobContact,
+        announcementMsg
+      );
+      if (!result.success) throw result.error;
+
+      // Bob fetches Alice's announcement
+      await bobSdk.announcements.fetch();
+
+      const bobDiscussion = await bobSdk.discussions.get(
+        bobSdk.userId,
+        aliceSdk.userId
+      );
+      expect(bobDiscussion).toBeDefined();
+      expect(bobDiscussion?.weAccepted).toBe(false);
+
+      // Alice deletes Bob's contact before he accepts
+      await aliceSdk.contacts.delete(aliceSdk.userId, bobSdk.userId);
+
+      // Verify deletion was successful
+      await checkDeleted(aliceSdk, bobSdk.userId, db);
+
+      // Bob accepts and sends announcement back
+      if (!bobDiscussion) throw new Error('Bob discussion not found');
+      await bobSdk.discussions.accept(bobDiscussion);
+
+      // Alice fetches Bob's announcement
+      await aliceSdk.announcements.fetch();
+
+      // Alice should see Bob's announcement as PeerRequested with weAccepted=false
+      const aliceDiscussionFromBob = await aliceSdk.discussions.get(
+        aliceSdk.userId,
+        bobSdk.userId
+      );
+      expect(aliceDiscussionFromBob).toBeDefined();
+      expect(aliceDiscussionFromBob?.weAccepted).toBe(false);
+      expect(aliceDiscussionFromBob?.direction).toBe(
+        DiscussionDirection.RECEIVED
+      );
+      expect(aliceSdk.discussions.getStatus(bobSdk.userId)).toBe(
+        SessionStatus.PeerRequested
+      );
+
+      // Alice accepts
+      if (!aliceDiscussionFromBob)
+        throw new Error('Alice discussion not found');
+      await aliceSdk.discussions.accept(aliceDiscussionFromBob);
+
+      // Bob fetches Alice's acceptance
+      await bobSdk.announcements.fetch();
+
+      // Verify both sides have active sessions
+      expect(await isSessionUp(aliceSdk, bobSdk)).toBe(true);
+    });
+
+    it('When delete contact, all msg status are deleted: waiting_session, ready, sent and acknowledge', async () => {
+      // Setup: Alice and Bob establish a session
+      await setupSession(aliceSdk, bobSdk, 'Bob', 'Alice');
+
+      // Create messages with different statuses
+      // 1. Incoming message
+      await bobSdk.messages.send({
+        ownerUserId: bobSdk.userId,
+        contactUserId: aliceSdk.userId,
+        content: 'Bob message',
+        type: MessageType.TEXT,
+        direction: MessageDirection.OUTGOING,
+        status: MessageStatus.WAITING_SESSION,
+        timestamp: new Date(),
+      });
+      await aliceSdk.messages.fetch();
+
+      // 2. Outgoing WAITING_SESSION
+      await db.messages.add({
+        ownerUserId: aliceSdk.userId,
+        contactUserId: bobSdk.userId,
+        content: 'Message WAITING_SESSION',
+        type: MessageType.TEXT,
+        direction: MessageDirection.OUTGOING,
+        status: MessageStatus.WAITING_SESSION,
+        timestamp: new Date(),
+      });
+
+      // 3. Outgoing READY
+      await db.messages.add({
+        ownerUserId: aliceSdk.userId,
+        contactUserId: bobSdk.userId,
+        content: 'Message READY',
+        type: MessageType.TEXT,
+        direction: MessageDirection.OUTGOING,
+        status: MessageStatus.READY,
+        timestamp: new Date(),
+        seeker: new Uint8Array([1, 2, 3]),
+        encryptedMessage: new Uint8Array([4, 5, 6]),
+        whenToSend: new Date(Date.now() + 1000),
+      });
+
+      // 4. Outgoing SENT
+      await db.messages.add({
+        ownerUserId: aliceSdk.userId,
+        contactUserId: bobSdk.userId,
+        content: 'Message SENT',
+        type: MessageType.TEXT,
+        direction: MessageDirection.OUTGOING,
+        status: MessageStatus.SENT,
+        timestamp: new Date(),
+        seeker: new Uint8Array([7, 8, 9]),
+        encryptedMessage: new Uint8Array([10, 11, 12]),
+        whenToSend: new Date(),
+      });
+
+      // 5. Outgoing DELIVERED (acknowledged)
+      await db.messages.add({
+        ownerUserId: aliceSdk.userId,
+        contactUserId: bobSdk.userId,
+        content: 'Message DELIVERED',
+        type: MessageType.TEXT,
+        direction: MessageDirection.OUTGOING,
+        status: MessageStatus.DELIVERED,
+        timestamp: new Date(),
+        seeker: new Uint8Array([13, 14, 15]),
+      });
+
+      // Alice deletes Bob's contact
+      await aliceSdk.contacts.delete(aliceSdk.userId, bobSdk.userId);
+
+      // Verify deletion was successful
+      await checkDeleted(aliceSdk, bobSdk.userId, db);
+    });
+
+    it("Alice delete bob contact, Bob send msg to alice, she fetch messages but don't receive it", async () => {
+      // Setup: Alice and Bob establish a session
+      await setupSession(aliceSdk, bobSdk, 'Bob', 'Alice');
+
+      // Verify session is active
+      expect(await isSessionUp(aliceSdk, bobSdk)).toBe(true);
+
+      // Alice deletes Bob's contact
+      await aliceSdk.contacts.delete(aliceSdk.userId, bobSdk.userId);
+
+      // Verify deletion was successful
+      await checkDeleted(aliceSdk, bobSdk.userId, db);
+
+      // Bob sends a message to Alice
+      const bobMsgResult = await bobSdk.messages.send({
+        ownerUserId: bobSdk.userId,
+        contactUserId: aliceSdk.userId,
+        content: 'Hello Alice after deletion!',
+        type: MessageType.TEXT,
+        direction: MessageDirection.OUTGOING,
+        status: MessageStatus.WAITING_SESSION,
+        timestamp: new Date(),
+      });
+      expect(bobMsgResult.success).toBe(true);
+
+      // Alice fetches messages
+      const fetchResult = await aliceSdk.messages.fetch();
+      expect(fetchResult.success).toBe(true);
+
+      // Verify Alice still has no messages (deletion should persist)
+      const aliceMessages = await db.messages
+        .where('[ownerUserId+contactUserId]')
+        .equals([aliceSdk.userId, bobSdk.userId])
+        .toArray();
+      expect(aliceMessages.length).toBe(0);
+
+      // Verify Bob's message is still sent but won't be delivered
+      const bobMessages = await db.messages
+        .where('[ownerUserId+contactUserId]')
+        .equals([bobSdk.userId, aliceSdk.userId])
+        .toArray();
+      const bobOutgoingMsg = bobMessages.find(
+        m => m.content === 'Hello Alice after deletion!'
+      );
+      expect(bobOutgoingMsg).toBeDefined();
+      expect(bobOutgoingMsg?.status).toBe(MessageStatus.SENT);
+    });
+  });
+});
+
+describe('session break in session manager', () => {
+  let mockProtocol: MockMessageProtocol;
+
+  let aliceSdk: GossipSdkImpl;
+  let bobSdk: GossipSdkImpl;
+
+  beforeAll(async () => {
+    await ensureWasmInitialized();
+    mockProtocol = new MockMessageProtocol();
+  });
+
+  beforeEach(async () => {
+    if (!db.isOpen()) {
+      await db.open();
+    }
+    mockProtocol.clearMockData();
+  });
+
+  afterEach(async () => {
+    await aliceSdk.closeSession();
+    await bobSdk.closeSession();
+  });
+
+  // Helper function to create a SessionConfig (each SDK needs its own instance)
+  function createSessionConfig(
+    max_session_inactivity_millis: number,
+    keep_alive_interval_millis: number
+  ): SessionConfig {
+    return new SessionConfig(
+      7 * 24 * 60 * 60 * 1000, // max_incoming_announcement_age_millis: 1 week
+      60 * 1000, // max_incoming_announcement_future_millis: 1 minute
+      7 * 24 * 60 * 60 * 1000, // max_incoming_message_age_millis: 1 week
+      60 * 1000, // max_incoming_message_future_millis: 1 minute
+      max_session_inactivity_millis,
+      keep_alive_interval_millis,
+      4n // max_session_lag_length: 4 messages
+    );
+  }
+
+  // Helper function to create custom SDKs with specific SessionConfig
+  async function createCustomSdks(
+    max_session_inactivity_millis: number,
+    keep_alive_interval_millis: number
+  ): Promise<void> {
+    const aliceMnemonic = generateMnemonic();
+    const bobMnemonic = generateMnemonic();
+    const aliceEncryptionKey = await generateEncryptionKey();
+    const bobEncryptionKey = await generateEncryptionKey();
+
+    aliceSdk = new GossipSdkImpl();
+    await aliceSdk.init({ db });
+    await aliceSdk.openSession({
+      mnemonic: aliceMnemonic,
+      onPersist: async () => {},
+      persistEncryptionKey: aliceEncryptionKey,
+      sessionConfig: createSessionConfig(
+        max_session_inactivity_millis,
+        keep_alive_interval_millis
+      ),
+    });
+    (
+      aliceSdk as unknown as { _announcement: AnnouncementService }
+    )._announcement.setMessageProtocol(mockProtocol);
+    (aliceSdk as unknown as { _message: MessageService })._message[
+      'messageProtocol'
+    ] = mockProtocol;
+
+    bobSdk = new GossipSdkImpl();
+    await bobSdk.init({ db });
+    await bobSdk.openSession({
+      mnemonic: bobMnemonic,
+      onPersist: async () => {},
+      persistEncryptionKey: bobEncryptionKey,
+      sessionConfig: createSessionConfig(
+        max_session_inactivity_millis,
+        keep_alive_interval_millis
+      ),
+    });
+    (
+      bobSdk as unknown as { _announcement: AnnouncementService }
+    )._announcement.setMessageProtocol(mockProtocol);
+    (bobSdk as unknown as { _message: MessageService })._message[
+      'messageProtocol'
+    ] = mockProtocol;
+  }
+
+  it('Alice has not received incoming msg for too long, session is killed and reset by updateState function', async () => {
+    await createCustomSdks(
+      2000, // max_session_inactivity_millis: 2 seconds
+      10000 // keep_alive_interval_millis: 10 seconds
+    );
+
+    // Setup: Alice and Bob establish a session
+    await setupSession(aliceSdk, bobSdk, 'Bob', 'Alice');
+
+    // Verify session is active
+    expect(await isLocalSessionUp(aliceSdk, bobSdk.userId)).toBe(true);
+
+    // Spy on establishSession to verify it's called during reset
+    const aliceAnnouncementService = (
+      aliceSdk as unknown as { _announcement: AnnouncementService }
+    )._announcement;
+    const establishSpy = vi.spyOn(aliceAnnouncementService, 'establishSession');
+
+    // Wait for max_session_inactivity_millis (2000ms) + buffer
+    await new Promise(resolve => setTimeout(resolve, 2100));
+
+    // Call updateState - this should trigger session reset
+    await aliceSdk.updateState();
+
+    // Verify establishSession was called (session was renewed)
+    expect(establishSpy).toHaveBeenCalled();
+
+    // Session should still be active after reset
+    expect(aliceSdk.discussions.getStatus(bobSdk.userId)).toBe(
+      SessionStatus.Active
+    );
+
+    establishSpy.mockRestore();
+  });
+
+  it('Alice send announcement to bob. max_session_inactivity_millis delay pass but session is not killed (on both alice and bob side) since it is not active', async () => {
+    await createCustomSdks(
+      2000, // max_session_inactivity_millis: 2 seconds
+      10000 // keep_alive_interval_millis: 10 seconds
+    );
+
+    const aliceBobContact: Omit<Contact, 'id'> = {
+      ownerUserId: aliceSdk.userId,
+      userId: bobSdk.userId,
+      name: 'Bob',
+      publicKeys: bobSdk.publicKeys.to_bytes(),
+      avatar: undefined,
+      isOnline: false,
+      lastSeen: new Date(),
+      createdAt: new Date(),
+    };
+
+    await db.contacts.add(aliceBobContact);
+
+    // Alice sends announcement (session becomes SelfRequested)
+    const result = await aliceSdk.discussions.start(aliceBobContact);
+    if (!result.success) throw result.error;
+
+    // Bob fetches announcement (session becomes PeerRequested on his side)
+    await bobSdk.announcements.fetch();
+
+    // Verify sessions are not active
+    expect(aliceSdk.discussions.getStatus(bobSdk.userId)).toBe(
+      SessionStatus.SelfRequested
+    );
+    expect(bobSdk.discussions.getStatus(aliceSdk.userId)).toBe(
+      SessionStatus.PeerRequested
+    );
+
+    // Spy on establishSession to verify it's called during reset
+    const aliceAnnouncementService = (
+      aliceSdk as unknown as { _announcement: AnnouncementService }
+    )._announcement;
+    const aliceEstablishSpy = vi.spyOn(
+      aliceAnnouncementService,
+      'establishSession'
+    );
+    const bobAnnouncementService = (
+      bobSdk as unknown as { _announcement: AnnouncementService }
+    )._announcement;
+    const bobEstablishSpy = vi.spyOn(
+      bobAnnouncementService,
+      'establishSession'
+    );
+
+    // Wait for max_session_inactivity_millis (2000ms) + buffer
+    await new Promise(resolve => setTimeout(resolve, 2100));
+
+    // Call updateState on both
+    await aliceSdk.updateState();
+    await bobSdk.updateState();
+
+    // Verify establishSession was not called (session was not renewed)
+    expect(aliceEstablishSpy).not.toHaveBeenCalled();
+    expect(bobEstablishSpy).not.toHaveBeenCalled();
+
+    // Sessions should still be in same state (not killed)
+    expect(aliceSdk.discussions.getStatus(bobSdk.userId)).toBe(
+      SessionStatus.SelfRequested
+    );
+    expect(bobSdk.discussions.getStatus(aliceSdk.userId)).toBe(
+      SessionStatus.PeerRequested
+    );
+  });
+
+  it('Alice has not received incoming msg for too long, session is killed but session manager return error when attempt to renew. Retry and succeed', async () => {
+    await createCustomSdks(
+      2000, // max_session_inactivity_millis: 2 seconds
+      10000 // keep_alive_interval_millis: 10 seconds
+    );
+
+    // Setup: Alice and Bob establish a session
+    await setupSession(aliceSdk, bobSdk, 'Bob', 'Alice');
+
+    // Set short retry delay
+    // const originalRetryDelay =
+    //   aliceSdk.config.announcements.retryDelayMs;
+    // aliceSdk.config.announcements.retryDelayMs = 100;
+
+    // Spy on establishSession to fail first time, then succeed
+    const aliceAnnouncementService = (
+      aliceSdk as unknown as { _announcement: AnnouncementService }
+    )._announcement;
+    const originalEstablishSession =
+      aliceAnnouncementService.establishSession.bind(aliceAnnouncementService);
+    let callCount = 0;
+    const establishSpy = vi
+      .spyOn(aliceAnnouncementService, 'establishSession')
+      .mockImplementation(
+        async (contactPublicKeys: UserPublicKeys, userData?: Uint8Array) => {
+          callCount++;
+          if (callCount === 1) {
+            return {
+              success: false,
+              error: new Error('Session manager error'),
+            };
+          }
+          return originalEstablishSession(contactPublicKeys, userData);
+        }
+      );
+
+    // Wait for max_session_inactivity_millis
+    await new Promise(resolve => setTimeout(resolve, 2100));
+
+    // First updateState - should fail to renew
+    await aliceSdk.updateState();
+
+    expect(aliceSdk.discussions.getStatus(bobSdk.userId)).toBe(
+      SessionStatus.Killed
+    );
+    const discussion = await aliceSdk.discussions.get(
+      aliceSdk.userId,
+      bobSdk.userId
+    );
+    expect(discussion?.sendAnnouncement).toBeNull();
+
+    // // Wait for retry delay
+    // await new Promise(resolve =>
+    //   setTimeout(resolve, aliceSdk.config.announcements.retryDelayMs + 50)
+    // );
+
+    // Second updateState - should succeed
+    await aliceSdk.updateState();
+
+    // Verify establishSession was called twice
+    expect(establishSpy).toHaveBeenCalledTimes(2);
+
+    // Session should be active after successful retry
+    expect(aliceSdk.discussions.getStatus(bobSdk.userId)).toBe(
+      SessionStatus.Active
+    );
+
+    establishSpy.mockRestore();
+    // aliceSdk.config.announcements.retryDelayMs = originalRetryDelay;
+  });
+
+  it('Alice has not received incoming msg for too long, session is killed but got network issue while reseting and sending announcement. Retry and success', async () => {
+    await createCustomSdks(
+      2000, // max_session_inactivity_millis: 2 seconds
+      10000 // keep_alive_interval_millis: 10 seconds
+    );
+
+    // Setup: Alice and Bob establish a session
+    await setupSession(aliceSdk, bobSdk, 'Bob', 'Alice');
+
+    // Set short retry delay
+    const originalRetryDelay = aliceSdk.config.announcements.retryDelayMs;
+    aliceSdk.config.announcements.retryDelayMs = 100;
+
+    // Set up spy to fail first time, then succeed
+    const originalSendAnnouncement =
+      MockMessageProtocol.prototype.sendAnnouncement;
+    let callCount = 0;
+    const sendSpy = vi
+      .spyOn(mockProtocol, 'sendAnnouncement')
+      .mockImplementation(async (announcement: Uint8Array) => {
+        callCount++;
+        if (callCount === 1) {
+          throw new Error('Network error');
+        }
+        return originalSendAnnouncement.call(mockProtocol, announcement);
+      });
+
+    // Wait for max_session_inactivity_millis
+    await new Promise(resolve => setTimeout(resolve, 2100));
+
+    // First updateState - should fail to send announcement
+    await aliceSdk.updateState();
+
+    // Verify the announcement is still pending
+    const discussion = await aliceSdk.discussions.get(
+      aliceSdk.userId,
+      bobSdk.userId
+    );
+    expect(discussion?.sendAnnouncement).not.toBeNull();
+    // The announcement is not sent on network but session in session manager is active
+    expect(aliceSdk.discussions.getStatus(bobSdk.userId)).toBe(
+      SessionStatus.Active
+    );
+
+    // Wait for retry delay
+    await new Promise(resolve =>
+      setTimeout(resolve, aliceSdk.config.announcements.retryDelayMs + 50)
+    );
+
+    // Second updateState - should succeed
+    await aliceSdk.updateState();
+
+    const discussionAfterRetry = await aliceSdk.discussions.get(
+      aliceSdk.userId,
+      bobSdk.userId
+    );
+    expect(discussionAfterRetry?.sendAnnouncement).toBeNull();
+
+    // Session should be active after successful retry
+    expect(aliceSdk.discussions.getStatus(bobSdk.userId)).toBe(
+      SessionStatus.Active
+    );
+
+    sendSpy.mockRestore();
+    aliceSdk.config.announcements.retryDelayMs = originalRetryDelay;
+  });
+
+  it('Alice has not received incoming msg for too long, session is killed and need send keep alive. keep alive are not sent', async () => {
+    // Create custom SDKs with shorter keep alive interval
+    await createCustomSdks(
+      2000, // max_session_inactivity_millis: 2 seconds
+      1000 // keep_alive_interval_millis: 1 second
+    );
+
+    // Setup: Alice and Bob establish a session
+    await setupSession(aliceSdk, bobSdk, 'Bob', 'Alice');
+
+    // Verify session is active
+    expect(await isLocalSessionUp(aliceSdk, bobSdk.userId)).toBe(true);
+
+    // Wait for both keep_alive_interval (1000ms) and max_session_inactivity (2000ms)
+    // After 1 second, keep alive would normally be sent
+    // But after 2 seconds, session breaks and is renewed instead
+    await new Promise(resolve => setTimeout(resolve, 2100));
+
+    // Call updateState - this should trigger session reset (not keep alive)
+    await aliceSdk.updateState();
+
+    // Check that no keep alive messages were created in the database
+    // Keep alive messages should have been skipped because session was being renewed
+    const aliceMessages = await db.messages
+      .where('[ownerUserId+contactUserId]')
+      .equals([aliceSdk.userId, bobSdk.userId])
+      .and(msg => msg.type === MessageType.KEEP_ALIVE)
+      .toArray();
+
+    // Filter for keep alive messages (content is empty string)
+    const keepAliveMessages = aliceMessages.filter(
+      msg => msg.type === MessageType.KEEP_ALIVE
+    );
+
+    // No keep alive messages should have been sent (session renewal takes precedence)
+    expect(keepAliveMessages.length).toBe(0);
+
+    // Session should still be active after reset
+    expect(aliceSdk.discussions.getStatus(bobSdk.userId)).toBe(
+      SessionStatus.Active
+    );
   });
 });

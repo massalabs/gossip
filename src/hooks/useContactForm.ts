@@ -84,6 +84,11 @@ export function useContactForm() {
         return { publicKey: cached };
       }
 
+      // Check if SDK is initialized before accessing auth service
+      if (!gossipSdk.isInitialized) {
+        return { error: 'SDK not initialized' };
+      }
+
       const result = await gossipSdk.auth.fetchPublicKeyByUserId(uid);
 
       if (result.publicKey) {

@@ -58,7 +58,10 @@ import {
 import { startWasmInitialization, ensureWasmInitialized } from './wasm/loader';
 import { generateUserKeys, UserKeys } from './wasm/userKeys';
 import { SessionModule } from './wasm/session';
-import { SessionStatus } from './assets/generated/wasm/gossip_wasm';
+import {
+  SessionStatus,
+  SessionConfig,
+} from './assets/generated/wasm/gossip_wasm';
 import { EncryptionKey } from './wasm/encryption';
 import {
   AnnouncementService,
@@ -140,6 +143,8 @@ export interface OpenSessionOptions {
   ) => Promise<void>;
   /** Encryption key for persisting session (required if onPersist is provided) */
   persistEncryptionKey?: EncryptionKey;
+  /** Custom session configuration (optional, uses defaults if not provided) */
+  sessionConfig?: SessionConfig;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -300,9 +305,13 @@ class GossipSdkImpl {
 
     // Create session with persistence callback
     // IMPORTANT: This callback is awaited by the session module before network sends
-    const session = new SessionModule(userKeys, async () => {
-      await this.handleSessionPersist();
-    });
+    const session = new SessionModule(
+      userKeys,
+      async () => {
+        await this.handleSessionPersist();
+      },
+      options.sessionConfig
+    );
 
     // Restore existing session state if provided
     if (options.encryptedSession && options.encryptionKey) {

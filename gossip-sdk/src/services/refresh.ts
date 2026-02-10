@@ -167,7 +167,12 @@ export class RefreshService {
         if (!discussion.weAccepted) continue;
 
         // Send keep alive message if needed
-        if (keepAliveSet.has(discussion.contactUserId)) {
+        if (
+          keepAliveSet.has(discussion.contactUserId) &&
+          this.session.peerSessionStatus(
+            decodeUserId(discussion.contactUserId)
+          ) === SessionStatus.Active
+        ) {
           // Send keep alive message only if no messages are pending
           const pendingCount = await this.messageService.getPendingSendCount(
             discussion.contactUserId

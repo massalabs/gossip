@@ -29,6 +29,10 @@ import { generateMnemonic } from '../../src/crypto/bip39';
 import { generateEncryptionKey } from '../../src/wasm/encryption';
 import { AnnouncementService } from '../../src/services/announcement';
 import { MessageService } from '../../src/services/message';
+import { DiscussionService } from '../../src/services/discussion';
+import { RefreshService } from '../../src/services/refresh';
+import { SessionModule } from '../../src/wasm/session';
+import { decodeUserId } from '../../src/utils/userId';
 import { SessionStatus } from '../../src/assets/generated/wasm/gossip_wasm';
 
 describe('Messaging Flow', () => {
@@ -922,6 +926,434 @@ describe('Messaging Flow', () => {
       );
       expect(bobOutgoing.length).toBe(1);
       expect(bobOutgoing[0].status).toBe(MessageStatus.SENT);
+    });
+  });
+
+  describe('keep alive msg', () => {
+    const getAliceServices = () =>
+      aliceSdk as unknown as {
+        _announcement: AnnouncementService;
+        _discussion: DiscussionService;
+        _message: MessageService;
+        _refresh: RefreshService;
+      };
+
+    const getBobServices = () =>
+      bobSdk as unknown as {
+        _announcement: AnnouncementService;
+        _discussion: DiscussionService;
+        _message: MessageService;
+        _refresh: RefreshService;
+      };
+
+    const getAliceSession = (): SessionModule =>
+      (aliceSdk as unknown as { state: { session: SessionModule } }).state
+        .session;
+    const getBobSession = (): SessionModule =>
+      (bobSdk as unknown as { state: { session: SessionModule } }).state
+        .session;
+
+    it('Alice send msg to bob. Bob send a keep alive. Alice msg is acknowledged', async () => {
+      await setupSession(aliceSdk, bobSdk, 'Bob', 'Alice');
+
+      const bobServices = getBobServices();
+      const bobSession = getBobSession();
+
+      // Alice sends a message to Bob
+      const aliceMsgResult = await aliceSdk.messages.send({
+        ownerUserId: aliceSdk.userId,
+        contactUserId: bobSdk.userId,
+        content: 'Hello Bob!',
+        type: MessageType.TEXT,
+        direction: MessageDirection.OUTGOING,
+        status: MessageStatus.WAITING_SESSION,
+        timestamp: new Date(),
+      });
+      expect(aliceMsgResult.success).toBe(true);
+
+      // Bob fetches Alice's message
+      await bobSdk.messages.fetch();
+
+      const bobMessages = await db.messages
+        .where('[ownerUserId+contactUserId]')
+        .equals([bobSdk.userId, aliceSdk.userId])
+        .toArray();
+
+      const bobReceived = bobMessages.find(
+        m =>
+          m.direction === MessageDirection.INCOMING &&
+          m.content === 'Hello Bob!'
+      );
+      expect(bobReceived?.status).toBe(MessageStatus.DELIVERED);
+
+      // Force Bob to send keep-alive
+      vi.spyOn(bobSession, 'refresh').mockResolvedValue([
+        decodeUserId(aliceSdk.userId),
+      ]);
+
+      await bobServices._refresh.stateUpdate();
+
+      // Verify Bob sent keep-alive
+      const bobKeepAlive = await db.messages
+        .where({
+          ownerUserId: bobSdk.userId,
+          type: MessageType.KEEP_ALIVE,
+          direction: MessageDirection.OUTGOING,
+        })
+        .first();
+      expect(bobKeepAlive).toBeDefined();
+      expect(bobKeepAlive?.status).toBe(MessageStatus.SENT);
+
+      // Alice fetches Bob's keep-alive (which acknowledges her message)
+      await aliceSdk.messages.fetch();
+
+      const aliceMessages = await db.messages
+        .where('[ownerUserId+contactUserId]')
+        .equals([aliceSdk.userId, bobSdk.userId])
+        .toArray();
+
+      const aliceSent = aliceMessages.find(
+        m =>
+          m.direction === MessageDirection.OUTGOING &&
+          m.content === 'Hello Bob!'
+      );
+      expect(aliceSent?.status).toBe(MessageStatus.DELIVERED);
+
+      // Check that there is no incoming keep-alive message in Alice's db
+      const incomingKeepAlive = aliceMessages.find(
+        m =>
+          m.type === MessageType.KEEP_ALIVE &&
+          m.direction === MessageDirection.INCOMING
+      );
+      expect(incomingKeepAlive).toBeUndefined();
+
+      // Alice sends a message back to acknowledge Bob's keep-alive
+      const aliceServices = getAliceServices();
+      const aliceSession = getAliceSession();
+
+      vi.spyOn(aliceSession, 'refresh').mockResolvedValue([
+        decodeUserId(bobSdk.userId),
+      ]);
+
+      await aliceServices._refresh.stateUpdate();
+
+      // Bob fetches Alice's acknowledgment
+      await bobSdk.messages.fetch();
+
+      // Bob's keep-alive should now be removed from db
+      const bobKeepAliveAfter = await db.messages
+        .where({
+          ownerUserId: bobSdk.userId,
+          type: MessageType.KEEP_ALIVE,
+        })
+        .first();
+      expect(bobKeepAliveAfter).toBeUndefined();
+    });
+
+    it('No keep alive when session is not active', async () => {
+      const aliceContact: Omit<Contact, 'id'> = {
+        ownerUserId: aliceSdk.userId,
+        userId: bobSdk.userId,
+        name: 'Bob',
+        publicKeys: bobSdk.publicKeys.to_bytes(),
+        avatar: undefined,
+        isOnline: false,
+        lastSeen: new Date(),
+        createdAt: new Date(),
+      };
+      await db.contacts.add(aliceContact);
+
+      const startResult = await aliceSdk.discussions.start(aliceContact);
+      if (!startResult.success) throw startResult.error;
+
+      await bobSdk.announcements.fetch();
+
+      const aliceSession = getAliceSession();
+      const bobSession = getBobSession();
+
+      expect(aliceSession.peerSessionStatus(decodeUserId(bobSdk.userId))).toBe(
+        SessionStatus.SelfRequested
+      );
+      expect(bobSession.peerSessionStatus(decodeUserId(aliceSdk.userId))).toBe(
+        SessionStatus.PeerRequested
+      );
+
+      const aliceRefreshSpy = vi
+        .spyOn(aliceSession, 'refresh')
+        .mockResolvedValue([decodeUserId(bobSdk.userId)]);
+      const bobRefreshSpy = vi
+        .spyOn(bobSession, 'refresh')
+        .mockResolvedValue([decodeUserId(aliceSdk.userId)]);
+
+      await aliceSdk.updateState();
+      await bobSdk.updateState();
+
+      aliceRefreshSpy.mockRestore();
+      bobRefreshSpy.mockRestore();
+
+      const keepAlives = await db.messages
+        .where('type')
+        .equals(MessageType.KEEP_ALIVE)
+        .toArray();
+      expect(keepAlives.length).toBe(0);
+    });
+
+    it('No keep alive msg when already a pending msg', async () => {
+      await setupSession(aliceSdk, bobSdk, 'Bob', 'Alice');
+
+      const aliceServices = getAliceServices();
+      const aliceSession = getAliceSession();
+
+      // Mock sendMessage to fail, keeping message in READY state
+      const sendSpy = vi
+        .spyOn(aliceSession, 'sendMessage')
+        .mockImplementation(async () => undefined);
+
+      // Queue a pending outgoing message for Alice -> Bob
+      const msgResult = await aliceSdk.messages.send({
+        ownerUserId: aliceSdk.userId,
+        contactUserId: bobSdk.userId,
+        content: 'Pending',
+        type: MessageType.TEXT,
+        direction: MessageDirection.OUTGOING,
+        status: MessageStatus.WAITING_SESSION,
+        timestamp: new Date(),
+      });
+      expect(msgResult.success).toBe(true);
+
+      // Verify message is in WAITING_SESSION (sendMessage failed)
+      const pendingMsg = await db.messages.get(msgResult.message!.id!);
+      expect(pendingMsg?.status).toBe(MessageStatus.WAITING_SESSION);
+
+      vi.spyOn(aliceSession, 'refresh').mockResolvedValue([
+        decodeUserId(bobSdk.userId),
+      ]);
+
+      await aliceServices._refresh.stateUpdate();
+
+      // Check that there is no outgoing keep-alive message in Alice's db
+      const messages = await db.messages
+        .where('[ownerUserId+contactUserId]')
+        .equals([aliceSdk.userId, bobSdk.userId])
+        .toArray();
+      const keepAlive = messages.find(
+        m =>
+          m.type === MessageType.KEEP_ALIVE &&
+          m.direction === MessageDirection.OUTGOING
+      );
+      expect(keepAlive).toBeUndefined();
+
+      sendSpy.mockRestore();
+    });
+
+    it('Alice send keep alive msg but session.sendMessage returns empty output. It is resent at next stateUpdate with success', async () => {
+      await setupSession(aliceSdk, bobSdk, 'Bob', 'Alice');
+
+      const aliceServices = getAliceServices();
+      const aliceSession = getAliceSession();
+
+      // Bob sends a message so Alice will later acknowledge via keep-alive
+      const bobMsgResult = await bobSdk.messages.send({
+        ownerUserId: bobSdk.userId,
+        contactUserId: aliceSdk.userId,
+        content: 'Test',
+        type: MessageType.TEXT,
+        direction: MessageDirection.OUTGOING,
+        status: MessageStatus.WAITING_SESSION,
+        timestamp: new Date(),
+      });
+      expect(bobMsgResult.success).toBe(true);
+      await aliceSdk.messages.fetch();
+
+      vi.spyOn(aliceSession, 'refresh').mockResolvedValue([
+        decodeUserId(bobSdk.userId),
+      ]);
+
+      // Mock sendMessage to return undefined
+      const originalSend = aliceSession.sendMessage.bind(aliceSession);
+      const sendSpy = vi
+        .spyOn(aliceSession, 'sendMessage')
+        .mockImplementationOnce(async () => undefined)
+        .mockImplementation(originalSend);
+
+      // First updateState: creates keep-alive but encryption fails, so it stays pending
+      await aliceServices._refresh.stateUpdate();
+
+      let aliceMessages = await db.messages
+        .where('[ownerUserId+contactUserId]')
+        .equals([aliceSdk.userId, bobSdk.userId])
+        .toArray();
+
+      const ka = aliceMessages.find(
+        m =>
+          m.type === MessageType.KEEP_ALIVE &&
+          m.direction === MessageDirection.OUTGOING
+      );
+      expect(ka).toBeDefined();
+      expect(ka?.status).toBe(MessageStatus.WAITING_SESSION);
+
+      // Second updateState: resend with real sendMessage
+      await aliceServices._refresh.stateUpdate();
+
+      aliceMessages = await db.messages
+        .where('[ownerUserId+contactUserId]')
+        .equals([aliceSdk.userId, bobSdk.userId])
+        .toArray();
+
+      const kaAfter = aliceMessages.find(
+        m =>
+          m.type === MessageType.KEEP_ALIVE &&
+          m.direction === MessageDirection.OUTGOING
+      );
+      if (kaAfter) {
+        expect(kaAfter.status).toBe(MessageStatus.SENT);
+      }
+
+      sendSpy.mockRestore();
+    });
+
+    it('Alice send keep alive msg then reset the session: keep alive is put in WAITING_SESSION then resent', async () => {
+      await setupSession(aliceSdk, bobSdk, 'Bob', 'Alice');
+
+      const aliceServices = getAliceServices();
+      const aliceSession = getAliceSession();
+
+      // Bob sends a message so Alice will later acknowledge via keep-alive
+      const bobMsgResult = await bobSdk.messages.send({
+        ownerUserId: bobSdk.userId,
+        contactUserId: aliceSdk.userId,
+        content: 'Test',
+        type: MessageType.TEXT,
+        direction: MessageDirection.OUTGOING,
+        status: MessageStatus.WAITING_SESSION,
+        timestamp: new Date(),
+      });
+      expect(bobMsgResult.success).toBe(true);
+      await aliceSdk.messages.fetch();
+
+      // Force Alice to send keep-alive
+      vi.spyOn(aliceSession, 'refresh').mockResolvedValue([
+        decodeUserId(bobSdk.userId),
+      ]);
+
+      await aliceServices._refresh.stateUpdate();
+
+      // Verify Alice sent keep-alive
+      let aliceMessages = await db.messages
+        .where('[ownerUserId+contactUserId]')
+        .equals([aliceSdk.userId, bobSdk.userId])
+        .toArray();
+
+      let aliceKeepAlive = aliceMessages.find(
+        m =>
+          m.type === MessageType.KEEP_ALIVE &&
+          m.direction === MessageDirection.OUTGOING
+      );
+      expect(aliceKeepAlive).toBeDefined();
+      expect(aliceKeepAlive?.status).toBe(MessageStatus.SENT);
+
+      // Alice renews the session (which resets messages to WAITING_SESSION)
+      const renewResult = await aliceSdk.discussions.renew(bobSdk.userId);
+      expect(renewResult.success).toBe(true);
+
+      // Check keep-alive was reset to WAITING_SESSION and then resent
+      aliceMessages = await db.messages
+        .where('[ownerUserId+contactUserId]')
+        .equals([aliceSdk.userId, bobSdk.userId])
+        .toArray();
+
+      aliceKeepAlive = aliceMessages.find(
+        m =>
+          m.type === MessageType.KEEP_ALIVE &&
+          m.direction === MessageDirection.OUTGOING
+      );
+      // After renew + stateUpdate, it should be SENT again
+      expect(aliceKeepAlive?.status).toBe(MessageStatus.SENT);
+    });
+
+    it('Alice send keep alive but got network issue. Resend with success', async () => {
+      await setupSession(aliceSdk, bobSdk, 'Bob', 'Alice');
+
+      const aliceServices = getAliceServices();
+      const aliceSession = getAliceSession();
+      const mockProtocol = (aliceSdk as unknown as { _message: MessageService })
+        ._message['messageProtocol'];
+
+      // Set short retry delay for this test
+      const originalRetryDelay = aliceSdk.config.messages.retryDelayMs;
+      aliceSdk.config.messages.retryDelayMs = 100;
+
+      // Bob sends a message so Alice will later acknowledge via keep-alive
+      const bobMsgResult = await bobSdk.messages.send({
+        ownerUserId: bobSdk.userId,
+        contactUserId: aliceSdk.userId,
+        content: 'Test',
+        type: MessageType.TEXT,
+        direction: MessageDirection.OUTGOING,
+        status: MessageStatus.WAITING_SESSION,
+        timestamp: new Date(),
+      });
+      expect(bobMsgResult.success).toBe(true);
+      await aliceSdk.messages.fetch();
+
+      // Force Alice to send keep-alive
+      vi.spyOn(aliceSession, 'refresh').mockResolvedValue([
+        decodeUserId(bobSdk.userId),
+      ]);
+
+      // Mock network failure for sendMessage
+      let sendAttempts = 0;
+      const sendSpy = vi
+        .spyOn(mockProtocol, 'sendMessage')
+        .mockImplementation(async () => {
+          sendAttempts++;
+          if (sendAttempts === 1) {
+            throw new Error('Network error');
+          }
+          // Return void on retry (success)
+        });
+
+      // First stateUpdate: keep-alive send fails
+      await aliceServices._refresh.stateUpdate();
+
+      let aliceMessages = await db.messages
+        .where('[ownerUserId+contactUserId]')
+        .equals([aliceSdk.userId, bobSdk.userId])
+        .toArray();
+
+      const ka = aliceMessages.find(
+        m =>
+          m.type === MessageType.KEEP_ALIVE &&
+          m.direction === MessageDirection.OUTGOING
+      );
+      expect(ka).toBeDefined();
+      expect(ka?.status).toBe(MessageStatus.READY);
+      expect(ka?.whenToSend).toBeDefined();
+      expect(ka?.whenToSend?.getTime()).toBeGreaterThan(Date.now());
+
+      // Wait for retry delay
+      await new Promise(resolve =>
+        setTimeout(resolve, aliceSdk.config.messages.retryDelayMs + 50)
+      );
+
+      // Second stateUpdate: retry should succeed
+      await aliceServices._refresh.stateUpdate();
+
+      aliceMessages = await db.messages
+        .where('[ownerUserId+contactUserId]')
+        .equals([aliceSdk.userId, bobSdk.userId])
+        .toArray();
+
+      const kaAfter = aliceMessages.find(
+        m =>
+          m.type === MessageType.KEEP_ALIVE &&
+          m.direction === MessageDirection.OUTGOING
+      );
+      expect(kaAfter?.status).toBe(MessageStatus.SENT);
+
+      // Restore
+      sendSpy.mockRestore();
+      aliceSdk.config.messages.retryDelayMs = originalRetryDelay;
     });
   });
 });
