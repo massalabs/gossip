@@ -47,9 +47,8 @@ await gossipSdk.openSession({
   mnemonic: 'word1 word2 word3 ... word12',
   // For existing session:
   encryptedSession: savedBlob,
-  encryptionKey: savedKey,
+  encryptionKey,
   // For persistence:
-  persistEncryptionKey: encryptionKey,
   onPersist: async (blob, key) => {
     await saveToStorage(blob, key);
   },
@@ -113,7 +112,7 @@ await gossipSdk.openSession({
 // With persistence (saves session on changes)
 await gossipSdk.openSession({
   mnemonic: 'word1 word2 word3 ... word12',
-  persistEncryptionKey: encryptionKey,
+  encryptionKey,
   onPersist: async (blob, key) => {
     await db.userProfile.update(userId, { session: blob });
   },
@@ -387,24 +386,15 @@ const decoded = utils.decodeUserId(encodedString);
 
 ## Session Persistence
 
-For restoring sessions across app restarts:
+For restoring sessions across app restarts, pass `encryptionKey` and `onPersist` when opening the session:
 
 ```typescript
-// Option 1: Provide persistence config in openSession
 await gossipSdk.openSession({
   mnemonic,
-  persistEncryptionKey: key,
+  encryptionKey,
   onPersist: async (blob, key) => {
-    // Save blob to your storage
     await db.userProfile.update(userId, { session: blob });
   },
-});
-
-// Option 2: Configure persistence after account creation
-await gossipSdk.openSession({ mnemonic });
-// ... create account, get encryption key ...
-gossipSdk.configurePersistence(encryptionKey, async (blob, key) => {
-  await db.userProfile.update(userId, { session: blob });
 });
 ```
 

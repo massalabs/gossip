@@ -17,7 +17,6 @@ import {
   AnnouncementResult,
   UserKeys,
 } from './bindings';
-import { UserProfile } from '../db';
 import { encodeUserId } from '../utils/userId';
 
 export class SessionModule {
@@ -73,14 +72,22 @@ export class SessionModule {
   /**
    * Initialize session from an encrypted blob
    */
-  load(profile: UserProfile, encryptionKey: EncryptionKey): void {
+  load(encryptedSession: Uint8Array, encryptionKey: EncryptionKey): void {
     // Clean up existing session if any
     this.cleanup();
 
-    this.sessionManager = SessionManagerWrapper.from_encrypted_blob(
-      profile.session,
-      encryptionKey
-    );
+    try {
+      this.sessionManager = SessionManagerWrapper.from_encrypted_blob(
+        encryptedSession,
+        encryptionKey
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : JSON.stringify(error);
+      throw new Error(
+        `[SessionModule] Failed to load encrypted session: ${message}`
+      );
+    }
   }
 
   /**
