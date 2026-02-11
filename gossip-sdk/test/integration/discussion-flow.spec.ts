@@ -114,8 +114,8 @@ describe('Discussion Flow', () => {
     });
     await aliceSdk.openSession({
       mnemonic: aliceMnemonic,
+      encryptionKey: aliceEncryptionKey,
       onPersist: async () => {},
-      persistEncryptionKey: aliceEncryptionKey,
     });
     // Replace protocol with mock for testing
     (
@@ -131,8 +131,8 @@ describe('Discussion Flow', () => {
     });
     await bobSdk.openSession({
       mnemonic: bobMnemonic,
+      encryptionKey: bobEncryptionKey,
       onPersist: async () => {},
-      persistEncryptionKey: bobEncryptionKey,
     });
     // Replace protocol with mock for testing
     (
@@ -1548,8 +1548,8 @@ describe('session break in session manager', () => {
     await aliceSdk.init({ db });
     await aliceSdk.openSession({
       mnemonic: aliceMnemonic,
+      encryptionKey: aliceEncryptionKey,
       onPersist: async () => {},
-      persistEncryptionKey: aliceEncryptionKey,
       sessionConfig: createSessionConfig(
         max_session_inactivity_millis,
         keep_alive_interval_millis
@@ -1566,8 +1566,8 @@ describe('session break in session manager', () => {
     await bobSdk.init({ db });
     await bobSdk.openSession({
       mnemonic: bobMnemonic,
+      encryptionKey: bobEncryptionKey,
       onPersist: async () => {},
-      persistEncryptionKey: bobEncryptionKey,
       sessionConfig: createSessionConfig(
         max_session_inactivity_millis,
         keep_alive_interval_millis

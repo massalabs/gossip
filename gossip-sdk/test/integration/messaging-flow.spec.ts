@@ -68,8 +68,8 @@ describe('Messaging Flow', () => {
     });
     await aliceSdk.openSession({
       mnemonic: aliceMnemonic,
+      encryptionKey: aliceEncryptionKey,
       onPersist: async () => {},
-      persistEncryptionKey: aliceEncryptionKey,
     });
     // Replace protocol with mock for testing
     (
@@ -85,8 +85,8 @@ describe('Messaging Flow', () => {
     });
     await bobSdk.openSession({
       mnemonic: bobMnemonic,
+      encryptionKey: bobEncryptionKey,
       onPersist: async () => {},
-      persistEncryptionKey: bobEncryptionKey,
     });
     // Replace protocol with mock for testing
     (

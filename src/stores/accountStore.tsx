@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { db, UserProfile } from '@massalabs/gossip-sdk';
+import { db, encodeUserId, UserProfile } from '@massalabs/gossip-sdk';
 
 import {
   encrypt,
@@ -26,7 +26,7 @@ import {
   EncryptionKey,
   generateNonce,
 } from '@massalabs/gossip-sdk';
-// import { SessionConfig } from '../assets/generated/wasm/gossip_wasm';
+
 import { getActiveOrFirstProfile } from './utils/getAccount';
 import { auth } from './utils/auth';
 import { useDiscussionStore } from './discussionStore';
@@ -78,25 +78,22 @@ async function createProfileFromAccount(
   return newProfile;
 }
 
+type accountProvisionResult = {
+  encryptionKey: EncryptionKey;
+  security: UserProfile['security'];
+};
+
 async function provisionAccount(
   username: string,
   mnemonic: string | undefined,
+  userIdBytes: Uint8Array,
   opts: { useBiometrics: boolean; password?: string; iCloudSync?: boolean }
-): Promise<{ profile: UserProfile; encryptionKey: EncryptionKey }> {
-  let built:
-    | { security: UserProfile['security']; encryptionKey: EncryptionKey }
-    | undefined;
-
-  // gossipSdk session must be open at this point
-  if (!gossipSdk.isSessionOpen) {
-    throw new Error('SDK session must be open before provisioning account');
-  }
-
+): Promise<accountProvisionResult> {
   if (opts.useBiometrics) {
-    built = await buildSecurityFromBiometrics(
+    return await buildSecurityFromBiometrics(
       mnemonic,
       username,
-      gossipSdk.userIdBytes,
+      userIdBytes,
       opts.iCloudSync ?? false
     );
   } else {
@@ -104,19 +101,8 @@ async function provisionAccount(
     if (!password) {
       throw new Error('Password is required');
     }
-    built = await buildSecurityFromPassword(mnemonic, password);
+    return await buildSecurityFromPassword(mnemonic, password);
   }
-
-  // Serialize and encrypt the session
-  const sessionBlob = gossipSdk.getEncryptedSession(built.encryptionKey);
-
-  const profile = await createProfileFromAccount(
-    username,
-    gossipSdk.userId,
-    built.security,
-    sessionBlob
-  );
-  return { profile, encryptionKey: built.encryptionKey };
 }
 
 // Helpers to build security blobs and in-memory keys
@@ -310,33 +296,44 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           PrivateKey.fromBytes(keys.secret_keys().massa_secret_key)
         );
 
-        // Open SDK session
-        await gossipSdk.openSession({
-          mnemonic,
-        });
+        const userIdBytes = keys.public_keys().derive_id();
+        const userId = encodeUserId(userIdBytes);
 
-        // Now provision the account (SDK session must be open)
-        const { profile, encryptionKey } = await provisionAccount(
+        const { encryptionKey, security } = await provisionAccount(
           username,
           mnemonic,
+          userIdBytes,
           {
             useBiometrics: false,
             password,
           }
         );
 
-        // Configure persistence now that we have the profile and encryption key
-        gossipSdk.configurePersistence(encryptionKey, async (blob, _key) => {
-          await db.userProfile.update(profile.userId, {
-            session: blob,
-            updatedAt: new Date(),
-          });
-          set(state => ({
-            userProfile: state.userProfile
-              ? { ...state.userProfile, session: blob, updatedAt: new Date() }
-              : null,
-          }));
+        // Open SDK session
+        await gossipSdk.openSession({
+          mnemonic,
+          encryptionKey,
+          onPersist: async (blob, _key) => {
+            await db.userProfile.update(userId, {
+              session: blob,
+              updatedAt: new Date(),
+            });
+            set(state => ({
+              userProfile: state.userProfile
+                ? { ...state.userProfile, session: blob, updatedAt: new Date() }
+                : null,
+            }));
+          },
         });
+
+        const session = gossipSdk.getEncryptedSession();
+
+        const profile = await createProfileFromAccount(
+          username,
+          encodeUserId(userIdBytes),
+          security,
+          session
+        );
 
         useAppStore.getState().setIsInitialized(true);
         set({
@@ -377,30 +374,42 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           PrivateKey.fromBytes(keys.secret_keys().massa_secret_key)
         );
 
-        // Open SDK session
-        await gossipSdk.openSession({
-          mnemonic,
-        });
+        const userIdBytes = keys.public_keys().derive_id();
+        const userId = encodeUserId(userIdBytes);
 
         // Provision the account
-        const { profile, encryptionKey } = await provisionAccount(
+        const { encryptionKey, security } = await provisionAccount(
           username,
           mnemonic,
+          userIdBytes,
           opts
         );
 
-        // Configure persistence now that we have the profile and encryption key
-        gossipSdk.configurePersistence(encryptionKey, async (blob, _key) => {
-          await db.userProfile.update(profile.userId, {
-            session: blob,
-            updatedAt: new Date(),
-          });
-          set(state => ({
-            userProfile: state.userProfile
-              ? { ...state.userProfile, session: blob, updatedAt: new Date() }
-              : null,
-          }));
+        // Open SDK session
+        await gossipSdk.openSession({
+          mnemonic,
+          encryptionKey,
+          onPersist: async (blob, _key) => {
+            await db.userProfile.update(userId, {
+              session: blob,
+              updatedAt: new Date(),
+            });
+            set(state => ({
+              userProfile: state.userProfile
+                ? { ...state.userProfile, session: blob, updatedAt: new Date() }
+                : null,
+            }));
+          },
         });
+
+        const session = gossipSdk.getEncryptedSession();
+
+        const profile = await createProfileFromAccount(
+          username,
+          encodeUserId(userIdBytes),
+          security,
+          session
+        );
 
         useAppStore.getState().setIsInitialized(true);
         set({
@@ -449,7 +458,6 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           mnemonic,
           encryptedSession: profile.session,
           encryptionKey,
-          persistEncryptionKey: encryptionKey,
           onPersist: async (blob: Uint8Array, _key: EncryptionKey) => {
             // Save the new session blob to the database
             await db.userProfile.update(profile.userId, {
@@ -566,35 +574,43 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         const account = await Account.fromPrivateKey(
           PrivateKey.fromBytes(keys.secret_keys().massa_secret_key)
         );
-
-        // Open SDK session
-        await gossipSdk.openSession({
-          mnemonic,
-        });
-
-        // Provision the account
-        const { profile, encryptionKey } = await provisionAccount(
+        const userIdBytes = keys.public_keys().derive_id();
+        const userId = encodeUserId(userIdBytes);
+        const { encryptionKey, security } = await provisionAccount(
           username,
           mnemonic,
+          userIdBytes,
           {
             useBiometrics: true,
             iCloudSync,
           }
         );
 
-        // Configure persistence now that we have the profile and encryption key
-        gossipSdk.configurePersistence(encryptionKey, async (blob, _key) => {
-          await db.userProfile.update(profile.userId, {
-            session: blob,
-            updatedAt: new Date(),
-          });
-          set(state => ({
-            userProfile: state.userProfile
-              ? { ...state.userProfile, session: blob, updatedAt: new Date() }
-              : null,
-          }));
+        // Open SDK session
+        await gossipSdk.openSession({
+          mnemonic,
+          encryptionKey,
+          onPersist: async (blob, _key) => {
+            await db.userProfile.update(userId, {
+              session: blob,
+              updatedAt: new Date(),
+            });
+            set(state => ({
+              userProfile: state.userProfile
+                ? { ...state.userProfile, session: blob, updatedAt: new Date() }
+                : null,
+            }));
+          },
         });
 
+        const session = gossipSdk.getEncryptedSession();
+
+        const profile = await createProfileFromAccount(
+          username,
+          encodeUserId(userIdBytes),
+          security,
+          session
+        );
         useAppStore.getState().setIsInitialized(true);
         set({
           userProfile: profile,
@@ -718,9 +734,9 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
 
     persistSession: async () => {
       const state = get();
-      const { userProfile, encryptionKey } = state;
+      const { userProfile } = state;
 
-      if (!gossipSdk.isSessionOpen || !userProfile || !encryptionKey) {
+      if (!gossipSdk.isSessionOpen || !userProfile) {
         console.warn(
           'No session, user profile, or encryption key to persist, skipping persistence'
         );
@@ -729,7 +745,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
 
       try {
         // Serialize the session via SDK
-        const sessionBlob = gossipSdk.getEncryptedSession(encryptionKey);
+        const sessionBlob = gossipSdk.getEncryptedSession();
         if (!sessionBlob) {
           console.warn('Failed to get encrypted session');
           return;
