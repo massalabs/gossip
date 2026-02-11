@@ -13,6 +13,10 @@ import {
   cleanupTestSession,
   TestSessionData,
 } from '../utils';
+import {
+  decodeAnnouncementPayload,
+  encodeAnnouncementPayload,
+} from '../../src/utils/announcementPayload';
 
 describe('Real WASM Session', () => {
   const sessionsToCleanup: TestSessionData[] = [];
@@ -102,9 +106,10 @@ describe('Real WASM Session', () => {
     sessionsToCleanup.push(alice, bob);
 
     // Alice sends announcement with custom user data
-    const userData = new TextEncoder().encode(
-      JSON.stringify({ u: 'Alice', m: 'Hello!' })
-    );
+    const userData = encodeAnnouncementPayload('Alice', 'Hello!');
+    if (!userData) {
+      throw new Error('Expected announcement payload');
+    }
     const announcement = await alice.session.establishOutgoingSession(
       bob.session.ourPk,
       userData
@@ -116,11 +121,9 @@ describe('Real WASM Session', () => {
     expect(result).toBeDefined();
     expect(result?.user_data).toBeInstanceOf(Uint8Array);
 
-    const parsedUserData = JSON.parse(
-      new TextDecoder().decode(result?.user_data)
-    );
-    expect(parsedUserData.u).toBe('Alice');
-    expect(parsedUserData.m).toBe('Hello!');
+    const parsedUserData = decodeAnnouncementPayload(result?.user_data);
+    expect(parsedUserData?.username).toBe('Alice');
+    expect(parsedUserData?.message).toBe('Hello!');
   });
 
   it('should get message board read keys (seekers)', async () => {
@@ -194,11 +197,9 @@ describe('Real WASM Session', () => {
 
     expect(receiveResult).toBeDefined();
 
-    // The plaintext should contain the original message
-    if (receiveResult?.plaintext) {
-      const decryptedMessage = new TextDecoder().decode(
-        receiveResult.plaintext
-      );
+    // The decrypted message should contain the original message
+    if (receiveResult?.message) {
+      const decryptedMessage = new TextDecoder().decode(receiveResult.message);
       expect(decryptedMessage).toBe('Hello Bob!');
     }
   });

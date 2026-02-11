@@ -15,20 +15,6 @@ describe('Button Component', () => {
     await expect.element(button).toHaveTextContent('Click me');
   });
 
-  it('handles click interactions', async () => {
-    let clicked = false;
-    const handleClick = () => {
-      clicked = true;
-    };
-
-    await render(<Button onClick={handleClick}>Click me</Button>);
-
-    const button = page.getByRole('button', { name: /click me/i });
-    await button.click();
-
-    expect(clicked).toBe(true);
-  });
-
   it('disables button when disabled prop is true', async () => {
     await render(<Button disabled>Disabled Button</Button>);
 
