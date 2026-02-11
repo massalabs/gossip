@@ -1119,10 +1119,6 @@ describe('Discussion Flow', () => {
 
       let result = await aliceSdk.discussions.start(aliceBobContact);
       expect(result.success).toBe(false);
-      console.log(
-        'await aliceSdk.discussions.get(aliceSdk.userId, bobSdk.userId): ',
-        await aliceSdk.discussions.get(aliceSdk.userId, bobSdk.userId)
-      );
       expect(
         await aliceSdk.discussions.get(aliceSdk.userId, bobSdk.userId)
       ).toBeUndefined();
@@ -1179,7 +1175,6 @@ describe('Discussion Flow', () => {
 
       // STEP 2: Bob fetches announcements and sees Alice's request
       const res = await bobSdk.announcements.fetch();
-      console.log('res of bobSdk.announcements.fetch', res);
       expect(res.success).toBe(true);
 
       const bobDiscussion = await bobSdk.discussions.get(

@@ -149,14 +149,19 @@ export class RefreshService {
       }
 
       // Step 2: send announcements
-      const activePendingDiscussions = discussions.filter(discussion => {
-        const status = this.session.peerSessionStatus(
-          decodeUserId(discussion.contactUserId)
-        );
-        return [SessionStatus.Active, SessionStatus.SelfRequested].includes(
-          status
-        );
-      });
+      const discussionsAfterRefresh =
+        await this.db.getDiscussionsByOwner(ownerUserId);
+      const activePendingDiscussions = discussionsAfterRefresh.filter(
+        discussion => {
+          const status = this.session.peerSessionStatus(
+            decodeUserId(discussion.contactUserId)
+          );
+          console.log('discussionstatus: ', status);
+          return [SessionStatus.Active, SessionStatus.SelfRequested].includes(
+            status
+          );
+        }
+      );
       await this.announcementService.processOutgoingAnnouncements(
         activePendingDiscussions
       );
