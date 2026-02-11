@@ -197,7 +197,7 @@ describe('Real WASM Session', () => {
 
     expect(receiveResult).toBeDefined();
 
-    // The plaintext should contain the original message
+    // The decrypted message should contain the original message
     if (receiveResult?.message) {
       const decryptedMessage = new TextDecoder().decode(receiveResult.message);
       expect(decryptedMessage).toBe('Hello Bob!');
