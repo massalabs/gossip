@@ -156,7 +156,6 @@ export class RefreshService {
           const status = this.session.peerSessionStatus(
             decodeUserId(discussion.contactUserId)
           );
-          console.log('discussionstatus: ', status);
           return [SessionStatus.Active, SessionStatus.SelfRequested].includes(
             status
           );

@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { GossipSdkImpl } from '../../src/gossipSdk';
+import { GossipSdkImpl, SdkEventType } from '../../src/gossipSdk';
 import {
   GossipDatabase,
   type Discussion,
@@ -151,7 +151,7 @@ describe('E2E: Discussion request (user A sends to user B)', () => {
           d.direction === DiscussionDirection.INITIATED
       );
       expect(sentDiscussion).toBeDefined();
-      expect(sentDiscussion!.announcementMessage).toBe('Hi from A');
+      expect(sentDiscussion!.lastAnnouncementMessage).toBe('Hi from A');
 
       // ─── B listens for discussionRequest event and fetches until it fires ───
       const maxWaitMs = 45_000;
@@ -170,11 +170,11 @@ describe('E2E: Discussion request (user A sends to user B)', () => {
           if (discussion.contactUserId === userAId) {
             done = true;
             clearTimeout(timeout);
-            sdkB.off('discussionRequest', handler);
+            sdkB.off(SdkEventType.SESSION_REQUESTED, handler);
             resolve({ discussion, contact });
           }
         };
-        sdkB.on('discussionRequest', handler);
+        sdkB.on(SdkEventType.SESSION_REQUESTED, handler);
 
         const poll = async () => {
           if (done) return;
@@ -186,7 +186,7 @@ describe('E2E: Discussion request (user A sends to user B)', () => {
       });
 
       if (received) {
-        expect(received.discussion.announcementMessage).toBe('Hi from A');
+        expect(received.discussion.lastAnnouncementMessage).toBe('Hi from A');
         expect(received.contact.name).toBe('Alice');
         expect(received.contact.userId).toBe(userAId);
       }

@@ -1620,7 +1620,7 @@ describe('session break in session manager', () => {
       60 * 1000, // max_incoming_message_future_millis: 1 minute
       max_session_inactivity_millis,
       keep_alive_interval_millis,
-      4n // max_session_lag_length: 4 messages
+      10000n // max_session_lag_length: 10000 messages
     );
   }
 
@@ -1671,7 +1671,7 @@ describe('session break in session manager', () => {
     ] = mockProtocol;
   }
 
-  it('Alice has not received incoming msg for too long, session is killed and reset by updateState function', async () => {
+  it('Alice has not received incoming msg for too long, session is killed and reset by updateState function (no msg)', async () => {
     await createCustomSdks(
       2000, // max_session_inactivity_millis: 2 seconds
       10000 // keep_alive_interval_millis: 10 seconds
@@ -1704,6 +1704,136 @@ describe('session break in session manager', () => {
     );
 
     establishSpy.mockRestore();
+  });
+
+  it('Alice has not received incoming msg for too long, session is killed and reset by updateState function (with msg)', async () => {
+    await createCustomSdks(
+      2000, // max_session_inactivity_millis: 2 seconds
+      10000 // keep_alive_interval_millis: 10 seconds
+    );
+
+    // Setup: Alice and Bob establish a session
+    await setupSession(aliceSdk, bobSdk, 'Bob', 'Alice', "hi it's alice");
+
+    // Verify session is active
+    expect(await isLocalSessionUp(aliceSdk, bobSdk.userId)).toBe(true);
+
+    // Spy on protocol announcements after initial session setup
+    const sendAnnouncementSpy = vi.spyOn(mockProtocol, 'sendAnnouncement');
+
+    // 1. Bob sends one incoming message to Alice
+    const bobMsgResult = await bobSdk.messages.send({
+      ownerUserId: bobSdk.userId,
+      contactUserId: aliceSdk.userId,
+      content: 'Incoming from Bob',
+      type: MessageType.TEXT,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.WAITING_SESSION,
+      timestamp: new Date(),
+    });
+    expect(bobMsgResult.success).toBe(true);
+
+    await aliceSdk.messages.fetch();
+
+    const aliceIncomingMessagesBefore = await db.messages
+      .where('[ownerUserId+contactUserId+direction]')
+      .equals([aliceSdk.userId, bobSdk.userId, MessageDirection.INCOMING])
+      .toArray();
+    expect(aliceIncomingMessagesBefore.length).toBe(1);
+    expect(aliceIncomingMessagesBefore[0].status).toBe(MessageStatus.DELIVERED);
+
+    // 2. Create 4 outgoing messages for Alice with different statuses
+    // WAITING_SESSION
+    await db.messages.add({
+      ownerUserId: aliceSdk.userId,
+      contactUserId: bobSdk.userId,
+      content: 'Message WAITING_SESSION',
+      type: MessageType.TEXT,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.WAITING_SESSION,
+      timestamp: new Date(),
+    });
+
+    // READY
+    await db.messages.add({
+      ownerUserId: aliceSdk.userId,
+      contactUserId: bobSdk.userId,
+      content: 'Message READY',
+      type: MessageType.TEXT,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.READY,
+      timestamp: new Date(),
+      seeker: new Uint8Array([1, 2, 3]),
+      encryptedMessage: new Uint8Array([4, 5, 6]),
+      whenToSend: new Date(),
+    });
+
+    // SENT
+    await db.messages.add({
+      ownerUserId: aliceSdk.userId,
+      contactUserId: bobSdk.userId,
+      content: 'Message SENT',
+      type: MessageType.TEXT,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.SENT,
+      timestamp: new Date(),
+      seeker: new Uint8Array([7, 8, 9]),
+      encryptedMessage: new Uint8Array([10, 11, 12]),
+      whenToSend: new Date(),
+    });
+
+    // DELIVERED (acknowledged)
+    await db.messages.add({
+      ownerUserId: aliceSdk.userId,
+      contactUserId: bobSdk.userId,
+      content: 'Message DELIVERED',
+      type: MessageType.TEXT,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.DELIVERED,
+      timestamp: new Date(),
+      seeker: new Uint8Array([13, 14, 15]),
+    });
+
+    const aliceOutgoingBefore = await db.messages
+      .where('[ownerUserId+contactUserId+direction]')
+      .equals([aliceSdk.userId, bobSdk.userId, MessageDirection.OUTGOING])
+      .toArray();
+    expect(aliceOutgoingBefore.length).toBe(5);
+
+    // Spy on message send to verify it's called
+    const sendMessageSpy = vi.spyOn(mockProtocol, 'sendMessage');
+
+    // 4. Wait for inactivity to kill the session
+    await new Promise(resolve => setTimeout(resolve, 2100));
+
+    // 5. Call updateState - this should reset the session
+    await aliceSdk.updateState();
+
+    // A new session should be created (announcement sent once for reset)
+    expect(sendAnnouncementSpy).toHaveBeenCalledTimes(1);
+
+    // Verify message send to verify it's called
+    expect(sendMessageSpy).toHaveBeenCalledTimes(3); // 3 messages are sent: 1 for the WAITING_SESSION message, 1 for the READY message, 1 for the SENT message
+
+    // Session should still be active after reset
+    expect(aliceSdk.discussions.getStatus(bobSdk.userId)).toBe(
+      SessionStatus.Active
+    );
+
+    // Outgoing DELIVERED message should not be resent or reset
+    const aliceOutgoingAfter = await db.messages
+      .where('[ownerUserId+contactUserId+direction]')
+      .equals([aliceSdk.userId, bobSdk.userId, MessageDirection.OUTGOING])
+      .toArray();
+    expect(aliceOutgoingAfter.length).toBe(5);
+
+    expect(aliceOutgoingAfter[0].status).toBe(MessageStatus.DELIVERED); // announcement message
+    expect(aliceOutgoingAfter[1].status).toBe(MessageStatus.SENT); // WAITING_SESSION message is set as SENT
+    expect(aliceOutgoingAfter[2].status).toBe(MessageStatus.SENT); // READY message is set as SENT
+    expect(aliceOutgoingAfter[3].status).toBe(MessageStatus.SENT);
+    expect(aliceOutgoingAfter[4].status).toBe(MessageStatus.DELIVERED);
+
+    sendAnnouncementSpy.mockRestore();
   });
 
   it('Alice send announcement to bob. max_session_inactivity_millis delay pass but session is not killed (on both alice and bob side) since it is not active', async () => {

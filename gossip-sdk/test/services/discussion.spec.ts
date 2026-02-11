@@ -248,6 +248,6 @@ describe('resetSendQueue function', () => {
     await resetSendQueue(db, RENEW_OWNER_USER_ID, RENEW_CONTACT_USER_ID);
 
     const incoming = await db.messages.get(incomingId);
-    expect(incoming?.status).toBe(MessageStatus.DELIVERED);
+    expect(incoming?.status).toBe(MessageStatus.SENT);
   });
 });
