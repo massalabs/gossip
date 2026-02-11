@@ -1,7 +1,7 @@
 /**
  * DiscussionService tests
  *
- * Includes message status reset behavior for session renewal.
+ * Tests for resetSendQueue function behavior.
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
@@ -10,40 +10,19 @@ import {
   MessageStatus,
   MessageDirection,
   MessageType,
-  DiscussionStatus,
   DiscussionDirection,
 } from '../../src/db';
 import { encodeUserId } from '../../src/utils/userId';
+import { resetSendQueue } from '../../src/services/discussion';
 
 // ============================================================================
-// DiscussionService renew message reset behavior
+// resetSendQueue function tests
 // ============================================================================
 
 const RENEW_OWNER_USER_ID = encodeUserId(new Uint8Array(32).fill(11));
 const RENEW_CONTACT_USER_ID = encodeUserId(new Uint8Array(32).fill(12));
 
-async function simulateRenewMessageReset(
-  ownerUserId: string,
-  contactUserId: string
-): Promise<number> {
-  return await db.messages
-    .where('[ownerUserId+contactUserId]')
-    .equals([ownerUserId, contactUserId])
-    .and(
-      message =>
-        message.direction === MessageDirection.OUTGOING &&
-        (message.status === MessageStatus.SENDING ||
-          message.status === MessageStatus.FAILED ||
-          message.status === MessageStatus.SENT)
-    )
-    .modify({
-      status: MessageStatus.WAITING_SESSION,
-      encryptedMessage: undefined,
-      seeker: undefined,
-    });
-}
-
-describe('DiscussionService renew message reset behavior', () => {
+describe('resetSendQueue function', () => {
   beforeEach(async () => {
     if (!db.isOpen()) {
       await db.open();
@@ -54,14 +33,38 @@ describe('DiscussionService renew message reset behavior', () => {
       ownerUserId: RENEW_OWNER_USER_ID,
       contactUserId: RENEW_CONTACT_USER_ID,
       direction: DiscussionDirection.INITIATED,
-      status: DiscussionStatus.ACTIVE,
+      weAccepted: true,
+      sendAnnouncement: null,
       unreadCount: 0,
       createdAt: new Date(),
       updatedAt: new Date(),
     });
   });
 
-  it('should reset SENT messages to WAITING_SESSION when renewing session', async () => {
+  it('should reset READY messages to WAITING_SESSION', async () => {
+    const readyMessageId = await db.messages.add({
+      ownerUserId: RENEW_OWNER_USER_ID,
+      contactUserId: RENEW_CONTACT_USER_ID,
+      content: 'Ready message',
+      type: MessageType.TEXT,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.READY,
+      timestamp: new Date(),
+      seeker: new Uint8Array(32).fill(1),
+      encryptedMessage: new Uint8Array(64).fill(2),
+      whenToSend: new Date(),
+    });
+
+    await resetSendQueue(db, RENEW_OWNER_USER_ID, RENEW_CONTACT_USER_ID);
+
+    const readyMessage = await db.messages.get(readyMessageId);
+    expect(readyMessage?.status).toBe(MessageStatus.WAITING_SESSION);
+    expect(readyMessage?.seeker).toBeUndefined();
+    expect(readyMessage?.encryptedMessage).toBeUndefined();
+    expect(readyMessage?.whenToSend).toBeUndefined();
+  });
+
+  it('should reset SENT messages to WAITING_SESSION', async () => {
     const sentMessageId = await db.messages.add({
       ownerUserId: RENEW_OWNER_USER_ID,
       contactUserId: RENEW_CONTACT_USER_ID,
@@ -72,17 +75,19 @@ describe('DiscussionService renew message reset behavior', () => {
       timestamp: new Date(),
       seeker: new Uint8Array(32).fill(1),
       encryptedMessage: new Uint8Array(64).fill(2),
+      whenToSend: new Date(),
     });
 
-    await simulateRenewMessageReset(RENEW_OWNER_USER_ID, RENEW_CONTACT_USER_ID);
+    await resetSendQueue(db, RENEW_OWNER_USER_ID, RENEW_CONTACT_USER_ID);
 
     const sentMessage = await db.messages.get(sentMessageId);
     expect(sentMessage?.status).toBe(MessageStatus.WAITING_SESSION);
     expect(sentMessage?.seeker).toBeUndefined();
     expect(sentMessage?.encryptedMessage).toBeUndefined();
+    expect(sentMessage?.whenToSend).toBeUndefined();
   });
 
-  it('should NOT reset DELIVERED messages when renewing session', async () => {
+  it('should NOT reset DELIVERED messages', async () => {
     const deliveredMessageId = await db.messages.add({
       ownerUserId: RENEW_OWNER_USER_ID,
       contactUserId: RENEW_CONTACT_USER_ID,
@@ -95,7 +100,7 @@ describe('DiscussionService renew message reset behavior', () => {
       encryptedMessage: new Uint8Array(64).fill(4),
     });
 
-    await simulateRenewMessageReset(RENEW_OWNER_USER_ID, RENEW_CONTACT_USER_ID);
+    await resetSendQueue(db, RENEW_OWNER_USER_ID, RENEW_CONTACT_USER_ID);
 
     const deliveredMessage = await db.messages.get(deliveredMessageId);
     expect(deliveredMessage?.status).toBe(MessageStatus.DELIVERED);
@@ -103,7 +108,7 @@ describe('DiscussionService renew message reset behavior', () => {
     expect(deliveredMessage?.encryptedMessage).toBeDefined();
   });
 
-  it('should NOT reset READ messages when renewing session', async () => {
+  it('should NOT reset READ messages', async () => {
     const readMessageId = await db.messages.add({
       ownerUserId: RENEW_OWNER_USER_ID,
       contactUserId: RENEW_CONTACT_USER_ID,
@@ -116,56 +121,14 @@ describe('DiscussionService renew message reset behavior', () => {
       encryptedMessage: new Uint8Array(64).fill(6),
     });
 
-    await simulateRenewMessageReset(RENEW_OWNER_USER_ID, RENEW_CONTACT_USER_ID);
+    await resetSendQueue(db, RENEW_OWNER_USER_ID, RENEW_CONTACT_USER_ID);
 
     const readMessage = await db.messages.get(readMessageId);
     expect(readMessage?.status).toBe(MessageStatus.READ);
     expect(readMessage?.seeker).toBeDefined();
   });
 
-  it('should reset SENDING messages to WAITING_SESSION when renewing', async () => {
-    const sendingMessageId = await db.messages.add({
-      ownerUserId: RENEW_OWNER_USER_ID,
-      contactUserId: RENEW_CONTACT_USER_ID,
-      content: 'Sending message',
-      type: MessageType.TEXT,
-      direction: MessageDirection.OUTGOING,
-      status: MessageStatus.SENDING,
-      timestamp: new Date(),
-      seeker: new Uint8Array(32).fill(5),
-      encryptedMessage: new Uint8Array(64).fill(6),
-    });
-
-    await simulateRenewMessageReset(RENEW_OWNER_USER_ID, RENEW_CONTACT_USER_ID);
-
-    const sendingMessage = await db.messages.get(sendingMessageId);
-    expect(sendingMessage?.status).toBe(MessageStatus.WAITING_SESSION);
-    expect(sendingMessage?.seeker).toBeUndefined();
-    expect(sendingMessage?.encryptedMessage).toBeUndefined();
-  });
-
-  it('should reset FAILED messages to WAITING_SESSION when renewing', async () => {
-    const failedMessageId = await db.messages.add({
-      ownerUserId: RENEW_OWNER_USER_ID,
-      contactUserId: RENEW_CONTACT_USER_ID,
-      content: 'Failed message',
-      type: MessageType.TEXT,
-      direction: MessageDirection.OUTGOING,
-      status: MessageStatus.FAILED,
-      timestamp: new Date(),
-      seeker: new Uint8Array(32).fill(7),
-      encryptedMessage: new Uint8Array(64).fill(8),
-    });
-
-    await simulateRenewMessageReset(RENEW_OWNER_USER_ID, RENEW_CONTACT_USER_ID);
-
-    const failedMessage = await db.messages.get(failedMessageId);
-    expect(failedMessage?.status).toBe(MessageStatus.WAITING_SESSION);
-    expect(failedMessage?.seeker).toBeUndefined();
-    expect(failedMessage?.encryptedMessage).toBeUndefined();
-  });
-
-  it('should keep WAITING_SESSION messages unchanged when renewing', async () => {
+  it('should keep WAITING_SESSION messages unchanged', async () => {
     const waitingMessageId = await db.messages.add({
       ownerUserId: RENEW_OWNER_USER_ID,
       contactUserId: RENEW_CONTACT_USER_ID,
@@ -176,13 +139,26 @@ describe('DiscussionService renew message reset behavior', () => {
       timestamp: new Date(),
     });
 
-    await simulateRenewMessageReset(RENEW_OWNER_USER_ID, RENEW_CONTACT_USER_ID);
+    await resetSendQueue(db, RENEW_OWNER_USER_ID, RENEW_CONTACT_USER_ID);
 
     const waitingMessage = await db.messages.get(waitingMessageId);
     expect(waitingMessage?.status).toBe(MessageStatus.WAITING_SESSION);
   });
 
-  it('should handle mixed message statuses correctly on renew', async () => {
+  it('should handle mixed message statuses correctly', async () => {
+    const readyId = await db.messages.add({
+      ownerUserId: RENEW_OWNER_USER_ID,
+      contactUserId: RENEW_CONTACT_USER_ID,
+      content: 'Ready',
+      type: MessageType.TEXT,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.READY,
+      timestamp: new Date(),
+      seeker: new Uint8Array(32).fill(1),
+      encryptedMessage: new Uint8Array(64).fill(1),
+      whenToSend: new Date(),
+    });
+
     const sentId = await db.messages.add({
       ownerUserId: RENEW_OWNER_USER_ID,
       contactUserId: RENEW_CONTACT_USER_ID,
@@ -191,30 +167,9 @@ describe('DiscussionService renew message reset behavior', () => {
       direction: MessageDirection.OUTGOING,
       status: MessageStatus.SENT,
       timestamp: new Date(),
-      seeker: new Uint8Array(32).fill(1),
-      encryptedMessage: new Uint8Array(64).fill(1),
-    });
-
-    const sendingId = await db.messages.add({
-      ownerUserId: RENEW_OWNER_USER_ID,
-      contactUserId: RENEW_CONTACT_USER_ID,
-      content: 'Sending',
-      type: MessageType.TEXT,
-      direction: MessageDirection.OUTGOING,
-      status: MessageStatus.SENDING,
-      timestamp: new Date(),
       seeker: new Uint8Array(32).fill(2),
       encryptedMessage: new Uint8Array(64).fill(2),
-    });
-
-    const failedId = await db.messages.add({
-      ownerUserId: RENEW_OWNER_USER_ID,
-      contactUserId: RENEW_CONTACT_USER_ID,
-      content: 'Failed',
-      type: MessageType.TEXT,
-      direction: MessageDirection.OUTGOING,
-      status: MessageStatus.FAILED,
-      timestamp: new Date(),
+      whenToSend: new Date(),
     });
 
     const deliveredId = await db.messages.add({
@@ -229,6 +184,18 @@ describe('DiscussionService renew message reset behavior', () => {
       encryptedMessage: new Uint8Array(64).fill(3),
     });
 
+    const readId = await db.messages.add({
+      ownerUserId: RENEW_OWNER_USER_ID,
+      contactUserId: RENEW_CONTACT_USER_ID,
+      content: 'Read',
+      type: MessageType.TEXT,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.READ,
+      timestamp: new Date(),
+      seeker: new Uint8Array(32).fill(4),
+      encryptedMessage: new Uint8Array(64).fill(4),
+    });
+
     const waitingId = await db.messages.add({
       ownerUserId: RENEW_OWNER_USER_ID,
       contactUserId: RENEW_CONTACT_USER_ID,
@@ -239,41 +206,48 @@ describe('DiscussionService renew message reset behavior', () => {
       timestamp: new Date(),
     });
 
-    await simulateRenewMessageReset(RENEW_OWNER_USER_ID, RENEW_CONTACT_USER_ID);
+    await resetSendQueue(db, RENEW_OWNER_USER_ID, RENEW_CONTACT_USER_ID);
+
+    const ready = await db.messages.get(readyId);
+    expect(ready?.status).toBe(MessageStatus.WAITING_SESSION);
+    expect(ready?.seeker).toBeUndefined();
+    expect(ready?.encryptedMessage).toBeUndefined();
+    expect(ready?.whenToSend).toBeUndefined();
 
     const sent = await db.messages.get(sentId);
     expect(sent?.status).toBe(MessageStatus.WAITING_SESSION);
     expect(sent?.seeker).toBeUndefined();
-
-    const sending = await db.messages.get(sendingId);
-    expect(sending?.status).toBe(MessageStatus.WAITING_SESSION);
-    expect(sending?.seeker).toBeUndefined();
-
-    const failed = await db.messages.get(failedId);
-    expect(failed?.status).toBe(MessageStatus.WAITING_SESSION);
+    expect(sent?.encryptedMessage).toBeUndefined();
+    expect(sent?.whenToSend).toBeUndefined();
 
     const delivered = await db.messages.get(deliveredId);
     expect(delivered?.status).toBe(MessageStatus.DELIVERED);
     expect(delivered?.seeker).toBeDefined();
+    expect(delivered?.encryptedMessage).toBeDefined();
+
+    const read = await db.messages.get(readId);
+    expect(read?.status).toBe(MessageStatus.READ);
+    expect(read?.seeker).toBeDefined();
+    expect(read?.encryptedMessage).toBeDefined();
 
     const waiting = await db.messages.get(waitingId);
     expect(waiting?.status).toBe(MessageStatus.WAITING_SESSION);
   });
 
-  it('should NOT reset incoming messages when renewing', async () => {
+  it('should NOT reset incoming messages', async () => {
     const incomingId = await db.messages.add({
       ownerUserId: RENEW_OWNER_USER_ID,
       contactUserId: RENEW_CONTACT_USER_ID,
       content: 'Incoming message',
       type: MessageType.TEXT,
       direction: MessageDirection.INCOMING,
-      status: MessageStatus.DELIVERED,
+      status: MessageStatus.SENT,
       timestamp: new Date(),
     });
 
-    await simulateRenewMessageReset(RENEW_OWNER_USER_ID, RENEW_CONTACT_USER_ID);
+    await resetSendQueue(db, RENEW_OWNER_USER_ID, RENEW_CONTACT_USER_ID);
 
     const incoming = await db.messages.get(incomingId);
-    expect(incoming?.status).toBe(MessageStatus.DELIVERED);
+    expect(incoming?.status).toBe(MessageStatus.SENT);
   });
 });

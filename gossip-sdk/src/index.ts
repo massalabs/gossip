@@ -23,13 +23,10 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // SDK Singleton - Primary API
 // ─────────────────────────────────────────────────────────────────────────────
-export { gossipSdk, GossipSdkImpl } from './gossipSdk';
-export type {
-  GossipSdkInitOptions,
-  OpenSessionOptions,
-  SdkEventType,
-  SdkEventHandlers,
-} from './gossipSdk';
+export { gossipSdk, GossipSdkImpl, SdkStatus } from './gossipSdk';
+export type { GossipSdkInitOptions, OpenSessionOptions } from './gossipSdk';
+export { SdkEventType } from './gossipSdk';
+export type { SdkEventHandlers } from './gossipSdk';
 
 // SDK Events
 export type { GossipSdkEvents } from './types/events';

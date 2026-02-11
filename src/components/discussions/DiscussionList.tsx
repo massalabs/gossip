@@ -8,7 +8,6 @@ import {
   useDiscussionStore,
 } from '../../stores/discussionStore';
 import { ROUTES } from '../../constants/routes';
-import { Discussion } from '../../db';
 
 import EmptyDiscussions from './EmptyDiscussions';
 import DiscussionListItem from './DiscussionListItem';
@@ -23,6 +22,7 @@ import {
   useFilteredContacts,
   useVirtualItems,
 } from './hooks/useDiscussionListItems';
+import { Discussion } from '@massalabs/gossip-sdk';
 
 // =============================================================================
 // Types

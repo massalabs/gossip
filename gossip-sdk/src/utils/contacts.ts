@@ -108,24 +108,23 @@ export async function deleteContact(
       };
     }
 
-    // Verify contact exists
-    const contact = await db.getContactByOwnerAndUserId(
-      ownerUserId,
-      contactUserId
-    );
-    if (!contact) {
-      return {
-        success: false,
-        reason: 'not_found',
-        message: 'Contact not found.',
-      };
-    }
-
     // Delete in a transaction to ensure atomicity
-    await db.transaction(
+    const result: DeleteContactResult = await db.transaction(
       'rw',
       [db.contacts, db.discussions, db.messages],
       async () => {
+        // Verify contact exists
+        const contact = await db.getContactByOwnerAndUserId(
+          ownerUserId,
+          contactUserId
+        );
+        if (!contact) {
+          return {
+            success: false,
+            reason: 'not_found',
+            message: 'Contact not found',
+          };
+        }
         // Delete the contact
         await db.contacts
           .where('[ownerUserId+userId]')
@@ -143,8 +142,12 @@ export async function deleteContact(
           .where('[ownerUserId+contactUserId]')
           .equals([ownerUserId, contactUserId])
           .delete();
+
+        return { success: true };
       }
     );
+
+    if (!result.success) return result;
 
     // Discard peer from session manager and persist
     await session.peerDiscard(decodeUserId(contactUserId));

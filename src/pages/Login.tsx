@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useAccountStore } from '../stores/accountStore';
-import { UserProfile } from '../db';
+import { UserProfile } from '@massalabs/gossip-sdk';
 import { biometricService } from '../services/biometricService';
 import AccountSelection from '../components/account/AccountSelection';
 import AccountImport from '../components/account/AccountImport';

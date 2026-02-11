@@ -5,7 +5,7 @@ import PageHeader from '../../components/ui/PageHeader';
 import Button from '../../components/ui/Button';
 import Toggle from '../../components/ui/Toggle';
 import { useAppStore } from '../../stores/appStore';
-import { db } from '../../db';
+import { db } from '@massalabs/gossip-sdk';
 import { clearAppStorage } from '../../utils/localStorage';
 import { useAccountStore } from '../../stores/accountStore';
 import { useVersionCheck } from '../../hooks/useVersionCheck';

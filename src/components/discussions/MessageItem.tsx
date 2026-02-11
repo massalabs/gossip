@@ -11,9 +11,13 @@ import {
   Check as CheckIcon,
   AlertTriangle,
 } from 'react-feather';
-import { Message, MessageDirection, MessageStatus } from '../../db';
 import { formatTime } from '../../utils/timeUtils';
-import { gossipSdk } from '@massalabs/gossip-sdk';
+import {
+  gossipSdk,
+  Message,
+  MessageStatus,
+  MessageDirection,
+} from '@massalabs/gossip-sdk';
 import { parseLinks, openUrl } from '../../utils/linkUtils';
 import { useMarkMessageAsRead } from '../../hooks/useMarkMessageAsRead';
 
@@ -654,8 +658,8 @@ const MessageItem: React.FC<MessageItemProps> = ({
               className="flex items-center gap-1"
               aria-label={`Status: ${message.status}`}
             >
-              {(message.status === MessageStatus.SENDING ||
-                message.status === MessageStatus.FAILED) && (
+              {(message.status === MessageStatus.WAITING_SESSION ||
+                message.status === MessageStatus.READY) && (
                 <div className="flex items-center gap-1">
                   <div
                     className="w-2.5 h-2.5 border border-current border-t-transparent rounded-full animate-spin"

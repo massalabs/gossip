@@ -86,7 +86,7 @@ export const defaultMessageProtocol: MessageProtocolType =
  *
  * @example
  * ```typescript
- * import { setProtocolBaseUrl } from 'gossip-sdk';
+ * import { setProtocolBaseUrl } from '@massalabs/gossip-sdk';
  *
  * // Set custom API endpoint
  * setProtocolBaseUrl('https://my-server.com/api');

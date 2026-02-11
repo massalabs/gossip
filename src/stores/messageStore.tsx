@@ -5,7 +5,7 @@ import {
   MessageDirection,
   MessageStatus,
   MessageType,
-} from '../db';
+} from '@massalabs/gossip-sdk';
 import { createSelectors } from './utils/createSelectors';
 import { useAccountStore } from './accountStore';
 import { gossipSdk } from '@massalabs/gossip-sdk';
@@ -219,7 +219,7 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
         content,
         type: MessageType.TEXT,
         direction: MessageDirection.OUTGOING,
-        status: MessageStatus.SENDING,
+        status: MessageStatus.WAITING_SESSION,
         timestamp: new Date(),
         replyTo,
         forwardOf,
