@@ -398,7 +398,7 @@ export function useContactForm() {
 
       const payload: AnnouncementPayload = {
         username: usernameToShare,
-        message: message.value,
+        message: message.value.trim(),
       };
 
       try {
