@@ -64,12 +64,12 @@ export class DiscussionService {
   /**
    * Initialize a discussion with a contact using SessionManager
    * @param contact - The contact to start a discussion with
-   * @param message - Optional message to include in the announcement
+   * @param payload - Optional payload to include in the announcement (username and message)
    * @returns The discussion ID and the created announcement
    */
   async initialize(
     contact: Contact,
-    payload: AnnouncementPayload
+    payload?: AnnouncementPayload
   ): Promise<{
     discussionId: number;
     announcement: Uint8Array;
@@ -79,10 +79,13 @@ export class DiscussionService {
     try {
       const userId = this.session.userIdEncoded;
 
-      const payloadBytes = encodeAnnouncementPayload(
-        payload.username,
-        payload.message
-      );
+      let payloadBytes: Uint8Array | undefined;
+      if (payload) {
+        payloadBytes = encodeAnnouncementPayload(
+          payload.username,
+          payload.message
+        );
+      }
 
       const result = await this.announcementService.establishSession(
         UserPublicKeys.from_bytes(contact.publicKeys),
@@ -105,7 +108,6 @@ export class DiscussionService {
         );
       }
 
-      // Persist discussion immediately with the announcement for reliable retry
       const discussionId = await this.db.discussions.add({
         ownerUserId: userId,
         contactUserId: contact.userId,
@@ -113,7 +115,7 @@ export class DiscussionService {
         status: status,
         nextSeeker: undefined,
         initiationAnnouncement: result.announcement,
-        announcementMessage: payload.message,
+        announcementMessage: payload?.message,
         unreadCount: 0,
         createdAt: new Date(),
         updatedAt: new Date(),
