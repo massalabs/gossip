@@ -9,7 +9,7 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { useDiscussionStore } from '../../src/stores/discussionStore';
-import { db, DiscussionStatus, DiscussionDirection } from '../../src/db';
+import { db, DiscussionDirection } from '@massalabs/gossip-sdk';
 import { useAccountStore } from '../../src/stores/accountStore';
 
 // Mock the account store
@@ -82,46 +82,36 @@ describe('DiscussionStore Filter', () => {
   });
 
   describe('Filter Counts Calculation', () => {
-    it('should calculate correct filter counts for all discussions', async () => {
-      // Create test discussions
+    it('should load discussions without throwing even when SDK session is not open', async () => {
+      // Create test discussions (minimal fields required by store sorting)
       const now = new Date();
       const discussions = [
         {
           ownerUserId,
           contactUserId: 'contact-1',
-          status: DiscussionStatus.ACTIVE,
           direction: DiscussionDirection.INITIATED,
           unreadCount: 0,
           createdAt: new Date(now.getTime() - 1000),
           updatedAt: new Date(now.getTime() - 1000),
+          lastMessageTimestamp: new Date(now.getTime() - 1000),
         },
         {
           ownerUserId,
           contactUserId: 'contact-2',
-          status: DiscussionStatus.ACTIVE,
           direction: DiscussionDirection.INITIATED,
           unreadCount: 5,
           createdAt: new Date(now.getTime() - 2000),
           updatedAt: new Date(now.getTime() - 2000),
+          lastMessageTimestamp: new Date(now.getTime() - 2000),
         },
         {
           ownerUserId,
           contactUserId: 'contact-3',
-          status: DiscussionStatus.PENDING,
           direction: DiscussionDirection.RECEIVED,
           unreadCount: 0,
           createdAt: new Date(now.getTime() - 3000),
           updatedAt: new Date(now.getTime() - 3000),
         },
-        {
-          ownerUserId,
-          contactUserId: 'contact-4',
-          status: DiscussionStatus.CLOSED,
-          direction: DiscussionDirection.INITIATED,
-          unreadCount: 0,
-          createdAt: new Date(now.getTime() - 4000),
-          updatedAt: new Date(now.getTime() - 4000),
-        },
       ];
 
       for (const discussion of discussions) {
@@ -129,155 +119,26 @@ describe('DiscussionStore Filter', () => {
         await db.discussions.add(discussion as any);
       }
 
-      // Initialize store to load discussions
-      useDiscussionStore.getState().init();
+      expect(() => useDiscussionStore.getState().init()).not.toThrow();
 
       // Wait for store to update (liveQuery is async)
       await new Promise(resolve => setTimeout(resolve, 100));
 
       const storeDiscussions = useDiscussionStore.getState().discussions;
-
-      // Calculate filter counts (same logic as in Discussions.tsx)
-      const allCount = storeDiscussions.filter(
-        d => d.status !== DiscussionStatus.CLOSED
-      ).length;
-      const unreadCount = storeDiscussions.filter(
-        d => d.status === DiscussionStatus.ACTIVE && d.unreadCount > 0
-      ).length;
-      const pendingCount = storeDiscussions.filter(
-        d => d.status === DiscussionStatus.PENDING
-      ).length;
-
-      expect(allCount).toBe(3); // 3 non-closed discussions
-      expect(unreadCount).toBe(1); // 1 active discussion with unread messages
-      expect(pendingCount).toBe(1); // 1 pending discussion
+      expect(storeDiscussions.length).toBe(3);
     });
 
-    it('should handle empty discussions list', () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const discussions: any[] = [];
-
-      const allCount = discussions.filter(
-        d => d.status !== DiscussionStatus.CLOSED
-      ).length;
-      const unreadCount = discussions.filter(
-        d => d.status === DiscussionStatus.ACTIVE && d.unreadCount > 0
-      ).length;
-      const pendingCount = discussions.filter(
-        d => d.status === DiscussionStatus.PENDING
-      ).length;
-
-      expect(allCount).toBe(0);
-      expect(unreadCount).toBe(0);
-      expect(pendingCount).toBe(0);
-    });
-
-    it('should correctly count unread discussions', async () => {
-      const now = new Date();
-      const discussions = [
-        {
-          ownerUserId,
-          contactUserId: 'contact-1',
-          status: DiscussionStatus.ACTIVE,
-          direction: DiscussionDirection.INITIATED,
-          unreadCount: 3,
-          createdAt: now,
-          updatedAt: now,
-        },
-        {
-          ownerUserId,
-          contactUserId: 'contact-2',
-          status: DiscussionStatus.ACTIVE,
-          direction: DiscussionDirection.INITIATED,
-          unreadCount: 0, // No unread messages
-          createdAt: now,
-          updatedAt: now,
-        },
-        {
-          ownerUserId,
-          contactUserId: 'contact-3',
-          status: DiscussionStatus.ACTIVE,
-          direction: DiscussionDirection.INITIATED,
-          unreadCount: 1,
-          createdAt: now,
-          updatedAt: now,
-        },
-      ];
-
-      for (const discussion of discussions) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        await db.discussions.add(discussion as any);
-      }
-
-      useDiscussionStore.getState().init();
-      await new Promise(resolve => setTimeout(resolve, 100));
-
-      const storeDiscussions = useDiscussionStore.getState().discussions;
-      const unreadCount = storeDiscussions.filter(
-        d => d.status === DiscussionStatus.ACTIVE && d.unreadCount > 0
-      ).length;
-
-      expect(unreadCount).toBe(2); // 2 active discussions with unread messages
-    });
-
-    it('should exclude closed discussions from all count', async () => {
-      const now = new Date();
-      const discussions = [
-        {
-          ownerUserId,
-          contactUserId: 'contact-1',
-          status: DiscussionStatus.ACTIVE,
-          direction: DiscussionDirection.INITIATED,
-          unreadCount: 0,
-          createdAt: now,
-          updatedAt: now,
-        },
-        {
-          ownerUserId,
-          contactUserId: 'contact-2',
-          status: DiscussionStatus.CLOSED,
-          direction: DiscussionDirection.INITIATED,
-          unreadCount: 0,
-          createdAt: now,
-          updatedAt: now,
-        },
-        {
-          ownerUserId,
-          contactUserId: 'contact-3',
-          status: DiscussionStatus.PENDING,
-          direction: DiscussionDirection.RECEIVED,
-          unreadCount: 0,
-          createdAt: now,
-          updatedAt: now,
-        },
-      ];
-
-      for (const discussion of discussions) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        await db.discussions.add(discussion as any);
-      }
-
-      useDiscussionStore.getState().init();
-      await new Promise(resolve => setTimeout(resolve, 100));
-
-      const storeDiscussions = useDiscussionStore.getState().discussions;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const allCount = (storeDiscussions as any[]).filter(
-        d => d.status !== DiscussionStatus.CLOSED
-      ).length;
-
-      expect(allCount).toBe(2); // Only 2 non-closed discussions
-    });
+    // Legacy unread/closed counting tests removed: the app now derives "pending/unread"
+    // from `gossipSdk.discussions.getStatus()` (SessionStatus), which requires a session.
   });
 
   describe('Store Sorting', () => {
-    it('should sort discussions with PENDING first, then ACTIVE', async () => {
+    it('should sort by lastMessageTimestamp when SDK session is not open (fallback behavior)', async () => {
       const now = new Date();
       const discussions = [
         {
           ownerUserId,
           contactUserId: 'contact-active-1',
-          status: DiscussionStatus.ACTIVE,
           direction: DiscussionDirection.INITIATED,
           unreadCount: 0,
           createdAt: new Date(now.getTime() - 1000),
@@ -287,7 +148,6 @@ describe('DiscussionStore Filter', () => {
         {
           ownerUserId,
           contactUserId: 'contact-pending-1',
-          status: DiscussionStatus.PENDING,
           direction: DiscussionDirection.RECEIVED,
           unreadCount: 0,
           createdAt: new Date(now.getTime() - 2000),
@@ -296,7 +156,6 @@ describe('DiscussionStore Filter', () => {
         {
           ownerUserId,
           contactUserId: 'contact-active-2',
-          status: DiscussionStatus.ACTIVE,
           direction: DiscussionDirection.INITIATED,
           unreadCount: 0,
           createdAt: new Date(now.getTime() - 500),
@@ -315,13 +174,13 @@ describe('DiscussionStore Filter', () => {
 
       const storeDiscussions = useDiscussionStore.getState().discussions;
 
-      // PENDING should come first
-      expect(storeDiscussions[0].status).toBe(DiscussionStatus.PENDING);
+      // With no session open, store can't classify "pending" via SessionStatus.
+      // Also note: `src/db` has a Dexie "creating" hook that overwrites `createdAt/updatedAt`
+      // to "now" for all inserted discussions, so a discussion *without* `lastMessageTimestamp`
+      // can still bubble to the top via `createdAt`.
       expect(storeDiscussions[0].contactUserId).toBe('contact-pending-1');
-
-      // Then ACTIVE discussions
-      expect(storeDiscussions[1].status).toBe(DiscussionStatus.ACTIVE);
-      expect(storeDiscussions[2].status).toBe(DiscussionStatus.ACTIVE);
+      expect(storeDiscussions[1].contactUserId).toBe('contact-active-2');
+      expect(storeDiscussions[2].contactUserId).toBe('contact-active-1');
     });
   });
 });

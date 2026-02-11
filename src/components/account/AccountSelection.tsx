@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Shield, Key, Check as CheckIcon, User, Plus } from 'react-feather';
 import { useAccountStore } from '../../stores/accountStore';
-import { UserProfile } from '../../db';
+import { UserProfile } from '@massalabs/gossip-sdk';
 import { formatDate } from '../../utils/timeUtils';
 import Button from '../ui/Button';
 import PageHeader from '../ui/PageHeader';

@@ -16,7 +16,7 @@ import PageLayout from '../components/ui/PageLayout';
 import { Check, Edit2, ChevronRight, RotateCw } from 'react-feather';
 import { Contact } from '../db';
 import { ROUTES } from '../constants/routes';
-import { useManualRenewDiscussion } from '../hooks/useResendFailedBlobs';
+import { useManualRenewDiscussion } from '../hooks/useManualRenew';
 
 const DiscussionSettings: React.FC = () => {
   const { discussionId } = useParams();

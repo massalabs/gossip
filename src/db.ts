@@ -121,9 +121,7 @@ export interface Discussion {
   // Protocol/Encryption fields
   direction: DiscussionDirection; // Whether this user initiated or received the discussion
   status: DiscussionStatus;
-  nextSeeker?: Uint8Array; // The next seeker for sending messages (from SendMessageOutput)
   initiationAnnouncement?: Uint8Array; // Outgoing announcement bytes when we initiate
-  announcementMessage?: string; // Optional message from incoming announcement (user_data)
   lastSyncTimestamp?: Date; // Last time messages were synced from protocol
 
   // UI/Display fields
@@ -350,7 +348,6 @@ export class GossipDatabase extends Dexie {
             ? DiscussionDirection.RECEIVED
             : DiscussionDirection.INITIATED,
         status: DiscussionStatus.PENDING,
-        nextSeeker: undefined,
         lastMessageId: messageId,
         lastMessageContent: message.content,
         lastMessageTimestamp: message.timestamp,
