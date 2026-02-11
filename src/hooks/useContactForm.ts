@@ -394,7 +394,7 @@ export function useContactForm() {
 
       await appDb.contacts.add(contact);
 
-      const usernameToShare = shareUsername ? customUsername : undefined;
+      const usernameToShare = shareUsername ? customUsername.trim() : undefined;
 
       const payload: AnnouncementPayload = {
         username: usernameToShare,
