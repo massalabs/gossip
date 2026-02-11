@@ -1,7 +1,13 @@
 import { create } from 'zustand';
 import { Subscription } from 'dexie';
 import { liveQuery } from 'dexie';
-import { Discussion, Contact, db, DiscussionStatus } from '../db';
+import {
+  Discussion,
+  Contact,
+  db,
+  gossipSdk,
+  SessionStatus,
+} from '@massalabs/gossip-sdk';
 import { createSelectors } from './utils/createSelectors';
 import { useAccountStore } from './accountStore';
 
@@ -19,7 +25,7 @@ interface DiscussionStoreState {
 
   init: () => void;
   getDiscussionsForContact: (contactUserId: string) => Discussion[];
-  getDiscussionsByStatus: (status: DiscussionStatus[]) => Discussion[];
+  getDiscussionsByStatus: (status: SessionStatus[]) => Discussion[];
   cleanup: () => void;
   setModalOpen: (discussionId: number, isOpen: boolean) => void;
   isModalOpen: (discussionId: number) => boolean;
@@ -55,6 +61,9 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
 
     const subscriptionDiscussions = discussionsQuery.subscribe({
       next: async discussionsList => {
+        // Check if SDK session is open before attempting to get status
+        const isSessionOpen = gossipSdk.isSessionOpen;
+
         // Sort discussions: new requests (PENDING) first, then active discussions
         // Within each group, sort by most recent activity
         const getActivityTime = (discussion: Discussion): number => {
@@ -63,34 +72,51 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
             return discussion.lastMessageTimestamp.getTime();
           }
 
-          // For pending requests, use updatedAt
-          if (
-            discussion.status === DiscussionStatus.PENDING &&
-            discussion.updatedAt
-          ) {
-            return discussion.updatedAt.getTime();
+          // For pending requests, use updatedAt (only if session is open)
+          if (isSessionOpen) {
+            const status = gossipSdk.discussions.getStatus(
+              discussion.contactUserId
+            );
+            if (
+              [
+                SessionStatus.SelfRequested,
+                SessionStatus.PeerRequested,
+              ].includes(status) &&
+              discussion.updatedAt
+            ) {
+              return discussion.updatedAt.getTime();
+            }
           }
 
           // Fallback to creation time for all other cases
           return discussion.createdAt.getTime();
         };
 
-        const getStatusPriority = (status: DiscussionStatus): number => {
+        const getStatusPriority = (status: SessionStatus): number => {
           // PENDING (new requests) = highest priority (0)
-          if (status === DiscussionStatus.PENDING) return 0;
+          if (
+            [SessionStatus.SelfRequested, SessionStatus.PeerRequested].includes(
+              status
+            )
+          )
+            return 0;
           // ACTIVE (ongoing discussions) = medium priority (1)
-          if (status === DiscussionStatus.ACTIVE) return 1;
+          if (status === SessionStatus.Active) return 1;
           // All other statuses = lowest priority (2)
           return 2;
         };
 
         const sortedDiscussions = discussionsList.sort((a, b) => {
-          // First, separate by status: PENDING first, then ACTIVE, then others
-          const statusDiff =
-            getStatusPriority(a.status) - getStatusPriority(b.status);
-          if (statusDiff !== 0) return statusDiff;
+          // If session is open, separate by status: PENDING first, then ACTIVE, then others
+          if (isSessionOpen) {
+            const aStatus = gossipSdk.discussions.getStatus(a.contactUserId);
+            const bStatus = gossipSdk.discussions.getStatus(b.contactUserId);
+            const statusDiff =
+              getStatusPriority(aStatus) - getStatusPriority(bStatus);
+            if (statusDiff !== 0) return statusDiff;
+          }
 
-          // Within the same status group, sort by activity time
+          // Within the same status group (or when session is closed), sort by activity time
           return getActivityTime(b) - getActivityTime(a);
         });
 
@@ -147,12 +173,16 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
     );
   },
 
-  getDiscussionsByStatus: (status: DiscussionStatus[]) => {
+  getDiscussionsByStatus: (status: SessionStatus[]) => {
     const ownerUserId = useAccountStore.getState().userProfile?.userId;
     if (!ownerUserId) return [];
-    return get().discussions.filter(discussion =>
-      status.includes(discussion.status)
-    );
+    // Return empty array if session is not open (cannot get status)
+    if (!gossipSdk.isSessionOpen) return [];
+    return get().discussions.filter(discussion => {
+      return status.includes(
+        gossipSdk.discussions.getStatus(discussion.contactUserId)
+      );
+    });
   },
 
   cleanup: () => {

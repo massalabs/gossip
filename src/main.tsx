@@ -8,9 +8,11 @@ import { enableDebugLogger } from './utils/logger.ts';
 import { Buffer } from 'buffer';
 
 // SDK configuration
-import { gossipSdk } from '@massalabs/gossip-sdk';
+import { gossipSdk, GossipDatabase } from '@massalabs/gossip-sdk';
 import { protocolConfig } from './config/protocol';
-import { db } from './db';
+
+// Create database instance using SDK's class
+const db = new GossipDatabase();
 
 // Setup SHA-512 for @noble/ed25519 (required for massa-web3)
 import { sha512 } from '@noble/hashes/sha2';
@@ -91,6 +93,11 @@ window.addEventListener('load', () => {
 gossipSdk.init({
   db,
   protocolBaseUrl: protocolConfig.baseUrl,
+  config: {
+    polling: {
+      enabled: true,
+    },
+  },
 });
 
 // Only enable the debug logger in development to avoid persisting

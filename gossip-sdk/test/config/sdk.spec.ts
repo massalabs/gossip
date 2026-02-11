@@ -22,7 +22,7 @@ describe('SDK Config', () => {
       expect(defaultSdkConfig.polling.enabled).toBe(false);
       expect(defaultSdkConfig.polling.messagesIntervalMs).toBe(5000);
       expect(defaultSdkConfig.polling.announcementsIntervalMs).toBe(10000);
-      expect(defaultSdkConfig.polling.sessionRefreshIntervalMs).toBe(30000);
+      expect(defaultSdkConfig.polling.sessionRefreshIntervalMs).toBe(10000);
     });
 
     it('should have correct default messages values', () => {
@@ -76,7 +76,7 @@ describe('SDK Config', () => {
       expect(config.polling.enabled).toBe(true);
       expect(config.polling.messagesIntervalMs).toBe(2000);
       expect(config.polling.announcementsIntervalMs).toBe(10000);
-      expect(config.polling.sessionRefreshIntervalMs).toBe(30000);
+      expect(config.polling.sessionRefreshIntervalMs).toBe(10000);
     });
 
     it('should merge partial messages config', () => {

@@ -2,9 +2,10 @@ import { useMemo } from 'react';
 import {
   Discussion,
   Contact,
-  DiscussionStatus,
   DiscussionDirection,
-} from '../../../db';
+  SessionStatus,
+  gossipSdk,
+} from '@massalabs/gossip-sdk';
 import { LastMessageInfo } from '../DiscussionListItem';
 import { DiscussionFilter } from '../../../stores/discussionStore';
 
@@ -57,19 +58,14 @@ export function useFilteredDiscussions(
   searchQuery: string
 ): Discussion[] {
   return useMemo(() => {
-    // Filter out closed discussions
-    const openDiscussions = discussions.filter(
-      d => d.status !== DiscussionStatus.CLOSED
-    );
-
     // No search query - return all open discussions
     if (!searchQuery.trim()) {
-      return openDiscussions;
+      return discussions;
     }
 
     // Filter by search query
     const query = searchQuery.toLowerCase().trim();
-    return openDiscussions.filter(discussion => {
+    return discussions.filter(discussion => {
       const contact = contactsMap.get(discussion.contactUserId);
       if (!contact) return false;
 
@@ -163,8 +159,10 @@ export function useVirtualItems(
         // Sort by direction: RECEIVED first, then INITIATED.
         // Within each direction group, sort by latest activity time (newest first)
         // to maintain the intended ordering from the store.
-        discussionsToShow = filteredDiscussions.filter(
-          d => d.status === DiscussionStatus.PENDING
+        discussionsToShow = filteredDiscussions.filter(d =>
+          [SessionStatus.SelfRequested, SessionStatus.PeerRequested].includes(
+            gossipSdk.discussions.getStatus(d.contactUserId)
+          )
         );
 
         discussionsToShow.sort((a, b) => {
@@ -190,7 +188,10 @@ export function useVirtualItems(
       } else if (filter === 'unread') {
         // Show only unread active discussions
         discussionsToShow = filteredDiscussions.filter(
-          d => d.status === DiscussionStatus.ACTIVE && d.unreadCount > 0
+          d =>
+            SessionStatus.Active ===
+              gossipSdk.discussions.getStatus(d.contactUserId) &&
+            d.unreadCount > 0
         );
 
         // Sort by latest message timestamp (newest first)
@@ -218,9 +219,16 @@ export function useVirtualItems(
 
         // filteredDiscussions is already sorted by the store (status priority + activity time)
         filteredDiscussions.forEach(discussion => {
-          if (discussion.status === DiscussionStatus.PENDING) {
+          if (
+            [SessionStatus.SelfRequested, SessionStatus.PeerRequested].includes(
+              gossipSdk.discussions.getStatus(discussion.contactUserId)
+            )
+          ) {
             pendingDiscussions.push(discussion);
-          } else if (discussion.status === DiscussionStatus.ACTIVE) {
+          } else if (
+            SessionStatus.Active ===
+            gossipSdk.discussions.getStatus(discussion.contactUserId)
+          ) {
             activeDiscussions.push(discussion);
           }
         });

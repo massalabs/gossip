@@ -77,6 +77,8 @@ vi.mock('../../src/services/auth', () => ({
 
 vi.mock('../../src/services/announcement', () => ({
   AnnouncementService: class {
+    setRefreshService = vi.fn();
+    fetchAndProcessAnnouncements = vi.fn();
     constructor(
       _db: unknown,
       _protocol: unknown,
@@ -92,13 +94,16 @@ vi.mock('../../src/services/message', () => ({
   MessageService: class {
     sendMessage = vi.fn();
     fetchMessages = vi.fn();
-    resendMessages = vi.fn();
+    processSendQueueForContact = vi.fn();
+    getPendingSendCount = vi.fn().mockResolvedValue(0);
     findMessageBySeeker = vi.fn();
+    setRefreshService = vi.fn();
 
     constructor(
       _db: unknown,
       _protocol: unknown,
       _session: unknown,
+      _discussion: unknown,
       events: typeof eventState.lastEvents
     ) {
       eventState.lastEvents = events ?? null;
@@ -110,8 +115,9 @@ vi.mock('../../src/services/discussion', () => ({
   DiscussionService: class {
     initialize = vi.fn();
     accept = vi.fn();
-    renew = vi.fn();
+    createSessionForContact = vi.fn();
     isStableState = vi.fn();
+    setRefreshService = vi.fn();
     constructor(
       _db: unknown,
       _announcement: unknown,
@@ -125,10 +131,12 @@ vi.mock('../../src/services/discussion', () => ({
 
 vi.mock('../../src/services/refresh', () => ({
   RefreshService: class {
-    handleSessionRefresh = vi.fn();
+    stateUpdate = vi.fn();
     constructor(
       _db: unknown,
       _message: unknown,
+      _discussion: unknown,
+      _announcement: unknown,
       _session: unknown,
       events: typeof eventState.lastEvents
     ) {
@@ -228,19 +236,6 @@ describe('GossipSdkImpl lifecycle', () => {
       new Uint8Array([9]),
       persistEncryptionKey
     );
-  });
-
-  it('bridges message events to sdk.on handlers', async () => {
-    const { GossipSdkImpl } = await import('../../src/gossipSdk');
-    const sdk = new GossipSdkImpl();
-    const handler = vi.fn();
-
-    await sdk.init({ db: new GossipDatabase() });
-    sdk.on('message', handler);
-    await sdk.openSession({ mnemonic: 'test words' });
-
-    eventState.lastEvents?.onMessageReceived?.({ id: 1 });
-    expect(handler).toHaveBeenCalledWith({ id: 1 });
   });
 });
 

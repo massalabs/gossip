@@ -1,10 +1,14 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Move } from 'react-feather';
-import { gossipSdk } from '@massalabs/gossip-sdk';
+import {
+  gossipSdk,
+  SdkEventType,
+  Discussion,
+  SessionStatus,
+} from '@massalabs/gossip-sdk';
 import { useOnlineStoreBase } from '../../stores/useOnlineStore';
 import { useDiscussionStore } from '../../stores/discussionStore';
 import { useAppStore } from '../../stores/appStore';
-import { Discussion, DiscussionStatus } from '../../db';
 
 interface LogEntry {
   id: number;
@@ -40,7 +44,7 @@ const ConnectionMonitor: React.FC = () => {
   const dragStartRef = useRef({ x: 0, y: 0 });
 
   // Track previous statuses to detect changes
-  const prevStatusMap = useRef<Map<number, DiscussionStatus>>(new Map());
+  const prevStatusMap = useRef<Map<number, SessionStatus>>(new Map());
   const prevIsOnline = useRef(isOnline);
 
   // Sync ref with store when savedPosition changes
@@ -193,30 +197,24 @@ const ConnectionMonitor: React.FC = () => {
   useEffect(() => {
     discussions.forEach(d => {
       const prevStatus = prevStatusMap.current.get(d.id!);
-      if (prevStatus !== undefined && prevStatus !== d.status) {
+      const currentStatus = gossipSdk.discussions.getStatus(d.contactUserId);
+      if (prevStatus !== undefined && prevStatus !== currentStatus) {
         const contact = contacts.find(c => c.userId === d.contactUserId);
         const name = contact?.name || d.contactUserId.slice(0, 12) + '...';
         const isError =
-          d.status === DiscussionStatus.BROKEN ||
-          d.status === DiscussionStatus.SEND_FAILED;
+          currentStatus === SessionStatus.Killed ||
+          currentStatus === SessionStatus.Saturated;
         addLog(
           isError ? 'error' : 'status',
-          `${name}: ${getStatusLabel(prevStatus)} -> ${getStatusLabel(d.status)}`
+          `${name}: ${getStatusLabel(d.contactUserId)} -> ${getStatusLabel(d.contactUserId)}`
         );
       }
-      prevStatusMap.current.set(d.id!, d.status);
+      prevStatusMap.current.set(d.id!, currentStatus);
     });
   }, [discussions, contacts, addLog]);
 
   // Subscribe to SDK events
   useEffect(() => {
-    const handleSessionBroken = (discussion: Discussion) => {
-      const contact = contacts.find(c => c.userId === discussion.contactUserId);
-      const name =
-        contact?.name || discussion.contactUserId?.slice(0, 12) + '...';
-      addLog('error', `${name}: SESSION BROKEN`);
-    };
-
     const handleSessionRenewed = (discussion: Discussion) => {
       const contact = contacts.find(c => c.userId === discussion.contactUserId);
       const name =
@@ -228,14 +226,12 @@ const ConnectionMonitor: React.FC = () => {
       addLog('error', `SDK [${context}]: ${error.message}`);
     };
 
-    gossipSdk.on('sessionBroken', handleSessionBroken);
-    gossipSdk.on('sessionRenewed', handleSessionRenewed);
-    gossipSdk.on('error', handleError);
+    gossipSdk.on(SdkEventType.SESSION_RENEWED, handleSessionRenewed);
+    gossipSdk.on(SdkEventType.ERROR, handleError);
 
     return () => {
-      gossipSdk.off('sessionBroken', handleSessionBroken);
-      gossipSdk.off('sessionRenewed', handleSessionRenewed);
-      gossipSdk.off('error', handleError);
+      gossipSdk.off(SdkEventType.SESSION_RENEWED, handleSessionRenewed);
+      gossipSdk.off(SdkEventType.ERROR, handleError);
     };
   }, [addLog, contacts]);
 
@@ -252,11 +248,13 @@ const ConnectionMonitor: React.FC = () => {
   }
 
   // Check if any discussion has a problem
-  const hasProblems = discussions.some(
-    d =>
-      d.status === DiscussionStatus.BROKEN ||
-      d.status === DiscussionStatus.SEND_FAILED
-  );
+  const hasProblems = discussions.some(d => {
+    const currentStatus = gossipSdk.discussions.getStatus(d.contactUserId);
+    return (
+      currentStatus === SessionStatus.Killed ||
+      currentStatus === SessionStatus.Saturated
+    );
+  });
 
   const getButtonColor = () => {
     if (!isOnline) return 'bg-red-500';
@@ -264,17 +262,17 @@ const ConnectionMonitor: React.FC = () => {
     return 'bg-green-500';
   };
 
-  const getStatusColor = (status: DiscussionStatus) => {
+  const getStatusColor = (contactUserId: string) => {
+    const status = gossipSdk.discussions.getStatus(contactUserId);
     switch (status) {
-      case DiscussionStatus.ACTIVE:
+      case SessionStatus.Active:
         return 'text-green-400';
-      case DiscussionStatus.PENDING:
+      case SessionStatus.PeerRequested:
+      case SessionStatus.SelfRequested:
         return 'text-yellow-400';
-      case DiscussionStatus.BROKEN:
-      case DiscussionStatus.SEND_FAILED:
+      case SessionStatus.Killed:
+      case SessionStatus.Saturated:
         return 'text-red-400';
-      case DiscussionStatus.CLOSED:
-        return 'text-gray-400';
       default:
         return 'text-gray-400';
     }
@@ -390,8 +388,8 @@ const ConnectionMonitor: React.FC = () => {
                     <span className="text-gray-300 truncate max-w-[140px]">
                       {getContactName(d.contactUserId)}
                     </span>
-                    <span className={getStatusColor(d.status)}>
-                      {getStatusLabel(d.status)}
+                    <span className={getStatusColor(d.contactUserId)}>
+                      {getStatusLabel(d.contactUserId)}
                     </span>
                   </div>
                 ))}
@@ -444,20 +442,20 @@ const ConnectionMonitor: React.FC = () => {
   );
 };
 
-function getStatusLabel(status: DiscussionStatus): string {
+function getStatusLabel(contactUserId: string): string {
+  const status = gossipSdk.discussions.getStatus(contactUserId);
   switch (status) {
-    case DiscussionStatus.PENDING:
+    case SessionStatus.PeerRequested:
+    case SessionStatus.SelfRequested:
       return 'PENDING';
-    case DiscussionStatus.ACTIVE:
+    case SessionStatus.Active:
       return 'ACTIVE';
-    case DiscussionStatus.CLOSED:
-      return 'CLOSED';
-    case DiscussionStatus.BROKEN:
-      return 'BROKEN';
-    case DiscussionStatus.SEND_FAILED:
-      return 'SEND_FAILED';
+    case SessionStatus.Killed:
+      return 'KILLED';
+    case SessionStatus.Saturated:
+      return 'SATURATED';
     default:
-      return String(status);
+      return 'UNKNOWN';
   }
 }
 
