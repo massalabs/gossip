@@ -34,8 +34,11 @@ import { GossipSdkImpl } from '../../src/gossipSdk';
 import { ensureWasmInitialized } from '../../src/wasm/loader';
 import { generateMnemonic } from '../../src/crypto/bip39';
 import { generateEncryptionKey } from '../../src/wasm/encryption';
-// @ts-expect-error - #wasm is a subpath import alias that works at runtime
-import { SessionStatus, SessionConfig, UserPublicKeys } from '#wasm';
+import {
+  SessionStatus,
+  SessionConfig,
+} from '../../src/assets/generated/wasm/gossip_wasm';
+import { UserPublicKeys } from '../../src/wasm/bindings';
 import { AnnouncementService } from '../../src/services/announcement';
 import { MessageService } from '../../src/services/message';
 

@@ -13,14 +13,13 @@ import {
   MessageStatus,
   MessageType,
 } from '../db';
-import { UserPublicKeys, SessionStatus } from '../wasm/bindings';
-import { AnnouncementService, EstablishSessionError } from './announcement';
-import { SessionModule, sessionStatusToString } from '../wasm/session';
-import { decodeUserId } from '../utils/userId';
 import {
   AnnouncementPayload,
   encodeAnnouncementPayload,
 } from '../utils/announcementPayload';
+import { UserPublicKeys } from '../wasm/bindings';
+import { AnnouncementService } from './announcement';
+import { SessionModule } from '../wasm/session';
 import { Logger } from '../utils/logs';
 import { RefreshService } from './refresh';
 import { Result } from '../utils/type';

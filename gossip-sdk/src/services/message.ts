@@ -14,7 +14,7 @@ import {
 } from '../db';
 import { decodeUserId, encodeUserId } from '../utils/userId';
 import { IMessageProtocol, EncryptedMessage } from '../api/messageProtocol';
-import { SessionStatus, SendMessageOutput } from '../wasm/bindings';
+import { SessionStatus } from '../wasm/bindings';
 import { SessionModule } from '../wasm';
 import {
   serializeRegularMessage,
