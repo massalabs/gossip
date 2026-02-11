@@ -66,6 +66,17 @@ export class DiscussionService {
    * @param contact - The contact to start a discussion with
    * @param payload - Optional payload to include in the announcement (username and message)
    * @returns The discussion ID and the created announcement
+   *
+   * @example
+   * ```ts
+   * const payload: AnnouncementPayload = {
+   *   username: 'alice',
+   *   message: 'Hello!',
+   * };
+   *
+   * const { discussionId, announcement } =
+   *   await discussionService.initialize(contact, payload);
+   * ```
    */
   async initialize(
     contact: Contact,

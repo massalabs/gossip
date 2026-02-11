@@ -50,7 +50,7 @@ describe('announcement payload', () => {
     expect(decoded?.message).toBe('Hello: how are you?');
   });
 
-  it('returns null for invalid payloads', () => {
+  it('returns undefined fields for invalid payloads', () => {
     expect(decodeAnnouncementPayload(new Uint8Array(0))).toEqual({
       username: undefined,
       message: undefined,

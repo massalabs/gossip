@@ -440,7 +440,7 @@ class GossipSdkImpl {
     };
 
     this._discussionsAPI = {
-      start: (contact, payload: AnnouncementPayload) =>
+      start: (contact, payload?: AnnouncementPayload) =>
         this._discussion!.initialize(contact, payload),
       accept: discussion => this._discussion!.accept(discussion),
       renew: contactUserId => this._discussion!.renew(contactUserId),
