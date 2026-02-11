@@ -10,6 +10,7 @@ import {
   UserPublicKeys,
   gossipSdk,
   type PublicKeyResult,
+  AnnouncementPayload,
 } from '@massalabs/gossip-sdk';
 import { authService } from '../services';
 import { useFileShareContact } from './useFileShareContact';
@@ -393,17 +394,13 @@ export function useContactForm() {
 
       await appDb.contacts.add(contact);
 
-      // Construct announcement message as JSON
-      // Format: {"u":"username","m":"message"} - fields omitted if empty
-      const usernameToShare = shareUsername ? customUsername.trim() : '';
-      const messageContent = message.value.trim();
-      const payload: { u?: string; m?: string } = {};
-      if (usernameToShare) payload.u = usernameToShare;
-      if (messageContent) payload.m = messageContent;
-      const announcementMessage =
-        Object.keys(payload).length > 0 ? JSON.stringify(payload) : undefined;
+      const payload: AnnouncementPayload = {
+        username: shareUsername ? customUsername.trim() : undefined,
+        message: message.value.trim(),
+      };
+
       try {
-        await gossipSdk.discussions.start(contact, announcementMessage);
+        await gossipSdk.discussions.start(contact, payload);
       } catch (e) {
         console.error(
           'Failed to initialize discussion after contact creation:',

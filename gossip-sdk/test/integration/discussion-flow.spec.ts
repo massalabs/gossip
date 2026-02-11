@@ -23,6 +23,7 @@ import {
   cleanupTestSession,
   TestSessionData,
 } from '../utils';
+import { encodeAnnouncementPayload } from '../../src/utils/announcementPayload';
 
 describe('Discussion Flow', () => {
   let mockProtocol: MockMessageProtocol;
@@ -83,11 +84,13 @@ describe('Discussion Flow', () => {
   describe('Announcement Username Parsing', () => {
     it('Bob receives announcement with username and uses it as contact name', async () => {
       // Alice creates announcement with username in user_data
-      const jsonPayload = JSON.stringify({
-        u: 'Alice',
-        m: 'Hi, I would like to connect!',
-      });
-      const userData = new TextEncoder().encode(jsonPayload);
+      const userData = encodeAnnouncementPayload(
+        'Alice',
+        'Hi, I would like to connect!'
+      );
+      if (!userData) {
+        throw new Error('Expected announcement payload');
+      }
 
       // Alice establishes outgoing session to Bob with user data
       const aliceAnnouncement = await alice.session.establishOutgoingSession(
@@ -121,9 +124,14 @@ describe('Discussion Flow', () => {
       );
     });
 
-    it('Bob receives JSON announcement without username (message only)', async () => {
-      const jsonPayload = JSON.stringify({ m: 'Hello without username' });
-      const userData = new TextEncoder().encode(jsonPayload);
+    it('Bob receives announcement without username (message only)', async () => {
+      const userData = encodeAnnouncementPayload(
+        undefined,
+        'Hello without username'
+      );
+      if (!userData) {
+        throw new Error('Expected announcement payload');
+      }
 
       const aliceAnnouncement = await alice.session.establishOutgoingSession(
         bob.session.ourPk,
@@ -150,8 +158,10 @@ describe('Discussion Flow', () => {
     });
 
     it('Bob receives announcement with username only (no message)', async () => {
-      const jsonPayload = JSON.stringify({ u: 'AliceUser' });
-      const userData = new TextEncoder().encode(jsonPayload);
+      const userData = encodeAnnouncementPayload('AliceUser');
+      if (!userData) {
+        throw new Error('Expected announcement payload');
+      }
 
       const aliceAnnouncement = await alice.session.establishOutgoingSession(
         bob.session.ourPk,
@@ -177,40 +187,14 @@ describe('Discussion Flow', () => {
       expect(bobDiscussion?.announcementMessage).toBeUndefined();
     });
 
-    it('Bob receives announcement without username (no colon in message)', async () => {
-      const oldFormatMessage = 'Hi, this is an old format message';
-      const userData = new TextEncoder().encode(oldFormatMessage);
-
-      const aliceAnnouncement = await alice.session.establishOutgoingSession(
-        bob.session.ourPk,
-        userData
+    it('Bob receives announcement with special characters (colons in message)', async () => {
+      const userData = encodeAnnouncementPayload(
+        'Alice:Smith',
+        'Hello: how are you?'
       );
-
-      await mockProtocol.sendAnnouncement(aliceAnnouncement);
-      await bobAnnouncementService.fetchAndProcessAnnouncements();
-
-      const bobContact = await db.getContactByOwnerAndUserId(
-        bob.session.userIdEncoded,
-        alice.session.userIdEncoded
-      );
-
-      expect(bobContact).toBeDefined();
-      expect(bobContact?.name).toMatch(/^New Request \d+$/);
-
-      const bobDiscussion = await db.getDiscussionByOwnerAndContact(
-        bob.session.userIdEncoded,
-        alice.session.userIdEncoded
-      );
-
-      expect(bobDiscussion?.announcementMessage).toBe(oldFormatMessage);
-    });
-
-    it('Bob receives JSON announcement with special characters (colons in message)', async () => {
-      const jsonPayload = JSON.stringify({
-        u: 'Alice:Smith',
-        m: 'Hello: how are you?',
-      });
-      const userData = new TextEncoder().encode(jsonPayload);
+      if (!userData) {
+        throw new Error('Expected announcement payload');
+      }
 
       const aliceAnnouncement = await alice.session.establishOutgoingSession(
         bob.session.ourPk,
@@ -235,33 +219,6 @@ describe('Discussion Flow', () => {
 
       expect(bobDiscussion?.announcementMessage).toBe('Hello: how are you?');
     });
-
-    it('Bob receives legacy colon format (backwards compatibility)', async () => {
-      const legacyMessage = 'OldAlice:Hello from old client';
-      const userData = new TextEncoder().encode(legacyMessage);
-
-      const aliceAnnouncement = await alice.session.establishOutgoingSession(
-        bob.session.ourPk,
-        userData
-      );
-
-      await mockProtocol.sendAnnouncement(aliceAnnouncement);
-      await bobAnnouncementService.fetchAndProcessAnnouncements();
-
-      const bobContact = await db.getContactByOwnerAndUserId(
-        bob.session.userIdEncoded,
-        alice.session.userIdEncoded
-      );
-
-      expect(bobContact?.name).toBe('OldAlice');
-
-      const bobDiscussion = await db.getDiscussionByOwnerAndContact(
-        bob.session.userIdEncoded,
-        alice.session.userIdEncoded
-      );
-
-      expect(bobDiscussion?.announcementMessage).toBe('Hello from old client');
-    });
   });
 
   describe('Discussion Initiation Happy Path', () => {
@@ -282,7 +239,10 @@ describe('Discussion Flow', () => {
 
       // Alice initiates discussion with Bob
       const { discussionId: aliceDiscussionId } =
-        await aliceDiscussionService.initialize(aliceBobContact);
+        await aliceDiscussionService.initialize(aliceBobContact, {
+          username: undefined,
+          message: 'Hello Bob!',
+        });
 
       const aliceDiscussion = await db.discussions.get(aliceDiscussionId);
       expect(aliceDiscussion).toBeDefined();
@@ -354,10 +314,16 @@ describe('Discussion Flow', () => {
 
       // Both initiate at the same time
       const { discussionId: aliceDiscussionId } =
-        await aliceDiscussionService.initialize(aliceBobContact);
+        await aliceDiscussionService.initialize(aliceBobContact, {
+          username: undefined,
+          message: 'Hello Bob!',
+        });
 
       const { discussionId: bobDiscussionId } =
-        await bobDiscussionService.initialize(bobAliceContact);
+        await bobDiscussionService.initialize(bobAliceContact, {
+          username: undefined,
+          message: 'Hello Alice!',
+        });
 
       const aliceDiscussion = await db.discussions.get(aliceDiscussionId);
       expect(aliceDiscussion?.status).toBe(DiscussionStatus.PENDING);
@@ -403,7 +369,10 @@ describe('Discussion Flow', () => {
         .mockResolvedValue('counter-123');
 
       const { discussionId: aliceDiscussionId } =
-        await aliceDiscussionService.initialize(aliceBobContact);
+        await aliceDiscussionService.initialize(aliceBobContact, {
+          username: undefined,
+          message: 'Hello Bob!',
+        });
 
       let aliceDiscussion = await db.discussions.get(aliceDiscussionId);
       expect(aliceDiscussion?.status).toBe(DiscussionStatus.SEND_FAILED);
