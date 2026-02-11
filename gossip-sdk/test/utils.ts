@@ -231,10 +231,10 @@ export async function setupSession(
   }
   // Initiator starts the discussion
   const startResult = announcementMessage
-    ? await initiatorSdk.discussions.start(
-        initiatorContact,
-        announcementMessage
-      )
+    ? await initiatorSdk.discussions.start(initiatorContact, {
+        username: initiatorContactName,
+        message: announcementMessage,
+      })
     : await initiatorSdk.discussions.start(initiatorContact);
 
   if (!startResult.success) {

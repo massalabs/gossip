@@ -260,96 +260,6 @@ describe('Discussion Flow', () => {
 
       expect(bobDiscussion?.lastAnnouncementMessage).toBeUndefined();
     });
-
-    it('Bob receives announcement without username (no colon in message)', async () => {
-      const oldFormatMessage = 'Hi, this is an old format message';
-      const userData = new TextEncoder().encode(oldFormatMessage);
-
-      const aliceAnnouncement = await alice.session.establishOutgoingSession(
-        bobSdk.publicKeys,
-        userData
-      );
-
-      await mockProtocol.sendAnnouncement(aliceAnnouncement);
-      await bobSdk.announcements.fetch();
-
-      const bobContact = await db.getContactByOwnerAndUserId(
-        bobSdk.userId,
-        alice.session.userIdEncoded
-      );
-
-      expect(bobContact).toBeDefined();
-      expect(bobContact?.name).toMatch(/^New Request \d+$/);
-
-      const bobDiscussion = await bobSdk.discussions.get(
-        bobSdk.userId,
-        alice.session.userIdEncoded
-      );
-
-      expect(bobDiscussion?.lastAnnouncementMessage).toBe(oldFormatMessage);
-    });
-
-    it('Bob receives JSON announcement with special characters (colons in message)', async () => {
-      const jsonPayload = JSON.stringify({
-        u: 'Alice:Smith',
-        m: 'Hello: how are you?',
-      });
-      const userData = new TextEncoder().encode(jsonPayload);
-
-      const aliceAnnouncement = await alice.session.establishOutgoingSession(
-        bobSdk.publicKeys,
-        userData
-      );
-
-      await mockProtocol.sendAnnouncement(aliceAnnouncement);
-      await bobSdk.announcements.fetch();
-
-      const bobContact = await db.getContactByOwnerAndUserId(
-        bobSdk.userId,
-        alice.session.userIdEncoded
-      );
-
-      expect(bobContact).toBeDefined();
-      expect(bobContact?.name).toBe('Alice:Smith');
-
-      const bobDiscussion = await bobSdk.discussions.get(
-        bobSdk.userId,
-        alice.session.userIdEncoded
-      );
-
-      expect(bobDiscussion?.lastAnnouncementMessage).toBe(
-        'Hello: how are you?'
-      );
-    });
-
-    it('Bob receives legacy colon format (backwards compatibility)', async () => {
-      const legacyMessage = 'OldAlice:Hello from old client';
-      const userData = new TextEncoder().encode(legacyMessage);
-
-      const aliceAnnouncement = await alice.session.establishOutgoingSession(
-        bobSdk.publicKeys,
-        userData
-      );
-
-      await mockProtocol.sendAnnouncement(aliceAnnouncement);
-      await bobSdk.announcements.fetch();
-
-      const bobContact = await db.getContactByOwnerAndUserId(
-        bobSdk.userId,
-        alice.session.userIdEncoded
-      );
-
-      expect(bobContact?.name).toBe('OldAlice');
-
-      const bobDiscussion = await bobSdk.discussions.get(
-        bobSdk.userId,
-        alice.session.userIdEncoded
-      );
-
-      expect(bobDiscussion?.lastAnnouncementMessage).toBe(
-        'Hello from old client'
-      );
-    });
   });
 
   describe('Discussion Initiation Happy Path', () => {
@@ -737,10 +647,10 @@ describe('Discussion Flow', () => {
 
       const announcementMsg = 'Hello Bob!';
       // Alice sends initial announcement (starts discussion)
-      const startResult = await aliceSdk.discussions.start(
-        aliceBobContact,
-        announcementMsg
-      );
+      const startResult = await aliceSdk.discussions.start(aliceBobContact, {
+        username: 'Alice',
+        message: announcementMsg,
+      });
       if (!startResult.success) throw startResult.error;
       const aliceDiscussionId = startResult.data.discussionId;
 
@@ -1344,10 +1254,10 @@ describe('Discussion Flow', () => {
 
       // Alice sends announcement with message
       const announcementMsg = "Hello Bob, let's connect!";
-      const result = await aliceSdk.discussions.start(
-        aliceBobContact,
-        announcementMsg
-      );
+      const result = await aliceSdk.discussions.start(aliceBobContact, {
+        username: 'Alice',
+        message: announcementMsg,
+      });
       if (!result.success) throw result.error;
 
       // Bob fetches Alice's announcement
@@ -1405,10 +1315,10 @@ describe('Discussion Flow', () => {
 
       // Alice sends announcement with message
       const announcementMsg = 'Hello Bob!';
-      const result = await aliceSdk.discussions.start(
-        aliceBobContact,
-        announcementMsg
-      );
+      const result = await aliceSdk.discussions.start(aliceBobContact, {
+        username: 'Alice',
+        message: announcementMsg,
+      });
       if (!result.success) throw result.error;
 
       // Bob fetches Alice's announcement

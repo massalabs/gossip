@@ -417,9 +417,13 @@ class GossipSdkImpl {
     };
 
     this._discussionsAPI = {
-      start: (contact, payload?: AnnouncementPayload): Promise<Result<discussionInitializationResult, Error>> =>
+      start: (
+        contact,
+        payload?: AnnouncementPayload
+      ): Promise<Result<discussionInitializationResult, Error>> =>
         this._discussion!.initialize(contact, payload),
-      accept: (discussion : Discussion): Promise<Result<Uint8Array, Error>> => this._discussion!.accept(discussion),
+      accept: (discussion: Discussion): Promise<Result<Uint8Array, Error>> =>
+        this._discussion!.accept(discussion),
       renew: async (
         contactUserId: string
       ): Promise<Result<Uint8Array, Error>> => {
@@ -767,7 +771,7 @@ interface DiscussionServiceAPI {
   /** Start a new discussion with a contact */
   start(
     contact: Contact,
-    payload: AnnouncementPayload
+    payload?: AnnouncementPayload
   ): Promise<Result<discussionInitializationResult, Error>>;
   /** Accept an incoming discussion request */
   accept(discussion: Discussion): Promise<Result<Uint8Array, Error>>;

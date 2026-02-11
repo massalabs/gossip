@@ -92,7 +92,7 @@ export class AnnouncementService {
 
   async establishSession(
     contactPublicKeys: UserPublicKeys,
-    userData?: Uint8Array
+    payloadBytes?: Uint8Array
   ): Promise<Result<Uint8Array, Error>> {
     const log = logger.forMethod('establishSession');
 
@@ -471,7 +471,7 @@ export class AnnouncementService {
     );
 
     // Store announcement message as an incoming message if present
-    if (announcementMessage) {
+    if (message) {
       const timestamp = new Date(result.timestamp);
       const windowStart = new Date(timestamp.getTime() - 1000);
       const windowEnd = new Date(timestamp.getTime() + 1000);
@@ -483,7 +483,7 @@ export class AnnouncementService {
           msg =>
             msg.direction === MessageDirection.INCOMING &&
             msg.type === MessageType.ANNOUNCEMENT &&
-            msg.content === announcementMessage &&
+            msg.content === message &&
             msg.timestamp >= windowStart &&
             msg.timestamp <= windowEnd
         )
@@ -493,7 +493,7 @@ export class AnnouncementService {
         await this.db.addMessage({
           ownerUserId: this.session.userIdEncoded,
           contactUserId,
-          content: announcementMessage,
+          content: message,
           type: MessageType.ANNOUNCEMENT,
           direction: MessageDirection.INCOMING,
           status: MessageStatus.DELIVERED,
@@ -514,7 +514,7 @@ export class AnnouncementService {
   private async _handleReceivedDiscussion(
     ownerUserId: string,
     contactUserId: string,
-    announcementMessage?: string
+    message?: string
   ): Promise<{ discussionId: number }> {
     const log = logger.forMethod('handleReceivedDiscussion');
 
@@ -531,8 +531,7 @@ export class AnnouncementService {
 
         if (existing) {
           const updateData: Partial<Discussion> = { updatedAt: new Date() };
-          if (announcementMessage)
-            updateData.lastAnnouncementMessage = announcementMessage;
+          if (message) updateData.lastAnnouncementMessage = message;
 
           log.info('updating existing discussion', {
             discussionId: existing.id,
@@ -576,7 +575,7 @@ export class AnnouncementService {
           weAccepted: false,
           sendAnnouncement: null,
           direction: DiscussionDirection.RECEIVED,
-          lastAnnouncementMessage: announcementMessage,
+          lastAnnouncementMessage: message,
           unreadCount: 0,
           createdAt: new Date(),
           updatedAt: new Date(),

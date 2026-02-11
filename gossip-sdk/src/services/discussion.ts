@@ -94,7 +94,7 @@ export class DiscussionService {
   async initialize(
     contact: Contact,
     payload?: AnnouncementPayload
-  ): Promise<Result<discussionInitializationResult, Error>>  {
+  ): Promise<Result<discussionInitializationResult, Error>> {
     const log = logger.forMethod('initialize');
 
     try {
