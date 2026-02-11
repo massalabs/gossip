@@ -650,8 +650,13 @@ describe('WAITING_SESSION messages after peer acceptance', () => {
     };
 
     // Alice initiates discussion
-    const { discussionId } =
-      await discussionService.initialize(aliceBobContact);
+    const { discussionId } = await discussionService.initialize(
+      aliceBobContact,
+      {
+        username: undefined,
+        message: 'Hello Bob!',
+      }
+    );
 
     const discussion = await db.discussions.get(discussionId);
     expect(discussion?.status).toBe(DiscussionStatus.PENDING);

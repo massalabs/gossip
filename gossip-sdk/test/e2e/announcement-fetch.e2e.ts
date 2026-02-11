@@ -138,7 +138,10 @@ describe('E2E: Discussion request (user A sends to user B)', () => {
       const contactB = await sdkA.contacts.get(userAId, userBId);
       expect(contactB).not.toBeNull();
 
-      await sdkA.discussions.start(contactB!, 'Hi from A');
+      await sdkA.discussions.start(contactB!, {
+        username: 'Alice',
+        message: 'Hi from A',
+      });
 
       // ─── A should have one discussion (INITIATED) toward B ───
       const discussionsA = await databaseA.getDiscussionsByOwner(userAId);
@@ -184,6 +187,7 @@ describe('E2E: Discussion request (user A sends to user B)', () => {
 
       if (received) {
         expect(received.discussion.announcementMessage).toBe('Hi from A');
+        expect(received.contact.name).toBe('Alice');
         expect(received.contact.userId).toBe(userAId);
       }
       // If B did not receive after maxWaitMs, the bulletin may be paginated oldest-first
