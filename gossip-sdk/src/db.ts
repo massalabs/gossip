@@ -162,8 +162,6 @@ export interface ActiveSeeker {
   seeker: Uint8Array;
 }
 
-export type GossipDatabaseType = typeof gossipDb;
-
 // Define the database class
 export class GossipDatabase extends Dexie {
   // Define tables

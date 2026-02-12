@@ -1,12 +1,11 @@
 # Gossip SDK
 
-A platform-agnostic SDK for the Gossip messenger app. This SDK enables automation, chatbot integrations, and programmatic access to Gossip functionality.
+A platform-agnostic SDK for the Gossip messenger app. Enables automation, chatbot integrations, and programmatic access to Gossip functionality.
 
 ## Overview
 
 The Gossip SDK provides a clean, typed interface for:
 
-- **Account Management** - Create, load, restore, and manage user accounts
 - **Contact Management** - Add, update, and delete contacts
 - **Discussion Management** - Initialize and manage encrypted discussions
 - **Message Operations** - Send and receive encrypted messages
@@ -16,66 +15,53 @@ The Gossip SDK provides a clean, typed interface for:
 ## Installation
 
 ```bash
-cd gossip-sdk
-npm install
+npm install @massalabs/gossip-sdk
 ```
-
-### Peer Dependencies
-
-The SDK requires these peer dependencies (provided by the host project):
-
-- `dexie` ^4.0.0 - IndexedDB wrapper for local storage
 
 ## Quick Start
 
-The SDK uses a singleton pattern with a simple lifecycle:
+The SDK uses a factory pattern — each call to `createGossipSdk()` returns a new instance:
 
 ```typescript
-import { gossipSdk, GossipDatabase } from 'gossip-sdk';
+import { createGossipSdk } from '@massalabs/gossip-sdk';
 
-// 1. Initialize once at app startup
-await gossipSdk.init({
-  protocolBaseUrl: 'https://api.example.com',
-});
+const sdk = createGossipSdk();
+
+// 1. Initialize (optional config)
+await sdk.init();
 
 // 2. Open session (login)
-await gossipSdk.openSession({
+await sdk.openSession({
   mnemonic: 'word1 word2 word3 ... word12',
-  // For existing session:
-  encryptedSession: savedBlob,
-  encryptionKey,
-  // For persistence:
-  onPersist: async (blob, key) => {
-    await saveToStorage(blob, key);
-  },
 });
 
 // 3. Use the SDK
-const contacts = await gossipSdk.contacts.list(gossipSdk.userId);
-await gossipSdk.discussions.start(contact, 'Hello!');
-await gossipSdk.messages.send(message);
+const contacts = await sdk.contacts.list(sdk.userId);
+await sdk.discussions.start(contact);
+await sdk.messages.send(message);
 
 // 4. Listen to events
-gossipSdk.on('message', msg => {
-  console.log('New message:', msg.content);
+sdk.on(SdkEventType.MESSAGE_RECEIVED, msg => {
+  console.log('New message:', msg);
 });
 
 // 5. Logout
-await gossipSdk.closeSession();
+await sdk.closeSession();
 ```
 
 ## Lifecycle
 
 ### 1. Initialize
 
-Call `init()` once at app startup to configure the database and protocol:
+Call `init()` once at app startup. All options are optional:
 
 ```typescript
-await gossipSdk.init({
-  // Optional: API base URL (uses default if not provided)
-  protocolBaseUrl: 'https://api.usegossip.com',
+// Uses GOSSIP_API_URL / VITE_GOSSIP_API_URL env var, or defaults to api.usegossip.com
+await sdk.init();
 
-  // Optional: Configuration overrides
+// Or with explicit config
+await sdk.init({
+  protocolBaseUrl: 'https://api.usegossip.com',
   config: {
     polling: {
       enabled: true,
@@ -91,23 +77,23 @@ Call `openSession()` to authenticate and create a cryptographic session:
 
 ```typescript
 // New account (no existing session)
-await gossipSdk.openSession({
+await sdk.openSession({
   mnemonic: 'word1 word2 word3 ... word12',
 });
 
 // Restore existing session
-await gossipSdk.openSession({
+await sdk.openSession({
   mnemonic: 'word1 word2 word3 ... word12',
   encryptedSession: savedBlob,
   encryptionKey: savedKey,
 });
 
 // With persistence (saves session on changes)
-await gossipSdk.openSession({
+await sdk.openSession({
   mnemonic: 'word1 word2 word3 ... word12',
   encryptionKey,
   onPersist: async (blob, key) => {
-    await db.userProfile.update(userId, { session: blob });
+    await storage.save({ session: blob });
   },
 });
 ```
@@ -115,7 +101,7 @@ await gossipSdk.openSession({
 ### 3. Close Session (Logout)
 
 ```typescript
-await gossipSdk.closeSession();
+await sdk.closeSession();
 ```
 
 ## Service APIs
@@ -126,8 +112,8 @@ All services are available after `openSession()` is called.
 
 ```typescript
 // Send a message
-const result = await gossipSdk.messages.send({
-  ownerUserId: gossipSdk.userId,
+const result = await sdk.messages.send({
+  ownerUserId: sdk.userId,
   contactUserId: contactId,
   content: 'Hello!',
   type: MessageType.TEXT,
@@ -137,51 +123,48 @@ const result = await gossipSdk.messages.send({
 });
 
 // Fetch new messages from server
-const fetchResult = await gossipSdk.messages.fetch();
-
-// Resend failed messages
-await gossipSdk.messages.resend(failedMessagesMap);
+const fetchResult = await sdk.messages.fetch();
 
 // Find message by seeker
-const msg = await gossipSdk.messages.findBySeeker(seeker, ownerUserId);
+const msg = await sdk.messages.findBySeeker(seeker, ownerUserId);
+
+// Mark as read
+await sdk.messages.markAsRead(messageId);
 ```
 
 ### Discussions
 
 ```typescript
 // Start a new discussion
-const { discussionId } = await gossipSdk.discussions.start(contact, 'Hello!');
+const result = await sdk.discussions.start(contact);
 
 // Accept an incoming discussion request
-await gossipSdk.discussions.accept(discussion);
+await sdk.discussions.accept(discussion);
 
 // Renew a broken session
-await gossipSdk.discussions.renew(contactUserId);
+await sdk.discussions.renew(contactUserId);
 
-// Check if discussion can send messages
-const canSend = await gossipSdk.discussions.isStable(
-  ownerUserId,
-  contactUserId
-);
+// Get session status for a contact
+const status = sdk.discussions.getStatus(contactUserId);
 
 // List all discussions
-const discussions = await gossipSdk.discussions.list(ownerUserId);
+const discussions = await sdk.discussions.list(ownerUserId);
 
 // Get a specific discussion
-const discussion = await gossipSdk.discussions.get(ownerUserId, contactUserId);
+const discussion = await sdk.discussions.get(ownerUserId, contactUserId);
 ```
 
 ### Contacts
 
 ```typescript
 // List all contacts
-const contacts = await gossipSdk.contacts.list(ownerUserId);
+const contacts = await sdk.contacts.list(ownerUserId);
 
 // Get a specific contact
-const contact = await gossipSdk.contacts.get(ownerUserId, contactUserId);
+const contact = await sdk.contacts.get(ownerUserId, contactUserId);
 
 // Add a new contact
-const result = await gossipSdk.contacts.add(
+const result = await sdk.contacts.add(
   ownerUserId,
   contactUserId,
   'Alice',
@@ -189,99 +172,54 @@ const result = await gossipSdk.contacts.add(
 );
 
 // Update contact name
-await gossipSdk.contacts.updateName(ownerUserId, contactUserId, 'Alice Smith');
+await sdk.contacts.updateName(ownerUserId, contactUserId, 'Alice Smith');
 
 // Delete contact and all associated data
-await gossipSdk.contacts.delete(ownerUserId, contactUserId);
+await sdk.contacts.delete(ownerUserId, contactUserId);
 ```
 
 ### Announcements
 
 ```typescript
 // Fetch and process announcements from server
-const result = await gossipSdk.announcements.fetch();
-
-// Resend failed announcements
-await gossipSdk.announcements.resend(failedDiscussions);
+const result = await sdk.announcements.fetch();
 ```
 
-### Auth (Available before session)
+### Auth (Available after init, before session)
 
 ```typescript
-// Create a new account
-const result = await gossipSdk.auth.createAccount(
-  username,
-  mnemonic,
-  encryptionKey
-);
-
-// Restore account from mnemonic
-const result = await gossipSdk.auth.restoreAccount(
-  username,
-  mnemonic,
-  encryptionKey
-);
-```
-
-### Refresh
-
-```typescript
-// Handle session refresh for active discussions
-await gossipSdk.refresh.handleSessionRefresh(activeDiscussions);
+// Publish public key so the user is discoverable
+await sdk.auth.ensurePublicKeyPublished(publicKey, userId);
 ```
 
 ## Events
 
-Subscribe to SDK events for real-time updates:
+Subscribe to SDK events using `SdkEventType`:
 
 ```typescript
+import { SdkEventType } from '@massalabs/gossip-sdk';
+
 // Message events
-gossipSdk.on('message', message => {
-  // New message received
-});
-
-gossipSdk.on('messageSent', message => {
-  // Message sent successfully
-});
-
-gossipSdk.on('messageFailed', (message, error) => {
-  // Message failed to send
-});
+sdk.on(SdkEventType.MESSAGE_RECEIVED, message => { ... });
+sdk.on(SdkEventType.MESSAGE_SENT, message => { ... });
 
 // Discussion events
-gossipSdk.on('discussionRequest', (discussion, contact) => {
-  // Incoming discussion request
-});
-
-gossipSdk.on('discussionStatusChanged', discussion => {
-  // Discussion status changed
-});
-
-// Session events
-gossipSdk.on('sessionBroken', discussion => {
-  // Session broken (deprecated - use auto-renewal)
-});
-
-gossipSdk.on('sessionRenewed', discussion => {
-  // Session successfully renewed
-});
+sdk.on(SdkEventType.SESSION_REQUESTED, (discussion, contact) => { ... });
 
 // Error handling
-gossipSdk.on('error', (error, context) => {
+sdk.on(SdkEventType.ERROR, (error, context) => {
   console.error(`Error in ${context}:`, error);
 });
 
 // Unsubscribe
-gossipSdk.off('message', handler);
+sdk.off(SdkEventType.MESSAGE_RECEIVED, handler);
 ```
 
 ## Polling
 
-The SDK can automatically poll for messages, announcements, and session refresh:
-
 ```typescript
 // Enable via config
-await gossipSdk.init({
+await sdk.init({
   config: {
     polling: {
       enabled: true,
@@ -293,75 +231,37 @@ await gossipSdk.init({
 });
 
 // Or control manually
-gossipSdk.polling.start();
-gossipSdk.polling.stop();
-console.log(gossipSdk.polling.isRunning);
+sdk.polling.start();
+sdk.polling.stop();
+console.log(sdk.polling.isRunning);
 ```
 
 ## Session Info
 
-Access session information after `openSession()`:
-
 ```typescript
-// User ID (encoded string)
-const userId = gossipSdk.userId;
+const userId = sdk.userId; // Encoded string
+const userIdBytes = sdk.userIdBytes; // Raw bytes
+const publicKeys = sdk.publicKeys;
 
-// User ID (raw bytes)
-const userIdBytes = gossipSdk.userIdBytes;
-
-// Public keys
-const publicKeys = gossipSdk.publicKeys;
-
-// Check session state
-console.log(gossipSdk.isInitialized); // true after init()
-console.log(gossipSdk.isSessionOpen); // true after openSession()
+console.log(sdk.isInitialized); // true after init()
+console.log(sdk.isSessionOpen); // true after openSession()
 
 // Get encrypted session for manual persistence
-const blob = gossipSdk.getEncryptedSession(encryptionKey);
+const blob = sdk.getEncryptedSession();
 ```
 
-## Configuration
+## State Update
 
-Full configuration options with defaults:
+Trigger a full state refresh for all discussions (session renewal, queued messages, keep-alives):
 
 ```typescript
-await gossipSdk.init({
-  config: {
-    // Network settings
-    protocol: {
-      baseUrl: 'https://api.usegossip.com', // API endpoint
-      timeout: 10000, // Request timeout (ms)
-      retryAttempts: 3, // Retry count
-    },
-
-    // Polling settings
-    polling: {
-      enabled: false, // Auto-start polling
-      messagesIntervalMs: 5000, // Message fetch interval
-      announcementsIntervalMs: 10000, // Announcement fetch interval
-      sessionRefreshIntervalMs: 30000, // Session refresh interval
-    },
-
-    // Message settings
-    messages: {
-      fetchDelayMs: 100, // Delay between fetch iterations
-      maxFetchIterations: 30, // Max iterations per fetch call
-      deduplicationWindowMs: 30000, // Duplicate detection window
-    },
-
-    // Announcement settings
-    announcements: {
-      fetchLimit: 500, // Max announcements per request
-      brokenThresholdMs: 3600000, // Time before marking broken (1 hour)
-    },
-  },
-});
+await sdk.updateState();
 ```
 
 ## Utilities
 
 ```typescript
-const utils = gossipSdk.utils;
+const utils = sdk.utils;
 
 // Validate user ID format
 const result = utils.validateUserId(userId);
@@ -375,16 +275,47 @@ const encoded = utils.encodeUserId(rawBytes);
 const decoded = utils.decodeUserId(encodedString);
 ```
 
-## Session Persistence
+## Configuration
 
-For restoring sessions across app restarts, pass `encryptionKey` and `onPersist` when opening the session:
+Full configuration options with defaults:
 
 ```typescript
-await gossipSdk.openSession({
+await sdk.init({
+  config: {
+    protocol: {
+      baseUrl: 'https://api.usegossip.com',
+      timeout: 10000,
+      retryAttempts: 3,
+    },
+    polling: {
+      enabled: false,
+      messagesIntervalMs: 5000,
+      announcementsIntervalMs: 10000,
+      sessionRefreshIntervalMs: 30000,
+    },
+    messages: {
+      fetchDelayMs: 100,
+      maxFetchIterations: 30,
+      deduplicationWindowMs: 30000,
+    },
+    announcements: {
+      fetchLimit: 500,
+      brokenThresholdMs: 3600000,
+    },
+  },
+});
+```
+
+## Session Persistence
+
+For restoring sessions across app restarts:
+
+```typescript
+await sdk.openSession({
   mnemonic,
   encryptionKey,
   onPersist: async (blob, key) => {
-    await db.userProfile.update(userId, { session: blob });
+    await storage.save({ session: blob });
   },
 });
 ```
@@ -398,11 +329,7 @@ The SDK automatically handles session recovery:
 3. **Auto-Accept** - When peer sends announcement, SDK auto-accepts for existing contacts
 4. **Message Processing** - After session becomes active, queued messages are sent automatically
 
-See [STATUS-REFERENCE.md](./docs/STATUS-REFERENCE.md) for detailed status documentation.
-
 ## Types
-
-Import types from the SDK:
 
 ```typescript
 import type {
@@ -410,12 +337,12 @@ import type {
   Contact,
   Discussion,
   Message,
-  DiscussionStatus,
-  DiscussionDirection,
   MessageStatus,
   MessageDirection,
   MessageType,
-} from 'gossip-sdk';
+} from '@massalabs/gossip-sdk';
+
+import { SessionStatus, SdkEventType } from '@massalabs/gossip-sdk';
 ```
 
 ## Testing
@@ -423,7 +350,6 @@ import type {
 ```bash
 npm test           # Watch mode
 npm run test:run   # Single run
-npm run test:coverage  # With coverage report
 ```
 
 Tests use `fake-indexeddb` to simulate IndexedDB in Node.js environment.
@@ -433,7 +359,7 @@ Tests use `fake-indexeddb` to simulate IndexedDB in Node.js environment.
 ```
 gossip-sdk/
 ├── src/
-│   ├── gossipSdk.ts      # Main singleton SDK class
+│   ├── gossipSdk.ts      # SDK class & factory
 │   ├── db.ts             # Database (Dexie) implementation
 │   ├── contacts.ts       # Contact operations
 │   ├── api/
@@ -450,14 +376,10 @@ gossip-sdk/
 │   │   ├── discussion.ts # Discussion service
 │   │   ├── announcement.ts # Announcement service
 │   │   └── refresh.ts    # Session refresh service
-│   ├── types/
-│   │   └── events.ts     # Event type definitions
+│   ├── types/            # Type definitions
 │   ├── utils/            # Utility modules
 │   └── wasm/             # WASM module wrappers
-├── test/                 # Test files
-├── docs/
-│   └── STATUS-REFERENCE.md  # Status documentation
-└── README.md
+└── test/                 # Test files
 ```
 
 ## License
