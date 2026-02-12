@@ -18,3 +18,12 @@ export {
 // Export specialized WASM functionality
 export * from './encryption';
 export * from './userKeys';
+
+export {
+  SessionStatus,
+  UserPublicKeys,
+  UserSecretKeys,
+  SendMessageOutput,
+  ReceiveMessageOutput,
+  AnnouncementResult,
+} from './bindings';

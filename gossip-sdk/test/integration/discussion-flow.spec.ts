@@ -31,7 +31,7 @@ import {
   setupSession,
 } from '../utils';
 import { encodeAnnouncementPayload } from '../../src/utils/announcementPayload';
-import { GossipSdk } from '../../src/gossipSdk';
+import { GossipSdk } from '../../src/gossip';
 import { ensureWasmInitialized } from '../../src/wasm/loader';
 import { generateMnemonic } from '../../src/crypto/bip39';
 import { generateEncryptionKey } from '../../src/wasm/encryption';

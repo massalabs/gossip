@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { GossipSdk } from '../../src/gossipSdk';
+import { GossipSdk } from '../../src/gossip';
 import {
   gossipDb,
   GossipDatabase,
