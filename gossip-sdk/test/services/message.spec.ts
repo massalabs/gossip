@@ -13,6 +13,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { GossipSdk } from '../../src/gossipSdk';
 import {
   gossipDb,
+  GossipDatabase,
   MessageStatus,
   MessageDirection,
   MessageType,

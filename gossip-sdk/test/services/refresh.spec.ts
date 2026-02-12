@@ -7,7 +7,12 @@ import { RefreshService } from '../../src/services/refresh';
 import { MessageService } from '../../src/services/message';
 import { DiscussionService } from '../../src/services/discussion';
 import { AnnouncementService } from '../../src/services/announcement';
-import { gossipDb, MessageType, DiscussionDirection } from '../../src/db';
+import {
+  gossipDb,
+  GossipDatabase,
+  MessageType,
+  DiscussionDirection,
+} from '../../src/db';
 import type { SessionModule } from '../../src/wasm/session';
 import { encodeUserId, decodeUserId } from '../../src/utils/userId';
 import { SessionStatus } from '../../src/assets/generated/wasm/gossip_wasm';

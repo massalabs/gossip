@@ -12,7 +12,7 @@ import {
   FAILED_TO_FETCH_MESSAGE,
   FAILED_TO_RETRIEVE_CONTACT_PUBLIC_KEY_ERROR,
 } from '../../src/services/auth';
-import { gossipDb, UserProfile } from '../../src/db';
+import { gossipDb, GossipDatabase, UserProfile } from '../../src/db';
 import type { IMessageProtocol } from '../../src/api/messageProtocol/types';
 import {
   UserPublicKeys,

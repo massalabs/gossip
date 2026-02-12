@@ -16,6 +16,7 @@ import {
 } from 'vitest';
 import {
   gossipDb,
+  GossipDatabase,
   MessageStatus,
   MessageDirection,
   MessageType,

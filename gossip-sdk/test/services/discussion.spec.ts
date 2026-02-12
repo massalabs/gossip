@@ -7,6 +7,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
   gossipDb,
+  GossipDatabase,
   MessageStatus,
   MessageDirection,
   MessageType,

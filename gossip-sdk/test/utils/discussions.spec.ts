@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { gossipDb, DiscussionDirection } from '../../src/db';
+import { gossipDb, GossipDatabase, DiscussionDirection } from '../../src/db';
 import { encodeUserId } from '../../src/utils/userId';
 import { updateDiscussionName } from '../../src/utils/discussions';
 

@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { gossipDb } from '../../src/db';
+import { gossipDb, GossipDatabase } from '../../src/db';
 import { encodeUserId } from '../../src/utils/userId';
 import {
   validatePassword,
