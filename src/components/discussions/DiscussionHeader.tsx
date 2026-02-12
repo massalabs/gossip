@@ -1,12 +1,9 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ChevronLeft } from 'react-feather';
-import {
-  Contact,
-  Discussion,
-  gossipSdk,
-  SessionStatus,
-} from '@massalabs/gossip-sdk';
+import { Contact, SessionStatus } from '@massalabs/gossip-sdk';
+import type { Discussion } from '@massalabs/gossip-sdk';
+import { useGossipSdk } from '../../hooks/useGossipSdk';
 import ContactAvatar from '../avatar/ContactAvatar';
 import Button from '../ui/Button';
 import BackButton from '../ui/BackButton';
@@ -27,6 +24,7 @@ const DiscussionHeader: React.FC<DiscussionHeaderProps> = ({
   onBack,
   title,
 }) => {
+  const gossip = useGossipSdk();
   const navigate = useNavigate();
 
   // Header with title (for list view with custom title)
@@ -60,7 +58,7 @@ const DiscussionHeader: React.FC<DiscussionHeaderProps> = ({
   // Check if discussion is pending outgoing (waiting for approval)
   const isPendingOutgoing =
     !!discussion &&
-    gossipSdk.discussions.getStatus(discussion.contactUserId) ===
+    gossip.discussions.getStatus(discussion.contactUserId) ===
       SessionStatus.SelfRequested;
 
   // Navigate to discussion settings if discussion exists, otherwise contact page

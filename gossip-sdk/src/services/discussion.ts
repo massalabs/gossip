@@ -21,7 +21,6 @@ import { UserPublicKeys } from '../wasm/bindings';
 import { AnnouncementService } from './announcement';
 import { SessionModule } from '../wasm/session';
 import { Logger } from '../utils/logs';
-import { RefreshService } from './refresh';
 import { Result } from '../utils/type';
 import { SdkEventEmitter, SdkEventType } from '../core/SdkEventEmitter';
 
@@ -54,24 +53,17 @@ export class DiscussionService {
   private announcementService: AnnouncementService;
   private session: SessionModule;
   private eventEmitter: SdkEventEmitter;
-  private refreshService?: RefreshService;
 
   constructor(
     db: GossipDatabase,
     announcementService: AnnouncementService,
     session: SessionModule,
-    eventEmitter: SdkEventEmitter,
-    refreshService?: RefreshService
+    eventEmitter: SdkEventEmitter
   ) {
     this.db = db;
     this.announcementService = announcementService;
     this.session = session;
     this.eventEmitter = eventEmitter;
-    this.refreshService = refreshService;
-  }
-
-  setRefreshService(refreshService: RefreshService): void {
-    this.refreshService = refreshService;
   }
 
   /**
@@ -112,9 +104,6 @@ export class DiscussionService {
         };
       }
 
-      log.info(
-        `${userId} is establishing session with contact ${contact.name}`
-      );
       const discussionId = await this.db.discussions.add({
         ownerUserId: userId,
         contactUserId: contact.userId,
@@ -298,19 +287,7 @@ export class DiscussionService {
       }
     );
 
-    if (!err) {
-      try {
-        /* trigger a state update to send the new announcement
-        If the stateUpdate function is already running, it will be skipped.
-        */
-        await this.refreshService?.stateUpdate();
-      } catch (error) {
-        return {
-          success: false,
-          error: new Error('Failed to trigger state update: ' + error),
-        };
-      }
-    } else {
+    if (err) {
       return { success: false, error: err };
     }
 

@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { GossipSdkImpl, SdkEventType } from '../../src/gossipSdk';
+import { GossipSdk, SdkEventType } from '../../src/gossipSdk';
 import {
   GossipDatabase,
   type Discussion,
@@ -21,15 +21,11 @@ import { generateMnemonic } from '../../src/crypto/bip39';
 import { protocolConfig } from '../../src/config/protocol';
 
 describe('E2E: Announcement fetch (real API, real account)', () => {
-  let sdk: GossipSdkImpl;
-  let database: GossipDatabase;
+  let sdk: GossipSdk;
 
   beforeEach(async () => {
-    database = new GossipDatabase();
-    await database.open();
-    sdk = new GossipSdkImpl();
+    sdk = new GossipSdk();
     await sdk.init({
-      db: database,
       protocolBaseUrl: protocolConfig.baseUrl,
     });
   });
@@ -38,8 +34,8 @@ describe('E2E: Announcement fetch (real API, real account)', () => {
     if (sdk?.isSessionOpen) {
       await sdk.closeSession();
     }
-    if (database) {
-      await database.close();
+    if (sdk.db.isOpen()) {
+      await sdk.db.close();
     }
   });
 
@@ -72,12 +68,12 @@ describe('E2E: Announcement fetch (real API, real account)', () => {
       const first = await sdk.announcements.fetch();
       expect(first).toBeDefined();
 
-      const profile = await database.userProfile.get(sdk.userId);
+      const profile = await sdk.db.userProfile.get(sdk.userId);
       const cursorBeforeSecond = profile?.lastBulletinCounter;
 
       const second = await sdk.announcements.fetch();
       expect(second).toBeDefined();
-      const profileAfter = await database.userProfile.get(sdk.userId);
+      const profileAfter = await sdk.db.userProfile.get(sdk.userId);
       if (cursorBeforeSecond !== undefined && first.newAnnouncementsCount > 0) {
         expect(profileAfter?.lastBulletinCounter).toBeDefined();
       }
@@ -93,11 +89,8 @@ describe('E2E: Discussion request (user A sends to user B)', () => {
     { timeout: 60_000 },
     async () => {
       // ─── User B: create account and publish public key ───
-      const databaseB = new GossipDatabase();
-      await databaseB.open();
-      const sdkB = new GossipSdkImpl();
+      const sdkB = new GossipSdk();
       await sdkB.init({
-        db: databaseB,
         protocolBaseUrl: baseUrl,
         config: {
           announcements: { fetchLimit: 1000 },
@@ -112,8 +105,8 @@ describe('E2E: Discussion request (user A sends to user B)', () => {
       // ─── User A: create account ───
       const databaseA = new GossipDatabase();
       await databaseA.open();
-      const sdkA = new GossipSdkImpl();
-      await sdkA.init({ db: databaseA, protocolBaseUrl: baseUrl });
+      const sdkA = new GossipSdk();
+      await sdkA.init({ protocolBaseUrl: baseUrl });
 
       const mnemonicA = generateMnemonic();
       await sdkA.openSession({ mnemonic: mnemonicA });
@@ -192,11 +185,10 @@ describe('E2E: Discussion request (user A sends to user B)', () => {
       }
       // If B did not receive after maxWaitMs, the bulletin may be paginated oldest-first
       // (production API). The test still validates that A sent the discussion request.
-
+      await sdkA.db.close();
+      await sdkB.db.close();
       await sdkA.closeSession();
       await sdkB.closeSession();
-      await databaseA.close();
-      await databaseB.close();
     }
   );
 });

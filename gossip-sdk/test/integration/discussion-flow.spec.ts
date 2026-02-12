@@ -15,12 +15,13 @@ import {
   beforeAll,
 } from 'vitest';
 import {
-  db,
+  gossipDb,
   Contact,
   DiscussionDirection,
   MessageType,
   MessageDirection,
   MessageStatus,
+  GossipDatabase,
 } from '../../src/db';
 import { MockMessageProtocol } from '../mocks';
 import {
@@ -30,7 +31,7 @@ import {
   setupSession,
 } from '../utils';
 import { encodeAnnouncementPayload } from '../../src/utils/announcementPayload';
-import { GossipSdkImpl } from '../../src/gossipSdk';
+import { GossipSdk } from '../../src/gossipSdk';
 import { ensureWasmInitialized } from '../../src/wasm/loader';
 import { generateMnemonic } from '../../src/crypto/bip39';
 import { generateEncryptionKey } from '../../src/wasm/encryption';
@@ -50,7 +51,7 @@ import { MessageService } from '../../src/services/message';
  * - sendAnnouncement is null (no pending announcements)
  */
 async function isLocalSessionUp(
-  sdk: GossipSdkImpl,
+  sdk: GossipSdk,
   contactUserId: string
 ): Promise<boolean> {
   const discussion = await sdk.discussions.get(sdk.userId, contactUserId);
@@ -65,8 +66,8 @@ async function isLocalSessionUp(
 }
 
 async function isSessionUp(
-  aliceSdk: GossipSdkImpl,
-  bobSdk: GossipSdkImpl
+  aliceSdk: GossipSdk,
+  bobSdk: GossipSdk
 ): Promise<boolean> {
   return (
     (await isLocalSessionUp(aliceSdk, bobSdk.userId)) &&
@@ -76,12 +77,13 @@ async function isSessionUp(
 
 describe('Discussion Flow', () => {
   let mockProtocol: MockMessageProtocol;
+  let db: GossipDatabase;
 
   let alice: TestSessionData;
-  let aliceSdk: GossipSdkImpl;
+  let aliceSdk: GossipSdk;
 
   let bob: TestSessionData;
-  let bobSdk: GossipSdkImpl;
+  let bobSdk: GossipSdk;
 
   beforeAll(async () => {
     await ensureWasmInitialized();
@@ -89,6 +91,7 @@ describe('Discussion Flow', () => {
   });
 
   beforeEach(async () => {
+    db = gossipDb();
     if (!db.isOpen()) {
       await db.open();
     }
@@ -108,10 +111,8 @@ describe('Discussion Flow', () => {
     const bobEncryptionKey = await generateEncryptionKey();
 
     // Create gossipSdk instances for Alice and Bob
-    aliceSdk = new GossipSdkImpl();
-    await aliceSdk.init({
-      db,
-    });
+    aliceSdk = new GossipSdk();
+    await aliceSdk.init();
     await aliceSdk.openSession({
       mnemonic: aliceMnemonic,
       encryptionKey: aliceEncryptionKey,
@@ -125,10 +126,8 @@ describe('Discussion Flow', () => {
       'messageProtocol'
     ] = mockProtocol;
 
-    bobSdk = new GossipSdkImpl();
-    await bobSdk.init({
-      db,
-    });
+    bobSdk = new GossipSdk();
+    await bobSdk.init();
     await bobSdk.openSession({
       mnemonic: bobMnemonic,
       encryptionKey: bobEncryptionKey,
@@ -1193,7 +1192,7 @@ describe('Discussion Flow', () => {
      * Helper function to verify that contact deletion was successful
      */
     async function checkDeleted(
-      userSdk: GossipSdkImpl,
+      userSdk: GossipSdk,
       contactUserId: string,
       database: typeof db
     ): Promise<void> {
@@ -1498,8 +1497,8 @@ describe('Discussion Flow', () => {
 describe('session break in session manager', () => {
   let mockProtocol: MockMessageProtocol;
 
-  let aliceSdk: GossipSdkImpl;
-  let bobSdk: GossipSdkImpl;
+  let aliceSdk: GossipSdk;
+  let bobSdk: GossipSdk;
 
   beforeAll(async () => {
     await ensureWasmInitialized();
@@ -1507,9 +1506,10 @@ describe('session break in session manager', () => {
   });
 
   beforeEach(async () => {
-    if (!db.isOpen()) {
-      await db.open();
-    }
+    aliceSdk = new GossipSdk();
+    await aliceSdk.init();
+    bobSdk = new GossipSdk();
+    await bobSdk.init();
     mockProtocol.clearMockData();
   });
 
@@ -1544,8 +1544,8 @@ describe('session break in session manager', () => {
     const aliceEncryptionKey = await generateEncryptionKey();
     const bobEncryptionKey = await generateEncryptionKey();
 
-    aliceSdk = new GossipSdkImpl();
-    await aliceSdk.init({ db });
+    aliceSdk = new GossipSdk();
+    await aliceSdk.init();
     await aliceSdk.openSession({
       mnemonic: aliceMnemonic,
       encryptionKey: aliceEncryptionKey,
@@ -1562,8 +1562,8 @@ describe('session break in session manager', () => {
       'messageProtocol'
     ] = mockProtocol;
 
-    bobSdk = new GossipSdkImpl();
-    await bobSdk.init({ db });
+    bobSdk = new GossipSdk();
+    await bobSdk.init();
     await bobSdk.openSession({
       mnemonic: bobMnemonic,
       encryptionKey: bobEncryptionKey,
@@ -1645,7 +1645,7 @@ describe('session break in session manager', () => {
 
     await aliceSdk.messages.fetch();
 
-    const aliceIncomingMessagesBefore = await db.messages
+    const aliceIncomingMessagesBefore = await aliceSdk.db.messages
       .where('[ownerUserId+contactUserId+direction]')
       .equals([aliceSdk.userId, bobSdk.userId, MessageDirection.INCOMING])
       .toArray();
@@ -1654,7 +1654,7 @@ describe('session break in session manager', () => {
 
     // 2. Create 4 outgoing messages for Alice with different statuses
     // WAITING_SESSION
-    await db.messages.add({
+    await aliceSdk.db.messages.add({
       ownerUserId: aliceSdk.userId,
       contactUserId: bobSdk.userId,
       content: 'Message WAITING_SESSION',
@@ -1665,7 +1665,7 @@ describe('session break in session manager', () => {
     });
 
     // READY
-    await db.messages.add({
+    await aliceSdk.db.messages.add({
       ownerUserId: aliceSdk.userId,
       contactUserId: bobSdk.userId,
       content: 'Message READY',
@@ -1679,7 +1679,7 @@ describe('session break in session manager', () => {
     });
 
     // SENT
-    await db.messages.add({
+    await aliceSdk.db.messages.add({
       ownerUserId: aliceSdk.userId,
       contactUserId: bobSdk.userId,
       content: 'Message SENT',
@@ -1693,7 +1693,7 @@ describe('session break in session manager', () => {
     });
 
     // DELIVERED (acknowledged)
-    await db.messages.add({
+    await aliceSdk.db.messages.add({
       ownerUserId: aliceSdk.userId,
       contactUserId: bobSdk.userId,
       content: 'Message DELIVERED',
@@ -1704,7 +1704,7 @@ describe('session break in session manager', () => {
       seeker: new Uint8Array([13, 14, 15]),
     });
 
-    const aliceOutgoingBefore = await db.messages
+    const aliceOutgoingBefore = await aliceSdk.db.messages
       .where('[ownerUserId+contactUserId+direction]')
       .equals([aliceSdk.userId, bobSdk.userId, MessageDirection.OUTGOING])
       .toArray();
@@ -1731,7 +1731,7 @@ describe('session break in session manager', () => {
     );
 
     // Outgoing DELIVERED message should not be resent or reset
-    const aliceOutgoingAfter = await db.messages
+    const aliceOutgoingAfter = await aliceSdk.db.messages
       .where('[ownerUserId+contactUserId+direction]')
       .equals([aliceSdk.userId, bobSdk.userId, MessageDirection.OUTGOING])
       .toArray();
@@ -1763,7 +1763,7 @@ describe('session break in session manager', () => {
       createdAt: new Date(),
     };
 
-    await db.contacts.add(aliceBobContact);
+    await aliceSdk.db.contacts.add(aliceBobContact);
 
     // Alice sends announcement (session becomes SelfRequested)
     const result = await aliceSdk.discussions.start(aliceBobContact);
@@ -1977,7 +1977,7 @@ describe('session break in session manager', () => {
 
     // Check that no keep alive messages were created in the database
     // Keep alive messages should have been skipped because session was being renewed
-    const aliceMessages = await db.messages
+    const aliceMessages = await aliceSdk.db.messages
       .where('[ownerUserId+contactUserId]')
       .equals([aliceSdk.userId, bobSdk.userId])
       .and(msg => msg.type === MessageType.KEEP_ALIVE)

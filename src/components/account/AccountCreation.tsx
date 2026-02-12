@@ -7,8 +7,8 @@ import {
   validatePassword,
   validateUsernameFormat,
   validateUsernameFormatAndAvailability,
-  db,
 } from '@massalabs/gossip-sdk';
+import { getSdk } from '../../stores/sdkStore';
 import PageHeader from '../ui/PageHeader';
 import PageLayout from '../ui/PageLayout';
 import TabSwitcher from '../ui/TabSwitcher';
@@ -112,7 +112,7 @@ const AccountCreation: React.FC<AccountCreationProps> = ({
     // Handle when user presses enter without triggering blur event
     const usernameResult = await validateUsernameFormatAndAvailability(
       username,
-      db
+      getSdk().db
     );
 
     if (!usernameResult.valid) {

@@ -3,16 +3,12 @@ import { createRoot } from 'react-dom/client';
 import './index.css';
 import App from './App.tsx';
 import { enableDebugLogger } from './utils/logger.ts';
+import { createSdk } from './sdk';
+import { useSdkStore } from './stores/sdkStore';
+import { protocolConfig } from './config/protocol';
 
 // Polyfill for Buffer
 import { Buffer } from 'buffer';
-
-// SDK configuration
-import { gossipSdk, GossipDatabase } from '@massalabs/gossip-sdk';
-import { protocolConfig } from './config/protocol';
-
-// Create database instance using SDK's class
-const db = new GossipDatabase();
 
 // Setup SHA-512 for @noble/ed25519 (required for massa-web3)
 import { sha512 } from '@noble/hashes/sha2';
@@ -20,8 +16,7 @@ import * as ed from '@noble/ed25519';
 ed.utils.sha512Sync = (...m) => sha512(ed.utils.concatBytes(...m));
 
 // Capacitor imports
-import { Capacitor } from '@capacitor/core';
-import { SafeArea } from 'capacitor-plugin-safe-area';
+import { initSafeArea } from './styles/initSafeArea.ts';
 
 // Extend Window interface to include Buffer
 declare global {
@@ -89,17 +84,6 @@ window.addEventListener('load', () => {
   }
 });
 
-// Initialize SDK (also starts WASM initialization in background)
-gossipSdk.init({
-  db,
-  protocolBaseUrl: protocolConfig.baseUrl,
-  config: {
-    polling: {
-      enabled: true,
-    },
-  },
-});
-
 // Only enable the debug logger in development to avoid persisting
 // potentially sensitive console output in production builds.
 // if (import.meta.env.DEV) {
@@ -108,34 +92,24 @@ gossipSdk.init({
 enableDebugLogger();
 // }
 
-/**
- * Initialize safe area insets using capacitor-plugin-safe-area.
- * This plugin injects CSS variables --safe-area-inset-* that work on both iOS and Android.
- */
-async function initSafeArea(): Promise<void> {
-  if (!Capacitor.isNativePlatform()) return;
+Promise.all([
+  createSdk({
+    protocolBaseUrl: protocolConfig.baseUrl,
+    config: { polling: { enabled: true } },
+  }),
+  initSafeArea(),
+])
+  .then(([sdk]) => {
+    useSdkStore.getState().setSdk(sdk);
 
-  try {
-    const { insets } = await SafeArea.getSafeAreaInsets();
-    const root = document.documentElement;
-
-    // Set CSS variables for safe areas
-    root.style.setProperty('--sat', `${insets.top}px`);
-    root.style.setProperty('--sab', `${insets.bottom}px`);
-    root.style.setProperty('--sal', `${insets.left}px`);
-    root.style.setProperty('--sar', `${insets.right}px`);
-
-    console.log('[SafeArea] Insets applied:', insets);
-  } catch (error) {
-    console.error('[SafeArea] Failed to get insets:', error);
-  }
-}
-
-// Initialize safe areas then render app
-initSafeArea().finally(() => {
-  createRoot(document.getElementById('root')!).render(
-    <StrictMode>
-      <App />
-    </StrictMode>
-  );
-});
+    createRoot(document.getElementById('root')!).render(
+      <StrictMode>
+        <App />
+      </StrictMode>
+    );
+  })
+  .catch(error => {
+    console.error('[Gossip] Failed to initialize:', error);
+    document.getElementById('root')!.textContent =
+      'Failed to start. Please restart the app.';
+  });

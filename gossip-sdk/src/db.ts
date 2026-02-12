@@ -398,59 +398,15 @@ export class GossipDatabase extends Dexie {
   }
 }
 
-// Database instance - initialized lazily or via setDb()
+// Database instance - lazily initialized singleton
 let _db: GossipDatabase | null = null;
-let _warnedGlobalDbAccess = false;
-// Store a reference to the Proxy to detect it
-let _proxyDb: GossipDatabase | null = null;
 
 /**
- * Get the database instance.
- * Creates a default instance if none was set via setDb().
+ * Get the database instance. Creates a default instance on first call.
  */
-export function getDb(): GossipDatabase {
-  // Prevent infinite recursion: if _db is the Proxy itself or not a real instance, create a new instance
-  if (!_db || _db === _proxyDb || !(_db instanceof GossipDatabase)) {
+export function gossipDb(): GossipDatabase {
+  if (!_db || !(_db instanceof GossipDatabase)) {
     _db = new GossipDatabase();
   }
   return _db;
 }
-
-/**
- * Set the database instance.
- * Call this before using any SDK functions if you need a custom db instance.
- */
-export function setDb(database: GossipDatabase): void {
-  // Prevent setting the Proxy itself to avoid infinite recursion
-  // The Proxy is not an instance of GossipDatabase, so we can detect it that way
-  if (!(database instanceof GossipDatabase) || database === _proxyDb) {
-    // If Proxy is passed, ensure _db exists by calling getDb()
-    // This will reuse existing _db if it was already created (e.g., by db.open())
-    // or create a new one if needed. This ensures we always use the same instance.
-    getDb();
-    // Don't overwrite _db - just ensure it exists and is consistent
-  } else {
-    _db = database;
-  }
-}
-
-/**
- * Get the database instance.
- * Creates a default instance if none was set via setDb().
- */
-export const db: GossipDatabase = (_proxyDb = new Proxy({} as GossipDatabase, {
-  get(_target, prop) {
-    if (!_warnedGlobalDbAccess) {
-      _warnedGlobalDbAccess = true;
-      console.warn(
-        '[GossipSdk] Global db access is deprecated. Use createGossipSdk() or setDb().'
-      );
-    }
-    const target = getDb();
-    const value = Reflect.get(target, prop);
-    if (typeof value === 'function') {
-      return value.bind(target);
-    }
-    return value;
-  },
-})) as GossipDatabase;

@@ -1,10 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import {
-  Discussion,
-  Contact,
-  gossipSdk,
-  SessionStatus,
-} from '@massalabs/gossip-sdk';
+import { Contact, SessionStatus } from '@massalabs/gossip-sdk';
+import type { Discussion } from '@massalabs/gossip-sdk';
+import { useGossipSdk } from '../../hooks/useGossipSdk';
 import ContactAvatar from '../avatar/ContactAvatar';
 import { formatRelativeTime } from '../../utils/timeUtils';
 import { formatUserId } from '@massalabs/gossip-sdk';
@@ -32,6 +29,7 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
   onAccept,
   onRefuse,
 }) => {
+  const sdk = useGossipSdk();
   const [proposedName, setProposedName] = useState(contact.name || '');
   const [isRefuseModalOpen, setIsRefuseModalOpen] = useState(false);
   // Re-render trigger to update relative time display every minute
@@ -59,7 +57,7 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
   // Effect 1: Close the modal if the discussion is no longer pending
   useEffect(() => {
     const isPendingIncomingCheck =
-      gossipSdk.discussions.getStatus(discussion.contactUserId) ===
+      sdk.discussions.getStatus(discussion.contactUserId) ===
       SessionStatus.PeerRequested;
 
     if (!isPendingIncomingCheck) {
@@ -74,12 +72,12 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
         return prev;
       });
     }
-  }, [discussion.contactUserId, discussion.id, setModalOpen]);
+  }, [discussion.contactUserId, discussion.id, sdk.discussions, setModalOpen]);
 
   // Effect 2: Open the modal if the store says it should be open and discussion is pending
   useEffect(() => {
     const isPendingIncomingCheck =
-      gossipSdk.discussions.getStatus(discussion.contactUserId) ===
+      sdk.discussions.getStatus(discussion.contactUserId) ===
       SessionStatus.PeerRequested;
 
     if (!isPendingIncomingCheck) {
@@ -98,13 +96,19 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
       }
       return prev;
     });
-  }, [discussion.contactUserId, discussion.id, openNameModals, contact.name]);
+  }, [
+    discussion.contactUserId,
+    discussion.id,
+    openNameModals,
+    contact.name,
+    sdk.discussions,
+  ]);
 
   const isPendingIncoming =
-    gossipSdk.discussions.getStatus(discussion.contactUserId) ===
+    sdk.discussions.getStatus(discussion.contactUserId) ===
     SessionStatus.PeerRequested;
   const isPendingOutgoing =
-    gossipSdk.discussions.getStatus(discussion.contactUserId) ===
+    sdk.discussions.getStatus(discussion.contactUserId) ===
     SessionStatus.SelfRequested;
 
   return (

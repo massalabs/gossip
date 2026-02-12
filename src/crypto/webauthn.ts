@@ -6,8 +6,11 @@ import {
   BiometricCreationData,
   BiometricCredentials,
 } from '../services/biometricService';
-import { decodeFromBase64Url, encodeToBase64 } from '../utils';
-import { generateEncryptionKeyFromSeed } from '@massalabs/gossip-sdk';
+import {
+  generateEncryptionKeyFromSeed,
+  decodeFromBase64Url,
+  encodeToBase64,
+} from '@massalabs/gossip-sdk';
 /**
  * Check if WebAuthn is supported in the current browser
  */

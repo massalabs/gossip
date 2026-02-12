@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { useAccountStore } from '../stores/accountStore';
 import { useAppStore } from '../stores/appStore';
-import { db } from '@massalabs/gossip-sdk';
+import { getSdk } from '../stores/sdkStore';
 
 const PROFILE_LOAD_DELAY_MS = 100;
 
@@ -23,6 +23,7 @@ export function useProfileLoader() {
 
         // Ensure database is open before querying.
         // NOTE: This may not be needed, but gives us the guarantee that it's open.
+        const db = getSdk().db;
         if (!db.isOpen()) {
           await db.open();
         }

@@ -15,7 +15,8 @@ import {
   beforeAll,
 } from 'vitest';
 import {
-  db,
+  gossipDb,
+  GossipDatabase,
   MessageStatus,
   MessageDirection,
   MessageType,
@@ -23,7 +24,7 @@ import {
 } from '../../src/db';
 import { MockMessageProtocol } from '../mocks';
 import { setupSession } from '../utils';
-import { GossipSdkImpl } from '../../src/gossipSdk';
+import { GossipSdk } from '../../src/gossipSdk';
 import { ensureWasmInitialized } from '../../src/wasm/loader';
 import { generateMnemonic } from '../../src/crypto/bip39';
 import { generateEncryptionKey } from '../../src/wasm/encryption';
@@ -37,9 +38,10 @@ import { SessionStatus } from '../../src/assets/generated/wasm/gossip_wasm';
 
 describe('Messaging Flow', () => {
   let mockProtocol: MockMessageProtocol;
+  let db: GossipDatabase;
 
-  let aliceSdk: GossipSdkImpl;
-  let bobSdk: GossipSdkImpl;
+  let aliceSdk: GossipSdk;
+  let bobSdk: GossipSdk;
 
   beforeAll(async () => {
     await ensureWasmInitialized();
@@ -47,6 +49,7 @@ describe('Messaging Flow', () => {
   });
 
   beforeEach(async () => {
+    db = gossipDb();
     if (!db.isOpen()) {
       await db.open();
     }
@@ -62,10 +65,8 @@ describe('Messaging Flow', () => {
     const bobEncryptionKey = await generateEncryptionKey();
 
     // Create gossipSdk instances for Alice and Bob
-    aliceSdk = new GossipSdkImpl();
-    await aliceSdk.init({
-      db,
-    });
+    aliceSdk = new GossipSdk();
+    await aliceSdk.init();
     await aliceSdk.openSession({
       mnemonic: aliceMnemonic,
       encryptionKey: aliceEncryptionKey,
@@ -79,10 +80,8 @@ describe('Messaging Flow', () => {
       'messageProtocol'
     ] = mockProtocol;
 
-    bobSdk = new GossipSdkImpl();
-    await bobSdk.init({
-      db,
-    });
+    bobSdk = new GossipSdk();
+    await bobSdk.init();
     await bobSdk.openSession({
       mnemonic: bobMnemonic,
       encryptionKey: bobEncryptionKey,

@@ -22,7 +22,7 @@ import {
   useFilteredContacts,
   useVirtualItems,
 } from './hooks/useDiscussionListItems';
-import { Discussion } from '@massalabs/gossip-sdk';
+import type { Discussion } from '@massalabs/gossip-sdk';
 
 // =============================================================================
 // Types
