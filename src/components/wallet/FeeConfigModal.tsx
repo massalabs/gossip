@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { Check, X } from 'react-feather';
 import Button from '../ui/Button';
-import type { FeeConfig } from '@massalabs/gossip-sdk';
+import type { FeeConfig } from './types';
 
 interface FeeConfigModalProps {
   isOpen: boolean;

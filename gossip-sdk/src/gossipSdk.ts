@@ -1,5 +1,5 @@
 /**
- * GossipSdk - SDK with clean lifecycle API
+ * GossipSdk
  *
  * @example
  * ```typescript
@@ -153,16 +153,17 @@ export interface OpenSessionOptions {
 
 type SdkStateUninitialized = { status: SdkStatus.UNINITIALIZED };
 
-type SdkStateInitialized = {
-  status: SdkStatus.INITIALIZED;
+type SdkReadyBase = {
   messageProtocol: IMessageProtocol;
   config: SdkConfig;
 };
 
-type SdkStateSessionOpen = {
+type SdkStateInitialized = SdkReadyBase & {
+  status: SdkStatus.INITIALIZED;
+};
+
+type SdkStateSessionOpen = SdkReadyBase & {
   status: SdkStatus.SESSION_OPEN;
-  messageProtocol: IMessageProtocol;
-  config: SdkConfig;
   session: SessionModule;
   userKeys: UserKeys;
   encryptionKey?: EncryptionKey;
@@ -209,17 +210,17 @@ class GossipSdk {
   /**
    * Initialize the SDK. Call once at app startup.
    */
-  async init(options: GossipSdkInitOptions = {}): Promise<void> {
+  async init(options?: GossipSdkInitOptions): Promise<void> {
     if (this.state.status !== SdkStatus.UNINITIALIZED) {
       console.warn('[GossipSdk] Already initialized');
       return;
     }
 
     // Merge config with defaults
-    const config = mergeConfig(options.config);
+    const config = mergeConfig(options?.config);
 
     // Configure protocol URL (prefer explicit option, then config)
-    const baseUrl = options.protocolBaseUrl ?? config.protocol.baseUrl;
+    const baseUrl = options?.protocolBaseUrl ?? config.protocol.baseUrl;
     if (baseUrl) {
       setProtocolBaseUrl(baseUrl);
     }
@@ -349,8 +350,9 @@ class GossipSdk {
     this._message.setRefreshService(this._refresh);
 
     this.state = {
-      ...this.state,
       status: SdkStatus.SESSION_OPEN,
+      messageProtocol: this.state.messageProtocol,
+      config: this.state.config,
       session,
       userKeys,
       encryptionKey,
