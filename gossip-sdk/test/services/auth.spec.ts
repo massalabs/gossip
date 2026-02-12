@@ -105,7 +105,7 @@ describe('AuthService', () => {
   let testUserIdBytes: Uint8Array;
   let testPublicKeys: UserPublicKeys;
   let userKeys: UserKeys | null = null;
-  let db: ReturnType<typeof gossipDb>;
+  let db: GossipDatabase;
 
   beforeEach(async () => {
     await ensureWasmInitialized();

@@ -305,20 +305,24 @@ class GossipSdk {
     }
 
     const db = this.db;
-    // Create services with config (refreshService will be set after creation)
+    // Callback resolves lazily — RefreshService created below
+    const triggerStateUpdate = () => this._refresh!.stateUpdate();
+
     this._announcement = new AnnouncementService(
       db,
       this.state.messageProtocol,
       session,
       this.eventEmitter,
-      this.config
+      this.config,
+      triggerStateUpdate
     );
 
     this._discussion = new DiscussionService(
       db,
       this._announcement,
       session,
-      this.eventEmitter
+      this.eventEmitter,
+      triggerStateUpdate
     );
 
     this._message = new MessageService(
@@ -327,7 +331,8 @@ class GossipSdk {
       session,
       this._discussion,
       this.eventEmitter,
-      this.config
+      this.config,
+      triggerStateUpdate
     );
 
     this._refresh = new RefreshService(
@@ -339,15 +344,13 @@ class GossipSdk {
       this.eventEmitter
     );
 
-    // Publish gossip ID (public key) on messageProtocol so the user is discoverable
-    await this._auth!.ensurePublicKeyPublished(
+    // Publish gossip ID so the user is discoverable (fire-and-forget — don't block login)
+    this._auth!.ensurePublicKeyPublished(
       session.ourPk,
       session.userIdEncoded
+    ).catch(err =>
+      console.warn('[GossipSdk] Failed to publish public key:', err)
     );
-    // Now set refreshService on other services
-    this._announcement.setRefreshService(this._refresh);
-    this._discussion.setRefreshService(this._refresh);
-    this._message.setRefreshService(this._refresh);
 
     this.state = {
       status: SdkStatus.SESSION_OPEN,
@@ -641,6 +644,10 @@ class GossipSdk {
           await this._announcement?.fetchAndProcessAnnouncements();
         },
         handleSessionRefresh: async () => {
+          // Retry public key publish if it failed during openSession()
+          this._auth
+            ?.ensurePublicKeyPublished(session.ourPk, session.userIdEncoded)
+            .catch(() => {});
           await this.updateState();
         },
         getActiveDiscussions: async () => {

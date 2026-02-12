@@ -132,7 +132,7 @@ describe('GossipSdk lifecycle', () => {
   });
 
   it('initializes once and exposes auth service', async () => {
-    await sdk.init({});
+    await sdk.init();
     expect(sdk.isInitialized).toBe(true);
     expect(() => sdk.auth).not.toThrow();
   });
@@ -144,7 +144,7 @@ describe('GossipSdk lifecycle', () => {
   });
 
   it('opens and closes session with getters wired', async () => {
-    await sdk.init({});
+    await sdk.init();
     await sdk.openSession({ mnemonic: 'test words' });
 
     expect(sdk.isSessionOpen).toBe(true);
@@ -164,7 +164,7 @@ describe('GossipSdk lifecycle', () => {
       new Uint8Array(32).fill(0)
     );
 
-    await sdk.init({});
+    await sdk.init();
     await sdk.openSession({
       mnemonic,
     });
@@ -182,7 +182,7 @@ describe('GossipSdk lifecycle', () => {
   it('throws an error when encryptedSession cannot be loaded with the provided encryptionKey', async () => {
     const mnemonic = 'test words long enough to generate an encryption key';
 
-    await sdk.init({});
+    await sdk.init();
     await sdk.openSession({
       mnemonic,
     });
@@ -205,7 +205,7 @@ describe('GossipSdk lifecycle', () => {
   it('bridges message events to sdk.on handlers', async () => {
     const handler = vi.fn();
 
-    await sdk.init({});
+    await sdk.init();
     sdk.on(SdkEventType.MESSAGE_RECEIVED, handler);
     await sdk.openSession({ mnemonic: 'test words' });
 

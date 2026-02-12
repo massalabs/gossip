@@ -29,7 +29,6 @@ import { sessionStatusToString } from '../wasm/session';
 import { Logger } from '../utils/logs';
 import { SdkConfig, defaultSdkConfig } from '../config/sdk';
 import { DiscussionService } from './discussion';
-import { RefreshService } from './refresh';
 import { SdkEventEmitter, SdkEventType } from '../core/SdkEventEmitter';
 
 export interface MessageResult {
@@ -71,7 +70,7 @@ export class MessageService {
   private discussionService: DiscussionService;
   private eventEmitter: SdkEventEmitter;
   private config: SdkConfig;
-  private refreshService?: RefreshService;
+  private onStateUpdateNeeded?: () => Promise<void>;
   private processingContacts = new Set<string>();
   private isFetchingMessages = false;
 
@@ -82,7 +81,7 @@ export class MessageService {
     discussionService: DiscussionService,
     eventEmitter: SdkEventEmitter,
     config: SdkConfig = defaultSdkConfig,
-    refreshService?: RefreshService
+    onStateUpdateNeeded?: () => Promise<void>
   ) {
     this.db = db;
     this.messageProtocol = messageProtocol;
@@ -90,12 +89,8 @@ export class MessageService {
     this.discussionService = discussionService;
     this.eventEmitter = eventEmitter;
     this.config = config;
-    this.refreshService = refreshService;
+    this.onStateUpdateNeeded = onStateUpdateNeeded;
     void this.discussionService;
-  }
-
-  setRefreshService(refreshService: RefreshService): void {
-    this.refreshService = refreshService;
   }
 
   async fetchMessages(): Promise<MessageResult> {
@@ -552,7 +547,7 @@ export class MessageService {
     Trigger a state update to send the new message
     If the stateUpdate function is already running, it will be skipped.
     */
-    await this.refreshService?.stateUpdate();
+    await this.onStateUpdateNeeded?.();
 
     return {
       success: true,

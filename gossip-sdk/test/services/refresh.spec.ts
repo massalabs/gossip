@@ -62,7 +62,7 @@ function createRefreshAnnouncementService(): AnnouncementService {
 
 describe('RefreshService', () => {
   let eventEmitter: SdkEventEmitter;
-  let db: ReturnType<typeof gossipDb>;
+  let db: GossipDatabase;
 
   beforeEach(async () => {
     db = gossipDb();

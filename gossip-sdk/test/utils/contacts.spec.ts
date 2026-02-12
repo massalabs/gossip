@@ -29,7 +29,7 @@ const fakeSession = {
 } as unknown as SessionModule;
 
 describe('Contacts utilities', () => {
-  let db: ReturnType<typeof gossipDb>;
+  let db: GossipDatabase;
 
   beforeEach(async () => {
     db = gossipDb();

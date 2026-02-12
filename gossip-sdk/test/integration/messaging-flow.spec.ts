@@ -37,7 +37,7 @@ import { SessionStatus } from '../../src/assets/generated/wasm/gossip_wasm';
 
 describe('Messaging Flow', () => {
   let mockProtocol: MockMessageProtocol;
-  let db: ReturnType<typeof gossipDb>;
+  let db: GossipDatabase;
 
   let aliceSdk: GossipSdk;
   let bobSdk: GossipSdk;
@@ -65,7 +65,7 @@ describe('Messaging Flow', () => {
 
     // Create gossipSdk instances for Alice and Bob
     aliceSdk = new GossipSdk();
-    await aliceSdk.init({});
+    await aliceSdk.init();
     await aliceSdk.openSession({
       mnemonic: aliceMnemonic,
       encryptionKey: aliceEncryptionKey,
@@ -80,7 +80,7 @@ describe('Messaging Flow', () => {
     ] = mockProtocol;
 
     bobSdk = new GossipSdk();
-    await bobSdk.init({});
+    await bobSdk.init();
     await bobSdk.openSession({
       mnemonic: bobMnemonic,
       encryptionKey: bobEncryptionKey,

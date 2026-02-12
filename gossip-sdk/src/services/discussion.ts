@@ -21,7 +21,6 @@ import { UserPublicKeys } from '../wasm/bindings';
 import { AnnouncementService } from './announcement';
 import { SessionModule } from '../wasm/session';
 import { Logger } from '../utils/logs';
-import { RefreshService } from './refresh';
 import { Result } from '../utils/type';
 import { SdkEventEmitter, SdkEventType } from '../core/SdkEventEmitter';
 
@@ -54,24 +53,20 @@ export class DiscussionService {
   private announcementService: AnnouncementService;
   private session: SessionModule;
   private eventEmitter: SdkEventEmitter;
-  private refreshService?: RefreshService;
+  private onStateUpdateNeeded?: () => Promise<void>;
 
   constructor(
     db: GossipDatabase,
     announcementService: AnnouncementService,
     session: SessionModule,
     eventEmitter: SdkEventEmitter,
-    refreshService?: RefreshService
+    onStateUpdateNeeded?: () => Promise<void>
   ) {
     this.db = db;
     this.announcementService = announcementService;
     this.session = session;
     this.eventEmitter = eventEmitter;
-    this.refreshService = refreshService;
-  }
-
-  setRefreshService(refreshService: RefreshService): void {
-    this.refreshService = refreshService;
+    this.onStateUpdateNeeded = onStateUpdateNeeded;
   }
 
   /**
@@ -300,7 +295,7 @@ export class DiscussionService {
         /* trigger a state update to send the new announcement
         If the stateUpdate function is already running, it will be skipped.
         */
-        await this.refreshService?.stateUpdate();
+        await this.onStateUpdateNeeded?.();
       } catch (error) {
         return {
           success: false,

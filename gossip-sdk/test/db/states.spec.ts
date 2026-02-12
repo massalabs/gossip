@@ -12,13 +12,14 @@ import {
   MessageDirection,
   MessageStatus,
   MessageType,
+  GossipDatabase,
 } from '../../src/db';
 
 const TEST_OWNER_USER_ID = 'gossip1testowner';
 const TEST_CONTACT_USER_ID = 'gossip1testcontact';
 
 describe('Announcement Storage for Retry', () => {
-  let db: ReturnType<typeof gossipDb>;
+  let db: GossipDatabase;
 
   beforeEach(async () => {
     db = gossipDb();
@@ -64,7 +65,7 @@ describe('Announcement Storage for Retry', () => {
 });
 
 describe('Message Status Transitions', () => {
-  let db: ReturnType<typeof gossipDb>;
+  let db: GossipDatabase;
 
   beforeEach(async () => {
     db = gossipDb();
@@ -167,7 +168,7 @@ describe('Message Status Transitions', () => {
 });
 
 describe('Pending Announcements', () => {
-  let db: ReturnType<typeof gossipDb>;
+  let db: GossipDatabase;
 
   beforeEach(async () => {
     db = gossipDb();
@@ -222,7 +223,7 @@ describe('Pending Announcements', () => {
 });
 
 describe('Contact Deletion Cleanup', () => {
-  let db: ReturnType<typeof gossipDb>;
+  let db: GossipDatabase;
 
   beforeEach(async () => {
     db = gossipDb();

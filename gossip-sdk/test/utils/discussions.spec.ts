@@ -11,7 +11,7 @@ const OWNER_USER_ID = encodeUserId(new Uint8Array(32).fill(6));
 const CONTACT_USER_ID = encodeUserId(new Uint8Array(32).fill(7));
 
 describe('Discussion utilities', () => {
-  let db: ReturnType<typeof gossipDb>;
+  let db: GossipDatabase;
 
   beforeEach(async () => {
     db = gossipDb();

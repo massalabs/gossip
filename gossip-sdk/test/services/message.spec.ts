@@ -26,7 +26,7 @@ const MESSAGE_CONTACT_USER_ID = encodeUserId(new Uint8Array(32).fill(12));
 let sdk: GossipSdk;
 
 describe('MessageService', () => {
-  let db: ReturnType<typeof gossipDb>;
+  let db: GossipDatabase;
 
   beforeEach(async () => {
     db = gossipDb();
@@ -36,7 +36,7 @@ describe('MessageService', () => {
     await Promise.all(db.tables.map(table => table.clear()));
 
     sdk = new GossipSdk();
-    await sdk.init({});
+    await sdk.init();
     await sdk.openSession({ mnemonic: generateMnemonic() });
   });
 

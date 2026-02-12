@@ -21,7 +21,6 @@ import { Logger } from '../utils/logs';
 import { BulletinItem } from '../api/messageProtocol/types';
 import { SdkConfig, defaultSdkConfig } from '../config/sdk';
 import { decodeAnnouncementPayload } from '../utils/announcementPayload';
-import { RefreshService } from './refresh';
 import { Result } from '../utils/type';
 import { resetSendQueue } from './discussion';
 import { SdkEventEmitter, SdkEventType } from '../core/SdkEventEmitter';
@@ -44,7 +43,7 @@ export class AnnouncementService {
   private isProcessingAnnouncements = false;
   private eventEmitter: SdkEventEmitter;
   private config: SdkConfig;
-  private refreshService?: RefreshService;
+  private onStateUpdateNeeded?: () => Promise<void>;
 
   constructor(
     db: GossipDatabase,
@@ -52,22 +51,18 @@ export class AnnouncementService {
     session: SessionModule,
     eventEmitter: SdkEventEmitter,
     config: SdkConfig = defaultSdkConfig,
-    refreshService?: RefreshService
+    onStateUpdateNeeded?: () => Promise<void>
   ) {
     this.db = db;
     this.messageProtocol = messageProtocol;
     this.session = session;
     this.eventEmitter = eventEmitter;
     this.config = config;
-    this.refreshService = refreshService;
+    this.onStateUpdateNeeded = onStateUpdateNeeded;
   }
 
   setMessageProtocol(messageProtocol: IMessageProtocol): void {
     this.messageProtocol = messageProtocol;
-  }
-
-  setRefreshService(refreshService: RefreshService): void {
-    this.refreshService = refreshService;
   }
 
   async sendAnnouncement(announcement: Uint8Array): Promise<{
@@ -502,7 +497,7 @@ export class AnnouncementService {
       }
     }
 
-    await this.refreshService?.stateUpdate();
+    await this.onStateUpdateNeeded?.();
 
     return {
       success: true,

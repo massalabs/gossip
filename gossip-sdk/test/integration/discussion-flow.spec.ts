@@ -76,7 +76,7 @@ async function isSessionUp(
 
 describe('Discussion Flow', () => {
   let mockProtocol: MockMessageProtocol;
-  let db: ReturnType<typeof gossipDb>;
+  let db: GossipDatabase;
 
   let alice: TestSessionData;
   let aliceSdk: GossipSdk;
@@ -111,7 +111,7 @@ describe('Discussion Flow', () => {
 
     // Create gossipSdk instances for Alice and Bob
     aliceSdk = new GossipSdk();
-    await aliceSdk.init({});
+    await aliceSdk.init();
     await aliceSdk.openSession({
       mnemonic: aliceMnemonic,
       encryptionKey: aliceEncryptionKey,
@@ -126,7 +126,7 @@ describe('Discussion Flow', () => {
     ] = mockProtocol;
 
     bobSdk = new GossipSdk();
-    await bobSdk.init({});
+    await bobSdk.init();
     await bobSdk.openSession({
       mnemonic: bobMnemonic,
       encryptionKey: bobEncryptionKey,
@@ -1506,9 +1506,9 @@ describe('session break in session manager', () => {
 
   beforeEach(async () => {
     aliceSdk = new GossipSdk();
-    await aliceSdk.init({});
+    await aliceSdk.init();
     bobSdk = new GossipSdk();
-    await bobSdk.init({});
+    await bobSdk.init();
     mockProtocol.clearMockData();
   });
 
@@ -1544,7 +1544,7 @@ describe('session break in session manager', () => {
     const bobEncryptionKey = await generateEncryptionKey();
 
     aliceSdk = new GossipSdk();
-    await aliceSdk.init({});
+    await aliceSdk.init();
     await aliceSdk.openSession({
       mnemonic: aliceMnemonic,
       encryptionKey: aliceEncryptionKey,
@@ -1562,7 +1562,7 @@ describe('session break in session manager', () => {
     ] = mockProtocol;
 
     bobSdk = new GossipSdk();
-    await bobSdk.init({});
+    await bobSdk.init();
     await bobSdk.openSession({
       mnemonic: bobMnemonic,
       encryptionKey: bobEncryptionKey,
