@@ -16,8 +16,7 @@ import 'fake-indexeddb/auto';
 // Import IDBKeyRange polyfill if needed
 import { IDBKeyRange } from 'fake-indexeddb';
 import { afterEach, vi } from 'vitest';
-import { db } from '../src/db';
-import { MessageProtocolType } from '../src/config/protocol';
+import { gossipDb } from '@massalabs/gossip-sdk';
 
 // Make IDBKeyRange available globally
 if (typeof globalThis.IDBKeyRange === 'undefined') {
@@ -36,18 +35,6 @@ vi.mock('../src/services/notifications', () => ({
   },
 }));
 
-// Mock the message protocol factory to always return mock protocol
-vi.mock('../src/api/messageProtocol', async importOriginal => {
-  const actual =
-    await importOriginal<typeof import('../src/api/messageProtocol')>();
-  return {
-    ...actual,
-    createMessageProtocol: vi.fn(() =>
-      actual.createMessageProtocol(MessageProtocolType.MOCK)
-    ),
-  };
-});
-
 // Optional: Add custom matchers or global test utilities here
 // Example: expect.extend({ ... })
 
@@ -59,7 +46,7 @@ afterEach(async () => {
   try {
     // Dexie's delete() method automatically closes the connection if open
     // and handles all cleanup properly
-    await db.delete();
+    await gossipDb().delete();
   } catch (_) {
     // Ignore errors - database might already be deleted or closed
   }

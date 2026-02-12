@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { db } from '@massalabs/gossip-sdk';
+import { getSdk } from '../stores/sdkStore';
 import { STORAGE_KEYS, clearAppStorage } from '../utils/localStorage';
 import { useLocalStorage } from './useLocalStorage';
 import { APP_BUILD_ID } from '../config/version';
@@ -28,7 +28,7 @@ export function useVersionCheck() {
       await Promise.all(cacheNames.map(name => caches.delete(name)));
 
       // 2. Remove IndexedDB databases
-      await db.deleteDb();
+      await getSdk().db.deleteDb();
 
       // 3. Clear app-specific localStorage keys
       clearAppStorage();

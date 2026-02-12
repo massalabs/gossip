@@ -6,7 +6,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
-  db,
+  gossipDb,
   MessageStatus,
   MessageDirection,
   MessageType,
@@ -23,7 +23,10 @@ const RENEW_OWNER_USER_ID = encodeUserId(new Uint8Array(32).fill(11));
 const RENEW_CONTACT_USER_ID = encodeUserId(new Uint8Array(32).fill(12));
 
 describe('resetSendQueue function', () => {
+  let db: ReturnType<typeof gossipDb>;
+
   beforeEach(async () => {
+    db = gossipDb();
     if (!db.isOpen()) {
       await db.open();
     }

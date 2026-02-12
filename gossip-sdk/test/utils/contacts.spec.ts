@@ -4,7 +4,7 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
-  db,
+  gossipDb,
   DiscussionDirection,
   MessageType,
   MessageDirection,
@@ -29,7 +29,10 @@ const fakeSession = {
 } as unknown as SessionModule;
 
 describe('Contacts utilities', () => {
+  let db: ReturnType<typeof gossipDb>;
+
   beforeEach(async () => {
+    db = gossipDb();
     if (!db.isOpen()) {
       await db.open();
     }

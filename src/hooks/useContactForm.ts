@@ -8,10 +8,10 @@ import {
   validateUsernameFormat,
   encodeUserId,
   UserPublicKeys,
-  gossipSdk,
   type PublicKeyResult,
   AnnouncementPayload,
 } from '@massalabs/gossip-sdk';
+import { useGossipSdk } from './useGossipSdk';
 import { useFileShareContact } from './useFileShareContact';
 import { mnsService, isMnsDomain } from '../services/mns';
 import toast from 'react-hot-toast';
@@ -33,6 +33,7 @@ type MnsState = {
 };
 
 export function useContactForm() {
+  const gossip = useGossipSdk();
   const navigate = useNavigate();
   const userProfile = useAccountStore(s => s.userProfile);
   const mnsEnabled = useAppStore(s => s.mnsEnabled);
@@ -85,11 +86,11 @@ export function useContactForm() {
       }
 
       // Check if SDK is initialized before accessing auth service
-      if (!gossipSdk.isInitialized) {
+      if (!gossip.isInitialized) {
         return { error: 'SDK not initialized' };
       }
 
-      const result = await gossipSdk.auth.fetchPublicKeyByUserId(uid);
+      const result = await gossip.auth.fetchPublicKeyByUserId(uid);
 
       if (result.publicKey) {
         publicKeysCache.current.set(uid, result.publicKey);
@@ -97,7 +98,7 @@ export function useContactForm() {
 
       return result;
     },
-    []
+    [gossip.auth, gossip.isInitialized]
   );
 
   const canSubmit =
@@ -276,7 +277,7 @@ export function useContactForm() {
       }
 
       // check here if user already exists in contacts
-      const contact = await gossipSdk.contacts.get(
+      const contact = await gossip.contacts.get(
         userProfile.userId,
         derivedUserId
       );
@@ -295,7 +296,7 @@ export function useContactForm() {
 
       setUserId({ value: derivedUserId, loading: false });
     },
-    [importFileContact, handleNameChange, userProfile]
+    [userProfile?.userId, importFileContact, gossip.contacts, handleNameChange]
   );
 
   const handleSubmit = useCallback(async () => {
@@ -349,7 +350,7 @@ export function useContactForm() {
       !canSubmit ||
       !userProfile?.userId ||
       !publicKeys ||
-      !gossipSdk.isSessionOpen
+      !gossip.isSessionOpen
     ) {
       return;
     }
@@ -359,7 +360,7 @@ export function useContactForm() {
 
     try {
       // Duplicate checks
-      const contacts = await gossipSdk.contacts.list(userProfile.userId);
+      const contacts = await gossip.contacts.list(userProfile.userId);
       const nameTaken = contacts.some(
         c => c.name.toLowerCase() === trimmedName.toLowerCase()
       );
@@ -372,7 +373,7 @@ export function useContactForm() {
         return;
       }
 
-      const existing = await gossipSdk.contacts.get(
+      const existing = await gossip.contacts.get(
         userProfile.userId,
         effectiveUserId
       );
@@ -396,7 +397,7 @@ export function useContactForm() {
         createdAt: new Date(),
       };
 
-      const result = await gossipSdk.contacts.add(
+      const result = await gossip.contacts.add(
         userProfile.userId,
         effectiveUserId,
         trimmedName,
@@ -413,7 +414,7 @@ export function useContactForm() {
       };
 
       try {
-        await gossipSdk.discussions.start(contact, payload);
+        await gossip.discussions.start(contact, payload);
       } catch (e) {
         console.error(
           'Failed to initialize discussion after contact creation:',
@@ -429,17 +430,20 @@ export function useContactForm() {
       setIsSubmitting(false);
     }
   }, [
-    canSubmit,
-    userProfile?.userId,
-    publicKeys,
     name.value,
     userId.value,
-    message.value,
     userId.loading,
     mnsState.resolvedGossipId,
-    navigate,
+    publicKeys,
+    userProfile?.userId,
+    canSubmit,
     shareUsername,
     customUsername,
+    message.value,
+    gossip.isSessionOpen,
+    gossip.contacts,
+    gossip.discussions,
+    navigate,
   ]);
 
   return {

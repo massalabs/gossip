@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { db } from '../../src/db';
+import { gossipDb } from '../../src/db';
 import { encodeUserId } from '../../src/utils/userId';
 import {
   validatePassword,
@@ -16,7 +16,10 @@ import {
 const VALIDATION_OWNER_USER_ID = encodeUserId(new Uint8Array(32).fill(13));
 
 describe('validation utilities', () => {
+  let db: ReturnType<typeof gossipDb>;
+
   beforeEach(async () => {
+    db = gossipDb();
     if (!db.isOpen()) {
       await db.open();
     }

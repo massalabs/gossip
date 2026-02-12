@@ -20,9 +20,11 @@ import UserProfileAvatar from '../components/avatar/UserProfileAvatar';
 import QrCodeIcon from '../components/ui/customIcons/QrCodeIcon';
 import { ROUTES } from '../constants/routes';
 import { useDiscussionStore } from '../stores/discussionStore';
-import { gossipSdk, SessionStatus } from '@massalabs/gossip-sdk';
+import { useGossipSdk } from '../hooks/useGossipSdk';
+import { SessionStatus } from '@massalabs/gossip-sdk';
 
 const Discussions: React.FC = () => {
+  const gossip = useGossipSdk();
   const navigate = useNavigate();
   const isLoading = useAccountStore(s => s.isLoading);
   const pendingSharedContent = useAppStore(s => s.pendingSharedContent);
@@ -93,22 +95,25 @@ const Discussions: React.FC = () => {
 
   // Calculate filter counts
   const filterCounts = useMemo(() => {
+    if (!gossip.isSessionOpen) {
+      return { all: 0, unread: 0, pending: 0 };
+    }
     const allCount = discussions.length;
     const unreadCount = discussions.filter(
       d =>
-        gossipSdk.discussions.getStatus(d.contactUserId) ===
+        gossip.discussions.getStatus(d.contactUserId) ===
           SessionStatus.Active && d.unreadCount > 0
     ).length;
     const pendingCount = discussions.filter(d =>
       [SessionStatus.PeerRequested, SessionStatus.SelfRequested].includes(
-        gossipSdk.discussions.getStatus(d.contactUserId)
+        gossip.discussions.getStatus(d.contactUserId)
       )
     ).length;
 
     return { all: allCount, unread: unreadCount, pending: pendingCount };
-  }, [discussions]);
+  }, [discussions, gossip.isSessionOpen, gossip.discussions]);
 
-  if (isLoading || !gossipSdk.isSessionOpen) {
+  if (isLoading || !gossip.isSessionOpen) {
     return (
       <div className="bg-background flex items-center justify-center h-full">
         <PrivacyGraphic size={120} loading={true} />

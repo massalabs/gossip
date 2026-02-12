@@ -10,23 +10,27 @@
  *
  * @example
  * ```typescript
- * import { gossipSdk } from '@massalabs/gossip-sdk';
+ * import { createGossipSdk } from '@massalabs/gossip-sdk';
  *
- * await gossipSdk.init({ db, protocolBaseUrl: 'https://api.example.com' });
- * await gossipSdk.openSession({ mnemonic: '...' });
- * await gossipSdk.messages.send(contactId, 'Hello!');
+ * const sdk = createGossipSdk();
+ * await sdk.init({ protocolBaseUrl: 'https://api.example.com' });
+ * await sdk.openSession({ mnemonic: '...' });
+ * await sdk.messages.send(contactId, 'Hello!');
  * ```
  *
  * @packageDocumentation
  */
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SDK Singleton - Primary API
+// SDK Factory & Class - Primary API
 // ─────────────────────────────────────────────────────────────────────────────
-export { gossipSdk, GossipSdkImpl, SdkStatus } from './gossipSdk';
-export type { GossipSdkInitOptions, OpenSessionOptions } from './gossipSdk';
+export { createGossipSdk, GossipSdk } from './gossipSdk';
+export type {
+  GossipSdkInitOptions,
+  OpenSessionOptions,
+  SdkEventHandlers,
+} from './gossipSdk';
 export { SdkEventType } from './gossipSdk';
-export type { SdkEventHandlers } from './gossipSdk';
 
 // SDK Events
 export type { GossipSdkEvents } from './types/events';
@@ -116,7 +120,7 @@ export type {
 } from './config/sdk';
 
 // Database
-export { setDb, getDb, db, GossipDatabase } from './db';
+export { gossipDb, GossipDatabase } from './db';
 
 // WASM utilities
 export { SessionModule, sessionStatusToString } from './wasm/session';

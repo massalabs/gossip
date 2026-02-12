@@ -7,7 +7,7 @@ import { RefreshService } from '../../src/services/refresh';
 import { MessageService } from '../../src/services/message';
 import { DiscussionService } from '../../src/services/discussion';
 import { AnnouncementService } from '../../src/services/announcement';
-import { db, MessageType, DiscussionDirection } from '../../src/db';
+import { gossipDb, MessageType, DiscussionDirection } from '../../src/db';
 import type { SessionModule } from '../../src/wasm/session';
 import { encodeUserId, decodeUserId } from '../../src/utils/userId';
 import { SessionStatus } from '../../src/assets/generated/wasm/gossip_wasm';
@@ -62,8 +62,10 @@ function createRefreshAnnouncementService(): AnnouncementService {
 
 describe('RefreshService', () => {
   let eventEmitter: SdkEventEmitter;
+  let db: ReturnType<typeof gossipDb>;
 
   beforeEach(async () => {
+    db = gossipDb();
     if (!db.isOpen()) {
       await db.open();
     }

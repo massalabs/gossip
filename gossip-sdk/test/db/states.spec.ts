@@ -7,7 +7,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
-  db,
+  gossipDb,
   DiscussionDirection,
   MessageDirection,
   MessageStatus,
@@ -18,7 +18,10 @@ const TEST_OWNER_USER_ID = 'gossip1testowner';
 const TEST_CONTACT_USER_ID = 'gossip1testcontact';
 
 describe('Announcement Storage for Retry', () => {
+  let db: ReturnType<typeof gossipDb>;
+
   beforeEach(async () => {
+    db = gossipDb();
     if (!db.isOpen()) {
       await db.open();
     }
@@ -61,7 +64,10 @@ describe('Announcement Storage for Retry', () => {
 });
 
 describe('Message Status Transitions', () => {
+  let db: ReturnType<typeof gossipDb>;
+
   beforeEach(async () => {
+    db = gossipDb();
     if (!db.isOpen()) {
       await db.open();
     }
@@ -161,7 +167,10 @@ describe('Message Status Transitions', () => {
 });
 
 describe('Pending Announcements', () => {
+  let db: ReturnType<typeof gossipDb>;
+
   beforeEach(async () => {
+    db = gossipDb();
     if (!db.isOpen()) {
       await db.open();
     }
@@ -213,7 +222,10 @@ describe('Pending Announcements', () => {
 });
 
 describe('Contact Deletion Cleanup', () => {
+  let db: ReturnType<typeof gossipDb>;
+
   beforeEach(async () => {
+    db = gossipDb();
     if (!db.isOpen()) {
       await db.open();
     }

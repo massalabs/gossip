@@ -4,8 +4,7 @@
  * Creates test UserProfile instances using Dexie schema validation.
  * This ensures mocks stay in sync with the actual database schema.
  */
-import { UserProfile, AuthMethod } from '../../../src/db';
-import { encodeUserId } from '../../../src/utils';
+import { UserProfile, AuthMethod, encodeUserId } from '@massalabs/gossip-sdk';
 
 /**
  * Default values for creating test user profiles

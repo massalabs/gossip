@@ -1,24 +1,25 @@
 /**
- * GossipSdk - Singleton SDK with clean lifecycle API
+ * GossipSdk - SDK with clean lifecycle API
  *
  * @example
  * ```typescript
- * import { gossipSdk } from '@massalabs/gossip-sdk';
+ * import { createGossipSdk } from '@massalabs/gossip-sdk';
+ *
+ * const sdk = createGossipSdk();
  *
  * // Initialize once at app startup
- * await gossipSdk.init({
- *   db,
+ * await sdk.init({
  *   protocolBaseUrl: 'https://api.example.com',
  * });
  *
  * // Open session (login) - SDK handles keys/session internally
- * await gossipSdk.openSession({
+ * await sdk.openSession({
  *   mnemonic: 'word1 word2 ...',
  *   onPersist: async (blob) => { /* save to db *\/ },
  * });
  *
  * // Or restore existing session
- * await gossipSdk.openSession({
+ * await sdk.openSession({
  *   mnemonic: 'word1 word2 ...',
  *   encryptedSession: savedBlob,
  *   encryptionKey: key,
@@ -26,26 +27,26 @@
  * });
  *
  * // Use clean API
- * await gossipSdk.messages.send(contactId, 'Hello!');
- * await gossipSdk.discussions.start(contact);
- * const contacts = await gossipSdk.contacts.list(ownerUserId);
+ * await sdk.messages.send(contactId, 'Hello!');
+ * await sdk.discussions.start(contact);
+ * const contacts = await sdk.contacts.list(ownerUserId);
  *
  * // Events
- * gossipSdk.on('message', (msg) => { ... });
- * gossipSdk.on('discussionRequest', (discussion, contact) => { ... });
+ * sdk.on('message', (msg) => { ... });
+ * sdk.on('discussionRequest', (discussion, contact) => { ... });
  *
  * // Logout
- * await gossipSdk.closeSession();
+ * await sdk.closeSession();
  * ```
  */
 
 import {
-  GossipDatabase,
+  gossipDb,
   type Contact,
   type Discussion,
   type Message,
+  type GossipDatabase,
 } from './db';
-import { setDb } from './db';
 import { IMessageProtocol, createMessageProtocol } from './api/messageProtocol';
 import { setProtocolBaseUrl } from './config/protocol';
 import {
@@ -124,8 +125,6 @@ export enum SdkStatus {
 }
 
 export interface GossipSdkInitOptions {
-  /** Database instance */
-  db: GossipDatabase;
   /** Protocol API base URL (shorthand for config.protocol.baseUrl) */
   protocolBaseUrl?: string;
   /** SDK configuration (optional - uses defaults if not provided) */
@@ -156,14 +155,12 @@ type SdkStateUninitialized = { status: SdkStatus.UNINITIALIZED };
 
 type SdkStateInitialized = {
   status: SdkStatus.INITIALIZED;
-  db: GossipDatabase;
   messageProtocol: IMessageProtocol;
   config: SdkConfig;
 };
 
 type SdkStateSessionOpen = {
   status: SdkStatus.SESSION_OPEN;
-  db: GossipDatabase;
   messageProtocol: IMessageProtocol;
   config: SdkConfig;
   session: SessionModule;
@@ -184,7 +181,7 @@ type SdkState =
 // SDK Class
 // ─────────────────────────────────────────────────────────────────────────────
 
-class GossipSdkImpl {
+class GossipSdk {
   private state: SdkState = { status: SdkStatus.UNINITIALIZED };
 
   // Core components
@@ -212,7 +209,7 @@ class GossipSdkImpl {
   /**
    * Initialize the SDK. Call once at app startup.
    */
-  async init(options: GossipSdkInitOptions): Promise<void> {
+  async init(options: GossipSdkInitOptions = {}): Promise<void> {
     if (this.state.status !== SdkStatus.UNINITIALIZED) {
       console.warn('[GossipSdk] Already initialized');
       return;
@@ -220,9 +217,6 @@ class GossipSdkImpl {
 
     // Merge config with defaults
     const config = mergeConfig(options.config);
-
-    // Configure database
-    setDb(options.db);
 
     // Configure protocol URL (prefer explicit option, then config)
     const baseUrl = options.protocolBaseUrl ?? config.protocol.baseUrl;
@@ -237,11 +231,10 @@ class GossipSdkImpl {
     const messageProtocol = createMessageProtocol();
 
     // Create auth service (doesn't need session)
-    this._auth = new AuthService(options.db, messageProtocol);
+    this._auth = new AuthService(this.db, messageProtocol);
 
     this.state = {
       status: SdkStatus.INITIALIZED,
-      db: options.db,
       messageProtocol,
       config,
     };
@@ -272,8 +265,6 @@ class GossipSdkImpl {
         options.mnemonic,
         new Uint8Array(32).fill(0)
       ));
-
-    const { db, messageProtocol } = this.state;
 
     // Ensure WASM is ready before using any WASM-backed helpers
     await ensureWasmInitialized();
@@ -312,16 +303,14 @@ class GossipSdkImpl {
       session.load(options.encryptedSession, encryptionKey);
     }
 
-    // Get config from initialized state
-    const { config } = this.state;
-
+    const db = this.db;
     // Create services with config (refreshService will be set after creation)
     this._announcement = new AnnouncementService(
       db,
-      messageProtocol,
+      this.state.messageProtocol,
       session,
       this.eventEmitter,
-      config
+      this.config
     );
 
     this._discussion = new DiscussionService(
@@ -333,11 +322,11 @@ class GossipSdkImpl {
 
     this._message = new MessageService(
       db,
-      messageProtocol,
+      this.state.messageProtocol,
       session,
       this._discussion,
       this.eventEmitter,
-      config
+      this.config
     );
 
     this._refresh = new RefreshService(
@@ -360,10 +349,8 @@ class GossipSdkImpl {
     this._message.setRefreshService(this._refresh);
 
     this.state = {
+      ...this.state,
       status: SdkStatus.SESSION_OPEN,
-      db,
-      messageProtocol,
-      config,
       session,
       userKeys,
       encryptionKey,
@@ -371,10 +358,10 @@ class GossipSdkImpl {
     };
 
     // Create cached service API wrappers
-    this.createServiceAPIWrappers(db, session);
+    this.createServiceAPIWrappers(session, db);
 
     // Auto-start polling if enabled in config
-    if (config.polling.enabled) {
+    if (this.config.polling.enabled) {
       this.startPolling();
     }
   }
@@ -384,8 +371,8 @@ class GossipSdkImpl {
    * Called once during openSession to avoid creating new objects on each getter access.
    */
   private createServiceAPIWrappers(
-    db: GossipDatabase,
-    session: SessionModule
+    session: SessionModule,
+    db: GossipDatabase
   ): void {
     this._messagesAPI = {
       get: id => db.messages.get(id),
@@ -483,7 +470,6 @@ class GossipSdkImpl {
     // Reset to initialized state
     this.state = {
       status: SdkStatus.INITIALIZED,
-      db: this.state.db,
       messageProtocol: this.state.messageProtocol,
       config: this.state.config,
     };
@@ -581,6 +567,10 @@ class GossipSdkImpl {
     return this._contactsAPI;
   }
 
+  get db(): GossipDatabase {
+    return gossipDb();
+  }
+
   /**
    * Update state for all discussions:
    * - Cleanup orphaned peers
@@ -637,7 +627,7 @@ class GossipSdkImpl {
       return;
     }
 
-    const { config, db, session } = this.state;
+    const { config, session } = this.state;
 
     this.pollingManager.start(
       config,
@@ -652,7 +642,7 @@ class GossipSdkImpl {
           await this.updateState();
         },
         getActiveDiscussions: async () => {
-          return db.getDiscussionsByOwner(session.userIdEncoded);
+          return this.db.getDiscussionsByOwner(session.userIdEncoded);
         },
       },
       this.eventEmitter
@@ -804,11 +794,12 @@ interface PollingAPI {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Singleton Export
+// Factory & Class Export
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** The singleton GossipSdk instance */
-export const gossipSdk = new GossipSdkImpl();
+/** Create a new GossipSdk instance. The consumer manages the instance lifecycle. */
+export function createGossipSdk(): GossipSdk {
+  return new GossipSdk();
+}
 
-// Also export the class for testing
-export { GossipSdkImpl };
+export { GossipSdk };

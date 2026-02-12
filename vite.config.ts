@@ -117,6 +117,9 @@ export default defineConfig({
     }),
   ],
   assetsInclude: ['**/*.wasm'],
+  resolve: {
+    dedupe: ['react', 'react-dom'],
+  },
   server: {
     fs: {
       allow: ['..'],

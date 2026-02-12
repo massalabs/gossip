@@ -12,7 +12,7 @@ import {
   FAILED_TO_FETCH_MESSAGE,
   FAILED_TO_RETRIEVE_CONTACT_PUBLIC_KEY_ERROR,
 } from '../../src/services/auth';
-import { db, UserProfile } from '../../src/db';
+import { gossipDb, UserProfile } from '../../src/db';
 import type { IMessageProtocol } from '../../src/api/messageProtocol/types';
 import {
   UserPublicKeys,
@@ -105,10 +105,12 @@ describe('AuthService', () => {
   let testUserIdBytes: Uint8Array;
   let testPublicKeys: UserPublicKeys;
   let userKeys: UserKeys | null = null;
+  let db: ReturnType<typeof gossipDb>;
 
   beforeEach(async () => {
     await ensureWasmInitialized();
 
+    db = gossipDb();
     if (!db.isOpen()) {
       await db.open();
     }

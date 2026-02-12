@@ -1,6 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { updateContactName, db } from '../utils';
 import { useDiscussionStore } from '../stores/discussionStore';
 import { useMessageStore } from '../stores/messageStore';
 import ContactAvatar from '../components/avatar/ContactAvatar';
@@ -14,12 +13,15 @@ import BaseModal from '../components/ui/BaseModal';
 import { Check, Edit2, Trash2 } from 'react-feather';
 import {
   UserPublicKeys,
-  gossipSdk,
   SessionStatus,
+  updateContactName,
 } from '@massalabs/gossip-sdk';
+import { getSdk } from '../stores/sdkStore';
+import { useGossipSdk } from '../hooks/useGossipSdk';
 import { ROUTES } from '../constants/routes';
 
 const Contact: React.FC = () => {
+  const gossip = useGossipSdk();
   const { userId } = useParams();
   const [showUserId, setShowUserId] = useState(false);
   const navigate = useNavigate();
@@ -74,7 +76,7 @@ const Contact: React.FC = () => {
         ownerUserId,
         contact.userId,
         name,
-        db
+        getSdk().db
       );
       if (!result.success) {
         setNameError(result.message);
@@ -98,16 +100,13 @@ const Contact: React.FC = () => {
   }, [showSuccessCheck]);
 
   const handleDeleteContact = useCallback(async () => {
-    if (!ownerUserId || !contact || !gossipSdk.isSessionOpen) return;
+    if (!ownerUserId || !contact || !gossip.isSessionOpen) return;
 
     setIsDeleting(true);
     setDeleteError(null);
 
     try {
-      const result = await gossipSdk.contacts.delete(
-        ownerUserId,
-        contact.userId
-      );
+      const result = await gossip.contacts.delete(ownerUserId, contact.userId);
       if (!result.success) {
         setDeleteError(result.message);
         setIsDeleting(false);
@@ -124,7 +123,14 @@ const Contact: React.FC = () => {
       setDeleteError('Failed to delete contact. Please try again.');
       setIsDeleting(false);
     }
-  }, [ownerUserId, contact, clearMessages, navigate]);
+  }, [
+    ownerUserId,
+    contact,
+    clearMessages,
+    navigate,
+    gossip.isSessionOpen,
+    gossip.contacts,
+  ]);
 
   if (!contact) {
     return (
@@ -138,7 +144,7 @@ const Contact: React.FC = () => {
   }
 
   const canStart = discussion
-    ? gossipSdk.discussions.getStatus(discussion.contactUserId) ===
+    ? gossip.discussions.getStatus(discussion.contactUserId) ===
       SessionStatus.Active
     : true;
 
@@ -201,7 +207,7 @@ const Contact: React.FC = () => {
               SessionStatus.PeerRequested,
               SessionStatus.SelfRequested,
             ].includes(
-              gossipSdk.discussions.getStatus(discussion.contactUserId)
+              gossip.discussions.getStatus(discussion.contactUserId)
             ) && 'Connection pending. You cannot chat yet.'}
           </p>
         )}

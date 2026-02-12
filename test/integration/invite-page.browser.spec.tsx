@@ -9,12 +9,37 @@ import { useAppStore } from '../../src/stores/appStore';
 import { useAccountStore } from '../../src/stores/accountStore';
 import { ROUTES } from '../../src/constants/routes';
 import { testUsers } from '../helpers/factories/userProfile';
-import { UserProfile } from '../../src/db';
+import { UserProfile, SessionStatus, gossipDb } from '@massalabs/gossip-sdk';
 import {
   GOOGLE_PLAY_STORE_URL,
   APPLE_APP_STORE_URL,
   LAST_APK_GITHUB_URL,
 } from '../../src/constants/links';
+
+// Mock SDK for tests that render full App. ConnectionMonitor uses useGossipSdk,
+// accountStore subscribe calls getSdk(), discussionStore/useProfileLoader use getSdk().db.
+const mockSdk = {
+  isSessionOpen: false,
+  userId: 'gossip1test',
+  db: gossipDb(),
+  auth: { ensurePublicKeyPublished: vi.fn().mockResolvedValue(undefined) },
+  discussions: {
+    getStatus: vi.fn(() => SessionStatus.NoSession),
+  },
+  publicKeys: null,
+  on: vi.fn(),
+  off: vi.fn(),
+};
+
+vi.mock('../../src/stores/sdkStore', () => ({
+  useSdkStore: {
+    getState: vi.fn(() => ({ sdk: mockSdk, setSdk: vi.fn() })),
+    use: {
+      sdk: () => mockSdk,
+    },
+  },
+  getSdk: () => mockSdk,
+}));
 
 // These values must stay in sync with `InvitePage` timing constants
 const NATIVE_APP_OPEN_DELAY = 150;

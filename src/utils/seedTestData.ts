@@ -6,7 +6,6 @@
  */
 
 import {
-  db,
   Contact,
   Discussion,
   Message,
@@ -15,6 +14,7 @@ import {
   MessageStatus,
   MessageType,
 } from '@massalabs/gossip-sdk';
+import { getSdk } from '../stores/sdkStore';
 import { bech32 } from '@scure/base';
 
 const GOSSIP_PREFIX = 'gossip';
@@ -247,6 +247,7 @@ export async function seedTestData(
   ownerUserId: string,
   options: Partial<SeedOptions> = {}
 ): Promise<SeedResult> {
+  const db = getSdk().db;
   const opts = { ...DEFAULT_SEED_OPTIONS, ...options };
   const startTime = performance.now();
 
@@ -373,6 +374,7 @@ export async function seedTestData(
  * Real conversations are preserved.
  */
 export async function clearTestData(ownerUserId: string): Promise<number> {
+  const db = getSdk().db;
   let deletedCount = 0;
 
   await db.transaction(
@@ -383,7 +385,7 @@ export async function clearTestData(ownerUserId: string): Promise<number> {
       const testContacts = await db.contacts
         .where('ownerUserId')
         .equals(ownerUserId)
-        .filter(contact => contact.name.startsWith(TEST_DATA_PREFIX))
+        .filter((contact: Contact) => contact.name.startsWith(TEST_DATA_PREFIX))
         .toArray();
 
       const testContactUserIds = testContacts.map(c => c.userId);

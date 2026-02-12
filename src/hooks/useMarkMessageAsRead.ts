@@ -4,8 +4,8 @@ import {
   Message,
   MessageStatus,
   MessageDirection,
-  gossipSdk,
 } from '@massalabs/gossip-sdk';
+import { useGossipSdk } from './useGossipSdk';
 
 // IntersectionObserver configuration constants
 // Use a lower threshold to handle very long messages that are taller than the viewport
@@ -18,6 +18,7 @@ const MESSAGE_READ_BOTTOM_MARGIN = '0px 0px -50px 0px'; // Require message to be
  * @param message - The message to potentially mark as read
  */
 export function useMarkMessageAsRead(message: Message) {
+  const gossip = useGossipSdk();
   const messageRef = useRef<HTMLDivElement | null>(null);
   const hasBeenMarkedAsReadRef = useRef<boolean>(false);
 
@@ -65,8 +66,9 @@ export function useMarkMessageAsRead(message: Message) {
               !hasBeenMarkedAsReadRef.current
             ) {
               // Mark this specific message as read
-              hasBeenMarkedAsReadRef.current =
-                await gossipSdk.messages.markAsRead(message.id!);
+              hasBeenMarkedAsReadRef.current = await gossip.messages.markAsRead(
+                message.id!
+              );
             }
           } catch (error) {
             console.error('Failed to mark message as read:', error);
@@ -93,6 +95,7 @@ export function useMarkMessageAsRead(message: Message) {
     message.ownerUserId,
     message.id,
     userProfile?.userId,
+    gossip.messages,
   ]);
 
   return messageRef;

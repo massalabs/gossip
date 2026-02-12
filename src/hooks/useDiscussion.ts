@@ -1,17 +1,15 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import {
-  Contact,
-  Discussion,
-  SessionStatus,
-  gossipSdk,
-} from '@massalabs/gossip-sdk';
+import { Contact, SessionStatus } from '@massalabs/gossip-sdk';
+import type { Discussion } from '@massalabs/gossip-sdk';
 import { useDiscussionStore } from '../stores/discussionStore';
+import { useGossipSdk } from './useGossipSdk';
 
 interface UseDiscussionProps {
   contact: Contact;
 }
 
 export const useDiscussion = ({ contact }: UseDiscussionProps) => {
+  const gossip = useGossipSdk();
   const [discussion, setDiscussion] = useState<Discussion | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const isMountedRef = useRef(true);
@@ -40,7 +38,7 @@ export const useDiscussion = ({ contact }: UseDiscussionProps) => {
             SessionStatus.Active,
             SessionStatus.SelfRequested,
             SessionStatus.PeerRequested,
-          ].includes(gossipSdk.discussions.getStatus(d.contactUserId))
+          ].includes(gossip.discussions.getStatus(d.contactUserId))
         )
         .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
 
@@ -52,7 +50,7 @@ export const useDiscussion = ({ contact }: UseDiscussionProps) => {
     } finally {
       setIsLoading(false);
     }
-  }, [contact.userId, getDiscussionsForContact]);
+  }, [contact.userId, getDiscussionsForContact, gossip.discussions]);
 
   useEffect(() => {
     loadDiscussion();

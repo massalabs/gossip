@@ -9,8 +9,27 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { useDiscussionStore } from '../../src/stores/discussionStore';
-import { db, DiscussionDirection } from '@massalabs/gossip-sdk';
+import {
+  gossipDb,
+  DiscussionDirection,
+  SessionStatus,
+} from '@massalabs/gossip-sdk';
 import { useAccountStore } from '../../src/stores/accountStore';
+
+// Mock sdkStore so getSdk() does not throw. The liveQuery callback calls
+// getSdk().db.discussions and getSdk().isSessionOpen — without this mock it throws.
+const mockSdk = {
+  isSessionOpen: false,
+  db: gossipDb(),
+  discussions: { getStatus: vi.fn(() => SessionStatus.NoSession) },
+};
+vi.mock('../../src/stores/sdkStore', () => ({
+  useSdkStore: {
+    getState: vi.fn(() => ({ sdk: mockSdk, setSdk: vi.fn() })),
+    use: { sdk: () => mockSdk },
+  },
+  getSdk: () => mockSdk,
+}));
 
 // Mock the account store
 vi.mock('../../src/stores/accountStore', () => ({
@@ -25,7 +44,7 @@ describe('DiscussionStore Filter', () => {
   const ownerUserId = 'test-user-id';
 
   beforeEach(async () => {
-    // Clean up database
+    const db = gossipDb();
     await db.delete();
     await db.open();
 
@@ -114,6 +133,7 @@ describe('DiscussionStore Filter', () => {
         },
       ];
 
+      const db = gossipDb();
       for (const discussion of discussions) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         await db.discussions.add(discussion as any);
@@ -164,6 +184,7 @@ describe('DiscussionStore Filter', () => {
         },
       ];
 
+      const db = gossipDb();
       for (const discussion of discussions) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         await db.discussions.add(discussion as any);

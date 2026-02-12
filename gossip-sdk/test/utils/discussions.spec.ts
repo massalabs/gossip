@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { db, DiscussionDirection } from '../../src/db';
+import { gossipDb, DiscussionDirection } from '../../src/db';
 import { encodeUserId } from '../../src/utils/userId';
 import { updateDiscussionName } from '../../src/utils/discussions';
 
@@ -11,7 +11,10 @@ const OWNER_USER_ID = encodeUserId(new Uint8Array(32).fill(6));
 const CONTACT_USER_ID = encodeUserId(new Uint8Array(32).fill(7));
 
 describe('Discussion utilities', () => {
+  let db: ReturnType<typeof gossipDb>;
+
   beforeEach(async () => {
+    db = gossipDb();
     if (!db.isOpen()) {
       await db.open();
     }

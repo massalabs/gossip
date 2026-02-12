@@ -34,11 +34,7 @@ The SDK uses a singleton pattern with a simple lifecycle:
 import { gossipSdk, GossipDatabase } from 'gossip-sdk';
 
 // 1. Initialize once at app startup
-const db = new GossipDatabase();
-await db.open();
-
 await gossipSdk.init({
-  db,
   protocolBaseUrl: 'https://api.example.com',
 });
 
@@ -76,9 +72,6 @@ Call `init()` once at app startup to configure the database and protocol:
 
 ```typescript
 await gossipSdk.init({
-  // Required: Database instance
-  db: new GossipDatabase(),
-
   // Optional: API base URL (uses default if not provided)
   protocolBaseUrl: 'https://api.usegossip.com',
 
@@ -289,7 +282,6 @@ The SDK can automatically poll for messages, announcements, and session refresh:
 ```typescript
 // Enable via config
 await gossipSdk.init({
-  db,
   config: {
     polling: {
       enabled: true,
@@ -334,7 +326,6 @@ Full configuration options with defaults:
 
 ```typescript
 await gossipSdk.init({
-  db,
   config: {
     // Network settings
     protocol: {
