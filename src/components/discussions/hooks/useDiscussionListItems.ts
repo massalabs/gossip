@@ -302,6 +302,6 @@ export function useVirtualItems(
     activeUserId,
     isSearching,
     filter,
-    gossip.discussions,
+    gossip,
   ]);
 }

@@ -21,6 +21,7 @@ import {
   MessageType,
   MessageDirection,
   MessageStatus,
+  GossipDatabase,
 } from '../../src/db';
 import { MockMessageProtocol } from '../mocks';
 import {

@@ -60,7 +60,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
   isLastInGroup = true,
 }) => {
   const sdk = useGossipSdk();
-  const { isSessionOpen, messages: sdkMessages } = sdk;
+  const isSessionOpen = sdk.isSessionOpen;
   const canReply = !!onReplyTo;
   const canForward = !!onForward;
   const isOutgoing = message.direction === MessageDirection.OUTGOING;
@@ -91,7 +91,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
 
       const findMessage = async () => {
         try {
-          const msg = await sdkMessages.findBySeeker(
+          const msg = await sdk.messages.findBySeeker(
             seekerForContext,
             message.ownerUserId
           );
@@ -127,7 +127,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
     message.forwardOf,
     message.ownerUserId,
     isSessionOpen,
-    sdkMessages,
+    sdk,
   ]);
 
   const handleDoubleClick = useCallback(

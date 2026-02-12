@@ -57,8 +57,19 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
 
     const subscriptionDiscussions = discussionsQuery.subscribe({
       next: async (discussionsList: Discussion[]) => {
-        // Check if SDK session is open before attempting to get status
-        const isSessionOpen = getSdk().isSessionOpen;
+        const sdk = getSdk();
+        const isSessionOpen = sdk.isSessionOpen;
+
+        // Pre-compute status map (one getStatus call per discussion)
+        const statusMap = new Map<string, SessionStatus>();
+        if (isSessionOpen) {
+          for (const d of discussionsList) {
+            statusMap.set(
+              d.contactUserId,
+              sdk.discussions.getStatus(d.contactUserId)
+            );
+          }
+        }
 
         // Sort discussions: new requests (PENDING) first, then active discussions
         // Within each group, sort by most recent activity
@@ -69,19 +80,15 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
           }
 
           // For pending requests, use updatedAt (only if session is open)
-          if (isSessionOpen) {
-            const status = getSdk().discussions.getStatus(
-              discussion.contactUserId
-            );
-            if (
-              [
-                SessionStatus.SelfRequested,
-                SessionStatus.PeerRequested,
-              ].includes(status) &&
-              discussion.updatedAt
-            ) {
-              return discussion.updatedAt.getTime();
-            }
+          const status = statusMap.get(discussion.contactUserId);
+          if (
+            status &&
+            [SessionStatus.SelfRequested, SessionStatus.PeerRequested].includes(
+              status
+            ) &&
+            discussion.updatedAt
+          ) {
+            return discussion.updatedAt.getTime();
           }
 
           // Fallback to creation time for all other cases
@@ -105,10 +112,9 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
         const sortedDiscussions = discussionsList.sort((a, b) => {
           // If session is open, separate by status: PENDING first, then ACTIVE, then others
           if (isSessionOpen) {
-            const aStatus = getSdk().discussions.getStatus(a.contactUserId);
-            const bStatus = getSdk().discussions.getStatus(b.contactUserId);
             const statusDiff =
-              getStatusPriority(aStatus) - getStatusPriority(bStatus);
+              getStatusPriority(statusMap.get(a.contactUserId)!) -
+              getStatusPriority(statusMap.get(b.contactUserId)!);
             if (statusDiff !== 0) return statusDiff;
           }
 

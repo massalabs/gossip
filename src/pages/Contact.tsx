@@ -123,14 +123,7 @@ const Contact: React.FC = () => {
       setDeleteError('Failed to delete contact. Please try again.');
       setIsDeleting(false);
     }
-  }, [
-    ownerUserId,
-    contact,
-    clearMessages,
-    navigate,
-    gossip.isSessionOpen,
-    gossip.contacts,
-  ]);
+  }, [ownerUserId, contact, clearMessages, navigate, gossip]);
 
   if (!contact) {
     return (

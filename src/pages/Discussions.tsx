@@ -111,7 +111,7 @@ const Discussions: React.FC = () => {
     ).length;
 
     return { all: allCount, unread: unreadCount, pending: pendingCount };
-  }, [discussions, gossip.isSessionOpen, gossip.discussions]);
+  }, [discussions, gossip]);
 
   if (isLoading || !gossip.isSessionOpen) {
     return (

@@ -42,7 +42,7 @@ export const useDiscussionList = () => {
         console.error('Failed to refuse discussion:', error);
       }
     },
-    [userProfile?.userId, gossip.contacts]
+    [userProfile?.userId, gossip]
   );
 
   // Only return handlers that are actually used - state and selectors should be accessed directly from stores

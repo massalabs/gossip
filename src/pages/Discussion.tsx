@@ -383,7 +383,7 @@ const Discussion: React.FC = () => {
       })();
     },
     [
-      gossip.messages,
+      gossip,
       contact?.userId,
       messages,
       discussion?.lastAnnouncementMessage,
@@ -419,7 +419,7 @@ const Discussion: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [forwardFromMessageId, contact, gossip.messages]);
+  }, [forwardFromMessageId, contact, gossip]);
 
   // When opening a discussion with a target message (e.g. from forwarded content),
   // automatically scroll to that message once messages have loaded.

@@ -45,7 +45,7 @@ const NewDiscussion: React.FC = () => {
     return () => {
       isMounted = false;
     };
-  }, [userProfile?.userId, gossip.contacts]);
+  }, [userProfile?.userId, gossip]);
 
   const handleClose = () => navigate(ROUTES.default());
   const onNewContact = () => navigate(ROUTES.newContact());

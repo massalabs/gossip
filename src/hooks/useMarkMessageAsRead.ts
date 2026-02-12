@@ -95,7 +95,7 @@ export function useMarkMessageAsRead(message: Message) {
     message.ownerUserId,
     message.id,
     userProfile?.userId,
-    gossip.messages,
+    gossip,
   ]);
 
   return messageRef;

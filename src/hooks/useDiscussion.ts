@@ -50,7 +50,7 @@ export const useDiscussion = ({ contact }: UseDiscussionProps) => {
     } finally {
       setIsLoading(false);
     }
-  }, [contact.userId, getDiscussionsForContact, gossip.discussions]);
+  }, [contact.userId, getDiscussionsForContact, gossip]);
 
   useEffect(() => {
     loadDiscussion();

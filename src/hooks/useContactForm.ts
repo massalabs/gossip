@@ -440,9 +440,7 @@ export function useContactForm() {
     shareUsername,
     customUsername,
     message.value,
-    gossip.isSessionOpen,
-    gossip.contacts,
-    gossip.discussions,
+    gossip,
     navigate,
   ]);
 

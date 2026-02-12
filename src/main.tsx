@@ -98,12 +98,18 @@ Promise.all([
     config: { polling: { enabled: true } },
   }),
   initSafeArea(),
-]).then(([sdk]) => {
-  useSdkStore.getState().setSdk(sdk);
+])
+  .then(([sdk]) => {
+    useSdkStore.getState().setSdk(sdk);
 
-  createRoot(document.getElementById('root')!).render(
-    <StrictMode>
-      <App />
-    </StrictMode>
-  );
-});
+    createRoot(document.getElementById('root')!).render(
+      <StrictMode>
+        <App />
+      </StrictMode>
+    );
+  })
+  .catch(error => {
+    console.error('[Gossip] Failed to initialize:', error);
+    document.getElementById('root')!.textContent =
+      'Failed to start. Please restart the app.';
+  });
