@@ -53,20 +53,17 @@ export class DiscussionService {
   private announcementService: AnnouncementService;
   private session: SessionModule;
   private eventEmitter: SdkEventEmitter;
-  private onStateUpdateNeeded?: () => Promise<void>;
 
   constructor(
     db: GossipDatabase,
     announcementService: AnnouncementService,
     session: SessionModule,
-    eventEmitter: SdkEventEmitter,
-    onStateUpdateNeeded?: () => Promise<void>
+    eventEmitter: SdkEventEmitter
   ) {
     this.db = db;
     this.announcementService = announcementService;
     this.session = session;
     this.eventEmitter = eventEmitter;
-    this.onStateUpdateNeeded = onStateUpdateNeeded;
   }
 
   /**
@@ -290,19 +287,7 @@ export class DiscussionService {
       }
     );
 
-    if (!err) {
-      try {
-        /* trigger a state update to send the new announcement
-        If the stateUpdate function is already running, it will be skipped.
-        */
-        await this.onStateUpdateNeeded?.();
-      } catch (error) {
-        return {
-          success: false,
-          error: new Error('Failed to trigger state update: ' + error),
-        };
-      }
-    } else {
+    if (err) {
       return { success: false, error: err };
     }
 

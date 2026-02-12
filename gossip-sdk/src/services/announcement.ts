@@ -43,22 +43,19 @@ export class AnnouncementService {
   private isProcessingAnnouncements = false;
   private eventEmitter: SdkEventEmitter;
   private config: SdkConfig;
-  private onStateUpdateNeeded?: () => Promise<void>;
 
   constructor(
     db: GossipDatabase,
     messageProtocol: IMessageProtocol,
     session: SessionModule,
     eventEmitter: SdkEventEmitter,
-    config: SdkConfig = defaultSdkConfig,
-    onStateUpdateNeeded?: () => Promise<void>
+    config: SdkConfig = defaultSdkConfig
   ) {
     this.db = db;
     this.messageProtocol = messageProtocol;
     this.session = session;
     this.eventEmitter = eventEmitter;
     this.config = config;
-    this.onStateUpdateNeeded = onStateUpdateNeeded;
   }
 
   setMessageProtocol(messageProtocol: IMessageProtocol): void {
@@ -496,8 +493,6 @@ export class AnnouncementService {
         });
       }
     }
-
-    await this.onStateUpdateNeeded?.();
 
     return {
       success: true,

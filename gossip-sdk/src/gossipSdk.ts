@@ -305,24 +305,20 @@ class GossipSdk {
     }
 
     const db = this.db;
-    // Callback resolves lazily — RefreshService created below
-    const triggerStateUpdate = () => this._refresh!.stateUpdate();
 
     this._announcement = new AnnouncementService(
       db,
       this.state.messageProtocol,
       session,
       this.eventEmitter,
-      this.config,
-      triggerStateUpdate
+      this.config
     );
 
     this._discussion = new DiscussionService(
       db,
       this._announcement,
       session,
-      this.eventEmitter,
-      triggerStateUpdate
+      this.eventEmitter
     );
 
     this._message = new MessageService(
@@ -331,8 +327,7 @@ class GossipSdk {
       session,
       this._discussion,
       this.eventEmitter,
-      this.config,
-      triggerStateUpdate
+      this.config
     );
 
     this._refresh = new RefreshService(
@@ -389,9 +384,11 @@ class GossipSdk {
           .toArray();
       },
       send: message =>
-        this.messageQueues.enqueue(message.contactUserId, () =>
-          this._message!.sendMessage(message)
-        ),
+        this.messageQueues.enqueue(message.contactUserId, async () => {
+          const result = await this._message!.sendMessage(message);
+          if (result.success) await this._refresh?.stateUpdate();
+          return result;
+        }),
       fetch: () => this._message!.fetchMessages(),
       findBySeeker: (seeker, ownerUserId) =>
         this._message!.findMessageBySeeker(seeker, ownerUserId),
@@ -399,20 +396,30 @@ class GossipSdk {
     };
 
     this._discussionsAPI = {
-      start: (
+      start: async (
         contact,
         payload?: AnnouncementPayload
-      ): Promise<Result<discussionInitializationResult, Error>> =>
-        this._discussion!.initialize(contact, payload),
-      accept: (discussion: Discussion): Promise<Result<Uint8Array, Error>> =>
-        this._discussion!.accept(discussion),
+      ): Promise<Result<discussionInitializationResult, Error>> => {
+        const result = await this._discussion!.initialize(contact, payload);
+        if (result.success) await this._refresh?.stateUpdate();
+        return result;
+      },
+      accept: async (
+        discussion: Discussion
+      ): Promise<Result<Uint8Array, Error>> => {
+        const result = await this._discussion!.accept(discussion);
+        if (result.success) await this._refresh?.stateUpdate();
+        return result;
+      },
       renew: async (
         contactUserId: string
       ): Promise<Result<Uint8Array, Error>> => {
-        return await this._discussion!.createSessionForContact(
+        const result = await this._discussion!.createSessionForContact(
           contactUserId,
           new Uint8Array(0)
         );
+        if (result.success) await this._refresh?.stateUpdate();
+        return result;
       },
       getStatus: (contactUserId: string): SessionStatus => {
         if (this.state.status !== SdkStatus.SESSION_OPEN)
@@ -427,7 +434,11 @@ class GossipSdk {
     };
 
     this._announcementsAPI = {
-      fetch: () => this._announcement!.fetchAndProcessAnnouncements(),
+      fetch: async () => {
+        const result = await this._announcement!.fetchAndProcessAnnouncements();
+        if (result.newAnnouncementsCount) await this._refresh?.stateUpdate();
+        return result;
+      },
     };
 
     this._contactsAPI = {
@@ -641,7 +652,9 @@ class GossipSdk {
           await this._message?.fetchMessages();
         },
         fetchAnnouncements: async () => {
-          await this._announcement?.fetchAndProcessAnnouncements();
+          const result =
+            await this._announcement?.fetchAndProcessAnnouncements();
+          if (result?.newAnnouncementsCount) this._refresh?.stateUpdate();
         },
         handleSessionRefresh: async () => {
           // Retry public key publish if it failed during openSession()

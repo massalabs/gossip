@@ -70,7 +70,6 @@ export class MessageService {
   private discussionService: DiscussionService;
   private eventEmitter: SdkEventEmitter;
   private config: SdkConfig;
-  private onStateUpdateNeeded?: () => Promise<void>;
   private processingContacts = new Set<string>();
   private isFetchingMessages = false;
 
@@ -80,8 +79,7 @@ export class MessageService {
     session: SessionModule,
     discussionService: DiscussionService,
     eventEmitter: SdkEventEmitter,
-    config: SdkConfig = defaultSdkConfig,
-    onStateUpdateNeeded?: () => Promise<void>
+    config: SdkConfig = defaultSdkConfig
   ) {
     this.db = db;
     this.messageProtocol = messageProtocol;
@@ -89,7 +87,6 @@ export class MessageService {
     this.discussionService = discussionService;
     this.eventEmitter = eventEmitter;
     this.config = config;
-    this.onStateUpdateNeeded = onStateUpdateNeeded;
     void this.discussionService;
   }
 
@@ -542,12 +539,6 @@ export class MessageService {
       id: messageId,
       status: MessageStatus.WAITING_SESSION,
     };
-
-    /*
-    Trigger a state update to send the new message
-    If the stateUpdate function is already running, it will be skipped.
-    */
-    await this.onStateUpdateNeeded?.();
 
     return {
       success: true,
