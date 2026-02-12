@@ -126,6 +126,7 @@ export interface Discussion {
 
   // UI/Display fields
   customName?: string; // Optional custom name for the discussion (overrides contact name)
+  lastAnnouncementMessage?: string; // Message from incoming discussion request
   lastMessageId?: number;
   lastMessageContent?: string;
   lastMessageTimestamp?: Date;

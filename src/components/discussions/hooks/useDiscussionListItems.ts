@@ -1,11 +1,11 @@
 import { useMemo } from 'react';
 import {
-  Discussion,
   Contact,
   DiscussionDirection,
   SessionStatus,
-  gossipSdk,
 } from '@massalabs/gossip-sdk';
+import type { Discussion } from '../../../db';
+import { useGossipSdk } from '../../../hooks/useGossipSdk';
 import { LastMessageInfo } from '../DiscussionListItem';
 import { DiscussionFilter } from '../../../stores/discussionStore';
 
@@ -111,6 +111,7 @@ export function useVirtualItems(
   isSearching: boolean,
   filter: DiscussionFilter = 'all'
 ): VirtualItem[] {
+  const sdk = useGossipSdk();
   return useMemo(() => {
     const items: VirtualItem[] = [];
 
@@ -161,7 +162,7 @@ export function useVirtualItems(
         // to maintain the intended ordering from the store.
         discussionsToShow = filteredDiscussions.filter(d =>
           [SessionStatus.SelfRequested, SessionStatus.PeerRequested].includes(
-            gossipSdk.discussions.getStatus(d.contactUserId)
+            sdk.discussions.getStatus(d.contactUserId)
           )
         );
 
@@ -190,7 +191,7 @@ export function useVirtualItems(
         discussionsToShow = filteredDiscussions.filter(
           d =>
             SessionStatus.Active ===
-              gossipSdk.discussions.getStatus(d.contactUserId) &&
+              sdk.discussions.getStatus(d.contactUserId) &&
             d.unreadCount > 0
         );
 
@@ -221,13 +222,13 @@ export function useVirtualItems(
         filteredDiscussions.forEach(discussion => {
           if (
             [SessionStatus.SelfRequested, SessionStatus.PeerRequested].includes(
-              gossipSdk.discussions.getStatus(discussion.contactUserId)
+              sdk.discussions.getStatus(discussion.contactUserId)
             )
           ) {
             pendingDiscussions.push(discussion);
           } else if (
             SessionStatus.Active ===
-            gossipSdk.discussions.getStatus(discussion.contactUserId)
+            sdk.discussions.getStatus(discussion.contactUserId)
           ) {
             activeDiscussions.push(discussion);
           }
@@ -302,5 +303,6 @@ export function useVirtualItems(
     activeUserId,
     isSearching,
     filter,
+    sdk.discussions,
   ]);
 }

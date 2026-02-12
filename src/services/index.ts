@@ -2,11 +2,10 @@
  * Service Instances
  *
  * Sets up SDK event handlers and exports auth service.
- * The SDK singleton (gossipSdk) handles all session-scoped services.
+ * The SDK instance is managed via getSdk().
  */
 
 import {
-  gossipSdk,
   SdkEventType,
   type Discussion,
   type Contact,
@@ -21,9 +20,11 @@ import { isAppInForeground } from '../utils/appState';
  * so we don't need to manually push state updates here. The events
  * are primarily for side effects like notifications.
  */
-function setupSdkEventHandlers(): void {
+function setupSdkEventHandlers(
+  sdk: import('@massalabs/gossip-sdk').GossipSdk
+): void {
   // Show notification for new discussion requests when app is in background
-  gossipSdk.on(
+  sdk.on(
     SdkEventType.SESSION_REQUESTED,
     async (discussion: Discussion, contact: Contact) => {
       const foreground = await isAppInForeground();
@@ -43,10 +44,9 @@ function setupSdkEventHandlers(): void {
   );
 
   // Log errors for debugging
-  gossipSdk.on(SdkEventType.ERROR, (error: Error, context: string) => {
+  sdk.on(SdkEventType.ERROR, (error: Error, context: string) => {
     console.error(`[SDK Error:${context}]`, error);
   });
 }
 
-// Set up event handlers (will be ready when SDK initializes)
-setupSdkEventHandlers();
+export { setupSdkEventHandlers };

@@ -3,16 +3,15 @@ import { createRoot } from 'react-dom/client';
 import './index.css';
 import App from './App.tsx';
 import { enableDebugLogger } from './utils/logger.ts';
+import { createSdk } from './sdk';
+import { useSdkStore } from './stores/sdkStore';
+import { protocolConfig } from './config/protocol';
+import { setupSdkEventHandlers } from './services';
+import { db } from './db';
+import type { GossipDatabase } from '@massalabs/gossip-sdk';
 
 // Polyfill for Buffer
 import { Buffer } from 'buffer';
-
-// SDK configuration
-import { gossipSdk, GossipDatabase } from '@massalabs/gossip-sdk';
-import { protocolConfig } from './config/protocol';
-
-// Create database instance using SDK's class
-const db = new GossipDatabase();
 
 // Setup SHA-512 for @noble/ed25519 (required for massa-web3)
 import { sha512 } from '@noble/hashes/sha2';
@@ -89,17 +88,6 @@ window.addEventListener('load', () => {
   }
 });
 
-// Initialize SDK (also starts WASM initialization in background)
-gossipSdk.init({
-  db,
-  protocolBaseUrl: protocolConfig.baseUrl,
-  config: {
-    polling: {
-      enabled: true,
-    },
-  },
-});
-
 // Only enable the debug logger in development to avoid persisting
 // potentially sensitive console output in production builds.
 // if (import.meta.env.DEV) {
@@ -131,8 +119,17 @@ async function initSafeArea(): Promise<void> {
   }
 }
 
-// Initialize safe areas then render app
-initSafeArea().finally(() => {
+// Initialize safe areas + SDK, then render app
+Promise.all([
+  initSafeArea(),
+  createSdk({
+    db: db as unknown as GossipDatabase,
+    protocolBaseUrl: protocolConfig.baseUrl,
+    config: { polling: { enabled: true } },
+  }),
+]).then(([, sdk]) => {
+  useSdkStore.getState().setSdk(sdk);
+  setupSdkEventHandlers(sdk);
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
       <App />

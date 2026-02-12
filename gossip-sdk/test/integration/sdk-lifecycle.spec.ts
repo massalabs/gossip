@@ -2,7 +2,7 @@
  * GossipSdk lifecycle and event wiring tests
  *
  * Uses vi.mock() and hoisted state for SDK dependencies.
- * Each test creates a fresh GossipSdkImpl instance in beforeEach so
+ * Each test creates a fresh GossipSdk instance in beforeEach so
  * that module-level state and WASM-backed services don't leak between tests.
  */
 
@@ -12,7 +12,7 @@ import {
   generateEncryptionKeyFromSeed,
   type EncryptionKey,
 } from '../../src/wasm/encryption';
-import { GossipSdkImpl, SdkEventType } from '../../src/gossipSdk';
+import { GossipSdk, SdkEventType } from '../../src/gossipSdk';
 
 const protocolMock = vi.hoisted(() => ({
   createMessageProtocolMock: vi.fn(),
@@ -32,7 +32,7 @@ const createEventsForEmitter = (emitter: {
   },
 });
 
-let sdk: GossipSdkImpl;
+let sdk: GossipSdk;
 
 vi.mock('../../src/api/messageProtocol', () => ({
   createMessageProtocol: () => protocolMock.createMessageProtocolMock(),
@@ -115,8 +115,8 @@ vi.mock('../../src/services/refresh', () => ({
   },
 }));
 
-describe('GossipSdkImpl lifecycle', () => {
-  beforeEach(async () => {
+describe('GossipSdk lifecycle', () => {
+  beforeEach(() => {
     vi.clearAllMocks();
     protocolMock.createMessageProtocolMock.mockReturnValue({
       fetchMessages: vi.fn(),
@@ -129,7 +129,7 @@ describe('GossipSdkImpl lifecycle', () => {
     });
     eventState.lastEvents = null;
 
-    sdk = new GossipSdkImpl();
+    sdk = new GossipSdk();
   });
 
   it('initializes once and exposes auth service', async () => {

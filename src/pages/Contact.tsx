@@ -12,14 +12,13 @@ import PageLayout from '../components/ui/PageLayout';
 import UserIdDisplay from '../components/ui/UserIdDisplay';
 import BaseModal from '../components/ui/BaseModal';
 import { Check, Edit2, Trash2 } from 'react-feather';
-import {
-  UserPublicKeys,
-  gossipSdk,
-  SessionStatus,
-} from '@massalabs/gossip-sdk';
+import { UserPublicKeys, SessionStatus } from '@massalabs/gossip-sdk';
+import { useGossipSdk } from '../hooks/useGossipSdk';
 import { ROUTES } from '../constants/routes';
 
 const Contact: React.FC = () => {
+  const sdk = useGossipSdk();
+  const { isSessionOpen, contacts: sdkContacts } = sdk;
   const { userId } = useParams();
   const [showUserId, setShowUserId] = useState(false);
   const navigate = useNavigate();
@@ -98,16 +97,13 @@ const Contact: React.FC = () => {
   }, [showSuccessCheck]);
 
   const handleDeleteContact = useCallback(async () => {
-    if (!ownerUserId || !contact || !gossipSdk.isSessionOpen) return;
+    if (!ownerUserId || !contact || !isSessionOpen) return;
 
     setIsDeleting(true);
     setDeleteError(null);
 
     try {
-      const result = await gossipSdk.contacts.delete(
-        ownerUserId,
-        contact.userId
-      );
+      const result = await sdkContacts.delete(ownerUserId, contact.userId);
       if (!result.success) {
         setDeleteError(result.message);
         setIsDeleting(false);
@@ -124,7 +120,14 @@ const Contact: React.FC = () => {
       setDeleteError('Failed to delete contact. Please try again.');
       setIsDeleting(false);
     }
-  }, [ownerUserId, contact, clearMessages, navigate]);
+  }, [
+    ownerUserId,
+    contact,
+    clearMessages,
+    navigate,
+    isSessionOpen,
+    sdkContacts,
+  ]);
 
   if (!contact) {
     return (
@@ -138,7 +141,7 @@ const Contact: React.FC = () => {
   }
 
   const canStart = discussion
-    ? gossipSdk.discussions.getStatus(discussion.contactUserId) ===
+    ? sdk.discussions.getStatus(discussion.contactUserId) ===
       SessionStatus.Active
     : true;
 
@@ -201,7 +204,7 @@ const Contact: React.FC = () => {
               SessionStatus.PeerRequested,
               SessionStatus.SelfRequested,
             ].includes(
-              gossipSdk.discussions.getStatus(discussion.contactUserId)
+              sdk.discussions.getStatus(discussion.contactUserId)
             ) && 'Connection pending. You cannot chat yet.'}
           </p>
         )}

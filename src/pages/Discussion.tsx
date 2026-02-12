@@ -12,7 +12,8 @@ import MessageList, {
 } from '../components/discussions/MessageList';
 import MessageInput from '../components/discussions/MessageInput';
 import ScrollToBottomButton from '../components/discussions/ScrollToBottomButton';
-import { Message, gossipSdk } from '@massalabs/gossip-sdk';
+import { Message } from '@massalabs/gossip-sdk';
+import { useGossipSdk } from '../hooks/useGossipSdk';
 import { isDifferentDay } from '../utils/timeUtils';
 import { useUiStore } from '../stores/uiStore';
 
@@ -21,6 +22,7 @@ const TEST_MESSAGE_COUNT = 50;
 const TEST_MESSAGE_BATCH_DELAY_MS = 100;
 
 const Discussion: React.FC = () => {
+  const sdk = useGossipSdk();
   const { userId } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
@@ -295,7 +297,7 @@ const Discussion: React.FC = () => {
     (messageId: number) => {
       (async () => {
         // Look up the message to determine which discussion it belongs to
-        const target = await gossipSdk.messages.get(messageId);
+        const target = await sdk.messages.get(messageId);
         if (!target) {
           console.warn(`Message with id ${messageId} not found in database`);
           return;
@@ -401,7 +403,7 @@ const Discussion: React.FC = () => {
         return;
       }
 
-      const original = await gossipSdk.messages.get(forwardFromMessageId);
+      const original = await sdk.messages.get(forwardFromMessageId);
       if (!cancelled) {
         setForwardPreviewText(original?.content ?? null);
         if (original && contact && original.contactUserId === contact.userId) {

@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { GossipSdkImpl, SdkEventType } from '../../src/gossipSdk';
+import { GossipSdk, SdkEventType } from '../../src/gossipSdk';
 import {
   GossipDatabase,
   type Discussion,
@@ -21,13 +21,13 @@ import { generateMnemonic } from '../../src/crypto/bip39';
 import { protocolConfig } from '../../src/config/protocol';
 
 describe('E2E: Announcement fetch (real API, real account)', () => {
-  let sdk: GossipSdkImpl;
+  let sdk: GossipSdk;
   let database: GossipDatabase;
 
   beforeEach(async () => {
     database = new GossipDatabase();
     await database.open();
-    sdk = new GossipSdkImpl();
+    sdk = new GossipSdk();
     await sdk.init({
       db: database,
       protocolBaseUrl: protocolConfig.baseUrl,
@@ -95,7 +95,7 @@ describe('E2E: Discussion request (user A sends to user B)', () => {
       // ─── User B: create account and publish public key ───
       const databaseB = new GossipDatabase();
       await databaseB.open();
-      const sdkB = new GossipSdkImpl();
+      const sdkB = new GossipSdk();
       await sdkB.init({
         db: databaseB,
         protocolBaseUrl: baseUrl,
@@ -112,7 +112,7 @@ describe('E2E: Discussion request (user A sends to user B)', () => {
       // ─── User A: create account ───
       const databaseA = new GossipDatabase();
       await databaseA.open();
-      const sdkA = new GossipSdkImpl();
+      const sdkA = new GossipSdk();
       await sdkA.init({ db: databaseA, protocolBaseUrl: baseUrl });
 
       const mnemonicA = generateMnemonic();

@@ -1,10 +1,10 @@
 import { useMemo } from 'react';
 import {
   Message,
-  Discussion,
   DiscussionDirection,
   MessageType,
 } from '@massalabs/gossip-sdk';
+import type { Discussion } from '../../../db';
 import { isDifferentDay } from '../../../utils/timeUtils';
 import {
   calculateMessageGroups,

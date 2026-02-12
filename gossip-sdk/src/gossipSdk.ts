@@ -1,24 +1,26 @@
 /**
- * GossipSdk - Singleton SDK with clean lifecycle API
+ * GossipSdk - SDK with clean lifecycle API
  *
  * @example
  * ```typescript
- * import { gossipSdk } from '@massalabs/gossip-sdk';
+ * import { createGossipSdk } from '@massalabs/gossip-sdk';
+ *
+ * const sdk = createGossipSdk();
  *
  * // Initialize once at app startup
- * await gossipSdk.init({
+ * await sdk.init({
  *   db,
  *   protocolBaseUrl: 'https://api.example.com',
  * });
  *
  * // Open session (login) - SDK handles keys/session internally
- * await gossipSdk.openSession({
+ * await sdk.openSession({
  *   mnemonic: 'word1 word2 ...',
  *   onPersist: async (blob) => { /* save to db *\/ },
  * });
  *
  * // Or restore existing session
- * await gossipSdk.openSession({
+ * await sdk.openSession({
  *   mnemonic: 'word1 word2 ...',
  *   encryptedSession: savedBlob,
  *   encryptionKey: key,
@@ -26,16 +28,16 @@
  * });
  *
  * // Use clean API
- * await gossipSdk.messages.send(contactId, 'Hello!');
- * await gossipSdk.discussions.start(contact);
- * const contacts = await gossipSdk.contacts.list(ownerUserId);
+ * await sdk.messages.send(contactId, 'Hello!');
+ * await sdk.discussions.start(contact);
+ * const contacts = await sdk.contacts.list(ownerUserId);
  *
  * // Events
- * gossipSdk.on('message', (msg) => { ... });
- * gossipSdk.on('discussionRequest', (discussion, contact) => { ... });
+ * sdk.on('message', (msg) => { ... });
+ * sdk.on('discussionRequest', (discussion, contact) => { ... });
  *
  * // Logout
- * await gossipSdk.closeSession();
+ * await sdk.closeSession();
  * ```
  */
 
@@ -184,7 +186,7 @@ type SdkState =
 // SDK Class
 // ─────────────────────────────────────────────────────────────────────────────
 
-class GossipSdkImpl {
+class GossipSdk {
   private state: SdkState = { status: SdkStatus.UNINITIALIZED };
 
   // Core components
@@ -804,11 +806,12 @@ interface PollingAPI {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Singleton Export
+// Factory & Class Export
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** The singleton GossipSdk instance */
-export const gossipSdk = new GossipSdkImpl();
+/** Create a new GossipSdk instance. The consumer manages the instance lifecycle. */
+export function createGossipSdk(): GossipSdk {
+  return new GossipSdk();
+}
 
-// Also export the class for testing
-export { GossipSdkImpl };
+export { GossipSdk };

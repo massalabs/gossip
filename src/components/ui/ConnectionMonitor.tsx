@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Move } from 'react-feather';
 import {
-  gossipSdk,
   SdkEventType,
-  Discussion,
+  type Discussion,
   SessionStatus,
 } from '@massalabs/gossip-sdk';
+import { useGossipSdk } from '../../hooks/useGossipSdk';
 import { useOnlineStoreBase } from '../../stores/useOnlineStore';
 import { useDiscussionStore } from '../../stores/discussionStore';
 import { useAppStore } from '../../stores/appStore';
@@ -25,6 +25,7 @@ let logIdCounter = 0;
  * Only visible when Show Debug Options is enabled.
  */
 const ConnectionMonitor: React.FC = () => {
+  const sdk = useGossipSdk();
   const [isOpen, setIsOpen] = useState(false);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const logsEndRef = useRef<HTMLDivElement>(null);
@@ -197,7 +198,7 @@ const ConnectionMonitor: React.FC = () => {
   useEffect(() => {
     discussions.forEach(d => {
       const prevStatus = prevStatusMap.current.get(d.id!);
-      const currentStatus = gossipSdk.discussions.getStatus(d.contactUserId);
+      const currentStatus = sdk.discussions.getStatus(d.contactUserId);
       if (prevStatus !== undefined && prevStatus !== currentStatus) {
         const contact = contacts.find(c => c.userId === d.contactUserId);
         const name = contact?.name || d.contactUserId.slice(0, 12) + '...';
@@ -206,7 +207,7 @@ const ConnectionMonitor: React.FC = () => {
           currentStatus === SessionStatus.Saturated;
         addLog(
           isError ? 'error' : 'status',
-          `${name}: ${getStatusLabel(d.contactUserId)} -> ${getStatusLabel(d.contactUserId)}`
+          `${name}: ${getStatusLabel(sdk, d.contactUserId)} -> ${getStatusLabel(sdk, d.contactUserId)}`
         );
       }
       prevStatusMap.current.set(d.id!, currentStatus);
@@ -226,14 +227,14 @@ const ConnectionMonitor: React.FC = () => {
       addLog('error', `SDK [${context}]: ${error.message}`);
     };
 
-    gossipSdk.on(SdkEventType.SESSION_RENEWED, handleSessionRenewed);
-    gossipSdk.on(SdkEventType.ERROR, handleError);
+    sdk.on(SdkEventType.SESSION_RENEWED, handleSessionRenewed);
+    sdk.on(SdkEventType.ERROR, handleError);
 
     return () => {
-      gossipSdk.off(SdkEventType.SESSION_RENEWED, handleSessionRenewed);
-      gossipSdk.off(SdkEventType.ERROR, handleError);
+      sdk.off(SdkEventType.SESSION_RENEWED, handleSessionRenewed);
+      sdk.off(SdkEventType.ERROR, handleError);
     };
-  }, [addLog, contacts]);
+  }, [sdk, addLog, contacts]);
 
   // Auto-scroll
   useEffect(() => {
@@ -249,7 +250,7 @@ const ConnectionMonitor: React.FC = () => {
 
   // Check if any discussion has a problem
   const hasProblems = discussions.some(d => {
-    const currentStatus = gossipSdk.discussions.getStatus(d.contactUserId);
+    const currentStatus = sdk.discussions.getStatus(d.contactUserId);
     return (
       currentStatus === SessionStatus.Killed ||
       currentStatus === SessionStatus.Saturated
@@ -263,7 +264,7 @@ const ConnectionMonitor: React.FC = () => {
   };
 
   const getStatusColor = (contactUserId: string) => {
-    const status = gossipSdk.discussions.getStatus(contactUserId);
+    const status = sdk.discussions.getStatus(contactUserId);
     switch (status) {
       case SessionStatus.Active:
         return 'text-green-400';
@@ -389,7 +390,7 @@ const ConnectionMonitor: React.FC = () => {
                       {getContactName(d.contactUserId)}
                     </span>
                     <span className={getStatusColor(d.contactUserId)}>
-                      {getStatusLabel(d.contactUserId)}
+                      {getStatusLabel(sdk, d.contactUserId)}
                     </span>
                   </div>
                 ))}
@@ -442,8 +443,11 @@ const ConnectionMonitor: React.FC = () => {
   );
 };
 
-function getStatusLabel(contactUserId: string): string {
-  const status = gossipSdk.discussions.getStatus(contactUserId);
+function getStatusLabel(
+  sdk: import('@massalabs/gossip-sdk').GossipSdk,
+  contactUserId: string
+): string {
+  const status = sdk.discussions.getStatus(contactUserId);
   switch (status) {
     case SessionStatus.PeerRequested:
     case SessionStatus.SelfRequested:

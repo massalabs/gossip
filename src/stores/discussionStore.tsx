@@ -2,12 +2,11 @@ import { create } from 'zustand';
 import { Subscription } from 'dexie';
 import { liveQuery } from 'dexie';
 import {
-  Discussion,
   Contact,
-  db,
-  gossipSdk,
   SessionStatus,
 } from '@massalabs/gossip-sdk';
+import { db, type Discussion } from '../db';
+import { getSdk } from './sdkStore';
 import { createSelectors } from './utils/createSelectors';
 import { useAccountStore } from './accountStore';
 
@@ -62,7 +61,7 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
     const subscriptionDiscussions = discussionsQuery.subscribe({
       next: async discussionsList => {
         // Check if SDK session is open before attempting to get status
-        const isSessionOpen = gossipSdk.isSessionOpen;
+        const isSessionOpen = getSdk().isSessionOpen;
 
         // Sort discussions: new requests (PENDING) first, then active discussions
         // Within each group, sort by most recent activity
@@ -74,7 +73,7 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
 
           // For pending requests, use updatedAt (only if session is open)
           if (isSessionOpen) {
-            const status = gossipSdk.discussions.getStatus(
+            const status = getSdk().discussions.getStatus(
               discussion.contactUserId
             );
             if (
@@ -109,8 +108,8 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
         const sortedDiscussions = discussionsList.sort((a, b) => {
           // If session is open, separate by status: PENDING first, then ACTIVE, then others
           if (isSessionOpen) {
-            const aStatus = gossipSdk.discussions.getStatus(a.contactUserId);
-            const bStatus = gossipSdk.discussions.getStatus(b.contactUserId);
+            const aStatus = getSdk().discussions.getStatus(a.contactUserId);
+            const bStatus = getSdk().discussions.getStatus(b.contactUserId);
             const statusDiff =
               getStatusPriority(aStatus) - getStatusPriority(bStatus);
             if (statusDiff !== 0) return statusDiff;
@@ -177,10 +176,10 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
     const ownerUserId = useAccountStore.getState().userProfile?.userId;
     if (!ownerUserId) return [];
     // Return empty array if session is not open (cannot get status)
-    if (!gossipSdk.isSessionOpen) return [];
+    if (!getSdk().isSessionOpen) return [];
     return get().discussions.filter(discussion => {
       return status.includes(
-        gossipSdk.discussions.getStatus(discussion.contactUserId)
+        getSdk().discussions.getStatus(discussion.contactUserId)
       );
     });
   },

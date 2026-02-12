@@ -8,7 +8,7 @@ import {
 } from '@massalabs/gossip-sdk';
 import { createSelectors } from './utils/createSelectors';
 import { useAccountStore } from './accountStore';
-import { gossipSdk } from '@massalabs/gossip-sdk';
+import { getSdk } from './sdkStore';
 import { liveQuery, Subscription } from 'dexie';
 
 interface MessageStoreState {
@@ -153,7 +153,7 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
     if (
       !userProfile?.userId ||
       (!content.trim() && !isForward) ||
-      !gossipSdk.isSessionOpen
+      !getSdk().isSessionOpen
     )
       return;
 
@@ -226,7 +226,7 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
       };
 
       // Send via service
-      const result = await gossipSdk.messages.send(message);
+      const result = await getSdk().messages.send(message);
       if (!result.success) {
         if (result.message) {
           console.warn(

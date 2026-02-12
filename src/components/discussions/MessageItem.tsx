@@ -13,11 +13,11 @@ import {
 } from 'react-feather';
 import { formatTime } from '../../utils/timeUtils';
 import {
-  gossipSdk,
   Message,
   MessageStatus,
   MessageDirection,
 } from '@massalabs/gossip-sdk';
+import { useGossipSdk } from '../../hooks/useGossipSdk';
 import { parseLinks, openUrl } from '../../utils/linkUtils';
 import { useMarkMessageAsRead } from '../../hooks/useMarkMessageAsRead';
 
@@ -59,6 +59,8 @@ const MessageItem: React.FC<MessageItemProps> = ({
   isFirstInGroup = true,
   isLastInGroup = true,
 }) => {
+  const sdk = useGossipSdk();
+  const { isSessionOpen, messages: sdkMessages } = sdk;
   const canReply = !!onReplyTo;
   const canForward = !!onForward;
   const isOutgoing = message.direction === MessageDirection.OUTGOING;
@@ -83,13 +85,13 @@ const MessageItem: React.FC<MessageItemProps> = ({
     const seekerForContext =
       message.replyTo?.originalSeeker || message.forwardOf?.originalSeeker;
 
-    if (seekerForContext && gossipSdk.isSessionOpen) {
+    if (seekerForContext && isSessionOpen) {
       setIsLoadingOriginal(true);
       setOriginalNotFound(false);
 
       const findMessage = async () => {
         try {
-          const msg = await gossipSdk.messages.findBySeeker(
+          const msg = await sdkMessages.findBySeeker(
             seekerForContext,
             message.ownerUserId
           );
@@ -120,7 +122,13 @@ const MessageItem: React.FC<MessageItemProps> = ({
       setOriginalNotFound(false);
       setIsLoadingOriginal(false);
     }
-  }, [message.replyTo, message.forwardOf, message.ownerUserId]);
+  }, [
+    message.replyTo,
+    message.forwardOf,
+    message.ownerUserId,
+    isSessionOpen,
+    sdkMessages,
+  ]);
 
   const handleDoubleClick = useCallback(
     (e: React.MouseEvent) => {

@@ -1,5 +1,6 @@
 import React, { useRef, useCallback, useEffect } from 'react';
-import { MessageDirection, Message, Discussion } from '@massalabs/gossip-sdk';
+import { MessageDirection, Message } from '@massalabs/gossip-sdk';
+import type { Discussion } from '../../db';
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 
 import LoadingState from './LoadingState';

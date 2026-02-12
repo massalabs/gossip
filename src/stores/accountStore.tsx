@@ -6,9 +6,12 @@ import {
   deriveKey,
   generateMnemonic,
   validateMnemonic,
-  gossipSdk,
+  generateUserKeys,
+  EncryptionKey,
+  generateNonce,
   validateUsernameFormat,
 } from '@massalabs/gossip-sdk';
+import { getSdk } from './sdkStore';
 import { isWebAuthnSupported } from '../crypto/webauthn';
 import { biometricService } from '../services/biometricService';
 import {
@@ -21,11 +24,6 @@ import {
 } from '@massalabs/massa-web3';
 import { useAppStore } from './appStore';
 import { createSelectors } from './utils/createSelectors';
-import {
-  generateUserKeys,
-  EncryptionKey,
-  generateNonce,
-} from '@massalabs/gossip-sdk';
 
 import { getActiveOrFirstProfile } from './utils/getAccount';
 import { auth } from './utils/auth';
@@ -240,8 +238,9 @@ interface AccountState {
 const useAccountStoreBase = create<AccountState>((set, get) => {
   // Helper function to cleanup session
   const cleanupSession = async () => {
-    if (gossipSdk.isSessionOpen) {
-      await gossipSdk.closeSession();
+    const sdk = getSdk();
+    if (sdk.isSessionOpen) {
+      await sdk.closeSession();
     }
   };
 
@@ -310,7 +309,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         );
 
         // Open SDK session
-        await gossipSdk.openSession({
+        await getSdk().openSession({
           mnemonic,
           encryptionKey,
           onPersist: async (blob, _key) => {
@@ -326,7 +325,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           },
         });
 
-        const session = gossipSdk.getEncryptedSession();
+        const session = getSdk().getEncryptedSession();
 
         const profile = await createProfileFromAccount(
           username,
@@ -386,7 +385,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         );
 
         // Open SDK session
-        await gossipSdk.openSession({
+        await getSdk().openSession({
           mnemonic,
           encryptionKey,
           onPersist: async (blob, _key) => {
@@ -402,7 +401,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           },
         });
 
-        const session = gossipSdk.getEncryptedSession();
+        const session = getSdk().getEncryptedSession();
 
         const profile = await createProfileFromAccount(
           username,
@@ -454,7 +453,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
 
         // Open SDK session with existing encrypted session state
         // IMPORTANT: Pass onPersist callback so session changes are automatically saved
-        await gossipSdk.openSession({
+        await getSdk().openSession({
           mnemonic,
           encryptedSession: profile.session,
           encryptionKey,
@@ -587,7 +586,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         );
 
         // Open SDK session
-        await gossipSdk.openSession({
+        await getSdk().openSession({
           mnemonic,
           encryptionKey,
           onPersist: async (blob, _key) => {
@@ -603,7 +602,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           },
         });
 
-        const session = gossipSdk.getEncryptedSession();
+        const session = getSdk().getEncryptedSession();
 
         const profile = await createProfileFromAccount(
           username,
@@ -638,7 +637,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       try {
         const state = get();
         const profile = state.userProfile;
-        if (!profile || !gossipSdk.isSessionOpen) {
+        if (!profile || !getSdk().isSessionOpen) {
           throw new Error('No authenticated user');
         }
 
@@ -736,7 +735,8 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       const state = get();
       const { userProfile } = state;
 
-      if (!gossipSdk.isSessionOpen || !userProfile) {
+      const { encryptionKey } = state;
+      if (!getSdk().isSessionOpen || !userProfile || !encryptionKey) {
         console.warn(
           'No session, user profile, or encryption key to persist, skipping persistence'
         );
@@ -745,7 +745,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
 
       try {
         // Serialize the session via SDK
-        const sessionBlob = gossipSdk.getEncryptedSession();
+        const sessionBlob = getSdk().getEncryptedSession();
         if (!sessionBlob) {
           console.warn('Failed to get encrypted session');
           return;
@@ -807,15 +807,13 @@ useAccountStoreBase.subscribe(async (state, prevState) => {
   const current = state.userProfile;
   const previous = prevState.userProfile;
 
-  if (!current || !gossipSdk.isSessionOpen) return;
+  const sdk = getSdk();
+  if (!current || !sdk.isSessionOpen) return;
   if (current === previous) return;
   if (previous && current.userId === previous.userId) return;
 
   try {
-    await gossipSdk.auth.ensurePublicKeyPublished(
-      gossipSdk.publicKeys,
-      current.userId
-    );
+    await sdk.auth.ensurePublicKeyPublished(sdk.publicKeys, current.userId);
   } catch (error) {
     console.error('Error publishing public key:', error);
   }
