@@ -11,7 +11,7 @@ import {
   generateEncryptionKeyFromSeed,
   type EncryptionKey,
 } from '../../src/wasm/encryption';
-import { GossipSdk, SdkEventType } from '../../src/gossipSdk';
+import { GossipSdk, SdkEventType } from '../../src/gossip';
 
 const protocolMock = vi.hoisted(() => ({
   createMessageProtocolMock: vi.fn(),

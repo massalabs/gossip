@@ -10,10 +10,6 @@ import { encodeToBase64, decodeFromBase64 } from '../utils/base64';
 import { IMessageProtocol } from '../api/messageProtocol/types';
 import { type GossipDatabase } from '../db';
 
-export type PublicKeyResult =
-  | { publicKey: UserPublicKeys; error?: never }
-  | { publicKey?: never; error: string };
-
 export class AuthService {
   constructor(
     private db: GossipDatabase,
@@ -24,19 +20,15 @@ export class AuthService {
    * Fetch public key by userId
    * @param userId - Bech32-encoded userId (e.g., "gossip1...")
    */
-  async fetchPublicKeyByUserId(userId: string): Promise<PublicKeyResult> {
+  async fetchPublicKeyByUserId(userId: string): Promise<UserPublicKeys> {
     try {
       const base64PublicKey = await this.messageProtocol.fetchPublicKeyByUserId(
         decodeUserId(userId)
       );
 
-      return {
-        publicKey: UserPublicKeys.from_bytes(decodeFromBase64(base64PublicKey)),
-      };
+      return UserPublicKeys.from_bytes(decodeFromBase64(base64PublicKey));
     } catch (err) {
-      return {
-        error: getPublicKeyErrorMessage(err),
-      };
+      throw new Error(getPublicKeyErrorMessage(err));
     }
   }
 

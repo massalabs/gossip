@@ -8,7 +8,6 @@ import {
   validateUsernameFormat,
   encodeUserId,
   UserPublicKeys,
-  type PublicKeyResult,
   AnnouncementPayload,
 } from '@massalabs/gossip-sdk';
 import { useGossipSdk } from './useGossipSdk';
@@ -78,25 +77,21 @@ export function useContactForm() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const getPublicKey = useCallback(
-    async (uid: string): Promise<PublicKeyResult> => {
+    async (uid: string): Promise<UserPublicKeys> => {
       const cached = publicKeysCache.current.get(uid);
 
       if (cached) {
-        return { publicKey: cached };
+        return cached;
       }
 
       // Check if SDK is initialized before accessing auth service
       if (!gossip.isInitialized) {
-        return { error: 'SDK not initialized' };
+        throw new Error('SDK not initialized');
       }
 
-      const result = await gossip.auth.fetchPublicKeyByUserId(uid);
-
-      if (result.publicKey) {
-        publicKeysCache.current.set(uid, result.publicKey);
-      }
-
-      return result;
+      const publicKey = await gossip.auth.fetchPublicKeyByUserId(uid);
+      publicKeysCache.current.set(uid, publicKey);
+      return publicKey;
     },
     [gossip.auth, gossip.isInitialized]
   );
@@ -190,17 +185,21 @@ export function useContactForm() {
           resolvedDomain: trimmed,
         });
 
-        // Fetch public key for the resolved gossip ID
-        const { publicKey, error } = await getPublicKey(resolvedGossipId);
+        try {
+          // Fetch public key for the resolved gossip ID
+          const publicKey = await getPublicKey(resolvedGossipId);
 
-        if (!publicKey) {
-          setUserId(prev => ({ ...prev, error, loading: false }));
+          setPublicKeys(publicKey);
+          setUserId(prev => ({ ...prev, loading: false }));
+          return;
+        } catch (error) {
+          setUserId(prev => ({
+            ...prev,
+            error: error instanceof Error ? error.message : String(error),
+            loading: false,
+          }));
           return;
         }
-
-        setPublicKeys(publicKey);
-        setUserId(prev => ({ ...prev, loading: false }));
-        return;
       }
 
       // Not an MNS domain - handle as regular gossip ID
@@ -233,15 +232,17 @@ export function useContactForm() {
         return;
       }
 
-      const { publicKey, error } = await getPublicKey(trimmed);
-
-      if (!publicKey) {
-        setUserId(prev => ({ ...prev, error, loading: false }));
-        return;
+      try {
+        const publicKey = await getPublicKey(trimmed);
+        setPublicKeys(publicKey);
+        setUserId(prev => ({ ...prev, loading: false }));
+      } catch (error) {
+        setUserId(prev => ({
+          ...prev,
+          error: error instanceof Error ? error.message : String(error),
+          loading: false,
+        }));
       }
-
-      setPublicKeys(publicKey);
-      setUserId(prev => ({ ...prev, loading: false }));
     },
     [getPublicKey, userProfile?.userId, mnsEnabled]
   );

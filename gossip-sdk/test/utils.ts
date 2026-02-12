@@ -10,7 +10,7 @@ import { UserPublicKeys, UserKeys } from '../src/wasm/bindings';
 import { generateUserKeys } from '../src/wasm/userKeys';
 import { SessionModule } from '../src/wasm/session';
 import { MessageType, MessageDirection, MessageStatus } from '../src/db';
-import { GossipSdk } from '../src/gossipSdk';
+import { GossipSdk } from '../src/gossip';
 import { SessionStatus } from '../src/assets/generated/wasm/gossip_wasm';
 
 /**
