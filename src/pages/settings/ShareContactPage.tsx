@@ -4,9 +4,10 @@ import ShareContact from '../../components/settings/ShareContact';
 import { useAccountStore } from '../../stores/accountStore';
 import { useAppStore } from '../../stores/appStore';
 import { ROUTES } from '../../constants/routes';
-import { gossipSdk } from '@massalabs/gossip-sdk';
+import { useGossipSdk } from '../../hooks/useGossipSdk';
 
 const ShareContactPage: React.FC = () => {
+  const gossip = useGossipSdk();
   const navigate = useNavigate();
   const { userProfile } = useAccountStore();
   const mnsEnabled = useAppStore(s => s.mnsEnabled);
@@ -16,7 +17,7 @@ const ShareContactPage: React.FC = () => {
     navigate(-1);
   };
 
-  if (!userProfile || !gossipSdk.isSessionOpen) {
+  if (!userProfile || !gossip.isSessionOpen) {
     // Redirect to settings if user profile or public key is not available
     navigate(ROUTES.settings());
     return null;
@@ -27,7 +28,7 @@ const ShareContactPage: React.FC = () => {
       onBack={handleBack}
       userId={userProfile.userId}
       userName={userProfile.username}
-      publicKey={gossipSdk.publicKeys}
+      publicKey={gossip.publicKeys}
       mnsDomains={mnsEnabled && mnsDomains.length > 0 ? mnsDomains : undefined}
     />
   );

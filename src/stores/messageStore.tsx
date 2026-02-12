@@ -1,14 +1,13 @@
 import { create } from 'zustand';
 import {
   Message,
-  db,
   MessageDirection,
   MessageStatus,
   MessageType,
 } from '@massalabs/gossip-sdk';
 import { createSelectors } from './utils/createSelectors';
 import { useAccountStore } from './accountStore';
-import { gossipSdk } from '@massalabs/gossip-sdk';
+import { getSdk } from './sdkStore';
 import { liveQuery, Subscription } from 'dexie';
 
 interface MessageStoreState {
@@ -89,8 +88,8 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
     set({ isInitializing: true });
     // Set up a single liveQuery for all messages of the owner
     const query = liveQuery(() =>
-      db.messages
-        .where('ownerUserId')
+      getSdk()
+        .db.messages.where('ownerUserId')
         .equals(ownerUserId)
         .and(m => m.type !== MessageType.KEEP_ALIVE)
         .sortBy('id')
@@ -153,14 +152,14 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
     if (
       !userProfile?.userId ||
       (!content.trim() && !isForward) ||
-      !gossipSdk.isSessionOpen
+      !getSdk().isSessionOpen
     )
       return;
 
     set({ isSending: true });
 
     try {
-      const discussion = await db.getDiscussionByOwnerAndContact(
+      const discussion = await getSdk().db.getDiscussionByOwnerAndContact(
         userProfile.userId,
         contactUserId
       );
@@ -175,7 +174,7 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
 
       if (replyToId) {
         // Look up the original message to get its seeker
-        const originalMessage = await db.messages.get(replyToId);
+        const originalMessage = await getSdk().db.messages.get(replyToId);
         if (!originalMessage) {
           throw new Error('Original message not found');
         }
@@ -190,7 +189,8 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
       }
 
       if (forwardFromMessageId) {
-        const originalMessage = await db.messages.get(forwardFromMessageId);
+        const originalMessage =
+          await getSdk().db.messages.get(forwardFromMessageId);
         if (!originalMessage) {
           console.warn(
             'Forward target message not found, sending as regular message'
@@ -226,7 +226,7 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
       };
 
       // Send via service
-      const result = await gossipSdk.messages.send(message);
+      const result = await getSdk().messages.send(message);
       if (!result.success) {
         if (result.message) {
           console.warn(

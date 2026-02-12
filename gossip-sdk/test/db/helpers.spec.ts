@@ -4,11 +4,12 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
-  db,
+  gossipDb,
   DiscussionDirection,
   MessageDirection,
   MessageStatus,
   MessageType,
+  GossipDatabase,
 } from '../../src/db';
 import { encodeUserId } from '../../src/utils/userId';
 
@@ -16,7 +17,10 @@ const OWNER_USER_ID = encodeUserId(new Uint8Array(32).fill(6));
 const CONTACT_USER_ID = encodeUserId(new Uint8Array(32).fill(7));
 
 describe('Database helper methods', () => {
+  let db: GossipDatabase;
+
   beforeEach(async () => {
+    db = gossipDb();
     if (!db.isOpen()) {
       await db.open();
     }

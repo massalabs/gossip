@@ -10,25 +10,34 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { GossipSdkImpl } from '../../src/gossipSdk';
-import { db, MessageStatus, MessageDirection, MessageType } from '../../src/db';
+import { GossipSdk } from '../../src/gossipSdk';
+import {
+  gossipDb,
+  GossipDatabase,
+  MessageStatus,
+  MessageDirection,
+  MessageType,
+} from '../../src/db';
 import { encodeUserId } from '../../src/utils/userId';
 import { generateMnemonic } from '../../src/crypto/bip39';
 
 const MESSAGE_OWNER_USER_ID = encodeUserId(new Uint8Array(32).fill(11));
 const MESSAGE_CONTACT_USER_ID = encodeUserId(new Uint8Array(32).fill(12));
 
-let sdk: GossipSdkImpl;
+let sdk: GossipSdk;
 
 describe('MessageService', () => {
+  let db: GossipDatabase;
+
   beforeEach(async () => {
+    db = gossipDb();
     if (!db.isOpen()) {
       await db.open();
     }
     await Promise.all(db.tables.map(table => table.clear()));
 
-    sdk = new GossipSdkImpl();
-    await sdk.init({ db });
+    sdk = new GossipSdk();
+    await sdk.init();
     await sdk.openSession({ mnemonic: generateMnemonic() });
   });
 

@@ -5,7 +5,7 @@ import PageHeader from '../../components/ui/PageHeader';
 import Button from '../../components/ui/Button';
 import Toggle from '../../components/ui/Toggle';
 import { useAppStore } from '../../stores/appStore';
-import { db } from '@massalabs/gossip-sdk';
+import { getSdk } from '../../stores/sdkStore';
 import { clearAppStorage } from '../../utils/localStorage';
 import { useAccountStore } from '../../stores/accountStore';
 import { useVersionCheck } from '../../hooks/useVersionCheck';
@@ -47,7 +47,7 @@ const DebugSettings: React.FC = () => {
     try {
       await resetAccount();
       clearAppStorage();
-      await db.deleteDb();
+      await getSdk().db.deleteDb();
       window.location.reload();
     } catch (error) {
       console.error('Failed to reset all accounts:', error);
@@ -56,6 +56,7 @@ const DebugSettings: React.FC = () => {
 
   const handleResetAllDiscussionsAndMessages = useCallback(async () => {
     try {
+      const db = getSdk().db;
       await db.transaction(
         'rw',
         [db.contacts, db.messages, db.discussions],

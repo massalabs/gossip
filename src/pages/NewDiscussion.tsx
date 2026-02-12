@@ -3,7 +3,8 @@ import { Edit2, Plus, Users, User } from 'react-feather';
 import { useAccountStore } from '../stores/accountStore';
 import Button from '../components/ui/Button';
 import { useEffect, useMemo, useState } from 'react';
-import { Contact, gossipSdk, SessionStatus } from '@massalabs/gossip-sdk';
+import { Contact, SessionStatus } from '@massalabs/gossip-sdk';
+import { useGossipSdk } from '../hooks/useGossipSdk';
 import ContactAvatar from '../components/avatar/ContactAvatar';
 import UserIdDisplay from '../components/ui/UserIdDisplay';
 import PageHeader from '../components/ui/PageHeader';
@@ -16,6 +17,7 @@ This is a temporary solution to avoid duplicating the contact list code.
 In future we should decouple contact from discussion.
 */
 const NewDiscussion: React.FC = () => {
+  const gossip = useGossipSdk();
   const navigate = useNavigate();
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -30,7 +32,7 @@ const NewDiscussion: React.FC = () => {
       try {
         setIsLoading(true);
         const list = userProfile?.userId
-          ? await gossipSdk.contacts
+          ? await gossip.contacts
               .list(userProfile.userId)
               .then(arr => arr.sort((a, b) => a.name.localeCompare(b.name)))
           : [];
@@ -43,7 +45,7 @@ const NewDiscussion: React.FC = () => {
     return () => {
       isMounted = false;
     };
-  }, [userProfile?.userId]);
+  }, [userProfile?.userId, gossip]);
 
   const handleClose = () => navigate(ROUTES.default());
   const onNewContact = () => navigate(ROUTES.newContact());
@@ -60,13 +62,13 @@ const NewDiscussion: React.FC = () => {
 
   const onSelectContact = async (contact: Contact) => {
     if (!userProfile?.userId) return;
-    const discussion = await gossipSdk.discussions.get(
+    const discussion = await gossip.discussions.get(
       userProfile.userId,
       contact.userId
     );
     if (
       discussion &&
-      gossipSdk.discussions.getStatus(contact.userId) === SessionStatus.Active
+      gossip.discussions.getStatus(contact.userId) === SessionStatus.Active
     ) {
       navigate(ROUTES.discussion({ userId: contact.userId }));
     }

@@ -7,14 +7,14 @@ import React, {
 } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useDiscussionStore } from '../stores/discussionStore';
-import { updateDiscussionName, db } from '../utils';
 import ContactAvatar from '../components/avatar/ContactAvatar';
 import ContactNameModal from '../components/ui/ContactNameModal';
 import Button from '../components/ui/Button';
 import PageHeader from '../components/ui/PageHeader';
 import PageLayout from '../components/ui/PageLayout';
 import { Check, Edit2, ChevronRight, RotateCw } from 'react-feather';
-import { Contact } from '../db';
+import { Contact, updateDiscussionName } from '@massalabs/gossip-sdk';
+import { getSdk } from '../stores/sdkStore';
 import { ROUTES } from '../constants/routes';
 import { useManualRenewDiscussion } from '../hooks/useManualRenew';
 
@@ -93,7 +93,11 @@ const DiscussionSettings: React.FC = () => {
     async (name?: string) => {
       if (!discussion?.id) return;
 
-      const result = await updateDiscussionName(discussion.id, name, db);
+      const result = await updateDiscussionName(
+        discussion.id,
+        name,
+        getSdk().db
+      );
       if (!result.success) {
         setNameError(result.message);
         return;
