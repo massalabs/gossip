@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { GossipSdk, SdkEventType } from '../../src/gossipSdk';
+import { GossipSdk, SdkEventType } from '../../src/gossip';
 import {
   GossipDatabase,
   type Discussion,
@@ -114,15 +114,14 @@ describe('E2E: Discussion request (user A sends to user B)', () => {
       expect(userAId).toMatch(/^gossip1/);
 
       // ─── A fetches B's public key and adds B as contact ───
-      const keyResult = await sdkA.auth.fetchPublicKeyByUserId(userBId);
-      expect(keyResult.error).toBeUndefined();
-      expect(keyResult.publicKey).toBeDefined();
+      const publicKey = await sdkA.auth.fetchPublicKeyByUserId(userBId);
+      expect(publicKey).toBeDefined();
 
       const addResult = await sdkA.contacts.add(
         userAId,
         userBId,
         'User B',
-        keyResult.publicKey!
+        publicKey
       );
       expect(addResult.success).toBe(true);
       expect(addResult.contact).toBeDefined();

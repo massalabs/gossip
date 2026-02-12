@@ -10,44 +10,22 @@ export type {
   MessageProtocolResponse,
   BulletinItem,
 } from './types';
-export { RestMessageProtocol } from './rest';
-export { MessageProtocol } from './mock';
-
 import type { IMessageProtocol } from './types';
-import {
-  defaultMessageProtocol,
-  protocolConfig,
-  type MessageProtocolType,
-} from '../../config/protocol';
-
+import { protocolConfig } from '../../config/protocol';
 import { RestMessageProtocol } from './rest';
-import { MessageProtocol } from './mock';
 
 /**
  * Factory function to create message protocol instances
  */
 export function createMessageProtocol(
-  type: MessageProtocolType = defaultMessageProtocol,
   config?: Partial<{ baseUrl: string; timeout: number; retryAttempts: number }>
 ): IMessageProtocol {
-  switch (type) {
-    case 'rest': {
-      return new RestMessageProtocol(
-        config?.baseUrl || protocolConfig.baseUrl,
-        config?.timeout || 10000,
-        config?.retryAttempts || 3
-      );
-    }
-    case 'mock': {
-      return new MessageProtocol(
-        config?.baseUrl || protocolConfig.baseUrl,
-        config?.timeout || 10000,
-        config?.retryAttempts || 3
-      );
-    }
-    default:
-      throw new Error(`Unsupported message protocol type: ${type}`);
-  }
+  return new RestMessageProtocol(
+    config?.baseUrl ?? protocolConfig.baseUrl,
+    config?.timeout ?? protocolConfig.timeout,
+    config?.retryAttempts ?? protocolConfig.retryAttempts
+  );
 }
 
 export const restMessageProtocol = createMessageProtocol();
+export { RestMessageProtocol } from './rest';
