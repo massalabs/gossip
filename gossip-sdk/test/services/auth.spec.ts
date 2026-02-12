@@ -150,52 +150,43 @@ describe('AuthService', () => {
 
       const result = await authService.fetchPublicKeyByUserId(testUserId);
 
-      expect(result).toHaveProperty('publicKey');
-      expect(result).not.toHaveProperty('error');
-      expect(result.publicKey).toBeInstanceOf(UserPublicKeys);
+      expect(result).toBeInstanceOf(UserPublicKeys);
       expect(mockMessageProtocol.fetchPublicKeyByUserId).toHaveBeenCalledWith(
         testUserIdBytes
       );
     });
 
-    it('should return error when public key is not found', async () => {
+    it('should throw when public key is not found', async () => {
       const error = new Error(PUBLIC_KEY_NOT_FOUND_ERROR);
       vi.mocked(mockMessageProtocol.fetchPublicKeyByUserId).mockRejectedValue(
         error
       );
 
-      const result = await authService.fetchPublicKeyByUserId(testUserId);
-
-      expect(result).toHaveProperty('error');
-      expect(result).not.toHaveProperty('publicKey');
-      expect(result.error).toBe(PUBLIC_KEY_NOT_FOUND_MESSAGE);
+      await expect(
+        authService.fetchPublicKeyByUserId(testUserId)
+      ).rejects.toThrow(PUBLIC_KEY_NOT_FOUND_MESSAGE);
     });
 
-    it('should return error when fetch fails', async () => {
+    it('should throw when fetch fails', async () => {
       const error = new Error(FAILED_TO_FETCH_ERROR);
       vi.mocked(mockMessageProtocol.fetchPublicKeyByUserId).mockRejectedValue(
         error
       );
 
-      const result = await authService.fetchPublicKeyByUserId(testUserId);
-
-      expect(result).toHaveProperty('error');
-      expect(result.error).toBe(FAILED_TO_FETCH_MESSAGE);
+      await expect(
+        authService.fetchPublicKeyByUserId(testUserId)
+      ).rejects.toThrow(FAILED_TO_FETCH_MESSAGE);
     });
 
-    it('should return error for network errors', async () => {
+    it('should throw for network errors', async () => {
       const error = new Error('Network timeout');
       vi.mocked(mockMessageProtocol.fetchPublicKeyByUserId).mockRejectedValue(
         error
       );
 
-      const result = await authService.fetchPublicKeyByUserId(testUserId);
-
-      expect(result).toHaveProperty('error');
-      expect(result.error).toContain(
-        FAILED_TO_RETRIEVE_CONTACT_PUBLIC_KEY_ERROR
-      );
-      expect(result.error).toContain('Network timeout');
+      await expect(
+        authService.fetchPublicKeyByUserId(testUserId)
+      ).rejects.toThrow('Network timeout');
     });
 
     it('should decode userId correctly before fetching', async () => {

@@ -110,13 +110,13 @@ import { SdkPolling } from './core/SdkPolling';
 import { AnnouncementPayload } from './utils/announcementPayload';
 import { Result } from './utils/type';
 
-// Re-export event types
-export type { SdkEventHandlers };
-export { SdkEventType };
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
+
+export type { SdkEventHandlers };
+
+export { SdkEventType };
 
 export enum SdkStatus {
   UNINITIALIZED = 'uninitialized',
