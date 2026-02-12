@@ -10,7 +10,7 @@ import { UserPublicKeys, UserKeys } from '../src/wasm/bindings';
 import { generateUserKeys } from '../src/wasm/userKeys';
 import { SessionModule } from '../src/wasm/session';
 import { MessageType, MessageDirection, MessageStatus } from '../src/db';
-import { GossipSdkImpl } from '../src/gossipSdk';
+import { GossipSdk } from '../src/gossipSdk';
 import { SessionStatus } from '../src/assets/generated/wasm/gossip_wasm';
 
 /**
@@ -196,8 +196,8 @@ export function cleanupTestSessions(sessions: TestSessionData[]): void {
  * @returns Promise that resolves when the session is fully established
  */
 export async function setupSession(
-  initiatorSdk: GossipSdkImpl,
-  acceptorSdk: GossipSdkImpl,
+  initiatorSdk: GossipSdk,
+  acceptorSdk: GossipSdk,
   initiatorContactName: string = 'Contact 1',
   acceptorContactName: string = 'Contact 2',
   announcementMessage?: string

@@ -1,8 +1,9 @@
 import React from 'react';
 import { Check } from 'react-feather';
 import Select from '../ui/Select';
-import type { TokenState } from '@massalabs/gossip-sdk';
+
 import { formatAmount } from '../../utils/parseAmount';
+import { TokenState } from './types';
 
 interface TokenSelectProps {
   tokens: TokenState[];

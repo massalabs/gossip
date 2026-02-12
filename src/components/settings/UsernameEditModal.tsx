@@ -3,7 +3,7 @@ import BaseModal from '../ui/BaseModal';
 import Button from '../ui/Button';
 import { useKeyDown } from '../../hooks/useKeyDown';
 import { validateUsernameFormat } from '@massalabs/gossip-sdk';
-import { db } from '@massalabs/gossip-sdk';
+import { getSdk } from '../../stores/sdkStore';
 
 interface UsernameEditModalProps {
   isOpen: boolean;
@@ -86,6 +86,7 @@ const UsernameEditModal: React.FC<UsernameEditModalProps> = ({
       // Validate availability (excluding current user)
       setIsValidating(true);
       try {
+        const db = getSdk().db;
         if (!db.isOpen()) {
           await db.open();
         }

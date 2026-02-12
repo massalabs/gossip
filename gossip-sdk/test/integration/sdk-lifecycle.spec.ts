@@ -2,17 +2,16 @@
  * GossipSdk lifecycle and event wiring tests
  *
  * Uses vi.mock() and hoisted state for SDK dependencies.
- * Each test creates a fresh GossipSdkImpl instance in beforeEach so
+ * Each test creates a fresh GossipSdk instance in beforeEach so
  * that module-level state and WASM-backed services don't leak between tests.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { GossipDatabase } from '../../src/db';
 import {
   generateEncryptionKeyFromSeed,
   type EncryptionKey,
 } from '../../src/wasm/encryption';
-import { GossipSdkImpl, SdkEventType } from '../../src/gossipSdk';
+import { GossipSdk, SdkEventType } from '../../src/gossipSdk';
 
 const protocolMock = vi.hoisted(() => ({
   createMessageProtocolMock: vi.fn(),
@@ -32,7 +31,7 @@ const createEventsForEmitter = (emitter: {
   },
 });
 
-let sdk: GossipSdkImpl;
+let sdk: GossipSdk;
 
 vi.mock('../../src/api/messageProtocol', () => ({
   createMessageProtocol: () => protocolMock.createMessageProtocolMock(),
@@ -115,8 +114,8 @@ vi.mock('../../src/services/refresh', () => ({
   },
 }));
 
-describe('GossipSdkImpl lifecycle', () => {
-  beforeEach(async () => {
+describe('GossipSdk lifecycle', () => {
+  beforeEach(() => {
     vi.clearAllMocks();
     protocolMock.createMessageProtocolMock.mockReturnValue({
       fetchMessages: vi.fn(),
@@ -129,11 +128,11 @@ describe('GossipSdkImpl lifecycle', () => {
     });
     eventState.lastEvents = null;
 
-    sdk = new GossipSdkImpl();
+    sdk = new GossipSdk();
   });
 
   it('initializes once and exposes auth service', async () => {
-    await sdk.init({ db: new GossipDatabase() });
+    await sdk.init();
     expect(sdk.isInitialized).toBe(true);
     expect(() => sdk.auth).not.toThrow();
   });
@@ -145,7 +144,7 @@ describe('GossipSdkImpl lifecycle', () => {
   });
 
   it('opens and closes session with getters wired', async () => {
-    await sdk.init({ db: new GossipDatabase() });
+    await sdk.init();
     await sdk.openSession({ mnemonic: 'test words' });
 
     expect(sdk.isSessionOpen).toBe(true);
@@ -165,7 +164,7 @@ describe('GossipSdkImpl lifecycle', () => {
       new Uint8Array(32).fill(0)
     );
 
-    await sdk.init({ db: new GossipDatabase() });
+    await sdk.init();
     await sdk.openSession({
       mnemonic,
     });
@@ -183,7 +182,7 @@ describe('GossipSdkImpl lifecycle', () => {
   it('throws an error when encryptedSession cannot be loaded with the provided encryptionKey', async () => {
     const mnemonic = 'test words long enough to generate an encryption key';
 
-    await sdk.init({ db: new GossipDatabase() });
+    await sdk.init();
     await sdk.openSession({
       mnemonic,
     });
@@ -206,7 +205,7 @@ describe('GossipSdkImpl lifecycle', () => {
   it('bridges message events to sdk.on handlers', async () => {
     const handler = vi.fn();
 
-    await sdk.init({ db: new GossipDatabase() });
+    await sdk.init();
     sdk.on(SdkEventType.MESSAGE_RECEIVED, handler);
     await sdk.openSession({ mnemonic: 'test words' });
 

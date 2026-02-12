@@ -3,7 +3,7 @@ import BaseModal from '../components/ui/BaseModal';
 import PageLayout from '../components/ui/PageLayout';
 import PageHeader from '../components/ui/PageHeader';
 import { useAccountStore } from '../stores/accountStore';
-import { gossipSdk } from '@massalabs/gossip-sdk';
+import { useGossipSdk } from '../hooks/useGossipSdk';
 import Button from '../components/ui/Button';
 import UserIdDisplay from '../components/ui/UserIdDisplay';
 import CopyClipboard from '../components/ui/CopyClipboard';
@@ -40,6 +40,7 @@ const REQUIRED_TAPS = 7;
 const TAP_TIMEOUT_MS = 2000; // Reset counter after 2 seconds of inactivity
 
 const Settings = (): React.ReactElement => {
+  const gossip = useGossipSdk();
   const {
     userProfile,
     getMnemonicBackupInfo,
@@ -149,7 +150,7 @@ const Settings = (): React.ReactElement => {
         onBack={handleBack}
         userId={userProfile!.userId}
         userName={userProfile!.username}
-        publicKey={gossipSdk.publicKeys}
+        publicKey={gossip.publicKeys}
         mnsDomains={
           mnsEnabled && mnsDomains.length > 0 ? mnsDomains : undefined
         }
