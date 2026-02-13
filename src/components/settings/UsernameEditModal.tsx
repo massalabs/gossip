@@ -2,8 +2,10 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import BaseModal from '../ui/BaseModal';
 import Button from '../ui/Button';
 import { useKeyDown } from '../../hooks/useKeyDown';
-import { validateUsernameFormat } from '@massalabs/gossip-sdk';
-import { getSdk } from '../../stores/sdkStore';
+import {
+  validateUsernameFormat,
+  getUserProfileByUsernameLowerExcluding,
+} from '@massalabs/gossip-sdk';
 
 interface UsernameEditModalProps {
   isOpen: boolean;
@@ -86,18 +88,10 @@ const UsernameEditModal: React.FC<UsernameEditModalProps> = ({
       // Validate availability (excluding current user)
       setIsValidating(true);
       try {
-        const db = getSdk().db;
-        if (!db.isOpen()) {
-          await db.open();
-        }
-
-        const existingProfile = await db.userProfile
-          .filter(
-            profile =>
-              profile.username.trim().toLowerCase() === trimmed.toLowerCase() &&
-              profile.userId !== currentUserId
-          )
-          .first();
+        const existingProfile = await getUserProfileByUsernameLowerExcluding(
+          trimmed,
+          currentUserId
+        );
 
         if (existingProfile) {
           setError('This username is already in use. Please choose another.');

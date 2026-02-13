@@ -107,7 +107,7 @@ src/
 
 ## Database Schema
 
-Gossip uses Dexie (IndexedDB) for local data storage with the following entities:
+Gossip uses SQLite for local data storage with the following entities:
 
 - **UserProfile**: User account information and blockchain credentials
 - **Contacts**: Contact list with usernames and public keys

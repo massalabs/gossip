@@ -2,17 +2,18 @@
  * RefreshService tests
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { RefreshService } from '../../src/services/refresh';
 import { MessageService } from '../../src/services/message';
 import { DiscussionService } from '../../src/services/discussion';
 import { AnnouncementService } from '../../src/services/announcement';
 import {
-  gossipDb,
-  GossipDatabase,
   MessageType,
   DiscussionDirection,
+  DiscussionStatus,
 } from '../../src/db';
+import { clearAllTables } from '../../src/sqlite';
+import { insertDiscussion } from '../../src/queries/discussions';
 import type { SessionModule } from '../../src/wasm/session';
 import { encodeUserId, decodeUserId } from '../../src/utils/userId';
 import { SessionStatus } from '../../src/assets/generated/wasm/gossip_wasm';
@@ -67,14 +68,9 @@ function createRefreshAnnouncementService(): AnnouncementService {
 
 describe('RefreshService', () => {
   let eventEmitter: SdkEventEmitter;
-  let db: GossipDatabase;
 
   beforeEach(async () => {
-    db = gossipDb();
-    if (!db.isOpen()) {
-      await db.open();
-    }
-    await Promise.all(db.tables.map(table => table.clear()));
+    await clearAllTables();
     eventEmitter = new SdkEventEmitter();
   });
 
@@ -86,7 +82,6 @@ describe('RefreshService', () => {
       const mockAnnouncementService = createRefreshAnnouncementService();
 
       const refreshService = new RefreshService(
-        db,
         mockMessageService,
         mockDiscussionService,
         mockAnnouncementService,
@@ -95,10 +90,11 @@ describe('RefreshService', () => {
       );
 
       // Create a discussion in the database
-      await db.discussions.add({
+      await insertDiscussion({
         ownerUserId: REFRESH_OWNER_USER_ID,
         contactUserId: REFRESH_CONTACT_USER_ID,
         direction: DiscussionDirection.INITIATED,
+        status: DiscussionStatus.ACTIVE,
         weAccepted: true,
         sendAnnouncement: null,
         unreadCount: 0,
@@ -123,7 +119,6 @@ describe('RefreshService', () => {
       const mockAnnouncementService = createRefreshAnnouncementService();
 
       const refreshService = new RefreshService(
-        db,
         mockMessageService,
         mockDiscussionService,
         mockAnnouncementService,
@@ -132,10 +127,11 @@ describe('RefreshService', () => {
       );
 
       // Create a discussion in the database
-      await db.discussions.add({
+      await insertDiscussion({
         ownerUserId: REFRESH_OWNER_USER_ID,
         contactUserId: REFRESH_CONTACT_USER_ID,
         direction: DiscussionDirection.INITIATED,
+        status: DiscussionStatus.ACTIVE,
         weAccepted: true,
         sendAnnouncement: null,
         unreadCount: 0,
@@ -160,7 +156,6 @@ describe('RefreshService', () => {
       const mockAnnouncementService = createRefreshAnnouncementService();
 
       const refreshService = new RefreshService(
-        db,
         mockMessageService,
         mockDiscussionService,
         mockAnnouncementService,
@@ -169,10 +164,11 @@ describe('RefreshService', () => {
       );
 
       // Create a discussion in the database
-      await db.discussions.add({
+      await insertDiscussion({
         ownerUserId: REFRESH_OWNER_USER_ID,
         contactUserId: REFRESH_CONTACT_USER_ID,
         direction: DiscussionDirection.INITIATED,
+        status: DiscussionStatus.ACTIVE,
         weAccepted: true,
         sendAnnouncement: null,
         unreadCount: 0,
@@ -200,7 +196,6 @@ describe('RefreshService', () => {
       const mockAnnouncementService = createRefreshAnnouncementService();
 
       const refreshService = new RefreshService(
-        db,
         mockMessageService,
         mockDiscussionService,
         mockAnnouncementService,
@@ -209,10 +204,11 @@ describe('RefreshService', () => {
       );
 
       // Create a discussion in the database
-      await db.discussions.add({
+      await insertDiscussion({
         ownerUserId: REFRESH_OWNER_USER_ID,
         contactUserId: REFRESH_CONTACT_USER_ID,
         direction: DiscussionDirection.INITIATED,
+        status: DiscussionStatus.ACTIVE,
         weAccepted: true,
         sendAnnouncement: null,
         unreadCount: 0,
@@ -232,7 +228,6 @@ describe('RefreshService', () => {
       const mockAnnouncementService = createRefreshAnnouncementService();
 
       const refreshService = new RefreshService(
-        db,
         mockMessageService,
         mockDiscussionService,
         mockAnnouncementService,
@@ -241,10 +236,11 @@ describe('RefreshService', () => {
       );
 
       // Create a discussion in the database
-      await db.discussions.add({
+      await insertDiscussion({
         ownerUserId: REFRESH_OWNER_USER_ID,
         contactUserId: REFRESH_CONTACT_USER_ID,
         direction: DiscussionDirection.INITIATED,
+        status: DiscussionStatus.ACTIVE,
         weAccepted: true,
         sendAnnouncement: null,
         unreadCount: 0,

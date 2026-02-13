@@ -3,7 +3,6 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { gossipDb, GossipDatabase } from '../../src/db';
 import { encodeUserId } from '../../src/utils/userId';
 import {
   validatePassword,
@@ -12,20 +11,12 @@ import {
   validateUsernameFormatAndAvailability,
   validateUserIdFormat,
 } from '../../src/utils/validation';
+import { getSqliteDb, clearAllTables } from '../../src/sqlite';
+import * as schema from '../../src/schema';
 
 const VALIDATION_OWNER_USER_ID = encodeUserId(new Uint8Array(32).fill(13));
 
 describe('validation utilities', () => {
-  let db: GossipDatabase;
-
-  beforeEach(async () => {
-    db = gossipDb();
-    if (!db.isOpen()) {
-      await db.open();
-    }
-    await Promise.all(db.tables.map(table => table.clear()));
-  });
-
   describe('validatePassword', () => {
     it('should reject empty password', () => {
       const result = validatePassword('');
@@ -133,40 +124,42 @@ describe('validation utilities', () => {
   });
 
   describe('validateUsernameAvailability', () => {
+    beforeEach(async () => {
+      await clearAllTables();
+    });
+
     it('checks username availability case-insensitively', async () => {
-      await db.userProfile.put({
+      const sqliteDb = getSqliteDb();
+      await sqliteDb.insert(schema.userProfile).values({
         userId: VALIDATION_OWNER_USER_ID,
         username: 'Alice',
-        security: {
-          encKeySalt: new Uint8Array(),
+        security: JSON.stringify({
+          encKeySalt: [],
           authMethod: 'password',
           mnemonicBackup: {
-            encryptedMnemonic: new Uint8Array(),
-            createdAt: new Date(),
+            encryptedMnemonic: [],
+            createdAt: Date.now(),
             backedUp: false,
           },
-        },
-        session: new Uint8Array(),
+        }),
+        session: new Uint8Array(1),
         status: 'online',
         lastSeen: new Date(),
         createdAt: new Date(),
         updatedAt: new Date(),
       });
 
-      const result = await validateUsernameAvailability('alice', db);
+      const result = await validateUsernameAvailability('alice');
       expect(result.valid).toBe(false);
     });
   });
 
   describe('validateUsernameFormatAndAvailability', () => {
     it('validates username format and availability', async () => {
-      const invalid = await validateUsernameFormatAndAvailability('ab', db);
+      const invalid = await validateUsernameFormatAndAvailability('ab');
       expect(invalid.valid).toBe(false);
 
-      const valid = await validateUsernameFormatAndAvailability(
-        'validname',
-        db
-      );
+      const valid = await validateUsernameFormatAndAvailability('validname');
       expect(valid.valid).toBe(true);
     });
   });

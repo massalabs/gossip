@@ -6,11 +6,12 @@
  */
 
 import {
-  type GossipDatabase,
   MessageType,
   MessageDirection,
   MessageStatus,
+  rowToDiscussion,
 } from '../db';
+import { getDiscussionsByOwner } from '../queries';
 import type { SessionModule } from '../wasm/session';
 import { SessionStatus } from '../wasm/bindings';
 import { decodeUserId, encodeUserId } from '../utils/userId';
@@ -28,11 +29,11 @@ const logger = new Logger('RefreshService');
  * @example
  * ```typescript
  * const refreshService = new RefreshService(
- *   db,
  *   messageService,
  *   discussionService,
  *   announcementService,
- *   session
+ *   session,
+ *   eventEmitter
  * );
  *
  * // Handle session refresh for active discussions
@@ -40,7 +41,6 @@ const logger = new Logger('RefreshService');
  * ```
  */
 export class RefreshService {
-  private db: GossipDatabase;
   private messageService: MessageService;
   private announcementService: AnnouncementService;
   private discussionService: DiscussionService;
@@ -49,14 +49,12 @@ export class RefreshService {
   private eventEmitter: SdkEventEmitter;
 
   constructor(
-    db: GossipDatabase,
     messageService: MessageService,
     discussionService: DiscussionService,
     announcementService: AnnouncementService,
     session: SessionModule,
     eventEmitter: SdkEventEmitter
   ) {
-    this.db = db;
     this.messageService = messageService;
     this.discussionService = discussionService;
     this.announcementService = announcementService;
@@ -89,7 +87,20 @@ export class RefreshService {
         return;
       }
 
-      const discussions = await this.db.getDiscussionsByOwner(ownerUserId);
+      const allRows = await getDiscussionsByOwner(ownerUserId);
+      const discussions = allRows
+        .map(r => rowToDiscussion(r as Record<string, unknown>))
+        .sort((a, b) => {
+          if (a.lastMessageTimestamp && b.lastMessageTimestamp) {
+            return (
+              b.lastMessageTimestamp.getTime() -
+              a.lastMessageTimestamp.getTime()
+            );
+          }
+          if (a.lastMessageTimestamp) return -1;
+          if (b.lastMessageTimestamp) return 1;
+          return b.createdAt.getTime() - a.createdAt.getTime();
+        });
 
       if (!discussions.length) {
         return;
@@ -149,8 +160,20 @@ export class RefreshService {
       }
 
       // Step 2: send announcements
-      const discussionsAfterRefresh =
-        await this.db.getDiscussionsByOwner(ownerUserId);
+      const refreshRows = await getDiscussionsByOwner(ownerUserId);
+      const discussionsAfterRefresh = refreshRows
+        .map(r => rowToDiscussion(r as Record<string, unknown>))
+        .sort((a, b) => {
+          if (a.lastMessageTimestamp && b.lastMessageTimestamp) {
+            return (
+              b.lastMessageTimestamp.getTime() -
+              a.lastMessageTimestamp.getTime()
+            );
+          }
+          if (a.lastMessageTimestamp) return -1;
+          if (b.lastMessageTimestamp) return 1;
+          return b.createdAt.getTime() - a.createdAt.getTime();
+        });
       const activePendingDiscussions = discussionsAfterRefresh.filter(
         discussion => {
           const status = this.session.peerSessionStatus(

@@ -7,11 +7,27 @@
 
 import {
   type Message,
-  type GossipDatabase,
   MessageDirection,
   MessageStatus,
   MessageType,
 } from '../db';
+import {
+  type MessageRow,
+  getMessageById,
+  getMessageByOwnerAndSeeker,
+  insertMessage,
+  updateMessageById,
+  deleteDeliveredKeepAliveMessages,
+  getOutgoingSentMessagesByOwner,
+  getWaitingMessageCount as getWaitingCount,
+  getSendQueueMessages,
+  findDuplicateIncomingMessage,
+} from '../queries';
+import {
+  getDiscussionByOwnerAndContact,
+  updateDiscussionById,
+} from '../queries';
+import { replaceActiveSeekers } from '../queries';
 import { decodeUserId, encodeUserId } from '../utils/userId';
 import { IMessageProtocol, EncryptedMessage } from '../api/messageProtocol';
 import { SessionStatus } from '../wasm/bindings';
@@ -23,13 +39,79 @@ import {
   serializeKeepAliveMessage,
   deserializeMessage,
 } from '../utils/messageSerialization';
-import { encodeToBase64 } from '../utils/base64';
+import { encodeToBase64, decodeFromBase64 } from '../utils/base64';
 import { Result } from '../utils/type';
 import { sessionStatusToString } from '../wasm/session';
 import { Logger } from '../utils/logs';
 import { SdkConfig, defaultSdkConfig } from '../config/sdk';
 import { DiscussionService } from './discussion';
 import { SdkEventEmitter, SdkEventType } from '../core/SdkEventEmitter';
+import type { RefreshService } from './refresh';
+
+// ---------------------------------------------------------------------------
+// JSON serialization helpers for message fields stored as text in SQLite
+// ---------------------------------------------------------------------------
+
+/** Serialize replyTo/forwardOf to JSON string for SQLite storage.
+ *  Uint8Array fields are base64-encoded. */
+function serializeLinkedMessage(
+  linked: { originalContent?: string; originalSeeker: Uint8Array } | undefined
+): string | null {
+  if (!linked) return null;
+  return JSON.stringify({
+    originalContent: linked.originalContent,
+    originalSeeker: encodeToBase64(linked.originalSeeker),
+  });
+}
+
+/** Deserialize replyTo/forwardOf from JSON string back to the Message interface shape. */
+function deserializeLinkedMessage(
+  json: string | null
+): { originalContent?: string; originalSeeker: Uint8Array } | undefined {
+  if (!json) return undefined;
+  const parsed = JSON.parse(json);
+  return {
+    originalContent: parsed.originalContent ?? undefined,
+    originalSeeker: decodeFromBase64(parsed.originalSeeker),
+  };
+}
+
+/** Serialize metadata to JSON string. */
+function serializeMetadata(
+  metadata: Record<string, unknown> | undefined
+): string | null {
+  if (!metadata) return null;
+  return JSON.stringify(metadata);
+}
+
+/** Deserialize metadata from JSON string. */
+function deserializeMetadata(
+  json: string | null
+): Record<string, unknown> | undefined {
+  if (!json) return undefined;
+  return JSON.parse(json);
+}
+
+/** Convert a SQLite row from the messages table to a Message object. */
+export function rowToMessage(row: MessageRow): Message {
+  return {
+    id: row.id,
+    ownerUserId: row.ownerUserId,
+    contactUserId: row.contactUserId,
+    content: row.content,
+    serializedContent: row.serializedContent ?? undefined,
+    type: row.type as MessageType,
+    direction: row.direction as MessageDirection,
+    status: row.status as MessageStatus,
+    timestamp: row.timestamp,
+    metadata: deserializeMetadata(row.metadata),
+    seeker: row.seeker ?? undefined,
+    replyTo: deserializeLinkedMessage(row.replyTo),
+    forwardOf: deserializeLinkedMessage(row.forwardOf),
+    encryptedMessage: row.encryptedMessage ?? undefined,
+    whenToSend: row.whenToSend ?? undefined,
+  };
+}
 
 export interface MessageResult {
   success: boolean;
@@ -64,30 +146,32 @@ const sleep = (ms: number) => new Promise(res => setTimeout(res, ms));
 
 const logger = new Logger('MessageService');
 export class MessageService {
-  private db: GossipDatabase;
   private messageProtocol: IMessageProtocol;
   private session: SessionModule;
   private discussionService: DiscussionService;
   private eventEmitter: SdkEventEmitter;
   private config: SdkConfig;
+  private refreshService?: RefreshService;
   private processingContacts = new Set<string>();
   private isFetchingMessages = false;
 
   constructor(
-    db: GossipDatabase,
     messageProtocol: IMessageProtocol,
     session: SessionModule,
     discussionService: DiscussionService,
     eventEmitter: SdkEventEmitter,
     config: SdkConfig = defaultSdkConfig
   ) {
-    this.db = db;
     this.messageProtocol = messageProtocol;
     this.session = session;
     this.discussionService = discussionService;
     this.eventEmitter = eventEmitter;
     this.config = config;
     void this.discussionService;
+  }
+
+  setRefreshService(refreshService: RefreshService): void {
+    this.refreshService = refreshService;
   }
 
   async fetchMessages(): Promise<MessageResult> {
@@ -168,7 +252,7 @@ export class MessageService {
       }
 
       try {
-        await this.db.setActiveSeekers(seekers);
+        await replaceActiveSeekers(seekers);
       } catch (error) {
         log.error('failed to update active seekers', error);
       }
@@ -188,6 +272,50 @@ export class MessageService {
     } finally {
       this.isFetchingMessages = false;
     }
+  }
+
+  /**
+   * Add a message to SQLite and update the corresponding discussion.
+   */
+  private async addMessageAndUpdateDiscussion(
+    message: Omit<Message, 'id'>
+  ): Promise<number> {
+    const messageId = await insertMessage({
+      ownerUserId: message.ownerUserId,
+      contactUserId: message.contactUserId,
+      content: message.content,
+      serializedContent: message.serializedContent,
+      type: message.type,
+      direction: message.direction,
+      status: message.status,
+      timestamp: message.timestamp,
+      metadata: serializeMetadata(message.metadata),
+      seeker: message.seeker,
+      replyTo: serializeLinkedMessage(message.replyTo),
+      forwardOf: serializeLinkedMessage(message.forwardOf),
+      encryptedMessage: message.encryptedMessage,
+      whenToSend: message.whenToSend,
+    });
+
+    const discussion = await getDiscussionByOwnerAndContact(
+      message.ownerUserId,
+      message.contactUserId
+    );
+
+    if (discussion) {
+      await updateDiscussionById(discussion.id, {
+        lastMessageId: messageId,
+        lastMessageContent: message.content,
+        lastMessageTimestamp: message.timestamp,
+        unreadCount:
+          message.direction === MessageDirection.INCOMING
+            ? discussion.unreadCount + 1
+            : discussion.unreadCount,
+        updatedAt: new Date(),
+      });
+    }
+
+    return messageId;
   }
 
   private async decryptMessages(encrypted: EncryptedMessage[]): Promise<{
@@ -268,112 +396,106 @@ export class MessageService {
     const storedIds: number[] = [];
 
     for (const message of decrypted) {
-      const result = await this.db.transaction(
-        'rw',
-        this.db.messages,
-        this.db.discussions,
-        async () => {
-          const discussion = await this.db.getDiscussionByOwnerAndContact(
-            ownerUserId,
-            message.senderId
-          );
-
-          if (!discussion) {
-            log.error('no discussion for incoming message', {
-              senderId: message.senderId,
-              preview: message.content.slice(0, 50),
-            });
-            return null;
-          }
-
-          // Check for duplicate message (same content + similar timestamp from same sender)
-          // This handles edge case: app crashes after network send but before DB update,
-          // message gets re-sent on restart, peer receives duplicate
-          const isDuplicate = await this.isDuplicateMessage(
-            ownerUserId,
-            message.senderId,
-            message.content,
-            message.sentAt
-          );
-
-          if (isDuplicate) {
-            log.info('skipping duplicate message', {
-              senderId: message.senderId,
-              preview: message.content.slice(0, 30),
-              timestamp: message.sentAt.toISOString(),
-            });
-            return null;
-          }
-
-          let replyToMessageId: number | undefined;
-          if (message.replyTo?.originalSeeker) {
-            const original = await this.findMessageBySeeker(
-              message.replyTo.originalSeeker,
-              ownerUserId
-            );
-            if (!original) {
-              log.warn('reply target not found', {
-                originalSeeker: encodeToBase64(message.replyTo.originalSeeker),
-              });
-            }
-            replyToMessageId = original?.id;
-          }
-
-          const id = await this.db.messages.add({
-            ownerUserId,
-            contactUserId: discussion.contactUserId,
-            content: message.content,
-            type: message.type,
-            direction: MessageDirection.INCOMING,
-            status: MessageStatus.DELIVERED,
-            timestamp: message.sentAt,
-            metadata: {},
-            seeker: message.seeker, // Store the seeker of the incoming message
-            replyTo: message.replyTo
-              ? {
-                  // Store the original content as a fallback only if we couldn't find
-                  // the original message in the database (replyToMessageId is undefined).
-                  // If the original message exists, we don't need to store the content
-                  // since we can fetch it using the originalSeeker.
-                  originalContent: replyToMessageId
-                    ? undefined
-                    : message.replyTo.originalContent,
-                  // Store the seeker (used to find the original message)
-                  originalSeeker: message.replyTo.originalSeeker,
-                }
-              : undefined,
-
-            forwardOf: message.forwardOf
-              ? {
-                  originalContent: message.forwardOf.originalContent,
-                  originalSeeker: message.forwardOf.originalSeeker,
-                }
-              : undefined,
-          });
-          const now = new Date();
-          await this.db.discussions.update(discussion.id, {
-            lastMessageId: id,
-            lastMessageContent: message.content,
-            lastMessageTimestamp: message.sentAt,
-            updatedAt: now,
-            lastSyncTimestamp: now,
-            unreadCount: discussion.unreadCount + 1,
-          });
-          return id;
-        }
+      const discussion = await getDiscussionByOwnerAndContact(
+        ownerUserId,
+        message.senderId
       );
 
-      if (result === null) {
+      if (!discussion) {
+        log.error('no discussion for incoming message', {
+          senderId: message.senderId,
+          preview: message.content.slice(0, 50),
+        });
         continue;
       }
 
-      const id = result;
+      // Check for duplicate message (same content + similar timestamp from same sender)
+      // This handles edge case: app crashes after network send but before DB update,
+      // message gets re-sent on restart, peer receives duplicate
+      const isDuplicate = await this.isDuplicateMessage(
+        ownerUserId,
+        message.senderId,
+        message.content,
+        message.sentAt
+      );
+
+      if (isDuplicate) {
+        log.info('skipping duplicate message', {
+          senderId: message.senderId,
+          preview: message.content.slice(0, 30),
+          timestamp: message.sentAt.toISOString(),
+        });
+        continue;
+      }
+
+      let replyToMessageId: number | undefined;
+      if (message.replyTo?.originalSeeker) {
+        const original = await this.findMessageBySeeker(
+          message.replyTo.originalSeeker,
+          ownerUserId
+        );
+        if (!original) {
+          log.warn('reply target not found', {
+            originalSeeker: encodeToBase64(message.replyTo.originalSeeker),
+          });
+        }
+        replyToMessageId = original?.id;
+      }
+
+      const replyToField = message.replyTo
+        ? {
+            // Store the original content as a fallback only if we couldn't find
+            // the original message in the database (replyToMessageId is undefined).
+            // If the original message exists, we don't need to store the content
+            // since we can fetch it using the originalSeeker.
+            originalContent: replyToMessageId
+              ? undefined
+              : message.replyTo.originalContent,
+            // Store the seeker (used to find the original message)
+            originalSeeker: message.replyTo.originalSeeker,
+          }
+        : undefined;
+      const forwardOfField = message.forwardOf
+        ? {
+            originalContent: message.forwardOf.originalContent,
+            originalSeeker: message.forwardOf.originalSeeker,
+          }
+        : undefined;
+
+      const id = await insertMessage({
+        ownerUserId,
+        contactUserId: discussion.contactUserId,
+        content: message.content,
+        type: message.type,
+        direction: MessageDirection.INCOMING,
+        status: MessageStatus.DELIVERED,
+        timestamp: message.sentAt,
+        metadata: serializeMetadata({}),
+        seeker: message.seeker,
+        replyTo: serializeLinkedMessage(replyToField),
+        forwardOf: serializeLinkedMessage(forwardOfField),
+      });
+
+      // Update discussion in SQLite
+      const now = new Date();
+      await updateDiscussionById(discussion.id, {
+        lastMessageId: id,
+        lastMessageContent: message.content,
+        lastMessageTimestamp: message.sentAt,
+        updatedAt: now,
+        lastSyncTimestamp: now,
+        unreadCount: discussion.unreadCount + 1,
+      });
+
       storedIds.push(id);
 
       // Emit event for new message
-      const storedMessage = await this.db.messages.get(id);
-      if (storedMessage) {
-        this.eventEmitter.emit(SdkEventType.MESSAGE_RECEIVED, storedMessage);
+      const row = await getMessageById(id);
+      if (row) {
+        this.eventEmitter.emit(
+          SdkEventType.MESSAGE_RECEIVED,
+          rowToMessage(row)
+        );
       }
     }
 
@@ -411,18 +533,13 @@ export class MessageService {
     const windowStart = new Date(timestamp.getTime() - windowMs);
     const windowEnd = new Date(timestamp.getTime() + windowMs);
 
-    // Query for messages from same sender with same content within time window
-    const existing = await this.db.messages
-      .where('[ownerUserId+contactUserId]')
-      .equals([ownerUserId, contactUserId])
-      .and(
-        msg =>
-          msg.direction === MessageDirection.INCOMING &&
-          msg.content === content &&
-          msg.timestamp >= windowStart &&
-          msg.timestamp <= windowEnd
-      )
-      .first();
+    const existing = await findDuplicateIncomingMessage(
+      ownerUserId,
+      contactUserId,
+      content,
+      windowStart,
+      windowEnd
+    );
 
     return existing !== undefined;
   }
@@ -431,10 +548,8 @@ export class MessageService {
     seeker: Uint8Array,
     ownerUserId: string
   ): Promise<Message | undefined> {
-    return await this.db.messages
-      .where('[ownerUserId+seeker]')
-      .equals([ownerUserId, seeker])
-      .first();
+    const row = await getMessageByOwnerAndSeeker(ownerUserId, seeker);
+    return row ? rowToMessage(row) : undefined;
   }
 
   private async acknowledgeMessages(
@@ -443,42 +558,29 @@ export class MessageService {
   ): Promise<void> {
     if (seekers.size === 0) return;
 
-    const updatedCount = await this.db.transaction(
-      'rw',
-      this.db.messages,
-      async () => {
-        // Mark matching OUTGOING SENT messages as DELIVERED
-        const count = await this.db.messages
-          .where('[ownerUserId+direction+status]')
-          .equals([userId, MessageDirection.OUTGOING, MessageStatus.SENT])
-          .filter(
-            message =>
-              message.seeker !== undefined &&
-              seekers.has(encodeToBase64(message.seeker))
-          )
-          .modify({
-            status: MessageStatus.DELIVERED,
-            encryptedMessage: undefined,
-            whenToSend: undefined,
-          });
+    // Find SENT outgoing messages, then filter by seeker match
+    const candidates = await getOutgoingSentMessagesByOwner(userId);
 
-        // After marking as DELIVERED, clean up DELIVERED keep-alive messages
-        await this.db.messages
-          .where({
-            ownerUserId: userId,
-            status: MessageStatus.DELIVERED,
-            type: MessageType.KEEP_ALIVE,
-          })
-          .delete();
-
-        return count;
-      }
+    const toUpdate = candidates.filter(
+      m => m.seeker != null && seekers.has(encodeToBase64(m.seeker))
     );
 
-    if (updatedCount > 0) {
+    // Mark matching OUTGOING SENT messages as DELIVERED and clear encrypted data
+    for (const m of toUpdate) {
+      await updateMessageById(m.id, {
+        status: MessageStatus.DELIVERED,
+        encryptedMessage: null,
+        whenToSend: null,
+      });
+    }
+
+    // After marking as DELIVERED, clean up DELIVERED keep-alive messages
+    await deleteDeliveredKeepAliveMessages(userId);
+
+    if (toUpdate.length > 0) {
       logger
         .forMethod('acknowledgeMessages')
-        .info(`acknowledged ${updatedCount} messages`);
+        .info(`acknowledged ${toUpdate.length} messages`);
     }
   }
 
@@ -499,39 +601,27 @@ export class MessageService {
       };
     }
 
-    // Run getDiscussionByOwnerAndContact and addMessage in a transaction
-    let discussion;
-    let messageId;
-
-    const error = await this.db.transaction(
-      'rw',
-      this.db.discussions,
-      this.db.messages,
-      async () => {
-        discussion = await this.db.getDiscussionByOwnerAndContact(
-          message.ownerUserId,
-          message.contactUserId
-        );
-        if (!discussion) {
-          // If the discussion doesn't exist (it may have been deleted by the user), Dexie aborts the transaction.
-          return new Error('Discussion not found');
-        }
-
-        try {
-          messageId = await this.db.addMessage({
-            ...message,
-            status: MessageStatus.WAITING_SESSION,
-          });
-        } catch (error) {
-          return new Error(
-            'Failed to add message to database, got error: ' + error
-          );
-        }
-      }
+    // Look up discussion
+    const discussion = await getDiscussionByOwnerAndContact(
+      message.ownerUserId,
+      message.contactUserId
     );
+    if (!discussion) {
+      return { success: false, error: 'Discussion not found' };
+    }
 
-    if (error) {
-      return { success: false, error: error.message };
+    // Add message as WAITING_SESSION
+    let messageId: number;
+    try {
+      messageId = await this.addMessageAndUpdateDiscussion({
+        ...message,
+        status: MessageStatus.WAITING_SESSION,
+      });
+    } catch (error) {
+      return {
+        success: false,
+        error: 'Failed to add message to database, got error: ' + error,
+      };
     }
 
     const queuedMessage = {
@@ -539,6 +629,12 @@ export class MessageService {
       id: messageId,
       status: MessageStatus.WAITING_SESSION,
     };
+
+    /*
+    Trigger a state update to send the new message.
+    If the stateUpdate function is already running, it will be skipped.
+    */
+    await this.refreshService?.stateUpdate();
 
     return {
       success: true,
@@ -615,11 +711,11 @@ export class MessageService {
 
       for (const msg of retryMessages) {
         if (!msg.id) continue;
-        await this.db.messages.update(msg.id, {
+        await updateMessageById(msg.id, {
           status: MessageStatus.WAITING_SESSION,
-          encryptedMessage: undefined,
-          seeker: undefined,
-          whenToSend: undefined,
+          encryptedMessage: null,
+          seeker: null,
+          whenToSend: null,
         });
       }
 
@@ -649,7 +745,7 @@ export class MessageService {
 
     this.processingContacts.add(contactUserId);
     try {
-      const discussion = await this.db.getDiscussionByOwnerAndContact(
+      const discussion = await getDiscussionByOwnerAndContact(
         ownerUserId,
         contactUserId
       );
@@ -680,18 +776,10 @@ export class MessageService {
         };
       }
 
-      // retrieve all message in send queue that need to be updated for this contact
-      const pendingMessages = await this.db.messages
-        .where('[ownerUserId+contactUserId]')
-        .equals([ownerUserId, contactUserId])
-        .and(
-          msg =>
-            msg.direction === MessageDirection.OUTGOING &&
-            [MessageStatus.WAITING_SESSION, MessageStatus.READY].includes(
-              msg.status
-            )
-        )
-        .sortBy('timestamp');
+      // retrieve all messages in send queue that need to be updated for this contact
+      const pendingMessages = (
+        await getSendQueueMessages(ownerUserId, contactUserId)
+      ).map(rowToMessage);
 
       log.debug('pending messages', {
         pendingMessages: pendingMessages.map(msg => ({
@@ -753,7 +841,7 @@ export class MessageService {
           seeker = sendOutput.seeker;
           whenToSend = new Date();
 
-          await this.db.messages.update(msg.id, {
+          await updateMessageById(msg.id, {
             status: MessageStatus.READY,
             encryptedMessage,
             seeker,
@@ -785,11 +873,11 @@ export class MessageService {
           }
 
           if (!encryptedMessage || !seeker) {
-            await this.db.messages.update(msg.id, {
+            await updateMessageById(msg.id, {
               status: MessageStatus.WAITING_SESSION,
-              encryptedMessage: undefined,
-              seeker: undefined,
-              whenToSend: undefined,
+              encryptedMessage: null,
+              seeker: null,
+              whenToSend: null,
             });
             log.debug(
               'message has no encryptedMessage or seeker, updated to WAITING_SESSION',
@@ -814,32 +902,20 @@ export class MessageService {
               ciphertext: encryptedMessage,
             });
 
-            // update the db
-            const sent = await this.db.transaction(
-              'rw',
-              this.db.messages,
-              async () => {
-                try {
-                  const latest = await this.db.messages.get(msg.id);
-                  if (
-                    latest && // ensure the discussion has not been deleted
-                    latest.status === MessageStatus.READY // ensure the discussion has not been reset with all pending messages reset to WAITING_SESSION
-                  ) {
-                    await this.db.messages.update(msg.id, {
-                      status: MessageStatus.SENT,
-                    });
-                    return true;
-                  }
-                } catch (error) {
-                  log.error('failed to update message status to SENT', {
-                    messageId: msg.id,
-                    error,
-                  });
-                  return false;
-                }
-                return false;
-              }
-            );
+            // update the db — check latest state to avoid race conditions
+            const latestRow = await getMessageById(msg.id);
+
+            let sent = false;
+            if (
+              latestRow && // ensure the discussion has not been deleted
+              latestRow.status === MessageStatus.READY // ensure the discussion has not been reset with all pending messages reset to WAITING_SESSION
+            ) {
+              await updateMessageById(msg.id, {
+                status: MessageStatus.SENT,
+              });
+              sent = true;
+            }
+
             if (sent) {
               sentCount++;
               log.debug('message sent', {
@@ -866,19 +942,17 @@ export class MessageService {
               messageId: msg.id,
               error,
             });
-            await this.db.transaction('rw', this.db.messages, async () => {
-              const latest = await this.db.messages.get(msg.id);
-              if (
-                latest && // ensure the discussion has not been deleted
-                latest.status === MessageStatus.READY // ensure the discussion has not been reset with all pending messages reset to WAITING_SESSION
-              ) {
-                await this.db.messages.update(msg.id, {
-                  whenToSend: new Date(
-                    Date.now() + this.config.messages.retryDelayMs
-                  ),
-                });
-              }
-            });
+            const latestRow = await getMessageById(msg.id);
+            if (
+              latestRow && // ensure the discussion has not been deleted
+              latestRow.status === MessageStatus.READY // ensure the discussion has not been reset with all pending messages reset to WAITING_SESSION
+            ) {
+              await updateMessageById(msg.id, {
+                whenToSend: new Date(
+                  Date.now() + this.config.messages.retryDelayMs
+                ),
+              });
+            }
           }
         }
       }
@@ -894,17 +968,8 @@ export class MessageService {
    */
   async getPendingSendCount(contactUserId: string): Promise<number> {
     const ownerUserId = this.session.userIdEncoded;
-    return await this.db.messages
-      .where('[ownerUserId+contactUserId]')
-      .equals([ownerUserId, contactUserId])
-      .and(
-        msg =>
-          msg.direction === MessageDirection.OUTGOING &&
-          [MessageStatus.WAITING_SESSION, MessageStatus.READY].includes(
-            msg.status
-          )
-      )
-      .count();
+    const rows = await getSendQueueMessages(ownerUserId, contactUserId);
+    return rows.length;
   }
 
   /**
@@ -945,41 +1010,36 @@ export class MessageService {
    */
   async getWaitingMessageCount(contactUserId: string): Promise<number> {
     const ownerUserId = this.session.userIdEncoded;
-    return await this.db.messages
-      .where('[ownerUserId+contactUserId+status]')
-      .equals([ownerUserId, contactUserId, MessageStatus.WAITING_SESSION])
-      .count();
+    return getWaitingCount(ownerUserId, contactUserId);
   }
 
   // Mark a message as read. Returns true if the message has been marked as read, false if it was already marked as read or doesn't exist.
   async markAsRead(id: number): Promise<boolean> {
-    return await this.db.transaction(
-      'rw',
-      [this.db.messages, this.db.discussions],
-      async () => {
-        // Check current message status from DB to avoid race conditions
-        const message = await this.db.messages.get(id);
-        if (!message || message.status !== MessageStatus.DELIVERED) {
-          // Message was already marked as read or doesn't exist
-          return false;
-        }
+    // Check current message status from DB to avoid race conditions
+    const row = await getMessageById(id);
 
-        // Update message status
-        await this.db.messages.update(id, {
-          status: MessageStatus.READ,
-        });
+    if (!row || row.status !== MessageStatus.DELIVERED) {
+      // Message was already marked as read or doesn't exist
+      return false;
+    }
 
-        // Decrement discussion unread count
-        await this.db.discussions
-          .where('[ownerUserId+contactUserId]')
-          .equals([message.ownerUserId, message.contactUserId])
-          .modify(discussion => {
-            if (discussion.unreadCount > 0) {
-              discussion.unreadCount -= 1;
-            }
-          });
-        return true;
-      }
+    const message = rowToMessage(row);
+
+    // Update message status
+    await updateMessageById(id, { status: MessageStatus.READ });
+
+    // Decrement discussion unread count
+    const discussion = await getDiscussionByOwnerAndContact(
+      message.ownerUserId,
+      message.contactUserId
     );
+
+    if (discussion && discussion.unreadCount > 0) {
+      await updateDiscussionById(discussion.id, {
+        unreadCount: discussion.unreadCount - 1,
+      });
+    }
+
+    return true;
   }
 }
