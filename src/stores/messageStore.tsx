@@ -7,7 +7,7 @@ import {
 } from '@massalabs/gossip-sdk';
 import { createSelectors } from './utils/createSelectors';
 import { useAccountStore } from './accountStore';
-import { getSdk } from './sdkStore';
+import { getSdk, decodeUserId } from '@massalabs/gossip-sdk';
 import { liveQuery, Subscription } from 'dexie';
 
 interface MessageStoreState {
@@ -178,13 +178,11 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
         if (!originalMessage) {
           throw new Error('Original message not found');
         }
-        if (!originalMessage.seeker) {
-          throw new Error(
-            'Cannot reply to a message that has not been sent yet'
-          );
+        if (!originalMessage.messageId) {
+          throw new Error('Cannot reply to a message that has no messageId');
         }
         replyTo = {
-          originalSeeker: originalMessage.seeker,
+          originalMsgId: originalMessage.messageId,
         };
       }
 
@@ -195,20 +193,25 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
           console.warn(
             'Forward target message not found, sending as regular message'
           );
-        } else if (!originalMessage.seeker) {
-          throw new Error(
-            'Cannot forward a message that has not been sent yet'
-          );
+        } else if (!originalMessage.messageId) {
+          throw new Error('Cannot forward a message that has no messageId');
         } else if (originalMessage.contactUserId === contactUserId) {
           // Forwarding within the same discussion → treat as a reply
           replyTo = {
-            originalSeeker: originalMessage.seeker,
+            originalMsgId: originalMessage.messageId!,
           };
         } else {
           // Forwarding to a different discussion → use forward metadata
+          let originalContactId: Uint8Array;
+          try {
+            originalContactId = decodeUserId(originalMessage.contactUserId);
+          } catch {
+            throw new Error('Invalid original contact userId');
+          }
+
           forwardOf = {
             originalContent: originalMessage.content,
-            originalSeeker: originalMessage.seeker,
+            originalContactId,
           };
         }
       }
