@@ -17,6 +17,7 @@ import {
   Message,
   MessageStatus,
   MessageDirection,
+  encodeUserId,
 } from '@massalabs/gossip-sdk';
 import { parseLinks, openUrl } from '../../utils/linkUtils';
 import { useMarkMessageAsRead } from '../../hooks/useMarkMessageAsRead';
@@ -78,20 +79,30 @@ const MessageItem: React.FC<MessageItemProps> = ({
   const touchSlopExceeded = useRef(false);
   const hasTriggeredHaptic = useRef(false);
 
-  // Load original message if this is a reply or a forward with a seeker
+  // Load original message if this is a reply or forward
   useEffect(() => {
-    const seekerForContext =
-      message.replyTo?.originalSeeker || message.forwardOf?.originalSeeker;
+    const citedMsgId = message.replyTo?.originalMsgId;
+    const citedContactId = message.forwardOf?.originalContactId;
+    let originalContactUserId = message.contactUserId;
 
-    if (seekerForContext && gossipSdk.isSessionOpen) {
+    if (citedContactId && citedContactId.length === 32) {
+      try {
+        originalContactUserId = encodeUserId(citedContactId);
+      } catch (error) {
+        console.warn('Failed to encode cited contact ID', error);
+      }
+    }
+
+    if (citedMsgId && gossipSdk.isSessionOpen) {
       setIsLoadingOriginal(true);
       setOriginalNotFound(false);
 
       const findMessage = async () => {
         try {
-          const msg = await gossipSdk.messages.findBySeeker(
-            seekerForContext,
-            message.ownerUserId
+          const msg = await gossipSdk.messages.findByMsgId(
+            citedMsgId,
+            message.ownerUserId,
+            originalContactUserId
           );
 
           if (msg) {
@@ -111,7 +122,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
       };
 
       findMessage();
-    } else if (message.replyTo?.originalContent || message.forwardOf) {
+    } else if (message.replyTo || message.forwardOf) {
       setOriginalMessage(null);
       setOriginalNotFound(true);
       setIsLoadingOriginal(false);
@@ -120,7 +131,12 @@ const MessageItem: React.FC<MessageItemProps> = ({
       setOriginalNotFound(false);
       setIsLoadingOriginal(false);
     }
-  }, [message.replyTo, message.forwardOf, message.ownerUserId]);
+  }, [
+    message.replyTo,
+    message.forwardOf,
+    message.ownerUserId,
+    message.contactUserId,
+  ]);
 
   const handleDoubleClick = useCallback(
     (e: React.MouseEvent) => {
@@ -307,8 +323,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
   );
 
   // Parse links in reply original content
-  const replyOriginalContent =
-    originalMessage?.content || message.replyTo?.originalContent || '';
+  const replyOriginalContent = originalMessage?.content || '';
   const parsedReplyLinks = useMemo(
     () => parseLinks(replyOriginalContent),
     [replyOriginalContent]
@@ -455,11 +470,11 @@ const MessageItem: React.FC<MessageItemProps> = ({
                 ? 'border-accent-foreground/30'
                 : 'border-card-foreground/30'
             } ${originalNotFound ? 'border-destructive/50' : ''} ${
-              message.replyTo.originalSeeker && onScrollToMessage
+              message.replyTo.originalMsgId && onScrollToMessage
                 ? 'cursor-pointer hover:bg-black/5 dark:hover:bg-white/5 rounded-r transition-colors active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2'
                 : ''
             }`}
-            {...(message.replyTo.originalSeeker && onScrollToMessage
+            {...(message.replyTo.originalMsgId && onScrollToMessage
               ? {
                   onClick: handleReplyContextClick,
                   onKeyDown: handleReplyContextKeyDown,
@@ -526,9 +541,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
                       }
                       return <span key={index}>{segment.content}</span>;
                     })
-                  : originalMessage?.content ||
-                    message.replyTo.originalContent ||
-                    'Original message'}
+                  : originalMessage?.content || 'Original message'}
               </p>
             )}
           </div>

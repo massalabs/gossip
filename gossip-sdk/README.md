@@ -150,8 +150,8 @@ const fetchResult = await gossipSdk.messages.fetch();
 // Resend failed messages
 await gossipSdk.messages.resend(failedMessagesMap);
 
-// Find message by seeker
-const msg = await gossipSdk.messages.findBySeeker(seeker, ownerUserId);
+// Find message by messageId
+const msg = await gossipSdk.messages.findByMsgId(messageId, ownerUserId);
 ```
 
 ### Discussions

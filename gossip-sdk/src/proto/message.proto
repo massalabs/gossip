@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package gossip.protocol;
+
+message Message {
+  enum MessageType {
+    MESSAGE_TYPE_REGULAR = 0;
+    MESSAGE_TYPE_REPLY = 1;
+    MESSAGE_TYPE_FORWARD = 2;
+    MESSAGE_TYPE_KEEP_ALIVE = 3;
+  }
+
+  MessageType messageType = 1;
+  optional bytes messageId = 2;
+  string content = 3;
+  optional bytes citedMsgId = 4;
+  optional bytes citedContactId = 5;
+  optional string forwardedContent = 6;
+}

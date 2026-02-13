@@ -18,6 +18,7 @@ export interface Contact {
 
 export interface Message {
   id?: number;
+  messageId?: Uint8Array; // 12-byte random ID for deduplication
   ownerUserId: string; // The current user's userId owning this message
   contactUserId: string; // Reference to Contact.userId
   content: string;
@@ -29,12 +30,11 @@ export interface Message {
   metadata?: Record<string, unknown>;
   seeker?: Uint8Array; // Seeker for this message (stored when sending or receiving)
   replyTo?: {
-    originalContent?: string;
-    originalSeeker: Uint8Array; // Seeker of the original message (required for replies)
+    originalMsgId: Uint8Array; // Message ID of the original message (required for replies)
   };
   forwardOf?: {
     originalContent?: string;
-    originalSeeker: Uint8Array;
+    originalContactId?: Uint8Array;
   };
   encryptedMessage?: Uint8Array; // Ciphertext of the message
 }
