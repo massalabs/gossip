@@ -6,12 +6,14 @@
 
 import {
   type Discussion,
-  type GossipDatabase,
   DiscussionDirection,
+  DiscussionStatus,
   MessageDirection,
   MessageStatus,
   MessageType,
+  serializeSendAnnouncement,
 } from '../db';
+import { toDiscussion } from '../utils/discussions';
 import { decodeUserId, encodeUserId } from '../utils/userId';
 import { IMessageProtocol } from '../api/messageProtocol';
 import { UserPublicKeys, SessionStatus } from '../wasm/bindings';
@@ -21,8 +23,24 @@ import { BulletinItem } from '../api/messageProtocol/types';
 import { SdkConfig, defaultSdkConfig } from '../config/sdk';
 import { decodeAnnouncementPayload } from '../utils/announcementPayload';
 import { Result } from '../utils/type';
-import { resetSendQueue } from './discussion';
 import { SdkEventEmitter, SdkEventType } from '../core/SdkEventEmitter';
+import type { RefreshService } from './refresh';
+import {
+  getContactByOwnerAndUser,
+  insertContact,
+  getContactNamesByPrefix,
+  getDiscussionByOwnerAndContact,
+  getDiscussionById,
+  insertDiscussion,
+  updateDiscussionById,
+  insertMessage,
+  getAnnouncementMessagesByContact,
+  resetSendQueueMessages,
+  getAllPendingAnnouncements,
+  deletePendingAnnouncementsByIds,
+  getAnnouncementCursor,
+  upsertAnnouncementCursor,
+} from '../queries';
 
 const logger = new Logger('AnnouncementService');
 
@@ -36,25 +54,27 @@ export const EstablishSessionError =
   'Session manager failed to establish outgoing session';
 
 export class AnnouncementService {
-  private db: GossipDatabase;
   private messageProtocol: IMessageProtocol;
   private session: SessionModule;
   private isProcessingAnnouncements = false;
   private eventEmitter: SdkEventEmitter;
   private config: SdkConfig;
+  private refreshService?: RefreshService;
 
   constructor(
-    db: GossipDatabase,
     messageProtocol: IMessageProtocol,
     session: SessionModule,
     eventEmitter: SdkEventEmitter,
     config: SdkConfig = defaultSdkConfig
   ) {
-    this.db = db;
     this.messageProtocol = messageProtocol;
     this.session = session;
     this.eventEmitter = eventEmitter;
     this.config = config;
+  }
+
+  setRefreshService(refreshService: RefreshService): void {
+    this.refreshService = refreshService;
   }
 
   setMessageProtocol(messageProtocol: IMessageProtocol): void {
@@ -117,7 +137,7 @@ export class AnnouncementService {
     for (const discussion of discussions) {
       if (!discussion.id) continue;
 
-      // ensure the announcement is not null
+      // sendAnnouncement is deserialized by toDiscussion() before reaching here
       if (discussion.sendAnnouncement === null) continue;
 
       const { announcement_bytes, when_to_send } = discussion.sendAnnouncement;
@@ -126,7 +146,7 @@ export class AnnouncementService {
           discussionId: discussion.id,
           contactUserId: discussion.contactUserId,
         });
-        await this.db.discussions.update(discussion.id, {
+        await updateDiscussionById(discussion.id, {
           sendAnnouncement: null,
           updatedAt: new Date(),
         });
@@ -146,29 +166,27 @@ export class AnnouncementService {
       // Send the announcement and handle updates after transaction
       const result = await this.sendAnnouncement(announcement_bytes);
 
-      // update discussion state after sending, inside a new transaction
-      await this.db.transaction('rw', [this.db.discussions], async () => {
-        const latest = await this.db.discussions.get(discussion.id);
-        if (!latest || latest.sendAnnouncement === null) {
-          return;
-        }
-        if (result.success) {
-          await this.db.discussions.update(discussion.id, {
-            sendAnnouncement: null,
-            updatedAt: new Date(),
-          });
-        } else {
-          await this.db.discussions.update(discussion.id, {
-            sendAnnouncement: {
-              announcement_bytes,
-              when_to_send: new Date(
-                Date.now() + this.config.announcements.retryDelayMs
-              ),
-            },
-            updatedAt: new Date(),
-          });
-        }
-      });
+      // update discussion state after sending
+      const latest = await getDiscussionById(discussion.id);
+      if (!latest || latest.sendAnnouncement === null) {
+        continue;
+      }
+      if (result.success) {
+        await updateDiscussionById(discussion.id, {
+          sendAnnouncement: null,
+          updatedAt: new Date(),
+        });
+      } else {
+        await updateDiscussionById(discussion.id, {
+          sendAnnouncement: serializeSendAnnouncement({
+            announcement_bytes,
+            when_to_send: new Date(
+              Date.now() + this.config.announcements.retryDelayMs
+            ),
+          }),
+          updatedAt: new Date(),
+        });
+      }
     }
   }
 
@@ -186,12 +204,12 @@ export class AnnouncementService {
 
     this.isProcessingAnnouncements = true;
     try {
-      const pending = await this.db.pendingAnnouncements.toArray();
+      const pending = await getAllPendingAnnouncements();
       const successfullyProcessedPendingIds: number[] = [];
 
       if (pending.length > 0) {
         log.info(
-          `processing ${pending.length} pending announcements from IndexedDB`
+          `processing ${pending.length} pending announcements from SQLite`
         );
 
         // Process pending announcements one by one, tracking successes
@@ -233,7 +251,7 @@ export class AnnouncementService {
 
         // Delete only successfully processed pending announcements
         if (successfullyProcessedPendingIds.length > 0) {
-          await this.db.pendingAnnouncements.bulkDelete(
+          await deletePendingAnnouncementsByIds(
             successfullyProcessedPendingIds
           );
           log.info(
@@ -257,8 +275,7 @@ export class AnnouncementService {
       }
 
       // No pending - fetch from API
-      const cursor = (await this.db.userProfile.get(this.session.userIdEncoded))
-        ?.lastBulletinCounter;
+      const cursor = await getAnnouncementCursor(this.session.userIdEncoded);
 
       // fetch from node all announcements since the last retrieved announcement
       const fetched = await this._fetchAnnouncements(cursor);
@@ -318,38 +335,22 @@ export class AnnouncementService {
   }
 
   /**
-   * Persist lastBulletinCounter for the current user.
-   * Only updates an existing profile row — never creates a partial one,
-   * since a row without `security`/`session` would crash downstream code.
+   * Persist the bulletin polling cursor for the current user.
+   * Stored in a dedicated announcementCursors table (not userProfile).
    */
   private async _upsertLastBulletinCounter(nextCounter: string): Promise<void> {
-    const userId = this.session.userIdEncoded;
-    const existing = await this.db.userProfile.get(userId);
-    if (!existing) {
-      logger
-        .forMethod('_upsertLastBulletinCounter')
-        .debug('no profile row yet — skipping counter write');
-      return;
-    }
-    await this.db.userProfile.update(userId, {
-      lastBulletinCounter: nextCounter,
-      updatedAt: new Date(),
-    });
+    await upsertAnnouncementCursor(this.session.userIdEncoded, nextCounter);
   }
 
   /**
    * Fetch the latest bulletin counter from the API and persist it so that
    * historical announcements (undecryptable by a new account) are skipped.
-   * No-op if a counter already exists or if the profile hasn't been created yet.
+   * No-op if a counter already exists.
    */
   async skipHistoricalAnnouncements(): Promise<void> {
     const log = logger.forMethod('skipHistoricalAnnouncements');
-    const existing = await this.db.userProfile.get(this.session.userIdEncoded);
-    if (!existing) {
-      log.debug('no profile row yet — skipping');
-      return;
-    }
-    if (existing.lastBulletinCounter !== undefined) return;
+    const existing = await getAnnouncementCursor(this.session.userIdEncoded);
+    if (existing !== undefined) return;
 
     try {
       const counter = await this.messageProtocol.fetchBulletinCounter();
@@ -383,11 +384,10 @@ export class AnnouncementService {
   private async _generateTemporaryContactName(
     ownerUserId: string
   ): Promise<string> {
-    const newRequestContacts = await this.db.contacts
-      .where('ownerUserId')
-      .equals(ownerUserId)
-      .filter(contact => contact.name.startsWith('New Request'))
-      .toArray();
+    const newRequestContacts = await getContactNamesByPrefix(
+      ownerUserId,
+      'New Request'
+    );
 
     const numbers = newRequestContacts
       .map(contact => {
@@ -428,16 +428,12 @@ export class AnnouncementService {
     const contactUserId = encodeUserId(contactUserIdRaw);
 
     const sessionStatus = this.session.peerSessionStatus(contactUserIdRaw);
-    // Log clearly for debugging
-    console.log(
-      `[Announcement] Received from ${contactUserId.slice(0, 12)}... -> session status: ${sessionStatusToString(sessionStatus)}`
-    );
-    log.info('session updated', {
+    log.info('announcement received', {
       contactUserId,
       status: sessionStatusToString(sessionStatus),
     });
 
-    let contact = await this.db.getContactByOwnerAndUserId(
+    let contact = await getContactByOwnerAndUser(
       this.session.userIdEncoded,
       contactUserId
     );
@@ -449,18 +445,17 @@ export class AnnouncementService {
         username ||
         (await this._generateTemporaryContactName(this.session.userIdEncoded));
 
-      await this.db.contacts.add({
+      await insertContact({
         ownerUserId: this.session.userIdEncoded,
         userId: contactUserId,
         name,
         publicKeys: announcerPkeys.to_bytes(),
-        avatar: undefined,
         isOnline: false,
         lastSeen: new Date(),
         createdAt: new Date(),
       });
 
-      contact = await this.db.getContactByOwnerAndUserId(
+      contact = await getContactByOwnerAndUser(
         this.session.userIdEncoded,
         contactUserId
       );
@@ -484,21 +479,21 @@ export class AnnouncementService {
       const windowStart = new Date(timestamp.getTime() - 1000);
       const windowEnd = new Date(timestamp.getTime() + 1000);
 
-      const existing = await this.db.messages
-        .where('[ownerUserId+contactUserId]')
-        .equals([this.session.userIdEncoded, contactUserId])
-        .and(
-          msg =>
-            msg.direction === MessageDirection.INCOMING &&
-            msg.type === MessageType.ANNOUNCEMENT &&
-            msg.content === message &&
-            msg.timestamp >= windowStart &&
-            msg.timestamp <= windowEnd
-        )
-        .first();
+      const existing = await getAnnouncementMessagesByContact(
+        this.session.userIdEncoded,
+        contactUserId
+      );
 
-      if (!existing) {
-        await this.db.addMessage({
+      // Filter in JS for content match and timestamp window (SQLite timestamp_ms comparison)
+      const duplicate = existing.find(
+        msg =>
+          msg.content === message &&
+          msg.timestamp >= windowStart &&
+          msg.timestamp <= windowEnd
+      );
+
+      if (!duplicate) {
+        await insertMessage({
           ownerUserId: this.session.userIdEncoded,
           contactUserId,
           content: message,
@@ -509,6 +504,8 @@ export class AnnouncementService {
         });
       }
     }
+
+    await this.refreshService?.stateUpdate();
 
     return {
       success: true,
@@ -524,81 +521,71 @@ export class AnnouncementService {
   ): Promise<{ discussionId: number }> {
     const log = logger.forMethod('handleReceivedDiscussion');
 
-    const discussionId = await this.db.transaction(
-      'rw',
-      this.db.discussions,
-      this.db.messages,
-      this.db.contacts,
-      async () => {
-        const existing = await this.db.getDiscussionByOwnerAndContact(
-          ownerUserId,
-          contactUserId
-        );
-
-        if (existing) {
-          const updateData: Partial<Discussion> = { updatedAt: new Date() };
-          if (message) updateData.lastAnnouncementMessage = message;
-
-          log.info('updating existing discussion', {
-            discussionId: existing.id,
-            contactUserId,
-          });
-
-          // Group update and queue reset in the same transaction to ensure atomicity
-
-          await this.db.discussions.update(existing.id!, updateData);
-          // reset all messages in send queue to WAITING_SESSION for this contact
-          await resetSendQueue(
-            this.db,
-            this.session.userIdEncoded,
-            contactUserId
-          );
-
-          const newDiscussion = await this.db.discussions.get(existing.id!);
-          const contact = await this.db.getContactByOwnerAndUserId(
-            ownerUserId,
-            contactUserId
-          );
-          if (
-            newDiscussion &&
-            contact &&
-            this.session.peerSessionStatus(decodeUserId(contactUserId)) ===
-              SessionStatus.PeerRequested
-          ) {
-            this.eventEmitter.emit(
-              SdkEventType.SESSION_REQUESTED,
-              newDiscussion,
-              contact
-            );
-          }
-          return existing.id!;
-        }
-
-        log.info('creating new discussion', { contactUserId });
-        return await this.db.discussions.add({
-          ownerUserId,
-          contactUserId,
-          weAccepted: false,
-          sendAnnouncement: null,
-          direction: DiscussionDirection.RECEIVED,
-          lastAnnouncementMessage: message,
-          unreadCount: 0,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        });
-      }
-    );
-
-    const discussion = await this.db.discussions.get(discussionId);
-    const contact = await this.db.getContactByOwnerAndUserId(
+    const existing = await getDiscussionByOwnerAndContact(
       ownerUserId,
       contactUserId
     );
-    if (discussion && contact) {
+
+    if (existing) {
+      const updateData: Record<string, unknown> = { updatedAt: new Date() };
+      if (message) updateData.announcementMessage = message;
+
+      log.info('updating existing discussion', {
+        discussionId: existing.id,
+        contactUserId,
+      });
+
+      await updateDiscussionById(existing.id, updateData);
+
+      // reset pending outgoing messages to WAITING_SESSION for this contact
+      // Only reset READY and SENT — DELIVERED messages should not be resent.
+      await resetSendQueueMessages(this.session.userIdEncoded, contactUserId, [
+        MessageStatus.READY,
+        MessageStatus.SENT,
+      ]);
+
+      const newDiscussion = await getDiscussionById(existing.id);
+      const contactRow = await getContactByOwnerAndUser(
+        ownerUserId,
+        contactUserId
+      );
+      if (
+        newDiscussion &&
+        contactRow &&
+        this.session.peerSessionStatus(decodeUserId(contactUserId)) ===
+          SessionStatus.PeerRequested
+      ) {
+        this.eventEmitter.emit(
+          SdkEventType.SESSION_REQUESTED,
+          toDiscussion(newDiscussion),
+          contactRow
+        );
+      }
+      return { discussionId: existing.id };
+    }
+
+    log.info('creating new discussion', { contactUserId });
+    const discussionId = await insertDiscussion({
+      ownerUserId,
+      contactUserId,
+      direction: DiscussionDirection.RECEIVED,
+      status: DiscussionStatus.PENDING,
+      announcementMessage: message,
+      unreadCount: 0,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    const discussion = await getDiscussionById(discussionId);
+    const contactRow = await getContactByOwnerAndUser(
+      ownerUserId,
+      contactUserId
+    );
+    if (discussion && contactRow) {
       this.eventEmitter.emit(
         SdkEventType.SESSION_REQUESTED,
-        discussion,
-        contact
+        toDiscussion(discussion),
+        contactRow
       );
     }
 

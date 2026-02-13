@@ -9,7 +9,7 @@ import { useAppStore } from '../../src/stores/appStore';
 import { useAccountStore } from '../../src/stores/accountStore';
 import { ROUTES } from '../../src/constants/routes';
 import { testUsers } from '../helpers/factories/userProfile';
-import { UserProfile, SessionStatus, gossipDb } from '@massalabs/gossip-sdk';
+import { UserProfile, SessionStatus } from '@massalabs/gossip-sdk';
 import {
   GOOGLE_PLAY_STORE_URL,
   APPLE_APP_STORE_URL,
@@ -17,14 +17,20 @@ import {
 } from '../../src/constants/links';
 
 // Mock SDK for tests that render full App.
-// accountStore subscribe calls getSdk(), discussionStore/useProfileLoader use getSdk().db.
+// accountStore subscribe calls getSdk(), discussionStore/useProfileLoader use SDK service APIs.
 const mockSdk = {
   isSessionOpen: false,
   userId: 'gossip1test',
-  db: gossipDb(),
   auth: { ensurePublicKeyPublished: vi.fn().mockResolvedValue(undefined) },
   discussions: {
     getStatus: vi.fn(() => SessionStatus.NoSession),
+    list: vi.fn(async () => []),
+  },
+  contacts: {
+    list: vi.fn(async () => []),
+  },
+  messages: {
+    getMessages: vi.fn(async () => []),
   },
   publicKeys: null,
   on: vi.fn(),
@@ -41,7 +47,7 @@ vi.mock('../../src/stores/sdkStore', () => ({
   getSdk: () => mockSdk,
 }));
 
-// Mock hooks whose deep import chains (Capacitor, Dexie, gossip-sdk WASM)
+// Mock hooks whose deep import chains (Capacitor, gossip-sdk WASM)
 // cause duplicate React instances in vitest browser mode on CI.
 vi.mock('../../src/hooks/useTheme', () => ({
   useTheme: () => ({

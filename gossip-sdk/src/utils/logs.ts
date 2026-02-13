@@ -42,9 +42,7 @@ export class Logger {
       const message =
         typeof messageOrError === 'string'
           ? messageOrError
-          : messageOrError instanceof Error
-            ? messageOrError.message
-            : JSON.stringify(messageOrError);
+          : JSON.stringify(messageOrError);
       const main = `[${source}] ${message}`;
       if (extra !== undefined) {
         console.error(main, extra);

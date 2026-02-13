@@ -7,12 +7,14 @@
 import {
   type Discussion,
   type Contact,
-  type GossipDatabase,
   DiscussionDirection,
+  DiscussionStatus,
   MessageDirection,
   MessageStatus,
   MessageType,
+  serializeSendAnnouncement,
 } from '../db';
+import { toDiscussion } from '../utils/discussions';
 import {
   AnnouncementPayload,
   encodeAnnouncementPayload,
@@ -21,12 +23,23 @@ import { UserPublicKeys } from '../wasm/bindings';
 import { AnnouncementService } from './announcement';
 import { SessionModule } from '../wasm/session';
 import { Logger } from '../utils/logs';
+import { RefreshService } from './refresh';
 import { Result } from '../utils/type';
 import { SdkEventEmitter, SdkEventType } from '../core/SdkEventEmitter';
+import {
+  getContactByOwnerAndUser,
+  getDiscussionByOwnerAndContact,
+  getDiscussionById,
+  insertDiscussion,
+  updateDiscussionById,
+  deleteDiscussionById,
+  insertMessage,
+  resetSendQueueMessages,
+} from '../queries';
 
 const logger = new Logger('DiscussionService');
 
-export interface discussionInitializationResult {
+export interface DiscussionInitializationResult {
   discussionId: number;
   announcement: Uint8Array;
 }
@@ -36,7 +49,7 @@ export interface discussionInitializationResult {
  *
  * @example
  * ```typescript
- * const discussionService = new DiscussionService(db, announcementService, session, refreshService);
+ * const discussionService = new DiscussionService(announcementService, session, eventEmitter, refreshService);
  *
  * // Initialize a new discussion
  * const result = await discussionService.initialize(contact, 'Hello!');
@@ -49,21 +62,25 @@ export interface discussionInitializationResult {
  * ```
  */
 export class DiscussionService {
-  private db: GossipDatabase;
   private announcementService: AnnouncementService;
   private session: SessionModule;
   private eventEmitter: SdkEventEmitter;
+  private refreshService?: RefreshService;
 
   constructor(
-    db: GossipDatabase,
     announcementService: AnnouncementService,
     session: SessionModule,
-    eventEmitter: SdkEventEmitter
+    eventEmitter: SdkEventEmitter,
+    refreshService?: RefreshService
   ) {
-    this.db = db;
     this.announcementService = announcementService;
     this.session = session;
     this.eventEmitter = eventEmitter;
+    this.refreshService = refreshService;
+  }
+
+  setRefreshService(refreshService: RefreshService): void {
+    this.refreshService = refreshService;
   }
 
   /**
@@ -86,13 +103,13 @@ export class DiscussionService {
   async initialize(
     contact: Contact,
     payload?: AnnouncementPayload
-  ): Promise<Result<discussionInitializationResult, Error>> {
+  ): Promise<Result<DiscussionInitializationResult, Error>> {
     const log = logger.forMethod('initialize');
 
     try {
       const userId = this.session.userIdEncoded;
 
-      const existing = await this.db.getDiscussionByOwnerAndContact(
+      const existing = await getDiscussionByOwnerAndContact(
         userId,
         contact.userId
       );
@@ -104,13 +121,15 @@ export class DiscussionService {
         };
       }
 
-      const discussionId = await this.db.discussions.add({
+      log.info(
+        `${userId} is establishing session with contact ${contact.name}`
+      );
+      const discussionId = await insertDiscussion({
         ownerUserId: userId,
         contactUserId: contact.userId,
         weAccepted: true,
-        sendAnnouncement: null,
-        lastAnnouncementMessage: payload?.message,
         direction: DiscussionDirection.INITIATED,
+        status: DiscussionStatus.PENDING,
         unreadCount: 0,
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -132,12 +151,12 @@ export class DiscussionService {
       );
 
       if (!result.success) {
-        await this.db.discussions.delete(discussionId);
+        await deleteDiscussionById(discussionId);
         return { success: false, error: result.error };
       }
 
       if (payload?.message) {
-        await this.db.addMessage({
+        await insertMessage({
           ownerUserId: userId,
           contactUserId: contact.userId,
           content: payload.message,
@@ -146,12 +165,19 @@ export class DiscussionService {
           status: MessageStatus.READ, // Announcement message are not like other msg. they are set as read to prevent them from being sent again if session is renewed
           timestamp: new Date(),
         });
+        // Store the announcement message on the discussion so the UI can display it
+        await updateDiscussionById(discussionId, {
+          announcementMessage: payload.message,
+        });
       }
 
       // Emit status change event
-      const discussion = await this.db.discussions.get(discussionId);
+      const discussion = await getDiscussionById(discussionId);
       if (discussion) {
-        this.eventEmitter.emit(SdkEventType.SESSION_CREATED, discussion);
+        this.eventEmitter.emit(
+          SdkEventType.SESSION_CREATED,
+          toDiscussion(discussion)
+        );
       }
 
       return {
@@ -192,7 +218,7 @@ export class DiscussionService {
         );
 
         // Emit status change event
-        const updatedDiscussion = await this.db.discussions.get(discussion.id!);
+        const updatedDiscussion = await getDiscussionById(discussion.id!);
         if (updatedDiscussion) {
           this.eventEmitter.emit(
             SdkEventType.SESSION_ACCEPTED,
@@ -229,7 +255,7 @@ export class DiscussionService {
     const log = logger.forMethod('createSessionForContact');
     const ownerUserId = this.session.userIdEncoded;
 
-    const discussion = await this.db.getDiscussionByOwnerAndContact(
+    const discussion = await getDiscussionByOwnerAndContact(
       ownerUserId,
       contactUserId
     );
@@ -237,10 +263,7 @@ export class DiscussionService {
       return { success: false, error: new Error('Discussion not found') };
     }
 
-    const contact = await this.db.getContactByOwnerAndUserId(
-      ownerUserId,
-      contactUserId
-    );
+    const contact = await getContactByOwnerAndUser(ownerUserId, contactUserId);
     if (!contact) {
       return { success: false, error: new Error('Contact not found') };
     }
@@ -261,65 +284,42 @@ export class DiscussionService {
 
     const now = new Date();
 
-    // Wrap discussion update and queue reset in a transaction for atomicity
-    const err = await this.db.transaction(
-      'rw',
-      this.db.discussions,
-      this.db.messages,
-      async () => {
-        try {
-          // add the new announcement to the discussion
-          await this.db.discussions.update(discussion.id!, {
-            weAccepted: true,
-            sendAnnouncement: {
-              announcement_bytes: sessionResult.data,
-              when_to_send: now,
-            },
-            updatedAt: now,
-          });
+    try {
+      // add the new announcement to the discussion
+      await updateDiscussionById(discussion.id!, {
+        weAccepted: true,
+        sendAnnouncement: serializeSendAnnouncement({
+          announcement_bytes: sessionResult.data,
+          when_to_send: now,
+        }),
+        initiationAnnouncement: sessionResult.data,
+        updatedAt: now,
+      });
 
-          // reset all messages in send queue to WAITING_SESSION for this contact
-          await resetSendQueue(this.db, ownerUserId, contactUserId);
-          return undefined;
-        } catch (error) {
-          return new Error('Failed to update discussion: ' + error);
-        }
-      }
-    );
+      // reset all messages in send queue to WAITING_SESSION for this contact
+      await resetSendQueueMessages(ownerUserId, contactUserId, [
+        MessageStatus.READY,
+        MessageStatus.SENT,
+      ]);
+    } catch (error) {
+      return {
+        success: false,
+        error: new Error('Failed to update discussion: ' + error),
+      };
+    }
 
-    if (err) {
-      return { success: false, error: err };
+    try {
+      /* trigger a state update to send the new announcement
+      If the stateUpdate function is already running, it will be skipped.
+      */
+      await this.refreshService?.stateUpdate();
+    } catch (error) {
+      return {
+        success: false,
+        error: new Error('Failed to trigger state update: ' + error),
+      };
     }
 
     return { success: true, data: sessionResult.data };
   }
-}
-
-/**
- * Reset the send queue for a contact.
- * All messages that are not yet delivered (i.e. READY, SENDING, SENT) are reset to WAITING_SESSION.
- * @param db - The database instance
- * @param ownerUserId - The user ID of the owner
- * @param contactUserId - The user ID of the contact
- * @returns A Promise that resolves when the send queue is reset
- */
-export async function resetSendQueue(
-  db: GossipDatabase,
-  ownerUserId: string,
-  contactUserId: string
-): Promise<void> {
-  await db.messages
-    .where('[ownerUserId+contactUserId]')
-    .equals([ownerUserId, contactUserId])
-    .and(
-      message =>
-        message.direction === MessageDirection.OUTGOING &&
-        [MessageStatus.READY, MessageStatus.SENT].includes(message.status)
-    )
-    .modify({
-      status: MessageStatus.WAITING_SESSION,
-      encryptedMessage: undefined,
-      seeker: undefined,
-      whenToSend: undefined,
-    });
 }

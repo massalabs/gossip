@@ -5,7 +5,6 @@
  */
 
 import type { SdkConfig } from '../config/sdk';
-import type { Discussion } from '../db';
 import { SdkEventEmitter, SdkEventType } from './SdkEventEmitter';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -17,10 +16,8 @@ export interface PollingCallbacks {
   fetchMessages: () => Promise<void>;
   /** Fetch and process announcements */
   fetchAnnouncements: () => Promise<void>;
-  /** Handle session refresh for active discussions */
-  handleSessionRefresh: (discussions: Discussion[]) => Promise<void>;
-  /** Get active discussions for session refresh */
-  getActiveDiscussions: () => Promise<Discussion[]>;
+  /** Handle session refresh (state update) */
+  handleSessionRefresh: () => Promise<void>;
 }
 
 interface PollingTimers {
@@ -90,10 +87,7 @@ export class SdkPolling {
     // Start session refresh polling
     this.timers.sessionRefresh = setInterval(async () => {
       try {
-        const discussions = await this.callbacks?.getActiveDiscussions();
-        if (discussions && discussions.length > 0) {
-          await this.callbacks?.handleSessionRefresh(discussions);
-        }
+        await this.callbacks?.handleSessionRefresh();
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
         this.eventEmitter?.emit(SdkEventType.ERROR, err, 'session_update');

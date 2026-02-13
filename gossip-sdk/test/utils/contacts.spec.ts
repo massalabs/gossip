@@ -2,18 +2,20 @@
  * Contacts utilities tests
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
-  gossipDb,
-  GossipDatabase,
   DiscussionDirection,
+  DiscussionStatus,
   MessageType,
   MessageDirection,
   MessageStatus,
 } from '../../src/db';
+import { getSqliteDb } from '../../src/sqlite';
+import * as schema from '../../src/schema';
 import { encodeUserId } from '../../src/utils/userId';
 import { addContact, getContact, getContacts } from '../../src/contacts';
 import { updateContactName, deleteContact } from '../../src/utils/contacts';
+import { clearAllTables } from '../../src/sqlite';
 import type { SessionModule } from '../../src/wasm/session';
 import type { UserPublicKeys as UserPublicKeysType } from '../../src/wasm/bindings';
 
@@ -30,14 +32,8 @@ const fakeSession = {
 } as unknown as SessionModule;
 
 describe('Contacts utilities', () => {
-  let db: GossipDatabase;
-
   beforeEach(async () => {
-    db = gossipDb();
-    if (!db.isOpen()) {
-      await db.open();
-    }
-    await Promise.all(db.tables.map(table => table.clear()));
+    await clearAllTables();
   });
 
   it('adds and fetches a contact', async () => {
@@ -45,15 +41,13 @@ describe('Contacts utilities', () => {
       CONTACTS_OWNER_USER_ID,
       CONTACTS_CONTACT_USER_ID,
       'Alice',
-      publicKeys,
-      db
+      publicKeys
     );
     expect(result.success).toBe(true);
 
     const contact = await getContact(
       CONTACTS_OWNER_USER_ID,
-      CONTACTS_CONTACT_USER_ID,
-      db
+      CONTACTS_CONTACT_USER_ID
     );
     expect(contact?.name).toBe('Alice');
   });
@@ -63,15 +57,13 @@ describe('Contacts utilities', () => {
       CONTACTS_OWNER_USER_ID,
       CONTACTS_CONTACT_USER_ID,
       'Alice',
-      publicKeys,
-      db
+      publicKeys
     );
     const result = await addContact(
       CONTACTS_OWNER_USER_ID,
       CONTACTS_CONTACT_USER_ID,
       'Alice 2',
-      publicKeys,
-      db
+      publicKeys
     );
 
     expect(result.success).toBe(false);
@@ -83,30 +75,26 @@ describe('Contacts utilities', () => {
       CONTACTS_OWNER_USER_ID,
       CONTACTS_CONTACT_USER_ID,
       'Alice',
-      publicKeys,
-      db
+      publicKeys
     );
     await addContact(
       CONTACTS_OWNER_USER_ID,
       CONTACTS_CONTACT_USER_ID_2,
       'Bob',
-      publicKeys,
-      db
+      publicKeys
     );
 
     const updateResult = await updateContactName(
       CONTACTS_OWNER_USER_ID,
       CONTACTS_CONTACT_USER_ID,
-      'Alice Updated',
-      db
+      'Alice Updated'
     );
     expect(updateResult.success).toBe(true);
 
     const duplicateResult = await updateContactName(
       CONTACTS_OWNER_USER_ID,
       CONTACTS_CONTACT_USER_ID,
-      'Bob',
-      db
+      'Bob'
     );
     expect(duplicateResult.success).toBe(false);
     if (!duplicateResult.success) {
@@ -119,14 +107,14 @@ describe('Contacts utilities', () => {
       CONTACTS_OWNER_USER_ID,
       CONTACTS_CONTACT_USER_ID,
       'Alice',
-      publicKeys,
-      db
+      publicKeys
     );
 
-    await db.discussions.add({
+    await getSqliteDb().insert(schema.discussions).values({
       ownerUserId: CONTACTS_OWNER_USER_ID,
       contactUserId: CONTACTS_CONTACT_USER_ID,
       direction: DiscussionDirection.INITIATED,
+      status: DiscussionStatus.ACTIVE,
       weAccepted: true,
       sendAnnouncement: null,
       unreadCount: 0,
@@ -134,7 +122,7 @@ describe('Contacts utilities', () => {
       updatedAt: new Date(),
     });
 
-    await db.messages.add({
+    await getSqliteDb().insert(schema.messages).values({
       ownerUserId: CONTACTS_OWNER_USER_ID,
       contactUserId: CONTACTS_CONTACT_USER_ID,
       content: 'Hello',
@@ -147,14 +135,13 @@ describe('Contacts utilities', () => {
     const result = await deleteContact(
       CONTACTS_OWNER_USER_ID,
       CONTACTS_CONTACT_USER_ID,
-      db,
       fakeSession
     );
 
     expect(result.success).toBe(true);
     expect(fakeSession.peerDiscard).toHaveBeenCalled();
 
-    const contacts = await getContacts(CONTACTS_OWNER_USER_ID, db);
+    const contacts = await getContacts(CONTACTS_OWNER_USER_ID);
     expect(contacts.length).toBe(0);
   });
 });

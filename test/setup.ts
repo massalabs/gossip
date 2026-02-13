@@ -2,7 +2,7 @@
  * Test Setup File (Node/jsdom environments)
  *
  * This file runs before all Node/jsdom tests and sets up:
- * - fake-indexeddb for Dexie/IndexedDB testing in Node
+ * - SQLite in-memory database for testing
  * - Global test utilities and mocks
  * - Shared setup from setup.shared.ts
  */
@@ -10,19 +10,15 @@
 // Import shared setup (service worker mocks, etc.)
 import './setup.shared';
 
-// Import fake-indexeddb to polyfill IndexedDB in Node environment
-import 'fake-indexeddb/auto';
+import { readFileSync } from 'fs';
+import { resolve, dirname } from 'path';
+import { createRequire } from 'module';
+import { afterEach, beforeAll, afterAll, vi } from 'vitest';
+import { initDb, closeSqlite, clearAllTables } from '@massalabs/gossip-sdk';
 
-// Import IDBKeyRange polyfill if needed
-import { IDBKeyRange } from 'fake-indexeddb';
-import { afterEach, vi } from 'vitest';
-import { gossipDb } from '@massalabs/gossip-sdk';
-
-// Make IDBKeyRange available globally
-if (typeof globalThis.IDBKeyRange === 'undefined') {
-  (globalThis as { IDBKeyRange?: typeof IDBKeyRange }).IDBKeyRange =
-    IDBKeyRange;
-}
+const require = createRequire(import.meta.url);
+const waSqlitePath = dirname(require.resolve('wa-sqlite/package.json'));
+const waSqliteWasm = readFileSync(resolve(waSqlitePath, 'dist/wa-sqlite.wasm'));
 
 // Mock the notification service to prevent window access
 vi.mock('../src/services/notifications', () => ({
@@ -35,22 +31,31 @@ vi.mock('../src/services/notifications', () => ({
   },
 }));
 
-// Optional: Add custom matchers or global test utilities here
-// Example: expect.extend({ ... })
+// Initialize SQLite before all tests
+beforeAll(async () => {
+  const wasmBinary = waSqliteWasm.buffer.slice(
+    waSqliteWasm.byteOffset,
+    waSqliteWasm.byteOffset + waSqliteWasm.byteLength
+  );
+  await initDb({ wasmBinary });
+});
 
 // Clean up between tests to avoid state leakage
-
 afterEach(async () => {
-  // Clean up database using Dexie's delete method which properly handles closing
-  // This avoids "Another connection wants to delete" warnings
   try {
-    // Dexie's delete() method automatically closes the connection if open
-    // and handles all cleanup properly
-    await gossipDb().delete();
-  } catch (_) {
-    // Ignore errors - database might already be deleted or closed
+    await clearAllTables();
+  } catch {
+    // Ignore errors - database might already be closed
+  }
+});
+
+afterAll(async () => {
+  try {
+    await closeSqlite();
+  } catch {
+    // SQLite might already be closed
   }
 });
 
 // Log setup completion
-console.log('✓ Test setup complete: fake-indexeddb initialized');
+console.log('✓ Test setup complete: SQLite in-memory database initialized');

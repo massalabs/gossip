@@ -1,25 +1,24 @@
 /**
- * GossipSdk
+ * GossipSdk - Singleton SDK with clean lifecycle API
  *
  * @example
  * ```typescript
- * import { createGossipSdk } from '@massalabs/gossip-sdk';
- *
- * const sdk = createGossipSdk();
+ * import { gossipSdk } from '@massalabs/gossip-sdk';
  *
  * // Initialize once at app startup
- * await sdk.init({
+ * await gossipSdk.init({
+ *   db,
  *   protocolBaseUrl: 'https://api.example.com',
  * });
  *
  * // Open session (login) - SDK handles keys/session internally
- * await sdk.openSession({
+ * await gossipSdk.openSession({
  *   mnemonic: 'word1 word2 ...',
  *   onPersist: async (blob) => { /* save to db *\/ },
  * });
  *
  * // Or restore existing session
- * await sdk.openSession({
+ * await gossipSdk.openSession({
  *   mnemonic: 'word1 word2 ...',
  *   encryptedSession: savedBlob,
  *   encryptionKey: key,
@@ -27,26 +26,26 @@
  * });
  *
  * // Use clean API
- * await sdk.messages.send(contactId, 'Hello!');
- * await sdk.discussions.start(contact);
- * const contacts = await sdk.contacts.list(ownerUserId);
+ * await gossipSdk.messages.send(contactId, 'Hello!');
+ * await gossipSdk.discussions.start(contact);
+ * const contacts = await gossipSdk.contacts.list(ownerUserId);
  *
  * // Events
- * sdk.on('message', (msg) => { ... });
- * sdk.on('discussionRequest', (discussion, contact) => { ... });
+ * gossipSdk.on('message', (msg) => { ... });
+ * gossipSdk.on('discussionRequest', (discussion, contact) => { ... });
  *
  * // Logout
- * await sdk.closeSession();
+ * await gossipSdk.closeSession();
  * ```
  */
 
 import {
-  gossipDb,
   type Contact,
   type Discussion,
   type Message,
-  type GossipDatabase,
+  MessageStatus,
 } from './db';
+import { toDiscussion, toSortedDiscussions } from './utils/discussions';
 import { IMessageProtocol, createMessageProtocol } from './api/messageProtocol';
 import { setProtocolBaseUrl } from './config/protocol';
 import {
@@ -59,21 +58,23 @@ import { startWasmInitialization, ensureWasmInitialized } from './wasm/loader';
 import { generateUserKeys, UserKeys } from './wasm/userKeys';
 import { SessionModule } from './wasm/session';
 import {
-  EncryptionKey,
-  generateEncryptionKeyFromSeed,
-} from './wasm/encryption';
+  SessionStatus,
+  SessionConfig,
+} from './assets/generated/wasm/gossip_wasm';
+import { EncryptionKey } from './wasm/encryption';
 import {
   AnnouncementService,
   type AnnouncementReceptionResult,
 } from './services/announcement';
 import {
-  discussionInitializationResult,
+  DiscussionInitializationResult,
   DiscussionService,
 } from './services/discussion';
 import {
   MessageService,
   type MessageResult,
   type SendMessageResult,
+  rowToMessage,
 } from './services/message';
 import { RefreshService } from './services/refresh';
 import { AuthService } from './services/auth';
@@ -88,6 +89,15 @@ import {
 } from './utils/validation';
 import { QueueManager } from './utils/queue';
 import { encodeUserId, decodeUserId } from './utils/userId';
+import { initDb } from './sqlite';
+import {
+  getMessageById as queryGetMessageById,
+  getMessagesByOwnerAndContact,
+  getMessagesByStatus,
+  updateMessageById,
+  getDiscussionsByOwner,
+  getDiscussionByOwnerAndContact,
+} from './queries';
 import {
   getContacts,
   getContact,
@@ -95,12 +105,7 @@ import {
   updateContactName,
   deleteContact,
 } from './contacts';
-import {
-  SessionManagerWrapper,
-  type UserPublicKeys,
-  SessionStatus,
-  SessionConfig,
-} from './wasm/bindings';
+import type { UserPublicKeys } from './wasm/bindings';
 import {
   SdkEventEmitter,
   SdkEventType,
@@ -129,6 +134,14 @@ export interface GossipSdkInitOptions {
   protocolBaseUrl?: string;
   /** SDK configuration (optional - uses defaults if not provided) */
   config?: DeepPartial<SdkConfig>;
+  /** URL to wa-sqlite.wasm (for bundlers that rewrite asset paths) */
+  wasmUrl?: string;
+  /**
+   * OPFS directory path for persistent SQLite storage.
+   * When set, data persists across page reloads via OPFS.
+   * When omitted, uses an in-memory database (data lost on reload).
+   */
+  opfsPath?: string;
 }
 
 export interface OpenSessionOptions {
@@ -136,13 +149,15 @@ export interface OpenSessionOptions {
   mnemonic: string;
   /** Existing encrypted session blob (for restoring session) */
   encryptedSession?: Uint8Array;
-  /** Encryption key for decrypting session and storage. Will be created if not provided. */
+  /** Encryption key for decrypting session */
   encryptionKey?: EncryptionKey;
   /** Callback when session state changes (for persistence) */
   onPersist?: (
     encryptedBlob: Uint8Array,
     encryptionKey: EncryptionKey
   ) => Promise<void>;
+  /** Encryption key for persisting session (required if onPersist is provided) */
+  persistEncryptionKey?: EncryptionKey;
   /** Custom session configuration (optional, uses defaults if not provided) */
   sessionConfig?: SessionConfig;
 }
@@ -153,20 +168,19 @@ export interface OpenSessionOptions {
 
 type SdkStateUninitialized = { status: SdkStatus.UNINITIALIZED };
 
-type SdkReadyBase = {
+type SdkStateInitialized = {
+  status: SdkStatus.INITIALIZED;
   messageProtocol: IMessageProtocol;
   config: SdkConfig;
 };
 
-type SdkStateInitialized = SdkReadyBase & {
-  status: SdkStatus.INITIALIZED;
-};
-
-type SdkStateSessionOpen = SdkReadyBase & {
+type SdkStateSessionOpen = {
   status: SdkStatus.SESSION_OPEN;
+  messageProtocol: IMessageProtocol;
+  config: SdkConfig;
   session: SessionModule;
   userKeys: UserKeys;
-  encryptionKey?: EncryptionKey;
+  persistEncryptionKey?: EncryptionKey;
   onPersist?: (
     encryptedBlob: Uint8Array,
     encryptionKey: EncryptionKey
@@ -210,17 +224,19 @@ class GossipSdk {
   /**
    * Initialize the SDK. Call once at app startup.
    */
-  async init(options?: GossipSdkInitOptions): Promise<void> {
+  async init(options: GossipSdkInitOptions): Promise<void> {
     if (this.state.status !== SdkStatus.UNINITIALIZED) {
       console.warn('[GossipSdk] Already initialized');
       return;
     }
 
+    console.log('[GossipSdk] Initializing SDK');
+
     // Merge config with defaults
-    const config = mergeConfig(options?.config);
+    const config = mergeConfig(options.config);
 
     // Configure protocol URL (prefer explicit option, then config)
-    const baseUrl = options?.protocolBaseUrl ?? config.protocol.baseUrl;
+    const baseUrl = options.protocolBaseUrl ?? config.protocol.baseUrl;
     if (baseUrl) {
       setProtocolBaseUrl(baseUrl);
     }
@@ -228,11 +244,16 @@ class GossipSdk {
     // Start WASM initialization
     startWasmInitialization();
 
+    console.log('[GossipSdk] Initializing SQLite');
+    // Initialize SQLite (idempotent — no-op if already initialized).
+    await initDb({ wasmUrl: options.wasmUrl, opfsPath: options.opfsPath });
+
+    console.log('[GossipSdk] SQLite initialized');
     // Create message protocol
     const messageProtocol = createMessageProtocol();
 
     // Create auth service (doesn't need session)
-    this._auth = new AuthService(this.db, messageProtocol);
+    this._auth = new AuthService(messageProtocol);
 
     this.state = {
       status: SdkStatus.INITIALIZED,
@@ -254,37 +275,34 @@ class GossipSdk {
       throw new Error('Session already open. Call closeSession() first.');
     }
 
-    if (!options.encryptionKey) {
+    // Validate session restore options - must have both or neither
+    if (options.encryptedSession && !options.encryptionKey) {
+      throw new Error(
+        'encryptionKey is required when encryptedSession is provided.'
+      );
+    }
+    if (options.encryptionKey && !options.encryptedSession) {
       console.warn(
-        '[GossipSdk] No encryptionKey provided. Creating a new one from mnemonic.'
+        '[GossipSdk] encryptionKey provided without encryptedSession - key will be ignored'
       );
     }
 
-    const encryptionKey =
-      options.encryptionKey ??
-      (await generateEncryptionKeyFromSeed(
-        options.mnemonic,
-        new Uint8Array(32).fill(0)
-      ));
-
-    // Ensure WASM is ready before using any WASM-backed helpers
-    await ensureWasmInitialized();
-
-    // Validate that encryptedSession can be decrypted with the provided key
-    if (options.encryptedSession) {
-      try {
-        const sessionManager = SessionManagerWrapper.from_encrypted_blob(
-          options.encryptedSession,
-          encryptionKey
-        );
-        // We only create this wrapper for validation, free it immediately
-        sessionManager.free();
-      } catch {
-        throw new Error(
-          '[GossipSdk] Failed to load encrypted session. Please provide a valid encryptedSession and encryptionKey.'
-        );
-      }
+    // Validate persistence options
+    if (options.onPersist && !options.persistEncryptionKey) {
+      throw new Error(
+        'persistEncryptionKey is required when onPersist is provided.'
+      );
     }
+    if (options.persistEncryptionKey && !options.onPersist) {
+      console.warn(
+        '[GossipSdk] persistEncryptionKey provided without onPersist callback - key will be unused'
+      );
+    }
+
+    const { messageProtocol } = this.state;
+
+    // Ensure WASM is ready
+    await ensureWasmInitialized();
 
     // Generate keys from mnemonic
     const userKeys = await generateUserKeys(options.mnemonic);
@@ -300,38 +318,35 @@ class GossipSdk {
     );
 
     // Restore existing session state if provided
-    if (options.encryptedSession) {
-      session.load(options.encryptedSession, encryptionKey);
+    if (options.encryptedSession && options.encryptionKey) {
+      session.load(options.encryptedSession, options.encryptionKey);
     }
 
-    const db = this.db;
+    // Get config from initialized state
+    const { config } = this.state;
 
+    // Create services with config (refreshService will be set after creation)
     this._announcement = new AnnouncementService(
-      db,
-      this.state.messageProtocol,
+      messageProtocol,
       session,
       this.eventEmitter,
-      this.config
+      config
     );
 
     this._discussion = new DiscussionService(
-      db,
       this._announcement,
       session,
       this.eventEmitter
     );
 
     this._message = new MessageService(
-      db,
-      this.state.messageProtocol,
+      messageProtocol,
       session,
-      this._discussion,
       this.eventEmitter,
-      this.config
+      config
     );
 
     this._refresh = new RefreshService(
-      db,
       this._message,
       this._discussion,
       this._announcement,
@@ -339,30 +354,36 @@ class GossipSdk {
       this.eventEmitter
     );
 
-    // Publish gossip ID so the user is discoverable (fire-and-forget — don't block login)
-    this._auth!.ensurePublicKeyPublished(
+    // Publish gossip ID (public key) on messageProtocol so the user is discoverable
+    await this._auth!.ensurePublicKeyPublished(
       session.ourPk,
       session.userIdEncoded
-    ).catch(err =>
-      console.warn('[GossipSdk] Failed to publish public key:', err)
     );
+    // Now set refreshService on services (circular dependency resolved via setter)
+    this._discussion.setRefreshService(this._refresh);
+    this._message.setRefreshService(this._refresh);
+    this._announcement.setRefreshService(this._refresh);
+
+    // Reset any messages stuck in SENDING status to WAITING_SESSION
+    // This handles app crash/close during message send
+    await this.resetStuckSendingMessages();
 
     // Update SDK state to reflect the newly opened session.
     this.state = {
       status: SdkStatus.SESSION_OPEN,
-      messageProtocol: this.state.messageProtocol,
-      config: this.state.config,
+      messageProtocol,
+      config,
       session,
       userKeys,
-      encryptionKey,
+      persistEncryptionKey: options.persistEncryptionKey,
       onPersist: options.onPersist,
     };
 
     // Create cached service API wrappers
-    this.createServiceAPIWrappers(session, db);
+    this.createServiceAPIWrappers(session);
 
     // Auto-start polling if enabled in config
-    if (this.config.polling.enabled) {
+    if (config.polling.enabled) {
       this.startPolling();
     }
   }
@@ -371,25 +392,24 @@ class GossipSdk {
    * Create cached service API wrappers.
    * Called once during openSession to avoid creating new objects on each getter access.
    */
-  private createServiceAPIWrappers(
-    session: SessionModule,
-    db: GossipDatabase
-  ): void {
+  private createServiceAPIWrappers(session: SessionModule): void {
     this._messagesAPI = {
-      get: id => db.messages.get(id),
+      get: async id => {
+        const row = await queryGetMessageById(id);
+        return row ? rowToMessage(row) : undefined;
+      },
       getMessages: async contactUserId => {
         const state = this.requireSession();
-        return await db.messages
-          .where('[ownerUserId+contactUserId]')
-          .equals([state.session.userIdEncoded, contactUserId])
-          .toArray();
+        const rows = await getMessagesByOwnerAndContact(
+          state.session.userIdEncoded,
+          contactUserId
+        );
+        return rows.map(rowToMessage);
       },
       send: message =>
-        this.messageQueues.enqueue(message.contactUserId, async () => {
-          const result = await this._message!.sendMessage(message);
-          if (result.success) await this._refresh?.stateUpdate();
-          return result;
-        }),
+        this.messageQueues.enqueue(message.contactUserId, () =>
+          this._message!.sendMessage(message)
+        ),
       fetch: () => this._message!.fetchMessages(),
       findByMsgId: (messageId, ownerUserId, contactUserId) =>
         this._message!.findMessageByMsgId(
@@ -401,31 +421,14 @@ class GossipSdk {
     };
 
     this._discussionsAPI = {
-      start: async (
-        contact,
-        payload?: AnnouncementPayload
-      ): Promise<Result<discussionInitializationResult, Error>> => {
-        const result = await this._discussion!.initialize(contact, payload);
-        if (result.success) await this._refresh?.stateUpdate();
-        return result;
-      },
-      accept: async (
-        discussion: Discussion
-      ): Promise<Result<Uint8Array, Error>> => {
-        const result = await this._discussion!.accept(discussion);
-        if (result.success) await this._refresh?.stateUpdate();
-        return result;
-      },
-      renew: async (
-        contactUserId: string
-      ): Promise<Result<Uint8Array, Error>> => {
-        const result = await this._discussion!.createSessionForContact(
+      start: (contact, payload?: AnnouncementPayload) =>
+        this._discussion!.initialize(contact, payload),
+      accept: (discussion: Discussion) => this._discussion!.accept(discussion),
+      renew: (contactUserId: string) =>
+        this._discussion!.createSessionForContact(
           contactUserId,
           new Uint8Array(0)
-        );
-        if (result.success) await this._refresh?.stateUpdate();
-        return result;
-      },
+        ),
       getStatus: (contactUserId: string): SessionStatus => {
         if (this.state.status !== SdkStatus.SESSION_OPEN)
           throw new Error('No session open. Call openSession() first.');
@@ -433,30 +436,34 @@ class GossipSdk {
           decodeUserId(contactUserId)
         );
       },
-      list: ownerUserId => db.getDiscussionsByOwner(ownerUserId),
-      get: (ownerUserId, contactUserId) =>
-        db.getDiscussionByOwnerAndContact(ownerUserId, contactUserId),
+      list: async ownerUserId => {
+        const all = await getDiscussionsByOwner(ownerUserId);
+        return toSortedDiscussions(all);
+      },
+      get: async (ownerUserId, contactUserId) => {
+        const row = await getDiscussionByOwnerAndContact(
+          ownerUserId,
+          contactUserId
+        );
+        return row ? toDiscussion(row) : undefined;
+      },
     };
 
     this._announcementsAPI = {
-      fetch: async () => {
-        const result = await this._announcement!.fetchAndProcessAnnouncements();
-        if (result.newAnnouncementsCount) await this._refresh?.stateUpdate();
-        return result;
-      },
+      fetch: () => this._announcement!.fetchAndProcessAnnouncements(),
       skipHistorical: () => this._announcement!.skipHistoricalAnnouncements(),
     };
 
     this._contactsAPI = {
-      list: ownerUserId => getContacts(ownerUserId, db),
+      list: ownerUserId => getContacts(ownerUserId),
       get: (ownerUserId, contactUserId) =>
-        getContact(ownerUserId, contactUserId, db),
+        getContact(ownerUserId, contactUserId),
       add: (ownerUserId, userId, name, publicKeys) =>
-        addContact(ownerUserId, userId, name, publicKeys, db),
+        addContact(ownerUserId, userId, name, publicKeys),
       updateName: (ownerUserId, contactUserId, newName) =>
-        updateContactName(ownerUserId, contactUserId, newName, db),
+        updateContactName(ownerUserId, contactUserId, newName),
       delete: (ownerUserId, contactUserId) =>
-        deleteContact(ownerUserId, contactUserId, db, session),
+        deleteContact(ownerUserId, contactUserId, session),
     };
   }
 
@@ -533,12 +540,37 @@ class GossipSdk {
    * Get encrypted session blob for persistence.
    * Throws if no session is open.
    */
-  getEncryptedSession(): Uint8Array {
+  getEncryptedSession(encryptionKey: EncryptionKey): Uint8Array {
     const state = this.requireSession();
-    if (!state.encryptionKey) {
-      throw new Error('No encryption key found. Call openSession() first.');
+    return state.session.toEncryptedBlob(encryptionKey);
+  }
+
+  /**
+   * Configure session persistence after session is opened.
+   * Use this when you need to set up persistence after account creation.
+   *
+   * @param encryptionKey - Key to encrypt session blob
+   * @param onPersist - Callback to save encrypted session blob
+   */
+  configurePersistence(
+    encryptionKey: EncryptionKey,
+    onPersist: (
+      encryptedBlob: Uint8Array,
+      encryptionKey: EncryptionKey
+    ) => Promise<void>
+  ): void {
+    if (this.state.status !== SdkStatus.SESSION_OPEN) {
+      throw new Error('No session open. Call openSession() first.');
     }
-    return state.session.toEncryptedBlob(state.encryptionKey);
+
+    // Update state with persistence config
+    this.state = {
+      ...this.state,
+      persistEncryptionKey: encryptionKey,
+      onPersist,
+    };
+
+    console.log('[GossipSdk] Session persistence configured');
   }
 
   // ─────────────────────────────────────────────────────────────────
@@ -587,10 +619,6 @@ class GossipSdk {
       throw new Error('Contacts API not initialized');
     }
     return this._contactsAPI;
-  }
-
-  get db(): GossipDatabase {
-    return gossipDb();
   }
 
   /**
@@ -649,7 +677,7 @@ class GossipSdk {
       return;
     }
 
-    const { config, session } = this.state;
+    const { config } = this.state;
 
     this.pollingManager.start(
       config,
@@ -658,19 +686,10 @@ class GossipSdk {
           await this._message?.fetchMessages();
         },
         fetchAnnouncements: async () => {
-          const result =
-            await this._announcement?.fetchAndProcessAnnouncements();
-          if (result?.newAnnouncementsCount) this._refresh?.stateUpdate();
+          await this._announcement?.fetchAndProcessAnnouncements();
         },
         handleSessionRefresh: async () => {
-          // Retry public key publish if it failed during openSession()
-          this._auth
-            ?.ensurePublicKeyPublished(session.ourPk, session.userIdEncoded)
-            .catch(() => {});
           await this.updateState();
-        },
-        getActiveDiscussions: async () => {
-          return this.db.getDiscussionsByOwner(session.userIdEncoded);
         },
       },
       this.eventEmitter
@@ -709,21 +728,56 @@ class GossipSdk {
   private async handleSessionPersist(): Promise<void> {
     if (this.state.status !== SdkStatus.SESSION_OPEN) return;
 
-    const { onPersist, encryptionKey, session } = this.state;
-    if (!onPersist || !encryptionKey) return;
+    const { onPersist, persistEncryptionKey, session } = this.state;
+    if (!onPersist || !persistEncryptionKey) return;
 
     try {
-      const blob = session.toEncryptedBlob(encryptionKey);
+      const blob = session.toEncryptedBlob(persistEncryptionKey);
       console.log(
         `[SessionPersist] Saving session blob (${blob.length} bytes)`
       );
-      await onPersist(blob, encryptionKey);
+      await onPersist(blob, persistEncryptionKey);
     } catch (error) {
       this.eventEmitter.emit(
         SdkEventType.ERROR,
         error instanceof Error ? error : new Error(String(error)),
         'session_persist'
       );
+    }
+  }
+
+  /**
+   * Reset messages stuck in SENDING status to WAITING_SESSION.
+   *
+   * Per spec: SENDING is a transient state that should never be persisted.
+   * If the app crashes/closes during a send, the message would be stuck forever.
+   *
+   * By resetting to WAITING_SESSION:
+   * - Message will be re-encrypted with current session keys
+   * - Message will be automatically sent when session is active
+   * - No manual user intervention required
+   *
+   * We also clear encryptedMessage and seeker since they may be stale.
+   */
+  private async resetStuckSendingMessages(): Promise<void> {
+    try {
+      const stuck = await getMessagesByStatus(MessageStatus.SENDING);
+
+      for (const m of stuck) {
+        await updateMessageById(m.id, {
+          status: MessageStatus.WAITING_SESSION,
+          encryptedMessage: null,
+          seeker: null,
+        });
+      }
+
+      if (stuck.length > 0) {
+        console.log(
+          `[GossipSdk] Reset ${stuck.length} stuck SENDING message(s) to WAITING_SESSION for auto-retry`
+        );
+      }
+    } catch (error) {
+      console.error('[GossipSdk] Failed to reset stuck messages:', error);
     }
   }
 }
@@ -756,7 +810,7 @@ interface DiscussionServiceAPI {
   start(
     contact: Contact,
     payload?: AnnouncementPayload
-  ): Promise<Result<discussionInitializationResult, Error>>;
+  ): Promise<Result<DiscussionInitializationResult, Error>>;
   /** Accept an incoming discussion request */
   accept(discussion: Discussion): Promise<Result<Uint8Array, Error>>;
   /** Renew a broken discussion */
@@ -825,12 +879,11 @@ interface PollingAPI {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Factory & Class Export
+// Singleton Export
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Create a new GossipSdk instance. The consumer manages the instance lifecycle. */
-export function createGossipSdk(): GossipSdk {
-  return new GossipSdk();
-}
+/** The singleton GossipSdk instance */
+export const gossipSdk = new GossipSdk();
 
+// Also export the class for testing
 export { GossipSdk };

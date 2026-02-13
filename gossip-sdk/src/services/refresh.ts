@@ -5,12 +5,9 @@
  * keep-alive messages and broken sessions.
  */
 
-import {
-  type GossipDatabase,
-  MessageType,
-  MessageDirection,
-  MessageStatus,
-} from '../db';
+import { MessageType, MessageDirection, MessageStatus } from '../db';
+import { getDiscussionsByOwner } from '../queries';
+import { toSortedDiscussions } from '../utils/discussions';
 import type { SessionModule } from '../wasm/session';
 import { SessionStatus } from '../wasm/bindings';
 import { decodeUserId, encodeUserId } from '../utils/userId';
@@ -28,11 +25,11 @@ const logger = new Logger('RefreshService');
  * @example
  * ```typescript
  * const refreshService = new RefreshService(
- *   db,
  *   messageService,
  *   discussionService,
  *   announcementService,
- *   session
+ *   session,
+ *   eventEmitter
  * );
  *
  * // Handle session refresh for active discussions
@@ -40,7 +37,6 @@ const logger = new Logger('RefreshService');
  * ```
  */
 export class RefreshService {
-  private db: GossipDatabase;
   private messageService: MessageService;
   private announcementService: AnnouncementService;
   private discussionService: DiscussionService;
@@ -49,14 +45,12 @@ export class RefreshService {
   private eventEmitter: SdkEventEmitter;
 
   constructor(
-    db: GossipDatabase,
     messageService: MessageService,
     discussionService: DiscussionService,
     announcementService: AnnouncementService,
     session: SessionModule,
     eventEmitter: SdkEventEmitter
   ) {
-    this.db = db;
     this.messageService = messageService;
     this.discussionService = discussionService;
     this.announcementService = announcementService;
@@ -89,7 +83,8 @@ export class RefreshService {
         return;
       }
 
-      const discussions = await this.db.getDiscussionsByOwner(ownerUserId);
+      const allRows = await getDiscussionsByOwner(ownerUserId);
+      const discussions = toSortedDiscussions(allRows);
 
       if (!discussions.length) {
         return;
@@ -149,8 +144,8 @@ export class RefreshService {
       }
 
       // Step 2: send announcements
-      const discussionsAfterRefresh =
-        await this.db.getDiscussionsByOwner(ownerUserId);
+      const refreshRows = await getDiscussionsByOwner(ownerUserId);
+      const discussionsAfterRefresh = toSortedDiscussions(refreshRows);
       const activePendingDiscussions = discussionsAfterRefresh.filter(
         discussion => {
           const status = this.session.peerSessionStatus(

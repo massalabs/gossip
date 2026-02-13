@@ -1,7 +1,5 @@
 import { create } from 'zustand';
-import { Subscription } from 'dexie';
-import { liveQuery } from 'dexie';
-import { Contact, SessionStatus } from '@massalabs/gossip-sdk';
+import { Contact, SessionStatus, SdkEventType } from '@massalabs/gossip-sdk';
 import type { Discussion } from '@massalabs/gossip-sdk';
 import { getSdk } from './sdkStore';
 import { createSelectors } from './utils/createSelectors';
@@ -9,13 +7,16 @@ import { useAccountStore } from './accountStore';
 
 export type DiscussionFilter = 'all' | 'unread' | 'pending';
 
+const POLL_INTERVAL_MS = 3000;
+
 interface DiscussionStoreState {
   discussions: Discussion[];
   contacts: Contact[];
   lastMessages: Map<string, { content: string; timestamp: Date }>;
   openNameModals: Set<number>;
-  subscriptionDiscussions: Subscription | null;
-  subscriptionContacts: Subscription | null;
+  pollTimer: ReturnType<typeof setInterval> | null;
+  eventHandler: (() => void) | null;
+  cancelDebounce: (() => void) | null;
   isInitializing: boolean;
   filter: DiscussionFilter;
 
@@ -33,32 +34,31 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
   contacts: [],
   lastMessages: new Map(),
   openNameModals: new Set<number>(),
-  subscriptionDiscussions: null,
-  subscriptionContacts: null,
+  pollTimer: null,
+  eventHandler: null,
+  cancelDebounce: null,
   isInitializing: false,
   filter: 'all',
 
   init: () => {
     const ownerUserId = useAccountStore.getState().userProfile?.userId;
 
-    if (
-      !ownerUserId ||
-      (get().subscriptionDiscussions && get().subscriptionContacts) ||
-      get().isInitializing
-    )
-      return;
+    if (!ownerUserId || get().pollTimer || get().isInitializing) return;
 
     set({ isInitializing: true });
 
-    // Set up liveQuery for discussions
-    const discussionsQuery = liveQuery(() =>
-      getSdk().db.discussions.where('ownerUserId').equals(ownerUserId).toArray()
-    );
-
-    const subscriptionDiscussions = discussionsQuery.subscribe({
-      next: async (discussionsList: Discussion[]) => {
+    let isFetching = false;
+    const fetchData = async () => {
+      if (isFetching) return;
+      isFetching = true;
+      try {
         const sdk = getSdk();
         const isSessionOpen = sdk.isSessionOpen;
+
+        // Fetch discussions
+        const discussionsList = isSessionOpen
+          ? await sdk.discussions.list(ownerUserId)
+          : [];
 
         // Pre-compute status map (one getStatus call per discussion)
         const statusMap = new Map<string, SessionStatus>();
@@ -74,12 +74,10 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
         // Sort discussions: new requests (PENDING) first, then active discussions
         // Within each group, sort by most recent activity
         const getActivityTime = (discussion: Discussion): number => {
-          // New messages always bubble to top within their group
           if (discussion.lastMessageTimestamp) {
             return discussion.lastMessageTimestamp.getTime();
           }
 
-          // For pending requests, use updatedAt (only if session is open)
           const status = statusMap.get(discussion.contactUserId);
           if (
             status &&
@@ -91,26 +89,21 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
             return discussion.updatedAt.getTime();
           }
 
-          // Fallback to creation time for all other cases
           return discussion.createdAt.getTime();
         };
 
         const getStatusPriority = (status: SessionStatus): number => {
-          // PENDING (new requests) = highest priority (0)
           if (
             [SessionStatus.SelfRequested, SessionStatus.PeerRequested].includes(
               status
             )
           )
             return 0;
-          // ACTIVE (ongoing discussions) = medium priority (1)
           if (status === SessionStatus.Active) return 1;
-          // All other statuses = lowest priority (2)
           return 2;
         };
 
         const sortedDiscussions = discussionsList.sort((a, b) => {
-          // If session is open, separate by status: PENDING first, then ACTIVE, then others
           if (isSessionOpen) {
             const statusDiff =
               getStatusPriority(statusMap.get(a.contactUserId)!) -
@@ -118,7 +111,6 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
             if (statusDiff !== 0) return statusDiff;
           }
 
-          // Within the same status group (or when session is closed), sort by activity time
           return getActivityTime(b) - getActivityTime(a);
         });
 
@@ -139,30 +131,55 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
           }
         });
 
-        set({ discussions: sortedDiscussions, lastMessages: messagesMap });
-      },
-      error: error => {
-        console.error('Discussions live query error:', error);
-      },
-    });
+        // Fetch contacts
+        let contactsList: Contact[] = [];
+        if (isSessionOpen) {
+          contactsList = await sdk.contacts.list(ownerUserId);
+        }
 
-    // Set up liveQuery for contacts
-    const contactsQuery = liveQuery(() =>
-      getSdk().db.contacts.where('ownerUserId').equals(ownerUserId).toArray()
-    );
+        set({
+          discussions: sortedDiscussions,
+          lastMessages: messagesMap,
+          contacts: contactsList,
+        });
+      } catch (error) {
+        console.error('Discussion/contacts fetch error:', error);
+      } finally {
+        isFetching = false;
+      }
+    };
 
-    const subscriptionContacts = contactsQuery.subscribe({
-      next: contactsList => {
-        set({ contacts: contactsList });
-      },
-      error: error => {
-        console.error('Contacts live query error:', error);
-      },
-    });
+    // Immediate fetch
+    fetchData();
+
+    // Polling interval
+    const timer = setInterval(fetchData, POLL_INTERVAL_MS);
+
+    // Event-driven immediate refetch (debounced to collapse rapid events)
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+    const onEvent = () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(fetchData, 100);
+    };
+    // Cancel pending debounce (called from cleanup)
+    const cancelDebounce = () => {
+      if (debounceTimer) {
+        clearTimeout(debounceTimer);
+        debounceTimer = null;
+      }
+    };
+    const sdk = getSdk();
+    sdk.on(SdkEventType.MESSAGE_RECEIVED, onEvent);
+    sdk.on(SdkEventType.MESSAGE_READ, onEvent);
+    sdk.on(SdkEventType.SESSION_CREATED, onEvent);
+    sdk.on(SdkEventType.SESSION_ACCEPTED, onEvent);
+    sdk.on(SdkEventType.SESSION_RENEWED, onEvent);
+    sdk.on(SdkEventType.SESSION_REQUESTED, onEvent);
 
     set({
-      subscriptionDiscussions,
-      subscriptionContacts,
+      pollTimer: timer,
+      eventHandler: onEvent,
+      cancelDebounce,
       isInitializing: false,
     });
   },
@@ -188,13 +205,27 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
   },
 
   cleanup: () => {
-    const subDisc = get().subscriptionDiscussions;
-    if (subDisc) subDisc.unsubscribe();
-    const subCont = get().subscriptionContacts;
-    if (subCont) subCont.unsubscribe();
+    const timer = get().pollTimer;
+    if (timer) clearInterval(timer);
+    get().cancelDebounce?.();
+    const handler = get().eventHandler;
+    if (handler) {
+      try {
+        const sdk = getSdk();
+        sdk.off(SdkEventType.MESSAGE_RECEIVED, handler);
+        sdk.off(SdkEventType.MESSAGE_READ, handler);
+        sdk.off(SdkEventType.SESSION_CREATED, handler);
+        sdk.off(SdkEventType.SESSION_ACCEPTED, handler);
+        sdk.off(SdkEventType.SESSION_RENEWED, handler);
+        sdk.off(SdkEventType.SESSION_REQUESTED, handler);
+      } catch {
+        // SDK might not be available during cleanup
+      }
+    }
     set({
-      subscriptionDiscussions: null,
-      subscriptionContacts: null,
+      pollTimer: null,
+      eventHandler: null,
+      cancelDebounce: null,
       discussions: [],
       contacts: [],
       lastMessages: new Map(),

@@ -12,13 +12,16 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { GossipSdk, SdkEventType } from '../../src/gossip';
 import {
-  GossipDatabase,
   type Discussion,
   type Contact,
   DiscussionDirection,
+  rowToDiscussion,
 } from '../../src/db';
 import { generateMnemonic } from '../../src/crypto/bip39';
 import { protocolConfig } from '../../src/config/protocol';
+import { eq } from 'drizzle-orm';
+import { getSqliteDb } from '../../src/sqlite';
+import * as schema from '../../src/schema';
 
 describe('E2E: Announcement fetch (real API, real account)', () => {
   let sdk: GossipSdk;
@@ -33,9 +36,6 @@ describe('E2E: Announcement fetch (real API, real account)', () => {
   afterEach(async () => {
     if (sdk?.isSessionOpen) {
       await sdk.closeSession();
-    }
-    if (sdk.db.isOpen()) {
-      await sdk.db.close();
     }
   });
 
@@ -68,14 +68,22 @@ describe('E2E: Announcement fetch (real API, real account)', () => {
       const first = await sdk.announcements.fetch();
       expect(first).toBeDefined();
 
-      const profile = await sdk.db.userProfile.get(sdk.userId);
-      const cursorBeforeSecond = profile?.lastBulletinCounter;
+      const cursorRow = await getSqliteDb()
+        .select({ counter: schema.announcementCursors.counter })
+        .from(schema.announcementCursors)
+        .where(eq(schema.announcementCursors.userId, sdk.userId))
+        .get();
+      const cursorBeforeSecond = cursorRow?.counter;
 
       const second = await sdk.announcements.fetch();
       expect(second).toBeDefined();
-      const profileAfter = await sdk.db.userProfile.get(sdk.userId);
+      const cursorRowAfter = await getSqliteDb()
+        .select({ counter: schema.announcementCursors.counter })
+        .from(schema.announcementCursors)
+        .where(eq(schema.announcementCursors.userId, sdk.userId))
+        .get();
       if (cursorBeforeSecond !== undefined && first.newAnnouncementsCount > 0) {
-        expect(profileAfter?.lastBulletinCounter).toBeDefined();
+        expect(cursorRowAfter?.counter).toBeDefined();
       }
     }
   );
@@ -103,8 +111,6 @@ describe('E2E: Discussion request (user A sends to user B)', () => {
       expect(userBId).toMatch(/^gossip1/);
 
       // ─── User A: create account ───
-      const databaseA = new GossipDatabase();
-      await databaseA.open();
       const sdkA = new GossipSdk();
       await sdkA.init({ protocolBaseUrl: baseUrl });
 
@@ -136,7 +142,13 @@ describe('E2E: Discussion request (user A sends to user B)', () => {
       });
 
       // ─── A should have one discussion (INITIATED) toward B ───
-      const discussionsA = await databaseA.getDiscussionsByOwner(userAId);
+      const discussionsA = (
+        await getSqliteDb()
+          .select()
+          .from(schema.discussions)
+          .where(eq(schema.discussions.ownerUserId, userAId))
+          .all()
+      ).map(r => rowToDiscussion(r as Record<string, unknown>));
       const sentDiscussion = discussionsA.find(
         d =>
           d.contactUserId === userBId &&
@@ -184,8 +196,7 @@ describe('E2E: Discussion request (user A sends to user B)', () => {
       }
       // If B did not receive after maxWaitMs, the bulletin may be paginated oldest-first
       // (production API). The test still validates that A sent the discussion request.
-      await sdkA.db.close();
-      await sdkB.db.close();
+
       await sdkA.closeSession();
       await sdkB.closeSession();
     }

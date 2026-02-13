@@ -6,6 +6,7 @@ import { enableDebugLogger } from './utils/logger.ts';
 import { createSdk } from './sdk';
 import { useSdkStore } from './stores/sdkStore';
 import { protocolConfig } from './config/protocol';
+import waSqliteWasmUrl from 'wa-sqlite/dist/wa-sqlite.wasm?url';
 
 // Polyfill for Buffer
 import { Buffer } from 'buffer';
@@ -96,6 +97,8 @@ Promise.all([
   createSdk({
     protocolBaseUrl: protocolConfig.baseUrl,
     config: { polling: { enabled: true } },
+    wasmUrl: waSqliteWasmUrl,
+    opfsPath: '/gossip-db',
   }),
   initSafeArea(),
 ])

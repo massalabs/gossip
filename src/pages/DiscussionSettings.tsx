@@ -13,10 +13,9 @@ import Button from '../components/ui/Button';
 import PageHeader from '../components/ui/PageHeader';
 import PageLayout from '../components/ui/PageLayout';
 import { Check, Edit2, ChevronRight, RotateCw } from 'react-feather';
-import { Contact, updateDiscussionName } from '@massalabs/gossip-sdk';
-import { getSdk } from '../stores/sdkStore';
 import { ROUTES } from '../constants/routes';
 import { useManualRenewDiscussion } from '../hooks/useManualRenew';
+import { updateDiscussionName, Contact } from '@massalabs/gossip-sdk';
 
 const DiscussionSettings: React.FC = () => {
   const { discussionId } = useParams();
@@ -93,11 +92,7 @@ const DiscussionSettings: React.FC = () => {
     async (name?: string) => {
       if (!discussion?.id) return;
 
-      const result = await updateDiscussionName(
-        discussion.id,
-        name,
-        getSdk().db
-      );
+      const result = await updateDiscussionName(discussion.id, name);
       if (!result.success) {
         setNameError(result.message);
         return;

@@ -2,59 +2,41 @@
  * SDK Test Setup File
  *
  * Minimal environment setup for SDK tests:
- * - fake-indexeddb for Dexie/IndexedDB in Node
- * - IDBKeyRange polyfill
  * - WASM initialization
+ * - In-memory SQLite database
  * - Shared database cleanup
  */
 
-import 'fake-indexeddb/auto';
-import { IDBKeyRange } from 'fake-indexeddb';
-import { afterAll, beforeAll, beforeEach } from 'vitest';
-import { gossipDb } from '../src/db';
+import { readFileSync } from 'fs';
+import { resolve, dirname } from 'path';
+import { createRequire } from 'module';
+import { afterAll, beforeAll } from 'vitest';
 import { initializeWasm } from '../src/wasm/loader';
+import { initDb, closeSqlite, clearAllTables } from '../src/sqlite';
+
+const require = createRequire(import.meta.url);
+const waSqlitePath = dirname(require.resolve('wa-sqlite/package.json'));
+const waSqliteWasm = readFileSync(resolve(waSqlitePath, 'dist/wa-sqlite.wasm'));
 
 if (typeof process !== 'undefined') {
   process.env.GOSSIP_API_URL = 'https://api.usegossip.com';
   process.env.VITE_GOSSIP_API_URL = 'https://api.usegossip.com';
 }
 
-if (typeof globalThis.IDBKeyRange === 'undefined') {
-  (globalThis as { IDBKeyRange?: typeof IDBKeyRange }).IDBKeyRange =
-    IDBKeyRange;
-}
-
-async function clearDatabase(): Promise<void> {
-  const db = gossipDb();
-  await Promise.all(db.tables.map(table => table.clear()));
-}
-
 beforeAll(async () => {
-  // Initialize WASM before any tests run
   await initializeWasm();
-
-  const db = gossipDb();
-  if (!db.isOpen()) {
-    await db.open();
-  }
-  await clearDatabase();
-});
-
-beforeEach(async () => {
-  const db = gossipDb();
-  if (!db.isOpen()) {
-    await db.open();
-  }
-  await clearDatabase();
+  const wasmBinary = waSqliteWasm.buffer.slice(
+    waSqliteWasm.byteOffset,
+    waSqliteWasm.byteOffset + waSqliteWasm.byteLength
+  );
+  await initDb({ wasmBinary });
+  await clearAllTables();
 });
 
 afterAll(async () => {
   try {
-    await clearDatabase();
-    await gossipDb().close();
-  } catch (_) {
-    // Ignore errors - database might already be closed
+    await closeSqlite();
+  } catch {
+    // SQLite might already be closed
   }
 });
-
-console.log('SDK test setup complete: fake-indexeddb initialized');

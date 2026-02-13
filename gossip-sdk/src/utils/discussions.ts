@@ -4,7 +4,28 @@
  * Functions for managing discussion metadata.
  */
 
-import { type GossipDatabase } from '../db';
+import { type Discussion, rowToDiscussion } from '../db';
+import type { DiscussionRow } from '../queries';
+import { getDiscussionById, updateDiscussionById } from '../queries';
+
+/** Convert a Drizzle discussion row to a domain Discussion. */
+export function toDiscussion(row: DiscussionRow): Discussion {
+  return rowToDiscussion(row as Record<string, unknown>);
+}
+
+/** Convert discussion rows to sorted Discussion[]. Most recent activity first. */
+export function toSortedDiscussions(rows: DiscussionRow[]): Discussion[] {
+  return rows.map(toDiscussion).sort((a, b) => {
+    if (a.lastMessageTimestamp && b.lastMessageTimestamp) {
+      return (
+        b.lastMessageTimestamp.getTime() - a.lastMessageTimestamp.getTime()
+      );
+    }
+    if (a.lastMessageTimestamp) return -1;
+    if (b.lastMessageTimestamp) return 1;
+    return b.createdAt.getTime() - a.createdAt.getTime();
+  });
+}
 
 export type UpdateDiscussionNameResult =
   | { success: true; trimmedName: string | undefined }
@@ -25,14 +46,13 @@ export type UpdateDiscussionNameResult =
  */
 export async function updateDiscussionName(
   discussionId: number,
-  newName: string | undefined,
-  db: GossipDatabase
+  newName: string | undefined
 ): Promise<UpdateDiscussionNameResult> {
   const trimmed = newName?.trim();
-  const customName = trimmed && trimmed.length > 0 ? trimmed : undefined;
+  const customName = trimmed && trimmed.length > 0 ? trimmed : null;
 
   try {
-    const discussion = await db.discussions.get(discussionId);
+    const discussion = await getDiscussionById(discussionId);
     if (!discussion) {
       return {
         success: false,
@@ -41,9 +61,9 @@ export async function updateDiscussionName(
       };
     }
 
-    await db.discussions.update(discussionId, { customName });
+    await updateDiscussionById(discussionId, { customName });
 
-    return { success: true, trimmedName: customName };
+    return { success: true, trimmedName: customName ?? undefined };
   } catch (e) {
     console.error('updateDiscussionName failed', e);
     return {

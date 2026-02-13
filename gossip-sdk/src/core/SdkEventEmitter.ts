@@ -13,6 +13,7 @@ import type { Message, Discussion, Contact } from '../db';
 export enum SdkEventType {
   MESSAGE_RECEIVED = 'messageReceived',
   MESSAGE_SENT = 'messageSent',
+  MESSAGE_READ = 'messageRead',
   MESSAGE_FAILED = 'messageFailed',
   SESSION_REQUESTED = 'sessionRequested',
   SESSION_CREATED = 'sessionCreated',
@@ -24,6 +25,7 @@ export enum SdkEventType {
 export interface SdkEventHandlers {
   [SdkEventType.MESSAGE_RECEIVED]: (message: Message) => void;
   [SdkEventType.MESSAGE_SENT]: (message: Message) => void;
+  [SdkEventType.MESSAGE_READ]: (messageId: number) => void;
   [SdkEventType.MESSAGE_FAILED]: (message: Message, error: Error) => void;
   [SdkEventType.SESSION_REQUESTED]: (
     discussion: Discussion,
@@ -48,6 +50,9 @@ export class SdkEventEmitter {
     >(),
     [SdkEventType.MESSAGE_SENT]: new Set<
       SdkEventHandlers[SdkEventType.MESSAGE_SENT]
+    >(),
+    [SdkEventType.MESSAGE_READ]: new Set<
+      SdkEventHandlers[SdkEventType.MESSAGE_READ]
     >(),
     [SdkEventType.MESSAGE_FAILED]: new Set<
       SdkEventHandlers[SdkEventType.MESSAGE_FAILED]
