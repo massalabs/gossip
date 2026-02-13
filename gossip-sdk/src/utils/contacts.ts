@@ -4,9 +4,16 @@
  * Functions for managing contacts including updating names and deleting contacts.
  */
 
-import { type GossipDatabase } from '../db';
 import { decodeUserId } from './userId';
 import type { SessionModule } from '../wasm/session';
+import {
+  getContactsByOwner,
+  getContactByOwnerAndUser,
+  updateContactByOwnerAndUser,
+  deleteContactByOwnerAndUser,
+  deleteDiscussionsByOwnerAndContact,
+  deleteMessagesByOwnerAndContact,
+} from '../queries';
 
 export type UpdateContactNameResult =
   | { success: true; trimmedName: string }
@@ -30,14 +37,12 @@ export type DeleteContactResult =
  * @param ownerUserId - Owner user ID
  * @param contactUserId - Contact user ID
  * @param newName - New name for the contact
- * @param db - Database instance
  * @returns Result with success status
  */
 export async function updateContactName(
   ownerUserId: string,
   contactUserId: string,
-  newName: string,
-  db: GossipDatabase
+  newName: string
 ): Promise<UpdateContactNameResult> {
   if (!ownerUserId || !contactUserId) {
     return {
@@ -55,7 +60,7 @@ export async function updateContactName(
       message: 'Name cannot be empty.',
     };
   try {
-    const list = await db.getContactsByOwner(ownerUserId);
+    const list = await getContactsByOwner(ownerUserId);
     const duplicate = list.find(
       contact =>
         contact.userId !== contactUserId &&
@@ -68,10 +73,9 @@ export async function updateContactName(
         message: 'This name is already used by another contact.',
       };
 
-    await db.contacts
-      .where('[ownerUserId+userId]')
-      .equals([ownerUserId, contactUserId])
-      .modify({ name: trimmed });
+    await updateContactByOwnerAndUser(ownerUserId, contactUserId, {
+      name: trimmed,
+    });
 
     return { success: true, trimmedName: trimmed };
   } catch (e) {
@@ -89,14 +93,12 @@ export async function updateContactName(
  *
  * @param ownerUserId - Owner user ID
  * @param contactUserId - Contact user ID
- * @param db - Database instance
  * @param session - Session module for peer management
  * @returns Result with success status
  */
 export async function deleteContact(
   ownerUserId: string,
   contactUserId: string,
-  db: GossipDatabase,
   session: SessionModule
 ): Promise<DeleteContactResult> {
   try {
@@ -108,46 +110,24 @@ export async function deleteContact(
       };
     }
 
-    // Delete in a transaction to ensure atomicity
-    const result: DeleteContactResult = await db.transaction(
-      'rw',
-      [db.contacts, db.discussions, db.messages],
-      async () => {
-        // Verify contact exists
-        const contact = await db.getContactByOwnerAndUserId(
-          ownerUserId,
-          contactUserId
-        );
-        if (!contact) {
-          return {
-            success: false,
-            reason: 'not_found',
-            message: 'Contact not found',
-          };
-        }
-        // Delete the contact
-        await db.contacts
-          .where('[ownerUserId+userId]')
-          .equals([ownerUserId, contactUserId])
-          .delete();
+    // Verify contact exists
+    const contact = await getContactByOwnerAndUser(ownerUserId, contactUserId);
+    if (!contact) {
+      return {
+        success: false,
+        reason: 'not_found',
+        message: 'Contact not found.',
+      };
+    }
 
-        // Delete related discussions
-        await db.discussions
-          .where('[ownerUserId+contactUserId]')
-          .equals([ownerUserId, contactUserId])
-          .delete();
+    // Delete contact from SQLite
+    await deleteContactByOwnerAndUser(ownerUserId, contactUserId);
 
-        // Delete related messages
-        await db.messages
-          .where('[ownerUserId+contactUserId]')
-          .equals([ownerUserId, contactUserId])
-          .delete();
+    // Delete related discussions
+    await deleteDiscussionsByOwnerAndContact(ownerUserId, contactUserId);
 
-        return { success: true };
-      }
-    );
-
-    if (!result.success) return result;
+    // Delete related messages
+    await deleteMessagesByOwnerAndContact(ownerUserId, contactUserId);
 
     // Discard peer from session manager and persist
     await session.peerDiscard(decodeUserId(contactUserId));

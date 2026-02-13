@@ -10,18 +10,30 @@ import {
   type Discussion,
   type Contact,
   GossipSdk,
+  setOnSeekersUpdated,
 } from '@massalabs/gossip-sdk';
 import { notificationService } from './notifications';
 import { isAppInForeground } from '../utils/appState';
+import { bridgeSet } from '../sw-bridge';
+import { setActiveSeekersInPreferences } from '../utils/preferences';
 
 /**
  * Wire up SDK events to app behaviors like notifications.
  *
- * Note: Zustand stores use liveQuery to watch the database directly,
- * so we don't need to manually push state updates here. The events
- * are primarily for side effects like notifications.
+ * Note: Zustand stores poll SQLite via SDK service APIs and listen to SDK events
+ * for immediate refetch. The event handlers here are primarily for side effects
+ * like notifications.
  */
 export function setupSdkEventHandlers(gossip: GossipSdk): void {
+  // Propagate seekers to SW bridge (web) and BackgroundRunner (mobile)
+  setOnSeekersUpdated(seekers => {
+    bridgeSet(
+      'activeSeekers',
+      seekers.map(s => Array.from(s))
+    ).catch(() => {});
+    setActiveSeekersInPreferences(seekers).catch(() => {});
+  });
+
   // Show notification for new discussion requests when app is in background
   gossip.on(
     SdkEventType.SESSION_REQUESTED,

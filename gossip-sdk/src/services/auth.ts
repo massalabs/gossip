@@ -8,13 +8,10 @@ import { UserPublicKeys } from '../wasm/bindings';
 import { decodeUserId } from '../utils/userId';
 import { encodeToBase64, decodeFromBase64 } from '../utils/base64';
 import { IMessageProtocol } from '../api/messageProtocol/types';
-import { type GossipDatabase } from '../db';
+import { getUserProfileField, updateUserProfileById } from '../queries';
 
 export class AuthService {
-  constructor(
-    private db: GossipDatabase,
-    public messageProtocol: IMessageProtocol
-  ) {}
+  constructor(public messageProtocol: IMessageProtocol) {}
 
   /**
    * Fetch public key by userId
@@ -42,7 +39,7 @@ export class AuthService {
     publicKeys: UserPublicKeys,
     userId: string
   ): Promise<void> {
-    const profile = await this.db.userProfile.get(userId);
+    const profile = await getUserProfileField(userId);
 
     if (profile) {
       const lastPush = profile.lastPublicKeyPush;
@@ -56,9 +53,7 @@ export class AuthService {
     );
 
     if (profile) {
-      await this.db.userProfile.update(userId, {
-        lastPublicKeyPush: new Date(),
-      });
+      await updateUserProfileById(userId, { lastPublicKeyPush: new Date() });
     }
   }
 }

@@ -6,15 +6,21 @@
  */
 
 import {
-  Contact,
-  Discussion,
+  DiscussionStatus,
   Message,
   DiscussionDirection,
   MessageDirection,
   MessageStatus,
   MessageType,
+  getSqliteDb,
+  insertContact,
+  insertDiscussion,
+  batchInsertMessages,
+  getContactsByOwner,
+  deleteContactByOwnerAndUser,
+  deleteDiscussionsByOwnerAndContact,
+  deleteMessagesByOwnerAndContact,
 } from '@massalabs/gossip-sdk';
-import { getSdk } from '../stores/sdkStore';
 import { bech32 } from '@scure/base';
 
 const GOSSIP_PREFIX = 'gossip';
@@ -247,7 +253,8 @@ export async function seedTestData(
   ownerUserId: string,
   options: Partial<SeedOptions> = {}
 ): Promise<SeedResult> {
-  const db = getSdk().db;
+  // Ensure SQLite is initialized
+  getSqliteDb();
   const opts = { ...DEFAULT_SEED_OPTIONS, ...options };
   const startTime = performance.now();
 
@@ -260,18 +267,13 @@ export async function seedTestData(
   let discussionsCreated = 0;
   let messagesCreated = 0;
 
-  // Generate all data in memory first for better performance
-  const contacts: Omit<Contact, 'id'>[] = [];
-  const discussions: Omit<Discussion, 'id'>[] = [];
-  const messages: Omit<Message, 'id'>[] = [];
-
   for (let i = 0; i < opts.discussionCount; i++) {
     const contactUserId = generateRandomUserId();
     const contactName = generateRandomName();
     const createdAt = randomDate(startDate, now);
 
     // Create contact
-    contacts.push({
+    await insertContact({
       ownerUserId,
       userId: contactUserId,
       name: contactName,
@@ -280,6 +282,7 @@ export async function seedTestData(
       lastSeen: randomDate(createdAt, now),
       createdAt,
     });
+    contactsCreated++;
 
     // Generate messages for this discussion
     const messageCount =
@@ -320,44 +323,36 @@ export async function seedTestData(
 
     // Create discussion
     const isInitiated = Math.random() > 0.5;
-    discussions.push({
+    await insertDiscussion({
       ownerUserId,
       contactUserId,
       direction: isInitiated
         ? DiscussionDirection.INITIATED
         : DiscussionDirection.RECEIVED,
       weAccepted: isInitiated,
-      sendAnnouncement: null,
-      lastMessageContent: lastMessage?.content,
-      lastMessageTimestamp: lastMessage?.timestamp,
+      status: DiscussionStatus.ACTIVE,
       unreadCount,
+      lastMessageContent: lastMessage?.content ?? null,
+      lastMessageTimestamp: lastMessage?.timestamp ?? null,
       createdAt,
       updatedAt: lastMessage?.timestamp || createdAt,
     });
+    discussionsCreated++;
 
-    messages.push(...discussionMessages);
+    // Batch insert all messages for this discussion
+    await batchInsertMessages(
+      discussionMessages.map(msg => ({
+        ownerUserId: msg.ownerUserId,
+        contactUserId: msg.contactUserId,
+        content: msg.content,
+        type: msg.type,
+        direction: msg.direction,
+        status: msg.status,
+        timestamp: msg.timestamp,
+      }))
+    );
     messagesCreated += discussionMessages.length;
   }
-
-  contactsCreated = contacts.length;
-  discussionsCreated = discussions.length;
-
-  // Bulk insert all data in a transaction
-  await db.transaction(
-    'rw',
-    [db.contacts, db.discussions, db.messages],
-    async () => {
-      // Clear existing test data first (optional, comment out to append)
-      // await db.contacts.where('ownerUserId').equals(ownerUserId).delete();
-      // await db.discussions.where('ownerUserId').equals(ownerUserId).delete();
-      // await db.messages.where('ownerUserId').equals(ownerUserId).delete();
-
-      // Bulk add all data
-      await db.contacts.bulkAdd(contacts as Contact[]);
-      await db.discussions.bulkAdd(discussions as Discussion[]);
-      await db.messages.bulkAdd(messages as Message[]);
-    }
-  );
 
   const duration = performance.now() - startTime;
 
@@ -374,52 +369,23 @@ export async function seedTestData(
  * Real conversations are preserved.
  */
 export async function clearTestData(ownerUserId: string): Promise<number> {
-  const db = getSdk().db;
-  let deletedCount = 0;
-
-  await db.transaction(
-    'rw',
-    [db.contacts, db.discussions, db.messages],
-    async () => {
-      // Find all test contacts (those with [TEST] prefix in name)
-      const testContacts = await db.contacts
-        .where('ownerUserId')
-        .equals(ownerUserId)
-        .filter((contact: Contact) => contact.name.startsWith(TEST_DATA_PREFIX))
-        .toArray();
-
-      const testContactUserIds = testContacts.map(c => c.userId);
-      deletedCount = testContactUserIds.length;
-
-      if (testContactUserIds.length === 0) {
-        return;
-      }
-
-      // Delete messages for test contacts
-      for (const contactUserId of testContactUserIds) {
-        await db.messages
-          .where('[ownerUserId+contactUserId]')
-          .equals([ownerUserId, contactUserId])
-          .delete();
-      }
-
-      // Delete discussions for test contacts
-      for (const contactUserId of testContactUserIds) {
-        await db.discussions
-          .where('[ownerUserId+contactUserId]')
-          .equals([ownerUserId, contactUserId])
-          .delete();
-      }
-
-      // Delete test contacts
-      for (const contactUserId of testContactUserIds) {
-        await db.contacts
-          .where('[ownerUserId+userId]')
-          .equals([ownerUserId, contactUserId])
-          .delete();
-      }
-    }
+  const allContacts = await getContactsByOwner(ownerUserId);
+  const testContacts = allContacts.filter(c =>
+    c.name.startsWith(TEST_DATA_PREFIX)
   );
+
+  const testContactUserIds = testContacts.map(c => c.userId);
+  const deletedCount = testContactUserIds.length;
+
+  if (testContactUserIds.length === 0) {
+    return 0;
+  }
+
+  for (const contactUserId of testContactUserIds) {
+    await deleteMessagesByOwnerAndContact(ownerUserId, contactUserId);
+    await deleteDiscussionsByOwnerAndContact(ownerUserId, contactUserId);
+    await deleteContactByOwnerAndUser(ownerUserId, contactUserId);
+  }
 
   return deletedCount;
 }

@@ -10,6 +10,14 @@ import {
   EncryptionKey,
   generateNonce,
   validateUsernameFormat,
+  updateUserProfileById,
+  getUserProfileField,
+  getUserProfileCount,
+  getAllUserProfiles,
+  upsertUserProfile,
+  deleteUserProfile,
+  rowToUserProfile,
+  userProfileToRow,
 } from '@massalabs/gossip-sdk';
 import { getSdk } from './sdkStore';
 import { isWebAuthnSupported } from '../crypto/webauthn';
@@ -36,9 +44,9 @@ async function createProfileFromAccount(
   security: UserProfile['security'],
   session: Uint8Array
 ): Promise<UserProfile> {
-  const db = getSdk().db;
-  const existing = await db.userProfile.get(userId);
-  if (existing) {
+  const existingRow = await getUserProfileField(userId);
+  if (existingRow) {
+    const existing = rowToUserProfile(existingRow);
     // Merge with existing profile; prefer newly provided security fields when present
     const mergedSecurity: UserProfile['security'] = {
       ...existing.security,
@@ -58,7 +66,7 @@ async function createProfileFromAccount(
       lastSeen: new Date(),
       updatedAt: new Date(),
     };
-    await db.userProfile.put(updatedProfile);
+    await upsertUserProfile(userProfileToRow(updatedProfile));
     return updatedProfile;
   }
 
@@ -73,7 +81,7 @@ async function createProfileFromAccount(
     updatedAt: new Date(),
   };
 
-  await db.userProfile.add(newProfile);
+  await upsertUserProfile(userProfileToRow(newProfile));
   return newProfile;
 }
 
@@ -271,6 +279,21 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       });
   };
 
+  // Helper to persist session blob to DB
+  const createOnPersist = (userId: string) => {
+    return async (blob: Uint8Array, _key: EncryptionKey) => {
+      await updateUserProfileById(userId, {
+        session: blob,
+        updatedAt: new Date(),
+      });
+      set(state => ({
+        userProfile: state.userProfile
+          ? { ...state.userProfile, session: blob, updatedAt: new Date() }
+          : null,
+      }));
+    };
+  };
+
   return {
     // Initial state
     userProfile: null,
@@ -313,20 +336,11 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         await getSdk().openSession({
           mnemonic,
           encryptionKey,
-          onPersist: async (blob, _key) => {
-            await getSdk().db.userProfile.update(userId, {
-              session: blob,
-              updatedAt: new Date(),
-            });
-            set(state => ({
-              userProfile: state.userProfile
-                ? { ...state.userProfile, session: blob, updatedAt: new Date() }
-                : null,
-            }));
-          },
+          persistEncryptionKey: encryptionKey,
+          onPersist: createOnPersist(userId),
         });
 
-        const session = getSdk().getEncryptedSession();
+        const session = getSdk().getEncryptedSession(encryptionKey);
 
         const profile = await createProfileFromAccount(
           username,
@@ -389,20 +403,11 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         await getSdk().openSession({
           mnemonic,
           encryptionKey,
-          onPersist: async (blob, _key) => {
-            await getSdk().db.userProfile.update(userId, {
-              session: blob,
-              updatedAt: new Date(),
-            });
-            set(state => ({
-              userProfile: state.userProfile
-                ? { ...state.userProfile, session: blob, updatedAt: new Date() }
-                : null,
-            }));
-          },
+          persistEncryptionKey: encryptionKey,
+          onPersist: createOnPersist(userId),
         });
 
-        const session = getSdk().getEncryptedSession();
+        const session = getSdk().getEncryptedSession(encryptionKey);
 
         const profile = await createProfileFromAccount(
           username,
@@ -435,7 +440,8 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         // If userId is provided, load that specific account, otherwise use active or first
         let profile: UserProfile | null;
         if (userId) {
-          profile = (await getSdk().db.userProfile.get(userId)) || null;
+          const row = await getUserProfileField(userId);
+          profile = row ? rowToUserProfile(row) : null;
         } else {
           profile = await getActiveOrFirstProfile();
         }
@@ -453,24 +459,12 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         );
 
         // Open SDK session with existing encrypted session state
-        // IMPORTANT: Pass onPersist callback so session changes are automatically saved
         await getSdk().openSession({
           mnemonic,
           encryptedSession: profile.session,
           encryptionKey,
-          onPersist: async (blob: Uint8Array, _key: EncryptionKey) => {
-            // Save the new session blob to the database
-            await getSdk().db.userProfile.update(profile.userId, {
-              session: blob,
-              updatedAt: new Date(),
-            });
-            // Update the store's cached profile
-            set(state => ({
-              userProfile: state.userProfile
-                ? { ...state.userProfile, session: blob, updatedAt: new Date() }
-                : null,
-            }));
-          },
+          persistEncryptionKey: encryptionKey,
+          onPersist: createOnPersist(profile.userId),
         });
 
         // Update lastSeen timestamp for the logged-in user
@@ -479,7 +473,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           ...profile,
           lastSeen,
         };
-        await getSdk().db.userProfile.update(profile.userId, { lastSeen });
+        await updateUserProfileById(profile.userId, { lastSeen });
 
         useAppStore.getState().setIsInitialized(true);
         set({
@@ -509,14 +503,13 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         useDiscussionStore.getState().cleanup();
         useMessageStore.getState().cleanup();
 
-        const db = getSdk().db;
         const currentProfile = await getActiveOrFirstProfile();
         if (currentProfile?.userId != null) {
-          await db.userProfile.delete(currentProfile.userId);
+          await deleteUserProfile(currentProfile.userId);
         }
 
         set(clearAccountState());
-        const nbAccounts = await db.userProfile.count();
+        const nbAccounts = await getUserProfileCount();
         useAppStore.getState().setIsInitialized(nbAccounts > 0);
       } catch (error) {
         console.error('Error resetting account:', error);
@@ -590,20 +583,11 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         await getSdk().openSession({
           mnemonic,
           encryptionKey,
-          onPersist: async (blob, _key) => {
-            await getSdk().db.userProfile.update(userId, {
-              session: blob,
-              updatedAt: new Date(),
-            });
-            set(state => ({
-              userProfile: state.userProfile
-                ? { ...state.userProfile, session: blob, updatedAt: new Date() }
-                : null,
-            }));
-          },
+          persistEncryptionKey: encryptionKey,
+          onPersist: createOnPersist(userId),
         });
 
-        const session = getSdk().getEncryptedSession();
+        const session = getSdk().getEncryptedSession(encryptionKey);
 
         const profile = await createProfileFromAccount(
           username,
@@ -690,7 +674,10 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           },
         };
 
-        await getSdk().db.userProfile.update(profile.userId, updatedProfile);
+        await updateUserProfileById(profile.userId, {
+          security: JSON.stringify(updatedProfile.security),
+          updatedAt: new Date(),
+        });
         set({ userProfile: updatedProfile });
       } catch (error) {
         console.error('Error marking mnemonic backup as complete:', error);
@@ -701,9 +688,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
     // Account detection methods
     hasExistingAccount: async () => {
       try {
-        const db = getSdk().db;
-        await db.open();
-        const count = await db.userProfile.count();
+        const count = await getUserProfileCount();
         return count > 0;
       } catch (error) {
         console.error('Error checking for existing account:', error);
@@ -722,10 +707,8 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
 
     getAllAccounts: async () => {
       try {
-        const db = getSdk().db;
-        await db.open();
-        const profiles = await db.userProfile.toCollection().toArray();
-        return profiles;
+        const rows = await getAllUserProfiles();
+        return rows.map(rowToUserProfile);
       } catch (error) {
         console.error('Error getting all accounts:', error);
         return [];
@@ -746,7 +729,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
 
       try {
         // Serialize the session via SDK
-        const sessionBlob = getSdk().getEncryptedSession();
+        const sessionBlob = getSdk().getEncryptedSession(encryptionKey);
         if (!sessionBlob) {
           console.warn('Failed to get encrypted session');
           return;
@@ -759,10 +742,10 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           updatedAt: new Date(),
         };
 
-        await getSdk().db.userProfile.update(
-          userProfile.userId,
-          updatedProfile
-        );
+        await updateUserProfileById(userProfile.userId, {
+          session: sessionBlob,
+          updatedAt: new Date(),
+        });
 
         // Update the store with the new profile
         set({ userProfile: updatedProfile });
@@ -795,7 +778,10 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           updatedAt: new Date(),
         };
 
-        await getSdk().db.userProfile.update(profile.userId, updatedProfile);
+        await updateUserProfileById(profile.userId, {
+          username: trimmedUsername,
+          updatedAt: new Date(),
+        });
 
         // Update the store with the new profile
         set({ userProfile: updatedProfile });

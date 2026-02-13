@@ -4,39 +4,82 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
-  GossipDatabase,
   MessageStatus,
   MessageDirection,
   MessageType,
   DiscussionDirection,
+  DiscussionStatus,
 } from '../../src/db';
 import { encodeUserId } from '../../src/utils/userId';
 import { defaultSdkConfig, type SdkConfig } from '../../src/config/sdk';
+import { eq, and, gte, lte } from 'drizzle-orm';
+import { getSqliteDb, clearAllTables } from '../../src/sqlite';
+import * as schema from '../../src/schema';
+import { insertDiscussion } from '../../src/queries/discussions';
+import { insertMessage, getMessageById } from '../../src/queries/messages';
 
 const DEDUP_OWNER_USER_ID = encodeUserId(new Uint8Array(32).fill(1));
 const DEDUP_CONTACT_USER_ID = encodeUserId(new Uint8Array(32).fill(2));
 
-describe('Message Deduplication', () => {
-  let testDb: GossipDatabase;
-
-  beforeEach(async () => {
-    testDb = new GossipDatabase();
-    if (!testDb.isOpen()) {
-      await testDb.open();
-    }
-    await Promise.all(testDb.tables.map(table => table.clear()));
-
-    await testDb.discussions.add({
-      ownerUserId: DEDUP_OWNER_USER_ID,
-      contactUserId: DEDUP_CONTACT_USER_ID,
-      direction: DiscussionDirection.RECEIVED,
-      weAccepted: true,
-      sendAnnouncement: null,
-      unreadCount: 0,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
+/** Helper: insert the default discussion for dedup tests */
+async function addDefaultDiscussion(
+  ownerUserId: string = DEDUP_OWNER_USER_ID,
+  contactUserId: string = DEDUP_CONTACT_USER_ID
+) {
+  await insertDiscussion({
+    ownerUserId,
+    contactUserId,
+    direction: DiscussionDirection.RECEIVED,
+    status: DiscussionStatus.ACTIVE,
+    weAccepted: true,
+    sendAnnouncement: null,
+    unreadCount: 0,
+    createdAt: new Date(),
+    updatedAt: new Date(),
   });
+}
+
+/** Helper: add a message and return its id */
+async function addMessage(
+  data: typeof schema.messages.$inferInsert
+): Promise<number> {
+  return insertMessage(data);
+}
+
+/** Helper: get a message by id */
+async function getMessage(id: number) {
+  return getMessageById(id);
+}
+
+/** Helper: find duplicate incoming message within a time window */
+async function findDuplicateIncoming(
+  ownerUserId: string,
+  contactUserId: string,
+  content: string,
+  timestamp: Date,
+  windowMs: number = 30000
+) {
+  const windowStart = new Date(timestamp.getTime() - windowMs);
+  const windowEnd = new Date(timestamp.getTime() + windowMs);
+
+  return getSqliteDb()
+    .select()
+    .from(schema.messages)
+    .where(
+      and(
+        eq(schema.messages.ownerUserId, ownerUserId),
+        eq(schema.messages.contactUserId, contactUserId),
+        eq(schema.messages.direction, MessageDirection.INCOMING),
+        eq(schema.messages.content, content),
+        gte(schema.messages.timestamp, windowStart),
+        lte(schema.messages.timestamp, windowEnd)
+      )
+    )
+    .get();
+}
+
+describe('Message Deduplication', () => {
+  beforeEach(clearAllTables);
 
   describe('isDuplicateMessage (via storeDecryptedMessages)', () => {
     async function storeIncomingMessage(
@@ -44,23 +87,18 @@ describe('Message Deduplication', () => {
       timestamp: Date,
       seeker: Uint8Array
     ): Promise<number | null> {
-      const existing = await testDb.messages
-        .where('[ownerUserId+contactUserId]')
-        .equals([DEDUP_OWNER_USER_ID, DEDUP_CONTACT_USER_ID])
-        .and(
-          msg =>
-            msg.direction === MessageDirection.INCOMING &&
-            msg.content === content &&
-            msg.timestamp >= new Date(timestamp.getTime() - 30000) &&
-            msg.timestamp <= new Date(timestamp.getTime() + 30000)
-        )
-        .first();
+      const existing = await findDuplicateIncoming(
+        DEDUP_OWNER_USER_ID,
+        DEDUP_CONTACT_USER_ID,
+        content,
+        timestamp
+      );
 
       if (existing) {
         return null;
       }
 
-      return await testDb.messages.add({
+      return await addMessage({
         ownerUserId: DEDUP_OWNER_USER_ID,
         contactUserId: DEDUP_CONTACT_USER_ID,
         content,
@@ -73,6 +111,7 @@ describe('Message Deduplication', () => {
     }
 
     it('should store first message normally', async () => {
+      await addDefaultDiscussion();
       const timestamp = new Date();
       const id = await storeIncomingMessage(
         'Hello world',
@@ -82,11 +121,12 @@ describe('Message Deduplication', () => {
 
       expect(id).not.toBeNull();
 
-      const message = await testDb.messages.get(id!);
+      const message = await getMessage(id!);
       expect(message?.content).toBe('Hello world');
     });
 
     it('should detect duplicate with same content and similar timestamp', async () => {
+      await addDefaultDiscussion();
       const timestamp = new Date();
 
       const id1 = await storeIncomingMessage(
@@ -107,6 +147,7 @@ describe('Message Deduplication', () => {
     });
 
     it('should NOT detect duplicate if content differs', async () => {
+      await addDefaultDiscussion();
       const timestamp = new Date();
 
       const id1 = await storeIncomingMessage(
@@ -126,6 +167,7 @@ describe('Message Deduplication', () => {
     });
 
     it('should NOT detect duplicate if timestamp outside window', async () => {
+      await addDefaultDiscussion();
       const timestamp = new Date();
 
       const id1 = await storeIncomingMessage(
@@ -146,9 +188,10 @@ describe('Message Deduplication', () => {
     });
 
     it('should NOT flag outgoing messages as duplicates of incoming', async () => {
+      await addDefaultDiscussion();
       const timestamp = new Date();
 
-      await testDb.messages.add({
+      await addMessage({
         ownerUserId: DEDUP_OWNER_USER_ID,
         contactUserId: DEDUP_CONTACT_USER_ID,
         content: 'Hello world',
@@ -159,7 +202,7 @@ describe('Message Deduplication', () => {
         seeker: new Uint8Array([1, 2, 3]),
       });
 
-      const outgoingId = await testDb.messages.add({
+      const outgoingId = await addMessage({
         ownerUserId: DEDUP_OWNER_USER_ID,
         contactUserId: DEDUP_CONTACT_USER_ID,
         content: 'Hello world',
@@ -176,6 +219,7 @@ describe('Message Deduplication', () => {
 
   describe('deduplication window configuration', () => {
     it('should respect custom deduplication window', async () => {
+      await addDefaultDiscussion();
       const customConfig: SdkConfig = {
         ...defaultSdkConfig,
         messages: {
@@ -186,7 +230,7 @@ describe('Message Deduplication', () => {
 
       const timestamp = new Date();
 
-      await testDb.messages.add({
+      await addMessage({
         ownerUserId: DEDUP_OWNER_USER_ID,
         contactUserId: DEDUP_CONTACT_USER_ID,
         content: 'Test message',
@@ -199,20 +243,14 @@ describe('Message Deduplication', () => {
 
       const timestamp2 = new Date(timestamp.getTime() + 10000);
       const windowMs = customConfig.messages.deduplicationWindowMs;
-      const windowStart = new Date(timestamp2.getTime() - windowMs);
-      const windowEnd = new Date(timestamp2.getTime() + windowMs);
 
-      const duplicate = await testDb.messages
-        .where('[ownerUserId+contactUserId]')
-        .equals([DEDUP_OWNER_USER_ID, DEDUP_CONTACT_USER_ID])
-        .and(
-          msg =>
-            msg.direction === MessageDirection.INCOMING &&
-            msg.content === 'Test message' &&
-            msg.timestamp >= windowStart &&
-            msg.timestamp <= windowEnd
-        )
-        .first();
+      const duplicate = await findDuplicateIncoming(
+        DEDUP_OWNER_USER_ID,
+        DEDUP_CONTACT_USER_ID,
+        'Test message',
+        timestamp2,
+        windowMs
+      );
 
       expect(duplicate).toBeUndefined();
     });
@@ -220,9 +258,10 @@ describe('Message Deduplication', () => {
 
   describe('edge cases', () => {
     it('should handle empty content messages', async () => {
+      await addDefaultDiscussion();
       const timestamp = new Date();
 
-      const id1 = await testDb.messages.add({
+      const id1 = await addMessage({
         ownerUserId: DEDUP_OWNER_USER_ID,
         contactUserId: DEDUP_CONTACT_USER_ID,
         content: '',
@@ -233,41 +272,24 @@ describe('Message Deduplication', () => {
         seeker: new Uint8Array([1, 2, 3]),
       });
 
-      const windowMs = 30000;
-      const windowStart = new Date(timestamp.getTime() - windowMs);
-      const windowEnd = new Date(timestamp.getTime() + windowMs);
-
-      const duplicate = await testDb.messages
-        .where('[ownerUserId+contactUserId]')
-        .equals([DEDUP_OWNER_USER_ID, DEDUP_CONTACT_USER_ID])
-        .and(
-          msg =>
-            msg.direction === MessageDirection.INCOMING &&
-            msg.content === '' &&
-            msg.timestamp >= windowStart &&
-            msg.timestamp <= windowEnd
-        )
-        .first();
+      const duplicate = await findDuplicateIncoming(
+        DEDUP_OWNER_USER_ID,
+        DEDUP_CONTACT_USER_ID,
+        '',
+        timestamp
+      );
 
       expect(duplicate?.id).toBe(id1);
     });
 
     it('should handle messages from different contacts separately', async () => {
+      await addDefaultDiscussion();
       const timestamp = new Date();
       const CONTACT_2_USER_ID = encodeUserId(new Uint8Array(32).fill(3));
 
-      await testDb.discussions.add({
-        ownerUserId: DEDUP_OWNER_USER_ID,
-        contactUserId: CONTACT_2_USER_ID,
-        direction: DiscussionDirection.RECEIVED,
-        weAccepted: true,
-        sendAnnouncement: null,
-        unreadCount: 0,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      });
+      await addDefaultDiscussion(DEDUP_OWNER_USER_ID, CONTACT_2_USER_ID);
 
-      await testDb.messages.add({
+      await addMessage({
         ownerUserId: DEDUP_OWNER_USER_ID,
         contactUserId: DEDUP_CONTACT_USER_ID,
         content: 'Hello',
@@ -278,21 +300,12 @@ describe('Message Deduplication', () => {
         seeker: new Uint8Array([1, 2, 3]),
       });
 
-      const windowMs = 30000;
-      const windowStart = new Date(timestamp.getTime() - windowMs);
-      const windowEnd = new Date(timestamp.getTime() + windowMs);
-
-      const duplicateFromContact2 = await testDb.messages
-        .where('[ownerUserId+contactUserId]')
-        .equals([DEDUP_OWNER_USER_ID, CONTACT_2_USER_ID])
-        .and(
-          msg =>
-            msg.direction === MessageDirection.INCOMING &&
-            msg.content === 'Hello' &&
-            msg.timestamp >= windowStart &&
-            msg.timestamp <= windowEnd
-        )
-        .first();
+      const duplicateFromContact2 = await findDuplicateIncoming(
+        DEDUP_OWNER_USER_ID,
+        CONTACT_2_USER_ID,
+        'Hello',
+        timestamp
+      );
 
       expect(duplicateFromContact2).toBeUndefined();
     });

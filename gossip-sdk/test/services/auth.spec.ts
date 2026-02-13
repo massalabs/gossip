@@ -3,6 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { eq } from 'drizzle-orm';
 import {
   AuthService,
   getPublicKeyErrorMessage,
@@ -12,7 +13,7 @@ import {
   FAILED_TO_FETCH_MESSAGE,
   FAILED_TO_RETRIEVE_CONTACT_PUBLIC_KEY_ERROR,
 } from '../../src/services/auth';
-import { gossipDb, GossipDatabase, UserProfile } from '../../src/db';
+import type { UserProfile } from '../../src/db';
 import type { IMessageProtocol } from '../../src/api/messageProtocol/types';
 import {
   UserPublicKeys,
@@ -22,6 +23,8 @@ import {
 import { encodeUserId } from '../../src/utils/userId';
 import { encodeToBase64, decodeFromBase64 } from '../../src/utils/base64';
 import { ensureWasmInitialized } from '../../src/wasm';
+import { getSqliteDb, clearAllTables } from '../../src/sqlite';
+import * as schema from '../../src/schema';
 
 function createMockProtocol(
   overrides: Partial<IMessageProtocol> = {}
@@ -61,6 +64,22 @@ function createUserProfile(
     updatedAt: new Date(),
     ...overrides,
   };
+}
+
+/** Insert a UserProfile into SQLite (serializes security to JSON). */
+async function addProfileToSqlite(profile: UserProfile): Promise<void> {
+  const sqliteDb = getSqliteDb();
+  await sqliteDb.insert(schema.userProfile).values({
+    userId: profile.userId,
+    username: profile.username,
+    security: JSON.stringify(profile.security),
+    session: profile.session,
+    status: profile.status,
+    lastSeen: profile.lastSeen,
+    createdAt: profile.createdAt,
+    updatedAt: profile.updatedAt,
+    lastPublicKeyPush: profile.lastPublicKeyPush,
+  });
 }
 
 describe('getPublicKeyErrorMessage', () => {
@@ -105,16 +124,10 @@ describe('AuthService', () => {
   let testUserIdBytes: Uint8Array;
   let testPublicKeys: UserPublicKeys;
   let userKeys: UserKeys | null = null;
-  let db: GossipDatabase;
 
   beforeEach(async () => {
+    await clearAllTables();
     await ensureWasmInitialized();
-
-    db = gossipDb();
-    if (!db.isOpen()) {
-      await db.open();
-    }
-    await Promise.all(db.tables.map(table => table.clear()));
 
     testUserIdBytes = new Uint8Array(32).fill(42);
     testUserId = encodeUserId(testUserIdBytes);
@@ -123,7 +136,7 @@ describe('AuthService', () => {
     testPublicKeys = userKeys.public_keys();
 
     mockMessageProtocol = createMockProtocol();
-    authService = new AuthService(db, mockMessageProtocol);
+    authService = new AuthService(mockMessageProtocol);
   });
 
   afterEach(async () => {
@@ -214,7 +227,7 @@ describe('AuthService', () => {
         lastPublicKeyPush: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000),
       });
 
-      await db.userProfile.add(profile);
+      await addProfileToSqlite(profile);
 
       await authService.ensurePublicKeyPublished(testPublicKeys, testUserId);
 
@@ -226,7 +239,7 @@ describe('AuthService', () => {
         lastPublicKeyPush: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000),
       });
 
-      await db.userProfile.add(profile);
+      await addProfileToSqlite(profile);
 
       vi.mocked(mockMessageProtocol.postPublicKey).mockResolvedValue('hash123');
 
@@ -237,7 +250,11 @@ describe('AuthService', () => {
         .calls[0][0];
       expect(calledWith).toBe(encodeToBase64(testPublicKeys.to_bytes()));
 
-      const updatedProfile = await db.userProfile.get(testUserId);
+      const updatedProfile = await getSqliteDb()
+        .select({ lastPublicKeyPush: schema.userProfile.lastPublicKeyPush })
+        .from(schema.userProfile)
+        .where(eq(schema.userProfile.userId, testUserId))
+        .get();
       expect(updatedProfile?.lastPublicKeyPush).toBeDefined();
       expect(updatedProfile?.lastPublicKeyPush?.getTime()).toBeGreaterThan(
         profile.lastPublicKeyPush!.getTime()
@@ -247,7 +264,7 @@ describe('AuthService', () => {
     it('should publish if lastPublicKeyPush is undefined', async () => {
       const profile = createUserProfile(testUserId);
 
-      await db.userProfile.add(profile);
+      await addProfileToSqlite(profile);
 
       vi.mocked(mockMessageProtocol.postPublicKey).mockResolvedValue('hash123');
 
@@ -255,7 +272,11 @@ describe('AuthService', () => {
 
       expect(mockMessageProtocol.postPublicKey).toHaveBeenCalledTimes(1);
 
-      const updatedProfile = await db.userProfile.get(testUserId);
+      const updatedProfile = await getSqliteDb()
+        .select({ lastPublicKeyPush: schema.userProfile.lastPublicKeyPush })
+        .from(schema.userProfile)
+        .where(eq(schema.userProfile.userId, testUserId))
+        .get();
       expect(updatedProfile?.lastPublicKeyPush).toBeDefined();
     });
 
@@ -265,7 +286,7 @@ describe('AuthService', () => {
         lastPublicKeyPush: oneWeekAgo,
       });
 
-      await db.userProfile.add(profile);
+      await addProfileToSqlite(profile);
 
       vi.mocked(mockMessageProtocol.postPublicKey).mockResolvedValue('hash123');
 
@@ -290,7 +311,7 @@ describe('AuthService', () => {
         lastPublicKeyPush: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000),
       });
 
-      await db.userProfile.add(profile);
+      await addProfileToSqlite(profile);
 
       vi.mocked(mockMessageProtocol.postPublicKey).mockResolvedValue('hash123');
 

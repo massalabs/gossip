@@ -1,3 +1,4 @@
+import path from 'path';
 import { VitePWA } from 'vite-plugin-pwa';
 import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
@@ -116,6 +117,11 @@ export default defineConfig({
       },
     }),
   ],
+  resolve: {
+    alias: {
+      '@massalabs/gossip-sdk': path.resolve(__dirname, 'gossip-sdk/src'),
+    },
+  },
   assetsInclude: ['**/*.wasm'],
   server: {
     fs: {

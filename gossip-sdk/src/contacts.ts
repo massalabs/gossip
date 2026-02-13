@@ -22,13 +22,18 @@ import {
   updateContactName as updateContactNameUtil,
   deleteContact as deleteContactUtil,
 } from './utils/contacts';
-import { type Contact, type GossipDatabase } from './db';
+import { type Contact } from './db';
 import type {
   UpdateContactNameResult,
   DeleteContactResult,
 } from './utils/contacts';
 import type { UserPublicKeys } from './wasm/bindings';
 import type { SessionModule } from './wasm/session';
+import {
+  getContactsByOwner,
+  getContactByOwnerAndUser,
+  insertContact as queryInsertContact,
+} from './queries';
 
 // Re-export result types
 export type { UpdateContactNameResult, DeleteContactResult };
@@ -46,12 +51,9 @@ export type { UpdateContactNameResult, DeleteContactResult };
  * contacts.forEach(c => console.log(c.name, c.userId));
  * ```
  */
-export async function getContacts(
-  ownerUserId: string,
-  db: GossipDatabase
-): Promise<Contact[]> {
+export async function getContacts(ownerUserId: string): Promise<Contact[]> {
   try {
-    return await db.getContactsByOwner(ownerUserId);
+    return (await getContactsByOwner(ownerUserId)) as Contact[];
   } catch (error) {
     console.error('Error getting contacts:', error);
     return [];
@@ -76,15 +78,11 @@ export async function getContacts(
  */
 export async function getContact(
   ownerUserId: string,
-  contactUserId: string,
-  db: GossipDatabase
+  contactUserId: string
 ): Promise<Contact | null> {
   try {
-    const contact = await db.getContactByOwnerAndUserId(
-      ownerUserId,
-      contactUserId
-    );
-    return contact ?? null;
+    const contact = await getContactByOwnerAndUser(ownerUserId, contactUserId);
+    return (contact as Contact) ?? null;
   } catch (error) {
     console.error('Error getting contact:', error);
     return null;
@@ -121,17 +119,16 @@ export async function addContact(
   ownerUserId: string,
   userId: string,
   name: string,
-  publicKeys: UserPublicKeys,
-  db: GossipDatabase
+  publicKeys: UserPublicKeys
 ): Promise<{ success: boolean; error?: string; contact?: Contact }> {
   try {
     // Check if contact already exists
-    const existing = await db.getContactByOwnerAndUserId(ownerUserId, userId);
+    const existing = await getContactByOwnerAndUser(ownerUserId, userId);
     if (existing) {
       return { success: false, error: 'Contact already exists' };
     }
 
-    const contact: Contact = {
+    await queryInsertContact({
       ownerUserId,
       userId,
       name,
@@ -139,11 +136,10 @@ export async function addContact(
       isOnline: false,
       lastSeen: new Date(),
       createdAt: new Date(),
-    };
+    });
 
-    const id = await db.contacts.add(contact);
-    const newContact = await db.contacts.get(id);
-    return { success: true, contact: newContact };
+    const newContact = await getContactByOwnerAndUser(ownerUserId, userId);
+    return { success: true, contact: (newContact as Contact) ?? undefined };
   } catch (error) {
     console.error('Error adding contact:', error);
     return {
@@ -175,10 +171,9 @@ export async function addContact(
 export async function updateContactName(
   ownerUserId: string,
   contactUserId: string,
-  newName: string,
-  db: GossipDatabase
+  newName: string
 ): Promise<UpdateContactNameResult> {
-  return await updateContactNameUtil(ownerUserId, contactUserId, newName, db);
+  return await updateContactNameUtil(ownerUserId, contactUserId, newName);
 }
 
 /**
@@ -203,8 +198,7 @@ export async function updateContactName(
 export async function deleteContact(
   ownerUserId: string,
   contactUserId: string,
-  db: GossipDatabase,
   session: SessionModule
 ): Promise<DeleteContactResult> {
-  return await deleteContactUtil(ownerUserId, contactUserId, db, session);
+  return await deleteContactUtil(ownerUserId, contactUserId, session);
 }

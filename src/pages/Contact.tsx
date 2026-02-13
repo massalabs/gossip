@@ -16,12 +16,12 @@ import {
   SessionStatus,
   updateContactName,
 } from '@massalabs/gossip-sdk';
-import { getSdk } from '../stores/sdkStore';
-import { useGossipSdk } from '../hooks/useGossipSdk';
 import { ROUTES } from '../constants/routes';
+import { useGossipSdk } from '../hooks/useGossipSdk';
 
 const Contact: React.FC = () => {
   const gossip = useGossipSdk();
+
   const { userId } = useParams();
   const [showUserId, setShowUserId] = useState(false);
   const navigate = useNavigate();
@@ -72,12 +72,7 @@ const Contact: React.FC = () => {
   const handleSaveName = useCallback(
     async (name: string) => {
       if (!ownerUserId || !contact) return;
-      const result = await updateContactName(
-        ownerUserId,
-        contact.userId,
-        name,
-        getSdk().db
-      );
+      const result = await updateContactName(ownerUserId, contact.userId, name);
       if (!result.success) {
         setNameError(result.message);
         return;

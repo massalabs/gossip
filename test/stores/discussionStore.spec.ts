@@ -8,18 +8,30 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { useDiscussionStore } from '../../src/stores/discussionStore';
 import {
-  gossipDb,
+  clearAllTables,
   DiscussionDirection,
   SessionStatus,
 } from '@massalabs/gossip-sdk';
 import { useAccountStore } from '../../src/stores/accountStore';
 
-// Mock sdkStore so getSdk() does not throw. The liveQuery callback calls
-// getSdk().db and getSdk().isSessionOpen.
+// Mock sdkStore so getSdk() does not throw. The polling callback calls
+// getSdk().discussions.list(), getSdk().contacts.list(), etc.
 const mockSdk = {
   isSessionOpen: false,
-  db: gossipDb(),
-  discussions: { getStatus: vi.fn(() => SessionStatus.NoSession) },
+  discussions: {
+    getStatus: vi.fn(() => SessionStatus.NoSession),
+    list: vi.fn(async () => []),
+    get: vi.fn(async () => undefined),
+  },
+  contacts: {
+    list: vi.fn(async () => []),
+  },
+  messages: {
+    getMessages: vi.fn(async () => []),
+    get: vi.fn(async () => undefined),
+  },
+  on: vi.fn(),
+  off: vi.fn(),
 };
 vi.mock('../../src/stores/sdkStore', () => ({
   useSdkStore: {
@@ -37,19 +49,19 @@ vi.mock('../../src/stores/accountStore', () => ({
   },
 }));
 
-/** Wait for Dexie liveQuery to propagate to the store. */
-const waitForLiveQuery = () => new Promise(resolve => setTimeout(resolve, 150));
+/** Wait for async polling to propagate to the store. */
+const waitForPolling = () => new Promise(resolve => setTimeout(resolve, 150));
 
 describe('DiscussionStore', () => {
   const ownerUserId = 'test-user-id';
 
   beforeEach(async () => {
-    const db = gossipDb();
-    await db.delete();
-    await db.open();
+    await clearAllTables();
 
     mockSdk.isSessionOpen = false;
     mockSdk.discussions.getStatus.mockReturnValue(SessionStatus.NoSession);
+    mockSdk.discussions.list.mockResolvedValue([]);
+    mockSdk.contacts.list.mockResolvedValue([]);
 
     useDiscussionStore.setState({
       discussions: [],
@@ -57,8 +69,8 @@ describe('DiscussionStore', () => {
       lastMessages: new Map(),
       filter: 'all',
       isInitializing: false,
-      subscriptionDiscussions: null,
-      subscriptionContacts: null,
+      pollTimer: null,
+      eventHandler: null,
     });
 
     vi.mocked(useAccountStore.getState).mockReturnValue({
@@ -71,77 +83,77 @@ describe('DiscussionStore', () => {
     useDiscussionStore.getState().cleanup();
   });
 
-  it('loads discussions from DB via liveQuery', async () => {
-    const db = gossipDb();
-    await db.discussions.add({
+  it('loads discussions from DB via polling', async () => {
+    const d1 = {
       ownerUserId,
       contactUserId: 'contact-1',
       direction: DiscussionDirection.INITIATED,
       weAccepted: true,
-      sendAnnouncement: null,
       unreadCount: 0,
+      status: 'ACTIVE',
       createdAt: new Date(),
       updatedAt: new Date(),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } as any);
-
-    await db.discussions.add({
+    };
+    const d2 = {
       ownerUserId,
       contactUserId: 'contact-2',
       direction: DiscussionDirection.RECEIVED,
       weAccepted: false,
-      sendAnnouncement: null,
       unreadCount: 3,
+      status: 'ACTIVE',
       createdAt: new Date(),
       updatedAt: new Date(),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } as any);
+    };
+
+    // Mock discussions.list to return these discussions
+    mockSdk.isSessionOpen = true;
+    mockSdk.discussions.list.mockResolvedValue([
+      { ...d1, id: 1 },
+      { ...d2, id: 2 },
+    ]);
 
     useDiscussionStore.getState().init();
-    await waitForLiveQuery();
+    await waitForPolling();
 
     const discussions = useDiscussionStore.getState().discussions;
     expect(discussions).toHaveLength(2);
   });
 
   it('sorts by lastMessageTimestamp (most recent first) when session is closed', async () => {
-    const db = gossipDb();
-
-    // Dexie creating hook overwrites createdAt/updatedAt to new Date(),
-    // so we set lastMessageTimestamp after insertion to get deterministic order.
-    const idOld = await db.discussions.add({
+    const oldDiscussion = {
+      id: 1,
       ownerUserId,
       contactUserId: 'old-msg',
       direction: DiscussionDirection.INITIATED,
       weAccepted: true,
-      sendAnnouncement: null,
       unreadCount: 0,
+      status: 'ACTIVE',
       createdAt: new Date(),
       updatedAt: new Date(),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } as any);
+      lastMessageTimestamp: new Date('2024-01-01'),
+      lastMessageContent: 'old',
+    };
 
-    const idNew = await db.discussions.add({
+    const newDiscussion = {
+      id: 2,
       ownerUserId,
       contactUserId: 'new-msg',
       direction: DiscussionDirection.INITIATED,
       weAccepted: true,
-      sendAnnouncement: null,
       unreadCount: 0,
+      status: 'ACTIVE',
       createdAt: new Date(),
       updatedAt: new Date(),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } as any);
-
-    await db.discussions.update(idOld, {
-      lastMessageTimestamp: new Date('2024-01-01'),
-    });
-    await db.discussions.update(idNew, {
       lastMessageTimestamp: new Date('2024-06-01'),
-    });
+      lastMessageContent: 'new',
+    };
+
+    // Return in wrong order, store should sort
+    mockSdk.isSessionOpen = true;
+    mockSdk.discussions.list.mockResolvedValue([oldDiscussion, newDiscussion]);
 
     useDiscussionStore.getState().init();
-    await waitForLiveQuery();
+    await waitForPolling();
 
     const discussions = useDiscussionStore.getState().discussions;
     expect(discussions[0].contactUserId).toBe('new-msg');
@@ -160,41 +172,39 @@ describe('DiscussionStore', () => {
       }
     );
 
-    const db = gossipDb();
-    const idActive = await db.discussions.add({
+    const activeDiscussion = {
+      id: 1,
       ownerUserId,
       contactUserId: 'active-contact',
       direction: DiscussionDirection.INITIATED,
       weAccepted: true,
-      sendAnnouncement: null,
       unreadCount: 0,
+      status: 'ACTIVE',
       createdAt: new Date(),
       updatedAt: new Date(),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } as any);
+      lastMessageTimestamp: new Date('2024-06-01'),
+    };
 
-    const idPending = await db.discussions.add({
+    const pendingDiscussion = {
+      id: 2,
       ownerUserId,
       contactUserId: 'pending-contact',
       direction: DiscussionDirection.RECEIVED,
       weAccepted: false,
-      sendAnnouncement: null,
       unreadCount: 0,
+      status: 'PENDING',
       createdAt: new Date(),
       updatedAt: new Date(),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } as any);
-
-    // Give active a more recent message to verify status priority overrides time
-    await db.discussions.update(idActive, {
-      lastMessageTimestamp: new Date('2024-06-01'),
-    });
-    await db.discussions.update(idPending, {
       lastMessageTimestamp: new Date('2024-01-01'),
-    });
+    };
+
+    mockSdk.discussions.list.mockResolvedValue([
+      activeDiscussion,
+      pendingDiscussion,
+    ]);
 
     useDiscussionStore.getState().init();
-    await waitForLiveQuery();
+    await waitForPolling();
 
     const discussions = useDiscussionStore.getState().discussions;
     expect(discussions[0].contactUserId).toBe('pending-contact');
@@ -202,39 +212,38 @@ describe('DiscussionStore', () => {
   });
 
   it('derives lastMessages map from discussions with message content', async () => {
-    const db = gossipDb();
-    const idWithMsg = await db.discussions.add({
-      ownerUserId,
-      contactUserId: 'contact-with-msg',
-      direction: DiscussionDirection.INITIATED,
-      weAccepted: true,
-      sendAnnouncement: null,
-      unreadCount: 0,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } as any);
-
-    await db.discussions.add({
-      ownerUserId,
-      contactUserId: 'contact-no-msg',
-      direction: DiscussionDirection.INITIATED,
-      weAccepted: true,
-      sendAnnouncement: null,
-      unreadCount: 0,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } as any);
+    mockSdk.isSessionOpen = true;
 
     const msgTimestamp = new Date('2024-03-15');
-    await db.discussions.update(idWithMsg, {
-      lastMessageContent: 'Hello!',
-      lastMessageTimestamp: msgTimestamp,
-    });
+    mockSdk.discussions.list.mockResolvedValue([
+      {
+        id: 1,
+        ownerUserId,
+        contactUserId: 'contact-with-msg',
+        direction: DiscussionDirection.INITIATED,
+        weAccepted: true,
+        unreadCount: 0,
+        status: 'ACTIVE',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        lastMessageContent: 'Hello!',
+        lastMessageTimestamp: msgTimestamp,
+      },
+      {
+        id: 2,
+        ownerUserId,
+        contactUserId: 'contact-no-msg',
+        direction: DiscussionDirection.INITIATED,
+        weAccepted: true,
+        unreadCount: 0,
+        status: 'ACTIVE',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
+    ]);
 
     useDiscussionStore.getState().init();
-    await waitForLiveQuery();
+    await waitForPolling();
 
     const lastMessages = useDiscussionStore.getState().lastMessages;
     expect(lastMessages.size).toBe(1);
