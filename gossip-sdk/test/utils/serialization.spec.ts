@@ -117,4 +117,24 @@ describe('Deserialization Failure Handling', () => {
       expect(true).toBe(true);
     }
   });
+
+  it('throws on reply payloads with truncated seeker', () => {
+    const valid = serializeReplyMessage('new', 'old', serializationSeeker);
+    const truncated = valid.slice(0, valid.length - 10);
+    expect(() => deserializeMessage(truncated)).toThrow(
+      'Invalid reply message'
+    );
+  });
+
+  it('throws on forward payloads with truncated seeker', () => {
+    const valid = serializeForwardMessage(
+      'forward',
+      'note',
+      serializationSeeker
+    );
+    const truncated = valid.slice(0, valid.length - 10);
+    expect(() => deserializeMessage(truncated)).toThrow(
+      'Invalid forward message'
+    );
+  });
 });

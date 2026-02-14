@@ -431,6 +431,19 @@ export class MessageService {
     seeker: Uint8Array,
     ownerUserId: string
   ): Promise<Message | undefined> {
+    // Malformed payloads can carry an empty seeker in reply/forward metadata.
+    // fake-indexeddb rejects that as an IndexedDB key and throws DataError.
+    if (!(seeker instanceof Uint8Array) || seeker.byteLength === 0) {
+      logger
+        .forMethod('findMessageBySeeker')
+        .warn('skipping invalid seeker lookup', {
+          ownerUserId,
+          seekerLength:
+            seeker instanceof Uint8Array ? seeker.byteLength : 'not-uint8array',
+        });
+      return undefined;
+    }
+
     return await this.db.messages
       .where('[ownerUserId+seeker]')
       .equals([ownerUserId, seeker])
