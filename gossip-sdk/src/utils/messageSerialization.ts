@@ -17,6 +17,19 @@ export const MESSAGE_TYPE_KEEP_ALIVE = 0x03;
 // Seeker size: 1 byte length prefix + 32 bytes hash + 1 byte key index
 const SEEKER_SIZE = 34;
 
+function assertAvailable(
+  buffer: Uint8Array,
+  offset: number,
+  neededBytes: number,
+  context: string
+): void {
+  if (buffer.length < offset + neededBytes) {
+    throw new Error(
+      `Invalid ${context} message: expected ${neededBytes} bytes at offset ${offset}, got ${Math.max(buffer.length - offset, 0)}`
+    );
+  }
+}
+
 export interface DeserializedMessage {
   content: string;
   replyTo?: {
@@ -190,18 +203,21 @@ export function deserializeMessage(buffer: Uint8Array): DeserializedMessage {
       let offset = 1;
 
       // Read original content length (4 bytes)
+      assertAvailable(buffer, offset, 4, 'reply');
       const originalContentLen = Number(
         U32.fromBytes(buffer.slice(offset, offset + 4))
       );
       offset += 4;
 
       // Read original content
+      assertAvailable(buffer, offset, originalContentLen, 'reply');
       const originalContent = bytesToStr(
         buffer.slice(offset, offset + originalContentLen)
       );
       offset += originalContentLen;
 
       // Read seeker (34 bytes)
+      assertAvailable(buffer, offset, SEEKER_SIZE, 'reply');
       const originalSeeker = buffer.slice(offset, offset + SEEKER_SIZE);
       offset += SEEKER_SIZE;
 
@@ -223,18 +239,21 @@ export function deserializeMessage(buffer: Uint8Array): DeserializedMessage {
       let offset = 1;
 
       // Read forward content length (4 bytes)
+      assertAvailable(buffer, offset, 4, 'forward');
       const forwardContentLen = Number(
         U32.fromBytes(buffer.slice(offset, offset + 4))
       );
       offset += 4;
 
       // Read forward content
+      assertAvailable(buffer, offset, forwardContentLen, 'forward');
       const originalContent = bytesToStr(
         buffer.slice(offset, offset + forwardContentLen)
       );
       offset += forwardContentLen;
 
       // Read seeker (34 bytes)
+      assertAvailable(buffer, offset, SEEKER_SIZE, 'forward');
       const originalSeeker = buffer.slice(offset, offset + SEEKER_SIZE);
       offset += SEEKER_SIZE;
 
