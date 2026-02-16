@@ -2007,7 +2007,7 @@ describe('session break in session manager', () => {
     );
   });
 
-  describe.only('Session saturation', () => {
+  describe('Session saturation', () => {
     /**
      * Bob sends a simple text message to Alice,
      * then alice fetches bob's messages.
