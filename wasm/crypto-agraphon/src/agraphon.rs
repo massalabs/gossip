@@ -451,6 +451,13 @@ impl Agraphon {
     /// }
     /// ```
     ///
+    /// # Attention
+    /// When running this function before the peer has sent it's first message, 
+    /// the lag length returned correspond to the number of messages we have sent since the session was created + 1.
+    /// There is a +1 offset because at the creation of the session, we push a message a message of height 1 to self_msg_history.
+    /// This +1 offset disapear when we receive the first message from the peer.
+    /// 
+    /// 
     /// # Panics
     ///
     /// Panics if the internal message history is empty. This should never happen in normal
