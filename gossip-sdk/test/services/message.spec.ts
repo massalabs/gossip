@@ -17,6 +17,7 @@ import {
   MessageStatus,
   MessageDirection,
   MessageType,
+  MESSAGE_ID_SIZE,
 } from '../../src/db';
 import { encodeUserId } from '../../src/utils/userId';
 import { generateMnemonic } from '../../src/crypto/bip39';

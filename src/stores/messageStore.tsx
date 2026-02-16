@@ -4,10 +4,11 @@ import {
   MessageDirection,
   MessageStatus,
   MessageType,
+  decodeUserId,
 } from '@massalabs/gossip-sdk';
 import { createSelectors } from './utils/createSelectors';
 import { useAccountStore } from './accountStore';
-import { getSdk, decodeUserId } from '@massalabs/gossip-sdk';
+import { getSdk } from './sdkStore';
 import { liveQuery, Subscription } from 'dexie';
 
 interface MessageStoreState {
@@ -91,15 +92,15 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
       getSdk()
         .db.messages.where('ownerUserId')
         .equals(ownerUserId)
-        .and(m => m.type !== MessageType.KEEP_ALIVE)
+        .and((m: Message) => m.type !== MessageType.KEEP_ALIVE)
         .sortBy('id')
     );
 
     const subscriptionObj = query.subscribe({
-      next: allMessages => {
+      next: (allMessages: Message[]) => {
         // Group messages by contactUserId
         const newMap = new Map<string, Message[]>();
-        allMessages.forEach(msg => {
+        allMessages.forEach((msg: Message) => {
           const contactId = msg.contactUserId;
           const existing = newMap.get(contactId) || [];
           newMap.set(contactId, [...existing, msg]);

@@ -61,7 +61,6 @@ const MessageItem: React.FC<MessageItemProps> = ({
   isLastInGroup = true,
 }) => {
   const sdk = useGossipSdk();
-  const isSessionOpen = sdk.isSessionOpen;
   const canReply = !!onReplyTo;
   const canForward = !!onForward;
   const isOutgoing = message.direction === MessageDirection.OUTGOING;
@@ -95,13 +94,13 @@ const MessageItem: React.FC<MessageItemProps> = ({
       }
     }
 
-    if (citedMsgId && gossipSdk.isSessionOpen) {
+    if (citedMsgId && sdk.isSessionOpen) {
       setIsLoadingOriginal(true);
       setOriginalNotFound(false);
 
       const findMessage = async () => {
         try {
-          const msg = await gossipSdk.messages.findByMsgId(
+          const msg = await sdk.messages.findByMsgId(
             citedMsgId,
             message.ownerUserId,
             originalContactUserId
@@ -138,6 +137,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
     message.forwardOf,
     message.ownerUserId,
     message.contactUserId,
+    sdk,
   ]);
 
   const handleDoubleClick = useCallback(
