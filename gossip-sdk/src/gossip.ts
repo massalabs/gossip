@@ -390,8 +390,12 @@ class GossipSdk {
           return result;
         }),
       fetch: () => this._message!.fetchMessages(),
-      findBySeeker: (seeker, ownerUserId) =>
-        this._message!.findMessageBySeeker(seeker, ownerUserId),
+      findByMsgId: (messageId, ownerUserId, contactUserId) =>
+        this._message!.findMessageByMsgId(
+          messageId,
+          ownerUserId,
+          contactUserId
+        ),
       markAsRead: id => this._message!.markAsRead(id),
     };
 
@@ -735,10 +739,11 @@ interface MessageServiceAPI {
   send(message: Omit<Message, 'id'>): Promise<SendMessageResult>;
   /** Fetch and decrypt messages from the protocol */
   fetch(): Promise<MessageResult>;
-  /** Find a message by its seeker */
-  findBySeeker(
-    seeker: Uint8Array,
-    ownerUserId: string
+  /** Find a message by its messageId */
+  findByMsgId(
+    messageId: Uint8Array,
+    ownerUserId: string,
+    contactUserId?: string
   ): Promise<Message | undefined>;
   /** Mark a message as read */
   markAsRead(id: number): Promise<boolean>;
