@@ -65,7 +65,7 @@ vi.mock('../../src/services/message', () => ({
     fetchMessages = vi.fn();
     processSendQueueForContact = vi.fn();
     getPendingSendCount = vi.fn().mockResolvedValue(0);
-    findMessageBySeeker = vi.fn();
+    findMessageByMsgId = vi.fn();
     setRefreshService = vi.fn();
 
     constructor(

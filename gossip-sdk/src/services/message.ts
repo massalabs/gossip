@@ -11,6 +11,7 @@ import {
   MessageDirection,
   MessageStatus,
   MessageType,
+  MESSAGE_ID_SIZE,
 } from '../db';
 import { decodeUserId, encodeUserId } from '../utils/userId';
 import { IMessageProtocol, EncryptedMessage } from '../api/messageProtocol';
@@ -48,13 +49,13 @@ interface Decrypted {
   sentAt: Date;
   senderId: string;
   seeker: Uint8Array;
+  messageId: Uint8Array; // 12-byte random ID
   replyTo?: {
-    originalContent: string;
-    originalSeeker: Uint8Array;
+    originalMsgId: Uint8Array;
   };
   forwardOf?: {
     originalContent: string;
-    originalSeeker: Uint8Array;
+    originalContactId?: Uint8Array;
   };
   encryptedMessage: Uint8Array;
   type: MessageType;
@@ -140,7 +141,6 @@ export class MessageService {
 
         const { decrypted: decryptedMessages, acknowledgedSeekers } =
           await this.decryptMessages(encryptedMessages);
-
         if (decryptedMessages.length > 0) {
           const storedIds = await this.storeDecryptedMessages(
             decryptedMessages,
@@ -219,25 +219,25 @@ export class MessageService {
             continue;
           }
 
+          if (
+            !deserialized.messageId ||
+            deserialized.messageId.length !== MESSAGE_ID_SIZE
+          ) {
+            log.warn('missing or invalid messageId, skipping message', {
+              messageId: deserialized.messageId,
+            });
+          }
+
           decrypted.push({
             content: deserialized.content,
             sentAt: new Date(Number(out.timestamp)),
             senderId: encodeUserId(out.user_id),
             seeker: msg.seeker,
+            messageId: deserialized.messageId ?? new Uint8Array(),
             encryptedMessage: msg.ciphertext,
             type: deserialized.type,
-            replyTo: deserialized.replyTo
-              ? {
-                  originalContent: deserialized.replyTo.originalContent,
-                  originalSeeker: deserialized.replyTo.originalSeeker,
-                }
-              : undefined,
-            forwardOf: deserialized.forwardOf
-              ? {
-                  originalContent: deserialized.forwardOf.originalContent,
-                  originalSeeker: deserialized.forwardOf.originalSeeker,
-                }
-              : undefined,
+            replyTo: deserialized.replyTo,
+            forwardOf: deserialized.forwardOf,
           });
         } catch (deserializationError) {
           log.error('deserialization failed', {
@@ -286,37 +286,31 @@ export class MessageService {
             return null;
           }
 
-          // Check for duplicate message (same content + similar timestamp from same sender)
-          // This handles edge case: app crashes after network send but before DB update,
-          // message gets re-sent on restart, peer receives duplicate
-          const isDuplicate = await this.isDuplicateMessage(
-            ownerUserId,
-            message.senderId,
-            message.content,
-            message.sentAt
+          // If received msg has same messageId as a previously received msg
+          const isDuplicate = await this.handleDuplicateMessageId(
+            message,
+            ownerUserId
           );
 
           if (isDuplicate) {
-            log.info('skipping duplicate message', {
+            log.info('Duplicate message received, skipping', {
               senderId: message.senderId,
               preview: message.content.slice(0, 30),
-              timestamp: message.sentAt.toISOString(),
             });
             return null;
           }
 
-          let replyToMessageId: number | undefined;
-          if (message.replyTo?.originalSeeker) {
-            const original = await this.findMessageBySeeker(
-              message.replyTo.originalSeeker,
-              ownerUserId
+          if (message.replyTo?.originalMsgId) {
+            const original = await this.findMessageByMsgId(
+              message.replyTo.originalMsgId,
+              ownerUserId,
+              message.senderId
             );
             if (!original) {
               log.warn('reply target not found', {
-                originalSeeker: encodeToBase64(message.replyTo.originalSeeker),
+                originalMsgId: encodeToBase64(message.replyTo.originalMsgId),
               });
             }
-            replyToMessageId = original?.id;
           }
 
           const id = await this.db.messages.add({
@@ -328,25 +322,17 @@ export class MessageService {
             status: MessageStatus.DELIVERED,
             timestamp: message.sentAt,
             metadata: {},
-            seeker: message.seeker, // Store the seeker of the incoming message
+            messageId: message.messageId,
             replyTo: message.replyTo
               ? {
-                  // Store the original content as a fallback only if we couldn't find
-                  // the original message in the database (replyToMessageId is undefined).
-                  // If the original message exists, we don't need to store the content
-                  // since we can fetch it using the originalSeeker.
-                  originalContent: replyToMessageId
-                    ? undefined
-                    : message.replyTo.originalContent,
-                  // Store the seeker (used to find the original message)
-                  originalSeeker: message.replyTo.originalSeeker,
+                  originalMsgId: message.replyTo.originalMsgId,
                 }
               : undefined,
 
             forwardOf: message.forwardOf
               ? {
                   originalContent: message.forwardOf.originalContent,
-                  originalSeeker: message.forwardOf.originalSeeker,
+                  originalContactId: message.forwardOf.originalContactId,
                 }
               : undefined,
           });
@@ -381,59 +367,80 @@ export class MessageService {
   }
 
   /**
-   * Check if a message is a duplicate based on content and timestamp.
+   * Checks for duplicate incoming messages in the message database based on messageId.
    *
-   * A message is considered duplicate if:
-   * - Same sender (contactUserId)
-   * - Same content
-   * - Incoming direction
-   * - Timestamp within deduplication window (default 30 seconds)
+   * A message is considered a duplicate if:
+   * - It has the same messageId
+   * - It is from the same sender (contactUserId)
+   * - Belongs to the same conversation (ownerUserId)
    *
-   * This handles the edge case where:
-   * 1. Sender sends message successfully to network
-   * 2. Sender app crashes before updating DB status to SENT
-   * 3. On restart, message is reset to WAITING_SESSION and re-sent
-   * 4. Receiver gets the same message twice with different seekers
+   * This protects against scenarios where:
+   * 1. A sender successfully delivers a message to the network,
+   * 2. Their app crashes or resets before marking the message as SENT in the local DB,
+   * 3. On restart, the sender's app re-sends the message (possibly with a different seeker),
+   * 4. The receiver gets the same message twice,
+   * 5. Duplicates are prevented by matching messageId byte-for-byte.
    *
-   * @param ownerUserId - The owner's user ID
-   * @param contactUserId - The sender's user ID
-   * @param content - The message content
-   * @param timestamp - The message timestamp
-   * @returns true if a duplicate exists
+   * This method uses messageId (usually a 12-byte random value) for exact match detection.
+   * If a duplicate is found, it updates certain fields (e.g., content, replyTo, forwardOf)
+   * on the existing message and returns true.
+   *
+   * @param message - The incoming decrypted message object.
+   * @param ownerUserId - The userId of the message database owner (the recipient).
+   * @returns true if a duplicate message (by messageId) was found; otherwise false.
    */
-  private async isDuplicateMessage(
-    ownerUserId: string,
-    contactUserId: string,
-    content: string,
-    timestamp: Date
+  private async handleDuplicateMessageId(
+    message: Decrypted,
+    ownerUserId: string
   ): Promise<boolean> {
-    const windowMs = this.config.messages.deduplicationWindowMs;
-    const windowStart = new Date(timestamp.getTime() - windowMs);
-    const windowEnd = new Date(timestamp.getTime() + windowMs);
+    // Check for duplicate message using messageId (12 bytes random)
+    if (message.messageId) {
+      const existingWithMessageId = await this.db.messages
+        .where('[ownerUserId+contactUserId]')
+        .equals([ownerUserId, message.senderId])
+        .and(m => {
+          if (!m.messageId || !message.messageId) return false;
+          if (m.messageId.length !== message.messageId.length) return false;
+          for (let i = 0; i < m.messageId.length; i++) {
+            if (m.messageId[i] !== message.messageId[i]) return false;
+          }
+          return true;
+        })
+        .first();
 
-    // Query for messages from same sender with same content within time window
-    const existing = await this.db.messages
-      .where('[ownerUserId+contactUserId]')
-      .equals([ownerUserId, contactUserId])
-      .and(
-        msg =>
-          msg.direction === MessageDirection.INCOMING &&
-          msg.content === content &&
-          msg.timestamp >= windowStart &&
-          msg.timestamp <= windowEnd
-      )
-      .first();
-
-    return existing !== undefined;
+      if (existingWithMessageId) {
+        await this.db.messages.update(existingWithMessageId.id!, {
+          content: message.content,
+          replyTo: message.replyTo,
+          forwardOf: message.forwardOf,
+        });
+        return true;
+      }
+    }
+    return false;
   }
 
-  async findMessageBySeeker(
-    seeker: Uint8Array,
-    ownerUserId: string
+  async findMessageByMsgId(
+    messageId: Uint8Array,
+    ownerUserId: string,
+    contactUserId?: string
   ): Promise<Message | undefined> {
-    return await this.db.messages
-      .where('[ownerUserId+seeker]')
-      .equals([ownerUserId, seeker])
+    const baseQuery = contactUserId
+      ? this.db.messages
+          .where('[ownerUserId+contactUserId]')
+          .equals([ownerUserId, contactUserId])
+      : this.db.messages.where('ownerUserId').equals(ownerUserId);
+
+    return await baseQuery
+      .and(m => {
+        if (!m.messageId || m.messageId.length !== messageId.length) {
+          return false;
+        }
+        for (let i = 0; i < messageId.length; i++) {
+          if (m.messageId[i] !== messageId[i]) return false;
+        }
+        return true;
+      })
       .first();
   }
 
@@ -458,8 +465,8 @@ export class MessageService {
           )
           .modify({
             status: MessageStatus.DELIVERED,
-            encryptedMessage: undefined,
-            whenToSend: undefined,
+            serializedContent: undefined,
+            seeker: undefined,
           });
 
         // After marking as DELIVERED, clean up DELIVERED keep-alive messages
@@ -518,6 +525,11 @@ export class MessageService {
         }
 
         try {
+          const randomMessageId =
+            message.type !== MessageType.KEEP_ALIVE
+              ? crypto.getRandomValues(new Uint8Array(MESSAGE_ID_SIZE))
+              : undefined;
+          message.messageId = randomMessageId;
           messageId = await this.db.addMessage({
             ...message,
             status: MessageStatus.WAITING_SESSION,
@@ -550,9 +562,17 @@ export class MessageService {
     message: Message
   ): Promise<Result<Uint8Array, string>> {
     const log = logger.forMethod('serializeMessage');
-    if (message.replyTo?.originalSeeker) {
-      const originalMessage = await this.findMessageBySeeker(
-        message.replyTo.originalSeeker,
+
+    if (!message.messageId && message.type !== MessageType.KEEP_ALIVE) {
+      return {
+        success: false,
+        error: 'Message ID is required',
+      };
+    }
+
+    if (message.replyTo) {
+      const originalMessage = await this.findMessageByMsgId(
+        message.replyTo.originalMsgId,
         message.ownerUserId
       );
 
@@ -567,8 +587,8 @@ export class MessageService {
         success: true,
         data: serializeReplyMessage(
           message.content,
-          originalMessage.content,
-          message.replyTo.originalSeeker
+          message.replyTo.originalMsgId,
+          message.messageId!
         ),
       };
     } else if (message.type === MessageType.KEEP_ALIVE) {
@@ -576,17 +596,15 @@ export class MessageService {
         success: true,
         data: serializeKeepAliveMessage(),
       };
-    } else if (
-      message.forwardOf?.originalContent &&
-      message.forwardOf.originalSeeker
-    ) {
+    } else if (message.forwardOf) {
       try {
         return {
           success: true,
           data: serializeForwardMessage(
-            message.forwardOf.originalContent,
+            message.forwardOf.originalContent ?? '',
             message.content,
-            message.forwardOf.originalSeeker
+            message.messageId!,
+            message.forwardOf.originalContactId
           ),
         };
       } catch (error) {
@@ -600,7 +618,7 @@ export class MessageService {
       // Regular message with type tag
       return {
         success: true,
-        data: serializeRegularMessage(message.content),
+        data: serializeRegularMessage(message.content, message.messageId!),
       };
     }
   }
@@ -827,6 +845,8 @@ export class MessageService {
                   ) {
                     await this.db.messages.update(msg.id, {
                       status: MessageStatus.SENT,
+                      encryptedMessage: undefined,
+                      whenToSend: undefined,
                     });
                     return true;
                   }

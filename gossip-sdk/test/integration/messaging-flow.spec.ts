@@ -163,6 +163,9 @@ describe('Messaging Flow', () => {
       expect(aliceReceivedMessage[0].status).toBe(MessageStatus.DELIVERED);
       expect(aliceReceivedMessage[1].status).toBe(MessageStatus.DELIVERED);
       expect(aliceReceivedMessage[2].status).toBe(MessageStatus.DELIVERED);
+      expect(aliceReceivedMessage[0].serializedContent).toBeUndefined();
+      expect(aliceReceivedMessage[1].serializedContent).toBeUndefined();
+      expect(aliceReceivedMessage[2].serializedContent).toBeUndefined();
       await aliceSdk.messages.markAsRead(aliceReceivedMessage[2].id!);
       // Re-fetch the message to get updated status
       const updatedMessage = await aliceSdk.messages.get(
@@ -193,6 +196,9 @@ describe('Messaging Flow', () => {
       expect(bobReceivedMessage[0].status).toBe(MessageStatus.DELIVERED);
       expect(bobReceivedMessage[1].status).toBe(MessageStatus.DELIVERED);
       expect(bobReceivedMessage[2].status).toBe(MessageStatus.DELIVERED);
+      expect(bobReceivedMessage[0].serializedContent).toBeUndefined();
+      expect(bobReceivedMessage[1].serializedContent).toBeUndefined();
+      expect(bobReceivedMessage[2].serializedContent).toBeUndefined();
       await bobSdk.messages.markAsRead(bobReceivedMessage[3].id!);
       // Re-fetch the message to get updated status
       const updatedBobMessage = await bobSdk.messages.get(
@@ -240,11 +246,21 @@ describe('Messaging Flow', () => {
       expect(aliceAllMessages.length).toBe(2);
       expect(aliceAllMessages[0].status).toBe(MessageStatus.SENT);
       expect(aliceAllMessages[1].status).toBe(MessageStatus.DELIVERED);
+      expect(aliceAllMessages[0].encryptedMessage).toBeUndefined();
+      expect(aliceAllMessages[0].seeker).toBeDefined();
+      expect(aliceAllMessages[0].whenToSend).toBeUndefined();
+      expect(aliceAllMessages[1].serializedContent).toBeUndefined();
+      expect(aliceAllMessages[1].seeker).toBeUndefined();
 
       const bobAllMessages = await bobSdk.messages.getMessages(aliceSdk.userId);
       expect(bobAllMessages.length).toBe(2);
       expect(bobAllMessages[0].status).toBe(MessageStatus.SENT);
       expect(bobAllMessages[1].status).toBe(MessageStatus.DELIVERED);
+      expect(bobAllMessages[0].encryptedMessage).toBeUndefined();
+      expect(bobAllMessages[0].seeker).toBeDefined();
+      expect(bobAllMessages[0].whenToSend).toBeUndefined();
+      expect(bobAllMessages[1].serializedContent).toBeUndefined();
+      expect(bobAllMessages[1].seeker).toBeUndefined();
     });
 
     it('Alice send announcement and send 2 message before Bob accept, Bob accept and receive messages', async () => {
@@ -337,6 +353,12 @@ describe('Messaging Flow', () => {
       expect(aliceMessagesSent.length).toBe(2);
       expect(aliceMessagesSent[0].status).toBe(MessageStatus.SENT);
       expect(aliceMessagesSent[1].status).toBe(MessageStatus.SENT);
+      expect(aliceMessagesSent[0].encryptedMessage).toBeUndefined();
+      expect(aliceMessagesSent[0].seeker).toBeDefined();
+      expect(aliceMessagesSent[0].whenToSend).toBeUndefined();
+      expect(aliceMessagesSent[1].encryptedMessage).toBeUndefined();
+      expect(aliceMessagesSent[1].seeker).toBeDefined();
+      expect(aliceMessagesSent[1].whenToSend).toBeUndefined();
 
       // Bob fetches messages and should receive the 2 queued messages
       await bobSdk.messages.fetch();
@@ -409,8 +431,8 @@ describe('Messaging Flow', () => {
       // Check message status - should now be SENT
       const retriedMessage = await db.messages.get(sendResult.message!.id!);
       expect(retriedMessage?.status).toBe(MessageStatus.SENT);
-      expect(retriedMessage?.whenToSend).toBeDefined();
-      expect(retriedMessage?.encryptedMessage).toBeDefined();
+      expect(retriedMessage?.whenToSend).toBeUndefined();
+      expect(retriedMessage?.encryptedMessage).toBeUndefined();
       expect(retriedMessage?.seeker).toBeDefined();
 
       // Bob fetches messages to receive Alice's message
@@ -419,6 +441,7 @@ describe('Messaging Flow', () => {
       expect(bobMessages.length).toBe(1);
       expect(bobMessages[0].content).toBe('Hello Bob!');
       expect(bobMessages[0].status).toBe(MessageStatus.DELIVERED);
+      expect(bobMessages[0].serializedContent).toBeUndefined();
     });
 
     it('Both alice and bob fail sending messages because of transport issue. Messages are resent in order', async () => {
@@ -528,6 +551,12 @@ describe('Messaging Flow', () => {
       expect(aliceSentMessages.length).toBe(2);
       expect(aliceSentMessages[0].status).toBe(MessageStatus.SENT);
       expect(aliceSentMessages[1].status).toBe(MessageStatus.SENT);
+      expect(aliceSentMessages[0].encryptedMessage).toBeUndefined();
+      expect(aliceSentMessages[0].seeker).toBeDefined();
+      expect(aliceSentMessages[0].whenToSend).toBeUndefined();
+      expect(aliceSentMessages[1].encryptedMessage).toBeUndefined();
+      expect(aliceSentMessages[1].seeker).toBeDefined();
+      expect(aliceSentMessages[1].whenToSend).toBeUndefined();
 
       const bobAllMessages = await bobSdk.messages.getMessages(aliceSdk.userId);
       const bobSentMessages = bobAllMessages.filter(
@@ -536,6 +565,12 @@ describe('Messaging Flow', () => {
       expect(bobSentMessages.length).toBe(2);
       expect(bobSentMessages[0].status).toBe(MessageStatus.SENT);
       expect(bobSentMessages[1].status).toBe(MessageStatus.SENT);
+      expect(bobSentMessages[0].encryptedMessage).toBeUndefined();
+      expect(bobSentMessages[0].seeker).toBeDefined();
+      expect(bobSentMessages[0].whenToSend).toBeUndefined();
+      expect(bobSentMessages[1].encryptedMessage).toBeUndefined();
+      expect(bobSentMessages[1].seeker).toBeDefined();
+      expect(bobSentMessages[1].whenToSend).toBeUndefined();
 
       /* STEP 6: Bob and Alice fetch messages with success */
       await bobSdk.messages.fetch();
@@ -628,6 +663,9 @@ describe('Messaging Flow', () => {
       );
       expect(aliceOutgoing.length).toBe(1);
       expect(aliceOutgoing[0].status).toBe(MessageStatus.SENT);
+      expect(aliceOutgoing[0].encryptedMessage).toBeUndefined();
+      expect(aliceOutgoing[0].seeker).toBeDefined();
+      expect(aliceOutgoing[0].whenToSend).toBeUndefined();
 
       // Bob renews session without fetching Alice's message first
       const bobRenewResult = await bobSdk.discussions.renew(aliceSdk.userId);
@@ -649,6 +687,10 @@ describe('Messaging Flow', () => {
       expect(bobIncoming.length).toBe(1);
       expect(bobIncoming[0].content).toBe('Hello Bob!');
       expect(bobIncoming[0].status).toBe(MessageStatus.DELIVERED);
+      expect(bobIncoming[0].serializedContent).toBeUndefined();
+      expect(bobIncoming[0].encryptedMessage).toBeUndefined();
+      expect(bobIncoming[0].seeker).toBeUndefined();
+      expect(bobIncoming[0].whenToSend).toBeUndefined();
     });
 
     it('Alice send msg, Bob fetch and renew. Alice msg is resent but no duplicata on bob side', async () => {
@@ -675,6 +717,8 @@ describe('Messaging Flow', () => {
       expect(bobIncomingBefore.length).toBe(1);
       expect(bobIncomingBefore[0].content).toBe('Hello Bob!');
       expect(bobIncomingBefore[0].status).toBe(MessageStatus.DELIVERED);
+      expect(bobIncomingBefore[0].serializedContent).toBeUndefined();
+      const bobIncomingBeforeMessageId = bobIncomingBefore[0].messageId;
 
       // Bob renews session
       const bobRenewResult = await bobSdk.discussions.renew(aliceSdk.userId);
@@ -686,7 +730,8 @@ describe('Messaging Flow', () => {
       const bobMessages = await bobSdk.messages.getMessages(aliceSdk.userId);
       expect(bobMessages.length).toBe(1);
       expect(bobMessages[0].status).toBe(MessageStatus.DELIVERED);
-      expect(bobMessages[0].seeker).toBeDefined();
+      expect(bobMessages[0].serializedContent).toBeUndefined();
+      expect(bobMessages[0].seeker).toBeUndefined();
       expect(bobMessages[0].encryptedMessage).toBeUndefined();
       expect(bobMessages[0].whenToSend).toBeUndefined();
 
@@ -705,6 +750,9 @@ describe('Messaging Flow', () => {
       expect(bobIncomingAfter.length).toBe(1);
       expect(bobIncomingAfter[0].content).toBe('Hello Bob!');
       expect(bobIncomingAfter[0].status).toBe(MessageStatus.DELIVERED);
+      expect(bobIncomingAfter[0].serializedContent).toBeUndefined();
+      expect(bobIncomingAfter[0].messageId).toEqual(bobIncomingBeforeMessageId);
+      expect(bobIncomingAfter[0].serializedContent).toBeUndefined();
     });
 
     it('Alice send msg, Bob answer. Alice msg is ack. then she renew -> her msg is not resent', async () => {
@@ -726,6 +774,10 @@ describe('Messaging Flow', () => {
       expect(bobMessages.length).toBe(1);
       expect(bobMessages[0].content).toBe('Hello Bob!');
       expect(bobMessages[0].status).toBe(MessageStatus.DELIVERED);
+      expect(bobMessages[0].serializedContent).toBeUndefined();
+      expect(bobMessages[0].encryptedMessage).toBeUndefined();
+      expect(bobMessages[0].seeker).toBeUndefined();
+      expect(bobMessages[0].whenToSend).toBeUndefined();
 
       // Bob answers
       const bobMsgResult = await bobSdk.messages.send({
@@ -749,10 +801,11 @@ describe('Messaging Flow', () => {
       );
       expect(aliceOutgoingAfterAck.length).toBe(1);
       expect(aliceOutgoingAfterAck[0].status).toBe(MessageStatus.DELIVERED);
+      expect(aliceOutgoingAfterAck[0].serializedContent).toBeUndefined();
       expect(aliceOutgoingAfterAck[0].content).toBe('Hello Bob!');
-      expect(aliceOutgoingAfterAck[0].encryptedMessage).not.toBeDefined();
-      expect(aliceOutgoingAfterAck[0].seeker).toBeDefined();
-      expect(aliceOutgoingAfterAck[0].whenToSend).not.toBeDefined();
+      expect(aliceOutgoingAfterAck[0].encryptedMessage).toBeUndefined();
+      expect(aliceOutgoingAfterAck[0].seeker).toBeUndefined();
+      expect(aliceOutgoingAfterAck[0].whenToSend).toBeUndefined();
 
       // Alice renews session
       const aliceRenewResult = await aliceSdk.discussions.renew(bobSdk.userId);
@@ -767,12 +820,13 @@ describe('Messaging Flow', () => {
       );
       expect(aliceOutgoingAfterRenew.length).toBe(1);
       expect(aliceOutgoingAfterRenew[0].status).toBe(MessageStatus.DELIVERED);
-      expect(aliceOutgoingAfterRenew[0].encryptedMessage).not.toBeDefined();
-      expect(aliceOutgoingAfterRenew[0].seeker).toBeDefined();
-      expect(aliceOutgoingAfterRenew[0].whenToSend).not.toBeDefined();
+      expect(aliceOutgoingAfterRenew[0].serializedContent).toBeUndefined();
+      expect(aliceOutgoingAfterRenew[0].encryptedMessage).toBeUndefined();
+      expect(aliceOutgoingAfterRenew[0].seeker).toBeUndefined();
+      expect(aliceOutgoingAfterRenew[0].whenToSend).toBeUndefined();
     });
 
-    it('Alice send msg, renew, resend, bob receive', async () => {
+    it('Alice send msg, renew, resend, bob receive (no duplicate msg)', async () => {
       // Alice sends a message
       const aliceMsgResult = await aliceSdk.messages.send({
         ownerUserId: aliceSdk.userId,
@@ -789,8 +843,12 @@ describe('Messaging Flow', () => {
       const aliceMessagesBeforeRenew = await aliceSdk.messages.getMessages(
         bobSdk.userId
       );
+      console.log('aliceMessagesBeforeRenew', aliceMessagesBeforeRenew);
       expect(aliceMessagesBeforeRenew.length).toBe(1);
       expect(aliceMessagesBeforeRenew[0].status).toBe(MessageStatus.SENT);
+      expect(aliceMessagesBeforeRenew[0].encryptedMessage).toBeUndefined();
+      expect(aliceMessagesBeforeRenew[0].seeker).toBeDefined();
+      expect(aliceMessagesBeforeRenew[0].whenToSend).toBeUndefined();
 
       // Alice renews session (this resets SENT messages to WAITING_SESSION)
       // Note: renew() triggers stateUpdate() internally, which may immediately
@@ -803,14 +861,15 @@ describe('Messaging Flow', () => {
       const aliceMessagesAfterRenew = await aliceSdk.messages.getMessages(
         bobSdk.userId
       );
+      console.log('aliceMessagesAfterRenew', aliceMessagesAfterRenew);
       const aliceOutgoingAfter = aliceMessagesAfterRenew.filter(
         m => m.direction === MessageDirection.OUTGOING
       );
       expect(aliceOutgoingAfter.length).toBe(1);
       expect(aliceOutgoingAfter[0].status).toBe(MessageStatus.SENT);
-      expect(aliceOutgoingAfter[0].encryptedMessage).toBeDefined();
+      expect(aliceOutgoingAfter[0].encryptedMessage).toBeUndefined();
       expect(aliceOutgoingAfter[0].seeker).toBeDefined();
-      expect(aliceOutgoingAfter[0].whenToSend).toBeDefined();
+      expect(aliceOutgoingAfter[0].whenToSend).toBeUndefined();
 
       // Bob fetches announcements (receives renewal)
       await bobSdk.announcements.fetch();
@@ -818,9 +877,16 @@ describe('Messaging Flow', () => {
       // Bob fetches messages and should receive Alice's message
       await bobSdk.messages.fetch();
       const bobMessages = await bobSdk.messages.getMessages(aliceSdk.userId);
+      console.log('bobMessages', bobMessages);
       expect(bobMessages.length).toBe(1);
       expect(bobMessages[0].content).toBe('Hello Bob!');
+      expect(bobMessages[0].messageId).toEqual(aliceOutgoingAfter[0].messageId);
+      expect(bobMessages[0].messageId).toEqual(aliceOutgoingAfter[0].messageId);
       expect(bobMessages[0].status).toBe(MessageStatus.DELIVERED);
+      expect(bobMessages[0].serializedContent).toBeUndefined();
+      expect(bobMessages[0].encryptedMessage).toBeUndefined();
+      expect(bobMessages[0].seeker).toBeUndefined();
+      expect(bobMessages[0].whenToSend).toBeUndefined();
     });
 
     it('Alice send msg, bob receive, alice renew and resend. Bob receive without duplicata', async () => {
@@ -844,6 +910,8 @@ describe('Messaging Flow', () => {
       expect(bobMessagesBeforeRenew.length).toBe(1);
       expect(bobMessagesBeforeRenew[0].content).toBe('Hello Bob!');
       expect(bobMessagesBeforeRenew[0].status).toBe(MessageStatus.DELIVERED);
+      expect(bobMessagesBeforeRenew[0].serializedContent).toBeUndefined();
+      const bobMessagesBeforeRenewId = bobMessagesBeforeRenew[0].messageId;
 
       // Alice renews session
       const aliceRenewResult = await aliceSdk.discussions.renew(bobSdk.userId);
@@ -862,7 +930,15 @@ describe('Messaging Flow', () => {
       );
       // Should still have only 1 message (no duplicate)
       expect(bobIncomingAfter.length).toBe(1);
+      expect(bobIncomingAfter[0].messageId).toEqual(
+        aliceMsgResult.message!.messageId
+      );
+      expect(bobIncomingAfter[0].messageId).toEqual(
+        aliceMsgResult.message!.messageId
+      );
       expect(bobIncomingAfter[0].content).toBe('Hello Bob!');
+      expect(bobIncomingAfter[0].serializedContent).toBeUndefined();
+      expect(bobIncomingAfter[0].messageId).toEqual(bobMessagesBeforeRenewId);
     });
 
     it('Alice send msg and renew, bob send msg and renew', async () => {
@@ -918,6 +994,9 @@ describe('Messaging Flow', () => {
       );
       expect(aliceOutgoing.length).toBe(1);
       expect(aliceOutgoing[0].status).toBe(MessageStatus.SENT);
+      expect(aliceOutgoing[0].encryptedMessage).toBeUndefined();
+      expect(aliceOutgoing[0].seeker).toBeDefined();
+      expect(aliceOutgoing[0].whenToSend).toBeUndefined();
 
       const bobMessages = await bobSdk.messages.getMessages(aliceSdk.userId);
       const bobOutgoing = bobMessages.filter(
@@ -925,6 +1004,9 @@ describe('Messaging Flow', () => {
       );
       expect(bobOutgoing.length).toBe(1);
       expect(bobOutgoing[0].status).toBe(MessageStatus.SENT);
+      expect(bobOutgoing[0].encryptedMessage).toBeUndefined();
+      expect(bobOutgoing[0].seeker).toBeDefined();
+      expect(bobOutgoing[0].whenToSend).toBeUndefined();
     });
   });
 
@@ -984,6 +1066,7 @@ describe('Messaging Flow', () => {
           m.content === 'Hello Bob!'
       );
       expect(bobReceived?.status).toBe(MessageStatus.DELIVERED);
+      expect(bobReceived?.serializedContent).toBeUndefined();
 
       // Force Bob to send keep-alive
       vi.spyOn(bobSession, 'refresh').mockResolvedValue([
@@ -1002,6 +1085,9 @@ describe('Messaging Flow', () => {
         .first();
       expect(bobKeepAlive).toBeDefined();
       expect(bobKeepAlive?.status).toBe(MessageStatus.SENT);
+      expect(bobKeepAlive?.encryptedMessage).toBeUndefined();
+      expect(bobKeepAlive?.seeker).toBeDefined();
+      expect(bobKeepAlive?.whenToSend).toBeUndefined();
 
       // Alice fetches Bob's keep-alive (which acknowledges her message)
       await aliceSdk.messages.fetch();
@@ -1017,6 +1103,7 @@ describe('Messaging Flow', () => {
           m.content === 'Hello Bob!'
       );
       expect(aliceSent?.status).toBe(MessageStatus.DELIVERED);
+      expect(aliceSent?.serializedContent).toBeUndefined();
 
       // Check that there is no incoming keep-alive message in Alice's db
       const incomingKeepAlive = aliceMessages.find(
@@ -1206,6 +1293,9 @@ describe('Messaging Flow', () => {
       );
       if (kaAfter) {
         expect(kaAfter.status).toBe(MessageStatus.SENT);
+        expect(kaAfter.encryptedMessage).toBeUndefined();
+        expect(kaAfter.seeker).toBeDefined();
+        expect(kaAfter.whenToSend).toBeUndefined();
       }
 
       sendSpy.mockRestore();
@@ -1250,6 +1340,9 @@ describe('Messaging Flow', () => {
       );
       expect(aliceKeepAlive).toBeDefined();
       expect(aliceKeepAlive?.status).toBe(MessageStatus.SENT);
+      expect(aliceKeepAlive?.encryptedMessage).toBeUndefined();
+      expect(aliceKeepAlive?.seeker).toBeDefined();
+      expect(aliceKeepAlive?.whenToSend).toBeUndefined();
 
       // Alice renews the session (which resets messages to WAITING_SESSION)
       const renewResult = await aliceSdk.discussions.renew(bobSdk.userId);
@@ -1268,6 +1361,9 @@ describe('Messaging Flow', () => {
       );
       // After renew + stateUpdate, it should be SENT again
       expect(aliceKeepAlive?.status).toBe(MessageStatus.SENT);
+      expect(aliceKeepAlive?.encryptedMessage).toBeUndefined();
+      expect(aliceKeepAlive?.seeker).toBeDefined();
+      expect(aliceKeepAlive?.whenToSend).toBeUndefined();
     });
 
     it('Alice send keep alive but got network issue. Resend with success', async () => {
@@ -1349,6 +1445,9 @@ describe('Messaging Flow', () => {
           m.direction === MessageDirection.OUTGOING
       );
       expect(kaAfter?.status).toBe(MessageStatus.SENT);
+      expect(kaAfter?.encryptedMessage).toBeUndefined();
+      expect(kaAfter?.seeker).toBeDefined();
+      expect(kaAfter?.whenToSend).toBeUndefined();
 
       // Restore
       sendSpy.mockRestore();

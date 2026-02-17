@@ -17,6 +17,7 @@ import {
   MessageStatus,
   MessageDirection,
   MessageType,
+  MESSAGE_ID_SIZE,
 } from '../../src/db';
 import { encodeUserId } from '../../src/utils/userId';
 import { generateMnemonic } from '../../src/crypto/bip39';
@@ -47,8 +48,8 @@ describe('MessageService', () => {
     }
   });
 
-  it('finds message by seeker', async () => {
-    const seeker = new Uint8Array(32).fill(5);
+  it('finds message by messageId', async () => {
+    const messageId = new Uint8Array(MESSAGE_ID_SIZE).fill(5);
     await db.messages.add({
       ownerUserId: MESSAGE_OWNER_USER_ID,
       contactUserId: MESSAGE_CONTACT_USER_ID,
@@ -57,24 +58,26 @@ describe('MessageService', () => {
       direction: MessageDirection.OUTGOING,
       status: MessageStatus.SENT,
       timestamp: new Date(),
-      seeker,
+      messageId,
     });
 
-    const message = await sdk.messages.findBySeeker(
-      seeker,
-      MESSAGE_OWNER_USER_ID
+    const message = await sdk.messages.findByMsgId(
+      messageId,
+      MESSAGE_OWNER_USER_ID,
+      MESSAGE_CONTACT_USER_ID
     );
 
     expect(message).toBeDefined();
     expect(message?.content).toBe('Hello');
   });
 
-  it('returns undefined for missing seeker', async () => {
-    const seeker = new Uint8Array(32).fill(9);
+  it('returns undefined for missing messageId', async () => {
+    const messageId = new Uint8Array(MESSAGE_ID_SIZE).fill(9);
 
-    const message = await sdk.messages.findBySeeker(
-      seeker,
-      MESSAGE_OWNER_USER_ID
+    const message = await sdk.messages.findByMsgId(
+      messageId,
+      MESSAGE_OWNER_USER_ID,
+      MESSAGE_CONTACT_USER_ID
     );
 
     expect(message).toBeUndefined();

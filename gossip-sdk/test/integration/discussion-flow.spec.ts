@@ -1490,6 +1490,7 @@ describe('Discussion Flow', () => {
       );
       expect(bobOutgoingMsg).toBeDefined();
       expect(bobOutgoingMsg?.status).toBe(MessageStatus.SENT);
+      expect(bobOutgoingMsg?.seeker).toBeDefined();
     });
   });
 });
@@ -1521,7 +1522,8 @@ describe('session break in session manager', () => {
   // Helper function to create a SessionConfig (each SDK needs its own instance)
   function createSessionConfig(
     max_session_inactivity_millis: number,
-    keep_alive_interval_millis: number
+    keep_alive_interval_millis: number,
+    max_session_lag_length: bigint = 10000n
   ): SessionConfig {
     return new SessionConfig(
       7 * 24 * 60 * 60 * 1000, // max_incoming_announcement_age_millis: 1 week
@@ -1530,14 +1532,15 @@ describe('session break in session manager', () => {
       60 * 1000, // max_incoming_message_future_millis: 1 minute
       max_session_inactivity_millis,
       keep_alive_interval_millis,
-      10000n // max_session_lag_length: 10000 messages
+      max_session_lag_length
     );
   }
 
   // Helper function to create custom SDKs with specific SessionConfig
   async function createCustomSdks(
     max_session_inactivity_millis: number,
-    keep_alive_interval_millis: number
+    keep_alive_interval_millis: number,
+    max_session_lag_length: bigint = 10000n
   ): Promise<void> {
     const aliceMnemonic = generateMnemonic();
     const bobMnemonic = generateMnemonic();
@@ -1552,7 +1555,8 @@ describe('session break in session manager', () => {
       onPersist: async () => {},
       sessionConfig: createSessionConfig(
         max_session_inactivity_millis,
-        keep_alive_interval_millis
+        keep_alive_interval_millis,
+        max_session_lag_length
       ),
     });
     (
@@ -1570,7 +1574,8 @@ describe('session break in session manager', () => {
       onPersist: async () => {},
       sessionConfig: createSessionConfig(
         max_session_inactivity_millis,
-        keep_alive_interval_millis
+        keep_alive_interval_millis,
+        max_session_lag_length
       ),
     });
     (
@@ -1651,12 +1656,14 @@ describe('session break in session manager', () => {
       .toArray();
     expect(aliceIncomingMessagesBefore.length).toBe(1);
     expect(aliceIncomingMessagesBefore[0].status).toBe(MessageStatus.DELIVERED);
+    expect(aliceIncomingMessagesBefore[0].seeker).toBeUndefined();
 
     // 2. Create 4 outgoing messages for Alice with different statuses
     // WAITING_SESSION
     await aliceSdk.db.messages.add({
       ownerUserId: aliceSdk.userId,
       contactUserId: bobSdk.userId,
+      messageId: new Uint8Array(12).fill(1),
       content: 'Message WAITING_SESSION',
       type: MessageType.TEXT,
       direction: MessageDirection.OUTGOING,
@@ -1668,6 +1675,7 @@ describe('session break in session manager', () => {
     await aliceSdk.db.messages.add({
       ownerUserId: aliceSdk.userId,
       contactUserId: bobSdk.userId,
+      messageId: new Uint8Array(12).fill(2),
       content: 'Message READY',
       type: MessageType.TEXT,
       direction: MessageDirection.OUTGOING,
@@ -1682,6 +1690,7 @@ describe('session break in session manager', () => {
     await aliceSdk.db.messages.add({
       ownerUserId: aliceSdk.userId,
       contactUserId: bobSdk.userId,
+      messageId: new Uint8Array(12).fill(3),
       content: 'Message SENT',
       type: MessageType.TEXT,
       direction: MessageDirection.OUTGOING,
@@ -1696,6 +1705,7 @@ describe('session break in session manager', () => {
     await aliceSdk.db.messages.add({
       ownerUserId: aliceSdk.userId,
       contactUserId: bobSdk.userId,
+      messageId: new Uint8Array(12).fill(4),
       content: 'Message DELIVERED',
       type: MessageType.TEXT,
       direction: MessageDirection.OUTGOING,
@@ -1995,5 +2005,360 @@ describe('session break in session manager', () => {
     expect(aliceSdk.discussions.getStatus(bobSdk.userId)).toBe(
       SessionStatus.Active
     );
+  });
+
+  describe('Session saturation', () => {
+    /**
+     * Bob sends a simple text message to Alice,
+     * then alice fetches bob's messages.
+     *
+     * Why ?
+     * This is due to the functionning of session manager: Before the peer has sent it's first message,
+     * the session is saturated after sending "max_session_lag_length - 1" messages.
+     * This behaviour disapear when the peer has sent it's first message.
+     * After that, the session become saturated after sending "max_session_lag_length" messages more than the peer has sent.
+     * This is why we use this function to setup a state in which bob has sent his first message and hence
+     * alice's session is saturated only after sending "max_session_lag_length" messages more than bob has sent.
+     */
+    async function BobSendFirstMsg(aliceSdk: GossipSdk, bobSdk: GossipSdk) {
+      // Bob sends a message to Alice
+      const bobSendResult = await bobSdk.messages.send({
+        ownerUserId: bobSdk.userId,
+        contactUserId: aliceSdk.userId,
+        content: 'Hello Alice!',
+        type: MessageType.TEXT,
+        direction: MessageDirection.OUTGOING,
+        status: MessageStatus.WAITING_SESSION,
+        timestamp: new Date(),
+      });
+      expect(bobSendResult.success).toBe(true);
+
+      // alice fetches bob's messages
+      await aliceSdk.messages.fetch();
+    }
+
+    it('Alice send an announcement to Bob and send more than max_session_lag_length msg. But when calling state_update she is not saturated because her session has status selfRequested', async () => {
+      await createCustomSdks(
+        3600000, // max_session_inactivity_millis: 1 hour
+        60000, // keep_alive_interval_millis: 1 minute
+        3n // max_session_lag_length: 3 messages
+      );
+
+      // Alice adds Bob as a contact
+      const aliceBobContact: Omit<Contact, 'id'> = {
+        ownerUserId: aliceSdk.userId,
+        userId: bobSdk.userId,
+        name: 'Bob',
+        publicKeys: bobSdk.publicKeys.to_bytes(),
+        avatar: undefined,
+        isOnline: false,
+        lastSeen: new Date(),
+        createdAt: new Date(),
+      };
+      await aliceSdk.db.contacts.add(aliceBobContact);
+
+      // Alice initiates discussion with Bob (session status becomes SelfRequested)
+      const result = await aliceSdk.discussions.start(aliceBobContact);
+      if (!result.success) throw result.error;
+
+      // Verify session status is SelfRequested
+      expect(aliceSdk.discussions.getStatus(bobSdk.userId)).toBe(
+        SessionStatus.SelfRequested
+      );
+
+      // Alice sends 4 messages (more than max_session_lag_length = 3)
+      for (let i = 1; i <= 4; i++) {
+        const msgResult = await aliceSdk.messages.send({
+          ownerUserId: aliceSdk.userId,
+          contactUserId: bobSdk.userId,
+          content: `Message ${i}`,
+          type: MessageType.TEXT,
+          direction: MessageDirection.OUTGOING,
+          status: MessageStatus.WAITING_SESSION,
+          timestamp: new Date(),
+        });
+        expect(msgResult.success).toBe(true);
+      }
+
+      // would have set the session as saturated if it was active.
+      await aliceSdk.updateState();
+
+      // Session should still be SelfRequested (not Saturated)
+      expect(aliceSdk.discussions.getStatus(bobSdk.userId)).toBe(
+        SessionStatus.SelfRequested
+      );
+    });
+
+    it('Alice become saturated, bob send her a message before calling state_update -> session is not reset', async () => {
+      await createCustomSdks(
+        3600000, // max_session_inactivity_millis: 1 hour
+        60000, // keep_alive_interval_millis: 1 minute
+        3n // max_session_lag_length: 3 messages
+      );
+
+      // Setup: Alice and Bob establish a session
+      await setupSession(aliceSdk, bobSdk, 'Bob', 'Alice');
+
+      // Verify session is active
+      expect(await isLocalSessionUp(aliceSdk, bobSdk.userId)).toBe(true);
+
+      // Bob sends his first message to Alice
+      await BobSendFirstMsg(aliceSdk, bobSdk);
+
+      // Alice sends 3 messages (exactly max_session_lag_length)
+      for (let i = 1; i <= 3; i++) {
+        const msgResult = await aliceSdk.messages.send({
+          ownerUserId: aliceSdk.userId,
+          contactUserId: bobSdk.userId,
+          content: `Alice message ${i}`,
+          type: MessageType.TEXT,
+          direction: MessageDirection.OUTGOING,
+          status: MessageStatus.WAITING_SESSION,
+          timestamp: new Date(),
+        });
+        expect(msgResult.success).toBe(true);
+      }
+      /* The last message is added directly in db because the aliceSdk.messages.send call
+       state_update and it would have set the session as saturated */
+      // await db.messages.add({
+      //   ownerUserId: aliceSdk.userId,
+      //   contactUserId: bobSdk.userId,
+      //   messageId: new Uint8Array(12).fill(3),
+      //   content: 'Alice message 3',
+      //   type: MessageType.TEXT,
+      //   direction: MessageDirection.OUTGOING,
+      //   status: MessageStatus.WAITING_SESSION,
+      //   timestamp: new Date(),
+      // });
+
+      // Check if Alice is saturated
+      expect(aliceSdk.discussions.getStatus(bobSdk.userId)).toBe(
+        SessionStatus.Saturated
+      );
+
+      // bob fetches alice's messages
+      await bobSdk.messages.fetch();
+
+      // Bob sends a message to Alice (this acknowledges Alice's messages)
+      const bobMsgResult = await bobSdk.messages.send({
+        ownerUserId: bobSdk.userId,
+        contactUserId: aliceSdk.userId,
+        content: 'Bob response',
+        type: MessageType.TEXT,
+        direction: MessageDirection.OUTGOING,
+        status: MessageStatus.WAITING_SESSION,
+        timestamp: new Date(),
+      });
+      expect(bobMsgResult.success).toBe(true);
+
+      // Alice fetches Bob's message (this acknowledges her messages, reducing lag)
+      await aliceSdk.messages.fetch();
+
+      // Session should be Active again (not Saturated, not reset)
+      expect(aliceSdk.discussions.getStatus(bobSdk.userId)).toBe(
+        SessionStatus.Active
+      );
+    });
+
+    it('Alice become saturated, session is reset all messages are resent, bob answer, no more saturation', async () => {
+      await createCustomSdks(
+        3600000, // max_session_inactivity_millis: 1 hour
+        60000, // keep_alive_interval_millis: 1 minute
+        3n // max_session_lag_length: 3 messages
+      );
+
+      // Setup: Alice and Bob establish a session
+      await setupSession(aliceSdk, bobSdk, 'Bob', 'Alice');
+
+      // Verify session is active
+      expect(await isLocalSessionUp(aliceSdk, bobSdk.userId)).toBe(true);
+
+      // Bob sends his first message to Alice
+      await BobSendFirstMsg(aliceSdk, bobSdk);
+
+      // Alice sends 3 messages (exactly max_session_lag_length)
+      for (let i = 1; i <= 3; i++) {
+        const msgResult = await aliceSdk.messages.send({
+          ownerUserId: aliceSdk.userId,
+          contactUserId: bobSdk.userId,
+          content: `Alice message ${i}`,
+          type: MessageType.TEXT,
+          direction: MessageDirection.OUTGOING,
+          status: MessageStatus.WAITING_SESSION,
+          timestamp: new Date(),
+        });
+        expect(msgResult.success).toBe(true);
+      }
+
+      // Verify Alice is saturated
+      expect(aliceSdk.discussions.getStatus(bobSdk.userId)).toBe(
+        SessionStatus.Saturated
+      );
+
+      // Call updateState - this should reset the session because it's saturated
+      // and resend all messages
+      await aliceSdk.updateState();
+
+      // Bob fetches announcements (receives renewal)
+      await bobSdk.announcements.fetch();
+
+      // Bob fetches messages and receives Alice's messages
+      await bobSdk.messages.fetch();
+      const bobMessages = await bobSdk.messages.getMessages(aliceSdk.userId);
+      const bobIncoming = bobMessages.filter(
+        m => m.direction === MessageDirection.INCOMING
+      );
+      // the 3rd msg has not been sent because session is saturated.
+      // This is because the session has been reset and there is a virtual lag of 1 msg so max_session_lag_length is reached at the 2nd msg
+      expect(bobIncoming.length).toEqual(2);
+
+      // Bob answers (this acknowledges Alice's messages)
+      const bobMsgResult = await bobSdk.messages.send({
+        ownerUserId: bobSdk.userId,
+        contactUserId: aliceSdk.userId,
+        content: 'Bob response',
+        type: MessageType.TEXT,
+        direction: MessageDirection.OUTGOING,
+        status: MessageStatus.WAITING_SESSION,
+        timestamp: new Date(),
+      });
+      expect(bobMsgResult.success).toBe(true);
+
+      // Alice fetches Bob's message (this acknowledges her messages)
+      await aliceSdk.messages.fetch();
+
+      // Session should be Active (not Saturated)
+      expect(aliceSdk.discussions.getStatus(bobSdk.userId)).toBe(
+        SessionStatus.Active
+      );
+
+      // alice resend her 3rd msg
+      await aliceSdk.updateState();
+
+      // Bob fetches announcements (receives Alice's renewal)
+      await bobSdk.announcements.fetch();
+
+      // Bob fetches messages and receives Alice's messages
+      await bobSdk.messages.fetch();
+      const bobMessages2 = await bobSdk.messages.getMessages(aliceSdk.userId);
+      const bobIncoming2 = bobMessages2.filter(
+        m => m.direction === MessageDirection.INCOMING
+      );
+      expect(bobIncoming2.length).toEqual(3);
+    });
+
+    it.skip("Alice and bob both become saturated because network lag. Alice session is reset, bob's no. They fetch messages and are no more saturated", async () => {
+      await createCustomSdks(
+        3600000, // max_session_inactivity_millis: 1 hour
+        60000, // keep_alive_interval_millis: 1 minute
+        3n // max_session_lag_length: 3 messages
+      );
+
+      // Setup: Alice and Bob establish a session
+      await setupSession(aliceSdk, bobSdk, 'Bob', 'Alice');
+
+      // Verify session is active
+      expect(await isLocalSessionUp(aliceSdk, bobSdk.userId)).toBe(true);
+      expect(await isLocalSessionUp(bobSdk, aliceSdk.userId)).toBe(true);
+
+      // Bob sends his first message to Alice
+      await BobSendFirstMsg(aliceSdk, bobSdk);
+
+      // Alice sends 3 messages (exactly max_session_lag_length)
+      for (let i = 1; i <= 3; i++) {
+        const msgResult = await aliceSdk.messages.send({
+          ownerUserId: aliceSdk.userId,
+          contactUserId: bobSdk.userId,
+          content: `Alice message ${i}`,
+          type: MessageType.TEXT,
+          direction: MessageDirection.OUTGOING,
+          status: MessageStatus.WAITING_SESSION,
+          timestamp: new Date(),
+        });
+        expect(msgResult.success).toBe(true);
+      }
+
+      // Bob sends 2 messages (with the 1st msg previously sent it reach exactly max_session_lag_length)
+      for (let i = 1; i <= 2; i++) {
+        const msgResult = await bobSdk.messages.send({
+          ownerUserId: bobSdk.userId,
+          contactUserId: aliceSdk.userId,
+          content: `Bob message ${i}`,
+          type: MessageType.TEXT,
+          direction: MessageDirection.OUTGOING,
+          status: MessageStatus.WAITING_SESSION,
+          timestamp: new Date(),
+        });
+        expect(msgResult.success).toBe(true);
+      }
+
+      // Verify both are saturated
+      expect(aliceSdk.discussions.getStatus(bobSdk.userId)).toBe(
+        SessionStatus.Saturated
+      );
+      expect(bobSdk.discussions.getStatus(aliceSdk.userId)).toBe(
+        SessionStatus.Saturated
+      );
+
+      // Alice calls updateState - her session should be reset
+      await aliceSdk.updateState();
+
+      // Bob fetches announcements (receives Alice's renewal)
+      await bobSdk.announcements.fetch();
+
+      // Bob fetches messages (receives Alice's messages, acknowledging them)
+      await bobSdk.messages.fetch();
+
+      // Alice fetches messages (receives Bob's messages, acknowledging them)
+      await aliceSdk.messages.fetch();
+
+      // Both sessions should still be Saturated because their respective message don't acknowledge the other's messages
+      expect(aliceSdk.discussions.getStatus(bobSdk.userId)).toBe(
+        SessionStatus.Saturated
+      );
+      expect(bobSdk.discussions.getStatus(aliceSdk.userId)).toBe(
+        SessionStatus.Saturated
+      );
+
+      // Alice send her 4th msg
+      const aliceMsgResult = await aliceSdk.messages.send({
+        ownerUserId: aliceSdk.userId,
+        contactUserId: bobSdk.userId,
+        content: `Alice message 4`,
+        type: MessageType.TEXT,
+        direction: MessageDirection.OUTGOING,
+        status: MessageStatus.WAITING_SESSION,
+        timestamp: new Date(),
+      });
+      expect(aliceMsgResult.success).toBe(true);
+
+      // Bob fetch messages and receive Alice's 4th msg
+      await bobSdk.messages.fetch();
+
+      // Bob's session should be Active because he has received Alice's 4th msg
+      expect(bobSdk.discussions.getStatus(aliceSdk.userId)).toBe(
+        SessionStatus.Active
+      );
+
+      // bob send his 4th msg
+      const bobMsgResult = await bobSdk.messages.send({
+        ownerUserId: bobSdk.userId,
+        contactUserId: aliceSdk.userId,
+        content: `Bob message 4`,
+        type: MessageType.TEXT,
+        direction: MessageDirection.OUTGOING,
+        status: MessageStatus.WAITING_SESSION,
+        timestamp: new Date(),
+      });
+      expect(bobMsgResult.success).toBe(true);
+
+      // Alice fetch messages and receive Bob's 4th msg
+      await aliceSdk.messages.fetch();
+
+      // Alice's session should be Active because she has received Bob's 4th msg
+      expect(aliceSdk.discussions.getStatus(bobSdk.userId)).toBe(
+        SessionStatus.Active
+      );
+    });
   });
 });

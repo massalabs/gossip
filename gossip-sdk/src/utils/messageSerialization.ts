@@ -5,27 +5,23 @@
  * Supports regular text messages, replies, forwards, and keep-alive messages.
  */
 
-import { strToBytes, bytesToStr, U32 } from '@massalabs/massa-web3';
-import { MessageType } from '../db';
+import { MessageType, MESSAGE_ID_SIZE } from '../db';
+import {
+  Message as ProtoMessage,
+  MessageType as ProtoMessageType,
+} from '../proto/generated/message';
 
-// Message type constants (protocol-level)
-const MESSAGE_TYPE_REGULAR = 0x00;
-const MESSAGE_TYPE_REPLY = 0x01;
-const MESSAGE_TYPE_FORWARD = 0x02;
-export const MESSAGE_TYPE_KEEP_ALIVE = 0x03;
-
-// Seeker size: 1 byte length prefix + 32 bytes hash + 1 byte key index
-const SEEKER_SIZE = 34;
+export const MESSAGE_TYPE_KEEP_ALIVE = ProtoMessageType.MESSAGE_TYPE_KEEP_ALIVE;
 
 export interface DeserializedMessage {
   content: string;
+  messageId?: Uint8Array;
   replyTo?: {
-    originalContent: string;
-    originalSeeker: Uint8Array;
+    originalMsgId: Uint8Array;
   };
   forwardOf?: {
     originalContent: string;
-    originalSeeker: Uint8Array;
+    originalContactId?: Uint8Array;
   };
   type: MessageType;
 }
@@ -35,127 +31,94 @@ export interface DeserializedMessage {
  * Keep-alive messages are used to maintain session activity
  */
 export function serializeKeepAliveMessage(): Uint8Array {
-  return new Uint8Array([MESSAGE_TYPE_KEEP_ALIVE]);
+  return ProtoMessage.encode({
+    messageType: ProtoMessageType.MESSAGE_TYPE_KEEP_ALIVE,
+    content: '',
+  });
 }
 
 /**
  * Serialize a regular text message
  *
- * Format: [type: 1 byte][content: variable]
+ * Format: [type: 1 byte][messageId: 12 bytes][content: variable]
  *
  * @param content - The message content string
+ * @param messageId - 12-byte random message ID
  * @returns Serialized message bytes
  */
-export function serializeRegularMessage(content: string): Uint8Array {
-  const contentBytes = strToBytes(content);
-  const result = new Uint8Array(1 + contentBytes.length);
-  result[0] = MESSAGE_TYPE_REGULAR;
-  result.set(contentBytes, 1);
-  return result;
+export function serializeRegularMessage(
+  content: string,
+  messageId: Uint8Array
+): Uint8Array {
+  if (messageId.length !== MESSAGE_ID_SIZE) {
+    throw new Error(`messageId must be ${MESSAGE_ID_SIZE} bytes`);
+  }
+  return ProtoMessage.encode({
+    messageType: ProtoMessageType.MESSAGE_TYPE_REGULAR,
+    messageId,
+    content,
+  });
 }
 
 /**
  * Serialize a reply message
  *
- * Format: [type: 1 byte][originalContentLen: 4 bytes][originalContent][seeker: 34 bytes][newContent]
+ * Format: protobuf Message with citedMsgId set
  *
  * @param newContent - The reply content
- * @param originalContent - The content being replied to
- * @param originalSeeker - The seeker of the original message
+ * @param originalMsgId - The messageId of the message being replied to
+ * @param messageId - 12-byte random message ID
  * @returns Serialized reply message bytes
  */
 export function serializeReplyMessage(
   newContent: string,
-  originalContent: string,
-  originalSeeker: Uint8Array
+  originalMsgId: Uint8Array,
+  messageId: Uint8Array
 ): Uint8Array {
-  const newContentBytes = strToBytes(newContent);
-  const originalContentBytes = strToBytes(originalContent);
-  const originalContentLenBytes = U32.toBytes(
-    BigInt(originalContentBytes.length)
-  );
-  // Calculate total size
-  const totalSize =
-    1 + // type
-    originalContentLenBytes.length + // length prefix (4 bytes)
-    originalContentBytes.length + // original content
-    SEEKER_SIZE + // seeker
-    newContentBytes.length; // new content
-
-  const result = new Uint8Array(totalSize);
-  let offset = 0;
-
-  // Type byte
-  result[offset++] = MESSAGE_TYPE_REPLY;
-
-  // Original content length (4 bytes)
-  result.set(originalContentLenBytes, offset);
-  offset += originalContentLenBytes.length;
-
-  // Original content
-  result.set(originalContentBytes, offset);
-  offset += originalContentBytes.length;
-
-  // Seeker (34 bytes)
-  result.set(originalSeeker, offset);
-  offset += SEEKER_SIZE;
-
-  // New content
-  result.set(newContentBytes, offset);
-
-  return result;
+  if (messageId.length !== MESSAGE_ID_SIZE) {
+    throw new Error(`messageId must be ${MESSAGE_ID_SIZE} bytes`);
+  }
+  if (originalMsgId.length !== MESSAGE_ID_SIZE) {
+    throw new Error(`originalMsgId must be ${MESSAGE_ID_SIZE} bytes`);
+  }
+  return ProtoMessage.encode({
+    messageType: ProtoMessageType.MESSAGE_TYPE_REPLY,
+    messageId,
+    content: newContent,
+    citedMsgId: originalMsgId,
+  });
 }
 
 /**
  * Serialize a forward message
  *
- * Format: [type: 1 byte][forwardContentLen: 4 bytes][forwardContent][seeker: 34 bytes][newContent]
+ * Format: protobuf Message with citedContactId set
  *
- * @param forwardContent - The content being forwarded
+ * @param forwardedContent - The content being forwarded
  * @param newContent - Optional new content to add (empty string if none)
- * @param originalSeeker - The seeker of the original message
+ * @param originalContactId - The contact ID (32 bytes) of the original message
+ * @param messageId - 12-byte random message ID
  * @returns Serialized forward message bytes
  */
 export function serializeForwardMessage(
-  forwardContent: string,
+  forwardedContent: string,
   newContent: string,
-  originalSeeker: Uint8Array
+  messageId: Uint8Array,
+  originalContactId?: Uint8Array
 ): Uint8Array {
-  const newContentBytes = strToBytes(newContent);
-  const forwardContentBytes = strToBytes(forwardContent);
-  const forwardContentLenBytes = U32.toBytes(
-    BigInt(forwardContentBytes.length)
-  );
-  // Calculate total size
-  const totalSize =
-    1 + // type
-    forwardContentLenBytes.length + // length prefix (4 bytes)
-    forwardContentBytes.length + // forward content
-    SEEKER_SIZE + // seeker
-    newContentBytes.length; // new content
-
-  const result = new Uint8Array(totalSize);
-  let offset = 0;
-
-  // Type byte
-  result[offset++] = MESSAGE_TYPE_FORWARD;
-
-  // Forward content length (4 bytes)
-  result.set(forwardContentLenBytes, offset);
-  offset += forwardContentLenBytes.length;
-
-  // Forward content
-  result.set(forwardContentBytes, offset);
-  offset += forwardContentBytes.length;
-
-  // Seeker (34 bytes)
-  result.set(originalSeeker, offset);
-  offset += SEEKER_SIZE;
-
-  // New content
-  result.set(newContentBytes, offset);
-
-  return result;
+  if (messageId.length !== MESSAGE_ID_SIZE) {
+    throw new Error(`messageId must be ${MESSAGE_ID_SIZE} bytes`);
+  }
+  if (originalContactId && originalContactId.length !== 32) {
+    throw new Error('originalContactId must be 32 bytes');
+  }
+  return ProtoMessage.encode({
+    messageType: ProtoMessageType.MESSAGE_TYPE_FORWARD,
+    messageId,
+    content: newContent,
+    citedContactId: originalContactId,
+    forwardedContent,
+  });
 }
 
 /**
@@ -166,92 +129,62 @@ export function serializeForwardMessage(
  * @throws Error if message format is invalid
  */
 export function deserializeMessage(buffer: Uint8Array): DeserializedMessage {
-  if (buffer.length < 1) {
+  if (buffer.length === 0) {
     throw new Error('Empty message buffer');
   }
 
-  const messageType = buffer[0];
+  const decoded = ProtoMessage.decode(buffer);
+  const protoType =
+    decoded.messageType ?? ProtoMessageType.MESSAGE_TYPE_REGULAR;
 
-  switch (messageType) {
-    case MESSAGE_TYPE_KEEP_ALIVE:
-      return {
-        content: '',
-        type: MessageType.KEEP_ALIVE,
-      };
-
-    case MESSAGE_TYPE_REGULAR:
-      return {
-        content: bytesToStr(buffer.slice(1)),
-        type: MessageType.TEXT,
-      };
-
-    case MESSAGE_TYPE_REPLY: {
-      // Format: [type: 1][originalContentLen: 4][originalContent][seeker: 34][newContent]
-      let offset = 1;
-
-      // Read original content length (4 bytes)
-      const originalContentLen = Number(
-        U32.fromBytes(buffer.slice(offset, offset + 4))
-      );
-      offset += 4;
-
-      // Read original content
-      const originalContent = bytesToStr(
-        buffer.slice(offset, offset + originalContentLen)
-      );
-      offset += originalContentLen;
-
-      // Read seeker (34 bytes)
-      const originalSeeker = buffer.slice(offset, offset + SEEKER_SIZE);
-      offset += SEEKER_SIZE;
-
-      // Read new content (rest of buffer)
-      const content = bytesToStr(buffer.slice(offset));
-
-      return {
-        content,
-        replyTo: {
-          originalContent,
-          originalSeeker,
-        },
-        type: MessageType.TEXT,
-      };
-    }
-
-    case MESSAGE_TYPE_FORWARD: {
-      // Format: [type: 1][forwardContentLen: 4][forwardContent][seeker: 34][newContent]
-      let offset = 1;
-
-      // Read forward content length (4 bytes)
-      const forwardContentLen = Number(
-        U32.fromBytes(buffer.slice(offset, offset + 4))
-      );
-      offset += 4;
-
-      // Read forward content
-      const originalContent = bytesToStr(
-        buffer.slice(offset, offset + forwardContentLen)
-      );
-      offset += forwardContentLen;
-
-      // Read seeker (34 bytes)
-      const originalSeeker = buffer.slice(offset, offset + SEEKER_SIZE);
-      offset += SEEKER_SIZE;
-
-      // Read new content (rest of buffer)
-      const content = bytesToStr(buffer.slice(offset));
-
-      return {
-        content,
-        forwardOf: {
-          originalContent,
-          originalSeeker,
-        },
-        type: MessageType.TEXT,
-      };
-    }
-
-    default:
-      throw new Error(`Unknown message type: ${messageType}`);
+  if (protoType === ProtoMessageType.MESSAGE_TYPE_KEEP_ALIVE) {
+    return {
+      content: '',
+      type: MessageType.KEEP_ALIVE,
+    };
   }
+
+  const content = decoded.content ?? '';
+  const messageId = decoded.messageId;
+  const citedMsgId = decoded.citedMsgId;
+
+  let replyTo = undefined;
+
+  if (protoType === ProtoMessageType.MESSAGE_TYPE_REPLY) {
+    if (citedMsgId && citedMsgId.length === MESSAGE_ID_SIZE) {
+      replyTo = {
+        originalMsgId: citedMsgId,
+      };
+    } else {
+      throw new Error(
+        `invalid message format: message of type reply but citedMsgId empty or not correct size (${MESSAGE_ID_SIZE})`
+      );
+    }
+  }
+
+  let forwardOf = undefined;
+  if (protoType === ProtoMessageType.MESSAGE_TYPE_FORWARD) {
+    if (
+      decoded.forwardedContent &&
+      decoded.citedContactId &&
+      decoded.citedContactId.length === 32
+    ) {
+      forwardOf = {
+        originalContent: decoded.forwardedContent,
+        originalContactId: decoded.citedContactId,
+      };
+    } else {
+      throw new Error(
+        `invalid message format: message of type forward but forwardedContent empty or not correct size (${MESSAGE_ID_SIZE}) or citedContactId empty or not correct size (32)`
+      );
+    }
+  }
+
+  return {
+    content,
+    messageId,
+    replyTo,
+    forwardOf,
+    type: MessageType.TEXT,
+  };
 }
