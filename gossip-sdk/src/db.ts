@@ -325,7 +325,10 @@ export class GossipDatabase extends Dexie {
         lastMessageContent: message.content,
         lastMessageTimestamp: message.timestamp,
         unreadCount:
-          message.direction === MessageDirection.INCOMING
+          message.direction === MessageDirection.INCOMING &&
+          ![MessageType.ANNOUNCEMENT, MessageType.KEEP_ALIVE].includes(
+            message.type
+          )
             ? discussion.unreadCount + 1
             : discussion.unreadCount,
         updatedAt: new Date(),
@@ -343,7 +346,13 @@ export class GossipDatabase extends Dexie {
         lastMessageId: messageId,
         lastMessageContent: message.content,
         lastMessageTimestamp: message.timestamp,
-        unreadCount: message.direction === MessageDirection.INCOMING ? 1 : 0,
+        unreadCount:
+          message.direction === MessageDirection.INCOMING &&
+          ![MessageType.ANNOUNCEMENT, MessageType.KEEP_ALIVE].includes(
+            message.type
+          )
+            ? 1
+            : 0,
         updatedAt: new Date(),
       } as Discussion);
     }
