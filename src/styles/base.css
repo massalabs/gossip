@@ -18,13 +18,14 @@
       'Mozilla Headline', system-ui, -apple-system, BlinkMacSystemFont,
       'Segoe UI', sans-serif;
 
-    /* Safe area insets - defaults use env() for web/iOS Safari.
+    /* Safe area insets - defaults use env() for web/PWA.
        On native platforms (Android/iOS), these are overridden by JavaScript
-       in main.tsx using capacitor-plugin-safe-area for accurate values. */
-    --sat: env(safe-area-inset-top, 0px);
-    --sab: env(safe-area-inset-bottom, 0px);
-    --sal: env(safe-area-inset-left, 0px);
-    --sar: env(safe-area-inset-right, 0px);
+       in main.tsx using capacitor-plugin-safe-area for accurate values.
+       Fallback: 0px first (for old browsers), then env() override. */
+    --sat: 0px;
+    --sab: 0px;
+    --sal: 0px;
+    --sar: 0px;
     --header-height: 3.5rem;
     --bottom-nav-height: 4rem;
     --header-padding: 1.5rem;
@@ -38,6 +39,15 @@
     text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+  }
+
+  @supports (padding-top: env(safe-area-inset-top)) {
+    :root {
+      --sat: env(safe-area-inset-top, 0px);
+      --sab: env(safe-area-inset-bottom, 0px);
+      --sal: env(safe-area-inset-left, 0px);
+      --sar: env(safe-area-inset-right, 0px);
+    }
   }
 
   /* Headings and explicit heading utility use the heading font */
