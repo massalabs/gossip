@@ -488,7 +488,7 @@ export class AnnouncementService {
           content: message,
           type: MessageType.ANNOUNCEMENT,
           direction: MessageDirection.INCOMING,
-          status: MessageStatus.DELIVERED,
+          status: MessageStatus.READ,
           timestamp,
         });
       }
