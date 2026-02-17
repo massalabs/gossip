@@ -3,78 +3,62 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { MessageType } from '../../src/db';
+import { MessageType, MESSAGE_ID_SIZE } from '../../src/db';
 import {
   serializeRegularMessage,
   serializeReplyMessage,
   serializeForwardMessage,
   serializeKeepAliveMessage,
   deserializeMessage,
-  MESSAGE_TYPE_KEEP_ALIVE,
 } from '../../src/utils/messageSerialization';
 
-const serializationSeeker = new Uint8Array(34).fill(4);
+const messageId = new Uint8Array(MESSAGE_ID_SIZE).fill(1);
+const originalMsgId = new Uint8Array(MESSAGE_ID_SIZE).fill(2);
+const originalContactId = new Uint8Array(32).fill(3);
 
 describe('message serialization', () => {
   it('serializes and deserializes regular messages', () => {
-    const serialized = serializeRegularMessage('hello');
+    const serialized = serializeRegularMessage('hello', messageId);
     const deserialized = deserializeMessage(serialized);
     expect(deserialized.content).toBe('hello');
     expect(deserialized.type).toBe(MessageType.TEXT);
+    expect(deserialized.messageId).toEqual(messageId);
   });
 
   it('serializes and deserializes reply messages', () => {
-    const serialized = serializeReplyMessage('new', 'old', serializationSeeker);
+    const serialized = serializeReplyMessage('new', originalMsgId, messageId);
     const deserialized = deserializeMessage(serialized);
     expect(deserialized.content).toBe('new');
-    expect(deserialized.replyTo?.originalContent).toBe('old');
-    expect(deserialized.replyTo?.originalSeeker).toEqual(serializationSeeker);
+    expect(deserialized.replyTo?.originalMsgId).toEqual(originalMsgId);
   });
 
   it('serializes and deserializes forward messages', () => {
     const serialized = serializeForwardMessage(
       'forward',
       'note',
-      serializationSeeker
+      messageId,
+      originalContactId
     );
     const deserialized = deserializeMessage(serialized);
     expect(deserialized.content).toBe('note');
     expect(deserialized.forwardOf?.originalContent).toBe('forward');
-    expect(deserialized.forwardOf?.originalSeeker).toEqual(serializationSeeker);
+    expect(deserialized.forwardOf?.originalContactId).toEqual(
+      originalContactId
+    );
   });
 
   it('serializes keep-alive messages', () => {
     const serialized = serializeKeepAliveMessage();
-    expect(serialized[0]).toBe(MESSAGE_TYPE_KEEP_ALIVE);
     const deserialized = deserializeMessage(serialized);
     expect(deserialized.type).toBe(MessageType.KEEP_ALIVE);
-  });
-
-  it('serializes reply with empty original content', () => {
-    const serialized = serializeReplyMessage('reply', '', serializationSeeker);
-    const deserialized = deserializeMessage(serialized);
-    expect(deserialized.replyTo?.originalContent).toBe('');
-    expect(deserialized.content).toBe('reply');
-  });
-
-  it('serializes reply with unicode characters', () => {
-    const serialized = serializeReplyMessage(
-      'Reply with emoji ',
-      'Original with unicode ',
-      serializationSeeker
-    );
-    const deserialized = deserializeMessage(serialized);
-    expect(deserialized.content).toBe('Reply with emoji ');
-    expect(deserialized.replyTo?.originalContent).toBe(
-      'Original with unicode '
-    );
   });
 
   it('serializes forward without additional content', () => {
     const serialized = serializeForwardMessage(
       'Just forwarding this',
       '',
-      serializationSeeker
+      messageId,
+      originalContactId
     );
     const deserialized = deserializeMessage(serialized);
     expect(deserialized.content).toBe('');

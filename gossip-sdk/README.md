@@ -125,8 +125,8 @@ const result = await sdk.messages.send({
 // Fetch new messages from server
 const fetchResult = await sdk.messages.fetch();
 
-// Find message by seeker
-const msg = await sdk.messages.findBySeeker(seeker, ownerUserId);
+// Find message by messageId
+const msg = await gossipSdk.messages.findByMsgId(messageId, ownerUserId);
 
 // Mark as read
 await sdk.messages.markAsRead(messageId);
