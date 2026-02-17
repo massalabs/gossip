@@ -119,7 +119,7 @@ export class AnnouncementService {
       if (!discussion.id) continue;
 
       // ensure the announcement is not null
-      if (discussion.sendAnnouncement === null) return;
+      if (discussion.sendAnnouncement === null) continue;
 
       const { announcement_bytes, when_to_send } = discussion.sendAnnouncement;
       if (announcement_bytes.length === 0) {
@@ -131,7 +131,7 @@ export class AnnouncementService {
           sendAnnouncement: null,
           updatedAt: new Date(),
         });
-        return;
+        continue;
       }
 
       if (when_to_send.getTime() > now) {
@@ -488,7 +488,7 @@ export class AnnouncementService {
           content: message,
           type: MessageType.ANNOUNCEMENT,
           direction: MessageDirection.INCOMING,
-          status: MessageStatus.DELIVERED,
+          status: MessageStatus.READ,
           timestamp,
         });
       }
