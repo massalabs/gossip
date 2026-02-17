@@ -1747,7 +1747,7 @@ describe('session break in session manager', () => {
       .toArray();
     expect(aliceOutgoingAfter.length).toBe(5);
 
-    expect(aliceOutgoingAfter[0].status).toBe(MessageStatus.DELIVERED); // announcement message
+    expect(aliceOutgoingAfter[0].status).toBe(MessageStatus.READ); // announcement message
     expect(aliceOutgoingAfter[1].status).toBe(MessageStatus.SENT); // WAITING_SESSION message is set as SENT
     expect(aliceOutgoingAfter[2].status).toBe(MessageStatus.SENT); // READY message is set as SENT
     expect(aliceOutgoingAfter[3].status).toBe(MessageStatus.SENT);

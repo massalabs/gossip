@@ -143,7 +143,7 @@ export class DiscussionService {
           content: payload.message,
           type: MessageType.ANNOUNCEMENT,
           direction: MessageDirection.OUTGOING,
-          status: MessageStatus.DELIVERED, // Announcement message are not like other msg. they are set as delivered to prevent them from being sent again if session is renewed
+          status: MessageStatus.READ, // Announcement message are not like other msg. they are set as read to prevent them from being sent again if session is renewed
           timestamp: new Date(),
         });
       }
