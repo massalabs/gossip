@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, Navigate } from 'react-router-dom';
 import ShareContact from '../components/settings/ShareContact';
 import { useDiscussionStore } from '../stores/discussionStore';
 import { ROUTES } from '../constants/routes';
@@ -23,23 +23,20 @@ const ContactSharePage: React.FC = () => {
   }, [contact]);
 
   const handleBack = () => {
-    if (userId) {
-      navigate(ROUTES.contact({ userId }));
-    } else {
-      navigate(-1);
-    }
+    navigate(-1);
   };
 
   if (!contact) {
-    // Redirect to discussions if contact not found
-    navigate(ROUTES.discussions());
-    return null;
+    return <Navigate to={ROUTES.discussions()} replace />;
   }
 
   if (!contactPublicKeys) {
-    // Redirect back to contact if public keys not available
-    handleBack();
-    return null;
+    return (
+      <Navigate
+        to={userId ? ROUTES.contact({ userId }) : ROUTES.discussions()}
+        replace
+      />
+    );
   }
 
   return (
