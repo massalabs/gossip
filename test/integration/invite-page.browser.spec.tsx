@@ -16,7 +16,7 @@ import {
   LAST_APK_GITHUB_URL,
 } from '../../src/constants/links';
 
-// Mock SDK for tests that render full App. ConnectionMonitor uses useGossipSdk,
+// Mock SDK for tests that render full App.
 // accountStore subscribe calls getSdk(), discussionStore/useProfileLoader use getSdk().db.
 const mockSdk = {
   isSessionOpen: false,
