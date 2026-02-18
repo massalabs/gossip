@@ -338,11 +338,6 @@ export class AnnouncementService {
   }
 
   /**
-   * Set the initial bulletin counter for a new account so that historical
-   * announcements (which can't be decrypted by us) are skipped.
-   * Only writes if no counter exists yet.
-   */
-  /**
    * Fetch the latest bulletin counter from the API and persist it so that
    * historical announcements (undecryptable by a new account) are skipped.
    * No-op if a counter already exists or if the profile hasn't been created yet.
