@@ -7,7 +7,6 @@
 import {
   type Discussion,
   type GossipDatabase,
-  type UserProfile,
   DiscussionDirection,
   MessageDirection,
   MessageStatus,
@@ -320,29 +319,51 @@ export class AnnouncementService {
 
   /**
    * Persist lastBulletinCounter for the current user.
-   * Uses put() so the cursor is saved even when no profile row exists yet
-   * (e.g. headless bot that never created a profile via app UI).
+   * Only updates an existing profile row — never creates a partial one,
+   * since a row without `security`/`session` would crash downstream code.
    */
   private async _upsertLastBulletinCounter(nextCounter: string): Promise<void> {
     const userId = this.session.userIdEncoded;
     const existing = await this.db.userProfile.get(userId);
-    if (existing) {
-      await this.db.userProfile.update(userId, {
-        lastBulletinCounter: nextCounter,
-        updatedAt: new Date(),
-      });
+    if (!existing) {
+      logger
+        .forMethod('_upsertLastBulletinCounter')
+        .debug('no profile row yet — skipping counter write');
       return;
     }
-    // Minimal profile so cursor persists; headless bots may never create a full profile
-    await this.db.userProfile.put({
-      userId,
-      username: '',
-      status: 'offline',
-      lastSeen: new Date(),
-      createdAt: new Date(),
-      updatedAt: new Date(),
+    await this.db.userProfile.update(userId, {
       lastBulletinCounter: nextCounter,
-    } as UserProfile);
+      updatedAt: new Date(),
+    });
+  }
+
+  /**
+   * Set the initial bulletin counter for a new account so that historical
+   * announcements (which can't be decrypted by us) are skipped.
+   * Only writes if no counter exists yet.
+   */
+  /**
+   * Fetch the latest bulletin counter from the API and persist it so that
+   * historical announcements (undecryptable by a new account) are skipped.
+   * No-op if a counter already exists or if the profile hasn't been created yet.
+   */
+  async skipHistoricalAnnouncements(): Promise<void> {
+    const log = logger.forMethod('skipHistoricalAnnouncements');
+    const existing = await this.db.userProfile.get(this.session.userIdEncoded);
+    if (!existing) {
+      log.debug('no profile row yet — skipping');
+      return;
+    }
+    if (existing.lastBulletinCounter !== undefined) return;
+
+    try {
+      const counter = await this.messageProtocol.fetchBulletinCounter();
+      await this._upsertLastBulletinCounter(counter);
+      log.info('set initial bulletin counter for new account', { counter });
+    } catch (err) {
+      // Non-critical — on failure the first fetch starts from the beginning.
+      log.warn('failed to initialize bulletin counter', { err });
+    }
   }
 
   private async _fetchAnnouncements(

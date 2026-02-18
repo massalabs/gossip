@@ -65,6 +65,10 @@ export class MockMessageProtocol implements IMessageProtocol {
     return results;
   }
 
+  async fetchBulletinCounter(): Promise<string> {
+    return String(this.announcementCounter);
+  }
+
   async fetchPublicKeyByUserId(_userId: Uint8Array): Promise<string> {
     // Return empty string - tests should handle this
     return '';

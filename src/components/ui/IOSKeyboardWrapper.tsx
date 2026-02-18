@@ -18,10 +18,9 @@ const IOSKeyboardWrapper: React.FC<{ children: React.ReactNode }> = ({
   return (
     <div
       className="w-full h-full flex flex-col transition-[height] duration-300 ease-out"
-      style={{
-        // Use full height by default, resize when keyboard is visible on iOS
-        height: active ? `calc(100vh - ${keyboardHeight}px)` : '100vh',
-      }}
+      style={
+        active ? { height: `calc(100dvh - ${keyboardHeight}px)` } : undefined
+      }
     >
       {children}
     </div>
