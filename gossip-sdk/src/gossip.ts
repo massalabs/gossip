@@ -347,8 +347,7 @@ class GossipSdk {
       console.warn('[GossipSdk] Failed to publish public key:', err)
     );
 
-    // New account: skip historical announcements (they can't be decrypted by us).
-    // Set the bulletin counter to the latest value so only future ones are fetched.
+    // Update SDK state to reflect the newly opened session.
     this.state = {
       status: SdkStatus.SESSION_OPEN,
       messageProtocol: this.state.messageProtocol,
