@@ -99,7 +99,7 @@ const SearchBar: React.FC<SearchBarProps> = React.memo(
           <button
             type="button"
             onClick={handleClear}
-            className="absolute right-4 top-1/2 -translate-y-1/2 p-1 hover:bg-muted rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-ring"
+            className="absolute right-4 top-1/2 -translate-y-1/2 p-1 hover:bg-muted rounded-full transition-colors touch-manipulation focus:outline-none focus:ring-2 focus:ring-ring"
             aria-label="Clear search"
             tabIndex={0}
           >

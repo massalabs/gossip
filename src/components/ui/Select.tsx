@@ -17,7 +17,7 @@ const SelectItem = <T,>({
 }) => (
   <button
     onClick={onSelect}
-    className={`w-full flex items-center p-3 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors ${
+    className={`w-full flex items-center p-3 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors touch-manipulation ${
       isSelected ? 'bg-blue-50 dark:bg-blue-900/20' : ''
     }`}
     style={{ height: `${itemHeight}px` }}
@@ -152,7 +152,7 @@ function Select<T>({
       <button
         onClick={() => !disabled && setIsOpen(!isOpen)}
         disabled={disabled}
-        className={`w-full flex items-center p-3 rounded-xl border transition-colors ${
+        className={`w-full flex items-center p-3 rounded-xl border transition-colors touch-manipulation ${
           disabled
             ? 'border-border bg-muted dark:bg-input/40 cursor-not-allowed opacity-50'
             : 'border-border bg-card hover:bg-muted/60 dark:bg-input dark:hover:bg-input/80'

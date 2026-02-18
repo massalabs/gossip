@@ -21,6 +21,7 @@ const AccountImport: React.FC<AccountImportProps> = ({
   const [mnemonic, setMnemonic] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [useBiometrics, setUseBiometrics] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [error, setError] = useState('');
@@ -68,6 +69,11 @@ const AccountImport: React.FC<AccountImportProps> = ({
         const pwdValidation = validatePassword(password);
         if (!pwdValidation.valid) {
           setError(pwdValidation.error || 'Invalid password');
+          return;
+        }
+
+        if (password !== confirmPassword) {
+          setError('Passwords do not match');
           return;
         }
       }
@@ -214,6 +220,28 @@ const AccountImport: React.FC<AccountImportProps> = ({
         </div>
       )}
 
+      {/* Confirm Password field */}
+      {!useBiometrics && (
+        <div>
+          <label className="block text-xl font-medium text-foreground mb-3">
+            Confirm Password
+          </label>
+          <RoundedInput
+            type="password"
+            value={confirmPassword}
+            onChange={e => setConfirmPassword(e.target.value)}
+            placeholder="Confirm your password"
+            error={confirmPassword.length > 0 && password !== confirmPassword}
+            disabled={isImporting}
+          />
+          {confirmPassword.length > 0 && password !== confirmPassword && (
+            <p className="text-destructive text-xs mt-1">
+              Passwords do not match
+            </p>
+          )}
+        </div>
+      )}
+
       {error && (
         <div className="p-4 bg-destructive/10 border border-destructive rounded-lg">
           <p className="text-destructive text-sm">{error}</p>
@@ -226,7 +254,9 @@ const AccountImport: React.FC<AccountImportProps> = ({
           disabled={
             isImporting ||
             !username.trim() ||
-            (!useBiometrics && !validatePassword(password).valid)
+            (!useBiometrics &&
+              (!validatePassword(password).valid ||
+                password !== confirmPassword))
           }
           loading={isImporting}
           variant="primary"
