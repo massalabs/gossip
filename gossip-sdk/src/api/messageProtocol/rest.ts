@@ -117,6 +117,20 @@ export class RestMessageProtocol implements IMessageProtocol {
     }));
   }
 
+  async fetchBulletinCounter(): Promise<string> {
+    const url = `${this.baseUrl}${BULLETIN_ENDPOINT}/counter`;
+
+    const response = await this.makeRequest<{ counter: string }>(url, {
+      method: 'GET',
+    });
+
+    if (!response.success || !response.data) {
+      throw new Error(response.error || 'Failed to fetch bulletin counter');
+    }
+
+    return response.data.counter;
+  }
+
   async fetchPublicKeyByUserId(userId: Uint8Array): Promise<string> {
     const response = await this.makeRequest<{ value: string }>(
       `${this.baseUrl}/auth/retrieve`,

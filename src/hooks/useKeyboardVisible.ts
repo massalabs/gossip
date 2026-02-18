@@ -121,7 +121,7 @@ export function useFixedKeyboardStyles(): React.CSSProperties {
   return {
     // Calculate height only accounting for keyboard
     // Safe areas are handled by padding (pt-safe-t, pb-safe-b) in the component
-    height: `calc(100vh - ${keyboardHeight}px)`,
+    height: `calc(100dvh - ${keyboardHeight}px)`,
     transition: 'height 300ms ease-out',
   };
 }
