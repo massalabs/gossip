@@ -28,18 +28,14 @@ const ShareContact: React.FC<ShareContactProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<ShareTab>('qr');
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
-  const { exportFileContact, fileState } = useFileShareContact();
+  const { shareFileContact, fileState } = useFileShareContact();
   const deepLinkUrl = useMemo(() => generateDeepLinkUrl(userId), [userId]);
   const isExportDisabled = !publicKey || fileState.isLoading;
 
-  const handleExportFile = useCallback(() => {
+  const handleShareFile = useCallback(() => {
     if (!publicKey || !userName) return;
-
-    exportFileContact({
-      userPubKeys: publicKey.to_bytes(),
-      userName,
-    });
-  }, [exportFileContact, publicKey, userName]);
+    shareFileContact({ userPubKeys: publicKey.to_bytes(), userName });
+  }, [shareFileContact, publicKey, userName]);
 
   return (
     <PageLayout
@@ -73,7 +69,7 @@ const ShareContact: React.FC<ShareContactProps> = ({
           disabled={isExportDisabled}
           isLoading={fileState.isLoading}
           error={fileState.error}
-          onExport={handleExportFile}
+          onShare={handleShareFile}
         />
       </div>
 

@@ -2,6 +2,7 @@ import { useCallback, useState } from 'react';
 import * as yaml from 'js-yaml';
 
 import { decodeFromBase64, encodeToBase64 } from '@massalabs/gossip-sdk';
+import { shareFile } from '../services/shareService';
 
 export interface FileContact {
   userPubKeys: Uint8Array;
@@ -20,6 +21,23 @@ type fileState = {
   error: string | null;
 };
 
+function buildContactFile(contact: FileContact) {
+  const doc = {
+    userPubKeys: encodeToBase64(contact.userPubKeys),
+    userName: contact.userName ?? undefined,
+  };
+  const yamlText = yaml.dump(doc, { noRefs: true });
+  const blob = new Blob([yamlText], { type: 'application/octet-stream' });
+  const base = (contact.userName || 'contact')
+    .toString()
+    .trim()
+    .replace(/[^a-zA-Z0-9-_]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .toLowerCase();
+  const fileName = `${base || 'contact'}-gossip-contact.yaml`;
+  return { blob, fileName };
+}
+
 export function useFileShareContact() {
   const [fileState, setFileState] = useState<fileState>({
     fileContact: null,
@@ -27,81 +45,23 @@ export function useFileShareContact() {
     error: null,
   });
 
-  const exportFileContact = useCallback(async (contact: FileContact) => {
+  const shareFileContact = useCallback(async (contact: FileContact) => {
     try {
       setFileState(prev => ({ ...prev, error: null }));
-      const doc = {
-        // Export as base64 using Buffer (no btoa)
-        userPubKeys: encodeToBase64(contact.userPubKeys),
-        userName: contact.userName ?? undefined,
-      };
-      const yamlText = yaml.dump(doc, { noRefs: true });
-
-      // Prefer a generic type for maximum compatibility in download fallbacks (iOS/Safari quirks)
-      const blob = new Blob([yamlText], { type: 'application/octet-stream' });
-      const base = (contact.userName || 'contact')
-        .toString()
-        .trim()
-        .replace(/[^a-zA-Z0-9-_]+/g, '-')
-        .replace(/^-+|-+$/g, '')
-        .toLowerCase();
-      const filename = `${base || 'contact'}-gossip-contact.yaml`;
-
-      // Try the Web Share API (files) if available and allowed
-      try {
-        type ShareData = {
-          files?: File[];
-          title?: string;
-          text?: string;
-          url?: string;
-        };
-        const nav = navigator as Navigator & {
-          canShare?: (data?: ShareData) => boolean;
-          share?: (data: ShareData) => Promise<void>;
-        };
-
-        // Create once and reuse for canShare and share
-        const shareFile = new File([blob], filename, {
-          type: 'text/yaml;charset=utf-8',
-        });
-
-        let canShareFiles = false;
-        if (typeof navigator !== 'undefined' && !!nav.canShare) {
-          try {
-            canShareFiles = nav.canShare({ files: [shareFile] });
-          } catch {
-            canShareFiles = false;
-          }
-        }
-
-        if (canShareFiles && nav.share) {
-          await nav.share({ files: [shareFile] });
-          return;
-        }
-      } catch {
-        // Ignore share errors and fall back to download
-      }
-
-      // Fallback: programmatic download via Object URL
-      const url = URL.createObjectURL(blob);
-      try {
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = filename;
-        a.rel = 'noopener';
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-      } finally {
-        URL.revokeObjectURL(url);
-      }
+      const { blob, fileName } = buildContactFile(contact);
+      await shareFile({
+        blob,
+        fileName,
+        title: 'Gossip Contact',
+        mimeType: 'text/yaml;charset=utf-8',
+      });
     } catch (e) {
       setFileState(prev => ({
         ...prev,
         error:
           e instanceof Error
-            ? `Failed to export file: ${e.message}`
-            : 'Failed to export file',
+            ? `Failed to share file: ${e.message}`
+            : 'Failed to share file',
       }));
     }
   }, []);
@@ -164,7 +124,7 @@ export function useFileShareContact() {
   return {
     fileState,
     setFileState,
-    exportFileContact,
+    shareFileContact,
     importFileContact,
   };
 }
