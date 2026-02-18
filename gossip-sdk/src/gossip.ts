@@ -347,6 +347,7 @@ class GossipSdk {
       console.warn('[GossipSdk] Failed to publish public key:', err)
     );
 
+    // Update SDK state to reflect the newly opened session.
     this.state = {
       status: SdkStatus.SESSION_OPEN,
       messageProtocol: this.state.messageProtocol,
@@ -443,6 +444,7 @@ class GossipSdk {
         if (result.newAnnouncementsCount) await this._refresh?.stateUpdate();
         return result;
       },
+      skipHistorical: () => this._announcement!.skipHistoricalAnnouncements(),
     };
 
     this._contactsAPI = {
@@ -773,6 +775,8 @@ interface DiscussionServiceAPI {
 interface AnnouncementServiceAPI {
   /** Fetch and process announcements from the protocol */
   fetch(): Promise<AnnouncementReceptionResult>;
+  /** Skip historical announcements for a new account. Call after profile creation. */
+  skipHistorical(): Promise<void>;
 }
 
 interface ContactsAPI {
