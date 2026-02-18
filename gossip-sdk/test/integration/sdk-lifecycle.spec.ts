@@ -48,6 +48,7 @@ vi.mock('../../src/services/announcement', () => ({
   AnnouncementService: class {
     setRefreshService = vi.fn();
     fetchAndProcessAnnouncements = vi.fn();
+    skipHistoricalAnnouncements = vi.fn().mockResolvedValue(undefined);
     constructor(
       _db: unknown,
       _protocol: unknown,
@@ -122,6 +123,7 @@ describe('GossipSdk lifecycle', () => {
       sendMessage: vi.fn(),
       sendAnnouncement: vi.fn(),
       fetchAnnouncements: vi.fn(),
+      fetchBulletinCounter: vi.fn().mockResolvedValue('0'),
       fetchPublicKeyByUserId: vi.fn(),
       postPublicKey: vi.fn(),
       changeNode: vi.fn(),

@@ -48,6 +48,11 @@ export interface IMessageProtocol {
   fetchAnnouncements(limit?: number, cursor?: string): Promise<BulletinItem[]>;
 
   /**
+   * Fetch the latest bulletin counter from the API without downloading announcement data.
+   */
+  fetchBulletinCounter(): Promise<string>;
+
+  /**
    * Fetch public key by userId hash (base64 string)
    * @param userId - Decoded userId bytes
    * @returns Base64-encoded public keys
