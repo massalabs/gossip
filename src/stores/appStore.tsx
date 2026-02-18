@@ -29,9 +29,6 @@ interface AppStoreState {
   // Debug console button position
   debugButtonPosition: DebugButtonPosition;
   setDebugButtonPosition: (position: DebugButtonPosition) => void;
-  // Connection monitor button position
-  connectionMonitorPosition: DebugButtonPosition;
-  setConnectionMonitorPosition: (position: DebugButtonPosition) => void;
   // App initialization state (whether app has checked for existing accounts)
   isInitialized: boolean;
   setIsInitialized: (value: boolean) => void;
@@ -84,11 +81,6 @@ const useAppStoreBase = create<AppStoreState>()(
       debugButtonPosition: { x: 8, y: 80 },
       setDebugButtonPosition: (position: DebugButtonPosition) => {
         set({ debugButtonPosition: position });
-      },
-      // Connection monitor button position (default: bottom-left, offset from debug button)
-      connectionMonitorPosition: { x: 8, y: 140 },
-      setConnectionMonitorPosition: (position: DebugButtonPosition) => {
-        set({ connectionMonitorPosition: position });
       },
       // App initialization state
       isInitialized: false,
@@ -154,7 +146,6 @@ const useAppStoreBase = create<AppStoreState>()(
         showDebugOption: state.showDebugOption,
         debugOverlayVisible: state.debugOverlayVisible,
         debugButtonPosition: state.debugButtonPosition,
-        connectionMonitorPosition: state.connectionMonitorPosition,
         isInitialized: state.isInitialized,
         networkName: state.networkName,
         mnsEnabled: state.mnsEnabled,
