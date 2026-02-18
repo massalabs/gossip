@@ -42,7 +42,7 @@ const CopyClipboard: React.FC<CopyClipboardProps> = ({
   return (
     <button
       onClick={handleCopy}
-      className={`shrink-0 p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors ${className}`}
+      className={`shrink-0 p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors touch-manipulation ${className}`}
       title={title}
     >
       {isCopied ? (

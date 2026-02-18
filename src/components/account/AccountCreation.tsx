@@ -28,6 +28,7 @@ const AccountCreation: React.FC<AccountCreationProps> = ({
 }) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [isUsernameValid, setIsUsernameValid] = useState(false);
   const [isPasswordValid, setIsPasswordValid] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
@@ -77,8 +78,9 @@ const AccountCreation: React.FC<AccountCreationProps> = ({
     setError(null);
   };
 
+  const passwordsMatch = password === confirmPassword;
   const canSubmit = usePassword
-    ? isUsernameValid && isPasswordValid && !isCreating
+    ? isUsernameValid && isPasswordValid && passwordsMatch && !isCreating
     : isUsernameValid && !isCreating;
 
   // No re-authentication in create flow
@@ -220,6 +222,28 @@ const AccountCreation: React.FC<AccountCreationProps> = ({
               {passwordError && (
                 <p className="text-red-500 dark:text-red-400 text-xs mt-1">
                   {passwordError}
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Confirm Password field */}
+          {usePassword && (
+            <div>
+              <label className="block text-xl font-medium text-black dark:text-white mb-3">
+                Confirm Password
+              </label>
+              <RoundedInput
+                type="password"
+                value={confirmPassword}
+                onChange={e => setConfirmPassword(e.target.value)}
+                placeholder="Confirm your password"
+                error={confirmPassword.length > 0 && !passwordsMatch}
+                disabled={isCreating}
+              />
+              {confirmPassword.length > 0 && !passwordsMatch && (
+                <p className="text-red-500 dark:text-red-400 text-xs mt-1">
+                  Passwords do not match
                 </p>
               )}
             </div>
