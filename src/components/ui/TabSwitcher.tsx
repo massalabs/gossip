@@ -61,7 +61,7 @@ function TabSwitcher<T extends string>({
           key={option.value}
           type="button"
           onClick={() => onChange(option.value)}
-          className={`relative z-10 flex-1 h-11 inline-flex items-center justify-center gap-2 text-sm font-semibold rounded-xl transition-all duration-200 ${
+          className={`relative z-10 flex-1 h-11 inline-flex items-center justify-center gap-2 text-sm font-semibold rounded-xl transition-all duration-200 touch-manipulation ${
             value === option.value
               ? 'text-primary-foreground'
               : 'text-muted-foreground hover:text-foreground'
