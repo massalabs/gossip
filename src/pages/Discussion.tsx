@@ -13,7 +13,11 @@ import MessageList, {
 import MessageInput from '../components/discussions/MessageInput';
 import ScrollToBottomButton from '../components/discussions/ScrollToBottomButton';
 import MessageSearch from '../components/discussions/MessageSearch';
-import { Message } from '@massalabs/gossip-sdk';
+import {
+  Message,
+  MessageDirection,
+  MessageStatus,
+} from '@massalabs/gossip-sdk';
 import { useGossipSdk } from '../hooks/useGossipSdk';
 import { isDifferentDay } from '../utils/timeUtils';
 import { useUiStore } from '../stores/uiStore';
@@ -112,6 +116,15 @@ const Discussion: React.FC = () => {
   const setCurrentContact = useMessageStore(s => s.setCurrentContact);
   const messages = useMessageStore(s =>
     contact ? s.getMessagesForContact(contact.userId) : []
+  );
+  const outgoingSentCount = React.useMemo(
+    () =>
+      messages.filter(
+        message =>
+          message.direction === MessageDirection.OUTGOING &&
+          message.status === MessageStatus.SENT
+      ).length,
+    [messages]
   );
 
   const isLoading = useMessageStore(s => s.isLoading);
@@ -478,6 +491,7 @@ const Discussion: React.FC = () => {
         discussion={discussion}
         onBack={onBack}
         onSearchToggle={() => setIsSearchOpen(prev => !prev)}
+        outgoingSentCount={outgoingSentCount}
       />
       {isSearchOpen && (
         <MessageSearch

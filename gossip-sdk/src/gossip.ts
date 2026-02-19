@@ -321,6 +321,7 @@ class GossipSdk {
       session,
       this.eventEmitter,
       queries
+      this.config
     );
 
     // Publish gossip ID (public key) on messageProtocol so the user is discoverable

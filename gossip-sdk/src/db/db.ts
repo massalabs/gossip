@@ -207,6 +207,13 @@ export interface Discussion {
   lastMessageTimestamp: Date | null;
   unreadCount: number;
 
+  // Session recovery state (persisted to throttle resets)
+  sessionRecovery?: {
+    killedNextRetryAt?: Date;
+    saturatedRetryAt?: Date;
+    saturatedRetryDone?: boolean;
+  };
+
   // Timestamps
   createdAt: Date;
   updatedAt: Date;
