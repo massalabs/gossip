@@ -63,6 +63,19 @@ export interface AnnouncementsConfig {
 }
 
 /**
+ * Session recovery configuration
+ */
+export interface SessionRecoveryConfig {
+  /** Delay before retrying a killed session reset (default: 15 minutes) */
+  killedRetryDelayMs: number;
+  /** Jitter applied (default: 2 minutes) */
+  JitterMs: number;
+  /** Delay before retrying a saturated session reset (default: 5 minutes) */
+  saturatedRetryDelayMs: number;
+  /** Jitter applied to saturated session retry delay (default: 2 minutes) */
+}
+
+/**
  * Complete SDK configuration
  */
 export interface SdkConfig {
@@ -74,6 +87,8 @@ export interface SdkConfig {
   messages: MessagesConfig;
   /** Announcement settings */
   announcements: AnnouncementsConfig;
+  /** Session recovery settings */
+  sessionRecovery: SessionRecoveryConfig;
 }
 
 /**
@@ -101,6 +116,11 @@ export const defaultSdkConfig: SdkConfig = {
     brokenThresholdMs: 60 * 60 * 1000, // 1 hour
     retryDelayMs: 15000, // 15 seconds
   },
+  sessionRecovery: {
+    killedRetryDelayMs: 15 * 60 * 1000,
+    JitterMs: 2 * 60 * 1000,
+    saturatedRetryDelayMs: 5 * 60 * 1000,
+  },
 };
 
 /**
@@ -125,6 +145,10 @@ export function mergeConfig(partial?: DeepPartial<SdkConfig>): SdkConfig {
     announcements: {
       ...defaultSdkConfig.announcements,
       ...partial.announcements,
+    },
+    sessionRecovery: {
+      ...defaultSdkConfig.sessionRecovery,
+      ...partial.sessionRecovery,
     },
   };
 }
