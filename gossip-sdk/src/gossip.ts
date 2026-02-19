@@ -336,7 +336,8 @@ class GossipSdk {
       this._discussion,
       this._announcement,
       session,
-      this.eventEmitter
+      this.eventEmitter,
+      this.config
     );
 
     // Publish gossip ID so the user is discoverable (fire-and-forget — don't block login)
