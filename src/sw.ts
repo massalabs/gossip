@@ -8,7 +8,7 @@ import { clientsClaim, setCacheNameDetails } from 'workbox-core';
 import { NavigationRoute, registerRoute } from 'workbox-routing';
 import { protocolConfig } from './config/protocol';
 import { defaultSyncConfig } from './config/sync';
-import { RestMessageProtocol } from '@massalabs/gossip-sdk';
+import { RestMessageProtocol } from '@massalabs/gossip-sdk/sw';
 import { bridgeGet, bridgeSet } from './sw-bridge';
 import { APP_BUILD_ID } from './config/version';
 

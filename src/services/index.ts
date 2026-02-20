@@ -7,8 +7,10 @@
 
 import {
   SdkEventType,
+  MessageDirection,
   type Discussion,
   type Contact,
+  type Message,
   GossipSdk,
   setOnSeekersUpdated,
 } from '@massalabs/gossip-sdk';
@@ -16,6 +18,8 @@ import { notificationService } from './notifications';
 import { isAppInForeground } from '../utils/appState';
 import { bridgeSet } from '../sw-bridge';
 import { setActiveSeekersInPreferences } from '../utils/preferences';
+import { useDiscussionStore } from '../stores/discussionStore';
+import { useMessageStore } from '../stores/messageStore';
 
 /**
  * Wire up SDK events to app behaviors like notifications.
@@ -53,6 +57,33 @@ export function setupSdkEventHandlers(gossip: GossipSdk): void {
       }
     }
   );
+
+  // Show notification for incoming messages when app is in background
+  gossip.on(SdkEventType.MESSAGE_RECEIVED, async (message: Message) => {
+    // Only notify for incoming messages
+    if (message.direction !== MessageDirection.INCOMING) return;
+
+    // Don't notify if user is currently viewing this discussion
+    const currentContact = useMessageStore.getState().currentContactUserId;
+    if (currentContact === message.contactUserId) return;
+
+    const foreground = await isAppInForeground();
+    if (foreground) return;
+
+    try {
+      const contacts = useDiscussionStore.getState().contacts;
+      const contact = contacts.find(c => c.userId === message.contactUserId);
+      const contactName = contact?.name || 'Someone';
+
+      await notificationService.showDiscussionNotification(
+        contactName,
+        message.content,
+        message.contactUserId
+      );
+    } catch (error) {
+      console.error('[SDK Event] Failed to show message notification:', error);
+    }
+  });
 
   // Log errors for debugging
   gossip.on(SdkEventType.ERROR, (error: Error, context: string) => {
