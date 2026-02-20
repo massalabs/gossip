@@ -9,6 +9,7 @@ import { Capacitor } from '@capacitor/core';
 import { Preferences } from '@capacitor/preferences';
 import { encodeToBase64 } from '@massalabs/gossip-sdk';
 import { isAppInForeground } from './appState';
+import { backgroundRunnerStorageService } from '../services/backgroundRunnerStorage';
 
 // Preferences keys
 const ACTIVE_SEEKERS_KEY = 'gossip-active-seekers';
@@ -24,26 +25,7 @@ async function setBackgroundRunnerStorage(
   key: string,
   value?: string | null
 ): Promise<void> {
-  if (!Capacitor.isNativePlatform()) {
-    return;
-  }
-
-  try {
-    const { registerPlugin } = await import('@capacitor/core');
-
-    interface BackgroundRunnerStoragePlugin {
-      set(options: { key: string; value?: string | null }): Promise<void>;
-    }
-
-    const BackgroundRunnerStorage =
-      registerPlugin<BackgroundRunnerStoragePlugin>('BackgroundRunnerStorage');
-    await BackgroundRunnerStorage.set({ key, value });
-  } catch (error) {
-    console.warn(
-      '[BackgroundRunnerStorage] Failed to write to BackgroundRunner storage:',
-      error
-    );
-  }
+  await backgroundRunnerStorageService.set(key, value);
 }
 
 /**
