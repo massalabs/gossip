@@ -778,14 +778,24 @@ export class MessageService {
 
       const peerId = decodeUserId(contactUserId);
       const sessionStatus = this.session.peerSessionStatus(peerId);
-      if (sessionStatus !== SessionStatus.Active) {
-        log.info('session not active, skipping send queue', {
-          contactUserId,
-          sessionStatus: sessionStatusToString(sessionStatus),
-        });
-        // Not an error: queued messages should remain pending until the
-        // handshake reaches Active.
-        return { success: true, data: 0 };
+      if (
+        ![
+          SessionStatus.Active,
+          SessionStatus.SelfRequested,
+          SessionStatus.Saturated,
+        ].includes(sessionStatus)
+      ) {
+        log.info(
+          'session not active, self requested or saturated, skipping send queue',
+          {
+            contactUserId,
+            sessionStatus: sessionStatusToString(sessionStatus),
+          }
+        );
+        return {
+          success: false,
+          error: new Error('Session not active, self requested or saturated'),
+        };
       }
 
       // retrieve all messages in send queue that need to be updated for this contact

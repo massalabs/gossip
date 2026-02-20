@@ -469,7 +469,7 @@ describe('RefreshService', () => {
             status: SessionStatus
           ) => Promise<void>;
         }
-      ).handleSessionStatus(discussion, SessionStatus.Killed, new Date());
+      ).handleSessionStatus(discussion, SessionStatus.Killed);
 
       expect(
         mockDiscussionService.createSessionForContact
@@ -499,7 +499,7 @@ describe('RefreshService', () => {
             status: SessionStatus
           ) => Promise<void>;
         }
-      ).handleSessionStatus(discussion, SessionStatus.NoSession, new Date());
+      ).handleSessionStatus(discussion, SessionStatus.NoSession);
 
       const updated = await db.getDiscussionByOwnerAndContact(
         REFRESH_OWNER_USER_ID,
