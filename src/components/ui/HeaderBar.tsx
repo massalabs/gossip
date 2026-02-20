@@ -29,7 +29,7 @@ const HeaderBar: React.FC<HeaderBarProps> = ({
 
   return (
     <div
-      className={`px-header-padding pt-safe-t h-header-safe flex items-center shrink-0 ${bgClass} ${className}`}
+      className={`px-header-padding pt-safe-t h-header-safe flex items-center shrink-0 relative z-10 ${bgClass} ${className}`}
       style={{
         boxShadow: shadowStyle,
         transition:

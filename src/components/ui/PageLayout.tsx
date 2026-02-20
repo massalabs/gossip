@@ -82,7 +82,7 @@ const PageLayout: React.FC<PageLayoutProps> = ({
       {/* Header with safe area */}
       {header && (
         <div
-          className={`px-header-padding pt-safe-t h-header-safe flex items-center shrink-0 ${bgClass}`}
+          className={`px-header-padding pt-safe-t h-header-safe flex items-center shrink-0 relative z-10 ${bgClass}`}
           style={{
             boxShadow: shadowStyle,
             transition:
