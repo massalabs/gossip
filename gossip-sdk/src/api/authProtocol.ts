@@ -4,10 +4,23 @@
 
 import { RestClient } from './restClient';
 import { encodeToBase64 } from '../utils/base64';
+import { protocolConfig } from '../config/protocol';
 
 export interface IAuthProtocol {
+  /** Fetches the base64-encoded public key for the given user ID. */
   fetchPublicKeyByUserId(userId: Uint8Array): Promise<string>;
+  /** Publishes the given base64-encoded public key to the server. */
   postPublicKey(base64PublicKeys: string): Promise<string>;
+}
+
+export function createAuthProtocol(
+  config?: Partial<{ baseUrl: string; timeout: number; retryAttempts: number }>
+): IAuthProtocol {
+  return new RestAuthProtocol(
+    config?.baseUrl ?? protocolConfig.baseUrl,
+    config?.timeout ?? protocolConfig.timeout,
+    config?.retryAttempts ?? protocolConfig.retryAttempts
+  );
 }
 
 export class RestAuthProtocol extends RestClient implements IAuthProtocol {

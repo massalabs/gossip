@@ -209,6 +209,18 @@ describe('AuthService', () => {
       expect(mockAuthProtocol.postPublicKey).toHaveBeenCalledTimes(1);
     });
 
+    it('should propagate error if publishing after fetch failure also fails', async () => {
+      vi.mocked(mockAuthProtocol.fetchPublicKeyByUserId).mockRejectedValue(
+        new Error('Network timeout')
+      );
+      const publishError = new Error('Publish failed');
+      vi.mocked(mockAuthProtocol.postPublicKey).mockRejectedValue(publishError);
+
+      await expect(
+        authService.ensurePublicKeyPublished(testPublicKeys, testUserId)
+      ).rejects.toThrow('Publish failed');
+    });
+
     it('should encode public keys to base64 before posting', async () => {
       vi.mocked(mockAuthProtocol.fetchPublicKeyByUserId).mockRejectedValue(
         new Error(PUBLIC_KEY_NOT_FOUND_ERROR)
