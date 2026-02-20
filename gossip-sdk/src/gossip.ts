@@ -47,6 +47,7 @@ import {
 } from './db';
 import { toDiscussion, toSortedDiscussions } from './utils/discussions';
 import { IMessageProtocol, createMessageProtocol } from './api/messageProtocol';
+import { createAuthProtocol } from './api/authProtocol';
 import { setProtocolBaseUrl } from './config/protocol';
 import {
   type SdkConfig,
@@ -252,8 +253,8 @@ class GossipSdk {
     // Create message protocol
     const messageProtocol = createMessageProtocol();
 
-    // Create auth service (doesn't need session)
-    this._auth = new AuthService(messageProtocol);
+    // Create auth protocol + service (doesn't need session)
+    this._auth = new AuthService(createAuthProtocol());
 
     this.state = {
       status: SdkStatus.INITIALIZED,

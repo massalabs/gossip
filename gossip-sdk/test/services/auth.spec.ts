@@ -3,7 +3,6 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { eq } from 'drizzle-orm';
 import {
   AuthService,
   getPublicKeyErrorMessage,
@@ -13,8 +12,7 @@ import {
   FAILED_TO_FETCH_MESSAGE,
   FAILED_TO_RETRIEVE_CONTACT_PUBLIC_KEY_ERROR,
 } from '../../src/services/auth';
-import type { UserProfile } from '../../src/db';
-import type { IMessageProtocol } from '../../src/api/messageProtocol/types';
+import type { IAuthProtocol } from '../../src/api/authProtocol';
 import {
   UserPublicKeys,
   UserKeys,
@@ -23,63 +21,16 @@ import {
 import { encodeUserId } from '../../src/utils/userId';
 import { encodeToBase64, decodeFromBase64 } from '../../src/utils/base64';
 import { ensureWasmInitialized } from '../../src/wasm';
-import { getSqliteDb, clearAllTables } from '../../src/sqlite';
-import * as schema from '../../src/schema';
+import { clearAllTables } from '../../src/sqlite';
 
-function createMockProtocol(
-  overrides: Partial<IMessageProtocol> = {}
-): IMessageProtocol {
+function createMockAuthProtocol(
+  overrides: Partial<IAuthProtocol> = {}
+): IAuthProtocol {
   return {
-    fetchMessages: vi.fn().mockResolvedValue([]),
-    sendMessage: vi.fn().mockResolvedValue(undefined),
-    sendAnnouncement: vi.fn().mockResolvedValue('1'),
-    fetchAnnouncements: vi.fn().mockResolvedValue([]),
     fetchPublicKeyByUserId: vi.fn().mockResolvedValue(''),
     postPublicKey: vi.fn().mockResolvedValue('hash'),
-    changeNode: vi.fn().mockResolvedValue({ success: true }),
     ...overrides,
   };
-}
-
-function createUserProfile(
-  userId: string,
-  overrides: Partial<UserProfile> = {}
-): UserProfile {
-  return {
-    userId,
-    username: 'testuser',
-    security: {
-      encKeySalt: new Uint8Array(32),
-      authMethod: 'password' as const,
-      mnemonicBackup: {
-        encryptedMnemonic: new Uint8Array(64),
-        createdAt: new Date(),
-        backedUp: false,
-      },
-    },
-    session: new Uint8Array(32),
-    status: 'online' as const,
-    lastSeen: new Date(),
-    createdAt: new Date(),
-    updatedAt: new Date(),
-    ...overrides,
-  };
-}
-
-/** Insert a UserProfile into SQLite (serializes security to JSON). */
-async function addProfileToSqlite(profile: UserProfile): Promise<void> {
-  const sqliteDb = getSqliteDb();
-  await sqliteDb.insert(schema.userProfile).values({
-    userId: profile.userId,
-    username: profile.username,
-    security: JSON.stringify(profile.security),
-    session: profile.session,
-    status: profile.status,
-    lastSeen: profile.lastSeen,
-    createdAt: profile.createdAt,
-    updatedAt: profile.updatedAt,
-    lastPublicKeyPush: profile.lastPublicKeyPush,
-  });
 }
 
 describe('getPublicKeyErrorMessage', () => {
@@ -118,7 +69,7 @@ describe('getPublicKeyErrorMessage', () => {
 });
 
 describe('AuthService', () => {
-  let mockMessageProtocol: IMessageProtocol;
+  let mockAuthProtocol: IAuthProtocol;
   let authService: AuthService;
   let testUserId: string;
   let testUserIdBytes: Uint8Array;
@@ -135,8 +86,8 @@ describe('AuthService', () => {
     userKeys = generate_user_keys('test-passphrase-' + Date.now());
     testPublicKeys = userKeys.public_keys();
 
-    mockMessageProtocol = createMockProtocol();
-    authService = new AuthService(mockMessageProtocol);
+    mockAuthProtocol = createMockAuthProtocol();
+    authService = new AuthService(mockAuthProtocol);
   });
 
   afterEach(async () => {
@@ -157,21 +108,21 @@ describe('AuthService', () => {
       const publicKeyBytes = testPublicKeys.to_bytes();
       const base64PublicKey = encodeToBase64(publicKeyBytes);
 
-      vi.mocked(mockMessageProtocol.fetchPublicKeyByUserId).mockResolvedValue(
+      vi.mocked(mockAuthProtocol.fetchPublicKeyByUserId).mockResolvedValue(
         base64PublicKey
       );
 
       const result = await authService.fetchPublicKeyByUserId(testUserId);
 
       expect(result).toBeInstanceOf(UserPublicKeys);
-      expect(mockMessageProtocol.fetchPublicKeyByUserId).toHaveBeenCalledWith(
+      expect(mockAuthProtocol.fetchPublicKeyByUserId).toHaveBeenCalledWith(
         testUserIdBytes
       );
     });
 
     it('should throw when public key is not found', async () => {
       const error = new Error(PUBLIC_KEY_NOT_FOUND_ERROR);
-      vi.mocked(mockMessageProtocol.fetchPublicKeyByUserId).mockRejectedValue(
+      vi.mocked(mockAuthProtocol.fetchPublicKeyByUserId).mockRejectedValue(
         error
       );
 
@@ -182,7 +133,7 @@ describe('AuthService', () => {
 
     it('should throw when fetch fails', async () => {
       const error = new Error(FAILED_TO_FETCH_ERROR);
-      vi.mocked(mockMessageProtocol.fetchPublicKeyByUserId).mockRejectedValue(
+      vi.mocked(mockAuthProtocol.fetchPublicKeyByUserId).mockRejectedValue(
         error
       );
 
@@ -193,7 +144,7 @@ describe('AuthService', () => {
 
     it('should throw for network errors', async () => {
       const error = new Error('Network timeout');
-      vi.mocked(mockMessageProtocol.fetchPublicKeyByUserId).mockRejectedValue(
+      vi.mocked(mockAuthProtocol.fetchPublicKeyByUserId).mockRejectedValue(
         error
       );
 
@@ -206,118 +157,79 @@ describe('AuthService', () => {
       const publicKeyBytes = testPublicKeys.to_bytes();
       const base64PublicKey = encodeToBase64(publicKeyBytes);
 
-      vi.mocked(mockMessageProtocol.fetchPublicKeyByUserId).mockResolvedValue(
+      vi.mocked(mockAuthProtocol.fetchPublicKeyByUserId).mockResolvedValue(
         base64PublicKey
       );
 
       await authService.fetchPublicKeyByUserId(testUserId);
 
-      expect(mockMessageProtocol.fetchPublicKeyByUserId).toHaveBeenCalledTimes(
-        1
-      );
-      const calledWith = vi.mocked(mockMessageProtocol.fetchPublicKeyByUserId)
-        .mock.calls[0][0];
+      expect(mockAuthProtocol.fetchPublicKeyByUserId).toHaveBeenCalledTimes(1);
+      const calledWith = vi.mocked(mockAuthProtocol.fetchPublicKeyByUserId).mock
+        .calls[0][0];
       expect(Array.from(calledWith)).toEqual(Array.from(testUserIdBytes));
     });
   });
 
   describe('ensurePublicKeyPublished', () => {
-    it('should not publish if last push was less than one week ago', async () => {
-      const profile = createUserProfile(testUserId, {
-        lastPublicKeyPush: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000),
-      });
-
-      await addProfileToSqlite(profile);
-
-      await authService.ensurePublicKeyPublished(testPublicKeys, testUserId);
-
-      expect(mockMessageProtocol.postPublicKey).not.toHaveBeenCalled();
-    });
-
-    it('should publish if last push was more than one week ago', async () => {
-      const profile = createUserProfile(testUserId, {
-        lastPublicKeyPush: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000),
-      });
-
-      await addProfileToSqlite(profile);
-
-      vi.mocked(mockMessageProtocol.postPublicKey).mockResolvedValue('hash123');
-
-      await authService.ensurePublicKeyPublished(testPublicKeys, testUserId);
-
-      expect(mockMessageProtocol.postPublicKey).toHaveBeenCalledTimes(1);
-      const calledWith = vi.mocked(mockMessageProtocol.postPublicKey).mock
-        .calls[0][0];
-      expect(calledWith).toBe(encodeToBase64(testPublicKeys.to_bytes()));
-
-      const updatedProfile = await getSqliteDb()
-        .select({ lastPublicKeyPush: schema.userProfile.lastPublicKeyPush })
-        .from(schema.userProfile)
-        .where(eq(schema.userProfile.userId, testUserId))
-        .get();
-      expect(updatedProfile?.lastPublicKeyPush).toBeDefined();
-      expect(updatedProfile?.lastPublicKeyPush?.getTime()).toBeGreaterThan(
-        profile.lastPublicKeyPush!.getTime()
+    it('should not publish if key already exists on server', async () => {
+      // fetchPublicKeyByUserId succeeds → key exists
+      vi.mocked(mockAuthProtocol.fetchPublicKeyByUserId).mockResolvedValue(
+        encodeToBase64(testPublicKeys.to_bytes())
       );
-    });
-
-    it('should publish if lastPublicKeyPush is undefined', async () => {
-      const profile = createUserProfile(testUserId);
-
-      await addProfileToSqlite(profile);
-
-      vi.mocked(mockMessageProtocol.postPublicKey).mockResolvedValue('hash123');
 
       await authService.ensurePublicKeyPublished(testPublicKeys, testUserId);
 
-      expect(mockMessageProtocol.postPublicKey).toHaveBeenCalledTimes(1);
-
-      const updatedProfile = await getSqliteDb()
-        .select({ lastPublicKeyPush: schema.userProfile.lastPublicKeyPush })
-        .from(schema.userProfile)
-        .where(eq(schema.userProfile.userId, testUserId))
-        .get();
-      expect(updatedProfile?.lastPublicKeyPush).toBeDefined();
+      expect(mockAuthProtocol.postPublicKey).not.toHaveBeenCalled();
     });
 
-    it('should publish if last push was exactly one week ago', async () => {
-      const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-      const profile = createUserProfile(testUserId, {
-        lastPublicKeyPush: oneWeekAgo,
-      });
-
-      await addProfileToSqlite(profile);
-
-      vi.mocked(mockMessageProtocol.postPublicKey).mockResolvedValue('hash123');
+    it('should publish if key is not found on server', async () => {
+      // fetchPublicKeyByUserId throws → key not found
+      vi.mocked(mockAuthProtocol.fetchPublicKeyByUserId).mockRejectedValue(
+        new Error(PUBLIC_KEY_NOT_FOUND_ERROR)
+      );
+      vi.mocked(mockAuthProtocol.postPublicKey).mockResolvedValue('hash123');
 
       await authService.ensurePublicKeyPublished(testPublicKeys, testUserId);
 
-      expect(mockMessageProtocol.postPublicKey).toHaveBeenCalledTimes(1);
-    });
-
-    it('should publish key when user profile not found (gossip ID still discoverable)', async () => {
-      vi.mocked(mockMessageProtocol.postPublicKey).mockResolvedValue('hash123');
-
-      await authService.ensurePublicKeyPublished(testPublicKeys, testUserId);
-
-      expect(mockMessageProtocol.postPublicKey).toHaveBeenCalledTimes(1);
-      expect(mockMessageProtocol.postPublicKey).toHaveBeenCalledWith(
+      expect(mockAuthProtocol.postPublicKey).toHaveBeenCalledTimes(1);
+      expect(mockAuthProtocol.postPublicKey).toHaveBeenCalledWith(
         encodeToBase64(testPublicKeys.to_bytes())
       );
     });
 
-    it('should encode public keys to base64 before posting', async () => {
-      const profile = createUserProfile(testUserId, {
-        lastPublicKeyPush: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000),
-      });
-
-      await addProfileToSqlite(profile);
-
-      vi.mocked(mockMessageProtocol.postPublicKey).mockResolvedValue('hash123');
+    it('should publish if server fetch fails with network error', async () => {
+      // Any fetch error → assume key not present, publish
+      vi.mocked(mockAuthProtocol.fetchPublicKeyByUserId).mockRejectedValue(
+        new Error('Network timeout')
+      );
+      vi.mocked(mockAuthProtocol.postPublicKey).mockResolvedValue('hash123');
 
       await authService.ensurePublicKeyPublished(testPublicKeys, testUserId);
 
-      const calledWith = vi.mocked(mockMessageProtocol.postPublicKey).mock
+      expect(mockAuthProtocol.postPublicKey).toHaveBeenCalledTimes(1);
+    });
+
+    it('should propagate error if publishing after fetch failure also fails', async () => {
+      vi.mocked(mockAuthProtocol.fetchPublicKeyByUserId).mockRejectedValue(
+        new Error('Network timeout')
+      );
+      const publishError = new Error('Publish failed');
+      vi.mocked(mockAuthProtocol.postPublicKey).mockRejectedValue(publishError);
+
+      await expect(
+        authService.ensurePublicKeyPublished(testPublicKeys, testUserId)
+      ).rejects.toThrow('Publish failed');
+    });
+
+    it('should encode public keys to base64 before posting', async () => {
+      vi.mocked(mockAuthProtocol.fetchPublicKeyByUserId).mockRejectedValue(
+        new Error(PUBLIC_KEY_NOT_FOUND_ERROR)
+      );
+      vi.mocked(mockAuthProtocol.postPublicKey).mockResolvedValue('hash123');
+
+      await authService.ensurePublicKeyPublished(testPublicKeys, testUserId);
+
+      const calledWith = vi.mocked(mockAuthProtocol.postPublicKey).mock
         .calls[0][0];
       const decoded = decodeFromBase64(calledWith);
       const originalBytes = testPublicKeys.to_bytes();

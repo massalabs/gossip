@@ -8,6 +8,7 @@ import {
   IMessageProtocol,
   MessageProtocolResponse,
 } from './types';
+import { RestClient } from '../restClient';
 import { encodeToBase64, decodeFromBase64 } from '../../utils/base64';
 
 const BULLETIN_ENDPOINT = '/bulletin';
@@ -23,13 +24,10 @@ type FetchMessagesResponse = {
   value: string;
 };
 
-export class RestMessageProtocol implements IMessageProtocol {
-  constructor(
-    private baseUrl: string,
-    private timeout: number = 10000,
-    private retryAttempts: number = 3
-  ) {}
-
+export class RestMessageProtocol
+  extends RestClient
+  implements IMessageProtocol
+{
   // TODO: Implement a fetch with pagination to avoid fetching all messages at once
   async fetchMessages(seekers: Uint8Array[]): Promise<EncryptedMessage[]> {
     const url = `${this.baseUrl}${MESSAGES_ENDPOINT}/fetch`;
@@ -129,86 +127,6 @@ export class RestMessageProtocol implements IMessageProtocol {
     }
 
     return response.data.counter;
-  }
-
-  async fetchPublicKeyByUserId(userId: Uint8Array): Promise<string> {
-    const response = await this.makeRequest<{ value: string }>(
-      `${this.baseUrl}/auth/retrieve`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key: encodeToBase64(userId) }),
-      }
-    );
-
-    if (!response.success || !response.data) {
-      throw new Error(response.error || 'Failed to fetch public key');
-    }
-
-    if (!response.data.value) {
-      throw new Error('Public key not found');
-    }
-
-    return response.data.value;
-  }
-
-  async postPublicKey(base64PublicKeys: string): Promise<string> {
-    const url = `${this.baseUrl}/auth`;
-
-    const response = await this.makeRequest<{ value: string }>(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ value: base64PublicKeys }),
-    });
-
-    if (!response.success || !response.data) {
-      const errorMessage = response.error || 'Failed to store public key';
-      throw new Error(errorMessage);
-    }
-
-    return response.data.value;
-  }
-
-  private async makeRequest<T>(
-    url: string,
-    options: RequestInit
-  ): Promise<MessageProtocolResponse<T>> {
-    let lastError: Error | null = null;
-
-    for (let attempt = 1; attempt <= this.retryAttempts; attempt++) {
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), this.timeout);
-
-        const response = await fetch(url, {
-          ...options,
-          signal: controller.signal,
-        });
-
-        clearTimeout(timeoutId);
-
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-
-        const data = await response.json();
-        return { success: true, data };
-      } catch (error) {
-        lastError = error as Error;
-        console.warn(`Request attempt ${attempt} failed:`, error);
-
-        if (attempt < this.retryAttempts) {
-          // Exponential backoff
-          const delay = Math.pow(2, attempt) * 1000;
-          await new Promise(resolve => setTimeout(resolve, delay));
-        }
-      }
-    }
-
-    return {
-      success: false,
-      error: lastError?.message || 'Request failed after all retry attempts',
-    };
   }
 
   async changeNode(nodeUrl?: string): Promise<MessageProtocolResponse> {
