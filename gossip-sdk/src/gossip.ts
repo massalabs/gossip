@@ -47,7 +47,8 @@ import {
 } from './db';
 import { toDiscussion, toSortedDiscussions } from './utils/discussions';
 import { IMessageProtocol, createMessageProtocol } from './api/messageProtocol';
-import { setProtocolBaseUrl } from './config/protocol';
+import { RestAuthProtocol } from './api/authProtocol';
+import { setProtocolBaseUrl, protocolConfig } from './config/protocol';
 import {
   type SdkConfig,
   type DeepPartial,
@@ -252,8 +253,13 @@ class GossipSdk {
     // Create message protocol
     const messageProtocol = createMessageProtocol();
 
-    // Create auth service (doesn't need session)
-    this._auth = new AuthService(messageProtocol);
+    // Create auth protocol + service (doesn't need session)
+    const authProtocol = new RestAuthProtocol(
+      protocolConfig.baseUrl,
+      protocolConfig.timeout,
+      protocolConfig.retryAttempts
+    );
+    this._auth = new AuthService(authProtocol);
 
     this.state = {
       status: SdkStatus.INITIALIZED,

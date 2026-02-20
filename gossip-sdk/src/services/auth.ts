@@ -7,11 +7,10 @@
 import { UserPublicKeys } from '../wasm/bindings';
 import { decodeUserId } from '../utils/userId';
 import { encodeToBase64, decodeFromBase64 } from '../utils/base64';
-import { IMessageProtocol } from '../api/messageProtocol/types';
-import { getUserProfileField, updateUserProfileById } from '../queries';
+import { IAuthProtocol } from '../api/authProtocol';
 
 export class AuthService {
-  constructor(public messageProtocol: IMessageProtocol) {}
+  constructor(public authProtocol: IAuthProtocol) {}
 
   /**
    * Fetch public key by userId
@@ -19,7 +18,7 @@ export class AuthService {
    */
   async fetchPublicKeyByUserId(userId: string): Promise<UserPublicKeys> {
     try {
-      const base64PublicKey = await this.messageProtocol.fetchPublicKeyByUserId(
+      const base64PublicKey = await this.authProtocol.fetchPublicKeyByUserId(
         decodeUserId(userId)
       );
 
@@ -30,8 +29,7 @@ export class AuthService {
   }
 
   /**
-   * Ensure public key is published (check first, then publish if needed).
-   * If no user profile exists, the key is still published so the gossip ID is discoverable.
+   * Ensure public key is published. Checks the server first, only publishes if not found.
    * @param publicKeys - UserPublicKeys instance
    * @param userId - Bech32-encoded userId (e.g., "gossip1...")
    */
@@ -39,29 +37,18 @@ export class AuthService {
     publicKeys: UserPublicKeys,
     userId: string
   ): Promise<void> {
-    const profile = await getUserProfileField(userId);
-
-    if (profile) {
-      const lastPush = profile.lastPublicKeyPush;
-      if (lastPush && !moreThanOneWeekAgo(lastPush)) {
-        return;
-      }
+    // Check if our key is already on the server
+    try {
+      await this.authProtocol.fetchPublicKeyByUserId(decodeUserId(userId));
+      return; // Key exists on server, nothing to do
+    } catch {
+      // Key not found on server — publish it
     }
 
-    await this.messageProtocol.postPublicKey(
+    await this.authProtocol.postPublicKey(
       encodeToBase64(publicKeys.to_bytes())
     );
-
-    if (profile) {
-      await updateUserProfileById(userId, { lastPublicKeyPush: new Date() });
-    }
   }
-}
-
-const ONE_WEEK_IN_MILLIS = 7 * 24 * 60 * 60 * 1000;
-
-function moreThanOneWeekAgo(date: Date): boolean {
-  return Date.now() - date.getTime() >= ONE_WEEK_IN_MILLIS;
 }
 
 export const PUBLIC_KEY_NOT_FOUND_ERROR = 'Public key not found';

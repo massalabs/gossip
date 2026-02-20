@@ -175,8 +175,6 @@ describe('GossipSdk lifecycle', () => {
       sendAnnouncement: vi.fn(),
       fetchAnnouncements: vi.fn(),
       fetchBulletinCounter: vi.fn().mockResolvedValue('0'),
-      fetchPublicKeyByUserId: vi.fn(),
-      postPublicKey: vi.fn(),
       changeNode: vi.fn(),
     });
     sessionMock.state.lastSessionInstance = null;

@@ -5,8 +5,8 @@
  * allowing tests to verify messaging flows without network calls.
  */
 
-import type { IMessageProtocol } from '../../src/api/messageProtocol/types';
 import type {
+  IMessageProtocol,
   EncryptedMessage,
   BulletinItem,
 } from '../../src/api/messageProtocol/types';
@@ -67,15 +67,6 @@ export class MockMessageProtocol implements IMessageProtocol {
 
   async fetchBulletinCounter(): Promise<string> {
     return String(this.announcementCounter);
-  }
-
-  async fetchPublicKeyByUserId(_userId: Uint8Array): Promise<string> {
-    // Return empty string - tests should handle this
-    return '';
-  }
-
-  async postPublicKey(_publicKey: string): Promise<string> {
-    return 'mock-counter';
   }
 
   async changeNode(newBaseUrl: string): Promise<{ success: boolean }> {
