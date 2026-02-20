@@ -138,9 +138,11 @@ export class RefreshService {
           const status = this.session.peerSessionStatus(
             decodeUserId(discussion.contactUserId)
           );
-          return [SessionStatus.Active, SessionStatus.SelfRequested].includes(
-            status
-          );
+          return [
+            SessionStatus.Active,
+            SessionStatus.SelfRequested,
+            SessionStatus.Saturated,
+          ].includes(status);
         }
       );
       await this.announcementService.processOutgoingAnnouncements(
@@ -286,6 +288,7 @@ export class RefreshService {
           contactUserId: discussion.contactUserId,
           error: res.error,
         });
+        return; // if we failed to create session, we don't want to set killedNextRetryAt
       } else {
         this.eventEmitter.emit(SdkEventType.SESSION_RENEWED, discussion);
       }
@@ -329,6 +332,7 @@ export class RefreshService {
           contactUserId: discussion.contactUserId,
           error: res.error,
         });
+        return; // if we failed to create session, we don't want to set saturatedRetryDone to true
       } else {
         this.eventEmitter.emit(SdkEventType.SESSION_RENEWED, discussion);
       }

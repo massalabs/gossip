@@ -1369,6 +1369,94 @@ describe('Discussion Flow', () => {
       expect(await isSessionUp(aliceSdk, bobSdk)).toBe(true);
     });
 
+    it('Alice send announcement, then she delete bob contact, then she send another announcement', async () => {
+      const aliceBobContact: Omit<Contact, 'id'> = {
+        ownerUserId: aliceSdk.userId,
+        userId: bobSdk.userId,
+        name: 'Bob',
+        publicKeys: bobSdk.publicKeys.to_bytes(),
+        avatar: undefined,
+        isOnline: false,
+        lastSeen: new Date(),
+        createdAt: new Date(),
+      };
+      await db.contacts.add(aliceBobContact);
+
+      // Alice sends announcement with message
+      const announcementMsg = 'Hello Bob!';
+      const result = await aliceSdk.discussions.start(aliceBobContact, {
+        username: 'Alice',
+        message: announcementMsg,
+      });
+      if (!result.success) throw result.error;
+
+      // Bob fetches Alice's announcement
+      await bobSdk.announcements.fetch();
+
+      // Alice deletes Bob's contact
+      await aliceSdk.contacts.delete(aliceSdk.userId, bobSdk.userId);
+
+      // Verify deletion was successful
+      await checkDeleted(aliceSdk, bobSdk.userId, db);
+
+      // Alice re adds Bob as a contact again
+      const aliceBobContact2: Omit<Contact, 'id'> = {
+        ownerUserId: aliceSdk.userId,
+        userId: bobSdk.userId,
+        name: 'Bob',
+        publicKeys: bobSdk.publicKeys.to_bytes(),
+        avatar: undefined,
+        isOnline: false,
+        lastSeen: new Date(),
+        createdAt: new Date(),
+      };
+      await db.contacts.add(aliceBobContact2);
+
+      // Alice sends another announcement
+      const result2 = await aliceSdk.discussions.start(aliceBobContact, {
+        username: 'Alice',
+        message: 'Hello Bob again!',
+      });
+      if (!result2.success) throw result2.error;
+
+      // Bob fetches Alice's announcement
+      await bobSdk.announcements.fetch();
+
+      // Verify Bob has Alice's contact
+
+      // Verify Bob has discussion with Alice
+      const bobDiscussion = await bobSdk.discussions.get(
+        bobSdk.userId,
+        aliceSdk.userId
+      );
+      if (!bobDiscussion) throw new Error('Bob discussion not found');
+      expect(bobDiscussion).toBeDefined();
+      expect(bobDiscussion?.lastAnnouncementMessage).toBe('Hello Bob again!');
+      expect(bobDiscussion?.weAccepted).toBe(false);
+      expect(bobDiscussion?.direction).toBe(DiscussionDirection.RECEIVED);
+      expect(bobSdk.discussions.getStatus(aliceSdk.userId)).toBe(
+        SessionStatus.PeerRequested
+      );
+
+      // Bob accept the discussion
+      await bobSdk.discussions.accept(bobDiscussion);
+
+      // Alice fetches Bob's announcement
+      await aliceSdk.announcements.fetch();
+
+      // Verify Alice has Bob's discussion
+      const aliceDiscussion = await aliceSdk.discussions.get(
+        aliceSdk.userId,
+        bobSdk.userId
+      );
+      expect(aliceDiscussion).toBeDefined();
+      expect(aliceDiscussion?.weAccepted).toBe(true);
+      expect(aliceDiscussion?.direction).toBe(DiscussionDirection.INITIATED);
+      expect(aliceSdk.discussions.getStatus(bobSdk.userId)).toBe(
+        SessionStatus.Active
+      );
+    });
+
     it('When delete contact, all msg status are deleted: waiting_session, ready, sent and acknowledge', async () => {
       // Setup: Alice and Bob establish a session
       await setupSession(aliceSdk, bobSdk, 'Bob', 'Alice');
@@ -1515,6 +1603,7 @@ describe('session break in session manager', () => {
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     await aliceSdk.closeSession();
     await bobSdk.closeSession();
   });
@@ -1587,51 +1676,40 @@ describe('session break in session manager', () => {
   }
 
   it('Alice has not received incoming msg for too long, session is killed and reset by updateState function (no msg)', async () => {
-    await createCustomSdks(
-      2000, // max_session_inactivity_millis: 2 seconds
-      10000 // keep_alive_interval_millis: 10 seconds
-    );
-
-    // Setup: Alice and Bob establish a session
+    await createCustomSdks(300, 10000);
     await setupSession(aliceSdk, bobSdk, 'Bob', 'Alice');
 
-    // Verify session is active
-    expect(await isLocalSessionUp(aliceSdk, bobSdk.userId)).toBe(true);
+    aliceSdk.config.sessionRecovery.killedRetryDelayMs = 200;
+    aliceSdk.config.sessionRecovery.JitterMs = 0;
 
-    // Spy on establishSession to verify it's called during reset
     const aliceAnnouncementService = (
       aliceSdk as unknown as { _announcement: AnnouncementService }
     )._announcement;
     const establishSpy = vi.spyOn(aliceAnnouncementService, 'establishSession');
 
-    // Wait for max_session_inactivity_millis (2000ms) + buffer
-    await new Promise(resolve => setTimeout(resolve, 2100));
-
-    // Call updateState - this should trigger session reset
+    await new Promise(resolve => setTimeout(resolve, 350));
+    const now = Date.now();
     await aliceSdk.updateState();
 
-    // Verify establishSession was called (session was renewed)
+    const discussion = await aliceSdk.discussions.get(
+      aliceSdk.userId,
+      bobSdk.userId
+    );
+    expect(
+      discussion?.sessionRecovery?.killedNextRetryAt?.getTime()
+    ).toBeGreaterThan(now + aliceSdk.config.sessionRecovery.killedRetryDelayMs);
     expect(establishSpy).toHaveBeenCalled();
-
-    // Session should still be active after reset
     expect(aliceSdk.discussions.getStatus(bobSdk.userId)).toBe(
       SessionStatus.Active
     );
-
-    establishSpy.mockRestore();
   });
 
   it('Alice has not received incoming msg for too long, session is killed and reset by updateState function (with msg)', async () => {
-    await createCustomSdks(
-      2000, // max_session_inactivity_millis: 2 seconds
-      10000 // keep_alive_interval_millis: 10 seconds
-    );
-
-    // Setup: Alice and Bob establish a session
+    await createCustomSdks(300, 10000);
     await setupSession(aliceSdk, bobSdk, 'Bob', 'Alice', "hi it's alice");
 
-    // Verify session is active
-    expect(await isLocalSessionUp(aliceSdk, bobSdk.userId)).toBe(true);
+    aliceSdk.config.sessionRecovery.killedRetryDelayMs = 200;
+    aliceSdk.config.sessionRecovery.JitterMs = 0;
 
     // Spy on protocol announcements after initial session setup
     const sendAnnouncementSpy = vi.spyOn(mockProtocol, 'sendAnnouncement');
@@ -1827,18 +1905,11 @@ describe('session break in session manager', () => {
   });
 
   it('Alice has not received incoming msg for too long, session is killed but session manager return error when attempt to renew. Retry and succeed', async () => {
-    await createCustomSdks(
-      2000, // max_session_inactivity_millis: 2 seconds
-      10000 // keep_alive_interval_millis: 10 seconds
-    );
-
-    // Setup: Alice and Bob establish a session
+    await createCustomSdks(300, 10000);
     await setupSession(aliceSdk, bobSdk, 'Bob', 'Alice');
 
-    // Set short retry delay
-    // const originalRetryDelay =
-    //   aliceSdk.config.announcements.retryDelayMs;
-    // aliceSdk.config.announcements.retryDelayMs = 100;
+    aliceSdk.config.sessionRecovery.killedRetryDelayMs = 200;
+    aliceSdk.config.sessionRecovery.JitterMs = 0;
 
     // Spy on establishSession to fail first time, then succeed
     const aliceAnnouncementService = (
@@ -1862,72 +1933,64 @@ describe('session break in session manager', () => {
         }
       );
 
-    // Wait for max_session_inactivity_millis
-    await new Promise(resolve => setTimeout(resolve, 2100));
-
-    // First updateState - should fail to renew
+    await new Promise(resolve => setTimeout(resolve, 350));
     await aliceSdk.updateState();
-
     expect(aliceSdk.discussions.getStatus(bobSdk.userId)).toBe(
       SessionStatus.Killed
     );
-    const discussion = await aliceSdk.discussions.get(
+
+    const discussionAfterFirst = await aliceSdk.discussions.get(
       aliceSdk.userId,
       bobSdk.userId
     );
-    expect(discussion?.sendAnnouncement).toBeNull();
+    expect(
+      discussionAfterFirst?.sessionRecovery?.killedNextRetryAt
+    ).toBeUndefined();
+    expect(establishSpy).toHaveBeenCalledTimes(1);
 
-    // // Wait for retry delay
-    // await new Promise(resolve =>
-    //   setTimeout(resolve, aliceSdk.config.announcements.retryDelayMs + 50)
-    // );
-
+    const now = Date.now();
     // Second updateState - should succeed
     await aliceSdk.updateState();
-
-    // Verify establishSession was called twice
     expect(establishSpy).toHaveBeenCalledTimes(2);
 
+    const discussionAfterSecond = await aliceSdk.discussions.get(
+      aliceSdk.userId,
+      bobSdk.userId
+    );
     // Session should be active after successful retry
     expect(aliceSdk.discussions.getStatus(bobSdk.userId)).toBe(
       SessionStatus.Active
     );
-
-    establishSpy.mockRestore();
-    // aliceSdk.config.announcements.retryDelayMs = originalRetryDelay;
+    expect(
+      discussionAfterSecond?.sessionRecovery?.killedNextRetryAt?.getTime()
+    ).greaterThanOrEqual(
+      now + aliceSdk.config.sessionRecovery.killedRetryDelayMs
+    );
   });
 
   it('Alice has not received incoming msg for too long, session is killed but got network issue while reseting and sending announcement. Retry and success', async () => {
-    await createCustomSdks(
-      2000, // max_session_inactivity_millis: 2 seconds
-      10000 // keep_alive_interval_millis: 10 seconds
-    );
-
-    // Setup: Alice and Bob establish a session
+    await createCustomSdks(300, 10000);
     await setupSession(aliceSdk, bobSdk, 'Bob', 'Alice');
 
-    // Set short retry delay
+    aliceSdk.config.sessionRecovery.killedRetryDelayMs = 200;
+    aliceSdk.config.sessionRecovery.JitterMs = 0;
     const originalRetryDelay = aliceSdk.config.announcements.retryDelayMs;
     aliceSdk.config.announcements.retryDelayMs = 100;
 
-    // Set up spy to fail first time, then succeed
     const originalSendAnnouncement =
       MockMessageProtocol.prototype.sendAnnouncement;
     let callCount = 0;
-    const sendSpy = vi
-      .spyOn(mockProtocol, 'sendAnnouncement')
-      .mockImplementation(async (announcement: Uint8Array) => {
+    vi.spyOn(mockProtocol, 'sendAnnouncement').mockImplementation(
+      async (announcement: Uint8Array) => {
         callCount++;
         if (callCount === 1) {
           throw new Error('Network error');
         }
         return originalSendAnnouncement.call(mockProtocol, announcement);
-      });
+      }
+    );
 
-    // Wait for max_session_inactivity_millis
-    await new Promise(resolve => setTimeout(resolve, 2100));
-
-    // First updateState - should fail to send announcement
+    await new Promise(resolve => setTimeout(resolve, 350));
     await aliceSdk.updateState();
 
     // Verify the announcement is still pending
@@ -1935,8 +1998,11 @@ describe('session break in session manager', () => {
       aliceSdk.userId,
       bobSdk.userId
     );
+
+    /* If send announcement failed, There are chances that the session will be killed again the next state_update call.
+    We don't want to wait a delay before reseting the session so we set killedNextRetryAt to undefined*/
+    expect(discussion?.sessionRecovery?.killedNextRetryAt).toBeUndefined();
     expect(discussion?.sendAnnouncement).not.toBeNull();
-    // The announcement is not sent on network but session in session manager is active
     expect(aliceSdk.discussions.getStatus(bobSdk.userId)).toBe(
       SessionStatus.Active
     );
@@ -1947,6 +2013,7 @@ describe('session break in session manager', () => {
     );
 
     // Second updateState - should succeed
+    console.log('updateState 2');
     await aliceSdk.updateState();
 
     const discussionAfterRetry = await aliceSdk.discussions.get(
@@ -1960,48 +2027,27 @@ describe('session break in session manager', () => {
       SessionStatus.Active
     );
 
-    sendSpy.mockRestore();
     aliceSdk.config.announcements.retryDelayMs = originalRetryDelay;
   });
 
   it('Alice has not received incoming msg for too long, session is killed and need send keep alive. keep alive are not sent', async () => {
-    // Create custom SDKs with shorter keep alive interval
-    await createCustomSdks(
-      2000, // max_session_inactivity_millis: 2 seconds
-      1000 // keep_alive_interval_millis: 1 second
-    );
-
-    // Setup: Alice and Bob establish a session
+    await createCustomSdks(300, 100);
     await setupSession(aliceSdk, bobSdk, 'Bob', 'Alice');
 
-    // Verify session is active
-    expect(await isLocalSessionUp(aliceSdk, bobSdk.userId)).toBe(true);
+    aliceSdk.config.sessionRecovery.killedRetryDelayMs = 200;
+    aliceSdk.config.sessionRecovery.JitterMs = 0;
 
-    // Wait for both keep_alive_interval (1000ms) and max_session_inactivity (2000ms)
-    // After 1 second, keep alive would normally be sent
-    // But after 2 seconds, session breaks and is renewed instead
-    await new Promise(resolve => setTimeout(resolve, 2100));
+    await new Promise(resolve => setTimeout(resolve, 350));
 
     // Call updateState - this should trigger session reset (not keep alive)
     await aliceSdk.updateState();
 
-    // Check that no keep alive messages were created in the database
-    // Keep alive messages should have been skipped because session was being renewed
     const aliceMessages = await aliceSdk.db.messages
       .where('[ownerUserId+contactUserId]')
       .equals([aliceSdk.userId, bobSdk.userId])
       .and(msg => msg.type === MessageType.KEEP_ALIVE)
       .toArray();
-
-    // Filter for keep alive messages (content is empty string)
-    const keepAliveMessages = aliceMessages.filter(
-      msg => msg.type === MessageType.KEEP_ALIVE
-    );
-
-    // No keep alive messages should have been sent (session renewal takes precedence)
-    expect(keepAliveMessages.length).toBe(0);
-
-    // Session should still be active after reset
+    expect(aliceMessages.length).toBe(0);
     expect(aliceSdk.discussions.getStatus(bobSdk.userId)).toBe(
       SessionStatus.Active
     );
@@ -2038,11 +2084,7 @@ describe('session break in session manager', () => {
     }
 
     it('Alice send an announcement to Bob and send more than max_session_lag_length msg. But when calling state_update she is not saturated because her session has status selfRequested', async () => {
-      await createCustomSdks(
-        3600000, // max_session_inactivity_millis: 1 hour
-        60000, // keep_alive_interval_millis: 1 minute
-        3n // max_session_lag_length: 3 messages
-      );
+      await createCustomSdks(3600000, 60000, 3n);
 
       // Alice adds Bob as a contact
       const aliceBobContact: Omit<Contact, 'id'> = {
@@ -2090,13 +2132,7 @@ describe('session break in session manager', () => {
     });
 
     it('Alice become saturated, bob send her a message before calling state_update -> session is not reset', async () => {
-      await createCustomSdks(
-        3600000, // max_session_inactivity_millis: 1 hour
-        60000, // keep_alive_interval_millis: 1 minute
-        3n // max_session_lag_length: 3 messages
-      );
-
-      // Setup: Alice and Bob establish a session
+      await createCustomSdks(3600000, 60000, 3n);
       await setupSession(aliceSdk, bobSdk, 'Bob', 'Alice');
 
       // Verify session is active
@@ -2118,18 +2154,6 @@ describe('session break in session manager', () => {
         });
         expect(msgResult.success).toBe(true);
       }
-      /* The last message is added directly in db because the aliceSdk.messages.send call
-       state_update and it would have set the session as saturated */
-      // await db.messages.add({
-      //   ownerUserId: aliceSdk.userId,
-      //   contactUserId: bobSdk.userId,
-      //   messageId: new Uint8Array(12).fill(3),
-      //   content: 'Alice message 3',
-      //   type: MessageType.TEXT,
-      //   direction: MessageDirection.OUTGOING,
-      //   status: MessageStatus.WAITING_SESSION,
-      //   timestamp: new Date(),
-      // });
 
       // Check if Alice is saturated
       expect(aliceSdk.discussions.getStatus(bobSdk.userId)).toBe(
@@ -2160,18 +2184,12 @@ describe('session break in session manager', () => {
       );
     });
 
-    it('Alice become saturated, session is reset all messages are resent, bob answer, no more saturation', async () => {
-      await createCustomSdks(
-        3600000, // max_session_inactivity_millis: 1 hour
-        60000, // keep_alive_interval_millis: 1 minute
-        3n // max_session_lag_length: 3 messages
-      );
-
-      // Setup: Alice and Bob establish a session
+    it('Alice become saturated, session is reset after delay all messages are resent, bob answer, no more saturation', async () => {
+      await createCustomSdks(3600000, 60000, 3n);
       await setupSession(aliceSdk, bobSdk, 'Bob', 'Alice');
 
-      // Verify session is active
-      expect(await isLocalSessionUp(aliceSdk, bobSdk.userId)).toBe(true);
+      aliceSdk.config.sessionRecovery.saturatedRetryDelayMs = 200;
+      aliceSdk.config.sessionRecovery.JitterMs = 0;
 
       // Bob sends his first message to Alice
       await BobSendFirstMsg(aliceSdk, bobSdk);
@@ -2195,11 +2213,50 @@ describe('session break in session manager', () => {
         SessionStatus.Saturated
       );
 
-      // Call updateState - this should reset the session because it's saturated
-      // and resend all messages
+      // detect saturation and set saturatedRetryAt in the future
+      const now = Date.now();
+      await aliceSdk.updateState();
+      const afterSchedule = await aliceSdk.discussions.get(
+        aliceSdk.userId,
+        bobSdk.userId
+      );
+      expect(
+        afterSchedule?.sessionRecovery?.saturatedRetryAt?.getTime()
+      ).toBeGreaterThanOrEqual(
+        now + aliceSdk.config.sessionRecovery.saturatedRetryDelayMs
+      );
+      expect(afterSchedule?.sessionRecovery?.saturatedRetryDone).toBe(false);
+
+      // updateState before saturatedRetryDelayMs will not reset the session
+      // Spy on establishSession of announcement service to observe session resets
+      const aliceAnnouncementService = (
+        aliceSdk as unknown as { _announcement: AnnouncementService }
+      )._announcement;
+      const establishSpy = vi.spyOn(
+        aliceAnnouncementService,
+        'establishSession'
+      );
+      await aliceSdk.updateState();
+      expect(establishSpy).not.toHaveBeenCalled();
+
+      // Wait for saturatedRetryDelayMs
+      await new Promise(resolve =>
+        setTimeout(
+          resolve,
+          aliceSdk.config.sessionRecovery.saturatedRetryDelayMs + 40
+        )
+      );
+
+      // reset the session
       await aliceSdk.updateState();
 
-      // Bob fetches announcements (receives renewal)
+      const afterRetry = await aliceSdk.discussions.get(
+        aliceSdk.userId,
+        bobSdk.userId
+      );
+      expect(afterRetry?.sessionRecovery?.saturatedRetryDone).toBe(true);
+
+      // bob fetch announcements
       await bobSdk.announcements.fetch();
 
       // Bob fetches messages and receives Alice's messages
@@ -2247,19 +2304,16 @@ describe('session break in session manager', () => {
       expect(bobIncoming2.length).toEqual(3);
     });
 
-    it.skip("Alice and bob both become saturated because network lag. Alice session is reset, bob's no. They fetch messages and are no more saturated", async () => {
-      await createCustomSdks(
-        3600000, // max_session_inactivity_millis: 1 hour
-        60000, // keep_alive_interval_millis: 1 minute
-        3n // max_session_lag_length: 3 messages
-      );
-
-      // Setup: Alice and Bob establish a session
+    it("Alice and bob both become saturated because network lag. Alice session is reset, bob's no. They fetch messages and are no more saturated", async () => {
+      await createCustomSdks(3600000, 60000, 3n);
       await setupSession(aliceSdk, bobSdk, 'Bob', 'Alice');
 
       // Verify session is active
       expect(await isLocalSessionUp(aliceSdk, bobSdk.userId)).toBe(true);
       expect(await isLocalSessionUp(bobSdk, aliceSdk.userId)).toBe(true);
+
+      aliceSdk.config.sessionRecovery.saturatedRetryDelayMs = 200;
+      aliceSdk.config.sessionRecovery.JitterMs = 0;
 
       // Bob sends his first message to Alice
       await BobSendFirstMsg(aliceSdk, bobSdk);
@@ -2300,8 +2354,78 @@ describe('session break in session manager', () => {
         SessionStatus.Saturated
       );
 
-      // Alice calls updateState - her session should be reset
+      // Spy on establishSession of announcement service to observe session resets
+      const aliceAnnouncementService = (
+        aliceSdk as unknown as { _announcement: AnnouncementService }
+      )._announcement;
+      const establishSpy = vi.spyOn(
+        aliceAnnouncementService,
+        'establishSession'
+      );
+
+      // Alice calls updateState - saturation is detected session not reset
+      const now = Date.now();
       await aliceSdk.updateState();
+
+      const afterSchedule = await aliceSdk.discussions.get(
+        aliceSdk.userId,
+        bobSdk.userId
+      );
+      expect(
+        afterSchedule?.sessionRecovery?.saturatedRetryAt?.getTime()
+      ).toBeGreaterThanOrEqual(
+        now + aliceSdk.config.sessionRecovery.saturatedRetryDelayMs
+      );
+      expect(afterSchedule?.sessionRecovery?.saturatedRetryDone).toBe(false);
+      expect(establishSpy).not.toHaveBeenCalled();
+
+      // Wait for saturatedRetryDelayMs
+      await new Promise(resolve =>
+        setTimeout(
+          resolve,
+          aliceSdk.config.sessionRecovery.saturatedRetryDelayMs + 40
+        )
+      );
+
+      // reset the session
+      await aliceSdk.updateState();
+
+      // Get all outgoing messages having status SENT
+      const aliceSentOutgoingMessages = await aliceSdk.db.messages
+        .where('[ownerUserId+contactUserId]')
+        .equals([aliceSdk.userId, bobSdk.userId])
+        .and(
+          msg =>
+            msg.direction === MessageDirection.OUTGOING &&
+            msg.status === MessageStatus.SENT
+        )
+        .toArray();
+      // the 3rd msg has not been sent because session is saturated.
+      // This is because the session has been reset and there is a virtual lag of 1 msg so max_session_lag_length is reached at the 2nd msg
+      expect(aliceSentOutgoingMessages.length).toEqual(2);
+
+      const bobSentOutgoingMessages = await bobSdk.db.messages
+        .where('[ownerUserId+contactUserId]')
+        .equals([bobSdk.userId, aliceSdk.userId])
+        .and(
+          msg =>
+            msg.direction === MessageDirection.OUTGOING &&
+            msg.status === MessageStatus.SENT
+        )
+        .toArray();
+      // the 2nd msg has not been sent because session is saturated.
+      // This is because the session has been reset and there is a virtual lag of 1 msg so max_session_lag_length is reached at the 1st msg
+      expect(bobSentOutgoingMessages.length).toEqual(2);
+
+      const afterRetry = await aliceSdk.discussions.get(
+        aliceSdk.userId,
+        bobSdk.userId
+      );
+      expect(
+        afterRetry?.sessionRecovery?.saturatedRetryAt?.getTime()
+      ).toBeLessThan(Date.now());
+      expect(afterRetry?.sessionRecovery?.saturatedRetryDone).toBe(true);
+      expect(establishSpy).toHaveBeenCalled();
 
       // Bob fetches announcements (receives Alice's renewal)
       await bobSdk.announcements.fetch();
@@ -2312,51 +2436,10 @@ describe('session break in session manager', () => {
       // Alice fetches messages (receives Bob's messages, acknowledging them)
       await aliceSdk.messages.fetch();
 
-      // Both sessions should still be Saturated because their respective message don't acknowledge the other's messages
       expect(aliceSdk.discussions.getStatus(bobSdk.userId)).toBe(
-        SessionStatus.Saturated
-      );
-      expect(bobSdk.discussions.getStatus(aliceSdk.userId)).toBe(
-        SessionStatus.Saturated
-      );
-
-      // Alice send her 4th msg
-      const aliceMsgResult = await aliceSdk.messages.send({
-        ownerUserId: aliceSdk.userId,
-        contactUserId: bobSdk.userId,
-        content: `Alice message 4`,
-        type: MessageType.TEXT,
-        direction: MessageDirection.OUTGOING,
-        status: MessageStatus.WAITING_SESSION,
-        timestamp: new Date(),
-      });
-      expect(aliceMsgResult.success).toBe(true);
-
-      // Bob fetch messages and receive Alice's 4th msg
-      await bobSdk.messages.fetch();
-
-      // Bob's session should be Active because he has received Alice's 4th msg
-      expect(bobSdk.discussions.getStatus(aliceSdk.userId)).toBe(
         SessionStatus.Active
       );
-
-      // bob send his 4th msg
-      const bobMsgResult = await bobSdk.messages.send({
-        ownerUserId: bobSdk.userId,
-        contactUserId: aliceSdk.userId,
-        content: `Bob message 4`,
-        type: MessageType.TEXT,
-        direction: MessageDirection.OUTGOING,
-        status: MessageStatus.WAITING_SESSION,
-        timestamp: new Date(),
-      });
-      expect(bobMsgResult.success).toBe(true);
-
-      // Alice fetch messages and receive Bob's 4th msg
-      await aliceSdk.messages.fetch();
-
-      // Alice's session should be Active because she has received Bob's 4th msg
-      expect(aliceSdk.discussions.getStatus(bobSdk.userId)).toBe(
+      expect(bobSdk.discussions.getStatus(aliceSdk.userId)).toBe(
         SessionStatus.Active
       );
     });

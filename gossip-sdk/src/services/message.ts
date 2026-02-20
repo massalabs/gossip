@@ -684,17 +684,22 @@ export class MessageService {
       const peerId = decodeUserId(contactUserId);
       const sessionStatus = this.session.peerSessionStatus(peerId);
       if (
-        ![SessionStatus.Active, SessionStatus.SelfRequested].includes(
-          sessionStatus
-        )
+        ![
+          SessionStatus.Active,
+          SessionStatus.SelfRequested,
+          SessionStatus.Saturated,
+        ].includes(sessionStatus)
       ) {
-        log.info('session not active or self requested, skipping send queue', {
-          contactUserId,
-          sessionStatus: sessionStatusToString(sessionStatus),
-        });
+        log.info(
+          'session not active, self requested or saturated, skipping send queue',
+          {
+            contactUserId,
+            sessionStatus: sessionStatusToString(sessionStatus),
+          }
+        );
         return {
           success: false,
-          error: new Error('Session not active or self requested'),
+          error: new Error('Session not active, self requested or saturated'),
         };
       }
 

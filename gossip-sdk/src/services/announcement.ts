@@ -166,6 +166,12 @@ export class AnnouncementService {
               ),
             },
             updatedAt: new Date(),
+            sessionRecovery: {
+              ...latest.sessionRecovery,
+              /* If send announcement failed, There are chances that the session will be killed again the next state_update call.
+              We don't want to wait a delay before reseting the session so we set killedNextRetryAt to undefined*/
+              killedNextRetryAt: undefined,
+            },
           });
         }
       });
