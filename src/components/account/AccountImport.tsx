@@ -26,6 +26,7 @@ const AccountImport: React.FC<AccountImportProps> = ({
   const [isImporting, setIsImporting] = useState(false);
   const [error, setError] = useState('');
   const [step, setStep] = useState<'mnemonic' | 'details'>('mnemonic');
+  const [showPasswords, setShowPasswords] = useState(false);
 
   const handleMnemonicSubmit = () => {
     setError('');
@@ -211,6 +212,9 @@ const AccountImport: React.FC<AccountImportProps> = ({
             placeholder="Enter your password"
             error={password ? !validatePassword(password).valid : false}
             disabled={isImporting}
+            showPasswordToggle={true}
+            showPassword={showPasswords}
+            onShowPasswordChange={setShowPasswords}
           />
           {password && !validatePassword(password).valid && (
             <p className="text-destructive text-xs mt-1">
@@ -233,6 +237,8 @@ const AccountImport: React.FC<AccountImportProps> = ({
             placeholder="Confirm your password"
             error={confirmPassword.length > 0 && password !== confirmPassword}
             disabled={isImporting}
+            showPasswordToggle={false}
+            showPassword={showPasswords}
           />
           {confirmPassword.length > 0 && password !== confirmPassword && (
             <p className="text-destructive text-xs mt-1">

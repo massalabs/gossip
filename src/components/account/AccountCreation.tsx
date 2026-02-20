@@ -38,6 +38,7 @@ const AccountCreation: React.FC<AccountCreationProps> = ({
   const [usePassword, setUsePassword] = useState(true); // Default to password for safety
   const [accountCreationStarted, setAccountCreationStarted] = useState(false);
   const [showICloudModal, setShowICloudModal] = useState(false);
+  const [showPasswords, setShowPasswords] = useState(false);
 
   const { initializeAccountWithBiometrics, initializeAccount } =
     useAccountStore();
@@ -215,6 +216,9 @@ const AccountCreation: React.FC<AccountCreationProps> = ({
                 placeholder="Enter password"
                 error={!!passwordError}
                 disabled={isCreating}
+                showPasswordToggle={true}
+                showPassword={showPasswords}
+                onShowPasswordChange={setShowPasswords}
               />
               {passwordError && (
                 <p className="text-red-500 dark:text-red-400 text-xs mt-1">
@@ -237,6 +241,8 @@ const AccountCreation: React.FC<AccountCreationProps> = ({
                 placeholder="Confirm your password"
                 error={confirmPassword.length > 0 && !passwordsMatch}
                 disabled={isCreating}
+                showPasswordToggle={false}
+                showPassword={showPasswords}
               />
               {confirmPassword.length > 0 && !passwordsMatch && (
                 <p className="text-red-500 dark:text-red-400 text-xs mt-1">
