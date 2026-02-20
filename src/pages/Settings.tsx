@@ -23,7 +23,7 @@ import {
 } from 'react-feather';
 import { useNavigate } from 'react-router-dom';
 
-import ProfilePicture from '../assets/gossip_face.svg';
+import { getProfileHead } from '../components/avatar/profileHeads';
 import { useAppStore } from '../stores/appStore';
 import AccountBackup from '../components/account/AccountBackup';
 import ShareContact from '../components/settings/ShareContact';
@@ -172,11 +172,13 @@ const Settings = (): React.ReactElement => {
             className="cursor-pointer focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 rounded-full transition-opacity active:opacity-70"
             aria-label="Profile"
           >
-            <img
-              src={ProfilePicture}
-              className="w-16 h-16 rounded-full object-cover"
-              alt="Profile"
-            />
+            <div className="w-16 h-16 p-2.5 rounded-full bg-primary flex items-center justify-center">
+              <img
+                src={getProfileHead(userProfile?.username || '')}
+                className="w-full h-full object-contain"
+                alt="Profile"
+              />
+            </div>
           </button>
           <div className="flex-1 min-w-0">
             <div className="mb-2 flex items-center gap-2">

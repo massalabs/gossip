@@ -27,6 +27,7 @@ const Discussions: React.FC = () => {
   const gossip = useGossipSdk();
   const navigate = useNavigate();
   const isLoading = useAccountStore(s => s.isLoading);
+  const username = useAccountStore(s => s.userProfile?.username);
   const pendingSharedContent = useAppStore(s => s.pendingSharedContent);
   const setPendingSharedContent = useAppStore(s => s.setPendingSharedContent);
   const pendingForwardMessageId = useAppStore(s => s.pendingForwardMessageId);
@@ -125,7 +126,7 @@ const Discussions: React.FC = () => {
   const headerContent = (
     <div className="flex items-center justify-between w-full">
       <div className="flex items-center gap-3">
-        <UserProfileAvatar size={10} />
+        <UserProfileAvatar name={username} size={10} />
         <h1 className="text-xl font-semibold text-foreground">Gossip</h1>
       </div>
       <button
