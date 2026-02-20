@@ -352,7 +352,7 @@ npm test           # Watch mode
 npm run test:run   # Single run
 ```
 
-Tests use `fake-indexeddb` to simulate IndexedDB in Node.js environment.
+Tests use wa-sqlite with in-memory databases for fast, isolated execution.
 
 ## Architecture
 
@@ -360,7 +360,7 @@ Tests use `fake-indexeddb` to simulate IndexedDB in Node.js environment.
 gossip-sdk/
 ├── src/
 │   ├── gossipSdk.ts      # SDK class & factory
-│   ├── db.ts             # Database (Dexie) implementation
+│   ├── db.ts             # Database (SQLite) implementation
 │   ├── contacts.ts       # Contact operations
 │   ├── api/
 │   │   └── messageProtocol/  # REST protocol implementation

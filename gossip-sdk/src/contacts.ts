@@ -22,13 +22,18 @@ import {
   updateContactName as updateContactNameUtil,
   deleteContact as deleteContactUtil,
 } from './utils/contacts';
-import { type Contact, type GossipDatabase } from './db';
+import { type Contact } from './db';
 import type {
   UpdateContactNameResult,
   DeleteContactResult,
 } from './utils/contacts';
 import type { UserPublicKeys } from './wasm/bindings';
 import type { SessionModule } from './wasm/session';
+import {
+  getContactsByOwner,
+  getContactByOwnerAndUser,
+  insertContact as queryInsertContact,
+} from './queries';
 
 // Re-export result types
 export type { UpdateContactNameResult, DeleteContactResult };
@@ -37,21 +42,17 @@ export type { UpdateContactNameResult, DeleteContactResult };
  * Get all contacts for an owner.
  *
  * @param ownerUserId - The user ID of the contact owner
- * @param db - Database instance
  * @returns Array of contacts
  *
  * @example
  * ```typescript
- * const contacts = await getContacts(myUserId, db);
+ * const contacts = await getContacts(myUserId);
  * contacts.forEach(c => console.log(c.name, c.userId));
  * ```
  */
-export async function getContacts(
-  ownerUserId: string,
-  db: GossipDatabase
-): Promise<Contact[]> {
+export async function getContacts(ownerUserId: string): Promise<Contact[]> {
   try {
-    return await db.getContactsByOwner(ownerUserId);
+    return await getContactsByOwner(ownerUserId);
   } catch (error) {
     console.error('Error getting contacts:', error);
     return [];
@@ -63,12 +64,11 @@ export async function getContacts(
  *
  * @param ownerUserId - The user ID of the contact owner
  * @param contactUserId - The user ID of the contact
- * @param db - Database instance
  * @returns Contact or null if not found
  *
  * @example
  * ```typescript
- * const contact = await getContact(myUserId, theirUserId, db);
+ * const contact = await getContact(myUserId, theirUserId);
  * if (contact) {
  *   console.log('Found contact:', contact.name);
  * }
@@ -76,14 +76,10 @@ export async function getContacts(
  */
 export async function getContact(
   ownerUserId: string,
-  contactUserId: string,
-  db: GossipDatabase
+  contactUserId: string
 ): Promise<Contact | null> {
   try {
-    const contact = await db.getContactByOwnerAndUserId(
-      ownerUserId,
-      contactUserId
-    );
+    const contact = await getContactByOwnerAndUser(ownerUserId, contactUserId);
     return contact ?? null;
   } catch (error) {
     console.error('Error getting contact:', error);
@@ -98,7 +94,6 @@ export async function getContact(
  * @param userId - The user ID of the contact (Bech32-encoded)
  * @param name - Display name for the contact
  * @param publicKeys - The contact's public keys
- * @param db - Database instance
  * @returns Result with success status and optional contact
  *
  * @example
@@ -107,8 +102,7 @@ export async function getContact(
  *   myUserId,
  *   'gossip1abc...',
  *   'Alice',
- *   alicePublicKeys,
- *   db
+ *   alicePublicKeys
  * );
  * if (result.success) {
  *   console.log('Contact added:', result.contact?.name);
@@ -121,17 +115,16 @@ export async function addContact(
   ownerUserId: string,
   userId: string,
   name: string,
-  publicKeys: UserPublicKeys,
-  db: GossipDatabase
+  publicKeys: UserPublicKeys
 ): Promise<{ success: boolean; error?: string; contact?: Contact }> {
   try {
     // Check if contact already exists
-    const existing = await db.getContactByOwnerAndUserId(ownerUserId, userId);
+    const existing = await getContactByOwnerAndUser(ownerUserId, userId);
     if (existing) {
       return { success: false, error: 'Contact already exists' };
     }
 
-    const contact: Contact = {
+    await queryInsertContact({
       ownerUserId,
       userId,
       name,
@@ -139,11 +132,10 @@ export async function addContact(
       isOnline: false,
       lastSeen: new Date(),
       createdAt: new Date(),
-    };
+    });
 
-    const id = await db.contacts.add(contact);
-    const newContact = await db.contacts.get(id);
-    return { success: true, contact: newContact };
+    const newContact = await getContactByOwnerAndUser(ownerUserId, userId);
+    return { success: true, contact: newContact ?? undefined };
   } catch (error) {
     console.error('Error adding contact:', error);
     return {
@@ -159,12 +151,11 @@ export async function addContact(
  * @param ownerUserId - The user ID of the contact owner
  * @param contactUserId - The user ID of the contact
  * @param newName - New name for the contact
- * @param db - Database instance
  * @returns Result with success status and trimmed name
  *
  * @example
  * ```typescript
- * const result = await updateContactName(myUserId, theirUserId, 'Alice Smith', db);
+ * const result = await updateContactName(myUserId, theirUserId, 'Alice Smith');
  * if (result.ok) {
  *   console.log('Updated to:', result.trimmedName);
  * } else {
@@ -175,10 +166,9 @@ export async function addContact(
 export async function updateContactName(
   ownerUserId: string,
   contactUserId: string,
-  newName: string,
-  db: GossipDatabase
+  newName: string
 ): Promise<UpdateContactNameResult> {
-  return await updateContactNameUtil(ownerUserId, contactUserId, newName, db);
+  return await updateContactNameUtil(ownerUserId, contactUserId, newName);
 }
 
 /**
@@ -186,13 +176,12 @@ export async function updateContactName(
  *
  * @param ownerUserId - The user ID of the contact owner
  * @param contactUserId - The user ID of the contact to delete
- * @param db - Database instance
  * @param session - Session module for peer management
  * @returns Result with success status
  *
  * @example
  * ```typescript
- * const result = await deleteContact(myUserId, theirUserId, db, session);
+ * const result = await deleteContact(myUserId, theirUserId, session);
  * if (result.ok) {
  *   console.log('Contact deleted');
  * } else {
@@ -203,8 +192,7 @@ export async function updateContactName(
 export async function deleteContact(
   ownerUserId: string,
   contactUserId: string,
-  db: GossipDatabase,
   session: SessionModule
 ): Promise<DeleteContactResult> {
-  return await deleteContactUtil(ownerUserId, contactUserId, db, session);
+  return await deleteContactUtil(ownerUserId, contactUserId, session);
 }

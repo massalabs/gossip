@@ -1,7 +1,7 @@
 /**
  * User Profile Factory
  *
- * Creates test UserProfile instances using Dexie schema validation.
+ * Creates test UserProfile instances.
  * This ensures mocks stay in sync with the actual database schema.
  */
 import { UserProfile, AuthMethod, encodeUserId } from '@massalabs/gossip-sdk';

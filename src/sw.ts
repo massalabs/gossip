@@ -8,18 +8,8 @@ import { clientsClaim, setCacheNameDetails } from 'workbox-core';
 import { NavigationRoute, registerRoute } from 'workbox-routing';
 import { protocolConfig } from './config/protocol';
 import { defaultSyncConfig } from './config/sync';
-import {
-  RestMessageProtocol,
-  type EncryptedMessage,
-  GossipDatabase,
-} from '@massalabs/gossip-sdk';
-
-// Create database instance for service worker
-const db = new GossipDatabase();
-import {
-  getLastSyncTimestamp,
-  setLastSyncTimestamp,
-} from './utils/preferences';
+import { RestMessageProtocol } from '@massalabs/gossip-sdk';
+import { bridgeGet, bridgeSet } from './sw-bridge';
 import { APP_BUILD_ID } from './config/version';
 
 declare let self: ServiceWorkerGlobalScope;
@@ -68,162 +58,18 @@ class ServiceWorkerMessageReception {
     newMessagesCount: number;
   }> {
     try {
-      // Get all active seekers from the database
-      // These are updated by the main app after each fetchMessages() call
-      const seekers = await db.getActiveSeekers();
-      if (!seekers || seekers.length === 0) {
-        return {
-          success: true,
-          newMessagesCount: 0,
-        };
+      // Read active seekers from IndexedDB bridge (written by main app)
+      const raw = await bridgeGet<number[][]>('activeSeekers');
+      if (!raw || raw.length === 0) {
+        return { success: true, newMessagesCount: 0 };
       }
 
-      // Fetch messages for all seekers at once using the message protocol
-      let encryptedMessages: EncryptedMessage[] = [];
-      try {
-        encryptedMessages = await this.protocol.fetchMessages(seekers);
-      } catch (error) {
-        console.error(
-          'Service Worker: Failed to fetch messages via protocol:',
-          error
-        );
-        // Return success: false if fetch fails
-        return {
-          success: false,
-          newMessagesCount: 0,
-        };
-      }
-
-      // Store encrypted messages in IndexedDB for the main app to process
-      let actuallyAddedCount = 0;
-      if (encryptedMessages.length > 0) {
-        try {
-          const now = new Date();
-          await db.pendingEncryptedMessages.bulkAdd(
-            encryptedMessages.map(msg => ({
-              seeker: msg.seeker,
-              ciphertext: msg.ciphertext,
-              fetchedAt: now,
-            }))
-          );
-          // All messages were added successfully
-          actuallyAddedCount = encryptedMessages.length;
-        } catch (error) {
-          // Handle BulkError: some items may have been added successfully
-          if (error instanceof Error && error.name === 'BulkError') {
-            // Dexie BulkError has failures array and we can calculate success count
-            const bulkError = error as unknown as {
-              failures: Array<{ index: number }>;
-              successCount?: number;
-            };
-            // Calculate how many were actually added
-            // If successCount is available, use it; otherwise calculate from failures
-            if (typeof bulkError.successCount === 'number') {
-              actuallyAddedCount = bulkError.successCount;
-            } else {
-              // Calculate: total - failures = successes
-              actuallyAddedCount =
-                encryptedMessages.length - bulkError.failures.length;
-            }
-          } else if (
-            error instanceof Error &&
-            error.message.includes('ConstraintError')
-          ) {
-            // Single ConstraintError means none were added
-            actuallyAddedCount = 0;
-          } else {
-            // Other errors - log them
-            console.error(
-              'Service Worker: Failed to store encrypted messages:',
-              error
-            );
-            actuallyAddedCount = 0;
-          }
-        }
-      }
-
-      return {
-        success: true,
-        newMessagesCount: actuallyAddedCount,
-      };
+      const seekers = raw.map(arr => new Uint8Array(arr));
+      const messages = await this.protocol.fetchMessages(seekers);
+      return { success: true, newMessagesCount: messages.length };
     } catch (error) {
-      console.error('Failed to fetch messages for all discussions:', error);
-      return {
-        success: false,
-        newMessagesCount: 0,
-      };
-    }
-  }
-
-  async fetchAnnouncements(): Promise<{
-    success: boolean;
-    newAnnouncementsCount: number;
-  }> {
-    try {
-      // Fetch announcements from the API
-      const announcements = await this.protocol.fetchAnnouncements();
-
-      // Store announcements in IndexedDB for the main app to process
-      let actuallyAddedCount = 0;
-      if (announcements.length > 0) {
-        try {
-          const now = new Date();
-          await db.pendingAnnouncements.bulkAdd(
-            announcements.map(announcement => ({
-              announcement: announcement.data,
-              fetchedAt: now,
-              counter: announcement.counter,
-            }))
-          );
-          // All announcements were added successfully
-          actuallyAddedCount = announcements.length;
-        } catch (error) {
-          // Handle BulkError: some items may have been added successfully
-          if (error instanceof Error && error.name === 'BulkError') {
-            // Dexie BulkError has failures array and we can calculate success count
-            const bulkError = error as unknown as {
-              failures: Array<{ index: number }>;
-              successCount?: number;
-            };
-            // Calculate how many were actually added
-            // If successCount is available, use it; otherwise calculate from failures
-            if (typeof bulkError.successCount === 'number') {
-              actuallyAddedCount = bulkError.successCount;
-            } else {
-              // Calculate: total - failures = successes
-              actuallyAddedCount =
-                announcements.length - bulkError.failures.length;
-            }
-          } else if (
-            error instanceof Error &&
-            error.message.includes('ConstraintError')
-          ) {
-            // Single ConstraintError means none were added
-            actuallyAddedCount = 0;
-          } else {
-            // Other errors - log them
-            console.error(
-              'Service Worker: Failed to store announcements:',
-              error
-            );
-            actuallyAddedCount = 0;
-          }
-        }
-      }
-
-      return {
-        success: true,
-        newAnnouncementsCount: actuallyAddedCount,
-      };
-    } catch (error) {
-      console.error(
-        'Service Worker: Failed to fetch announcements via protocol:',
-        error
-      );
-      return {
-        success: false,
-        newAnnouncementsCount: 0,
-      };
+      console.error('Service Worker: Failed to fetch messages:', error);
+      return { success: false, newMessagesCount: 0 };
     }
   }
 }
@@ -292,7 +138,7 @@ async function handleSyncEvent(event: SyncEvent): Promise<void> {
         try {
           await performSyncAndNotify();
           // Update last sync timestamp after successful sync
-          await setLastSyncTimestamp();
+          await updateLastSyncTimestamp();
         } catch (error) {
           console.error('Service Worker: Periodic sync failed', error);
         }
@@ -397,13 +243,11 @@ self.addEventListener('notificationclick', (event: NotificationEvent) => {
 /**
  * Check if enough time has passed since the last sync.
  * Returns true if sync should proceed, false if it should be skipped.
- * Uses timestamp stored in Capacitor Preferences (accessible by service worker and background runner).
- * Also checks if the device is online.
+ * Uses timestamp stored in IndexedDB bridge (accessible by both main app and SW).
  */
 async function shouldPerformSync(): Promise<boolean> {
-  const lastSyncTime = await getLastSyncTimestamp();
+  const lastSyncTime = (await bridgeGet<number>('lastSyncTimestamp')) ?? 0;
   if (lastSyncTime === 0) {
-    // No previous sync recorded, proceed
     return true;
   }
 
@@ -418,38 +262,20 @@ async function shouldPerformSync(): Promise<boolean> {
   return true;
 }
 
-/**
- * Build notification body text for new messages/announcements
- */
-function buildNewItemsBody(
-  messageCount: number,
-  announcementCount: number
-): string {
-  if (messageCount > 0 && announcementCount > 0) {
-    return `You have ${messageCount} new message${messageCount > 1 ? 's' : ''} and ${announcementCount} new contact request${announcementCount > 1 ? 's' : ''}`;
-  }
-  if (messageCount > 0) {
-    return `You have ${messageCount} new message${messageCount > 1 ? 's' : ''}`;
-  }
-  if (announcementCount > 0) {
-    return `You have ${announcementCount} new contact request${announcementCount > 1 ? 's' : ''}`;
-  }
-  return '';
+async function updateLastSyncTimestamp(): Promise<void> {
+  await bridgeSet('lastSyncTimestamp', Date.now());
 }
 
 /**
- * Show a unified notification for messages/announcements
+ * Show a notification for new messages
  */
-async function showNewItemsNotification(
-  messageCount: number,
-  announcementCount: number
+async function showNewMessagesNotification(
+  messageCount: number
 ): Promise<void> {
-  const body = buildNewItemsBody(messageCount, announcementCount);
-  if (!body) return;
+  if (messageCount <= 0) return;
 
-  const title = announcementCount > 0 ? 'New contact request' : 'New message';
-  await showNotificationIfAllowed(title, {
-    body,
+  await showNotificationIfAllowed('New message', {
+    body: `You have ${messageCount} new message${messageCount > 1 ? 's' : ''}`,
     icon: '/favicon/favicon-96x96.png',
     badge: '/favicon/favicon-96x96.png',
     tag: 'gossip-sw-notification',
@@ -527,37 +353,16 @@ async function showNotificationIfAllowed(
 }
 
 /**
- * Perform sync and, if needed, show a notification or notify clients
+ * Perform sync and, if needed, show a notification
  */
 async function performSyncAndNotify(): Promise<void> {
   try {
-    // const [messageResult, announcementResult] = await Promise.all([
-    //   messageReception.fetchAllDiscussions(),
-    //   messageReception.fetchAnnouncements(),
-    // ]);
+    const result = await messageReception.fetchAllDiscussions();
 
-    // Disable announcements sync for now
-    const messageResult = await messageReception.fetchAllDiscussions();
-    const announcementResult = {
-      success: true,
-      newAnnouncementsCount: 0,
-    };
-
-    const hasNewMessages =
-      messageResult.success && messageResult.newMessagesCount > 0;
-    const hasNewAnnouncements =
-      announcementResult.success &&
-      announcementResult.newAnnouncementsCount > 0;
-
-    if (hasNewMessages || hasNewAnnouncements) {
-      // Show notification for new messages/discussions
+    if (result.success && result.newMessagesCount > 0) {
       const isActive = await hasActiveClients();
       if (!isActive) {
-        // App is in background - show notification
-        await showNewItemsNotification(
-          messageResult.newMessagesCount,
-          announcementResult.newAnnouncementsCount
-        );
+        await showNewMessagesNotification(result.newMessagesCount);
       }
     }
   } catch (error) {
@@ -606,7 +411,7 @@ function scheduleBackgroundSync(): void {
 
     await performSyncAndNotify();
     // Update last sync timestamp after successful sync
-    await setLastSyncTimestamp();
+    await updateLastSyncTimestamp();
     // Schedule next sync (will re-check app state)
     scheduleNextSync();
   }, FALLBACK_SYNC_INTERVAL_MS);

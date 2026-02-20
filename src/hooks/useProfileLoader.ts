@@ -1,12 +1,12 @@
 import { useEffect } from 'react';
 import { useAccountStore } from '../stores/accountStore';
 import { useAppStore } from '../stores/appStore';
-import { getSdk } from '../stores/sdkStore';
+import { getMostRecentUserProfile } from '@massalabs/gossip-sdk';
 
 const PROFILE_LOAD_DELAY_MS = 100;
 
 /**
- * Hook to load user profile from Dexie on app start
+ * Hook to load user profile from SQLite on app start
  */
 export function useProfileLoader() {
   const { setLoading } = useAccountStore();
@@ -21,18 +21,11 @@ export function useProfileLoader() {
           setTimeout(resolve, PROFILE_LOAD_DELAY_MS)
         );
 
-        // Ensure database is open before querying.
-        // NOTE: This may not be needed, but gives us the guarantee that it's open.
-        const db = getSdk().db;
-        if (!db.isOpen()) {
-          await db.open();
-        }
-
         const state = useAccountStore.getState();
-        const profile =
-          state.userProfile || (await db.userProfile.toCollection().first());
+        const existingProfile =
+          state.userProfile || (await getMostRecentUserProfile());
 
-        if (profile) {
+        if (existingProfile) {
           // Profile exists - let DiscussionList handle the welcome flow
           useAppStore.getState().setIsInitialized(true);
         } else {
@@ -40,7 +33,7 @@ export function useProfileLoader() {
           useAppStore.getState().setIsInitialized(false);
         }
       } catch (error) {
-        console.error('Error loading user profile from Dexie:', error);
+        console.error('Error loading user profile from SQLite:', error);
         // On error, assume no profile exists
         useAppStore.getState().setIsInitialized(false);
       } finally {

@@ -3,29 +3,27 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { gossipDb, GossipDatabase, DiscussionDirection } from '../../src/db';
+import { DiscussionDirection, DiscussionStatus } from '../../src/db';
 import { encodeUserId } from '../../src/utils/userId';
 import { updateDiscussionName } from '../../src/utils/discussions';
+import { clearAllTables } from '../../src/sqlite';
+import {
+  insertDiscussion,
+  getDiscussionById,
+} from '../../src/queries/discussions';
 
 const OWNER_USER_ID = encodeUserId(new Uint8Array(32).fill(6));
 const CONTACT_USER_ID = encodeUserId(new Uint8Array(32).fill(7));
 
 describe('Discussion utilities', () => {
-  let db: GossipDatabase;
-
-  beforeEach(async () => {
-    db = gossipDb();
-    if (!db.isOpen()) {
-      await db.open();
-    }
-    await Promise.all(db.tables.map(table => table.clear()));
-  });
+  beforeEach(clearAllTables);
 
   it('updates the custom discussion name', async () => {
-    const discussionId = await db.discussions.add({
+    const discussionId = await insertDiscussion({
       ownerUserId: OWNER_USER_ID,
       contactUserId: CONTACT_USER_ID,
       direction: DiscussionDirection.INITIATED,
+      status: DiscussionStatus.ACTIVE,
       weAccepted: true,
       sendAnnouncement: null,
       unreadCount: 0,
@@ -33,18 +31,19 @@ describe('Discussion utilities', () => {
       updatedAt: new Date(),
     });
 
-    const result = await updateDiscussionName(discussionId, 'Custom Name', db);
+    const result = await updateDiscussionName(discussionId, 'Custom Name');
 
     expect(result.success).toBe(true);
-    const discussion = await db.discussions.get(discussionId);
+    const discussion = await getDiscussionById(discussionId);
     expect(discussion?.customName).toBe('Custom Name');
   });
 
   it('clears the custom name when empty', async () => {
-    const discussionId = await db.discussions.add({
+    const discussionId = await insertDiscussion({
       ownerUserId: OWNER_USER_ID,
       contactUserId: CONTACT_USER_ID,
       direction: DiscussionDirection.INITIATED,
+      status: DiscussionStatus.ACTIVE,
       weAccepted: true,
       sendAnnouncement: null,
       customName: 'Old Name',
@@ -53,15 +52,15 @@ describe('Discussion utilities', () => {
       updatedAt: new Date(),
     });
 
-    const result = await updateDiscussionName(discussionId, '  ', db);
+    const result = await updateDiscussionName(discussionId, '  ');
 
     expect(result.success).toBe(true);
-    const discussion = await db.discussions.get(discussionId);
-    expect(discussion?.customName).toBeUndefined();
+    const discussion = await getDiscussionById(discussionId);
+    expect(discussion?.customName).toBeNull();
   });
 
   it('returns not_found for unknown discussion', async () => {
-    const result = await updateDiscussionName(99999, 'Name', db);
+    const result = await updateDiscussionName(99999, 'Name');
 
     expect(result.success).toBe(false);
     if (!result.success) {

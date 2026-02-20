@@ -7,8 +7,13 @@ const __dirname = dirname(__filename);
 
 // Dedicated Vitest config file for VSCode plugin compatibility
 // The VSCode Vitest plugin specifically looks for vitest.config.* files
-// This ensures the setup file with fake-indexeddb is properly loaded
+// This ensures the setup file with SQLite initialization is properly loaded
 export default defineConfig({
+  resolve: {
+    alias: {
+      '@massalabs/gossip-sdk': resolve(__dirname, 'gossip-sdk/src'),
+    },
+  },
   test: {
     globals: true,
     environment: 'node',

@@ -8,6 +8,7 @@ export default tseslint.config(
   {
     ignores: [
       'dist',
+      'gossip-sdk/dist',
       'src/assets/generated',
       'gossip-sdk/src/assets/generated',
       'android/**',

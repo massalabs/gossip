@@ -6,8 +6,8 @@
  * - Browser-specific service worker mocks
  * - React availability for hooks
  *
- * Note: Browser tests use real IndexedDB (no fake-indexeddb needed),
- * so we import setup.shared.ts instead of setup.ts to avoid Node-specific polyfills.
+ * Note: Browser tests use setup.shared.ts instead of setup.ts
+ * to avoid Node-specific polyfills (fs, createRequire for wa-sqlite WASM loading).
  */
 
 // Import shared setup first (includes service worker mock and other utilities)

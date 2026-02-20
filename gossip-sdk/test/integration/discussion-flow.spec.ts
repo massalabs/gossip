@@ -15,15 +15,16 @@ import {
   beforeAll,
 } from 'vitest';
 import {
-  gossipDb,
   Contact,
   DiscussionDirection,
   MessageType,
   MessageDirection,
   MessageStatus,
-  GossipDatabase,
 } from '../../src/db';
 import { MockMessageProtocol } from '../mocks';
+import { eq, and } from 'drizzle-orm';
+import { getSqliteDb, clearAllTables } from '../../src/sqlite';
+import * as schema from '../../src/schema';
 import {
   createTestSession,
   cleanupTestSession,
@@ -75,9 +76,32 @@ async function isSessionUp(
   );
 }
 
+async function getContactFromSqlite(
+  ownerUserId: string,
+  contactUserId: string
+) {
+  return getSqliteDb()
+    .select()
+    .from(schema.contacts)
+    .where(
+      and(
+        eq(schema.contacts.ownerUserId, ownerUserId),
+        eq(schema.contacts.userId, contactUserId)
+      )
+    )
+    .get();
+}
+
+async function getDiscussionFromSqlite(id: number) {
+  return getSqliteDb()
+    .select()
+    .from(schema.discussions)
+    .where(eq(schema.discussions.id, id))
+    .get();
+}
+
 describe('Discussion Flow', () => {
   let mockProtocol: MockMessageProtocol;
-  let db: GossipDatabase;
 
   let alice: TestSessionData;
   let aliceSdk: GossipSdk;
@@ -91,11 +115,7 @@ describe('Discussion Flow', () => {
   });
 
   beforeEach(async () => {
-    db = gossipDb();
-    if (!db.isOpen()) {
-      await db.open();
-    }
-    await Promise.all(db.tables.map(table => table.clear()));
+    await clearAllTables();
     mockProtocol.clearMockData();
 
     vi.clearAllMocks();
@@ -112,11 +132,11 @@ describe('Discussion Flow', () => {
 
     // Create gossipSdk instances for Alice and Bob
     aliceSdk = new GossipSdk();
-    await aliceSdk.init();
+    await aliceSdk.init({});
     await aliceSdk.openSession({
       mnemonic: aliceMnemonic,
-      encryptionKey: aliceEncryptionKey,
       onPersist: async () => {},
+      persistEncryptionKey: aliceEncryptionKey,
     });
     // Replace protocol with mock for testing
     (
@@ -127,11 +147,11 @@ describe('Discussion Flow', () => {
     ] = mockProtocol;
 
     bobSdk = new GossipSdk();
-    await bobSdk.init();
+    await bobSdk.init({});
     await bobSdk.openSession({
       mnemonic: bobMnemonic,
-      encryptionKey: bobEncryptionKey,
       onPersist: async () => {},
+      persistEncryptionKey: bobEncryptionKey,
     });
     // Replace protocol with mock for testing
     (
@@ -176,7 +196,7 @@ describe('Discussion Flow', () => {
       await bobSdk.announcements.fetch();
 
       // Bob should have Alice as a contact with the username from announcement
-      const bobContact = await db.getContactByOwnerAndUserId(
+      const bobContact = await getContactFromSqlite(
         bobSdk.userId,
         alice.session.userIdEncoded
       );
@@ -212,7 +232,7 @@ describe('Discussion Flow', () => {
       await mockProtocol.sendAnnouncement(aliceAnnouncement);
       await bobSdk.announcements.fetch();
 
-      const bobContact = await db.getContactByOwnerAndUserId(
+      const bobContact = await getContactFromSqlite(
         bobSdk.userId,
         alice.session.userIdEncoded
       );
@@ -244,7 +264,7 @@ describe('Discussion Flow', () => {
       await mockProtocol.sendAnnouncement(aliceAnnouncement);
       await bobSdk.announcements.fetch();
 
-      const bobContact = await db.getContactByOwnerAndUserId(
+      const bobContact = await getContactFromSqlite(
         bobSdk.userId,
         alice.session.userIdEncoded
       );
@@ -275,14 +295,14 @@ describe('Discussion Flow', () => {
         createdAt: new Date(),
       };
 
-      await db.contacts.add(aliceBobContact);
+      await getSqliteDb().insert(schema.contacts).values(aliceBobContact);
 
       // Alice initiates discussion with Bob
       const result = await aliceSdk.discussions.start(aliceBobContact);
       if (!result.success) throw result.error;
       const aliceDiscussionId = result.data.discussionId;
 
-      const aliceDiscussion = await db.discussions.get(aliceDiscussionId);
+      const aliceDiscussion = await getDiscussionFromSqlite(aliceDiscussionId);
       expect(aliceDiscussion).toBeDefined();
       expect(aliceDiscussion?.weAccepted).toBe(true);
       expect(aliceDiscussion?.direction).toBe(DiscussionDirection.INITIATED);
@@ -311,7 +331,7 @@ describe('Discussion Flow', () => {
       // Bob accepts the discussion
       await bobSdk.discussions.accept(bobDiscussion);
 
-      const bobDiscussionAfterAccept = await db.discussions.get(
+      const bobDiscussionAfterAccept = await getDiscussionFromSqlite(
         bobDiscussion.id!
       );
       expect(bobDiscussionAfterAccept?.weAccepted).toBe(true);
@@ -341,7 +361,7 @@ describe('Discussion Flow', () => {
         createdAt: new Date(),
       };
 
-      await db.contacts.add(aliceBobContact);
+      await getSqliteDb().insert(schema.contacts).values(aliceBobContact);
 
       // Bob adds Alice as contact
       const bobAliceContact: Omit<Contact, 'id'> = {
@@ -355,7 +375,7 @@ describe('Discussion Flow', () => {
         createdAt: new Date(),
       };
 
-      await db.contacts.add(bobAliceContact);
+      await getSqliteDb().insert(schema.contacts).values(bobAliceContact);
 
       // Both initiate at the same time
       const aliceResult = await aliceSdk.discussions.start(aliceBobContact, {
@@ -374,16 +394,13 @@ describe('Discussion Flow', () => {
       if (!bobResult.success) throw bobResult.error;
       const bobDiscussionId = bobResult.data.discussionId;
 
-      const aliceDiscussion = await db.discussions.get(aliceDiscussionId);
+      const aliceDiscussion = await getDiscussionFromSqlite(aliceDiscussionId);
       expect(aliceDiscussion?.weAccepted).toBe(true);
       expect(aliceDiscussion?.direction).toBe(DiscussionDirection.INITIATED);
 
-      const bobDiscussion = await db.discussions.get(bobDiscussionId);
+      const bobDiscussion = await getDiscussionFromSqlite(bobDiscussionId);
       expect(bobDiscussion?.weAccepted).toBe(true);
       expect(bobDiscussion?.direction).toBe(DiscussionDirection.INITIATED);
-
-      // Alice fetches and sees Bob's announcement
-      await aliceSdk.announcements.fetch();
 
       // Alice fetches and sees Bob's announcement
       await aliceSdk.announcements.fetch();
@@ -409,14 +426,14 @@ describe('Discussion Flow', () => {
         createdAt: new Date(),
       };
 
-      await db.contacts.add(aliceBobContact);
+      await getSqliteDb().insert(schema.contacts).values(aliceBobContact);
 
       // Alice initiates discussion with Bob
       const result = await aliceSdk.discussions.start(aliceBobContact);
       if (!result.success) throw result.error;
       const aliceDiscussionId = result.data.discussionId;
 
-      const aliceDiscussion = await db.discussions.get(aliceDiscussionId);
+      const aliceDiscussion = await getDiscussionFromSqlite(aliceDiscussionId);
       expect(aliceDiscussion).toBeDefined();
       expect(aliceDiscussion?.weAccepted).toBe(true);
       expect(aliceDiscussion?.direction).toBe(DiscussionDirection.INITIATED);
@@ -449,7 +466,7 @@ describe('Discussion Flow', () => {
       );
       expect(bobDiscussionAfterRefuse).toBeUndefined();
 
-      const bobContactAfterRefuse = await db.getContactByOwnerAndUserId(
+      const bobContactAfterRefuse = await getContactFromSqlite(
         bobSdk.userId,
         aliceSdk.userId
       );
@@ -457,7 +474,7 @@ describe('Discussion Flow', () => {
 
       // On Alice's side: discussion should remain pending
       const aliceDiscussionAfterRefuse =
-        await db.discussions.get(aliceDiscussionId);
+        await getDiscussionFromSqlite(aliceDiscussionId);
       expect(aliceDiscussionAfterRefuse).toBeDefined();
       expect(aliceDiscussionAfterRefuse?.weAccepted).toBe(true);
       expect(aliceDiscussionAfterRefuse?.direction).toBe(
@@ -481,7 +498,7 @@ describe('Discussion Flow', () => {
         createdAt: new Date(),
       };
 
-      await db.contacts.add(aliceBobContact);
+      await getSqliteDb().insert(schema.contacts).values(aliceBobContact);
 
       // Alice initiates discussion with Bob
       const aliceResult = await aliceSdk.discussions.start(aliceBobContact);
@@ -518,13 +535,13 @@ describe('Discussion Flow', () => {
         createdAt: new Date(),
       };
 
-      await db.contacts.add(bobAliceContact);
+      await getSqliteDb().insert(schema.contacts).values(bobAliceContact);
 
       const bobResult = await bobSdk.discussions.start(bobAliceContact);
       if (!bobResult.success) throw bobResult.error;
       const bobDiscussionId = bobResult.data.discussionId;
 
-      const bobNewDiscussion = await db.discussions.get(bobDiscussionId);
+      const bobNewDiscussion = await getDiscussionFromSqlite(bobDiscussionId);
       expect(bobNewDiscussion).toBeDefined();
       expect(bobNewDiscussion?.weAccepted).toBe(true);
       expect(bobNewDiscussion?.direction).toBe(DiscussionDirection.INITIATED);
@@ -568,7 +585,7 @@ describe('Discussion Flow', () => {
         createdAt: new Date(),
       };
 
-      await db.contacts.add(aliceBobContact);
+      await getSqliteDb().insert(schema.contacts).values(aliceBobContact);
 
       // Alice initiates discussion with Bob
       const result = await aliceSdk.discussions.start(aliceBobContact);
@@ -593,7 +610,7 @@ describe('Discussion Flow', () => {
       // Bob accepts the discussion
       await bobSdk.discussions.accept(bobDiscussion);
 
-      const bobDiscussionAfterAccept = await db.discussions.get(
+      const bobDiscussionAfterAccept = await getDiscussionFromSqlite(
         bobDiscussion.id!
       );
       expect(bobDiscussionAfterAccept?.weAccepted).toBe(true);
@@ -613,7 +630,7 @@ describe('Discussion Flow', () => {
       expect(renewResult.success).toBe(true);
       if (!renewResult.success) throw renewResult.error;
 
-      const bobDiscussionAfterRenew = await db.discussions.get(
+      const bobDiscussionAfterRenew = await getDiscussionFromSqlite(
         bobDiscussion.id!
       );
       expect(bobDiscussionAfterRenew?.sendAnnouncement).toBeDefined();
@@ -642,7 +659,7 @@ describe('Discussion Flow', () => {
         createdAt: new Date(),
       };
 
-      await db.contacts.add(aliceBobContact);
+      await getSqliteDb().insert(schema.contacts).values(aliceBobContact);
 
       const announcementMsg = 'Hello Bob!';
       // Alice sends initial announcement (starts discussion)
@@ -653,7 +670,7 @@ describe('Discussion Flow', () => {
       if (!startResult.success) throw startResult.error;
       const aliceDiscussionId = startResult.data.discussionId;
 
-      const aliceDiscussion = await db.discussions.get(aliceDiscussionId);
+      const aliceDiscussion = await getDiscussionFromSqlite(aliceDiscussionId);
       expect(aliceDiscussion).toBeDefined();
       expect(aliceDiscussion?.weAccepted).toBe(true);
       expect(aliceDiscussion?.direction).toBe(DiscussionDirection.INITIATED);
@@ -682,7 +699,7 @@ describe('Discussion Flow', () => {
       if (!renewResult.success) throw renewResult.error;
 
       const aliceDiscussionAfterRenew =
-        await db.discussions.get(aliceDiscussionId);
+        await getDiscussionFromSqlite(aliceDiscussionId);
       expect(aliceDiscussionAfterRenew).toBeDefined();
       expect(aliceDiscussionAfterRenew?.weAccepted).toBe(true);
       expect(aliceDiscussionAfterRenew?.sendAnnouncement).toBeDefined();
@@ -710,7 +727,7 @@ describe('Discussion Flow', () => {
       // Bob accepts the discussion after receiving the renewal
       await bobSdk.discussions.accept(bobDiscussion);
 
-      const bobDiscussionAfterAccept = await db.discussions.get(
+      const bobDiscussionAfterAccept = await getDiscussionFromSqlite(
         bobDiscussion.id!
       );
       expect(bobDiscussionAfterAccept?.weAccepted).toBe(true);
@@ -741,7 +758,7 @@ describe('Discussion Flow', () => {
         createdAt: new Date(),
       };
 
-      await db.contacts.add(aliceBobContact);
+      await getSqliteDb().insert(schema.contacts).values(aliceBobContact);
 
       // Set a short retry delay for this test
       // Since the service stores a reference to config, modifying it will update the service's config
@@ -768,7 +785,7 @@ describe('Discussion Flow', () => {
       if (!result.success) throw result.error;
       const aliceDiscussionId = result.data.discussionId;
 
-      let aliceDiscussion = await db.discussions.get(aliceDiscussionId);
+      let aliceDiscussion = await getDiscussionFromSqlite(aliceDiscussionId);
       // After network failure, sendAnnouncement should still be set (ready to retry)
       expect(aliceDiscussion?.sendAnnouncement).not.toBeNull();
 
@@ -779,7 +796,7 @@ describe('Discussion Flow', () => {
       // Resend should succeed
       await expect(aliceSdk.updateState()).resolves.not.toThrow();
 
-      aliceDiscussion = await db.discussions.get(aliceDiscussionId);
+      aliceDiscussion = await getDiscussionFromSqlite(aliceDiscussionId);
 
       // After resend, sendAnnouncement should be cleared if successful
       expect(aliceDiscussion?.sendAnnouncement).toBeNull();
@@ -828,7 +845,7 @@ describe('Discussion Flow', () => {
         createdAt: new Date(),
       };
 
-      await db.contacts.add(aliceBobContact);
+      await getSqliteDb().insert(schema.contacts).values(aliceBobContact);
 
       // Alice initiates discussion with Bob (announcement succeeds - call 1)
       const result = await aliceSdk.discussions.start(aliceBobContact);
@@ -849,7 +866,7 @@ describe('Discussion Flow', () => {
       // STEP 3: Bob accepts but network fails
       await bobSdk.discussions.accept(bobDiscussion);
 
-      let bobDiscussionAfterAccept = await db.discussions.get(
+      let bobDiscussionAfterAccept = await getDiscussionFromSqlite(
         bobDiscussion.id!
       );
       expect(bobDiscussionAfterAccept?.weAccepted).toBe(true);
@@ -863,7 +880,9 @@ describe('Discussion Flow', () => {
       // STEP 4: Bob resends and succeeds
       await expect(bobSdk.updateState()).resolves.not.toThrow();
 
-      bobDiscussionAfterAccept = await db.discussions.get(bobDiscussion.id!);
+      bobDiscussionAfterAccept = await getDiscussionFromSqlite(
+        bobDiscussion.id!
+      );
       expect(bobDiscussionAfterAccept?.sendAnnouncement).toBeNull();
 
       // STEP 5: Alice fetches announcements and sees Bob's acceptance
@@ -911,14 +930,14 @@ describe('Discussion Flow', () => {
         createdAt: new Date(),
       };
 
-      await db.contacts.add(aliceBobContact);
+      await getSqliteDb().insert(schema.contacts).values(aliceBobContact);
 
       // Alice initiates discussion but network fails
       const result = await aliceSdk.discussions.start(aliceBobContact);
       if (!result.success) throw result.error;
       const aliceDiscussionId = result.data.discussionId;
 
-      let aliceDiscussion = await db.discussions.get(aliceDiscussionId);
+      let aliceDiscussion = await getDiscussionFromSqlite(aliceDiscussionId);
       expect(aliceDiscussion?.sendAnnouncement).not.toBeNull();
 
       // STEP 2: Bob adds Alice as contact and initiates discussion
@@ -933,14 +952,14 @@ describe('Discussion Flow', () => {
         createdAt: new Date(),
       };
 
-      await db.contacts.add(bobAliceContact);
+      await getSqliteDb().insert(schema.contacts).values(bobAliceContact);
       await bobSdk.discussions.start(bobAliceContact);
 
       // STEP 3: Alice receives Bob's announcement before resending her own
       const res = await aliceSdk.announcements.fetch();
       expect(res.success).toBe(true);
 
-      aliceDiscussion = await db.discussions.get(aliceDiscussionId);
+      aliceDiscussion = await getDiscussionFromSqlite(aliceDiscussionId);
       // When Alice receives Bob's announcement, the session should become Active
       // But sendAnnouncement is still not null (pending retry of Alice's failed announcement)
       expect(aliceDiscussion?.weAccepted).toBe(true);
@@ -957,7 +976,7 @@ describe('Discussion Flow', () => {
 
       await expect(aliceSdk.updateState()).resolves.not.toThrow();
 
-      aliceDiscussion = await db.discussions.get(aliceDiscussionId);
+      aliceDiscussion = await getDiscussionFromSqlite(aliceDiscussionId);
       expect(aliceDiscussion?.sendAnnouncement).toBeNull();
 
       // STEP 5: Bob fetches and sees Alice's announcement
@@ -1027,7 +1046,7 @@ describe('Discussion Flow', () => {
         createdAt: new Date(),
       };
 
-      await db.contacts.add(aliceBobContact);
+      await getSqliteDb().insert(schema.contacts).values(aliceBobContact);
 
       let result = await aliceSdk.discussions.start(aliceBobContact);
       expect(result.success).toBe(false);
@@ -1040,7 +1059,7 @@ describe('Discussion Flow', () => {
       if (!result.success) throw result.error;
       const aliceDiscussionId = result.data.discussionId;
 
-      let aliceDiscussion = await db.discussions.get(aliceDiscussionId);
+      let aliceDiscussion = await getDiscussionFromSqlite(aliceDiscussionId);
       // After network failure, sendAnnouncement should be set for retry
       expect(aliceDiscussion?.sendAnnouncement).not.toBeNull();
 
@@ -1052,7 +1071,7 @@ describe('Discussion Flow', () => {
 
       await expect(aliceSdk.updateState()).resolves.not.toThrow();
 
-      aliceDiscussion = await db.discussions.get(aliceDiscussionId);
+      aliceDiscussion = await getDiscussionFromSqlite(aliceDiscussionId);
       expect(aliceDiscussion?.sendAnnouncement).toBeNull();
       expect(aliceSdk.discussions.getStatus(bobSdk.userId)).toBe(
         SessionStatus.SelfRequested
@@ -1075,7 +1094,7 @@ describe('Discussion Flow', () => {
         createdAt: new Date(),
       };
 
-      await db.contacts.add(aliceBobContact);
+      await getSqliteDb().insert(schema.contacts).values(aliceBobContact);
 
       // Set short retry delay for this test
       const originalRetryDelay = bobSdk.config.announcements.retryDelayMs;
@@ -1193,14 +1212,10 @@ describe('Discussion Flow', () => {
      */
     async function checkDeleted(
       userSdk: GossipSdk,
-      contactUserId: string,
-      database: typeof db
+      contactUserId: string
     ): Promise<void> {
       // Verify contact is deleted
-      const contact = await database.getContactByOwnerAndUserId(
-        userSdk.userId,
-        contactUserId
-      );
+      const contact = await getContactFromSqlite(userSdk.userId, contactUserId);
       expect(contact).toBeUndefined();
 
       // Verify discussion is deleted
@@ -1211,10 +1226,16 @@ describe('Discussion Flow', () => {
       expect(discussion).toBeUndefined();
 
       // Verify all messages are deleted
-      const messages = await database.messages
-        .where('[ownerUserId+contactUserId]')
-        .equals([userSdk.userId, contactUserId])
-        .toArray();
+      const messages = await getSqliteDb()
+        .select()
+        .from(schema.messages)
+        .where(
+          and(
+            eq(schema.messages.ownerUserId, userSdk.userId),
+            eq(schema.messages.contactUserId, contactUserId)
+          )
+        )
+        .all();
       expect(messages.length).toBe(0);
 
       // Verify session status is UnknownPeer
@@ -1234,7 +1255,7 @@ describe('Discussion Flow', () => {
       await aliceSdk.contacts.delete(aliceSdk.userId, bobSdk.userId);
 
       // Verify deletion was successful
-      await checkDeleted(aliceSdk, bobSdk.userId, db);
+      await checkDeleted(aliceSdk, bobSdk.userId);
     });
 
     it('Alice send an announcement with msg to bob but bob delete alice contact', async () => {
@@ -1249,7 +1270,7 @@ describe('Discussion Flow', () => {
         createdAt: new Date(),
       };
 
-      await db.contacts.add(aliceBobContact);
+      await getSqliteDb().insert(schema.contacts).values(aliceBobContact);
 
       // Alice sends announcement with message
       const announcementMsg = "Hello Bob, let's connect!";
@@ -1263,7 +1284,7 @@ describe('Discussion Flow', () => {
       await bobSdk.announcements.fetch();
 
       // Verify Bob has Alice's contact
-      const bobAliceContact = await db.getContactByOwnerAndUserId(
+      const bobAliceContact = await getContactFromSqlite(
         bobSdk.userId,
         aliceSdk.userId
       );
@@ -1282,7 +1303,7 @@ describe('Discussion Flow', () => {
       await bobSdk.contacts.delete(bobSdk.userId, aliceSdk.userId);
 
       // Verify deletion was successful
-      await checkDeleted(bobSdk, aliceSdk.userId, db);
+      await checkDeleted(bobSdk, aliceSdk.userId);
 
       // Verify Alice has still a pending discussion with Bob
       const aliceDiscussion = await aliceSdk.discussions.get(
@@ -1310,7 +1331,7 @@ describe('Discussion Flow', () => {
         createdAt: new Date(),
       };
 
-      await db.contacts.add(aliceBobContact);
+      await getSqliteDb().insert(schema.contacts).values(aliceBobContact);
 
       // Alice sends announcement with message
       const announcementMsg = 'Hello Bob!';
@@ -1334,7 +1355,7 @@ describe('Discussion Flow', () => {
       await aliceSdk.contacts.delete(aliceSdk.userId, bobSdk.userId);
 
       // Verify deletion was successful
-      await checkDeleted(aliceSdk, bobSdk.userId, db);
+      await checkDeleted(aliceSdk, bobSdk.userId);
 
       // Bob accepts and sends announcement back
       if (!bobDiscussion) throw new Error('Bob discussion not found');
@@ -1387,7 +1408,7 @@ describe('Discussion Flow', () => {
       await aliceSdk.messages.fetch();
 
       // 2. Outgoing WAITING_SESSION
-      await db.messages.add({
+      await getSqliteDb().insert(schema.messages).values({
         ownerUserId: aliceSdk.userId,
         contactUserId: bobSdk.userId,
         content: 'Message WAITING_SESSION',
@@ -1398,50 +1419,56 @@ describe('Discussion Flow', () => {
       });
 
       // 3. Outgoing READY
-      await db.messages.add({
-        ownerUserId: aliceSdk.userId,
-        contactUserId: bobSdk.userId,
-        content: 'Message READY',
-        type: MessageType.TEXT,
-        direction: MessageDirection.OUTGOING,
-        status: MessageStatus.READY,
-        timestamp: new Date(),
-        seeker: new Uint8Array([1, 2, 3]),
-        encryptedMessage: new Uint8Array([4, 5, 6]),
-        whenToSend: new Date(Date.now() + 1000),
-      });
+      await getSqliteDb()
+        .insert(schema.messages)
+        .values({
+          ownerUserId: aliceSdk.userId,
+          contactUserId: bobSdk.userId,
+          content: 'Message READY',
+          type: MessageType.TEXT,
+          direction: MessageDirection.OUTGOING,
+          status: MessageStatus.READY,
+          timestamp: new Date(),
+          seeker: new Uint8Array([1, 2, 3]),
+          encryptedMessage: new Uint8Array([4, 5, 6]),
+          whenToSend: new Date(Date.now() + 1000),
+        });
 
       // 4. Outgoing SENT
-      await db.messages.add({
-        ownerUserId: aliceSdk.userId,
-        contactUserId: bobSdk.userId,
-        content: 'Message SENT',
-        type: MessageType.TEXT,
-        direction: MessageDirection.OUTGOING,
-        status: MessageStatus.SENT,
-        timestamp: new Date(),
-        seeker: new Uint8Array([7, 8, 9]),
-        encryptedMessage: new Uint8Array([10, 11, 12]),
-        whenToSend: new Date(),
-      });
+      await getSqliteDb()
+        .insert(schema.messages)
+        .values({
+          ownerUserId: aliceSdk.userId,
+          contactUserId: bobSdk.userId,
+          content: 'Message SENT',
+          type: MessageType.TEXT,
+          direction: MessageDirection.OUTGOING,
+          status: MessageStatus.SENT,
+          timestamp: new Date(),
+          seeker: new Uint8Array([7, 8, 9]),
+          encryptedMessage: new Uint8Array([10, 11, 12]),
+          whenToSend: new Date(),
+        });
 
       // 5. Outgoing DELIVERED (acknowledged)
-      await db.messages.add({
-        ownerUserId: aliceSdk.userId,
-        contactUserId: bobSdk.userId,
-        content: 'Message DELIVERED',
-        type: MessageType.TEXT,
-        direction: MessageDirection.OUTGOING,
-        status: MessageStatus.DELIVERED,
-        timestamp: new Date(),
-        seeker: new Uint8Array([13, 14, 15]),
-      });
+      await getSqliteDb()
+        .insert(schema.messages)
+        .values({
+          ownerUserId: aliceSdk.userId,
+          contactUserId: bobSdk.userId,
+          content: 'Message DELIVERED',
+          type: MessageType.TEXT,
+          direction: MessageDirection.OUTGOING,
+          status: MessageStatus.DELIVERED,
+          timestamp: new Date(),
+          seeker: new Uint8Array([13, 14, 15]),
+        });
 
       // Alice deletes Bob's contact
       await aliceSdk.contacts.delete(aliceSdk.userId, bobSdk.userId);
 
       // Verify deletion was successful
-      await checkDeleted(aliceSdk, bobSdk.userId, db);
+      await checkDeleted(aliceSdk, bobSdk.userId);
     });
 
     it("Alice delete bob contact, Bob send msg to alice, she fetch messages but don't receive it", async () => {
@@ -1455,7 +1482,7 @@ describe('Discussion Flow', () => {
       await aliceSdk.contacts.delete(aliceSdk.userId, bobSdk.userId);
 
       // Verify deletion was successful
-      await checkDeleted(aliceSdk, bobSdk.userId, db);
+      await checkDeleted(aliceSdk, bobSdk.userId);
 
       // Bob sends a message to Alice
       const bobMsgResult = await bobSdk.messages.send({
@@ -1474,17 +1501,29 @@ describe('Discussion Flow', () => {
       expect(fetchResult.success).toBe(true);
 
       // Verify Alice still has no messages (deletion should persist)
-      const aliceMessages = await db.messages
-        .where('[ownerUserId+contactUserId]')
-        .equals([aliceSdk.userId, bobSdk.userId])
-        .toArray();
+      const aliceMessages = await getSqliteDb()
+        .select()
+        .from(schema.messages)
+        .where(
+          and(
+            eq(schema.messages.ownerUserId, aliceSdk.userId),
+            eq(schema.messages.contactUserId, bobSdk.userId)
+          )
+        )
+        .all();
       expect(aliceMessages.length).toBe(0);
 
       // Verify Bob's message is still sent but won't be delivered
-      const bobMessages = await db.messages
-        .where('[ownerUserId+contactUserId]')
-        .equals([bobSdk.userId, aliceSdk.userId])
-        .toArray();
+      const bobMessages = await getSqliteDb()
+        .select()
+        .from(schema.messages)
+        .where(
+          and(
+            eq(schema.messages.ownerUserId, bobSdk.userId),
+            eq(schema.messages.contactUserId, aliceSdk.userId)
+          )
+        )
+        .all();
       const bobOutgoingMsg = bobMessages.find(
         m => m.content === 'Hello Alice after deletion!'
       );
@@ -1507,10 +1546,7 @@ describe('session break in session manager', () => {
   });
 
   beforeEach(async () => {
-    aliceSdk = new GossipSdk();
-    await aliceSdk.init();
-    bobSdk = new GossipSdk();
-    await bobSdk.init();
+    await clearAllTables();
     mockProtocol.clearMockData();
   });
 
@@ -1548,11 +1584,11 @@ describe('session break in session manager', () => {
     const bobEncryptionKey = await generateEncryptionKey();
 
     aliceSdk = new GossipSdk();
-    await aliceSdk.init();
+    await aliceSdk.init({});
     await aliceSdk.openSession({
       mnemonic: aliceMnemonic,
-      encryptionKey: aliceEncryptionKey,
       onPersist: async () => {},
+      persistEncryptionKey: aliceEncryptionKey,
       sessionConfig: createSessionConfig(
         max_session_inactivity_millis,
         keep_alive_interval_millis,
@@ -1567,11 +1603,11 @@ describe('session break in session manager', () => {
     ] = mockProtocol;
 
     bobSdk = new GossipSdk();
-    await bobSdk.init();
+    await bobSdk.init({});
     await bobSdk.openSession({
       mnemonic: bobMnemonic,
-      encryptionKey: bobEncryptionKey,
       onPersist: async () => {},
+      persistEncryptionKey: bobEncryptionKey,
       sessionConfig: createSessionConfig(
         max_session_inactivity_millis,
         keep_alive_interval_millis,
@@ -1650,74 +1686,95 @@ describe('session break in session manager', () => {
 
     await aliceSdk.messages.fetch();
 
-    const aliceIncomingMessagesBefore = await aliceSdk.db.messages
-      .where('[ownerUserId+contactUserId+direction]')
-      .equals([aliceSdk.userId, bobSdk.userId, MessageDirection.INCOMING])
-      .toArray();
+    const aliceIncomingMessagesBefore = await getSqliteDb()
+      .select()
+      .from(schema.messages)
+      .where(
+        and(
+          eq(schema.messages.ownerUserId, aliceSdk.userId),
+          eq(schema.messages.contactUserId, bobSdk.userId),
+          eq(schema.messages.direction, MessageDirection.INCOMING)
+        )
+      )
+      .all();
     expect(aliceIncomingMessagesBefore.length).toBe(1);
     expect(aliceIncomingMessagesBefore[0].status).toBe(MessageStatus.DELIVERED);
-    expect(aliceIncomingMessagesBefore[0].seeker).toBeUndefined();
+    expect(aliceIncomingMessagesBefore[0].seeker).toBeNull();
 
     // 2. Create 4 outgoing messages for Alice with different statuses
     // WAITING_SESSION
-    await aliceSdk.db.messages.add({
-      ownerUserId: aliceSdk.userId,
-      contactUserId: bobSdk.userId,
-      messageId: new Uint8Array(12).fill(1),
-      content: 'Message WAITING_SESSION',
-      type: MessageType.TEXT,
-      direction: MessageDirection.OUTGOING,
-      status: MessageStatus.WAITING_SESSION,
-      timestamp: new Date(),
-    });
+    await getSqliteDb()
+      .insert(schema.messages)
+      .values({
+        ownerUserId: aliceSdk.userId,
+        contactUserId: bobSdk.userId,
+        messageId: new Uint8Array(12).fill(1),
+        content: 'Message WAITING_SESSION',
+        type: MessageType.TEXT,
+        direction: MessageDirection.OUTGOING,
+        status: MessageStatus.WAITING_SESSION,
+        timestamp: new Date(),
+      });
 
     // READY
-    await aliceSdk.db.messages.add({
-      ownerUserId: aliceSdk.userId,
-      contactUserId: bobSdk.userId,
-      messageId: new Uint8Array(12).fill(2),
-      content: 'Message READY',
-      type: MessageType.TEXT,
-      direction: MessageDirection.OUTGOING,
-      status: MessageStatus.READY,
-      timestamp: new Date(),
-      seeker: new Uint8Array([1, 2, 3]),
-      encryptedMessage: new Uint8Array([4, 5, 6]),
-      whenToSend: new Date(),
-    });
+    await getSqliteDb()
+      .insert(schema.messages)
+      .values({
+        ownerUserId: aliceSdk.userId,
+        contactUserId: bobSdk.userId,
+        messageId: crypto.getRandomValues(new Uint8Array(12)),
+        content: 'Message READY',
+        type: MessageType.TEXT,
+        direction: MessageDirection.OUTGOING,
+        status: MessageStatus.READY,
+        timestamp: new Date(),
+        seeker: new Uint8Array([1, 2, 3]),
+        encryptedMessage: new Uint8Array([4, 5, 6]),
+        whenToSend: new Date(),
+      });
 
     // SENT
-    await aliceSdk.db.messages.add({
-      ownerUserId: aliceSdk.userId,
-      contactUserId: bobSdk.userId,
-      messageId: new Uint8Array(12).fill(3),
-      content: 'Message SENT',
-      type: MessageType.TEXT,
-      direction: MessageDirection.OUTGOING,
-      status: MessageStatus.SENT,
-      timestamp: new Date(),
-      seeker: new Uint8Array([7, 8, 9]),
-      encryptedMessage: new Uint8Array([10, 11, 12]),
-      whenToSend: new Date(),
-    });
+    await getSqliteDb()
+      .insert(schema.messages)
+      .values({
+        ownerUserId: aliceSdk.userId,
+        contactUserId: bobSdk.userId,
+        messageId: crypto.getRandomValues(new Uint8Array(12)),
+        content: 'Message SENT',
+        type: MessageType.TEXT,
+        direction: MessageDirection.OUTGOING,
+        status: MessageStatus.SENT,
+        timestamp: new Date(),
+        seeker: new Uint8Array([7, 8, 9]),
+        encryptedMessage: new Uint8Array([10, 11, 12]),
+        whenToSend: new Date(),
+      });
 
     // DELIVERED (acknowledged)
-    await aliceSdk.db.messages.add({
-      ownerUserId: aliceSdk.userId,
-      contactUserId: bobSdk.userId,
-      messageId: new Uint8Array(12).fill(4),
-      content: 'Message DELIVERED',
-      type: MessageType.TEXT,
-      direction: MessageDirection.OUTGOING,
-      status: MessageStatus.DELIVERED,
-      timestamp: new Date(),
-      seeker: new Uint8Array([13, 14, 15]),
-    });
+    await getSqliteDb()
+      .insert(schema.messages)
+      .values({
+        ownerUserId: aliceSdk.userId,
+        contactUserId: bobSdk.userId,
+        content: 'Message DELIVERED',
+        type: MessageType.TEXT,
+        direction: MessageDirection.OUTGOING,
+        status: MessageStatus.DELIVERED,
+        timestamp: new Date(),
+        seeker: new Uint8Array([13, 14, 15]),
+      });
 
-    const aliceOutgoingBefore = await aliceSdk.db.messages
-      .where('[ownerUserId+contactUserId+direction]')
-      .equals([aliceSdk.userId, bobSdk.userId, MessageDirection.OUTGOING])
-      .toArray();
+    const aliceOutgoingBefore = await getSqliteDb()
+      .select()
+      .from(schema.messages)
+      .where(
+        and(
+          eq(schema.messages.ownerUserId, aliceSdk.userId),
+          eq(schema.messages.contactUserId, bobSdk.userId),
+          eq(schema.messages.direction, MessageDirection.OUTGOING)
+        )
+      )
+      .all();
     expect(aliceOutgoingBefore.length).toBe(5);
 
     // Spy on message send to verify it's called
@@ -1741,10 +1798,17 @@ describe('session break in session manager', () => {
     );
 
     // Outgoing DELIVERED message should not be resent or reset
-    const aliceOutgoingAfter = await aliceSdk.db.messages
-      .where('[ownerUserId+contactUserId+direction]')
-      .equals([aliceSdk.userId, bobSdk.userId, MessageDirection.OUTGOING])
-      .toArray();
+    const aliceOutgoingAfter = await getSqliteDb()
+      .select()
+      .from(schema.messages)
+      .where(
+        and(
+          eq(schema.messages.ownerUserId, aliceSdk.userId),
+          eq(schema.messages.contactUserId, bobSdk.userId),
+          eq(schema.messages.direction, MessageDirection.OUTGOING)
+        )
+      )
+      .all();
     expect(aliceOutgoingAfter.length).toBe(5);
 
     expect(aliceOutgoingAfter[0].status).toBe(MessageStatus.READ); // announcement message
@@ -1773,7 +1837,7 @@ describe('session break in session manager', () => {
       createdAt: new Date(),
     };
 
-    await aliceSdk.db.contacts.add(aliceBobContact);
+    await getSqliteDb().insert(schema.contacts).values(aliceBobContact);
 
     // Alice sends announcement (session becomes SelfRequested)
     const result = await aliceSdk.discussions.start(aliceBobContact);
@@ -1987,19 +2051,20 @@ describe('session break in session manager', () => {
 
     // Check that no keep alive messages were created in the database
     // Keep alive messages should have been skipped because session was being renewed
-    const aliceMessages = await aliceSdk.db.messages
-      .where('[ownerUserId+contactUserId]')
-      .equals([aliceSdk.userId, bobSdk.userId])
-      .and(msg => msg.type === MessageType.KEEP_ALIVE)
-      .toArray();
-
-    // Filter for keep alive messages (content is empty string)
-    const keepAliveMessages = aliceMessages.filter(
-      msg => msg.type === MessageType.KEEP_ALIVE
-    );
+    const aliceMessages = await getSqliteDb()
+      .select()
+      .from(schema.messages)
+      .where(
+        and(
+          eq(schema.messages.ownerUserId, aliceSdk.userId),
+          eq(schema.messages.contactUserId, bobSdk.userId),
+          eq(schema.messages.type, MessageType.KEEP_ALIVE)
+        )
+      )
+      .all();
 
     // No keep alive messages should have been sent (session renewal takes precedence)
-    expect(keepAliveMessages.length).toBe(0);
+    expect(aliceMessages.length).toBe(0);
 
     // Session should still be active after reset
     expect(aliceSdk.discussions.getStatus(bobSdk.userId)).toBe(
@@ -2055,7 +2120,12 @@ describe('session break in session manager', () => {
         lastSeen: new Date(),
         createdAt: new Date(),
       };
-      await aliceSdk.db.contacts.add(aliceBobContact);
+      await aliceSdk.contacts.add(
+        aliceBobContact.ownerUserId,
+        aliceBobContact.userId,
+        aliceBobContact.name,
+        bobSdk.publicKeys
+      );
 
       // Alice initiates discussion with Bob (session status becomes SelfRequested)
       const result = await aliceSdk.discussions.start(aliceBobContact);

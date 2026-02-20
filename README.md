@@ -17,7 +17,7 @@ Gossip is a privacy-first, secure messaging application built with React, TypeSc
 - **Build Tool**: Vite
 - **Styling**: Tailwind CSS
 - **State Management**: Zustand
-- **Database**: Dexie (IndexedDB wrapper)
+- **Database**: SQLite (wa-sqlite + Drizzle ORM)
 - **PWA**: Vite PWA Plugin
 - **Blockchain**: Massa Web3 SDK
 
@@ -107,7 +107,7 @@ src/
 
 ## Database Schema
 
-Gossip uses Dexie (IndexedDB) for local data storage with the following entities:
+Gossip uses SQLite for local data storage with the following entities:
 
 - **UserProfile**: User account information and blockchain credentials
 - **Contacts**: Contact list with usernames and public keys

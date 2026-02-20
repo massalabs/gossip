@@ -5,7 +5,11 @@ import PageHeader from '../../components/ui/PageHeader';
 import Button from '../../components/ui/Button';
 import Toggle from '../../components/ui/Toggle';
 import { useAppStore } from '../../stores/appStore';
-import { gossipDb } from '@massalabs/gossip-sdk';
+import {
+  clearAllTables,
+  clearConversationTables,
+  closeSqlite,
+} from '@massalabs/gossip-sdk';
 import { clearAppStorage } from '../../utils/localStorage';
 import { useAccountStore } from '../../stores/accountStore';
 import { useVersionCheck } from '../../hooks/useVersionCheck';
@@ -37,7 +41,12 @@ const DebugSettings: React.FC = () => {
     try {
       await resetAccount();
       clearAppStorage();
-      await gossipDb().deleteDb();
+      try {
+        await clearAllTables();
+        await closeSqlite();
+      } catch {
+        // SQLite might not be initialized
+      }
       window.location.reload();
     } catch (error) {
       console.error('Failed to reset all accounts:', error);
@@ -46,16 +55,7 @@ const DebugSettings: React.FC = () => {
 
   const handleResetAllDiscussionsAndMessages = useCallback(async () => {
     try {
-      const db = gossipDb();
-      await db.transaction(
-        'rw',
-        [db.contacts, db.messages, db.discussions],
-        async () => {
-          await db.messages.clear();
-          await db.discussions.clear();
-          await db.contacts.clear();
-        }
-      );
+      await clearConversationTables();
     } catch (error) {
       console.error('Failed to reset discussions and messages:', error);
     }

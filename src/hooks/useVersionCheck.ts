@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { getSdk } from '../stores/sdkStore';
+import { clearAllTables, closeSqlite } from '@massalabs/gossip-sdk';
 import { STORAGE_KEYS, clearAppStorage } from '../utils/localStorage';
 import { useLocalStorage } from './useLocalStorage';
 import { APP_BUILD_ID } from '../config/version';
@@ -27,8 +27,13 @@ export function useVersionCheck() {
       const cacheNames = await caches.keys();
       await Promise.all(cacheNames.map(name => caches.delete(name)));
 
-      // 2. Remove IndexedDB databases
-      await getSdk().db.deleteDb();
+      // 2. Clear SQLite data and close
+      try {
+        await clearAllTables();
+        await closeSqlite();
+      } catch {
+        // SQLite might not be initialized
+      }
 
       // 3. Clear app-specific localStorage keys
       clearAppStorage();

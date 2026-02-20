@@ -5,11 +5,13 @@ import {
   MessageStatus,
   MessageType,
   decodeUserId,
+  SdkEventType,
 } from '@massalabs/gossip-sdk';
 import { createSelectors } from './utils/createSelectors';
 import { useAccountStore } from './accountStore';
 import { getSdk } from './sdkStore';
-import { liveQuery, Subscription } from 'dexie';
+
+const POLL_INTERVAL_MS = 3000;
 
 interface MessageStoreState {
   // Messages keyed by contactUserId (Map for efficient lookups)
@@ -20,8 +22,10 @@ interface MessageStoreState {
   isLoading: boolean;
   // Sending state (global, since you can only send to one contact at a time)
   isSending: boolean;
-  // Subscription for liveQuery
-  subscription: Subscription | null;
+  // Polling timer and event handler
+  pollTimer: ReturnType<typeof setInterval> | null;
+  eventHandler: (() => void) | null;
+  cancelDebounce: (() => void) | null;
 
   init: () => Promise<void>;
   isInitializing: boolean;
@@ -49,13 +53,13 @@ const messagesChanged = (
 ): boolean => {
   return (
     newMessages.length > existing.length || // New messages at the end
-    existing.some((existing, index) => {
+    existing.some((existingMsg, index) => {
       const newMsg = newMessages[index];
       if (!newMsg) return true; // New message added
       return (
-        existing.id !== newMsg.id ||
-        existing.content !== newMsg.content ||
-        existing.status !== newMsg.status
+        existingMsg.id !== newMsg.id ||
+        existingMsg.content !== newMsg.content ||
+        existingMsg.status !== newMsg.status
       );
     })
   );
@@ -67,7 +71,9 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
   currentContactUserId: null,
   isLoading: false,
   isSending: false,
-  subscription: null,
+  pollTimer: null,
+  eventHandler: null,
+  cancelDebounce: null,
   isInitializing: false,
 
   // Set current contact (for viewing messages)
@@ -79,32 +85,38 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
     set({ currentContactUserId: contactUserId });
   },
 
-  // New: Initialize the store with a global liveQuery subscription
+  // Initialize the store with polling + event-driven refetch
   init: async () => {
     const { userProfile } = useAccountStore.getState();
     const ownerUserId = userProfile?.userId;
 
-    if (!ownerUserId || get().subscription || get().isInitializing) return; // Already initialized
+    if (!ownerUserId || get().pollTimer || get().isInitializing) return;
 
     set({ isInitializing: true });
-    // Set up a single liveQuery for all messages of the owner
-    const query = liveQuery(() =>
-      getSdk()
-        .db.messages.where('ownerUserId')
-        .equals(ownerUserId)
-        .and((m: Message) => m.type !== MessageType.KEEP_ALIVE)
-        .sortBy('id')
-    );
 
-    const subscriptionObj = query.subscribe({
-      next: (allMessages: Message[]) => {
-        // Group messages by contactUserId
+    let isFetching = false;
+    const fetchAllMessages = async () => {
+      if (isFetching) return;
+      isFetching = true;
+      try {
+        const sdk = getSdk();
+        if (!sdk.isSessionOpen) return;
+
+        // Get all contacts from the discussion store to know which contacts have messages
+        const discussions = await sdk.discussions.list(ownerUserId);
+        const contactUserIds = discussions.map(d => d.contactUserId);
+
+        // Fetch messages for all contacts
         const newMap = new Map<string, Message[]>();
-        allMessages.forEach((msg: Message) => {
-          const contactId = msg.contactUserId;
-          const existing = newMap.get(contactId) || [];
-          newMap.set(contactId, [...existing, msg]);
-        });
+        for (const contactUserId of contactUserIds) {
+          const allMessages = await sdk.messages.getMessages(contactUserId);
+          const filtered = allMessages
+            .filter(m => m.type !== MessageType.KEEP_ALIVE)
+            .sort((a, b) => (a.id ?? 0) - (b.id ?? 0));
+          if (filtered.length > 0) {
+            newMap.set(contactUserId, filtered);
+          }
+        }
 
         // Check for changes before updating to avoid unnecessary sets
         let hasChanges = false;
@@ -119,7 +131,7 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
           }
         });
 
-        // Also check for removed contacts (unlikely, but complete)
+        // Also check for removed contacts
         if (!hasChanges) {
           currentMap.forEach((_, contactId) => {
             if (!newMap.has(contactId)) hasChanges = true;
@@ -129,16 +141,44 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
         if (hasChanges) {
           set({ messagesByContact: newMap });
         }
-      },
-      error: error => {
-        console.error('Global live query error:', error);
-      },
-      complete: () => {
-        set({ isLoading: false });
-      },
-    });
+      } catch (error) {
+        console.error('Messages fetch error:', error);
+      } finally {
+        isFetching = false;
+      }
+    };
 
-    set({ subscription: subscriptionObj, isInitializing: false }); // Loading during initial fetch
+    // Immediate fetch
+    await fetchAllMessages();
+
+    // Polling interval
+    const timer = setInterval(fetchAllMessages, POLL_INTERVAL_MS);
+
+    // Event-driven immediate refetch (debounced to collapse rapid events)
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+    const onEvent = () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(fetchAllMessages, 100);
+    };
+    const cancelDebounce = () => {
+      if (debounceTimer) {
+        clearTimeout(debounceTimer);
+        debounceTimer = null;
+      }
+    };
+    const sdk = getSdk();
+    sdk.on(SdkEventType.MESSAGE_RECEIVED, onEvent);
+    sdk.on(SdkEventType.MESSAGE_SENT, onEvent);
+    sdk.on(SdkEventType.MESSAGE_READ, onEvent);
+    sdk.on(SdkEventType.SESSION_CREATED, onEvent);
+    sdk.on(SdkEventType.SESSION_ACCEPTED, onEvent);
+
+    set({
+      pollTimer: timer,
+      eventHandler: onEvent,
+      cancelDebounce,
+      isInitializing: false,
+    });
   },
 
   // Send a message
@@ -160,7 +200,7 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
     set({ isSending: true });
 
     try {
-      const discussion = await getSdk().db.getDiscussionByOwnerAndContact(
+      const discussion = await getSdk().discussions.get(
         userProfile.userId,
         contactUserId
       );
@@ -175,7 +215,7 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
 
       if (replyToId) {
         // Look up the original message to get its seeker
-        const originalMessage = await getSdk().db.messages.get(replyToId);
+        const originalMessage = await getSdk().messages.get(replyToId);
         if (!originalMessage) {
           throw new Error('Original message not found');
         }
@@ -189,7 +229,7 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
 
       if (forwardFromMessageId) {
         const originalMessage =
-          await getSdk().db.messages.get(forwardFromMessageId);
+          await getSdk().messages.get(forwardFromMessageId);
         if (!originalMessage) {
           console.warn(
             'Forward target message not found, sending as regular message'
@@ -234,15 +274,10 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
       if (!result.success) {
         if (result.message) {
           console.warn(
-            `Message "${result.message.content}" has been added to pending queue waiting to be resent. Cause: ${result.error}`
+            `Message has been added to pending queue waiting to be resent. Cause: ${result.error}`
           );
         } else {
-          console.error(
-            'Failed to send message ',
-            content,
-            ', got error:',
-            result.error
-          );
+          console.error('Failed to send message, got error:', result.error);
         }
       }
     } catch (error) {
@@ -266,12 +301,26 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
   },
 
   cleanup: () => {
-    const subscription = get().subscription;
-    if (subscription) {
-      subscription.unsubscribe();
-      set({ subscription: null });
+    const timer = get().pollTimer;
+    if (timer) clearInterval(timer);
+    get().cancelDebounce?.();
+    const handler = get().eventHandler;
+    if (handler) {
+      try {
+        const sdk = getSdk();
+        sdk.off(SdkEventType.MESSAGE_RECEIVED, handler);
+        sdk.off(SdkEventType.MESSAGE_SENT, handler);
+        sdk.off(SdkEventType.MESSAGE_READ, handler);
+        sdk.off(SdkEventType.SESSION_CREATED, handler);
+        sdk.off(SdkEventType.SESSION_ACCEPTED, handler);
+      } catch {
+        // SDK might not be available during cleanup
+      }
     }
     set({
+      pollTimer: null,
+      eventHandler: null,
+      cancelDebounce: null,
       messagesByContact: new Map(),
       currentContactUserId: null,
       isLoading: false,

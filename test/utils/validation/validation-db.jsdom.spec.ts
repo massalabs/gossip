@@ -1,51 +1,77 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
+import { readFileSync } from 'fs';
+import { resolve, dirname } from 'path';
+import { createRequire } from 'module';
 import {
   validateUsernameAvailability,
   validateUsernameFormatAndAvailability,
-  GossipDatabase,
-} from '@massalabs/gossip-sdk';
-import { userProfile } from '../../helpers';
-import { Dexie, PromiseExtended } from 'dexie';
+} from '../../../gossip-sdk/src/utils/validation';
+import {
+  initDb,
+  closeSqlite,
+  getSqliteDb,
+  clearAllTables,
+} from '../../../gossip-sdk/src/sqlite';
+import * as schema from '../../../gossip-sdk/src/schema';
+import { encodeUserId } from '../../../gossip-sdk/src/utils/userId';
 
-describe('utils/validation.ts - Database tests (requires IndexedDB)', () => {
-  let testDb: GossipDatabase;
+const require = createRequire(import.meta.url);
+const waSqlitePath = dirname(require.resolve('wa-sqlite/package.json'));
+const waSqliteWasm = readFileSync(resolve(waSqlitePath, 'dist/wa-sqlite.wasm'));
 
-  beforeEach(async () => {
-    testDb = new GossipDatabase();
+const TEST_USER_ID = encodeUserId(new Uint8Array(32).fill(42));
+
+const TEST_PROFILE = {
+  userId: TEST_USER_ID,
+  username: 'existinguser',
+  security: JSON.stringify({
+    encKeySalt: [],
+    authMethod: 'password',
+    mnemonicBackup: {
+      encryptedMnemonic: [],
+      createdAt: Date.now(),
+      backedUp: false,
+    },
+  }),
+  session: new Uint8Array(1),
+  status: 'online',
+  lastSeen: new Date(),
+  createdAt: new Date(),
+  updatedAt: new Date(),
+};
+
+describe('utils/validation.ts - Database tests', () => {
+  beforeAll(async () => {
+    const wasmBinary = waSqliteWasm.buffer.slice(
+      waSqliteWasm.byteOffset,
+      waSqliteWasm.byteOffset + waSqliteWasm.byteLength
+    );
+    await initDb({ wasmBinary });
+  });
+
+  afterAll(async () => {
+    try {
+      await closeSqlite();
+    } catch {
+      // SQLite might already be closed
+    }
   });
 
   describe('validateUsernameAvailability()', () => {
     beforeEach(async () => {
-      // Ensure DB is open and clear any existing profiles
-      if (!testDb.isOpen()) {
-        await testDb.open();
-      }
-      await testDb.userProfile.clear();
-    });
-
-    afterEach(async () => {
-      // Clean up after tests
-      if (testDb.isOpen()) {
-        await testDb.userProfile.clear();
-      }
+      await clearAllTables();
     });
 
     it('should accept username that does not exist', async () => {
-      const result = await validateUsernameAvailability('newuser', testDb);
+      const result = await validateUsernameAvailability('newuser');
       expect(result.valid).toBe(true);
       expect(result.error).toBeUndefined();
     });
 
     it('should reject username that already exists', async () => {
-      // Create a user profile
-      await testDb.userProfile.add(
-        userProfile()
-          .username('existinguser')
-          .userId('gossip1qpzry9x8gf2tvdw0s3jn54khce6mua7l')
-          .build()
-      );
+      await getSqliteDb().insert(schema.userProfile).values(TEST_PROFILE);
 
-      const result = await validateUsernameAvailability('existinguser', testDb);
+      const result = await validateUsernameAvailability('existinguser');
       expect(result.valid).toBe(false);
       expect(result.error).toBe(
         'This username is already in use. Please choose another.'
@@ -53,16 +79,11 @@ describe('utils/validation.ts - Database tests (requires IndexedDB)', () => {
     });
 
     it('should reject username case-insensitively', async () => {
-      // Create a user profile with lowercase username
-      await testDb.userProfile.add(
-        userProfile()
-          .username('testuser')
-          .userId('gossip1qpzry9x8gf2tvdw0s3jn54khce6mua7l')
-          .build()
-      );
+      await getSqliteDb()
+        .insert(schema.userProfile)
+        .values({ ...TEST_PROFILE, username: 'testuser' });
 
-      // Try with uppercase
-      const result = await validateUsernameAvailability('TestUser', testDb);
+      const result = await validateUsernameAvailability('TestUser');
       expect(result.valid).toBe(false);
       expect(result.error).toBe(
         'This username is already in use. Please choose another.'
@@ -70,76 +91,34 @@ describe('utils/validation.ts - Database tests (requires IndexedDB)', () => {
     });
 
     it('should handle username with whitespace', async () => {
-      // Create a user profile
-      await testDb.userProfile.add(
-        userProfile()
-          .username('testuser')
-          .userId('gossip1qpzry9x8gf2tvdw0s3jn54khce6mua7l')
-          .build()
-      );
+      await getSqliteDb()
+        .insert(schema.userProfile)
+        .values({ ...TEST_PROFILE, username: 'testuser' });
 
-      // Try with whitespace
-      const result = await validateUsernameAvailability('  testuser  ', testDb);
+      const result = await validateUsernameAvailability('  testuser  ');
       expect(result.valid).toBe(false);
       expect(result.error).toBe(
         'This username is already in use. Please choose another.'
       );
     });
-
-    it('should return error when database connection fails', async () => {
-      // Close the database to simulate an error
-      if (testDb.isOpen()) {
-        testDb.close();
-      }
-
-      // Mock the db to throw an error
-      const originalOpen = testDb.open.bind(testDb);
-      testDb.open = vi.fn(async () => {
-        throw new Error('Database connection failed');
-      }) as unknown as () => PromiseExtended<Dexie>;
-
-      const result = await validateUsernameAvailability('testuser', testDb);
-      expect(result.valid).toBe(false);
-      expect(result.error).toContain('Database connection failed');
-
-      // Restore
-      testDb.open = originalOpen;
-      await testDb.open();
-    });
   });
 
   describe('validateUsernameFormatAndAvailability()', () => {
     beforeEach(async () => {
-      if (!testDb.isOpen()) {
-        await testDb.open();
-      }
-      await testDb.userProfile.clear();
-    });
-
-    afterEach(async () => {
-      if (testDb.isOpen()) {
-        await testDb.userProfile.clear();
-      }
+      await clearAllTables();
     });
 
     it('should reject if format is invalid', async () => {
-      const result = await validateUsernameFormatAndAvailability('ab', testDb);
+      const result = await validateUsernameFormatAndAvailability('ab');
       expect(result.valid).toBe(false);
       expect(result.error).toBe('Username must be at least 3 characters long');
     });
 
     it('should reject if format is valid but username exists', async () => {
-      await testDb.userProfile.add(
-        userProfile()
-          .username('existinguser')
-          .userId('gossip1qpzry9x8gf2tvdw0s3jn54khce6mua7l')
-          .build()
-      );
+      await getSqliteDb().insert(schema.userProfile).values(TEST_PROFILE);
 
-      const result = await validateUsernameFormatAndAvailability(
-        'existinguser',
-        testDb
-      );
+      const result =
+        await validateUsernameFormatAndAvailability('existinguser');
       expect(result.valid).toBe(false);
       expect(result.error).toBe(
         'This username is already in use. Please choose another.'
@@ -147,20 +126,9 @@ describe('utils/validation.ts - Database tests (requires IndexedDB)', () => {
     });
 
     it('should accept if format is valid and username is available', async () => {
-      const result = await validateUsernameFormatAndAvailability(
-        'newuser123',
-        testDb
-      );
+      const result = await validateUsernameFormatAndAvailability('newuser123');
       expect(result.valid).toBe(true);
       expect(result.error).toBeUndefined();
     });
-  });
-
-  afterEach(async () => {
-    try {
-      await testDb.delete();
-    } catch (_) {
-      // ignore
-    }
   });
 });

@@ -88,7 +88,7 @@ export const defaultSdkConfig: SdkConfig = {
     enabled: false,
     messagesIntervalMs: 5000,
     announcementsIntervalMs: 10000,
-    sessionRefreshIntervalMs: 10000, //30000,
+    sessionRefreshIntervalMs: 10000,
   },
   messages: {
     fetchDelayMs: 100,
