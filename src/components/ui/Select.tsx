@@ -17,8 +17,8 @@ const SelectItem = <T,>({
 }) => (
   <button
     onClick={onSelect}
-    className={`w-full flex items-center p-3 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors touch-manipulation ${
-      isSelected ? 'bg-blue-50 dark:bg-blue-900/20' : ''
+    className={`w-full flex items-center p-3 hover:bg-muted transition-colors touch-manipulation ${
+      isSelected ? 'bg-accent/10' : ''
     }`}
     style={{ height: `${itemHeight}px` }}
   >
@@ -161,12 +161,10 @@ function Select<T>({
         {selectedItem ? (
           renderSelected(selectedItem)
         ) : (
-          <span className="text-gray-500 dark:text-gray-400">
-            {placeholder}
-          </span>
+          <span className="text-muted-foreground">{placeholder}</span>
         )}
         <ChevronDown
-          className={`w-5 h-5 text-gray-500 transition-transform ml-auto ${
+          className={`w-5 h-5 text-muted-foreground transition-transform ml-auto ${
             isOpen ? 'rotate-180' : ''
           }`}
         />
@@ -190,16 +188,16 @@ function Select<T>({
           )}
 
           {/* Items List */}
-          <div className="overflow-y-auto flex-1 scrollbar-thin scrollbar-thumb-gray-300 dark:scrollbar-thumb-gray-600 scrollbar-track-transparent">
+          <div className="overflow-y-auto flex-1">
             {loading ? (
-              <div className="p-4 text-center text-gray-500 dark:text-gray-400">
+              <div className="p-4 text-center text-muted-foreground">
                 <div className="flex items-center justify-center">
-                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-500"></div>
+                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
                   <span className="ml-2">Loading...</span>
                 </div>
               </div>
             ) : filteredItems.length === 0 ? (
-              <div className="p-4 text-center text-gray-500 dark:text-gray-400">
+              <div className="p-4 text-center text-muted-foreground">
                 {emptyMessage}
               </div>
             ) : (

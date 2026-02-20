@@ -30,10 +30,32 @@
     pointer-events: none;
   }
 
-  /* Message highlight animation for scroll-to-message */
+  /* Message highlight animation for scroll-to-message (Telegram-style) */
+  @keyframes highlight-message {
+    0% {
+      background-color: color-mix(in oklch, var(--primary) 15%, transparent);
+    }
+    70% {
+      background-color: color-mix(in oklch, var(--primary) 15%, transparent);
+    }
+    100% {
+      background-color: transparent;
+    }
+  }
+
   .highlight-message {
     animation: highlight-message 2s ease-out;
-    border-radius: var(--radius);
+    border-radius: 1.5rem;
+  }
+
+  /* Persistent search highlight (stays until search navigates away) */
+  .search-highlight {
+    background-color: color-mix(in oklch, var(--primary) 12%, transparent);
+    margin-left: -1rem;
+    margin-right: -1rem;
+    padding-left: 1rem;
+    padding-right: 1rem;
+    transition: background-color 200ms ease;
   }
 
   /* Nav button click animations */

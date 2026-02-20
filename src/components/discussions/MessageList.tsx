@@ -1,6 +1,6 @@
 import React, { useRef, useCallback, useEffect } from 'react';
 import { MessageDirection, Message } from '@massalabs/gossip-sdk';
-import type { Discussion } from '@massalabs/gossip-sdk';
+import type { Discussion, Contact } from '@massalabs/gossip-sdk';
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 
 import LoadingState from './LoadingState';
@@ -37,11 +37,13 @@ const INITIAL_SCROLL_DELAY_MS = 100;
 interface MessageListProps {
   messages: Message[];
   discussion?: Discussion | null;
+  contact?: Pick<Contact, 'name' | 'avatar'>;
   isLoading: boolean;
   onReplyTo?: (message: Message) => void;
   onForward?: (message: Message) => void;
   onScrollToMessage?: (messageId: number) => void;
   onAtBottomChange?: (atBottom: boolean) => void;
+  highlightedMessageId?: number | null;
 }
 
 export interface MessageListHandle {
@@ -59,11 +61,13 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
     {
       messages,
       discussion,
+      contact,
       isLoading,
       onReplyTo,
       onForward,
       onScrollToMessage,
       onAtBottomChange,
+      highlightedMessageId,
     },
     ref
   ) => {
@@ -226,6 +230,8 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
                 onReplyTo={onReplyTo}
                 onForward={onForward}
                 onScrollToMessage={onScrollToMessage}
+                contact={contact}
+                isHighlighted={item.message.id === highlightedMessageId}
               />
             );
 
@@ -233,7 +239,14 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
             return null;
         }
       },
-      [virtualItems, onReplyTo, onForward, onScrollToMessage]
+      [
+        virtualItems,
+        onReplyTo,
+        onForward,
+        onScrollToMessage,
+        contact,
+        highlightedMessageId,
+      ]
     );
 
     // Loading state

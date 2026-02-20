@@ -12,6 +12,7 @@ import MessageList, {
 } from '../components/discussions/MessageList';
 import MessageInput from '../components/discussions/MessageInput';
 import ScrollToBottomButton from '../components/discussions/ScrollToBottomButton';
+import MessageSearch from '../components/discussions/MessageSearch';
 import { Message } from '@massalabs/gossip-sdk';
 import { useGossipSdk } from '../hooks/useGossipSdk';
 import { isDifferentDay } from '../utils/timeUtils';
@@ -124,6 +125,14 @@ const Discussion: React.FC = () => {
 
   // Scroll to bottom button visibility
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+
+  // Message search
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [searchHighlightId, setSearchHighlightId] = useState<number | null>(
+    null
+  );
+  const isSearchOpenRef = useRef(false);
+  isSearchOpenRef.current = isSearchOpen;
 
   // Handle at bottom state changes
   const handleAtBottomChange = useCallback((atBottom: boolean) => {
@@ -361,25 +370,27 @@ const Discussion: React.FC = () => {
         // Use scrollToIndex to scroll to the message
         messageListRef.current?.scrollToIndex(virtualIndex);
 
-        // Add highlight after a short delay to ensure element is rendered
-        setTimeout(() => {
-          const element = document.getElementById(`message-${messageId}`);
-          if (element) {
-            element.classList.add('highlight-message');
+        // Add animated highlight only when NOT driven by search (search uses persistent highlight)
+        if (!isSearchOpenRef.current) {
+          setTimeout(() => {
+            const element = document.getElementById(`message-${messageId}`);
+            if (element) {
+              element.classList.add('highlight-message');
 
-            // Clear any existing timeout
-            if (highlightTimeoutRef.current) {
-              clearTimeout(highlightTimeoutRef.current);
-            }
-
-            highlightTimeoutRef.current = setTimeout(() => {
-              const el = document.getElementById(`message-${messageId}`);
-              if (el) {
-                el.classList.remove('highlight-message');
+              // Clear any existing timeout
+              if (highlightTimeoutRef.current) {
+                clearTimeout(highlightTimeoutRef.current);
               }
-            }, 2000);
-          }
-        }, 200);
+
+              highlightTimeoutRef.current = setTimeout(() => {
+                const el = document.getElementById(`message-${messageId}`);
+                if (el) {
+                  el.classList.remove('highlight-message');
+                }
+              }, 2000);
+            }
+          }, 200);
+        }
       })();
     },
     [
@@ -466,7 +477,19 @@ const Discussion: React.FC = () => {
         contact={contact}
         discussion={discussion}
         onBack={onBack}
+        onSearchToggle={() => setIsSearchOpen(prev => !prev)}
       />
+      {isSearchOpen && (
+        <MessageSearch
+          messages={messages}
+          onScrollToMessage={handleScrollToMessage}
+          onHighlightChange={setSearchHighlightId}
+          onClose={() => {
+            setIsSearchOpen(false);
+            setSearchHighlightId(null);
+          }}
+        />
+      )}
 
       <div
         ref={messageListContainerRef}
@@ -476,11 +499,13 @@ const Discussion: React.FC = () => {
           ref={messageListRef}
           messages={messages}
           discussion={discussion}
+          contact={contact}
           isLoading={isLoading || isDiscussionLoading}
           onReplyTo={handleReplyToMessage}
           onForward={handleForwardMessage}
           onScrollToMessage={handleScrollToMessage}
           onAtBottomChange={handleAtBottomChange}
+          highlightedMessageId={searchHighlightId}
         />
       </div>
 

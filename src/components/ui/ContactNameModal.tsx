@@ -85,11 +85,7 @@ const ContactNameModal: React.FC<ContactNameModalProps> = ({
             placeholder="Enter a name"
             enterKeyHint="done"
           />
-          {error && (
-            <p className="mt-1 text-xs text-red-600 dark:text-red-400">
-              {error}
-            </p>
-          )}
+          {error && <p className="mt-1 text-xs text-destructive">{error}</p>}
         </div>
         <div className="flex gap-3">
           <Button
@@ -105,7 +101,7 @@ const ContactNameModal: React.FC<ContactNameModalProps> = ({
               onClick={onSkip}
               variant="secondary"
               size="custom"
-              className="flex-1 h-11 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white font-semibold"
+              className="flex-1 h-11 rounded-lg bg-muted text-foreground font-semibold"
             >
               Skip
             </Button>
@@ -114,7 +110,7 @@ const ContactNameModal: React.FC<ContactNameModalProps> = ({
               onClick={onClose}
               variant="secondary"
               size="custom"
-              className="flex-1 h-11 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white font-semibold"
+              className="flex-1 h-11 rounded-lg bg-muted text-foreground font-semibold"
             >
               Cancel
             </Button>

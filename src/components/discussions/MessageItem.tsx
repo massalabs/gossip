@@ -6,8 +6,8 @@ import React, {
   useCallback,
 } from 'react';
 import {
-  ArrowRightCircle,
-  ArrowLeftCircle,
+  CornerUpLeft,
+  Share,
   Check as CheckIcon,
   AlertTriangle,
 } from 'react-feather';
@@ -21,6 +21,8 @@ import {
 import { useGossipSdk } from '../../hooks/useGossipSdk';
 import { parseLinks, openUrl } from '../../utils/linkUtils';
 import { useMarkMessageAsRead } from '../../hooks/useMarkMessageAsRead';
+import ContactAvatar from '../avatar/ContactAvatar';
+import type { Contact } from '@massalabs/gossip-sdk';
 
 // Swipe gesture constants - base values for incoming messages
 const SWIPE_MAX_DISTANCE = 80;
@@ -48,6 +50,9 @@ interface MessageItemProps {
   showTimestamp?: boolean;
   isFirstInGroup?: boolean;
   isLastInGroup?: boolean;
+  showAvatar?: boolean;
+  contact?: Pick<Contact, 'name' | 'avatar'>;
+  isHighlighted?: boolean;
 }
 
 const MessageItem: React.FC<MessageItemProps> = ({
@@ -59,6 +64,9 @@ const MessageItem: React.FC<MessageItemProps> = ({
   showTimestamp = true,
   isFirstInGroup = true,
   isLastInGroup = true,
+  showAvatar = false,
+  contact,
+  isHighlighted = false,
 }) => {
   const sdk = useGossipSdk();
   const canReply = !!onReplyTo;
@@ -246,11 +254,11 @@ const MessageItem: React.FC<MessageItemProps> = ({
     const isRightSwipeCompleted = swipeOffset >= threshold;
     const isLeftSwipeCompleted = swipeOffset <= -threshold;
 
-    if (isRightSwipeCompleted && onForward) {
-      onForward(message);
-      swipeCompleted.current = true;
-    } else if (isLeftSwipeCompleted && onReplyTo) {
+    if (isRightSwipeCompleted && onReplyTo) {
       onReplyTo(message);
+      swipeCompleted.current = true;
+    } else if (isLeftSwipeCompleted && onForward) {
+      onForward(message);
       swipeCompleted.current = true;
     }
 
@@ -347,20 +355,20 @@ const MessageItem: React.FC<MessageItemProps> = ({
   const borderRadiusClass = useMemo(() => {
     if (isFirstInGroup && isLastInGroup) {
       return isOutgoing
-        ? 'rounded-3xl rounded-br-lg'
-        : 'rounded-3xl rounded-bl-lg';
+        ? 'rounded-3xl rounded-br-md'
+        : 'rounded-3xl rounded-bl-md';
     } else if (isFirstInGroup) {
       return isOutgoing
-        ? 'rounded-t-3xl rounded-bl-3xl rounded-br-lg'
-        : 'rounded-t-3xl rounded-br-3xl rounded-bl-lg';
+        ? 'rounded-t-3xl rounded-bl-3xl rounded-br-md'
+        : 'rounded-t-3xl rounded-br-3xl rounded-bl-md';
     } else if (isLastInGroup) {
       return isOutgoing
-        ? 'rounded-b-3xl rounded-tl-3xl rounded-tr-lg'
-        : 'rounded-b-3xl rounded-tl-lg rounded-tr-3xl';
+        ? 'rounded-b-3xl rounded-tl-3xl rounded-tr-md'
+        : 'rounded-b-3xl rounded-tl-md rounded-tr-3xl';
     } else {
       return isOutgoing
-        ? 'rounded-tr-lg rounded-br-lg rounded-tl-3xl rounded-bl-3xl'
-        : 'rounded-tr-3xl rounded-tl-lg rounded-br-3xl rounded-bl-lg';
+        ? 'rounded-tr-md rounded-br-md rounded-tl-3xl rounded-bl-3xl'
+        : 'rounded-tr-3xl rounded-tl-md rounded-br-3xl rounded-bl-md';
     }
   }, [isFirstInGroup, isLastInGroup, isOutgoing]);
 
@@ -374,19 +382,29 @@ const MessageItem: React.FC<MessageItemProps> = ({
   return (
     <div
       id={id}
-      className={`flex items-end gap-2 ${isOutgoing ? 'justify-end' : 'justify-start'} group relative ${spacingClass}`}
+      className={`flex items-end gap-1 ${isOutgoing ? 'justify-end' : 'justify-start'} group relative ${spacingClass} ${isHighlighted ? 'search-highlight' : ''}`}
       onTouchStart={canReply ? handleTouchStart : undefined}
       onTouchMove={canReply ? handleTouchMove : undefined}
       onTouchEnd={canReply ? handleTouchEnd : undefined}
       role="listitem"
       aria-label={`${isOutgoing ? 'Sent' : 'Received'} message`}
     >
+      {/* Incoming avatar or spacer */}
+      {!isOutgoing && contact && (
+        <div className="w-8 shrink-0 ml-1">
+          {showAvatar ? (
+            <ContactAvatar contact={contact} size={8} />
+          ) : (
+            <div className="w-8 h-8" />
+          )}
+        </div>
+      )}
       <div
         ref={messageRef}
-        className={`relative max-w-[78%] sm:max-w-[70%] md:max-w-[65%] lg:max-w-[60%] px-4 py-4 font-medium text-[15px] leading-tight animate-bubble-in ${borderRadiusClass} ${
+        className={`relative max-w-[80%] sm:max-w-[70%] md:max-w-[65%] lg:max-w-[60%] px-3.5 py-3 font-normal text-[15px] leading-tight animate-bubble-in ${borderRadiusClass} ${
           isOutgoing
             ? 'ml-auto mr-3 bg-accent text-accent-foreground'
-            : 'ml-3 mr-auto bg-card dark:bg-surface-secondary text-card-foreground shadow-sm'
+            : `${contact ? '' : 'ml-3'} mr-auto bg-surface-secondary text-card-foreground`
         } ${
           canReply
             ? 'cursor-pointer hover:opacity-90 transition-opacity focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2'
@@ -408,8 +426,8 @@ const MessageItem: React.FC<MessageItemProps> = ({
             : 'none',
         }}
       >
-        {/* Forward indicator (right swipe) */}
-        {swipeOffset > indicatorThreshold && canForward && (
+        {/* Reply indicator (right swipe) */}
+        {swipeOffset > indicatorThreshold && canReply && (
           <div
             className={`absolute left-0 top-0 bottom-0 flex items-center justify-center ${
               isOutgoing ? 'bg-accent/20' : 'bg-card/20'
@@ -421,7 +439,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
             }}
             aria-hidden="true"
           >
-            <ArrowRightCircle
+            <CornerUpLeft
               className={`w-5 h-5 text-muted-foreground transition-transform ${
                 swipeOffset >=
                 (isOutgoing ? SWIPE_THRESHOLD_OUTGOING : SWIPE_THRESHOLD)
@@ -433,8 +451,8 @@ const MessageItem: React.FC<MessageItemProps> = ({
           </div>
         )}
 
-        {/* Reply indicator (left swipe) */}
-        {swipeOffset < -indicatorThreshold && canReply && (
+        {/* Forward indicator (left swipe) */}
+        {swipeOffset < -indicatorThreshold && canForward && (
           <div
             className={`absolute right-0 top-0 bottom-0 flex items-center justify-center ${
               isOutgoing ? 'bg-accent/20' : 'bg-card/20'
@@ -452,7 +470,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
             }}
             aria-hidden="true"
           >
-            <ArrowLeftCircle
+            <Share
               className={`w-5 h-5 text-muted-foreground transition-transform ${
                 Math.abs(swipeOffset) >=
                 (isOutgoing ? SWIPE_THRESHOLD_OUTGOING : SWIPE_THRESHOLD)
@@ -658,47 +676,49 @@ const MessageItem: React.FC<MessageItemProps> = ({
         </p>
 
         {/* Timestamp and Status */}
-        <div
-          className={`flex items-center justify-end gap-1.5 mt-1.5 ${
-            isOutgoing ? 'text-accent-foreground/80' : 'text-muted-foreground'
-          }`}
-        >
-          {showTimestamp && (
-            <span className="text-[11px] font-medium">
-              {formatTime(message.timestamp)}
-            </span>
-          )}
-          {isOutgoing && (
-            <div
-              className="flex items-center gap-1"
-              aria-label={`Status: ${message.status}`}
-            >
-              {(message.status === MessageStatus.WAITING_SESSION ||
-                message.status === MessageStatus.READY) && (
-                <div className="flex items-center gap-1">
+        {(showTimestamp || isOutgoing) && (
+          <div
+            className={`flex items-center justify-end gap-1.5 mt-1.5 ${
+              isOutgoing ? 'text-accent-foreground/80' : 'text-muted-foreground'
+            }`}
+          >
+            {showTimestamp && (
+              <span className="text-[11px] font-medium">
+                {formatTime(message.timestamp)}
+              </span>
+            )}
+            {isOutgoing && (
+              <div
+                className="flex items-center gap-1"
+                aria-label={`Status: ${message.status}`}
+              >
+                {(message.status === MessageStatus.WAITING_SESSION ||
+                  message.status === MessageStatus.READY) && (
+                  <div className="flex items-center gap-1">
+                    <div
+                      className="w-2.5 h-2.5 border border-current border-t-transparent rounded-full animate-spin"
+                      aria-hidden="true"
+                    />
+                    <span className="text-[10px] font-medium">Sending</span>
+                  </div>
+                )}
+                {message.status === MessageStatus.SENT && (
+                  <CheckIcon className="w-3.5 h-3.5" aria-label="Sent" />
+                )}
+                {(message.status === MessageStatus.DELIVERED ||
+                  message.status === MessageStatus.READ) && (
                   <div
-                    className="w-2.5 h-2.5 border border-current border-t-transparent rounded-full animate-spin"
-                    aria-hidden="true"
-                  />
-                  <span className="text-[10px] font-medium">Sending</span>
-                </div>
-              )}
-              {message.status === MessageStatus.SENT && (
-                <CheckIcon className="w-3.5 h-3.5" aria-label="Sent" />
-              )}
-              {(message.status === MessageStatus.DELIVERED ||
-                message.status === MessageStatus.READ) && (
-                <div
-                  className="relative inline-flex items-center w-4 h-3.5"
-                  aria-label="Delivered"
-                >
-                  <CheckIcon className="w-3.5 h-3.5 absolute left-0" />
-                  <CheckIcon className="w-3.5 h-3.5 absolute left-[5px] top-[1.5px]" />
-                </div>
-              )}
-            </div>
-          )}
-        </div>
+                    className="relative inline-flex items-center w-4 h-3.5"
+                    aria-label="Delivered"
+                  >
+                    <CheckIcon className="w-3.5 h-3.5 absolute left-0" />
+                    <CheckIcon className="w-3.5 h-3.5 absolute left-[5px] top-[1.5px]" />
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
