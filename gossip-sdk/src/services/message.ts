@@ -661,7 +661,8 @@ export class MessageService {
     if (message.replyTo) {
       const originalMessage = await this.findMessageByMsgId(
         message.replyTo.originalMsgId,
-        message.ownerUserId
+        message.ownerUserId,
+        message.contactUserId
       );
 
       if (!originalMessage) {

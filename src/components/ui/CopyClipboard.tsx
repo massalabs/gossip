@@ -42,13 +42,13 @@ const CopyClipboard: React.FC<CopyClipboardProps> = ({
   return (
     <button
       onClick={handleCopy}
-      className={`shrink-0 p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors touch-manipulation ${className}`}
+      className={`shrink-0 p-1 hover:bg-muted rounded transition-colors touch-manipulation ${className}`}
       title={title}
     >
       {isCopied ? (
         <Check className={`${iconSize} text-success`} />
       ) : (
-        <Copy className={`${iconSize} text-gray-500 dark:text-gray-400`} />
+        <Copy className={`${iconSize} text-muted-foreground`} />
       )}
     </button>
   );

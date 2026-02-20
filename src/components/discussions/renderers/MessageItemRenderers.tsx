@@ -1,5 +1,10 @@
 import React, { useMemo, useCallback } from 'react';
-import { Message, DiscussionDirection } from '@massalabs/gossip-sdk';
+import {
+  Message,
+  MessageDirection,
+  DiscussionDirection,
+} from '@massalabs/gossip-sdk';
+import type { Contact } from '@massalabs/gossip-sdk';
 import { MessageGroupInfo } from '../../../utils/messageGrouping';
 import MessageItem from '../MessageItem';
 import DateSeparator from '../DateSeparator';
@@ -42,15 +47,9 @@ export const AnnouncementRenderer: React.FC<AnnouncementRendererProps> = ({
           : 'justify-start'
       }`}
     >
-      <div
-        className={`max-w-[85%] sm:max-w-[75%] md:max-w-[70%] px-4 py-3 rounded-3xl text-sm leading-tight ${
-          direction === DiscussionDirection.INITIATED
-            ? 'bg-accent text-accent-foreground rounded-br-lg'
-            : 'bg-card dark:bg-surface-secondary text-card-foreground rounded-bl-lg shadow-sm'
-        }`}
-      >
-        <p className="text-xs text-center font-light opacity-80 mb-1.5">
-          Announcement message:
+      <div className="max-w-[85%] sm:max-w-[75%] md:max-w-[70%] px-4 py-3 rounded-2xl text-sm leading-tight bg-muted text-foreground border-l-2 border-primary">
+        <p className="text-xs font-medium opacity-60 mb-1.5 italic">
+          Announcement
         </p>
         <p className="whitespace-pre-wrap wrap-break-word">
           {parsedLinks.map((segment, index) => {
@@ -106,6 +105,8 @@ interface MessageRendererProps {
   onReplyTo?: (message: Message) => void;
   onForward?: (message: Message) => void;
   onScrollToMessage?: (messageId: number) => void;
+  contact?: Pick<Contact, 'name' | 'avatar'>;
+  isHighlighted?: boolean;
 }
 
 export const MessageRenderer: React.FC<MessageRendererProps> = ({
@@ -115,20 +116,29 @@ export const MessageRenderer: React.FC<MessageRendererProps> = ({
   onReplyTo,
   onForward,
   onScrollToMessage,
-}) => (
-  <div className="px-4 md:px-6 lg:px-8">
-    <MessageItem
-      id={`message-${message.id}`}
-      message={message}
-      onReplyTo={onReplyTo}
-      onForward={onForward}
-      onScrollToMessage={onScrollToMessage}
-      showTimestamp={showTimestamp}
-      isFirstInGroup={groupInfo.isFirstInGroup}
-      isLastInGroup={groupInfo.isLastInGroup}
-    />
-  </div>
-);
+  contact,
+  isHighlighted,
+}) => {
+  const isIncoming = message.direction === MessageDirection.INCOMING;
+
+  return (
+    <div className="px-4 md:px-6 lg:px-8">
+      <MessageItem
+        id={`message-${message.id}`}
+        message={message}
+        onReplyTo={onReplyTo}
+        onForward={onForward}
+        onScrollToMessage={onScrollToMessage}
+        showTimestamp={showTimestamp}
+        isFirstInGroup={groupInfo.isFirstInGroup}
+        isLastInGroup={groupInfo.isLastInGroup}
+        showAvatar={isIncoming && groupInfo.isLastInGroup}
+        contact={isIncoming ? contact : undefined}
+        isHighlighted={isHighlighted}
+      />
+    </div>
+  );
+};
 
 // =============================================================================
 // Spacer Renderer

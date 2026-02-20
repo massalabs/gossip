@@ -165,9 +165,7 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
           return (
             <div
               key={item.discussion.id}
-              className={
-                item.isSelected ? 'bg-blue-50 dark:bg-blue-950/20' : ''
-              }
+              className={item.isSelected ? 'bg-accent/10' : ''}
             >
               <DiscussionListItem
                 discussion={item.discussion}

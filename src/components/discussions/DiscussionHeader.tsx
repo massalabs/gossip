@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronLeft } from 'react-feather';
+import { ChevronLeft, Search } from 'react-feather';
 import { Contact, SessionStatus } from '@massalabs/gossip-sdk';
 import type { Discussion } from '@massalabs/gossip-sdk';
 import { useGossipSdk } from '../../hooks/useGossipSdk';
@@ -15,6 +15,7 @@ interface DiscussionHeaderProps {
   discussion?: Discussion | null;
   onBack?: () => void;
   onSync?: () => void;
+  onSearchToggle?: () => void;
   title?: string;
 }
 
@@ -22,6 +23,7 @@ const DiscussionHeader: React.FC<DiscussionHeaderProps> = ({
   contact,
   discussion,
   onBack,
+  onSearchToggle,
   title,
 }) => {
   const gossip = useGossipSdk();
@@ -108,6 +110,17 @@ const DiscussionHeader: React.FC<DiscussionHeaderProps> = ({
             )}
           </div>
         </button>
+        {onSearchToggle && (
+          <Button
+            onClick={onSearchToggle}
+            variant="circular"
+            size="custom"
+            ariaLabel="Search messages"
+            className="w-8 h-8 flex items-center justify-center shrink-0"
+          >
+            <Search className="w-5 h-5 text-muted-foreground" />
+          </Button>
+        )}
       </div>
     </HeaderBar>
   );

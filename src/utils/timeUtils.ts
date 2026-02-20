@@ -3,7 +3,14 @@
  */
 
 /**
- * Format a date to show relative time (e.g., "2m", "3h", "1d")
+ * Format a date to show relative time for discussion list items.
+ * - < 1 min: "now"
+ * - < 60 min: "3m"
+ * - Today (>= 60 min): "14:30"
+ * - Yesterday: "Yesterday"
+ * - < 7 days: weekday name (e.g. "Monday")
+ * - Same year: "Jan 15"
+ * - Older: "Jan 15, 2024"
  * @param date - The date to format
  * @returns Formatted relative time string
  */
@@ -11,14 +18,27 @@ export function formatRelativeTime(date: Date): string {
   const now = new Date();
   const diff = now.getTime() - date.getTime();
   const minutes = Math.floor(diff / 60000);
-  const hours = Math.floor(diff / 3600000);
-  const days = Math.floor(diff / 86400000);
 
   if (minutes < 1) return 'now';
   if (minutes < 60) return `${minutes}m`;
-  if (hours < 24) return `${hours}h`;
-  if (days < 7) return `${days}d`;
-  return date.toLocaleDateString();
+
+  if (isToday(date)) return formatTime(date);
+  if (isYesterday(date)) return 'Yesterday';
+
+  const days = Math.floor(diff / 86400000);
+  if (days < 7) {
+    return date.toLocaleDateString('en-US', { weekday: 'long' });
+  }
+
+  if (date.getFullYear() === now.getFullYear()) {
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  }
+
+  return date.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
 }
 
 /**

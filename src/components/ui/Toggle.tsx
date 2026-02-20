@@ -18,9 +18,7 @@ const Toggle: React.FC<ToggleProps> = ({
   const baseClasses =
     'relative inline-flex h-6 w-11 items-center rounded-full transition-colors touch-manipulation focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50';
 
-  const checkedClasses = checked
-    ? 'bg-primary'
-    : 'bg-gray-300 dark:bg-gray-600';
+  const checkedClasses = checked ? 'bg-primary' : 'bg-muted-foreground/40';
 
   const combinedClasses =
     `${baseClasses} ${checkedClasses} ${className}`.trim();

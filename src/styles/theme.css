@@ -54,9 +54,7 @@
   --badge-border: #f4f4f4; /* badge border color */
 
   /* Surface colors */
-  --surface-secondary: var(
-    --card
-  ); /* secondary surface background (light mode uses card) */
+  --surface-secondary: #eef0f2; /* light gray for incoming bubbles - visible against #fafbfc background */
 
   /* Graphic colors */
   --graphic-accent: var(--primary); /* brand green for illustrations */
@@ -107,7 +105,7 @@
   --card-foreground: var(--foreground);
 
   /* Surface colors */
-  --surface-secondary: #243032; /* secondary surface background (incoming messages, discussion items, popups) */
+  --surface-secondary: #2a3638; /* secondary surface background (incoming messages, discussion items, popups) */
 
   --popover: var(
     --surface-secondary
