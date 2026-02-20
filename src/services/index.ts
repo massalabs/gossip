@@ -20,6 +20,7 @@ import { bridgeSet } from '../sw-bridge';
 import { setActiveSeekersInPreferences } from '../utils/preferences';
 import { useDiscussionStore } from '../stores/discussionStore';
 import { useMessageStore } from '../stores/messageStore';
+
 /**
  * Wire up SDK events to app behaviors like notifications.
  *
@@ -64,7 +65,6 @@ export function setupSdkEventHandlers(gossip: GossipSdk): void {
 
     // Don't notify for keep-alive messages
     if (message.type === MessageType.KEEP_ALIVE) return;
-
     // Don't notify if user is currently viewing this discussion
     const currentContact = useMessageStore.getState().currentContactUserId;
     if (currentContact === message.contactUserId) return;
