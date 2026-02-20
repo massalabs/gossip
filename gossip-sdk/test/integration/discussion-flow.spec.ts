@@ -1559,7 +1559,8 @@ describe('session break in session manager', () => {
   function createSessionConfig(
     max_session_inactivity_millis: number,
     keep_alive_interval_millis: number,
-    max_session_lag_length: bigint = 10000n
+    max_session_lag_length: bigint = 10000n,
+    max_keep_alive_peer_lag_length: bigint = 8n
   ): SessionConfig {
     return new SessionConfig(
       7 * 24 * 60 * 60 * 1000, // max_incoming_announcement_age_millis: 1 week
@@ -1568,7 +1569,8 @@ describe('session break in session manager', () => {
       60 * 1000, // max_incoming_message_future_millis: 1 minute
       max_session_inactivity_millis,
       keep_alive_interval_millis,
-      max_session_lag_length
+      max_session_lag_length,
+      max_keep_alive_peer_lag_length
     );
   }
 

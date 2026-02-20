@@ -110,6 +110,7 @@
 //!     max_session_inactivity_millis: 3_600_000,           // 1 hour
 //!     keep_alive_interval_millis: 60_000,                 // 1 minute
 //!     max_session_lag_length: 100,                        // max unacknowledged messages
+//!     max_keep_alive_peer_lag_length: 8,                  // trigger keep-alive on peer lag
 //! };
 //!
 //! let mut session_manager = SessionManager::new(config);

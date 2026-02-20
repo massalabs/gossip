@@ -622,13 +622,24 @@ impl Session {
         })
     }
 
-    /// Returns the number of unacknowledged messages sent by this session.
+    /// Returns the number of unacknowledged self messages sent by this session.
     ///
-    /// The lag length increases when you send messages and decreases when the peer
+    /// The self lag length increases when you send messages and decreases when the peer
     /// acknowledges them (by sending messages back to you). This can be used to
     /// implement flow control or detect communication issues.
-    pub fn lag_length(&self) -> u64 {
-        self.agraphon_instance.lag_length()
+    pub fn self_lag_length(&self) -> u64 {
+        self.agraphon_instance.self_lag_length()
+    }
+
+    /// Returns how many peer messages are not yet acknowledged by our latest outgoing message.
+    ///
+    /// This value increases when we receive messages without replying, and drops to `0`
+    /// whenever we send a message.
+    ///
+    /// Before the first post-announcement send, this starts at `1` due to protocol
+    /// bootstrap semantics (announcement at height `1`, acknowledging parent `0`).
+    pub fn peer_lag_length(&self) -> u64 {
+        self.agraphon_instance.peer_lag_length()
     }
 }
 
@@ -930,7 +941,7 @@ mod tests {
 
     /// Tests that lag length increases when messages are sent without acknowledgment
     #[test]
-    fn test_session_lag_length() {
+    fn test_session_self_lag_length() {
         let (alice_pk, alice_sk) = generate_test_keypair();
         let (bob_pk, bob_sk) = generate_test_keypair();
 
@@ -947,15 +958,15 @@ mod tests {
             Session::from_initiation_request_pair(&alice_outgoing, &bob_incoming_at_alice);
 
         // Get initial lag
-        let initial_lag = alice_session.lag_length();
+        let initial_lag = alice_session.self_lag_length();
 
         // Send messages (lag increases without acknowledgments)
         alice_session.send_outgoing_message(&create_test_message(b"msg1").contents);
-        let lag1 = alice_session.lag_length();
+        let lag1 = alice_session.self_lag_length();
         assert!(lag1 > initial_lag);
 
         alice_session.send_outgoing_message(&create_test_message(b"msg2").contents);
-        let lag2 = alice_session.lag_length();
+        let lag2 = alice_session.self_lag_length();
         assert!(lag2 > lag1);
     }
 
