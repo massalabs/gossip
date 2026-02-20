@@ -7,7 +7,7 @@ edition.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-libcrux-ml-dsa = "0.0.3"
+libcrux-ml-dsa = "0.0.4"
 serde = { version = "1.0", features = ["derive"] }
 zeroize = { version = "1.8", features = ["derive"] }
 
