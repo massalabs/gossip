@@ -13,10 +13,10 @@ import {
 import { encodeUserId } from '../../src/utils/userId';
 import { defaultSdkConfig, type SdkConfig } from '../../src/config/sdk';
 import { eq, and, gte, lte } from 'drizzle-orm';
-import { getSqliteDb, clearAllTables } from '../../src/sqlite';
-import * as schema from '../../src/schema';
-import { insertDiscussion } from '../../src/queries/discussions';
-import { insertMessage, getMessageById } from '../../src/queries/messages';
+import { getSqliteDb, clearAllTables } from '../../src/db';
+import * as schema from '../../src/db/schema';
+import { insertDiscussion } from '../../src/db';
+import { insertMessage, getMessageById } from '../../src/db';
 
 const DEDUP_OWNER_USER_ID = encodeUserId(new Uint8Array(32).fill(1));
 const DEDUP_CONTACT_USER_ID = encodeUserId(new Uint8Array(32).fill(2));

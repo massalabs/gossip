@@ -1,14 +1,6 @@
 import * as schema from '../schema';
 import { getSqliteDb, withTransaction } from '../sqlite';
 
-let onSeekersUpdated: ((seekers: Uint8Array[]) => void) | null = null;
-
-export function setOnSeekersUpdated(
-  cb: ((seekers: Uint8Array[]) => void) | null
-): void {
-  onSeekersUpdated = cb;
-}
-
 export async function replaceActiveSeekers(
   seekers: Uint8Array[]
 ): Promise<void> {
@@ -21,5 +13,4 @@ export async function replaceActiveSeekers(
         .values(seekers.map(seeker => ({ seeker })));
     }
   });
-  onSeekersUpdated?.(seekers);
 }

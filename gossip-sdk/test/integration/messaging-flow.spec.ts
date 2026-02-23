@@ -42,12 +42,8 @@ import { decodeUserId } from '../../src/utils/userId';
 import { SessionStatus } from '../../src/assets/generated/wasm/gossip_wasm';
 import { SdkEventEmitter } from '../../src/core/SdkEventEmitter';
 import { eq, and } from 'drizzle-orm';
-import {
-  getSqliteDb,
-  getLastInsertRowId,
-  clearAllTables,
-} from '../../src/sqlite';
-import * as schema from '../../src/schema';
+import { getSqliteDb, getLastInsertRowId, clearAllTables } from '../../src/db';
+import * as schema from '../../src/db/schema';
 
 // Helper: insert a discussion into SQLite and return its id
 async function addDiscussionToSqlite(

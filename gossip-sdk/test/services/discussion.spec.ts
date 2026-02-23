@@ -11,13 +11,13 @@ import {
   MessageType,
   DiscussionDirection,
 } from '../../src/db';
-import { clearAllTables, getSqliteDb } from '../../src/sqlite';
-import * as schema from '../../src/schema';
+import { clearAllTables, getSqliteDb } from '../../src/db';
+import * as schema from '../../src/db/schema';
 import { eq, and, inArray } from 'drizzle-orm';
 import { encodeUserId } from '../../src/utils/userId';
-import { resetSendQueueMessages } from '../../src/queries';
-import { insertMessage, getMessageById } from '../../src/queries/messages';
-import { insertDiscussion } from '../../src/queries/discussions';
+import { resetSendQueueMessages } from '../../src/db';
+import { insertMessage, getMessageById } from '../../src/db';
+import { insertDiscussion } from '../../src/db';
 
 // ============================================================================
 // resetSendQueueMessages function tests

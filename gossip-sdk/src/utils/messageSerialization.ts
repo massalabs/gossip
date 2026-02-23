@@ -5,7 +5,7 @@
  * Supports regular text messages, replies, forwards, and keep-alive messages.
  */
 
-import { MessageType, MESSAGE_ID_SIZE } from '../db/db';
+import { MessageType, MESSAGE_ID_SIZE } from '../db';
 import {
   Message as ProtoMessage,
   MessageType as ProtoMessageType,

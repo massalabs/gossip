@@ -11,8 +11,8 @@ import {
   validateUsernameFormatAndAvailability,
   validateUserIdFormat,
 } from '../../src/utils/validation';
-import { getSqliteDb, clearAllTables } from '../../src/sqlite';
-import * as schema from '../../src/schema';
+import { getSqliteDb, clearAllTables } from '../../src/db';
+import * as schema from '../../src/db/schema';
 
 const VALIDATION_OWNER_USER_ID = encodeUserId(new Uint8Array(32).fill(13));
 

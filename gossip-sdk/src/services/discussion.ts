@@ -13,7 +13,7 @@ import {
   MessageStatus,
   MessageType,
   serializeSendAnnouncement,
-} from '../db/db';
+} from '../db';
 import { toDiscussion } from '../utils/discussions';
 import {
   AnnouncementPayload,
@@ -35,7 +35,7 @@ import {
   deleteDiscussionById,
   insertMessage,
   resetSendQueueMessages,
-} from '../queries';
+} from '../db';
 
 const logger = new Logger('DiscussionService');
 

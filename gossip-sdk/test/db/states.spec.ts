@@ -13,38 +13,38 @@ import {
   MessageStatus,
   MessageType,
 } from '../../src/db';
-import { clearAllTables } from '../../src/sqlite';
+import { clearAllTables } from '../../src/db';
 import {
   insertMessage,
   getMessageById,
   updateMessageById,
   getMessagesByOwnerAndContact,
   deleteMessagesByOwnerAndContact,
-} from '../../src/queries/messages';
+} from '../../src/db';
 import {
   insertDiscussion,
   getDiscussionByOwnerAndContact,
   deleteDiscussionsByOwnerAndContact,
   getDiscussionsByOwner,
-} from '../../src/queries/discussions';
+} from '../../src/db';
 import {
   insertContact,
   getContactByOwnerAndUser,
   deleteContactByOwnerAndUser,
-} from '../../src/queries/contacts';
+} from '../../src/db';
 import {
   getAllPendingAnnouncements,
   deletePendingAnnouncementsByIds,
-} from '../../src/queries/pendingAnnouncements';
+} from '../../src/db';
 import {
   insertUserProfile,
-  getUserProfileField,
+  getUserProfileById,
   updateUserProfileById,
   rowToUserProfile,
   userProfileToRow,
-} from '../../src/queries/userProfile';
-import { getSqliteDb } from '../../src/sqlite';
-import * as schema from '../../src/schema';
+} from '../../src/db';
+import { getSqliteDb } from '../../src/db';
+import * as schema from '../../src/db/schema';
 import type { UserProfile } from '../../src/db';
 
 const TEST_OWNER_USER_ID = 'gossip1testowner';
@@ -353,7 +353,7 @@ describe('Session Blob Round-Trip', () => {
 
     await insertUserProfile(userProfileToRow(makeProfile(blob)));
 
-    const row = await getUserProfileField('gossip1testsession');
+    const row = await getUserProfileById('gossip1testsession');
     expect(row).toBeDefined();
     const profile = rowToUserProfile(row!);
     expect(profile.session).toBeInstanceOf(Uint8Array);
@@ -367,7 +367,7 @@ describe('Session Blob Round-Trip', () => {
 
     await insertUserProfile(userProfileToRow(makeProfile(blob)));
 
-    const row = await getUserProfileField('gossip1testsession');
+    const row = await getUserProfileById('gossip1testsession');
     const profile = rowToUserProfile(row!);
     expect(profile.session.length).toBe(25_000);
     expect(Array.from(profile.session)).toEqual(Array.from(blob));
@@ -380,7 +380,7 @@ describe('Session Blob Round-Trip', () => {
     await insertUserProfile(userProfileToRow(makeProfile(smallBlob)));
 
     // Verify small blob is stored
-    let row = await getUserProfileField('gossip1testsession');
+    let row = await getUserProfileById('gossip1testsession');
     let profile = rowToUserProfile(row!);
     expect(profile.session.length).toBe(62);
 
@@ -394,7 +394,7 @@ describe('Session Blob Round-Trip', () => {
     });
 
     // Verify large blob is stored correctly
-    row = await getUserProfileField('gossip1testsession');
+    row = await getUserProfileById('gossip1testsession');
     profile = rowToUserProfile(row!);
     expect(profile.session.length).toBe(20_000);
     expect(Array.from(profile.session)).toEqual(Array.from(largeBlob));
@@ -413,7 +413,7 @@ describe('Session Blob Round-Trip', () => {
     await updateUserProfileById('gossip1testsession', { session: blob3 });
     await updateUserProfileById('gossip1testsession', { session: blob4 });
 
-    const row = await getUserProfileField('gossip1testsession');
+    const row = await getUserProfileById('gossip1testsession');
     const profile = rowToUserProfile(row!);
     expect(profile.session.length).toBe(15_000);
     expect(profile.session.every(b => b === 4)).toBe(true);

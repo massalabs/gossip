@@ -45,5 +45,10 @@ export const messages = sqliteTable(
       table.status
     ),
     index('messages_timestamp_idx').on(table.timestamp),
+    index('messages_owner_contact_msgid_idx').on(
+      table.ownerUserId,
+      table.contactUserId,
+      table.messageId
+    ),
   ]
 );

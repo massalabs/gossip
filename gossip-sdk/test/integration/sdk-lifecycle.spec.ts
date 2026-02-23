@@ -126,13 +126,13 @@ vi.mock('../../src/services/discussion', () => ({
   },
 }));
 
-vi.mock('../../src/sqlite', () => ({
+vi.mock('../../src/db/sqlite', () => ({
   initDb: vi.fn().mockResolvedValue(undefined),
   getSqliteDb: vi.fn(),
   closeSqlite: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock('../../src/queries', () => ({
+vi.mock('../../src/db/queries', () => ({
   getMessageById: vi.fn(),
   getMessagesByOwnerAndContact: vi.fn().mockResolvedValue([]),
   getMessagesByStatus: vi.fn().mockResolvedValue([]),

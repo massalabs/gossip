@@ -4,13 +4,13 @@
  * Functions for managing discussion metadata.
  */
 
-import { type Discussion, rowToDiscussion } from '../db/db';
-import type { DiscussionRow } from '../queries';
-import { getDiscussionById, updateDiscussionById } from '../queries';
+import { type Discussion, rowToDiscussion } from '../db';
+import type { DiscussionRow } from '../db';
+import { getDiscussionById, updateDiscussionById } from '../db';
 
 /** Convert a Drizzle discussion row to a domain Discussion. */
 export function toDiscussion(row: DiscussionRow): Discussion {
-  return rowToDiscussion(row as Record<string, unknown>);
+  return rowToDiscussion(row);
 }
 
 /** Convert discussion rows to sorted Discussion[]. Most recent activity first. */

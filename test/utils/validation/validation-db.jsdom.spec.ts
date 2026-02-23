@@ -11,8 +11,8 @@ import {
   closeSqlite,
   getSqliteDb,
   clearAllTables,
-} from '../../../gossip-sdk/src/sqlite';
-import * as schema from '../../../gossip-sdk/src/schema';
+} from '../../../gossip-sdk/src/db';
+import * as schema from '../../../gossip-sdk/src/db/schema';
 import { encodeUserId } from '../../../gossip-sdk/src/utils/userId';
 
 const require = createRequire(import.meta.url);

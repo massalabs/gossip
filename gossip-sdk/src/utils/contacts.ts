@@ -7,8 +7,8 @@
 import { decodeUserId } from './userId';
 import type { SessionModule } from '../wasm/session';
 import type { UserPublicKeys } from '../wasm/bindings';
-import { type Contact } from '../db/db';
 import {
+  type Contact,
   getContactsByOwner,
   getContactByOwnerAndUser,
   insertContact as queryInsertContact,
@@ -16,8 +16,8 @@ import {
   deleteContactByOwnerAndUser,
   deleteDiscussionsByOwnerAndContact,
   deleteMessagesByOwnerAndContact,
-} from '../db/queries';
-import { withTransaction } from '../db/sqlite';
+  withTransaction,
+} from '../db';
 
 export type AddContactResult = {
   success: boolean;

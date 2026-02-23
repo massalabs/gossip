@@ -59,7 +59,7 @@ export function userProfileToRow(profile: UserProfile): UserProfileInsert {
   };
 }
 
-export async function getUserProfileField(
+export async function getUserProfileById(
   userId: string
 ): Promise<UserProfileRow | undefined> {
   return getSqliteDb()

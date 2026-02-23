@@ -174,12 +174,18 @@ export async function getSendQueueMessages(
 }
 
 export async function getMessagesByStatus(
+  ownerUserId: string,
   status: MessageStatus
 ): Promise<MessageRow[]> {
   return getSqliteDb()
     .select()
     .from(schema.messages)
-    .where(eq(schema.messages.status, status))
+    .where(
+      and(
+        eq(schema.messages.ownerUserId, ownerUserId),
+        eq(schema.messages.status, status)
+      )
+    )
     .all();
 }
 

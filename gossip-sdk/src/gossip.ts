@@ -360,7 +360,7 @@ class GossipSdk {
 
     // Reset any messages stuck in SENDING status to WAITING_SESSION
     // This handles app crash/close during message send
-    await this.resetStuckSendingMessages();
+    await this.resetStuckSendingMessages(session.userIdEncoded);
 
     // Update SDK state to reflect the newly opened session.
     this.state = {
@@ -753,9 +753,12 @@ class GossipSdk {
    *
    * We also clear encryptedMessage and seeker since they may be stale.
    */
-  private async resetStuckSendingMessages(): Promise<void> {
+  private async resetStuckSendingMessages(ownerUserId: string): Promise<void> {
     try {
-      const stuck = await getMessagesByStatus(MessageStatus.SENDING);
+      const stuck = await getMessagesByStatus(
+        ownerUserId,
+        MessageStatus.SENDING
+      );
 
       for (const m of stuck) {
         await updateMessageById(m.id, {

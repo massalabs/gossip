@@ -21,7 +21,7 @@ import {
 import { encodeUserId } from '../../src/utils/userId';
 import { encodeToBase64, decodeFromBase64 } from '../../src/utils/base64';
 import { ensureWasmInitialized } from '../../src/wasm';
-import { clearAllTables } from '../../src/db/sqlite';
+import { clearAllTables } from '../../src/db';
 
 function createMockAuthProtocol(
   overrides: Partial<IAuthProtocol> = {}

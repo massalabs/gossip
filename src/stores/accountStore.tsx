@@ -11,7 +11,7 @@ import {
   generateNonce,
   validateUsernameFormat,
   updateUserProfileById,
-  getUserProfileField,
+  getUserProfileById,
   getUserProfileCount,
   getAllUserProfiles,
   upsertUserProfile,
@@ -44,7 +44,7 @@ async function createProfileFromAccount(
   security: UserProfile['security'],
   session: Uint8Array
 ): Promise<UserProfile> {
-  const existingRow = await getUserProfileField(userId);
+  const existingRow = await getUserProfileById(userId);
   if (existingRow) {
     const existing = rowToUserProfile(existingRow);
     // Merge with existing profile; prefer newly provided security fields when present
@@ -446,7 +446,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         // If userId is provided, load that specific account, otherwise use active or first
         let profile: UserProfile | null;
         if (userId) {
-          const row = await getUserProfileField(userId);
+          const row = await getUserProfileById(userId);
           profile = row ? rowToUserProfile(row) : null;
         } else {
           profile = await getActiveOrFirstProfile();

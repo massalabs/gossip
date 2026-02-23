@@ -6,11 +6,8 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { DiscussionDirection, DiscussionStatus } from '../../src/db';
 import { encodeUserId } from '../../src/utils/userId';
 import { updateDiscussionName } from '../../src/utils/discussions';
-import { clearAllTables } from '../../src/sqlite';
-import {
-  insertDiscussion,
-  getDiscussionById,
-} from '../../src/queries/discussions';
+import { clearAllTables } from '../../src/db';
+import { insertDiscussion, getDiscussionById } from '../../src/db';
 
 const OWNER_USER_ID = encodeUserId(new Uint8Array(32).fill(6));
 const CONTACT_USER_ID = encodeUserId(new Uint8Array(32).fill(7));

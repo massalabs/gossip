@@ -12,7 +12,7 @@ import {
   MessageStatus,
   MessageType,
   serializeSendAnnouncement,
-} from '../db/db';
+} from '../db';
 import { toDiscussion } from '../utils/discussions';
 import { decodeUserId, encodeUserId } from '../utils/userId';
 import { IMessageProtocol } from '../api/messageProtocol';
@@ -40,7 +40,7 @@ import {
   deletePendingAnnouncementsByIds,
   getAnnouncementCursor,
   upsertAnnouncementCursor,
-} from '../db/queries';
+} from '../db';
 
 const logger = new Logger('AnnouncementService');
 

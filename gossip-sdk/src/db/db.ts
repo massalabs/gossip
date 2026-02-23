@@ -140,26 +140,45 @@ export function serializeSendAnnouncement(
   });
 }
 
-/** Deserialize a SendAnnouncement JSON string from SQLite back to an object */
+/** Deserialize a SendAnnouncement JSON string from SQLite back to an object.
+ *  Throws a descriptive error if the stored JSON is malformed. */
 export function deserializeSendAnnouncement(json: string): ReadyAnnouncement {
-  const parsed = JSON.parse(json);
-  return {
-    announcement_bytes: new Uint8Array(parsed.announcement_bytes),
-    when_to_send: new Date(parsed.when_to_send),
-  };
+  try {
+    const parsed = JSON.parse(json);
+    if (!parsed || !parsed.announcement_bytes || !parsed.when_to_send) {
+      throw new Error('missing required fields');
+    }
+    return {
+      announcement_bytes: new Uint8Array(parsed.announcement_bytes),
+      when_to_send: new Date(parsed.when_to_send),
+    };
+  } catch (e) {
+    throw new Error(
+      `Failed to deserialize SendAnnouncement: ${e instanceof Error ? e.message : e}`
+    );
+  }
 }
 
-/** Convert a raw SQLite discussion row to a Discussion object.
+/**
+ * Shape required by rowToDiscussion — matches Drizzle's inferred DiscussionRow
+ * without importing from schema (avoids circular dependency).
+ */
+interface DiscussionRowLike {
+  sendAnnouncement: string | null;
+  announcementMessage: string | null;
+  [key: string]: unknown;
+}
+
+/** Convert a Drizzle discussion row to a domain Discussion object.
  *  Deserializes sendAnnouncement from JSON text to SendAnnouncement. */
-export function rowToDiscussion(row: Record<string, unknown>): Discussion {
+export function rowToDiscussion(row: DiscussionRowLike): Discussion {
   return {
     ...row,
     sendAnnouncement:
-      typeof row.sendAnnouncement === 'string'
+      row.sendAnnouncement !== null
         ? deserializeSendAnnouncement(row.sendAnnouncement)
         : null,
-    lastAnnouncementMessage:
-      (row.announcementMessage as string | null) ?? undefined,
+    lastAnnouncementMessage: row.announcementMessage ?? undefined,
   } as Discussion;
 }
 

@@ -10,19 +10,16 @@ import {
   MessageDirection,
   MessageStatus,
 } from '../../src/db';
-import { getSqliteDb } from '../../src/sqlite';
-import * as schema from '../../src/schema';
+import { getSqliteDb } from '../../src/db';
+import * as schema from '../../src/db/schema';
 import { encodeUserId } from '../../src/utils/userId';
 import {
   addContact,
   updateContactName,
   deleteContact,
 } from '../../src/utils/contacts';
-import {
-  getContactsByOwner,
-  getContactByOwnerAndUser,
-} from '../../src/db/queries';
-import { clearAllTables } from '../../src/sqlite';
+import { getContactsByOwner, getContactByOwnerAndUser } from '../../src/db';
+import { clearAllTables } from '../../src/db';
 import type { SessionModule } from '../../src/wasm/session';
 import type { UserPublicKeys as UserPublicKeysType } from '../../src/wasm/bindings';
 
