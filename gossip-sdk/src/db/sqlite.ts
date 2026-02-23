@@ -208,12 +208,26 @@ export async function initDb(options: InitDbOptions = {}): Promise<void> {
     db.worker.onmessage = handleWorkerMessage;
     db.useWorker = true;
 
-    await postToWorker({
-      type: 'init',
-      opfsPath: options.opfsPath,
-      wasmUrl: options.wasmUrl,
-      initSql: PRAGMAS,
-    });
+    try {
+      await postToWorker({
+        type: 'init',
+        opfsPath: options.opfsPath,
+        wasmUrl: options.wasmUrl,
+        initSql: PRAGMAS,
+      });
+    } catch (err) {
+      // Prevent dangling worker and "another open Access Handle" on retry:
+      // only one SyncAccessHandle per file is allowed (e.g. another tab or
+      // a previous failed init may hold it). Terminate and reset so retry
+      // doesn't create a second worker.
+      if (db.worker) {
+        db.worker.terminate();
+        db.worker = null;
+      }
+      db.useWorker = false;
+      db.pending.clear();
+      throw err;
+    }
   } else {
     // In-memory mode (tests): sync WASM build, in-process, fast, isolated.
     const moduleArg: Record<string, unknown> = {};
