@@ -29,7 +29,7 @@ beforeAll(async () => {
     waSqliteWasm.byteOffset,
     waSqliteWasm.byteOffset + waSqliteWasm.byteLength
   );
-  await initDb({ wasmBinary });
+  await initDb({ storage: { type: 'memory', wasmBinary } });
   await clearAllTables();
 });
 

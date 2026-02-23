@@ -84,6 +84,7 @@ import { QueueManager } from './utils/queue';
 import { encodeUserId, decodeUserId } from './utils/userId';
 import {
   initDb,
+  type StorageConfig,
   getMessageById,
   getMessagesByOwnerAndContact,
   getMessagesByStatus,
@@ -132,18 +133,8 @@ export interface GossipSdkInitOptions {
   protocolBaseUrl?: string;
   /** SDK configuration (optional - uses defaults if not provided) */
   config?: DeepPartial<SdkConfig>;
-  /** URL to wa-sqlite WASM file (for bundlers that rewrite asset paths) */
-  wasmUrl?: string;
-  /**
-   * OPFS directory path for persistent SQLite storage (mobile/Capacitor).
-   * Fast but single-tab only. Mutually exclusive with `idbName`.
-   */
-  opfsPath?: string;
-  /**
-   * IndexedDB database name for persistent SQLite storage (web).
-   * Multi-tab safe. Mutually exclusive with `opfsPath`.
-   */
-  idbName?: string;
+  /** SQLite storage backend. Defaults to in-memory. */
+  storage?: StorageConfig;
 }
 
 export interface OpenSessionOptions {
@@ -246,11 +237,7 @@ class GossipSdk {
 
     console.log('[GossipSdk] Initializing SQLite');
     // Initialize SQLite (idempotent — no-op if already initialized).
-    await initDb({
-      wasmUrl: options.wasmUrl,
-      opfsPath: options.opfsPath,
-      idbName: options.idbName,
-    });
+    await initDb({ storage: options.storage });
 
     console.log('[GossipSdk] SQLite initialized');
     // Create message protocol

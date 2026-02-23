@@ -2,11 +2,11 @@
  * SQLite initialization module for the Gossip SDK.
  *
  * Uses wa-sqlite (WASM) with Drizzle ORM's sqlite-proxy driver.
- * Two execution paths:
- *   - Browser (opfsPath set): Web Worker + IDBBatchAtomicVFS — IndexedDB persistence,
- *     off the main thread. Uses the sync WASM build (wa-sqlite).
+ * Four execution paths:
+ *   - Browser/OPFS (opfsPath set): Web Worker + AccessHandlePoolVFS — fast, single-tab.
+ *   - Browser/IDB (idbName set): Web Worker + IDBBatchAtomicVFS — multi-tab safe.
+ *   - Node.js file (fsPath set): In-process + NodeFsVFS — file persistence via node:fs.
  *   - In-memory (tests): :memory: in-process — no persistence, fast, isolated.
- *     Uses the sync WASM build with wasmBinary passed directly.
  *
  * In Phase C the VFS will be swapped for the encrypted PlausibleDeniableVFS.
  */
@@ -20,32 +20,16 @@ import { execStatements } from './exec-utils.js';
 
 export type GossipDatabase = SqliteRemoteDatabase<typeof schema>;
 
+/** Selects the SQLite storage backend. */
+export type StorageConfig =
+  | { type: 'opfs'; path: string; wasmUrl?: string }
+  | { type: 'idb'; name: string; wasmUrl?: string }
+  | { type: 'node-fs'; path: string }
+  | { type: 'memory'; wasmBinary?: ArrayBuffer };
+
 export interface InitDbOptions {
-  /**
-   * OPFS directory path. When set, uses AccessHandlePoolVFS (fast, single-tab).
-   * Use for mobile (Capacitor) where only one instance runs at a time.
-   */
-  opfsPath?: string;
-
-  /**
-   * IndexedDB database name. When set, uses IDBBatchAtomicVFS (multi-tab safe).
-   * Use for web where multiple tabs may be open.
-   */
-  idbName?: string;
-
-  /**
-   * Pre-loaded WASM binary for environments where fetch() is unavailable
-   * (e.g. Node.js tests). When omitted, the factory uses fetch() to load
-   * the .wasm file (browser default).
-   */
-  wasmBinary?: ArrayBuffer;
-
-  /**
-   * URL to the wa-sqlite WASM file. Used in browser to tell the Emscripten
-   * factory where to fetch the WASM binary (needed when bundlers like Vite
-   * rewrite asset paths). When omitted, the factory uses its default path.
-   */
-  wasmUrl?: string;
+  /** Storage backend selection. Defaults to in-memory. */
+  storage?: StorageConfig;
 }
 
 // ---------------------------------------------------------------------------
@@ -184,9 +168,15 @@ async function execRawInProcess(
   return execStatements(db.sqlite3, db.dbHandle, sql, params);
 }
 
-/** PRAGMAs applied before migrations. */
+/** PRAGMAs applied before migrations (in-memory / browser worker). */
 const PRAGMAS = `
   PRAGMA journal_mode=MEMORY;
+  PRAGMA temp_store=MEMORY;
+`;
+
+/** PRAGMAs for file-based persistence (Node.js). WAL gives crash recovery. */
+const PRAGMAS_FILE = `
+  PRAGMA journal_mode=WAL;
   PRAGMA temp_store=MEMORY;
 `;
 
@@ -197,57 +187,89 @@ const PRAGMAS = `
 /**
  * Initialize wa-sqlite and create the Drizzle ORM instance.
  * Idempotent — subsequent calls are no-ops.
- *
- * @param options.opfsPath - OPFS path for mobile (single-tab, fast).
- * @param options.idbName  - IndexedDB name for web (multi-tab safe).
- *                           Omit both for in-memory database (tests).
  */
 export async function initDb(options: InitDbOptions = {}): Promise<void> {
   if (db.drizzleDb) return;
 
-  const useOPFS = !!options.opfsPath;
-  const dbPath = options.opfsPath ?? options.idbName;
+  const storage: StorageConfig = options.storage ?? { type: 'memory' };
 
-  if (dbPath) {
-    // Spawn Worker with persistent VFS.
-    db.worker = new Worker(new URL('./sqlite-worker.ts', import.meta.url), {
-      type: 'module',
-    });
-    db.worker.onmessage = handleWorkerMessage;
-    db.useWorker = true;
+  switch (storage.type) {
+    case 'opfs':
+    case 'idb': {
+      // Spawn Worker with persistent VFS (browser).
+      const dbPath = storage.type === 'opfs' ? storage.path : storage.name;
+      const useOPFS = storage.type === 'opfs';
 
-    try {
-      await postToWorker({
-        type: 'init',
-        dbPath,
-        useOPFS,
-        wasmUrl: options.wasmUrl,
-        initSql: PRAGMAS,
+      db.worker = new Worker(new URL('./sqlite-worker.ts', import.meta.url), {
+        type: 'module',
       });
-    } catch (err) {
-      // Prevent dangling worker on init failure.
-      // Terminate and reset so retry doesn't create a second worker.
-      if (db.worker) {
-        db.worker.terminate();
-        db.worker = null;
+      db.worker.onmessage = handleWorkerMessage;
+      db.useWorker = true;
+
+      try {
+        await postToWorker({
+          type: 'init',
+          dbPath,
+          useOPFS,
+          wasmUrl: storage.wasmUrl,
+          initSql: PRAGMAS,
+        });
+      } catch (err) {
+        // Prevent dangling worker on init failure.
+        if (db.worker) {
+          db.worker.terminate();
+          db.worker = null;
+        }
+        db.useWorker = false;
+        db.pending.clear();
+        throw err;
       }
+      break;
+    }
+
+    case 'node-fs': {
+      // Node.js file mode: sync WASM build + NodeFsVFS — file persistence.
+      // Dynamic imports avoid bundling node:fs / node:path in browser builds.
+      const { NodeFsVFS } = await import('./node-fs-vfs.js');
+      const { readFileSync } = await import('node:fs');
+      const { dirname, resolve } = await import('node:path');
+      const { createRequire } = await import('node:module');
+
+      // Load WASM binary from disk (fetch() is unreliable in Node.js).
+      const require = createRequire(import.meta.url);
+      const wasmDir = dirname(require.resolve('wa-sqlite/package.json'));
+      const wasmBinary = readFileSync(resolve(wasmDir, 'dist/wa-sqlite.wasm'));
+
+      const module = await SQLiteESMFactory({
+        wasmBinary: wasmBinary.buffer.slice(
+          wasmBinary.byteOffset,
+          wasmBinary.byteOffset + wasmBinary.byteLength
+        ),
+      });
+      db.sqlite3 = SQLite.Factory(module);
+      db.sqlite3.vfs_register(new NodeFsVFS(storage.path) as never, true);
+      db.dbHandle = await db.sqlite3.open_v2('gossip.db');
       db.useWorker = false;
-      db.pending.clear();
-      throw err;
-    }
-  } else {
-    // In-memory mode (tests): sync WASM build, in-process, fast, isolated.
-    const moduleArg: Record<string, unknown> = {};
-    if (options.wasmBinary) {
-      moduleArg.wasmBinary = options.wasmBinary;
+
+      await db.sqlite3.exec(db.dbHandle, PRAGMAS_FILE);
+      break;
     }
 
-    const module = await SQLiteESMFactory(moduleArg);
-    db.sqlite3 = SQLite.Factory(module);
-    db.dbHandle = await db.sqlite3.open_v2(':memory:');
-    db.useWorker = false;
+    case 'memory': {
+      // In-memory mode (tests): sync WASM build, in-process, fast, isolated.
+      const moduleArg: Record<string, unknown> = {};
+      if (storage.wasmBinary) {
+        moduleArg.wasmBinary = storage.wasmBinary;
+      }
 
-    await db.sqlite3.exec(db.dbHandle, PRAGMAS);
+      const module = await SQLiteESMFactory(moduleArg);
+      db.sqlite3 = SQLite.Factory(module);
+      db.dbHandle = await db.sqlite3.open_v2(':memory:');
+      db.useWorker = false;
+
+      await db.sqlite3.exec(db.dbHandle, PRAGMAS);
+      break;
+    }
   }
 
   db.drizzleDb = createDrizzleInstance();
