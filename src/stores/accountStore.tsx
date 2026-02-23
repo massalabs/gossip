@@ -336,11 +336,10 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         await getSdk().openSession({
           mnemonic,
           encryptionKey,
-          persistEncryptionKey: encryptionKey,
           onPersist: createOnPersist(userId),
         });
 
-        const session = getSdk().getEncryptedSession(encryptionKey);
+        const session = getSdk().getEncryptedSession();
 
         const profile = await createProfileFromAccount(
           username,
@@ -406,11 +405,10 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         await getSdk().openSession({
           mnemonic,
           encryptionKey,
-          persistEncryptionKey: encryptionKey,
           onPersist: createOnPersist(userId),
         });
 
-        const session = getSdk().getEncryptedSession(encryptionKey);
+        const session = getSdk().getEncryptedSession();
 
         const profile = await createProfileFromAccount(
           username,
@@ -469,7 +467,6 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           mnemonic,
           encryptedSession: profile.session,
           encryptionKey,
-          persistEncryptionKey: encryptionKey,
           onPersist: createOnPersist(profile.userId),
         });
 
@@ -589,11 +586,10 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         await getSdk().openSession({
           mnemonic,
           encryptionKey,
-          persistEncryptionKey: encryptionKey,
           onPersist: createOnPersist(userId),
         });
 
-        const session = getSdk().getEncryptedSession(encryptionKey);
+        const session = getSdk().getEncryptedSession();
 
         const profile = await createProfileFromAccount(
           username,
@@ -729,8 +725,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       const state = get();
       const { userProfile } = state;
 
-      const { encryptionKey } = state;
-      if (!getSdk().isSessionOpen || !userProfile || !encryptionKey) {
+      if (!getSdk().isSessionOpen || !userProfile) {
         console.warn(
           'No session, user profile, or encryption key to persist, skipping persistence'
         );
@@ -739,7 +734,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
 
       try {
         // Serialize the session via SDK
-        const sessionBlob = getSdk().getEncryptedSession(encryptionKey);
+        const sessionBlob = getSdk().getEncryptedSession();
         if (!sessionBlob) {
           console.warn('Failed to get encrypted session');
           return;
