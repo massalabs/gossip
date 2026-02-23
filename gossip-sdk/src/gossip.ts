@@ -38,13 +38,6 @@
  * await gossipSdk.closeSession();
  * ```
  */
-
-import {
-  type Contact,
-  type Discussion,
-  type Message,
-  MessageStatus,
-} from './db';
 import { toDiscussion, toSortedDiscussions } from './utils/discussions';
 import { IMessageProtocol, createMessageProtocol } from './api/messageProtocol';
 import { createAuthProtocol } from './api/authProtocol';
@@ -90,22 +83,22 @@ import {
 } from './utils/validation';
 import { QueueManager } from './utils/queue';
 import { encodeUserId, decodeUserId } from './utils/userId';
-import { initDb } from './sqlite';
 import {
-  getMessageById as queryGetMessageById,
+  initDb,
+  getMessageById,
   getMessagesByOwnerAndContact,
   getMessagesByStatus,
   updateMessageById,
-  getDiscussionsByOwner,
   getDiscussionByOwnerAndContact,
-} from './queries';
-import {
-  getContacts,
-  getContact,
-  addContact,
-  updateContactName,
-  deleteContact,
-} from './contacts';
+  getDiscussionsByOwner,
+  getContactsByOwner,
+  getContactByOwnerAndUser,
+  type Contact,
+  type Discussion,
+  type Message,
+  MessageStatus,
+} from './db';
+import { addContact, updateContactName, deleteContact } from './utils/contacts';
 import type { UserPublicKeys } from './wasm/bindings';
 import {
   SdkEventEmitter,
@@ -396,7 +389,7 @@ class GossipSdk {
   private createServiceAPIWrappers(session: SessionModule): void {
     this._messagesAPI = {
       get: async id => {
-        const row = await queryGetMessageById(id);
+        const row = await getMessageById(id);
         return row ? rowToMessage(row) : undefined;
       },
       getMessages: async contactUserId => {
@@ -456,9 +449,9 @@ class GossipSdk {
     };
 
     this._contactsAPI = {
-      list: ownerUserId => getContacts(ownerUserId),
-      get: (ownerUserId, contactUserId) =>
-        getContact(ownerUserId, contactUserId),
+      list: ownerUserId => getContactsByOwner(ownerUserId),
+      get: async (ownerUserId, contactUserId) =>
+        (await getContactByOwnerAndUser(ownerUserId, contactUserId)) ?? null,
       add: (ownerUserId, userId, name, publicKeys) =>
         addContact(ownerUserId, userId, name, publicKeys),
       updateName: (ownerUserId, contactUserId, newName) =>

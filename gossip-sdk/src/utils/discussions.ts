@@ -4,7 +4,7 @@
  * Functions for managing discussion metadata.
  */
 
-import { type Discussion, rowToDiscussion } from '../db';
+import { type Discussion, rowToDiscussion } from '../db/db';
 import type { DiscussionRow } from '../queries';
 import { getDiscussionById, updateDiscussionById } from '../queries';
 

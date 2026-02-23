@@ -13,7 +13,7 @@ import {
   MessageStatus,
   MessageType,
   serializeSendAnnouncement,
-} from '../db';
+} from '../db/db';
 import { toDiscussion } from '../utils/discussions';
 import {
   AnnouncementPayload,

@@ -11,7 +11,7 @@ import {
   MessageStatus,
   MessageType,
   MESSAGE_ID_SIZE,
-} from '../db';
+} from '../db/db';
 import {
   type MessageRow,
   getMessageById,
@@ -23,14 +23,14 @@ import {
   getOutgoingSentMessagesByOwner,
   getWaitingMessageCount as getWaitingCount,
   getSendQueueMessages,
-} from '../queries';
+} from '../db/queries';
 import {
   getDiscussionByOwnerAndContact,
   updateDiscussionById,
   incrementUnreadCount,
   decrementUnreadCount,
-} from '../queries';
-import { replaceActiveSeekers } from '../queries';
+} from '../db/queries';
+import { replaceActiveSeekers } from '../db/queries';
 import { decodeUserId, encodeUserId } from '../utils/userId';
 import { IMessageProtocol, EncryptedMessage } from '../api/messageProtocol';
 import { SessionStatus } from '../wasm/bindings';

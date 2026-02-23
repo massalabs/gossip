@@ -12,7 +12,7 @@ import { resolve, dirname } from 'path';
 import { createRequire } from 'module';
 import { afterAll, beforeAll } from 'vitest';
 import { initializeWasm } from '../src/wasm/loader';
-import { initDb, closeSqlite, clearAllTables } from '../src/sqlite';
+import { initDb, closeSqlite, clearAllTables } from '../src/db/sqlite';
 
 const require = createRequire(import.meta.url);
 const waSqlitePath = dirname(require.resolve('wa-sqlite/package.json'));

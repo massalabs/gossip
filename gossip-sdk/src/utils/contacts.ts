@@ -6,15 +6,24 @@
 
 import { decodeUserId } from './userId';
 import type { SessionModule } from '../wasm/session';
+import type { UserPublicKeys } from '../wasm/bindings';
+import { type Contact } from '../db/db';
 import {
   getContactsByOwner,
   getContactByOwnerAndUser,
+  insertContact as queryInsertContact,
   updateContactByOwnerAndUser,
   deleteContactByOwnerAndUser,
   deleteDiscussionsByOwnerAndContact,
   deleteMessagesByOwnerAndContact,
-} from '../queries';
-import { withTransaction } from '../sqlite';
+} from '../db/queries';
+import { withTransaction } from '../db/sqlite';
+
+export type AddContactResult = {
+  success: boolean;
+  error?: string;
+  contact?: Contact;
+};
 
 export type UpdateContactNameResult =
   | { success: true; trimmedName: string }
@@ -138,6 +147,42 @@ export async function deleteContact(
       success: false,
       reason: 'error',
       message: 'Failed to delete contact. Please try again.',
+    };
+  }
+}
+
+/**
+ * Add a new contact.
+ */
+export async function addContact(
+  ownerUserId: string,
+  userId: string,
+  name: string,
+  publicKeys: UserPublicKeys
+): Promise<AddContactResult> {
+  try {
+    const existing = await getContactByOwnerAndUser(ownerUserId, userId);
+    if (existing) {
+      return { success: false, error: 'Contact already exists' };
+    }
+
+    await queryInsertContact({
+      ownerUserId,
+      userId,
+      name,
+      publicKeys: publicKeys.to_bytes(),
+      isOnline: false,
+      lastSeen: new Date(),
+      createdAt: new Date(),
+    });
+
+    const newContact = await getContactByOwnerAndUser(ownerUserId, userId);
+    return { success: true, contact: newContact ?? undefined };
+  } catch (error) {
+    console.error('Error adding contact:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
     };
   }
 }

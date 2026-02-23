@@ -5,7 +5,7 @@
  * keep-alive messages and broken sessions.
  */
 
-import { MessageType, MessageDirection, MessageStatus } from '../db';
+import { MessageType, MessageDirection, MessageStatus } from '../db/db';
 import { getDiscussionsByOwner } from '../queries';
 import { toSortedDiscussions } from '../utils/discussions';
 import type { SessionModule } from '../wasm/session';

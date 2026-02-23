@@ -13,8 +13,15 @@ import {
 import { getSqliteDb } from '../../src/sqlite';
 import * as schema from '../../src/schema';
 import { encodeUserId } from '../../src/utils/userId';
-import { addContact, getContact, getContacts } from '../../src/contacts';
-import { updateContactName, deleteContact } from '../../src/utils/contacts';
+import {
+  addContact,
+  updateContactName,
+  deleteContact,
+} from '../../src/utils/contacts';
+import {
+  getContactsByOwner,
+  getContactByOwnerAndUser,
+} from '../../src/db/queries';
 import { clearAllTables } from '../../src/sqlite';
 import type { SessionModule } from '../../src/wasm/session';
 import type { UserPublicKeys as UserPublicKeysType } from '../../src/wasm/bindings';
@@ -45,7 +52,7 @@ describe('Contacts utilities', () => {
     );
     expect(result.success).toBe(true);
 
-    const contact = await getContact(
+    const contact = await getContactByOwnerAndUser(
       CONTACTS_OWNER_USER_ID,
       CONTACTS_CONTACT_USER_ID
     );
@@ -141,7 +148,7 @@ describe('Contacts utilities', () => {
     expect(result.success).toBe(true);
     expect(fakeSession.peerDiscard).toHaveBeenCalled();
 
-    const contacts = await getContacts(CONTACTS_OWNER_USER_ID);
+    const contacts = await getContactsByOwner(CONTACTS_OWNER_USER_ID);
     expect(contacts.length).toBe(0);
   });
 });
