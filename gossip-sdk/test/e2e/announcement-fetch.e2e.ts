@@ -148,7 +148,7 @@ describe('E2E: Discussion request (user A sends to user B)', () => {
           .from(schema.discussions)
           .where(eq(schema.discussions.ownerUserId, userAId))
           .all()
-      ).map(r => rowToDiscussion(r as Record<string, unknown>));
+      ).map(r => rowToDiscussion(r));
       const sentDiscussion = discussionsA.find(
         d =>
           d.contactUserId === userBId &&
