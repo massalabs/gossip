@@ -33,6 +33,11 @@ await sdk.init();
 // 2. Open session (login)
 await sdk.openSession({
   mnemonic: 'word1 word2 word3 ... word12',
+  // Optional: for existing session
+  // encryptedSession: savedBlob,
+  // encryptionKey,  // optional - derived from mnemonic if not provided
+  // Optional: for persistence
+  // onPersist: async (blob, key) => { await saveToStorage(blob, key); },
 });
 
 // 3. Use the SDK
@@ -308,12 +313,12 @@ await sdk.init({
 
 ## Session Persistence
 
-For restoring sessions across app restarts:
+For restoring sessions across app restarts, pass `encryptionKey` (optional — derived from mnemonic if omitted) and `onPersist` when opening the session:
 
 ```typescript
 await sdk.openSession({
   mnemonic,
-  encryptionKey,
+  encryptionKey, // optional
   onPersist: async (blob, key) => {
     await storage.save({ session: blob });
   },

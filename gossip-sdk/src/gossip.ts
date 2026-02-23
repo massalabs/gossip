@@ -52,10 +52,9 @@ import { startWasmInitialization, ensureWasmInitialized } from './wasm/loader';
 import { generateUserKeys, UserKeys } from './wasm/userKeys';
 import { SessionModule } from './wasm/session';
 import {
-  SessionStatus,
-  SessionConfig,
-} from './assets/generated/wasm/gossip_wasm';
-import { EncryptionKey } from './wasm/encryption';
+  EncryptionKey,
+  generateEncryptionKeyFromSeed,
+} from './wasm/encryption';
 import {
   AnnouncementService,
   type AnnouncementReceptionResult,
@@ -99,7 +98,12 @@ import {
   MessageStatus,
 } from './db';
 import { addContact, updateContactName, deleteContact } from './utils/contacts';
-import type { UserPublicKeys } from './wasm/bindings';
+import {
+  type UserPublicKeys,
+  type SessionConfig,
+  SessionManagerWrapper,
+  SessionStatus,
+} from './wasm/bindings';
 import {
   SdkEventEmitter,
   SdkEventType,
@@ -143,15 +147,13 @@ export interface OpenSessionOptions {
   mnemonic: string;
   /** Existing encrypted session blob (for restoring session) */
   encryptedSession?: Uint8Array;
-  /** Encryption key for decrypting session */
+  /** Encryption key for decrypting session and storage. Will be created if not provided. */
   encryptionKey?: EncryptionKey;
   /** Callback when session state changes (for persistence) */
   onPersist?: (
     encryptedBlob: Uint8Array,
     encryptionKey: EncryptionKey
   ) => Promise<void>;
-  /** Encryption key for persisting session (required if onPersist is provided) */
-  persistEncryptionKey?: EncryptionKey;
   /** Custom session configuration (optional, uses defaults if not provided) */
   sessionConfig?: SessionConfig;
 }
@@ -174,7 +176,7 @@ type SdkStateSessionOpen = {
   config: SdkConfig;
   session: SessionModule;
   userKeys: UserKeys;
-  persistEncryptionKey?: EncryptionKey;
+  encryptionKey?: EncryptionKey;
   onPersist?: (
     encryptedBlob: Uint8Array,
     encryptionKey: EncryptionKey
@@ -269,34 +271,34 @@ class GossipSdk {
       throw new Error('Session already open. Call closeSession() first.');
     }
 
-    // Validate session restore options - must have both or neither
-    if (options.encryptedSession && !options.encryptionKey) {
-      throw new Error(
-        'encryptionKey is required when encryptedSession is provided.'
-      );
-    }
-    if (options.encryptionKey && !options.encryptedSession) {
-      console.warn(
-        '[GossipSdk] encryptionKey provided without encryptedSession - key will be ignored'
-      );
-    }
-
-    // Validate persistence options
-    if (options.onPersist && !options.persistEncryptionKey) {
-      throw new Error(
-        'persistEncryptionKey is required when onPersist is provided.'
-      );
-    }
-    if (options.persistEncryptionKey && !options.onPersist) {
-      console.warn(
-        '[GossipSdk] persistEncryptionKey provided without onPersist callback - key will be unused'
-      );
-    }
+    // Derive encryption key from mnemonic when not provided
+    const encryptionKey =
+      options.encryptionKey ??
+      (await generateEncryptionKeyFromSeed(
+        options.mnemonic,
+        new Uint8Array(32).fill(0)
+      ));
 
     const { messageProtocol } = this.state;
 
     // Ensure WASM is ready
     await ensureWasmInitialized();
+
+    // Validate that encryptedSession can be decrypted with the provided key
+    if (options.encryptedSession) {
+      try {
+        const sessionManager = SessionManagerWrapper.from_encrypted_blob(
+          options.encryptedSession,
+          encryptionKey
+        );
+        // We only create this wrapper for validation, free it immediately
+        sessionManager.free();
+      } catch {
+        throw new Error(
+          '[GossipSdk] Failed to load encrypted session. Please provide a valid encryptedSession and encryptionKey.'
+        );
+      }
+    }
 
     // Generate keys from mnemonic
     const userKeys = await generateUserKeys(options.mnemonic);
@@ -312,8 +314,8 @@ class GossipSdk {
     );
 
     // Restore existing session state if provided
-    if (options.encryptedSession && options.encryptionKey) {
-      session.load(options.encryptedSession, options.encryptionKey);
+    if (options.encryptedSession) {
+      session.load(options.encryptedSession, encryptionKey);
     }
 
     // Get config from initialized state
@@ -369,7 +371,7 @@ class GossipSdk {
       config,
       session,
       userKeys,
-      persistEncryptionKey: options.persistEncryptionKey,
+      encryptionKey,
       onPersist: options.onPersist,
     };
 
@@ -534,37 +536,12 @@ class GossipSdk {
    * Get encrypted session blob for persistence.
    * Throws if no session is open.
    */
-  getEncryptedSession(encryptionKey: EncryptionKey): Uint8Array {
+  getEncryptedSession(): Uint8Array {
     const state = this.requireSession();
-    return state.session.toEncryptedBlob(encryptionKey);
-  }
-
-  /**
-   * Configure session persistence after session is opened.
-   * Use this when you need to set up persistence after account creation.
-   *
-   * @param encryptionKey - Key to encrypt session blob
-   * @param onPersist - Callback to save encrypted session blob
-   */
-  configurePersistence(
-    encryptionKey: EncryptionKey,
-    onPersist: (
-      encryptedBlob: Uint8Array,
-      encryptionKey: EncryptionKey
-    ) => Promise<void>
-  ): void {
-    if (this.state.status !== SdkStatus.SESSION_OPEN) {
-      throw new Error('No session open. Call openSession() first.');
+    if (!state.encryptionKey) {
+      throw new Error('No encryption key found. Call openSession() first.');
     }
-
-    // Update state with persistence config
-    this.state = {
-      ...this.state,
-      persistEncryptionKey: encryptionKey,
-      onPersist,
-    };
-
-    console.log('[GossipSdk] Session persistence configured');
+    return state.session.toEncryptedBlob(state.encryptionKey);
   }
 
   // ─────────────────────────────────────────────────────────────────
@@ -722,15 +699,15 @@ class GossipSdk {
   private async handleSessionPersist(): Promise<void> {
     if (this.state.status !== SdkStatus.SESSION_OPEN) return;
 
-    const { onPersist, persistEncryptionKey, session } = this.state;
-    if (!onPersist || !persistEncryptionKey) return;
+    const { onPersist, encryptionKey, session } = this.state;
+    if (!onPersist || !encryptionKey) return;
 
     try {
-      const blob = session.toEncryptedBlob(persistEncryptionKey);
+      const blob = session.toEncryptedBlob(encryptionKey);
       console.log(
         `[SessionPersist] Saving session blob (${blob.length} bytes)`
       );
-      await onPersist(blob, persistEncryptionKey);
+      await onPersist(blob, encryptionKey);
     } catch (error) {
       this.eventEmitter.emit(
         SdkEventType.ERROR,
