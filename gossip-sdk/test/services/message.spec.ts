@@ -24,17 +24,14 @@ import { encodeUserId } from '../../src/utils/userId';
 import { SessionStatus } from '../../src/wasm/bindings';
 import { defaultSdkConfig } from '../../src/config/sdk';
 import { SdkEventEmitter } from '../../src/core/SdkEventEmitter';
-import { clearAllTables } from '../../src/sqlite';
+import { clearAllTables } from '../../src/db';
 import {
   insertMessage,
   getMessageById,
   getMessagesByOwnerAndContact,
-} from '../../src/queries/messages';
-import {
-  insertDiscussion,
-  getDiscussionByOwnerAndContact,
-} from '../../src/queries/discussions';
-import { insertContact } from '../../src/queries/contacts';
+} from '../../src/db';
+import { insertDiscussion, getDiscussionByOwnerAndContact } from '../../src/db';
+import { insertContact } from '../../src/db';
 
 const MESSAGE_OWNER_USER_ID = encodeUserId(new Uint8Array(32).fill(11));
 const MESSAGE_CONTACT_USER_ID = encodeUserId(new Uint8Array(32).fill(12));

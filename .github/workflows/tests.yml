@@ -5,31 +5,52 @@ on:
     branches: [main, dev]
 
 jobs:
-  test:
+  sdk-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: Run gossip-sdk tests
+        run: npm --workspace gossip-sdk test
+
+  app-tests:
     runs-on: ubuntu-latest
     env:
       VITE_GOSSIP_API_URL: ${{ vars.GOSSIP_API_URL }}
       VITE_INVITE_DOMAIN: ${{ vars.INVITE_DOMAIN_DEV }}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: '24'
           cache: 'npm'
 
-      - name: Install dependencies
-        run: npm ci
+      - run: npm ci
+
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('**/package-lock.json') }}
 
       - name: Install Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
         run: npx playwright install --with-deps chromium
+
+      - name: Install Playwright deps (cached)
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
 
       - name: Run tests
         run: |
           npm run build
           npm run test:run
-
-      - name: Run gossip-sdk tests
-        run: npm --workspace gossip-sdk test

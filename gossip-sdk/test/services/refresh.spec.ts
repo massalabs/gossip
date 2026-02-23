@@ -12,8 +12,8 @@ import {
   DiscussionDirection,
   DiscussionStatus,
 } from '../../src/db';
-import { clearAllTables } from '../../src/sqlite';
-import { insertDiscussion } from '../../src/queries/discussions';
+import { clearAllTables } from '../../src/db';
+import { insertDiscussion } from '../../src/db';
 import type { SessionModule } from '../../src/wasm/session';
 import { encodeUserId, decodeUserId } from '../../src/utils/userId';
 import { SessionStatus } from '../../src/assets/generated/wasm/gossip_wasm';

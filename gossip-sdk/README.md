@@ -345,6 +345,26 @@ import type {
 import { SessionStatus, SdkEventType } from '@massalabs/gossip-sdk';
 ```
 
+## Database
+
+SQLite via [wa-sqlite](https://github.com/nicolo-ribaudo/wa-sqlite) (WASM) with [Drizzle ORM](https://orm.drizzle.team). Data is persisted to IndexedDB using `IDBBatchAtomicVFS`.
+
+### Schema
+
+Schema is defined in `src/db/schema/` with one file per table. Drizzle-kit generates SQL migrations from the schema.
+
+### Migrations
+
+Migrations live in `drizzle/` and are applied automatically on `initDb()` via Drizzle's built-in migrator.
+
+When you change the schema, regenerate migrations:
+
+```bash
+npm run db:generate
+```
+
+This runs `drizzle-kit generate`, which diffs the schema against existing migrations and outputs a new `.sql` file in `drizzle/`. Commit the generated migration alongside your schema change.
+
 ## Testing
 
 ```bash
@@ -358,10 +378,14 @@ Tests use wa-sqlite with in-memory databases for fast, isolated execution.
 
 ```
 gossip-sdk/
+├── drizzle/              # Generated SQL migrations
 ├── src/
 │   ├── gossipSdk.ts      # SDK class & factory
-│   ├── db.ts             # Database (SQLite) implementation
-│   ├── contacts.ts       # Contact operations
+│   ├── db/
+│   │   ├── index.ts      # Barrel export (all DB access goes through here)
+│   │   ├── schema/       # Drizzle table definitions (one file per table)
+│   │   ├── queries/      # Query functions
+│   │   └── sqlite.ts     # SQLite init, migration, connection
 │   ├── api/
 │   │   └── messageProtocol/  # REST protocol implementation
 │   ├── config/
@@ -376,7 +400,6 @@ gossip-sdk/
 │   │   ├── discussion.ts # Discussion service
 │   │   ├── announcement.ts # Announcement service
 │   │   └── refresh.ts    # Session refresh service
-│   ├── types/            # Type definitions
 │   ├── utils/            # Utility modules
 │   └── wasm/             # WASM module wrappers
 └── test/                 # Test files

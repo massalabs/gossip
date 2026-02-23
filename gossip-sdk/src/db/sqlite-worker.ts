@@ -13,6 +13,7 @@
 import SQLiteESMFactory from 'wa-sqlite/dist/wa-sqlite.mjs';
 import * as SQLite from 'wa-sqlite';
 import { AccessHandlePoolVFS } from 'wa-sqlite/src/examples/AccessHandlePoolVFS.js';
+import { execStatements } from './exec-utils.js';
 
 let sqlite3: ReturnType<typeof SQLite.Factory> | null = null;
 let dbHandle: number | null = null;
@@ -22,48 +23,14 @@ const post: (data: unknown) => void = (
   globalThis as unknown as { postMessage(data: unknown): void }
 ).postMessage.bind(globalThis);
 
-function copyRow(row: unknown[]): unknown[] {
-  return row.map(v => (v instanceof Uint8Array ? new Uint8Array(v) : v));
-}
-
 async function execSql(
   sql: string,
   params: unknown[]
 ): Promise<{ rows: unknown[][]; lastInsertRowId: number }> {
   if (!sqlite3 || dbHandle === null) throw new Error('SQLite not initialized');
 
-  const rows: unknown[][] = [];
+  const rows = await execStatements(sqlite3, dbHandle, sql, params);
 
-  if (params.length === 0) {
-    await sqlite3.exec(dbHandle, sql, (row: unknown[]) => {
-      rows.push(copyRow(row));
-    });
-  } else {
-    const str = sqlite3.str_new(dbHandle, sql);
-    try {
-      const prepared = await sqlite3.prepare_v2(
-        dbHandle,
-        sqlite3.str_value(str)
-      );
-      if (prepared) {
-        try {
-          sqlite3.bind_collection(
-            prepared.stmt,
-            params as (number | string | Uint8Array | null)[]
-          );
-          while ((await sqlite3.step(prepared.stmt)) === SQLite.SQLITE_ROW) {
-            rows.push(copyRow(sqlite3.row(prepared.stmt)));
-          }
-        } finally {
-          await sqlite3.finalize(prepared.stmt);
-        }
-      }
-    } finally {
-      sqlite3.str_finish(str);
-    }
-  }
-
-  // Only capture lastInsertRowId for INSERT statements (avoid unnecessary query on SELECT/UPDATE/DELETE)
   let lastInsertRowId = 0;
   if (sql.trimStart().toUpperCase().startsWith('INSERT')) {
     await sqlite3.exec(

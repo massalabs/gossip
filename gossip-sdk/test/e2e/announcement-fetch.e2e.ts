@@ -20,8 +20,8 @@ import {
 import { generateMnemonic } from '../../src/crypto/bip39';
 import { protocolConfig } from '../../src/config/protocol';
 import { eq } from 'drizzle-orm';
-import { getSqliteDb } from '../../src/sqlite';
-import * as schema from '../../src/schema';
+import { getSqliteDb } from '../../src/db';
+import * as schema from '../../src/db/schema';
 
 describe('E2E: Announcement fetch (real API, real account)', () => {
   let sdk: GossipSdk;

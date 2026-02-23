@@ -23,14 +23,12 @@ import {
   getOutgoingSentMessagesByOwner,
   getWaitingMessageCount as getWaitingCount,
   getSendQueueMessages,
-} from '../queries';
-import {
   getDiscussionByOwnerAndContact,
   updateDiscussionById,
   incrementUnreadCount,
   decrementUnreadCount,
-} from '../queries';
-import { replaceActiveSeekers } from '../queries';
+  replaceActiveSeekers,
+} from '../db';
 import { decodeUserId, encodeUserId } from '../utils/userId';
 import { IMessageProtocol, EncryptedMessage } from '../api/messageProtocol';
 import { SessionStatus } from '../wasm/bindings';
@@ -278,6 +276,7 @@ export class MessageService {
 
       try {
         await replaceActiveSeekers(seekers);
+        this.eventEmitter.emit(SdkEventType.SEEKERS_UPDATED, seekers);
       } catch (error) {
         log.error('failed to update active seekers', error);
       }

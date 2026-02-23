@@ -14,7 +14,9 @@
 import SQLiteESMFactory from 'wa-sqlite/dist/wa-sqlite.mjs';
 import * as SQLite from 'wa-sqlite';
 import { drizzle, type SqliteRemoteDatabase } from 'drizzle-orm/sqlite-proxy';
-import * as schema from './schema.js';
+import * as schema from './schema/index.js';
+import { DDL } from './generated-ddl.js';
+import { execStatements } from './exec-utils.js';
 
 export type GossipDatabase = SqliteRemoteDatabase<typeof schema>;
 
@@ -167,14 +169,6 @@ async function execRawDirect(
   return execRawInProcess(sql, params);
 }
 
-// wa-sqlite's column_blob() returns a Uint8Array VIEW into WASM linear memory
-// (Module.HEAPU8.subarray). These views become stale after finalize() frees the
-// prepared statement, or if WASM memory grows. Copy blob values so callers get
-// owned data that survives beyond the current query.
-function copyRow(row: unknown[]): unknown[] {
-  return row.map(v => (v instanceof Uint8Array ? new Uint8Array(v) : v));
-}
-
 async function execRawInProcess(
   sql: string,
   params: unknown[] = []
@@ -182,203 +176,13 @@ async function execRawInProcess(
   if (!db.sqlite3 || db.dbHandle === null) {
     throw new Error('SQLite not initialized');
   }
-
-  // Simple path for parameterless statements
-  if (params.length === 0) {
-    const rows: unknown[][] = [];
-    await db.sqlite3.exec(db.dbHandle, sql, (row: unknown[]) => {
-      rows.push(copyRow(row));
-    });
-    return rows;
-  }
-
-  // Prepared statement path for parameterized queries
-  const str = db.sqlite3.str_new(db.dbHandle, sql);
-  try {
-    const prepared = await db.sqlite3.prepare_v2(
-      db.dbHandle,
-      db.sqlite3.str_value(str)
-    );
-    if (!prepared) return [];
-
-    try {
-      db.sqlite3.bind_collection(
-        prepared.stmt,
-        params as (number | string | Uint8Array | null)[]
-      );
-      const rows: unknown[][] = [];
-      while ((await db.sqlite3.step(prepared.stmt)) === SQLite.SQLITE_ROW) {
-        rows.push(copyRow(db.sqlite3.row(prepared.stmt)));
-      }
-      return rows;
-    } finally {
-      await db.sqlite3.finalize(prepared.stmt);
-    }
-  } finally {
-    db.sqlite3.str_finish(str);
-  }
+  return execStatements(db.sqlite3, db.dbHandle, sql, params);
 }
 
-// ---------------------------------------------------------------------------
-// DDL — CREATE TABLE + indexes
-//
-// IMPORTANT: This DDL must stay in sync with schema.ts.
-// When adding/removing/renaming columns, tables, or indexes, update BOTH files.
-// schema.ts is the Drizzle type source; this DDL is the runtime CREATE source.
-// ---------------------------------------------------------------------------
-
-const DDL = `
-  CREATE TABLE IF NOT EXISTS contacts (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    ownerUserId TEXT NOT NULL,
-    userId TEXT NOT NULL,
-    name TEXT NOT NULL,
-    avatar TEXT,
-    publicKeys BLOB NOT NULL,
-    isOnline INTEGER NOT NULL DEFAULT 0,
-    lastSeen INTEGER NOT NULL,
-    createdAt INTEGER NOT NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS messages (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    ownerUserId TEXT NOT NULL,
-    contactUserId TEXT NOT NULL,
-    messageId BLOB,
-    content TEXT NOT NULL,
-    serializedContent BLOB,
-    type TEXT NOT NULL,
-    direction TEXT NOT NULL,
-    status TEXT NOT NULL,
-    timestamp INTEGER NOT NULL,
-    metadata TEXT,
-    seeker BLOB,
-    replyTo TEXT,
-    forwardOf TEXT,
-    encryptedMessage BLOB,
-    whenToSend INTEGER
-  );
-
-  CREATE TABLE IF NOT EXISTS userProfile (
-    userId TEXT PRIMARY KEY,
-    username TEXT NOT NULL,
-    avatar TEXT,
-    bio TEXT,
-    status TEXT NOT NULL,
-    lastSeen INTEGER NOT NULL,
-    createdAt INTEGER NOT NULL,
-    updatedAt INTEGER NOT NULL,
-    lastPublicKeyPush INTEGER,
-    security TEXT NOT NULL,
-    session BLOB NOT NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS discussions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    ownerUserId TEXT NOT NULL,
-    contactUserId TEXT NOT NULL,
-    direction TEXT NOT NULL,
-    status TEXT NOT NULL,
-    weAccepted INTEGER NOT NULL DEFAULT 0,
-    sendAnnouncement TEXT,
-    nextSeeker BLOB,
-    initiationAnnouncement BLOB,
-    announcementMessage TEXT,
-    lastSyncTimestamp INTEGER,
-    customName TEXT,
-    lastMessageId INTEGER,
-    lastMessageContent TEXT,
-    lastMessageTimestamp INTEGER,
-    unreadCount INTEGER NOT NULL DEFAULT 0,
-    createdAt INTEGER NOT NULL,
-    updatedAt INTEGER NOT NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS pendingEncryptedMessages (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    seeker BLOB NOT NULL,
-    ciphertext BLOB NOT NULL,
-    fetchedAt INTEGER NOT NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS pendingAnnouncements (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    announcement BLOB NOT NULL,
-    fetchedAt INTEGER NOT NULL,
-    counter TEXT
-  );
-
-  CREATE TABLE IF NOT EXISTS activeSeekers (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    seeker BLOB NOT NULL
-  );
-
-  -- Indexes: contacts
-  CREATE INDEX IF NOT EXISTS contacts_owner_user_idx ON contacts(ownerUserId, userId);
-  CREATE INDEX IF NOT EXISTS contacts_owner_name_idx ON contacts(ownerUserId, name);
-
-  -- Indexes: messages
-  CREATE INDEX IF NOT EXISTS messages_owner_contact_idx ON messages(ownerUserId, contactUserId);
-  CREATE INDEX IF NOT EXISTS messages_owner_status_idx ON messages(ownerUserId, status);
-  CREATE INDEX IF NOT EXISTS messages_owner_contact_status_idx ON messages(ownerUserId, contactUserId, status);
-  CREATE INDEX IF NOT EXISTS messages_owner_seeker_idx ON messages(ownerUserId, seeker);
-  CREATE INDEX IF NOT EXISTS messages_owner_contact_dir_idx ON messages(ownerUserId, contactUserId, direction);
-  CREATE INDEX IF NOT EXISTS messages_owner_dir_status_idx ON messages(ownerUserId, direction, status);
-  CREATE INDEX IF NOT EXISTS messages_timestamp_idx ON messages(timestamp);
-
-  -- Indexes: userProfile
-  CREATE INDEX IF NOT EXISTS userProfile_username_idx ON userProfile(username);
-  CREATE INDEX IF NOT EXISTS userProfile_status_idx ON userProfile(status);
-
-  -- Indexes: discussions
-  CREATE UNIQUE INDEX IF NOT EXISTS discussions_owner_contact_idx ON discussions(ownerUserId, contactUserId);
-  CREATE INDEX IF NOT EXISTS discussions_owner_status_idx ON discussions(ownerUserId, status);
-
-  -- Indexes: pendingEncryptedMessages
-  CREATE INDEX IF NOT EXISTS pending_encrypted_seeker_idx ON pendingEncryptedMessages(seeker);
-  CREATE INDEX IF NOT EXISTS pending_encrypted_fetchedAt_idx ON pendingEncryptedMessages(fetchedAt);
-
-  -- Indexes: pendingAnnouncements
-  CREATE UNIQUE INDEX IF NOT EXISTS pending_announcements_announcement_idx ON pendingAnnouncements(announcement);
-  CREATE INDEX IF NOT EXISTS pending_announcements_fetchedAt_idx ON pendingAnnouncements(fetchedAt);
-
-  -- Indexes: activeSeekers
-  CREATE INDEX IF NOT EXISTS active_seekers_seeker_idx ON activeSeekers(seeker);
-
-  CREATE TABLE IF NOT EXISTS announcementCursors (
-    userId TEXT PRIMARY KEY,
-    counter TEXT NOT NULL
-  );
-`;
-
-// ---------------------------------------------------------------------------
-// Migrations — add columns that may be missing from older schema versions.
-// ALTER TABLE … ADD COLUMN is idempotent via try/catch (SQLite errors on
-// duplicate columns; we simply ignore that error).
-// ---------------------------------------------------------------------------
-
-/**
- * Run schema migrations that can't be expressed with CREATE TABLE IF NOT EXISTS.
- * Each migration is a single ALTER TABLE statement; duplicates are caught and ignored.
- */
-async function runMigrations(
-  tryExec: (sql: string) => Promise<void>
-): Promise<void> {
-  const alterStatements = [
-    // v1: add messageId column to messages table
-    'ALTER TABLE messages ADD COLUMN messageId BLOB;',
-  ];
-
-  for (const sql of alterStatements) {
-    await tryExec(sql);
-  }
-}
-
-/** PRAGMAs + DDL combined — sent to Worker during init or run in-process. */
-const INIT_SQL = `
+/** PRAGMAs applied before migrations. */
+const PRAGMAS = `
   PRAGMA journal_mode=MEMORY;
   PRAGMA temp_store=MEMORY;
-  ${DDL}
 `;
 
 // ---------------------------------------------------------------------------
@@ -408,16 +212,7 @@ export async function initDb(options: InitDbOptions = {}): Promise<void> {
       type: 'init',
       opfsPath: options.opfsPath,
       wasmUrl: options.wasmUrl,
-      initSql: INIT_SQL,
-    });
-
-    // Run migrations via Worker exec (ignore "duplicate column" errors)
-    await runMigrations(async sql => {
-      try {
-        await postToWorker({ type: 'exec', sql, params: [] });
-      } catch {
-        // Expected: "duplicate column name: …" when column already exists
-      }
+      initSql: PRAGMAS,
     });
   } else {
     // In-memory mode (tests): sync WASM build, in-process, fast, isolated.
@@ -431,19 +226,15 @@ export async function initDb(options: InitDbOptions = {}): Promise<void> {
     db.dbHandle = await db.sqlite3.open_v2(':memory:');
     db.useWorker = false;
 
-    await db.sqlite3.exec(db.dbHandle, INIT_SQL);
-
-    // Run migrations in-process (ignore "duplicate column" errors)
-    await runMigrations(async sql => {
-      try {
-        await db.sqlite3!.exec(db.dbHandle!, sql);
-      } catch {
-        // Expected: "duplicate column name: …" when column already exists
-      }
-    });
+    await db.sqlite3.exec(db.dbHandle, PRAGMAS);
   }
 
   db.drizzleDb = createDrizzleInstance();
+
+  // Run DDL (generated by npm run db:generate). Uses IF NOT EXISTS.
+  for (const stmt of DDL) {
+    await execRaw(stmt);
+  }
 }
 
 /**
@@ -491,15 +282,17 @@ export async function withTransaction<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 export async function clearAllTables(): Promise<void> {
-  const drizzleDb = getSqliteDb();
-  await drizzleDb.delete(schema.messages);
-  await drizzleDb.delete(schema.discussions);
-  await drizzleDb.delete(schema.contacts);
-  await drizzleDb.delete(schema.userProfile);
-  await drizzleDb.delete(schema.pendingEncryptedMessages);
-  await drizzleDb.delete(schema.pendingAnnouncements);
-  await drizzleDb.delete(schema.activeSeekers);
-  await drizzleDb.delete(schema.announcementCursors);
+  await withTransaction(async () => {
+    const drizzleDb = getSqliteDb();
+    await drizzleDb.delete(schema.messages);
+    await drizzleDb.delete(schema.discussions);
+    await drizzleDb.delete(schema.contacts);
+    await drizzleDb.delete(schema.userProfile);
+    await drizzleDb.delete(schema.pendingEncryptedMessages);
+    await drizzleDb.delete(schema.pendingAnnouncements);
+    await drizzleDb.delete(schema.activeSeekers);
+    await drizzleDb.delete(schema.announcementCursors);
+  });
 }
 
 /**
@@ -507,10 +300,12 @@ export async function clearAllTables(): Promise<void> {
  * Preserves user profiles and other data.
  */
 export async function clearConversationTables(): Promise<void> {
-  const drizzleDb = getSqliteDb();
-  await drizzleDb.delete(schema.messages);
-  await drizzleDb.delete(schema.discussions);
-  await drizzleDb.delete(schema.contacts);
+  await withTransaction(async () => {
+    const drizzleDb = getSqliteDb();
+    await drizzleDb.delete(schema.messages);
+    await drizzleDb.delete(schema.discussions);
+    await drizzleDb.delete(schema.contacts);
+  });
 }
 
 /**
@@ -544,6 +339,3 @@ export async function closeSqlite(): Promise<void> {
   }
   db = createDefaultState();
 }
-
-/** Exported for testing — the raw DDL string used to create tables. */
-export const _DDL_FOR_TESTING = DDL;

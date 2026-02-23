@@ -6,7 +6,7 @@
  */
 
 import { MessageType, MessageDirection, MessageStatus } from '../db';
-import { getDiscussionsByOwner } from '../queries';
+import { getDiscussionsByOwner } from '../db';
 import { toSortedDiscussions } from '../utils/discussions';
 import type { SessionModule } from '../wasm/session';
 import { SessionStatus } from '../wasm/bindings';

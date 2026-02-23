@@ -40,7 +40,7 @@ import {
   deletePendingAnnouncementsByIds,
   getAnnouncementCursor,
   upsertAnnouncementCursor,
-} from '../queries';
+} from '../db';
 
 const logger = new Logger('AnnouncementService');
 

@@ -1,7 +1,7 @@
 import { eq, and, sql, inArray, asc } from 'drizzle-orm';
 import * as schema from '../schema';
 import { getSqliteDb, getLastInsertRowId } from '../sqlite';
-import { MessageDirection, MessageStatus, MessageType } from '../db';
+import { MessageDirection, MessageStatus, MessageType } from '../../db/db';
 
 export type MessageRow = typeof schema.messages.$inferSelect;
 export type MessageInsert = typeof schema.messages.$inferInsert;
@@ -174,12 +174,18 @@ export async function getSendQueueMessages(
 }
 
 export async function getMessagesByStatus(
+  ownerUserId: string,
   status: MessageStatus
 ): Promise<MessageRow[]> {
   return getSqliteDb()
     .select()
     .from(schema.messages)
-    .where(eq(schema.messages.status, status))
+    .where(
+      and(
+        eq(schema.messages.ownerUserId, ownerUserId),
+        eq(schema.messages.status, status)
+      )
+    )
     .all();
 }
 

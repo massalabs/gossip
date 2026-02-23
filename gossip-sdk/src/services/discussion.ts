@@ -35,7 +35,7 @@ import {
   deleteDiscussionById,
   insertMessage,
   resetSendQueueMessages,
-} from '../queries';
+} from '../db';
 
 const logger = new Logger('DiscussionService');
 

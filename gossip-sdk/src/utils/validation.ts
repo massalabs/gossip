@@ -5,7 +5,7 @@
  */
 
 import { isValidUserId } from './userId';
-import { getUserProfileByUsernameLower } from '../queries';
+import { getUserProfileByUsernameLower } from '../db';
 
 export type ValidationResult =
   | { valid: true; error?: never }

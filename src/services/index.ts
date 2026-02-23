@@ -12,7 +12,6 @@ import {
   type Contact,
   type Message,
   GossipSdk,
-  setOnSeekersUpdated,
 } from '@massalabs/gossip-sdk';
 import { notificationService } from './notifications';
 import { isAppInForeground } from '../utils/appState';
@@ -30,7 +29,7 @@ import { useMessageStore } from '../stores/messageStore';
  */
 export function setupSdkEventHandlers(gossip: GossipSdk): void {
   // Propagate seekers to SW bridge (web) and BackgroundRunner (mobile)
-  setOnSeekersUpdated(seekers => {
+  gossip.on(SdkEventType.SEEKERS_UPDATED, (seekers: Uint8Array[]) => {
     bridgeSet(
       'activeSeekers',
       seekers.map(s => Array.from(s))

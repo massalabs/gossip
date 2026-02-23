@@ -22,16 +22,9 @@
 
 export * from './api';
 export * from './crypto';
-export * from './db';
 export * from './gossip';
-export * from './queries';
 export * from './utils';
 export * from './wasm';
-export {
-  initDb,
-  closeSqlite,
-  getSqliteDb,
-  clearAllTables,
-  clearConversationTables,
-  isSqliteOpen,
-} from './sqlite';
+export * from './db/db';
+export * from './db/queries';
+export * from './db/sqlite';

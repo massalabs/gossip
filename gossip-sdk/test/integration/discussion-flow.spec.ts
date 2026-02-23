@@ -23,8 +23,8 @@ import {
 } from '../../src/db';
 import { MockMessageProtocol } from '../mocks';
 import { eq, and } from 'drizzle-orm';
-import { getSqliteDb, clearAllTables } from '../../src/sqlite';
-import * as schema from '../../src/schema';
+import { getSqliteDb, clearAllTables } from '../../src/db';
+import * as schema from '../../src/db/schema';
 import {
   createTestSession,
   cleanupTestSession,
