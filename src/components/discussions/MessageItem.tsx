@@ -308,10 +308,6 @@ const MessageItem: React.FC<MessageItemProps> = ({
     [originalMessage?.id, onScrollToMessage]
   );
 
-  const handleClick = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-  }, []);
-
   const handleLinkClick = useCallback(
     (e: React.MouseEvent<HTMLAnchorElement>) => {
       // Stop propagation to prevent double-click to reply from triggering
@@ -411,7 +407,6 @@ const MessageItem: React.FC<MessageItemProps> = ({
             : ''
         }`}
         onDoubleClick={handleDoubleClick}
-        onMouseDown={handleClick}
         onKeyDown={handleKeyDown}
         tabIndex={canReply ? 0 : undefined}
         role={canReply ? 'button' : undefined}
