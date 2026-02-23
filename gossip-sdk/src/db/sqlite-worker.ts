@@ -1,8 +1,9 @@
 /**
  * SQLite Web Worker — owns all WASM/SQLite state.
  *
- * Runs wa-sqlite (sync build) with AccessHandlePoolVFS for OPFS persistence.
- * The main thread communicates via postMessage with { id, type, ... } messages.
+ * Two VFS modes:
+ *   - OPFS (mobile): AccessHandlePoolVFS + sync WASM — fast, single-tab.
+ *   - IDB (web): IDBBatchAtomicVFS + async WASM — multi-tab safe.
  *
  * Messages:
  *   init  → load WASM + VFS, open DB, run init SQL (PRAGMAs + DDL)
@@ -10,9 +11,7 @@
  *   close → close DB
  */
 
-import SQLiteESMFactory from 'wa-sqlite/dist/wa-sqlite.mjs';
 import * as SQLite from 'wa-sqlite';
-import { AccessHandlePoolVFS } from 'wa-sqlite/src/examples/AccessHandlePoolVFS.js';
 import { execStatements } from './exec-utils.js';
 
 let sqlite3: ReturnType<typeof SQLite.Factory> | null = null;
@@ -51,16 +50,32 @@ addEventListener('message', async (e: MessageEvent) => {
   try {
     switch (type) {
       case 'init': {
-        const { opfsPath, wasmUrl, initSql } = e.data;
+        const { dbPath, wasmUrl, initSql, useOPFS } = e.data;
         const moduleArg: Record<string, unknown> = {};
         if (wasmUrl) moduleArg.locateFile = () => wasmUrl;
 
-        const module = await SQLiteESMFactory(moduleArg);
-        sqlite3 = SQLite.Factory(module);
+        // Load the right WASM build + VFS.
+        // NOTE: import() paths must be string literals — Vite can't resolve variables.
+        if (useOPFS) {
+          const { default: SQLiteESMFactory } =
+            await import('wa-sqlite/dist/wa-sqlite.mjs');
+          const { AccessHandlePoolVFS } =
+            await import('wa-sqlite/src/examples/AccessHandlePoolVFS.js');
+          const module = await SQLiteESMFactory(moduleArg);
+          sqlite3 = SQLite.Factory(module);
+          const vfs = new AccessHandlePoolVFS(dbPath);
+          await vfs.isReady;
+          sqlite3.vfs_register(vfs as never, true);
+        } else {
+          const { default: SQLiteESMFactory } =
+            await import('wa-sqlite/dist/wa-sqlite-async.mjs');
+          const { IDBBatchAtomicVFS } =
+            await import('wa-sqlite/src/examples/IDBBatchAtomicVFS.js');
+          const module = await SQLiteESMFactory(moduleArg);
+          sqlite3 = SQLite.Factory(module);
+          sqlite3.vfs_register(new IDBBatchAtomicVFS(dbPath) as never, true);
+        }
 
-        const vfs = new AccessHandlePoolVFS(opfsPath);
-        await vfs.isReady;
-        sqlite3.vfs_register(vfs as never, true);
         dbHandle = await sqlite3.open_v2('gossip.db');
 
         if (initSql) {

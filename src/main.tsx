@@ -6,7 +6,9 @@ import { enableDebugLogger } from './utils/logger.ts';
 import { createSdk } from './sdk';
 import { useSdkStore } from './stores/sdkStore';
 import { protocolConfig } from './config/protocol';
+import { Capacitor } from '@capacitor/core';
 import waSqliteWasmUrl from 'wa-sqlite/dist/wa-sqlite.wasm?url';
+import waSqliteAsyncWasmUrl from 'wa-sqlite/dist/wa-sqlite-async.wasm?url';
 
 // Polyfill for Buffer
 import { Buffer } from 'buffer';
@@ -93,12 +95,14 @@ window.addEventListener('load', () => {
 enableDebugLogger();
 // }
 
+const isNative = Capacitor.isNativePlatform();
+
 Promise.all([
   createSdk({
     protocolBaseUrl: protocolConfig.baseUrl,
     config: { polling: { enabled: true } },
-    wasmUrl: waSqliteWasmUrl,
-    opfsPath: '/gossip-db',
+    wasmUrl: isNative ? waSqliteWasmUrl : waSqliteAsyncWasmUrl,
+    ...(isNative ? { opfsPath: '/gossip-db' } : { idbName: 'gossip-db' }),
   }),
   initSafeArea(),
 ])

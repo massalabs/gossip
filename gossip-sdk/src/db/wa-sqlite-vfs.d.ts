@@ -12,3 +12,19 @@ declare module 'wa-sqlite/src/examples/AccessHandlePoolVFS.js' {
     addCapacity(count: number): Promise<number>;
   }
 }
+
+declare module 'wa-sqlite/src/examples/IDBBatchAtomicVFS.js' {
+  import * as VFS from 'wa-sqlite/src/VFS.js';
+  export class IDBBatchAtomicVFS extends VFS.Base {
+    constructor(
+      idbDatabaseName?: string,
+      options?: {
+        durability?: 'default' | 'strict' | 'relaxed';
+        purge?: 'deferred' | 'manual';
+        purgeAtLeast?: number;
+      }
+    );
+    name: string;
+    close(): Promise<void>;
+  }
+}

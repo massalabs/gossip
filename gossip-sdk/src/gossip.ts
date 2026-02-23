@@ -132,14 +132,18 @@ export interface GossipSdkInitOptions {
   protocolBaseUrl?: string;
   /** SDK configuration (optional - uses defaults if not provided) */
   config?: DeepPartial<SdkConfig>;
-  /** URL to wa-sqlite.wasm (for bundlers that rewrite asset paths) */
+  /** URL to wa-sqlite WASM file (for bundlers that rewrite asset paths) */
   wasmUrl?: string;
   /**
-   * OPFS directory path for persistent SQLite storage.
-   * When set, data persists across page reloads via OPFS.
-   * When omitted, uses an in-memory database (data lost on reload).
+   * OPFS directory path for persistent SQLite storage (mobile/Capacitor).
+   * Fast but single-tab only. Mutually exclusive with `idbName`.
    */
   opfsPath?: string;
+  /**
+   * IndexedDB database name for persistent SQLite storage (web).
+   * Multi-tab safe. Mutually exclusive with `opfsPath`.
+   */
+  idbName?: string;
 }
 
 export interface OpenSessionOptions {
@@ -242,7 +246,11 @@ class GossipSdk {
 
     console.log('[GossipSdk] Initializing SQLite');
     // Initialize SQLite (idempotent — no-op if already initialized).
-    await initDb({ wasmUrl: options.wasmUrl, opfsPath: options.opfsPath });
+    await initDb({
+      wasmUrl: options.wasmUrl,
+      opfsPath: options.opfsPath,
+      idbName: options.idbName,
+    });
 
     console.log('[GossipSdk] SQLite initialized');
     // Create message protocol

@@ -3,7 +3,7 @@
  *
  * Uses wa-sqlite (WASM) with Drizzle ORM's sqlite-proxy driver.
  * Two execution paths:
- *   - Browser (opfsPath set): Web Worker + AccessHandlePoolVFS — OPFS persistence,
+ *   - Browser (opfsPath set): Web Worker + IDBBatchAtomicVFS — IndexedDB persistence,
  *     off the main thread. Uses the sync WASM build (wa-sqlite).
  *   - In-memory (tests): :memory: in-process — no persistence, fast, isolated.
  *     Uses the sync WASM build with wasmBinary passed directly.
@@ -22,11 +22,16 @@ export type GossipDatabase = SqliteRemoteDatabase<typeof schema>;
 
 export interface InitDbOptions {
   /**
-   * OPFS directory path for persistent storage.
-   * When set, spawns a Web Worker with AccessHandlePoolVFS for OPFS persistence.
-   * When omitted, uses an in-memory database (for tests).
+   * OPFS directory path. When set, uses AccessHandlePoolVFS (fast, single-tab).
+   * Use for mobile (Capacitor) where only one instance runs at a time.
    */
   opfsPath?: string;
+
+  /**
+   * IndexedDB database name. When set, uses IDBBatchAtomicVFS (multi-tab safe).
+   * Use for web where multiple tabs may be open.
+   */
+  idbName?: string;
 
   /**
    * Pre-loaded WASM binary for environments where fetch() is unavailable
@@ -193,15 +198,18 @@ const PRAGMAS = `
  * Initialize wa-sqlite and create the Drizzle ORM instance.
  * Idempotent — subsequent calls are no-ops.
  *
- * @param options.opfsPath - Set to persist via OPFS Worker (production).
- *                           Omit for in-memory database (tests).
+ * @param options.opfsPath - OPFS path for mobile (single-tab, fast).
+ * @param options.idbName  - IndexedDB name for web (multi-tab safe).
+ *                           Omit both for in-memory database (tests).
  */
 export async function initDb(options: InitDbOptions = {}): Promise<void> {
   if (db.drizzleDb) return;
 
-  if (options.opfsPath) {
-    // Browser path: spawn Worker with OPFS + AccessHandlePoolVFS.
-    // The sync WASM build runs in the Worker (no Asyncify needed).
+  const useOPFS = !!options.opfsPath;
+  const dbPath = options.opfsPath ?? options.idbName;
+
+  if (dbPath) {
+    // Spawn Worker with persistent VFS.
     db.worker = new Worker(new URL('./sqlite-worker.ts', import.meta.url), {
       type: 'module',
     });
@@ -211,15 +219,14 @@ export async function initDb(options: InitDbOptions = {}): Promise<void> {
     try {
       await postToWorker({
         type: 'init',
-        opfsPath: options.opfsPath,
+        dbPath,
+        useOPFS,
         wasmUrl: options.wasmUrl,
         initSql: PRAGMAS,
       });
     } catch (err) {
-      // Prevent dangling worker and "another open Access Handle" on retry:
-      // only one SyncAccessHandle per file is allowed (e.g. another tab or
-      // a previous failed init may hold it). Terminate and reset so retry
-      // doesn't create a second worker.
+      // Prevent dangling worker on init failure.
+      // Terminate and reset so retry doesn't create a second worker.
       if (db.worker) {
         db.worker.terminate();
         db.worker = null;
