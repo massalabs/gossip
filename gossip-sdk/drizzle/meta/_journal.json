@@ -1,0 +1,13 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1771825473415,
+      "tag": "0000_nifty_molly_hayes",
+      "breakpoints": true
+    }
+  ]
+}

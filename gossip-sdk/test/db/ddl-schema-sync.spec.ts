@@ -1,25 +1,15 @@
 /**
- * Validates that the hand-written DDL in sqlite.ts stays in sync with the
- * Drizzle schema definitions in schema.ts.
- *
- * The DDL is the runtime CREATE TABLE source (sent to wa-sqlite).
- * The Drizzle schema is the type/query source (used by ORM operations).
- * A column present in one but missing from the other causes silent runtime bugs.
- *
- * This test:
- *   1. Opens an in-memory SQLite DB using the raw DDL
- *   2. Queries PRAGMA table_info() for each table
- *   3. Compares column names against the Drizzle schema column definitions
+ * Validates that the drizzle-kit generated migration creates all expected
+ * tables, columns, and indexes when run against a real SQLite instance.
  */
 
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'fs';
+import { readFileSync, readdirSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { createRequire } from 'module';
 import SQLiteESMFactory from 'wa-sqlite/dist/wa-sqlite.mjs';
 import * as SQLite from 'wa-sqlite';
-import * as schema from '../../src/schema';
-import { _DDL_FOR_TESTING } from '../../src/sqlite';
+import * as schema from '../../src/db/schema';
 import { getTableColumns } from 'drizzle-orm';
 
 const require = createRequire(import.meta.url);
@@ -30,8 +20,20 @@ const waSqliteWasmBinary = waSqliteWasm.buffer.slice(
   waSqliteWasm.byteOffset + waSqliteWasm.byteLength
 );
 
-// Map of Drizzle table exports to their SQL table names
-const TABLES = [
+// Read all migration SQL files from drizzle/ in order
+const drizzleDir = resolve(__dirname, '../../drizzle');
+const migrationSql = readdirSync(drizzleDir)
+  .filter(f => f.endsWith('.sql'))
+  .sort()
+  .map(f =>
+    readFileSync(resolve(drizzleDir, f), 'utf-8').replace(
+      /--> statement-breakpoint\n?/g,
+      '\n'
+    )
+  )
+  .join('\n');
+
+const ALL_TABLES = [
   { drizzleTable: schema.contacts, name: 'contacts' },
   { drizzleTable: schema.messages, name: 'messages' },
   { drizzleTable: schema.userProfile, name: 'userProfile' },
@@ -45,47 +47,47 @@ const TABLES = [
   { drizzleTable: schema.announcementCursors, name: 'announcementCursors' },
 ] as const;
 
-describe('DDL ↔ Drizzle schema sync', () => {
-  it('DDL columns match Drizzle schema columns for every table', async () => {
-    // Open a fresh in-memory DB with just the DDL
+describe('Drizzle migration SQL', () => {
+  it('creates all expected tables with correct columns', async () => {
     const module = await SQLiteESMFactory({ wasmBinary: waSqliteWasmBinary });
     const sqlite3 = SQLite.Factory(module);
     const dbHandle = await sqlite3.open_v2(':memory:');
-    await sqlite3.exec(dbHandle, _DDL_FOR_TESTING);
+    await sqlite3.exec(dbHandle, migrationSql);
 
     const errors: string[] = [];
 
-    for (const { drizzleTable, name } of TABLES) {
-      // Get columns from DDL via PRAGMA
-      const ddlColumns: string[] = [];
+    for (const { drizzleTable, name } of ALL_TABLES) {
+      const sqliteColumns: string[] = [];
       await sqlite3.exec(
         dbHandle,
         `PRAGMA table_info(${name})`,
         (row: unknown[]) => {
-          // PRAGMA table_info columns: cid, name, type, notnull, dflt_value, pk
-          ddlColumns.push(row[1] as string);
+          sqliteColumns.push(row[1] as string);
         }
       );
 
-      // Get columns from Drizzle schema
-      const drizzleColumns = Object.keys(getTableColumns(drizzleTable));
+      if (sqliteColumns.length === 0) {
+        errors.push(`${name}: table not created by migration SQL`);
+        continue;
+      }
 
-      // Sort both for stable comparison
-      const sortedDdl = [...ddlColumns].sort();
+      const drizzleColumns = Object.keys(getTableColumns(drizzleTable));
+      const sortedSqlite = [...sqliteColumns].sort();
       const sortedDrizzle = [...drizzleColumns].sort();
 
-      // Find mismatches
-      const inDdlOnly = sortedDdl.filter(c => !sortedDrizzle.includes(c));
-      const inDrizzleOnly = sortedDrizzle.filter(c => !sortedDdl.includes(c));
+      const inSqliteOnly = sortedSqlite.filter(c => !sortedDrizzle.includes(c));
+      const inDrizzleOnly = sortedDrizzle.filter(
+        c => !sortedSqlite.includes(c)
+      );
 
-      if (inDdlOnly.length > 0) {
+      if (inSqliteOnly.length > 0) {
         errors.push(
-          `${name}: columns in DDL but not in Drizzle schema: ${inDdlOnly.join(', ')}`
+          `${name}: unexpected columns in migration SQL: ${inSqliteOnly.join(', ')}`
         );
       }
       if (inDrizzleOnly.length > 0) {
         errors.push(
-          `${name}: columns in Drizzle schema but not in DDL: ${inDrizzleOnly.join(', ')}`
+          `${name}: missing columns in migration SQL: ${inDrizzleOnly.join(', ')}`
         );
       }
     }
@@ -93,33 +95,31 @@ describe('DDL ↔ Drizzle schema sync', () => {
     await sqlite3.close(dbHandle);
 
     if (errors.length > 0) {
-      throw new Error(
-        'DDL and Drizzle schema are out of sync:\n  ' + errors.join('\n  ')
-      );
+      throw new Error('Migration SQL issues:\n  ' + errors.join('\n  '));
     }
   });
 
-  it('DDL creates all tables defined in Drizzle schema', async () => {
+  it('creates all expected indexes', async () => {
     const module = await SQLiteESMFactory({ wasmBinary: waSqliteWasmBinary });
     const sqlite3 = SQLite.Factory(module);
     const dbHandle = await sqlite3.open_v2(':memory:');
-    await sqlite3.exec(dbHandle, _DDL_FOR_TESTING);
+    await sqlite3.exec(dbHandle, migrationSql);
 
-    // Get all tables from SQLite
-    const sqliteTables: string[] = [];
+    const indexes: string[] = [];
     await sqlite3.exec(
       dbHandle,
-      `SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'`,
+      `SELECT name FROM sqlite_master WHERE type='index' AND name NOT LIKE 'sqlite_%'`,
       (row: unknown[]) => {
-        sqliteTables.push(row[0] as string);
+        indexes.push(row[0] as string);
       }
     );
 
     await sqlite3.close(dbHandle);
 
-    const expectedTables = TABLES.map(t => t.name);
-    const missingTables = expectedTables.filter(t => !sqliteTables.includes(t));
-
-    expect(missingTables).toEqual([]);
+    expect(indexes).toContain('contacts_owner_user_idx');
+    expect(indexes).toContain('messages_owner_contact_idx');
+    expect(indexes).toContain('discussions_owner_contact_idx');
+    expect(indexes).toContain('pending_announcements_announcement_idx');
+    expect(indexes).toContain('active_seekers_seeker_idx');
   });
 });
