@@ -84,15 +84,6 @@ export interface UserProfile {
 
 // Unified discussion interface combining protocol state and UI metadata
 
-export enum DiscussionStatus {
-  PENDING = 'pending',
-  ACTIVE = 'active',
-  CLOSED = 'closed', // closed by the user
-  BROKEN = 'broken', // The session is killed. Need to be reinitiated
-  SEND_FAILED = 'sendFailed', // The discussion was initiated by the session manager but could not be broadcasted on network
-  RECONNECTING = 'reconnecting', // Session recovery in progress, waiting for peer's response
-}
-
 export enum DiscussionDirection {
   RECEIVED = 'received',
   INITIATED = 'initiated',
@@ -193,7 +184,6 @@ export interface Discussion {
   weAccepted: boolean;
   sendAnnouncement: SendAnnouncement;
   direction: DiscussionDirection; // Whether this user initiated or received the discussion
-  status: DiscussionStatus;
   nextSeeker: Uint8Array | null; // The next seeker for sending messages (from SendMessageOutput)
   initiationAnnouncement: Uint8Array | null; // Outgoing announcement bytes when we initiate
   announcementMessage: string | null; // Optional message from incoming announcement (user_data)
@@ -208,11 +198,9 @@ export interface Discussion {
   unreadCount: number;
 
   // Session recovery state (persisted to throttle resets)
-  sessionRecovery?: {
-    killedNextRetryAt?: Date;
-    saturatedRetryAt?: Date;
-    saturatedRetryDone?: boolean;
-  };
+  killedNextRetryAt?: Date | null;
+  saturatedRetryAt?: Date | null;
+  saturatedRetryDone: boolean;
 
   // Timestamps
   createdAt: Date;

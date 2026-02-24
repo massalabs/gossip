@@ -20,6 +20,7 @@ export * from './userKeys.js';
 
 export {
   SessionStatus,
+  SessionConfig,
   UserPublicKeys,
   UserSecretKeys,
   SendMessageOutput,

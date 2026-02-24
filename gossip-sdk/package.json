@@ -27,7 +27,7 @@
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "vitest run test/e2e/",
-    "db:generate": "drizzle-kit generate && node --experimental-strip-types scripts/embed-migrations.ts",
+    "db:generate": "drizzle-kit generate",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix"
   },

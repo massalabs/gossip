@@ -17,6 +17,7 @@ import { Logger } from '../utils/logs';
 import { SdkEventEmitter, SdkEventType } from '../core/SdkEventEmitter';
 import type { Discussion, Queries } from '../db';
 import type { SdkConfig } from '../config/sdk';
+import * as schema from '../db/schema';
 
 const logger = new Logger('RefreshService');
 
@@ -53,7 +54,7 @@ export class RefreshService {
     announcementService: AnnouncementService,
     session: SessionModule,
     eventEmitter: SdkEventEmitter,
-    queries: Queries
+    queries: Queries,
     config: SdkConfig
   ) {
     this.messageService = messageService;
@@ -217,31 +218,63 @@ export class RefreshService {
 
   private async updateSessionRecovery(
     discussion: Discussion,
-    nextRecovery?: Discussion['sessionRecovery']
+    updates?: {
+      killedNextRetryAt?: Date | null;
+      saturatedRetryAt?: Date | null;
+      saturatedRetryDone: boolean;
+    }
   ): Promise<void> {
-    const current = discussion.sessionRecovery;
-    const normalize = (recovery?: Discussion['sessionRecovery']) => ({
-      killedNextRetryAt: recovery?.killedNextRetryAt?.getTime() ?? null,
-      saturatedRetryAt: recovery?.saturatedRetryAt?.getTime() ?? null,
-      saturatedRetryDone: recovery?.saturatedRetryDone ?? null,
-    });
-    const currentNormalized = normalize(current);
-    const nextNormalized = normalize(nextRecovery);
+    if (!discussion.id) {
+      return;
+    }
+
+    type DiscussionUpdate = Partial<typeof schema.discussions.$inferInsert>;
+
+    if (!updates) {
+      // Clear all recovery fields
+      if (
+        (discussion.killedNextRetryAt === null ||
+          discussion.killedNextRetryAt === undefined) &&
+        (discussion.saturatedRetryAt === null ||
+          discussion.saturatedRetryAt === undefined) &&
+        (discussion.saturatedRetryDone === null ||
+          discussion.saturatedRetryDone === undefined)
+      ) {
+        return; // Already cleared
+      }
+
+      const updateData: DiscussionUpdate = {
+        killedNextRetryAt: null,
+        saturatedRetryAt: null,
+        saturatedRetryDone: false,
+      };
+      await this.queries.discussions.updateById(discussion.id, updateData);
+      return;
+    }
+
+    const currentNormalized = {
+      killedNextRetryAt: discussion.killedNextRetryAt?.getTime() ?? null,
+      saturatedRetryAt: discussion.saturatedRetryAt?.getTime() ?? null,
+    };
+    const nextNormalized = {
+      killedNextRetryAt: updates.killedNextRetryAt?.getTime() ?? null,
+      saturatedRetryAt: updates.saturatedRetryAt?.getTime() ?? null,
+    };
     const isSame =
       currentNormalized.killedNextRetryAt ===
         nextNormalized.killedNextRetryAt &&
       currentNormalized.saturatedRetryAt === nextNormalized.saturatedRetryAt &&
-      currentNormalized.saturatedRetryDone ===
-        nextNormalized.saturatedRetryDone;
+      discussion.saturatedRetryDone === updates.saturatedRetryDone;
     if (isSame) {
       return;
     }
-    if (!discussion.id) {
-      return;
-    }
-    await this.db.discussions.update(discussion.id, {
-      sessionRecovery: nextRecovery,
-    });
+
+    const updateData: DiscussionUpdate = {
+      killedNextRetryAt: updates.killedNextRetryAt,
+      saturatedRetryAt: updates.saturatedRetryAt,
+      saturatedRetryDone: updates.saturatedRetryDone,
+    };
+    await this.queries.discussions.updateById(discussion.id, updateData);
   }
 
   private async handleSessionStatus(
@@ -251,7 +284,6 @@ export class RefreshService {
     const now = new Date();
 
     const log = logger.forMethod('handleSessionStatus');
-    const recovery = discussion.sessionRecovery ?? {};
 
     if (status === SessionStatus.Active) {
       await this.updateSessionRecovery(discussion, undefined);
@@ -282,7 +314,7 @@ export class RefreshService {
     }
 
     if (status === SessionStatus.Killed) {
-      const nextRetryAt = recovery.killedNextRetryAt;
+      const nextRetryAt = discussion.killedNextRetryAt;
       if (nextRetryAt && nextRetryAt.getTime() > now.getTime()) {
         return;
       }
@@ -304,16 +336,16 @@ export class RefreshService {
         this.config.sessionRecovery.JitterMs
       );
       await this.updateSessionRecovery(discussion, {
-        ...recovery,
         killedNextRetryAt: new Date(now.getTime() + delayMs),
+        saturatedRetryDone: false,
       });
       return;
     }
 
     if (status === SessionStatus.Saturated) {
-      const retryAt = recovery.saturatedRetryAt;
+      const retryAt = discussion.saturatedRetryAt;
       if (
-        recovery.saturatedRetryDone ||
+        discussion.saturatedRetryDone ||
         (retryAt && retryAt.getTime() > now.getTime())
       ) {
         return;
@@ -324,7 +356,6 @@ export class RefreshService {
           this.config.sessionRecovery.JitterMs
         );
         await this.updateSessionRecovery(discussion, {
-          ...recovery,
           saturatedRetryAt: new Date(now.getTime() + delayMs),
           saturatedRetryDone: false,
         });
@@ -344,7 +375,6 @@ export class RefreshService {
         this.eventEmitter.emit(SdkEventType.SESSION_RENEWED, discussion);
       }
       await this.updateSessionRecovery(discussion, {
-        ...recovery,
         saturatedRetryDone: true,
       });
     }

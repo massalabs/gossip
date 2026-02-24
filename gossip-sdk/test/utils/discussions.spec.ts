@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { DiscussionDirection, DiscussionStatus } from '../../src/db';
+import { DiscussionDirection } from '../../src/db';
 import { encodeUserId } from '../../src/utils/userId';
 import { updateDiscussionName } from '../../src/utils/discussions';
 import { clearAllTables, getTestQueries } from '../testDb';
@@ -20,7 +20,6 @@ describe('Discussion utilities', () => {
       ownerUserId: OWNER_USER_ID,
       contactUserId: CONTACT_USER_ID,
       direction: DiscussionDirection.INITIATED,
-      status: DiscussionStatus.ACTIVE,
       weAccepted: true,
       sendAnnouncement: null,
       unreadCount: 0,
@@ -45,7 +44,6 @@ describe('Discussion utilities', () => {
       ownerUserId: OWNER_USER_ID,
       contactUserId: CONTACT_USER_ID,
       direction: DiscussionDirection.INITIATED,
-      status: DiscussionStatus.ACTIVE,
       weAccepted: true,
       sendAnnouncement: null,
       customName: 'Old Name',

@@ -320,7 +320,7 @@ class GossipSdk {
       this._announcement,
       session,
       this.eventEmitter,
-      queries
+      queries,
       this.config
     );
 

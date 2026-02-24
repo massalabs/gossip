@@ -29,6 +29,7 @@ import { getActiveOrFirstProfile } from './utils/getAccount';
 import { auth } from './utils/auth';
 import { useDiscussionStore } from './discussionStore';
 import { useMessageStore } from './messageStore';
+import { SessionConfig } from '@massalabs/gossip-sdk';
 
 type accountProvisionResult = {
   encryptionKey: EncryptionKey;
@@ -278,6 +279,15 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           mnemonic,
           encryptionKey,
           onPersist: createOnPersist(userId),
+          sessionConfig: new SessionConfig(
+            604_800_000, // 1 week
+            60_000, // 1 minute
+            604_800_000, // 1 week
+            60_000, // 1 minute
+            604_800_000, // 1 week
+            60_000, // 1 minute,
+            3n as bigint // 10000 messages
+          ),
         });
 
         const session = getSdk().getEncryptedSession();

@@ -15,7 +15,6 @@ import {
   MessageStatus,
   MessageDirection,
   MessageType,
-  DiscussionStatus,
   DiscussionDirection,
 } from '../../src/db';
 import type { SessionModule } from '../../src/wasm/session';
@@ -31,10 +30,9 @@ const CONTACT_USER_ID = encodeUserId(new Uint8Array(32).fill(2));
 const SEEKER_SIZE = 34;
 
 function createMockSession(
-  ownerUserId: string = OWNER_USER_ID,
   status: SessionStatus = SessionStatus.Active
 ): SessionModule {
-  const ownerBytes = decodeUserId(ownerUserId);
+  const ownerBytes = decodeUserId(OWNER_USER_ID);
   return {
     peerSessionStatus: vi.fn().mockReturnValue(status),
     sendMessage: vi.fn().mockReturnValue({
@@ -48,7 +46,7 @@ function createMockSession(
       .fn()
       .mockResolvedValue(new Uint8Array([1, 2, 3])),
     toEncryptedBlob: vi.fn(),
-    userIdEncoded: ownerUserId,
+    userIdEncoded: OWNER_USER_ID,
     userIdRaw: ownerBytes,
     userId: ownerBytes,
     getMessageBoardReadKeys: vi.fn().mockReturnValue([]),
@@ -92,7 +90,6 @@ async function insertTestContactAndDiscussion(
     ownerUserId,
     contactUserId,
     direction: DiscussionDirection.INITIATED,
-    status: DiscussionStatus.ACTIVE,
     weAccepted: true,
     unreadCount: 0,
     createdAt: new Date(),
@@ -150,7 +147,6 @@ describe('MessageService', () => {
         ownerUserId: OWNER_USER_ID,
         contactUserId: CONTACT_USER_ID,
         direction: DiscussionDirection.INITIATED,
-        status: DiscussionStatus.ACTIVE,
         unreadCount: 0,
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -168,7 +164,7 @@ describe('MessageService', () => {
       async status => {
         const service = new MessageService(
           new MockMessageProtocol(),
-          createMockSession(OWNER_USER_ID, status),
+          createMockSession(status),
           new SdkEventEmitter(),
           defaultSdkConfig,
           getTestQueries()
@@ -189,20 +185,13 @@ describe('MessageService', () => {
     it('should NOT mark discussion as BROKEN when session is lost', async () => {
       const service = new MessageService(
         new MockMessageProtocol(),
-        createMockSession(OWNER_USER_ID, SessionStatus.NoSession),
+        createMockSession(SessionStatus.NoSession),
         new SdkEventEmitter(),
         defaultSdkConfig,
         getTestQueries()
       );
 
       await service.sendMessage(createTestMessage());
-
-      const discussion =
-        await getTestQueries().discussions.getByOwnerAndContact(
-          OWNER_USER_ID,
-          CONTACT_USER_ID
-        );
-      expect(discussion?.status).toBe(DiscussionStatus.ACTIVE);
     });
   });
 });

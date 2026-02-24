@@ -7,7 +7,6 @@
 import {
   type Discussion,
   DiscussionDirection,
-  DiscussionStatus,
   MessageDirection,
   MessageStatus,
   MessageType,
@@ -173,12 +172,9 @@ export class AnnouncementService {
             ),
           }),
           updatedAt: new Date(),
-          sessionRecovery: {
-            ...latest.sessionRecovery,
-            /* If send announcement failed, There are chances that the session will be killed again the next state_update call.
-            We don't want to wait a delay before reseting the session so we set killedNextRetryAt to undefined*/
-            killedNextRetryAt: undefined,
-          },
+          /* If send announcement failed, There are chances that the session will be killed again the next state_update call.
+          We don't want to wait a delay before reseting the session so we set killedNextRetryAt to null*/
+          killedNextRetryAt: null,
         });
       }
     }
@@ -585,7 +581,6 @@ export class AnnouncementService {
       ownerUserId,
       contactUserId,
       direction: DiscussionDirection.RECEIVED,
-      status: DiscussionStatus.PENDING,
       announcementMessage: message,
       unreadCount: 0,
       createdAt: new Date(),

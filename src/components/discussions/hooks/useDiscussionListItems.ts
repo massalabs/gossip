@@ -190,8 +190,12 @@ export function useVirtualItems(
         // Show only unread active discussions
         discussionsToShow = filteredDiscussions.filter(
           d =>
-            SessionStatus.Active ===
-              gossip.discussions.getStatus(d.contactUserId) && d.unreadCount > 0
+            [
+              SessionStatus.Active,
+              SessionStatus.Saturated,
+              SessionStatus.Killed,
+            ].includes(gossip.discussions.getStatus(d.contactUserId)) &&
+            d.unreadCount > 0
         );
 
         // Sort by latest message timestamp (newest first)
@@ -226,8 +230,11 @@ export function useVirtualItems(
           ) {
             pendingDiscussions.push(discussion);
           } else if (
-            SessionStatus.Active ===
-            gossip.discussions.getStatus(discussion.contactUserId)
+            [
+              SessionStatus.Active,
+              SessionStatus.Saturated,
+              SessionStatus.Killed,
+            ].includes(gossip.discussions.getStatus(discussion.contactUserId))
           ) {
             activeDiscussions.push(discussion);
           }

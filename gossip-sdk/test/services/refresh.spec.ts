@@ -7,17 +7,16 @@ import { RefreshService } from '../../src/services/refresh';
 import { MessageService } from '../../src/services/message';
 import { DiscussionService } from '../../src/services/discussion';
 import { AnnouncementService } from '../../src/services/announcement';
-import {
-  MessageType,
-  DiscussionDirection,
-  DiscussionStatus,
-} from '../../src/db';
+import { MessageType, DiscussionDirection } from '../../src/db';
+import type { Discussion } from '../../src/db';
+import type { DiscussionInsert } from '../../src/db/queries/discussions';
 import { clearAllTables, getTestQueries } from '../testDb';
 import { defaultSdkConfig } from '../../src/config/sdk';
 import type { SessionModule } from '../../src/wasm/session';
 import { encodeUserId, decodeUserId } from '../../src/utils/userId';
 import { SessionStatus } from '../../src/assets/generated/wasm/gossip_wasm';
 import { SdkEventEmitter } from '../../src/core/SdkEventEmitter';
+import { toDiscussion } from '../../src/utils/discussions';
 
 const REFRESH_OWNER_USER_ID = encodeUserId(new Uint8Array(32).fill(11));
 const REFRESH_CONTACT_USER_ID = encodeUserId(new Uint8Array(32).fill(12));
@@ -92,7 +91,7 @@ describe('RefreshService', () => {
         mockAnnouncementService,
         mockSession,
         eventEmitter,
-        getTestQueries()
+        getTestQueries(),
         defaultSdkConfig
       );
 
@@ -101,7 +100,6 @@ describe('RefreshService', () => {
         ownerUserId: REFRESH_OWNER_USER_ID,
         contactUserId: REFRESH_CONTACT_USER_ID,
         direction: DiscussionDirection.INITIATED,
-        status: DiscussionStatus.ACTIVE,
         weAccepted: true,
         sendAnnouncement: null,
         unreadCount: 0,
@@ -131,7 +129,7 @@ describe('RefreshService', () => {
         mockAnnouncementService,
         mockSession,
         eventEmitter,
-        getTestQueries()
+        getTestQueries(),
         defaultSdkConfig
       );
 
@@ -140,7 +138,6 @@ describe('RefreshService', () => {
         ownerUserId: REFRESH_OWNER_USER_ID,
         contactUserId: REFRESH_CONTACT_USER_ID,
         direction: DiscussionDirection.INITIATED,
-        status: DiscussionStatus.ACTIVE,
         weAccepted: true,
         sendAnnouncement: null,
         unreadCount: 0,
@@ -170,7 +167,7 @@ describe('RefreshService', () => {
         mockAnnouncementService,
         mockSession,
         eventEmitter,
-        getTestQueries()
+        getTestQueries(),
         defaultSdkConfig
       );
 
@@ -179,7 +176,6 @@ describe('RefreshService', () => {
         ownerUserId: REFRESH_OWNER_USER_ID,
         contactUserId: REFRESH_CONTACT_USER_ID,
         direction: DiscussionDirection.INITIATED,
-        status: DiscussionStatus.ACTIVE,
         weAccepted: true,
         sendAnnouncement: null,
         unreadCount: 0,
@@ -212,7 +208,7 @@ describe('RefreshService', () => {
         mockAnnouncementService,
         mockSession,
         eventEmitter,
-        getTestQueries()
+        getTestQueries(),
         defaultSdkConfig
       );
 
@@ -221,7 +217,6 @@ describe('RefreshService', () => {
         ownerUserId: REFRESH_OWNER_USER_ID,
         contactUserId: REFRESH_CONTACT_USER_ID,
         direction: DiscussionDirection.INITIATED,
-        status: DiscussionStatus.ACTIVE,
         weAccepted: true,
         sendAnnouncement: null,
         unreadCount: 0,
@@ -246,7 +241,7 @@ describe('RefreshService', () => {
         mockAnnouncementService,
         mockSession,
         eventEmitter,
-        getTestQueries()
+        getTestQueries(),
         defaultSdkConfig
       );
 
@@ -255,7 +250,6 @@ describe('RefreshService', () => {
         ownerUserId: REFRESH_OWNER_USER_ID,
         contactUserId: REFRESH_CONTACT_USER_ID,
         direction: DiscussionDirection.INITIATED,
-        status: DiscussionStatus.ACTIVE,
         weAccepted: true,
         sendAnnouncement: null,
         unreadCount: 0,
@@ -312,25 +306,38 @@ describe('RefreshService', () => {
     const createDiscussion = async (
       overrides: Partial<Discussion> = {}
     ): Promise<Discussion> => {
-      const baseDiscussion: Discussion = {
+      const baseDiscussion = {
         ownerUserId: REFRESH_OWNER_USER_ID,
         contactUserId: REFRESH_CONTACT_USER_ID,
         direction: DiscussionDirection.INITIATED,
         weAccepted: true,
-        sendAnnouncement: null,
+        initiationAnnouncement: null,
+        announcementMessage: null,
+        lastSyncTimestamp: null,
+        customName: null,
+        lastMessageId: null,
+        lastMessageContent: null,
+        lastMessageTimestamp: null,
+        killedNextRetryAt: undefined,
+        saturatedRetryAt: undefined,
+        saturatedRetryDone: false,
         unreadCount: 0,
         createdAt: new Date(),
         updatedAt: new Date(),
       };
-      await db.discussions.add({ ...baseDiscussion, ...overrides });
-      const discussion = await db.getDiscussionByOwnerAndContact(
+      const insertData = {
+        ...baseDiscussion,
+        ...overrides,
+      } as DiscussionInsert;
+      await getTestQueries().discussions.insert(insertData);
+      const row = await getTestQueries().discussions.getByOwnerAndContact(
         REFRESH_OWNER_USER_ID,
         REFRESH_CONTACT_USER_ID
       );
-      if (!discussion) {
+      if (!row) {
         throw new Error('Expected discussion to exist');
       }
-      return discussion;
+      return toDiscussion(row);
     };
 
     it('clears recovery state when session is Active', async () => {
@@ -339,20 +346,18 @@ describe('RefreshService', () => {
       const mockDiscussionService = createRefreshDiscussionService();
       const mockAnnouncementService = createRefreshAnnouncementService();
       const refreshService = new RefreshService(
-        db,
         mockMessageService,
         mockDiscussionService,
         mockAnnouncementService,
         mockSession,
         eventEmitter,
+        getTestQueries(),
         defaultSdkConfig
       );
       const discussion = await createDiscussion({
-        sessionRecovery: {
-          killedNextRetryAt: new Date(Date.now() + 60 * 1000),
-          saturatedRetryAt: new Date(Date.now() + 60 * 1000),
-          saturatedRetryDone: true,
-        },
+        killedNextRetryAt: new Date(Date.now() + 60 * 1000),
+        saturatedRetryAt: new Date(Date.now() + 60 * 1000),
+        saturatedRetryDone: true,
       });
 
       await (
@@ -364,13 +369,15 @@ describe('RefreshService', () => {
         }
       ).handleSessionStatus(discussion, SessionStatus.Active);
 
-      const updated = await db.getDiscussionByOwnerAndContact(
-        REFRESH_OWNER_USER_ID,
-        REFRESH_CONTACT_USER_ID
-      );
-      expect(updated?.sessionRecovery?.killedNextRetryAt).toBeUndefined();
-      expect(updated?.sessionRecovery?.saturatedRetryAt).toBeUndefined();
-      expect(updated?.sessionRecovery?.saturatedRetryDone).toBeUndefined();
+      const updatedRow =
+        await getTestQueries().discussions.getByOwnerAndContact(
+          REFRESH_OWNER_USER_ID,
+          REFRESH_CONTACT_USER_ID
+        );
+      const updated = updatedRow ? toDiscussion(updatedRow) : null;
+      expect(updated?.killedNextRetryAt).toBeNull();
+      expect(updated?.saturatedRetryAt).toBeNull();
+      expect(updated?.saturatedRetryDone).toBe(false);
     });
 
     it('returns early for SelfRequested status', async () => {
@@ -379,12 +386,12 @@ describe('RefreshService', () => {
       const mockDiscussionService = createRefreshDiscussionService();
       const mockAnnouncementService = createRefreshAnnouncementService();
       const refreshService = new RefreshService(
-        db,
         mockMessageService,
         mockDiscussionService,
         mockAnnouncementService,
         mockSession,
         eventEmitter,
+        getTestQueries(),
         defaultSdkConfig
       );
       const discussion = await createDiscussion();
@@ -398,14 +405,18 @@ describe('RefreshService', () => {
         }
       ).handleSessionStatus(discussion, SessionStatus.SelfRequested);
 
-      const updated = await db.getDiscussionByOwnerAndContact(
-        REFRESH_OWNER_USER_ID,
-        REFRESH_CONTACT_USER_ID
-      );
+      const updatedRow =
+        await getTestQueries().discussions.getByOwnerAndContact(
+          REFRESH_OWNER_USER_ID,
+          REFRESH_CONTACT_USER_ID
+        );
+      const updated = updatedRow ? toDiscussion(updatedRow) : null;
       expect(
         mockDiscussionService.createSessionForContact
       ).not.toHaveBeenCalled();
-      expect(updated?.sessionRecovery).toBeUndefined();
+      expect(updated?.killedNextRetryAt).toBeNull();
+      expect(updated?.saturatedRetryAt).toBeNull();
+      expect(updated?.saturatedRetryDone).toBe(false);
     });
 
     it('returns early for PeerRequested status', async () => {
@@ -414,17 +425,17 @@ describe('RefreshService', () => {
       const mockDiscussionService = createRefreshDiscussionService();
       const mockAnnouncementService = createRefreshAnnouncementService();
       const refreshService = new RefreshService(
-        db,
         mockMessageService,
         mockDiscussionService,
         mockAnnouncementService,
         mockSession,
         eventEmitter,
+        getTestQueries(),
         defaultSdkConfig
       );
       const now = Date.now();
       const discussion = await createDiscussion({
-        sessionRecovery: { killedNextRetryAt: new Date(now) },
+        killedNextRetryAt: new Date(now),
       });
 
       await (
@@ -436,14 +447,14 @@ describe('RefreshService', () => {
         }
       ).handleSessionStatus(discussion, SessionStatus.PeerRequested);
 
-      const updated = await db.getDiscussionByOwnerAndContact(
+      const updated = await getTestQueries().discussions.getByOwnerAndContact(
         REFRESH_OWNER_USER_ID,
         REFRESH_CONTACT_USER_ID
       );
       expect(
         mockDiscussionService.createSessionForContact
       ).not.toHaveBeenCalled();
-      expect(updated?.sessionRecovery?.killedNextRetryAt?.getTime()).toBe(now);
+      expect(updated?.killedNextRetryAt?.getTime()).toBe(now);
     });
 
     it('returns early when discussion is not accepted', async () => {
@@ -452,12 +463,12 @@ describe('RefreshService', () => {
       const mockDiscussionService = createRefreshDiscussionService();
       const mockAnnouncementService = createRefreshAnnouncementService();
       const refreshService = new RefreshService(
-        db,
         mockMessageService,
         mockDiscussionService,
         mockAnnouncementService,
         mockSession,
         eventEmitter,
+        getTestQueries(),
         defaultSdkConfig
       );
       const discussion = await createDiscussion({ weAccepted: false });
@@ -482,12 +493,12 @@ describe('RefreshService', () => {
       const mockDiscussionService = createRefreshDiscussionService();
       const mockAnnouncementService = createRefreshAnnouncementService();
       const refreshService = new RefreshService(
-        db,
         mockMessageService,
         mockDiscussionService,
         mockAnnouncementService,
         mockSession,
         eventEmitter,
+        getTestQueries(),
         defaultSdkConfig
       );
       const discussion = await createDiscussion();
@@ -501,14 +512,18 @@ describe('RefreshService', () => {
         }
       ).handleSessionStatus(discussion, SessionStatus.NoSession);
 
-      const updated = await db.getDiscussionByOwnerAndContact(
-        REFRESH_OWNER_USER_ID,
-        REFRESH_CONTACT_USER_ID
-      );
+      const updatedRow =
+        await getTestQueries().discussions.getByOwnerAndContact(
+          REFRESH_OWNER_USER_ID,
+          REFRESH_CONTACT_USER_ID
+        );
+      const updated = updatedRow ? toDiscussion(updatedRow) : null;
       expect(
         mockDiscussionService.createSessionForContact
       ).not.toHaveBeenCalled();
-      expect(updated?.sessionRecovery).toBeUndefined();
+      expect(updated?.killedNextRetryAt).toBeNull();
+      expect(updated?.saturatedRetryAt).toBeNull();
+      expect(updated?.saturatedRetryDone).toBe(false);
     });
 
     it('does nothing for UnknownPeer status', async () => {
@@ -517,17 +532,17 @@ describe('RefreshService', () => {
       const mockDiscussionService = createRefreshDiscussionService();
       const mockAnnouncementService = createRefreshAnnouncementService();
       const refreshService = new RefreshService(
-        db,
         mockMessageService,
         mockDiscussionService,
         mockAnnouncementService,
         mockSession,
         eventEmitter,
+        getTestQueries(),
         defaultSdkConfig
       );
       const now = Date.now();
       const discussion = await createDiscussion({
-        sessionRecovery: { killedNextRetryAt: new Date(now) },
+        killedNextRetryAt: new Date(now),
       });
 
       await (
@@ -539,14 +554,14 @@ describe('RefreshService', () => {
         }
       ).handleSessionStatus(discussion, SessionStatus.UnknownPeer);
 
-      const updated = await db.getDiscussionByOwnerAndContact(
+      const updated = await getTestQueries().discussions.getByOwnerAndContact(
         REFRESH_OWNER_USER_ID,
         REFRESH_CONTACT_USER_ID
       );
       expect(
         mockDiscussionService.createSessionForContact
       ).not.toHaveBeenCalled();
-      expect(updated?.sessionRecovery?.killedNextRetryAt?.getTime()).toBe(now);
+      expect(updated?.killedNextRetryAt?.getTime()).toBe(now);
     });
 
     it('retries killed session and schedules next retry', async () => {
@@ -558,12 +573,12 @@ describe('RefreshService', () => {
       const mockDiscussionService = createRefreshDiscussionService();
       const mockAnnouncementService = createRefreshAnnouncementService();
       const refreshService = new RefreshService(
-        db,
         mockMessageService,
         mockDiscussionService,
         mockAnnouncementService,
         mockSession,
         eventEmitter,
+        getTestQueries(),
         defaultSdkConfig
       );
       const discussion = await createDiscussion();
@@ -578,16 +593,14 @@ describe('RefreshService', () => {
         }
       ).handleSessionStatus(discussion, SessionStatus.Killed);
 
-      const updated = await db.getDiscussionByOwnerAndContact(
+      const updated = await getTestQueries().discussions.getByOwnerAndContact(
         REFRESH_OWNER_USER_ID,
         REFRESH_CONTACT_USER_ID
       );
       expect(
         mockDiscussionService.createSessionForContact
       ).toHaveBeenCalledWith(REFRESH_CONTACT_USER_ID, new Uint8Array(0));
-      expect(
-        updated?.sessionRecovery?.killedNextRetryAt?.getTime()
-      ).toBeGreaterThanOrEqual(
+      expect(updated?.killedNextRetryAt?.getTime()).toBeGreaterThanOrEqual(
         now + defaultSdkConfig.sessionRecovery.killedRetryDelayMs
       );
 
@@ -600,19 +613,17 @@ describe('RefreshService', () => {
       const mockDiscussionService = createRefreshDiscussionService();
       const mockAnnouncementService = createRefreshAnnouncementService();
       const refreshService = new RefreshService(
-        db,
         mockMessageService,
         mockDiscussionService,
         mockAnnouncementService,
         mockSession,
         eventEmitter,
+        getTestQueries(),
         defaultSdkConfig
       );
       const now = Date.now();
       const discussion = await createDiscussion({
-        sessionRecovery: {
-          killedNextRetryAt: new Date(now + 60 * 1000), // Future time
-        },
+        killedNextRetryAt: new Date(now + 60 * 1000), // Future time
       });
 
       await (
@@ -624,17 +635,18 @@ describe('RefreshService', () => {
         }
       ).handleSessionStatus(discussion, SessionStatus.Killed);
 
-      const discussionAfter = await db.getDiscussionByOwnerAndContact(
-        REFRESH_OWNER_USER_ID,
-        REFRESH_CONTACT_USER_ID
-      );
+      const discussionAfter =
+        await getTestQueries().discussions.getByOwnerAndContact(
+          REFRESH_OWNER_USER_ID,
+          REFRESH_CONTACT_USER_ID
+        );
 
       expect(
         mockDiscussionService.createSessionForContact
       ).not.toHaveBeenCalled();
-      expect(
-        discussionAfter?.sessionRecovery?.killedNextRetryAt?.getTime()
-      ).toEqual(now + 60 * 1000);
+      expect(discussionAfter?.killedNextRetryAt?.getTime()).toEqual(
+        now + 60 * 1000
+      );
     });
 
     it('schedules saturated retry when no retry exists', async () => {
@@ -646,12 +658,12 @@ describe('RefreshService', () => {
       const mockDiscussionService = createRefreshDiscussionService();
       const mockAnnouncementService = createRefreshAnnouncementService();
       const refreshService = new RefreshService(
-        db,
         mockMessageService,
         mockDiscussionService,
         mockAnnouncementService,
         mockSession,
         eventEmitter,
+        getTestQueries(),
         defaultSdkConfig
       );
       const discussion = await createDiscussion();
@@ -666,19 +678,17 @@ describe('RefreshService', () => {
         }
       ).handleSessionStatus(discussion, SessionStatus.Saturated);
 
-      const updated = await db.getDiscussionByOwnerAndContact(
+      const updated = await getTestQueries().discussions.getByOwnerAndContact(
         REFRESH_OWNER_USER_ID,
         REFRESH_CONTACT_USER_ID
       );
       expect(
         mockDiscussionService.createSessionForContact
       ).not.toHaveBeenCalled();
-      expect(
-        updated?.sessionRecovery?.saturatedRetryAt?.getTime()
-      ).toBeGreaterThanOrEqual(
+      expect(updated?.saturatedRetryAt?.getTime()).toBeGreaterThanOrEqual(
         now + defaultSdkConfig.sessionRecovery.saturatedRetryDelayMs + 2 * 1000
       );
-      expect(updated?.sessionRecovery?.saturatedRetryDone).toBe(false);
+      expect(updated?.saturatedRetryDone).toBe(false);
 
       randomSpy.mockRestore();
     });
@@ -689,19 +699,17 @@ describe('RefreshService', () => {
       const mockDiscussionService = createRefreshDiscussionService();
       const mockAnnouncementService = createRefreshAnnouncementService();
       const refreshService = new RefreshService(
-        db,
         mockMessageService,
         mockDiscussionService,
         mockAnnouncementService,
         mockSession,
         eventEmitter,
+        getTestQueries(),
         defaultSdkConfig
       );
       const discussion = await createDiscussion({
-        sessionRecovery: {
-          saturatedRetryAt: new Date(Date.now() - 1000),
-          saturatedRetryDone: true,
-        },
+        saturatedRetryAt: new Date(Date.now() - 1000),
+        saturatedRetryDone: true,
       });
 
       await (
@@ -724,20 +732,18 @@ describe('RefreshService', () => {
       const mockDiscussionService = createRefreshDiscussionService();
       const mockAnnouncementService = createRefreshAnnouncementService();
       const refreshService = new RefreshService(
-        db,
         mockMessageService,
         mockDiscussionService,
         mockAnnouncementService,
         mockSession,
         eventEmitter,
+        getTestQueries(),
         defaultSdkConfig
       );
       const now = new Date();
       const discussion = await createDiscussion({
-        sessionRecovery: {
-          saturatedRetryAt: new Date(now.getTime() + 60 * 1000),
-          saturatedRetryDone: false,
-        },
+        saturatedRetryAt: new Date(now.getTime() + 60 * 1000),
+        saturatedRetryDone: false,
       });
 
       await (
@@ -749,17 +755,18 @@ describe('RefreshService', () => {
         }
       ).handleSessionStatus(discussion, SessionStatus.Saturated);
 
-      const discussionAfter = await db.getDiscussionByOwnerAndContact(
-        REFRESH_OWNER_USER_ID,
-        REFRESH_CONTACT_USER_ID
-      );
+      const discussionAfter =
+        await getTestQueries().discussions.getByOwnerAndContact(
+          REFRESH_OWNER_USER_ID,
+          REFRESH_CONTACT_USER_ID
+        );
 
       expect(
         mockDiscussionService.createSessionForContact
       ).not.toHaveBeenCalled();
-      expect(
-        discussionAfter?.sessionRecovery?.saturatedRetryAt?.getTime()
-      ).toEqual(now.getTime() + 60 * 1000);
+      expect(discussionAfter?.saturatedRetryAt?.getTime()).toEqual(
+        now.getTime() + 60 * 1000
+      );
     });
 
     it('retries saturated session when retry time has passed', async () => {
@@ -768,19 +775,17 @@ describe('RefreshService', () => {
       const mockDiscussionService = createRefreshDiscussionService();
       const mockAnnouncementService = createRefreshAnnouncementService();
       const refreshService = new RefreshService(
-        db,
         mockMessageService,
         mockDiscussionService,
         mockAnnouncementService,
         mockSession,
         eventEmitter,
+        getTestQueries(),
         defaultSdkConfig
       );
       const discussion = await createDiscussion({
-        sessionRecovery: {
-          saturatedRetryAt: new Date(Date.now() - 1000),
-          saturatedRetryDone: false,
-        },
+        saturatedRetryAt: new Date(Date.now() - 1000),
+        saturatedRetryDone: false,
       });
 
       await (
@@ -792,14 +797,14 @@ describe('RefreshService', () => {
         }
       ).handleSessionStatus(discussion, SessionStatus.Saturated);
 
-      const updated = await db.getDiscussionByOwnerAndContact(
+      const updated = await getTestQueries().discussions.getByOwnerAndContact(
         REFRESH_OWNER_USER_ID,
         REFRESH_CONTACT_USER_ID
       );
       expect(
         mockDiscussionService.createSessionForContact
       ).toHaveBeenCalledWith(REFRESH_CONTACT_USER_ID, new Uint8Array(0));
-      expect(updated?.sessionRecovery?.saturatedRetryDone).toBe(true);
+      expect(updated?.saturatedRetryDone).toBe(true);
     });
   });
 });

@@ -15,7 +15,6 @@ import {
   beforeAll,
 } from 'vitest';
 import {
-  DiscussionStatus,
   DiscussionDirection,
   MessageStatus,
   MessageDirection,
@@ -1602,6 +1601,13 @@ describe('Renew session — SQLite-level tests', () => {
       announcementService,
       alice.session,
       events,
+      q,
+      defaultSdkConfig
+    );
+    discussionService = new DiscussionService(
+      announcementService,
+      alice.session,
+      events,
       q
     );
     discussionService.setRefreshService(refreshService);
@@ -1631,7 +1637,6 @@ describe('Renew session — SQLite-level tests', () => {
       contactUserId: bob.session.userIdEncoded,
       weAccepted: true,
       direction: DiscussionDirection.INITIATED,
-      status: DiscussionStatus.ACTIVE,
       unreadCount: 0,
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -1715,7 +1720,6 @@ describe('Renew session — SQLite-level tests', () => {
       contactUserId: bob.session.userIdEncoded,
       weAccepted: true,
       direction: DiscussionDirection.INITIATED,
-      status: DiscussionStatus.ACTIVE,
       unreadCount: 0,
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -1819,7 +1823,6 @@ describe('Renew session — SQLite-level tests', () => {
       contactUserId: bob.session.userIdEncoded,
       weAccepted: true,
       direction: DiscussionDirection.INITIATED,
-      status: DiscussionStatus.ACTIVE,
       unreadCount: 0,
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -1905,7 +1908,6 @@ describe('Renew session — SQLite-level tests', () => {
       contactUserId: bob.session.userIdEncoded,
       weAccepted: true,
       direction: DiscussionDirection.INITIATED,
-      status: DiscussionStatus.ACTIVE,
       unreadCount: 0,
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -2046,7 +2048,8 @@ describe('WAITING_SESSION messages after peer acceptance', () => {
       announcementService,
       alice.session,
       events,
-      q
+      q,
+      defaultSdkConfig
     );
     discussionService.setRefreshService(refreshService);
     messageService.setRefreshService(refreshService);
@@ -2072,7 +2075,6 @@ describe('WAITING_SESSION messages after peer acceptance', () => {
       contactUserId: bob.session.userIdEncoded,
       weAccepted: true,
       direction: DiscussionDirection.INITIATED,
-      status: DiscussionStatus.PENDING,
       unreadCount: 0,
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -2120,7 +2122,6 @@ describe('WAITING_SESSION messages after peer acceptance', () => {
       bob.session.userIdEncoded
     );
     await getTestQueries().discussions.updateById(discussion!.id!, {
-      status: DiscussionStatus.ACTIVE,
       updatedAt: new Date(),
     });
 
@@ -2152,7 +2153,6 @@ describe('WAITING_SESSION messages after peer acceptance', () => {
       contactUserId: bob.session.userIdEncoded,
       weAccepted: true,
       direction: DiscussionDirection.INITIATED,
-      status: DiscussionStatus.ACTIVE,
       unreadCount: 0,
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -2201,11 +2201,6 @@ describe('WAITING_SESSION messages after peer acceptance', () => {
 
     if (!result.success) throw result.error;
 
-    const discussion = await getTestQueries().discussions.getById(
-      result.data.discussionId
-    );
-    expect(discussion?.status).toBe(DiscussionStatus.PENDING);
-
     // Alice sends a message (will be queued)
     const sendResult = await messageService.sendMessage({
       ownerUserId: alice.session.userIdEncoded,
@@ -2239,11 +2234,6 @@ describe('WAITING_SESSION messages after peer acceptance', () => {
     expect(alice.session.peerSessionStatus(bob.session.userId)).toBe(
       SessionStatus.Active
     );
-
-    // Update discussion status
-    await getTestQueries().discussions.updateById(result.data.discussionId, {
-      status: DiscussionStatus.ACTIVE,
-    });
 
     // Process waiting messages
     const processResult = await messageService.processSendQueueForContact(

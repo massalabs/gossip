@@ -23,6 +23,7 @@ import {
 } from '../../src/db';
 import { MockMessageProtocol } from '../mocks';
 import { getTestStorageConfig } from '../testDb';
+
 import {
   createTestSession,
   cleanupTestSession,
@@ -1338,7 +1339,7 @@ describe('Discussion Flow', () => {
         lastSeen: new Date(),
         createdAt: new Date(),
       };
-      await db.contacts.add(aliceBobContact);
+      await aliceSdk.queries.contacts.insert(aliceBobContact);
 
       // Alice sends announcement with message
       const announcementMsg = 'Hello Bob!';
@@ -1352,10 +1353,10 @@ describe('Discussion Flow', () => {
       await bobSdk.announcements.fetch();
 
       // Alice deletes Bob's contact
-      await aliceSdk.contacts.delete(aliceSdk.userId, bobSdk.userId);
+      await aliceSdk.contacts.delete(bobSdk.userId);
 
       // Verify deletion was successful
-      await checkDeleted(aliceSdk, bobSdk.userId, db);
+      await checkDeleted(aliceSdk, bobSdk.userId);
 
       // Alice re adds Bob as a contact again
       const aliceBobContact2: Omit<Contact, 'id'> = {
@@ -1368,7 +1369,7 @@ describe('Discussion Flow', () => {
         lastSeen: new Date(),
         createdAt: new Date(),
       };
-      await db.contacts.add(aliceBobContact2);
+      await aliceSdk.queries.contacts.insert(aliceBobContact2);
 
       // Alice sends another announcement
       const result2 = await aliceSdk.discussions.start(aliceBobContact, {
@@ -1383,10 +1384,7 @@ describe('Discussion Flow', () => {
       // Verify Bob has Alice's contact
 
       // Verify Bob has discussion with Alice
-      const bobDiscussion = await bobSdk.discussions.get(
-        bobSdk.userId,
-        aliceSdk.userId
-      );
+      const bobDiscussion = await bobSdk.discussions.get(aliceSdk.userId);
       if (!bobDiscussion) throw new Error('Bob discussion not found');
       expect(bobDiscussion).toBeDefined();
       expect(bobDiscussion?.lastAnnouncementMessage).toBe('Hello Bob again!');
@@ -1403,10 +1401,7 @@ describe('Discussion Flow', () => {
       await aliceSdk.announcements.fetch();
 
       // Verify Alice has Bob's discussion
-      const aliceDiscussion = await aliceSdk.discussions.get(
-        aliceSdk.userId,
-        bobSdk.userId
-      );
+      const aliceDiscussion = await aliceSdk.discussions.get(bobSdk.userId);
       expect(aliceDiscussion).toBeDefined();
       expect(aliceDiscussion?.weAccepted).toBe(true);
       expect(aliceDiscussion?.direction).toBe(DiscussionDirection.INITIATED);
@@ -1648,13 +1643,10 @@ describe('session break in session manager', () => {
     const now = Date.now();
     await aliceSdk.updateState();
 
-    const discussion = await aliceSdk.discussions.get(
-      aliceSdk.userId,
-      bobSdk.userId
+    const discussion = await aliceSdk.discussions.get(bobSdk.userId);
+    expect(discussion?.killedNextRetryAt?.getTime()).toBeGreaterThan(
+      now + aliceSdk.config.sessionRecovery.killedRetryDelayMs
     );
-    expect(
-      discussion?.sessionRecovery?.killedNextRetryAt?.getTime()
-    ).toBeGreaterThan(now + aliceSdk.config.sessionRecovery.killedRetryDelayMs);
     expect(establishSpy).toHaveBeenCalled();
     expect(aliceSdk.discussions.getStatus(bobSdk.userId)).toBe(
       SessionStatus.Active
@@ -1908,9 +1900,7 @@ describe('session break in session manager', () => {
     );
     const discussionAfterFirst = await aliceSdk.discussions.get(bobSdk.userId);
     expect(discussionAfterFirst?.sendAnnouncement).toBeNull();
-    expect(
-      discussionAfterFirst?.sessionRecovery?.killedNextRetryAt
-    ).toBeUndefined();
+    expect(discussionAfterFirst?.killedNextRetryAt).toBeNull();
     expect(establishSpy).toHaveBeenCalledTimes(1);
 
     const now = Date.now();
@@ -1918,15 +1908,13 @@ describe('session break in session manager', () => {
     await aliceSdk.updateState();
     expect(establishSpy).toHaveBeenCalledTimes(2);
 
-    const discussionAfterSecond = await aliceSdk.discussions.get(
-      bobSdk.userId
-    );
+    const discussionAfterSecond = await aliceSdk.discussions.get(bobSdk.userId);
     // Session should be active after successful retry
     expect(aliceSdk.discussions.getStatus(bobSdk.userId)).toBe(
       SessionStatus.Active
     );
     expect(
-      discussionAfterSecond?.sessionRecovery?.killedNextRetryAt?.getTime()
+      discussionAfterSecond?.killedNextRetryAt?.getTime()
     ).greaterThanOrEqual(
       now + aliceSdk.config.sessionRecovery.killedRetryDelayMs
     );
@@ -1961,8 +1949,8 @@ describe('session break in session manager', () => {
     const discussion = await aliceSdk.discussions.get(bobSdk.userId);
 
     /* If send announcement failed, There are chances that the session will be killed again the next state_update call.
-    We don't want to wait a delay before reseting the session so we set killedNextRetryAt to undefined*/
-    expect(discussion?.sessionRecovery?.killedNextRetryAt).toBeUndefined();
+    We don't want to wait a delay before reseting the session so we set killedNextRetryAt to null*/
+    expect(discussion?.killedNextRetryAt).toBeNull();
     expect(discussion?.sendAnnouncement).not.toBeNull();
     expect(aliceSdk.discussions.getStatus(bobSdk.userId)).toBe(
       SessionStatus.Active
@@ -2187,16 +2175,11 @@ describe('session break in session manager', () => {
       // detect saturation and set saturatedRetryAt in the future
       const now = Date.now();
       await aliceSdk.updateState();
-      const afterSchedule = await aliceSdk.discussions.get(
-        aliceSdk.userId,
-        bobSdk.userId
-      );
-      expect(
-        afterSchedule?.sessionRecovery?.saturatedRetryAt?.getTime()
-      ).toBeGreaterThanOrEqual(
+      const afterSchedule = await aliceSdk.discussions.get(bobSdk.userId);
+      expect(afterSchedule?.saturatedRetryAt?.getTime()).toBeGreaterThanOrEqual(
         now + aliceSdk.config.sessionRecovery.saturatedRetryDelayMs
       );
-      expect(afterSchedule?.sessionRecovery?.saturatedRetryDone).toBe(false);
+      expect(afterSchedule?.saturatedRetryDone).toBe(false);
 
       // updateState before saturatedRetryDelayMs will not reset the session
       // Spy on establishSession of announcement service to observe session resets
@@ -2221,11 +2204,8 @@ describe('session break in session manager', () => {
       // reset the session
       await aliceSdk.updateState();
 
-      const afterRetry = await aliceSdk.discussions.get(
-        aliceSdk.userId,
-        bobSdk.userId
-      );
-      expect(afterRetry?.sessionRecovery?.saturatedRetryDone).toBe(true);
+      const afterRetry = await aliceSdk.discussions.get(bobSdk.userId);
+      expect(afterRetry?.saturatedRetryDone).toBe(true);
 
       // bob fetch announcements
       await bobSdk.announcements.fetch();
@@ -2338,16 +2318,11 @@ describe('session break in session manager', () => {
       const now = Date.now();
       await aliceSdk.updateState();
 
-      const afterSchedule = await aliceSdk.discussions.get(
-        aliceSdk.userId,
-        bobSdk.userId
-      );
-      expect(
-        afterSchedule?.sessionRecovery?.saturatedRetryAt?.getTime()
-      ).toBeGreaterThanOrEqual(
+      const afterSchedule = await aliceSdk.discussions.get(bobSdk.userId);
+      expect(afterSchedule?.saturatedRetryAt?.getTime()).toBeGreaterThanOrEqual(
         now + aliceSdk.config.sessionRecovery.saturatedRetryDelayMs
       );
-      expect(afterSchedule?.sessionRecovery?.saturatedRetryDone).toBe(false);
+      expect(afterSchedule?.saturatedRetryDone).toBe(false);
       expect(establishSpy).not.toHaveBeenCalled();
 
       // Wait for saturatedRetryDelayMs
@@ -2361,41 +2336,38 @@ describe('session break in session manager', () => {
       // reset the session
       await aliceSdk.updateState();
 
-      // Get all outgoing messages having status SENT
-      const aliceSentOutgoingMessages = await aliceSdk.db.messages
-        .where('[ownerUserId+contactUserId]')
-        .equals([aliceSdk.userId, bobSdk.userId])
-        .and(
-          msg =>
-            msg.direction === MessageDirection.OUTGOING &&
-            msg.status === MessageStatus.SENT
-        )
-        .toArray();
+      // Get all outgoing messages having status SENT from Alice's SDK database
+      const aliceMessages =
+        await aliceSdk.queries.messages.getByOwnerAndContact(
+          aliceSdk.userId,
+          bobSdk.userId
+        );
+      const aliceSentOutgoingMessages = aliceMessages.filter(
+        m =>
+          m.direction === MessageDirection.OUTGOING &&
+          m.status === MessageStatus.SENT
+      );
+
       // the 3rd msg has not been sent because session is saturated.
       // This is because the session has been reset and there is a virtual lag of 1 msg so max_session_lag_length is reached at the 2nd msg
       expect(aliceSentOutgoingMessages.length).toEqual(2);
 
-      const bobSentOutgoingMessages = await bobSdk.db.messages
-        .where('[ownerUserId+contactUserId]')
-        .equals([bobSdk.userId, aliceSdk.userId])
-        .and(
-          msg =>
-            msg.direction === MessageDirection.OUTGOING &&
-            msg.status === MessageStatus.SENT
-        )
-        .toArray();
+      const bobMessages = await bobSdk.queries.messages.getByOwnerAndContact(
+        bobSdk.userId,
+        aliceSdk.userId
+      );
+      const bobSentOutgoingMessages = bobMessages.filter(
+        m =>
+          m.direction === MessageDirection.OUTGOING &&
+          m.status === MessageStatus.SENT
+      );
       // the 2nd msg has not been sent because session is saturated.
       // This is because the session has been reset and there is a virtual lag of 1 msg so max_session_lag_length is reached at the 1st msg
       expect(bobSentOutgoingMessages.length).toEqual(2);
 
-      const afterRetry = await aliceSdk.discussions.get(
-        aliceSdk.userId,
-        bobSdk.userId
-      );
-      expect(
-        afterRetry?.sessionRecovery?.saturatedRetryAt?.getTime()
-      ).toBeLessThan(Date.now());
-      expect(afterRetry?.sessionRecovery?.saturatedRetryDone).toBe(true);
+      const afterRetry = await aliceSdk.discussions.get(bobSdk.userId);
+      expect(afterRetry?.saturatedRetryAt?.getTime()).toBeLessThan(Date.now());
+      expect(afterRetry?.saturatedRetryDone).toBe(true);
       expect(establishSpy).toHaveBeenCalled();
 
       // Bob fetches announcements (receives Alice's renewal)
