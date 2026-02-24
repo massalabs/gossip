@@ -101,8 +101,9 @@ Promise.all([
   createSdk({
     protocolBaseUrl: protocolConfig.baseUrl,
     config: { polling: { enabled: true } },
-    wasmUrl: isNative ? waSqliteWasmUrl : waSqliteAsyncWasmUrl,
-    ...(isNative ? { opfsPath: '/gossip-db' } : { idbName: 'gossip-db' }),
+    storage: isNative
+      ? { type: 'opfs', path: '/gossip-db', wasmUrl: waSqliteWasmUrl }
+      : { type: 'idb', name: 'gossip-db', wasmUrl: waSqliteAsyncWasmUrl },
   }),
   initSafeArea(),
 ])

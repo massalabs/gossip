@@ -2,10 +2,8 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import BaseModal from '../ui/BaseModal';
 import Button from '../ui/Button';
 import { useKeyDown } from '../../hooks/useKeyDown';
-import {
-  validateUsernameFormat,
-  getUserProfileByUsernameLowerExcluding,
-} from '@massalabs/gossip-sdk';
+import { validateUsernameFormat } from '@massalabs/gossip-sdk';
+import { useGossipSdk } from '../../hooks/useGossipSdk';
 
 interface UsernameEditModalProps {
   isOpen: boolean;
@@ -22,6 +20,7 @@ const UsernameEditModal: React.FC<UsernameEditModalProps> = ({
   onConfirm,
   onClose,
 }) => {
+  const gossip = useGossipSdk();
   const [username, setUsername] = useState(currentUsername);
   const [error, setError] = useState<string | null>(null);
   const [isValidating, setIsValidating] = useState(false);
@@ -88,12 +87,12 @@ const UsernameEditModal: React.FC<UsernameEditModalProps> = ({
       // Validate availability (excluding current user)
       setIsValidating(true);
       try {
-        const existingProfile = await getUserProfileByUsernameLowerExcluding(
+        const taken = await gossip.profiles.isUsernameTaken(
           trimmed,
           currentUserId
         );
 
-        if (existingProfile) {
+        if (taken) {
           setError('This username is already in use. Please choose another.');
           setIsValidating(false);
           return false;
@@ -112,7 +111,7 @@ const UsernameEditModal: React.FC<UsernameEditModalProps> = ({
         return false;
       }
     },
-    []
+    [gossip]
   );
 
   const handleUsernameChange = useCallback(

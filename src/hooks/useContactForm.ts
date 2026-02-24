@@ -278,10 +278,7 @@ export function useContactForm() {
       }
 
       // check here if user already exists in contacts
-      const contact = await gossip.contacts.get(
-        userProfile.userId,
-        derivedUserId
-      );
+      const contact = await gossip.contacts.get(derivedUserId);
 
       if (contact) {
         toast.error('User already registred');
@@ -361,7 +358,7 @@ export function useContactForm() {
 
     try {
       // Duplicate checks
-      const contacts = await gossip.contacts.list(userProfile.userId);
+      const contacts = await gossip.contacts.list();
       const nameTaken = contacts.some(
         c => c.name.toLowerCase() === trimmedName.toLowerCase()
       );
@@ -374,10 +371,7 @@ export function useContactForm() {
         return;
       }
 
-      const existing = await gossip.contacts.get(
-        userProfile.userId,
-        effectiveUserId
-      );
+      const existing = await gossip.contacts.get(effectiveUserId);
       if (existing) {
         setUserId(prev => ({
           ...prev,
@@ -399,7 +393,6 @@ export function useContactForm() {
       };
 
       const result = await gossip.contacts.add(
-        userProfile.userId,
         effectiveUserId,
         trimmedName,
         publicKeys

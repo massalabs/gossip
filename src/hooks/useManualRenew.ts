@@ -1,7 +1,7 @@
 import { useCallback } from 'react';
 import { useAccountStore } from '../stores/accountStore';
 import { restMessageProtocol } from '@massalabs/gossip-sdk';
-import { getSdk } from '../stores/sdkStore';
+import { useGossipSdk } from './useGossipSdk';
 
 /**
  * Hook to manually renew a discussion (e.g., from settings page).
@@ -9,10 +9,11 @@ import { getSdk } from '../stores/sdkStore';
  */
 export function useManualRenewDiscussion() {
   const userProfile = useAccountStore(s => s.userProfile);
+  const gossip = useGossipSdk();
 
   return useCallback(
     async (contactUserId: string): Promise<void> => {
-      if (!userProfile?.userId || !getSdk().isSessionOpen) {
+      if (!userProfile?.userId || !gossip.isSessionOpen) {
         console.warn(
           'Cannot renew discussion: Services or session unavailable'
         );
@@ -26,7 +27,7 @@ export function useManualRenewDiscussion() {
       }
 
       try {
-        await getSdk().discussions.renew(contactUserId);
+        await gossip.discussions.renew(contactUserId);
       } catch (error) {
         console.error(
           `Failed to renew discussion with ${contactUserId}:`,
@@ -34,6 +35,6 @@ export function useManualRenewDiscussion() {
         );
       }
     },
-    [userProfile?.userId]
+    [userProfile?.userId, gossip]
   );
 }

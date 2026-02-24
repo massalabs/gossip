@@ -103,7 +103,7 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
         if (!sdk.isSessionOpen) return;
 
         // Get all contacts from the discussion store to know which contacts have messages
-        const discussions = await sdk.discussions.list(ownerUserId);
+        const discussions = await sdk.discussions.list();
         const contactUserIds = discussions.map(d => d.contactUserId);
 
         // Fetch messages for all contacts
@@ -200,10 +200,7 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
     set({ isSending: true });
 
     try {
-      const discussion = await getSdk().discussions.get(
-        userProfile.userId,
-        contactUserId
-      );
+      const discussion = await getSdk().discussions.get(contactUserId);
 
       if (!discussion) {
         throw new Error('Discussion not found');

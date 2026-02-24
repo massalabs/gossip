@@ -204,28 +204,20 @@ export async function setupSession(
 ): Promise<void> {
   // Create contacts for both sides
   await initiatorSdk.contacts.add(
-    initiatorSdk.userId,
     acceptorSdk.userId,
     initiatorContactName,
     acceptorSdk.publicKeys
   );
-  const initiatorContact = await initiatorSdk.contacts.get(
-    initiatorSdk.userId,
-    acceptorSdk.userId
-  );
+  const initiatorContact = await initiatorSdk.contacts.get(acceptorSdk.userId);
   if (!initiatorContact) {
     throw new Error('Initiator contact not found');
   }
   await acceptorSdk.contacts.add(
-    acceptorSdk.userId,
     initiatorSdk.userId,
     acceptorContactName,
     initiatorSdk.publicKeys
   );
-  const acceptorContact = await acceptorSdk.contacts.get(
-    acceptorSdk.userId,
-    initiatorSdk.userId
-  );
+  const acceptorContact = await acceptorSdk.contacts.get(initiatorSdk.userId);
   if (!acceptorContact) {
     throw new Error('Acceptor contact not found');
   }
@@ -244,7 +236,6 @@ export async function setupSession(
   // Acceptor fetches announcements and accepts
   await acceptorSdk.announcements.fetch();
   const acceptorDiscussion = await acceptorSdk.discussions.get(
-    acceptorSdk.userId,
     initiatorSdk.userId
   );
 

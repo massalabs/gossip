@@ -1,6 +1,6 @@
 import { and, desc, eq, ne, sql } from 'drizzle-orm';
 import * as schema from '../schema';
-import { getSqliteDb } from '../sqlite';
+import type { DatabaseConnection } from '../sqlite';
 import type { UserProfile } from '../db';
 
 export type UserProfileRow = typeof schema.userProfile.$inferSelect;
@@ -59,98 +59,94 @@ export function userProfileToRow(profile: UserProfile): UserProfileInsert {
   };
 }
 
-export async function getUserProfileById(
-  userId: string
-): Promise<UserProfileRow | undefined> {
-  return getSqliteDb()
-    .select()
-    .from(schema.userProfile)
-    .where(eq(schema.userProfile.userId, userId))
-    .get();
-}
+export class UserProfileQueries {
+  constructor(private conn: DatabaseConnection) {}
 
-export async function updateUserProfileById(
-  userId: string,
-  data: Partial<UserProfileInsert>
-): Promise<void> {
-  await getSqliteDb()
-    .update(schema.userProfile)
-    .set(data)
-    .where(eq(schema.userProfile.userId, userId));
-}
+  async getById(userId: string): Promise<UserProfileRow | undefined> {
+    return this.conn.db
+      .select()
+      .from(schema.userProfile)
+      .where(eq(schema.userProfile.userId, userId))
+      .get();
+  }
 
-export async function getUserProfileByUsernameLower(
-  username: string
-): Promise<{ userId: string } | undefined> {
-  return getSqliteDb()
-    .select({ userId: schema.userProfile.userId })
-    .from(schema.userProfile)
-    .where(
-      sql`LOWER(${schema.userProfile.username}) = ${username.trim().toLowerCase()}`
-    )
-    .get();
-}
+  async updateById(
+    userId: string,
+    data: Partial<UserProfileInsert>
+  ): Promise<void> {
+    await this.conn.db
+      .update(schema.userProfile)
+      .set(data)
+      .where(eq(schema.userProfile.userId, userId));
+  }
 
-export async function getMostRecentUserProfile(): Promise<
-  UserProfileRow | undefined
-> {
-  return getSqliteDb()
-    .select()
-    .from(schema.userProfile)
-    .orderBy(desc(schema.userProfile.lastSeen))
-    .limit(1)
-    .get();
-}
-
-export async function getAllUserProfiles(): Promise<UserProfileRow[]> {
-  return getSqliteDb().select().from(schema.userProfile).all();
-}
-
-export async function getUserProfileCount(): Promise<number> {
-  const result = await getSqliteDb()
-    .select({ count: sql<number>`count(*)` })
-    .from(schema.userProfile)
-    .get();
-  return result?.count ?? 0;
-}
-
-export async function insertUserProfile(
-  values: UserProfileInsert
-): Promise<void> {
-  await getSqliteDb().insert(schema.userProfile).values(values);
-}
-
-export async function deleteUserProfile(userId: string): Promise<void> {
-  await getSqliteDb()
-    .delete(schema.userProfile)
-    .where(eq(schema.userProfile.userId, userId));
-}
-
-export async function getUserProfileByUsernameLowerExcluding(
-  username: string,
-  excludeUserId: string
-): Promise<{ userId: string } | undefined> {
-  return getSqliteDb()
-    .select({ userId: schema.userProfile.userId })
-    .from(schema.userProfile)
-    .where(
-      and(
-        sql`LOWER(${schema.userProfile.username}) = ${username.trim().toLowerCase()}`,
-        ne(schema.userProfile.userId, excludeUserId)
+  async getByUsernameLower(
+    username: string
+  ): Promise<{ userId: string } | undefined> {
+    return this.conn.db
+      .select({ userId: schema.userProfile.userId })
+      .from(schema.userProfile)
+      .where(
+        sql`LOWER(${schema.userProfile.username}) = ${username.trim().toLowerCase()}`
       )
-    )
-    .get();
-}
+      .get();
+  }
 
-export async function upsertUserProfile(
-  values: UserProfileInsert
-): Promise<void> {
-  const { userId: _, ...rest } = values;
-  await getSqliteDb()
-    .insert(schema.userProfile)
-    .values(values)
-    .onConflictDoUpdate({
-      target: schema.userProfile.userId,
-      set: rest,
-    });
+  async getMostRecent(): Promise<UserProfileRow | undefined> {
+    return this.conn.db
+      .select()
+      .from(schema.userProfile)
+      .orderBy(desc(schema.userProfile.lastSeen))
+      .limit(1)
+      .get();
+  }
+
+  async getAll(): Promise<UserProfileRow[]> {
+    return this.conn.db.select().from(schema.userProfile).all();
+  }
+
+  async getCount(): Promise<number> {
+    const result = await this.conn.db
+      .select({ count: sql<number>`count(*)` })
+      .from(schema.userProfile)
+      .get();
+    return result?.count ?? 0;
+  }
+
+  async insert(values: UserProfileInsert): Promise<void> {
+    await this.conn.db.insert(schema.userProfile).values(values);
+  }
+
+  async delete(userId: string): Promise<void> {
+    await this.conn.db
+      .delete(schema.userProfile)
+      .where(eq(schema.userProfile.userId, userId));
+  }
+
+  async getByUsernameLowerExcluding(
+    username: string,
+    excludeUserId: string
+  ): Promise<{ userId: string } | undefined> {
+    return this.conn.db
+      .select({ userId: schema.userProfile.userId })
+      .from(schema.userProfile)
+      .where(
+        and(
+          sql`LOWER(${schema.userProfile.username}) = ${username.trim().toLowerCase()}`,
+          ne(schema.userProfile.userId, excludeUserId)
+        )
+      )
+      .get();
+  }
+
+  async upsert(values: UserProfileInsert): Promise<void> {
+    const { userId: _, ...rest } = values;
+    await this.conn.db
+      .insert(schema.userProfile)
+      .values(values)
+      .onConflictDoUpdate({
+        target: schema.userProfile.userId,
+        set: rest,
+      });
+  }
 }

@@ -41,60 +41,12 @@ import { SessionModule } from '../../src/wasm/session';
 import { decodeUserId } from '../../src/utils/userId';
 import { SessionStatus } from '../../src/assets/generated/wasm/gossip_wasm';
 import { SdkEventEmitter } from '../../src/core/SdkEventEmitter';
-import { eq, and } from 'drizzle-orm';
-import { getSqliteDb, getLastInsertRowId, clearAllTables } from '../../src/db';
-import * as schema from '../../src/db/schema';
-
-// Helper: insert a discussion into SQLite and return its id
-async function addDiscussionToSqlite(
-  data: typeof schema.discussions.$inferInsert
-): Promise<number> {
-  await getSqliteDb().insert(schema.discussions).values(data);
-  return await getLastInsertRowId();
-}
-
-// Helper: get a discussion by id from SQLite
-async function getDiscussionFromSqlite(id: number) {
-  return getSqliteDb()
-    .select()
-    .from(schema.discussions)
-    .where(eq(schema.discussions.id, id))
-    .get();
-}
-
-// Helper: get a discussion by owner+contact from SQLite
-async function getDiscussionByOwnerAndContact(
-  ownerUserId: string,
-  contactUserId: string
-) {
-  return getSqliteDb()
-    .select()
-    .from(schema.discussions)
-    .where(
-      and(
-        eq(schema.discussions.ownerUserId, ownerUserId),
-        eq(schema.discussions.contactUserId, contactUserId)
-      )
-    )
-    .get();
-}
-
-// Helper: add a message to SQLite and return its id
-async function addMessageToSqlite(
-  data: typeof schema.messages.$inferInsert
-): Promise<number> {
-  await getSqliteDb().insert(schema.messages).values(data);
-  return await getLastInsertRowId();
-}
-
-// Helper: get a message by id from SQLite
-async function getMessageFromSqlite(id: number) {
-  return getSqliteDb()
-    .select()
-    .from(schema.messages)
-    .where(eq(schema.messages.id, id))
-    .get();
-}
+import { defaultSdkConfig } from '../../src/config/sdk';
+import {
+  clearAllTables,
+  getTestQueries,
+  getTestStorageConfig,
+} from '../testDb';
 
 describe('Messaging Flow', () => {
   let mockProtocol: MockMessageProtocol;
@@ -108,7 +60,6 @@ describe('Messaging Flow', () => {
   });
 
   beforeEach(async () => {
-    await clearAllTables();
     mockProtocol.clearMockData();
 
     vi.clearAllMocks();
@@ -121,7 +72,7 @@ describe('Messaging Flow', () => {
 
     // Create gossipSdk instances for Alice and Bob
     aliceSdk = new GossipSdk();
-    await aliceSdk.init({});
+    await aliceSdk.init({ storage: getTestStorageConfig() });
     await aliceSdk.openSession({
       mnemonic: aliceMnemonic,
       encryptionKey: aliceEncryptionKey,
@@ -136,7 +87,7 @@ describe('Messaging Flow', () => {
     ] = mockProtocol;
 
     bobSdk = new GossipSdk();
-    await bobSdk.init({});
+    await bobSdk.init({ storage: getTestStorageConfig() });
     await bobSdk.openSession({
       mnemonic: bobMnemonic,
       encryptionKey: bobEncryptionKey,
@@ -326,7 +277,7 @@ describe('Messaging Flow', () => {
         lastSeen: new Date(),
         createdAt: new Date(),
       };
-      await getSqliteDb().insert(schema.contacts).values({
+      await aliceSdk.queries.contacts.insert({
         ownerUserId: aliceBobContact.ownerUserId,
         userId: aliceBobContact.userId,
         name: aliceBobContact.name,
@@ -346,7 +297,7 @@ describe('Messaging Flow', () => {
         lastSeen: new Date(),
         createdAt: new Date(),
       };
-      await getSqliteDb().insert(schema.contacts).values({
+      await bobSdk.queries.contacts.insert({
         ownerUserId: bobAliceContact.ownerUserId,
         userId: bobAliceContact.userId,
         name: bobAliceContact.name,
@@ -391,10 +342,7 @@ describe('Messaging Flow', () => {
 
       // Bob fetches announcements and accepts
       await bobSdk.announcements.fetch();
-      const bobDiscussion = await bobSdk.discussions.get(
-        bobSdk.userId,
-        aliceSdk.userId
-      );
+      const bobDiscussion = await bobSdk.discussions.get(aliceSdk.userId);
       if (!bobDiscussion) throw new Error('Bob discussion not found');
       await bobSdk.discussions.accept(bobDiscussion);
 
@@ -477,11 +425,9 @@ describe('Messaging Flow', () => {
       expect(sendResult.success).toBe(true);
 
       // Check message status - should still be READY (will retry on next updateState)
-      const messageRow = await getSqliteDb()
-        .select()
-        .from(schema.messages)
-        .where(eq(schema.messages.id, sendResult.message!.id!))
-        .get();
+      const messageRow = await aliceSdk.queries.messages.getById(
+        sendResult.message!.id!
+      );
       expect(messageRow?.status).toBe(MessageStatus.READY);
       expect(messageRow?.whenToSend).toBeDefined();
       expect(messageRow?.whenToSend!.getTime()).toBeGreaterThan(Date.now());
@@ -500,11 +446,9 @@ describe('Messaging Flow', () => {
       aliceSdk.config.messages.retryDelayMs = originalRetryDelay;
 
       // Check message status - should now be SENT
-      const retriedMessageRow = await getSqliteDb()
-        .select()
-        .from(schema.messages)
-        .where(eq(schema.messages.id, sendResult.message!.id!))
-        .get();
+      const retriedMessageRow = await aliceSdk.queries.messages.getById(
+        sendResult.message!.id!
+      );
       expect(retriedMessageRow?.status).toBe(MessageStatus.SENT);
       expect(retriedMessageRow?.whenToSend).toBeDefined();
       expect(retriedMessageRow?.encryptedMessage).toBeDefined();
@@ -592,28 +536,22 @@ describe('Messaging Flow', () => {
       await aliceSdk.messages.fetch();
       await bobSdk.messages.fetch();
 
-      const aliceIncomingMessages = await getSqliteDb()
-        .select()
-        .from(schema.messages)
-        .where(
-          and(
-            eq(schema.messages.ownerUserId, aliceSdk.userId),
-            eq(schema.messages.contactUserId, bobSdk.userId),
-            eq(schema.messages.direction, MessageDirection.INCOMING)
-          )
-        )
-        .all();
-      const bobIncomingMessages = await getSqliteDb()
-        .select()
-        .from(schema.messages)
-        .where(
-          and(
-            eq(schema.messages.ownerUserId, bobSdk.userId),
-            eq(schema.messages.contactUserId, aliceSdk.userId),
-            eq(schema.messages.direction, MessageDirection.INCOMING)
-          )
-        )
-        .all();
+      const aliceAllMsgsCheck =
+        await aliceSdk.queries.messages.getByOwnerAndContact(
+          aliceSdk.userId,
+          bobSdk.userId
+        );
+      const aliceIncomingMessages = aliceAllMsgsCheck.filter(
+        m => m.direction === MessageDirection.INCOMING
+      );
+      const bobAllMsgsCheck =
+        await bobSdk.queries.messages.getByOwnerAndContact(
+          bobSdk.userId,
+          aliceSdk.userId
+        );
+      const bobIncomingMessages = bobAllMsgsCheck.filter(
+        m => m.direction === MessageDirection.INCOMING
+      );
       expect(aliceIncomingMessages.length).toBe(0);
       expect(bobIncomingMessages.length).toBe(0);
 
@@ -1146,16 +1084,10 @@ describe('Messaging Flow', () => {
       // Bob fetches Alice's message
       await bobSdk.messages.fetch();
 
-      const bobMessages = await getSqliteDb()
-        .select()
-        .from(schema.messages)
-        .where(
-          and(
-            eq(schema.messages.ownerUserId, bobSdk.userId),
-            eq(schema.messages.contactUserId, aliceSdk.userId)
-          )
-        )
-        .all();
+      const bobMessages = await bobSdk.queries.messages.getByOwnerAndContact(
+        bobSdk.userId,
+        aliceSdk.userId
+      );
 
       const bobReceived = bobMessages.find(
         m =>
@@ -1173,17 +1105,15 @@ describe('Messaging Flow', () => {
       await bobServices._refresh.stateUpdate();
 
       // Verify Bob sent keep-alive
-      const bobKeepAliveRows = await getSqliteDb()
-        .select()
-        .from(schema.messages)
-        .where(
-          and(
-            eq(schema.messages.ownerUserId, bobSdk.userId),
-            eq(schema.messages.type, MessageType.KEEP_ALIVE),
-            eq(schema.messages.direction, MessageDirection.OUTGOING)
-          )
-        )
-        .all();
+      const bobAllMsgsKA = await bobSdk.queries.messages.getByOwnerAndContact(
+        bobSdk.userId,
+        aliceSdk.userId
+      );
+      const bobKeepAliveRows = bobAllMsgsKA.filter(
+        m =>
+          m.type === MessageType.KEEP_ALIVE &&
+          m.direction === MessageDirection.OUTGOING
+      );
       const bobKeepAlive = bobKeepAliveRows[0];
       expect(bobKeepAlive).toBeDefined();
       expect(bobKeepAlive?.status).toBe(MessageStatus.SENT);
@@ -1194,16 +1124,11 @@ describe('Messaging Flow', () => {
       // Alice fetches Bob's keep-alive (which acknowledges her message)
       await aliceSdk.messages.fetch();
 
-      const aliceMessages = await getSqliteDb()
-        .select()
-        .from(schema.messages)
-        .where(
-          and(
-            eq(schema.messages.ownerUserId, aliceSdk.userId),
-            eq(schema.messages.contactUserId, bobSdk.userId)
-          )
-        )
-        .all();
+      const aliceMessages =
+        await aliceSdk.queries.messages.getByOwnerAndContact(
+          aliceSdk.userId,
+          bobSdk.userId
+        );
 
       const aliceSent = aliceMessages.find(
         m =>
@@ -1235,16 +1160,14 @@ describe('Messaging Flow', () => {
       await bobSdk.messages.fetch();
 
       // Bob's keep-alive should now be removed from db
-      const bobKeepAliveAfterRows = await getSqliteDb()
-        .select()
-        .from(schema.messages)
-        .where(
-          and(
-            eq(schema.messages.ownerUserId, bobSdk.userId),
-            eq(schema.messages.type, MessageType.KEEP_ALIVE)
-          )
-        )
-        .all();
+      const bobAllMsgsAfter =
+        await bobSdk.queries.messages.getByOwnerAndContact(
+          bobSdk.userId,
+          aliceSdk.userId
+        );
+      const bobKeepAliveAfterRows = bobAllMsgsAfter.filter(
+        m => m.type === MessageType.KEEP_ALIVE
+      );
       expect(bobKeepAliveAfterRows.length).toBe(0);
     });
 
@@ -1259,7 +1182,7 @@ describe('Messaging Flow', () => {
         lastSeen: new Date(),
         createdAt: new Date(),
       };
-      await getSqliteDb().insert(schema.contacts).values({
+      await aliceSdk.queries.contacts.insert({
         ownerUserId: aliceContact.ownerUserId,
         userId: aliceContact.userId,
         name: aliceContact.name,
@@ -1297,11 +1220,19 @@ describe('Messaging Flow', () => {
       aliceRefreshSpy.mockRestore();
       bobRefreshSpy.mockRestore();
 
-      const keepAlives = await getSqliteDb()
-        .select()
-        .from(schema.messages)
-        .where(eq(schema.messages.type, MessageType.KEEP_ALIVE))
-        .all();
+      const aliceKeepAlives = (
+        await aliceSdk.queries.messages.getByOwnerAndContact(
+          aliceSdk.userId,
+          bobSdk.userId
+        )
+      ).filter(m => m.type === MessageType.KEEP_ALIVE);
+      const bobKeepAlives = (
+        await bobSdk.queries.messages.getByOwnerAndContact(
+          bobSdk.userId,
+          aliceSdk.userId
+        )
+      ).filter(m => m.type === MessageType.KEEP_ALIVE);
+      const keepAlives = [...aliceKeepAlives, ...bobKeepAlives];
       expect(keepAlives.length).toBe(0);
     });
 
@@ -1329,11 +1260,9 @@ describe('Messaging Flow', () => {
       expect(msgResult.success).toBe(true);
 
       // Verify message is in WAITING_SESSION (sendMessage failed)
-      const pendingMsg = await getSqliteDb()
-        .select()
-        .from(schema.messages)
-        .where(eq(schema.messages.id, msgResult.message!.id!))
-        .get();
+      const pendingMsg = await aliceSdk.queries.messages.getById(
+        msgResult.message!.id!
+      );
       expect(pendingMsg?.status).toBe(MessageStatus.WAITING_SESSION);
 
       vi.spyOn(aliceSession, 'refresh').mockResolvedValue([
@@ -1343,16 +1272,10 @@ describe('Messaging Flow', () => {
       await aliceServices._refresh.stateUpdate();
 
       // Check that there is no outgoing keep-alive message in Alice's db
-      const messages = await getSqliteDb()
-        .select()
-        .from(schema.messages)
-        .where(
-          and(
-            eq(schema.messages.ownerUserId, aliceSdk.userId),
-            eq(schema.messages.contactUserId, bobSdk.userId)
-          )
-        )
-        .all();
+      const messages = await aliceSdk.queries.messages.getByOwnerAndContact(
+        aliceSdk.userId,
+        bobSdk.userId
+      );
       const keepAlive = messages.find(
         m =>
           m.type === MessageType.KEEP_ALIVE &&
@@ -1396,16 +1319,10 @@ describe('Messaging Flow', () => {
       // First updateState: creates keep-alive but encryption fails, so it stays pending
       await aliceServices._refresh.stateUpdate();
 
-      let aliceMessages = await getSqliteDb()
-        .select()
-        .from(schema.messages)
-        .where(
-          and(
-            eq(schema.messages.ownerUserId, aliceSdk.userId),
-            eq(schema.messages.contactUserId, bobSdk.userId)
-          )
-        )
-        .all();
+      let aliceMessages = await aliceSdk.queries.messages.getByOwnerAndContact(
+        aliceSdk.userId,
+        bobSdk.userId
+      );
 
       const ka = aliceMessages.find(
         m =>
@@ -1418,16 +1335,10 @@ describe('Messaging Flow', () => {
       // Second updateState: resend with real sendMessage
       await aliceServices._refresh.stateUpdate();
 
-      aliceMessages = await getSqliteDb()
-        .select()
-        .from(schema.messages)
-        .where(
-          and(
-            eq(schema.messages.ownerUserId, aliceSdk.userId),
-            eq(schema.messages.contactUserId, bobSdk.userId)
-          )
-        )
-        .all();
+      aliceMessages = await aliceSdk.queries.messages.getByOwnerAndContact(
+        aliceSdk.userId,
+        bobSdk.userId
+      );
 
       const kaAfter = aliceMessages.find(
         m =>
@@ -1471,16 +1382,10 @@ describe('Messaging Flow', () => {
       await aliceServices._refresh.stateUpdate();
 
       // Verify Alice sent keep-alive
-      let aliceMessages = await getSqliteDb()
-        .select()
-        .from(schema.messages)
-        .where(
-          and(
-            eq(schema.messages.ownerUserId, aliceSdk.userId),
-            eq(schema.messages.contactUserId, bobSdk.userId)
-          )
-        )
-        .all();
+      let aliceMessages = await aliceSdk.queries.messages.getByOwnerAndContact(
+        aliceSdk.userId,
+        bobSdk.userId
+      );
 
       let aliceKeepAlive = aliceMessages.find(
         m =>
@@ -1498,16 +1403,10 @@ describe('Messaging Flow', () => {
       expect(renewResult.success).toBe(true);
 
       // Check keep-alive was reset to WAITING_SESSION and then resent
-      aliceMessages = await getSqliteDb()
-        .select()
-        .from(schema.messages)
-        .where(
-          and(
-            eq(schema.messages.ownerUserId, aliceSdk.userId),
-            eq(schema.messages.contactUserId, bobSdk.userId)
-          )
-        )
-        .all();
+      aliceMessages = await aliceSdk.queries.messages.getByOwnerAndContact(
+        aliceSdk.userId,
+        bobSdk.userId
+      );
 
       aliceKeepAlive = aliceMessages.find(
         m =>
@@ -1566,16 +1465,10 @@ describe('Messaging Flow', () => {
       // First stateUpdate: keep-alive send fails
       await aliceServices._refresh.stateUpdate();
 
-      let aliceMessages = await getSqliteDb()
-        .select()
-        .from(schema.messages)
-        .where(
-          and(
-            eq(schema.messages.ownerUserId, aliceSdk.userId),
-            eq(schema.messages.contactUserId, bobSdk.userId)
-          )
-        )
-        .all();
+      let aliceMessages = await aliceSdk.queries.messages.getByOwnerAndContact(
+        aliceSdk.userId,
+        bobSdk.userId
+      );
 
       const ka = aliceMessages.find(
         m =>
@@ -1595,16 +1488,10 @@ describe('Messaging Flow', () => {
       // Second stateUpdate: retry should succeed
       await aliceServices._refresh.stateUpdate();
 
-      aliceMessages = await getSqliteDb()
-        .select()
-        .from(schema.messages)
-        .where(
-          and(
-            eq(schema.messages.ownerUserId, aliceSdk.userId),
-            eq(schema.messages.contactUserId, bobSdk.userId)
-          )
-        )
-        .all();
+      aliceMessages = await aliceSdk.queries.messages.getByOwnerAndContact(
+        aliceSdk.userId,
+        bobSdk.userId
+      );
 
       const kaAfter = aliceMessages.find(
         m =>
@@ -1645,41 +1532,26 @@ describe('Renew session — SQLite-level tests', () => {
     ownerUserId: string,
     contactUserId: string
   ): Promise<number> {
-    const sqliteDb = getSqliteDb();
-    const toReset = await sqliteDb
-      .select({ id: schema.messages.id })
-      .from(schema.messages)
-      .where(
-        and(
-          eq(schema.messages.ownerUserId, ownerUserId),
-          eq(schema.messages.contactUserId, contactUserId),
-          eq(schema.messages.direction, MessageDirection.OUTGOING)
-        )
-      )
-      .all();
-    const filtered: number[] = [];
+    const q = getTestQueries();
+    const all = await q.messages.getByOwnerAndContact(
+      ownerUserId,
+      contactUserId
+    );
+    const toReset = all.filter(
+      m =>
+        m.direction === MessageDirection.OUTGOING &&
+        (m.status === MessageStatus.SENDING ||
+          m.status === MessageStatus.FAILED ||
+          m.status === MessageStatus.SENT)
+    );
     for (const m of toReset) {
-      const full = await getMessageFromSqlite(m.id);
-      if (
-        full &&
-        (full.status === MessageStatus.SENDING ||
-          full.status === MessageStatus.FAILED ||
-          full.status === MessageStatus.SENT)
-      ) {
-        filtered.push(m.id);
-      }
+      await q.messages.updateById(m.id, {
+        status: MessageStatus.WAITING_SESSION,
+        encryptedMessage: null,
+        seeker: null,
+      });
     }
-    for (const id of filtered) {
-      await sqliteDb
-        .update(schema.messages)
-        .set({
-          status: MessageStatus.WAITING_SESSION,
-          encryptedMessage: null,
-          seeker: null,
-        })
-        .where(eq(schema.messages.id, id));
-    }
-    return filtered.length;
+    return toReset.length;
   }
 
   beforeEach(async () => {
@@ -1692,8 +1564,10 @@ describe('Renew session — SQLite-level tests', () => {
     mockProtocol = new MockMessageProtocol();
     events = new SdkEventEmitter();
 
+    const q = getTestQueries();
+
     // Add Bob as Alice's contact
-    await getSqliteDb().insert(schema.contacts).values({
+    await q.contacts.insert({
       ownerUserId: alice.session.userIdEncoded,
       userId: bob.session.userIdEncoded,
       name: 'Bob',
@@ -1702,27 +1576,37 @@ describe('Renew session — SQLite-level tests', () => {
       lastSeen: new Date(),
       createdAt: new Date(),
     });
-
-    // Set up services
     announcementService = new AnnouncementService(
       mockProtocol,
       alice.session,
-      events
+      events,
+      defaultSdkConfig,
+      q
+    );
+    messageService = new MessageService(
+      mockProtocol,
+      alice.session,
+      events,
+      defaultSdkConfig,
+      q
+    );
+    discussionService = new DiscussionService(
+      announcementService,
+      alice.session,
+      events,
+      q
     );
     refreshService = new RefreshService(
       messageService,
       discussionService,
       announcementService,
       alice.session,
-      events
-    );
-    discussionService = new DiscussionService(
-      announcementService,
-      alice.session,
       events,
-      refreshService
+      q
     );
-    messageService = new MessageService(mockProtocol, alice.session, events);
+    discussionService.setRefreshService(refreshService);
+    messageService.setRefreshService(refreshService);
+    announcementService.setRefreshService(refreshService);
   });
 
   afterEach(() => {
@@ -1742,7 +1626,7 @@ describe('Renew session — SQLite-level tests', () => {
     await alice.session.feedIncomingAnnouncement(bobAnnouncement);
 
     // Create active discussion
-    await addDiscussionToSqlite({
+    await getTestQueries().discussions.insert({
       ownerUserId: alice.session.userIdEncoded,
       contactUserId: bob.session.userIdEncoded,
       weAccepted: true,
@@ -1754,7 +1638,7 @@ describe('Renew session — SQLite-level tests', () => {
     });
 
     // Add a SENT message (simulates message sent but not acknowledged)
-    const sentMessageId = await addMessageToSqlite({
+    const sentMessageId = await getTestQueries().messages.insert({
       ownerUserId: alice.session.userIdEncoded,
       contactUserId: bob.session.userIdEncoded,
       content: 'Hello Bob! This was sent but not delivered.',
@@ -1768,7 +1652,7 @@ describe('Renew session — SQLite-level tests', () => {
     });
 
     // Add a DELIVERED message (should not be reset)
-    const deliveredMessageId = await addMessageToSqlite({
+    const deliveredMessageId = await getTestQueries().messages.insert({
       ownerUserId: alice.session.userIdEncoded,
       contactUserId: bob.session.userIdEncoded,
       content: 'This was delivered already.',
@@ -1781,7 +1665,7 @@ describe('Renew session — SQLite-level tests', () => {
     });
 
     // Verify initial state
-    let sentMessage = await getMessageFromSqlite(sentMessageId);
+    let sentMessage = await getTestQueries().messages.getById(sentMessageId);
     expect(sentMessage?.status).toBe(MessageStatus.SENT);
     expect(sentMessage?.seeker).toBeDefined();
 
@@ -1793,12 +1677,13 @@ describe('Renew session — SQLite-level tests', () => {
     expect(resetCount).toBe(1);
 
     // Verify reset state
-    sentMessage = await getMessageFromSqlite(sentMessageId);
+    sentMessage = await getTestQueries().messages.getById(sentMessageId);
     expect(sentMessage?.status).toBe(MessageStatus.WAITING_SESSION);
     expect(sentMessage?.seeker).toBeNull();
 
     // DELIVERED should be unchanged
-    const deliveredMessage = await getMessageFromSqlite(deliveredMessageId);
+    const deliveredMessage =
+      await getTestQueries().messages.getById(deliveredMessageId);
     expect(deliveredMessage?.status).toBe(MessageStatus.DELIVERED);
     expect(deliveredMessage?.seeker).toBeDefined();
 
@@ -1810,7 +1695,7 @@ describe('Renew session — SQLite-level tests', () => {
     expect(sendResult.success).toBe(true);
     if (!sendResult.success) throw sendResult.error;
     expect(sendResult.data).toBe(1);
-    sentMessage = await getMessageFromSqlite(sentMessageId);
+    sentMessage = await getTestQueries().messages.getById(sentMessageId);
     expect(sentMessage?.status).toBe(MessageStatus.SENT);
   });
 
@@ -1825,7 +1710,7 @@ describe('Renew session — SQLite-level tests', () => {
     );
     await alice.session.feedIncomingAnnouncement(bobAnnouncement);
 
-    await addDiscussionToSqlite({
+    await getTestQueries().discussions.insert({
       ownerUserId: alice.session.userIdEncoded,
       contactUserId: bob.session.userIdEncoded,
       weAccepted: true,
@@ -1837,7 +1722,7 @@ describe('Renew session — SQLite-level tests', () => {
     });
 
     // Add messages with different statuses
-    const sentId = await addMessageToSqlite({
+    const sentId = await getTestQueries().messages.insert({
       ownerUserId: alice.session.userIdEncoded,
       contactUserId: bob.session.userIdEncoded,
       content: 'SENT message',
@@ -1850,7 +1735,7 @@ describe('Renew session — SQLite-level tests', () => {
       encryptedMessage: new Uint8Array(64).fill(1),
     });
 
-    const sendingId = await addMessageToSqlite({
+    const sendingId = await getTestQueries().messages.insert({
       ownerUserId: alice.session.userIdEncoded,
       contactUserId: bob.session.userIdEncoded,
       content: 'SENDING message (interrupted)',
@@ -1863,7 +1748,7 @@ describe('Renew session — SQLite-level tests', () => {
       encryptedMessage: new Uint8Array(64).fill(2),
     });
 
-    const failedId = await addMessageToSqlite({
+    const failedId = await getTestQueries().messages.insert({
       ownerUserId: alice.session.userIdEncoded,
       contactUserId: bob.session.userIdEncoded,
       content: 'FAILED message',
@@ -1876,7 +1761,7 @@ describe('Renew session — SQLite-level tests', () => {
       encryptedMessage: new Uint8Array(64).fill(3),
     });
 
-    const deliveredId = await addMessageToSqlite({
+    const deliveredId = await getTestQueries().messages.insert({
       ownerUserId: alice.session.userIdEncoded,
       contactUserId: bob.session.userIdEncoded,
       content: 'DELIVERED message',
@@ -1896,16 +1781,16 @@ describe('Renew session — SQLite-level tests', () => {
     expect(resetCount).toBe(3); // SENT, SENDING, FAILED
 
     // Verify reset
-    expect((await getMessageFromSqlite(sentId))?.status).toBe(
+    expect((await getTestQueries().messages.getById(sentId))?.status).toBe(
       MessageStatus.WAITING_SESSION
     );
-    expect((await getMessageFromSqlite(sendingId))?.status).toBe(
+    expect((await getTestQueries().messages.getById(sendingId))?.status).toBe(
       MessageStatus.WAITING_SESSION
     );
-    expect((await getMessageFromSqlite(failedId))?.status).toBe(
+    expect((await getTestQueries().messages.getById(failedId))?.status).toBe(
       MessageStatus.WAITING_SESSION
     );
-    expect((await getMessageFromSqlite(deliveredId))?.status).toBe(
+    expect((await getTestQueries().messages.getById(deliveredId))?.status).toBe(
       MessageStatus.DELIVERED
     );
 
@@ -1929,7 +1814,7 @@ describe('Renew session — SQLite-level tests', () => {
     );
     await alice.session.feedIncomingAnnouncement(bobAnnouncement);
 
-    await addDiscussionToSqlite({
+    await getTestQueries().discussions.insert({
       ownerUserId: alice.session.userIdEncoded,
       contactUserId: bob.session.userIdEncoded,
       weAccepted: true,
@@ -1941,7 +1826,7 @@ describe('Renew session — SQLite-level tests', () => {
     });
 
     // Add 3 messages in order
-    const msg1Id = await addMessageToSqlite({
+    const msg1Id = await getTestQueries().messages.insert({
       ownerUserId: alice.session.userIdEncoded,
       contactUserId: bob.session.userIdEncoded,
       content: 'Message 1',
@@ -1952,7 +1837,7 @@ describe('Renew session — SQLite-level tests', () => {
       timestamp: new Date(),
     });
 
-    const msg2Id = await addMessageToSqlite({
+    const msg2Id = await getTestQueries().messages.insert({
       ownerUserId: alice.session.userIdEncoded,
       contactUserId: bob.session.userIdEncoded,
       content: 'Message 2',
@@ -1965,7 +1850,7 @@ describe('Renew session — SQLite-level tests', () => {
       encryptedMessage: new Uint8Array(64).fill(2),
     });
 
-    const msg3Id = await addMessageToSqlite({
+    const msg3Id = await getTestQueries().messages.insert({
       ownerUserId: alice.session.userIdEncoded,
       contactUserId: bob.session.userIdEncoded,
       content: 'Message 3',
@@ -1993,13 +1878,13 @@ describe('Renew session — SQLite-level tests', () => {
     expect(sendResult3.data).toBe(3);
 
     // All should be SENT now
-    expect((await getMessageFromSqlite(msg1Id))?.status).toBe(
+    expect((await getTestQueries().messages.getById(msg1Id))?.status).toBe(
       MessageStatus.SENT
     );
-    expect((await getMessageFromSqlite(msg2Id))?.status).toBe(
+    expect((await getTestQueries().messages.getById(msg2Id))?.status).toBe(
       MessageStatus.SENT
     );
-    expect((await getMessageFromSqlite(msg3Id))?.status).toBe(
+    expect((await getTestQueries().messages.getById(msg3Id))?.status).toBe(
       MessageStatus.SENT
     );
   });
@@ -2015,7 +1900,7 @@ describe('Renew session — SQLite-level tests', () => {
     );
     await alice.session.feedIncomingAnnouncement(bobAnnouncement);
 
-    await addDiscussionToSqlite({
+    await getTestQueries().discussions.insert({
       ownerUserId: alice.session.userIdEncoded,
       contactUserId: bob.session.userIdEncoded,
       weAccepted: true,
@@ -2026,7 +1911,7 @@ describe('Renew session — SQLite-level tests', () => {
       updatedAt: new Date(),
     });
 
-    const outgoingId = await addMessageToSqlite({
+    const outgoingId = await getTestQueries().messages.insert({
       ownerUserId: alice.session.userIdEncoded,
       contactUserId: bob.session.userIdEncoded,
       content: 'Outgoing message',
@@ -2039,7 +1924,7 @@ describe('Renew session — SQLite-level tests', () => {
       encryptedMessage: new Uint8Array(64).fill(1),
     });
 
-    const incomingId = await addMessageToSqlite({
+    const incomingId = await getTestQueries().messages.insert({
       ownerUserId: alice.session.userIdEncoded,
       contactUserId: bob.session.userIdEncoded,
       content: 'Incoming message from Bob',
@@ -2057,11 +1942,11 @@ describe('Renew session — SQLite-level tests', () => {
     expect(resetCount).toBe(1);
 
     // Outgoing should be reset to WAITING_SESSION
-    expect((await getMessageFromSqlite(outgoingId))?.status).toBe(
+    expect((await getTestQueries().messages.getById(outgoingId))?.status).toBe(
       MessageStatus.WAITING_SESSION
     );
     // Incoming should remain DELIVERED
-    expect((await getMessageFromSqlite(incomingId))?.status).toBe(
+    expect((await getTestQueries().messages.getById(incomingId))?.status).toBe(
       MessageStatus.DELIVERED
     );
   });
@@ -2110,7 +1995,9 @@ describe('WAITING_SESSION messages after peer acceptance', () => {
     mockProtocol = new MockMessageProtocol();
     events = new SdkEventEmitter();
 
-    await getSqliteDb().insert(schema.contacts).values({
+    const q = getTestQueries();
+
+    await q.contacts.insert({
       ownerUserId: alice.session.userIdEncoded,
       userId: bob.session.userIdEncoded,
       name: 'Bob',
@@ -2121,30 +2008,36 @@ describe('WAITING_SESSION messages after peer acceptance', () => {
     });
 
     const profile = createUserProfile(alice.session.userIdEncoded);
-    await getSqliteDb()
-      .insert(schema.userProfile)
-      .values({
-        userId: profile.userId,
-        username: profile.username,
-        security: JSON.stringify(profile.security),
-        session: new Uint8Array([0]), // placeholder — empty Uint8Array fails NOT NULL
-        status: profile.status,
-        lastSeen: profile.lastSeen,
-        createdAt: profile.createdAt,
-        updatedAt: profile.updatedAt,
-      });
-
+    await q.userProfiles.insert({
+      userId: profile.userId,
+      username: profile.username,
+      security: JSON.stringify(profile.security),
+      session: new Uint8Array([0]),
+      status: profile.status,
+      lastSeen: profile.lastSeen,
+      createdAt: profile.createdAt,
+      updatedAt: profile.updatedAt,
+    });
     announcementService = new AnnouncementService(
       mockProtocol,
       alice.session,
-      events
+      events,
+      defaultSdkConfig,
+      q
     );
     discussionService = new DiscussionService(
       announcementService,
       alice.session,
-      events
+      events,
+      q
     );
-    messageService = new MessageService(mockProtocol, alice.session, events);
+    messageService = new MessageService(
+      mockProtocol,
+      alice.session,
+      events,
+      defaultSdkConfig,
+      q
+    );
 
     // Wire up RefreshService so stateUpdate() inside services works
     const refreshService = new RefreshService(
@@ -2152,7 +2045,8 @@ describe('WAITING_SESSION messages after peer acceptance', () => {
       discussionService,
       announcementService,
       alice.session,
-      events
+      events,
+      q
     );
     discussionService.setRefreshService(refreshService);
     messageService.setRefreshService(refreshService);
@@ -2173,7 +2067,7 @@ describe('WAITING_SESSION messages after peer acceptance', () => {
     );
 
     // Create pending discussion
-    await addDiscussionToSqlite({
+    await getTestQueries().discussions.insert({
       ownerUserId: alice.session.userIdEncoded,
       contactUserId: bob.session.userIdEncoded,
       weAccepted: true,
@@ -2202,7 +2096,7 @@ describe('WAITING_SESSION messages after peer acceptance', () => {
     expect(sendResult.message?.status).toBe(MessageStatus.WAITING_SESSION);
 
     const queuedMessageId = sendResult.message!.id!;
-    let dbMessage = await getMessageFromSqlite(queuedMessageId);
+    let dbMessage = await getTestQueries().messages.getById(queuedMessageId);
     expect(dbMessage?.status).toBe(MessageStatus.WAITING_SESSION);
 
     // Now Bob accepts - establish the full handshake
@@ -2221,14 +2115,14 @@ describe('WAITING_SESSION messages after peer acceptance', () => {
     );
 
     // Update discussion to active
-    const discussion = await getDiscussionByOwnerAndContact(
+    const discussion = await getTestQueries().discussions.getByOwnerAndContact(
       alice.session.userIdEncoded,
       bob.session.userIdEncoded
     );
-    await getSqliteDb()
-      .update(schema.discussions)
-      .set({ status: DiscussionStatus.ACTIVE, updatedAt: new Date() })
-      .where(eq(schema.discussions.id, discussion!.id!));
+    await getTestQueries().discussions.updateById(discussion!.id!, {
+      status: DiscussionStatus.ACTIVE,
+      updatedAt: new Date(),
+    });
 
     // Process waiting messages
     const processResult = await messageService.processSendQueueForContact(
@@ -2238,7 +2132,7 @@ describe('WAITING_SESSION messages after peer acceptance', () => {
     expect(processResult.success).toBe(true);
     if (!processResult.success) throw processResult.error;
     expect(processResult.data).toBe(1);
-    dbMessage = await getMessageFromSqlite(queuedMessageId);
+    dbMessage = await getTestQueries().messages.getById(queuedMessageId);
     expect(dbMessage?.status).toBe(MessageStatus.SENT);
   });
 
@@ -2253,7 +2147,7 @@ describe('WAITING_SESSION messages after peer acceptance', () => {
     );
     await alice.session.feedIncomingAnnouncement(bobAnnouncement);
 
-    await addDiscussionToSqlite({
+    await getTestQueries().discussions.insert({
       ownerUserId: alice.session.userIdEncoded,
       contactUserId: bob.session.userIdEncoded,
       weAccepted: true,
@@ -2265,7 +2159,7 @@ describe('WAITING_SESSION messages after peer acceptance', () => {
     });
 
     // Add a WAITING_SESSION message directly
-    const messageId = await addMessageToSqlite({
+    const messageId = await getTestQueries().messages.insert({
       ownerUserId: alice.session.userIdEncoded,
       contactUserId: bob.session.userIdEncoded,
       content: 'Stuck message',
@@ -2276,7 +2170,7 @@ describe('WAITING_SESSION messages after peer acceptance', () => {
       timestamp: new Date(),
     });
 
-    let dbMessage = await getMessageFromSqlite(messageId);
+    let dbMessage = await getTestQueries().messages.getById(messageId);
     expect(dbMessage?.status).toBe(MessageStatus.WAITING_SESSION);
 
     const processResult = await messageService.processSendQueueForContact(
@@ -2286,7 +2180,7 @@ describe('WAITING_SESSION messages after peer acceptance', () => {
     expect(processResult.success).toBe(true);
     if (!processResult.success) throw processResult.error;
     expect(processResult.data).toBe(1);
-    dbMessage = await getMessageFromSqlite(messageId);
+    dbMessage = await getTestQueries().messages.getById(messageId);
     expect(dbMessage?.status).toBe(MessageStatus.SENT);
   });
 
@@ -2307,7 +2201,9 @@ describe('WAITING_SESSION messages after peer acceptance', () => {
 
     if (!result.success) throw result.error;
 
-    const discussion = await getDiscussionFromSqlite(result.data.discussionId);
+    const discussion = await getTestQueries().discussions.getById(
+      result.data.discussionId
+    );
     expect(discussion?.status).toBe(DiscussionStatus.PENDING);
 
     // Alice sends a message (will be queued)
@@ -2345,10 +2241,9 @@ describe('WAITING_SESSION messages after peer acceptance', () => {
     );
 
     // Update discussion status
-    await getSqliteDb()
-      .update(schema.discussions)
-      .set({ status: DiscussionStatus.ACTIVE })
-      .where(eq(schema.discussions.id, result.data.discussionId));
+    await getTestQueries().discussions.updateById(result.data.discussionId, {
+      status: DiscussionStatus.ACTIVE,
+    });
 
     // Process waiting messages
     const processResult = await messageService.processSendQueueForContact(
@@ -2359,7 +2254,9 @@ describe('WAITING_SESSION messages after peer acceptance', () => {
     if (!processResult.success) throw processResult.error;
     expect(processResult.data).toBe(1);
 
-    const finalMessage = await getMessageFromSqlite(sendResult.message!.id!);
+    const finalMessage = await getTestQueries().messages.getById(
+      sendResult.message!.id!
+    );
     expect(finalMessage?.status).toBe(MessageStatus.SENT);
   });
 });

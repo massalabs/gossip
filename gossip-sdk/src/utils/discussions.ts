@@ -6,7 +6,7 @@
 
 import { type Discussion, rowToDiscussion } from '../db';
 import type { DiscussionRow } from '../db';
-import { getDiscussionById, updateDiscussionById } from '../db';
+import { Queries } from '../db/queries';
 
 /** Convert a Drizzle discussion row to a domain Discussion. */
 export function toDiscussion(row: DiscussionRow): Discussion {
@@ -46,13 +46,14 @@ export type UpdateDiscussionNameResult =
  */
 export async function updateDiscussionName(
   discussionId: number,
-  newName: string | undefined
+  newName: string | undefined,
+  queries: Queries
 ): Promise<UpdateDiscussionNameResult> {
   const trimmed = newName?.trim();
   const customName = trimmed && trimmed.length > 0 ? trimmed : null;
 
   try {
-    const discussion = await getDiscussionById(discussionId);
+    const discussion = await queries.discussions.getById(discussionId);
     if (!discussion) {
       return {
         success: false,
@@ -61,7 +62,7 @@ export async function updateDiscussionName(
       };
     }
 
-    await updateDiscussionById(discussionId, { customName });
+    await queries.discussions.updateById(discussionId, { customName });
 
     return { success: true, trimmedName: customName ?? undefined };
   } catch (e) {

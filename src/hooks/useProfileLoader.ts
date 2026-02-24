@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { useAccountStore } from '../stores/accountStore';
 import { useAppStore } from '../stores/appStore';
-import { getMostRecentUserProfile } from '@massalabs/gossip-sdk';
+import { getSdk } from '../stores/sdkStore';
 
 const PROFILE_LOAD_DELAY_MS = 100;
 
@@ -23,18 +23,15 @@ export function useProfileLoader() {
 
         const state = useAccountStore.getState();
         const existingProfile =
-          state.userProfile || (await getMostRecentUserProfile());
+          state.userProfile || (await getSdk().profiles.getMostRecent());
 
         if (existingProfile) {
-          // Profile exists - let DiscussionList handle the welcome flow
           useAppStore.getState().setIsInitialized(true);
         } else {
-          // No profile exists - show onboarding
           useAppStore.getState().setIsInitialized(false);
         }
       } catch (error) {
         console.error('Error loading user profile from SQLite:', error);
-        // On error, assume no profile exists
         useAppStore.getState().setIsInitialized(false);
       } finally {
         setLoading(false);

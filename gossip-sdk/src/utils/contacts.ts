@@ -7,17 +7,8 @@
 import { decodeUserId } from './userId';
 import type { SessionModule } from '../wasm/session';
 import type { UserPublicKeys } from '../wasm/bindings';
-import {
-  type Contact,
-  getContactsByOwner,
-  getContactByOwnerAndUser,
-  insertContact as queryInsertContact,
-  updateContactByOwnerAndUser,
-  deleteContactByOwnerAndUser,
-  deleteDiscussionsByOwnerAndContact,
-  deleteMessagesByOwnerAndContact,
-  withTransaction,
-} from '../db';
+import type { Contact } from '../db';
+import { Queries } from '../db/queries';
 
 export type AddContactResult = {
   success: boolean;
@@ -52,7 +43,8 @@ export type DeleteContactResult =
 export async function updateContactName(
   ownerUserId: string,
   contactUserId: string,
-  newName: string
+  newName: string,
+  queries: Queries
 ): Promise<UpdateContactNameResult> {
   if (!ownerUserId || !contactUserId) {
     return {
@@ -70,7 +62,7 @@ export async function updateContactName(
       message: 'Name cannot be empty.',
     };
   try {
-    const list = await getContactsByOwner(ownerUserId);
+    const list = await queries.contacts.getByOwner(ownerUserId);
     const duplicate = list.find(
       contact =>
         contact.userId !== contactUserId &&
@@ -83,7 +75,7 @@ export async function updateContactName(
         message: 'This name is already used by another contact.',
       };
 
-    await updateContactByOwnerAndUser(ownerUserId, contactUserId, {
+    await queries.contacts.updateByOwnerAndUser(ownerUserId, contactUserId, {
       name: trimmed,
     });
 
@@ -109,7 +101,8 @@ export async function updateContactName(
 export async function deleteContact(
   ownerUserId: string,
   contactUserId: string,
-  session: SessionModule
+  session: SessionModule,
+  queries: Queries
 ): Promise<DeleteContactResult> {
   try {
     if (!ownerUserId || !contactUserId) {
@@ -121,7 +114,10 @@ export async function deleteContact(
     }
 
     // Verify contact exists
-    const contact = await getContactByOwnerAndUser(ownerUserId, contactUserId);
+    const contact = await queries.contacts.getByOwnerAndUser(
+      ownerUserId,
+      contactUserId
+    );
     if (!contact) {
       return {
         success: false,
@@ -131,10 +127,16 @@ export async function deleteContact(
     }
 
     // Delete contact, discussions, and messages atomically
-    await withTransaction(async () => {
-      await deleteContactByOwnerAndUser(ownerUserId, contactUserId);
-      await deleteDiscussionsByOwnerAndContact(ownerUserId, contactUserId);
-      await deleteMessagesByOwnerAndContact(ownerUserId, contactUserId);
+    await queries.conn.withTransaction(async () => {
+      await queries.contacts.deleteByOwnerAndUser(ownerUserId, contactUserId);
+      await queries.discussions.deleteByOwnerAndContact(
+        ownerUserId,
+        contactUserId
+      );
+      await queries.messages.deleteByOwnerAndContact(
+        ownerUserId,
+        contactUserId
+      );
     });
 
     // Discard peer from session manager (WASM state, outside transaction)
@@ -158,15 +160,19 @@ export async function addContact(
   ownerUserId: string,
   userId: string,
   name: string,
-  publicKeys: UserPublicKeys
+  publicKeys: UserPublicKeys,
+  queries: Queries
 ): Promise<AddContactResult> {
   try {
-    const existing = await getContactByOwnerAndUser(ownerUserId, userId);
+    const existing = await queries.contacts.getByOwnerAndUser(
+      ownerUserId,
+      userId
+    );
     if (existing) {
       return { success: false, error: 'Contact already exists' };
     }
 
-    await queryInsertContact({
+    await queries.contacts.insert({
       ownerUserId,
       userId,
       name,
@@ -176,7 +182,10 @@ export async function addContact(
       createdAt: new Date(),
     });
 
-    const newContact = await getContactByOwnerAndUser(ownerUserId, userId);
+    const newContact = await queries.contacts.getByOwnerAndUser(
+      ownerUserId,
+      userId
+    );
     return { success: true, contact: newContact ?? undefined };
   } catch (error) {
     console.error('Error adding contact:', error);

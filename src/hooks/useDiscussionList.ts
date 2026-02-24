@@ -13,11 +13,7 @@ export const useDiscussionList = () => {
         // If the user provided a new contact name, update it first
         if (newName && userProfile?.userId) {
           try {
-            await gossip.contacts.updateName(
-              userProfile.userId,
-              discussion.contactUserId,
-              newName
-            );
+            await gossip.contacts.updateName(discussion.contactUserId, newName);
           } catch (e) {
             console.error('Failed to update contact name:', e);
           }
@@ -34,10 +30,7 @@ export const useDiscussionList = () => {
     async (discussion: Discussion) => {
       try {
         if (userProfile?.userId == null) return;
-        await gossip.contacts.delete(
-          userProfile.userId,
-          discussion.contactUserId
-        );
+        await gossip.contacts.delete(discussion.contactUserId);
       } catch (error) {
         console.error('Failed to refuse discussion:', error);
       }

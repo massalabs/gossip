@@ -7,11 +7,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { useDiscussionStore } from '../../src/stores/discussionStore';
-import {
-  clearAllTables,
-  DiscussionDirection,
-  SessionStatus,
-} from '@massalabs/gossip-sdk';
+import { DiscussionDirection, SessionStatus } from '@massalabs/gossip-sdk';
 import { useAccountStore } from '../../src/stores/accountStore';
 
 // Mock sdkStore so getSdk() does not throw. The polling callback calls
@@ -56,8 +52,6 @@ describe('DiscussionStore', () => {
   const ownerUserId = 'test-user-id';
 
   beforeEach(async () => {
-    await clearAllTables();
-
     mockSdk.isSessionOpen = false;
     mockSdk.discussions.getStatus.mockReturnValue(SessionStatus.NoSession);
     mockSdk.discussions.list.mockResolvedValue([]);

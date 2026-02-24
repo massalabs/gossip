@@ -1,5 +1,5 @@
 /**
- * GossipSdk - Singleton SDK with clean lifecycle API
+ * GossipSdk - SDK with clean lifecycle API
  *
  * @example
  * ```typescript
@@ -7,38 +7,31 @@
  *
  * // Initialize once at app startup
  * await gossipSdk.init({
- *   db,
  *   protocolBaseUrl: 'https://api.example.com',
+ *   storage: { type: 'idb', name: 'gossip-db' },
  * });
  *
- * // Open session (login) - SDK handles keys/session internally
+ * // Open session (login)
  * await gossipSdk.openSession({
  *   mnemonic: 'word1 word2 ...',
  *   onPersist: async (blob) => { /* save to db *\/ },
  * });
  *
- * // Or restore existing session
- * await gossipSdk.openSession({
- *   mnemonic: 'word1 word2 ...',
- *   encryptedSession: savedBlob,
- *   encryptionKey: key,
- *   onPersist: async (blob) => { /* save to db *\/ },
- * });
- *
- * // Use clean API
- * await gossipSdk.messages.send(contactId, 'Hello!');
- * await gossipSdk.discussions.start(contact);
- * const contacts = await gossipSdk.contacts.list(ownerUserId);
+ * // Service API — ownerUserId handled internally via session
+ * await gossipSdk.contacts.add(userId, 'Bob');              // fetches keys automatically
+ * await gossipSdk.discussions.startByUserId(userId, 'Bob'); // add + start + send
+ * await gossipSdk.messages.sendText(contactId, 'Hello!');   // build + send + flush
+ * const contacts = await gossipSdk.contacts.list();         // ownerUserId inferred
+ * const discussions = await gossipSdk.discussions.list();   // ownerUserId inferred
  *
  * // Events
- * gossipSdk.on('message', (msg) => { ... });
- * gossipSdk.on('discussionRequest', (discussion, contact) => { ... });
+ * gossipSdk.on(SdkEventType.MESSAGE_RECEIVED, (msg) => { ... });
+ * gossipSdk.on(SdkEventType.SESSION_REQUESTED, (discussion, contact) => { ... });
  *
  * // Logout
  * await gossipSdk.closeSession();
  * ```
  */
-import { toDiscussion, toSortedDiscussions } from './utils/discussions';
 import { IMessageProtocol, createMessageProtocol } from './api/messageProtocol';
 import { createAuthProtocol } from './api/authProtocol';
 import { setProtocolBaseUrl } from './config/protocol';
@@ -55,26 +48,13 @@ import {
   EncryptionKey,
   generateEncryptionKeyFromSeed,
 } from './wasm/encryption';
-import {
-  AnnouncementService,
-  type AnnouncementReceptionResult,
-} from './services/announcement';
-import {
-  DiscussionInitializationResult,
-  DiscussionService,
-} from './services/discussion';
-import {
-  MessageService,
-  type MessageResult,
-  type SendMessageResult,
-  rowToMessage,
-} from './services/message';
+import { AnnouncementService } from './services/announcement';
+import { DiscussionService } from './services/discussion';
+import { MessageService } from './services/message';
 import { RefreshService } from './services/refresh';
 import { AuthService } from './services/auth';
-import type {
-  DeleteContactResult,
-  UpdateContactNameResult,
-} from './utils/contacts';
+import { ProfileService } from './services/profile';
+import { ContactService } from './services/contact';
 import {
   validateUserIdFormat,
   validateUsernameFormat,
@@ -82,27 +62,13 @@ import {
 } from './utils/validation';
 import { QueueManager } from './utils/queue';
 import { encodeUserId, decodeUserId } from './utils/userId';
-import {
-  initDb,
-  getMessageById,
-  getMessagesByOwnerAndContact,
-  getMessagesByStatus,
-  updateMessageById,
-  getDiscussionByOwnerAndContact,
-  getDiscussionsByOwner,
-  getContactsByOwner,
-  getContactByOwnerAndUser,
-  type Contact,
-  type Discussion,
-  type Message,
-  MessageStatus,
-} from './db';
-import { addContact, updateContactName, deleteContact } from './utils/contacts';
+import { type StorageConfig, MessageStatus } from './db';
+import { DatabaseConnection } from './db/sqlite';
+import { Queries } from './db/queries';
 import {
   type UserPublicKeys,
   type SessionConfig,
   SessionManagerWrapper,
-  SessionStatus,
 } from './wasm/bindings';
 import {
   SdkEventEmitter,
@@ -110,8 +76,6 @@ import {
   type SdkEventHandlers,
 } from './core/SdkEventEmitter';
 import { SdkPolling } from './core/SdkPolling';
-import { AnnouncementPayload } from './utils/announcementPayload';
-import { Result } from './utils/type';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -132,18 +96,8 @@ export interface GossipSdkInitOptions {
   protocolBaseUrl?: string;
   /** SDK configuration (optional - uses defaults if not provided) */
   config?: DeepPartial<SdkConfig>;
-  /** URL to wa-sqlite WASM file (for bundlers that rewrite asset paths) */
-  wasmUrl?: string;
-  /**
-   * OPFS directory path for persistent SQLite storage (mobile/Capacitor).
-   * Fast but single-tab only. Mutually exclusive with `idbName`.
-   */
-  opfsPath?: string;
-  /**
-   * IndexedDB database name for persistent SQLite storage (web).
-   * Multi-tab safe. Mutually exclusive with `opfsPath`.
-   */
-  idbName?: string;
+  /** SQLite storage backend. Defaults to in-memory. */
+  storage?: StorageConfig;
 }
 
 export interface OpenSessionOptions {
@@ -199,23 +153,23 @@ type SdkState =
 class GossipSdk {
   private state: SdkState = { status: SdkStatus.UNINITIALIZED };
 
+  // Database — each instance owns its own connection + query set
+  private _conn: DatabaseConnection | null = null;
+  private _queries: Queries | null = null;
+
   // Core components
   private eventEmitter = new SdkEventEmitter();
   private pollingManager = new SdkPolling();
   private messageQueues = new QueueManager();
 
-  // Services (created when session opens)
+  // Services — profile is created at init(), others at openSession()
   private _auth: AuthService | null = null;
+  private _profile: ProfileService | null = null;
   private _announcement: AnnouncementService | null = null;
   private _discussion: DiscussionService | null = null;
   private _message: MessageService | null = null;
   private _refresh: RefreshService | null = null;
-
-  // Cached service API wrappers (created in openSession)
-  private _messagesAPI: MessageServiceAPI | null = null;
-  private _discussionsAPI: DiscussionServiceAPI | null = null;
-  private _announcementsAPI: AnnouncementServiceAPI | null = null;
-  private _contactsAPI: ContactsAPI | null = null;
+  private _contact: ContactService | null = null;
 
   // ─────────────────────────────────────────────────────────────────
   // Lifecycle
@@ -224,10 +178,10 @@ class GossipSdk {
   /**
    * Initialize the SDK. Call once at app startup.
    */
-  async init(options: GossipSdkInitOptions): Promise<void> {
+  async init(options: GossipSdkInitOptions): Promise<GossipSdk> {
     if (this.state.status !== SdkStatus.UNINITIALIZED) {
       console.warn('[GossipSdk] Already initialized');
-      return;
+      return this;
     }
 
     console.log('[GossipSdk] Initializing SDK');
@@ -245,25 +199,24 @@ class GossipSdk {
     startWasmInitialization();
 
     console.log('[GossipSdk] Initializing SQLite');
-    // Initialize SQLite (idempotent — no-op if already initialized).
-    await initDb({
-      wasmUrl: options.wasmUrl,
-      opfsPath: options.opfsPath,
-      idbName: options.idbName,
-    });
+    this._conn = await DatabaseConnection.create({ storage: options.storage });
+    this._queries = new Queries(this._conn);
 
     console.log('[GossipSdk] SQLite initialized');
     // Create message protocol
     const messageProtocol = createMessageProtocol();
 
-    // Create auth protocol + service (doesn't need session)
+    // Create services that don't need a session
     this._auth = new AuthService(createAuthProtocol());
+    this._profile = new ProfileService(this._queries);
 
     this.state = {
       status: SdkStatus.INITIALIZED,
       messageProtocol,
       config,
     };
+
+    return this;
   }
 
   /**
@@ -330,24 +283,29 @@ class GossipSdk {
     const { config } = this.state;
 
     // Create services with config (refreshService will be set after creation)
+    const queries = this._queries!;
+
     this._announcement = new AnnouncementService(
       messageProtocol,
       session,
       this.eventEmitter,
-      config
+      config,
+      queries
     );
 
     this._discussion = new DiscussionService(
       this._announcement,
       session,
-      this.eventEmitter
+      this.eventEmitter,
+      queries
     );
 
     this._message = new MessageService(
       messageProtocol,
       session,
       this.eventEmitter,
-      config
+      config,
+      queries
     );
 
     this._refresh = new RefreshService(
@@ -355,7 +313,8 @@ class GossipSdk {
       this._discussion,
       this._announcement,
       session,
-      this.eventEmitter
+      this.eventEmitter,
+      queries
     );
 
     // Publish gossip ID (public key) on messageProtocol so the user is discoverable
@@ -383,8 +342,10 @@ class GossipSdk {
       onPersist: options.onPersist,
     };
 
-    // Create cached service API wrappers
-    this.createServiceAPIWrappers(session);
+    // Wire up cross-service dependencies
+    this._contact = new ContactService(session, queries, this._auth!);
+    this._message.setQueueManager(this.messageQueues);
+    this._discussion.setAuthService(this._auth!);
 
     // Auto-start polling if enabled in config
     if (config.polling.enabled) {
@@ -393,86 +354,9 @@ class GossipSdk {
   }
 
   /**
-   * Create cached service API wrappers.
-   * Called once during openSession to avoid creating new objects on each getter access.
-   */
-  private createServiceAPIWrappers(session: SessionModule): void {
-    this._messagesAPI = {
-      get: async id => {
-        const row = await getMessageById(id);
-        return row ? rowToMessage(row) : undefined;
-      },
-      getMessages: async contactUserId => {
-        const state = this.requireSession();
-        const rows = await getMessagesByOwnerAndContact(
-          state.session.userIdEncoded,
-          contactUserId
-        );
-        return rows.map(rowToMessage);
-      },
-      send: message =>
-        this.messageQueues.enqueue(message.contactUserId, () =>
-          this._message!.sendMessage(message)
-        ),
-      fetch: () => this._message!.fetchMessages(),
-      findByMsgId: (messageId, ownerUserId, contactUserId) =>
-        this._message!.findMessageByMsgId(
-          messageId,
-          ownerUserId,
-          contactUserId
-        ),
-      markAsRead: id => this._message!.markAsRead(id),
-    };
-
-    this._discussionsAPI = {
-      start: (contact, payload?: AnnouncementPayload) =>
-        this._discussion!.initialize(contact, payload),
-      accept: (discussion: Discussion) => this._discussion!.accept(discussion),
-      renew: (contactUserId: string) =>
-        this._discussion!.createSessionForContact(
-          contactUserId,
-          new Uint8Array(0)
-        ),
-      getStatus: (contactUserId: string): SessionStatus => {
-        if (this.state.status !== SdkStatus.SESSION_OPEN)
-          throw new Error('No session open. Call openSession() first.');
-        return this.state.session.peerSessionStatus(
-          decodeUserId(contactUserId)
-        );
-      },
-      list: async ownerUserId => {
-        const all = await getDiscussionsByOwner(ownerUserId);
-        return toSortedDiscussions(all);
-      },
-      get: async (ownerUserId, contactUserId) => {
-        const row = await getDiscussionByOwnerAndContact(
-          ownerUserId,
-          contactUserId
-        );
-        return row ? toDiscussion(row) : undefined;
-      },
-    };
-
-    this._announcementsAPI = {
-      fetch: () => this._announcement!.fetchAndProcessAnnouncements(),
-      skipHistorical: () => this._announcement!.skipHistoricalAnnouncements(),
-    };
-
-    this._contactsAPI = {
-      list: ownerUserId => getContactsByOwner(ownerUserId),
-      get: async (ownerUserId, contactUserId) =>
-        (await getContactByOwnerAndUser(ownerUserId, contactUserId)) ?? null,
-      add: (ownerUserId, userId, name, publicKeys) =>
-        addContact(ownerUserId, userId, name, publicKeys),
-      updateName: (ownerUserId, contactUserId, newName) =>
-        updateContactName(ownerUserId, contactUserId, newName),
-      delete: (ownerUserId, contactUserId) =>
-        deleteContact(ownerUserId, contactUserId, session),
-    };
-  }
-
-  /**
    * Close the current session (logout).
+   * The database connection is kept open so a new session can be opened.
+   * Call `destroy()` to release the database connection entirely.
    */
   async closeSession(): Promise<void> {
     if (this.state.status !== SdkStatus.SESSION_OPEN) {
@@ -490,12 +374,7 @@ class GossipSdk {
     this._discussion = null;
     this._message = null;
     this._refresh = null;
-
-    // Clear cached API wrappers
-    this._messagesAPI = null;
-    this._discussionsAPI = null;
-    this._announcementsAPI = null;
-    this._contactsAPI = null;
+    this._contact = null;
 
     // Clear message queues
     this.messageQueues.clear();
@@ -506,6 +385,20 @@ class GossipSdk {
       messageProtocol: this.state.messageProtocol,
       config: this.state.config,
     };
+  }
+
+  /**
+   * Close the session and release the database connection.
+   * After calling this, the instance cannot be reused — create a new one.
+   */
+  async destroy(): Promise<void> {
+    await this.closeSession();
+    this._queries = null;
+    if (this._conn) {
+      await this._conn.close();
+      this._conn = null;
+    }
+    this.state = { status: SdkStatus.UNINITIALIZED };
   }
 
   // ─────────────────────────────────────────────────────────────────
@@ -540,6 +433,29 @@ class GossipSdk {
     return this.state.status !== SdkStatus.UNINITIALIZED;
   }
 
+  get queries(): Queries {
+    if (!this._queries) {
+      throw new Error('SDK not initialized. Call init() first.');
+    }
+    return this._queries;
+  }
+
+  /** Clear all database tables. */
+  async clearAllTables(): Promise<void> {
+    if (!this._conn) {
+      throw new Error('SDK not initialized. Call init() first.');
+    }
+    await this._conn.clearAllTables();
+  }
+
+  /** Clear only conversation-related tables (messages, discussions, contacts). */
+  async clearConversationTables(): Promise<void> {
+    if (!this._conn) {
+      throw new Error('SDK not initialized. Call init() first.');
+    }
+    await this._conn.clearConversationTables();
+  }
+
   /**
    * Get encrypted session blob for persistence.
    * Throws if no session is open.
@@ -564,40 +480,48 @@ class GossipSdk {
     return this._auth;
   }
 
-  /** Message service */
-  get messages(): MessageServiceAPI {
-    this.requireSession();
-    if (!this._messagesAPI) {
-      throw new Error('Messages API not initialized');
+  /** User profile management (available after init, before session) */
+  get profiles(): ProfileService {
+    if (!this._profile) {
+      throw new Error('SDK not initialized. Call init() first.');
     }
-    return this._messagesAPI;
+    return this._profile;
+  }
+
+  /** Message service */
+  get messages(): MessageService {
+    this.requireSession();
+    if (!this._message) {
+      throw new Error('Message service not initialized');
+    }
+    return this._message;
   }
 
   /** Discussion service */
-  get discussions(): DiscussionServiceAPI {
+  get discussions(): DiscussionService {
     this.requireSession();
-    if (!this._discussionsAPI) {
-      throw new Error('Discussions API not initialized');
+    if (!this._discussion) {
+      throw new Error('Discussion service not initialized');
     }
-    return this._discussionsAPI;
+    return this._discussion;
   }
 
   /** Announcement service */
-  get announcements(): AnnouncementServiceAPI {
+  get announcements(): AnnouncementService {
     this.requireSession();
-    if (!this._announcementsAPI) {
-      throw new Error('Announcements API not initialized');
+    if (!this._announcement) {
+      throw new Error('Announcement service not initialized');
     }
-    return this._announcementsAPI;
+    return this._announcement;
   }
 
   /** Contact management */
-  get contacts(): ContactsAPI {
+  get contacts(): ContactService {
     this.requireSession();
-    if (!this._contactsAPI) {
-      throw new Error('Contacts API not initialized');
+    if (!this._contact) {
+      throw new Error('Contact service not initialized');
     }
-    return this._contactsAPI;
+    return this._contact;
   }
 
   /**
@@ -615,7 +539,7 @@ class GossipSdk {
     await this._refresh.stateUpdate();
   }
 
-  /** Utility functions */
+  /** Utility functions (pure — no DB access) */
   get utils(): SdkUtils {
     return {
       validateUserId: validateUserIdFormat,
@@ -740,13 +664,14 @@ class GossipSdk {
    */
   private async resetStuckSendingMessages(ownerUserId: string): Promise<void> {
     try {
-      const stuck = await getMessagesByStatus(
+      const q = this._queries!;
+      const stuck = await q.messages.getByStatus(
         ownerUserId,
         MessageStatus.SENDING
       );
 
       for (const m of stuck) {
-        await updateMessageById(m.id, {
+        await q.messages.updateById(m.id, {
           status: MessageStatus.WAITING_SESSION,
           encryptedMessage: null,
           seeker: null,
@@ -762,82 +687,6 @@ class GossipSdk {
       console.error('[GossipSdk] Failed to reset stuck messages:', error);
     }
   }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Service API Types
-// ─────────────────────────────────────────────────────────────────────────────
-
-interface MessageServiceAPI {
-  /** Get a message by its ID */
-  get(id: number): Promise<Message | undefined>;
-  /** Get all messages for a contact */
-  getMessages(contactUserId: string): Promise<Message[]>;
-  /** Send a message */
-  send(message: Omit<Message, 'id'>): Promise<SendMessageResult>;
-  /** Fetch and decrypt messages from the protocol */
-  fetch(): Promise<MessageResult>;
-  /** Find a message by its messageId */
-  findByMsgId(
-    messageId: Uint8Array,
-    ownerUserId: string,
-    contactUserId?: string
-  ): Promise<Message | undefined>;
-  /** Mark a message as read */
-  markAsRead(id: number): Promise<boolean>;
-}
-
-interface DiscussionServiceAPI {
-  /** Start a new discussion with a contact */
-  start(
-    contact: Contact,
-    payload?: AnnouncementPayload
-  ): Promise<Result<DiscussionInitializationResult, Error>>;
-  /** Accept an incoming discussion request */
-  accept(discussion: Discussion): Promise<Result<Uint8Array, Error>>;
-  /** Renew a broken discussion */
-  renew(contactUserId: string): Promise<Result<Uint8Array, Error>>;
-  /** Get the status of a discussion */
-  getStatus(contactUserId: string): SessionStatus;
-  /** List all discussions for the owner */
-  list(ownerUserId: string): Promise<Discussion[]>;
-  /** Get a specific discussion */
-  get(
-    ownerUserId: string,
-    contactUserId: string
-  ): Promise<Discussion | undefined>;
-}
-
-interface AnnouncementServiceAPI {
-  /** Fetch and process announcements from the protocol */
-  fetch(): Promise<AnnouncementReceptionResult>;
-  /** Skip historical announcements for a new account. Call after profile creation. */
-  skipHistorical(): Promise<void>;
-}
-
-interface ContactsAPI {
-  /** List all contacts for the owner */
-  list(ownerUserId: string): Promise<Contact[]>;
-  /** Get a specific contact */
-  get(ownerUserId: string, contactUserId: string): Promise<Contact | null>;
-  /** Add a new contact */
-  add(
-    ownerUserId: string,
-    userId: string,
-    name: string,
-    publicKeys: UserPublicKeys
-  ): Promise<{ success: boolean; error?: string; contact?: Contact }>;
-  /** Update a contact's name */
-  updateName(
-    ownerUserId: string,
-    contactUserId: string,
-    newName: string
-  ): Promise<UpdateContactNameResult>;
-  /** Delete a contact and all related data */
-  delete(
-    ownerUserId: string,
-    contactUserId: string
-  ): Promise<DeleteContactResult>;
 }
 
 interface SdkUtils {
@@ -861,11 +710,10 @@ interface PollingAPI {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Singleton Export
+// Exports
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** The singleton GossipSdk instance */
+/** A convenience singleton for apps that only need one SDK instance. */
 export const gossipSdk = new GossipSdk();
 
-// Also export the class for testing
 export { GossipSdk };

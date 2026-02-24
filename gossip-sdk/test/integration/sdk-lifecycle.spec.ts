@@ -8,7 +8,7 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { type EncryptionKey } from '../../src/wasm/encryption';
 import { GossipSdk } from '../../src/gossip';
-import { clearAllTables } from '../../src/db/sqlite';
+import { clearAllTables, getTestStorageConfig } from '../testDb';
 import { generateMnemonic } from '../../src/crypto/bip39';
 import { MockMessageProtocol } from '../mocks';
 
@@ -41,12 +41,12 @@ describe('GossipSdk lifecycle', () => {
   });
 
   it('initializes once and exposes auth service', async () => {
-    await sdk.init({});
+    await sdk.init({ storage: getTestStorageConfig() });
     expect(sdk.isInitialized).toBe(true);
     expect(() => sdk.auth).not.toThrow();
 
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    await sdk.init({});
+    await sdk.init({ storage: getTestStorageConfig() });
     expect(warnSpy).toHaveBeenCalled();
     warnSpy.mockRestore();
   });
@@ -58,7 +58,7 @@ describe('GossipSdk lifecycle', () => {
   });
 
   it('opens and closes session with getters wired', async () => {
-    await sdk.init({});
+    await sdk.init({ storage: getTestStorageConfig() });
     await sdk.openSession({ mnemonic: generateMnemonic() });
 
     expect(sdk.isSessionOpen).toBe(true);
@@ -74,7 +74,7 @@ describe('GossipSdk lifecycle', () => {
   it('restores encrypted session when provided', async () => {
     const mnemonic = generateMnemonic();
 
-    await sdk.init({});
+    await sdk.init({ storage: getTestStorageConfig() });
     await sdk.openSession({ mnemonic });
 
     const encryptedSession = sdk.getEncryptedSession();
@@ -89,7 +89,7 @@ describe('GossipSdk lifecycle', () => {
   it('throws an error when encryptedSession cannot be loaded with the provided encryptionKey', async () => {
     const mnemonic = generateMnemonic();
 
-    await sdk.init({});
+    await sdk.init({ storage: getTestStorageConfig() });
     await sdk.openSession({ mnemonic });
 
     const encryptedSession = sdk.getEncryptedSession();

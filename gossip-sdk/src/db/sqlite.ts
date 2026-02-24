@@ -2,13 +2,14 @@
  * SQLite initialization module for the Gossip SDK.
  *
  * Uses wa-sqlite (WASM) with Drizzle ORM's sqlite-proxy driver.
- * Two execution paths:
- *   - Browser (opfsPath set): Web Worker + IDBBatchAtomicVFS — IndexedDB persistence,
- *     off the main thread. Uses the sync WASM build (wa-sqlite).
+ * Four execution paths:
+ *   - Browser/OPFS (opfsPath set): Web Worker + AccessHandlePoolVFS — fast, single-tab.
+ *   - Browser/IDB (idbName set): Web Worker + IDBBatchAtomicVFS — multi-tab safe.
+ *   - Node.js file (path set): In-process + NodeFsVFS — file persistence via node:fs.
  *   - In-memory (tests): :memory: in-process — no persistence, fast, isolated.
- *     Uses the sync WASM build with wasmBinary passed directly.
  *
- * In Phase C the VFS will be swapped for the encrypted PlausibleDeniableVFS.
+ * Each GossipSdk instance owns a DatabaseConnection, allowing multiple
+ * independent SDK instances in the same process.
  */
 
 import SQLiteESMFactory from 'wa-sqlite/dist/wa-sqlite.mjs';
@@ -20,57 +21,32 @@ import { execStatements } from './exec-utils.js';
 
 export type GossipDatabase = SqliteRemoteDatabase<typeof schema>;
 
+/** Selects the SQLite storage backend. */
+export type StorageConfig =
+  | { type: 'opfs'; path: string; wasmUrl?: string }
+  | { type: 'idb'; name: string; wasmUrl?: string }
+  | { type: 'node-fs'; path: string }
+  | { type: 'memory'; wasmBinary?: ArrayBuffer };
+
 export interface InitDbOptions {
-  /**
-   * OPFS directory path. When set, uses AccessHandlePoolVFS (fast, single-tab).
-   * Use for mobile (Capacitor) where only one instance runs at a time.
-   */
-  opfsPath?: string;
-
-  /**
-   * IndexedDB database name. When set, uses IDBBatchAtomicVFS (multi-tab safe).
-   * Use for web where multiple tabs may be open.
-   */
-  idbName?: string;
-
-  /**
-   * Pre-loaded WASM binary for environments where fetch() is unavailable
-   * (e.g. Node.js tests). When omitted, the factory uses fetch() to load
-   * the .wasm file (browser default).
-   */
-  wasmBinary?: ArrayBuffer;
-
-  /**
-   * URL to the wa-sqlite WASM file. Used in browser to tell the Emscripten
-   * factory where to fetch the WASM binary (needed when bundlers like Vite
-   * rewrite asset paths). When omitted, the factory uses its default path.
-   */
-  wasmUrl?: string;
+  /** Storage backend selection. Defaults to in-memory. */
+  storage?: StorageConfig;
 }
 
 // ---------------------------------------------------------------------------
-// All mutable state is encapsulated in a single object so that closeSqlite()
-// can atomically reset everything by replacing it with a fresh instance.
-// This prevents state leaks (e.g. a forgotten variable) and makes it
-// impossible for tests to observe stale state from a previous init.
+// Internal state shape
 // ---------------------------------------------------------------------------
 
 interface DbState {
-  // Worker state (browser path)
   worker: Worker | null;
   msgId: number;
-
   pending: Map<
     number,
     { resolve: (v: unknown) => void; reject: (e: Error) => void }
   >;
   lastInsertRowIdCache: number;
-
-  // In-process state (test path)
   sqlite3: ReturnType<typeof SQLite.Factory> | null;
   dbHandle: number | null;
-
-  // Shared state
   useWorker: boolean;
   drizzleDb: GossipDatabase | null;
   dbLock: Promise<unknown>;
@@ -92,271 +68,286 @@ function createDefaultState(): DbState {
   };
 }
 
-let db = createDefaultState();
-
-// ---------------------------------------------------------------------------
-// Worker communication (browser path)
-// ---------------------------------------------------------------------------
-
-function postToWorker(
-  msg: Record<string, unknown>
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-): Promise<any> {
-  return new Promise((resolve, reject) => {
-    const id = ++db.msgId;
-    db.pending.set(id, { resolve, reject });
-    db.worker!.postMessage({ ...msg, id });
-  });
-}
-
-function handleWorkerMessage(e: MessageEvent) {
-  const { id, type, ...rest } = e.data;
-  const p = db.pending.get(id);
-  if (!p) return;
-  db.pending.delete(id);
-  if (type === 'error') {
-    p.reject(new Error(rest.message));
-  } else {
-    p.resolve(rest);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Drizzle instance factory
-// ---------------------------------------------------------------------------
-
-function createDrizzleInstance() {
-  return drizzle(
-    async (sql, params, method) => {
-      const rows = await execRaw(sql, params);
-      if (method === 'get') {
-        return { rows: rows[0] };
-      }
-      return { rows };
-    },
-    { schema }
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Raw SQL execution
-// ---------------------------------------------------------------------------
-
-async function execRaw(
-  sql: string,
-  params: unknown[] = []
-): Promise<unknown[][]> {
-  // When inside a withTransaction(), the outer lock is already held —
-  // skip re-acquisition to avoid deadlock.
-  if (db.inTransaction) {
-    return execRawDirect(sql, params);
-  }
-  const prev = db.dbLock;
-  let release!: () => void;
-  db.dbLock = new Promise<void>(r => (release = r));
-  await prev;
-  try {
-    return await execRawDirect(sql, params);
-  } finally {
-    release();
-  }
-}
-
-async function execRawDirect(
-  sql: string,
-  params: unknown[] = []
-): Promise<unknown[][]> {
-  if (db.useWorker) {
-    const result = await postToWorker({ type: 'exec', sql, params });
-    db.lastInsertRowIdCache = result.lastInsertRowId;
-    return result.rows;
-  }
-  return execRawInProcess(sql, params);
-}
-
-async function execRawInProcess(
-  sql: string,
-  params: unknown[] = []
-): Promise<unknown[][]> {
-  if (!db.sqlite3 || db.dbHandle === null) {
-    throw new Error('SQLite not initialized');
-  }
-  return execStatements(db.sqlite3, db.dbHandle, sql, params);
-}
-
-/** PRAGMAs applied before migrations. */
+/** PRAGMAs applied before migrations (in-memory / browser worker). */
 const PRAGMAS = `
   PRAGMA journal_mode=MEMORY;
   PRAGMA temp_store=MEMORY;
 `;
 
+/** PRAGMAs for file-based persistence (Node.js). WAL gives crash recovery. */
+const PRAGMAS_FILE = `
+  PRAGMA journal_mode=WAL;
+  PRAGMA temp_store=MEMORY;
+`;
+
 // ---------------------------------------------------------------------------
-// Public API
+// DatabaseConnection — instance-scoped database connection
 // ---------------------------------------------------------------------------
 
-/**
- * Initialize wa-sqlite and create the Drizzle ORM instance.
- * Idempotent — subsequent calls are no-ops.
- *
- * @param options.opfsPath - OPFS path for mobile (single-tab, fast).
- * @param options.idbName  - IndexedDB name for web (multi-tab safe).
- *                           Omit both for in-memory database (tests).
- */
-export async function initDb(options: InitDbOptions = {}): Promise<void> {
-  if (db.drizzleDb) return;
+export class DatabaseConnection {
+  private state: DbState;
 
-  const useOPFS = !!options.opfsPath;
-  const dbPath = options.opfsPath ?? options.idbName;
+  private constructor() {
+    this.state = createDefaultState();
+  }
 
-  if (dbPath) {
-    // Spawn Worker with persistent VFS.
-    db.worker = new Worker(new URL('./sqlite-worker.ts', import.meta.url), {
-      type: 'module',
+  /**
+   * Create and initialize a new database connection.
+   */
+  static async create(
+    options: InitDbOptions = {}
+  ): Promise<DatabaseConnection> {
+    const conn = new DatabaseConnection();
+    await conn.init(options);
+    return conn;
+  }
+
+  /** The Drizzle ORM instance. Throws if not initialized. */
+  get db(): GossipDatabase {
+    if (!this.state.drizzleDb) {
+      throw new Error('SQLite not initialized.');
+    }
+    return this.state.drizzleDb;
+  }
+
+  get isOpen(): boolean {
+    return this.state.drizzleDb !== null;
+  }
+
+  // ─── Raw SQL execution ─────────────────────────────────────────
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private postToWorker(msg: Record<string, unknown>): Promise<any> {
+    return new Promise((resolve, reject) => {
+      const id = ++this.state.msgId;
+      this.state.pending.set(id, { resolve, reject });
+      this.state.worker!.postMessage({ ...msg, id });
     });
-    db.worker.onmessage = handleWorkerMessage;
-    db.useWorker = true;
+  }
 
-    try {
-      await postToWorker({
-        type: 'init',
-        dbPath,
-        useOPFS,
-        wasmUrl: options.wasmUrl,
-        initSql: PRAGMAS,
-      });
-    } catch (err) {
-      // Prevent dangling worker on init failure.
-      // Terminate and reset so retry doesn't create a second worker.
-      if (db.worker) {
-        db.worker.terminate();
-        db.worker = null;
-      }
-      db.useWorker = false;
-      db.pending.clear();
-      throw err;
+  private handleWorkerMessage = (e: MessageEvent) => {
+    const { id, type, ...rest } = e.data;
+    const p = this.state.pending.get(id);
+    if (!p) return;
+    this.state.pending.delete(id);
+    if (type === 'error') {
+      p.reject(new Error(rest.message));
+    } else {
+      p.resolve(rest);
     }
-  } else {
-    // In-memory mode (tests): sync WASM build, in-process, fast, isolated.
-    const moduleArg: Record<string, unknown> = {};
-    if (options.wasmBinary) {
-      moduleArg.wasmBinary = options.wasmBinary;
+  };
+
+  private createDrizzleInstance(): GossipDatabase {
+    return drizzle(
+      async (sql, params, method) => {
+        const rows = await this.execRaw(sql, params);
+        if (method === 'get') {
+          return { rows: rows[0] };
+        }
+        return { rows };
+      },
+      { schema }
+    );
+  }
+
+  private async execRaw(
+    sql: string,
+    params: unknown[] = []
+  ): Promise<unknown[][]> {
+    if (this.state.inTransaction) {
+      return this.execRawDirect(sql, params);
     }
-
-    const module = await SQLiteESMFactory(moduleArg);
-    db.sqlite3 = SQLite.Factory(module);
-    db.dbHandle = await db.sqlite3.open_v2(':memory:');
-    db.useWorker = false;
-
-    await db.sqlite3.exec(db.dbHandle, PRAGMAS);
-  }
-
-  db.drizzleDb = createDrizzleInstance();
-
-  // Run DDL (generated by npm run db:generate). Uses IF NOT EXISTS.
-  for (const stmt of DDL) {
-    await execRaw(stmt);
-  }
-}
-
-/**
- * Get the Drizzle ORM database instance.
- * Throws if initDb() has not been called.
- */
-export function getSqliteDb(): GossipDatabase {
-  if (!db.drizzleDb) {
-    throw new Error('SQLite not initialized. Call initDb() first.');
-  }
-  return db.drizzleDb;
-}
-
-export function isSqliteOpen(): boolean {
-  return db.drizzleDb !== null;
-}
-
-/**
- * Run a callback inside a SQLite transaction (BEGIN / COMMIT / ROLLBACK).
- * All Drizzle operations inside the callback share the same transaction
- * and the same dbLock hold, so they cannot interleave with outside queries.
- */
-export async function withTransaction<T>(fn: () => Promise<T>): Promise<T> {
-  const prev = db.dbLock;
-  let release!: () => void;
-  db.dbLock = new Promise<void>(r => (release = r));
-  await prev;
-
-  try {
-    await execRawDirect('BEGIN');
-    db.inTransaction = true;
+    const prev = this.state.dbLock;
+    let release!: () => void;
+    this.state.dbLock = new Promise<void>(r => (release = r));
+    await prev;
     try {
-      const result = await fn();
-      await execRawDirect('COMMIT');
-      return result;
-    } catch (e) {
-      await execRawDirect('ROLLBACK');
-      throw e;
+      return await this.execRawDirect(sql, params);
     } finally {
-      db.inTransaction = false;
+      release();
     }
-  } finally {
-    release();
   }
-}
 
-export async function clearAllTables(): Promise<void> {
-  await withTransaction(async () => {
-    const drizzleDb = getSqliteDb();
-    await drizzleDb.delete(schema.messages);
-    await drizzleDb.delete(schema.discussions);
-    await drizzleDb.delete(schema.contacts);
-    await drizzleDb.delete(schema.userProfile);
-    await drizzleDb.delete(schema.pendingEncryptedMessages);
-    await drizzleDb.delete(schema.pendingAnnouncements);
-    await drizzleDb.delete(schema.activeSeekers);
-    await drizzleDb.delete(schema.announcementCursors);
-  });
-}
-
-/**
- * Clear only conversation-related tables (contacts, discussions, messages).
- * Preserves user profiles and other data.
- */
-export async function clearConversationTables(): Promise<void> {
-  await withTransaction(async () => {
-    const drizzleDb = getSqliteDb();
-    await drizzleDb.delete(schema.messages);
-    await drizzleDb.delete(schema.discussions);
-    await drizzleDb.delete(schema.contacts);
-  });
-}
-
-/**
- * Get the last auto-increment row ID inserted via this connection.
- * Used after INSERT into tables with INTEGER PRIMARY KEY AUTOINCREMENT.
- *
- * Browser path: returns the cached value from the last Worker exec response
- * (returned atomically with every exec — no race condition).
- * Test path: queries directly (same connection, serialized by dbLock).
- */
-export async function getLastInsertRowId(): Promise<number> {
-  if (db.useWorker) {
-    return db.lastInsertRowIdCache;
+  private async execRawDirect(
+    sql: string,
+    params: unknown[] = []
+  ): Promise<unknown[][]> {
+    if (this.state.useWorker) {
+      const result = await this.postToWorker({ type: 'exec', sql, params });
+      this.state.lastInsertRowIdCache = result.lastInsertRowId;
+      return result.rows;
+    }
+    return this.execRawInProcess(sql, params);
   }
-  const rows = await execRaw('SELECT last_insert_rowid()');
-  return (rows[0] as number[])[0];
-}
 
-/**
- * Close the database and release all resources.
- * Browser path: sends close to Worker, then terminates it.
- * Test path: closes in-process database handle.
- * Atomically resets all state by replacing with a fresh default.
- */
-export async function closeSqlite(): Promise<void> {
-  if (db.useWorker && db.worker) {
-    await postToWorker({ type: 'close' });
-    db.worker.terminate();
-  } else if (db.dbHandle !== null && db.sqlite3) {
-    await db.sqlite3.close(db.dbHandle);
+  private async execRawInProcess(
+    sql: string,
+    params: unknown[] = []
+  ): Promise<unknown[][]> {
+    if (!this.state.sqlite3 || this.state.dbHandle === null) {
+      throw new Error('SQLite not initialized');
+    }
+    return execStatements(this.state.sqlite3, this.state.dbHandle, sql, params);
   }
-  db = createDefaultState();
+
+  // ─── Initialization ────────────────────────────────────────────
+
+  private async init(options: InitDbOptions): Promise<void> {
+    if (this.state.drizzleDb) return;
+
+    const storage: StorageConfig = options.storage ?? { type: 'memory' };
+
+    switch (storage.type) {
+      case 'opfs':
+      case 'idb': {
+        const dbPath = storage.type === 'opfs' ? storage.path : storage.name;
+        const useOPFS = storage.type === 'opfs';
+
+        this.state.worker = new Worker(
+          new URL('./sqlite-worker.ts', import.meta.url),
+          { type: 'module' }
+        );
+        this.state.worker.onmessage = this.handleWorkerMessage;
+        this.state.useWorker = true;
+
+        try {
+          await this.postToWorker({
+            type: 'init',
+            dbPath,
+            useOPFS,
+            wasmUrl: storage.wasmUrl,
+            initSql: PRAGMAS,
+          });
+        } catch (err) {
+          if (this.state.worker) {
+            this.state.worker.terminate();
+            this.state.worker = null;
+          }
+          this.state.useWorker = false;
+          this.state.pending.clear();
+          throw err;
+        }
+        break;
+      }
+
+      case 'node-fs': {
+        const { NodeFsVFS } = await import('./node-fs-vfs.js');
+        const { readFileSync } = await import('node:fs');
+        const { dirname, resolve } = await import('node:path');
+        const { createRequire } = await import('node:module');
+
+        const require = createRequire(import.meta.url);
+        const wasmDir = dirname(require.resolve('wa-sqlite/package.json'));
+        const wasmBinary = readFileSync(
+          resolve(wasmDir, 'dist/wa-sqlite.wasm')
+        );
+
+        const module = await SQLiteESMFactory({
+          wasmBinary: wasmBinary.buffer.slice(
+            wasmBinary.byteOffset,
+            wasmBinary.byteOffset + wasmBinary.byteLength
+          ),
+        });
+        this.state.sqlite3 = SQLite.Factory(module);
+        // NodeFsVFS extends VFS.Base at runtime but wa-sqlite's TS
+        // declarations use an opaque generic, so a cast is required.
+
+        this.state.sqlite3.vfs_register(
+          new NodeFsVFS(storage.path) as unknown as SQLiteVFS,
+          true
+        );
+        this.state.dbHandle = await this.state.sqlite3.open_v2('gossip.db');
+        this.state.useWorker = false;
+
+        await this.state.sqlite3.exec(this.state.dbHandle, PRAGMAS_FILE);
+        break;
+      }
+
+      case 'memory': {
+        const moduleArg: Record<string, unknown> = {};
+        if (storage.wasmBinary) {
+          moduleArg.wasmBinary = storage.wasmBinary;
+        }
+
+        const module = await SQLiteESMFactory(moduleArg);
+        this.state.sqlite3 = SQLite.Factory(module);
+        this.state.dbHandle = await this.state.sqlite3.open_v2(':memory:');
+        this.state.useWorker = false;
+
+        await this.state.sqlite3.exec(this.state.dbHandle, PRAGMAS);
+        break;
+      }
+    }
+
+    this.state.drizzleDb = this.createDrizzleInstance();
+
+    for (const stmt of DDL) {
+      await this.execRaw(stmt);
+    }
+  }
+
+  // ─── Public methods ────────────────────────────────────────────
+
+  async getLastInsertRowId(): Promise<number> {
+    if (this.state.useWorker) {
+      return this.state.lastInsertRowIdCache;
+    }
+    const rows = await this.execRaw('SELECT last_insert_rowid()');
+    return (rows[0] as number[])[0];
+  }
+
+  async withTransaction<T>(fn: () => Promise<T>): Promise<T> {
+    const prev = this.state.dbLock;
+    let release!: () => void;
+    this.state.dbLock = new Promise<void>(r => (release = r));
+    await prev;
+
+    try {
+      await this.execRawDirect('BEGIN');
+      this.state.inTransaction = true;
+      try {
+        const result = await fn();
+        await this.execRawDirect('COMMIT');
+        return result;
+      } catch (e) {
+        await this.execRawDirect('ROLLBACK');
+        throw e;
+      } finally {
+        this.state.inTransaction = false;
+      }
+    } finally {
+      release();
+    }
+  }
+
+  async close(): Promise<void> {
+    if (this.state.useWorker && this.state.worker) {
+      await this.postToWorker({ type: 'close' });
+      this.state.worker.terminate();
+    } else if (this.state.dbHandle !== null && this.state.sqlite3) {
+      await this.state.sqlite3.close(this.state.dbHandle);
+    }
+    this.state = createDefaultState();
+  }
+
+  async clearAllTables(): Promise<void> {
+    await this.withTransaction(async () => {
+      await this.db.delete(schema.messages);
+      await this.db.delete(schema.discussions);
+      await this.db.delete(schema.contacts);
+      await this.db.delete(schema.userProfile);
+      await this.db.delete(schema.pendingEncryptedMessages);
+      await this.db.delete(schema.pendingAnnouncements);
+      await this.db.delete(schema.activeSeekers);
+      await this.db.delete(schema.announcementCursors);
+    });
+  }
+
+  async clearConversationTables(): Promise<void> {
+    await this.withTransaction(async () => {
+      await this.db.delete(schema.messages);
+      await this.db.delete(schema.discussions);
+      await this.db.delete(schema.contacts);
+    });
+  }
 }
