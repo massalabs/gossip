@@ -1,49 +1,56 @@
 /**
- * Reads drizzle-kit's generated SQL and writes a DDL array
- * with IF NOT EXISTS for safe re-runs.
+ * Reads drizzle-kit's migration journal and SQL files, then writes
+ * a versioned migration array for the runtime migration runner.
  *
  * Run via: npm run db:generate
  */
 
-import { readFileSync, writeFileSync, readdirSync } from 'fs';
+import { readFileSync, writeFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const drizzleDir = resolve(__dirname, '../drizzle');
-const outputFile = resolve(__dirname, '../src/db/generated-ddl.ts');
+const outputFile = resolve(__dirname, '../src/db/generated-migrations.ts');
 
-// Read all .sql files in order
-const sqlFiles = readdirSync(drizzleDir)
-  .filter(f => f.endsWith('.sql'))
-  .sort();
+const journal = JSON.parse(
+  readFileSync(resolve(drizzleDir, 'meta/_journal.json'), 'utf-8')
+);
 
-const statements: string[] = [];
-for (const file of sqlFiles) {
-  const content = readFileSync(resolve(drizzleDir, file), 'utf-8');
-  const stmts = content
-    .split('--> statement-breakpoint')
-    .map(s => s.trim())
-    .filter(Boolean)
-    .map(s =>
-      s
-        .replace(/^CREATE TABLE `/m, 'CREATE TABLE IF NOT EXISTS `')
-        .replace(/^CREATE INDEX `/m, 'CREATE INDEX IF NOT EXISTS `')
-        .replace(
-          /^CREATE UNIQUE INDEX `/m,
-          'CREATE UNIQUE INDEX IF NOT EXISTS `'
-        )
-    );
-  statements.push(...stmts);
-}
+const migrations = journal.entries.map(
+  (entry: { idx: number; tag: string; when: number }) => {
+    const sql = readFileSync(resolve(drizzleDir, `${entry.tag}.sql`), 'utf-8');
+    return {
+      idx: entry.idx,
+      tag: entry.tag,
+      when: entry.when,
+      statements: sql
+        .split('--> statement-breakpoint')
+        .map((s: string) => s.trim())
+        .filter(Boolean),
+    };
+  }
+);
+
+const totalStatements = migrations.reduce(
+  (n: number, m: { statements: string[] }) => n + m.statements.length,
+  0
+);
 
 const output = `// Auto-generated from drizzle migrations — do not edit manually.
 // Regenerate with: npm run db:generate
 
-export const DDL: string[] = ${JSON.stringify(statements, null, 2)};
+export interface EmbeddedMigration {
+  idx: number;
+  tag: string;
+  when: number;
+  statements: string[];
+}
+
+export const MIGRATIONS: EmbeddedMigration[] = ${JSON.stringify(migrations, null, 2)};
 `;
 
 writeFileSync(outputFile, output);
 console.log(
-  `Generated ${statements.length} DDL statements -> src/db/generated-ddl.ts`
+  `Generated ${migrations.length} migrations (${totalStatements} statements) -> src/db/generated-migrations.ts`
 );

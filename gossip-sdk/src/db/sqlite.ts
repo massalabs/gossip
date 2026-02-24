@@ -16,7 +16,7 @@ import SQLiteESMFactory from 'wa-sqlite/dist/wa-sqlite.mjs';
 import * as SQLite from 'wa-sqlite';
 import { drizzle, type SqliteRemoteDatabase } from 'drizzle-orm/sqlite-proxy';
 import * as schema from './schema/index.js';
-import { DDL } from './generated-ddl.js';
+import { runMigrations } from './migrate.js';
 import { execStatements } from './exec-utils.js';
 
 export type GossipDatabase = SqliteRemoteDatabase<typeof schema>;
@@ -279,11 +279,12 @@ export class DatabaseConnection {
       }
     }
 
-    this.state.drizzleDb = this.createDrizzleInstance();
+    await runMigrations(
+      (sql, params) => this.execRaw(sql, params),
+      fn => this.withTransaction(fn)
+    );
 
-    for (const stmt of DDL) {
-      await this.execRaw(stmt);
-    }
+    this.state.drizzleDb = this.createDrizzleInstance();
   }
 
   // ─── Public methods ────────────────────────────────────────────
