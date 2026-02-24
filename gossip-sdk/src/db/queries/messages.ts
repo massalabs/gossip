@@ -1,258 +1,246 @@
 import { eq, and, sql, inArray, asc } from 'drizzle-orm';
 import * as schema from '../schema';
-import { getSqliteDb, getLastInsertRowId } from '../sqlite';
+import type { DatabaseConnection } from '../sqlite';
 import { MessageDirection, MessageStatus, MessageType } from '../../db/db';
 
 export type MessageRow = typeof schema.messages.$inferSelect;
 export type MessageInsert = typeof schema.messages.$inferInsert;
 
-export async function getMessageById(
-  id: number
-): Promise<MessageRow | undefined> {
-  return getSqliteDb()
-    .select()
-    .from(schema.messages)
-    .where(eq(schema.messages.id, id))
-    .get();
-}
+export class MessageQueries {
+  constructor(private conn: DatabaseConnection) {}
 
-export async function getMessagesByOwnerAndContact(
-  ownerUserId: string,
-  contactUserId: string
-): Promise<MessageRow[]> {
-  return getSqliteDb()
-    .select()
-    .from(schema.messages)
-    .where(
-      and(
-        eq(schema.messages.ownerUserId, ownerUserId),
-        eq(schema.messages.contactUserId, contactUserId)
+  async getById(id: number): Promise<MessageRow | undefined> {
+    return this.conn.db
+      .select()
+      .from(schema.messages)
+      .where(eq(schema.messages.id, id))
+      .get();
+  }
+
+  async getByOwnerAndContact(
+    ownerUserId: string,
+    contactUserId: string
+  ): Promise<MessageRow[]> {
+    return this.conn.db
+      .select()
+      .from(schema.messages)
+      .where(
+        and(
+          eq(schema.messages.ownerUserId, ownerUserId),
+          eq(schema.messages.contactUserId, contactUserId)
+        )
       )
-    )
-    .orderBy(asc(schema.messages.timestamp), asc(schema.messages.id))
-    .all();
-}
+      .orderBy(asc(schema.messages.timestamp), asc(schema.messages.id))
+      .all();
+  }
 
-export async function getMessageByOwnerAndSeeker(
-  ownerUserId: string,
-  seeker: Uint8Array
-): Promise<MessageRow | undefined> {
-  return getSqliteDb()
-    .select()
-    .from(schema.messages)
-    .where(
-      and(
-        eq(schema.messages.ownerUserId, ownerUserId),
-        eq(schema.messages.seeker, seeker)
+  async getByOwnerAndSeeker(
+    ownerUserId: string,
+    seeker: Uint8Array
+  ): Promise<MessageRow | undefined> {
+    return this.conn.db
+      .select()
+      .from(schema.messages)
+      .where(
+        and(
+          eq(schema.messages.ownerUserId, ownerUserId),
+          eq(schema.messages.seeker, seeker)
+        )
       )
-    )
-    .get();
-}
+      .get();
+  }
 
-export async function findMessageByMessageId(
-  ownerUserId: string,
-  contactUserId: string,
-  messageId: Uint8Array
-): Promise<MessageRow | undefined> {
-  return getSqliteDb()
-    .select()
-    .from(schema.messages)
-    .where(
-      and(
-        eq(schema.messages.ownerUserId, ownerUserId),
-        eq(schema.messages.contactUserId, contactUserId),
-        eq(schema.messages.messageId, messageId)
+  async findByMessageId(
+    ownerUserId: string,
+    contactUserId: string,
+    messageId: Uint8Array
+  ): Promise<MessageRow | undefined> {
+    return this.conn.db
+      .select()
+      .from(schema.messages)
+      .where(
+        and(
+          eq(schema.messages.ownerUserId, ownerUserId),
+          eq(schema.messages.contactUserId, contactUserId),
+          eq(schema.messages.messageId, messageId)
+        )
       )
-    )
-    .get();
-}
+      .get();
+  }
 
-export async function insertMessage(values: MessageInsert): Promise<number> {
-  await getSqliteDb().insert(schema.messages).values(values);
-  return getLastInsertRowId();
-}
+  async insert(values: MessageInsert): Promise<number> {
+    await this.conn.db.insert(schema.messages).values(values);
+    return this.conn.getLastInsertRowId();
+  }
 
-export async function batchInsertMessages(
-  values: MessageInsert[]
-): Promise<void> {
-  if (values.length === 0) return;
-  await getSqliteDb().insert(schema.messages).values(values);
-}
+  async batchInsert(values: MessageInsert[]): Promise<void> {
+    if (values.length === 0) return;
+    await this.conn.db.insert(schema.messages).values(values);
+  }
 
-export async function updateMessageById(
-  id: number,
-  data: Partial<MessageInsert>
-): Promise<void> {
-  await getSqliteDb()
-    .update(schema.messages)
-    .set(data)
-    .where(eq(schema.messages.id, id));
-}
+  async updateById(id: number, data: Partial<MessageInsert>): Promise<void> {
+    await this.conn.db
+      .update(schema.messages)
+      .set(data)
+      .where(eq(schema.messages.id, id));
+  }
 
-export async function deleteMessagesByOwnerAndContact(
-  ownerUserId: string,
-  contactUserId: string
-): Promise<void> {
-  await getSqliteDb()
-    .delete(schema.messages)
-    .where(
-      and(
-        eq(schema.messages.ownerUserId, ownerUserId),
-        eq(schema.messages.contactUserId, contactUserId)
+  async deleteByOwnerAndContact(
+    ownerUserId: string,
+    contactUserId: string
+  ): Promise<void> {
+    await this.conn.db
+      .delete(schema.messages)
+      .where(
+        and(
+          eq(schema.messages.ownerUserId, ownerUserId),
+          eq(schema.messages.contactUserId, contactUserId)
+        )
+      );
+  }
+
+  async deleteDeliveredKeepAlive(ownerUserId: string): Promise<void> {
+    await this.conn.db
+      .delete(schema.messages)
+      .where(
+        and(
+          eq(schema.messages.ownerUserId, ownerUserId),
+          eq(schema.messages.status, MessageStatus.DELIVERED),
+          eq(schema.messages.type, MessageType.KEEP_ALIVE)
+        )
+      );
+  }
+
+  async getOutgoingSentByOwner(ownerUserId: string): Promise<MessageRow[]> {
+    return this.conn.db
+      .select()
+      .from(schema.messages)
+      .where(
+        and(
+          eq(schema.messages.ownerUserId, ownerUserId),
+          eq(schema.messages.direction, MessageDirection.OUTGOING),
+          eq(schema.messages.status, MessageStatus.SENT)
+        )
       )
-    );
-}
+      .all();
+  }
 
-export async function deleteDeliveredKeepAliveMessages(
-  ownerUserId: string
-): Promise<void> {
-  await getSqliteDb()
-    .delete(schema.messages)
-    .where(
-      and(
-        eq(schema.messages.ownerUserId, ownerUserId),
-        eq(schema.messages.status, MessageStatus.DELIVERED),
-        eq(schema.messages.type, MessageType.KEEP_ALIVE)
+  async getWaitingCount(
+    ownerUserId: string,
+    contactUserId: string
+  ): Promise<number> {
+    const result = await this.conn.db
+      .select({ count: sql<number>`count(*)` })
+      .from(schema.messages)
+      .where(
+        and(
+          eq(schema.messages.ownerUserId, ownerUserId),
+          eq(schema.messages.contactUserId, contactUserId),
+          eq(schema.messages.status, MessageStatus.WAITING_SESSION)
+        )
       )
-    );
-}
+      .get();
+    return result?.count ?? 0;
+  }
 
-export async function getOutgoingSentMessagesByOwner(
-  ownerUserId: string
-): Promise<MessageRow[]> {
-  return getSqliteDb()
-    .select()
-    .from(schema.messages)
-    .where(
-      and(
-        eq(schema.messages.ownerUserId, ownerUserId),
-        eq(schema.messages.direction, MessageDirection.OUTGOING),
-        eq(schema.messages.status, MessageStatus.SENT)
+  async getSendQueue(
+    ownerUserId: string,
+    contactUserId: string
+  ): Promise<MessageRow[]> {
+    return this.conn.db
+      .select()
+      .from(schema.messages)
+      .where(
+        and(
+          eq(schema.messages.ownerUserId, ownerUserId),
+          eq(schema.messages.contactUserId, contactUserId),
+          eq(schema.messages.direction, MessageDirection.OUTGOING),
+          inArray(schema.messages.status, [
+            MessageStatus.WAITING_SESSION,
+            MessageStatus.READY,
+          ])
+        )
       )
-    )
-    .all();
-}
+      .orderBy(asc(schema.messages.timestamp), asc(schema.messages.id))
+      .all();
+  }
 
-export async function getWaitingMessageCount(
-  ownerUserId: string,
-  contactUserId: string
-): Promise<number> {
-  const result = await getSqliteDb()
-    .select({ count: sql<number>`count(*)` })
-    .from(schema.messages)
-    .where(
-      and(
-        eq(schema.messages.ownerUserId, ownerUserId),
-        eq(schema.messages.contactUserId, contactUserId),
-        eq(schema.messages.status, MessageStatus.WAITING_SESSION)
+  async getByStatus(
+    ownerUserId: string,
+    status: MessageStatus
+  ): Promise<MessageRow[]> {
+    return this.conn.db
+      .select()
+      .from(schema.messages)
+      .where(
+        and(
+          eq(schema.messages.ownerUserId, ownerUserId),
+          eq(schema.messages.status, status)
+        )
       )
-    )
-    .get();
-  return result?.count ?? 0;
-}
+      .all();
+  }
 
-export async function getSendQueueMessages(
-  ownerUserId: string,
-  contactUserId: string
-): Promise<MessageRow[]> {
-  return getSqliteDb()
-    .select()
-    .from(schema.messages)
-    .where(
-      and(
-        eq(schema.messages.ownerUserId, ownerUserId),
-        eq(schema.messages.contactUserId, contactUserId),
-        eq(schema.messages.direction, MessageDirection.OUTGOING),
-        inArray(schema.messages.status, [
-          MessageStatus.WAITING_SESSION,
-          MessageStatus.READY,
-        ])
-      )
-    )
-    .orderBy(asc(schema.messages.timestamp), asc(schema.messages.id))
-    .all();
-}
+  async resetSendQueue(
+    ownerUserId: string,
+    contactUserId: string,
+    statuses?: MessageStatus[]
+  ): Promise<void> {
+    await this.conn.db
+      .update(schema.messages)
+      .set({
+        status: MessageStatus.WAITING_SESSION,
+        encryptedMessage: null,
+        seeker: null,
+      })
+      .where(
+        and(
+          eq(schema.messages.ownerUserId, ownerUserId),
+          eq(schema.messages.contactUserId, contactUserId),
+          eq(schema.messages.direction, MessageDirection.OUTGOING),
+          statuses ? inArray(schema.messages.status, statuses) : undefined
+        )
+      );
+  }
 
-export async function getMessagesByStatus(
-  ownerUserId: string,
-  status: MessageStatus
-): Promise<MessageRow[]> {
-  return getSqliteDb()
-    .select()
-    .from(schema.messages)
-    .where(
-      and(
-        eq(schema.messages.ownerUserId, ownerUserId),
-        eq(schema.messages.status, status)
+  async getAnnouncementsByContact(
+    ownerUserId: string,
+    contactUserId: string
+  ): Promise<MessageRow[]> {
+    return this.conn.db
+      .select()
+      .from(schema.messages)
+      .where(
+        and(
+          eq(schema.messages.ownerUserId, ownerUserId),
+          eq(schema.messages.contactUserId, contactUserId),
+          eq(schema.messages.direction, MessageDirection.INCOMING),
+          eq(schema.messages.type, MessageType.ANNOUNCEMENT)
+        )
       )
-    )
-    .all();
-}
+      .all();
+  }
 
-/**
- * Reset outgoing messages to WAITING_SESSION, clearing encryption data.
- * @param statuses - If provided, only reset messages with these statuses.
- *                   If omitted, reset ALL outgoing messages for the contact.
- */
-export async function resetSendQueueMessages(
-  ownerUserId: string,
-  contactUserId: string,
-  statuses?: MessageStatus[]
-): Promise<void> {
-  await getSqliteDb()
-    .update(schema.messages)
-    .set({
-      status: MessageStatus.WAITING_SESSION,
-      encryptedMessage: null,
-      seeker: null,
-    })
-    .where(
-      and(
-        eq(schema.messages.ownerUserId, ownerUserId),
-        eq(schema.messages.contactUserId, contactUserId),
-        eq(schema.messages.direction, MessageDirection.OUTGOING),
-        statuses ? inArray(schema.messages.status, statuses) : undefined
+  async findDuplicateIncoming(
+    ownerUserId: string,
+    contactUserId: string,
+    content: string,
+    windowStart: Date,
+    windowEnd: Date
+  ): Promise<{ id: number } | undefined> {
+    return this.conn.db
+      .select({ id: schema.messages.id })
+      .from(schema.messages)
+      .where(
+        and(
+          eq(schema.messages.ownerUserId, ownerUserId),
+          eq(schema.messages.contactUserId, contactUserId),
+          eq(schema.messages.direction, MessageDirection.INCOMING),
+          eq(schema.messages.content, content),
+          sql`${schema.messages.timestamp} >= ${windowStart.getTime()}`,
+          sql`${schema.messages.timestamp} <= ${windowEnd.getTime()}`
+        )
       )
-    );
-}
-
-export async function getAnnouncementMessagesByContact(
-  ownerUserId: string,
-  contactUserId: string
-): Promise<MessageRow[]> {
-  return getSqliteDb()
-    .select()
-    .from(schema.messages)
-    .where(
-      and(
-        eq(schema.messages.ownerUserId, ownerUserId),
-        eq(schema.messages.contactUserId, contactUserId),
-        eq(schema.messages.direction, MessageDirection.INCOMING),
-        eq(schema.messages.type, MessageType.ANNOUNCEMENT)
-      )
-    )
-    .all();
-}
-
-export async function findDuplicateIncomingMessage(
-  ownerUserId: string,
-  contactUserId: string,
-  content: string,
-  windowStart: Date,
-  windowEnd: Date
-): Promise<{ id: number } | undefined> {
-  return getSqliteDb()
-    .select({ id: schema.messages.id })
-    .from(schema.messages)
-    .where(
-      and(
-        eq(schema.messages.ownerUserId, ownerUserId),
-        eq(schema.messages.contactUserId, contactUserId),
-        eq(schema.messages.direction, MessageDirection.INCOMING),
-        eq(schema.messages.content, content),
-        sql`${schema.messages.timestamp} >= ${windowStart.getTime()}`,
-        sql`${schema.messages.timestamp} <= ${windowEnd.getTime()}`
-      )
-    )
-    .get();
+      .get();
+  }
 }

@@ -26,16 +26,7 @@ import { Logger } from '../utils/logs';
 import { RefreshService } from './refresh';
 import { Result } from '../utils/type';
 import { SdkEventEmitter, SdkEventType } from '../core/SdkEventEmitter';
-import {
-  getContactByOwnerAndUser,
-  getDiscussionByOwnerAndContact,
-  getDiscussionById,
-  insertDiscussion,
-  updateDiscussionById,
-  deleteDiscussionById,
-  insertMessage,
-  resetSendQueueMessages,
-} from '../db';
+import { Queries } from '../db/queries';
 
 const logger = new Logger('DiscussionService');
 
@@ -66,16 +57,19 @@ export class DiscussionService {
   private session: SessionModule;
   private eventEmitter: SdkEventEmitter;
   private refreshService?: RefreshService;
+  private queries: Queries;
 
   constructor(
     announcementService: AnnouncementService,
     session: SessionModule,
     eventEmitter: SdkEventEmitter,
+    queries: Queries,
     refreshService?: RefreshService
   ) {
     this.announcementService = announcementService;
     this.session = session;
     this.eventEmitter = eventEmitter;
+    this.queries = queries;
     this.refreshService = refreshService;
   }
 
@@ -109,7 +103,7 @@ export class DiscussionService {
     try {
       const userId = this.session.userIdEncoded;
 
-      const existing = await getDiscussionByOwnerAndContact(
+      const existing = await this.queries.discussions.getByOwnerAndContact(
         userId,
         contact.userId
       );
@@ -124,7 +118,7 @@ export class DiscussionService {
       log.info(
         `${userId} is establishing session with contact ${contact.name}`
       );
-      const discussionId = await insertDiscussion({
+      const discussionId = await this.queries.discussions.insert({
         ownerUserId: userId,
         contactUserId: contact.userId,
         weAccepted: true,
@@ -151,28 +145,28 @@ export class DiscussionService {
       );
 
       if (!result.success) {
-        await deleteDiscussionById(discussionId);
+        await this.queries.discussions.deleteById(discussionId);
         return { success: false, error: result.error };
       }
 
       if (payload?.message) {
-        await insertMessage({
+        await this.queries.messages.insert({
           ownerUserId: userId,
           contactUserId: contact.userId,
           content: payload.message,
           type: MessageType.ANNOUNCEMENT,
           direction: MessageDirection.OUTGOING,
-          status: MessageStatus.READ, // Announcement message are not like other msg. they are set as read to prevent them from being sent again if session is renewed
+          status: MessageStatus.READ,
           timestamp: new Date(),
         });
         // Store the announcement message on the discussion so the UI can display it
-        await updateDiscussionById(discussionId, {
+        await this.queries.discussions.updateById(discussionId, {
           announcementMessage: payload.message,
         });
       }
 
       // Emit status change event
-      const discussion = await getDiscussionById(discussionId);
+      const discussion = await this.queries.discussions.getById(discussionId);
       if (discussion) {
         this.eventEmitter.emit(
           SdkEventType.SESSION_CREATED,
@@ -218,7 +212,9 @@ export class DiscussionService {
         );
 
         // Emit status change event
-        const updatedDiscussion = await getDiscussionById(discussion.id!);
+        const updatedDiscussion = await this.queries.discussions.getById(
+          discussion.id!
+        );
         if (updatedDiscussion) {
           this.eventEmitter.emit(
             SdkEventType.SESSION_ACCEPTED,
@@ -255,7 +251,7 @@ export class DiscussionService {
     const log = logger.forMethod('createSessionForContact');
     const ownerUserId = this.session.userIdEncoded;
 
-    const discussion = await getDiscussionByOwnerAndContact(
+    const discussion = await this.queries.discussions.getByOwnerAndContact(
       ownerUserId,
       contactUserId
     );
@@ -263,7 +259,10 @@ export class DiscussionService {
       return { success: false, error: new Error('Discussion not found') };
     }
 
-    const contact = await getContactByOwnerAndUser(ownerUserId, contactUserId);
+    const contact = await this.queries.contacts.getByOwnerAndUser(
+      ownerUserId,
+      contactUserId
+    );
     if (!contact) {
       return { success: false, error: new Error('Contact not found') };
     }
@@ -286,7 +285,7 @@ export class DiscussionService {
 
     try {
       // add the new announcement to the discussion
-      await updateDiscussionById(discussion.id!, {
+      await this.queries.discussions.updateById(discussion.id!, {
         weAccepted: true,
         sendAnnouncement: serializeSendAnnouncement({
           announcement_bytes: sessionResult.data,
@@ -297,7 +296,7 @@ export class DiscussionService {
       });
 
       // reset all messages in send queue to WAITING_SESSION for this contact
-      await resetSendQueueMessages(ownerUserId, contactUserId, [
+      await this.queries.messages.resetSendQueue(ownerUserId, contactUserId, [
         MessageStatus.READY,
         MessageStatus.SENT,
       ]);

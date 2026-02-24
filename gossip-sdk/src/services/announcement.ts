@@ -25,22 +25,7 @@ import { decodeAnnouncementPayload } from '../utils/announcementPayload';
 import { Result } from '../utils/type';
 import { SdkEventEmitter, SdkEventType } from '../core/SdkEventEmitter';
 import type { RefreshService } from './refresh';
-import {
-  getContactByOwnerAndUser,
-  insertContact,
-  getContactNamesByPrefix,
-  getDiscussionByOwnerAndContact,
-  getDiscussionById,
-  insertDiscussion,
-  updateDiscussionById,
-  insertMessage,
-  getAnnouncementMessagesByContact,
-  resetSendQueueMessages,
-  getAllPendingAnnouncements,
-  deletePendingAnnouncementsByIds,
-  getAnnouncementCursor,
-  upsertAnnouncementCursor,
-} from '../db';
+import { Queries } from '../db/queries';
 
 const logger = new Logger('AnnouncementService');
 
@@ -60,17 +45,20 @@ export class AnnouncementService {
   private eventEmitter: SdkEventEmitter;
   private config: SdkConfig;
   private refreshService?: RefreshService;
+  private queries: Queries;
 
   constructor(
     messageProtocol: IMessageProtocol,
     session: SessionModule,
     eventEmitter: SdkEventEmitter,
-    config: SdkConfig = defaultSdkConfig
+    config: SdkConfig = defaultSdkConfig,
+    queries: Queries
   ) {
     this.messageProtocol = messageProtocol;
     this.session = session;
     this.eventEmitter = eventEmitter;
     this.config = config;
+    this.queries = queries;
   }
 
   setRefreshService(refreshService: RefreshService): void {
@@ -146,7 +134,7 @@ export class AnnouncementService {
           discussionId: discussion.id,
           contactUserId: discussion.contactUserId,
         });
-        await updateDiscussionById(discussion.id, {
+        await this.queries.discussions.updateById(discussion.id, {
           sendAnnouncement: null,
           updatedAt: new Date(),
         });
@@ -167,17 +155,17 @@ export class AnnouncementService {
       const result = await this.sendAnnouncement(announcement_bytes);
 
       // update discussion state after sending
-      const latest = await getDiscussionById(discussion.id);
+      const latest = await this.queries.discussions.getById(discussion.id);
       if (!latest || latest.sendAnnouncement === null) {
         continue;
       }
       if (result.success) {
-        await updateDiscussionById(discussion.id, {
+        await this.queries.discussions.updateById(discussion.id, {
           sendAnnouncement: null,
           updatedAt: new Date(),
         });
       } else {
-        await updateDiscussionById(discussion.id, {
+        await this.queries.discussions.updateById(discussion.id, {
           sendAnnouncement: serializeSendAnnouncement({
             announcement_bytes,
             when_to_send: new Date(
@@ -204,7 +192,7 @@ export class AnnouncementService {
 
     this.isProcessingAnnouncements = true;
     try {
-      const pending = await getAllPendingAnnouncements();
+      const pending = await this.queries.pendingAnnouncements.getAll();
       const successfullyProcessedPendingIds: number[] = [];
 
       if (pending.length > 0) {
@@ -251,7 +239,7 @@ export class AnnouncementService {
 
         // Delete only successfully processed pending announcements
         if (successfullyProcessedPendingIds.length > 0) {
-          await deletePendingAnnouncementsByIds(
+          await this.queries.pendingAnnouncements.deleteByIds(
             successfullyProcessedPendingIds
           );
           log.info(
@@ -275,7 +263,9 @@ export class AnnouncementService {
       }
 
       // No pending - fetch from API
-      const cursor = await getAnnouncementCursor(this.session.userIdEncoded);
+      const cursor = await this.queries.announcementCursors.get(
+        this.session.userIdEncoded
+      );
 
       // fetch from node all announcements since the last retrieved announcement
       const fetched = await this._fetchAnnouncements(cursor);
@@ -339,7 +329,10 @@ export class AnnouncementService {
    * Stored in a dedicated announcementCursors table (not userProfile).
    */
   private async _upsertLastBulletinCounter(nextCounter: string): Promise<void> {
-    await upsertAnnouncementCursor(this.session.userIdEncoded, nextCounter);
+    await this.queries.announcementCursors.upsert(
+      this.session.userIdEncoded,
+      nextCounter
+    );
   }
 
   /**
@@ -349,7 +342,9 @@ export class AnnouncementService {
    */
   async skipHistoricalAnnouncements(): Promise<void> {
     const log = logger.forMethod('skipHistoricalAnnouncements');
-    const existing = await getAnnouncementCursor(this.session.userIdEncoded);
+    const existing = await this.queries.announcementCursors.get(
+      this.session.userIdEncoded
+    );
     if (existing !== undefined) return;
 
     try {
@@ -384,7 +379,7 @@ export class AnnouncementService {
   private async _generateTemporaryContactName(
     ownerUserId: string
   ): Promise<string> {
-    const newRequestContacts = await getContactNamesByPrefix(
+    const newRequestContacts = await this.queries.contacts.getNamesByPrefix(
       ownerUserId,
       'New Request'
     );
@@ -433,7 +428,7 @@ export class AnnouncementService {
       status: sessionStatusToString(sessionStatus),
     });
 
-    let contact = await getContactByOwnerAndUser(
+    let contact = await this.queries.contacts.getByOwnerAndUser(
       this.session.userIdEncoded,
       contactUserId
     );
@@ -445,7 +440,7 @@ export class AnnouncementService {
         username ||
         (await this._generateTemporaryContactName(this.session.userIdEncoded));
 
-      await insertContact({
+      await this.queries.contacts.insert({
         ownerUserId: this.session.userIdEncoded,
         userId: contactUserId,
         name,
@@ -455,7 +450,7 @@ export class AnnouncementService {
         createdAt: new Date(),
       });
 
-      contact = await getContactByOwnerAndUser(
+      contact = await this.queries.contacts.getByOwnerAndUser(
         this.session.userIdEncoded,
         contactUserId
       );
@@ -479,7 +474,7 @@ export class AnnouncementService {
       const windowStart = new Date(timestamp.getTime() - 1000);
       const windowEnd = new Date(timestamp.getTime() + 1000);
 
-      const existing = await getAnnouncementMessagesByContact(
+      const existing = await this.queries.messages.getAnnouncementsByContact(
         this.session.userIdEncoded,
         contactUserId
       );
@@ -493,7 +488,7 @@ export class AnnouncementService {
       );
 
       if (!duplicate) {
-        await insertMessage({
+        await this.queries.messages.insert({
           ownerUserId: this.session.userIdEncoded,
           contactUserId,
           content: message,
@@ -521,7 +516,7 @@ export class AnnouncementService {
   ): Promise<{ discussionId: number }> {
     const log = logger.forMethod('handleReceivedDiscussion');
 
-    const existing = await getDiscussionByOwnerAndContact(
+    const existing = await this.queries.discussions.getByOwnerAndContact(
       ownerUserId,
       contactUserId
     );
@@ -535,17 +530,18 @@ export class AnnouncementService {
         contactUserId,
       });
 
-      await updateDiscussionById(existing.id, updateData);
+      await this.queries.discussions.updateById(existing.id, updateData);
 
       // reset pending outgoing messages to WAITING_SESSION for this contact
       // Only reset READY and SENT — DELIVERED messages should not be resent.
-      await resetSendQueueMessages(this.session.userIdEncoded, contactUserId, [
-        MessageStatus.READY,
-        MessageStatus.SENT,
-      ]);
+      await this.queries.messages.resetSendQueue(
+        this.session.userIdEncoded,
+        contactUserId,
+        [MessageStatus.READY, MessageStatus.SENT]
+      );
 
-      const newDiscussion = await getDiscussionById(existing.id);
-      const contactRow = await getContactByOwnerAndUser(
+      const newDiscussion = await this.queries.discussions.getById(existing.id);
+      const contactRow = await this.queries.contacts.getByOwnerAndUser(
         ownerUserId,
         contactUserId
       );
@@ -565,7 +561,7 @@ export class AnnouncementService {
     }
 
     log.info('creating new discussion', { contactUserId });
-    const discussionId = await insertDiscussion({
+    const discussionId = await this.queries.discussions.insert({
       ownerUserId,
       contactUserId,
       direction: DiscussionDirection.RECEIVED,
@@ -576,8 +572,8 @@ export class AnnouncementService {
       updatedAt: new Date(),
     });
 
-    const discussion = await getDiscussionById(discussionId);
-    const contactRow = await getContactByOwnerAndUser(
+    const discussion = await this.queries.discussions.getById(discussionId);
+    const contactRow = await this.queries.contacts.getByOwnerAndUser(
       ownerUserId,
       contactUserId
     );

@@ -12,8 +12,7 @@ import {
   DiscussionDirection,
   DiscussionStatus,
 } from '../../src/db';
-import { clearAllTables } from '../../src/db';
-import { insertDiscussion } from '../../src/db';
+import { clearAllTables, getTestQueries } from '../testDb';
 import type { SessionModule } from '../../src/wasm/session';
 import { encodeUserId, decodeUserId } from '../../src/utils/userId';
 import { SessionStatus } from '../../src/assets/generated/wasm/gossip_wasm';
@@ -86,11 +85,12 @@ describe('RefreshService', () => {
         mockDiscussionService,
         mockAnnouncementService,
         mockSession,
-        eventEmitter
+        eventEmitter,
+        getTestQueries()
       );
 
       // Create a discussion in the database
-      await insertDiscussion({
+      await getTestQueries().discussions.insert({
         ownerUserId: REFRESH_OWNER_USER_ID,
         contactUserId: REFRESH_CONTACT_USER_ID,
         direction: DiscussionDirection.INITIATED,
@@ -123,11 +123,12 @@ describe('RefreshService', () => {
         mockDiscussionService,
         mockAnnouncementService,
         mockSession,
-        eventEmitter
+        eventEmitter,
+        getTestQueries()
       );
 
       // Create a discussion in the database
-      await insertDiscussion({
+      await getTestQueries().discussions.insert({
         ownerUserId: REFRESH_OWNER_USER_ID,
         contactUserId: REFRESH_CONTACT_USER_ID,
         direction: DiscussionDirection.INITIATED,
@@ -160,11 +161,12 @@ describe('RefreshService', () => {
         mockDiscussionService,
         mockAnnouncementService,
         mockSession,
-        eventEmitter
+        eventEmitter,
+        getTestQueries()
       );
 
       // Create a discussion in the database
-      await insertDiscussion({
+      await getTestQueries().discussions.insert({
         ownerUserId: REFRESH_OWNER_USER_ID,
         contactUserId: REFRESH_CONTACT_USER_ID,
         direction: DiscussionDirection.INITIATED,
@@ -200,11 +202,12 @@ describe('RefreshService', () => {
         mockDiscussionService,
         mockAnnouncementService,
         mockSession,
-        eventEmitter
+        eventEmitter,
+        getTestQueries()
       );
 
       // Create a discussion in the database
-      await insertDiscussion({
+      await getTestQueries().discussions.insert({
         ownerUserId: REFRESH_OWNER_USER_ID,
         contactUserId: REFRESH_CONTACT_USER_ID,
         direction: DiscussionDirection.INITIATED,
@@ -232,11 +235,12 @@ describe('RefreshService', () => {
         mockDiscussionService,
         mockAnnouncementService,
         mockSession,
-        eventEmitter
+        eventEmitter,
+        getTestQueries()
       );
 
       // Create a discussion in the database
-      await insertDiscussion({
+      await getTestQueries().discussions.insert({
         ownerUserId: REFRESH_OWNER_USER_ID,
         contactUserId: REFRESH_CONTACT_USER_ID,
         direction: DiscussionDirection.INITIATED,

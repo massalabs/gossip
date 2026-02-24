@@ -10,14 +10,6 @@ import {
   EncryptionKey,
   generateNonce,
   validateUsernameFormat,
-  updateUserProfileById,
-  getUserProfileById,
-  getUserProfileCount,
-  getAllUserProfiles,
-  upsertUserProfile,
-  deleteUserProfile,
-  rowToUserProfile,
-  userProfileToRow,
 } from '@massalabs/gossip-sdk';
 import { getSdk } from './sdkStore';
 import { isWebAuthnSupported } from '../crypto/webauthn';
@@ -37,53 +29,6 @@ import { getActiveOrFirstProfile } from './utils/getAccount';
 import { auth } from './utils/auth';
 import { useDiscussionStore } from './discussionStore';
 import { useMessageStore } from './messageStore';
-
-async function createProfileFromAccount(
-  username: string,
-  userId: string,
-  security: UserProfile['security'],
-  session: Uint8Array
-): Promise<UserProfile> {
-  const existingRow = await getUserProfileById(userId);
-  if (existingRow) {
-    const existing = rowToUserProfile(existingRow);
-    // Merge with existing profile; prefer newly provided security fields when present
-    const mergedSecurity: UserProfile['security'] = {
-      ...existing.security,
-      ...security,
-      webauthn: security.webauthn ?? existing.security.webauthn,
-      encKeySalt: security.encKeySalt ?? existing.security.encKeySalt,
-      mnemonicBackup: security.mnemonicBackup,
-    };
-
-    const updatedProfile: UserProfile = {
-      ...existing,
-      // Preserve existing username if already set; do not silently overwrite
-      username: existing.username || username,
-      security: mergedSecurity,
-      session,
-      status: existing.status ?? 'online',
-      lastSeen: new Date(),
-      updatedAt: new Date(),
-    };
-    await upsertUserProfile(userProfileToRow(updatedProfile));
-    return updatedProfile;
-  }
-
-  const newProfile: UserProfile = {
-    userId,
-    username,
-    security,
-    session,
-    status: 'online',
-    lastSeen: new Date(),
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  };
-
-  await upsertUserProfile(userProfileToRow(newProfile));
-  return newProfile;
-}
 
 type accountProvisionResult = {
   encryptionKey: EncryptionKey;
@@ -280,17 +225,13 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
   };
 
   // Helper to persist session blob to DB
-  const createOnPersist = (userId: string) => {
+  const createOnPersist = (_userId: string) => {
     return async (blob: Uint8Array, _key: EncryptionKey) => {
-      await updateUserProfileById(userId, {
-        session: blob,
-        updatedAt: new Date(),
-      });
-      set(state => ({
-        userProfile: state.userProfile
-          ? { ...state.userProfile, session: blob, updatedAt: new Date() }
-          : null,
-      }));
+      const current = get().userProfile;
+      if (!current) return;
+      const updated = { ...current, session: blob, updatedAt: new Date() };
+      await getSdk().profiles.save(updated);
+      set({ userProfile: updated });
     };
   };
 
@@ -341,7 +282,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
 
         const session = getSdk().getEncryptedSession();
 
-        const profile = await createProfileFromAccount(
+        const profile = await getSdk().profiles.createOrUpdate(
           username,
           encodeUserId(userIdBytes),
           security,
@@ -410,7 +351,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
 
         const session = getSdk().getEncryptedSession();
 
-        const profile = await createProfileFromAccount(
+        const profile = await getSdk().profiles.createOrUpdate(
           username,
           encodeUserId(userIdBytes),
           security,
@@ -444,8 +385,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         // If userId is provided, load that specific account, otherwise use active or first
         let profile: UserProfile | null;
         if (userId) {
-          const row = await getUserProfileById(userId);
-          profile = row ? rowToUserProfile(row) : null;
+          profile = await getSdk().profiles.get(userId);
         } else {
           profile = await getActiveOrFirstProfile();
         }
@@ -476,7 +416,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           ...profile,
           lastSeen,
         };
-        await updateUserProfileById(profile.userId, { lastSeen });
+        await getSdk().profiles.save(updatedProfile);
 
         useAppStore.getState().setIsInitialized(true);
         set({
@@ -508,11 +448,11 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
 
         const currentProfile = await getActiveOrFirstProfile();
         if (currentProfile?.userId != null) {
-          await deleteUserProfile(currentProfile.userId);
+          await getSdk().profiles.delete(currentProfile.userId);
         }
 
         set(clearAccountState());
-        const nbAccounts = await getUserProfileCount();
+        const nbAccounts = await getSdk().profiles.getCount();
         useAppStore.getState().setIsInitialized(nbAccounts > 0);
       } catch (error) {
         console.error('Error resetting account:', error);
@@ -591,7 +531,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
 
         const session = getSdk().getEncryptedSession();
 
-        const profile = await createProfileFromAccount(
+        const profile = await getSdk().profiles.createOrUpdate(
           username,
           encodeUserId(userIdBytes),
           security,
@@ -680,8 +620,8 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           },
         };
 
-        await updateUserProfileById(profile.userId, {
-          security: JSON.stringify(updatedProfile.security),
+        await getSdk().profiles.save({
+          ...updatedProfile,
           updatedAt: new Date(),
         });
         set({ userProfile: updatedProfile });
@@ -694,7 +634,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
     // Account detection methods
     hasExistingAccount: async () => {
       try {
-        const count = await getUserProfileCount();
+        const count = await getSdk().profiles.getCount();
         return count > 0;
       } catch (error) {
         console.error('Error checking for existing account:', error);
@@ -713,8 +653,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
 
     getAllAccounts: async () => {
       try {
-        const rows = await getAllUserProfiles();
-        return rows.map(rowToUserProfile);
+        return await getSdk().profiles.getAll();
       } catch (error) {
         console.error('Error getting all accounts:', error);
         return [];
@@ -747,12 +686,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           updatedAt: new Date(),
         };
 
-        await updateUserProfileById(userProfile.userId, {
-          session: sessionBlob,
-          updatedAt: new Date(),
-        });
-
-        // Update the store with the new profile
+        await getSdk().profiles.save(updatedProfile);
         set({ userProfile: updatedProfile });
       } catch (error) {
         console.error('Error persisting session:', error);
@@ -783,12 +717,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           updatedAt: new Date(),
         };
 
-        await updateUserProfileById(profile.userId, {
-          username: trimmedUsername,
-          updatedAt: new Date(),
-        });
-
-        // Update the store with the new profile
+        await getSdk().profiles.save(updatedProfile);
         set({ userProfile: updatedProfile });
       } catch (error) {
         console.error('Error updating username:', error);

@@ -10,14 +10,12 @@ import {
   MessageDirection,
   MessageType,
   DiscussionDirection,
+  DiscussionStatus,
 } from '../../src/db';
-import { clearAllTables, getSqliteDb } from '../../src/db';
+import { clearAllTables, getTestDb, getTestQueries } from '../testDb';
 import * as schema from '../../src/db/schema';
 import { eq, and, inArray } from 'drizzle-orm';
 import { encodeUserId } from '../../src/utils/userId';
-import { resetSendQueueMessages } from '../../src/db';
-import { insertMessage, getMessageById } from '../../src/db';
-import { insertDiscussion } from '../../src/db';
 
 // ============================================================================
 // resetSendQueueMessages function tests
@@ -30,7 +28,7 @@ async function simulateRenewMessageReset(
   ownerUserId: string,
   contactUserId: string
 ): Promise<void> {
-  await getSqliteDb()
+  await getTestDb()
     .update(schema.messages)
     .set({
       status: MessageStatus.WAITING_SESSION,
@@ -54,11 +52,11 @@ async function simulateRenewMessageReset(
 describe('resetSendQueueMessages function', () => {
   beforeEach(async () => {
     await clearAllTables();
-    await insertDiscussion({
+    await getTestQueries().discussions.insert({
       ownerUserId: RENEW_OWNER_USER_ID,
       contactUserId: RENEW_CONTACT_USER_ID,
       direction: DiscussionDirection.INITIATED,
-      status: 'pending',
+      status: DiscussionStatus.PENDING,
       weAccepted: true,
       sendAnnouncement: null,
       unreadCount: 0,
@@ -68,7 +66,7 @@ describe('resetSendQueueMessages function', () => {
   });
 
   it('should reset READY messages to WAITING_SESSION', async () => {
-    const readyMessageId = await insertMessage({
+    const readyMessageId = await getTestQueries().messages.insert({
       ownerUserId: RENEW_OWNER_USER_ID,
       contactUserId: RENEW_CONTACT_USER_ID,
       content: 'Ready message',
@@ -81,19 +79,21 @@ describe('resetSendQueueMessages function', () => {
       whenToSend: new Date(),
     });
 
-    await resetSendQueueMessages(RENEW_OWNER_USER_ID, RENEW_CONTACT_USER_ID, [
-      MessageStatus.READY,
-      MessageStatus.SENT,
-    ]);
+    await getTestQueries().messages.resetSendQueue(
+      RENEW_OWNER_USER_ID,
+      RENEW_CONTACT_USER_ID,
+      [MessageStatus.READY, MessageStatus.SENT]
+    );
 
-    const readyMessage = await getMessageById(readyMessageId);
+    const readyMessage =
+      await getTestQueries().messages.getById(readyMessageId);
     expect(readyMessage?.status).toBe(MessageStatus.WAITING_SESSION);
     expect(readyMessage?.seeker).toBeNull();
     expect(readyMessage?.encryptedMessage).toBeNull();
   });
 
   it('should reset SENT messages to WAITING_SESSION', async () => {
-    const sentMessageId = await insertMessage({
+    const sentMessageId = await getTestQueries().messages.insert({
       ownerUserId: RENEW_OWNER_USER_ID,
       contactUserId: RENEW_CONTACT_USER_ID,
       content: 'Already sent message',
@@ -105,19 +105,20 @@ describe('resetSendQueueMessages function', () => {
       encryptedMessage: new Uint8Array(64).fill(2),
     });
 
-    await resetSendQueueMessages(RENEW_OWNER_USER_ID, RENEW_CONTACT_USER_ID, [
-      MessageStatus.READY,
-      MessageStatus.SENT,
-    ]);
+    await getTestQueries().messages.resetSendQueue(
+      RENEW_OWNER_USER_ID,
+      RENEW_CONTACT_USER_ID,
+      [MessageStatus.READY, MessageStatus.SENT]
+    );
 
-    const sentMessage = await getMessageById(sentMessageId);
+    const sentMessage = await getTestQueries().messages.getById(sentMessageId);
     expect(sentMessage?.status).toBe(MessageStatus.WAITING_SESSION);
     expect(sentMessage?.seeker).toBeNull();
     expect(sentMessage?.encryptedMessage).toBeNull();
   });
 
   it('should NOT reset DELIVERED messages', async () => {
-    const deliveredMessageId = await insertMessage({
+    const deliveredMessageId = await getTestQueries().messages.insert({
       ownerUserId: RENEW_OWNER_USER_ID,
       contactUserId: RENEW_CONTACT_USER_ID,
       content: 'Delivered message',
@@ -129,19 +130,21 @@ describe('resetSendQueueMessages function', () => {
       encryptedMessage: new Uint8Array(64).fill(4),
     });
 
-    await resetSendQueueMessages(RENEW_OWNER_USER_ID, RENEW_CONTACT_USER_ID, [
-      MessageStatus.READY,
-      MessageStatus.SENT,
-    ]);
+    await getTestQueries().messages.resetSendQueue(
+      RENEW_OWNER_USER_ID,
+      RENEW_CONTACT_USER_ID,
+      [MessageStatus.READY, MessageStatus.SENT]
+    );
 
-    const deliveredMessage = await getMessageById(deliveredMessageId);
+    const deliveredMessage =
+      await getTestQueries().messages.getById(deliveredMessageId);
     expect(deliveredMessage?.status).toBe(MessageStatus.DELIVERED);
     expect(deliveredMessage?.seeker).toBeDefined();
     expect(deliveredMessage?.encryptedMessage).toBeDefined();
   });
 
   it('should NOT reset READ messages', async () => {
-    const readMessageId = await insertMessage({
+    const readMessageId = await getTestQueries().messages.insert({
       ownerUserId: RENEW_OWNER_USER_ID,
       contactUserId: RENEW_CONTACT_USER_ID,
       content: 'Read message',
@@ -153,18 +156,19 @@ describe('resetSendQueueMessages function', () => {
       encryptedMessage: new Uint8Array(64).fill(6),
     });
 
-    await resetSendQueueMessages(RENEW_OWNER_USER_ID, RENEW_CONTACT_USER_ID, [
-      MessageStatus.READY,
-      MessageStatus.SENT,
-    ]);
+    await getTestQueries().messages.resetSendQueue(
+      RENEW_OWNER_USER_ID,
+      RENEW_CONTACT_USER_ID,
+      [MessageStatus.READY, MessageStatus.SENT]
+    );
 
-    const readMessage = await getMessageById(readMessageId);
+    const readMessage = await getTestQueries().messages.getById(readMessageId);
     expect(readMessage?.status).toBe(MessageStatus.READ);
     expect(readMessage?.seeker).toBeDefined();
   });
 
   it('should keep WAITING_SESSION messages unchanged', async () => {
-    const waitingMessageId = await insertMessage({
+    const waitingMessageId = await getTestQueries().messages.insert({
       ownerUserId: RENEW_OWNER_USER_ID,
       contactUserId: RENEW_CONTACT_USER_ID,
       content: 'Waiting message',
@@ -174,17 +178,19 @@ describe('resetSendQueueMessages function', () => {
       timestamp: new Date(),
     });
 
-    await resetSendQueueMessages(RENEW_OWNER_USER_ID, RENEW_CONTACT_USER_ID, [
-      MessageStatus.READY,
-      MessageStatus.SENT,
-    ]);
+    await getTestQueries().messages.resetSendQueue(
+      RENEW_OWNER_USER_ID,
+      RENEW_CONTACT_USER_ID,
+      [MessageStatus.READY, MessageStatus.SENT]
+    );
 
-    const waitingMessage = await getMessageById(waitingMessageId);
+    const waitingMessage =
+      await getTestQueries().messages.getById(waitingMessageId);
     expect(waitingMessage?.status).toBe(MessageStatus.WAITING_SESSION);
   });
 
   it('should handle mixed message statuses correctly', async () => {
-    const readyId = await insertMessage({
+    const readyId = await getTestQueries().messages.insert({
       ownerUserId: RENEW_OWNER_USER_ID,
       contactUserId: RENEW_CONTACT_USER_ID,
       content: 'Ready',
@@ -197,7 +203,7 @@ describe('resetSendQueueMessages function', () => {
       whenToSend: new Date(),
     });
 
-    const sentId = await insertMessage({
+    const sentId = await getTestQueries().messages.insert({
       ownerUserId: RENEW_OWNER_USER_ID,
       contactUserId: RENEW_CONTACT_USER_ID,
       content: 'Sent',
@@ -209,7 +215,7 @@ describe('resetSendQueueMessages function', () => {
       encryptedMessage: new Uint8Array(64).fill(2),
     });
 
-    const deliveredId = await insertMessage({
+    const deliveredId = await getTestQueries().messages.insert({
       ownerUserId: RENEW_OWNER_USER_ID,
       contactUserId: RENEW_CONTACT_USER_ID,
       content: 'Delivered',
@@ -221,7 +227,7 @@ describe('resetSendQueueMessages function', () => {
       encryptedMessage: new Uint8Array(64).fill(3),
     });
 
-    const readId = await insertMessage({
+    const readId = await getTestQueries().messages.insert({
       ownerUserId: RENEW_OWNER_USER_ID,
       contactUserId: RENEW_CONTACT_USER_ID,
       content: 'Read',
@@ -233,7 +239,7 @@ describe('resetSendQueueMessages function', () => {
       encryptedMessage: new Uint8Array(64).fill(4),
     });
 
-    const waitingId = await insertMessage({
+    const waitingId = await getTestQueries().messages.insert({
       ownerUserId: RENEW_OWNER_USER_ID,
       contactUserId: RENEW_CONTACT_USER_ID,
       content: 'Waiting',
@@ -243,37 +249,38 @@ describe('resetSendQueueMessages function', () => {
       timestamp: new Date(),
     });
 
-    await resetSendQueueMessages(RENEW_OWNER_USER_ID, RENEW_CONTACT_USER_ID, [
-      MessageStatus.READY,
-      MessageStatus.SENT,
-    ]);
+    await getTestQueries().messages.resetSendQueue(
+      RENEW_OWNER_USER_ID,
+      RENEW_CONTACT_USER_ID,
+      [MessageStatus.READY, MessageStatus.SENT]
+    );
 
-    const ready = await getMessageById(readyId);
+    const ready = await getTestQueries().messages.getById(readyId);
     expect(ready?.status).toBe(MessageStatus.WAITING_SESSION);
     expect(ready?.seeker).toBeNull();
     expect(ready?.encryptedMessage).toBeNull();
 
-    const sent = await getMessageById(sentId);
+    const sent = await getTestQueries().messages.getById(sentId);
     expect(sent?.status).toBe(MessageStatus.WAITING_SESSION);
     expect(sent?.seeker).toBeNull();
     expect(sent?.encryptedMessage).toBeNull();
 
-    const delivered = await getMessageById(deliveredId);
+    const delivered = await getTestQueries().messages.getById(deliveredId);
     expect(delivered?.status).toBe(MessageStatus.DELIVERED);
     expect(delivered?.seeker).toBeDefined();
     expect(delivered?.encryptedMessage).toBeDefined();
 
-    const read = await getMessageById(readId);
+    const read = await getTestQueries().messages.getById(readId);
     expect(read?.status).toBe(MessageStatus.READ);
     expect(read?.seeker).toBeDefined();
     expect(read?.encryptedMessage).toBeDefined();
 
-    const waiting = await getMessageById(waitingId);
+    const waiting = await getTestQueries().messages.getById(waitingId);
     expect(waiting?.status).toBe(MessageStatus.WAITING_SESSION);
   });
 
   it('should NOT reset incoming messages', async () => {
-    const incomingId = await insertMessage({
+    const incomingId = await getTestQueries().messages.insert({
       ownerUserId: RENEW_OWNER_USER_ID,
       contactUserId: RENEW_CONTACT_USER_ID,
       content: 'Incoming message',
@@ -283,12 +290,13 @@ describe('resetSendQueueMessages function', () => {
       timestamp: new Date(),
     });
 
-    await resetSendQueueMessages(RENEW_OWNER_USER_ID, RENEW_CONTACT_USER_ID, [
-      MessageStatus.READY,
-      MessageStatus.SENT,
-    ]);
+    await getTestQueries().messages.resetSendQueue(
+      RENEW_OWNER_USER_ID,
+      RENEW_CONTACT_USER_ID,
+      [MessageStatus.READY, MessageStatus.SENT]
+    );
 
-    const incoming = await getMessageById(incomingId);
+    const incoming = await getTestQueries().messages.getById(incomingId);
     expect(incoming?.status).toBe(MessageStatus.SENT);
   });
 });
@@ -300,11 +308,11 @@ describe('resetSendQueueMessages function', () => {
 describe('DiscussionService renew message reset behavior', () => {
   beforeEach(async () => {
     await clearAllTables();
-    await insertDiscussion({
+    await getTestQueries().discussions.insert({
       ownerUserId: RENEW_OWNER_USER_ID,
       contactUserId: RENEW_CONTACT_USER_ID,
       direction: DiscussionDirection.INITIATED,
-      status: 'pending',
+      status: DiscussionStatus.PENDING,
       weAccepted: true,
       sendAnnouncement: null,
       unreadCount: 0,
@@ -314,7 +322,7 @@ describe('DiscussionService renew message reset behavior', () => {
   });
 
   it('should reset SENDING messages to WAITING_SESSION when renewing', async () => {
-    const sendingMessageId = await insertMessage({
+    const sendingMessageId = await getTestQueries().messages.insert({
       ownerUserId: RENEW_OWNER_USER_ID,
       contactUserId: RENEW_CONTACT_USER_ID,
       content: 'Sending message',
@@ -328,14 +336,15 @@ describe('DiscussionService renew message reset behavior', () => {
 
     await simulateRenewMessageReset(RENEW_OWNER_USER_ID, RENEW_CONTACT_USER_ID);
 
-    const sendingMessage = await getMessageById(sendingMessageId);
+    const sendingMessage =
+      await getTestQueries().messages.getById(sendingMessageId);
     expect(sendingMessage?.status).toBe(MessageStatus.WAITING_SESSION);
     expect(sendingMessage?.seeker).toBeNull();
     expect(sendingMessage?.encryptedMessage).toBeNull();
   });
 
   it('should reset FAILED messages to WAITING_SESSION when renewing', async () => {
-    const failedMessageId = await insertMessage({
+    const failedMessageId = await getTestQueries().messages.insert({
       ownerUserId: RENEW_OWNER_USER_ID,
       contactUserId: RENEW_CONTACT_USER_ID,
       content: 'Failed message',
@@ -349,14 +358,15 @@ describe('DiscussionService renew message reset behavior', () => {
 
     await simulateRenewMessageReset(RENEW_OWNER_USER_ID, RENEW_CONTACT_USER_ID);
 
-    const failedMessage = await getMessageById(failedMessageId);
+    const failedMessage =
+      await getTestQueries().messages.getById(failedMessageId);
     expect(failedMessage?.status).toBe(MessageStatus.WAITING_SESSION);
     expect(failedMessage?.seeker).toBeNull();
     expect(failedMessage?.encryptedMessage).toBeNull();
   });
 
   it('should reset SENT messages to WAITING_SESSION when renewing session', async () => {
-    const sentMessageId = await insertMessage({
+    const sentMessageId = await getTestQueries().messages.insert({
       ownerUserId: RENEW_OWNER_USER_ID,
       contactUserId: RENEW_CONTACT_USER_ID,
       content: 'Already sent message',
@@ -370,14 +380,14 @@ describe('DiscussionService renew message reset behavior', () => {
 
     await simulateRenewMessageReset(RENEW_OWNER_USER_ID, RENEW_CONTACT_USER_ID);
 
-    const sentMessage = await getMessageById(sentMessageId);
+    const sentMessage = await getTestQueries().messages.getById(sentMessageId);
     expect(sentMessage?.status).toBe(MessageStatus.WAITING_SESSION);
     expect(sentMessage?.seeker).toBeNull();
     expect(sentMessage?.encryptedMessage).toBeNull();
   });
 
   it('should NOT reset DELIVERED messages when renewing session', async () => {
-    const deliveredMessageId = await insertMessage({
+    const deliveredMessageId = await getTestQueries().messages.insert({
       ownerUserId: RENEW_OWNER_USER_ID,
       contactUserId: RENEW_CONTACT_USER_ID,
       content: 'Delivered message',
@@ -391,14 +401,15 @@ describe('DiscussionService renew message reset behavior', () => {
 
     await simulateRenewMessageReset(RENEW_OWNER_USER_ID, RENEW_CONTACT_USER_ID);
 
-    const deliveredMessage = await getMessageById(deliveredMessageId);
+    const deliveredMessage =
+      await getTestQueries().messages.getById(deliveredMessageId);
     expect(deliveredMessage?.status).toBe(MessageStatus.DELIVERED);
     expect(deliveredMessage?.seeker).toBeDefined();
     expect(deliveredMessage?.encryptedMessage).toBeDefined();
   });
 
   it('should NOT reset READ messages when renewing session', async () => {
-    const readMessageId = await insertMessage({
+    const readMessageId = await getTestQueries().messages.insert({
       ownerUserId: RENEW_OWNER_USER_ID,
       contactUserId: RENEW_CONTACT_USER_ID,
       content: 'Read message',
@@ -412,13 +423,13 @@ describe('DiscussionService renew message reset behavior', () => {
 
     await simulateRenewMessageReset(RENEW_OWNER_USER_ID, RENEW_CONTACT_USER_ID);
 
-    const readMessage = await getMessageById(readMessageId);
+    const readMessage = await getTestQueries().messages.getById(readMessageId);
     expect(readMessage?.status).toBe(MessageStatus.READ);
     expect(readMessage?.seeker).toBeDefined();
   });
 
   it('should handle mixed message statuses correctly on renew', async () => {
-    const sentId = await insertMessage({
+    const sentId = await getTestQueries().messages.insert({
       ownerUserId: RENEW_OWNER_USER_ID,
       contactUserId: RENEW_CONTACT_USER_ID,
       content: 'Sent',
@@ -430,7 +441,7 @@ describe('DiscussionService renew message reset behavior', () => {
       encryptedMessage: new Uint8Array(64).fill(1),
     });
 
-    const sendingId = await insertMessage({
+    const sendingId = await getTestQueries().messages.insert({
       ownerUserId: RENEW_OWNER_USER_ID,
       contactUserId: RENEW_CONTACT_USER_ID,
       content: 'Sending',
@@ -442,7 +453,7 @@ describe('DiscussionService renew message reset behavior', () => {
       encryptedMessage: new Uint8Array(64).fill(2),
     });
 
-    const failedId = await insertMessage({
+    const failedId = await getTestQueries().messages.insert({
       ownerUserId: RENEW_OWNER_USER_ID,
       contactUserId: RENEW_CONTACT_USER_ID,
       content: 'Failed',
@@ -452,7 +463,7 @@ describe('DiscussionService renew message reset behavior', () => {
       timestamp: new Date(),
     });
 
-    const deliveredId = await insertMessage({
+    const deliveredId = await getTestQueries().messages.insert({
       ownerUserId: RENEW_OWNER_USER_ID,
       contactUserId: RENEW_CONTACT_USER_ID,
       content: 'Delivered',
@@ -464,7 +475,7 @@ describe('DiscussionService renew message reset behavior', () => {
       encryptedMessage: new Uint8Array(64).fill(3),
     });
 
-    const waitingId = await insertMessage({
+    const waitingId = await getTestQueries().messages.insert({
       ownerUserId: RENEW_OWNER_USER_ID,
       contactUserId: RENEW_CONTACT_USER_ID,
       content: 'Waiting',
@@ -476,28 +487,28 @@ describe('DiscussionService renew message reset behavior', () => {
 
     await simulateRenewMessageReset(RENEW_OWNER_USER_ID, RENEW_CONTACT_USER_ID);
 
-    const sent = await getMessageById(sentId);
+    const sent = await getTestQueries().messages.getById(sentId);
     expect(sent?.status).toBe(MessageStatus.WAITING_SESSION);
     expect(sent?.seeker).toBeNull();
 
-    const sending = await getMessageById(sendingId);
+    const sending = await getTestQueries().messages.getById(sendingId);
     expect(sending?.status).toBe(MessageStatus.WAITING_SESSION);
     expect(sending?.seeker).toBeNull();
 
-    const failed = await getMessageById(failedId);
+    const failed = await getTestQueries().messages.getById(failedId);
     expect(failed?.status).toBe(MessageStatus.WAITING_SESSION);
 
-    const delivered = await getMessageById(deliveredId);
+    const delivered = await getTestQueries().messages.getById(deliveredId);
     expect(delivered?.status).toBe(MessageStatus.DELIVERED);
     expect(delivered?.seeker).toBeDefined();
     expect(delivered?.encryptedMessage).toBeDefined();
 
-    const waiting = await getMessageById(waitingId);
+    const waiting = await getTestQueries().messages.getById(waitingId);
     expect(waiting?.status).toBe(MessageStatus.WAITING_SESSION);
   });
 
   it('should NOT reset incoming messages when renewing', async () => {
-    const incomingId = await insertMessage({
+    const incomingId = await getTestQueries().messages.insert({
       ownerUserId: RENEW_OWNER_USER_ID,
       contactUserId: RENEW_CONTACT_USER_ID,
       content: 'Incoming message',
@@ -509,7 +520,7 @@ describe('DiscussionService renew message reset behavior', () => {
 
     await simulateRenewMessageReset(RENEW_OWNER_USER_ID, RENEW_CONTACT_USER_ID);
 
-    const incoming = await getMessageById(incomingId);
+    const incoming = await getTestQueries().messages.getById(incomingId);
     expect(incoming?.status).toBe(MessageStatus.DELIVERED);
   });
 });

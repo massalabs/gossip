@@ -1,20 +1,20 @@
 import { inArray } from 'drizzle-orm';
 import * as schema from '../schema';
-import { getSqliteDb } from '../sqlite';
+import type { DatabaseConnection } from '../sqlite';
 
 export type PendingAnnouncementRow =
   typeof schema.pendingAnnouncements.$inferSelect;
 
-export async function getAllPendingAnnouncements(): Promise<
-  PendingAnnouncementRow[]
-> {
-  return getSqliteDb().select().from(schema.pendingAnnouncements).all();
-}
+export class PendingAnnouncementQueries {
+  constructor(private conn: DatabaseConnection) {}
 
-export async function deletePendingAnnouncementsByIds(
-  ids: number[]
-): Promise<void> {
-  await getSqliteDb()
-    .delete(schema.pendingAnnouncements)
-    .where(inArray(schema.pendingAnnouncements.id, ids));
+  async getAll(): Promise<PendingAnnouncementRow[]> {
+    return this.conn.db.select().from(schema.pendingAnnouncements).all();
+  }
+
+  async deleteByIds(ids: number[]): Promise<void> {
+    await this.conn.db
+      .delete(schema.pendingAnnouncements)
+      .where(inArray(schema.pendingAnnouncements.id, ids));
+  }
 }

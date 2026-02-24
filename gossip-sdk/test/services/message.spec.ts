@@ -23,14 +23,7 @@ import { encodeUserId, decodeUserId } from '../../src/utils/userId';
 import { SessionStatus } from '../../src/wasm/bindings';
 import { defaultSdkConfig } from '../../src/config/sdk';
 import { SdkEventEmitter } from '../../src/core/SdkEventEmitter';
-import { clearAllTables } from '../../src/db';
-import {
-  insertMessage,
-  getMessageById,
-  getMessagesByOwnerAndContact,
-} from '../../src/db';
-import { insertDiscussion, getDiscussionByOwnerAndContact } from '../../src/db';
-import { insertContact } from '../../src/db';
+import { clearAllTables, getTestQueries } from '../testDb';
 import { MockMessageProtocol } from '../mocks';
 
 const OWNER_USER_ID = encodeUserId(new Uint8Array(32).fill(1));
@@ -85,7 +78,7 @@ async function insertTestContactAndDiscussion(
   ownerUserId: string = OWNER_USER_ID,
   contactUserId: string = CONTACT_USER_ID
 ) {
-  await insertContact({
+  await getTestQueries().contacts.insert({
     ownerUserId,
     userId: contactUserId,
     name: 'Test Contact',
@@ -95,7 +88,7 @@ async function insertTestContactAndDiscussion(
     createdAt: new Date(),
   });
 
-  await insertDiscussion({
+  await getTestQueries().discussions.insert({
     ownerUserId,
     contactUserId,
     direction: DiscussionDirection.INITIATED,
@@ -112,7 +105,7 @@ describe('MessageService', () => {
 
   it('finds message by seeker', async () => {
     const seeker = new Uint8Array(32).fill(5);
-    await insertMessage({
+    await getTestQueries().messages.insert({
       ownerUserId: OWNER_USER_ID,
       contactUserId: CONTACT_USER_ID,
       content: 'Hello',
@@ -126,7 +119,9 @@ describe('MessageService', () => {
     const service = new MessageService(
       new MockMessageProtocol(),
       createMockSession(),
-      new SdkEventEmitter()
+      new SdkEventEmitter(),
+      defaultSdkConfig,
+      getTestQueries()
     );
     const message = await service.findMessageBySeeker(seeker, OWNER_USER_ID);
 
@@ -140,7 +135,9 @@ describe('MessageService', () => {
     const service = new MessageService(
       new MockMessageProtocol(),
       createMockSession(),
-      new SdkEventEmitter()
+      new SdkEventEmitter(),
+      defaultSdkConfig,
+      getTestQueries()
     );
     const message = await service.findMessageBySeeker(seeker, OWNER_USER_ID);
 
@@ -149,7 +146,7 @@ describe('MessageService', () => {
 
   describe('sendMessage queues as WAITING_SESSION', () => {
     beforeEach(async () => {
-      await insertDiscussion({
+      await getTestQueries().discussions.insert({
         ownerUserId: OWNER_USER_ID,
         contactUserId: CONTACT_USER_ID,
         direction: DiscussionDirection.INITIATED,
@@ -172,7 +169,9 @@ describe('MessageService', () => {
         const service = new MessageService(
           new MockMessageProtocol(),
           createMockSession(OWNER_USER_ID, status),
-          new SdkEventEmitter()
+          new SdkEventEmitter(),
+          defaultSdkConfig,
+          getTestQueries()
         );
 
         const result = await service.sendMessage(createTestMessage());
@@ -180,7 +179,9 @@ describe('MessageService', () => {
         expect(result.success).toBe(true);
         expect(result.message?.status).toBe(MessageStatus.WAITING_SESSION);
 
-        const dbMessage = await getMessageById(result.message!.id!);
+        const dbMessage = await getTestQueries().messages.getById(
+          result.message!.id!
+        );
         expect(dbMessage?.status).toBe(MessageStatus.WAITING_SESSION);
       }
     );
@@ -189,15 +190,18 @@ describe('MessageService', () => {
       const service = new MessageService(
         new MockMessageProtocol(),
         createMockSession(OWNER_USER_ID, SessionStatus.NoSession),
-        new SdkEventEmitter()
+        new SdkEventEmitter(),
+        defaultSdkConfig,
+        getTestQueries()
       );
 
       await service.sendMessage(createTestMessage());
 
-      const discussion = await getDiscussionByOwnerAndContact(
-        OWNER_USER_ID,
-        CONTACT_USER_ID
-      );
+      const discussion =
+        await getTestQueries().discussions.getByOwnerAndContact(
+          OWNER_USER_ID,
+          CONTACT_USER_ID
+        );
       expect(discussion?.status).toBe(DiscussionStatus.ACTIVE);
     });
   });
@@ -212,7 +216,8 @@ describe('sendMessage: missing contact or discussion', () => {
       new MockMessageProtocol(),
       createMockSession(),
       new SdkEventEmitter(),
-      defaultSdkConfig
+      defaultSdkConfig,
+      getTestQueries()
     );
   });
 
@@ -224,7 +229,7 @@ describe('sendMessage: missing contact or discussion', () => {
   });
 
   it('should fail when discussion not found', async () => {
-    await insertContact({
+    await getTestQueries().contacts.insert({
       ownerUserId: OWNER_USER_ID,
       userId: CONTACT_USER_ID,
       name: 'Test Contact',
@@ -270,7 +275,8 @@ describe('processSendQueueForContact: Encryption Error', () => {
       new MockMessageProtocol(),
       mockSession,
       new SdkEventEmitter(),
-      defaultSdkConfig
+      defaultSdkConfig,
+      getTestQueries()
     );
 
     await messageService.sendMessage(createTestMessage());
@@ -293,7 +299,8 @@ describe('processSendQueueForContact: Encryption Error', () => {
       new MockMessageProtocol(),
       mockSession,
       new SdkEventEmitter(),
-      defaultSdkConfig
+      defaultSdkConfig,
+      getTestQueries()
     );
 
     const sendResult = await messageService.sendMessage(createTestMessage());
@@ -303,7 +310,7 @@ describe('processSendQueueForContact: Encryption Error', () => {
       .processSendQueueForContact(CONTACT_USER_ID)
       .catch(() => {});
 
-    const messages = await getMessagesByOwnerAndContact(
+    const messages = await getTestQueries().messages.getByOwnerAndContact(
       OWNER_USER_ID,
       CONTACT_USER_ID
     );

@@ -93,13 +93,16 @@ export class NodeFsVFS extends VFS.Base {
     const file = this.mapIdToFile.get(fileId);
     if (!file) return VFS.SQLITE_IOERR;
 
-    const nRead = fs.readSync(file.fd, pData, 0, pData.byteLength, iOffset);
-
-    if (nRead < pData.byteLength) {
-      pData.fill(0, nRead);
-      return VFS.SQLITE_IOERR_SHORT_READ;
+    try {
+      const nRead = fs.readSync(file.fd, pData, 0, pData.byteLength, iOffset);
+      if (nRead < pData.byteLength) {
+        pData.fill(0, nRead);
+        return VFS.SQLITE_IOERR_SHORT_READ;
+      }
+      return VFS.SQLITE_OK;
+    } catch {
+      return VFS.SQLITE_IOERR;
     }
-    return VFS.SQLITE_OK;
   }
 
   xWrite(
@@ -111,33 +114,49 @@ export class NodeFsVFS extends VFS.Base {
     const file = this.mapIdToFile.get(fileId);
     if (!file) return VFS.SQLITE_IOERR;
 
-    fs.writeSync(file.fd, pData, 0, pData.byteLength, iOffset);
-    return VFS.SQLITE_OK;
+    try {
+      fs.writeSync(file.fd, pData, 0, pData.byteLength, iOffset);
+      return VFS.SQLITE_OK;
+    } catch {
+      return VFS.SQLITE_IOERR;
+    }
   }
 
   xTruncate(fileId: number, iSize: number): number {
     const file = this.mapIdToFile.get(fileId);
     if (!file) return VFS.SQLITE_IOERR;
 
-    fs.ftruncateSync(file.fd, iSize);
-    return VFS.SQLITE_OK;
+    try {
+      fs.ftruncateSync(file.fd, iSize);
+      return VFS.SQLITE_OK;
+    } catch {
+      return VFS.SQLITE_IOERR;
+    }
   }
 
   xSync(fileId: number, _flags: number): number {
     const file = this.mapIdToFile.get(fileId);
     if (!file) return VFS.SQLITE_IOERR;
 
-    fs.fsyncSync(file.fd);
-    return VFS.SQLITE_OK;
+    try {
+      fs.fsyncSync(file.fd);
+      return VFS.SQLITE_OK;
+    } catch {
+      return VFS.SQLITE_IOERR;
+    }
   }
 
   xFileSize(fileId: number, pSize64: DataView): number {
     const file = this.mapIdToFile.get(fileId);
     if (!file) return VFS.SQLITE_IOERR;
 
-    const size = fs.fstatSync(file.fd).size;
-    pSize64.setBigInt64(0, BigInt(size), true);
-    return VFS.SQLITE_OK;
+    try {
+      const size = fs.fstatSync(file.fd).size;
+      pSize64.setBigInt64(0, BigInt(size), true);
+      return VFS.SQLITE_OK;
+    } catch {
+      return VFS.SQLITE_IOERR;
+    }
   }
 
   xDelete(name: string, _syncDir: number): number {

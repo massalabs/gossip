@@ -15,11 +15,13 @@ import PageLayout from '../components/ui/PageLayout';
 import { Check, Edit2, ChevronRight, RotateCw } from 'react-feather';
 import { ROUTES } from '../constants/routes';
 import { useManualRenewDiscussion } from '../hooks/useManualRenew';
-import { updateDiscussionName, Contact } from '@massalabs/gossip-sdk';
+import type { Contact } from '@massalabs/gossip-sdk';
+import { useGossipSdk } from '../hooks/useGossipSdk';
 
 const DiscussionSettings: React.FC = () => {
   const { discussionId } = useParams();
   const navigate = useNavigate();
+  const gossip = useGossipSdk();
 
   const discussions = useDiscussionStore(s => s.discussions);
   const contacts = useDiscussionStore(s => s.contacts);
@@ -92,7 +94,7 @@ const DiscussionSettings: React.FC = () => {
     async (name?: string) => {
       if (!discussion?.id) return;
 
-      const result = await updateDiscussionName(discussion.id, name);
+      const result = await gossip.discussions.updateName(discussion.id, name);
       if (!result.success) {
         setNameError(result.message);
         return;
@@ -101,7 +103,7 @@ const DiscussionSettings: React.FC = () => {
       setIsNameModalOpen(false);
       setShowSuccessCheck(true);
     },
-    [discussion?.id]
+    [gossip, discussion?.id]
   );
 
   const handleNavigateToContact = useCallback(

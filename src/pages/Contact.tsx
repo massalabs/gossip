@@ -11,11 +11,7 @@ import PageLayout from '../components/ui/PageLayout';
 import UserIdDisplay from '../components/ui/UserIdDisplay';
 import BaseModal from '../components/ui/BaseModal';
 import { Check, Edit2, Trash2 } from 'react-feather';
-import {
-  UserPublicKeys,
-  SessionStatus,
-  updateContactName,
-} from '@massalabs/gossip-sdk';
+import { UserPublicKeys, SessionStatus } from '@massalabs/gossip-sdk';
 import { ROUTES } from '../constants/routes';
 import { useGossipSdk } from '../hooks/useGossipSdk';
 
@@ -71,8 +67,8 @@ const Contact: React.FC = () => {
 
   const handleSaveName = useCallback(
     async (name: string) => {
-      if (!ownerUserId || !contact) return;
-      const result = await updateContactName(ownerUserId, contact.userId, name);
+      if (!contact) return;
+      const result = await gossip.contacts.updateName(contact.userId, name);
       if (!result.success) {
         setNameError(result.message);
         return;
@@ -81,7 +77,7 @@ const Contact: React.FC = () => {
       setIsNameModalOpen(false);
       setShowSuccessCheck(true);
     },
-    [ownerUserId, contact]
+    [gossip, contact]
   );
 
   // Hide success check after 3 seconds

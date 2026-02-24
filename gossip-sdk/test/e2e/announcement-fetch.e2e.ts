@@ -19,9 +19,7 @@ import {
 } from '../../src/db';
 import { generateMnemonic } from '../../src/crypto/bip39';
 import { protocolConfig } from '../../src/config/protocol';
-import { eq } from 'drizzle-orm';
-import { getSqliteDb } from '../../src/db';
-import * as schema from '../../src/db/schema';
+import { getTestStorageConfig } from '../testDb';
 
 describe('E2E: Announcement fetch (real API, real account)', () => {
   let sdk: GossipSdk;
@@ -30,6 +28,7 @@ describe('E2E: Announcement fetch (real API, real account)', () => {
     sdk = new GossipSdk();
     await sdk.init({
       protocolBaseUrl: protocolConfig.baseUrl,
+      storage: getTestStorageConfig(),
     });
   });
 
@@ -68,22 +67,17 @@ describe('E2E: Announcement fetch (real API, real account)', () => {
       const first = await sdk.announcements.fetch();
       expect(first).toBeDefined();
 
-      const cursorRow = await getSqliteDb()
-        .select({ counter: schema.announcementCursors.counter })
-        .from(schema.announcementCursors)
-        .where(eq(schema.announcementCursors.userId, sdk.userId))
-        .get();
-      const cursorBeforeSecond = cursorRow?.counter;
+      const cursorBeforeSecond = await sdk.queries.announcementCursors.get(
+        sdk.userId
+      );
 
       const second = await sdk.announcements.fetch();
       expect(second).toBeDefined();
-      const cursorRowAfter = await getSqliteDb()
-        .select({ counter: schema.announcementCursors.counter })
-        .from(schema.announcementCursors)
-        .where(eq(schema.announcementCursors.userId, sdk.userId))
-        .get();
+      const cursorAfterSecond = await sdk.queries.announcementCursors.get(
+        sdk.userId
+      );
       if (cursorBeforeSecond !== undefined && first.newAnnouncementsCount > 0) {
-        expect(cursorRowAfter?.counter).toBeDefined();
+        expect(cursorAfterSecond).toBeDefined();
       }
     }
   );
@@ -100,6 +94,7 @@ describe('E2E: Discussion request (user A sends to user B)', () => {
       const sdkB = new GossipSdk();
       await sdkB.init({
         protocolBaseUrl: baseUrl,
+        storage: getTestStorageConfig(),
         config: {
           announcements: { fetchLimit: 1000 },
         },
@@ -112,7 +107,10 @@ describe('E2E: Discussion request (user A sends to user B)', () => {
 
       // ─── User A: create account ───
       const sdkA = new GossipSdk();
-      await sdkA.init({ protocolBaseUrl: baseUrl });
+      await sdkA.init({
+        protocolBaseUrl: baseUrl,
+        storage: getTestStorageConfig(),
+      });
 
       const mnemonicA = generateMnemonic();
       await sdkA.openSession({ mnemonic: mnemonicA });
@@ -142,13 +140,9 @@ describe('E2E: Discussion request (user A sends to user B)', () => {
       });
 
       // ─── A should have one discussion (INITIATED) toward B ───
-      const discussionsA = (
-        await getSqliteDb()
-          .select()
-          .from(schema.discussions)
-          .where(eq(schema.discussions.ownerUserId, userAId))
-          .all()
-      ).map(r => rowToDiscussion(r));
+      const discussionRowsA =
+        await sdkA.queries.discussions.getByOwner(userAId);
+      const discussionsA = discussionRowsA.map(r => rowToDiscussion(r));
       const sentDiscussion = discussionsA.find(
         d =>
           d.contactUserId === userBId &&

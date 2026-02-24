@@ -12,23 +12,7 @@ import {
   MessageType,
   MESSAGE_ID_SIZE,
 } from '../db';
-import {
-  type MessageRow,
-  getMessageById,
-  getMessageByOwnerAndSeeker,
-  findMessageByMessageId,
-  insertMessage,
-  updateMessageById,
-  deleteDeliveredKeepAliveMessages,
-  getOutgoingSentMessagesByOwner,
-  getWaitingMessageCount as getWaitingCount,
-  getSendQueueMessages,
-  getDiscussionByOwnerAndContact,
-  updateDiscussionById,
-  incrementUnreadCount,
-  decrementUnreadCount,
-  replaceActiveSeekers,
-} from '../db';
+import { type MessageRow } from '../db';
 import { decodeUserId, encodeUserId } from '../utils/userId';
 import { IMessageProtocol, EncryptedMessage } from '../api/messageProtocol';
 import { SessionStatus } from '../wasm/bindings';
@@ -47,6 +31,16 @@ import { Logger } from '../utils/logs';
 import { SdkConfig, defaultSdkConfig } from '../config/sdk';
 import { SdkEventEmitter, SdkEventType } from '../core/SdkEventEmitter';
 import type { RefreshService } from './refresh';
+import { Queries } from '../db/queries';
+import { QueueManager } from '../utils/queue';
+
+/** Options for the simplified sendText method */
+export interface SendTextOptions {
+  /** Reply to an existing message */
+  replyTo?: { originalMsgId: Uint8Array };
+  /** Arbitrary metadata to attach */
+  metadata?: Record<string, unknown>;
+}
 
 // ---------------------------------------------------------------------------
 // JSON serialization helpers for message fields stored as text in SQLite
@@ -179,23 +173,31 @@ export class MessageService {
   private eventEmitter: SdkEventEmitter;
   private config: SdkConfig;
   private refreshService?: RefreshService;
+  private queueManager?: QueueManager;
   private processingContacts = new Set<string>();
   private isFetchingMessages = false;
+  private queries: Queries;
 
   constructor(
     messageProtocol: IMessageProtocol,
     session: SessionModule,
     eventEmitter: SdkEventEmitter,
-    config: SdkConfig = defaultSdkConfig
+    config: SdkConfig = defaultSdkConfig,
+    queries: Queries
   ) {
     this.messageProtocol = messageProtocol;
     this.session = session;
     this.eventEmitter = eventEmitter;
     this.config = config;
+    this.queries = queries;
   }
 
   setRefreshService(refreshService: RefreshService): void {
     this.refreshService = refreshService;
+  }
+
+  setQueueManager(queueManager: QueueManager): void {
+    this.queueManager = queueManager;
   }
 
   async fetchMessages(): Promise<MessageResult> {
@@ -275,7 +277,7 @@ export class MessageService {
       }
 
       try {
-        await replaceActiveSeekers(seekers);
+        await this.queries.activeSeekers.replaceAll(seekers);
         this.eventEmitter.emit(SdkEventType.SEEKERS_UPDATED, seekers);
       } catch (error) {
         log.error('failed to update active seekers', error);
@@ -304,7 +306,7 @@ export class MessageService {
   private async addMessageAndUpdateDiscussion(
     message: Omit<Message, 'id'>
   ): Promise<number> {
-    const messageId = await insertMessage({
+    const messageId = await this.queries.messages.insert({
       messageId: message.messageId,
       ownerUserId: message.ownerUserId,
       contactUserId: message.contactUserId,
@@ -322,13 +324,13 @@ export class MessageService {
       whenToSend: message.whenToSend,
     });
 
-    const discussion = await getDiscussionByOwnerAndContact(
+    const discussion = await this.queries.discussions.getByOwnerAndContact(
       message.ownerUserId,
       message.contactUserId
     );
 
     if (discussion) {
-      await updateDiscussionById(discussion.id, {
+      await this.queries.discussions.updateById(discussion.id, {
         lastMessageId: messageId,
         lastMessageContent: message.content,
         lastMessageTimestamp: message.timestamp,
@@ -336,7 +338,7 @@ export class MessageService {
       });
 
       if (message.direction === MessageDirection.INCOMING) {
-        await incrementUnreadCount(discussion.id);
+        await this.queries.discussions.incrementUnreadCount(discussion.id);
       }
     }
 
@@ -421,7 +423,7 @@ export class MessageService {
     const storedIds: number[] = [];
 
     for (const message of decrypted) {
-      const discussion = await getDiscussionByOwnerAndContact(
+      const discussion = await this.queries.discussions.getByOwnerAndContact(
         ownerUserId,
         message.senderId
       );
@@ -461,7 +463,7 @@ export class MessageService {
         }
       }
 
-      const id = await insertMessage({
+      const id = await this.queries.messages.insert({
         messageId: message.messageId,
         ownerUserId,
         contactUserId: discussion.contactUserId,
@@ -477,19 +479,19 @@ export class MessageService {
 
       // Update discussion in SQLite
       const now = new Date();
-      await updateDiscussionById(discussion.id, {
+      await this.queries.discussions.updateById(discussion.id, {
         lastMessageId: id,
         lastMessageContent: message.content,
         lastMessageTimestamp: message.sentAt,
         updatedAt: now,
         lastSyncTimestamp: now,
       });
-      await incrementUnreadCount(discussion.id);
+      await this.queries.discussions.incrementUnreadCount(discussion.id);
 
       storedIds.push(id);
 
       // Emit event for new message
-      const row = await getMessageById(id);
+      const row = await this.queries.messages.getById(id);
       if (row) {
         this.eventEmitter.emit(
           SdkEventType.MESSAGE_RECEIVED,
@@ -510,7 +512,7 @@ export class MessageService {
     ownerUserId: string
   ): Promise<boolean> {
     if (message.messageId && message.messageId.length > 0) {
-      const existing = await findMessageByMessageId(
+      const existing = await this.queries.messages.findByMessageId(
         ownerUserId,
         message.senderId,
         message.messageId
@@ -529,11 +531,9 @@ export class MessageService {
     contactUserId?: string
   ): Promise<Message | undefined> {
     if (!contactUserId) {
-      // Without contactUserId, fall back to seeker-based lookup is not possible
-      // with messageId. Return undefined.
       return undefined;
     }
-    const row = await findMessageByMessageId(
+    const row = await this.queries.messages.findByMessageId(
       ownerUserId,
       contactUserId,
       messageId
@@ -545,7 +545,10 @@ export class MessageService {
     seeker: Uint8Array,
     ownerUserId: string
   ): Promise<Message | undefined> {
-    const row = await getMessageByOwnerAndSeeker(ownerUserId, seeker);
+    const row = await this.queries.messages.getByOwnerAndSeeker(
+      ownerUserId,
+      seeker
+    );
     return row ? rowToMessage(row) : undefined;
   }
 
@@ -556,7 +559,8 @@ export class MessageService {
     if (seekers.size === 0) return;
 
     // Find SENT outgoing messages, then filter by seeker match
-    const candidates = await getOutgoingSentMessagesByOwner(userId);
+    const candidates =
+      await this.queries.messages.getOutgoingSentByOwner(userId);
 
     const toUpdate = candidates.filter(
       m => m.seeker != null && seekers.has(encodeToBase64(m.seeker))
@@ -564,7 +568,7 @@ export class MessageService {
 
     // Mark matching OUTGOING SENT messages as DELIVERED and clear encrypted data
     for (const m of toUpdate) {
-      await updateMessageById(m.id, {
+      await this.queries.messages.updateById(m.id, {
         status: MessageStatus.DELIVERED,
         encryptedMessage: null,
         serializedContent: null,
@@ -574,7 +578,7 @@ export class MessageService {
     }
 
     // After marking as DELIVERED, clean up DELIVERED keep-alive messages
-    await deleteDeliveredKeepAliveMessages(userId);
+    await this.queries.messages.deleteDeliveredKeepAlive(userId);
 
     if (toUpdate.length > 0) {
       logger
@@ -598,7 +602,7 @@ export class MessageService {
     }
 
     // Look up discussion
-    const discussion = await getDiscussionByOwnerAndContact(
+    const discussion = await this.queries.discussions.getByOwnerAndContact(
       message.ownerUserId,
       message.contactUserId
     );
@@ -721,7 +725,7 @@ export class MessageService {
 
       for (const msg of retryMessages) {
         if (!msg.id) continue;
-        await updateMessageById(msg.id, {
+        await this.queries.messages.updateById(msg.id, {
           status: MessageStatus.WAITING_SESSION,
           encryptedMessage: null,
           seeker: null,
@@ -755,7 +759,7 @@ export class MessageService {
 
     this.processingContacts.add(contactUserId);
     try {
-      const discussion = await getDiscussionByOwnerAndContact(
+      const discussion = await this.queries.discussions.getByOwnerAndContact(
         ownerUserId,
         contactUserId
       );
@@ -788,7 +792,7 @@ export class MessageService {
 
       // retrieve all messages in send queue that need to be updated for this contact
       const pendingMessages = (
-        await getSendQueueMessages(ownerUserId, contactUserId)
+        await this.queries.messages.getSendQueue(ownerUserId, contactUserId)
       ).map(rowToMessage);
 
       log.debug('pending messages', {
@@ -851,7 +855,7 @@ export class MessageService {
           seeker = sendOutput.seeker;
           whenToSend = new Date();
 
-          await updateMessageById(msg.id, {
+          await this.queries.messages.updateById(msg.id, {
             status: MessageStatus.READY,
             encryptedMessage,
             seeker,
@@ -883,7 +887,7 @@ export class MessageService {
           }
 
           if (!encryptedMessage || !seeker) {
-            await updateMessageById(msg.id, {
+            await this.queries.messages.updateById(msg.id, {
               status: MessageStatus.WAITING_SESSION,
               encryptedMessage: null,
               seeker: null,
@@ -913,14 +917,14 @@ export class MessageService {
             });
 
             // update the db — check latest state to avoid race conditions
-            const latestRow = await getMessageById(msg.id);
+            const latestRow = await this.queries.messages.getById(msg.id);
 
             let sent = false;
             if (
               latestRow && // ensure the discussion has not been deleted
               latestRow.status === MessageStatus.READY // ensure the discussion has not been reset with all pending messages reset to WAITING_SESSION
             ) {
-              await updateMessageById(msg.id, {
+              await this.queries.messages.updateById(msg.id, {
                 status: MessageStatus.SENT,
                 encryptedMessage: null,
                 serializedContent: null,
@@ -955,12 +959,12 @@ export class MessageService {
               messageId: msg.id,
               error,
             });
-            const latestRow = await getMessageById(msg.id);
+            const latestRow = await this.queries.messages.getById(msg.id);
             if (
               latestRow && // ensure the discussion has not been deleted
               latestRow.status === MessageStatus.READY // ensure the discussion has not been reset with all pending messages reset to WAITING_SESSION
             ) {
-              await updateMessageById(msg.id, {
+              await this.queries.messages.updateById(msg.id, {
                 whenToSend: new Date(
                   Date.now() + this.config.messages.retryDelayMs
                 ),
@@ -981,7 +985,10 @@ export class MessageService {
    */
   async getPendingSendCount(contactUserId: string): Promise<number> {
     const ownerUserId = this.session.userIdEncoded;
-    const rows = await getSendQueueMessages(ownerUserId, contactUserId);
+    const rows = await this.queries.messages.getSendQueue(
+      ownerUserId,
+      contactUserId
+    );
     return rows.length;
   }
 
@@ -1023,13 +1030,13 @@ export class MessageService {
    */
   async getWaitingMessageCount(contactUserId: string): Promise<number> {
     const ownerUserId = this.session.userIdEncoded;
-    return getWaitingCount(ownerUserId, contactUserId);
+    return this.queries.messages.getWaitingCount(ownerUserId, contactUserId);
   }
 
   // Mark a message as read. Returns true if the message has been marked as read, false if it was already marked as read or doesn't exist.
   async markAsRead(id: number): Promise<boolean> {
     // Check current message status from DB to avoid race conditions
-    const row = await getMessageById(id);
+    const row = await this.queries.messages.getById(id);
 
     if (!row || row.status !== MessageStatus.DELIVERED) {
       // Message was already marked as read or doesn't exist
@@ -1039,16 +1046,16 @@ export class MessageService {
     const message = rowToMessage(row);
 
     // Update message status
-    await updateMessageById(id, { status: MessageStatus.READ });
+    await this.queries.messages.updateById(id, { status: MessageStatus.READ });
 
     // Atomically decrement discussion unread count
-    const discussion = await getDiscussionByOwnerAndContact(
+    const discussion = await this.queries.discussions.getByOwnerAndContact(
       message.ownerUserId,
       message.contactUserId
     );
 
     if (discussion) {
-      await decrementUnreadCount(discussion.id);
+      await this.queries.discussions.decrementUnreadCount(discussion.id);
     }
 
     this.eventEmitter.emit(SdkEventType.MESSAGE_READ, id);

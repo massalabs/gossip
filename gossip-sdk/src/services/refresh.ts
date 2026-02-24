@@ -6,7 +6,6 @@
  */
 
 import { MessageType, MessageDirection, MessageStatus } from '../db';
-import { getDiscussionsByOwner } from '../db';
 import { toSortedDiscussions } from '../utils/discussions';
 import type { SessionModule } from '../wasm/session';
 import { SessionStatus } from '../wasm/bindings';
@@ -16,6 +15,7 @@ import { AnnouncementService } from './announcement';
 import { DiscussionService } from './discussion';
 import { Logger } from '../utils/logs';
 import { SdkEventEmitter, SdkEventType } from '../core/SdkEventEmitter';
+import { Queries } from '../db/queries';
 
 const logger = new Logger('RefreshService');
 
@@ -43,19 +43,22 @@ export class RefreshService {
   private session: SessionModule;
   private isUpdating = false;
   private eventEmitter: SdkEventEmitter;
+  private queries: Queries;
 
   constructor(
     messageService: MessageService,
     discussionService: DiscussionService,
     announcementService: AnnouncementService,
     session: SessionModule,
-    eventEmitter: SdkEventEmitter
+    eventEmitter: SdkEventEmitter,
+    queries: Queries
   ) {
     this.messageService = messageService;
     this.discussionService = discussionService;
     this.announcementService = announcementService;
     this.session = session;
     this.eventEmitter = eventEmitter;
+    this.queries = queries;
   }
 
   /**
@@ -83,7 +86,7 @@ export class RefreshService {
         return;
       }
 
-      const allRows = await getDiscussionsByOwner(ownerUserId);
+      const allRows = await this.queries.discussions.getByOwner(ownerUserId);
       const discussions = toSortedDiscussions(allRows);
 
       if (!discussions.length) {
@@ -144,7 +147,8 @@ export class RefreshService {
       }
 
       // Step 2: send announcements
-      const refreshRows = await getDiscussionsByOwner(ownerUserId);
+      const refreshRows =
+        await this.queries.discussions.getByOwner(ownerUserId);
       const discussionsAfterRefresh = toSortedDiscussions(refreshRows);
       const activePendingDiscussions = discussionsAfterRefresh.filter(
         discussion => {
