@@ -357,6 +357,20 @@ export class AnnouncementService {
     }
   }
 
+  // ─────────────────────────────────────────────────────────────────
+  // Consumer-facing aliases
+  // ─────────────────────────────────────────────────────────────────
+
+  /** Fetch and process announcements from the protocol (alias) */
+  async fetch(): Promise<AnnouncementReceptionResult> {
+    return this.fetchAndProcessAnnouncements();
+  }
+
+  /** Skip historical announcements for a new account (alias) */
+  async skipHistorical(): Promise<void> {
+    return this.skipHistoricalAnnouncements();
+  }
+
   private async _fetchAnnouncements(
     cursor?: string,
     limit?: number

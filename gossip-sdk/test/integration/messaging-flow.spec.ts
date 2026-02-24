@@ -342,10 +342,7 @@ describe('Messaging Flow', () => {
 
       // Bob fetches announcements and accepts
       await bobSdk.announcements.fetch();
-      const bobDiscussion = await bobSdk.discussions.get(
-        bobSdk.userId,
-        aliceSdk.userId
-      );
+      const bobDiscussion = await bobSdk.discussions.get(aliceSdk.userId);
       if (!bobDiscussion) throw new Error('Bob discussion not found');
       await bobSdk.discussions.accept(bobDiscussion);
 

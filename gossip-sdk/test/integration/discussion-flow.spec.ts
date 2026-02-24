@@ -53,7 +53,7 @@ async function isLocalSessionUp(
   sdk: GossipSdk,
   contactUserId: string
 ): Promise<boolean> {
-  const discussion = await sdk.discussions.get(sdk.userId, contactUserId);
+  const discussion = await sdk.discussions.get(contactUserId);
   if (!discussion) return false;
 
   const status = sdk.discussions.getStatus(contactUserId);
@@ -178,7 +178,6 @@ describe('Discussion Flow', () => {
       expect(bobContact?.name).toBe('Alice');
 
       const bobDiscussion = await bobSdk.discussions.get(
-        bobSdk.userId,
         alice.session.userIdEncoded
       );
 
@@ -214,7 +213,6 @@ describe('Discussion Flow', () => {
       expect(bobContact?.name).toMatch(/^New Request \d+$/);
 
       const bobDiscussion = await bobSdk.discussions.get(
-        bobSdk.userId,
         alice.session.userIdEncoded
       );
 
@@ -246,7 +244,6 @@ describe('Discussion Flow', () => {
       expect(bobContact?.name).toBe('AliceUser');
 
       const bobDiscussion = await bobSdk.discussions.get(
-        bobSdk.userId,
         alice.session.userIdEncoded
       );
 
@@ -288,10 +285,7 @@ describe('Discussion Flow', () => {
       // Bob fetches announcements and sees Alice's request
       await bobSdk.announcements.fetch();
 
-      const bobDiscussion = await bobSdk.discussions.get(
-        bobSdk.userId,
-        aliceSdk.userId
-      );
+      const bobDiscussion = await bobSdk.discussions.get(aliceSdk.userId);
 
       expect(bobDiscussion).toBeDefined();
       expect(bobDiscussion?.weAccepted).toBe(false);
@@ -421,10 +415,7 @@ describe('Discussion Flow', () => {
       // Bob fetches announcements and sees Alice's request
       await bobSdk.announcements.fetch();
 
-      const bobDiscussion = await bobSdk.discussions.get(
-        bobSdk.userId,
-        aliceSdk.userId
-      );
+      const bobDiscussion = await bobSdk.discussions.get(aliceSdk.userId);
 
       expect(bobDiscussion).toBeDefined();
       expect(bobDiscussion?.weAccepted).toBe(false);
@@ -434,11 +425,10 @@ describe('Discussion Flow', () => {
       );
 
       // Bob refuses by deleting the contact (which also deletes the discussion)
-      await bobSdk.contacts.delete(bobSdk.userId, aliceSdk.userId);
+      await bobSdk.contacts.delete(aliceSdk.userId);
 
       // On Bob's side: discussion and contact should be deleted
       const bobDiscussionAfterRefuse = await bobSdk.discussions.get(
-        bobSdk.userId,
         aliceSdk.userId
       );
       expect(bobDiscussionAfterRefuse).toBeUndefined();
@@ -485,18 +475,14 @@ describe('Discussion Flow', () => {
       // Bob fetches announcements and sees Alice's request
       await bobSdk.announcements.fetch();
 
-      const bobDiscussion = await bobSdk.discussions.get(
-        bobSdk.userId,
-        aliceSdk.userId
-      );
+      const bobDiscussion = await bobSdk.discussions.get(aliceSdk.userId);
       expect(bobDiscussion).toBeDefined();
 
       // Bob refuses by deleting the contact
-      await bobSdk.contacts.delete(bobSdk.userId, aliceSdk.userId);
+      await bobSdk.contacts.delete(aliceSdk.userId);
 
       // Verify Bob's side is cleaned up
       const bobDiscussionAfterRefuse = await bobSdk.discussions.get(
-        bobSdk.userId,
         aliceSdk.userId
       );
       expect(bobDiscussionAfterRefuse).toBeUndefined();
@@ -534,7 +520,6 @@ describe('Discussion Flow', () => {
       await aliceSdk.announcements.fetch();
 
       const aliceDiscussionFromBob = await aliceSdk.discussions.get(
-        aliceSdk.userId,
         bobSdk.userId
       );
       expect(aliceDiscussionFromBob).toBeDefined();
@@ -573,10 +558,7 @@ describe('Discussion Flow', () => {
       // Bob fetches announcements and sees Alice's request
       await bobSdk.announcements.fetch();
 
-      const bobDiscussion = await bobSdk.discussions.get(
-        bobSdk.userId,
-        aliceSdk.userId
-      );
+      const bobDiscussion = await bobSdk.discussions.get(aliceSdk.userId);
 
       expect(bobDiscussion).toBeDefined();
       expect(bobDiscussion?.weAccepted).toBe(false);
@@ -662,10 +644,7 @@ describe('Discussion Flow', () => {
       // Bob fetches announcements and sees Alice's initial request
       await bobSdk.announcements.fetch();
 
-      let bobDiscussion = await bobSdk.discussions.get(
-        bobSdk.userId,
-        aliceSdk.userId
-      );
+      let bobDiscussion = await bobSdk.discussions.get(aliceSdk.userId);
       expect(bobDiscussion).toBeDefined();
       expect(bobDiscussion?.weAccepted).toBe(false);
       expect(bobDiscussion?.direction).toBe(DiscussionDirection.RECEIVED);
@@ -690,10 +669,7 @@ describe('Discussion Flow', () => {
       // Bob fetches announcements and sees Alice's renewal
       await bobSdk.announcements.fetch();
 
-      bobDiscussion = await bobSdk.discussions.get(
-        bobSdk.userId,
-        aliceSdk.userId
-      );
+      bobDiscussion = await bobSdk.discussions.get(aliceSdk.userId);
       expect(bobDiscussion).toBeDefined();
       expect(bobDiscussion?.weAccepted).toBe(false);
       expect(bobDiscussion?.direction).toBe(DiscussionDirection.RECEIVED);
@@ -836,10 +812,7 @@ describe('Discussion Flow', () => {
       // STEP 2: Bob fetches announcements and sees Alice's request
       await bobSdk.announcements.fetch();
 
-      const bobDiscussion = await bobSdk.discussions.get(
-        bobSdk.userId,
-        aliceSdk.userId
-      );
+      const bobDiscussion = await bobSdk.discussions.get(aliceSdk.userId);
       expect(bobDiscussion).toBeDefined();
       expect(bobDiscussion?.weAccepted).toBe(false);
 
@@ -1035,9 +1008,7 @@ describe('Discussion Flow', () => {
 
       let result = await aliceSdk.discussions.start(aliceBobContact);
       expect(result.success).toBe(false);
-      expect(
-        await aliceSdk.discussions.get(aliceSdk.userId, bobSdk.userId)
-      ).toBeUndefined();
+      expect(await aliceSdk.discussions.get(bobSdk.userId)).toBeUndefined();
 
       // STEP 2: Retry start (establishSession will work now) but network error
       result = await aliceSdk.discussions.start(aliceBobContact);
@@ -1095,10 +1066,7 @@ describe('Discussion Flow', () => {
       const res = await bobSdk.announcements.fetch();
       expect(res.success).toBe(true);
 
-      const bobDiscussion = await bobSdk.discussions.get(
-        bobSdk.userId,
-        aliceSdk.userId
-      );
+      const bobDiscussion = await bobSdk.discussions.get(aliceSdk.userId);
       if (!bobDiscussion) throw new Error('Bob discussion not found');
 
       expect(bobDiscussion.weAccepted).toBe(false);
@@ -1146,7 +1114,6 @@ describe('Discussion Flow', () => {
       // Bob accepts but gets signing error on first attempt
       const res1 = await bobSdk.discussions.accept(bobDiscussion);
       const bobDiscussionSignError = await bobSdk.discussions.get(
-        bobSdk.userId,
         aliceSdk.userId
       );
       expect(res1.success).toBe(false);
@@ -1161,7 +1128,6 @@ describe('Discussion Flow', () => {
       const res2 = await bobSdk.discussions.accept(bobDiscussion);
       expect(res2.success).toBe(true);
       const bobDiscussionAfterAccept = await bobSdk.discussions.get(
-        bobSdk.userId,
         aliceSdk.userId
       );
       expect(bobSdk.discussions.getStatus(aliceSdk.userId)).toBe(
@@ -1209,10 +1175,7 @@ describe('Discussion Flow', () => {
       expect(contact).toBeUndefined();
 
       // Verify discussion is deleted
-      const discussion = await userSdk.discussions.get(
-        userSdk.userId,
-        contactUserId
-      );
+      const discussion = await userSdk.discussions.get(contactUserId);
       expect(discussion).toBeUndefined();
 
       // Verify all messages are deleted
@@ -1236,7 +1199,7 @@ describe('Discussion Flow', () => {
       expect(await isLocalSessionUp(aliceSdk, bobSdk.userId)).toBe(true);
 
       // Alice deletes Bob contact
-      await aliceSdk.contacts.delete(aliceSdk.userId, bobSdk.userId);
+      await aliceSdk.contacts.delete(bobSdk.userId);
 
       // Verify deletion was successful
       await checkDeleted(aliceSdk, bobSdk.userId);
@@ -1275,25 +1238,19 @@ describe('Discussion Flow', () => {
       expect(bobAliceContact).toBeDefined();
 
       // Verify Bob has discussion with Alice
-      const bobDiscussion = await bobSdk.discussions.get(
-        bobSdk.userId,
-        aliceSdk.userId
-      );
+      const bobDiscussion = await bobSdk.discussions.get(aliceSdk.userId);
       expect(bobDiscussion).toBeDefined();
       expect(bobDiscussion?.lastAnnouncementMessage).toBe(announcementMsg);
       expect(bobDiscussion?.weAccepted).toBe(false);
 
       // Bob deletes Alice's contact
-      await bobSdk.contacts.delete(bobSdk.userId, aliceSdk.userId);
+      await bobSdk.contacts.delete(aliceSdk.userId);
 
       // Verify deletion was successful
       await checkDeleted(bobSdk, aliceSdk.userId);
 
       // Verify Alice has still a pending discussion with Bob
-      const aliceDiscussion = await aliceSdk.discussions.get(
-        aliceSdk.userId,
-        bobSdk.userId
-      );
+      const aliceDiscussion = await aliceSdk.discussions.get(bobSdk.userId);
       expect(aliceDiscussion).toBeDefined();
       // Alice initiated the discussion, so weAccepted stays true but the session is still pending on Bob's side
       expect(aliceDiscussion?.weAccepted).toBe(true);
@@ -1328,15 +1285,12 @@ describe('Discussion Flow', () => {
       // Bob fetches Alice's announcement
       await bobSdk.announcements.fetch();
 
-      const bobDiscussion = await bobSdk.discussions.get(
-        bobSdk.userId,
-        aliceSdk.userId
-      );
+      const bobDiscussion = await bobSdk.discussions.get(aliceSdk.userId);
       expect(bobDiscussion).toBeDefined();
       expect(bobDiscussion?.weAccepted).toBe(false);
 
       // Alice deletes Bob's contact before he accepts
-      await aliceSdk.contacts.delete(aliceSdk.userId, bobSdk.userId);
+      await aliceSdk.contacts.delete(bobSdk.userId);
 
       // Verify deletion was successful
       await checkDeleted(aliceSdk, bobSdk.userId);
@@ -1350,7 +1304,6 @@ describe('Discussion Flow', () => {
 
       // Alice should see Bob's announcement as PeerRequested with weAccepted=false
       const aliceDiscussionFromBob = await aliceSdk.discussions.get(
-        aliceSdk.userId,
         bobSdk.userId
       );
       expect(aliceDiscussionFromBob).toBeDefined();
@@ -1443,7 +1396,7 @@ describe('Discussion Flow', () => {
       });
 
       // Alice deletes Bob's contact
-      await aliceSdk.contacts.delete(aliceSdk.userId, bobSdk.userId);
+      await aliceSdk.contacts.delete(bobSdk.userId);
 
       // Verify deletion was successful
       await checkDeleted(aliceSdk, bobSdk.userId);
@@ -1457,7 +1410,7 @@ describe('Discussion Flow', () => {
       expect(await isSessionUp(aliceSdk, bobSdk)).toBe(true);
 
       // Alice deletes Bob's contact
-      await aliceSdk.contacts.delete(aliceSdk.userId, bobSdk.userId);
+      await aliceSdk.contacts.delete(bobSdk.userId);
 
       // Verify deletion was successful
       await checkDeleted(aliceSdk, bobSdk.userId);
@@ -1884,10 +1837,7 @@ describe('session break in session manager', () => {
     expect(aliceSdk.discussions.getStatus(bobSdk.userId)).toBe(
       SessionStatus.Killed
     );
-    const discussion = await aliceSdk.discussions.get(
-      aliceSdk.userId,
-      bobSdk.userId
-    );
+    const discussion = await aliceSdk.discussions.get(bobSdk.userId);
     expect(discussion?.sendAnnouncement).toBeNull();
 
     // // Wait for retry delay
@@ -1944,10 +1894,7 @@ describe('session break in session manager', () => {
     await aliceSdk.updateState();
 
     // Verify the announcement is still pending
-    const discussion = await aliceSdk.discussions.get(
-      aliceSdk.userId,
-      bobSdk.userId
-    );
+    const discussion = await aliceSdk.discussions.get(bobSdk.userId);
     expect(discussion?.sendAnnouncement).not.toBeNull();
     // The announcement is not sent on network but session in session manager is active
     expect(aliceSdk.discussions.getStatus(bobSdk.userId)).toBe(
@@ -1962,10 +1909,7 @@ describe('session break in session manager', () => {
     // Second updateState - should succeed
     await aliceSdk.updateState();
 
-    const discussionAfterRetry = await aliceSdk.discussions.get(
-      aliceSdk.userId,
-      bobSdk.userId
-    );
+    const discussionAfterRetry = await aliceSdk.discussions.get(bobSdk.userId);
     expect(discussionAfterRetry?.sendAnnouncement).toBeNull();
 
     // Session should be active after successful retry
@@ -2067,7 +2011,6 @@ describe('session break in session manager', () => {
         createdAt: new Date(),
       };
       await aliceSdk.contacts.add(
-        aliceBobContact.ownerUserId,
         aliceBobContact.userId,
         aliceBobContact.name,
         bobSdk.publicKeys

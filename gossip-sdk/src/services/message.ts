@@ -1033,6 +1033,65 @@ export class MessageService {
     return this.queries.messages.getWaitingCount(ownerUserId, contactUserId);
   }
 
+  // ─────────────────────────────────────────────────────────────────
+  // Consumer-facing convenience methods
+  // ─────────────────────────────────────────────────────────────────
+
+  /** Get a message by its database ID */
+  async get(id: number): Promise<Message | undefined> {
+    const row = await this.queries.messages.getById(id);
+    return row ? rowToMessage(row) : undefined;
+  }
+
+  /** Get all messages for a contact (using session owner) */
+  async getMessages(contactUserId: string): Promise<Message[]> {
+    const rows = await this.queries.messages.getByOwnerAndContact(
+      this.session.userIdEncoded,
+      contactUserId
+    );
+    return rows.map(rowToMessage);
+  }
+
+  /** Send a message, queued via QueueManager if available */
+  async send(message: Omit<Message, 'id'>): Promise<SendMessageResult> {
+    if (this.queueManager) {
+      return this.queueManager.enqueue(message.contactUserId, () =>
+        this.sendMessage(message)
+      );
+    }
+    return this.sendMessage(message);
+  }
+
+  /**
+   * Send a text message (simplified).
+   * Builds the Message internally, sends it via queue, and triggers state update.
+   */
+  async sendText(
+    contactUserId: string,
+    text: string,
+    options?: SendTextOptions
+  ): Promise<SendMessageResult> {
+    const message: Omit<Message, 'id'> = {
+      ownerUserId: this.session.userIdEncoded,
+      contactUserId,
+      content: text,
+      type: MessageType.TEXT,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.WAITING_SESSION,
+      timestamp: new Date(),
+      ...(options?.replyTo && { replyTo: options.replyTo }),
+      ...(options?.metadata && { metadata: options.metadata }),
+    };
+    const result = await this.send(message);
+    await this.refreshService?.stateUpdate();
+    return result;
+  }
+
+  /** Fetch and decrypt messages from the protocol (alias) */
+  async fetch(): Promise<MessageResult> {
+    return this.fetchMessages();
+  }
+
   // Mark a message as read. Returns true if the message has been marked as read, false if it was already marked as read or doesn't exist.
   async markAsRead(id: number): Promise<boolean> {
     // Check current message status from DB to avoid race conditions

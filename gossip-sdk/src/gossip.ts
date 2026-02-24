@@ -17,17 +17,12 @@
  *   onPersist: async (blob) => { /* save to db *\/ },
  * });
  *
- * // Simplified API — ownerUserId and boilerplate handled internally
- * await gossipSdk.contacts.add(userId, 'Bob');           // fetches keys automatically
+ * // Service API — ownerUserId handled internally via session
+ * await gossipSdk.contacts.add(userId, 'Bob');              // fetches keys automatically
  * await gossipSdk.discussions.startByUserId(userId, 'Bob'); // add + start + send
  * await gossipSdk.messages.sendText(contactId, 'Hello!');   // build + send + flush
- * const contacts = await gossipSdk.contacts.list();       // ownerUserId inferred
- * const discussions = await gossipSdk.discussions.list();  // ownerUserId inferred
- *
- * // Full control API still available
- * await gossipSdk.messages.send(fullMessageObject);
- * await gossipSdk.discussions.start(contact, payload);
- * await gossipSdk.contacts.add(ownerUserId, userId, name, publicKeys);
+ * const contacts = await gossipSdk.contacts.list();         // ownerUserId inferred
+ * const discussions = await gossipSdk.discussions.list();   // ownerUserId inferred
  *
  * // Events
  * gossipSdk.on(SdkEventType.MESSAGE_RECEIVED, (msg) => { ... });
@@ -37,12 +32,6 @@
  * await gossipSdk.closeSession();
  * ```
  */
-import {
-  toDiscussion,
-  toSortedDiscussions,
-  updateDiscussionName,
-  type UpdateDiscussionNameResult,
-} from './utils/discussions';
 import { IMessageProtocol, createMessageProtocol } from './api/messageProtocol';
 import { createAuthProtocol } from './api/authProtocol';
 import { setProtocolBaseUrl } from './config/protocol';
@@ -59,52 +48,27 @@ import {
   EncryptionKey,
   generateEncryptionKeyFromSeed,
 } from './wasm/encryption';
-import {
-  AnnouncementService,
-  type AnnouncementReceptionResult,
-} from './services/announcement';
-import {
-  DiscussionInitializationResult,
-  DiscussionService,
-} from './services/discussion';
-import {
-  MessageService,
-  type MessageResult,
-  type SendMessageResult,
-  rowToMessage,
-} from './services/message';
+import { AnnouncementService } from './services/announcement';
+import { DiscussionService } from './services/discussion';
+import { MessageService } from './services/message';
 import { RefreshService } from './services/refresh';
 import { AuthService } from './services/auth';
-import type {
-  DeleteContactResult,
-  UpdateContactNameResult,
-} from './utils/contacts';
+import { ProfileService } from './services/profile';
+import { ContactService } from './services/contact';
 import {
   validateUserIdFormat,
   validateUsernameFormat,
-  validateUsernameFormatAndAvailability,
   type ValidationResult,
 } from './utils/validation';
 import { QueueManager } from './utils/queue';
 import { encodeUserId, decodeUserId } from './utils/userId';
-import {
-  type StorageConfig,
-  type Contact,
-  type Discussion,
-  type Message,
-  type UserProfile,
-  MessageStatus,
-  MessageType,
-  MessageDirection,
-} from './db';
+import { type StorageConfig, MessageStatus } from './db';
 import { DatabaseConnection } from './db/sqlite';
-import { Queries, rowToUserProfile, userProfileToRow } from './db/queries';
-import { addContact, updateContactName, deleteContact } from './utils/contacts';
+import { Queries } from './db/queries';
 import {
   type UserPublicKeys,
   type SessionConfig,
   SessionManagerWrapper,
-  SessionStatus,
 } from './wasm/bindings';
 import {
   SdkEventEmitter,
@@ -112,8 +76,6 @@ import {
   type SdkEventHandlers,
 } from './core/SdkEventEmitter';
 import { SdkPolling } from './core/SdkPolling';
-import { AnnouncementPayload } from './utils/announcementPayload';
-import { Result } from './utils/type';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -200,18 +162,14 @@ class GossipSdk {
   private pollingManager = new SdkPolling();
   private messageQueues = new QueueManager();
 
-  // Services (created when session opens)
+  // Services — profile is created at init(), others at openSession()
   private _auth: AuthService | null = null;
+  private _profile: ProfileService | null = null;
   private _announcement: AnnouncementService | null = null;
   private _discussion: DiscussionService | null = null;
   private _message: MessageService | null = null;
   private _refresh: RefreshService | null = null;
-
-  // Cached service API wrappers (created in openSession)
-  private _messagesAPI: MessageServiceAPI | null = null;
-  private _discussionsAPI: DiscussionServiceAPI | null = null;
-  private _announcementsAPI: AnnouncementServiceAPI | null = null;
-  private _contactsAPI: ContactsAPI | null = null;
+  private _contact: ContactService | null = null;
 
   // ─────────────────────────────────────────────────────────────────
   // Lifecycle
@@ -248,8 +206,9 @@ class GossipSdk {
     // Create message protocol
     const messageProtocol = createMessageProtocol();
 
-    // Create auth protocol + service (doesn't need session)
+    // Create services that don't need a session
     this._auth = new AuthService(createAuthProtocol());
+    this._profile = new ProfileService(this._queries);
 
     this.state = {
       status: SdkStatus.INITIALIZED,
@@ -383,189 +342,15 @@ class GossipSdk {
       onPersist: options.onPersist,
     };
 
-    // Create cached service API wrappers
-    this.createServiceAPIWrappers(session);
+    // Wire up cross-service dependencies
+    this._contact = new ContactService(session, queries, this._auth!);
+    this._message.setQueueManager(this.messageQueues);
+    this._discussion.setAuthService(this._auth!);
 
     // Auto-start polling if enabled in config
     if (config.polling.enabled) {
       this.startPolling();
     }
-  }
-
-  /**
-   * Create cached service API wrappers.
-   * Called once during openSession to avoid creating new objects on each getter access.
-   */
-  private createServiceAPIWrappers(session: SessionModule): void {
-    const getOwner = () => this.requireSession().session.userIdEncoded;
-
-    const q = this._queries!;
-
-    this._messagesAPI = {
-      get: async id => {
-        const row = await q.messages.getById(id);
-        return row ? rowToMessage(row) : undefined;
-      },
-      getMessages: async contactUserId => {
-        const rows = await q.messages.getByOwnerAndContact(
-          getOwner(),
-          contactUserId
-        );
-        return rows.map(rowToMessage);
-      },
-      send: message =>
-        this.messageQueues.enqueue(message.contactUserId, () =>
-          this._message!.sendMessage(message)
-        ),
-      sendText: async (contactUserId, text, options) => {
-        const message: Omit<Message, 'id'> = {
-          ownerUserId: getOwner(),
-          contactUserId,
-          content: text,
-          type: MessageType.TEXT,
-          direction: MessageDirection.OUTGOING,
-          status: MessageStatus.WAITING_SESSION,
-          timestamp: new Date(),
-          ...(options?.replyTo && { replyTo: options.replyTo }),
-          ...(options?.metadata && { metadata: options.metadata }),
-        };
-        const result = await this.messageQueues.enqueue(contactUserId, () =>
-          this._message!.sendMessage(message)
-        );
-        await this._refresh?.stateUpdate();
-        return result;
-      },
-      fetch: () => this._message!.fetchMessages(),
-      findByMsgId: (messageId, ownerUserId, contactUserId) =>
-        this._message!.findMessageByMsgId(
-          messageId,
-          ownerUserId,
-          contactUserId
-        ),
-      markAsRead: id => this._message!.markAsRead(id),
-    };
-
-    this._discussionsAPI = {
-      start: async (contact, payload?) => {
-        const result = await this._discussion!.initialize(contact, payload);
-        if (result.success) await this._refresh?.stateUpdate();
-        return result;
-      },
-      startByUserId: async (contactUserId, name, payload?) => {
-        const pubKeys = await this._auth!.fetchPublicKeyByUserId(contactUserId);
-        const owner = getOwner();
-        const existing = await q.contacts.getByOwnerAndUser(
-          owner,
-          contactUserId
-        );
-        let contact: Contact;
-        if (existing) {
-          contact = existing;
-        } else {
-          const addResult = await addContact(
-            owner,
-            contactUserId,
-            name,
-            pubKeys,
-            q
-          );
-          if (!addResult.success || !addResult.contact)
-            return {
-              success: false,
-              error: new Error(addResult.error ?? 'Failed to add contact'),
-            } as Result<DiscussionInitializationResult, Error>;
-          contact = addResult.contact;
-        }
-        const result = await this._discussion!.initialize(contact, payload);
-        if (result.success) await this._refresh?.stateUpdate();
-        return result;
-      },
-      accept: async (discussion: Discussion) => {
-        const result = await this._discussion!.accept(discussion);
-        if (result.success) await this._refresh?.stateUpdate();
-        return result;
-      },
-      renew: (contactUserId: string) =>
-        this._discussion!.createSessionForContact(
-          contactUserId,
-          new Uint8Array(0)
-        ),
-      getStatus: (contactUserId: string): SessionStatus => {
-        if (this.state.status !== SdkStatus.SESSION_OPEN)
-          throw new Error('No session open. Call openSession() first.');
-        return this.state.session.peerSessionStatus(
-          decodeUserId(contactUserId)
-        );
-      },
-      list: async (ownerUserId?) => {
-        const all = await q.discussions.getByOwner(ownerUserId ?? getOwner());
-        return toSortedDiscussions(all);
-      },
-      get: async (ownerUserIdOrContactId: string, contactUserId?: string) => {
-        const owner = contactUserId ? ownerUserIdOrContactId : getOwner();
-        const contact = contactUserId ?? ownerUserIdOrContactId;
-        const row = await q.discussions.getByOwnerAndContact(owner, contact);
-        return row ? toDiscussion(row) : undefined;
-      },
-      updateName: (discussionId: number, name: string | undefined) =>
-        updateDiscussionName(discussionId, name, q),
-    };
-
-    this._announcementsAPI = {
-      fetch: () => this._announcement!.fetchAndProcessAnnouncements(),
-      skipHistorical: () => this._announcement!.skipHistoricalAnnouncements(),
-    };
-
-    this._contactsAPI = {
-      list: (ownerUserId?: string) =>
-        q.contacts.getByOwner(ownerUserId ?? getOwner()),
-      get: async (ownerUserIdOrContactId: string, contactUserId?: string) => {
-        const owner = contactUserId ? ownerUserIdOrContactId : getOwner();
-        const contact = contactUserId ?? ownerUserIdOrContactId;
-        return (await q.contacts.getByOwnerAndUser(owner, contact)) ?? null;
-      },
-      add: async (
-        ownerUserIdOrUserId: string,
-        userIdOrName: string,
-        nameOrPublicKeys?: string | UserPublicKeys,
-        publicKeys?: UserPublicKeys
-      ) => {
-        if (typeof nameOrPublicKeys === 'string') {
-          return addContact(
-            ownerUserIdOrUserId,
-            userIdOrName,
-            nameOrPublicKeys,
-            publicKeys!,
-            q
-          );
-        }
-        const userId = ownerUserIdOrUserId;
-        const name = userIdOrName;
-        const owner = getOwner();
-        const pubKeys =
-          nameOrPublicKeys ??
-          (await this._auth!.fetchPublicKeyByUserId(userId));
-        return addContact(owner, userId, name, pubKeys, q);
-      },
-      updateName: async (
-        ownerUserIdOrContactId: string,
-        contactUserIdOrName: string,
-        newName?: string
-      ) => {
-        const owner = newName ? ownerUserIdOrContactId : getOwner();
-        const contact = newName ? contactUserIdOrName : ownerUserIdOrContactId;
-        const name = newName ?? contactUserIdOrName;
-        return updateContactName(owner, contact, name, q);
-      },
-      delete: async (
-        ownerUserIdOrContactId: string,
-        contactUserId?: string
-      ) => {
-        const owner = contactUserId ? ownerUserIdOrContactId : getOwner();
-        const contact = contactUserId ?? ownerUserIdOrContactId;
-        return deleteContact(owner, contact, session, q);
-      },
-    };
   }
 
   /**
@@ -589,12 +374,7 @@ class GossipSdk {
     this._discussion = null;
     this._message = null;
     this._refresh = null;
-
-    // Clear cached API wrappers
-    this._messagesAPI = null;
-    this._discussionsAPI = null;
-    this._announcementsAPI = null;
-    this._contactsAPI = null;
+    this._contact = null;
 
     // Clear message queues
     this.messageQueues.clear();
@@ -701,117 +481,47 @@ class GossipSdk {
   }
 
   /** User profile management (available after init, before session) */
-  get profiles(): ProfilesAPI {
-    const q = this.queries;
-    return {
-      get: async (userId: string) => {
-        const row = await q.userProfiles.getById(userId);
-        return row ? rowToUserProfile(row) : null;
-      },
-      getMostRecent: async () => {
-        const row = await q.userProfiles.getMostRecent();
-        return row ? rowToUserProfile(row) : null;
-      },
-      getAll: async () => {
-        const rows = await q.userProfiles.getAll();
-        return rows.map(rowToUserProfile);
-      },
-      getCount: () => q.userProfiles.getCount(),
-      save: async (profile: UserProfile) => {
-        await q.userProfiles.upsert(userProfileToRow(profile));
-      },
-      delete: (userId: string) => q.userProfiles.delete(userId),
-      validateUsername: (username: string) =>
-        validateUsernameFormatAndAvailability(username, q),
-      isUsernameTaken: async (username: string, excludeUserId?: string) => {
-        const match = excludeUserId
-          ? await q.userProfiles.getByUsernameLowerExcluding(
-              username,
-              excludeUserId
-            )
-          : await q.userProfiles.getByUsernameLower(username);
-        return !!match;
-      },
-      createOrUpdate: async (
-        username: string,
-        userId: string,
-        security: UserProfile['security'],
-        session: Uint8Array
-      ): Promise<UserProfile> => {
-        const existing = await q.userProfiles.getById(userId);
-        if (existing) {
-          const existingProfile = rowToUserProfile(existing);
-          const mergedSecurity: UserProfile['security'] = {
-            ...existingProfile.security,
-            ...security,
-            webauthn: security.webauthn ?? existingProfile.security.webauthn,
-            encKeySalt:
-              security.encKeySalt ?? existingProfile.security.encKeySalt,
-            mnemonicBackup: security.mnemonicBackup,
-          };
-          const updatedProfile: UserProfile = {
-            ...existingProfile,
-            username: existingProfile.username || username,
-            security: mergedSecurity,
-            session,
-            status: existingProfile.status ?? 'online',
-            lastSeen: new Date(),
-            updatedAt: new Date(),
-          };
-          await q.userProfiles.upsert(userProfileToRow(updatedProfile));
-          return updatedProfile;
-        }
-
-        const newProfile: UserProfile = {
-          userId,
-          username,
-          security,
-          session,
-          status: 'online',
-          lastSeen: new Date(),
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        };
-        await q.userProfiles.upsert(userProfileToRow(newProfile));
-        return newProfile;
-      },
-    };
+  get profiles(): ProfileService {
+    if (!this._profile) {
+      throw new Error('SDK not initialized. Call init() first.');
+    }
+    return this._profile;
   }
 
   /** Message service */
-  get messages(): MessageServiceAPI {
+  get messages(): MessageService {
     this.requireSession();
-    if (!this._messagesAPI) {
-      throw new Error('Messages API not initialized');
+    if (!this._message) {
+      throw new Error('Message service not initialized');
     }
-    return this._messagesAPI;
+    return this._message;
   }
 
   /** Discussion service */
-  get discussions(): DiscussionServiceAPI {
+  get discussions(): DiscussionService {
     this.requireSession();
-    if (!this._discussionsAPI) {
-      throw new Error('Discussions API not initialized');
+    if (!this._discussion) {
+      throw new Error('Discussion service not initialized');
     }
-    return this._discussionsAPI;
+    return this._discussion;
   }
 
   /** Announcement service */
-  get announcements(): AnnouncementServiceAPI {
+  get announcements(): AnnouncementService {
     this.requireSession();
-    if (!this._announcementsAPI) {
-      throw new Error('Announcements API not initialized');
+    if (!this._announcement) {
+      throw new Error('Announcement service not initialized');
     }
-    return this._announcementsAPI;
+    return this._announcement;
   }
 
   /** Contact management */
-  get contacts(): ContactsAPI {
+  get contacts(): ContactService {
     this.requireSession();
-    if (!this._contactsAPI) {
-      throw new Error('Contacts API not initialized');
+    if (!this._contact) {
+      throw new Error('Contact service not initialized');
     }
-    return this._contactsAPI;
+    return this._contact;
   }
 
   /**
@@ -979,152 +689,6 @@ class GossipSdk {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Service API Types
-// ─────────────────────────────────────────────────────────────────────────────
-
-/** Options for the simplified sendText method */
-export interface SendTextOptions {
-  /** Reply to an existing message */
-  replyTo?: { originalMsgId: Uint8Array };
-  /** Arbitrary metadata to attach */
-  metadata?: Record<string, unknown>;
-}
-
-interface MessageServiceAPI {
-  /** Get a message by its ID */
-  get(id: number): Promise<Message | undefined>;
-  /** Get all messages for a contact */
-  getMessages(contactUserId: string): Promise<Message[]>;
-  /** Send a message (full control — you build the Message object) */
-  send(message: Omit<Message, 'id'>): Promise<SendMessageResult>;
-  /**
-   * Send a text message (simplified).
-   * Builds the Message internally, sends it, and triggers state update.
-   *
-   * @example
-   * ```typescript
-   * await sdk.messages.sendText(contactId, 'Hello!');
-   * ```
-   */
-  sendText(
-    contactUserId: string,
-    text: string,
-    options?: SendTextOptions
-  ): Promise<SendMessageResult>;
-  /** Fetch and decrypt messages from the protocol */
-  fetch(): Promise<MessageResult>;
-  /** Find a message by its messageId */
-  findByMsgId(
-    messageId: Uint8Array,
-    ownerUserId: string,
-    contactUserId?: string
-  ): Promise<Message | undefined>;
-  /** Mark a message as read */
-  markAsRead(id: number): Promise<boolean>;
-}
-
-interface DiscussionServiceAPI {
-  /**
-   * Start a new discussion with a contact.
-   * Automatically triggers state update to broadcast the announcement.
-   */
-  start(
-    contact: Contact,
-    payload?: AnnouncementPayload
-  ): Promise<Result<DiscussionInitializationResult, Error>>;
-  /**
-   * Start a discussion by userId (simplified).
-   * Fetches public keys from the server, adds the contact if needed,
-   * starts the discussion, and triggers state update.
-   *
-   * @example
-   * ```typescript
-   * await sdk.discussions.startByUserId(contactId, 'Bob', { message: 'Hey!' });
-   * ```
-   */
-  startByUserId(
-    contactUserId: string,
-    name: string,
-    payload?: AnnouncementPayload
-  ): Promise<Result<DiscussionInitializationResult, Error>>;
-  /**
-   * Accept an incoming discussion request.
-   * Automatically triggers state update to broadcast the acceptance.
-   */
-  accept(discussion: Discussion): Promise<Result<Uint8Array, Error>>;
-  /** Renew a broken discussion */
-  renew(contactUserId: string): Promise<Result<Uint8Array, Error>>;
-  /** Get the session status with a contact */
-  getStatus(contactUserId: string): SessionStatus;
-  /** List all discussions. ownerUserId defaults to the current user. */
-  list(ownerUserId?: string): Promise<Discussion[]>;
-  /**
-   * Get a specific discussion.
-   * Can be called as `get(contactUserId)` or `get(ownerUserId, contactUserId)`.
-   */
-  get(contactUserId: string): Promise<Discussion | undefined>;
-  get(
-    ownerUserId: string,
-    contactUserId: string
-  ): Promise<Discussion | undefined>;
-  /** Update the custom name of a discussion. Pass undefined to clear. */
-  updateName(
-    discussionId: number,
-    name: string | undefined
-  ): Promise<UpdateDiscussionNameResult>;
-}
-
-interface AnnouncementServiceAPI {
-  /** Fetch and process announcements from the protocol */
-  fetch(): Promise<AnnouncementReceptionResult>;
-  /** Skip historical announcements for a new account. Call after profile creation. */
-  skipHistorical(): Promise<void>;
-}
-
-interface ContactsAPI {
-  /** List all contacts. ownerUserId defaults to the current user. */
-  list(ownerUserId?: string): Promise<Contact[]>;
-  /**
-   * Get a specific contact.
-   * Can be called as `get(contactUserId)` or `get(ownerUserId, contactUserId)`.
-   */
-  get(contactUserId: string): Promise<Contact | null>;
-  get(ownerUserId: string, contactUserId: string): Promise<Contact | null>;
-  /**
-   * Add a new contact.
-   *
-   * Simplified: `add(userId, name)` — fetches public keys from the server automatically.
-   * Full control: `add(ownerUserId, userId, name, publicKeys)`.
-   */
-  add(
-    userId: string,
-    name: string
-  ): Promise<{ success: boolean; error?: string; contact?: Contact }>;
-  add(
-    ownerUserId: string,
-    userId: string,
-    name: string,
-    publicKeys: UserPublicKeys
-  ): Promise<{ success: boolean; error?: string; contact?: Contact }>;
-  /** Update a contact's name. Can be called as `updateName(contactUserId, newName)` or `updateName(ownerUserId, contactUserId, newName)`. */
-  updateName(
-    contactUserId: string,
-    newName: string
-  ): Promise<UpdateContactNameResult>;
-  updateName(
-    ownerUserId: string,
-    contactUserId: string,
-    newName: string
-  ): Promise<UpdateContactNameResult>;
-  /** Delete a contact. Can be called as `delete(contactUserId)` or `delete(ownerUserId, contactUserId)`. */
-  delete(contactUserId: string): Promise<DeleteContactResult>;
-  delete(
-    ownerUserId: string,
-    contactUserId: string
-  ): Promise<DeleteContactResult>;
-}
-
 interface SdkUtils {
   /** Validate a user ID format */
   validateUserId(userId: string): ValidationResult;
@@ -1134,35 +698,6 @@ interface SdkUtils {
   encodeUserId(rawId: Uint8Array): string;
   /** Decode user ID string to raw bytes */
   decodeUserId(encodedId: string): Uint8Array;
-}
-
-interface ProfilesAPI {
-  /** Get a user profile by ID. Returns null if not found. */
-  get(userId: string): Promise<UserProfile | null>;
-  /** Get the most recently active profile (by lastSeen). */
-  getMostRecent(): Promise<UserProfile | null>;
-  /** Get all user profiles. */
-  getAll(): Promise<UserProfile[]>;
-  /** Get the total number of profiles. */
-  getCount(): Promise<number>;
-  /** Save (upsert) a user profile. Handles domain-to-row conversion internally. */
-  save(profile: UserProfile): Promise<void>;
-  /** Delete a user profile by ID. */
-  delete(userId: string): Promise<void>;
-  /** Validate username format and check availability in one call. */
-  validateUsername(username: string): Promise<ValidationResult>;
-  /** Check if a username is already taken, optionally excluding a specific user. */
-  isUsernameTaken(username: string, excludeUserId?: string): Promise<boolean>;
-  /**
-   * Create a new profile or update an existing one.
-   * If a profile already exists for this userId, merges security fields and preserves existing username.
-   */
-  createOrUpdate(
-    username: string,
-    userId: string,
-    security: UserProfile['security'],
-    session: Uint8Array
-  ): Promise<UserProfile>;
 }
 
 interface PollingAPI {

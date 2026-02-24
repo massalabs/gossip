@@ -97,7 +97,7 @@ const Contact: React.FC = () => {
     setDeleteError(null);
 
     try {
-      const result = await gossip.contacts.delete(ownerUserId, contact.userId);
+      const result = await gossip.contacts.delete(contact.userId);
       if (!result.success) {
         setDeleteError(result.message);
         setIsDeleting(false);

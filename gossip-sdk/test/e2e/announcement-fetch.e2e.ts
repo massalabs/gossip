@@ -121,17 +121,12 @@ describe('E2E: Discussion request (user A sends to user B)', () => {
       const publicKey = await sdkA.auth.fetchPublicKeyByUserId(userBId);
       expect(publicKey).toBeDefined();
 
-      const addResult = await sdkA.contacts.add(
-        userAId,
-        userBId,
-        'User B',
-        publicKey
-      );
+      const addResult = await sdkA.contacts.add(userBId, 'User B', publicKey);
       expect(addResult.success).toBe(true);
       expect(addResult.contact).toBeDefined();
 
       // ─── A starts a discussion (sends request) to B ───
-      const contactB = await sdkA.contacts.get(userAId, userBId);
+      const contactB = await sdkA.contacts.get(userBId);
       expect(contactB).not.toBeNull();
 
       await sdkA.discussions.start(contactB!, {

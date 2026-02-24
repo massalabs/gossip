@@ -57,7 +57,7 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
 
         // Fetch discussions
         const discussionsList = isSessionOpen
-          ? await sdk.discussions.list(ownerUserId)
+          ? await sdk.discussions.list()
           : [];
 
         // Pre-compute status map (one getStatus call per discussion)
@@ -134,7 +134,7 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
         // Fetch contacts
         let contactsList: Contact[] = [];
         if (isSessionOpen) {
-          contactsList = await sdk.contacts.list(ownerUserId);
+          contactsList = await sdk.contacts.list();
         }
 
         set({

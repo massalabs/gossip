@@ -14,19 +14,27 @@ import {
   MessageType,
   serializeSendAnnouncement,
 } from '../db';
-import { toDiscussion } from '../utils/discussions';
+import {
+  toDiscussion,
+  toSortedDiscussions,
+  updateDiscussionName,
+  type UpdateDiscussionNameResult,
+} from '../utils/discussions';
 import {
   AnnouncementPayload,
   encodeAnnouncementPayload,
 } from '../utils/announcementPayload';
-import { UserPublicKeys } from '../wasm/bindings';
+import { UserPublicKeys, SessionStatus } from '../wasm/bindings';
 import { AnnouncementService } from './announcement';
 import { SessionModule } from '../wasm/session';
 import { Logger } from '../utils/logs';
 import { RefreshService } from './refresh';
+import type { AuthService } from './auth';
 import { Result } from '../utils/type';
 import { SdkEventEmitter, SdkEventType } from '../core/SdkEventEmitter';
 import { Queries } from '../db/queries';
+import { decodeUserId } from '../utils/userId';
+import { addContact } from '../utils/contacts';
 
 const logger = new Logger('DiscussionService');
 
@@ -57,6 +65,7 @@ export class DiscussionService {
   private session: SessionModule;
   private eventEmitter: SdkEventEmitter;
   private refreshService?: RefreshService;
+  private authService?: AuthService;
   private queries: Queries;
 
   constructor(
@@ -75,6 +84,10 @@ export class DiscussionService {
 
   setRefreshService(refreshService: RefreshService): void {
     this.refreshService = refreshService;
+  }
+
+  setAuthService(authService: AuthService): void {
+    this.authService = authService;
   }
 
   /**
@@ -221,6 +234,8 @@ export class DiscussionService {
             updatedDiscussion.contactUserId
           );
         }
+
+        await this.refreshService?.stateUpdate();
       }
 
       return result;
@@ -320,5 +335,104 @@ export class DiscussionService {
     }
 
     return { success: true, data: sessionResult.data };
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // Consumer-facing convenience methods
+  // ─────────────────────────────────────────────────────────────────
+
+  /**
+   * Start a new discussion with a contact.
+   * Wraps initialize() and triggers state update on success.
+   */
+  async start(
+    contact: Contact,
+    payload?: AnnouncementPayload
+  ): Promise<Result<DiscussionInitializationResult, Error>> {
+    const result = await this.initialize(contact, payload);
+    if (result.success) await this.refreshService?.stateUpdate();
+    return result;
+  }
+
+  /**
+   * Start a discussion by userId (simplified).
+   * Fetches public keys, adds the contact if needed, starts the discussion,
+   * and triggers state update.
+   */
+  async startByUserId(
+    contactUserId: string,
+    name: string,
+    payload?: AnnouncementPayload
+  ): Promise<Result<DiscussionInitializationResult, Error>> {
+    if (!this.authService) {
+      return { success: false, error: new Error('AuthService not set') };
+    }
+
+    const pubKeys =
+      await this.authService.fetchPublicKeyByUserId(contactUserId);
+    const owner = this.session.userIdEncoded;
+    const existing = await this.queries.contacts.getByOwnerAndUser(
+      owner,
+      contactUserId
+    );
+
+    let contact: Contact;
+    if (existing) {
+      contact = existing;
+    } else {
+      const addResult = await addContact(
+        owner,
+        contactUserId,
+        name,
+        pubKeys,
+        this.queries
+      );
+      if (!addResult.success || !addResult.contact) {
+        return {
+          success: false,
+          error: new Error(addResult.error ?? 'Failed to add contact'),
+        };
+      }
+      contact = addResult.contact;
+    }
+
+    const result = await this.initialize(contact, payload);
+    if (result.success) await this.refreshService?.stateUpdate();
+    return result;
+  }
+
+  /** Renew a broken discussion (re-create outgoing session) */
+  renew(contactUserId: string): Promise<Result<Uint8Array, Error>> {
+    return this.createSessionForContact(contactUserId, new Uint8Array(0));
+  }
+
+  /** Get the session status with a contact */
+  getStatus(contactUserId: string): SessionStatus {
+    return this.session.peerSessionStatus(decodeUserId(contactUserId));
+  }
+
+  /** List all discussions for the current user */
+  async list(): Promise<Discussion[]> {
+    const all = await this.queries.discussions.getByOwner(
+      this.session.userIdEncoded
+    );
+    return toSortedDiscussions(all);
+  }
+
+  /** Get a specific discussion by contact userId */
+  async get(contactUserId: string): Promise<Discussion | undefined> {
+    const row = await this.queries.discussions.getByOwnerAndContact(
+      this.session.userIdEncoded,
+      contactUserId
+    );
+    return row ? toDiscussion(row) : undefined;
+  }
+
+  /** Update the custom name of a discussion */
+  updateName(
+    discussionId: number,
+    name: string | undefined
+  ): Promise<UpdateDiscussionNameResult> {
+    return updateDiscussionName(discussionId, name, this.queries);
   }
 }
