@@ -108,7 +108,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
 
       const findMessage = async () => {
         try {
-          const msg = await sdk.messages.findByMsgId(
+          const msg = await sdk.messages.findMessageByMsgId(
             citedMsgId,
             message.ownerUserId,
             originalContactUserId

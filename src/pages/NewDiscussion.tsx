@@ -33,7 +33,7 @@ const NewDiscussion: React.FC = () => {
         setIsLoading(true);
         const list = userProfile?.userId
           ? await gossip.contacts
-              .list(userProfile.userId)
+              .list()
               .then(arr => arr.sort((a, b) => a.name.localeCompare(b.name)))
           : [];
         if (isMounted) setContacts(list);
@@ -62,10 +62,7 @@ const NewDiscussion: React.FC = () => {
 
   const onSelectContact = async (contact: Contact) => {
     if (!userProfile?.userId) return;
-    const discussion = await gossip.discussions.get(
-      userProfile.userId,
-      contact.userId
-    );
+    const discussion = await gossip.discussions.get(contact.userId);
     if (
       discussion &&
       gossip.discussions.getStatus(contact.userId) === SessionStatus.Active
