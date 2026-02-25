@@ -1,0 +1,9 @@
+[package]
+name = "bordercrypt"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+crypto-aead = { path = "../crypto-aead" }
+pq-rerand = { git = "https://github.com/massalabs/pq-rerand", branch = "main" }
+thiserror = "2"
