@@ -34,6 +34,8 @@ pub struct HistoryItemSelf {
     pub(crate) sk_next: kem::SecretKey,
     /// Root key for children messages
     pub(crate) k_next: [u8; 32],
+    /// Height of the peer message this message acknowledges as parent
+    pub(crate) peer_parent_height: u64,
 }
 
 /// History item representing the peer's most recent message.
@@ -57,6 +59,8 @@ pub struct HistoryItemSelf {
 /// 4. We can delete our history items older than `our_parent_height` (they've been acknowledged)
 #[derive(Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
 pub struct HistoryItemPeer {
+    /// Monotonic height of the latest peer message we have successfully processed
+    pub(crate) height: u64,
     /// Which of our messages they were responding to
     pub(crate) our_parent_height: u64,
     /// Their next public key for us to encapsulate to
@@ -85,8 +89,8 @@ mod tests {
             height: 1,
             sk_next,
             k_next,
-
             seeker: seeker.to_vec(),
+            peer_parent_height: 0,
         };
 
         assert_eq!(history_item.height, 1);
@@ -103,11 +107,13 @@ mod tests {
         let k_next = [42u8; 32];
 
         let history_item = HistoryItemPeer {
+            height: 7,
             our_parent_height: 5,
             pk_next,
             k_next,
         };
 
+        assert_eq!(history_item.height, 7);
         assert_eq!(history_item.our_parent_height, 5);
         assert_eq!(history_item.k_next, k_next);
     }
