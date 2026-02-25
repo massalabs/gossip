@@ -11,6 +11,23 @@ import { MIGRATIONS } from './generated-migrations.js';
 type ExecRaw = (sql: string, params?: unknown[]) => Promise<unknown[][]>;
 type WithTransaction = <T>(fn: () => Promise<T>) => Promise<T>;
 
+function makeCreateStatementsIdempotent(statement: string): string {
+  if (/^\s*CREATE\s+TABLE\s+(?!IF\s+NOT\s+EXISTS)/i.test(statement)) {
+    return statement.replace(/^(\s*CREATE\s+TABLE\s+)/i, '$1IF NOT EXISTS ');
+  }
+
+  if (
+    /^\s*CREATE\s+(UNIQUE\s+)?INDEX\s+(?!IF\s+NOT\s+EXISTS)/i.test(statement)
+  ) {
+    return statement.replace(
+      /^(\s*CREATE\s+(?:UNIQUE\s+)?INDEX\s+)/i,
+      '$1IF NOT EXISTS '
+    );
+  }
+
+  return statement;
+}
+
 export async function runMigrations(
   execRaw: ExecRaw,
   withTransaction: WithTransaction
@@ -30,7 +47,7 @@ export async function runMigrations(
   for (const migration of pending) {
     await withTransaction(async () => {
       for (const stmt of migration.statements) {
-        await execRaw(stmt);
+        await execRaw(makeCreateStatementsIdempotent(stmt));
       }
       await execRaw(
         'INSERT INTO _migrations (idx, tag, applied_at) VALUES (?, ?, ?)',
