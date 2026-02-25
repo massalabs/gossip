@@ -261,5 +261,39 @@ describe('RefreshService', () => {
         mockMessageService.processSendQueueForContact
       ).toHaveBeenCalledWith(REFRESH_CONTACT_USER_ID);
     });
+
+    it('should not process send queue for self requested discussions', async () => {
+      const mockSession = createRefreshSession(SessionStatus.SelfRequested);
+      const mockMessageService = createRefreshMessageService();
+      const mockDiscussionService = createRefreshDiscussionService();
+      const mockAnnouncementService = createRefreshAnnouncementService();
+
+      const refreshService = new RefreshService(
+        mockMessageService,
+        mockDiscussionService,
+        mockAnnouncementService,
+        mockSession,
+        eventEmitter,
+        getTestQueries()
+      );
+
+      await getTestQueries().discussions.insert({
+        ownerUserId: REFRESH_OWNER_USER_ID,
+        contactUserId: REFRESH_CONTACT_USER_ID,
+        direction: DiscussionDirection.INITIATED,
+        status: DiscussionStatus.ACTIVE,
+        weAccepted: true,
+        sendAnnouncement: null,
+        unreadCount: 0,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      await refreshService.stateUpdate();
+
+      expect(
+        mockMessageService.processSendQueueForContact
+      ).not.toHaveBeenCalled();
+    });
   });
 });

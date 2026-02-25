@@ -165,8 +165,17 @@ export class RefreshService {
       );
 
       // Step 3: send queued messages and keep-alives
+      // NOTE: only flush queued messages once the session is fully Active.
+      // SelfRequested means the handshake is still establishing and
+      // session.sendMessage() can return null.
+      const activeEstablishedDiscussions = activePendingDiscussions.filter(
+        discussion =>
+          this.session.peerSessionStatus(
+            decodeUserId(discussion.contactUserId)
+          ) === SessionStatus.Active
+      );
       const keepAliveSet = new Set(keepAlivePeerIds);
-      for (const discussion of activePendingDiscussions) {
+      for (const discussion of activeEstablishedDiscussions) {
         if (!discussion.weAccepted) continue;
 
         // Send keep alive message if needed
