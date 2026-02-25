@@ -319,3 +319,41 @@ describe('processSendQueueForContact: Encryption Error', () => {
     expect(messages[0].status).toBe(MessageStatus.WAITING_SESSION);
   });
 });
+
+describe('processSendQueueForContact: Session Not Active', () => {
+  it('should skip processing for SelfRequested session and keep message queued', async () => {
+    await clearAllTables();
+    const mockSession = createMockSession(
+      OWNER_USER_ID,
+      SessionStatus.SelfRequested
+    );
+    await insertTestContactAndDiscussion();
+
+    const messageService = new MessageService(
+      new MockMessageProtocol(),
+      mockSession,
+      new SdkEventEmitter(),
+      defaultSdkConfig,
+      getTestQueries()
+    );
+
+    const sendResult = await messageService.sendMessage(createTestMessage());
+    expect(sendResult.success).toBe(true);
+
+    const processResult =
+      await messageService.processSendQueueForContact(CONTACT_USER_ID);
+
+    expect(processResult.success).toBe(true);
+    if (processResult.success) {
+      expect(processResult.data).toBe(0);
+    }
+    expect(mockSession.sendMessage).not.toHaveBeenCalled();
+
+    const messages = await getTestQueries().messages.getByOwnerAndContact(
+      OWNER_USER_ID,
+      CONTACT_USER_ID
+    );
+    expect(messages).toHaveLength(1);
+    expect(messages[0].status).toBe(MessageStatus.WAITING_SESSION);
+  });
+});

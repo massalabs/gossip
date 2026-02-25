@@ -775,19 +775,14 @@ export class MessageService {
 
       const peerId = decodeUserId(contactUserId);
       const sessionStatus = this.session.peerSessionStatus(peerId);
-      if (
-        ![SessionStatus.Active, SessionStatus.SelfRequested].includes(
-          sessionStatus
-        )
-      ) {
-        log.info('session not active or self requested, skipping send queue', {
+      if (sessionStatus !== SessionStatus.Active) {
+        log.info('session not active, skipping send queue', {
           contactUserId,
           sessionStatus: sessionStatusToString(sessionStatus),
         });
-        return {
-          success: false,
-          error: new Error('Session not active or self requested'),
-        };
+        // Not an error: queued messages should remain pending until the
+        // handshake reaches Active.
+        return { success: true, data: 0 };
       }
 
       // retrieve all messages in send queue that need to be updated for this contact
@@ -840,15 +835,14 @@ export class MessageService {
             serializedContent
           );
           if (!sendOutput) {
-            log.warn('session manager returned null for queued message', {
-              messageId: msg.id,
-            });
-            return {
-              success: false,
-              error: new Error(
-                'Session manager returned null for queued message'
-              ),
-            };
+            log.info(
+              'session manager returned null for queued message; will retry later',
+              {
+                messageId: msg.id,
+              }
+            );
+            // Treat as transient and keep message in WAITING_SESSION.
+            continue;
           }
 
           encryptedMessage = sendOutput.data;
