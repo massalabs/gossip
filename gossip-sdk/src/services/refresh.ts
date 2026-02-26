@@ -47,6 +47,7 @@ export class RefreshService {
   private eventEmitter: SdkEventEmitter;
   private queries: Queries;
   private config: SdkConfig;
+  private sessionStatusMap: Map<string, SessionStatus> = new Map();
 
   constructor(
     messageService: MessageService,
@@ -64,6 +65,35 @@ export class RefreshService {
     this.eventEmitter = eventEmitter;
     this.queries = queries;
     this.config = config;
+  }
+
+  /**
+   * Emit sessionStatusChanged events for discussions whose session status
+   * has changed since the last check.
+   */
+  async refreshSessionsStatusEvent(): Promise<void> {
+    const ownerUserId = this.session.userIdEncoded;
+    if (!ownerUserId) {
+      return;
+    }
+
+    const allRows = await this.queries.discussions.getByOwner(ownerUserId);
+    const discussions = toSortedDiscussions(allRows);
+
+    for (const discussion of discussions) {
+      const peerId = decodeUserId(discussion.contactUserId);
+      const status = this.session.peerSessionStatus(peerId);
+      const previous = this.sessionStatusMap.get(discussion.contactUserId);
+
+      if (previous !== status) {
+        this.sessionStatusMap.set(discussion.contactUserId, status);
+        this.eventEmitter.emit(
+          SdkEventType.SESSION_STATUS_CHANGED,
+          discussion.contactUserId,
+          status
+        );
+      }
+    }
   }
 
   /**

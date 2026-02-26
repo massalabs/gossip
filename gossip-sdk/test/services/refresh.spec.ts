@@ -9,13 +9,16 @@ import { DiscussionService } from '../../src/services/discussion';
 import { AnnouncementService } from '../../src/services/announcement';
 import { MessageType, DiscussionDirection } from '../../src/db';
 import type { Discussion } from '../../src/db';
-import type { DiscussionInsert } from '../../src/db/queries/discussions';
+import type {
+  DiscussionInsert,
+  DiscussionRow,
+} from '../../src/db/queries/discussions';
 import { clearAllTables, getTestQueries } from '../testDb';
 import { defaultSdkConfig } from '../../src/config/sdk';
 import type { SessionModule } from '../../src/wasm/session';
 import { encodeUserId, decodeUserId } from '../../src/utils/userId';
 import { SessionStatus } from '../../src/assets/generated/wasm/gossip_wasm';
-import { SdkEventEmitter } from '../../src/core/SdkEventEmitter';
+import { SdkEventEmitter, SdkEventType } from '../../src/core/SdkEventEmitter';
 import { toDiscussion } from '../../src/utils/discussions';
 
 const REFRESH_OWNER_USER_ID = encodeUserId(new Uint8Array(32).fill(11));
@@ -76,6 +79,106 @@ describe('RefreshService', () => {
   afterEach(() => {
     // Ensure timers are restored after each test
     vi.useRealTimers();
+  });
+
+  describe('refreshSessionsStatusEvent', () => {
+    let mockSession: SessionModule;
+    let mockMessageService: MessageService;
+    let mockDiscussionService: DiscussionService;
+    let mockAnnouncementService: AnnouncementService;
+    let queries: ReturnType<typeof getTestQueries>;
+    let refreshService: RefreshService;
+    let emitSpy: ReturnType<typeof vi.spyOn>;
+    let getByOwnerSpy: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      mockSession = createRefreshSession(SessionStatus.Active);
+      mockMessageService = createRefreshMessageService();
+      mockDiscussionService = createRefreshDiscussionService();
+      mockAnnouncementService = createRefreshAnnouncementService();
+
+      queries = getTestQueries();
+      getByOwnerSpy = vi
+        .spyOn(queries.discussions, 'getByOwner')
+        .mockResolvedValue([
+          {
+            ownerUserId: REFRESH_OWNER_USER_ID,
+            contactUserId: REFRESH_CONTACT_USER_ID,
+            sendAnnouncement: null,
+            announcementMessage: null,
+            createdAt: new Date(),
+            lastMessageTimestamp: null,
+          } as DiscussionRow,
+        ]);
+
+      refreshService = new RefreshService(
+        mockMessageService,
+        mockDiscussionService,
+        mockAnnouncementService,
+        mockSession,
+        eventEmitter,
+        queries,
+        defaultSdkConfig
+      );
+
+      emitSpy = vi.spyOn(eventEmitter, 'emit');
+    });
+
+    afterEach(() => {
+      emitSpy.mockRestore();
+      getByOwnerSpy.mockRestore();
+    });
+
+    it('emits SESSION_STATUS_CHANGED when status changes for a session', async () => {
+      await refreshService.refreshSessionsStatusEvent();
+
+      expect(getByOwnerSpy).toHaveBeenCalledWith(REFRESH_OWNER_USER_ID);
+      expect(emitSpy).toHaveBeenCalledWith(
+        SdkEventType.SESSION_STATUS_CHANGED,
+        REFRESH_CONTACT_USER_ID,
+        SessionStatus.Active
+      );
+    });
+
+    it('does not emit SESSION_STATUS_CHANGED when status has not changed', async () => {
+      // First call populates the internal map and emits once
+      await refreshService.refreshSessionsStatusEvent();
+      // Second call sees the same status and should not emit again
+      await refreshService.refreshSessionsStatusEvent();
+
+      expect(emitSpy).toHaveBeenCalledTimes(1);
+      expect(emitSpy).toHaveBeenCalledWith(
+        SdkEventType.SESSION_STATUS_CHANGED,
+        REFRESH_CONTACT_USER_ID,
+        SessionStatus.Active
+      );
+    });
+
+    it('emits SESSION_STATUS_CHANGED again when status changes between calls', async () => {
+      // First call: status is Active
+      await refreshService.refreshSessionsStatusEvent();
+
+      // Change the mocked session status and call again
+      vi.mocked(mockSession.peerSessionStatus).mockReturnValue(
+        SessionStatus.Killed
+      );
+      await refreshService.refreshSessionsStatusEvent();
+
+      // Should have emitted once for Active and once for Killed
+      expect(emitSpy).toHaveBeenCalledTimes(2);
+      expect(emitSpy).toHaveBeenNthCalledWith(
+        1,
+        SdkEventType.SESSION_STATUS_CHANGED,
+        REFRESH_CONTACT_USER_ID,
+        SessionStatus.Active
+      );
+      expect(emitSpy).toHaveBeenNthCalledWith(
+        2,
+        SdkEventType.SESSION_STATUS_CHANGED,
+        REFRESH_CONTACT_USER_ID,
+        SessionStatus.Killed
+      );
+    });
   });
 
   describe('stateUpdate', () => {

@@ -21,6 +21,7 @@ import {
 import { useGossipSdk } from '../hooks/useGossipSdk';
 import { isDifferentDay } from '../utils/timeUtils';
 import { useUiStore } from '../stores/uiStore';
+import SessionIssueBanner from '../components/discussions/SessionIssueBanner';
 
 // Debug test message constants
 const TEST_MESSAGE_COUNT = 50;
@@ -491,6 +492,9 @@ const Discussion: React.FC = () => {
         discussion={discussion}
         onBack={onBack}
         onSearchToggle={() => setIsSearchOpen(prev => !prev)}
+      />
+      <SessionIssueBanner
+        discussion={discussion}
         outgoingSentCount={outgoingSentCount}
       />
       {isSearchOpen && (

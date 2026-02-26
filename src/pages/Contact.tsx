@@ -27,6 +27,7 @@ const Contact: React.FC = () => {
   const discussion = useDiscussionStore(s =>
     s.discussions.find(d => d.contactUserId === userId)
   );
+  const sessionsStatuses = useDiscussionStore(s => s.sessionsStatuses);
 
   // All hooks must be called before early return
   const ownerUserId = useAccountStore(s => s.userProfile?.userId);
@@ -128,8 +129,7 @@ const Contact: React.FC = () => {
   }
 
   const canStart = discussion
-    ? gossip.discussions.getStatus(discussion.contactUserId) ===
-      SessionStatus.Active
+    ? sessionsStatuses.get(discussion.contactUserId) === SessionStatus.Active
     : true;
 
   return (
@@ -191,7 +191,7 @@ const Contact: React.FC = () => {
               SessionStatus.PeerRequested,
               SessionStatus.SelfRequested,
             ].includes(
-              gossip.discussions.getStatus(discussion.contactUserId)
+              sessionsStatuses.get(discussion.contactUserId) as SessionStatus
             ) && 'Connection pending. You cannot chat yet.'}
           </p>
         )}

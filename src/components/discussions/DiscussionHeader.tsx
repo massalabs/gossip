@@ -3,12 +3,11 @@ import { useNavigate } from 'react-router-dom';
 import { ChevronLeft, Search } from 'react-feather';
 import { Contact, SessionStatus } from '@massalabs/gossip-sdk';
 import type { Discussion } from '@massalabs/gossip-sdk';
-import { useGossipSdk } from '../../hooks/useGossipSdk';
+import { useDiscussionStore } from '../../stores/discussionStore';
 import ContactAvatar from '../avatar/ContactAvatar';
 import Button from '../ui/Button';
 import BackButton from '../ui/BackButton';
 import HeaderBar from '../ui/HeaderBar';
-import Popover from '../ui/Popover';
 import { ROUTES } from '../../constants/routes';
 
 interface DiscussionHeaderProps {
@@ -18,7 +17,6 @@ interface DiscussionHeaderProps {
   onSync?: () => void;
   onSearchToggle?: () => void;
   title?: string;
-  outgoingSentCount?: number;
 }
 
 const DiscussionHeader: React.FC<DiscussionHeaderProps> = ({
@@ -27,9 +25,8 @@ const DiscussionHeader: React.FC<DiscussionHeaderProps> = ({
   onBack,
   onSearchToggle,
   title,
-  outgoingSentCount = 0,
 }) => {
-  const gossip = useGossipSdk();
+  const sessionsStatuses = useDiscussionStore(s => s.sessionsStatuses);
   const navigate = useNavigate();
 
   // Header with title (for list view with custom title)
@@ -61,13 +58,11 @@ const DiscussionHeader: React.FC<DiscussionHeaderProps> = ({
   const displayName = discussion?.customName || contact.name || 'Unknown';
 
   const sessionStatus = discussion
-    ? gossip.discussions.getStatus(discussion.contactUserId)
+    ? sessionsStatuses.get(discussion.contactUserId)
     : undefined;
 
   // Check if discussion is pending outgoing (waiting for approval)
   const isPendingOutgoing = sessionStatus === SessionStatus.SelfRequested;
-  const isSaturated = sessionStatus === SessionStatus.Saturated;
-  const isKilled = sessionStatus === SessionStatus.Killed;
 
   // Navigate to discussion settings if discussion exists, otherwise contact page
   const handleHeaderClick = () => {
@@ -118,34 +113,6 @@ const DiscussionHeader: React.FC<DiscussionHeaderProps> = ({
             </div>
           </button>
         </div>
-        {isKilled && (
-          <div className="w-full rounded-md border border-border bg-muted/60 px-3 py-2 text-sm text-foreground">
-            Session is currently broken. We will retry automatically every few
-            minutes.
-          </div>
-        )}
-        {isSaturated && (
-          <div className="w-full rounded-md border border-border bg-accent/20 px-3 py-2 text-sm text-foreground flex items-start gap-2">
-            <span className="flex-1">
-              You have sent many messages that have not been acknowledged yet.
-              For security, it is best to wait for a reply before sending more.
-            </span>
-            <Popover
-              ariaLabel="Why wait for a reply?"
-              message={`Receiving a message from the peer allows the encryption key to be renewed. If an attacker gets your current key, they could decrypt your last ${outgoingSentCount} sent messages.`}
-            />
-          </div>
-          <div className="flex-1 min-w-0 text-left">
-            <h1 className="text-xl font-semibold text-foreground truncate leading-tight">
-              {displayName}
-            </h1>
-            {isPendingOutgoing && (
-              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-accent text-accent-foreground border border-border">
-                Waiting approval
-              </span>
-            )}
-          </div>
-        </button>
         {onSearchToggle && (
           <Button
             onClick={onSearchToggle}

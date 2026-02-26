@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Contact, SessionStatus } from '@massalabs/gossip-sdk';
 import type { Discussion } from '@massalabs/gossip-sdk';
-import { useGossipSdk } from '../../hooks/useGossipSdk';
 import ContactAvatar from '../avatar/ContactAvatar';
 import { formatRelativeTime } from '../../utils/timeUtils';
 import { formatUserId } from '@massalabs/gossip-sdk';
@@ -29,7 +28,6 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
   onAccept,
   onRefuse,
 }) => {
-  const sdk = useGossipSdk();
   const [proposedName, setProposedName] = useState(contact.name || '');
   const [isRefuseModalOpen, setIsRefuseModalOpen] = useState(false);
   // Re-render trigger to update relative time display every minute
@@ -38,6 +36,7 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
   // Use store to persist modal state across component remounts
   const openNameModals = useDiscussionStore(s => s.openNameModals);
   const setModalOpen = useDiscussionStore(s => s.setModalOpen);
+  const sessionsStatuses = useDiscussionStore(s => s.sessionsStatuses);
   const isModalOpenInStore = discussion.id
     ? openNameModals.has(discussion.id)
     : false;
@@ -57,7 +56,7 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
   // Effect 1: Close the modal if the discussion is no longer pending
   useEffect(() => {
     const isPendingIncomingCheck =
-      sdk.discussions.getStatus(discussion.contactUserId) ===
+      sessionsStatuses.get(discussion.contactUserId) ===
       SessionStatus.PeerRequested;
 
     if (!isPendingIncomingCheck) {
@@ -72,12 +71,12 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
         return prev;
       });
     }
-  }, [discussion.contactUserId, discussion.id, sdk.discussions, setModalOpen]);
+  }, [discussion.contactUserId, discussion.id, sessionsStatuses, setModalOpen]);
 
   // Effect 2: Open the modal if the store says it should be open and discussion is pending
   useEffect(() => {
     const isPendingIncomingCheck =
-      sdk.discussions.getStatus(discussion.contactUserId) ===
+      sessionsStatuses.get(discussion.contactUserId) ===
       SessionStatus.PeerRequested;
 
     if (!isPendingIncomingCheck) {
@@ -101,14 +100,14 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
     discussion.id,
     openNameModals,
     contact.name,
-    sdk.discussions,
+    sessionsStatuses,
   ]);
 
   const isPendingIncoming =
-    sdk.discussions.getStatus(discussion.contactUserId) ===
+    sessionsStatuses.get(discussion.contactUserId) ===
     SessionStatus.PeerRequested;
   const isPendingOutgoing =
-    sdk.discussions.getStatus(discussion.contactUserId) ===
+    sessionsStatuses.get(discussion.contactUserId) ===
     SessionStatus.SelfRequested;
 
   return (

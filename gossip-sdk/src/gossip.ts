@@ -601,6 +601,9 @@ class GossipSdk {
         handleSessionRefresh: async () => {
           await this.updateState();
         },
+        refreshSessionsStatusEvent: async () => {
+          await this._refresh?.refreshSessionsStatusEvent();
+        },
       },
       this.eventEmitter
     );
