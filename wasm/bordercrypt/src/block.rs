@@ -28,11 +28,12 @@ pub fn encrypt_block(
 
     let aead_ct = crypto_aead::encrypt(&key, &nonce, plaintext, aad.as_bytes());
 
-    let mut msg = Zeroizing::new([0u8; PQ_MSG_SIZE]);
+    let mut msg = Zeroizing::new(vec![0u8; PQ_MSG_SIZE]);
     msg[..crypto_aead::NONCE_SIZE].copy_from_slice(&nonce_bytes);
     msg[crypto_aead::NONCE_SIZE..].copy_from_slice(&aead_ct);
 
-    pq_encrypt(pq_pk, &msg)
+    let msg_arr: &[u8; PQ_MSG_SIZE] = msg.as_slice().try_into().expect("msg is PQ_MSG_SIZE");
+    pq_encrypt(pq_pk, msg_arr)
 }
 
 /// Decrypt an on-disk ciphertext block back to plaintext.
@@ -43,7 +44,7 @@ pub fn decrypt_block(
     aead_key: &[u8; crypto_aead::KEY_SIZE],
     aad: &str,
     block_ct: &[u8; BLOCK_SIZE],
-) -> Result<Zeroizing<[u8; PLAINTEXT_SIZE]>> {
+) -> Result<Zeroizing<Vec<u8>>> {
     let msg = pq_decrypt(pq_sk, block_ct);
 
     let nonce = crypto_aead::Nonce::from(
@@ -53,16 +54,14 @@ pub fn decrypt_block(
     let aead_ct = &msg[crypto_aead::NONCE_SIZE..];
     let key = crypto_aead::Key::from(*aead_key);
 
-    let plaintext_vec = Zeroizing::new(
+    let plaintext = Zeroizing::new(
         crypto_aead::decrypt(&key, &nonce, aead_ct, aad.as_bytes())
             .ok_or(BordercryptError::CorruptedBlock)?,
     );
 
-    let mut plaintext = Zeroizing::new([0u8; PLAINTEXT_SIZE]);
-    if plaintext_vec.len() != PLAINTEXT_SIZE {
+    if plaintext.len() != PLAINTEXT_SIZE {
         return Err(BordercryptError::CorruptedBlock);
     }
-    plaintext.copy_from_slice(&plaintext_vec);
     Ok(plaintext)
 }
 
@@ -82,16 +81,17 @@ pub fn create_cover_block(pq_pk: &PqPublicKey, aad: &str) -> Vec<u8> {
     rng.fill_bytes(&mut nonce_bytes);
     let nonce = crypto_aead::Nonce::from(nonce_bytes);
 
-    let mut plaintext = Zeroizing::new([0u8; PLAINTEXT_SIZE]);
-    rng.fill_bytes(plaintext.as_mut());
+    let mut plaintext = Zeroizing::new(vec![0u8; PLAINTEXT_SIZE]);
+    rng.fill_bytes(&mut plaintext[..]);
 
-    let aead_ct = crypto_aead::encrypt(&tmp_key, &nonce, plaintext.as_ref(), aad.as_bytes());
+    let aead_ct = crypto_aead::encrypt(&tmp_key, &nonce, &plaintext, aad.as_bytes());
 
-    let mut msg = Zeroizing::new([0u8; PQ_MSG_SIZE]);
+    let mut msg = Zeroizing::new(vec![0u8; PQ_MSG_SIZE]);
     msg[..crypto_aead::NONCE_SIZE].copy_from_slice(&nonce_bytes);
     msg[crypto_aead::NONCE_SIZE..].copy_from_slice(&aead_ct);
 
-    pq_encrypt(pq_pk, &msg)
+    let msg_arr: &[u8; PQ_MSG_SIZE] = msg.as_slice().try_into().expect("msg is PQ_MSG_SIZE");
+    pq_encrypt(pq_pk, msg_arr)
 }
 
 /// Re-randomize a ciphertext block using only the public key.

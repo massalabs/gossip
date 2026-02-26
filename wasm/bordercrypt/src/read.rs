@@ -16,7 +16,7 @@ pub fn decrypt_session_data_block<S: BlockStorage>(
     domain: &str,
     session: &UnlockedSession,
     block_index: u64,
-) -> Result<Zeroizing<[u8; PLAINTEXT_SIZE]>> {
+) -> Result<Zeroizing<Vec<u8>>> {
     let block_ct = storage.read_block(session.session_index, block_index)?;
 
     let mut buf = String::new();
