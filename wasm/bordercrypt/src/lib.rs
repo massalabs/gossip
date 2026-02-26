@@ -8,6 +8,7 @@ mod domain;
 mod error;
 mod kdf;
 mod keypair;
+mod lifecycle;
 mod pq;
 mod read;
 pub mod storage;
@@ -25,6 +26,7 @@ pub use domain::{
 pub use error::{BordercryptError, Result};
 pub use kdf::derive_block_aead_key;
 pub use keypair::{KeypairFile, read_session_keypair, read_session_version_and_pk};
+pub use lifecycle::{allocate_session, cover_traffic_tick, provision_storage};
 pub use pq::{
     PQ_CT_SIZE, PQ_MSG_SIZE, PqPublicKey, PqSecretKey, pq_decrypt, pq_encrypt, pq_keygen, pq_rerand,
 };
