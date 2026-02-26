@@ -158,6 +158,7 @@ dependencies = [
  "pq-rerand",
  "tempfile",
  "thiserror 2.0.18",
+ "zeroize",
 ]
 
 [[package]]
@@ -953,7 +954,7 @@ dependencies = [
 [[package]]
 name = "pq-rerand"
 version = "0.1.0"
-source = "git+https://github.com/massalabs/pq-rerand?branch=main#c5bbcea0858c2d1412cb945824fd0bae959eead3"
+source = "git+https://github.com/massalabs/pq-rerand?rev=c5bbcea0858c2d1412cb945824fd0bae959eead3#c5bbcea0858c2d1412cb945824fd0bae959eead3"
 dependencies = [
  "rand 0.8.5",
  "rand_distr",

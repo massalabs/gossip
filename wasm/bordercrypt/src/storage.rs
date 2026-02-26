@@ -1,5 +1,7 @@
 //! Storage abstraction for bordercrypt.
 
+use zeroize::Zeroizing;
+
 use crate::{BLOCK_SIZE, BordercryptError, Result, SESSION_COUNT, SessionIndex};
 
 /// Block-level storage for session blockstream files.
@@ -30,7 +32,10 @@ pub trait BlockStorage {
 /// Keypair file storage for session keypair files.
 pub trait KeypairStorage {
     /// Read the raw keypair file bytes for a session.
-    fn read_keypair(&self, session: SessionIndex) -> Result<Vec<u8>>;
+    ///
+    /// Returns `Zeroizing<Vec<u8>>` so the buffer is zeroized on drop
+    /// (keypair files contain encrypted secret key material).
+    fn read_keypair(&self, session: SessionIndex) -> Result<Zeroizing<Vec<u8>>>;
 
     /// Write raw keypair file bytes for a session.
     fn write_keypair(&mut self, session: SessionIndex, data: &[u8]) -> Result<()>;
@@ -97,12 +102,12 @@ impl BlockStorage for MemoryStorage {
 }
 
 impl KeypairStorage for MemoryStorage {
-    fn read_keypair(&self, session: SessionIndex) -> Result<Vec<u8>> {
+    fn read_keypair(&self, session: SessionIndex) -> Result<Zeroizing<Vec<u8>>> {
         let data = &self.keypairs[session.as_usize()];
         if data.is_empty() {
             return Err(BordercryptError::Storage("keypair not found".into()));
         }
-        Ok(data.clone())
+        Ok(Zeroizing::new(data.clone()))
     }
 
     fn write_keypair(&mut self, session: SessionIndex, data: &[u8]) -> Result<()> {
@@ -200,7 +205,12 @@ mod fs_backend {
 
         fn block_count(&self, session: SessionIndex) -> Result<u64> {
             let metadata = fs::metadata(self.blocks_path(session))?;
-            Ok(metadata.len() / BLOCK_SIZE as u64)
+            let len = metadata.len();
+            let block_size = BLOCK_SIZE as u64;
+            if len % block_size != 0 {
+                return Err(BordercryptError::CorruptedBlock);
+            }
+            Ok(len / block_size)
         }
 
         fn fsync(&self, session: SessionIndex) -> Result<()> {
@@ -211,14 +221,15 @@ mod fs_backend {
     }
 
     impl KeypairStorage for FsStorage {
-        fn read_keypair(&self, session: SessionIndex) -> Result<Vec<u8>> {
-            fs::read(self.keypair_path(session)).map_err(|e| {
+        fn read_keypair(&self, session: SessionIndex) -> Result<Zeroizing<Vec<u8>>> {
+            let data = fs::read(self.keypair_path(session)).map_err(|e| {
                 if e.kind() == std::io::ErrorKind::NotFound {
                     BordercryptError::Storage("keypair not found".into())
                 } else {
                     BordercryptError::Io(e)
                 }
-            })
+            })?;
+            Ok(Zeroizing::new(data))
         }
 
         fn write_keypair(&mut self, session: SessionIndex, data: &[u8]) -> Result<()> {
@@ -320,7 +331,7 @@ mod tests {
         store.write_keypair(s0, data).unwrap();
 
         let read_back = store.read_keypair(s0).unwrap();
-        assert_eq!(read_back, data);
+        assert_eq!(&*read_back, data);
     }
 
     #[test]
@@ -405,7 +416,7 @@ mod tests {
             store.write_keypair(s0, data).unwrap();
 
             let read_back = store.read_keypair(s0).unwrap();
-            assert_eq!(read_back, data);
+            assert_eq!(&*read_back, data);
         }
 
         #[test]
@@ -418,6 +429,33 @@ mod tests {
 
             assert_eq!(store.block_count(s0).unwrap(), 1);
             assert_eq!(store.block_count(s1).unwrap(), 0);
+        }
+
+        #[test]
+        fn test_fs_write_oob() {
+            let (mut store, _dir) = make_fs_storage();
+            let s0 = SessionIndex::new(0).unwrap();
+
+            let result = store.write_block(s0, 0, &make_block(0));
+            assert!(result.is_err());
+        }
+
+        #[test]
+        fn test_fs_keypair_not_found() {
+            let (store, _dir) = make_fs_storage();
+            let s0 = SessionIndex::new(0).unwrap();
+
+            let result = store.read_keypair(s0);
+            assert!(result.is_err());
+        }
+
+        #[test]
+        fn test_fs_fsync() {
+            let (mut store, _dir) = make_fs_storage();
+            let s0 = SessionIndex::new(0).unwrap();
+
+            store.append_block(s0, &make_block(0xAB)).unwrap();
+            store.fsync(s0).unwrap();
         }
     }
 }
