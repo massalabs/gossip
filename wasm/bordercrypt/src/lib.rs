@@ -9,6 +9,7 @@ mod error;
 mod kdf;
 mod keypair;
 mod pq;
+mod read;
 pub mod storage;
 mod types;
 mod unlock;
@@ -25,5 +26,6 @@ pub use keypair::{KeypairFile, read_session_keypair, read_session_version_and_pk
 pub use pq::{
     PQ_CT_SIZE, PQ_MSG_SIZE, PqPublicKey, PqSecretKey, pq_decrypt, pq_encrypt, pq_keygen, pq_rerand,
 };
+pub use read::{decrypt_session_data_block, read_session_data, read_total_length};
 pub use types::SessionIndex;
 pub use unlock::{UnlockedSession, unlock_session};
