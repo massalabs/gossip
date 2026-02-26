@@ -7,3 +7,6 @@ edition.workspace = true
 crypto-aead = { path = "../crypto-aead" }
 pq-rerand = { git = "https://github.com/massalabs/pq-rerand", branch = "main" }
 thiserror = "2"
+
+[dev-dependencies]
+tempfile = "3"
