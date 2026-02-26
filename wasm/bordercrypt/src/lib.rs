@@ -11,6 +11,7 @@ mod keypair;
 mod pq;
 pub mod storage;
 mod types;
+mod unlock;
 
 pub use block::{create_cover_block, decrypt_block, encrypt_block, rerandomize_block};
 pub use constants::{AEAD_TAG_SIZE, BLOCK_SIZE, LENGTH_HDR_SIZE, PLAINTEXT_SIZE, SESSION_COUNT};
@@ -25,3 +26,4 @@ pub use pq::{
     PQ_CT_SIZE, PQ_MSG_SIZE, PqPublicKey, PqSecretKey, pq_decrypt, pq_encrypt, pq_keygen, pq_rerand,
 };
 pub use types::SessionIndex;
+pub use unlock::{UnlockedSession, unlock_session};
