@@ -8,6 +8,9 @@ use zeroize::{Zeroize, Zeroizing};
 use crate::constants::BLOCK_SIZE;
 use crate::error::{BordercryptError, Result};
 
+/// NTT tables computed at compile time — zero runtime cost.
+const NTT_CTX: pq_rerand::poly::NttContext = pq_rerand::poly::NttContext::new();
+
 /// Plaintext message size per pq-rerand slot.
 pub const PQ_MSG_SIZE: usize = pq_rerand::params::SLOT_BYTES;
 
@@ -42,9 +45,9 @@ impl Drop for PqSecretKey {
 
 /// Generate a fresh pq-rerand keypair.
 pub fn pq_keygen() -> (PqPublicKey, PqSecretKey) {
-    let ctx = pq_rerand::poly::NttContext::new();
+    let ctx = &NTT_CTX;
     let mut rng = rand::rngs::OsRng;
-    let (sk, pk) = pq_rerand::keygen::keygen(&mut rng, &ctx);
+    let (sk, pk) = pq_rerand::keygen::keygen(&mut rng, ctx);
     (PqPublicKey(pk), PqSecretKey(Some(sk)))
 }
 
@@ -53,12 +56,12 @@ pub fn pq_keygen() -> (PqPublicKey, PqSecretKey) {
 /// `message` must be exactly `PQ_MSG_SIZE` bytes.
 /// Returns a boxed ciphertext of exactly `PQ_CT_SIZE` bytes.
 pub fn pq_encrypt(pk: &PqPublicKey, message: &[u8; PQ_MSG_SIZE]) -> Vec<u8> {
-    let ctx = pq_rerand::poly::NttContext::new();
+    let ctx = &NTT_CTX;
     let mut rng = rand::rngs::OsRng;
     let mut coeffs = Zeroizing::new(pq_rerand::encoding::encode(message));
     let ct = pq_rerand::encrypt::encrypt_slot(
         &mut rng,
-        &ctx,
+        ctx,
         &pk.0,
         &coeffs,
         pq_rerand::params::SIGMA_FLOOD,
@@ -77,10 +80,10 @@ pub fn pq_encrypt(pk: &PqPublicKey, message: &[u8; PQ_MSG_SIZE]) -> Vec<u8> {
 /// tampering. The returned bytes may be garbage if the ciphertext was
 /// modified.
 pub fn pq_decrypt(sk: &PqSecretKey, ciphertext: &[u8; PQ_CT_SIZE]) -> Zeroizing<Vec<u8>> {
-    let ctx = pq_rerand::poly::NttContext::new();
+    let ctx = &NTT_CTX;
     let ct = pq_rerand::serialize::deserialize_slot(ciphertext);
     let sk_inner = sk.0.as_ref().expect("secret key consumed");
-    let coeffs = Zeroizing::new(pq_rerand::decrypt::decrypt_slot(&ctx, sk_inner, &ct));
+    let coeffs = Zeroizing::new(pq_rerand::decrypt::decrypt_slot(ctx, sk_inner, &ct));
     Zeroizing::new(pq_rerand::encoding::decode(&coeffs))
 }
 
@@ -89,10 +92,10 @@ pub fn pq_decrypt(sk: &PqSecretKey, ciphertext: &[u8; PQ_CT_SIZE]) -> Zeroizing<
 /// The decrypted plaintext is unchanged but the ciphertext bytes differ.
 /// `ciphertext` must be exactly `PQ_CT_SIZE` bytes.
 pub fn pq_rerand(pk: &PqPublicKey, ciphertext: &[u8; PQ_CT_SIZE]) -> Vec<u8> {
-    let ctx = pq_rerand::poly::NttContext::new();
+    let ctx = &NTT_CTX;
     let mut rng = rand::rngs::OsRng;
     let ct = pq_rerand::serialize::deserialize_slot(ciphertext);
-    let ct_new = pq_rerand::rerandomize::rerandomize_slot(&mut rng, &ctx, &pk.0, &ct);
+    let ct_new = pq_rerand::rerandomize::rerandomize_slot(&mut rng, ctx, &pk.0, &ct);
     pq_rerand::serialize::serialize_slot(&ct_new)
 }
 
