@@ -5,6 +5,7 @@
 mod constants;
 mod domain;
 mod error;
+pub mod storage;
 mod types;
 
 pub use constants::{AEAD_TAG_SIZE, BLOCK_SIZE, LENGTH_HDR_SIZE, PLAINTEXT_SIZE, SESSION_COUNT};
