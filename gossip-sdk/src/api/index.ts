@@ -2,4 +2,4 @@ export {
   restMessageProtocol,
   RestMessageProtocol,
   type EncryptedMessage,
-} from './messageProtocol';
+} from './messageProtocol/index.js';

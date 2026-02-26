@@ -12,20 +12,20 @@ import {
   MessageStatus,
   MessageType,
   serializeSendAnnouncement,
-} from '../db';
-import { toDiscussion } from '../utils/discussions';
-import { decodeUserId, encodeUserId } from '../utils/userId';
-import { IMessageProtocol } from '../api/messageProtocol';
-import { UserPublicKeys, SessionStatus } from '../wasm/bindings';
-import { SessionModule, sessionStatusToString } from '../wasm/session';
-import { Logger } from '../utils/logs';
-import { BulletinItem } from '../api/messageProtocol/types';
-import { SdkConfig, defaultSdkConfig } from '../config/sdk';
-import { decodeAnnouncementPayload } from '../utils/announcementPayload';
-import { Result } from '../utils/type';
-import { SdkEventEmitter, SdkEventType } from '../core/SdkEventEmitter';
-import type { RefreshService } from './refresh';
-import { Queries } from '../db/queries';
+} from '../db/index.js';
+import { toDiscussion } from '../utils/discussions.js';
+import { decodeUserId, encodeUserId } from '../utils/userId.js';
+import { IMessageProtocol } from '../api/messageProtocol/index.js';
+import { UserPublicKeys, SessionStatus } from '../wasm/bindings.js';
+import { SessionModule, sessionStatusToString } from '../wasm/session.js';
+import { Logger } from '../utils/logs.js';
+import { BulletinItem } from '../api/messageProtocol/types.js';
+import { SdkConfig, defaultSdkConfig } from '../config/sdk.js';
+import { decodeAnnouncementPayload } from '../utils/announcementPayload.js';
+import { Result } from '../utils/type.js';
+import { SdkEventEmitter, SdkEventType } from '../core/SdkEventEmitter.js';
+import type { RefreshService } from './refresh.js';
+import { Queries } from '../db/queries/index.js';
 
 const logger = new Logger('AnnouncementService');
 

@@ -4,10 +4,10 @@
  * Handles storing and retrieving public keys by userId hash via the auth API.
  */
 
-import { UserPublicKeys } from '../wasm/bindings';
-import { decodeUserId } from '../utils/userId';
-import { encodeToBase64, decodeFromBase64 } from '../utils/base64';
-import { IAuthProtocol } from '../api/authProtocol';
+import { UserPublicKeys } from '../wasm/bindings.js';
+import { decodeUserId } from '../utils/userId.js';
+import { encodeToBase64, decodeFromBase64 } from '../utils/base64.js';
+import { IAuthProtocol } from '../api/authProtocol.js';
 
 export class AuthService {
   constructor(public authProtocol: IAuthProtocol) {}

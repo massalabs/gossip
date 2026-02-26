@@ -1,7 +1,7 @@
 import { eq, and, sql } from 'drizzle-orm';
-import * as schema from '../schema';
-import type { DatabaseConnection } from '../sqlite';
-import { Contact } from '../db';
+import * as schema from '../schema/index.js';
+import type { DatabaseConnection } from '../sqlite.js';
+import type { Contact } from '../db.js';
 
 export type ContactRow = typeof schema.contacts.$inferSelect;
 type ContactInsert = typeof schema.contacts.$inferInsert;

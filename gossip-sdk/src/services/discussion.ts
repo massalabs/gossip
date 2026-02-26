@@ -13,28 +13,28 @@ import {
   MessageStatus,
   MessageType,
   serializeSendAnnouncement,
-} from '../db';
+} from '../db/index.js';
 import {
   toDiscussion,
   toSortedDiscussions,
   updateDiscussionName,
   type UpdateDiscussionNameResult,
-} from '../utils/discussions';
+} from '../utils/discussions.js';
 import {
   AnnouncementPayload,
   encodeAnnouncementPayload,
-} from '../utils/announcementPayload';
-import { UserPublicKeys, SessionStatus } from '../wasm/bindings';
-import { AnnouncementService } from './announcement';
-import { SessionModule } from '../wasm/session';
-import { Logger } from '../utils/logs';
-import { RefreshService } from './refresh';
-import type { AuthService } from './auth';
-import { Result } from '../utils/type';
-import { SdkEventEmitter, SdkEventType } from '../core/SdkEventEmitter';
-import { Queries } from '../db/queries';
-import { decodeUserId } from '../utils/userId';
-import { addContact } from '../utils/contacts';
+} from '../utils/announcementPayload.js';
+import { UserPublicKeys, SessionStatus } from '../wasm/bindings.js';
+import { AnnouncementService } from './announcement.js';
+import { SessionModule } from '../wasm/session.js';
+import { Logger } from '../utils/logs.js';
+import { RefreshService } from './refresh.js';
+import type { AuthService } from './auth.js';
+import { Result } from '../utils/type.js';
+import { SdkEventEmitter, SdkEventType } from '../core/SdkEventEmitter.js';
+import { Queries } from '../db/queries/index.js';
+import { decodeUserId } from '../utils/userId.js';
+import { addContact } from '../utils/contacts.js';
 
 const logger = new Logger('DiscussionService');
 

@@ -1,6 +1,6 @@
 import { inArray } from 'drizzle-orm';
-import * as schema from '../schema';
-import type { DatabaseConnection } from '../sqlite';
+import * as schema from '../schema/index.js';
+import type { DatabaseConnection } from '../sqlite.js';
 
 export type PendingAnnouncementRow =
   typeof schema.pendingAnnouncements.$inferSelect;

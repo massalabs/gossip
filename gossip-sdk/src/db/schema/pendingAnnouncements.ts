@@ -5,7 +5,7 @@ import {
   index,
   uniqueIndex,
 } from 'drizzle-orm/sqlite-core';
-import { bytes } from './_helpers';
+import { bytes } from './_helpers.js';
 
 export const pendingAnnouncements = sqliteTable(
   'pendingAnnouncements',

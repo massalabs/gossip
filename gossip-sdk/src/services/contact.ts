@@ -5,10 +5,10 @@
  * Created during openSession().
  */
 
-import type { Contact } from '../db';
-import type { UserPublicKeys } from '../wasm/bindings';
-import type { SessionModule } from '../wasm/session';
-import type { AuthService } from './auth';
+import type { Contact } from '../db/index.js';
+import type { UserPublicKeys } from '../wasm/bindings.js';
+import type { SessionModule } from '../wasm/session.js';
+import type { AuthService } from './auth.js';
 import {
   addContact,
   updateContactName,
@@ -16,8 +16,8 @@ import {
   type AddContactResult,
   type UpdateContactNameResult,
   type DeleteContactResult,
-} from '../utils/contacts';
-import { Queries } from '../db/queries';
+} from '../utils/contacts.js';
+import { Queries } from '../db/queries/index.js';
 
 export class ContactService {
   private session: SessionModule;

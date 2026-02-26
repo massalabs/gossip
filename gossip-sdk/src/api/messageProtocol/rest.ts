@@ -7,9 +7,9 @@ import {
   EncryptedMessage,
   IMessageProtocol,
   MessageProtocolResponse,
-} from './types';
-import { RestClient } from '../restClient';
-import { encodeToBase64, decodeFromBase64 } from '../../utils/base64';
+} from './types.js';
+import { RestClient } from '../restClient.js';
+import { encodeToBase64, decodeFromBase64 } from '../../utils/base64.js';
 
 const BULLETIN_ENDPOINT = '/bulletin';
 const MESSAGES_ENDPOINT = '/messages';

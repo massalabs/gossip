@@ -5,11 +5,11 @@
  * ensuring proper initialization before calling any WASM functions.
  */
 
-import { ensureWasmInitialized } from './loader';
+import { ensureWasmInitialized } from './loader.js';
 import {
   generate_user_keys as _generate_user_keys,
   UserKeys,
-} from './bindings';
+} from './bindings.js';
 
 // Re-export classes
 export { UserKeys };

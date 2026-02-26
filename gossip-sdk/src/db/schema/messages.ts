@@ -1,6 +1,6 @@
 import { sqliteTable, text, integer, index } from 'drizzle-orm/sqlite-core';
 import type { MessageType, MessageDirection, MessageStatus } from '../db';
-import { bytes } from './_helpers';
+import { bytes } from './_helpers.js';
 
 export const messages = sqliteTable(
   'messages',

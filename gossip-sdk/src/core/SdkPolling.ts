@@ -4,8 +4,8 @@
  * Manages polling timers for messages, announcements, and session refresh.
  */
 
-import type { SdkConfig } from '../config/sdk';
-import { SdkEventEmitter, SdkEventType } from './SdkEventEmitter';
+import type { SdkConfig } from '../config/sdk.js';
+import { SdkEventEmitter, SdkEventType } from './SdkEventEmitter.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types

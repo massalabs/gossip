@@ -1,6 +1,6 @@
 import { and, desc, eq, ne, sql } from 'drizzle-orm';
-import * as schema from '../schema';
-import type { DatabaseConnection } from '../sqlite';
+import * as schema from '../schema/index.js';
+import type { DatabaseConnection } from '../sqlite.js';
 import type { UserProfile } from '../db';
 
 export type UserProfileRow = typeof schema.userProfile.$inferSelect;

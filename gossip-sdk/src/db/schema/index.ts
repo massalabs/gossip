@@ -1,8 +1,8 @@
-export { contacts } from './contacts';
-export { messages } from './messages';
-export { userProfile } from './userProfile';
-export { discussions } from './discussions';
-export { pendingEncryptedMessages } from './pendingEncryptedMessages';
-export { pendingAnnouncements } from './pendingAnnouncements';
-export { activeSeekers } from './activeSeekers';
-export { announcementCursors } from './announcementCursors';
+export { contacts } from './contacts.js';
+export { messages } from './messages.js';
+export { userProfile } from './userProfile.js';
+export { discussions } from './discussions.js';
+export { pendingEncryptedMessages } from './pendingEncryptedMessages.js';
+export { pendingAnnouncements } from './pendingAnnouncements.js';
+export { activeSeekers } from './activeSeekers.js';
+export { announcementCursors } from './announcementCursors.js';

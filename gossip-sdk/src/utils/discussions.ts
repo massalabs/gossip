@@ -4,9 +4,9 @@
  * Functions for managing discussion metadata.
  */
 
-import { type Discussion, rowToDiscussion } from '../db';
-import type { DiscussionRow } from '../db';
-import { Queries } from '../db/queries';
+import { type Discussion, rowToDiscussion } from '../db/index.js';
+import type { DiscussionRow } from '../db/index.js';
+import { Queries } from '../db/queries/index.js';
 
 /** Convert a Drizzle discussion row to a domain Discussion. */
 export function toDiscussion(row: DiscussionRow): Discussion {

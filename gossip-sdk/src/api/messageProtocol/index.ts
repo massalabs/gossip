@@ -9,10 +9,10 @@ export type {
   IMessageProtocol,
   MessageProtocolResponse,
   BulletinItem,
-} from './types';
-import type { IMessageProtocol } from './types';
-import { protocolConfig } from '../../config/protocol';
-import { RestMessageProtocol } from './rest';
+} from './types.js';
+import type { IMessageProtocol } from './types.js';
+import { protocolConfig } from '../../config/protocol.js';
+import { RestMessageProtocol } from './rest.js';
 
 /**
  * Factory function to create message protocol instances
@@ -28,4 +28,4 @@ export function createMessageProtocol(
 }
 
 export const restMessageProtocol = createMessageProtocol();
-export { RestMessageProtocol } from './rest';
+export { RestMessageProtocol } from './rest.js';

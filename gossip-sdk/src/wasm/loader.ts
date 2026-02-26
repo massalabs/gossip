@@ -7,7 +7,7 @@
  * - Node.js / Jiti: init(bytes) with WASM bytes read from the filesystem
  */
 
-import { init } from './bindings';
+import { init } from './bindings.js';
 
 /**
  * WASM Initialization State

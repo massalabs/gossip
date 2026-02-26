@@ -5,17 +5,17 @@
  * keep-alive messages and broken sessions.
  */
 
-import { MessageType, MessageDirection, MessageStatus } from '../db';
-import { toSortedDiscussions } from '../utils/discussions';
-import type { SessionModule } from '../wasm/session';
-import { SessionStatus } from '../wasm/bindings';
-import { decodeUserId, encodeUserId } from '../utils/userId';
-import { MessageService } from './message';
-import { AnnouncementService } from './announcement';
-import { DiscussionService } from './discussion';
-import { Logger } from '../utils/logs';
-import { SdkEventEmitter, SdkEventType } from '../core/SdkEventEmitter';
-import { Queries } from '../db/queries';
+import { MessageType, MessageDirection, MessageStatus } from '../db/index.js';
+import { toSortedDiscussions } from '../utils/discussions.js';
+import type { SessionModule } from '../wasm/session.js';
+import { SessionStatus } from '../wasm/bindings.js';
+import { decodeUserId, encodeUserId } from '../utils/userId.js';
+import { MessageService } from './message.js';
+import { AnnouncementService } from './announcement.js';
+import { DiscussionService } from './discussion.js';
+import { Logger } from '../utils/logs.js';
+import { SdkEventEmitter, SdkEventType } from '../core/SdkEventEmitter.js';
+import { Queries } from '../db/queries/index.js';
 
 const logger = new Logger('RefreshService');
 

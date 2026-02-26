@@ -20,11 +20,11 @@
  * @packageDocumentation
  */
 
-export * from './api';
-export * from './crypto';
-export * from './gossip';
-export * from './utils';
-export * from './wasm';
-export * from './db/db';
-export * from './db/queries';
-export * from './db/sqlite';
+export * from './api/index.js';
+export * from './crypto/index.js';
+export * from './gossip.js';
+export * from './utils/index.js';
+export * from './wasm/index.js';
+export * from './db/db.js';
+export * from './db/queries/index.js';
+export * from './db/sqlite.js';

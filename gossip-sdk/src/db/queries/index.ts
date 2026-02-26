@@ -1,18 +1,18 @@
-import type { DatabaseConnection } from '../sqlite';
-import { ContactQueries } from './contacts';
-import { DiscussionQueries } from './discussions';
-import { MessageQueries } from './messages';
-import { UserProfileQueries } from './userProfile';
-import { AnnouncementCursorQueries } from './announcementCursors';
-import { PendingAnnouncementQueries } from './pendingAnnouncements';
-import { ActiveSeekerQueries } from './activeSeekers';
+import type { DatabaseConnection } from '../sqlite.js';
+import { ContactQueries } from './contacts.js';
+import { DiscussionQueries } from './discussions.js';
+import { MessageQueries } from './messages.js';
+import { UserProfileQueries } from './userProfile.js';
+import { AnnouncementCursorQueries } from './announcementCursors.js';
+import { PendingAnnouncementQueries } from './pendingAnnouncements.js';
+import { ActiveSeekerQueries } from './activeSeekers.js';
 
-export type { ContactRow } from './contacts';
-export type { DiscussionRow } from './discussions';
-export type { MessageRow, MessageInsert } from './messages';
-export type { UserProfileRow, UserProfileInsert } from './userProfile';
-export { rowToUserProfile, userProfileToRow } from './userProfile';
-export type { PendingAnnouncementRow } from './pendingAnnouncements';
+export type { ContactRow } from './contacts.js';
+export type { DiscussionRow } from './discussions.js';
+export type { MessageRow, MessageInsert } from './messages.js';
+export type { UserProfileRow, UserProfileInsert } from './userProfile.js';
+export { rowToUserProfile, userProfileToRow } from './userProfile.js';
+export type { PendingAnnouncementRow } from './pendingAnnouncements.js';
 
 /**
  * Bundle of all query classes, scoped to a single DatabaseConnection.

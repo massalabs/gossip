@@ -11,28 +11,31 @@ import {
   MessageStatus,
   MessageType,
   MESSAGE_ID_SIZE,
-} from '../db';
-import { type MessageRow } from '../db';
-import { decodeUserId, encodeUserId } from '../utils/userId';
-import { IMessageProtocol, EncryptedMessage } from '../api/messageProtocol';
-import { SessionStatus } from '../wasm/bindings';
-import { SessionModule } from '../wasm';
+} from '../db/index.js';
+import { type MessageRow } from '../db/index.js';
+import { decodeUserId, encodeUserId } from '../utils/userId.js';
+import {
+  IMessageProtocol,
+  EncryptedMessage,
+} from '../api/messageProtocol/index.js';
+import { SessionStatus } from '../wasm/bindings.js';
+import { SessionModule } from '../wasm/index.js';
 import {
   serializeRegularMessage,
   serializeReplyMessage,
   serializeForwardMessage,
   serializeKeepAliveMessage,
   deserializeMessage,
-} from '../utils/messageSerialization';
-import { encodeToBase64, decodeFromBase64 } from '../utils/base64';
-import { Result } from '../utils/type';
-import { sessionStatusToString } from '../wasm/session';
-import { Logger } from '../utils/logs';
-import { SdkConfig, defaultSdkConfig } from '../config/sdk';
-import { SdkEventEmitter, SdkEventType } from '../core/SdkEventEmitter';
-import type { RefreshService } from './refresh';
-import { Queries } from '../db/queries';
-import { QueueManager } from '../utils/queue';
+} from '../utils/messageSerialization.js';
+import { encodeToBase64, decodeFromBase64 } from '../utils/base64.js';
+import { Result } from '../utils/type.js';
+import { sessionStatusToString } from '../wasm/session.js';
+import { Logger } from '../utils/logs.js';
+import { SdkConfig, defaultSdkConfig } from '../config/sdk.js';
+import { SdkEventEmitter, SdkEventType } from '../core/SdkEventEmitter.js';
+import type { RefreshService } from './refresh.js';
+import { Queries } from '../db/queries/index.js';
+import { QueueManager } from '../utils/queue.js';
 
 /** Options for the simplified sendText method */
 export interface SendTextOptions {

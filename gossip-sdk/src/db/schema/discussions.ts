@@ -6,7 +6,7 @@ import {
   uniqueIndex,
 } from 'drizzle-orm/sqlite-core';
 import type { DiscussionDirection, DiscussionStatus } from '../db';
-import { bytes } from './_helpers';
+import { bytes } from './_helpers.js';
 
 export const discussions = sqliteTable(
   'discussions',

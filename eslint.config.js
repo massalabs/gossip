@@ -3,6 +3,7 @@ import globals from 'globals';
 import reactHooks from 'eslint-plugin-react-hooks';
 import reactRefresh from 'eslint-plugin-react-refresh';
 import tseslint from 'typescript-eslint';
+import importPlugin from 'eslint-plugin-import';
 
 export default tseslint.config(
   {
@@ -41,6 +42,33 @@ export default tseslint.config(
           caughtErrorsIgnorePattern: '^_',
         },
       ],
+    },
+  },
+  // Gossip SDK: enforce explicit .js extensions in relative imports
+  {
+    files: ['gossip-sdk/src/**/*.{ts,tsx}'],
+    plugins: {
+      import: importPlugin,
+    },
+    languageOptions: {
+      ecmaVersion: 2020,
+      sourceType: 'module',
+    },
+    rules: {
+      // Require .js extension for all relative imports (./ or ../)
+      'import/extensions': [
+        'error',
+        'ignorePackages',
+        {
+          js: 'always',
+          jsx: 'always',
+          ts: 'always',
+          tsx: 'always',
+        },
+      ],
+    },
+    settings: {
+      'import/extensions': ['.js'],
     },
   }
 );

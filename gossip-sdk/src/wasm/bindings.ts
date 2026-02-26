@@ -6,5 +6,5 @@
  * a standard relative import instead of conditional #wasm subpath imports.
  */
 
-export { default as init } from '../assets/generated/wasm/gossip_wasm';
-export * from '../assets/generated/wasm/gossip_wasm';
+export { default as init } from '../assets/generated/wasm/gossip_wasm.js';
+export * from '../assets/generated/wasm/gossip_wasm.js';
