@@ -116,7 +116,6 @@ impl KeypairStorage for MemoryStorage {
     }
 }
 
-<<<<<<< HEAD
 #[cfg(not(target_arch = "wasm32"))]
 mod fs_backend {
     use super::*;
@@ -243,8 +242,6 @@ mod fs_backend {
 #[cfg(not(target_arch = "wasm32"))]
 pub use fs_backend::FsStorage;
 
-=======
->>>>>>> d64727d2 (feat(bordercrypt): add BlockStorage/KeypairStorage traits and MemoryStorage backend)
 #[cfg(test)]
 mod tests {
     use super::*;
