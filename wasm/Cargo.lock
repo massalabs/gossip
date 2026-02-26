@@ -156,6 +156,7 @@ version = "0.1.0"
 dependencies = [
  "crypto-aead",
  "crypto-kdf",
+ "crypto-password-kdf",
  "pq-rerand",
  "rand 0.8.5",
  "tempfile",
