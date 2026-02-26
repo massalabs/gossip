@@ -5,6 +5,8 @@
 mod constants;
 mod domain;
 mod error;
+mod kdf;
+mod pq;
 pub mod storage;
 mod types;
 
@@ -14,4 +16,8 @@ pub use domain::{
     root_aead_key_label, root_kdf_salt, session_scope, sk_wrap_aad, sk_wrap_key_label,
 };
 pub use error::{BordercryptError, Result};
+pub use kdf::derive_block_aead_key;
+pub use pq::{
+    PQ_CT_SIZE, PQ_MSG_SIZE, PqPublicKey, PqSecretKey, pq_decrypt, pq_encrypt, pq_keygen, pq_rerand,
+};
 pub use types::SessionIndex;

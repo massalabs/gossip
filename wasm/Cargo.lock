@@ -155,7 +155,9 @@ name = "bordercrypt"
 version = "0.1.0"
 dependencies = [
  "crypto-aead",
+ "crypto-kdf",
  "pq-rerand",
+ "rand 0.8.5",
  "tempfile",
  "thiserror 2.0.18",
  "zeroize",
