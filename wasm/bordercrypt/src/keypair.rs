@@ -133,4 +133,9 @@ mod tests {
     fn deserialize_empty() {
         assert!(KeypairFile::deserialize(&[]).is_err());
     }
+
+    #[test]
+    fn pk_size_matches_pq_rerand() {
+        assert_eq!(PqPublicKey::byte_size(), 4 * pq_rerand::params::N * 4);
+    }
 }
