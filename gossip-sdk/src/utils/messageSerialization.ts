@@ -5,11 +5,11 @@
  * Supports regular text messages, replies, forwards, and keep-alive messages.
  */
 
-import { MessageType, MESSAGE_ID_SIZE } from '../db';
+import { MessageType, MESSAGE_ID_SIZE } from '../db/index.js';
 import {
   Message as ProtoMessage,
   MessageType as ProtoMessageType,
-} from '../proto/generated/message';
+} from '../proto/generated/message.js';
 
 export const MESSAGE_TYPE_KEEP_ALIVE = ProtoMessageType.MESSAGE_TYPE_KEEP_ALIVE;
 

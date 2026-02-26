@@ -4,11 +4,11 @@
  * Functions for managing contacts including updating names and deleting contacts.
  */
 
-import { decodeUserId } from './userId';
-import type { SessionModule } from '../wasm/session';
-import type { UserPublicKeys } from '../wasm/bindings';
-import type { Contact } from '../db';
-import { Queries } from '../db/queries';
+import { decodeUserId } from './userId.js';
+import type { SessionModule } from '../wasm/session.js';
+import type { UserPublicKeys } from '../wasm/bindings.js';
+import type { Contact } from '../db/index.js';
+import { Queries } from '../db/queries/index.js';
 
 export type AddContactResult = {
   success: boolean;

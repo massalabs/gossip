@@ -1,7 +1,7 @@
 import { eq, and, sql, inArray, asc } from 'drizzle-orm';
-import * as schema from '../schema';
-import type { DatabaseConnection } from '../sqlite';
-import { MessageDirection, MessageStatus, MessageType } from '../../db/db';
+import * as schema from '../schema/index.js';
+import type { DatabaseConnection } from '../sqlite.js';
+import { MessageDirection, MessageStatus, MessageType } from '../../db/db.js';
 
 export type MessageRow = typeof schema.messages.$inferSelect;
 export type MessageInsert = typeof schema.messages.$inferInsert;

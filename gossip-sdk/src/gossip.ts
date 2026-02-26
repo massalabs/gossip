@@ -32,50 +32,56 @@
  * await gossipSdk.closeSession();
  * ```
  */
-import { IMessageProtocol, createMessageProtocol } from './api/messageProtocol';
-import { createAuthProtocol } from './api/authProtocol';
-import { setProtocolBaseUrl } from './config/protocol';
+import {
+  IMessageProtocol,
+  createMessageProtocol,
+} from './api/messageProtocol/index.js';
+import { createAuthProtocol } from './api/authProtocol.js';
+import { setProtocolBaseUrl } from './config/protocol.js';
 import {
   type SdkConfig,
   type DeepPartial,
   defaultSdkConfig,
   mergeConfig,
-} from './config/sdk';
-import { startWasmInitialization, ensureWasmInitialized } from './wasm/loader';
-import { generateUserKeys, UserKeys } from './wasm/userKeys';
-import { SessionModule } from './wasm/session';
+} from './config/sdk.js';
+import {
+  startWasmInitialization,
+  ensureWasmInitialized,
+} from './wasm/loader.js';
+import { generateUserKeys, UserKeys } from './wasm/userKeys.js';
+import { SessionModule } from './wasm/session.js';
 import {
   EncryptionKey,
   generateEncryptionKeyFromSeed,
-} from './wasm/encryption';
-import { AnnouncementService } from './services/announcement';
-import { DiscussionService } from './services/discussion';
-import { MessageService } from './services/message';
-import { RefreshService } from './services/refresh';
-import { AuthService } from './services/auth';
-import { ProfileService } from './services/profile';
-import { ContactService } from './services/contact';
+} from './wasm/encryption.js';
+import { AnnouncementService } from './services/announcement.js';
+import { DiscussionService } from './services/discussion.js';
+import { MessageService } from './services/message.js';
+import { RefreshService } from './services/refresh.js';
+import { AuthService } from './services/auth.js';
+import { ProfileService } from './services/profile.js';
+import { ContactService } from './services/contact.js';
 import {
   validateUserIdFormat,
   validateUsernameFormat,
   type ValidationResult,
-} from './utils/validation';
-import { QueueManager } from './utils/queue';
-import { encodeUserId, decodeUserId } from './utils/userId';
-import { type StorageConfig, MessageStatus } from './db';
-import { DatabaseConnection } from './db/sqlite';
-import { Queries } from './db/queries';
+} from './utils/validation.js';
+import { QueueManager } from './utils/queue.js';
+import { encodeUserId, decodeUserId } from './utils/userId.js';
+import { type StorageConfig, MessageStatus } from './db/index.js';
+import { DatabaseConnection } from './db/sqlite.js';
+import { Queries } from './db/queries/index.js';
 import {
   type UserPublicKeys,
   type SessionConfig,
   SessionManagerWrapper,
-} from './wasm/bindings';
+} from './wasm/bindings.js';
 import {
   SdkEventEmitter,
   SdkEventType,
   type SdkEventHandlers,
-} from './core/SdkEventEmitter';
-import { SdkPolling } from './core/SdkPolling';
+} from './core/SdkEventEmitter.js';
+import { SdkPolling } from './core/SdkPolling.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types

@@ -1,5 +1,5 @@
 import { sqliteTable, integer, index } from 'drizzle-orm/sqlite-core';
-import { bytes } from './_helpers';
+import { bytes } from './_helpers.js';
 
 export const activeSeekers = sqliteTable(
   'activeSeekers',

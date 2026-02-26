@@ -6,7 +6,7 @@
  */
 
 import { bech32 } from '@scure/base';
-import { generateUserKeys } from '../wasm';
+import { generateUserKeys } from '../wasm/index.js';
 
 const GOSSIP_PREFIX = 'gossip';
 const USER_ID_BYTE_LENGTH = 32;

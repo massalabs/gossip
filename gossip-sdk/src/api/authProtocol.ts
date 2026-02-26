@@ -2,9 +2,9 @@
  * Auth Protocol — public key publishing & retrieval
  */
 
-import { RestClient } from './restClient';
-import { encodeToBase64 } from '../utils/base64';
-import { protocolConfig } from '../config/protocol';
+import { RestClient } from './restClient.js';
+import { encodeToBase64 } from '../utils/base64.js';
+import { protocolConfig } from '../config/protocol.js';
 
 export interface IAuthProtocol {
   /** Fetches the base64-encoded public key for the given user ID. */

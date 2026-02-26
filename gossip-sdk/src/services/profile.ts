@@ -5,12 +5,16 @@
  * Only requires Queries — no session needed, so it can be created at init() time.
  */
 
-import { type UserProfile } from '../db';
-import { Queries, rowToUserProfile, userProfileToRow } from '../db/queries';
+import { type UserProfile } from '../db/index.js';
+import {
+  Queries,
+  rowToUserProfile,
+  userProfileToRow,
+} from '../db/queries/index.js';
 import {
   validateUsernameFormatAndAvailability,
   type ValidationResult,
-} from '../utils/validation';
+} from '../utils/validation.js';
 
 export class ProfileService {
   private queries: Queries;
