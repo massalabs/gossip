@@ -104,6 +104,12 @@ impl PqPublicKey {
 }
 
 impl PqSecretKey {
+    /// Serialized byte size of a secret key.
+    #[must_use]
+    pub const fn byte_size() -> usize {
+        pq_rerand::keygen::SecretKey::BYTES
+    }
+
     /// Serialize to bytes (little-endian u32 arrays).
     ///
     /// Returned buffer is zeroized on drop.
