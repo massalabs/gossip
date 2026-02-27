@@ -8,7 +8,6 @@ import { useSdkStore } from './stores/sdkStore';
 import { protocolConfig } from './config/protocol';
 import { Capacitor } from '@capacitor/core';
 import waSqliteWasmUrl from 'wa-sqlite/dist/wa-sqlite.wasm?url';
-import waSqliteAsyncWasmUrl from 'wa-sqlite/dist/wa-sqlite-async.wasm?url';
 
 // Polyfill for Buffer
 import { Buffer } from 'buffer';
@@ -101,9 +100,13 @@ Promise.all([
   createSdk({
     protocolBaseUrl: protocolConfig.baseUrl,
     config: { polling: { enabled: true } },
-    storage: isNative
-      ? { type: 'opfs', path: '/gossip-db', wasmUrl: waSqliteWasmUrl }
-      : { type: 'idb', name: 'gossip-db', wasmUrl: waSqliteAsyncWasmUrl },
+    storage: {
+      type: 'bordercrypt',
+      path: '/gossip-db',
+      domain: 'gossip',
+      wasmUrl: waSqliteWasmUrl,
+      backend: isNative ? 'opfs' : 'idb',
+    },
   }),
   initSafeArea(),
 ])
