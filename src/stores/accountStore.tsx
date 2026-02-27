@@ -252,6 +252,10 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         // Ensure any existing session is closed before creating new account
         await cleanupSession();
 
+        // Initialize encrypted storage with this password
+        const sdk = getSdk();
+        await sdk.bordercryptAllocate(0, password);
+
         const mnemonic = generateMnemonic(256);
 
         // Generate keys for Massa wallet (SDK generates its own internally)
@@ -382,10 +386,20 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       try {
         set({ isLoading: true });
 
+        const sdk = getSdk();
+
+        // Unlock encrypted storage first — DB may be deferred until after unlock
+        if (password && sdk.needsUnlock) {
+          const unlocked = await sdk.bordercryptUnlock(password);
+          if (!unlocked) {
+            throw new Error('Failed to unlock encrypted storage');
+          }
+        }
+
         // If userId is provided, load that specific account, otherwise use active or first
         let profile: UserProfile | null;
         if (userId) {
-          profile = await getSdk().profiles.get(userId);
+          profile = await sdk.profiles.get(userId);
         } else {
           profile = await getActiveOrFirstProfile();
         }
@@ -469,6 +483,12 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         await cleanupSession();
         useDiscussionStore.getState().cleanup();
         useMessageStore.getState().cleanup();
+        // Lock encrypted storage
+        try {
+          await getSdk().bordercryptLock();
+        } catch {
+          // Bordercrypt not initialized — ignore
+        }
         // Clear in-memory state but keep data in database
         // Keep isInitialized true so user goes to login screen
         set(clearAccountState());

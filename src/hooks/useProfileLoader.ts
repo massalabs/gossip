@@ -16,6 +16,16 @@ export function useProfileLoader() {
       try {
         setLoading(true);
 
+        const sdk = getSdk();
+
+        // Bordercrypt: DB isn't ready until allocate/unlock.
+        // Leave isInitialized as-is from localStorage:
+        //   - First use: false → Onboarding
+        //   - Returning user: true (persisted) → Login
+        if (!sdk.dbReady) {
+          return;
+        }
+
         // Add a small delay to ensure database is ready
         await new Promise(resolve =>
           setTimeout(resolve, PROFILE_LOAD_DELAY_MS)
@@ -23,7 +33,7 @@ export function useProfileLoader() {
 
         const state = useAccountStore.getState();
         const existingProfile =
-          state.userProfile || (await getSdk().profiles.getMostRecent());
+          state.userProfile || (await sdk.profiles.getMostRecent());
 
         if (existingProfile) {
           useAppStore.getState().setIsInitialized(true);

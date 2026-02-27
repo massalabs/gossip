@@ -45,8 +45,10 @@ const Login: React.FC<LoginProps> = React.memo(
     const currentAccount = selectedAccountInfo || accountInfo;
 
     useEffect(() => {
+      // When currentAccount is null (e.g. bordercrypt DB not yet unlocked),
+      // default to password — we need it for unlock anyway.
       const shouldUsePassword =
-        currentAccount?.security?.authMethod === 'password';
+        !currentAccount || currentAccount?.security?.authMethod === 'password';
       if (usePassword !== shouldUsePassword) {
         setUsePassword(shouldUsePassword);
       }

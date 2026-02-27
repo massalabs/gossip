@@ -7,7 +7,6 @@ import {
   validatePassword,
   validateUsernameFormat,
 } from '@massalabs/gossip-sdk';
-import { useGossipSdk } from '../../hooks/useGossipSdk';
 import PageHeader from '../ui/PageHeader';
 import PageLayout from '../ui/PageLayout';
 import TabSwitcher from '../ui/TabSwitcher';
@@ -25,7 +24,6 @@ const AccountCreation: React.FC<AccountCreationProps> = ({
   onComplete,
   onBack,
 }) => {
-  const gossip = useGossipSdk();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -113,7 +111,7 @@ const AccountCreation: React.FC<AccountCreationProps> = ({
     e.stopPropagation();
 
     // Handle when user presses enter without triggering blur event
-    const usernameResult = await gossip.profiles.validateUsername(username);
+    const usernameResult = validateUsernameFormat(username);
 
     if (!usernameResult.valid) {
       setIsUsernameValid(false);
