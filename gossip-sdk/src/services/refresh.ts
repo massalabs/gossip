@@ -5,19 +5,24 @@
  * keep-alive messages and broken sessions.
  */
 
-import { MessageType, MessageDirection, MessageStatus } from '../db';
-import { toSortedDiscussions } from '../utils/discussions';
-import type { SessionModule } from '../wasm/session';
-import { SessionStatus } from '../wasm/bindings';
-import { decodeUserId, encodeUserId } from '../utils/userId';
-import { MessageService } from './message';
-import { AnnouncementService } from './announcement';
-import { DiscussionService } from './discussion';
-import { Logger } from '../utils/logs';
-import { SdkEventEmitter, SdkEventType } from '../core/SdkEventEmitter';
-import type { Discussion, Queries } from '../db';
-import type { SdkConfig } from '../config/sdk';
-import * as schema from '../db/schema';
+import {
+  type Discussion,
+  type Queries,
+  MessageDirection,
+  MessageStatus,
+  MessageType,
+} from '../db/index.js';
+import { toSortedDiscussions } from '../utils/discussions.js';
+import type { SessionModule } from '../wasm/session.js';
+import { SessionStatus } from '../wasm/bindings.js';
+import { decodeUserId, encodeUserId } from '../utils/userId.js';
+import { MessageService } from './message.js';
+import { AnnouncementService } from './announcement.js';
+import { DiscussionService } from './discussion.js';
+import { Logger } from '../utils/logs.js';
+import { SdkEventEmitter, SdkEventType } from '../core/SdkEventEmitter.js';
+import type { SdkConfig } from '../config/sdk.js';
+import * as schema from '../db/schema/index.js';
 
 const logger = new Logger('RefreshService');
 
@@ -179,14 +184,17 @@ export class RefreshService {
       );
 
       // Step 3: send queued messages and keep-alives
-      // NOTE: only flush queued messages once the session is fully Active.
+      // NOTE: only flush queued messages once the session is fully Active or saturated.
       // SelfRequested means the handshake is still establishing and
       // session.sendMessage() can return null.
       const activeEstablishedDiscussions = activePendingDiscussions.filter(
         discussion =>
-          this.session.peerSessionStatus(
-            decodeUserId(discussion.contactUserId)
-          ) === SessionStatus.Active
+          // saturated sessions can't send messages on session manager but it's still possible to send on network msg that have already been encrypted if any
+          [SessionStatus.Active, SessionStatus.Saturated].includes(
+            this.session.peerSessionStatus(
+              decodeUserId(discussion.contactUserId)
+            )
+          )
       );
       const keepAliveSet = new Set(keepAlivePeerIds);
       for (const discussion of activeEstablishedDiscussions) {

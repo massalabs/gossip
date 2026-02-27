@@ -382,14 +382,14 @@ describe('RefreshService', () => {
         mockAnnouncementService,
         mockSession,
         eventEmitter,
-        getTestQueries()
+        getTestQueries(),
+        defaultSdkConfig
       );
 
       await getTestQueries().discussions.insert({
         ownerUserId: REFRESH_OWNER_USER_ID,
         contactUserId: REFRESH_CONTACT_USER_ID,
         direction: DiscussionDirection.INITIATED,
-        status: DiscussionStatus.ACTIVE,
         weAccepted: true,
         sendAnnouncement: null,
         unreadCount: 0,
