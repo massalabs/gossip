@@ -95,4 +95,11 @@ mod tests {
         let k1 = derive("d", 0, 0, &other_root, 0);
         assert_ne!(k0, k1);
     }
+
+    #[test]
+    fn different_domains() {
+        let k0 = derive("d", 0, 0, &ROOT_KEY, 0);
+        let k1 = derive("other-domain", 0, 0, &ROOT_KEY, 0);
+        assert_ne!(k0, k1);
+    }
 }
