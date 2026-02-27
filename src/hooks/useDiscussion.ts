@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { Contact, SessionStatus } from '@massalabs/gossip-sdk';
 import type { Discussion } from '@massalabs/gossip-sdk';
 import { useDiscussionStore } from '../stores/discussionStore';
+import { useGossipSdk } from './useGossipSdk';
 
 interface UseDiscussionProps {
   contact: Contact;
@@ -11,6 +12,7 @@ export const useDiscussion = ({ contact }: UseDiscussionProps) => {
   const [discussion, setDiscussion] = useState<Discussion | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const isMountedRef = useRef(true);
+  const sdk = useGossipSdk();
 
   useEffect(() => {
     return () => {
@@ -32,13 +34,16 @@ export const useDiscussion = ({ contact }: UseDiscussionProps) => {
 
       // Get the most recent discussion (active or pending)
       const latestDiscussion = discussions
-        .filter(d =>
-          [
+        .filter(d => {
+          const status: SessionStatus =
+            sessionsStatuses.get(d.contactUserId) ??
+            sdk.discussions.getStatus(d.contactUserId);
+          return [
             SessionStatus.Active,
             SessionStatus.SelfRequested,
             SessionStatus.PeerRequested,
-          ].includes(sessionsStatuses.get(d.contactUserId) as SessionStatus)
-        )
+          ].includes(status);
+        })
         .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
 
       if (latestDiscussion) {
@@ -49,7 +54,12 @@ export const useDiscussion = ({ contact }: UseDiscussionProps) => {
     } finally {
       setIsLoading(false);
     }
-  }, [contact.userId, getDiscussionsForContact, sessionsStatuses]);
+  }, [
+    contact.userId,
+    getDiscussionsForContact,
+    sessionsStatuses,
+    sdk.discussions,
+  ]);
 
   useEffect(() => {
     loadDiscussion();

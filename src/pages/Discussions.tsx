@@ -103,7 +103,11 @@ const Discussions: React.FC = () => {
     const allCount = discussions.length;
     const unreadCount = discussions.filter(d => {
       const status = sessionsStatuses.get(d.contactUserId);
-      return status === SessionStatus.Active && d.unreadCount > 0;
+      return (
+        status != null &&
+        [SessionStatus.Active, SessionStatus.Killed].includes(status) &&
+        d.unreadCount > 0
+      );
     }).length;
     const pendingCount = discussions.filter(d => {
       const status = sessionsStatuses.get(d.contactUserId);

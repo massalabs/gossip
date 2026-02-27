@@ -1962,7 +1962,6 @@ describe('session break in session manager', () => {
     );
 
     // Second updateState - should succeed
-    console.log('updateState 2');
     await aliceSdk.updateState();
 
     const discussionAfterRetry = await aliceSdk.discussions.get(bobSdk.userId);
