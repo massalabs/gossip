@@ -23,23 +23,18 @@ const _: () = assert!(PQ_CT_SIZE == BLOCK_SIZE);
 pub struct PqPublicKey(pq_rerand::keygen::PublicKey);
 
 /// Post-quantum secret key for decryption.
-///
-/// Does not implement `Debug` or `Clone` to prevent accidental leakage.
-/// Inner `SecretKey` is zeroized on drop by pq-rerand.
 pub struct PqSecretKey(pq_rerand::keygen::SecretKey);
 
 /// Generate a fresh pq-rerand keypair.
 pub fn pq_keygen() -> (PqPublicKey, PqSecretKey) {
     let ctx = &NTT_CTX;
+    // OsRng because pq-rerand requires `rand::Rng`; same getrandom source as crypto_rng.
     let mut rng = rand::rngs::OsRng;
     let (sk, pk) = pq_rerand::keygen::keygen(&mut rng, ctx);
     (PqPublicKey(pk), PqSecretKey(sk))
 }
 
 /// Encrypt a message into a ciphertext block.
-///
-/// `message` must be exactly `PQ_MSG_SIZE` bytes.
-/// Returns a ciphertext of exactly `PQ_CT_SIZE` bytes.
 pub fn pq_encrypt(pk: &PqPublicKey, message: &[u8; PQ_MSG_SIZE]) -> Vec<u8> {
     let ctx = &NTT_CTX;
     let mut rng = rand::rngs::OsRng;
@@ -59,8 +54,6 @@ pub fn pq_encrypt(pk: &PqPublicKey, message: &[u8; PQ_MSG_SIZE]) -> Vec<u8> {
 
 /// Decrypt a ciphertext block back to the original message.
 ///
-/// `ciphertext` must be exactly `PQ_CT_SIZE` bytes.
-///
 /// Ring-LWE always decrypts — it is the AEAD layer above that detects
 /// tampering. The returned bytes may be garbage if the ciphertext was
 /// modified.
@@ -74,7 +67,6 @@ pub fn pq_decrypt(sk: &PqSecretKey, ciphertext: &[u8; PQ_CT_SIZE]) -> Zeroizing<
 /// Re-randomize a ciphertext block using only the public key.
 ///
 /// The decrypted plaintext is unchanged but the ciphertext bytes differ.
-/// `ciphertext` must be exactly `PQ_CT_SIZE` bytes.
 pub fn pq_rerand(pk: &PqPublicKey, ciphertext: &[u8; PQ_CT_SIZE]) -> Vec<u8> {
     let ctx = &NTT_CTX;
     let mut rng = rand::rngs::OsRng;
