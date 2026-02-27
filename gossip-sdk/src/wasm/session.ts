@@ -22,6 +22,7 @@ import { encodeUserId } from '../utils/userId';
 export class SessionModule {
   private sessionManager: SessionManagerWrapper | null = null;
   private onPersist?: () => Promise<void>; // Async callback for persistence
+  private dirty = false; // Track whether session state changed since last persist
   public ourPk: UserPublicKeys;
   public ourSk: UserSecretKeys;
   public userId: Uint8Array;
@@ -51,14 +52,19 @@ export class SessionModule {
 
   /**
    * Helper to trigger persistence after state changes.
-   * Returns a promise that resolves when persistence is complete.
+   * Only persists if the session was marked dirty (state actually changed).
    * IMPORTANT: Callers should await this before sending data to network
    * to prevent state loss on app crash.
    */
   private async persistIfNeeded(): Promise<void> {
-    if (this.onPersist) {
+    if (this.dirty && this.onPersist) {
+      this.dirty = false;
       await this.onPersist!();
     }
+  }
+
+  private markDirty(): void {
+    this.dirty = true;
   }
 
   /**
@@ -134,6 +140,7 @@ export class SessionModule {
       );
     }
 
+    this.markDirty();
     await this.persistIfNeeded();
     return result;
   }
@@ -156,6 +163,7 @@ export class SessionModule {
     );
 
     if (result) {
+      this.markDirty();
       await this.persistIfNeeded();
     }
     return result;
@@ -189,6 +197,9 @@ export class SessionModule {
       this.ourSk
     );
 
+    if (result) {
+      this.markDirty();
+    }
     await this.persistIfNeeded();
     return result;
   }
@@ -209,6 +220,7 @@ export class SessionModule {
     const result = this.sessionManager.send_message(peerId, message);
     // CRITICAL: Persist session state BEFORE returning
     // This ensures state is saved before the encrypted message goes on the network
+    this.markDirty();
     await this.persistIfNeeded();
     return result;
   }
@@ -244,6 +256,7 @@ export class SessionModule {
     }
 
     this.sessionManager.peer_discard(peerId);
+    this.markDirty();
     await this.persistIfNeeded();
   }
 
@@ -256,6 +269,9 @@ export class SessionModule {
     }
 
     const result = this.sessionManager.refresh();
+    if (result.length > 0) {
+      this.markDirty();
+    }
     await this.persistIfNeeded();
     return result;
   }
