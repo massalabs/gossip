@@ -1,8 +1,4 @@
 //! Key derivation for bordercrypt.
-//!
-//! Higher-level KDF operations (password KDF, root key derivation) are
-//! performed inline at their call sites using `crypto_kdf` and
-//! `crypto_password_kdf` directly.
 
 use zeroize::Zeroizing;
 
