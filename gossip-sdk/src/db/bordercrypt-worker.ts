@@ -31,6 +31,10 @@ let sqlite3: ReturnType<typeof SQLite.Factory> | null = null;
 let dbHandle: number | null = null;
 let bordercryptWasm: any = null;
 
+// Saved init config for deferred SQLite open after unlock
+let savedInitSql: string | null = null;
+let savedWasmUrl: string | null = null;
+
 const post: (data: unknown) => void = (
   globalThis as unknown as { postMessage(data: unknown): void }
 ).postMessage.bind(globalThis);
@@ -43,6 +47,7 @@ interface StorageBackend {
   appendBlock(session: number, data: Uint8Array): void;
   blockCount(session: number): number;
   fsync(session: number): void;
+  flushAll(): void;
   readKeypair(session: number): Uint8Array;
   writeKeypair(session: number, data: Uint8Array): void;
   close(): void;
@@ -134,8 +139,13 @@ class OpfsBackend implements StorageBackend {
     return Math.floor(this.blockHandles[session].getSize() / BLOCK_SIZE);
   }
 
-  fsync(session: number): void {
-    this.blockHandles[session].flush();
+  fsync(_session: number): void {
+    // No-op: data is already in the sync handle buffer.
+    // Flushed to disk on flushAll() (after exec / on close).
+  }
+
+  flushAll(): void {
+    for (const h of this.blockHandles) h.flush();
   }
 
   readKeypair(session: number): Uint8Array {
@@ -155,6 +165,7 @@ class OpfsBackend implements StorageBackend {
   }
 
   close(): void {
+    this.flushAll();
     for (const h of this.blockHandles) h.close();
     for (const h of this.keypairHandles) h.close();
     this.blockHandles = [];
@@ -169,6 +180,7 @@ class IdbBackend implements StorageBackend {
   private keypairs: Uint8Array[] = [];
   private db: IDBDatabase | null = null;
   private storeName: string;
+  private dirtySessions: Set<number> = new Set();
 
   constructor(storeName: string) {
     this.storeName = storeName;
@@ -212,18 +224,27 @@ class IdbBackend implements StorageBackend {
       this.blocks[session].push(new Uint8Array(BLOCK_SIZE));
     }
     this.blocks[session][block] = new Uint8Array(data);
+    this.dirtySessions.add(session);
   }
 
   appendBlock(session: number, data: Uint8Array): void {
     this.blocks[session].push(new Uint8Array(data));
+    this.dirtySessions.add(session);
   }
 
   blockCount(session: number): number {
     return this.blocks[session].length;
   }
 
-  fsync(session: number): void {
-    this.persistSession(session);
+  fsync(_session: number): void {
+    // No-op: data is in memory, persisted on flushAll().
+  }
+
+  flushAll(): void {
+    for (const session of this.dirtySessions) {
+      this.persistSession(session);
+    }
+    this.dirtySessions.clear();
   }
 
   readKeypair(session: number): Uint8Array {
@@ -236,9 +257,7 @@ class IdbBackend implements StorageBackend {
   }
 
   close(): void {
-    for (let i = 0; i < SESSION_COUNT; i++) {
-      this.persistSession(i);
-    }
+    this.flushAll();
     if (this.db) {
       this.db.close();
       this.db = null;
@@ -287,6 +306,39 @@ class IdbBackend implements StorageBackend {
   }
 }
 
+// ── SQLite lifecycle ────────────────────────────────────────────
+
+async function openSqlite(
+  wasmUrl?: string | null,
+  initSql?: string | null
+): Promise<void> {
+  const { default: SQLiteESMFactory } = await import(
+    'wa-sqlite/dist/wa-sqlite.mjs'
+  );
+  const moduleArg: Record<string, unknown> = {};
+  if (wasmUrl) moduleArg.locateFile = () => wasmUrl;
+  const module = await SQLiteESMFactory(moduleArg);
+  sqlite3 = SQLite.Factory(module);
+  console.log('[BC-Worker] wa-sqlite loaded');
+
+  const { BordecryptVFS } = await import('./bordercrypt-vfs.js');
+  const vfs = new BordecryptVFS(bordercryptWasm);
+  sqlite3.vfs_register(vfs as never, true);
+  console.log('[BC-Worker] VFS registered');
+
+  dbHandle = await sqlite3.open_v2('gossip.db');
+  console.log('[BC-Worker] database opened');
+
+  if (initSql) {
+    const stmts = initSql.split(';').map(s => s.trim()).filter(Boolean);
+    for (const stmt of stmts) {
+      console.log(`[BC-Worker] init: ${stmt.substring(0, 80)}`);
+      await sqlite3.exec(dbHandle, stmt);
+    }
+    console.log('[BC-Worker] init SQL done');
+  }
+}
+
 // ── SQL execution ───────────────────────────────────────────────
 
 async function execSql(
@@ -320,7 +372,9 @@ addEventListener('message', async (e: MessageEvent) => {
       case 'init': {
         const { dirPath, domain, backend, wasmUrl, initSql } = e.data;
 
-        // 1. Register storage callbacks before loading bordercrypt WASM
+        console.log('[BC-Worker] init start', { dirPath, domain, backend });
+
+        // 1. Register storage callbacks
         registerBordercryptCallbacks();
 
         // 2. Initialize storage backend
@@ -328,10 +382,12 @@ addEventListener('message', async (e: MessageEvent) => {
           const idb = new IdbBackend(dirPath);
           await idb.init();
           storage = idb;
+          console.log('[BC-Worker] IDB backend ready');
         } else {
           const opfs = new OpfsBackend();
           await opfs.init(dirPath);
           storage = opfs;
+          console.log('[BC-Worker] OPFS backend ready');
         }
 
         // 3. Load bordercrypt WASM
@@ -341,39 +397,34 @@ addEventListener('message', async (e: MessageEvent) => {
         );
         await bcModule.default();
         bordercryptWasm = bcModule;
+        console.log('[BC-Worker] bordercrypt WASM loaded');
 
         // 4. Initialize bordercrypt
         bordercryptWasm.initBordercrypt(domain || 'gossip');
 
-        // 5. Load wa-sqlite
-        const { default: SQLiteESMFactory } = await import(
-          'wa-sqlite/dist/wa-sqlite.mjs'
-        );
-        const moduleArg: Record<string, unknown> = {};
-        if (wasmUrl) moduleArg.locateFile = () => wasmUrl;
-        const module = await SQLiteESMFactory(moduleArg);
-        sqlite3 = SQLite.Factory(module);
+        // 5. Always defer SQLite — it needs an unlocked session
+        savedInitSql = initSql || null;
+        savedWasmUrl = wasmUrl || null;
 
-        // 6. Register BordecryptVFS
-        const { BordecryptVFS } = await import('./bordercrypt-vfs.js');
-        const vfs = new BordecryptVFS(bordercryptWasm);
-        sqlite3.vfs_register(vfs as never, true);
+        const hasData = storage.blockCount(0) > 0;
 
-        // 7. Open database
-        dbHandle = await sqlite3.open_v2('gossip.db');
-
-        // 8. Run init SQL (PRAGMAs)
-        if (initSql) {
-          await sqlite3.exec(dbHandle, initSql);
+        if (hasData) {
+          console.log('[BC-Worker] existing data found — SQLite deferred until unlock');
+          post({ id, type: 'init-result', success: true, needsUnlock: true });
+        } else {
+          console.log('[BC-Worker] first use — provisioning storage, SQLite deferred until allocate');
+          bordercryptWasm.provisionStorage();
+          post({ id, type: 'init-result', success: true, needsUnlock: false });
         }
-
-        post({ id, type: 'init-result', success: true });
         break;
       }
 
       case 'exec': {
         const { sql, params } = e.data;
+        const label = sql.trim().substring(0, 80).replace(/\s+/g, ' ');
+        console.log(`[BC-Worker] exec: ${label}`);
         const result = await execSql(sql, params);
+        if (storage) storage.flushAll();
         post({
           id,
           type: 'exec-result',
@@ -387,6 +438,7 @@ addEventListener('message', async (e: MessageEvent) => {
         if (!bordercryptWasm)
           throw new Error('Bordercrypt not initialized');
         bordercryptWasm.provisionStorage();
+        console.log('[BC-Worker] provision done');
         post({ id, type: 'provision-result', success: true });
         break;
       }
@@ -399,6 +451,17 @@ addEventListener('message', async (e: MessageEvent) => {
           slot,
           new TextEncoder().encode(password)
         );
+        console.log(`[BC-Worker] allocate slot=${slot}, session now unlocked=${bordercryptWasm.isUnlocked()}`);
+
+        // Session is now unlocked — open deferred SQLite
+        if (!sqlite3) {
+          console.log('[BC-Worker] opening deferred SQLite after allocate');
+          await openSqlite(savedWasmUrl, savedInitSql);
+          savedInitSql = null;
+          savedWasmUrl = null;
+        }
+        if (storage) storage.flushAll();
+
         post({ id, type: 'allocate-result', success: true });
         break;
       }
@@ -410,13 +473,26 @@ addEventListener('message', async (e: MessageEvent) => {
         const unlocked = bordercryptWasm.unlockSession(
           new TextEncoder().encode(password)
         );
+        console.log(`[BC-Worker] unlock result=${unlocked}`);
+
+        // If SQLite was deferred, open it now that we have an unlocked session
+        if (unlocked && !sqlite3) {
+          console.log('[BC-Worker] opening deferred SQLite after unlock');
+          await openSqlite(savedWasmUrl, savedInitSql);
+          savedInitSql = null;
+          savedWasmUrl = null;
+        }
+        if (unlocked && storage) storage.flushAll();
+
         post({ id, type: 'unlock-result', unlocked });
         break;
       }
 
       case 'lock': {
+        if (storage) storage.flushAll();
         if (bordercryptWasm) {
           bordercryptWasm.lockSession();
+          console.log('[BC-Worker] session locked');
         }
         post({ id, type: 'lock-result' });
         break;

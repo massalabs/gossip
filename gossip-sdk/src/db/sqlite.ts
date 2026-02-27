@@ -63,6 +63,7 @@ interface DbState {
   dbLock: Promise<unknown>;
   inTransaction: boolean;
   bordercryptWasm: BordercryptWasmModule | null;
+  needsUnlock: boolean;
 }
 
 function createDefaultState(): DbState {
@@ -78,6 +79,7 @@ function createDefaultState(): DbState {
     dbLock: Promise.resolve(),
     inTransaction: false,
     bordercryptWasm: null,
+    needsUnlock: false,
   };
 }
 
@@ -125,6 +127,11 @@ export class DatabaseConnection {
 
   get isOpen(): boolean {
     return this.state.drizzleDb !== null;
+  }
+
+  /** True when bordercrypt has existing data that needs unlock before DB is usable. */
+  get needsUnlock(): boolean {
+    return this.state.needsUnlock;
   }
 
   // ─── Raw SQL execution ─────────────────────────────────────────
@@ -301,6 +308,14 @@ export class DatabaseConnection {
       }
     }
 
+    // Bordercrypt always defers SQLite open until allocate/unlock
+    if (storage.type === 'bordercrypt') return;
+
+    await this.finalizeDatabaseInit();
+  }
+
+  /** Run migrations and create Drizzle instance. Called after init or after bordercrypt unlock. */
+  private async finalizeDatabaseInit(): Promise<void> {
     await runMigrations(
       (sql, params) => this.execRaw(sql, params),
       fn => this.withTransaction(fn)
@@ -320,7 +335,7 @@ export class DatabaseConnection {
     this.state.useWorker = true;
 
     try {
-      await this.postToWorker({
+      const result = await this.postToWorker({
         type: 'init',
         dirPath: storage.path,
         domain: storage.domain,
@@ -328,6 +343,11 @@ export class DatabaseConnection {
         wasmUrl: storage.wasmUrl,
         initSql: PRAGMAS,
       });
+
+      if (result.needsUnlock) {
+        this.state.needsUnlock = true;
+        console.log('[DatabaseConnection] bordercrypt needs unlock — deferring SQLite');
+      }
     } catch (err) {
       if (this.state.worker) {
         this.state.worker.terminate();
@@ -454,6 +474,11 @@ export class DatabaseConnection {
   async bordercryptAllocate(slot: number, password: string): Promise<void> {
     if (this.state.useWorker) {
       await this.postToWorker({ type: 'allocate', slot, password });
+      // First use: worker opened SQLite after allocate, finalize DB init
+      if (!this.state.drizzleDb) {
+        console.log('[DatabaseConnection] finalizing DB after allocate');
+        await this.finalizeDatabaseInit();
+      }
     } else {
       this.requireBordercrypt().allocateSession(
         slot,
@@ -465,6 +490,12 @@ export class DatabaseConnection {
   async bordercryptUnlock(password: string): Promise<boolean> {
     if (this.state.useWorker) {
       const result = await this.postToWorker({ type: 'unlock', password });
+      // Worker opens SQLite on unlock — now run migrations and create Drizzle
+      if (result.unlocked && !this.state.drizzleDb) {
+        console.log('[DatabaseConnection] unlock succeeded — finalizing DB init');
+        await this.finalizeDatabaseInit();
+        this.state.needsUnlock = false;
+      }
       return result.unlocked;
     }
     return this.requireBordercrypt().unlockSession(
