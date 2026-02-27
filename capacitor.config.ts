@@ -11,6 +11,7 @@ const config: CapacitorConfig = {
     backgroundColor: '#000000',
     scrollEnabled: false, // Disable webview scrolling - we handle scrolling in app content
     allowsLinkPreview: false,
+    webContentsDebuggingEnabled: true,
   },
   plugins: {
     // Keyboard plugin configuration

@@ -638,10 +638,22 @@ export class MessageService {
     };
 
     /*
-    Trigger a state update to send the new message.
-    If the stateUpdate function is already running, it will be skipped.
+    Trigger stateUpdate to encrypt and send the queued message.
+    Fire-and-forget so the caller can return immediately and the UI
+    can show the WAITING_SESSION bubble without waiting for bordercrypt
+    encryption + network send.
+
+    Race safety:
+    - stateUpdate() has an `isUpdating` guard — concurrent calls are skipped.
+    - If skipped, the next polling cycle (every 5s) will pick up the message.
+    - The message row is already committed to DB above, so it survives
+      even if stateUpdate() fails or the app is interrupted.
     */
-    await this.refreshService?.stateUpdate();
+    this.refreshService
+      ?.stateUpdate()
+      .catch(err =>
+        console.error('[MessageService] stateUpdate after send failed:', err)
+      );
 
     return {
       success: true,
@@ -1076,9 +1088,7 @@ export class MessageService {
       ...(options?.replyTo && { replyTo: options.replyTo }),
       ...(options?.metadata && { metadata: options.metadata }),
     };
-    const result = await this.send(message);
-    await this.refreshService?.stateUpdate();
-    return result;
+    return this.send(message);
   }
 
   /** Fetch and decrypt messages from the protocol (alias) */

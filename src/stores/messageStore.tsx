@@ -108,19 +108,37 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
 
         // Fetch messages for all contacts
         const newMap = new Map<string, Message[]>();
+        const currentMap = get().messagesByContact;
         for (const contactUserId of contactUserIds) {
           const allMessages = await sdk.messages.getMessages(contactUserId);
-          const filtered = allMessages
+          const dbMessages = allMessages
             .filter(m => m.type !== MessageType.KEEP_ALIVE)
             .sort((a, b) => (a.id ?? 0) - (b.id ?? 0));
-          if (filtered.length > 0) {
-            newMap.set(contactUserId, filtered);
+
+          // HACK: Preserve optimistic messages (negative IDs) that haven't
+          // been persisted yet — append them at the end so they stay
+          // visible until the next poll picks up the real DB row.
+          // Matches by content+direction which is fragile (e.g. duplicate
+          // messages). See the TODO in sendMessage for the proper fix.
+          const existing = currentMap.get(contactUserId) || [];
+          const optimistic = existing.filter(
+            m =>
+              (m.id ?? 0) < 0 &&
+              !dbMessages.some(
+                db => db.content === m.content && db.direction === m.direction
+              )
+          );
+
+          const merged =
+            optimistic.length > 0 ? [...dbMessages, ...optimistic] : dbMessages;
+
+          if (merged.length > 0) {
+            newMap.set(contactUserId, merged);
           }
         }
 
         // Check for changes before updating to avoid unnecessary sets
         let hasChanges = false;
-        const currentMap = get().messagesByContact;
 
         newMap.forEach((msgs, contactId) => {
           if (!hasChanges) {
@@ -266,7 +284,23 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
         forwardOf,
       };
 
-      // Send via service
+      // HACK: Optimistic UI — show the message bubble instantly with a
+      // temporary negative ID so the user doesn't wait for the DB round-trip.
+      // The polling loop in init() has a matching hack that preserves these
+      // negative-ID messages until the real DB row appears.
+      // TODO: replace with a proper optimistic update layer (e.g. pending
+      // queue in the store with reconciliation on poll) instead of relying
+      // on negative IDs and content-matching heuristics.
+      const optimisticMessage: Message = {
+        ...message,
+        id: -(Date.now() % 1_000_000), // temporary negative id
+      };
+      const currentMessages = get().messagesByContact.get(contactUserId) || [];
+      const optimisticMap = new Map(get().messagesByContact);
+      optimisticMap.set(contactUserId, [...currentMessages, optimisticMessage]);
+      set({ messagesByContact: optimisticMap, isSending: false });
+
+      // Send via service (DB insert + async stateUpdate)
       const result = await getSdk().messages.send(message);
       if (!result.success) {
         if (result.message) {
