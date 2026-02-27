@@ -8,8 +8,8 @@ use zeroize::{Zeroize, Zeroizing};
 use crate::constants::BLOCK_SIZE;
 use crate::error::{BordercryptError, Result};
 
-/// NTT tables computed at compile time — zero runtime cost.
-const NTT_CTX: pq_rerand::poly::NttContext = pq_rerand::poly::NttContext::new();
+/// NTT tables in static storage — single copy, no stack allocation on reference.
+static NTT_CTX: pq_rerand::poly::NttContext = pq_rerand::poly::NttContext::new();
 
 /// Plaintext message size per pq-rerand slot.
 pub const PQ_MSG_SIZE: usize = pq_rerand::params::SLOT_BYTES;
