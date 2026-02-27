@@ -154,13 +154,16 @@ dependencies = [
 name = "bordercrypt"
 version = "0.1.0"
 dependencies = [
+ "console_error_panic_hook",
  "crypto-aead",
  "crypto-kdf",
  "crypto-password-kdf",
+ "js-sys",
  "pq-rerand",
  "rand 0.8.5",
  "tempfile",
  "thiserror 2.0.18",
+ "wasm-bindgen",
  "zeroize",
 ]
 

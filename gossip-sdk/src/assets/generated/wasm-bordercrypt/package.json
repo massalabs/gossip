@@ -1,0 +1,15 @@
+{
+  "name": "bordercrypt",
+  "type": "module",
+  "version": "0.1.0",
+  "files": [
+    "bordercrypt_bg.wasm",
+    "bordercrypt.js",
+    "bordercrypt.d.ts"
+  ],
+  "main": "bordercrypt.js",
+  "types": "bordercrypt.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}
