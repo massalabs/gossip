@@ -956,10 +956,11 @@ dependencies = [
 [[package]]
 name = "pq-rerand"
 version = "0.1.0"
-source = "git+https://github.com/massalabs/pq-rerand?rev=62c113b971fd62b9aa0a434467b6fc6d63f6095d#62c113b971fd62b9aa0a434467b6fc6d63f6095d"
+source = "git+https://github.com/massalabs/pq-rerand?rev=1d5f9d1afd6f06383fffc0aa3a362774ba35d45f#1d5f9d1afd6f06383fffc0aa3a362774ba35d45f"
 dependencies = [
  "rand 0.8.5",
  "rand_distr",
+ "zeroize",
 ]
 
 [[package]]

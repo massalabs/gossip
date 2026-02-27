@@ -19,42 +19,27 @@ pub const PQ_CT_SIZE: usize = pq_rerand::serialize::SLOT_CT_BYTES;
 
 const _: () = assert!(PQ_CT_SIZE == BLOCK_SIZE);
 
-/// Byte size of a serialized public key (4 arrays of 4096 little-endian u32s).
-const PK_BYTE_SIZE: usize = 4 * pq_rerand::params::N * 4;
-
-/// Byte size of a serialized secret key (2 arrays of 4096 little-endian u32s).
-const SK_BYTE_SIZE: usize = 2 * pq_rerand::params::N * 4;
-
 /// Post-quantum public key for encryption and re-randomization.
 pub struct PqPublicKey(pq_rerand::keygen::PublicKey);
 
 /// Post-quantum secret key for decryption.
 ///
 /// Does not implement `Debug` or `Clone` to prevent accidental leakage.
-/// Zeroized on drop.
-pub struct PqSecretKey(Option<pq_rerand::keygen::SecretKey>);
-
-impl Drop for PqSecretKey {
-    fn drop(&mut self) {
-        if let Some(ref mut sk) = self.0 {
-            sk.s_t.zeroize();
-            sk.s_q2.zeroize();
-        }
-    }
-}
+/// Inner `SecretKey` is zeroized on drop by pq-rerand.
+pub struct PqSecretKey(pq_rerand::keygen::SecretKey);
 
 /// Generate a fresh pq-rerand keypair.
 pub fn pq_keygen() -> (PqPublicKey, PqSecretKey) {
     let ctx = &NTT_CTX;
     let mut rng = rand::rngs::OsRng;
     let (sk, pk) = pq_rerand::keygen::keygen(&mut rng, ctx);
-    (PqPublicKey(pk), PqSecretKey(Some(sk)))
+    (PqPublicKey(pk), PqSecretKey(sk))
 }
 
 /// Encrypt a message into a ciphertext block.
 ///
 /// `message` must be exactly `PQ_MSG_SIZE` bytes.
-/// Returns a boxed ciphertext of exactly `PQ_CT_SIZE` bytes.
+/// Returns a ciphertext of exactly `PQ_CT_SIZE` bytes.
 pub fn pq_encrypt(pk: &PqPublicKey, message: &[u8; PQ_MSG_SIZE]) -> Vec<u8> {
     let ctx = &NTT_CTX;
     let mut rng = rand::rngs::OsRng;
@@ -82,8 +67,7 @@ pub fn pq_encrypt(pk: &PqPublicKey, message: &[u8; PQ_MSG_SIZE]) -> Vec<u8> {
 pub fn pq_decrypt(sk: &PqSecretKey, ciphertext: &[u8; PQ_CT_SIZE]) -> Zeroizing<Vec<u8>> {
     let ctx = &NTT_CTX;
     let ct = pq_rerand::serialize::deserialize_slot(ciphertext);
-    let sk_inner = sk.0.as_ref().expect("secret key consumed");
-    let coeffs = Zeroizing::new(pq_rerand::decrypt::decrypt_slot(ctx, sk_inner, &ct));
+    let coeffs = Zeroizing::new(pq_rerand::decrypt::decrypt_slot(ctx, &sk.0, &ct));
     Zeroizing::new(pq_rerand::encoding::decode(&coeffs))
 }
 
@@ -103,54 +87,20 @@ impl PqPublicKey {
     /// Serialized byte size of a public key.
     #[must_use]
     pub const fn byte_size() -> usize {
-        PK_BYTE_SIZE
+        pq_rerand::keygen::PublicKey::BYTES
     }
 
     /// Serialize to bytes (little-endian u32 arrays).
     #[must_use]
     pub fn to_bytes(&self) -> Vec<u8> {
-        let mut buf = Vec::with_capacity(PK_BYTE_SIZE);
-        for arr in [
-            &self.0.a_ntt_t,
-            &self.0.a_ntt_q2,
-            &self.0.b_ntt_t,
-            &self.0.b_ntt_q2,
-        ] {
-            for &val in arr.iter() {
-                buf.extend_from_slice(&val.to_le_bytes());
-            }
-        }
-        buf
+        self.0.to_bytes()
     }
 
     /// Deserialize from bytes.
     pub fn from_bytes(data: &[u8]) -> Result<Self> {
-        if data.len() != PK_BYTE_SIZE {
-            return Err(BordercryptError::CorruptedBlock);
-        }
-        let mut pk = pq_rerand::keygen::PublicKey {
-            a_ntt_t: [0u32; pq_rerand::params::N],
-            a_ntt_q2: [0u32; pq_rerand::params::N],
-            b_ntt_t: [0u32; pq_rerand::params::N],
-            b_ntt_q2: [0u32; pq_rerand::params::N],
-        };
-        let arrays: [&mut [u32; pq_rerand::params::N]; 4] = [
-            &mut pk.a_ntt_t,
-            &mut pk.a_ntt_q2,
-            &mut pk.b_ntt_t,
-            &mut pk.b_ntt_q2,
-        ];
-        let mut offset = 0;
-        for arr in arrays {
-            for val in arr.iter_mut() {
-                let bytes: [u8; 4] = data[offset..offset + 4]
-                    .try_into()
-                    .map_err(|_| BordercryptError::CorruptedBlock)?;
-                *val = u32::from_le_bytes(bytes);
-                offset += 4;
-            }
-        }
-        Ok(Self(pk))
+        pq_rerand::keygen::PublicKey::from_bytes(data)
+            .map(Self)
+            .ok_or(BordercryptError::CorruptedBlock)
     }
 }
 
@@ -160,50 +110,20 @@ impl PqSecretKey {
     /// Returned buffer is zeroized on drop.
     #[must_use]
     pub fn to_bytes(&self) -> Zeroizing<Vec<u8>> {
-        let sk = self.0.as_ref().expect("secret key consumed");
-        let mut buf = Vec::with_capacity(SK_BYTE_SIZE);
-        for arr in [&sk.s_t, &sk.s_q2] {
-            for &val in arr.iter() {
-                buf.extend_from_slice(&val.to_le_bytes());
-            }
-        }
-        Zeroizing::new(buf)
+        self.0.to_bytes()
     }
 
     /// Deserialize from bytes.
     pub fn from_bytes(data: &[u8]) -> Result<Self> {
-        if data.len() != SK_BYTE_SIZE {
-            return Err(BordercryptError::CorruptedBlock);
-        }
-        let mut sk = pq_rerand::keygen::SecretKey {
-            s_t: [0u32; pq_rerand::params::N],
-            s_q2: [0u32; pq_rerand::params::N],
-        };
-        let arrays: [&mut [u32; pq_rerand::params::N]; 2] = [&mut sk.s_t, &mut sk.s_q2];
-        let mut offset = 0;
-        for arr in arrays {
-            for val in arr.iter_mut() {
-                let bytes: [u8; 4] = data[offset..offset + 4]
-                    .try_into()
-                    .map_err(|_| BordercryptError::CorruptedBlock)?;
-                *val = u32::from_le_bytes(bytes);
-                offset += 4;
-            }
-        }
-        Ok(Self(Some(sk)))
+        pq_rerand::keygen::SecretKey::from_bytes(data)
+            .map(Self)
+            .ok_or(BordercryptError::CorruptedBlock)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn keygen_produces_valid_keys() {
-        let (pk, sk) = pq_keygen();
-        assert_eq!(pk.to_bytes().len(), PK_BYTE_SIZE);
-        assert_eq!(sk.to_bytes().len(), SK_BYTE_SIZE);
-    }
 
     #[test]
     fn encrypt_decrypt_roundtrip() {
