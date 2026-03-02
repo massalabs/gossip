@@ -129,7 +129,9 @@ const Contact: React.FC = () => {
   }
 
   const canStart = discussion
-    ? sessionsStatuses.get(discussion.contactUserId) === SessionStatus.Active
+    ? (sessionsStatuses.get(discussion.contactUserId) ??
+        gossip.discussions.getStatus(discussion.contactUserId)) ===
+      SessionStatus.Active
     : true;
 
   return (
@@ -191,7 +193,10 @@ const Contact: React.FC = () => {
               SessionStatus.PeerRequested,
               SessionStatus.SelfRequested,
             ].includes(
-              sessionsStatuses.get(discussion.contactUserId) as SessionStatus
+              sessionsStatuses.get(discussion.contactUserId) ??
+                (gossip.discussions.getStatus(
+                  discussion.contactUserId
+                ) as SessionStatus)
             ) && 'Connection pending. You cannot chat yet.'}
           </p>
         )}
