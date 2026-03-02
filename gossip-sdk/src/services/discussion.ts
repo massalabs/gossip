@@ -309,10 +309,7 @@ export class DiscussionService {
       });
 
       // reset all messages in send queue to WAITING_SESSION for this contact
-      await this.queries.messages.resetSendQueue(ownerUserId, contactUserId, [
-        MessageStatus.READY,
-        MessageStatus.SENT,
-      ]);
+      await this.queries.messages.resetSendQueue(ownerUserId, contactUserId);
     } catch (error) {
       return {
         success: false,

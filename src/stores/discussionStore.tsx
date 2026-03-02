@@ -77,7 +77,6 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
           }
           set({ sessionsStatuses: statusMap }); // Update sessionsStatuses map reference
         }
-        console.log('sessionsStatuses: ', get().sessionsStatuses);
 
         // Sort discussions: new requests (PENDING) first, then active discussions
         // Within each group, sort by most recent activity
