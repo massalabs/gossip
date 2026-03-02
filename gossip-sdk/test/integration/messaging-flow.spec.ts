@@ -38,7 +38,10 @@ import { DiscussionService } from '../../src/services/discussion';
 import { RefreshService } from '../../src/services/refresh';
 import { SessionModule } from '../../src/wasm/session';
 import { decodeUserId } from '../../src/utils/userId';
-import { SessionStatus } from '../../src/assets/generated/wasm/gossip_wasm';
+import {
+  SessionStatus,
+  SessionConfig,
+} from '../../src/assets/generated/wasm/gossip_wasm';
 import { SdkEventEmitter } from '../../src/core/SdkEventEmitter';
 import { defaultSdkConfig } from '../../src/config/sdk';
 import {
@@ -1039,6 +1042,93 @@ describe('Messaging Flow', () => {
   });
 
   describe('keep alive msg', () => {
+    const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+    const ONE_MINUTE_MS = 60 * 1000;
+
+    beforeEach(async () => {
+      (
+        aliceSdk as unknown as { _announcement: AnnouncementService }
+      )._announcement.setMessageProtocol(mockProtocol);
+      (aliceSdk as unknown as { _message: MessageService })._message[
+        'messageProtocol'
+      ] = mockProtocol;
+      (
+        bobSdk as unknown as { _announcement: AnnouncementService }
+      )._announcement.setMessageProtocol(mockProtocol);
+      (bobSdk as unknown as { _message: MessageService })._message[
+        'messageProtocol'
+      ] = mockProtocol;
+    });
+
+    function createSessionConfig(
+      keep_alive_interval_millis: number,
+      max_keep_alive_peer_lag_length: bigint = 8n
+    ): SessionConfig {
+      return new SessionConfig(
+        ONE_WEEK_MS,
+        ONE_MINUTE_MS,
+        ONE_WEEK_MS,
+        ONE_MINUTE_MS,
+        ONE_WEEK_MS,
+        keep_alive_interval_millis,
+        10000n,
+        max_keep_alive_peer_lag_length
+      );
+    }
+
+    async function reconfigureSessionsForKeepAlive(options: {
+      keepAliveIntervalMs: number;
+      maxKeepAlivePeerLagLength?: bigint;
+    }): Promise<void> {
+      const { keepAliveIntervalMs, maxKeepAlivePeerLagLength = 8n } = options;
+
+      // Close any existing sessions created by the top-level beforeEach
+      await aliceSdk.closeSession();
+      await bobSdk.closeSession();
+
+      const aliceMnemonic = generateMnemonic();
+      const bobMnemonic = generateMnemonic();
+      const aliceEncryptionKey = await generateEncryptionKey();
+      const bobEncryptionKey = await generateEncryptionKey();
+
+      const aliceSessionConfig = createSessionConfig(
+        keepAliveIntervalMs,
+        maxKeepAlivePeerLagLength
+      );
+      const bobSessionConfig = createSessionConfig(
+        keepAliveIntervalMs,
+        maxKeepAlivePeerLagLength
+      );
+
+      await aliceSdk.openSession({
+        mnemonic: aliceMnemonic,
+        encryptionKey: aliceEncryptionKey,
+        onPersist: async () => {},
+        sessionConfig: aliceSessionConfig,
+      });
+
+      await bobSdk.openSession({
+        mnemonic: bobMnemonic,
+        encryptionKey: bobEncryptionKey,
+        onPersist: async () => {},
+        sessionConfig: bobSessionConfig,
+      });
+
+      // Re-wire mock protocol (openSession recreates services with default protocol)
+      (
+        aliceSdk as unknown as { _announcement: AnnouncementService }
+      )._announcement.setMessageProtocol(mockProtocol);
+      (aliceSdk as unknown as { _message: MessageService })._message[
+        'messageProtocol'
+      ] = mockProtocol;
+      (
+        bobSdk as unknown as { _announcement: AnnouncementService }
+      )._announcement.setMessageProtocol(mockProtocol);
+      (bobSdk as unknown as { _message: MessageService })._message[
+        'messageProtocol'
+      ] = mockProtocol;
+    }
+
     const getAliceServices = () =>
       aliceSdk as unknown as {
         _announcement: AnnouncementService;
@@ -1062,11 +1152,16 @@ describe('Messaging Flow', () => {
       (bobSdk as unknown as { state: { session: SessionModule } }).state
         .session;
 
-    it('Alice send msg to bob. Bob send a keep alive. Alice msg is acknowledged', async () => {
+    it('Alice send msg to bob. Bob wait keep_alive_interval_millis then send a keep alive. Alice msg is acknowledged', async () => {
+      const keepAliveIntervalMs = 100;
+
+      await reconfigureSessionsForKeepAlive({
+        keepAliveIntervalMs,
+      });
+
       await setupSession(aliceSdk, bobSdk, 'Bob', 'Alice');
 
       const bobServices = getBobServices();
-      const bobSession = getBobSession();
 
       // Alice sends a message to Bob
       const aliceMsgResult = await aliceSdk.messages.send({
@@ -1096,10 +1191,10 @@ describe('Messaging Flow', () => {
       expect(bobReceived?.status).toBe(MessageStatus.DELIVERED);
       expect(bobReceived?.serializedContent).toBeNull();
 
-      // Force Bob to send keep-alive
-      vi.spyOn(bobSession, 'refresh').mockResolvedValue([
-        decodeUserId(aliceSdk.userId),
-      ]);
+      // Wait so that Bob's last outgoing message is older than keep_alive_interval_millis
+      await new Promise(resolve =>
+        setTimeout(resolve, keepAliveIntervalMs + 20)
+      );
 
       await bobServices._refresh.stateUpdate();
 
@@ -1147,11 +1242,9 @@ describe('Messaging Flow', () => {
 
       // Alice sends a message back to acknowledge Bob's keep-alive
       const aliceServices = getAliceServices();
-      const aliceSession = getAliceSession();
-
-      vi.spyOn(aliceSession, 'refresh').mockResolvedValue([
-        decodeUserId(bobSdk.userId),
-      ]);
+      await new Promise(resolve =>
+        setTimeout(resolve, keepAliveIntervalMs + 20)
+      );
 
       await aliceServices._refresh.stateUpdate();
 
@@ -1170,7 +1263,103 @@ describe('Messaging Flow', () => {
       expect(bobKeepAliveAfterRows.length).toBe(0);
     });
 
+    it('Alice send max_keep_alive_peer_lag_length msg to bob. Bob send a keep alive. Alice msg are acknowledged', async () => {
+      const maxKeepAlivePeerLagLength = 3n;
+      const keepAliveIntervalMs = 60 * 60 * 1000; // large so peer lag is the trigger
+
+      await reconfigureSessionsForKeepAlive({
+        keepAliveIntervalMs,
+        maxKeepAlivePeerLagLength,
+      });
+
+      await setupSession(aliceSdk, bobSdk, 'Bob', 'Alice');
+
+      const bobServices = getBobServices();
+
+      // Alice sends max_keep_alive_peer_lag_length messages to Bob
+      const contents = ['A1', 'A2', 'A3'];
+      for (const content of contents) {
+        const result = await aliceSdk.messages.send({
+          ownerUserId: aliceSdk.userId,
+          contactUserId: bobSdk.userId,
+          content,
+          type: MessageType.TEXT,
+          direction: MessageDirection.OUTGOING,
+          status: MessageStatus.WAITING_SESSION,
+          timestamp: new Date(),
+        });
+        expect(result.success).toBe(true);
+      }
+
+      // Bob fetches Alice's messages
+      await bobSdk.messages.fetch();
+
+      const bobMessagesAfterFetch =
+        await bobSdk.queries.messages.getByOwnerAndContact(
+          bobSdk.userId,
+          aliceSdk.userId
+        );
+      const bobIncomingTexts = bobMessagesAfterFetch.filter(
+        m =>
+          m.direction === MessageDirection.INCOMING &&
+          m.type === MessageType.TEXT
+      );
+      expect(bobIncomingTexts.length).toBe(contents.length);
+
+      // Since Bob received max_keep_alive_peer_lag_length messages since his last outgoing,
+      // refresh should cause a keep-alive to be sent.
+      await bobServices._refresh.stateUpdate();
+
+      const bobAllMsgsKA = await bobSdk.queries.messages.getByOwnerAndContact(
+        bobSdk.userId,
+        aliceSdk.userId
+      );
+      const bobKeepAliveRows = bobAllMsgsKA.filter(
+        m =>
+          m.type === MessageType.KEEP_ALIVE &&
+          m.direction === MessageDirection.OUTGOING
+      );
+      const bobKeepAlive = bobKeepAliveRows[0];
+      expect(bobKeepAlive).toBeDefined();
+      expect(bobKeepAlive?.status).toBe(MessageStatus.SENT);
+      expect(bobKeepAlive?.encryptedMessage).toBeNull();
+      expect(bobKeepAlive?.seeker).toBeDefined();
+      expect(bobKeepAlive?.whenToSend).toBeNull();
+
+      // Alice fetches Bob's keep-alive (which acknowledges her messages)
+      await aliceSdk.messages.fetch();
+
+      const aliceMessagesAfterKA =
+        await aliceSdk.queries.messages.getByOwnerAndContact(
+          aliceSdk.userId,
+          bobSdk.userId
+        );
+
+      const aliceOutgoingTexts = aliceMessagesAfterKA.filter(
+        m =>
+          m.direction === MessageDirection.OUTGOING &&
+          m.type === MessageType.TEXT
+      );
+      expect(aliceOutgoingTexts.length).toBe(contents.length);
+      for (const msg of aliceOutgoingTexts) {
+        expect(msg.status).toBe(MessageStatus.DELIVERED);
+        expect(msg.serializedContent).toBeNull();
+      }
+
+      // Check that there is no incoming keep-alive message in Alice's db
+      const incomingKeepAlive = aliceMessagesAfterKA.find(
+        m =>
+          m.type === MessageType.KEEP_ALIVE &&
+          m.direction === MessageDirection.INCOMING
+      );
+      expect(incomingKeepAlive).toBeUndefined();
+    });
+
     it('No keep alive when session is not active', async () => {
+      await reconfigureSessionsForKeepAlive({
+        keepAliveIntervalMs: 100,
+      });
+
       const aliceContact: Omit<Contact, 'id'> = {
         ownerUserId: aliceSdk.userId,
         userId: bobSdk.userId,
@@ -1206,18 +1395,8 @@ describe('Messaging Flow', () => {
         SessionStatus.PeerRequested
       );
 
-      const aliceRefreshSpy = vi
-        .spyOn(aliceSession, 'refresh')
-        .mockResolvedValue([decodeUserId(bobSdk.userId)]);
-      const bobRefreshSpy = vi
-        .spyOn(bobSession, 'refresh')
-        .mockResolvedValue([decodeUserId(aliceSdk.userId)]);
-
       await aliceSdk.updateState();
       await bobSdk.updateState();
-
-      aliceRefreshSpy.mockRestore();
-      bobRefreshSpy.mockRestore();
 
       const aliceKeepAlives = (
         await aliceSdk.queries.messages.getByOwnerAndContact(
@@ -1236,6 +1415,12 @@ describe('Messaging Flow', () => {
     });
 
     it('No keep alive msg when already a pending msg', async () => {
+      const keepAliveIntervalMs = 100;
+
+      await reconfigureSessionsForKeepAlive({
+        keepAliveIntervalMs,
+      });
+
       await setupSession(aliceSdk, bobSdk, 'Bob', 'Alice');
 
       const aliceServices = getAliceServices();
@@ -1263,10 +1448,9 @@ describe('Messaging Flow', () => {
         msgResult.message!.id!
       );
       expect(pendingMsg?.status).toBe(MessageStatus.WAITING_SESSION);
-
-      vi.spyOn(aliceSession, 'refresh').mockResolvedValue([
-        decodeUserId(bobSdk.userId),
-      ]);
+      await new Promise(resolve =>
+        setTimeout(resolve, keepAliveIntervalMs + 20)
+      );
 
       await aliceServices._refresh.stateUpdate();
 
@@ -1286,6 +1470,11 @@ describe('Messaging Flow', () => {
     });
 
     it('Alice send keep alive msg but session.sendMessage returns empty output. It is resent at next stateUpdate with success', async () => {
+      await reconfigureSessionsForKeepAlive({
+        keepAliveIntervalMs: 60 * 60 * 1000,
+        maxKeepAlivePeerLagLength: 1n,
+      });
+
       await setupSession(aliceSdk, bobSdk, 'Bob', 'Alice');
 
       const aliceServices = getAliceServices();
@@ -1302,20 +1491,23 @@ describe('Messaging Flow', () => {
         timestamp: new Date(),
       });
       expect(bobMsgResult.success).toBe(true);
-      await aliceSdk.messages.fetch();
 
-      vi.spyOn(aliceSession, 'refresh').mockResolvedValue([
-        decodeUserId(bobSdk.userId),
-      ]);
-
-      // Mock sendMessage to return undefined
+      // Mock sendMessage: first call returns undefined (encryption "fails"), then use real
       const originalSend = aliceSession.sendMessage.bind(aliceSession);
+      let callCount = 0;
       const sendSpy = vi
         .spyOn(aliceSession, 'sendMessage')
-        .mockImplementationOnce(async () => undefined)
-        .mockImplementation(originalSend);
+        .mockImplementation(
+          async (...args: Parameters<SessionModule['sendMessage']>) => {
+            callCount++;
+            if (callCount === 1) return undefined;
+            return originalSend(...args);
+          }
+        );
 
-      // First updateState: creates keep-alive but encryption fails, so it stays pending
+      await aliceSdk.messages.fetch();
+
+      // First stateUpdate: mock returns undefined, keep-alive stays WAITING_SESSION
       await aliceServices._refresh.stateUpdate();
 
       let aliceMessages = await aliceSdk.queries.messages.getByOwnerAndContact(
@@ -1323,15 +1515,19 @@ describe('Messaging Flow', () => {
         bobSdk.userId
       );
 
-      const ka = aliceMessages.find(
+      const keepAlives = aliceMessages.filter(
         m =>
           m.type === MessageType.KEEP_ALIVE &&
           m.direction === MessageDirection.OUTGOING
       );
+      const ka =
+        keepAlives.find(m => m.status === MessageStatus.WAITING_SESSION) ??
+        keepAlives[keepAlives.length - 1];
       expect(ka).toBeDefined();
+      expect(sendSpy).toHaveBeenCalled();
       expect(ka?.status).toBe(MessageStatus.WAITING_SESSION);
 
-      // Second updateState: resend with real sendMessage
+      // Second stateUpdate: resend with real sendMessage
       await aliceServices._refresh.stateUpdate();
 
       aliceMessages = await aliceSdk.queries.messages.getByOwnerAndContact(
@@ -1355,10 +1551,14 @@ describe('Messaging Flow', () => {
     });
 
     it('Alice send keep alive msg then reset the session: keep alive is put in WAITING_SESSION then resent', async () => {
+      await reconfigureSessionsForKeepAlive({
+        keepAliveIntervalMs: 60 * 60 * 1000,
+        maxKeepAlivePeerLagLength: 1n,
+      });
+
       await setupSession(aliceSdk, bobSdk, 'Bob', 'Alice');
 
       const aliceServices = getAliceServices();
-      const aliceSession = getAliceSession();
 
       // Bob sends a message so Alice will later acknowledge via keep-alive
       const bobMsgResult = await bobSdk.messages.send({
@@ -1372,11 +1572,6 @@ describe('Messaging Flow', () => {
       });
       expect(bobMsgResult.success).toBe(true);
       await aliceSdk.messages.fetch();
-
-      // Force Alice to send keep-alive
-      vi.spyOn(aliceSession, 'refresh').mockResolvedValue([
-        decodeUserId(bobSdk.userId),
-      ]);
 
       await aliceServices._refresh.stateUpdate();
 
@@ -1420,12 +1615,14 @@ describe('Messaging Flow', () => {
     });
 
     it('Alice send keep alive but got network issue. Resend with success', async () => {
+      await reconfigureSessionsForKeepAlive({
+        keepAliveIntervalMs: 60 * 60 * 1000,
+        maxKeepAlivePeerLagLength: 1n,
+      });
+
       await setupSession(aliceSdk, bobSdk, 'Bob', 'Alice');
 
       const aliceServices = getAliceServices();
-      const aliceSession = getAliceSession();
-      const mockProtocol = (aliceSdk as unknown as { _message: MessageService })
-        ._message['messageProtocol'];
 
       // Set short retry delay for this test
       const originalRetryDelay = aliceSdk.config.messages.retryDelayMs;
@@ -1442,14 +1639,8 @@ describe('Messaging Flow', () => {
         timestamp: new Date(),
       });
       expect(bobMsgResult.success).toBe(true);
-      await aliceSdk.messages.fetch();
 
-      // Force Alice to send keep-alive
-      vi.spyOn(aliceSession, 'refresh').mockResolvedValue([
-        decodeUserId(bobSdk.userId),
-      ]);
-
-      // Mock network failure for sendMessage
+      // Mock network failure for protocol.sendMessage
       let sendAttempts = 0;
       const sendSpy = vi
         .spyOn(mockProtocol, 'sendMessage')
@@ -1461,7 +1652,9 @@ describe('Messaging Flow', () => {
           // Return void on retry (success)
         });
 
-      // First stateUpdate: keep-alive send fails
+      await aliceSdk.messages.fetch();
+
+      // First stateUpdate: protocol.sendMessage throws, keep-alive stays READY with whenToSend
       await aliceServices._refresh.stateUpdate();
 
       let aliceMessages = await aliceSdk.queries.messages.getByOwnerAndContact(
@@ -1469,11 +1662,14 @@ describe('Messaging Flow', () => {
         bobSdk.userId
       );
 
-      const ka = aliceMessages.find(
+      const keepAlivesAfterFail = aliceMessages.filter(
         m =>
           m.type === MessageType.KEEP_ALIVE &&
           m.direction === MessageDirection.OUTGOING
       );
+      const ka =
+        keepAlivesAfterFail.find(m => m.status === MessageStatus.READY) ??
+        keepAlivesAfterFail[keepAlivesAfterFail.length - 1];
       expect(ka).toBeDefined();
       expect(ka?.status).toBe(MessageStatus.READY);
       expect(ka?.whenToSend).toBeDefined();
