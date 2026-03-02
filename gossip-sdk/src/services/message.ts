@@ -1001,39 +1001,6 @@ export class MessageService {
   }
 
   /**
-   * Send a keep-alive message without adding it to the message history.
-   */
-  async sendKeepAlive(contactUserId: string): Promise<void> {
-    const log = logger.forMethod('sendKeepAlive');
-    const peerId = decodeUserId(contactUserId);
-    const sessionStatus = this.session.peerSessionStatus(peerId);
-    if (sessionStatus !== SessionStatus.Active) {
-      return;
-    }
-
-    const serialized = serializeKeepAliveMessage();
-    const sendOutput = await this.session.sendMessage(peerId, serialized);
-    if (!sendOutput) {
-      log.warn('session manager failed to encrypt keep-alive', {
-        contactUserId,
-      });
-      return;
-    }
-
-    try {
-      await this.messageProtocol.sendMessage({
-        seeker: sendOutput.seeker,
-        ciphertext: sendOutput.data,
-      });
-    } catch (error) {
-      log.error('keep-alive send failed', {
-        contactUserId,
-        error,
-      });
-    }
-  }
-
-  /**
    * Get count of messages waiting for session with a specific contact.
    */
   async getWaitingMessageCount(contactUserId: string): Promise<number> {
