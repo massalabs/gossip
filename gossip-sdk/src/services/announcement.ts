@@ -552,8 +552,7 @@ export class AnnouncementService {
       // Only reset READY and SENT — DELIVERED messages should not be resent.
       await this.queries.messages.resetSendQueue(
         this.session.userIdEncoded,
-        contactUserId,
-        [MessageStatus.READY, MessageStatus.SENT]
+        contactUserId
       );
 
       const newDiscussion = await this.queries.discussions.getById(existing.id);

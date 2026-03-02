@@ -183,9 +183,9 @@ export class MessageQueries {
 
   async resetSendQueue(
     ownerUserId: string,
-    contactUserId: string,
-    statuses?: MessageStatus[]
+    contactUserId: string
   ): Promise<void> {
+    const statuses = [MessageStatus.READY, MessageStatus.SENT];
     await this.conn.db
       .update(schema.messages)
       .set({
@@ -201,6 +201,39 @@ export class MessageQueries {
           statuses ? inArray(schema.messages.status, statuses) : undefined
         )
       );
+
+    const waitingSessionMessages = await this.conn.db
+      .select()
+      .from(schema.messages)
+      .where(
+        and(
+          eq(schema.messages.ownerUserId, ownerUserId),
+          eq(schema.messages.contactUserId, contactUserId),
+          eq(schema.messages.status, MessageStatus.WAITING_SESSION)
+        )
+      )
+      .all();
+
+    // if there are keep alive messages and other messages, delete the keep alive messages
+    if (
+      waitingSessionMessages.some(
+        message => message.type === MessageType.KEEP_ALIVE
+      ) &&
+      waitingSessionMessages.some(
+        message => message.type !== MessageType.KEEP_ALIVE
+      )
+    ) {
+      // delete keep alive messages
+      await this.conn.db
+        .delete(schema.messages)
+        .where(
+          and(
+            eq(schema.messages.ownerUserId, ownerUserId),
+            eq(schema.messages.contactUserId, contactUserId),
+            eq(schema.messages.type, MessageType.KEEP_ALIVE)
+          )
+        );
+    }
   }
 
   async getAnnouncementsByContact(
