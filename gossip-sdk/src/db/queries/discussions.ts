@@ -1,10 +1,9 @@
 import { eq, and, gt, sql } from 'drizzle-orm';
 import * as schema from '../schema/index.js';
 import type { DatabaseConnection } from '../sqlite.js';
-import type { DiscussionStatus } from '../db';
 
 export type DiscussionRow = typeof schema.discussions.$inferSelect;
-type DiscussionInsert = typeof schema.discussions.$inferInsert;
+export type DiscussionInsert = typeof schema.discussions.$inferInsert;
 
 export class DiscussionQueries {
   constructor(private conn: DatabaseConnection) {}
@@ -94,21 +93,5 @@ export class DiscussionQueries {
           gt(schema.discussions.unreadCount, 0)
         )
       );
-  }
-
-  async getByOwnerAndStatus(
-    ownerUserId: string,
-    status: DiscussionStatus
-  ): Promise<DiscussionRow[]> {
-    return this.conn.db
-      .select()
-      .from(schema.discussions)
-      .where(
-        and(
-          eq(schema.discussions.ownerUserId, ownerUserId),
-          eq(schema.discussions.status, status)
-        )
-      )
-      .all();
   }
 }

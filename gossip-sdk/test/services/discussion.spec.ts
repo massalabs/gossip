@@ -10,7 +10,6 @@ import {
   MessageDirection,
   MessageType,
   DiscussionDirection,
-  DiscussionStatus,
 } from '../../src/db';
 import { clearAllTables, getTestDb, getTestQueries } from '../testDb';
 import * as schema from '../../src/db/schema';
@@ -56,7 +55,6 @@ describe('resetSendQueueMessages function', () => {
       ownerUserId: RENEW_OWNER_USER_ID,
       contactUserId: RENEW_CONTACT_USER_ID,
       direction: DiscussionDirection.INITIATED,
-      status: DiscussionStatus.PENDING,
       weAccepted: true,
       sendAnnouncement: null,
       unreadCount: 0,
@@ -312,7 +310,6 @@ describe('DiscussionService renew message reset behavior', () => {
       ownerUserId: RENEW_OWNER_USER_ID,
       contactUserId: RENEW_CONTACT_USER_ID,
       direction: DiscussionDirection.INITIATED,
-      status: DiscussionStatus.PENDING,
       weAccepted: true,
       sendAnnouncement: null,
       unreadCount: 0,

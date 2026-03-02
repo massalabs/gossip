@@ -8,7 +8,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
   DiscussionDirection,
-  DiscussionStatus,
   MessageDirection,
   MessageStatus,
   MessageType,
@@ -37,7 +36,6 @@ describe('Announcement Storage for Retry', () => {
       ownerUserId: TEST_OWNER_USER_ID,
       contactUserId: TEST_CONTACT_USER_ID,
       direction: DiscussionDirection.INITIATED,
-      status: DiscussionStatus.ACTIVE,
       weAccepted: true,
       sendAnnouncement: JSON.stringify({
         announcement_bytes: Array.from(announcement),
@@ -229,7 +227,6 @@ describe('Contact Deletion Cleanup', () => {
       ownerUserId: TEST_OWNER_USER_ID,
       contactUserId: TEST_CONTACT_USER_ID,
       direction: DiscussionDirection.INITIATED,
-      status: DiscussionStatus.ACTIVE,
       weAccepted: true,
       sendAnnouncement: null,
       unreadCount: 0,

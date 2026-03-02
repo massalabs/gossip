@@ -8,7 +8,6 @@ import {
   MessageDirection,
   MessageType,
   DiscussionDirection,
-  DiscussionStatus,
 } from '../../src/db';
 import { encodeUserId } from '../../src/utils/userId';
 import { defaultSdkConfig, type SdkConfig } from '../../src/config/sdk';
@@ -28,7 +27,6 @@ async function addDefaultDiscussion(
     ownerUserId,
     contactUserId,
     direction: DiscussionDirection.RECEIVED,
-    status: DiscussionStatus.ACTIVE,
     weAccepted: true,
     sendAnnouncement: null,
     unreadCount: 0,

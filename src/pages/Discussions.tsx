@@ -37,6 +37,7 @@ const Discussions: React.FC = () => {
   const discussions = useDiscussionStore(s => s.discussions);
   const filter = useDiscussionStore(s => s.filter);
   const setFilter = useDiscussionStore(s => s.setFilter);
+  const sessionsStatuses = useDiscussionStore(s => s.sessionsStatuses);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   // Force re-render when ref is set to ensure DiscussionList gets the scroll parent
   const [scrollParentReady, setScrollParentReady] = useState(false);
@@ -100,19 +101,26 @@ const Discussions: React.FC = () => {
       return { all: 0, unread: 0, pending: 0 };
     }
     const allCount = discussions.length;
-    const unreadCount = discussions.filter(
-      d =>
-        gossip.discussions.getStatus(d.contactUserId) ===
-          SessionStatus.Active && d.unreadCount > 0
-    ).length;
-    const pendingCount = discussions.filter(d =>
-      [SessionStatus.PeerRequested, SessionStatus.SelfRequested].includes(
-        gossip.discussions.getStatus(d.contactUserId)
-      )
-    ).length;
+    const unreadCount = discussions.filter(d => {
+      const status = sessionsStatuses.get(d.contactUserId);
+      return (
+        status != null &&
+        [SessionStatus.Active, SessionStatus.Killed].includes(status) &&
+        d.unreadCount > 0
+      );
+    }).length;
+    const pendingCount = discussions.filter(d => {
+      const status = sessionsStatuses.get(d.contactUserId);
+      return (
+        status != null &&
+        [SessionStatus.PeerRequested, SessionStatus.SelfRequested].includes(
+          status
+        )
+      );
+    }).length;
 
     return { all: allCount, unread: unreadCount, pending: pendingCount };
-  }, [discussions, gossip]);
+  }, [discussions, gossip, sessionsStatuses]);
 
   if (isLoading || !gossip.isSessionOpen) {
     return (

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { ChevronLeft, Search } from 'react-feather';
 import { Contact, SessionStatus } from '@massalabs/gossip-sdk';
 import type { Discussion } from '@massalabs/gossip-sdk';
-import { useGossipSdk } from '../../hooks/useGossipSdk';
+import { useDiscussionStore } from '../../stores/discussionStore';
 import ContactAvatar from '../avatar/ContactAvatar';
 import Button from '../ui/Button';
 import BackButton from '../ui/BackButton';
@@ -26,7 +26,7 @@ const DiscussionHeader: React.FC<DiscussionHeaderProps> = ({
   onSearchToggle,
   title,
 }) => {
-  const gossip = useGossipSdk();
+  const sessionsStatuses = useDiscussionStore(s => s.sessionsStatuses);
   const navigate = useNavigate();
 
   // Header with title (for list view with custom title)
@@ -57,11 +57,12 @@ const DiscussionHeader: React.FC<DiscussionHeaderProps> = ({
   // Display name: customName takes priority over contact name
   const displayName = discussion?.customName || contact.name || 'Unknown';
 
+  const sessionStatus = discussion
+    ? sessionsStatuses.get(discussion.contactUserId)
+    : undefined;
+
   // Check if discussion is pending outgoing (waiting for approval)
-  const isPendingOutgoing =
-    !!discussion &&
-    gossip.discussions.getStatus(discussion.contactUserId) ===
-      SessionStatus.SelfRequested;
+  const isPendingOutgoing = sessionStatus === SessionStatus.SelfRequested;
 
   // Navigate to discussion settings if discussion exists, otherwise contact page
   const handleHeaderClick = () => {
@@ -76,40 +77,42 @@ const DiscussionHeader: React.FC<DiscussionHeaderProps> = ({
 
   return (
     <HeaderBar>
-      <div className="flex items-center w-full gap-3">
-        {onBack && (
-          <Button
-            onClick={onBack}
-            variant="circular"
-            size="custom"
-            ariaLabel="Back"
-            className="w-8 h-8 flex items-center justify-center"
+      <div className="flex flex-col w-full gap-3">
+        <div className="flex items-center w-full gap-3">
+          {onBack && (
+            <Button
+              onClick={onBack}
+              variant="circular"
+              size="custom"
+              ariaLabel="Back"
+              className="w-8 h-8 flex items-center justify-center"
+            >
+              <ChevronLeft className="w-5 h-5 text-muted-foreground" />
+            </Button>
+          )}
+          <button
+            onClick={handleHeaderClick}
+            className="flex items-center flex-1 min-w-0 gap-3 group hover:opacity-80 transition-opacity active:opacity-70"
+            title="Discussion settings"
           >
-            <ChevronLeft className="w-5 h-5 text-muted-foreground" />
-          </Button>
-        )}
-        <button
-          onClick={handleHeaderClick}
-          className="flex items-center flex-1 min-w-0 gap-3 group hover:opacity-80 transition-opacity active:opacity-70"
-          title="Discussion settings"
-        >
-          <div className="relative">
-            <ContactAvatar contact={contact} size={12} />
-            {contact?.isOnline && (
-              <span className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-success border-2 border-card rounded-full shadow-sm"></span>
-            )}
-          </div>
-          <div className="flex-1 min-w-0 text-left">
-            <h1 className="text-xl font-semibold text-foreground truncate leading-tight">
-              {displayName}
-            </h1>
-            {isPendingOutgoing && (
-              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-accent text-accent-foreground border border-border">
-                Waiting approval
-              </span>
-            )}
-          </div>
-        </button>
+            <div className="relative">
+              <ContactAvatar contact={contact} size={12} />
+              {contact?.isOnline && (
+                <span className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-success border-2 border-card rounded-full shadow-sm"></span>
+              )}
+            </div>
+            <div className="flex-1 min-w-0 text-left">
+              <h1 className="text-xl font-semibold text-foreground truncate leading-tight">
+                {displayName}
+              </h1>
+              {isPendingOutgoing && (
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-accent text-accent-foreground border border-border">
+                  Waiting approval
+                </span>
+              )}
+            </div>
+          </button>
+        </div>
         {onSearchToggle && (
           <Button
             onClick={onSearchToggle}

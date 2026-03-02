@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "8fd54e12-3aeb-4674-8b98-58f232bb38e9",
+  "id": "ddd5d69b-7051-45ac-8ec1-98300ff5df42",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "activeSeekers": {
@@ -188,13 +188,6 @@
           "notNull": true,
           "autoincrement": false
         },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
         "nextSeeker": {
           "name": "nextSeeker",
           "type": "blob",
@@ -259,6 +252,28 @@
           "autoincrement": false,
           "default": 0
         },
+        "killedNextRetryAt": {
+          "name": "killedNextRetryAt",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "saturatedRetryAt": {
+          "name": "saturatedRetryAt",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "saturatedRetryDone": {
+          "name": "saturatedRetryDone",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
         "createdAt": {
           "name": "createdAt",
           "type": "integer",
@@ -279,11 +294,6 @@
           "name": "discussions_owner_contact_idx",
           "columns": ["ownerUserId", "contactUserId"],
           "isUnique": true
-        },
-        "discussions_owner_status_idx": {
-          "name": "discussions_owner_status_idx",
-          "columns": ["ownerUserId", "status"],
-          "isUnique": false
         }
       },
       "foreignKeys": {},
@@ -441,6 +451,11 @@
         "messages_timestamp_idx": {
           "name": "messages_timestamp_idx",
           "columns": ["timestamp"],
+          "isUnique": false
+        },
+        "messages_owner_contact_msgid_idx": {
+          "name": "messages_owner_contact_msgid_idx",
+          "columns": ["ownerUserId", "contactUserId", "messageId"],
           "isUnique": false
         }
       },

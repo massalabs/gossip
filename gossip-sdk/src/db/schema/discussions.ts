@@ -2,10 +2,9 @@ import {
   sqliteTable,
   text,
   integer,
-  index,
   uniqueIndex,
 } from 'drizzle-orm/sqlite-core';
-import type { DiscussionDirection, DiscussionStatus } from '../db';
+import type { DiscussionDirection } from '../db';
 import { bytes } from './_helpers.js';
 
 export const discussions = sqliteTable(
@@ -19,7 +18,6 @@ export const discussions = sqliteTable(
       .default(false),
     sendAnnouncement: text('sendAnnouncement'),
     direction: text('direction').$type<DiscussionDirection>().notNull(),
-    status: text('status').$type<DiscussionStatus>().notNull(),
     nextSeeker: bytes('nextSeeker'),
     initiationAnnouncement: bytes('initiationAnnouncement'),
     announcementMessage: text('announcementMessage'),
@@ -33,6 +31,11 @@ export const discussions = sqliteTable(
       mode: 'timestamp_ms',
     }),
     unreadCount: integer('unreadCount').notNull().default(0),
+    killedNextRetryAt: integer('killedNextRetryAt', { mode: 'timestamp_ms' }),
+    saturatedRetryAt: integer('saturatedRetryAt', { mode: 'timestamp_ms' }),
+    saturatedRetryDone: integer('saturatedRetryDone', { mode: 'boolean' })
+      .notNull()
+      .default(false),
     createdAt: integer('createdAt', { mode: 'timestamp_ms' }).notNull(),
     updatedAt: integer('updatedAt', { mode: 'timestamp_ms' }).notNull(),
   },
@@ -41,6 +44,5 @@ export const discussions = sqliteTable(
       table.ownerUserId,
       table.contactUserId
     ),
-    index('discussions_owner_status_idx').on(table.ownerUserId, table.status),
   ]
 );

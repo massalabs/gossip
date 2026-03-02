@@ -5,7 +5,13 @@
  * keep-alive messages and broken sessions.
  */
 
-import { MessageType, MessageDirection, MessageStatus } from '../db/index.js';
+import {
+  type Discussion,
+  type Queries,
+  MessageDirection,
+  MessageStatus,
+  MessageType,
+} from '../db/index.js';
 import { toSortedDiscussions } from '../utils/discussions.js';
 import type { SessionModule } from '../wasm/session.js';
 import { SessionStatus } from '../wasm/bindings.js';
@@ -15,7 +21,8 @@ import { AnnouncementService } from './announcement.js';
 import { DiscussionService } from './discussion.js';
 import { Logger } from '../utils/logs.js';
 import { SdkEventEmitter, SdkEventType } from '../core/SdkEventEmitter.js';
-import { Queries } from '../db/queries/index.js';
+import type { SdkConfig } from '../config/sdk.js';
+import * as schema from '../db/schema/index.js';
 
 const logger = new Logger('RefreshService');
 
@@ -44,6 +51,8 @@ export class RefreshService {
   private isUpdating = false;
   private eventEmitter: SdkEventEmitter;
   private queries: Queries;
+  private config: SdkConfig;
+  private sessionStatusMap: Map<string, SessionStatus> = new Map();
 
   constructor(
     messageService: MessageService,
@@ -51,7 +60,8 @@ export class RefreshService {
     announcementService: AnnouncementService,
     session: SessionModule,
     eventEmitter: SdkEventEmitter,
-    queries: Queries
+    queries: Queries,
+    config: SdkConfig
   ) {
     this.messageService = messageService;
     this.discussionService = discussionService;
@@ -59,6 +69,36 @@ export class RefreshService {
     this.session = session;
     this.eventEmitter = eventEmitter;
     this.queries = queries;
+    this.config = config;
+  }
+
+  /**
+   * Emit sessionStatusChanged events for discussions whose session status
+   * has changed since the last check.
+   */
+  async refreshSessionsStatusEvent(): Promise<void> {
+    const ownerUserId = this.session.userIdEncoded;
+    if (!ownerUserId) {
+      return;
+    }
+
+    const allRows = await this.queries.discussions.getByOwner(ownerUserId);
+    const discussions = toSortedDiscussions(allRows);
+
+    for (const discussion of discussions) {
+      const peerId = decodeUserId(discussion.contactUserId);
+      const status = this.session.peerSessionStatus(peerId);
+      const previous = this.sessionStatusMap.get(discussion.contactUserId);
+
+      if (previous !== status) {
+        this.sessionStatusMap.set(discussion.contactUserId, status);
+        this.eventEmitter.emit(
+          SdkEventType.SESSION_STATUS_CHANGED,
+          discussion.contactUserId,
+          status
+        );
+      }
+    }
   }
 
   /**
@@ -120,30 +160,7 @@ export class RefreshService {
       for (const discussion of discussions) {
         const peerId = decodeUserId(discussion.contactUserId);
         const status = this.session.peerSessionStatus(peerId);
-
-        if (
-          [
-            SessionStatus.Killed,
-            SessionStatus.Saturated,
-            SessionStatus.NoSession,
-            SessionStatus.UnknownPeer,
-          ].includes(status)
-        ) {
-          if (discussion.weAccepted) {
-            const res = await this.discussionService.createSessionForContact(
-              discussion.contactUserId,
-              new Uint8Array(0)
-            );
-            if (!res.success) {
-              log.error('failed to create session for contact', {
-                contactUserId: discussion.contactUserId,
-                error: res.error,
-              });
-            } else {
-              this.eventEmitter.emit(SdkEventType.SESSION_RENEWED, discussion);
-            }
-          }
-        }
+        await this.handleSessionStatus(discussion, status);
       }
 
       // Step 2: send announcements
@@ -155,9 +172,11 @@ export class RefreshService {
           const status = this.session.peerSessionStatus(
             decodeUserId(discussion.contactUserId)
           );
-          return [SessionStatus.Active, SessionStatus.SelfRequested].includes(
-            status
-          );
+          return [
+            SessionStatus.Active,
+            SessionStatus.SelfRequested,
+            SessionStatus.Saturated,
+          ].includes(status);
         }
       );
       await this.announcementService.processOutgoingAnnouncements(
@@ -165,14 +184,17 @@ export class RefreshService {
       );
 
       // Step 3: send queued messages and keep-alives
-      // NOTE: only flush queued messages once the session is fully Active.
+      // NOTE: only flush queued messages once the session is fully Active or saturated.
       // SelfRequested means the handshake is still establishing and
       // session.sendMessage() can return null.
       const activeEstablishedDiscussions = activePendingDiscussions.filter(
         discussion =>
-          this.session.peerSessionStatus(
-            decodeUserId(discussion.contactUserId)
-          ) === SessionStatus.Active
+          // saturated sessions can't send messages on session manager but it's still possible to send on network msg that have already been encrypted if any
+          [SessionStatus.Active, SessionStatus.Saturated].includes(
+            this.session.peerSessionStatus(
+              decodeUserId(discussion.contactUserId)
+            )
+          )
       );
       const keepAliveSet = new Set(keepAlivePeerIds);
       for (const discussion of activeEstablishedDiscussions) {
@@ -224,6 +246,175 @@ export class RefreshService {
       log.error('error in update_state', { error });
     } finally {
       this.isUpdating = false;
+    }
+  }
+
+  private getJitteredDelayMs(baseMs: number, jitterMs: number): number {
+    const jitter = (Math.random() * 2 - 1) * jitterMs;
+    return Math.max(0, Math.round(baseMs + jitter));
+  }
+
+  private async updateSessionRecovery(
+    discussion: Discussion,
+    updates?: {
+      killedNextRetryAt?: Date | null;
+      saturatedRetryAt?: Date | null;
+      saturatedRetryDone: boolean;
+    }
+  ): Promise<void> {
+    if (!discussion.id) {
+      return;
+    }
+
+    type DiscussionUpdate = Partial<typeof schema.discussions.$inferInsert>;
+
+    if (!updates) {
+      // Clear all recovery fields
+      if (
+        (discussion.killedNextRetryAt === null ||
+          discussion.killedNextRetryAt === undefined) &&
+        (discussion.saturatedRetryAt === null ||
+          discussion.saturatedRetryAt === undefined) &&
+        (discussion.saturatedRetryDone === null ||
+          discussion.saturatedRetryDone === undefined)
+      ) {
+        return; // Already cleared
+      }
+
+      const updateData: DiscussionUpdate = {
+        killedNextRetryAt: null,
+        saturatedRetryAt: null,
+        saturatedRetryDone: false,
+      };
+      await this.queries.discussions.updateById(discussion.id, updateData);
+      return;
+    }
+
+    const currentNormalized = {
+      killedNextRetryAt: discussion.killedNextRetryAt?.getTime() ?? null,
+      saturatedRetryAt: discussion.saturatedRetryAt?.getTime() ?? null,
+    };
+    const nextNormalized = {
+      killedNextRetryAt: updates.killedNextRetryAt?.getTime() ?? null,
+      saturatedRetryAt: updates.saturatedRetryAt?.getTime() ?? null,
+    };
+    const isSame =
+      currentNormalized.killedNextRetryAt ===
+        nextNormalized.killedNextRetryAt &&
+      currentNormalized.saturatedRetryAt === nextNormalized.saturatedRetryAt &&
+      discussion.saturatedRetryDone === updates.saturatedRetryDone;
+    if (isSame) {
+      return;
+    }
+
+    const updateData: DiscussionUpdate = {
+      killedNextRetryAt: updates.killedNextRetryAt,
+      saturatedRetryAt: updates.saturatedRetryAt,
+      saturatedRetryDone: updates.saturatedRetryDone,
+    };
+    await this.queries.discussions.updateById(discussion.id, updateData);
+  }
+
+  private async handleSessionStatus(
+    discussion: Discussion,
+    status: SessionStatus
+  ): Promise<void> {
+    const now = new Date();
+
+    const log = logger.forMethod('handleSessionStatus');
+
+    if (status === SessionStatus.Active) {
+      await this.updateSessionRecovery(discussion, undefined);
+      return;
+    }
+
+    if (
+      [SessionStatus.SelfRequested, SessionStatus.PeerRequested].includes(
+        status
+      )
+    ) {
+      return;
+    }
+
+    if (!discussion.weAccepted) {
+      return;
+    }
+
+    if (
+      status === SessionStatus.NoSession ||
+      status === SessionStatus.UnknownPeer
+    ) {
+      log.error('no session or unknown peer', {
+        contactUserId: discussion.contactUserId,
+        status: status,
+      });
+      return;
+    }
+
+    if (status === SessionStatus.Killed) {
+      const nextRetryAt = discussion.killedNextRetryAt;
+      if (nextRetryAt && nextRetryAt.getTime() > now.getTime()) {
+        return;
+      }
+      const res = await this.discussionService.createSessionForContact(
+        discussion.contactUserId,
+        new Uint8Array(0)
+      );
+      if (!res.success) {
+        log.error('failed to create session for contact', {
+          contactUserId: discussion.contactUserId,
+          error: res.error,
+        });
+        return; // if we failed to create session, we don't want to set killedNextRetryAt
+      } else {
+        this.eventEmitter.emit(SdkEventType.SESSION_RENEWED, discussion);
+      }
+      const delayMs = this.getJitteredDelayMs(
+        this.config.sessionRecovery.killedRetryDelayMs,
+        this.config.sessionRecovery.JitterMs
+      );
+      await this.updateSessionRecovery(discussion, {
+        killedNextRetryAt: new Date(now.getTime() + delayMs),
+        saturatedRetryDone: false,
+      });
+      return;
+    }
+
+    if (status === SessionStatus.Saturated) {
+      const retryAt = discussion.saturatedRetryAt;
+      if (
+        discussion.saturatedRetryDone ||
+        (retryAt && retryAt.getTime() > now.getTime())
+      ) {
+        return;
+      }
+      if (!retryAt) {
+        const delayMs = this.getJitteredDelayMs(
+          this.config.sessionRecovery.saturatedRetryDelayMs,
+          this.config.sessionRecovery.JitterMs
+        );
+        await this.updateSessionRecovery(discussion, {
+          saturatedRetryAt: new Date(now.getTime() + delayMs),
+          saturatedRetryDone: false,
+        });
+        return;
+      }
+      const res = await this.discussionService.createSessionForContact(
+        discussion.contactUserId,
+        new Uint8Array(0)
+      );
+      if (!res.success) {
+        log.error('failed to create session for contact', {
+          contactUserId: discussion.contactUserId,
+          error: res.error,
+        });
+        return; // if we failed to create session, we don't want to set saturatedRetryDone to true
+      } else {
+        this.eventEmitter.emit(SdkEventType.SESSION_RENEWED, discussion);
+      }
+      await this.updateSessionRecovery(discussion, {
+        saturatedRetryDone: true,
+      });
     }
   }
 }

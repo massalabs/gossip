@@ -320,7 +320,8 @@ class GossipSdk {
       this._announcement,
       session,
       this.eventEmitter,
-      queries
+      queries,
+      this.config
     );
 
     // Publish gossip ID (public key) on messageProtocol so the user is discoverable
@@ -599,6 +600,9 @@ class GossipSdk {
         },
         handleSessionRefresh: async () => {
           await this.updateState();
+        },
+        refreshSessionsStatusEvent: async () => {
+          await this._refresh?.refreshSessionsStatusEvent();
         },
       },
       this.eventEmitter

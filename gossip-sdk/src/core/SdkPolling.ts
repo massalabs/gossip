@@ -7,6 +7,8 @@
 import type { SdkConfig } from '../config/sdk.js';
 import { SdkEventEmitter, SdkEventType } from './SdkEventEmitter.js';
 
+const SESSION_STATUS_POLL_INTERVAL_MS = 3000;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
@@ -18,12 +20,15 @@ export interface PollingCallbacks {
   fetchAnnouncements: () => Promise<void>;
   /** Handle session refresh (state update) */
   handleSessionRefresh: () => Promise<void>;
+  /** Check for session status changes and emit events */
+  refreshSessionsStatusEvent: () => Promise<void>;
 }
 
 interface PollingTimers {
   messages: ReturnType<typeof setInterval> | null;
   announcements: ReturnType<typeof setInterval> | null;
   sessionRefresh: ReturnType<typeof setInterval> | null;
+  sessionStatus: ReturnType<typeof setInterval> | null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -35,6 +40,7 @@ export class SdkPolling {
     messages: null,
     announcements: null,
     sessionRefresh: null,
+    sessionStatus: null,
   };
 
   private callbacks: PollingCallbacks | null = null;
@@ -93,6 +99,20 @@ export class SdkPolling {
         this.eventEmitter?.emit(SdkEventType.ERROR, err, 'session_update');
       }
     }, config.polling.sessionRefreshIntervalMs);
+
+    // Start session status change polling (fixed 3s interval)
+    this.timers.sessionStatus = setInterval(async () => {
+      try {
+        await this.callbacks?.refreshSessionsStatusEvent();
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        this.eventEmitter?.emit(
+          SdkEventType.ERROR,
+          err,
+          'session_status_polling'
+        );
+      }
+    }, SESSION_STATUS_POLL_INTERVAL_MS);
   }
 
   /**
@@ -111,6 +131,10 @@ export class SdkPolling {
       clearInterval(this.timers.sessionRefresh);
       this.timers.sessionRefresh = null;
     }
+    if (this.timers.sessionStatus) {
+      clearInterval(this.timers.sessionStatus);
+      this.timers.sessionStatus = null;
+    }
 
     this.callbacks = null;
     this.eventEmitter = null;
@@ -123,7 +147,8 @@ export class SdkPolling {
     return (
       this.timers.messages !== null ||
       this.timers.announcements !== null ||
-      this.timers.sessionRefresh !== null
+      this.timers.sessionRefresh !== null ||
+      this.timers.sessionStatus !== null
     );
   }
 }

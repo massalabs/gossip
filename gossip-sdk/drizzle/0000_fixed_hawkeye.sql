@@ -30,7 +30,6 @@ CREATE TABLE `discussions` (
 	`weAccepted` integer DEFAULT false NOT NULL,
 	`sendAnnouncement` text,
 	`direction` text NOT NULL,
-	`status` text NOT NULL,
 	`nextSeeker` blob,
 	`initiationAnnouncement` blob,
 	`announcementMessage` text,
@@ -40,12 +39,14 @@ CREATE TABLE `discussions` (
 	`lastMessageContent` text,
 	`lastMessageTimestamp` integer,
 	`unreadCount` integer DEFAULT 0 NOT NULL,
+	`killedNextRetryAt` integer,
+	`saturatedRetryAt` integer,
+	`saturatedRetryDone` integer DEFAULT false NOT NULL,
 	`createdAt` integer NOT NULL,
 	`updatedAt` integer NOT NULL
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `discussions_owner_contact_idx` ON `discussions` (`ownerUserId`,`contactUserId`);--> statement-breakpoint
-CREATE INDEX `discussions_owner_status_idx` ON `discussions` (`ownerUserId`,`status`);--> statement-breakpoint
 CREATE TABLE `messages` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`ownerUserId` text NOT NULL,
@@ -72,6 +73,7 @@ CREATE INDEX `messages_owner_seeker_idx` ON `messages` (`ownerUserId`,`seeker`);
 CREATE INDEX `messages_owner_contact_dir_idx` ON `messages` (`ownerUserId`,`contactUserId`,`direction`);--> statement-breakpoint
 CREATE INDEX `messages_owner_dir_status_idx` ON `messages` (`ownerUserId`,`direction`,`status`);--> statement-breakpoint
 CREATE INDEX `messages_timestamp_idx` ON `messages` (`timestamp`);--> statement-breakpoint
+CREATE INDEX `messages_owner_contact_msgid_idx` ON `messages` (`ownerUserId`,`contactUserId`,`messageId`);--> statement-breakpoint
 CREATE TABLE `pendingAnnouncements` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`announcement` blob NOT NULL,

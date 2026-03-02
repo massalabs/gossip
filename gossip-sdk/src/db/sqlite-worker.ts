@@ -17,6 +17,10 @@ import { execStatements } from './exec-utils.js';
 let sqlite3: ReturnType<typeof SQLite.Factory> | null = null;
 let dbHandle: number | null = null;
 
+// Add a message queue to process messages sequentially
+const messageQueue: Array<{ e: MessageEvent; resolve: () => void }> = [];
+let processing = false;
+
 // Bind Worker's postMessage (avoids DOM lib signature mismatch at compile time)
 const post: (data: unknown) => void = (
   globalThis as unknown as { postMessage(data: unknown): void }
@@ -44,7 +48,24 @@ async function execSql(
   return { rows, lastInsertRowId };
 }
 
-addEventListener('message', async (e: MessageEvent) => {
+// Ensure that all messages are processed sequentially to avoid
+// concurrent access to the underlying WASM/SQLite state, which
+// can lead to heap corruption and "index out of bounds"/
+// "unreachable executed" errors.
+async function processMessageQueue() {
+  if (processing || messageQueue.length === 0) return;
+  processing = true;
+
+  while (messageQueue.length > 0) {
+    const { e, resolve } = messageQueue.shift()!;
+    await handleMessage(e);
+    resolve();
+  }
+
+  processing = false;
+}
+
+async function handleMessage(e: MessageEvent): Promise<void> {
   const { id, type } = e.data;
 
   try {
@@ -111,4 +132,14 @@ addEventListener('message', async (e: MessageEvent) => {
   } catch (err) {
     post({ id, type: 'error', message: (err as Error).message });
   }
+}
+
+addEventListener('message', (e: MessageEvent) => {
+  // Chain each message onto the promise queue so that messages
+  // are handled strictly one after another.
+  let resolve!: () => void;
+  const promise = new Promise<void>(r => (resolve = r));
+  messageQueue.push({ e, resolve });
+  promise.then(() => processMessageQueue());
+  processMessageQueue();
 });

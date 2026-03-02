@@ -9,10 +9,10 @@ interface UseDiscussionProps {
 }
 
 export const useDiscussion = ({ contact }: UseDiscussionProps) => {
-  const gossip = useGossipSdk();
   const [discussion, setDiscussion] = useState<Discussion | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const isMountedRef = useRef(true);
+  const sdk = useGossipSdk();
 
   useEffect(() => {
     return () => {
@@ -23,6 +23,7 @@ export const useDiscussion = ({ contact }: UseDiscussionProps) => {
   const getDiscussionsForContact = useDiscussionStore(
     s => s.getDiscussionsForContact
   );
+  const sessionsStatuses = useDiscussionStore(s => s.sessionsStatuses);
 
   const loadDiscussion = useCallback(async () => {
     if (!contact.userId || !isMountedRef.current) return;
@@ -33,13 +34,16 @@ export const useDiscussion = ({ contact }: UseDiscussionProps) => {
 
       // Get the most recent discussion (active or pending)
       const latestDiscussion = discussions
-        .filter(d =>
-          [
+        .filter(d => {
+          const status: SessionStatus =
+            sessionsStatuses.get(d.contactUserId) ??
+            sdk.discussions.getStatus(d.contactUserId);
+          return [
             SessionStatus.Active,
             SessionStatus.SelfRequested,
             SessionStatus.PeerRequested,
-          ].includes(gossip.discussions.getStatus(d.contactUserId))
-        )
+          ].includes(status);
+        })
         .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
 
       if (latestDiscussion) {
@@ -50,7 +54,12 @@ export const useDiscussion = ({ contact }: UseDiscussionProps) => {
     } finally {
       setIsLoading(false);
     }
-  }, [contact.userId, getDiscussionsForContact, gossip]);
+  }, [
+    contact.userId,
+    getDiscussionsForContact,
+    sessionsStatuses,
+    sdk.discussions,
+  ]);
 
   useEffect(() => {
     loadDiscussion();

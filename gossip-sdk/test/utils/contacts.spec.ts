@@ -5,7 +5,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   DiscussionDirection,
-  DiscussionStatus,
   MessageType,
   MessageDirection,
   MessageStatus,
@@ -128,7 +127,6 @@ describe('Contacts utilities', () => {
       ownerUserId: CONTACTS_OWNER_USER_ID,
       contactUserId: CONTACTS_CONTACT_USER_ID,
       direction: DiscussionDirection.INITIATED,
-      status: DiscussionStatus.ACTIVE,
       weAccepted: true,
       sendAnnouncement: null,
       unreadCount: 0,

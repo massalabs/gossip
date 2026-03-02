@@ -778,14 +778,21 @@ export class MessageService {
 
       const peerId = decodeUserId(contactUserId);
       const sessionStatus = this.session.peerSessionStatus(peerId);
-      if (sessionStatus !== SessionStatus.Active) {
-        log.info('session not active, skipping send queue', {
+      if (
+        ![
+          SessionStatus.Active,
+          // saturated sessions can't send messages on session manager but it's still possible to send on network msg that have already been encrypted if any
+          SessionStatus.Saturated,
+        ].includes(sessionStatus)
+      ) {
+        log.info('session neither active nor saturated, skipping send queue', {
           contactUserId,
           sessionStatus: sessionStatusToString(sessionStatus),
         });
-        // Not an error: queued messages should remain pending until the
-        // handshake reaches Active.
-        return { success: true, data: 0 };
+        return {
+          success: false,
+          error: new Error('Session neither active nor saturated'),
+        };
       }
 
       // retrieve all messages in send queue that need to be updated for this contact
@@ -818,7 +825,11 @@ export class MessageService {
         let seeker = msg.seeker;
         let whenToSend = msg.whenToSend;
 
-        if (currentStatus === MessageStatus.WAITING_SESSION) {
+        // If the sessions is saturated it can't send messages on session manager
+        if (
+          currentStatus === MessageStatus.WAITING_SESSION &&
+          sessionStatus === SessionStatus.Active
+        ) {
           let serializedContent = msg.serializedContent;
           if (!serializedContent) {
             const serializeResult = await this.serializeMessage(msg);
