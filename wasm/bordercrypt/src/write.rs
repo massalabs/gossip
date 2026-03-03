@@ -296,6 +296,134 @@ pub fn write_session_data<S: BlockStorage + KeypairStorage>(
     Ok(())
 }
 
+/// Shrink session data to `new_total` bytes, converting freed blocks to cover.
+///
+/// The global blockstream length never decreases. Freed blocks become
+/// cover blocks indistinguishable from blocks allocated by other sessions.
+/// All touched block indices are updated across ALL sessions in randomized
+/// order (snapshot resistance).
+pub fn shrink_session_data<S: BlockStorage + KeypairStorage>(
+    storage: &mut S,
+    domain: &str,
+    session: &mut UnlockedSession,
+    new_total: u64,
+) -> Result<()> {
+    if session.session_version != 0 {
+        return Err(BordercryptError::UnsupportedVersion(
+            session.session_version,
+        ));
+    }
+
+    let old_total = session.total_data_length;
+    if new_total >= old_total {
+        return Ok(());
+    }
+
+    session.total_data_length = new_total;
+
+    let ps = PLAINTEXT_SIZE as u64;
+    let hdr = LENGTH_HDR_SIZE as u64;
+
+    // Determine old and new last block indices
+    let old_last_block = if old_total == 0 {
+        0
+    } else {
+        hdr.checked_add(old_total - 1)
+            .ok_or(BordercryptError::Overflow)?
+            / ps
+    };
+    let new_last_block = if new_total == 0 {
+        0
+    } else {
+        hdr.checked_add(new_total - 1)
+            .ok_or(BordercryptError::Overflow)?
+            / ps
+    };
+
+    // --- Step 1: Re-encrypt the new last block with updated content ---
+    let mut pt = Zeroizing::new(vec![0u8; PLAINTEXT_SIZE]);
+    if new_total == 0 {
+        // Shrinking to zero: block 0 gets fresh randomness with length header = 0
+        rand::rngs::OsRng.fill_bytes(&mut pt[..]);
+    } else {
+        match decrypt_session_data_block(storage, domain, session, new_last_block) {
+            Ok(existing) => pt.copy_from_slice(&existing),
+            Err(_) => rand::rngs::OsRng.fill_bytes(&mut pt[..]),
+        }
+    }
+
+    // Update length header if this is block 0
+    if new_last_block == 0 {
+        pt[..LENGTH_HDR_SIZE].copy_from_slice(&new_total.to_be_bytes());
+    }
+
+    // Randomize the unused tail of this block
+    let new_data_end_pos = hdr
+        .checked_add(new_total)
+        .ok_or(BordercryptError::Overflow)?;
+    let block_start_pos = new_last_block
+        .checked_mul(ps)
+        .ok_or(BordercryptError::Overflow)?;
+    let tail_start = new_data_end_pos
+        .checked_sub(block_start_pos)
+        .ok_or(BordercryptError::Overflow)?;
+    if tail_start < ps {
+        let tail_start_usize =
+            usize::try_from(tail_start).map_err(|_| BordercryptError::Overflow)?;
+        rand::rngs::OsRng.fill_bytes(&mut pt[tail_start_usize..]);
+    }
+
+    let pt_arr: &[u8; PLAINTEXT_SIZE] = pt.as_slice().try_into().expect("pt is PLAINTEXT_SIZE");
+    encrypt_session_data_block(storage, domain, session, new_last_block, pt_arr)?;
+
+    // If block 0 was not the new last block, also update block 0's length header
+    if new_last_block != 0 {
+        let mut pt0 = Zeroizing::new(vec![0u8; PLAINTEXT_SIZE]);
+        match decrypt_session_data_block(storage, domain, session, 0) {
+            Ok(existing) => pt0.copy_from_slice(&existing),
+            Err(_) => rand::rngs::OsRng.fill_bytes(&mut pt0[..]),
+        }
+        pt0[..LENGTH_HDR_SIZE].copy_from_slice(&new_total.to_be_bytes());
+        let pt0_arr: &[u8; PLAINTEXT_SIZE] =
+            pt0.as_slice().try_into().expect("pt0 is PLAINTEXT_SIZE");
+        encrypt_session_data_block(storage, domain, session, 0, pt0_arr)?;
+    }
+
+    // --- Step 2: Convert fully freed blocks into cover blocks ---
+    let mut buf = String::new();
+    for b in (new_last_block + 1)..=old_last_block {
+        let mut indices: Vec<u8> = (0..SESSION_COUNT as u8).collect();
+        indices.shuffle(&mut rand::rngs::OsRng);
+
+        for &i in &indices {
+            let cur_session = SessionIndex::new(i).expect("index within SESSION_COUNT");
+            let (cur_version, cur_pk_bytes) = read_session_version_and_pk(storage, cur_session)?;
+            let cur_pk = PqPublicKey::from_bytes(&cur_pk_bytes)?;
+
+            let new_ct = if cur_session == session.session_index {
+                domain::block_aead_aad(&mut buf, domain, cur_version, cur_session, b);
+                create_cover_block(&cur_pk, &buf)
+            } else {
+                match storage.read_block(cur_session, b) {
+                    Ok(existing_ct) => rerandomize_block(&cur_pk, &existing_ct),
+                    Err(_) => {
+                        domain::block_aead_aad(&mut buf, domain, cur_version, cur_session, b);
+                        create_cover_block(&cur_pk, &buf)
+                    }
+                }
+            };
+            let ct_arr: &[u8; BLOCK_SIZE] = new_ct
+                .as_slice()
+                .try_into()
+                .map_err(|_| BordercryptError::CorruptedBlock)?;
+            storage.write_block(cur_session, b, ct_arr)?;
+            storage.fsync(cur_session)?;
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -582,5 +710,178 @@ mod tests {
         write_session_data(&mut storage, DOMAIN, &mut session, 0, &[]).unwrap();
         assert_eq!(session.total_data_length, 0);
         assert_eq!(get_global_block_count(&storage).unwrap(), 0);
+    }
+
+    // --- shrink_session_data ---
+
+    #[test]
+    fn shrink_no_op_when_not_smaller() {
+        let mut storage = MemoryStorage::new();
+        let (mut session, _) = provision_all_sessions(&mut storage);
+
+        let data = vec![0xAA; 100];
+        write_session_data(&mut storage, DOMAIN, &mut session, 0, &data).unwrap();
+
+        // Same size: no-op
+        shrink_session_data(&mut storage, DOMAIN, &mut session, 100).unwrap();
+        assert_eq!(session.total_data_length, 100);
+
+        // Larger size: no-op
+        shrink_session_data(&mut storage, DOMAIN, &mut session, 200).unwrap();
+        assert_eq!(session.total_data_length, 100);
+    }
+
+    #[test]
+    fn shrink_updates_total_length() {
+        let mut storage = MemoryStorage::new();
+        let (mut session, _) = provision_all_sessions(&mut storage);
+
+        let data = vec![0xAA; 100];
+        write_session_data(&mut storage, DOMAIN, &mut session, 0, &data).unwrap();
+
+        shrink_session_data(&mut storage, DOMAIN, &mut session, 50).unwrap();
+        assert_eq!(session.total_data_length, 50);
+
+        let total = crate::read::read_total_length(&storage, DOMAIN, &session).unwrap();
+        assert_eq!(total, 50);
+    }
+
+    #[test]
+    fn shrink_preserves_remaining_data() {
+        let mut storage = MemoryStorage::new();
+        let (mut session, _) = provision_all_sessions(&mut storage);
+
+        let data: Vec<u8> = (0..200).map(|i| (i % 256) as u8).collect();
+        write_session_data(&mut storage, DOMAIN, &mut session, 0, &data).unwrap();
+
+        shrink_session_data(&mut storage, DOMAIN, &mut session, 100).unwrap();
+
+        let result = read_session_data(&storage, DOMAIN, &session, 0, 100).unwrap();
+        assert_eq!(&*result, &data[..100]);
+    }
+
+    #[test]
+    fn shrink_freed_blocks_become_cover() {
+        let mut storage = MemoryStorage::new();
+        let (mut session, _) = provision_all_sessions(&mut storage);
+
+        // Write enough data to span multiple blocks
+        let data_len = PLAINTEXT_SIZE * 3;
+        let data = vec![0xBB; data_len];
+        write_session_data(&mut storage, DOMAIN, &mut session, 0, &data).unwrap();
+
+        // Shrink to fit in 1 block
+        shrink_session_data(&mut storage, DOMAIN, &mut session, 10).unwrap();
+
+        // Blocks beyond new_last_block should no longer be decryptable
+        // (they are now cover blocks with throwaway AEAD keys)
+        let result = decrypt_session_data_block(&storage, DOMAIN, &session, 2);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn shrink_all_sessions_updated_at_freed_indices() {
+        let mut storage = MemoryStorage::new();
+        let (mut session, _) = provision_all_sessions(&mut storage);
+
+        let data_len = PLAINTEXT_SIZE * 3;
+        let data = vec![0xCC; data_len];
+        write_session_data(&mut storage, DOMAIN, &mut session, 0, &data).unwrap();
+
+        // Snapshot block 2 for all sessions before shrink
+        let mut before = Vec::new();
+        for i in 0..SESSION_COUNT as u8 {
+            let s = SessionIndex::new(i).unwrap();
+            before.push(storage.read_block(s, 2).unwrap());
+        }
+
+        // Shrink to 1 block — blocks 1 and 2 become freed
+        shrink_session_data(&mut storage, DOMAIN, &mut session, 10).unwrap();
+
+        // All sessions should have changed ciphertexts at the freed index
+        for i in 0..SESSION_COUNT as u8 {
+            let s = SessionIndex::new(i).unwrap();
+            let after = storage.read_block(s, 2).unwrap();
+            assert_ne!(
+                *after, *before[i as usize],
+                "session {i} block 2 was not updated during shrink"
+            );
+        }
+    }
+
+    #[test]
+    fn shrink_to_zero() {
+        let mut storage = MemoryStorage::new();
+        let (mut session, _) = provision_all_sessions(&mut storage);
+
+        let data = vec![0xDD; 100];
+        write_session_data(&mut storage, DOMAIN, &mut session, 0, &data).unwrap();
+
+        shrink_session_data(&mut storage, DOMAIN, &mut session, 0).unwrap();
+        assert_eq!(session.total_data_length, 0);
+
+        let total = crate::read::read_total_length(&storage, DOMAIN, &session).unwrap();
+        assert_eq!(total, 0);
+
+        // Blockstream length unchanged
+        assert!(get_global_block_count(&storage).unwrap() >= 1);
+    }
+
+    #[test]
+    fn shrink_cross_block_boundary() {
+        let mut storage = MemoryStorage::new();
+        let (mut session, _) = provision_all_sessions(&mut storage);
+
+        // Write across 3 blocks
+        let data_len = PLAINTEXT_SIZE * 3;
+        let data: Vec<u8> = (0..data_len).map(|i| (i % 256) as u8).collect();
+        write_session_data(&mut storage, DOMAIN, &mut session, 0, &data).unwrap();
+
+        let blocks_before = get_global_block_count(&storage).unwrap();
+
+        // Shrink to 1.5 blocks worth of data
+        let new_size = PLAINTEXT_SIZE + PLAINTEXT_SIZE / 2;
+        shrink_session_data(&mut storage, DOMAIN, &mut session, new_size as u64).unwrap();
+
+        // Blockstream length unchanged (blocks never removed)
+        assert_eq!(get_global_block_count(&storage).unwrap(), blocks_before);
+
+        // Data in the remaining range is intact
+        let result = read_session_data(&storage, DOMAIN, &session, 0, new_size).unwrap();
+        assert_eq!(&*result, &data[..new_size]);
+    }
+
+    #[test]
+    fn shrink_partial_block_tail_randomized() {
+        let mut storage = MemoryStorage::new();
+        let (mut session, _) = provision_all_sessions(&mut storage);
+
+        // Fill exactly 1 block worth of data
+        let data = vec![0xEE; PLAINTEXT_SIZE - LENGTH_HDR_SIZE];
+        write_session_data(&mut storage, DOMAIN, &mut session, 0, &data).unwrap();
+
+        // Read the full plaintext of block 0 before shrink
+        let pt_before = decrypt_session_data_block(&storage, DOMAIN, &session, 0).unwrap();
+
+        // Shrink to half the data
+        let half = (PLAINTEXT_SIZE - LENGTH_HDR_SIZE) / 2;
+        shrink_session_data(&mut storage, DOMAIN, &mut session, half as u64).unwrap();
+
+        // Read the full plaintext of block 0 after shrink
+        let pt_after = decrypt_session_data_block(&storage, DOMAIN, &session, 0).unwrap();
+
+        // The data portion should match
+        assert_eq!(
+            &pt_after[LENGTH_HDR_SIZE..LENGTH_HDR_SIZE + half],
+            &pt_before[LENGTH_HDR_SIZE..LENGTH_HDR_SIZE + half]
+        );
+
+        // The tail portion should differ (randomized)
+        let tail_before = &pt_before[LENGTH_HDR_SIZE + half..];
+        let tail_after = &pt_after[LENGTH_HDR_SIZE + half..];
+        assert_ne!(
+            tail_before, tail_after,
+            "tail should be randomized after shrink"
+        );
     }
 }

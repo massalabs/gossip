@@ -34,5 +34,5 @@ pub use types::SessionIndex;
 pub use unlock::{UnlockedSession, unlock_session};
 pub use write::{
     encrypt_session_data_block, ensure_block_count, get_global_block_count,
-    repair_blockstream_lengths, write_session_data,
+    repair_blockstream_lengths, shrink_session_data, write_session_data,
 };
