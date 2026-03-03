@@ -17,7 +17,10 @@ pub const PQ_MSG_SIZE: usize = pq_rerand::params::SLOT_BYTES;
 /// Ciphertext size per pq-rerand slot.
 pub const PQ_CT_SIZE: usize = pq_rerand::serialize::SLOT_CT_BYTES;
 
-const _: () = assert!(PQ_CT_SIZE == BLOCK_SIZE);
+const _: () = assert!(
+    PQ_CT_SIZE == BLOCK_SIZE,
+    "pq-rerand ciphertext slot size must equal bordercrypt block size"
+);
 
 /// Post-quantum public key for encryption and re-randomization.
 pub struct PqPublicKey(pq_rerand::keygen::PublicKey);
