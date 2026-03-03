@@ -5,9 +5,14 @@ edition.workspace = true
 
 [dependencies]
 crypto-aead = { path = "../crypto-aead" }
-pq-rerand = { git = "https://github.com/massalabs/pq-rerand", rev = "c5bbcea0858c2d1412cb945824fd0bae959eead3" }
+crypto-kdf = { path = "../crypto-kdf" }
+pq-rerand = { git = "https://github.com/massalabs/pq-rerand", rev = "1d5f9d1afd6f06383fffc0aa3a362774ba35d45f" }
+rand = "0.8"
 thiserror = "2"
 zeroize = "1.8"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.2", features = ["js"] }
 
 [dev-dependencies]
 tempfile = "3"
