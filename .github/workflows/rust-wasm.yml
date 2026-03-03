@@ -85,4 +85,6 @@ jobs:
           fi
 
       - name: Run Rust tests via npm
+        env:
+          RUST_MIN_STACK: 16777216
         run: npm run wasm:test
