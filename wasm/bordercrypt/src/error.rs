@@ -1,4 +1,7 @@
 /// Unified error type for all bordercrypt operations.
+///
+/// Error messages are deliberately generic to avoid leaking information
+/// to an adversary (e.g. no distinction between "bad nonce" and "bad tag").
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum BordercryptError {
