@@ -20,15 +20,24 @@ npm install @massalabs/gossip-sdk
 
 ## Quick Start
 
-The SDK uses a factory pattern — each call to `createGossipSdk()` returns a new instance:
+The SDK exposes a convenient singleton `gossipSdk` for most apps, and you can also create additional `GossipSdk` instances when you need multiple independent sessions:
 
 ```typescript
-import { createGossipSdk } from '@massalabs/gossip-sdk';
+import { gossipSdk, GossipSdk, SdkEventType } from '@massalabs/gossip-sdk';
 
-const sdk = createGossipSdk();
+// Use the singleton for most cases
+const sdk = gossipSdk;
+
+// Or create your own instance if you need multiple SDKs in the same process
+// const sdk = await new GossipSdk().init({
+//   storage: { type: 'idb', name: 'gossip-db' },
+// });
 
 // 1. Initialize (optional config)
-await sdk.init();
+await sdk.init({
+  // protocolBaseUrl: 'https://api.usegossip.com', // optional, otherwise env/default is used
+  // storage: { type: 'idb', name: 'gossip-db' }, // optional, defaults to in-memory
+});
 
 // 2. Open session (login)
 await sdk.openSession({
@@ -41,9 +50,12 @@ await sdk.openSession({
 });
 
 // 3. Use the SDK
-const contacts = await sdk.contacts.list(sdk.userId);
-await sdk.discussions.start(contact);
-await sdk.messages.send(message);
+const contacts = await sdk.contacts.list();
+await sdk.discussions.startByUserId(contactUserId, 'Alice', {
+  username: 'Alice',
+  message: 'Hello!',
+});
+await sdk.messages.sendText(contactUserId, 'Hi Alice!');
 
 // 4. Listen to events
 sdk.on(SdkEventType.MESSAGE_RECEIVED, msg => {
@@ -58,15 +70,15 @@ await sdk.closeSession();
 
 ### 1. Initialize
 
-Call `init()` once at app startup. All options are optional:
+Call `init()` once at app startup on your SDK instance (either the `gossipSdk` singleton or an instance of `GossipSdk`). All options inside the `GossipSdkInitOptions` object are optional:
 
 ```typescript
-// Uses GOSSIP_API_URL / VITE_GOSSIP_API_URL env var, or defaults to api.usegossip.com
-await sdk.init();
+// Uses VITE_GOSSIP_API_URL / GOSSIP_API_URL env vars, or defaults to https://api.usegossip.com/api
+await sdk.init({});
 
 // Or with explicit config
 await sdk.init({
-  protocolBaseUrl: 'https://api.usegossip.com',
+  protocolBaseUrl: 'https://api.usegossip.com/api',
   config: {
     polling: {
       enabled: true,
@@ -118,22 +130,27 @@ All services are available after `openSession()` is called.
 ```typescript
 // Send a message
 const result = await sdk.messages.send({
-  ownerUserId: sdk.userId,
-  contactUserId: contactId,
+  ownerUserId: sdk.userId, // inferred session owner
+  contactUserId: contactId, // encoded userId of the contact
   content: 'Hello!',
   type: MessageType.TEXT,
   direction: MessageDirection.OUTGOING,
-  status: MessageStatus.SENDING,
+  status: MessageStatus.WAITING_SESSION,
   timestamp: new Date(),
+});
+
+// Or use the simplified helper
+await sdk.messages.sendText(contactId, 'Hello!', {
+  metadata: { source: 'bot' },
 });
 
 // Fetch new messages from server
 const fetchResult = await sdk.messages.fetch();
 
-// Find message by messageId
-const msg = await gossipSdk.messages.findByMsgId(messageId, ownerUserId);
+// Get all messages for a given contact
+const messages = await sdk.messages.getMessages(contactId);
 
-// Mark as read
+// Mark a specific message (by DB ID) as read
 await sdk.messages.markAsRead(messageId);
 ```
 
@@ -141,7 +158,10 @@ await sdk.messages.markAsRead(messageId);
 
 ```typescript
 // Start a new discussion
-const result = await sdk.discussions.start(contact);
+const result = await sdk.discussions.startByUserId(contactUserId, 'Alice', {
+  username: 'Alice',
+  message: 'Hi!',
+});
 
 // Accept an incoming discussion request
 await sdk.discussions.accept(discussion);
@@ -153,34 +173,29 @@ await sdk.discussions.renew(contactUserId);
 const status = sdk.discussions.getStatus(contactUserId);
 
 // List all discussions
-const discussions = await sdk.discussions.list(ownerUserId);
+const discussions = await sdk.discussions.list();
 
 // Get a specific discussion
-const discussion = await sdk.discussions.get(ownerUserId, contactUserId);
+const discussion = await sdk.discussions.get(contactUserId);
 ```
 
 ### Contacts
 
 ```typescript
 // List all contacts
-const contacts = await sdk.contacts.list(ownerUserId);
+const contacts = await sdk.contacts.list();
 
 // Get a specific contact
-const contact = await sdk.contacts.get(ownerUserId, contactUserId);
+const contact = await sdk.contacts.get(contactUserId);
 
 // Add a new contact
-const result = await sdk.contacts.add(
-  ownerUserId,
-  contactUserId,
-  'Alice',
-  publicKeys
-);
+const result = await sdk.contacts.add(contactUserId, 'Alice', publicKeys);
 
 // Update contact name
-await sdk.contacts.updateName(ownerUserId, contactUserId, 'Alice Smith');
+await sdk.contacts.updateName(contactUserId, 'Alice Smith');
 
 // Delete contact and all associated data
-await sdk.contacts.delete(ownerUserId, contactUserId);
+await sdk.contacts.delete(contactUserId);
 ```
 
 ### Announcements
@@ -288,7 +303,7 @@ Full configuration options with defaults:
 await sdk.init({
   config: {
     protocol: {
-      baseUrl: 'https://api.usegossip.com',
+      baseUrl: 'https://api.usegossip.com', // optional; if omitted, env/default is used
       timeout: 10000,
       retryAttempts: 3,
     },
@@ -296,16 +311,23 @@ await sdk.init({
       enabled: false,
       messagesIntervalMs: 5000,
       announcementsIntervalMs: 10000,
-      sessionRefreshIntervalMs: 30000,
+      sessionRefreshIntervalMs: 10000,
     },
     messages: {
       fetchDelayMs: 100,
       maxFetchIterations: 30,
       deduplicationWindowMs: 30000,
+      retryDelayMs: 5000,
     },
     announcements: {
       fetchLimit: 500,
-      brokenThresholdMs: 3600000,
+      brokenThresholdMs: 60 * 60 * 1000,
+      retryDelayMs: 15000,
+    },
+    sessionRecovery: {
+      killedRetryDelayMs: 15 * 60 * 1000,
+      JitterMs: 2 * 60 * 1000,
+      saturatedRetryDelayMs: 5 * 60 * 1000,
     },
   },
 });
@@ -330,9 +352,9 @@ await sdk.openSession({
 The SDK automatically handles session recovery:
 
 1. **Session Lost** - When a session is killed/lost, messages are queued as `WAITING_SESSION`
-2. **Auto-Renewal** - SDK emits `onSessionRenewalNeeded` and attempts renewal
-3. **Auto-Accept** - When peer sends announcement, SDK auto-accepts for existing contacts
-4. **Message Processing** - After session becomes active, queued messages are sent automatically
+2. **Auto-Renewal** - `updateState()` (called automatically when polling is enabled) re-establishes sessions as needed
+3. **Auto-Accept** - When a peer sends an announcement, the SDK can automatically accept for existing contacts
+4. **Message Processing** - After the session becomes active, queued messages are sent automatically
 
 ## Types
 
