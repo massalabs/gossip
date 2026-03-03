@@ -24,6 +24,7 @@ import { defaultSdkConfig } from '../../src/config/sdk';
 import { SdkEventEmitter } from '../../src/core/SdkEventEmitter';
 import { clearAllTables, getTestQueries } from '../testDb';
 import { MockMessageProtocol } from '../mocks';
+import { Queries } from '../../src/db/queries';
 
 const OWNER_USER_ID = encodeUserId(new Uint8Array(32).fill(1));
 const CONTACT_USER_ID = encodeUserId(new Uint8Array(32).fill(2));
@@ -59,13 +60,14 @@ function createTestMessage(
     ownerUserId: string;
     contactUserId: string;
     content: string;
+    type: MessageType;
   }> = {}
 ) {
   return {
     ownerUserId: overrides.ownerUserId ?? OWNER_USER_ID,
     contactUserId: overrides.contactUserId ?? CONTACT_USER_ID,
     content: overrides.content ?? 'Test message',
-    type: MessageType.TEXT,
+    type: overrides.type ?? MessageType.TEXT,
     direction: MessageDirection.OUTGOING,
     status: MessageStatus.SENDING,
     timestamp: new Date(),
@@ -141,16 +143,19 @@ describe('MessageService', () => {
     expect(message).toBeUndefined();
   });
 
-  describe('sendMessage queues as WAITING_SESSION', () => {
+  describe('sendMessage', () => {
+    let testQueries: Queries;
+    let messageService: MessageService;
+
     beforeEach(async () => {
-      await getTestQueries().discussions.insert({
-        ownerUserId: OWNER_USER_ID,
-        contactUserId: CONTACT_USER_ID,
-        direction: DiscussionDirection.INITIATED,
-        unreadCount: 0,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      });
+      testQueries = getTestQueries();
+      messageService = new MessageService(
+        new MockMessageProtocol(),
+        createMockSession(),
+        new SdkEventEmitter(),
+        defaultSdkConfig,
+        testQueries
+      );
     });
 
     it.each([
@@ -162,84 +167,83 @@ describe('MessageService', () => {
     ])(
       'should queue message as WAITING_SESSION when session is %s',
       async status => {
-        const service = new MessageService(
+        await testQueries.discussions.insert({
+          ownerUserId: OWNER_USER_ID,
+          contactUserId: CONTACT_USER_ID,
+          direction: DiscussionDirection.INITIATED,
+          unreadCount: 0,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        });
+
+        messageService = new MessageService(
           new MockMessageProtocol(),
           createMockSession(status),
           new SdkEventEmitter(),
           defaultSdkConfig,
-          getTestQueries()
+          testQueries
         );
 
-        const result = await service.sendMessage(createTestMessage());
+        const result = await messageService.sendMessage(createTestMessage());
 
         expect(result.success).toBe(true);
         expect(result.message?.status).toBe(MessageStatus.WAITING_SESSION);
 
-        const dbMessage = await getTestQueries().messages.getById(
+        const dbMessage = await testQueries.messages.getById(
           result.message!.id!
         );
+        const discussion = await testQueries.discussions.getByOwnerAndContact(
+          OWNER_USER_ID,
+          CONTACT_USER_ID
+        );
+
         expect(dbMessage?.status).toBe(MessageStatus.WAITING_SESSION);
+        expect(discussion?.unreadCount).toBe(0);
+        expect(discussion?.lastMessageTimestamp).toBeDefined();
+        expect(discussion?.lastMessageContent).toBe(dbMessage?.content);
+        expect(discussion?.lastMessageId).toBe(dbMessage?.id);
       }
     );
 
-    it('should NOT mark discussion as BROKEN when session is lost', async () => {
-      const service = new MessageService(
-        new MockMessageProtocol(),
-        createMockSession(SessionStatus.NoSession),
-        new SdkEventEmitter(),
-        defaultSdkConfig,
-        getTestQueries()
+    it('discussion should not be updated when sending keep-alive message', async () => {
+      await insertTestContactAndDiscussion();
+      const result = await messageService.sendMessage(
+        createTestMessage({ type: MessageType.KEEP_ALIVE })
       );
-
-      await service.sendMessage(createTestMessage());
-    });
-  });
-});
-
-describe('sendMessage: missing contact or discussion', () => {
-  let messageService: MessageService;
-
-  beforeEach(async () => {
-    await clearAllTables();
-    messageService = new MessageService(
-      new MockMessageProtocol(),
-      createMockSession(),
-      new SdkEventEmitter(),
-      defaultSdkConfig,
-      getTestQueries()
-    );
-  });
-
-  it('should fail when no contact or discussion exists', async () => {
-    const result = await messageService.sendMessage(createTestMessage());
-
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('not found');
-  });
-
-  it('should fail when discussion not found', async () => {
-    await getTestQueries().contacts.insert({
-      ownerUserId: OWNER_USER_ID,
-      userId: CONTACT_USER_ID,
-      name: 'Test Contact',
-      publicKeys: new Uint8Array(32),
-      isOnline: true,
-      lastSeen: new Date(),
-      createdAt: new Date(),
+      expect(result.success).toBe(true);
+      const discussion = await testQueries.discussions.getByOwnerAndContact(
+        OWNER_USER_ID,
+        CONTACT_USER_ID
+      );
+      expect(discussion?.unreadCount).toBe(0);
+      expect(discussion?.lastMessageTimestamp).toBeNull();
+      expect(discussion?.lastMessageContent).toBeNull();
+      expect(discussion?.lastMessageId).toBeNull();
     });
 
-    const result = await messageService.sendMessage(createTestMessage());
+    it('should fail when no contact or discussion exists', async () => {
+      const result = await messageService.sendMessage(createTestMessage());
 
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('Discussion not found');
-  });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('not found');
+    });
 
-  it('should succeed when both contact and discussion exist', async () => {
-    await insertTestContactAndDiscussion();
+    it('should fail when discussion not found', async () => {
+      await getTestQueries().contacts.insert({
+        ownerUserId: OWNER_USER_ID,
+        userId: CONTACT_USER_ID,
+        name: 'Test Contact',
+        publicKeys: new Uint8Array(32),
+        isOnline: true,
+        lastSeen: new Date(),
+        createdAt: new Date(),
+      });
 
-    const result = await messageService.sendMessage(createTestMessage());
+      const result = await messageService.sendMessage(createTestMessage());
 
-    expect(result.success).toBe(true);
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Discussion not found');
+    });
   });
 });
 

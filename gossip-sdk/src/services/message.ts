@@ -332,7 +332,7 @@ export class MessageService {
       message.contactUserId
     );
 
-    if (discussion) {
+    if (discussion && message.type !== MessageType.KEEP_ALIVE) {
       await this.queries.discussions.updateById(discussion.id, {
         lastMessageId: messageId,
         lastMessageContent: message.content,

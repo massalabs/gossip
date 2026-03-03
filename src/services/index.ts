@@ -12,6 +12,7 @@ import {
   type Contact,
   type Message,
   GossipSdk,
+  MessageType,
 } from '@massalabs/gossip-sdk';
 import { notificationService } from './notifications';
 import { isAppInForeground } from '../utils/appState';
@@ -61,6 +62,9 @@ export function setupSdkEventHandlers(gossip: GossipSdk): void {
   gossip.on(SdkEventType.MESSAGE_RECEIVED, async (message: Message) => {
     // Only notify for incoming messages
     if (message.direction !== MessageDirection.INCOMING) return;
+
+    // Don't notify for keep-alive messages
+    if (message.type === MessageType.KEEP_ALIVE) return;
 
     // Don't notify if user is currently viewing this discussion
     const currentContact = useMessageStore.getState().currentContactUserId;
