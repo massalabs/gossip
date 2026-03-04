@@ -13,8 +13,7 @@ use crate::types::SessionIndex;
 
 /// Minimum byte size of a valid keypair file.
 /// Includes at least `AEAD_TAG_SIZE` bytes for `sk_ct` (the AEAD tag alone).
-const MIN_SIZE: usize =
-    4 + PqPublicKey::byte_size() + crypto_aead::NONCE_SIZE + AEAD_TAG_SIZE;
+const MIN_SIZE: usize = 4 + PqPublicKey::byte_size() + crypto_aead::NONCE_SIZE + AEAD_TAG_SIZE;
 
 /// Serialized keypair file for a session.
 pub struct KeypairFile {

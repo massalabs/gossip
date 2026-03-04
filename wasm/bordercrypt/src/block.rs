@@ -18,8 +18,8 @@ const BLOCK_AEAD_SUFFIX: &str = ":block_aead";
 /// Flow: random nonce -> AEAD encrypt -> pq-rerand encrypt.
 #[must_use]
 pub fn encrypt_block(
-    pq_pk: &PqPublicKey,
-    aead_key: &[u8; crypto_aead::KEY_SIZE],
+    pq_rerand_pk: &PqPublicKey,
+    aead_sk: &[u8; crypto_aead::KEY_SIZE],
     aad_root: &str,
     plaintext: &[u8; PLAINTEXT_SIZE],
 ) -> Vec<u8> {
@@ -27,7 +27,7 @@ pub fn encrypt_block(
     let mut nonce_bytes = [0u8; crypto_aead::NONCE_SIZE];
     rand::rngs::OsRng.fill_bytes(&mut nonce_bytes);
     let nonce = crypto_aead::Nonce::from(nonce_bytes);
-    let key = crypto_aead::Key::from(*aead_key);
+    let key = crypto_aead::Key::from(*aead_sk);
 
     let aead_ct = crypto_aead::encrypt(&key, &nonce, plaintext, aad.as_bytes());
 
@@ -35,27 +35,27 @@ pub fn encrypt_block(
     msg[..crypto_aead::NONCE_SIZE].copy_from_slice(&nonce_bytes);
     msg[crypto_aead::NONCE_SIZE..].copy_from_slice(&aead_ct);
 
-    pq_encrypt(pq_pk, &msg)
+    pq_encrypt(pq_rerand_pk, &msg)
 }
 
 /// Decrypt an on-disk ciphertext block back to plaintext.
 ///
 /// Flow: pq-rerand decrypt -> split nonce || aead_ct -> AEAD decrypt.
 pub fn decrypt_block(
-    pq_sk: &PqSecretKey,
-    aead_key: &[u8; crypto_aead::KEY_SIZE],
+    pq_rerand_sk: &PqSecretKey,
+    aead_sk: &[u8; crypto_aead::KEY_SIZE],
     aad_root: &str,
     block_ct: &[u8; BLOCK_SIZE],
 ) -> Result<Zeroizing<[u8; PLAINTEXT_SIZE]>> {
     let aad = format!("{aad_root}{BLOCK_AEAD_SUFFIX}");
-    let msg = pq_decrypt(pq_sk, block_ct);
+    let msg = pq_decrypt(pq_rerand_sk, block_ct);
 
     let nonce = crypto_aead::Nonce::from(
         <[u8; crypto_aead::NONCE_SIZE]>::try_from(&msg[..crypto_aead::NONCE_SIZE])
             .map_err(|_| BordercryptError::CorruptedBlock)?,
     );
     let aead_ct = &msg[crypto_aead::NONCE_SIZE..];
-    let key = crypto_aead::Key::from(*aead_key);
+    let key = crypto_aead::Key::from(*aead_sk);
 
     let plaintext_vec = Zeroizing::new(
         crypto_aead::decrypt(&key, &nonce, aead_ct, aad.as_bytes())
@@ -75,7 +75,7 @@ pub fn decrypt_block(
 /// Uses a throwaway AEAD key so the block looks structurally valid
 /// under pq-rerand decryption but fails AEAD authentication.
 #[must_use]
-pub fn create_cover_block(pq_pk: &PqPublicKey, aad_root: &str) -> Vec<u8> {
+pub fn create_cover_block(pq_rerand_pk: &PqPublicKey, aad_root: &str) -> Vec<u8> {
     let aad = format!("{aad_root}{BLOCK_AEAD_SUFFIX}");
     let mut rng = rand::rngs::OsRng;
 
@@ -96,15 +96,15 @@ pub fn create_cover_block(pq_pk: &PqPublicKey, aad_root: &str) -> Vec<u8> {
     msg[..crypto_aead::NONCE_SIZE].copy_from_slice(&nonce_bytes);
     msg[crypto_aead::NONCE_SIZE..].copy_from_slice(&aead_ct);
 
-    pq_encrypt(pq_pk, &msg)
+    pq_encrypt(pq_rerand_pk, &msg)
 }
 
 /// Re-randomize a ciphertext block using only the public key.
 ///
 /// The decrypted plaintext is unchanged but the ciphertext bytes differ.
 #[must_use]
-pub fn rerandomize_block(pq_pk: &PqPublicKey, block_ct: &[u8; BLOCK_SIZE]) -> Vec<u8> {
-    pq_rerand(pq_pk, block_ct)
+pub fn rerandomize_block(pq_rerand_pk: &PqPublicKey, block_ct: &[u8; BLOCK_SIZE]) -> Vec<u8> {
+    pq_rerand(pq_rerand_pk, block_ct)
 }
 
 // Compile-time check: nonce + AEAD output = PQ_MSG_SIZE.
