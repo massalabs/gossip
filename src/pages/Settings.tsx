@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import BaseModal from '../components/ui/BaseModal';
 import PageLayout from '../components/ui/PageLayout';
 import PageHeader from '../components/ui/PageHeader';
@@ -25,6 +25,7 @@ import { useNavigate } from 'react-router-dom';
 
 import { getProfileHead } from '../components/avatar/profileHeads';
 import { useAppStore } from '../stores/appStore';
+import { useNClicksTrigger } from '../hooks/useNClicksTrigger';
 import AccountBackup from '../components/account/AccountBackup';
 import ShareContact from '../components/settings/ShareContact';
 import UsernameEditModal from '../components/settings/UsernameEditModal';
@@ -59,51 +60,14 @@ const Settings = (): React.ReactElement => {
   const navigate = useNavigate();
   const mnsDomains = useAppStore(s => s.mnsDomains);
 
-  // Debug mode unlock: 7-tap gesture on profile image
-  const [tapCount, setTapCount] = useState(0);
-  const tapTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const showDebugOptionRef = useRef(showDebugOption);
-
-  // Keep ref in sync with state
-  useEffect(() => {
-    showDebugOptionRef.current = showDebugOption;
-  }, [showDebugOption]);
-
-  // Reset tap counter after timeout
-  useEffect(() => {
-    if (tapCount > 0) {
-      if (tapTimeoutRef.current) {
-        clearTimeout(tapTimeoutRef.current);
-      }
-      tapTimeoutRef.current = setTimeout(() => {
-        setTapCount(0);
-      }, TAP_TIMEOUT_MS);
-    }
-
-    return () => {
-      if (tapTimeoutRef.current) {
-        clearTimeout(tapTimeoutRef.current);
-      }
-    };
-  }, [tapCount]);
-
-  // Handle profile image tap for debug mode unlock
-  const handleProfileImageTap = useCallback(() => {
-    setTapCount(prevCount => {
-      const newTapCount = prevCount + 1;
-
-      if (newTapCount >= REQUIRED_TAPS) {
-        // Toggle debug mode using ref to avoid closure dependency
-        setShowDebugOption(!showDebugOptionRef.current);
-        if (tapTimeoutRef.current) {
-          clearTimeout(tapTimeoutRef.current);
-        }
-        return 0; // Reset counter
-      }
-
-      return newTapCount;
-    });
-  }, [setShowDebugOption]);
+  // Debug mode unlock: N-tap gesture on profile image
+  const { ping: handleProfileImageTap } = useNClicksTrigger({
+    clickNumber: REQUIRED_TAPS,
+    callback: () => {
+      setShowDebugOption(!showDebugOption);
+    },
+    pingTimeout: TAP_TIMEOUT_MS,
+  });
 
   const mnemonicBackupInfo = getMnemonicBackupInfo();
 
