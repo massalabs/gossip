@@ -52,11 +52,11 @@ const MainLayout: React.FC<MainLayoutProps> = ({
 
   return (
     <div className="relative h-full flex flex-col">
-      <div
+      <main
         className={`flex-1 min-h-0 app-max-w ${safeAreaClass} ${contentClassName}`.trim()}
       >
         {children}
-      </div>
+      </main>
       {showBottomNav && <BottomNavigation />}
     </div>
   );

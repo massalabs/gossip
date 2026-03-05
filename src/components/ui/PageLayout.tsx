@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useUiStore } from '../../stores/uiStore';
 import { useHeaderScroll } from '../../hooks/useHeaderScroll';
 
@@ -13,8 +13,8 @@ interface PageLayoutProps {
   contentClassName?: string;
   /** Whether the header should change background on scroll (default: true) */
   scrollAwareHeader?: boolean;
-  /** Ref to the scroll container (exposed for pages that need it) */
-  scrollRef?: React.RefObject<HTMLDivElement | null>;
+  /** Callback ref to the scroll container (exposed for pages that need the DOM node) */
+  onScrollContainerRef?: (node: HTMLDivElement | null) => void;
 }
 
 /**
@@ -50,12 +50,22 @@ const PageLayout: React.FC<PageLayoutProps> = ({
   className = '',
   contentClassName = '',
   scrollAwareHeader = true,
-  scrollRef,
+  onScrollContainerRef,
 }) => {
   const headerIsScrolled = useUiStore(s => s.headerIsScrolled);
   const setHeaderVisible = useUiStore(s => s.setHeaderVisible);
-  const internalScrollRef = useRef<HTMLDivElement>(null);
-  const scrollContainerRef = scrollRef || internalScrollRef;
+  const [scrollContainer, setScrollContainer] = useState<HTMLDivElement | null>(
+    null
+  );
+
+  // Callback ref: stores node in state + notifies parent
+  const scrollRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      setScrollContainer(node);
+      onScrollContainerRef?.(node);
+    },
+    [onScrollContainerRef]
+  );
 
   // Track header visibility in store
   useEffect(() => {
@@ -67,7 +77,7 @@ const PageLayout: React.FC<PageLayoutProps> = ({
 
   // Setup scroll detection for header background
   useHeaderScroll(
-    scrollAwareHeader && header ? { scrollContainerRef } : undefined
+    scrollAwareHeader && header ? { scrollContainer } : undefined
   );
 
   const bgClass =
@@ -95,7 +105,7 @@ const PageLayout: React.FC<PageLayoutProps> = ({
 
       {/* Scrollable content */}
       <div
-        ref={scrollContainerRef as React.RefObject<HTMLDivElement>}
+        ref={scrollRef}
         className={`flex-1 min-h-0 overflow-y-auto ${contentClassName}`.trim()}
       >
         {children}
