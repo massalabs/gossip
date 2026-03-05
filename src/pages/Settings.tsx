@@ -160,7 +160,12 @@ const Settings = (): React.ReactElement => {
 
   return (
     <PageLayout
-      header={<PageHeader title="Settings" />}
+      header={
+        <PageHeader
+          title="Settings"
+          onBack={() => navigate(ROUTES.discussions())}
+        />
+      }
       className="app-max-w mx-auto"
       contentClassName="px-6 py-6"
     >

@@ -209,6 +209,41 @@
     transform-origin: center;
   }
 
+  /* Hover fill effect — spreads from center horizontally.
+     Usage: add .hover-fill to a parent with position:relative + overflow:hidden.
+     The pseudo-element handles the animation automatically.
+     Customize color with --hover-fill-color (default: accent/50). */
+  .hover-fill {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .hover-fill::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-color: var(
+      --hover-fill-color,
+      color-mix(in oklch, var(--color-accent) 50%, transparent)
+    );
+    transform: scaleX(0);
+    transform-origin: center;
+    transition: transform 0ms;
+    pointer-events: none;
+  }
+
+  .hover-fill:hover::before {
+    transform: scaleX(1);
+    transition: transform 150ms cubic-bezier(0.1, 0.6, 0.3, 1);
+  }
+
+  .hover-fill:active::before {
+    background-color: var(
+      --hover-fill-active-color,
+      color-mix(in oklch, var(--color-accent) 70%, transparent)
+    );
+  }
+
   @media (prefers-reduced-motion: reduce) {
     * {
       animation-duration: 0.01ms !important;

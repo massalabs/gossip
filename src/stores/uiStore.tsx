@@ -19,7 +19,7 @@ interface UiStoreState {
   headerIsScrolled: boolean;
   setHeaderIsScrolled: (isScrolled: boolean) => void;
 
-  // Bottom navigation visibility
+  // Bottom navigation visibility (kept for potential future use)
   bottomNavVisible: boolean;
   setBottomNavVisible: (visible: boolean) => void;
 }

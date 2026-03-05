@@ -21,21 +21,6 @@ vi.mock('@capacitor/keyboard', () => ({
   },
 }));
 
-// Mock the uiStore
-vi.mock('../../../src/stores/uiStore', () => {
-  return {
-    useUiStore: (selector: (s: Record<string, unknown>) => unknown) =>
-      selector({
-        bottomNavVisible: true,
-        setBottomNavVisible: vi.fn(),
-        headerIsScrolled: false,
-        setHeaderIsScrolled: vi.fn(),
-        headerVisible: false,
-        setHeaderVisible: vi.fn(),
-      }),
-  };
-});
-
 function renderWithRouter(
   children: React.ReactNode,
   initialEntry = '/discussions'
@@ -58,28 +43,5 @@ describe('MainLayout', () => {
     const child = page.getByTestId('child');
     await expect.element(child).toBeInTheDocument();
     await expect.element(child).toHaveTextContent('Hello');
-  });
-
-  it('shows bottom navigation on /discussions route', async () => {
-    await renderWithRouter(<div>Content</div>, '/discussions');
-
-    const discussionsBtn = page.getByTitle('Discussions');
-    const settingsBtn = page.getByTitle('Settings');
-    await expect.element(discussionsBtn).toBeInTheDocument();
-    await expect.element(settingsBtn).toBeInTheDocument();
-  });
-
-  it('shows bottom navigation on /settings route', async () => {
-    await renderWithRouter(<div>Content</div>, '/settings');
-
-    const settingsBtn = page.getByTitle('Settings');
-    await expect.element(settingsBtn).toBeInTheDocument();
-  });
-
-  it('hides bottom navigation on other routes', async () => {
-    await renderWithRouter(<div>Content</div>, '/discussion/user123');
-
-    const discussionsBtn = page.getByTitle('Discussions');
-    await expect.element(discussionsBtn).not.toBeInTheDocument();
   });
 });
