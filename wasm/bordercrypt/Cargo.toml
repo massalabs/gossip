@@ -10,7 +10,7 @@ crypto-password-kdf = { path = "../crypto-password-kdf" }
 pq-rerand = { git = "https://github.com/massalabs/pq-rerand", rev = "1d5f9d1afd6f06383fffc0aa3a362774ba35d45f" }
 rand = "0.8"
 thiserror = "2"
-zeroize = "1.8"
+zeroize = { version = "1.8", features = ["derive"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.2", features = ["js"] }
