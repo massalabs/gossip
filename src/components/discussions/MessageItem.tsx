@@ -741,7 +741,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
         <button
           type="button"
           onClick={() => setIsContextMenuOpen(true)}
-          className={`absolute top-1 ${isOutgoing ? 'left-1' : 'right-1'} w-6 h-6 items-center justify-center rounded-full bg-card/80 shadow-sm opacity-0 group-hover:opacity-100 transition-opacity hidden md:flex`}
+          className="absolute top-1 right-1 p-0.5 opacity-0 group-hover:opacity-100 transition-opacity hidden md:flex items-center justify-center"
           aria-label="Message actions"
         >
           <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
