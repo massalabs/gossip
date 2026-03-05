@@ -1,7 +1,7 @@
 //! Session unlock: password → keys → try decrypt each session slot.
 
 use rand::seq::SliceRandom;
-use zeroize::Zeroizing;
+use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 use crate::block::decrypt_block;
 use crate::constants::LENGTH_HDR_SIZE;
@@ -14,12 +14,13 @@ use crate::storage::{BlockStorage, KeypairStorage};
 use crate::types::SessionIndex;
 
 /// A successfully unlocked session with cached keys and metadata.
+#[derive(Zeroize, ZeroizeOnDrop)]
 pub struct UnlockedSession {
     pub session_index: SessionIndex,
     pub session_version: u32,
     pub pq_rerand_pk: PqPublicKey,
     pub pq_rerand_sk: PqSecretKey,
-    pub root_aead_key: Zeroizing<[u8; crypto_aead::KEY_SIZE]>,
+    pub root_aead_key: Zeroizing<[u8; crate::ROOT_BLOCK_KEY_SIZE]>,
     pub total_data_length: u64,
 }
 
@@ -52,28 +53,27 @@ pub fn unlock_session<S: BlockStorage + KeypairStorage>(
 
     // 4. Derive root_aead_key
     let root_aead_label = domain::root_aead_key_label(domain);
-    let mut root_aead_key = Zeroizing::new([0u8; crypto_aead::KEY_SIZE]);
+    let mut root_aead_key = Zeroizing::new([0u8; crate::ROOT_BLOCK_KEY_SIZE]);
     expander.expand(root_aead_label.as_bytes(), root_aead_key.as_mut());
 
     // 5. Try each session in shuffled order
     let mut indices: Vec<u8> = (0..crate::SESSION_COUNT as u8).collect();
     indices.shuffle(&mut rand::rngs::OsRng);
 
-    for &i in &indices {
-        let session = match SessionIndex::new(i) {
-            Ok(s) => s,
-            Err(_) => continue,
+    let sk_wrap_aead_key = crypto_aead::Key::from(*sk_wrap_key);
+
+    for i in indices {
+        let Ok(session) = SessionIndex::new(i) else {
+            continue;
         };
 
-        let kf = match read_session_keypair(storage, session) {
-            Ok(kf) => kf,
-            Err(_) => continue,
+        let Ok(kf) = read_session_keypair(storage, session) else {
+            continue;
         };
 
         // Try AEAD-unwrap the secret key
         let sk_wrap_aad = domain::sk_wrap_aad(domain, kf.version, session);
         let nonce = crypto_aead::Nonce::from(kf.sk_nonce);
-        let sk_wrap_aead_key = crypto_aead::Key::from(*sk_wrap_key);
 
         let sk_bytes = match crypto_aead::decrypt(
             &sk_wrap_aead_key,
@@ -85,14 +85,12 @@ pub fn unlock_session<S: BlockStorage + KeypairStorage>(
             None => continue,
         };
 
-        let pq_rerand_sk = match PqSecretKey::from_bytes(&sk_bytes) {
-            Ok(sk) => sk,
-            Err(_) => continue,
+        let Ok(pq_rerand_sk) = PqSecretKey::from_bytes(&sk_bytes) else {
+            continue;
         };
 
-        let pq_rerand_pk = match PqPublicKey::from_bytes(&kf.pq_pk) {
-            Ok(pk) => pk,
-            Err(_) => continue,
+        let Ok(pq_rerand_pk) = PqPublicKey::from_bytes(&kf.pq_pk) else {
+            continue;
         };
 
         // Read total_data_length from block 0
@@ -125,13 +123,15 @@ pub fn unlock_session<S: BlockStorage + KeypairStorage>(
 /// Read total data length from block 0 of a session.
 ///
 /// Returns 0 if the session has no blocks.
+///
+/// TODO: replace with `decrypt_session_data_block` once defined in the spec.
 pub(crate) fn read_total_length<S: BlockStorage>(
     storage: &S,
     domain: &str,
     version: u32,
     session: SessionIndex,
     pq_rerand_sk: &PqSecretKey,
-    root_aead_key: &[u8; crypto_aead::KEY_SIZE],
+    root_aead_key: &[u8; crate::ROOT_BLOCK_KEY_SIZE],
 ) -> Result<u64> {
     let count = storage.block_count(session)?;
     if count == 0 {
