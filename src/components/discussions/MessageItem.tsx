@@ -459,22 +459,23 @@ const MessageItem: React.FC<MessageItemProps> = ({
           canReply
             ? 'cursor-pointer hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2'
             : ''
-        } transition-[transform,box-shadow] duration-200 ease-out ${
-          isContextMenuOpen ? 'z-[1001] scale-[1.03] shadow-lg' : ''
-        }`}
+        } ${isContextMenuOpen ? 'z-[1001] shadow-lg' : ''}`}
         onDoubleClick={handleDoubleClick}
         onKeyDown={handleKeyDown}
         tabIndex={canReply ? 0 : undefined}
         role={canReply ? 'button' : undefined}
         aria-label={canReply ? 'Double-tap to reply' : undefined}
         style={{
-          transform:
-            swipeOffset !== 0
+          transform: isContextMenuOpen
+            ? 'translateY(-4px) scale(1.03)'
+            : swipeOffset !== 0
               ? `translateX(${swipeOffset}px)`
               : 'translateX(0)',
-          transition: isAnimatingBack
-            ? 'transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)'
-            : 'none',
+          transition: isContextMenuOpen
+            ? 'transform 0.2s ease-out, box-shadow 0.2s ease-out'
+            : isAnimatingBack
+              ? 'transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)'
+              : 'none',
         }}
       >
         {/* Reply indicator (right swipe) */}
