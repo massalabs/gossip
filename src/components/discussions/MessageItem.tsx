@@ -431,7 +431,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
   return (
     <div
       id={id}
-      className={`flex items-end gap-1 ${isOutgoing ? 'justify-end' : 'justify-start'} group relative ${spacingClass} ${isHighlighted ? 'search-highlight' : ''}`}
+      className={`flex items-end gap-1 ${isOutgoing ? 'justify-end' : 'justify-start'} group relative ${spacingClass} ${isHighlighted ? 'search-highlight' : ''} ${isContextMenuOpen ? 'z-[1001]' : ''}`}
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
@@ -457,8 +457,10 @@ const MessageItem: React.FC<MessageItemProps> = ({
             : `${contact ? '' : 'ml-3'} mr-auto bg-surface-secondary text-card-foreground`
         } ${
           canReply
-            ? 'cursor-pointer hover:opacity-90 transition-opacity focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2'
+            ? 'cursor-pointer hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2'
             : ''
+        } transition-[transform,box-shadow] duration-200 ease-out ${
+          isContextMenuOpen ? 'z-[1001] scale-[1.03] shadow-lg' : ''
         }`}
         onDoubleClick={handleDoubleClick}
         onKeyDown={handleKeyDown}
