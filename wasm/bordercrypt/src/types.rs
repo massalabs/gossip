@@ -1,10 +1,12 @@
+use zeroize::Zeroize;
+
 use crate::constants::SESSION_COUNT;
 use crate::error::{BordercryptError, Result};
 
 const _: () = assert!(SESSION_COUNT <= u8::MAX as usize + 1);
 
 /// Validated index into the session array (0..SESSION_COUNT).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Zeroize)]
 pub struct SessionIndex(u8);
 
 impl SessionIndex {
