@@ -467,7 +467,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
         aria-label={canReply ? 'Double-tap to reply' : undefined}
         style={{
           transform: isContextMenuOpen
-            ? 'translateY(-4px) scale(1.03)'
+            ? `translate(${isOutgoing ? '-6px' : '6px'}, -4px) scale(1.03)`
             : swipeOffset !== 0
               ? `translateX(${swipeOffset}px)`
               : 'translateX(0)',
