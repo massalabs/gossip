@@ -3,7 +3,7 @@
 //! Adapts the polynomial-based API to a byte-oriented interface suitable
 //! for bordercrypt's block-level operations.
 
-use zeroize::{Zeroize, Zeroizing};
+use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 use crate::constants::BLOCK_SIZE;
 use crate::error::{BordercryptError, Result};
@@ -25,7 +25,17 @@ const _: () = assert!(
 /// Post-quantum public key for encryption and re-randomization.
 pub struct PqPublicKey(pq_rerand::keygen::PublicKey);
 
+impl Zeroize for PqPublicKey {
+    fn zeroize(&mut self) {
+        self.0.a_ntt_t.zeroize();
+        self.0.a_ntt_q2.zeroize();
+        self.0.b_ntt_t.zeroize();
+        self.0.b_ntt_q2.zeroize();
+    }
+}
+
 /// Post-quantum secret key for decryption.
+#[derive(Zeroize, ZeroizeOnDrop)]
 pub struct PqSecretKey(pq_rerand::keygen::SecretKey);
 
 /// Generate a fresh pq-rerand keypair.
