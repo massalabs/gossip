@@ -1,8 +1,10 @@
 import React, { useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Virtuoso } from 'react-virtuoso';
+import toast from 'react-hot-toast';
 
 import { useDiscussionList } from '../../hooks/useDiscussionList';
+import { useGossipSdk } from '../../hooks/useGossipSdk';
 import {
   DiscussionFilter,
   useDiscussionStore,
@@ -92,6 +94,7 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
   filter = 'all',
 }) => {
   const navigate = useNavigate();
+  const gossip = useGossipSdk();
 
   // Store selectors
   const discussions = useDiscussionStore(s => s.discussions);
@@ -142,6 +145,22 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
     [handleRefuseDiscussionRequest]
   );
 
+  const handleEditName = useCallback(
+    async (discussion: Discussion, newName: string) => {
+      if (!discussion.id) return;
+      const result = await gossip.discussions.updateName(
+        discussion.id,
+        newName || undefined
+      );
+      if (result.success) {
+        toast.success('Name updated');
+      } else {
+        toast.error(result.message || 'Failed to update name');
+      }
+    },
+    [gossip]
+  );
+
   // Virtuoso item renderer
   const renderItem = useCallback(
     (index: number) => {
@@ -174,6 +193,7 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
                 onSelect={d => onSelect(d.contactUserId)}
                 onAccept={handleAccept}
                 onRefuse={() => handleRefuse(item.discussion)}
+                onEditName={handleEditName}
               />
             </div>
           );
@@ -182,7 +202,7 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
           return null;
       }
     },
-    [virtualItems, onSelect, handleAccept, handleRefuse]
+    [virtualItems, onSelect, handleAccept, handleRefuse, handleEditName]
   );
 
   // Empty states
