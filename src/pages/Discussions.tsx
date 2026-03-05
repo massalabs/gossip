@@ -1,16 +1,10 @@
-import React, {
-  useCallback,
-  useRef,
-  useState,
-  useEffect,
-  useMemo,
-} from 'react';
+import React, { useCallback, useState, useMemo } from 'react';
 import DiscussionListPanel from '../components/discussions/DiscussionList';
 import DiscussionFilterButtons from '../components/discussions/DiscussionFilterButtons';
 import { useAccountStore } from '../stores/accountStore';
 import { useAppStore } from '../stores/appStore';
 import { useNavigate } from 'react-router-dom';
-import { Plus, X } from 'react-feather';
+import { Plus, X, Settings } from 'react-feather';
 import Button from '../components/ui/Button';
 import SearchBar from '../components/ui/SearchBar';
 import { useSearch } from '../hooks/useSearch';
@@ -18,6 +12,7 @@ import { PrivacyGraphic } from '../components/graphics';
 import PageLayout from '../components/ui/PageLayout';
 import UserProfileAvatar from '../components/avatar/UserProfileAvatar';
 import QrCodeIcon from '../components/ui/customIcons/QrCodeIcon';
+import ThreeDotMenu, { MenuItem } from '../components/ui/ThreeDotMenu';
 import { ROUTES } from '../constants/routes';
 import { useDiscussionStore } from '../stores/discussionStore';
 import { useGossipSdk } from '../hooks/useGossipSdk';
@@ -38,16 +33,10 @@ const Discussions: React.FC = () => {
   const filter = useDiscussionStore(s => s.filter);
   const setFilter = useDiscussionStore(s => s.setFilter);
   const sessionsStatuses = useDiscussionStore(s => s.sessionsStatuses);
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
-  // Force re-render when ref is set to ensure DiscussionList gets the scroll parent
-  const [scrollParentReady, setScrollParentReady] = useState(false);
-
-  // Set up scroll parent ready state
-  useEffect(() => {
-    if (scrollContainerRef.current) {
-      setScrollParentReady(true);
-    }
-  }, []);
+  // Callback ref: triggers re-render when scroll container is mounted
+  const [scrollContainer, setScrollContainer] = useState<HTMLDivElement | null>(
+    null
+  );
 
   const handleSelectDiscussion = useCallback(
     (contactUserId: string) => {
@@ -122,6 +111,17 @@ const Discussions: React.FC = () => {
     return { all: allCount, unread: unreadCount, pending: pendingCount };
   }, [discussions, gossip, sessionsStatuses]);
 
+  const menuItems: MenuItem[] = useMemo(
+    () => [
+      {
+        label: 'Settings',
+        icon: <Settings className="w-5 h-5" />,
+        onClick: () => navigate(ROUTES.settings()),
+      },
+    ],
+    [navigate]
+  );
+
   if (isLoading || !gossip.isSessionOpen) {
     return (
       <div className="bg-background flex items-center justify-center h-full">
@@ -137,13 +137,17 @@ const Discussions: React.FC = () => {
         <UserProfileAvatar name={username} size={10} />
         <h1 className="text-xl font-semibold text-foreground">Gossip</h1>
       </div>
-      <button
-        onClick={() => navigate(ROUTES.settingsShareContact())}
-        aria-label="Share my contact"
-        title="Share my contact"
-      >
-        <QrCodeIcon className="w-5 h-5 text-accent hover:brightness-150" />
-      </button>
+      <div className="flex items-center gap-2">
+        <button
+          onClick={() => navigate(ROUTES.settingsShareContact())}
+          aria-label="Share my contact"
+          title="Share my contact"
+          className="w-8 h-8 flex items-center justify-center rounded-full hover:opacity-70 active:opacity-50"
+        >
+          <QrCodeIcon className="w-5 h-5 text-accent" />
+        </button>
+        <ThreeDotMenu items={menuItems} />
+      </div>
     </div>
   );
 
@@ -152,7 +156,7 @@ const Discussions: React.FC = () => {
       header={headerContent}
       className="relative"
       contentClassName="pt-2 px-2 pb-4"
-      scrollRef={scrollContainerRef}
+      onScrollContainerRef={setScrollContainer}
     >
       {/* Show banner when there's pending shared content */}
       {pendingSharedContent && (
@@ -192,12 +196,12 @@ const Discussions: React.FC = () => {
           filterCounts={filterCounts}
         />
       )}
-      {scrollParentReady && scrollContainerRef.current && (
+      {scrollContainer && (
         <DiscussionListPanel
           onSelect={handleSelectDiscussion}
           headerVariant="link"
           searchQuery={debouncedSearchQuery}
-          scrollParent={scrollContainerRef.current}
+          scrollParent={scrollContainer}
           filter={filter}
         />
       )}

@@ -17,7 +17,7 @@ const SelectItem = <T,>({
 }) => (
   <button
     onClick={onSelect}
-    className={`w-full flex items-center p-3 hover:bg-muted transition-colors touch-manipulation ${
+    className={`hover-fill w-full flex items-center p-3 touch-manipulation ${
       isSelected ? 'bg-accent/10' : ''
     }`}
     style={{ height: `${itemHeight}px` }}

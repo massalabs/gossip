@@ -210,6 +210,10 @@ export default {
           from: { transform: 'translateX(0)' },
           to: { transform: 'translateX(100%)' },
         },
+        'menu-open': {
+          from: { opacity: '0', transform: 'scale(0.95)' },
+          to: { opacity: '1', transform: 'scale(1)' },
+        },
       },
       animation: {
         'spin-reverse': 'spin-reverse 1s linear infinite',
@@ -229,6 +233,7 @@ export default {
         'highlight-message': 'highlight-message 2s ease-out',
         'slide-in-right': 'slide-in-right 0.3s ease-out',
         'slide-out-right': 'slide-out-right 0.3s ease-out',
+        'menu-open': 'menu-open 200ms ease-out',
       },
     },
   },

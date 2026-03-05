@@ -146,7 +146,7 @@ const NewDiscussion: React.FC = () => {
                       onClick={() => onSelectContact(contact)}
                       variant="ghost"
                       size="custom"
-                      className="flex-1 px-4 py-3 flex items-center gap-3 text-left hover:bg-accent/50 rounded-none border-0 border-b border-border last:border-b-0"
+                      className="hover-fill flex-1 px-4 py-3 flex items-center gap-3 text-left rounded-none border-0 border-b border-border last:border-b-0"
                     >
                       <ContactAvatar contact={contact} size={10} />
                       <div className="flex-1 min-w-0">

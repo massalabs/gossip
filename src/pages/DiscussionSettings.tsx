@@ -220,7 +220,7 @@ const DiscussionSettings: React.FC = () => {
             <button
               key={contact.userId}
               onClick={() => handleNavigateToContact(contact)}
-              className="w-full flex items-center gap-3 p-4 hover:bg-muted/50 transition-colors first:rounded-t-xl last:rounded-b-xl"
+              className="hover-fill w-full flex items-center gap-3 p-4 first:rounded-t-xl last:rounded-b-xl"
             >
               <ContactAvatar contact={contact} size={10} />
               <div className="flex-1 min-w-0 text-left">

@@ -65,7 +65,7 @@ const ContactItemRenderer: React.FC<ContactItemProps> = ({
   <button
     type="button"
     onClick={() => onSelect(item.contact.userId)}
-    className="w-full px-3 py-2 flex items-center gap-3 rounded-xl hover:bg-accent/50 transition-colors text-left"
+    className="hover-fill w-full px-3 py-2 flex items-center gap-3 rounded-xl text-left"
   >
     <ContactAvatar contact={item.contact} size={10} />
     <div className="flex-1 min-w-0">
