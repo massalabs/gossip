@@ -8,9 +8,15 @@ import React, {
 import {
   CornerUpLeft,
   Share,
+  Copy,
+  ChevronDown,
   Check as CheckIcon,
   AlertTriangle,
 } from 'react-feather';
+import toast from 'react-hot-toast';
+import { useLongPress } from '../../hooks/useLongPress';
+import ContextMenu from '../ui/ContextMenu';
+import type { ContextMenuItem } from '../ui/ContextMenu';
 import { formatTime } from '../../utils/timeUtils';
 import {
   Message,
@@ -88,6 +94,41 @@ const MessageItem: React.FC<MessageItemProps> = ({
   const touchSlopExceeded = useRef(false);
   const hasTriggeredHaptic = useRef(false);
 
+  // Context menu state
+  const [isContextMenuOpen, setIsContextMenuOpen] = useState(false);
+
+  const longPress = useLongPress({
+    onLongPress: () => setIsContextMenuOpen(true),
+  });
+
+  // Context menu items
+  const contextMenuItems = useMemo<ContextMenuItem[]>(() => {
+    const items: ContextMenuItem[] = [];
+    if (onReplyTo) {
+      items.push({
+        label: 'Reply',
+        icon: <CornerUpLeft className="w-4 h-4" />,
+        onClick: () => onReplyTo(message),
+      });
+    }
+    if (onForward) {
+      items.push({
+        label: 'Forward',
+        icon: <Share className="w-4 h-4" />,
+        onClick: () => onForward(message),
+      });
+    }
+    items.push({
+      label: 'Copy',
+      icon: <Copy className="w-4 h-4" />,
+      onClick: () => {
+        navigator.clipboard.writeText(message.content);
+        toast.success('Copied');
+      },
+    });
+    return items;
+  }, [onReplyTo, onForward, message]);
+
   // Load original message if this is a reply or forward
   useEffect(() => {
     const citedMsgId = message.replyTo?.originalMsgId;
@@ -164,12 +205,17 @@ const MessageItem: React.FC<MessageItemProps> = ({
         e.preventDefault();
         onReplyTo(message);
       }
+      if (e.key === 'F10' && e.shiftKey) {
+        e.preventDefault();
+        setIsContextMenuOpen(true);
+      }
     },
     [canReply, onReplyTo, message]
   );
 
   const handleTouchStart = useCallback(
     (e: React.TouchEvent) => {
+      longPress.onTouchStart(e);
       if (!canReply && !canForward) return;
       const touch = e.touches[0];
       touchStartX.current = touch.clientX;
@@ -180,11 +226,12 @@ const MessageItem: React.FC<MessageItemProps> = ({
       hasTriggeredHaptic.current = false;
       setIsAnimatingBack(false);
     },
-    [canReply, canForward]
+    [canReply, canForward, longPress]
   );
 
   const handleTouchMove = useCallback(
     (e: React.TouchEvent) => {
+      longPress.onTouchMove(e);
       if (!canReply && !canForward) return;
       if (touchStartX.current === null || touchStartY.current === null) return;
 
@@ -217,30 +264,27 @@ const MessageItem: React.FC<MessageItemProps> = ({
           ? SWIPE_MAX_DISTANCE_OUTGOING
           : SWIPE_MAX_DISTANCE;
         const rawSwipe = deltaX * resistance;
-        const clampedSwipe = Math.max(
-          -maxDistance,
-          Math.min(rawSwipe, maxDistance)
-        );
+        // Clamp to >= 0 (right-swipe only, no left-swipe)
+        const clampedSwipe = Math.max(0, Math.min(rawSwipe, maxDistance));
         setSwipeOffset(clampedSwipe);
 
         // Trigger haptic when crossing the threshold
         const threshold = isOutgoing
           ? SWIPE_THRESHOLD_OUTGOING
           : SWIPE_THRESHOLD;
-        if (
-          Math.abs(clampedSwipe) >= threshold &&
-          !hasTriggeredHaptic.current
-        ) {
+        if (clampedSwipe >= threshold && !hasTriggeredHaptic.current) {
           hasTriggeredHaptic.current = true;
         }
       } else if (Math.abs(deltaX) > 5 || Math.abs(deltaY) > 5) {
         setSwipeOffset(0);
       }
     },
-    [canReply, canForward, isOutgoing]
+    [canReply, canForward, isOutgoing, longPress]
   );
 
   const handleTouchEnd = useCallback(() => {
+    longPress.onTouchEnd();
+
     if (!canReply && !canForward) {
       setSwipeOffset(0);
       touchStartX.current = null;
@@ -250,15 +294,24 @@ const MessageItem: React.FC<MessageItemProps> = ({
       return;
     }
 
+    // If long-press fired, skip swipe action and reset
+    if (longPress.longPressTriggered.current) {
+      setIsAnimatingBack(true);
+      setSwipeOffset(0);
+      touchStartX.current = null;
+      touchStartY.current = null;
+      isSwiping.current = false;
+      touchSlopExceeded.current = false;
+      hasTriggeredHaptic.current = false;
+      setTimeout(() => setIsAnimatingBack(false), 300);
+      return;
+    }
+
     const threshold = isOutgoing ? SWIPE_THRESHOLD_OUTGOING : SWIPE_THRESHOLD;
     const isRightSwipeCompleted = swipeOffset >= threshold;
-    const isLeftSwipeCompleted = swipeOffset <= -threshold;
 
     if (isRightSwipeCompleted && onReplyTo) {
       onReplyTo(message);
-      swipeCompleted.current = true;
-    } else if (isLeftSwipeCompleted && onForward) {
-      onForward(message);
       swipeCompleted.current = true;
     }
 
@@ -279,8 +332,8 @@ const MessageItem: React.FC<MessageItemProps> = ({
     isOutgoing,
     swipeOffset,
     onReplyTo,
-    onForward,
     message,
+    longPress,
   ]);
 
   const handleReplyContextClick = useCallback(
@@ -379,9 +432,10 @@ const MessageItem: React.FC<MessageItemProps> = ({
     <div
       id={id}
       className={`flex items-end gap-1 ${isOutgoing ? 'justify-end' : 'justify-start'} group relative ${spacingClass} ${isHighlighted ? 'search-highlight' : ''}`}
-      onTouchStart={canReply ? handleTouchStart : undefined}
-      onTouchMove={canReply ? handleTouchMove : undefined}
-      onTouchEnd={canReply ? handleTouchEnd : undefined}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+      onContextMenu={longPress.onContextMenu}
       role="listitem"
       aria-label={`${isOutgoing ? 'Sent' : 'Received'} message`}
     >
@@ -437,37 +491,6 @@ const MessageItem: React.FC<MessageItemProps> = ({
             <CornerUpLeft
               className={`w-5 h-5 text-muted-foreground transition-transform ${
                 swipeOffset >=
-                (isOutgoing ? SWIPE_THRESHOLD_OUTGOING : SWIPE_THRESHOLD)
-                  ? 'scale-110'
-                  : 'scale-100'
-              }`}
-              aria-hidden="true"
-            />
-          </div>
-        )}
-
-        {/* Forward indicator (left swipe) */}
-        {swipeOffset < -indicatorThreshold && canForward && (
-          <div
-            className={`absolute right-0 top-0 bottom-0 flex items-center justify-center ${
-              isOutgoing ? 'bg-accent/20' : 'bg-card/20'
-            } rounded-r-2xl`}
-            style={{
-              width: `${Math.min(
-                Math.abs(swipeOffset),
-                SWIPE_INDICATOR_MAX_WIDTH
-              )}px`,
-              opacity: Math.min(
-                Math.abs(swipeOffset) / SWIPE_INDICATOR_MAX_WIDTH,
-                1
-              ),
-              transition: isAnimatingBack ? 'all 0.3s ease-out' : 'none',
-            }}
-            aria-hidden="true"
-          >
-            <Share
-              className={`w-5 h-5 text-muted-foreground transition-transform ${
-                Math.abs(swipeOffset) >=
                 (isOutgoing ? SWIPE_THRESHOLD_OUTGOING : SWIPE_THRESHOLD)
                   ? 'scale-110'
                   : 'scale-100'
@@ -714,7 +737,22 @@ const MessageItem: React.FC<MessageItemProps> = ({
             )}
           </div>
         )}
+        {/* Hover arrow for desktop context menu */}
+        <button
+          type="button"
+          onClick={() => setIsContextMenuOpen(true)}
+          className={`absolute top-1 ${isOutgoing ? 'left-1' : 'right-1'} w-6 h-6 items-center justify-center rounded-full bg-card/80 shadow-sm opacity-0 group-hover:opacity-100 transition-opacity hidden md:flex`}
+          aria-label="Message actions"
+        >
+          <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
+        </button>
       </div>
+
+      <ContextMenu
+        items={contextMenuItems}
+        isOpen={isContextMenuOpen}
+        onClose={() => setIsContextMenuOpen(false)}
+      />
     </div>
   );
 };
