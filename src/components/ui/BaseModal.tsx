@@ -55,7 +55,7 @@ const BaseModal: React.FC<BaseModalProps> = ({
       />
 
       <div
-        className={`relative pb-safe-b w-full max-w-md bg-card md:rounded-2xl rounded-t-3xl shadow-2xl transform transition-all duration-300 ease-out flex flex-col
+        className={`relative pb-safe-b w-full md:max-w-2xl lg:max-w-3xl bg-card md:rounded-2xl rounded-t-3xl shadow-2xl transform transition-all duration-300 ease-out flex flex-col
         ${mounted ? 'translate-y-0 md:translate-y-0 md:opacity-100' : 'translate-y-full md:translate-y-4 md:opacity-0'}`}
       >
         <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">

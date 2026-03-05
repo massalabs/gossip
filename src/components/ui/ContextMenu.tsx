@@ -110,7 +110,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
   if (!isOpen) return null;
 
   return createPortal(
-    <div className="fixed inset-0 z-1000 flex flex-col justify-end">
+    <div className="fixed inset-0 z-1000 flex flex-col items-center justify-end">
       {/* Backdrop */}
       <div
         className="absolute inset-0 bg-black/50 dark:bg-black/60 transition-opacity"
@@ -123,7 +123,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
         ref={menuRef}
         role="menu"
         aria-label="Context menu"
-        className={`relative bg-card rounded-t-2xl shadow-2xl pb-safe-b transform transition-transform duration-200 ease-out ${
+        className={`relative w-full md:max-w-2xl lg:max-w-3xl bg-card rounded-t-2xl shadow-2xl pb-safe-b transform transition-transform duration-200 ease-out ${
           mounted ? 'translate-y-0' : 'translate-y-full'
         }`}
         onTouchStart={handleTouchStart}
