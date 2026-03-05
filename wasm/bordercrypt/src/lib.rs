@@ -14,7 +14,9 @@ mod types;
 mod unlock;
 
 pub use block::{create_cover_block, decrypt_block, encrypt_block, rerandomize_block};
-pub use constants::{AEAD_TAG_SIZE, BLOCK_SIZE, LENGTH_HDR_SIZE, PLAINTEXT_SIZE, SESSION_COUNT};
+pub use constants::{
+    AEAD_TAG_SIZE, BLOCK_SIZE, LENGTH_HDR_SIZE, PLAINTEXT_SIZE, ROOT_BLOCK_KEY_SIZE, SESSION_COUNT,
+};
 pub use domain::{
     block_aead_aad, block_aead_key_label, block_kdf_salt, block_scope, password_kdf_salt, root,
     root_aead_key_label, root_kdf_salt, session_scope, sk_wrap_aad, sk_wrap_key_label,
