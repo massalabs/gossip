@@ -17,8 +17,8 @@ use crate::types::SessionIndex;
 pub struct UnlockedSession {
     pub session_index: SessionIndex,
     pub session_version: u32,
-    pub pq_pk: PqPublicKey,
-    pub pq_sk: PqSecretKey,
+    pub pq_rerand_pk: PqPublicKey,
+    pub pq_rerand_sk: PqSecretKey,
     pub root_aead_key: Zeroizing<[u8; crypto_aead::KEY_SIZE]>,
     pub total_data_length: u64,
 }
@@ -71,21 +71,26 @@ pub fn unlock_session<S: BlockStorage + KeypairStorage>(
         };
 
         // Try AEAD-unwrap the secret key
-        let aad = domain::sk_wrap_aad(domain, kf.version, session);
+        let sk_wrap_aad = domain::sk_wrap_aad(domain, kf.version, session);
         let nonce = crypto_aead::Nonce::from(kf.sk_nonce);
-        let wrap_key = crypto_aead::Key::from(*sk_wrap_key);
+        let sk_wrap_aead_key = crypto_aead::Key::from(*sk_wrap_key);
 
-        let sk_bytes = match crypto_aead::decrypt(&wrap_key, &nonce, &kf.sk_ct, aad.as_bytes()) {
+        let sk_bytes = match crypto_aead::decrypt(
+            &sk_wrap_aead_key,
+            &nonce,
+            &kf.sk_ct,
+            sk_wrap_aad.as_bytes(),
+        ) {
             Some(bytes) => Zeroizing::new(bytes),
             None => continue,
         };
 
-        let pq_sk = match PqSecretKey::from_bytes(&sk_bytes) {
+        let pq_rerand_sk = match PqSecretKey::from_bytes(&sk_bytes) {
             Ok(sk) => sk,
             Err(_) => continue,
         };
 
-        let pq_pk = match PqPublicKey::from_bytes(&kf.pq_pk) {
+        let pq_rerand_pk = match PqPublicKey::from_bytes(&kf.pq_pk) {
             Ok(pk) => pk,
             Err(_) => continue,
         };
@@ -95,14 +100,20 @@ pub fn unlock_session<S: BlockStorage + KeypairStorage>(
         // two sessions should never share a password, a failure after successful
         // AEAD unwrap means real corruption — returning CorruptedBlock is more
         // informative than a misleading InvalidPassword. Confirm this is desired.
-        let total_data_length =
-            read_total_length(storage, domain, kf.version, session, &pq_sk, &root_aead_key)?;
+        let total_data_length = read_total_length(
+            storage,
+            domain,
+            kf.version,
+            session,
+            &pq_rerand_sk,
+            &root_aead_key,
+        )?;
 
         return Ok(UnlockedSession {
             session_index: session,
             session_version: kf.version,
-            pq_pk,
-            pq_sk,
+            pq_rerand_pk,
+            pq_rerand_sk,
             root_aead_key,
             total_data_length,
         });
@@ -119,7 +130,7 @@ pub(crate) fn read_total_length<S: BlockStorage>(
     domain: &str,
     version: u32,
     session: SessionIndex,
-    pq_sk: &PqSecretKey,
+    pq_rerand_sk: &PqSecretKey,
     root_aead_key: &[u8; crypto_aead::KEY_SIZE],
 ) -> Result<u64> {
     let count = storage.block_count(session)?;
@@ -130,10 +141,10 @@ pub(crate) fn read_total_length<S: BlockStorage>(
     let block_ct = storage.read_block(session, 0)?;
 
     let mut buf = String::new();
-    let aead_key = derive_block_aead_key(&mut buf, domain, version, session, root_aead_key, 0);
+    let aead_sk = derive_block_aead_key(&mut buf, domain, version, session, root_aead_key, 0);
     domain::block_aead_aad(&mut buf, domain, version, session, 0);
 
-    let plaintext = decrypt_block(pq_sk, &aead_key, &buf, &block_ct)?;
+    let plaintext = decrypt_block(pq_rerand_sk, &aead_sk, &buf, &block_ct)?;
 
     let length_bytes: [u8; 8] = plaintext[..LENGTH_HDR_SIZE]
         .try_into()
