@@ -83,7 +83,7 @@ impl BlockStorage for MemoryStorage {
         if idx >= session_blockstreams.len() {
             return Err(BordercryptError::OutOfBounds);
         }
-        session_blockstreams[idx] = Box::new(*data);
+        *session_blockstreams[idx] = *data;
         Ok(())
     }
 
