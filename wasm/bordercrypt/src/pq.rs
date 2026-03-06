@@ -40,11 +40,27 @@ impl Drop for PqPublicKey {
     }
 }
 
+// SAFETY: manual Drop calls zeroize() — satisfies ZeroizeOnDrop contract.
 impl ZeroizeOnDrop for PqPublicKey {}
 
 /// Post-quantum secret key for decryption.
-#[derive(Zeroize, ZeroizeOnDrop)]
 pub struct PqSecretKey(pq_rerand::keygen::SecretKey);
+
+impl Zeroize for PqSecretKey {
+    fn zeroize(&mut self) {
+        self.0.s_t.zeroize();
+        self.0.s_q2.zeroize();
+    }
+}
+
+impl Drop for PqSecretKey {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
+}
+
+// SAFETY: manual Drop calls zeroize() — satisfies ZeroizeOnDrop contract.
+impl ZeroizeOnDrop for PqSecretKey {}
 
 /// Generate a fresh pq-rerand keypair.
 #[must_use]
