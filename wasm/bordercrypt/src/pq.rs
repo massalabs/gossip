@@ -34,6 +34,14 @@ impl Zeroize for PqPublicKey {
     }
 }
 
+impl Drop for PqPublicKey {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
+}
+
+impl ZeroizeOnDrop for PqPublicKey {}
+
 /// Post-quantum secret key for decryption.
 #[derive(Zeroize, ZeroizeOnDrop)]
 pub struct PqSecretKey(pq_rerand::keygen::SecretKey);
