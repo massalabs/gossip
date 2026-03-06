@@ -2,25 +2,23 @@
 
 use zeroize::Zeroizing;
 
-use crate::domain::{block_aead_key_label, block_kdf_salt};
+use crate::domain::{block_aead_key_label, block_kdf_salt, block_scope};
 use crate::types::SessionIndex;
 
-/// Derive the per-block AEAD key for a given session and block index.
+/// Derive the per-block AEAD key and block scope for a given session and block index.
 ///
-/// Uses HKDF-SHA256 with domain-separated salt and label, plus canonical
-/// big-endian encoding of the session index and block index as input items.
-///
-/// `buf` is a reusable `String` buffer (cleared internally) to avoid
-/// allocations in per-block loops.
+/// Returns `(aead_key, block_scope)` where `block_scope` is the domain-separated
+/// string for the block, used as the root of the AEAD AAD.
 pub fn derive_block_aead_key(
-    buf: &mut String,
     domain: &str,
     version: u32,
     index: SessionIndex,
     root_aead_key: &[u8],
     block: u64,
-) -> Zeroizing<[u8; crypto_aead::KEY_SIZE]> {
-    block_kdf_salt(buf, domain, version, index, block);
+) -> (Zeroizing<[u8; crypto_aead::KEY_SIZE]>, String) {
+    let mut buf = String::new();
+
+    block_kdf_salt(&mut buf, domain, version, index, block);
     let expander = {
         let mut extract = crypto_kdf::Extract::new(buf.as_bytes());
         extract.input_item(root_aead_key);
@@ -29,10 +27,12 @@ pub fn derive_block_aead_key(
         extract.finalize()
     };
 
-    block_aead_key_label(buf, domain, version, index, block);
+    block_aead_key_label(&mut buf, domain, version, index, block);
     let mut key = Zeroizing::new([0u8; crypto_aead::KEY_SIZE]);
     expander.expand(buf.as_bytes(), key.as_mut());
-    key
+
+    block_scope(&mut buf, domain, version, index, block);
+    (key, buf)
 }
 
 #[cfg(test)]
@@ -52,8 +52,8 @@ mod tests {
         root: &[u8],
         block: u64,
     ) -> [u8; crypto_aead::KEY_SIZE] {
-        let mut buf = String::new();
-        *derive_block_aead_key(&mut buf, domain, version, idx(session), root, block)
+        let (key, _scope) = derive_block_aead_key(domain, version, idx(session), root, block);
+        *key
     }
 
     #[test]
@@ -97,5 +97,11 @@ mod tests {
         let k0 = derive("d", 0, 0, &ROOT_KEY, 0);
         let k1 = derive("other-domain", 0, 0, &ROOT_KEY, 0);
         assert_ne!(k0, k1);
+    }
+
+    #[test]
+    fn returns_block_scope() {
+        let (_key, scope) = derive_block_aead_key("app", 0, idx(2), &ROOT_KEY, 5);
+        assert_eq!(scope, "app:bordercrypt:session:v0:i2:b5");
     }
 }
