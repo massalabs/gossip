@@ -335,7 +335,7 @@ pub fn shrink_session_data<S: BlockStorage + KeypairStorage>(
         rand::rngs::OsRng.fill_bytes(&mut pt[..]);
     } else {
         match decrypt_session_data_block(storage, domain, session, new_last_block) {
-            Ok(existing) => pt.copy_from_slice(&existing),
+            Ok(existing) => pt.copy_from_slice(existing.as_ref()),
             Err(_) => rand::rngs::OsRng.fill_bytes(&mut pt[..]),
         }
     }
@@ -368,7 +368,7 @@ pub fn shrink_session_data<S: BlockStorage + KeypairStorage>(
     if new_last_block != 0 {
         let mut pt0 = Zeroizing::new(vec![0u8; PLAINTEXT_SIZE]);
         match decrypt_session_data_block(storage, domain, session, 0) {
-            Ok(existing) => pt0.copy_from_slice(&existing),
+            Ok(existing) => pt0.copy_from_slice(existing.as_ref()),
             Err(_) => rand::rngs::OsRng.fill_bytes(&mut pt0[..]),
         }
         pt0[..LENGTH_HDR_SIZE].copy_from_slice(&new_total.to_be_bytes());
@@ -389,13 +389,13 @@ pub fn shrink_session_data<S: BlockStorage + KeypairStorage>(
             let cur_pk = PqPublicKey::from_bytes(&cur_pk_bytes)?;
 
             let new_ct = if cur_session == session.session_index {
-                domain::block_aead_aad(&mut buf, domain, cur_version, cur_session, b);
+                domain::block_scope(&mut buf, domain, cur_version, cur_session, b);
                 create_cover_block(&cur_pk, &buf)
             } else {
                 match storage.read_block(cur_session, b) {
                     Ok(existing_ct) => rerandomize_block(&cur_pk, &existing_ct),
                     Err(_) => {
-                        domain::block_aead_aad(&mut buf, domain, cur_version, cur_session, b);
+                        domain::block_scope(&mut buf, domain, cur_version, cur_session, b);
                         create_cover_block(&cur_pk, &buf)
                     }
                 }
