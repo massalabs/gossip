@@ -103,8 +103,8 @@ pub fn allocate_session<S: BlockStorage + KeypairStorage>(
     Ok(UnlockedSession {
         session_index: slot,
         session_version: version,
-        pq_pk,
-        pq_sk,
+        pq_rerand_pk: pq_pk,
+        pq_rerand_sk: pq_sk,
         root_aead_key,
         total_data_length: 0,
     })
@@ -138,7 +138,7 @@ pub fn cover_traffic_tick<S: BlockStorage + KeypairStorage>(
         let new_ct = match storage.read_block(cur_session, block_index) {
             Ok(existing_ct) => rerandomize_block(&cur_pk, &existing_ct),
             Err(_) => {
-                domain::block_aead_aad(&mut buf, domain, cur_version, cur_session, block_index);
+                domain::block_scope(&mut buf, domain, cur_version, cur_session, block_index);
                 create_cover_block(&cur_pk, &buf)
             }
         };
