@@ -21,7 +21,7 @@ import {
 const mockSdk = {
   isSessionOpen: false,
   userId: 'gossip1test',
-  auth: { ensurePublicKeyPublished: vi.fn().mockResolvedValue(undefined) },
+  auth: { publishPublicKey: vi.fn().mockResolvedValue(undefined) },
   discussions: {
     getStatus: vi.fn(() => SessionStatus.NoSession),
     list: vi.fn(async () => []),

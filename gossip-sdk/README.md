@@ -209,7 +209,7 @@ const result = await sdk.announcements.fetch();
 
 ```typescript
 // Publish public key so the user is discoverable
-await sdk.auth.ensurePublicKeyPublished(publicKey, userId);
+await sdk.auth.publishPublicKey(publicKey);
 ```
 
 ## Events

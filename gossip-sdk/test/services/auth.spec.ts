@@ -21,7 +21,9 @@ import {
 import { encodeUserId } from '../../src/utils/userId';
 import { encodeToBase64, decodeFromBase64 } from '../../src/utils/base64';
 import { ensureWasmInitialized } from '../../src/wasm';
-import { clearAllTables } from '../testDb';
+import { clearAllTables, getTestQueries } from '../testDb';
+import type { Queries } from '../../src/db/queries';
+import { makeUserProfileRow } from '../helpers/factories';
 
 function createMockAuthProtocol(
   overrides: Partial<IAuthProtocol> = {}
@@ -170,26 +172,20 @@ describe('AuthService', () => {
     });
   });
 
-  describe('ensurePublicKeyPublished', () => {
-    it('should not publish if key already exists on server', async () => {
-      // fetchPublicKeyByUserId succeeds → key exists
-      vi.mocked(mockAuthProtocol.fetchPublicKeyByUserId).mockResolvedValue(
-        encodeToBase64(testPublicKeys.to_bytes())
+  describe('publishPublicKey', () => {
+    let queries: Queries;
+
+    beforeEach(async () => {
+      queries = getTestQueries();
+      await queries.userProfiles.insert(
+        makeUserProfileRow({ userId: testUserId })
       );
-
-      await authService.ensurePublicKeyPublished(testPublicKeys, testUserId);
-
-      expect(mockAuthProtocol.postPublicKey).not.toHaveBeenCalled();
     });
 
-    it('should publish if key is not found on server', async () => {
-      // fetchPublicKeyByUserId throws → key not found
-      vi.mocked(mockAuthProtocol.fetchPublicKeyByUserId).mockRejectedValue(
-        new Error(PUBLIC_KEY_NOT_FOUND_ERROR)
-      );
+    it('should publish if never published before', async () => {
       vi.mocked(mockAuthProtocol.postPublicKey).mockResolvedValue('hash123');
 
-      await authService.ensurePublicKeyPublished(testPublicKeys, testUserId);
+      await authService.publishPublicKey(testPublicKeys, testUserId, queries);
 
       expect(mockAuthProtocol.postPublicKey).toHaveBeenCalledTimes(1);
       expect(mockAuthProtocol.postPublicKey).toHaveBeenCalledWith(
@@ -197,37 +193,50 @@ describe('AuthService', () => {
       );
     });
 
-    it('should publish if server fetch fails with network error', async () => {
-      // Any fetch error → assume key not present, publish
-      vi.mocked(mockAuthProtocol.fetchPublicKeyByUserId).mockRejectedValue(
-        new Error('Network timeout')
-      );
+    it('should update lastPublicKeyPush after publishing', async () => {
       vi.mocked(mockAuthProtocol.postPublicKey).mockResolvedValue('hash123');
 
-      await authService.ensurePublicKeyPublished(testPublicKeys, testUserId);
+      await authService.publishPublicKey(testPublicKeys, testUserId, queries);
+
+      const profile = await queries.userProfiles.getById(testUserId);
+      expect(profile?.lastPublicKeyPush).toBeTruthy();
+    });
+
+    it('should skip publishing if published less than 24h ago', async () => {
+      await queries.userProfiles.updateById(testUserId, {
+        lastPublicKeyPush: new Date(),
+      });
+
+      await authService.publishPublicKey(testPublicKeys, testUserId, queries);
+
+      expect(mockAuthProtocol.postPublicKey).not.toHaveBeenCalled();
+    });
+
+    it('should republish if published more than 24h ago', async () => {
+      const over24hAgo = new Date(Date.now() - 25 * 60 * 60 * 1000);
+      await queries.userProfiles.updateById(testUserId, {
+        lastPublicKeyPush: over24hAgo,
+      });
+      vi.mocked(mockAuthProtocol.postPublicKey).mockResolvedValue('hash123');
+
+      await authService.publishPublicKey(testPublicKeys, testUserId, queries);
 
       expect(mockAuthProtocol.postPublicKey).toHaveBeenCalledTimes(1);
     });
 
-    it('should propagate error if publishing after fetch failure also fails', async () => {
-      vi.mocked(mockAuthProtocol.fetchPublicKeyByUserId).mockRejectedValue(
-        new Error('Network timeout')
-      );
+    it('should propagate error if publishing fails', async () => {
       const publishError = new Error('Publish failed');
       vi.mocked(mockAuthProtocol.postPublicKey).mockRejectedValue(publishError);
 
       await expect(
-        authService.ensurePublicKeyPublished(testPublicKeys, testUserId)
+        authService.publishPublicKey(testPublicKeys, testUserId, queries)
       ).rejects.toThrow('Publish failed');
     });
 
     it('should encode public keys to base64 before posting', async () => {
-      vi.mocked(mockAuthProtocol.fetchPublicKeyByUserId).mockRejectedValue(
-        new Error(PUBLIC_KEY_NOT_FOUND_ERROR)
-      );
       vi.mocked(mockAuthProtocol.postPublicKey).mockResolvedValue('hash123');
 
-      await authService.ensurePublicKeyPublished(testPublicKeys, testUserId);
+      await authService.publishPublicKey(testPublicKeys, testUserId, queries);
 
       const calledWith = vi.mocked(mockAuthProtocol.postPublicKey).mock
         .calls[0][0];

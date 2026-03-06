@@ -737,7 +737,7 @@ useAccountStoreBase.subscribe(async (state, prevState) => {
   if (previous && current.userId === previous.userId) return;
 
   try {
-    await sdk.auth.ensurePublicKeyPublished(sdk.publicKeys, current.userId);
+    await sdk.auth.publishPublicKey(sdk.publicKeys, sdk.userId, sdk.queries);
   } catch (error) {
     console.error('Error publishing public key:', error);
   }

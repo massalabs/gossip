@@ -8,6 +8,9 @@ import { UserPublicKeys } from '../wasm/bindings.js';
 import { decodeUserId } from '../utils/userId.js';
 import { encodeToBase64, decodeFromBase64 } from '../utils/base64.js';
 import { IAuthProtocol } from '../api/authProtocol.js';
+import type { Queries } from '../db/queries/index.js';
+
+const REPUBLISH_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 export class AuthService {
   constructor(public authProtocol: IAuthProtocol) {}
@@ -29,25 +32,29 @@ export class AuthService {
   }
 
   /**
-   * Ensure public key is published. Checks the server first, only publishes if not found.
+   * Publish public key to the server if not published in the last 24 hours.
    * @param publicKeys - UserPublicKeys instance
-   * @param userId - Bech32-encoded userId (e.g., "gossip1...")
+   * @param userId - Bech32-encoded userId
+   * @param queries - Database queries
    */
-  async ensurePublicKeyPublished(
+  async publishPublicKey(
     publicKeys: UserPublicKeys,
-    userId: string
+    userId: string,
+    queries: Queries
   ): Promise<void> {
-    // Check if our key is already on the server
-    try {
-      await this.authProtocol.fetchPublicKeyByUserId(decodeUserId(userId));
-      return; // Key exists on server, nothing to do
-    } catch {
-      // Key not found on server — publish it
+    const profile = await queries.userProfiles.getById(userId);
+    if (profile?.lastPublicKeyPush) {
+      const elapsed = Date.now() - profile.lastPublicKeyPush.getTime();
+      if (elapsed < REPUBLISH_INTERVAL_MS) return;
     }
 
     await this.authProtocol.postPublicKey(
       encodeToBase64(publicKeys.to_bytes())
     );
+
+    await queries.userProfiles.updateById(userId, {
+      lastPublicKeyPush: new Date(),
+    });
   }
 }
 

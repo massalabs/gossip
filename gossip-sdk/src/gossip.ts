@@ -325,9 +325,10 @@ class GossipSdk {
     );
 
     // Publish gossip ID (public key) on messageProtocol so the user is discoverable
-    await this._auth!.ensurePublicKeyPublished(
+    await this._auth!.publishPublicKey(
       session.ourPk,
-      session.userIdEncoded
+      session.userIdEncoded,
+      queries
     );
     // Now set refreshService on services (circular dependency resolved via setter)
     this._discussion.setRefreshService(this._refresh);
