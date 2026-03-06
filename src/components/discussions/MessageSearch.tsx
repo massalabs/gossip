@@ -139,7 +139,15 @@ const MessageSearch: React.FC<MessageSearchProps> = ({
         <ChevronDown className="w-4 h-4 text-foreground" />
       </button>
       <button
-        onClick={onClose}
+        onMouseDown={e => {
+          e.preventDefault();
+          // Focus textarea before search unmounts to keep keyboard open
+          const textarea = document.querySelector(
+            'textarea[aria-label="Message input"]'
+          ) as HTMLElement;
+          textarea?.focus({ preventScroll: true });
+          onClose();
+        }}
         className="p-1.5 rounded-lg hover:bg-muted transition-colors"
         aria-label="Close search"
       >

@@ -2,6 +2,7 @@ import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { Send, X } from 'react-feather';
 import { Capacitor } from '@capacitor/core';
 import { Message } from '@massalabs/gossip-sdk';
+import { useKeyboardVisible } from '../../hooks/useKeyboardVisible';
 
 interface MessageInputProps {
   onSend: (message: string, replyToId?: number) => void;
@@ -35,6 +36,8 @@ const MessageInput: React.FC<MessageInputProps> = ({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const prevInitialValueRef = useRef(initialValue);
   const hasInitialFocusRef = useRef(false);
+  const { isKeyboardVisible } = useKeyboardVisible();
+  const isRefocusingRef = useRef(false);
   const isForwarding = !!forwardPreview;
   const sendButtonDisabled = disabled || (!newMessage.trim() && !isForwarding);
 
@@ -191,7 +194,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
   const safeAreaBottom =
     Capacitor.getPlatform() === 'android'
       ? 'max(min(var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 12px)), 16px), 12px)' // Android: clamp to max 16px, min 12px
-      : '12px';
+      : 'max(env(safe-area-inset-bottom, 12px), 12px)';
 
   return (
     <div
@@ -280,7 +283,20 @@ const MessageInput: React.FC<MessageInputProps> = ({
             value={newMessage}
             onChange={handleTextareaChange}
             onKeyDown={handleTextareaKeyDown}
-            onFocus={onFocus}
+            onFocus={() => {
+              if (isRefocusingRef.current) return;
+              onFocus?.();
+            }}
+            onBlur={e => {
+              if (!isKeyboardVisible) return;
+              const next = e.relatedTarget as HTMLElement | null;
+              if (next?.tagName === 'INPUT' || next?.tagName === 'TEXTAREA')
+                return;
+              if (!(e.target as HTMLElement).isConnected) return;
+              isRefocusingRef.current = true;
+              (e.target as HTMLElement).focus({ preventScroll: true });
+              isRefocusingRef.current = false;
+            }}
             placeholder="Type a message"
             rows={1}
             inputMode="text"

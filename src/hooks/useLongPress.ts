@@ -58,15 +58,24 @@ export function useLongPress({
     [disabled, threshold, clear]
   );
 
-  const onTouchEnd = useCallback(() => {
-    clear();
-    startPos.current = null;
-  }, [clear]);
+  const onTouchEnd = useCallback(
+    (e: React.TouchEvent) => {
+      clear();
+      // Prevent browser from synthesizing mousedown/click after a long press,
+      // which would blur the focused input and dismiss the keyboard.
+      if (longPressTriggered.current) {
+        e.preventDefault();
+      }
+      startPos.current = null;
+    },
+    [clear]
+  );
 
   const onContextMenu = useCallback(
     (e: React.MouseEvent) => {
       if (disabled) return;
       e.preventDefault();
+      if (longPressTriggered.current) return;
       longPressTriggered.current = true;
       onLongPress();
     },

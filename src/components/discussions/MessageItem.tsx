@@ -13,10 +13,9 @@ import {
   Check as CheckIcon,
   AlertTriangle,
 } from 'react-feather';
-import toast from 'react-hot-toast';
 import { useLongPress } from '../../hooks/useLongPress';
-import ContextMenu from '../ui/ContextMenu';
-import type { ContextMenuItem } from '../ui/ContextMenu';
+import MessageContextMenu from '../ui/MessageContextMenu';
+import type { MessageContextMenuItem } from '../ui/MessageContextMenu';
 import { formatTime } from '../../utils/timeUtils';
 import {
   Message,
@@ -90,20 +89,81 @@ const MessageItem: React.FC<MessageItemProps> = ({
   const isSwiping = useRef(false);
   const swipeCompleted = useRef(false);
   // Handle automatic message read marking
-  const messageRef = useMarkMessageAsRead(message);
+  const markAsReadRef = useMarkMessageAsRead(message);
+  const bubbleRef = useRef<HTMLDivElement>(null);
+  const combinedBubbleRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      bubbleRef.current = node;
+      markAsReadRef.current = node;
+    },
+    [markAsReadRef]
+  );
   const touchSlopExceeded = useRef(false);
   const hasTriggeredHaptic = useRef(false);
 
   // Context menu state
   const [isContextMenuOpen, setIsContextMenuOpen] = useState(false);
+  const [contextMenuTranslateY, setContextMenuTranslateY] = useState(0);
+  const [menuPosition, setMenuPosition] = useState<{
+    top: number;
+    left?: number;
+    right?: number;
+  } | null>(null);
+  const contextMenuOpenRef = useRef(false);
+
+  const openContextMenu = useCallback(() => {
+    if (!bubbleRef.current || contextMenuOpenRef.current) return;
+    const rect = bubbleRef.current.getBoundingClientRect();
+    let itemCount = 1; // Copy always present
+    if (canReply) itemCount++;
+    if (canForward) itemCount++;
+    const menuHeight = itemCount * 44;
+    const gap = 8;
+    const sab =
+      parseFloat(
+        getComputedStyle(document.documentElement).getPropertyValue('--sab')
+      ) || 0;
+    const pad = 16 + sab;
+    const vh = window.innerHeight;
+
+    // Menu appears right below the bubble
+    const menuTop = rect.bottom + gap;
+
+    // If menu would overflow the viewport, translate bubble up
+    let ty = 0;
+    if (menuTop + menuHeight > vh - pad) {
+      ty = -(menuTop + menuHeight - (vh - pad));
+    }
+    // Don't push bubble above viewport
+    if (rect.top + ty < pad) {
+      ty = pad - rect.top;
+    }
+
+    setContextMenuTranslateY(ty);
+    setMenuPosition({
+      top: rect.bottom + gap,
+      ...(isOutgoing
+        ? { right: window.innerWidth - rect.right }
+        : { left: rect.left }),
+    });
+    contextMenuOpenRef.current = true;
+    setIsContextMenuOpen(true);
+  }, [canReply, canForward, isOutgoing]);
+
+  const closeContextMenu = useCallback(() => {
+    contextMenuOpenRef.current = false;
+    setIsContextMenuOpen(false);
+    setContextMenuTranslateY(0);
+    setMenuPosition(null);
+  }, []);
 
   const longPress = useLongPress({
-    onLongPress: () => setIsContextMenuOpen(true),
+    onLongPress: openContextMenu,
   });
 
   // Context menu items
-  const contextMenuItems = useMemo<ContextMenuItem[]>(() => {
-    const items: ContextMenuItem[] = [];
+  const contextMenuItems = useMemo<MessageContextMenuItem[]>(() => {
+    const items: MessageContextMenuItem[] = [];
     if (onReplyTo) {
       items.push({
         label: 'Reply',
@@ -123,7 +183,6 @@ const MessageItem: React.FC<MessageItemProps> = ({
       icon: <Copy className="w-4 h-4" />,
       onClick: () => {
         navigator.clipboard.writeText(message.content);
-        toast.success('Copied');
       },
     });
     return items;
@@ -189,16 +248,6 @@ const MessageItem: React.FC<MessageItemProps> = ({
     sdk,
   ]);
 
-  const handleDoubleClick = useCallback(
-    (e: React.MouseEvent) => {
-      e.preventDefault();
-      if (canReply && onReplyTo) {
-        onReplyTo(message);
-      }
-    },
-    [canReply, onReplyTo, message]
-  );
-
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if ((e.key === 'Enter' || e.key === ' ') && canReply && onReplyTo) {
@@ -207,10 +256,10 @@ const MessageItem: React.FC<MessageItemProps> = ({
       }
       if (e.key === 'F10' && e.shiftKey) {
         e.preventDefault();
-        setIsContextMenuOpen(true);
+        openContextMenu();
       }
     },
-    [canReply, onReplyTo, message]
+    [canReply, onReplyTo, message, openContextMenu]
   );
 
   const handleTouchStart = useCallback(
@@ -282,20 +331,41 @@ const MessageItem: React.FC<MessageItemProps> = ({
     [canReply, canForward, isOutgoing, longPress]
   );
 
-  const handleTouchEnd = useCallback(() => {
-    longPress.onTouchEnd();
+  const handleTouchEnd = useCallback(
+    (e: React.TouchEvent) => {
+      longPress.onTouchEnd(e);
 
-    if (!canReply && !canForward) {
-      setSwipeOffset(0);
-      touchStartX.current = null;
-      touchStartY.current = null;
-      isSwiping.current = false;
-      touchSlopExceeded.current = false;
-      return;
-    }
+      if (!canReply && !canForward) {
+        setSwipeOffset(0);
+        touchStartX.current = null;
+        touchStartY.current = null;
+        isSwiping.current = false;
+        touchSlopExceeded.current = false;
+        return;
+      }
 
-    // If long-press fired, skip swipe action and reset
-    if (longPress.longPressTriggered.current) {
+      // If long-press fired, skip swipe action and reset
+      if (longPress.longPressTriggered.current) {
+        setIsAnimatingBack(true);
+        setSwipeOffset(0);
+        touchStartX.current = null;
+        touchStartY.current = null;
+        isSwiping.current = false;
+        touchSlopExceeded.current = false;
+        hasTriggeredHaptic.current = false;
+        setTimeout(() => setIsAnimatingBack(false), 300);
+        return;
+      }
+
+      const threshold = isOutgoing ? SWIPE_THRESHOLD_OUTGOING : SWIPE_THRESHOLD;
+      const isRightSwipeCompleted = swipeOffset >= threshold;
+
+      if (isRightSwipeCompleted && onReplyTo) {
+        onReplyTo(message);
+        swipeCompleted.current = true;
+      }
+
+      // Animate back with spring effect
       setIsAnimatingBack(true);
       setSwipeOffset(0);
       touchStartX.current = null;
@@ -303,38 +373,20 @@ const MessageItem: React.FC<MessageItemProps> = ({
       isSwiping.current = false;
       touchSlopExceeded.current = false;
       hasTriggeredHaptic.current = false;
+
+      // Remove animation class after animation completes
       setTimeout(() => setIsAnimatingBack(false), 300);
-      return;
-    }
-
-    const threshold = isOutgoing ? SWIPE_THRESHOLD_OUTGOING : SWIPE_THRESHOLD;
-    const isRightSwipeCompleted = swipeOffset >= threshold;
-
-    if (isRightSwipeCompleted && onReplyTo) {
-      onReplyTo(message);
-      swipeCompleted.current = true;
-    }
-
-    // Animate back with spring effect
-    setIsAnimatingBack(true);
-    setSwipeOffset(0);
-    touchStartX.current = null;
-    touchStartY.current = null;
-    isSwiping.current = false;
-    touchSlopExceeded.current = false;
-    hasTriggeredHaptic.current = false;
-
-    // Remove animation class after animation completes
-    setTimeout(() => setIsAnimatingBack(false), 300);
-  }, [
-    canReply,
-    canForward,
-    isOutgoing,
-    swipeOffset,
-    onReplyTo,
-    message,
-    longPress,
-  ]);
+    },
+    [
+      canReply,
+      canForward,
+      isOutgoing,
+      swipeOffset,
+      onReplyTo,
+      message,
+      longPress,
+    ]
+  );
 
   const handleReplyContextClick = useCallback(
     (e: React.MouseEvent) => {
@@ -431,7 +483,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
   return (
     <div
       id={id}
-      className={`flex items-end gap-1 ${isOutgoing ? 'justify-end' : 'justify-start'} group relative ${spacingClass} ${isHighlighted ? 'search-highlight' : ''} ${isContextMenuOpen ? 'z-[1001]' : ''}`}
+      className={`flex items-end gap-1 ${isOutgoing ? 'justify-end' : 'justify-start'} group relative ${spacingClass} ${isHighlighted ? 'search-highlight' : ''} ${isContextMenuOpen ? 'z-[1001] pointer-events-none' : ''}`}
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
@@ -450,29 +502,26 @@ const MessageItem: React.FC<MessageItemProps> = ({
         </div>
       )}
       <div
-        ref={messageRef}
-        className={`relative max-w-[80%] sm:max-w-[70%] md:max-w-[65%] lg:max-w-[60%] px-3.5 py-3 font-normal text-[15px] leading-tight animate-bubble-in ${borderRadiusClass} ${
+        ref={combinedBubbleRef}
+        className={`relative max-w-[80%] sm:max-w-[70%] md:max-w-[65%] lg:max-w-[60%] px-3.5 py-3 font-normal text-[15px] leading-tight animate-bubble-in select-none ${borderRadiusClass} ${
           isOutgoing
             ? 'ml-auto mr-3 bg-accent text-accent-foreground'
             : `${contact ? '' : 'ml-3'} mr-auto bg-surface-secondary text-card-foreground`
         } ${
-          canReply
-            ? 'cursor-pointer hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2'
-            : ''
-        } ${isContextMenuOpen ? 'z-[1001] shadow-lg' : ''}`}
-        onDoubleClick={handleDoubleClick}
+          canReply ? 'cursor-pointer hover:opacity-90 focus:outline-none' : ''
+        } ${isContextMenuOpen ? 'z-[1001] shadow-lg pointer-events-auto' : ''}`}
         onKeyDown={handleKeyDown}
         tabIndex={canReply ? 0 : undefined}
         role={canReply ? 'button' : undefined}
-        aria-label={canReply ? 'Double-tap to reply' : undefined}
+        aria-label={canReply ? 'Long press for actions' : undefined}
         style={{
           transform: isContextMenuOpen
-            ? `translate(${isOutgoing ? '-6px' : '6px'}, -4px) scale(1.03)`
+            ? `translateY(${contextMenuTranslateY}px)`
             : swipeOffset !== 0
               ? `translateX(${swipeOffset}px)`
               : 'translateX(0)',
           transition: isContextMenuOpen
-            ? 'transform 0.2s ease-out, box-shadow 0.2s ease-out'
+            ? 'transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s ease-out'
             : isAnimatingBack
               ? 'transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)'
               : 'none',
@@ -512,7 +561,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
                 : 'border-card-foreground/30'
             } ${originalNotFound ? 'border-destructive/50' : ''} ${
               message.replyTo.originalMsgId && onScrollToMessage
-                ? 'cursor-pointer hover:bg-black/5 dark:hover:bg-white/5 rounded-r transition-colors active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2'
+                ? 'cursor-pointer hover:bg-black/5 dark:hover:bg-white/5 rounded-r transition-colors active:scale-[0.98] focus:outline-none'
                 : ''
             }`}
             {...(message.replyTo.originalMsgId && onScrollToMessage
@@ -597,7 +646,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
                 : 'border-card-foreground/30'
             } ${
               canNavigateToForwarded
-                ? 'cursor-pointer hover:bg-black/5 dark:hover:bg-white/5 rounded-r transition-colors active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2'
+                ? 'cursor-pointer hover:bg-black/5 dark:hover:bg-white/5 rounded-r transition-colors active:scale-[0.98] focus:outline-none'
                 : ''
             }`}
             {...(canNavigateToForwarded
@@ -743,7 +792,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
         {/* Hover arrow for desktop context menu */}
         <button
           type="button"
-          onClick={() => setIsContextMenuOpen(true)}
+          onClick={openContextMenu}
           className="absolute top-1.5 right-2 p-0.5 opacity-0 group-hover:opacity-100 transition-opacity hidden md:flex items-center justify-center"
           aria-label="Message actions"
         >
@@ -751,10 +800,13 @@ const MessageItem: React.FC<MessageItemProps> = ({
         </button>
       </div>
 
-      <ContextMenu
+      <MessageContextMenu
         items={contextMenuItems}
         isOpen={isContextMenuOpen}
-        onClose={() => setIsContextMenuOpen(false)}
+        onClose={closeContextMenu}
+        isOutgoing={isOutgoing}
+        position={menuPosition}
+        translateY={contextMenuTranslateY}
       />
     </div>
   );

@@ -486,7 +486,18 @@ const Discussion: React.FC = () => {
   if (!contact) return null;
 
   return (
-    <div className="h-full app-max-w mx-auto bg-card flex flex-col relative">
+    <div
+      className="h-full app-max-w mx-auto bg-card flex flex-col relative select-none"
+      style={{ WebkitTouchCallout: 'none' }}
+      onMouseDown={e => {
+        // Prevent taps from stealing focus / dismissing keyboard,
+        // unless the tap target is itself a focusable input element.
+        const tag = (e.target as HTMLElement).tagName;
+        if (tag !== 'INPUT' && tag !== 'TEXTAREA') {
+          e.preventDefault();
+        }
+      }}
+    >
       <DiscussionHeader
         contact={contact}
         discussion={discussion}

@@ -1,0 +1,149 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
+
+export interface MessageContextMenuItem {
+  label: string;
+  icon?: React.ReactNode;
+  onClick: () => void;
+  danger?: boolean;
+}
+
+interface MessageContextMenuProps {
+  items: MessageContextMenuItem[];
+  isOpen: boolean;
+  onClose: () => void;
+  isOutgoing: boolean;
+  position: { top: number; left?: number; right?: number } | null;
+  translateY?: number;
+}
+
+const MessageContextMenu: React.FC<MessageContextMenuProps> = ({
+  items,
+  isOpen,
+  onClose,
+  isOutgoing,
+  position,
+  translateY = 0,
+}) => {
+  const [mounted, setMounted] = useState(false);
+  const [touchReady, setTouchReady] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      const id = requestAnimationFrame(() => setMounted(true));
+      // Enable interaction shortly after the long-press touch ends,
+      // so the lift itself doesn't activate a menu item.
+      let timer: ReturnType<typeof setTimeout>;
+      const enable = () => {
+        timer = setTimeout(() => setTouchReady(true), 80);
+      };
+      document.addEventListener('touchend', enable, { once: true });
+      document.addEventListener('mouseup', enable, { once: true });
+      return () => {
+        cancelAnimationFrame(id);
+        clearTimeout(timer);
+        document.removeEventListener('touchend', enable);
+        document.removeEventListener('mouseup', enable);
+      };
+    }
+    setMounted(false);
+    setTouchReady(false);
+  }, [isOpen]);
+
+  // Keyboard: Escape + arrow navigation
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+        return;
+      }
+
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        const menuItems =
+          menuRef.current?.querySelectorAll<HTMLButtonElement>(
+            '[role="menuitem"]'
+          );
+        if (!menuItems?.length) return;
+
+        const currentIndex = Array.from(menuItems).findIndex(
+          el => el === document.activeElement
+        );
+        let nextIndex: number;
+        if (e.key === 'ArrowDown') {
+          nextIndex =
+            currentIndex < menuItems.length - 1 ? currentIndex + 1 : 0;
+        } else {
+          nextIndex =
+            currentIndex > 0 ? currentIndex - 1 : menuItems.length - 1;
+        }
+        menuItems[nextIndex].focus();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
+  if (!isOpen || !position) return null;
+
+  return createPortal(
+    <div className="fixed inset-0 z-1000">
+      {/* Glass blur backdrop */}
+      <div
+        className={`absolute inset-0 bg-white/50 dark:bg-black/50 transition-opacity duration-300 ${
+          mounted ? 'opacity-100' : 'opacity-0'
+        }`}
+        onClick={onClose}
+        data-testid="context-menu-backdrop"
+      />
+
+      {/* Floating menu — positioned right below the bubble */}
+      <div
+        ref={menuRef}
+        role="menu"
+        aria-label="Message actions"
+        className={`fixed min-w-[180px] bg-card border border-border rounded-xl shadow-xl overflow-hidden ${
+          mounted ? 'opacity-100' : 'opacity-0 scale-95'
+        } ${touchReady ? '' : 'pointer-events-none'}`}
+        style={{
+          top: position.top,
+          ...(position.left !== undefined ? { left: position.left } : {}),
+          ...(position.right !== undefined ? { right: position.right } : {}),
+          transform: `translateY(${mounted ? translateY : translateY}px) ${mounted ? 'scale(1)' : 'scale(0.95)'}`,
+          transformOrigin: isOutgoing ? 'top right' : 'top left',
+          transition:
+            'transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s ease-out',
+        }}
+      >
+        {items.map(item => (
+          <button
+            key={item.label}
+            role="menuitem"
+            type="button"
+            onClick={() => {
+              onClose();
+              item.onClick();
+            }}
+            className={`hover-fill w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-left ${
+              item.danger ? 'text-destructive' : 'text-foreground'
+            }`}
+          >
+            {item.icon && (
+              <span className="relative w-5 h-5 shrink-0 flex items-center justify-center">
+                {item.icon}
+              </span>
+            )}
+            <span className="relative">{item.label}</span>
+          </button>
+        ))}
+      </div>
+    </div>,
+    document.body
+  );
+};
+
+export default MessageContextMenu;
