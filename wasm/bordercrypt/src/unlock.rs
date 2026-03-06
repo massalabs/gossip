@@ -26,19 +26,17 @@ pub struct UnlockedSession {
 
 /// Unlock a session by trying each slot with the given password.
 ///
-/// Slots are tried in random order to prevent timing side-channels
-/// from revealing which slot is active.
+/// All slots are tried regardless of whether a match is found,
+/// to prevent timing side-channels from revealing which slot is active.
 pub fn unlock_session<S: BlockStorage + KeypairStorage>(
     storage: &S,
     domain: &str,
     password: &[u8],
 ) -> Result<UnlockedSession> {
-    // 1. Password KDF → root_key
     let salt = domain::password_kdf_salt(domain);
     let mut root_key = Zeroizing::new([0u8; 32]);
     crypto_password_kdf::derive(password, salt.as_bytes(), root_key.as_mut());
 
-    // 2. HKDF extract
     let root_kdf_salt = domain::root_kdf_salt(domain);
     let expander = {
         let mut extract = crypto_kdf::Extract::new(root_kdf_salt.as_bytes());
@@ -46,21 +44,20 @@ pub fn unlock_session<S: BlockStorage + KeypairStorage>(
         extract.finalize()
     };
 
-    // 3. Derive sk_wrap_key
     let sk_wrap_label = domain::sk_wrap_key_label(domain);
     let mut sk_wrap_key = Zeroizing::new([0u8; crypto_aead::KEY_SIZE]);
     expander.expand(sk_wrap_label.as_bytes(), sk_wrap_key.as_mut());
 
-    // 4. Derive root_aead_key
     let root_aead_label = domain::root_aead_key_label(domain);
     let mut root_aead_key = Zeroizing::new([0u8; crate::ROOT_BLOCK_KEY_SIZE]);
     expander.expand(root_aead_label.as_bytes(), root_aead_key.as_mut());
 
-    // 5. Try each session in shuffled order
     let mut indices: Vec<u8> = (0..crate::SESSION_COUNT as u8).collect();
     indices.shuffle(&mut rand::rngs::OsRng);
 
     let sk_wrap_aead_key = crypto_aead::Key::from(*sk_wrap_key);
+
+    let mut result: Option<UnlockedSession> = None;
 
     for i in indices {
         let Ok(session) = SessionIndex::new(i) else {
@@ -71,7 +68,6 @@ pub fn unlock_session<S: BlockStorage + KeypairStorage>(
             continue;
         };
 
-        // Try AEAD-unwrap the secret key
         let sk_wrap_aad = domain::sk_wrap_aad(domain, kf.version, session);
         let nonce = crypto_aead::Nonce::from(kf.sk_nonce);
 
@@ -93,38 +89,50 @@ pub fn unlock_session<S: BlockStorage + KeypairStorage>(
             continue;
         };
 
-        // Read total_data_length from block 0
-        // TODO: spec says continue on error here (try all sessions), but since
-        // two sessions should never share a password, a failure after successful
-        // AEAD unwrap means real corruption — returning CorruptedBlock is more
-        // informative than a misleading InvalidPassword. Confirm this is desired.
-        let total_data_length = read_total_length(
-            storage,
-            domain,
-            kf.version,
-            session,
-            &pq_rerand_sk,
-            &root_aead_key,
-        )?;
+        if result.is_none() {
+            let total_data_length = read_total_length(
+                storage,
+                domain,
+                kf.version,
+                session,
+                &pq_rerand_sk,
+                &root_aead_key,
+            )?;
 
-        return Ok(UnlockedSession {
-            session_index: session,
-            session_version: kf.version,
-            pq_rerand_pk,
-            pq_rerand_sk,
-            root_aead_key,
-            total_data_length,
-        });
+            result = Some(UnlockedSession {
+                session_index: session,
+                session_version: kf.version,
+                pq_rerand_pk,
+                pq_rerand_sk,
+                root_aead_key: root_aead_key.clone(),
+                total_data_length,
+            });
+        }
     }
 
-    Err(BordercryptError::InvalidPassword)
+    result.ok_or(BordercryptError::InvalidPassword)
+}
+
+/// Decrypt a single session data block.
+pub(crate) fn decrypt_session_data_block<S: BlockStorage>(
+    storage: &S,
+    domain: &str,
+    version: u32,
+    session: SessionIndex,
+    pq_rerand_sk: &PqSecretKey,
+    root_aead_key: &[u8; crate::ROOT_BLOCK_KEY_SIZE],
+    block_index: u64,
+) -> Result<Zeroizing<[u8; crate::PLAINTEXT_SIZE]>> {
+    if version != 0 {
+        return Err(BordercryptError::UnsupportedVersion(version));
+    }
+    let block_ct = storage.read_block(session, block_index)?;
+    let (aead_sk, aad_root) =
+        derive_block_aead_key(domain, version, session, root_aead_key, block_index);
+    decrypt_block(pq_rerand_sk, &aead_sk, &aad_root, &block_ct)
 }
 
 /// Read total data length from block 0 of a session.
-///
-/// Returns 0 if the session has no blocks.
-///
-/// TODO: replace with `decrypt_session_data_block` once defined in the spec.
 pub(crate) fn read_total_length<S: BlockStorage>(
     storage: &S,
     domain: &str,
@@ -133,18 +141,15 @@ pub(crate) fn read_total_length<S: BlockStorage>(
     pq_rerand_sk: &PqSecretKey,
     root_aead_key: &[u8; crate::ROOT_BLOCK_KEY_SIZE],
 ) -> Result<u64> {
-    let count = storage.block_count(session)?;
-    if count == 0 {
-        return Ok(0);
-    }
-
-    let block_ct = storage.read_block(session, 0)?;
-
-    let mut buf = String::new();
-    let aead_sk = derive_block_aead_key(&mut buf, domain, version, session, root_aead_key, 0);
-    domain::block_aead_aad(&mut buf, domain, version, session, 0);
-
-    let plaintext = decrypt_block(pq_rerand_sk, &aead_sk, &buf, &block_ct)?;
+    let plaintext = decrypt_session_data_block(
+        storage,
+        domain,
+        version,
+        session,
+        pq_rerand_sk,
+        root_aead_key,
+        0,
+    )?;
 
     let length_bytes: [u8; 8] = plaintext[..LENGTH_HDR_SIZE]
         .try_into()
@@ -196,7 +201,7 @@ mod tests {
         rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut nonce_bytes);
         let nonce = crypto_aead::Nonce::from(nonce_bytes);
         let wrap_key = crypto_aead::Key::from(*sk_wrap_key);
-        let sk_ct = crypto_aead::encrypt(&wrap_key, &nonce, &*pq_sk.to_bytes(), aad.as_bytes());
+        let sk_ct = crypto_aead::encrypt(&wrap_key, &nonce, &pq_sk.to_bytes(), aad.as_bytes());
 
         // Write keypair file
         let kf = KeypairFile {
@@ -220,7 +225,6 @@ mod tests {
         pq_pk: &PqPublicKey,
         total_data_length: u64,
     ) {
-        // Derive root_aead_key
         let salt = domain::password_kdf_salt(domain);
         let mut root_key = Zeroizing::new([0u8; 32]);
         crypto_password_kdf::derive(password, salt.as_bytes(), root_key.as_mut());
@@ -236,16 +240,13 @@ mod tests {
         let mut root_aead_key = Zeroizing::new([0u8; crypto_aead::KEY_SIZE]);
         expander.expand(root_aead_label.as_bytes(), root_aead_key.as_mut());
 
-        // Build plaintext for block 0
-        let mut plaintext = [0u8; crate::PLAINTEXT_SIZE];
+        let mut plaintext = Box::new([0u8; crate::PLAINTEXT_SIZE]);
         plaintext[..LENGTH_HDR_SIZE].copy_from_slice(&total_data_length.to_be_bytes());
 
-        let mut buf = String::new();
-        let aead_key =
-            derive_block_aead_key(&mut buf, domain, version, session, &*root_aead_key, 0);
-        domain::block_aead_aad(&mut buf, domain, version, session, 0);
+        let (aead_key, aad_root) =
+            derive_block_aead_key(domain, version, session, &*root_aead_key, 0);
 
-        let ct = encrypt_block(pq_pk, &aead_key, &buf, &plaintext);
+        let ct = encrypt_block(pq_pk, &aead_key, &aad_root, &plaintext);
         let ct_arr: &[u8; crate::BLOCK_SIZE] = ct.as_slice().try_into().unwrap();
         storage.append_block(session, ct_arr).unwrap();
     }
@@ -254,7 +255,8 @@ mod tests {
     fn unlock_success() {
         let mut storage = MemoryStorage::new();
         let session = SessionIndex::new(0).unwrap();
-        provision_test_session(&mut storage, DOMAIN, PASSWORD, session, 0);
+        let (pq_pk, _) = provision_test_session(&mut storage, DOMAIN, PASSWORD, session, 0);
+        write_block_0(&mut storage, DOMAIN, 0, session, PASSWORD, &pq_pk, 0);
 
         let unlocked = unlock_session(&storage, DOMAIN, PASSWORD).unwrap();
         assert_eq!(unlocked.session_index, session);
@@ -266,7 +268,8 @@ mod tests {
     fn unlock_wrong_password() {
         let mut storage = MemoryStorage::new();
         let session = SessionIndex::new(0).unwrap();
-        provision_test_session(&mut storage, DOMAIN, PASSWORD, session, 0);
+        let (pq_pk, _) = provision_test_session(&mut storage, DOMAIN, PASSWORD, session, 0);
+        write_block_0(&mut storage, DOMAIN, 0, session, PASSWORD, &pq_pk, 0);
 
         let result = unlock_session(&storage, DOMAIN, b"wrong-password");
         assert!(result.is_err());
@@ -276,7 +279,8 @@ mod tests {
     fn unlock_finds_correct_slot() {
         let mut storage = MemoryStorage::new();
         let session = SessionIndex::new(3).unwrap();
-        provision_test_session(&mut storage, DOMAIN, PASSWORD, session, 0);
+        let (pq_pk, _) = provision_test_session(&mut storage, DOMAIN, PASSWORD, session, 0);
+        write_block_0(&mut storage, DOMAIN, 0, session, PASSWORD, &pq_pk, 0);
 
         let unlocked = unlock_session(&storage, DOMAIN, PASSWORD).unwrap();
         assert_eq!(unlocked.session_index.as_u8(), 3);
@@ -284,20 +288,29 @@ mod tests {
 
     #[test]
     fn unlock_multiple_sessions() {
-        let mut storage = MemoryStorage::new();
-        let s1 = SessionIndex::new(1).unwrap();
-        let s4 = SessionIndex::new(4).unwrap();
-        let pw1 = b"password-one";
-        let pw2 = b"password-two";
+        std::thread::Builder::new()
+            .stack_size(4 * 1024 * 1024)
+            .spawn(|| {
+                let mut storage = MemoryStorage::new();
+                let s1 = SessionIndex::new(1).unwrap();
+                let s4 = SessionIndex::new(4).unwrap();
+                let pw1 = b"password-one";
+                let pw2 = b"password-two";
 
-        provision_test_session(&mut storage, DOMAIN, pw1, s1, 0);
-        provision_test_session(&mut storage, DOMAIN, pw2, s4, 0);
+                let (pk1, _) = provision_test_session(&mut storage, DOMAIN, pw1, s1, 0);
+                write_block_0(&mut storage, DOMAIN, 0, s1, pw1, &pk1, 0);
+                let (pk4, _) = provision_test_session(&mut storage, DOMAIN, pw2, s4, 0);
+                write_block_0(&mut storage, DOMAIN, 0, s4, pw2, &pk4, 0);
 
-        let u1 = unlock_session(&storage, DOMAIN, pw1).unwrap();
-        assert_eq!(u1.session_index.as_u8(), 1);
+                let u1 = unlock_session(&storage, DOMAIN, pw1).unwrap();
+                assert_eq!(u1.session_index.as_u8(), 1);
 
-        let u2 = unlock_session(&storage, DOMAIN, pw2).unwrap();
-        assert_eq!(u2.session_index.as_u8(), 4);
+                let u2 = unlock_session(&storage, DOMAIN, pw2).unwrap();
+                assert_eq!(u2.session_index.as_u8(), 4);
+            })
+            .unwrap()
+            .join()
+            .unwrap();
     }
 
     #[test]
@@ -311,8 +324,7 @@ mod tests {
     fn unlock_reads_total_length() {
         let mut storage = MemoryStorage::new();
         let session = SessionIndex::new(0).unwrap();
-        let (pq_pk, _pq_sk) = provision_test_session(&mut storage, DOMAIN, PASSWORD, session, 0);
-
+        let (pq_pk, _) = provision_test_session(&mut storage, DOMAIN, PASSWORD, session, 0);
         write_block_0(&mut storage, DOMAIN, 0, session, PASSWORD, &pq_pk, 42);
 
         let unlocked = unlock_session(&storage, DOMAIN, PASSWORD).unwrap();
