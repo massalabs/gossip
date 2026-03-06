@@ -11,6 +11,8 @@ use crate::constants::{AEAD_TAG_SIZE, BLOCK_SIZE, PLAINTEXT_SIZE};
 use crate::error::{BordercryptError, Result};
 use crate::pq::{PQ_MSG_SIZE, PqPublicKey, PqSecretKey, pq_decrypt, pq_encrypt, pq_rerand};
 
+const BLOCK_AEAD_SUFFIX: &str = ":block_aead";
+
 /// Encrypt a plaintext block into an on-disk ciphertext block.
 ///
 /// Flow: random nonce -> AEAD encrypt -> pq-rerand encrypt.
@@ -21,7 +23,7 @@ pub fn encrypt_block(
     aad_root: &str,
     plaintext: &[u8; PLAINTEXT_SIZE],
 ) -> Vec<u8> {
-    let aad = format!("{aad_root}:block_aead");
+    let aad = format!("{aad_root}{BLOCK_AEAD_SUFFIX}");
     let mut nonce_bytes = [0u8; crypto_aead::NONCE_SIZE];
     rand::rngs::OsRng.fill_bytes(&mut nonce_bytes);
     let nonce = crypto_aead::Nonce::from(nonce_bytes);
@@ -45,7 +47,7 @@ pub fn decrypt_block(
     aad_root: &str,
     block_ct: &[u8; BLOCK_SIZE],
 ) -> Result<Zeroizing<[u8; PLAINTEXT_SIZE]>> {
-    let aad = format!("{aad_root}:block_aead");
+    let aad = format!("{aad_root}{BLOCK_AEAD_SUFFIX}");
     let msg = pq_decrypt(pq_sk, block_ct);
 
     let nonce = crypto_aead::Nonce::from(
@@ -74,7 +76,7 @@ pub fn decrypt_block(
 /// under pq-rerand decryption but fails AEAD authentication.
 #[must_use]
 pub fn create_cover_block(pq_pk: &PqPublicKey, aad_root: &str) -> Vec<u8> {
-    let aad = format!("{aad_root}:block_aead");
+    let aad = format!("{aad_root}{BLOCK_AEAD_SUFFIX}");
     let mut rng = rand::rngs::OsRng;
 
     let mut tmp_key_bytes = Zeroizing::new([0u8; crypto_aead::KEY_SIZE]);
