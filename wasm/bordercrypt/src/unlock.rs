@@ -5,9 +5,9 @@ use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 use crate::domain;
 use crate::error::{BordercryptError, Result};
-use crate::read::read_total_length;
 use crate::keypair::read_session_keypair;
 use crate::pq::{PqPublicKey, PqSecretKey};
+use crate::read::read_total_length;
 use crate::storage::{BlockStorage, KeypairStorage};
 use crate::types::SessionIndex;
 
