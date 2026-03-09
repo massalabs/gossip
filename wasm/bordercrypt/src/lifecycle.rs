@@ -129,18 +129,18 @@ pub fn cover_traffic_tick<S: BlockStorage + KeypairStorage>(
     let mut indices: Vec<u8> = (0..SESSION_COUNT as u8).collect();
     indices.shuffle(&mut rand::rngs::OsRng);
 
-    let mut buf = String::new();
+    let mut cur_aad_root = String::new();
     for i in indices {
         let cur_session = SessionIndex::new(i)?;
         let (cur_version, cur_pk_bytes) = read_session_version_and_pk(storage, cur_session)?;
         let cur_pk = PqPublicKey::from_bytes(&cur_pk_bytes)?;
 
         // Computed unconditionally for timing uniformity (spec §15).
-        domain::block_scope(&mut buf, domain, cur_version, cur_session, block_index);
+        domain::block_scope(&mut cur_aad_root, domain, cur_version, cur_session, block_index);
 
         let new_ct = match storage.read_block(cur_session, block_index) {
-            Ok(existing_ct) => rerandomize_block(&cur_pk, &existing_ct),
-            Err(_) => create_cover_block(&cur_pk, &buf),
+            Ok(cur_ct) => rerandomize_block(&cur_pk, &cur_ct),
+            Err(_) => create_cover_block(&cur_pk, &cur_aad_root),
         };
         let ct_arr: &[u8; BLOCK_SIZE] = new_ct
             .as_slice()
