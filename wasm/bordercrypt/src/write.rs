@@ -48,6 +48,12 @@ pub fn encrypt_session_data_block<S: BlockStorage + KeypairStorage>(
     let mut buf = String::new();
     for &i in &indices {
         let cur_session = SessionIndex::new(i).expect("index within SESSION_COUNT");
+        // Read version/pk for ALL sessions (including target) for timing uniformity per spec §11.2
+        let (cur_version, cur_pk_bytes) = read_session_version_and_pk(storage, cur_session)?;
+        let cur_pk = PqPublicKey::from_bytes(&cur_pk_bytes)?;
+
+        // Compute aad_root unconditionally for timing uniformity per spec §11.2
+        domain::block_scope(&mut buf, domain, cur_version, cur_session, block_index);
 
         if cur_session == session.session_index {
             let ct_arr: &[u8; BLOCK_SIZE] = genuine_ct
@@ -56,15 +62,9 @@ pub fn encrypt_session_data_block<S: BlockStorage + KeypairStorage>(
                 .map_err(|_| BordercryptError::CorruptedBlock)?;
             storage.write_block(cur_session, block_index, ct_arr)?;
         } else {
-            let (cur_version, cur_pk_bytes) = read_session_version_and_pk(storage, cur_session)?;
-            let cur_pk = PqPublicKey::from_bytes(&cur_pk_bytes)?;
-
             let new_ct = match storage.read_block(cur_session, block_index) {
                 Ok(existing_ct) => rerandomize_block(&cur_pk, &existing_ct),
-                Err(_) => {
-                    domain::block_scope(&mut buf, domain, cur_version, cur_session, block_index);
-                    create_cover_block(&cur_pk, &buf)
-                }
+                Err(_) => create_cover_block(&cur_pk, &buf),
             };
             let ct_arr: &[u8; BLOCK_SIZE] = new_ct
                 .as_slice()
@@ -155,6 +155,12 @@ fn extend_blockstream_with_session_block<S: BlockStorage + KeypairStorage>(
     let mut buf = String::new();
     for &i in &indices {
         let cur_session = SessionIndex::new(i).expect("index within SESSION_COUNT");
+        // Read version/pk for ALL sessions (including target) for timing uniformity per spec §12.3
+        let (cur_version, cur_pk_bytes) = read_session_version_and_pk(storage, cur_session)?;
+        let cur_pk = PqPublicKey::from_bytes(&cur_pk_bytes)?;
+
+        // Compute aad_root unconditionally for timing uniformity per spec §12.3
+        domain::block_scope(&mut buf, domain, cur_version, cur_session, block_index);
 
         if cur_session == session.session_index {
             let mut pt = Zeroizing::new(vec![0u8; PLAINTEXT_SIZE]);
@@ -179,10 +185,6 @@ fn extend_blockstream_with_session_block<S: BlockStorage + KeypairStorage>(
                 .map_err(|_| BordercryptError::CorruptedBlock)?;
             storage.append_block(cur_session, ct_arr)?;
         } else {
-            let (cur_version, cur_pk_bytes) = read_session_version_and_pk(storage, cur_session)?;
-            let cur_pk = PqPublicKey::from_bytes(&cur_pk_bytes)?;
-
-            domain::block_scope(&mut buf, domain, cur_version, cur_session, block_index);
             let cover = create_cover_block(&cur_pk, &buf);
             let ct_arr: &[u8; BLOCK_SIZE] = cover
                 .as_slice()
@@ -237,21 +239,19 @@ pub fn write_session_data<S: BlockStorage + KeypairStorage>(
 
     // Map logical data offset to virtual plaintext stream position
     let start_pos = hdr.checked_add(offset).ok_or(BordercryptError::Overflow)?;
-    let end_pos = hdr
-        .checked_add(offset)
-        .ok_or(BordercryptError::Overflow)?
+    let end_pos_excl = start_pos
         .checked_add(data_len)
         .ok_or(BordercryptError::Overflow)?;
 
     let first_block = start_pos / ps;
-    let last_block = end_pos.checked_sub(1).ok_or(BordercryptError::Overflow)? / ps;
+    let last_block = end_pos_excl.checked_sub(1).ok_or(BordercryptError::Overflow)? / ps;
 
     for b in first_block..=last_block {
         let block_start = b * ps;
         let block_end = block_start + ps;
 
         let w_start = start_pos.max(block_start);
-        let w_end = end_pos.min(block_end);
+        let w_end = end_pos_excl.min(block_end);
 
         // Full overwrite optimization: skip decrypt for non-block-0 fully overwritten blocks
         let full_overwrite = w_start == block_start && w_end == block_end && b != 0;
@@ -330,14 +330,9 @@ pub fn shrink_session_data<S: BlockStorage + KeypairStorage>(
 
     // --- Step 1: Re-encrypt the new last block with updated content ---
     let mut pt = Zeroizing::new(vec![0u8; PLAINTEXT_SIZE]);
-    if new_total == 0 {
-        // Shrinking to zero: block 0 gets fresh randomness with length header = 0
-        rand::rngs::OsRng.fill_bytes(&mut pt[..]);
-    } else {
-        match decrypt_session_data_block(storage, domain, session, new_last_block) {
-            Ok(existing) => pt.copy_from_slice(existing.as_ref()),
-            Err(_) => rand::rngs::OsRng.fill_bytes(&mut pt[..]),
-        }
+    match decrypt_session_data_block(storage, domain, session, new_last_block) {
+        Ok(existing) => pt.copy_from_slice(existing.as_ref()),
+        Err(_) => rand::rngs::OsRng.fill_bytes(&mut pt[..]),
     }
 
     // Update length header if this is block 0
@@ -388,16 +383,15 @@ pub fn shrink_session_data<S: BlockStorage + KeypairStorage>(
             let (cur_version, cur_pk_bytes) = read_session_version_and_pk(storage, cur_session)?;
             let cur_pk = PqPublicKey::from_bytes(&cur_pk_bytes)?;
 
+            // Compute aad_root unconditionally for timing uniformity per spec §14.3
+            domain::block_scope(&mut buf, domain, cur_version, cur_session, b);
+
             let new_ct = if cur_session == session.session_index {
-                domain::block_scope(&mut buf, domain, cur_version, cur_session, b);
                 create_cover_block(&cur_pk, &buf)
             } else {
                 match storage.read_block(cur_session, b) {
                     Ok(existing_ct) => rerandomize_block(&cur_pk, &existing_ct),
-                    Err(_) => {
-                        domain::block_scope(&mut buf, domain, cur_version, cur_session, b);
-                        create_cover_block(&cur_pk, &buf)
-                    }
+                    Err(_) => create_cover_block(&cur_pk, &buf),
                 }
             };
             let ct_arr: &[u8; BLOCK_SIZE] = new_ct
