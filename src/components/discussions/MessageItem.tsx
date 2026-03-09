@@ -427,6 +427,8 @@ const MessageItem: React.FC<MessageItemProps> = ({
       }
 
       if (isHorizontalSwipe) {
+        // Prevent iOS from scrolling the parent container during swipe
+        e.preventDefault();
         isSwiping.current = true;
         const resistance = isOutgoing
           ? SWIPE_RESISTANCE_OUTGOING

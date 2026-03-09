@@ -130,7 +130,7 @@ const MessageContextMenu: React.FC<MessageContextMenuProps> = ({
         ref={menuRef}
         role="menu"
         aria-label="Message actions"
-        className={`fixed min-w-[180px] bg-card border border-border rounded-xl shadow-xl overflow-hidden ${
+        className={`fixed min-w-[200px] bg-card border border-border rounded-lg shadow-xl overflow-hidden ${
           mounted ? 'opacity-100' : 'opacity-0 scale-95'
         } ${touchReady ? '' : 'pointer-events-none'}`}
         style={{
@@ -143,7 +143,7 @@ const MessageContextMenu: React.FC<MessageContextMenuProps> = ({
             'transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s ease-out',
         }}
       >
-        {items.map(item => (
+        {items.map((item, index) => (
           <button
             key={item.label}
             role="menuitem"
@@ -152,16 +152,16 @@ const MessageContextMenu: React.FC<MessageContextMenuProps> = ({
               onClose();
               item.onClick();
             }}
-            className={`hover-fill w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-left ${
+            className={`hover-fill w-full flex items-center justify-between gap-3 px-4 py-3 text-sm font-medium text-left ${
               item.danger ? 'text-destructive' : 'text-foreground'
-            }`}
+            } ${index < items.length - 1 ? 'border-b border-border' : ''}`}
           >
+            <span className="relative">{item.label}</span>
             {item.icon && (
-              <span className="relative w-5 h-5 shrink-0 flex items-center justify-center">
+              <span className="w-6 h-6 rounded-full bg-muted shrink-0 flex items-center justify-center text-accent [&>svg]:w-3.5 [&>svg]:h-3.5">
                 {item.icon}
               </span>
             )}
-            <span className="relative">{item.label}</span>
           </button>
         ))}
       </div>
