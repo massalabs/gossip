@@ -114,7 +114,10 @@ pub fn read_session_data<S: BlockStorage>(
     let end_pos_excl = hdr.checked_add(end).ok_or(BordercryptError::Overflow)?;
 
     let first_block = start_pos / ps;
-    let last_block = end_pos_excl.checked_sub(1).ok_or(BordercryptError::Overflow)? / ps;
+    let last_block = end_pos_excl
+        .checked_sub(1)
+        .ok_or(BordercryptError::Overflow)?
+        / ps;
 
     let mut result = Zeroizing::new(Vec::with_capacity(length));
 
