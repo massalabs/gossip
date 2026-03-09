@@ -36,7 +36,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const prevInitialValueRef = useRef(initialValue);
   const hasInitialFocusRef = useRef(false);
-  const { isKeyboardVisible } = useKeyboardVisible();
+  const { isKeyboardVisibleRef } = useKeyboardVisible();
   const isRefocusingRef = useRef(false);
   const isForwarding = !!forwardPreview;
   const sendButtonDisabled = disabled || (!newMessage.trim() && !isForwarding);
@@ -288,7 +288,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
               onFocus?.();
             }}
             onBlur={e => {
-              if (!isKeyboardVisible) return;
+              if (!isKeyboardVisibleRef.current) return;
               const next = e.relatedTarget as HTMLElement | null;
               if (next?.tagName === 'INPUT' || next?.tagName === 'TEXTAREA')
                 return;

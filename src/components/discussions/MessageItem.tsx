@@ -26,6 +26,7 @@ import {
 import { useGossipSdk } from '../../hooks/useGossipSdk';
 import { parseLinks, openUrl } from '../../utils/linkUtils';
 import { useMarkMessageAsRead } from '../../hooks/useMarkMessageAsRead';
+import { useKeyboardVisible } from '../../hooks/useKeyboardVisible';
 import ContactAvatar from '../avatar/ContactAvatar';
 import type { Contact } from '@massalabs/gossip-sdk';
 
@@ -110,6 +111,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
     right?: number;
   } | null>(null);
   const contextMenuOpenRef = useRef(false);
+  const { keyboardHeightRef } = useKeyboardVisible();
 
   const openContextMenu = useCallback(() => {
     if (!bubbleRef.current || contextMenuOpenRef.current) return;
@@ -124,7 +126,11 @@ const MessageItem: React.FC<MessageItemProps> = ({
         getComputedStyle(document.documentElement).getPropertyValue('--sab')
       ) || 0;
     const pad = 16 + sab;
-    const vh = window.innerHeight;
+    const vh = Math.min(
+      document.documentElement.clientHeight,
+      window.visualViewport?.height ?? Infinity,
+      window.innerHeight - keyboardHeightRef.current
+    );
 
     // Menu appears right below the bubble
     const menuTop = rect.bottom + gap;
@@ -148,7 +154,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
     });
     contextMenuOpenRef.current = true;
     setIsContextMenuOpen(true);
-  }, [canReply, canForward, isOutgoing]);
+  }, [canReply, canForward, isOutgoing, keyboardHeightRef]);
 
   const closeContextMenu = useCallback(() => {
     contextMenuOpenRef.current = false;
