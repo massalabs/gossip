@@ -13,7 +13,7 @@ import AppearanceSettings from '../pages/settings/AppearanceSettings';
 import AboutSettings from '../pages/settings/AboutSettings';
 import DebugSettings from '../pages/settings/DebugSettings';
 import AccountBackupPage from '../pages/settings/AccountBackupPage';
-import ShareContactPage from '../pages/settings/ShareContactPage';
+import QRCodeSwitcher from '../pages/settings/QRCodeSwitcher';
 import Web3Settings from '../pages/settings/Web3Settings';
 import ContactSharePage from '../pages/ContactSharePage';
 import { InvitePage } from '../pages/InvitePage';
@@ -67,7 +67,7 @@ export const AuthenticatedRoutes: React.FC = () => {
         />
         <Route
           path={ROUTES.settingsShareContact()}
-          element={<ShareContactPage />}
+          element={<QRCodeSwitcher />}
         />
         <Route path={ROUTES.settingsWeb3()} element={<Web3Settings />} />
         <Route path={ROUTES.settings()} element={<Settings />} />
