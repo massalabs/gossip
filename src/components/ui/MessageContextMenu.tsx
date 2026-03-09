@@ -15,6 +15,12 @@ interface MessageContextMenuProps {
   isOutgoing: boolean;
   position: { top: number; left?: number; right?: number } | null;
   translateY?: number;
+  bubbleRect?: {
+    top: number;
+    left: number;
+    width: number;
+    height: number;
+  } | null;
 }
 
 const MessageContextMenu: React.FC<MessageContextMenuProps> = ({
@@ -24,6 +30,7 @@ const MessageContextMenu: React.FC<MessageContextMenuProps> = ({
   isOutgoing,
   position,
   translateY = 0,
+  bubbleRect,
 }) => {
   const [mounted, setMounted] = useState(false);
   const [touchReady, setTouchReady] = useState(false);
@@ -92,14 +99,39 @@ const MessageContextMenu: React.FC<MessageContextMenuProps> = ({
 
   return createPortal(
     <div className="fixed inset-0 z-1000">
-      {/* Glass blur backdrop */}
+      {/* Click handler layer */}
       <div
-        className={`absolute inset-0 bg-white/50 dark:bg-black/50 transition-opacity duration-300 ${
-          mounted ? 'opacity-100' : 'opacity-0'
-        }`}
+        className={`absolute inset-0 ${touchReady ? '' : 'pointer-events-none'}`}
         onClick={onClose}
         data-testid="context-menu-backdrop"
       />
+
+      {/* Spotlight overlay — dims everything except the selected bubble */}
+      {bubbleRect ? (
+        <div
+          className={`absolute pointer-events-none transition-opacity duration-300 ${
+            mounted ? 'opacity-100' : 'opacity-0'
+          }`}
+          style={{
+            top: bubbleRect.top,
+            left: bubbleRect.left,
+            width: bubbleRect.width,
+            height: bubbleRect.height,
+            borderRadius: 24,
+            boxShadow: `0 0 0 200vmax ${
+              document.documentElement.classList.contains('dark')
+                ? 'rgba(0,0,0,0.5)'
+                : 'rgba(255,255,255,0.5)'
+            }`,
+          }}
+        />
+      ) : (
+        <div
+          className={`absolute inset-0 bg-white/50 dark:bg-black/50 pointer-events-none transition-opacity duration-300 ${
+            mounted ? 'opacity-100' : 'opacity-0'
+          }`}
+        />
+      )}
 
       {/* Floating menu — positioned right below the bubble */}
       <div

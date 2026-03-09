@@ -26,7 +26,8 @@ import {
 import { useGossipSdk } from '../../hooks/useGossipSdk';
 import { parseLinks, openUrl } from '../../utils/linkUtils';
 import { useMarkMessageAsRead } from '../../hooks/useMarkMessageAsRead';
-import { useKeyboardVisible } from '../../hooks/useKeyboardVisible';
+import { getKeyboardHeight } from '../../hooks/useKeyboardVisible';
+import { Capacitor } from '@capacitor/core';
 import ContactAvatar from '../avatar/ContactAvatar';
 import type { Contact } from '@massalabs/gossip-sdk';
 
@@ -104,14 +105,24 @@ const MessageItem: React.FC<MessageItemProps> = ({
 
   // Context menu state
   const [isContextMenuOpen, setIsContextMenuOpen] = useState(false);
+  const [contextMenuTranslateX, setContextMenuTranslateX] = useState(0);
   const [contextMenuTranslateY, setContextMenuTranslateY] = useState(0);
   const [menuPosition, setMenuPosition] = useState<{
     top: number;
     left?: number;
     right?: number;
   } | null>(null);
+  const [bubbleRect, setBubbleRect] = useState<{
+    top: number;
+    left: number;
+    width: number;
+    height: number;
+  } | null>(null);
   const contextMenuOpenRef = useRef(false);
-  const { keyboardHeightRef } = useKeyboardVisible();
+  // Snapshot the keyboard height at touchstart — on iOS the keyboard may start
+  // dismissing during the 500ms long-press delay, zeroing the live value before
+  // openContextMenu fires.
+  const kbHeightSnapshotRef = useRef(0);
 
   const openContextMenu = useCallback(() => {
     if (!bubbleRef.current || contextMenuOpenRef.current) return;
@@ -126,46 +137,81 @@ const MessageItem: React.FC<MessageItemProps> = ({
         getComputedStyle(document.documentElement).getPropertyValue('--sab')
       ) || 0;
     const pad = 16 + sab;
+    // On Android, clientHeight/visualViewport already shrink with the keyboard.
+    // On iOS they don't, so we subtract the keyboard height manually.
+    // Use the snapshot taken at touchstart to avoid stale values.
+    const kbAdjust =
+      Capacitor.getPlatform() === 'ios' ? kbHeightSnapshotRef.current : 0;
     const vh = Math.min(
       document.documentElement.clientHeight,
       window.visualViewport?.height ?? Infinity,
-      window.innerHeight - keyboardHeightRef.current
+      window.innerHeight - kbAdjust
     );
 
-    // Menu appears right below the bubble
-    const menuTop = rect.bottom + gap;
+    // For tall bubbles that take up most of the viewport, don't translate —
+    // just overlay the menu at the bottom of the visible area.
+    const tall = rect.height > vh * 0.5;
 
-    // If menu would overflow the viewport, translate bubble up
+    let tx = 0;
     let ty = 0;
-    if (menuTop + menuHeight > vh - pad) {
-      ty = -(menuTop + menuHeight - (vh - pad));
-    }
-    // Don't push bubble above viewport
-    if (rect.top + ty < pad) {
-      ty = pad - rect.top;
+    let menuY: number;
+
+    if (tall) {
+      // Subtle diagonal nudge so the bubble feels "selected"
+      tx = isOutgoing ? -6 : 6;
+      ty = -6;
+      // Try below bubble first; only overlap if it would overflow
+      menuY = rect.bottom + gap;
+      if (menuY + menuHeight > vh - pad) {
+        menuY = vh - pad - menuHeight;
+      }
+    } else {
+      // Menu appears right below the bubble
+      menuY = rect.bottom + gap;
+
+      // If menu would overflow the viewport, translate bubble up
+      if (menuY + menuHeight > vh - pad) {
+        ty = -(menuY + menuHeight - (vh - pad));
+      }
+      // Don't push bubble above viewport
+      if (rect.top + ty < pad) {
+        ty = pad - rect.top;
+      }
     }
 
+    setContextMenuTranslateX(tx);
     setContextMenuTranslateY(ty);
     setMenuPosition({
-      top: rect.bottom + gap,
+      top: menuY,
       ...(isOutgoing
         ? { right: window.innerWidth - rect.right }
         : { left: rect.left }),
     });
+    setBubbleRect({
+      top: rect.top + ty,
+      left: rect.left + tx,
+      width: rect.width,
+      height: rect.height,
+    });
     contextMenuOpenRef.current = true;
     setIsContextMenuOpen(true);
-  }, [canReply, canForward, isOutgoing, keyboardHeightRef]);
+  }, [canReply, canForward, isOutgoing]);
 
   const closeContextMenu = useCallback(() => {
     contextMenuOpenRef.current = false;
     setIsContextMenuOpen(false);
+    setContextMenuTranslateX(0);
     setContextMenuTranslateY(0);
     setMenuPosition(null);
+    setBubbleRect(null);
   }, []);
 
+  // Long press reserved for future action
   const longPress = useLongPress({
-    onLongPress: openContextMenu,
+    onLongPress: () => {},
   });
+  // Suppress click after gestures (swipe / long-press / scroll)
+  const suppressClickRef = useRef(false);
 
   // Context menu items
   const contextMenuItems = useMemo<MessageContextMenuItem[]>(() => {
@@ -254,22 +300,28 @@ const MessageItem: React.FC<MessageItemProps> = ({
     sdk,
   ]);
 
+  const handleBubbleClick = useCallback(() => {
+    if (suppressClickRef.current) {
+      suppressClickRef.current = false;
+      return;
+    }
+    openContextMenu();
+  }, [openContextMenu]);
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      if ((e.key === 'Enter' || e.key === ' ') && canReply && onReplyTo) {
-        e.preventDefault();
-        onReplyTo(message);
-      }
       if (e.key === 'F10' && e.shiftKey) {
         e.preventDefault();
         openContextMenu();
       }
     },
-    [canReply, onReplyTo, message, openContextMenu]
+    [openContextMenu]
   );
 
   const handleTouchStart = useCallback(
     (e: React.TouchEvent) => {
+      // Snapshot keyboard height before it can dismiss during long-press delay
+      kbHeightSnapshotRef.current = getKeyboardHeight();
       longPress.onTouchStart(e);
       if (!canReply && !canForward) return;
       const touch = e.touches[0];
@@ -350,8 +402,9 @@ const MessageItem: React.FC<MessageItemProps> = ({
         return;
       }
 
-      // If long-press fired, skip swipe action and reset
+      // If long-press fired, suppress tap and reset
       if (longPress.longPressTriggered.current) {
+        suppressClickRef.current = true;
         setIsAnimatingBack(true);
         setSwipeOffset(0);
         touchStartX.current = null;
@@ -369,6 +422,11 @@ const MessageItem: React.FC<MessageItemProps> = ({
       if (isRightSwipeCompleted && onReplyTo) {
         onReplyTo(message);
         swipeCompleted.current = true;
+      }
+
+      // Suppress tap after any swipe gesture
+      if (touchSlopExceeded.current || isSwiping.current) {
+        suppressClickRef.current = true;
       }
 
       // Animate back with spring effect
@@ -489,7 +547,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
   return (
     <div
       id={id}
-      className={`flex items-end gap-1 ${isOutgoing ? 'justify-end' : 'justify-start'} group relative ${spacingClass} ${isHighlighted ? 'search-highlight' : ''} ${isContextMenuOpen ? 'z-[1001] pointer-events-none' : ''}`}
+      className={`flex items-end gap-1 ${isOutgoing ? 'justify-end' : 'justify-start'} group relative ${spacingClass} ${isHighlighted ? 'search-highlight' : ''}`}
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
@@ -509,25 +567,27 @@ const MessageItem: React.FC<MessageItemProps> = ({
       )}
       <div
         ref={combinedBubbleRef}
-        className={`relative max-w-[80%] sm:max-w-[70%] md:max-w-[65%] lg:max-w-[60%] px-3.5 py-3 font-normal text-[15px] leading-tight animate-bubble-in select-none ${borderRadiusClass} ${
+        className={`relative max-w-[80%] sm:max-w-[70%] md:max-w-[65%] lg:max-w-[60%] px-3.5 py-3 font-normal text-[15px] leading-tight animate-bubble-in select-none ${isContextMenuOpen ? 'rounded-3xl' : borderRadiusClass} ${
           isOutgoing
             ? 'ml-auto mr-3 bg-accent text-accent-foreground'
             : `${contact ? '' : 'ml-3'} mr-auto bg-surface-secondary text-card-foreground`
         } ${
           canReply ? 'cursor-pointer hover:opacity-90 focus:outline-none' : ''
-        } ${isContextMenuOpen ? 'z-[1001] shadow-lg pointer-events-auto' : ''}`}
+        } ${isContextMenuOpen ? 'shadow-lg' : ''}`}
+        onClick={handleBubbleClick}
         onKeyDown={handleKeyDown}
-        tabIndex={canReply ? 0 : undefined}
-        role={canReply ? 'button' : undefined}
-        aria-label={canReply ? 'Long press for actions' : undefined}
+        tabIndex={0}
+        role="button"
+        aria-label="Tap for actions"
         style={{
           transform: isContextMenuOpen
-            ? `translateY(${contextMenuTranslateY}px)`
+            ? `translate(${contextMenuTranslateX}px, ${contextMenuTranslateY}px)`
             : swipeOffset !== 0
               ? `translateX(${swipeOffset}px)`
               : 'translateX(0)',
+          filter: isContextMenuOpen ? 'brightness(0.95)' : undefined,
           transition: isContextMenuOpen
-            ? 'transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s ease-out'
+            ? 'transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s ease-out, border-radius 0.3s ease-out, filter 0.2s ease-out'
             : isAnimatingBack
               ? 'transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)'
               : 'none',
@@ -798,7 +858,10 @@ const MessageItem: React.FC<MessageItemProps> = ({
         {/* Hover arrow for desktop context menu */}
         <button
           type="button"
-          onClick={openContextMenu}
+          onClick={e => {
+            e.stopPropagation();
+            openContextMenu();
+          }}
           className="absolute top-1.5 right-2 p-0.5 opacity-0 group-hover:opacity-100 transition-opacity hidden md:flex items-center justify-center"
           aria-label="Message actions"
         >
@@ -813,6 +876,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
         isOutgoing={isOutgoing}
         position={menuPosition}
         translateY={contextMenuTranslateY}
+        bubbleRect={bubbleRect}
       />
     </div>
   );

@@ -3,6 +3,35 @@ import type React from 'react';
 import { Keyboard, KeyboardInfo } from '@capacitor/keyboard';
 import { Capacitor } from '@capacitor/core';
 
+// ---------------------------------------------------------------------------
+// Module-level singleton — tracks keyboard height independently of any React
+// component lifecycle.  This lets code that mounts *after* the keyboard is
+// already open read the correct height via `getKeyboardHeight()`.
+// ---------------------------------------------------------------------------
+let _kbHeight = 0;
+let _kbListenersReady = false;
+
+function setupKeyboardTracking() {
+  if (_kbListenersReady || !Capacitor.isNativePlatform()) return;
+  _kbListenersReady = true;
+  Keyboard.addListener('keyboardWillShow', (info: KeyboardInfo) => {
+    _kbHeight = info.keyboardHeight;
+  });
+  Keyboard.addListener('keyboardWillHide', () => {
+    _kbHeight = 0;
+  });
+}
+
+/**
+ * Returns the current keyboard height (px) without needing a React hook.
+ * Safe to call from event handlers, callbacks, or components that mounted
+ * after the keyboard was already open.
+ */
+export function getKeyboardHeight(): number {
+  setupKeyboardTracking();
+  return _kbHeight;
+}
+
 /**
  * Hook to detect if the virtual keyboard  * Uses the @capacitor/keyboard plugin for native keyboard events.
  * Uses 'keyboardWillShow/Hide' events for instant response (before animation).

@@ -22,6 +22,7 @@ import { useGossipSdk } from '../hooks/useGossipSdk';
 import { isDifferentDay } from '../utils/timeUtils';
 import { useUiStore } from '../stores/uiStore';
 import SessionIssueBanner from '../components/discussions/SessionIssueBanner';
+import { useKeyboardVisible } from '../hooks/useKeyboardVisible';
 
 // Debug test message constants
 const TEST_MESSAGE_COUNT = 50;
@@ -152,6 +153,19 @@ const Discussion: React.FC = () => {
   const handleAtBottomChange = useCallback((atBottom: boolean) => {
     setShowScrollToBottom(!atBottom);
   }, []);
+
+  // On iOS, when the keyboard opens the body resizes but Virtuoso doesn't
+  // adjust the scroll position — the last messages end up behind the keyboard.
+  // Scroll to bottom after layout settles, but only if user was already there.
+  const { isKeyboardVisible } = useKeyboardVisible();
+  useEffect(() => {
+    if (!isKeyboardVisible) return;
+    if (!messageListRef.current?.isAtBottom) return;
+    const id = setTimeout(() => {
+      messageListRef.current?.scrollToBottom();
+    }, 350);
+    return () => clearTimeout(id);
+  }, [isKeyboardVisible]);
 
   // Track timeout for message highlight
   const highlightTimeoutRef = useRef<NodeJS.Timeout | null>(null);
