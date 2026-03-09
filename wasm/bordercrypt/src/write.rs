@@ -30,7 +30,9 @@ pub fn encrypt_session_data_block<S: BlockStorage + KeypairStorage>(
     plaintext: &[u8; PLAINTEXT_SIZE],
 ) -> Result<()> {
     if session.session_version != 0 {
-        return Err(BordercryptError::UnsupportedVersion(session.session_version));
+        return Err(BordercryptError::UnsupportedVersion(
+            session.session_version,
+        ));
     }
 
     let (aead_sk, aad_root) = derive_block_aead_key(
@@ -53,7 +55,13 @@ pub fn encrypt_session_data_block<S: BlockStorage + KeypairStorage>(
         let cur_pk = PqPublicKey::from_bytes(&cur_pk_bytes)?;
 
         // Compute cur_aad_root unconditionally for timing uniformity per spec §11.2
-        domain::block_scope(&mut cur_aad_root, domain, cur_version, cur_session, block_index);
+        domain::block_scope(
+            &mut cur_aad_root,
+            domain,
+            cur_version,
+            cur_session,
+            block_index,
+        );
 
         if cur_session == session.session_index {
             let ct_arr: &[u8; BLOCK_SIZE] = genuine_ct
@@ -160,7 +168,13 @@ fn extend_blockstream_with_session_block<S: BlockStorage + KeypairStorage>(
         let cur_pk = PqPublicKey::from_bytes(&cur_pk_bytes)?;
 
         // Compute cur_aad_root unconditionally for timing uniformity per spec §12.3
-        domain::block_scope(&mut cur_aad_root, domain, cur_version, cur_session, block_index);
+        domain::block_scope(
+            &mut cur_aad_root,
+            domain,
+            cur_version,
+            cur_session,
+            block_index,
+        );
 
         if cur_session == session.session_index {
             let mut pt = Zeroizing::new(vec![0u8; PLAINTEXT_SIZE]);
@@ -210,7 +224,9 @@ pub fn write_session_data<S: BlockStorage + KeypairStorage>(
     data: &[u8],
 ) -> Result<()> {
     if session.session_version != 0 {
-        return Err(BordercryptError::UnsupportedVersion(session.session_version));
+        return Err(BordercryptError::UnsupportedVersion(
+            session.session_version,
+        ));
     }
     if data.is_empty() {
         return Ok(());
@@ -244,7 +260,10 @@ pub fn write_session_data<S: BlockStorage + KeypairStorage>(
         .ok_or(BordercryptError::Overflow)?;
 
     let first_block = start_pos / ps;
-    let last_block = end_pos_excl.checked_sub(1).ok_or(BordercryptError::Overflow)? / ps;
+    let last_block = end_pos_excl
+        .checked_sub(1)
+        .ok_or(BordercryptError::Overflow)?
+        / ps;
 
     for b in first_block..=last_block {
         let block_start_pos = b * ps;
@@ -655,14 +674,14 @@ mod tests {
 
         // Read total length from block 0 header
         let total = crate::read::read_total_length(
-                &storage,
-                DOMAIN,
-                session.session_version,
-                session.session_index,
-                &session.pq_rerand_sk,
-                session.root_aead_key.as_ref(),
-            )
-            .unwrap();
+            &storage,
+            DOMAIN,
+            session.session_version,
+            session.session_index,
+            &session.pq_rerand_sk,
+            session.root_aead_key.as_ref(),
+        )
+        .unwrap();
         assert_eq!(total, 50);
     }
 
@@ -733,14 +752,14 @@ mod tests {
         assert_eq!(session.total_data_length, 50);
 
         let total = crate::read::read_total_length(
-                &storage,
-                DOMAIN,
-                session.session_version,
-                session.session_index,
-                &session.pq_rerand_sk,
-                session.root_aead_key.as_ref(),
-            )
-            .unwrap();
+            &storage,
+            DOMAIN,
+            session.session_version,
+            session.session_index,
+            &session.pq_rerand_sk,
+            session.root_aead_key.as_ref(),
+        )
+        .unwrap();
         assert_eq!(total, 50);
     }
 
@@ -819,14 +838,14 @@ mod tests {
         assert_eq!(session.total_data_length, 0);
 
         let total = crate::read::read_total_length(
-                &storage,
-                DOMAIN,
-                session.session_version,
-                session.session_index,
-                &session.pq_rerand_sk,
-                session.root_aead_key.as_ref(),
-            )
-            .unwrap();
+            &storage,
+            DOMAIN,
+            session.session_version,
+            session.session_index,
+            &session.pq_rerand_sk,
+            session.root_aead_key.as_ref(),
+        )
+        .unwrap();
         assert_eq!(total, 0);
 
         // Blockstream length unchanged
