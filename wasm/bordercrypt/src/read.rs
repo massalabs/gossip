@@ -11,6 +11,30 @@ use crate::storage::BlockStorage;
 use crate::types::SessionIndex;
 use crate::unlock::UnlockedSession;
 
+/// Internal helper to decrypt a single block given all session parameters.
+fn _decrypt_session_data_block<S: BlockStorage>(
+    storage: &S,
+    domain: &str,
+    session_version: u32,
+    session_index: SessionIndex,
+    pq_rerand_sk: &PqSecretKey,
+    root_aead_key: &[u8],
+    block_index: u64,
+) -> Result<Zeroizing<[u8; PLAINTEXT_SIZE]>> {
+    if session_version != 0 {
+        return Err(BordercryptError::UnsupportedVersion(session_version));
+    }
+    let block_ct = storage.read_block(session_index, block_index)?;
+    let (aead_sk, aad_root) = derive_block_aead_key(
+        domain,
+        session_version,
+        session_index,
+        root_aead_key,
+        block_index,
+    );
+    decrypt_block(pq_rerand_sk, &aead_sk, &aad_root, &block_ct)
+}
+
 /// Decrypt a single data block from an unlocked session.
 pub fn decrypt_session_data_block<S: BlockStorage>(
     storage: &S,
@@ -18,18 +42,15 @@ pub fn decrypt_session_data_block<S: BlockStorage>(
     session: &UnlockedSession,
     block_index: u64,
 ) -> Result<Zeroizing<[u8; PLAINTEXT_SIZE]>> {
-    if session.session_version != 0 {
-        return Err(BordercryptError::UnsupportedVersion(session.session_version));
-    }
-    let block_ct = storage.read_block(session.session_index, block_index)?;
-    let (aead_sk, aad_root) = derive_block_aead_key(
+    _decrypt_session_data_block(
+        storage,
         domain,
         session.session_version,
         session.session_index,
+        &session.pq_rerand_sk,
         session.root_aead_key.as_ref(),
         block_index,
-    );
-    decrypt_block(&session.pq_rerand_sk, &aead_sk, &aad_root, &block_ct)
+    )
 }
 
 /// Read total data length by decrypting block 0.
@@ -46,13 +67,15 @@ pub fn read_total_length<S: BlockStorage>(
     if storage.block_count(session_index)? == 0 {
         return Ok(0);
     }
-    if version != 0 {
-        return Err(BordercryptError::UnsupportedVersion(version));
-    }
-    let block_ct = storage.read_block(session_index, 0)?;
-    let (aead_sk, aad_root) =
-        derive_block_aead_key(domain, version, session_index, root_aead_key, 0);
-    let plaintext = decrypt_block(pq_rerand_sk, &aead_sk, &aad_root, &block_ct)?;
+    let plaintext = _decrypt_session_data_block(
+        storage,
+        domain,
+        version,
+        session_index,
+        pq_rerand_sk,
+        root_aead_key,
+        0,
+    )?;
     let length_bytes: [u8; 8] = plaintext[..LENGTH_HDR_SIZE]
         .try_into()
         .map_err(|_| BordercryptError::CorruptedBlock)?;
