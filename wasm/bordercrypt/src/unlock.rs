@@ -5,7 +5,7 @@ use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 use crate::domain;
 use crate::error::{BordercryptError, Result};
-use crate::read::read_total_length_raw;
+use crate::read::read_total_length;
 use crate::keypair::read_session_keypair;
 use crate::pq::{PqPublicKey, PqSecretKey};
 use crate::storage::{BlockStorage, KeypairStorage};
@@ -88,18 +88,14 @@ pub fn unlock_session<S: BlockStorage + KeypairStorage>(
         };
 
         if result.is_none() {
-            let total_data_length = if storage.block_count(session)? == 0 {
-                0
-            } else {
-                read_total_length_raw(
-                    storage,
-                    domain,
-                    kf.version,
-                    session,
-                    &pq_rerand_sk,
-                    &*root_aead_key,
-                )?
-            };
+            let total_data_length = read_total_length(
+                storage,
+                domain,
+                kf.version,
+                session,
+                &pq_rerand_sk,
+                &*root_aead_key,
+            )?;
 
             result = Some(UnlockedSession {
                 session_index: session,
