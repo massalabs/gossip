@@ -64,6 +64,8 @@ pub fn read_total_length<S: BlockStorage>(
     pq_rerand_sk: &PqSecretKey,
     root_aead_key: &[u8],
 ) -> Result<u64> {
+    // If there are no blocks, we can't read a length header, but we can infer that
+    // the length is 0 for all sessions since they all have the same number of blocks
     if storage.block_count(session_index)? == 0 {
         return Ok(0);
     }
