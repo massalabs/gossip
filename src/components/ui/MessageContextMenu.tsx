@@ -39,19 +39,11 @@ const MessageContextMenu: React.FC<MessageContextMenuProps> = ({
   useEffect(() => {
     if (isOpen) {
       const id = requestAnimationFrame(() => setMounted(true));
-      // Enable interaction shortly after the long-press touch ends,
-      // so the lift itself doesn't activate a menu item.
-      let timer: ReturnType<typeof setTimeout>;
-      const enable = () => {
-        timer = setTimeout(() => setTouchReady(true), 80);
-      };
-      document.addEventListener('touchend', enable, { once: true });
-      document.addEventListener('mouseup', enable, { once: true });
+      // Short delay so the opening tap doesn't accidentally hit a menu item
+      const timer = setTimeout(() => setTouchReady(true), 120);
       return () => {
         cancelAnimationFrame(id);
         clearTimeout(timer);
-        document.removeEventListener('touchend', enable);
-        document.removeEventListener('mouseup', enable);
       };
     }
     setMounted(false);

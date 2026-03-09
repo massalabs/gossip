@@ -206,9 +206,68 @@ const MessageItem: React.FC<MessageItemProps> = ({
     setBubbleRect(null);
   }, []);
 
-  // Long press reserved for future action
+  // Text selection on long press
+  const [isTextSelectable, setIsTextSelectable] = useState(false);
+  const longPressPosRef = useRef<{ x: number; y: number } | null>(null);
+
+  const enableTextSelection = useCallback(() => {
+    if (!bubbleRef.current || contextMenuOpenRef.current) return;
+    // Enable selection immediately so caretRangeFromPoint works
+    bubbleRef.current.style.userSelect = 'text';
+    (
+      bubbleRef.current.style as unknown as Record<string, string>
+    ).webkitUserSelect = 'text';
+    setIsTextSelectable(true);
+
+    requestAnimationFrame(() => {
+      const pos = longPressPosRef.current;
+      if (!pos) return;
+      const range = document.caretRangeFromPoint(pos.x, pos.y);
+      if (!range) return;
+      const sel = window.getSelection();
+      if (!sel) return;
+      sel.removeAllRanges();
+      sel.addRange(range);
+      try {
+        sel.modify('move', 'backward', 'word');
+        sel.modify('extend', 'forward', 'word');
+      } catch {
+        // modify not available — selection stays at caret
+      }
+    });
+  }, []);
+
+  const clearTextSelection = useCallback(() => {
+    window.getSelection()?.removeAllRanges();
+    setIsTextSelectable(false);
+    if (bubbleRef.current) {
+      bubbleRef.current.style.userSelect = '';
+      (
+        bubbleRef.current.style as unknown as Record<string, string>
+      ).webkitUserSelect = '';
+    }
+  }, []);
+
+  // Deselect when tapping outside the bubble
+  useEffect(() => {
+    if (!isTextSelectable) return;
+    const handleOutsideTouch = (e: TouchEvent) => {
+      if (bubbleRef.current && !bubbleRef.current.contains(e.target as Node)) {
+        clearTextSelection();
+      }
+    };
+    // Delay so the long-press touchend doesn't immediately clear
+    const timer = setTimeout(() => {
+      document.addEventListener('touchstart', handleOutsideTouch);
+    }, 100);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('touchstart', handleOutsideTouch);
+    };
+  }, [isTextSelectable, clearTextSelection]);
+
   const longPress = useLongPress({
-    onLongPress: () => {},
+    onLongPress: enableTextSelection,
   });
   // Suppress click after gestures (swipe / long-press / scroll)
   const suppressClickRef = useRef(false);
@@ -305,8 +364,12 @@ const MessageItem: React.FC<MessageItemProps> = ({
       suppressClickRef.current = false;
       return;
     }
+    if (isTextSelectable) {
+      clearTextSelection();
+      return;
+    }
     openContextMenu();
-  }, [openContextMenu]);
+  }, [openContextMenu, isTextSelectable, clearTextSelection]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -322,9 +385,10 @@ const MessageItem: React.FC<MessageItemProps> = ({
     (e: React.TouchEvent) => {
       // Snapshot keyboard height before it can dismiss during long-press delay
       kbHeightSnapshotRef.current = getKeyboardHeight();
-      longPress.onTouchStart(e);
-      if (!canReply && !canForward) return;
       const touch = e.touches[0];
+      longPressPosRef.current = { x: touch.clientX, y: touch.clientY };
+      longPress.onTouchStart(e);
+      if (isTextSelectable || (!canReply && !canForward)) return;
       touchStartX.current = touch.clientX;
       touchStartY.current = touch.clientY;
       isSwiping.current = false;
@@ -333,7 +397,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
       hasTriggeredHaptic.current = false;
       setIsAnimatingBack(false);
     },
-    [canReply, canForward, longPress]
+    [isTextSelectable, canReply, canForward, longPress]
   );
 
   const handleTouchMove = useCallback(
@@ -567,7 +631,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
       )}
       <div
         ref={combinedBubbleRef}
-        className={`relative max-w-[80%] sm:max-w-[70%] md:max-w-[65%] lg:max-w-[60%] px-3.5 py-3 font-normal text-[15px] leading-tight animate-bubble-in select-none ${isContextMenuOpen ? 'rounded-3xl' : borderRadiusClass} ${
+        className={`relative max-w-[80%] sm:max-w-[70%] md:max-w-[65%] lg:max-w-[60%] px-3.5 py-3 font-normal text-[15px] leading-tight animate-bubble-in ${isTextSelectable ? 'select-text' : 'select-none'} ${isContextMenuOpen ? 'rounded-3xl' : borderRadiusClass} ${
           isOutgoing
             ? 'ml-auto mr-3 bg-accent text-accent-foreground'
             : `${contact ? '' : 'ml-3'} mr-auto bg-surface-secondary text-card-foreground`
