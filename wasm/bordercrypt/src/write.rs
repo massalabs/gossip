@@ -33,27 +33,27 @@ pub fn encrypt_session_data_block<S: BlockStorage + KeypairStorage>(
         return Err(BordercryptError::UnsupportedVersion(session.session_version));
     }
 
-    let (aead_key, aad_root) = derive_block_aead_key(
+    let (aead_sk, aad_root) = derive_block_aead_key(
         domain,
         session.session_version,
         session.session_index,
         session.root_aead_key.as_ref(),
         block_index,
     );
-    let genuine_ct = encrypt_block(&session.pq_rerand_pk, &aead_key, &aad_root, plaintext);
+    let genuine_ct = encrypt_block(&session.pq_rerand_pk, &aead_sk, &aad_root, plaintext);
 
     let mut indices: Vec<u8> = (0..SESSION_COUNT as u8).collect();
     indices.shuffle(&mut rand::rngs::OsRng);
 
-    let mut buf = String::new();
-    for &i in &indices {
+    let mut cur_aad_root = String::new();
+    for i in indices {
         let cur_session = SessionIndex::new(i).expect("index within SESSION_COUNT");
         // Read version/pk for ALL sessions (including target) for timing uniformity per spec §11.2
         let (cur_version, cur_pk_bytes) = read_session_version_and_pk(storage, cur_session)?;
         let cur_pk = PqPublicKey::from_bytes(&cur_pk_bytes)?;
 
-        // Compute aad_root unconditionally for timing uniformity per spec §11.2
-        domain::block_scope(&mut buf, domain, cur_version, cur_session, block_index);
+        // Compute cur_aad_root unconditionally for timing uniformity per spec §11.2
+        domain::block_scope(&mut cur_aad_root, domain, cur_version, cur_session, block_index);
 
         if cur_session == session.session_index {
             let ct_arr: &[u8; BLOCK_SIZE] = genuine_ct
@@ -63,8 +63,8 @@ pub fn encrypt_session_data_block<S: BlockStorage + KeypairStorage>(
             storage.write_block(cur_session, block_index, ct_arr)?;
         } else {
             let new_ct = match storage.read_block(cur_session, block_index) {
-                Ok(existing_ct) => rerandomize_block(&cur_pk, &existing_ct),
-                Err(_) => create_cover_block(&cur_pk, &buf),
+                Ok(cur_ct) => rerandomize_block(&cur_pk, &cur_ct),
+                Err(_) => create_cover_block(&cur_pk, &cur_aad_root),
             };
             let ct_arr: &[u8; BLOCK_SIZE] = new_ct
                 .as_slice()
@@ -98,7 +98,7 @@ pub fn repair_blockstream_lengths<S: BlockStorage + KeypairStorage>(
     domain: &str,
 ) -> Result<()> {
     let global_count = get_global_block_count(storage)?;
-    let mut buf = String::new();
+    let mut cur_aad_root = String::new();
 
     for i in 0..SESSION_COUNT as u8 {
         let session = SessionIndex::new(i).expect("index within SESSION_COUNT");
@@ -108,8 +108,8 @@ pub fn repair_blockstream_lengths<S: BlockStorage + KeypairStorage>(
             let (version, pk_bytes) = read_session_version_and_pk(storage, session)?;
             let pk = PqPublicKey::from_bytes(&pk_bytes)?;
 
-            domain::block_scope(&mut buf, domain, version, session, count);
-            let cover = create_cover_block(&pk, &buf);
+            domain::block_scope(&mut cur_aad_root, domain, version, session, count);
+            let cover = create_cover_block(&pk, &cur_aad_root);
             let ct_arr: &[u8; BLOCK_SIZE] = cover
                 .as_slice()
                 .try_into()
@@ -152,15 +152,15 @@ fn extend_blockstream_with_session_block<S: BlockStorage + KeypairStorage>(
     let mut indices: Vec<u8> = (0..SESSION_COUNT as u8).collect();
     indices.shuffle(&mut rand::rngs::OsRng);
 
-    let mut buf = String::new();
-    for &i in &indices {
+    let mut cur_aad_root = String::new();
+    for i in indices {
         let cur_session = SessionIndex::new(i).expect("index within SESSION_COUNT");
         // Read version/pk for ALL sessions (including target) for timing uniformity per spec §12.3
         let (cur_version, cur_pk_bytes) = read_session_version_and_pk(storage, cur_session)?;
         let cur_pk = PqPublicKey::from_bytes(&cur_pk_bytes)?;
 
-        // Compute aad_root unconditionally for timing uniformity per spec §12.3
-        domain::block_scope(&mut buf, domain, cur_version, cur_session, block_index);
+        // Compute cur_aad_root unconditionally for timing uniformity per spec §12.3
+        domain::block_scope(&mut cur_aad_root, domain, cur_version, cur_session, block_index);
 
         if cur_session == session.session_index {
             let mut pt = Zeroizing::new(vec![0u8; PLAINTEXT_SIZE]);
@@ -169,7 +169,7 @@ fn extend_blockstream_with_session_block<S: BlockStorage + KeypairStorage>(
                 pt[..LENGTH_HDR_SIZE].copy_from_slice(&session.total_data_length.to_be_bytes());
             }
 
-            let (aead_key, aad_root) = derive_block_aead_key(
+            let (aead_sk, aad_root) = derive_block_aead_key(
                 domain,
                 session.session_version,
                 cur_session,
@@ -178,14 +178,14 @@ fn extend_blockstream_with_session_block<S: BlockStorage + KeypairStorage>(
             );
             let pt_arr: &[u8; PLAINTEXT_SIZE] =
                 pt.as_slice().try_into().expect("pt is PLAINTEXT_SIZE");
-            let ct = encrypt_block(&session.pq_rerand_pk, &aead_key, &aad_root, pt_arr);
+            let ct = encrypt_block(&session.pq_rerand_pk, &aead_sk, &aad_root, pt_arr);
             let ct_arr: &[u8; BLOCK_SIZE] = ct
                 .as_slice()
                 .try_into()
                 .map_err(|_| BordercryptError::CorruptedBlock)?;
             storage.append_block(cur_session, ct_arr)?;
         } else {
-            let cover = create_cover_block(&cur_pk, &buf);
+            let cover = create_cover_block(&cur_pk, &cur_aad_root);
             let ct_arr: &[u8; BLOCK_SIZE] = cover
                 .as_slice()
                 .try_into()
@@ -247,14 +247,14 @@ pub fn write_session_data<S: BlockStorage + KeypairStorage>(
     let last_block = end_pos_excl.checked_sub(1).ok_or(BordercryptError::Overflow)? / ps;
 
     for b in first_block..=last_block {
-        let block_start = b * ps;
-        let block_end = block_start + ps;
+        let block_start_pos = b * ps;
+        let block_end_pos = block_start_pos + ps;
 
-        let w_start = start_pos.max(block_start);
-        let w_end = end_pos_excl.min(block_end);
+        let w_start = start_pos.max(block_start_pos);
+        let w_end = end_pos_excl.min(block_end_pos);
 
         // Full overwrite optimization: skip decrypt for non-block-0 fully overwritten blocks
-        let full_overwrite = w_start == block_start && w_end == block_end && b != 0;
+        let full_overwrite = w_start == block_start_pos && w_end == block_end_pos && b != 0;
 
         let mut pt = Zeroizing::new(vec![0u8; PLAINTEXT_SIZE]);
         if full_overwrite {
@@ -269,7 +269,7 @@ pub fn write_session_data<S: BlockStorage + KeypairStorage>(
         // Copy data into the plaintext
         let src_off = (w_start - start_pos) as usize;
         let src_len = (w_end - w_start) as usize;
-        let dst_off = (w_start - block_start) as usize;
+        let dst_off = (w_start - block_start_pos) as usize;
         pt[dst_off..dst_off + src_len].copy_from_slice(&data[src_off..src_off + src_len]);
 
         // Block 0 always carries the length header
@@ -373,25 +373,25 @@ pub fn shrink_session_data<S: BlockStorage + KeypairStorage>(
     }
 
     // --- Step 2: Convert fully freed blocks into cover blocks ---
-    let mut buf = String::new();
+    let mut cur_aad_root = String::new();
     for b in (new_last_block + 1)..=old_last_block {
         let mut indices: Vec<u8> = (0..SESSION_COUNT as u8).collect();
         indices.shuffle(&mut rand::rngs::OsRng);
 
-        for &i in &indices {
+        for i in indices {
             let cur_session = SessionIndex::new(i).expect("index within SESSION_COUNT");
             let (cur_version, cur_pk_bytes) = read_session_version_and_pk(storage, cur_session)?;
             let cur_pk = PqPublicKey::from_bytes(&cur_pk_bytes)?;
 
-            // Compute aad_root unconditionally for timing uniformity per spec §14.3
-            domain::block_scope(&mut buf, domain, cur_version, cur_session, b);
+            // Compute cur_aad_root unconditionally for timing uniformity per spec §14.3
+            domain::block_scope(&mut cur_aad_root, domain, cur_version, cur_session, b);
 
             let new_ct = if cur_session == session.session_index {
-                create_cover_block(&cur_pk, &buf)
+                create_cover_block(&cur_pk, &cur_aad_root)
             } else {
                 match storage.read_block(cur_session, b) {
-                    Ok(existing_ct) => rerandomize_block(&cur_pk, &existing_ct),
-                    Err(_) => create_cover_block(&cur_pk, &buf),
+                    Ok(cur_ct) => rerandomize_block(&cur_pk, &cur_ct),
+                    Err(_) => create_cover_block(&cur_pk, &cur_aad_root),
                 }
             };
             let ct_arr: &[u8; BLOCK_SIZE] = new_ct
@@ -654,7 +654,15 @@ mod tests {
         write_session_data(&mut storage, DOMAIN, &mut session, 0, &data).unwrap();
 
         // Read total length from block 0 header
-        let total = crate::read::read_total_length(&storage, DOMAIN, &session).unwrap();
+        let total = crate::read::read_total_length(
+                &storage,
+                DOMAIN,
+                session.session_version,
+                session.session_index,
+                &session.pq_rerand_sk,
+                session.root_aead_key.as_ref(),
+            )
+            .unwrap();
         assert_eq!(total, 50);
     }
 
@@ -724,7 +732,15 @@ mod tests {
         shrink_session_data(&mut storage, DOMAIN, &mut session, 50).unwrap();
         assert_eq!(session.total_data_length, 50);
 
-        let total = crate::read::read_total_length(&storage, DOMAIN, &session).unwrap();
+        let total = crate::read::read_total_length(
+                &storage,
+                DOMAIN,
+                session.session_version,
+                session.session_index,
+                &session.pq_rerand_sk,
+                session.root_aead_key.as_ref(),
+            )
+            .unwrap();
         assert_eq!(total, 50);
     }
 
@@ -802,7 +818,15 @@ mod tests {
         shrink_session_data(&mut storage, DOMAIN, &mut session, 0).unwrap();
         assert_eq!(session.total_data_length, 0);
 
-        let total = crate::read::read_total_length(&storage, DOMAIN, &session).unwrap();
+        let total = crate::read::read_total_length(
+                &storage,
+                DOMAIN,
+                session.session_version,
+                session.session_index,
+                &session.pq_rerand_sk,
+                session.root_aead_key.as_ref(),
+            )
+            .unwrap();
         assert_eq!(total, 0);
 
         // Blockstream length unchanged
