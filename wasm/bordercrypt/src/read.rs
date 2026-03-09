@@ -6,7 +6,9 @@ use crate::block::decrypt_block;
 use crate::constants::{LENGTH_HDR_SIZE, PLAINTEXT_SIZE};
 use crate::error::{BordercryptError, Result};
 use crate::kdf::derive_block_aead_key;
+use crate::pq::PqSecretKey;
 use crate::storage::BlockStorage;
+use crate::types::SessionIndex;
 use crate::unlock::UnlockedSession;
 
 /// Decrypt a single data block from an unlocked session.
@@ -30,17 +32,42 @@ pub fn decrypt_session_data_block<S: BlockStorage>(
     decrypt_block(&session.pq_rerand_sk, &aead_key, &aad_root, &block_ct)
 }
 
+/// Read total data length by decrypting block 0.
+pub(crate) fn read_total_length_raw<S: BlockStorage>(
+    storage: &S,
+    domain: &str,
+    version: u32,
+    session_index: SessionIndex,
+    pq_rerand_sk: &PqSecretKey,
+    root_aead_key: &[u8],
+) -> Result<u64> {
+    if version != 0 {
+        return Err(BordercryptError::UnsupportedVersion(version));
+    }
+    let block_ct = storage.read_block(session_index, 0)?;
+    let (aead_key, aad_root) =
+        derive_block_aead_key(domain, version, session_index, root_aead_key, 0);
+    let plaintext = decrypt_block(pq_rerand_sk, &aead_key, &aad_root, &block_ct)?;
+    let length_bytes: [u8; 8] = plaintext[..LENGTH_HDR_SIZE]
+        .try_into()
+        .map_err(|_| BordercryptError::CorruptedBlock)?;
+    Ok(u64::from_be_bytes(length_bytes))
+}
+
 /// Read total data length from block 0 of an unlocked session.
 pub fn read_total_length<S: BlockStorage>(
     storage: &S,
     domain: &str,
     session: &UnlockedSession,
 ) -> Result<u64> {
-    let plaintext = decrypt_session_data_block(storage, domain, session, 0)?;
-    let length_bytes: [u8; 8] = plaintext[..LENGTH_HDR_SIZE]
-        .try_into()
-        .map_err(|_| BordercryptError::CorruptedBlock)?;
-    Ok(u64::from_be_bytes(length_bytes))
+    read_total_length_raw(
+        storage,
+        domain,
+        session.session_version,
+        session.session_index,
+        &session.pq_rerand_sk,
+        session.root_aead_key.as_ref(),
+    )
 }
 
 /// Read session data from an offset for a given length.
@@ -72,10 +99,10 @@ pub fn read_session_data<S: BlockStorage>(
     let hdr = LENGTH_HDR_SIZE as u64;
 
     let start_pos = hdr.checked_add(offset).ok_or(BordercryptError::Overflow)?;
-    let end_pos = hdr.checked_add(end).ok_or(BordercryptError::Overflow)?;
+    let end_pos_excl = hdr.checked_add(end).ok_or(BordercryptError::Overflow)?;
 
     let first_block = start_pos / ps;
-    let last_block = end_pos.checked_sub(1).ok_or(BordercryptError::Overflow)? / ps;
+    let last_block = end_pos_excl.checked_sub(1).ok_or(BordercryptError::Overflow)? / ps;
 
     let mut result = Zeroizing::new(Vec::with_capacity(length));
 
@@ -85,19 +112,8 @@ pub fn read_session_data<S: BlockStorage>(
         let block_start = block_idx
             .checked_mul(ps)
             .ok_or(BordercryptError::Overflow)?;
-        let slice_start = if start_pos > block_start {
-            (start_pos - block_start) as usize
-        } else {
-            0
-        };
-        let block_limit = block_start
-            .checked_add(ps)
-            .ok_or(BordercryptError::Overflow)?;
-        let slice_end = if end_pos < block_limit {
-            (end_pos - block_start) as usize
-        } else {
-            PLAINTEXT_SIZE
-        };
+        let slice_start = start_pos.saturating_sub(block_start) as usize;
+        let slice_end = ((end_pos_excl - block_start) as usize).min(PLAINTEXT_SIZE);
 
         result.extend_from_slice(&plaintext[slice_start..slice_end]);
     }
