@@ -23,7 +23,7 @@ use crate::write::repair_blockstream_lengths;
 /// making the slot impossible to unlock with any password.
 pub fn provision_storage<S: BlockStorage + KeypairStorage>(storage: &mut S) -> Result<()> {
     for i in 0..SESSION_COUNT as u8 {
-        let session = SessionIndex::new(i).expect("index within SESSION_COUNT");
+        let session = SessionIndex::new(i)?;
         let (pk, _sk) = pq_keygen();
         // _sk is dropped here — its Drop impl zeroizes
 
@@ -130,17 +130,17 @@ pub fn cover_traffic_tick<S: BlockStorage + KeypairStorage>(
     indices.shuffle(&mut rand::rngs::OsRng);
 
     let mut buf = String::new();
-    for &i in &indices {
-        let cur_session = SessionIndex::new(i).expect("index within SESSION_COUNT");
+    for i in indices {
+        let cur_session = SessionIndex::new(i)?;
         let (cur_version, cur_pk_bytes) = read_session_version_and_pk(storage, cur_session)?;
         let cur_pk = PqPublicKey::from_bytes(&cur_pk_bytes)?;
 
+        // Computed unconditionally for timing uniformity (spec §15).
+        domain::block_scope(&mut buf, domain, cur_version, cur_session, block_index);
+
         let new_ct = match storage.read_block(cur_session, block_index) {
             Ok(existing_ct) => rerandomize_block(&cur_pk, &existing_ct),
-            Err(_) => {
-                domain::block_scope(&mut buf, domain, cur_version, cur_session, block_index);
-                create_cover_block(&cur_pk, &buf)
-            }
+            Err(_) => create_cover_block(&cur_pk, &buf),
         };
         let ct_arr: &[u8; BLOCK_SIZE] = new_ct
             .as_slice()
@@ -248,19 +248,26 @@ mod tests {
 
     #[test]
     fn two_sessions_different_passwords() {
-        let mut storage = MemoryStorage::new();
-        provision_storage(&mut storage).unwrap();
+        std::thread::Builder::new()
+            .stack_size(4 * 1024 * 1024)
+            .spawn(|| {
+                let mut storage = MemoryStorage::new();
+                provision_storage(&mut storage).unwrap();
 
-        let s0 = SessionIndex::new(0).unwrap();
-        let s3 = SessionIndex::new(3).unwrap();
-        allocate_session(&mut storage, DOMAIN, s0, b"password-one").unwrap();
-        allocate_session(&mut storage, DOMAIN, s3, b"password-two").unwrap();
+                let s0 = SessionIndex::new(0).unwrap();
+                let s3 = SessionIndex::new(3).unwrap();
+                allocate_session(&mut storage, DOMAIN, s0, b"password-one").unwrap();
+                allocate_session(&mut storage, DOMAIN, s3, b"password-two").unwrap();
 
-        let u1 = unlock_session(&storage, DOMAIN, b"password-one").unwrap();
-        assert_eq!(u1.session_index, s0);
+                let u1 = unlock_session(&storage, DOMAIN, b"password-one").unwrap();
+                assert_eq!(u1.session_index, s0);
 
-        let u2 = unlock_session(&storage, DOMAIN, b"password-two").unwrap();
-        assert_eq!(u2.session_index, s3);
+                let u2 = unlock_session(&storage, DOMAIN, b"password-two").unwrap();
+                assert_eq!(u2.session_index, s3);
+            })
+            .unwrap()
+            .join()
+            .unwrap();
     }
 
     // --- commit 16: cover_traffic_tick ---
