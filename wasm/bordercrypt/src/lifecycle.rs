@@ -6,7 +6,7 @@ use zeroize::Zeroizing;
 
 use crate::BLOCK_SIZE;
 use crate::block::{create_cover_block, rerandomize_block};
-use crate::constants::{AEAD_TAG_SIZE, SESSION_COUNT};
+use crate::constants::{LENGTH_HDR_SIZE, PLAINTEXT_SIZE, SESSION_COUNT};
 use crate::domain;
 use crate::error::{BordercryptError, Result};
 use crate::keypair::{KeypairFile, read_session_version_and_pk};
@@ -14,28 +14,36 @@ use crate::pq::{PqPublicKey, PqSecretKey, pq_keygen};
 use crate::storage::{BlockStorage, KeypairStorage};
 use crate::types::SessionIndex;
 use crate::unlock::UnlockedSession;
-use crate::write::repair_blockstream_lengths;
+use crate::write::{encrypt_session_data_block, ensure_block_count, repair_blockstream_lengths};
 
 /// Initialize all session slots with valid but non-unlockable keypairs.
 ///
 /// Each slot gets a real public key (needed for rerand/cover), but the
-/// secret key is discarded and `sk_ct` is filled with random bytes,
-/// making the slot impossible to unlock with any password.
+/// secret key is discarded and `sk_ct` is a valid AEAD ciphertext under
+/// a random throwaway key, making the slot impossible to unlock with
+/// any password while remaining structurally indistinguishable from
+/// an allocated slot's `sk_ct`.
 pub fn provision_storage<S: BlockStorage + KeypairStorage>(storage: &mut S) -> Result<()> {
     for i in 0..SESSION_COUNT as u8 {
-        let session = SessionIndex::new(i)?;
+        let session = SessionIndex::new(i).unwrap();
         let (pk, _sk) = pq_keygen();
         // _sk is dropped here — its Drop impl zeroizes
 
-        let mut rng = rand::rngs::OsRng;
-
         let mut sk_nonce = [0u8; crypto_aead::NONCE_SIZE];
-        rng.fill_bytes(&mut sk_nonce);
+        rand::rngs::OsRng.fill_bytes(&mut sk_nonce);
 
-        // Random sk_ct matching the size of a real AEAD-wrapped secret key
-        let sk_ct_len = PqSecretKey::byte_size() + AEAD_TAG_SIZE;
-        let mut sk_ct = vec![0u8; sk_ct_len];
-        rng.fill_bytes(&mut sk_ct);
+        // Encrypt random plaintext under a random throwaway key so sk_ct
+        // is a structurally valid AEAD ciphertext, indistinguishable from
+        // an allocated slot's sk_ct (not just random bytes).
+        let dummy_wrap_key = crypto_aead::Key::from({
+            let mut k = [0u8; crypto_aead::KEY_SIZE];
+            rand::rngs::OsRng.fill_bytes(&mut k);
+            k
+        });
+        let mut dummy_sk = vec![0u8; PqSecretKey::byte_size()];
+        rand::rngs::OsRng.fill_bytes(&mut dummy_sk);
+        let nonce = crypto_aead::Nonce::from(sk_nonce);
+        let sk_ct = crypto_aead::encrypt(&dummy_wrap_key, &nonce, &dummy_sk, b"");
 
         let kf = KeypairFile {
             version: 0,
@@ -59,7 +67,7 @@ pub fn allocate_session<S: BlockStorage + KeypairStorage>(
     slot: SessionIndex,
     password: &[u8],
 ) -> Result<UnlockedSession> {
-    let (pq_pk, pq_sk) = pq_keygen();
+    let (pq_rerand_pk, pq_rerand_sk) = pq_keygen();
 
     // Derive keys from password (same flow as unlock)
     let salt = domain::password_kdf_salt(domain);
@@ -83,31 +91,50 @@ pub fn allocate_session<S: BlockStorage + KeypairStorage>(
 
     // AEAD-wrap the secret key
     let version: u32 = 0;
-    let aad = domain::sk_wrap_aad(domain, version, slot);
+    let sk_wrap_aad = domain::sk_wrap_aad(domain, version, slot);
 
     let mut nonce_bytes = [0u8; crypto_aead::NONCE_SIZE];
     rand::rngs::OsRng.fill_bytes(&mut nonce_bytes);
     let nonce = crypto_aead::Nonce::from(nonce_bytes);
-    let wrap_key = crypto_aead::Key::from(*sk_wrap_key);
-    let sk_ct = crypto_aead::encrypt(&wrap_key, &nonce, &pq_sk.to_bytes(), aad.as_bytes());
+    let sk_wrap_aead_key = crypto_aead::Key::from(*sk_wrap_key);
+    let sk_ct = crypto_aead::encrypt(
+        &sk_wrap_aead_key,
+        &nonce,
+        &pq_rerand_sk.to_bytes(),
+        sk_wrap_aad.as_bytes(),
+    );
 
     // Write keypair file
     let kf = KeypairFile {
         version,
-        pq_pk: pq_pk.to_bytes(),
+        pq_pk: pq_rerand_pk.to_bytes(),
         sk_nonce: nonce_bytes,
         sk_ct,
     };
     storage.write_keypair(slot, &kf.serialize())?;
 
-    Ok(UnlockedSession {
+    let session = UnlockedSession {
         session_index: slot,
         session_version: version,
-        pq_rerand_pk: pq_pk,
-        pq_rerand_sk: pq_sk,
+        pq_rerand_pk,
+        pq_rerand_sk,
         root_aead_key,
         total_data_length: 0,
-    })
+    };
+
+    // Write a genuine block 0 with zero-length header.
+    // ensure_block_count alone is insufficient: if another session already
+    // has blocks, repair_blockstream_lengths pads this slot with cover
+    // blocks and global_count >= 1 skips extend_blockstream_with_session_block.
+    // Block 0 would stay a cover block, corrupting unlock_session.
+    ensure_block_count(storage, domain, &session, 1)?;
+    let mut pt = Zeroizing::new(vec![0u8; PLAINTEXT_SIZE]);
+    rand::rngs::OsRng.fill_bytes(&mut pt[..]);
+    pt[..LENGTH_HDR_SIZE].copy_from_slice(&0u64.to_be_bytes());
+    let pt_arr: &[u8; PLAINTEXT_SIZE] = pt.as_slice().try_into().unwrap();
+    encrypt_session_data_block(storage, domain, &session, 0, pt_arr)?;
+
+    Ok(session)
 }
 
 /// Rerandomize a random block across all sessions.
@@ -124,19 +151,25 @@ pub fn cover_traffic_tick<S: BlockStorage + KeypairStorage>(
         return Ok(());
     }
 
-    let block_index = rand::rngs::OsRng.next_u64() % global_count;
+    let block_index = rand::Rng::gen_range(&mut rand::rngs::OsRng, 0..global_count);
 
     let mut indices: Vec<u8> = (0..SESSION_COUNT as u8).collect();
     indices.shuffle(&mut rand::rngs::OsRng);
 
     let mut cur_aad_root = String::new();
     for i in indices {
-        let cur_session = SessionIndex::new(i)?;
+        let cur_session = SessionIndex::new(i).unwrap();
         let (cur_version, cur_pk_bytes) = read_session_version_and_pk(storage, cur_session)?;
         let cur_pk = PqPublicKey::from_bytes(&cur_pk_bytes)?;
 
         // Computed unconditionally for timing uniformity (spec §15).
-        domain::block_scope(&mut cur_aad_root, domain, cur_version, cur_session, block_index);
+        domain::block_scope(
+            &mut cur_aad_root,
+            domain,
+            cur_version,
+            cur_session,
+            block_index,
+        );
 
         let new_ct = match storage.read_block(cur_session, block_index) {
             Ok(cur_ct) => rerandomize_block(&cur_pk, &cur_ct),
@@ -268,6 +301,70 @@ mod tests {
             .unwrap()
             .join()
             .unwrap();
+    }
+
+    #[test]
+    fn allocate_writes_genuine_block_0() {
+        let mut storage = MemoryStorage::new();
+        provision_storage(&mut storage).unwrap();
+
+        let slot = SessionIndex::new(0).unwrap();
+        allocate_session(&mut storage, DOMAIN, slot, b"pw").unwrap();
+
+        // Block 0 should exist and be decryptable
+        let unlocked = unlock_session(&storage, DOMAIN, b"pw").unwrap();
+        assert_eq!(unlocked.total_data_length, 0);
+    }
+
+    #[test]
+    fn allocate_after_other_session_has_blocks() {
+        std::thread::Builder::new()
+            .stack_size(4 * 1024 * 1024)
+            .spawn(|| {
+                let mut storage = MemoryStorage::new();
+                provision_storage(&mut storage).unwrap();
+
+                // Session 0 allocates and writes data (creates blocks for all sessions)
+                let s0 = SessionIndex::new(0).unwrap();
+                let mut sess0 =
+                    allocate_session(&mut storage, DOMAIN, s0, b"password-one").unwrap();
+                write_session_data(&mut storage, DOMAIN, &mut sess0, 0, &[0xAB; 100]).unwrap();
+
+                // Session 2 allocates later — blocks already exist from session 0
+                let s2 = SessionIndex::new(2).unwrap();
+                allocate_session(&mut storage, DOMAIN, s2, b"password-two").unwrap();
+
+                // Session 2 must still be unlockable (block 0 is genuine, not a cover)
+                let unlocked = unlock_session(&storage, DOMAIN, b"password-two").unwrap();
+                assert_eq!(unlocked.session_index, s2);
+                assert_eq!(unlocked.total_data_length, 0);
+
+                // Session 0 is still unlockable too
+                let u0 = unlock_session(&storage, DOMAIN, b"password-one").unwrap();
+                assert_eq!(u0.session_index, s0);
+                assert_eq!(u0.total_data_length, 100);
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    #[test]
+    fn cover_tick_after_allocate_before_write() {
+        let mut storage = MemoryStorage::new();
+        provision_storage(&mut storage).unwrap();
+
+        let slot = SessionIndex::new(0).unwrap();
+        allocate_session(&mut storage, DOMAIN, slot, b"pw").unwrap();
+
+        // Cover traffic runs before any user write
+        for _ in 0..10 {
+            cover_traffic_tick(&mut storage, DOMAIN).unwrap();
+        }
+
+        // Session must still be unlockable
+        let unlocked = unlock_session(&storage, DOMAIN, b"pw").unwrap();
+        assert_eq!(unlocked.total_data_length, 0);
     }
 
     // --- commit 16: cover_traffic_tick ---
