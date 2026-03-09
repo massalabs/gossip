@@ -3,13 +3,11 @@
 use rand::seq::SliceRandom;
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
-use crate::block::decrypt_block;
-use crate::constants::LENGTH_HDR_SIZE;
 use crate::domain;
 use crate::error::{BordercryptError, Result};
-use crate::kdf::derive_block_aead_key;
 use crate::keypair::read_session_keypair;
 use crate::pq::{PqPublicKey, PqSecretKey};
+use crate::read::read_total_length;
 use crate::storage::{BlockStorage, KeypairStorage};
 use crate::types::SessionIndex;
 
@@ -96,7 +94,7 @@ pub fn unlock_session<S: BlockStorage + KeypairStorage>(
                 kf.version,
                 session,
                 &pq_rerand_sk,
-                &root_aead_key,
+                &*root_aead_key,
             )?;
 
             result = Some(UnlockedSession {
@@ -113,39 +111,12 @@ pub fn unlock_session<S: BlockStorage + KeypairStorage>(
     result.ok_or(BordercryptError::InvalidPassword)
 }
 
-/// Read total data length from block 0 of a session.
-///
-/// Returns 0 if no blocks exist yet (freshly allocated session).
-pub(crate) fn read_total_length<S: BlockStorage>(
-    storage: &S,
-    domain: &str,
-    version: u32,
-    session: SessionIndex,
-    pq_rerand_sk: &PqSecretKey,
-    root_aead_key: &[u8; crate::ROOT_BLOCK_KEY_SIZE],
-) -> Result<u64> {
-    if storage.block_count(session)? == 0 {
-        return Ok(0);
-    }
-    if version != 0 {
-        return Err(BordercryptError::UnsupportedVersion(version));
-    }
-
-    let block_ct = storage.read_block(session, 0)?;
-    let (aead_sk, aad_root) =
-        derive_block_aead_key(domain, version, session, root_aead_key, 0);
-    let plaintext = decrypt_block(pq_rerand_sk, &aead_sk, &aad_root, &block_ct)?;
-
-    let length_bytes: [u8; 8] = plaintext[..LENGTH_HDR_SIZE]
-        .try_into()
-        .map_err(|_| BordercryptError::CorruptedBlock)?;
-    Ok(u64::from_be_bytes(length_bytes))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::block::encrypt_block;
+    use crate::constants::LENGTH_HDR_SIZE;
+    use crate::kdf::derive_block_aead_key;
     use crate::keypair::KeypairFile;
     use crate::pq::pq_keygen;
     use crate::storage::MemoryStorage;
