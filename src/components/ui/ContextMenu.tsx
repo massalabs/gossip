@@ -135,7 +135,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
         </div>
 
         {/* Menu items */}
-        {items.map(item => (
+        {items.map((item, index) => (
           <button
             key={item.label}
             role="menuitem"
@@ -144,16 +144,16 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
               onClose();
               item.onClick();
             }}
-            className={`hover-fill w-full flex items-center gap-3 py-3.5 px-6 text-sm font-medium text-left ${
+            className={`hover-fill w-full flex items-center justify-between gap-3 py-3.5 px-6 text-sm font-medium text-left ${
               item.danger ? 'text-destructive' : 'text-foreground'
-            }`}
+            } ${index < items.length - 1 ? 'border-b border-border' : ''}`}
           >
+            <span className="relative">{item.label}</span>
             {item.icon && (
-              <span className="relative w-5 h-5 shrink-0 flex items-center justify-center">
+              <span className="w-6 h-6 rounded-full bg-muted shrink-0 flex items-center justify-center text-accent [&>svg]:w-3.5 [&>svg]:h-3.5">
                 {item.icon}
               </span>
             )}
-            <span className="relative">{item.label}</span>
           </button>
         ))}
       </div>
