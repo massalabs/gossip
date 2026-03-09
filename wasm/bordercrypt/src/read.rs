@@ -22,18 +22,20 @@ pub fn decrypt_session_data_block<S: BlockStorage>(
         return Err(BordercryptError::UnsupportedVersion(session.session_version));
     }
     let block_ct = storage.read_block(session.session_index, block_index)?;
-    let (aead_key, aad_root) = derive_block_aead_key(
+    let (aead_sk, aad_root) = derive_block_aead_key(
         domain,
         session.session_version,
         session.session_index,
         session.root_aead_key.as_ref(),
         block_index,
     );
-    decrypt_block(&session.pq_rerand_sk, &aead_key, &aad_root, &block_ct)
+    decrypt_block(&session.pq_rerand_sk, &aead_sk, &aad_root, &block_ct)
 }
 
 /// Read total data length by decrypting block 0.
-pub(crate) fn read_total_length_raw<S: BlockStorage>(
+///
+/// Returns 0 if the session has no blocks yet.
+pub fn read_total_length<S: BlockStorage>(
     storage: &S,
     domain: &str,
     version: u32,
@@ -41,33 +43,20 @@ pub(crate) fn read_total_length_raw<S: BlockStorage>(
     pq_rerand_sk: &PqSecretKey,
     root_aead_key: &[u8],
 ) -> Result<u64> {
+    if storage.block_count(session_index)? == 0 {
+        return Ok(0);
+    }
     if version != 0 {
         return Err(BordercryptError::UnsupportedVersion(version));
     }
     let block_ct = storage.read_block(session_index, 0)?;
-    let (aead_key, aad_root) =
+    let (aead_sk, aad_root) =
         derive_block_aead_key(domain, version, session_index, root_aead_key, 0);
-    let plaintext = decrypt_block(pq_rerand_sk, &aead_key, &aad_root, &block_ct)?;
+    let plaintext = decrypt_block(pq_rerand_sk, &aead_sk, &aad_root, &block_ct)?;
     let length_bytes: [u8; 8] = plaintext[..LENGTH_HDR_SIZE]
         .try_into()
         .map_err(|_| BordercryptError::CorruptedBlock)?;
     Ok(u64::from_be_bytes(length_bytes))
-}
-
-/// Read total data length from block 0 of an unlocked session.
-pub fn read_total_length<S: BlockStorage>(
-    storage: &S,
-    domain: &str,
-    session: &UnlockedSession,
-) -> Result<u64> {
-    read_total_length_raw(
-        storage,
-        domain,
-        session.session_version,
-        session.session_index,
-        &session.pq_rerand_sk,
-        session.root_aead_key.as_ref(),
-    )
 }
 
 /// Read session data from an offset for a given length.
@@ -112,10 +101,13 @@ pub fn read_session_data<S: BlockStorage>(
         let block_start = block_idx
             .checked_mul(ps)
             .ok_or(BordercryptError::Overflow)?;
-        let slice_start = start_pos.saturating_sub(block_start) as usize;
-        let slice_end = ((end_pos_excl - block_start) as usize).min(PLAINTEXT_SIZE);
+        let block_end = block_start
+            .checked_add(ps)
+            .ok_or(BordercryptError::Overflow)?;
+        let take_start = (start_pos.max(block_start) - block_start) as usize;
+        let take_end = (end_pos_excl.min(block_end) - block_start) as usize;
 
-        result.extend_from_slice(&plaintext[slice_start..slice_end]);
+        result.extend_from_slice(&plaintext[take_start..take_end]);
     }
 
     Ok(result)
@@ -187,7 +179,15 @@ mod tests {
         write_test_block(&mut storage, &session, 0, &pt);
         session.total_data_length = 42;
 
-        let len = read_total_length(&storage, DOMAIN, &session).unwrap();
+        let len = read_total_length(
+            &storage,
+            DOMAIN,
+            session.session_version,
+            session.session_index,
+            &session.pq_rerand_sk,
+            session.root_aead_key.as_ref(),
+        )
+        .unwrap();
         assert_eq!(len, 42);
     }
 
