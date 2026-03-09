@@ -110,11 +110,8 @@ const MessageContextMenu: React.FC<MessageContextMenuProps> = ({
             width: bubbleRect.width,
             height: bubbleRect.height,
             borderRadius: 24,
-            boxShadow: `0 0 0 200vmax ${
-              document.documentElement.classList.contains('dark')
-                ? 'rgba(0,0,0,0.5)'
-                : 'rgba(255,255,255,0.5)'
-            }`,
+            boxShadow:
+              '0 0 0 200vmax var(--spotlight-overlay, rgba(255,255,255,0.5))',
           }}
         />
       ) : (
@@ -137,7 +134,7 @@ const MessageContextMenu: React.FC<MessageContextMenuProps> = ({
           top: position.top,
           ...(position.left !== undefined ? { left: position.left } : {}),
           ...(position.right !== undefined ? { right: position.right } : {}),
-          transform: `translateY(${mounted ? translateY : translateY}px) ${mounted ? 'scale(1)' : 'scale(0.95)'}`,
+          transform: `translateY(${translateY}px) ${mounted ? 'scale(1)' : 'scale(0.95)'}`,
           transformOrigin: isOutgoing ? 'top right' : 'top left',
           transition:
             'transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s ease-out',
@@ -149,8 +146,8 @@ const MessageContextMenu: React.FC<MessageContextMenuProps> = ({
             role="menuitem"
             type="button"
             onClick={() => {
-              onClose();
               item.onClick();
+              onClose();
             }}
             className={`hover-fill w-full flex items-center justify-between gap-3 px-4 py-3 text-sm font-medium text-left ${
               item.danger ? 'text-destructive' : 'text-foreground'

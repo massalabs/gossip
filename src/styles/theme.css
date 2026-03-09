@@ -91,6 +91,9 @@
 
   /* Scrollbar colors (light mode) */
   --scrollbar-thumb-rgb: 26, 26, 29;
+
+  /* Spotlight overlay (context menu) */
+  --spotlight-overlay: rgba(255, 255, 255, 0.5);
 }
 
 .dark {
@@ -185,4 +188,7 @@
 
   /* Scrollbar colors (dark mode) */
   --scrollbar-thumb-rgb: 232, 232, 234;
+
+  /* Spotlight overlay (context menu) */
+  --spotlight-overlay: rgba(0, 0, 0, 0.5);
 }

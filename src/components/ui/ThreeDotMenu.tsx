@@ -134,8 +134,8 @@ const ThreeDotMenu: React.FC<ThreeDotMenuProps> = ({
               role="menuitem"
               type="button"
               onClick={() => {
-                close();
                 item.onClick();
+                close();
               }}
               className={`hover-fill w-full flex items-center justify-between gap-3 px-4 py-3 text-sm font-medium text-left ${
                 item.danger ? 'text-destructive' : 'text-foreground'

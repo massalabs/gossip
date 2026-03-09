@@ -85,7 +85,9 @@ const MessageItem: React.FC<MessageItemProps> = ({
 
   // Swipe gesture state
   const [swipeOffset, setSwipeOffset] = useState(0);
+  const swipeOffsetRef = useRef(0);
   const [isAnimatingBack, setIsAnimatingBack] = useState(false);
+  const animTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const touchStartX = useRef<number | null>(null);
   const touchStartY = useRef<number | null>(null);
   const isSwiping = useRef(false);
@@ -272,7 +274,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
   // Suppress click after gestures (swipe / long-press / scroll)
   const suppressClickRef = useRef(false);
 
-  // Context menu items
+  // Context menu items — depend on stable scalars, not the full message object
   const contextMenuItems = useMemo<MessageContextMenuItem[]>(() => {
     const items: MessageContextMenuItem[] = [];
     if (onReplyTo) {
@@ -293,11 +295,21 @@ const MessageItem: React.FC<MessageItemProps> = ({
       label: 'Copy',
       icon: <Copy className="w-4 h-4" />,
       onClick: () => {
-        navigator.clipboard.writeText(message.content);
+        navigator.clipboard.writeText(message.content).catch(() => {
+          /* clipboard not available */
+        });
       },
     });
     return items;
-  }, [onReplyTo, onForward, message]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onReplyTo, onForward, message.id, message.content]);
+
+  // Clean up animation timer on unmount
+  useEffect(() => {
+    return () => {
+      if (animTimerRef.current) clearTimeout(animTimerRef.current);
+    };
+  }, []);
 
   // Load original message if this is a reply or forward
   useEffect(() => {
@@ -439,6 +451,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
         const rawSwipe = deltaX * resistance;
         // Clamp to >= 0 (right-swipe only, no left-swipe)
         const clampedSwipe = Math.max(0, Math.min(rawSwipe, maxDistance));
+        swipeOffsetRef.current = clampedSwipe;
         setSwipeOffset(clampedSwipe);
 
         // Trigger haptic when crossing the threshold
@@ -472,18 +485,20 @@ const MessageItem: React.FC<MessageItemProps> = ({
       if (longPress.longPressTriggered.current) {
         suppressClickRef.current = true;
         setIsAnimatingBack(true);
+        swipeOffsetRef.current = 0;
         setSwipeOffset(0);
         touchStartX.current = null;
         touchStartY.current = null;
         isSwiping.current = false;
         touchSlopExceeded.current = false;
         hasTriggeredHaptic.current = false;
-        setTimeout(() => setIsAnimatingBack(false), 300);
+        if (animTimerRef.current) clearTimeout(animTimerRef.current);
+        animTimerRef.current = setTimeout(() => setIsAnimatingBack(false), 300);
         return;
       }
 
       const threshold = isOutgoing ? SWIPE_THRESHOLD_OUTGOING : SWIPE_THRESHOLD;
-      const isRightSwipeCompleted = swipeOffset >= threshold;
+      const isRightSwipeCompleted = swipeOffsetRef.current >= threshold;
 
       if (isRightSwipeCompleted && onReplyTo) {
         onReplyTo(message);
@@ -497,6 +512,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
 
       // Animate back with spring effect
       setIsAnimatingBack(true);
+      swipeOffsetRef.current = 0;
       setSwipeOffset(0);
       touchStartX.current = null;
       touchStartY.current = null;
@@ -505,17 +521,10 @@ const MessageItem: React.FC<MessageItemProps> = ({
       hasTriggeredHaptic.current = false;
 
       // Remove animation class after animation completes
-      setTimeout(() => setIsAnimatingBack(false), 300);
+      if (animTimerRef.current) clearTimeout(animTimerRef.current);
+      animTimerRef.current = setTimeout(() => setIsAnimatingBack(false), 300);
     },
-    [
-      canReply,
-      canForward,
-      isOutgoing,
-      swipeOffset,
-      onReplyTo,
-      message,
-      longPress,
-    ]
+    [canReply, canForward, isOutgoing, onReplyTo, message, longPress]
   );
 
   const handleReplyContextClick = useCallback(

@@ -141,8 +141,8 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
             role="menuitem"
             type="button"
             onClick={() => {
-              onClose();
               item.onClick();
+              onClose();
             }}
             className={`hover-fill w-full flex items-center justify-between gap-3 py-3.5 px-6 text-sm font-medium text-left ${
               item.danger ? 'text-destructive' : 'text-foreground'
