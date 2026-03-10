@@ -11,6 +11,7 @@ import PageHeader from '../components/ui/PageHeader';
 import PageLayout from '../components/ui/PageLayout';
 import { ROUTES } from '../constants/routes';
 import SearchBar from '../components/ui/SearchBar';
+import ConnectionBanner from '../components/ui/ConnectionBanner';
 
 /* TODO: contact list is implemented using corresponding discussions.
 This is a temporary solution to avoid duplicating the contact list code.
@@ -77,6 +78,7 @@ const NewDiscussion: React.FC = () => {
       className="app-max-w mx-auto"
       contentClassName="px-6 py-6 space-y-4"
     >
+      <ConnectionBanner />
       {/* Primary actions */}
       <div className="bg-card rounded-xl border border-border overflow-hidden">
         <Button

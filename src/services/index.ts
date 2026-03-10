@@ -20,6 +20,7 @@ import { bridgeSet } from '../sw-bridge';
 import { setActiveSeekersInPreferences } from '../utils/preferences';
 import { useDiscussionStore } from '../stores/discussionStore';
 import { useMessageStore } from '../stores/messageStore';
+import { useOnlineStoreBase } from '../stores/useOnlineStore';
 
 /**
  * Wire up SDK events to app behaviors like notifications.
@@ -88,8 +89,20 @@ export function setupSdkEventHandlers(gossip: GossipSdk): void {
     }
   });
 
-  // Log errors for debugging
+  // Log errors for debugging and track API reachability
   gossip.on(SdkEventType.ERROR, (error: Error, context: string) => {
     console.error(`[SDK Error:${context}]`, error);
+    useOnlineStoreBase.getState().setApiReachable(false);
   });
+
+  // Mark API reachable when messages or sessions arrive
+  gossip.on(SdkEventType.MESSAGE_RECEIVED, () => {
+    useOnlineStoreBase.getState().setApiReachable(true);
+  });
+  gossip.on(SdkEventType.SESSION_REQUESTED, () => {
+    useOnlineStoreBase.getState().setApiReachable(true);
+  });
+
+  // Start periodic API connectivity check
+  useOnlineStoreBase.getState().startApiCheck();
 }

@@ -4,7 +4,7 @@ import DiscussionFilterButtons from '../components/discussions/DiscussionFilterB
 import { useAccountStore } from '../stores/accountStore';
 import { useAppStore } from '../stores/appStore';
 import { useNavigate } from 'react-router-dom';
-import { Plus, X, Settings } from 'react-feather';
+import { Plus, X, Settings, WifiOff } from 'react-feather';
 import Button from '../components/ui/Button';
 import SearchBar from '../components/ui/SearchBar';
 import { useSearch } from '../hooks/useSearch';
@@ -17,6 +17,7 @@ import { ROUTES } from '../constants/routes';
 import { useDiscussionStore } from '../stores/discussionStore';
 import { useGossipSdk } from '../hooks/useGossipSdk';
 import { SessionStatus } from '@massalabs/gossip-sdk';
+import { useOnlineStore } from '../stores/useOnlineStore';
 
 const Discussions: React.FC = () => {
   const gossip = useGossipSdk();
@@ -33,6 +34,9 @@ const Discussions: React.FC = () => {
   const filter = useDiscussionStore(s => s.filter);
   const setFilter = useDiscussionStore(s => s.setFilter);
   const sessionsStatuses = useDiscussionStore(s => s.sessionsStatuses);
+  const isOnline = useOnlineStore(s => s.isOnline);
+  const isApiReachable = useOnlineStore(s => s.isApiReachable);
+  const isConnected = isOnline && isApiReachable;
   // Callback ref: triggers re-render when scroll container is mounted
   const [scrollContainer, setScrollContainer] = useState<HTMLDivElement | null>(
     null
@@ -135,7 +139,16 @@ const Discussions: React.FC = () => {
     <div className="flex items-center justify-between w-full">
       <div className="flex items-center gap-3">
         <UserProfileAvatar name={username} size={10} />
-        <h1 className="text-xl font-semibold text-foreground">Gossip</h1>
+        {isConnected ? (
+          <h1 className="text-xl font-semibold text-foreground">Gossip</h1>
+        ) : (
+          <div className="flex items-center gap-2 text-warning">
+            <WifiOff className="w-4 h-4" />
+            <span className="text-sm font-medium">
+              Waiting for connection...
+            </span>
+          </div>
+        )}
       </div>
       <div className="flex items-center gap-2">
         <button
