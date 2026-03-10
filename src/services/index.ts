@@ -89,13 +89,12 @@ export function setupSdkEventHandlers(gossip: GossipSdk): void {
     }
   });
 
-  // Log errors for debugging and track API reachability
+  // Log errors for debugging
   gossip.on(SdkEventType.ERROR, (error: Error, context: string) => {
     console.error(`[SDK Error:${context}]`, error);
-    useOnlineStoreBase.getState().setApiReachable(false);
   });
 
-  // Mark API reachable when messages or sessions arrive
+  // Mark API reachable immediately when data arrives from the server
   gossip.on(SdkEventType.MESSAGE_RECEIVED, () => {
     useOnlineStoreBase.getState().setApiReachable(true);
   });
@@ -103,6 +102,6 @@ export function setupSdkEventHandlers(gossip: GossipSdk): void {
     useOnlineStoreBase.getState().setApiReachable(true);
   });
 
-  // Start periodic API connectivity check
+  // Periodic ping is the authoritative source for isApiReachable
   useOnlineStoreBase.getState().startApiCheck();
 }
