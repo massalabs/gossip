@@ -517,13 +517,13 @@ const MessageItem: React.FC<MessageItemProps> = ({
             )}
             {isLoadingOriginal ? (
               <p
-                className={`text-xs ${
+                className={`text-xs truncate ${
                   isOutgoing
                     ? 'text-accent-foreground/80'
                     : 'text-muted-foreground/80'
                 }`}
               >
-                Loading...
+                &nbsp;
               </p>
             ) : (
               <p
@@ -585,15 +585,26 @@ const MessageItem: React.FC<MessageItemProps> = ({
               : {})}
           >
             {isLoadingOriginal ? (
-              <p
-                className={`text-xs ${
-                  isOutgoing
-                    ? 'text-accent-foreground/80'
-                    : 'text-muted-foreground/80'
-                }`}
-              >
-                Loading...
-              </p>
+              <>
+                <p
+                  className={`text-[11px] font-medium mb-0.5 ${
+                    isOutgoing
+                      ? 'text-accent-foreground/80'
+                      : 'text-muted-foreground/80'
+                  }`}
+                >
+                  &nbsp;
+                </p>
+                <p
+                  className={`text-xs truncate ${
+                    isOutgoing
+                      ? 'text-accent-foreground/80'
+                      : 'text-muted-foreground/80'
+                  }`}
+                >
+                  &nbsp;
+                </p>
+              </>
             ) : (
               <>
                 <p
