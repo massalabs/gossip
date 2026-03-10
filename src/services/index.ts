@@ -20,7 +20,6 @@ import { bridgeSet } from '../sw-bridge';
 import { setActiveSeekersInPreferences } from '../utils/preferences';
 import { useDiscussionStore } from '../stores/discussionStore';
 import { useMessageStore } from '../stores/messageStore';
-
 /**
  * Wire up SDK events to app behaviors like notifications.
  *

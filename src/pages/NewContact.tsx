@@ -12,6 +12,7 @@ import { formatUserId } from '@massalabs/gossip-sdk';
 import QrCodeIcon from '../components/ui/customIcons/QrCodeIcon';
 import PageLayout from '../components/ui/PageLayout';
 import PageHeader from '../components/ui/PageHeader';
+import ConnectionBanner from '../components/ui/ConnectionBanner';
 
 const NewContact: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -117,6 +118,7 @@ const NewContact: React.FC = () => {
       className="app-max-w mx-auto"
       contentClassName="px-6 py-6 pb-safe-b"
     >
+      <ConnectionBanner />
       {/* Input Fields Container */}
       <div className="bg-card rounded-xl border border-border overflow-hidden mb-6">
         {/* Username Field */}

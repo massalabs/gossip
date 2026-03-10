@@ -17,6 +17,7 @@ import { ROUTES } from '../constants/routes';
 import { useDiscussionStore } from '../stores/discussionStore';
 import { useGossipSdk } from '../hooks/useGossipSdk';
 import { SessionStatus } from '@massalabs/gossip-sdk';
+import { useOnlineStore } from '../stores/useOnlineStore';
 
 const Discussions: React.FC = () => {
   const gossip = useGossipSdk();
@@ -33,6 +34,7 @@ const Discussions: React.FC = () => {
   const filter = useDiscussionStore(s => s.filter);
   const setFilter = useDiscussionStore(s => s.setFilter);
   const sessionsStatuses = useDiscussionStore(s => s.sessionsStatuses);
+  const isOnline = useOnlineStore(s => s.isOnline);
   // Callback ref: triggers re-render when scroll container is mounted
   const [scrollContainer, setScrollContainer] = useState<HTMLDivElement | null>(
     null
@@ -134,8 +136,14 @@ const Discussions: React.FC = () => {
   const headerContent = (
     <div className="flex items-center justify-between w-full">
       <div className="flex items-center gap-3">
-        <UserProfileAvatar name={username} size={10} />
-        <h1 className="text-xl font-semibold text-foreground">Gossip</h1>
+        {isOnline && <UserProfileAvatar name={username} size={10} />}
+        {isOnline ? (
+          <h1 className="text-xl font-semibold text-foreground">Gossip</h1>
+        ) : (
+          <h1 className="text-xl font-semibold text-accent">
+            Waiting for connection...
+          </h1>
+        )}
       </div>
       <div className="flex items-center gap-2">
         <button
