@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { execSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -29,16 +30,12 @@ function getVersionArg() {
   return version;
 }
 
-function updatePackageJson(version) {
-  const pkgPath = resolve(ROOT, 'package.json');
-  const pkgRaw = readFileSync(pkgPath, 'utf8');
-  const pkg = JSON.parse(pkgRaw);
-
-  const prev = pkg.version;
-  pkg.version = version;
-
-  writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`, 'utf8');
-  log(`Updated package.json version: ${prev} -> ${version}`);
+function updatePackageVersion(version) {
+  execSync(`npm version ${version} --no-git-tag-version`, {
+    cwd: ROOT,
+    stdio: 'pipe',
+  });
+  log(`Updated package.json + package-lock.json to ${version}`);
 }
 
 function updateAndroidVersion(version) {
@@ -93,7 +90,7 @@ function main() {
   const version = getVersionArg();
   log(`Releasing version ${version}`);
 
-  updatePackageJson(version);
+  updatePackageVersion(version);
   updateAndroidVersion(version);
   updateIosVersion(version);
   updateVersionConfig(version);
