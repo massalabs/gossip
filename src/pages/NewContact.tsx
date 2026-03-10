@@ -5,9 +5,10 @@ import Button from '../components/ui/Button';
 import { useContactForm } from '../hooks/useContactForm';
 import ErrorDisplay from '../components/account/ErrorDisplay';
 import ScanQRCode from '../components/settings/ScanQRCode';
+import Notice from '../components/account/PrivacyNotice';
 import { useAccountStore } from '../stores/accountStore';
 import { useAppStore } from '../stores/appStore';
-import { Info, Upload, CheckCircle } from 'react-feather';
+import { Upload, CheckCircle } from 'react-feather';
 import { formatUserId } from '@massalabs/gossip-sdk';
 import QrCodeIcon from '../components/ui/customIcons/QrCodeIcon';
 import PageLayout from '../components/ui/PageLayout';
@@ -308,28 +309,21 @@ const NewContact: React.FC = () => {
       </div>
 
       {/* Privacy Notice */}
-      <div className="bg-muted/30 border border-border rounded-xl p-4 mb-6">
-        <div className="flex items-start gap-2">
-          <Info className="w-4 h-4 text-muted-foreground mt-0.5 shrink-0" />
-          <div className="flex-1">
-            <p className="text-xs font-medium text-foreground mb-1">
-              Privacy notice
-            </p>
-            <p className="text-xs text-muted-foreground leading-relaxed">
-              This message is sent with your contact request announcement and
-              has{' '}
-              <span className="font-medium text-foreground">
-                reduced privacy
-              </span>{' '}
-              compared to regular Gossip messages. Unlike regular messages, if
-              your keys are compromised in the future, this message could be
-              decrypted. Use it for introductions or context, but avoid sharing
-              sensitive information. Send private details through regular
-              messages after the contact accepts your request.
-            </p>
-          </div>
-        </div>
-      </div>
+      <Notice
+        className="mb-6"
+        title="Privacy notice"
+        content={
+          <>
+            This message is sent with your contact request announcement and has{' '}
+            <span className="font-medium text-foreground">reduced privacy</span>{' '}
+            compared to regular Gossip messages. Unlike regular messages, if
+            your keys are compromised in the future, this message could be
+            decrypted. Use it for introductions or context, but avoid sharing
+            sensitive information. Send private details through regular messages
+            after the contact accepts your request.
+          </>
+        }
+      />
 
       {/* Hidden file input for file import */}
       <input

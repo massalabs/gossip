@@ -1,23 +1,34 @@
 import React from 'react';
-import { Info } from 'react-feather';
+import { AlertTriangle, Info } from 'react-feather';
 
-const PrivacyNotice: React.FC = () => {
+interface NoticeProps {
+  title: React.ReactNode;
+  content: React.ReactNode;
+  className?: string;
+  tone?: 'info' | 'warning';
+}
+
+const Notice: React.FC<NoticeProps> = ({
+  title,
+  content,
+  className = '',
+  tone = 'info',
+}) => {
+  const isWarning = tone === 'warning';
+  const ContainerIcon = isWarning ? AlertTriangle : Info;
+  const containerClasses = isWarning
+    ? 'bg-warning/10 border border-warning/30'
+    : 'bg-muted/30 border border-border';
+  const iconClasses = isWarning ? 'text-warning' : 'text-muted-foreground';
+
   return (
-    <div className="mt-2 p-3 bg-muted/30 border border-border rounded-lg">
+    <div className={`rounded-xl p-4 ${containerClasses} ${className}`}>
       <div className="flex items-start gap-2">
-        <Info className="w-4 h-4 text-muted-foreground mt-0.5 shrink-0" />
+        <ContainerIcon className={`w-4 h-4 mt-0.5 shrink-0 ${iconClasses}`} />
         <div className="flex-1">
-          <p className="text-xs font-medium text-foreground mb-1">
-            Privacy notice
-          </p>
+          <p className="text-xs font-medium text-foreground mb-1">{title}</p>
           <p className="text-xs text-muted-foreground leading-relaxed">
-            This message is sent with your contact request announcement and has{' '}
-            <span className="font-medium text-foreground">reduced privacy</span>{' '}
-            compared to regular Gossip messages. Unlike regular messages, if
-            your keys are compromised in the future, this message could be
-            decrypted. Use it for introductions or context, but avoid sharing
-            sensitive information. Send private details through regular messages
-            after the contact accepts your request.
+            {content}
           </p>
         </div>
       </div>
@@ -25,4 +36,4 @@ const PrivacyNotice: React.FC = () => {
   );
 };
 
-export default PrivacyNotice;
+export default Notice;
