@@ -74,6 +74,12 @@ export function useLongPress({
     [clear, preventDefaultOnEnd]
   );
 
+  // iOS fires touchcancel when it takes over for scrolling — clear the timer
+  const onTouchCancel = useCallback(() => {
+    clear();
+    startPos.current = null;
+  }, [clear]);
+
   const onContextMenu = useCallback(
     (e: React.MouseEvent) => {
       if (disabled) return;
@@ -92,6 +98,7 @@ export function useLongPress({
     onTouchStart,
     onTouchMove,
     onTouchEnd,
+    onTouchCancel,
     onContextMenu,
     longPressTriggered,
   };

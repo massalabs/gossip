@@ -559,6 +559,16 @@ const MessageItem: React.FC<MessageItemProps> = ({
     [canReply, canForward, isOutgoing, onReplyTo, message, longPress]
   );
 
+  const handleTouchCancel = useCallback(() => {
+    longPress.onTouchCancel();
+    setSwipeOffset(0);
+    swipeOffsetRef.current = 0;
+    touchStartX.current = null;
+    touchStartY.current = null;
+    isSwiping.current = false;
+    touchSlopExceeded.current = false;
+  }, [longPress]);
+
   const handleReplyContextClick = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
@@ -658,7 +668,9 @@ const MessageItem: React.FC<MessageItemProps> = ({
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
+      onTouchCancel={handleTouchCancel}
       onContextMenu={handleContextMenu}
+      style={{ touchAction: 'manipulation' }}
       role="listitem"
       aria-label={`${isOutgoing ? 'Sent' : 'Received'} message`}
     >
