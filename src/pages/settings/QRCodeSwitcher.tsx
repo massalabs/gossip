@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import ShareContact from '../../components/settings/ShareContact';
 import ScanQRCode from '../../components/settings/ScanQRCode';
@@ -31,10 +31,11 @@ const QRCodeSwitcher: React.FC = () => {
     [navigate]
   );
 
-  if (!userProfile || !gossip.isSessionOpen) {
-    navigate(ROUTES.settings());
-    return null;
-  }
+  useEffect(() => {
+    if (!userProfile || !gossip.isSessionOpen) {
+      navigate(ROUTES.settings());
+    }
+  }, [userProfile, gossip.isSessionOpen, navigate]);
 
   return (
     <PageLayout

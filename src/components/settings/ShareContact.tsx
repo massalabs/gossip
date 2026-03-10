@@ -248,7 +248,7 @@ const ShareContact: React.FC<ShareContactProps> = ({
             page.
           </p>
           <p className="text-sm font-semibold text-foreground">
-            Compared to other profile sharing mode, the file profile remain
+            Compared to other profile sharing mode, the file profile remains
             valid even if you don&apos;t login to the app for more than 2 weeks.
           </p>
           <Button
