@@ -41,7 +41,7 @@ describe('MessageItem', () => {
   });
 
   describe('context menu', () => {
-    it('opens context menu on right-click', async () => {
+    it('opens context menu on click', async () => {
       const onReplyTo = vi.fn();
       const onForward = vi.fn();
       render(
@@ -52,11 +52,9 @@ describe('MessageItem', () => {
         />
       );
 
-      const msg = page.getByRole('listitem');
-      const el = msg.element() as HTMLElement;
-
-      el.dispatchEvent(
-        new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
+      // Click the bubble to open context menu
+      await userEvent.click(
+        page.getByRole('button', { name: 'Tap for actions' })
       );
 
       const menu = page.getByRole('menu');
@@ -77,9 +75,8 @@ describe('MessageItem', () => {
       const onReplyTo = vi.fn();
       render(<MessageItem message={makeMessage()} onReplyTo={onReplyTo} />);
 
-      const el = page.getByRole('listitem').element() as HTMLElement;
-      el.dispatchEvent(
-        new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
+      await userEvent.click(
+        page.getByRole('button', { name: 'Tap for actions' })
       );
 
       await userEvent.click(page.getByRole('menuitem', { name: 'Reply' }));
@@ -90,9 +87,8 @@ describe('MessageItem', () => {
       const onForward = vi.fn();
       render(<MessageItem message={makeMessage()} onForward={onForward} />);
 
-      const el = page.getByRole('listitem').element() as HTMLElement;
-      el.dispatchEvent(
-        new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
+      await userEvent.click(
+        page.getByRole('button', { name: 'Tap for actions' })
       );
 
       await userEvent.click(page.getByRole('menuitem', { name: 'Forward' }));
@@ -106,9 +102,8 @@ describe('MessageItem', () => {
 
       render(<MessageItem message={makeMessage({ content: 'Copy me' })} />);
 
-      const el = page.getByRole('listitem').element() as HTMLElement;
-      el.dispatchEvent(
-        new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
+      await userEvent.click(
+        page.getByRole('button', { name: 'Tap for actions' })
       );
 
       await userEvent.click(page.getByRole('menuitem', { name: 'Copy' }));
