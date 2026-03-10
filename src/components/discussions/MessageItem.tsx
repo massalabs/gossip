@@ -210,6 +210,16 @@ const MessageItem: React.FC<MessageItemProps> = ({
     setBubbleRect(null);
   }, []);
 
+  // Close context menu if the list scrolls (e.g. desktop mouse wheel)
+  useEffect(() => {
+    if (!isContextMenuOpen) return;
+    const scroller = bubbleRef.current?.closest('[data-virtuoso-scroller]');
+    if (!scroller) return;
+    const onScroll = () => closeContextMenu();
+    scroller.addEventListener('scroll', onScroll, { passive: true });
+    return () => scroller.removeEventListener('scroll', onScroll);
+  }, [isContextMenuOpen, closeContextMenu]);
+
   // Text selection on long press
   const [isTextSelectable, setIsTextSelectable] = useState(false);
   const longPressPosRef = useRef<{ x: number; y: number } | null>(null);

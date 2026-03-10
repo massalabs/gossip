@@ -1,4 +1,4 @@
-import { useRef, useCallback } from 'react';
+import { useRef, useCallback, useEffect } from 'react';
 
 interface UseLongPressOptions {
   onLongPress: () => void;
@@ -84,6 +84,9 @@ export function useLongPress({
     },
     [disabled, onLongPress]
   );
+
+  // Cancel pending timer on unmount
+  useEffect(() => () => clear(), [clear]);
 
   return {
     onTouchStart,
