@@ -480,28 +480,32 @@ const MessageItem: React.FC<MessageItemProps> = ({
     sdk,
   ]);
 
-  const handleBubbleClick = useCallback(() => {
-    if (isSelecting) {
-      onToggleSelect?.(message.id!);
-      return;
-    }
-    if (suppressClickRef.current) {
-      suppressClickRef.current = false;
-      return;
-    }
-    if (isTextSelectable) {
-      clearTextSelection();
-      return;
-    }
-    openContextMenu();
-  }, [
-    openContextMenu,
-    isTextSelectable,
-    clearTextSelection,
-    isSelecting,
-    onToggleSelect,
-    message.id,
-  ]);
+  const handleBubbleClick = useCallback(
+    (e: React.MouseEvent) => {
+      if (isSelecting) {
+        e.stopPropagation();
+        onToggleSelect?.(message.id!);
+        return;
+      }
+      if (suppressClickRef.current) {
+        suppressClickRef.current = false;
+        return;
+      }
+      if (isTextSelectable) {
+        clearTextSelection();
+        return;
+      }
+      openContextMenu();
+    },
+    [
+      openContextMenu,
+      isTextSelectable,
+      clearTextSelection,
+      isSelecting,
+      onToggleSelect,
+      message.id,
+    ]
+  );
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -752,21 +756,25 @@ const MessageItem: React.FC<MessageItemProps> = ({
   return (
     <div
       id={id}
-      className={`flex items-end gap-1 ${isOutgoing ? 'justify-end' : 'justify-start'} group relative ${spacingClass} ${isHighlighted ? 'search-highlight' : ''}`}
+      className={`flex items-end gap-1 ${isOutgoing ? 'justify-end' : 'justify-start'} group relative ${spacingClass} ${isHighlighted ? 'search-highlight' : ''} ${isSelecting ? 'cursor-pointer' : ''}`}
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
       onTouchCancel={handleTouchCancel}
       onContextMenu={handleContextMenu}
-      style={{ touchAction: 'manipulation' }}
+      style={{
+        touchAction: 'manipulation',
+        paddingLeft: isSelecting ? '2rem' : '0',
+        transition: 'padding-left 0.2s ease-out',
+      }}
       role="listitem"
       aria-label={`${isOutgoing ? 'Sent' : 'Received'} message`}
       onClick={isSelecting ? () => onToggleSelect?.(message.id!) : undefined}
     >
-      {/* Selection checkbox */}
+      {/* Selection checkbox — absolutely positioned to avoid affecting flex layout */}
       <div
-        className={`shrink-0 self-center flex items-center justify-center transition-all duration-200 ease-out overflow-hidden ${
-          isSelecting ? 'w-7 opacity-100 ml-1' : 'w-0 opacity-0 ml-0'
+        className={`absolute left-1 top-0 bottom-0 flex items-center justify-center transition-opacity duration-200 ease-out ${
+          isSelecting ? 'opacity-100' : 'opacity-0 pointer-events-none'
         }`}
         onClick={e => {
           e.stopPropagation();

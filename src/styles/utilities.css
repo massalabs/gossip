@@ -244,6 +244,25 @@
     );
   }
 
+  /* Animated counter keyframes */
+  @keyframes counter-out {
+    from {
+      transform: translateY(0);
+    }
+    to {
+      transform: translateY(var(--counter-end));
+    }
+  }
+
+  @keyframes counter-in {
+    from {
+      transform: var(--counter-start);
+    }
+    to {
+      transform: translateY(0);
+    }
+  }
+
   @media (prefers-reduced-motion: reduce) {
     * {
       animation-duration: 0.01ms !important;
