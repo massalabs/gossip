@@ -669,7 +669,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
             ? 'ml-auto mr-3 bg-accent text-accent-foreground'
             : `${contact ? '' : 'ml-3'} mr-auto bg-surface-secondary text-card-foreground`
         } ${
-          canReply ? 'cursor-pointer hover:opacity-90 focus:outline-none' : ''
+          canReply ? 'cursor-pointer focus:outline-none' : ''
         } ${isContextMenuOpen ? 'shadow-lg' : ''}`}
         onClick={handleBubbleClick}
         onKeyDown={handleKeyDown}
