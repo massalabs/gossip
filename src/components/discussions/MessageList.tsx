@@ -268,7 +268,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
                 contact={contact}
                 isHighlighted={item.message.id === highlightedMessageId}
                 isSelecting={isSelecting}
-                isSelected={selectedMessageIds?.has(item.message.id)}
+                isSelected={selectedMessageIds?.has(item.message.id!)}
                 onToggleSelect={onToggleSelect}
               />
             );

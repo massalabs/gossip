@@ -160,7 +160,7 @@ const Discussion: React.FC = () => {
 
   const handleCopySelected = useCallback(async () => {
     const selected = messages
-      .filter(m => selectedMessageIds.has(m.id))
+      .filter(m => m.id != null && selectedMessageIds.has(m.id))
       .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
 
     const contactName = discussion?.customName || contact?.name || 'Unknown';
