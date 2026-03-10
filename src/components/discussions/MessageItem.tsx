@@ -64,6 +64,9 @@ interface MessageItemProps {
   showAvatar?: boolean;
   contact?: Pick<Contact, 'name' | 'avatar'>;
   isHighlighted?: boolean;
+  isSelecting?: boolean;
+  isSelected?: boolean;
+  onToggleSelect?: (messageId: number) => void;
 }
 
 const MessageItem: React.FC<MessageItemProps> = ({
@@ -80,6 +83,9 @@ const MessageItem: React.FC<MessageItemProps> = ({
   showAvatar = false,
   contact,
   isHighlighted = false,
+  isSelecting = false,
+  isSelected = false,
+  onToggleSelect,
 }) => {
   const sdk = useGossipSdk();
   const canReply = !!onReplyTo;
@@ -316,9 +322,23 @@ const MessageItem: React.FC<MessageItemProps> = ({
     };
   }, [isTextSelectable, clearTextSelection]);
 
+  const handleLongPress = useCallback(() => {
+    if (isSelecting && isSelected) {
+      enableTextSelection();
+    } else {
+      onToggleSelect?.(message.id);
+    }
+  }, [
+    isSelecting,
+    isSelected,
+    enableTextSelection,
+    onToggleSelect,
+    message.id,
+  ]);
+
   const isAndroid = Capacitor.getPlatform() === 'android';
   const longPress = useLongPress({
-    onLongPress: enableTextSelection,
+    onLongPress: handleLongPress,
     // On Android, don't preventDefault on touchEnd — it interferes with native selection handles
     preventDefaultOnEnd: !isAndroid,
   });
@@ -461,6 +481,10 @@ const MessageItem: React.FC<MessageItemProps> = ({
   ]);
 
   const handleBubbleClick = useCallback(() => {
+    if (isSelecting) {
+      onToggleSelect?.(message.id);
+      return;
+    }
     if (suppressClickRef.current) {
       suppressClickRef.current = false;
       return;
@@ -470,7 +494,14 @@ const MessageItem: React.FC<MessageItemProps> = ({
       return;
     }
     openContextMenu();
-  }, [openContextMenu, isTextSelectable, clearTextSelection]);
+  }, [
+    openContextMenu,
+    isTextSelectable,
+    clearTextSelection,
+    isSelecting,
+    onToggleSelect,
+    message.id,
+  ]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -489,7 +520,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
       const touch = e.touches[0];
       longPressPosRef.current = { x: touch.clientX, y: touch.clientY };
       longPress.onTouchStart(e);
-      if (isTextSelectable || (!canReply && !canForward)) return;
+      if (isSelecting || isTextSelectable || (!canReply && !canForward)) return;
       touchStartX.current = touch.clientX;
       touchStartY.current = touch.clientY;
       isSwiping.current = false;
@@ -498,7 +529,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
       hasTriggeredHaptic.current = false;
       setIsAnimatingBack(false);
     },
-    [isTextSelectable, canReply, canForward, longPress]
+    [isSelecting, isTextSelectable, canReply, canForward, longPress]
   );
 
   const handleTouchMove = useCallback(
@@ -730,7 +761,34 @@ const MessageItem: React.FC<MessageItemProps> = ({
       style={{ touchAction: 'manipulation' }}
       role="listitem"
       aria-label={`${isOutgoing ? 'Sent' : 'Received'} message`}
+      onClick={isSelecting ? () => onToggleSelect?.(message.id) : undefined}
     >
+      {/* Selection checkbox */}
+      <div
+        className={`shrink-0 flex items-center justify-center transition-all duration-200 ease-out overflow-hidden ${
+          isSelecting ? 'w-7 opacity-100 ml-1' : 'w-0 opacity-0 ml-0'
+        }`}
+        onClick={e => {
+          e.stopPropagation();
+          onToggleSelect?.(message.id);
+        }}
+        data-testid="select-checkbox"
+      >
+        <div
+          className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors duration-150 ${
+            isSelected
+              ? 'bg-accent border-accent'
+              : 'border-muted-foreground/40 bg-transparent'
+          }`}
+        >
+          {isSelected && (
+            <CheckIcon
+              className="w-3 h-3 text-accent-foreground"
+              strokeWidth={3}
+            />
+          )}
+        </div>
+      </div>
       {/* Incoming avatar or spacer */}
       {!isOutgoing && contact && (
         <div className="w-8 shrink-0 ml-1">
@@ -1055,17 +1113,19 @@ const MessageItem: React.FC<MessageItemProps> = ({
           </div>
         )}
         {/* Hover arrow for desktop context menu */}
-        <button
-          type="button"
-          onClick={e => {
-            e.stopPropagation();
-            openContextMenu();
-          }}
-          className="absolute top-1.5 right-2 p-0.5 opacity-0 group-hover:opacity-100 transition-opacity hidden md:flex items-center justify-center"
-          aria-label="Message actions"
-        >
-          <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
-        </button>
+        {!isSelecting && (
+          <button
+            type="button"
+            onClick={e => {
+              e.stopPropagation();
+              openContextMenu();
+            }}
+            className="absolute top-1.5 right-2 p-0.5 opacity-0 group-hover:opacity-100 transition-opacity hidden md:flex items-center justify-center"
+            aria-label="Message actions"
+          >
+            <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
+          </button>
+        )}
       </div>
 
       <MessageContextMenu

@@ -22,6 +22,8 @@ import { useGossipSdk } from '../hooks/useGossipSdk';
 import { isDifferentDay } from '../utils/timeUtils';
 import { useUiStore } from '../stores/uiStore';
 import SessionIssueBanner from '../components/discussions/SessionIssueBanner';
+import SelectionHeader from '../components/discussions/SelectionHeader';
+import { useKeyboardVisible } from '../hooks/useKeyboardVisible';
 
 // Debug test message constants
 const TEST_MESSAGE_COUNT = 50;
@@ -133,6 +135,50 @@ const Discussion: React.FC = () => {
 
   // Track previous contact userId to prevent unnecessary updates
   const prevContactUserIdRef = useRef<string | null>(null);
+
+  // Multi-select state
+  const [selectedMessageIds, setSelectedMessageIds] = useState<Set<number>>(
+    new Set()
+  );
+  const isSelecting = selectedMessageIds.size > 0;
+
+  const handleToggleSelect = useCallback((messageId: number) => {
+    setSelectedMessageIds(prev => {
+      const next = new Set(prev);
+      if (next.has(messageId)) {
+        next.delete(messageId);
+      } else {
+        next.add(messageId);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleClearSelection = useCallback(() => {
+    setSelectedMessageIds(new Set());
+  }, []);
+
+  const handleCopySelected = useCallback(async () => {
+    const selected = messages
+      .filter(m => selectedMessageIds.has(m.id))
+      .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+
+    const contactName = discussion?.customName || contact?.name || 'Unknown';
+    const text = selected
+      .map(m => {
+        const sender =
+          m.direction === MessageDirection.OUTGOING ? 'You' : contactName;
+        return `${sender}\n${m.content}`;
+      })
+      .join('\n\n');
+
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // Silent fail
+    }
+    handleClearSelection();
+  }, [messages, selectedMessageIds, discussion, contact, handleClearSelection]);
 
   // Reply state
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
@@ -542,12 +588,20 @@ const Discussion: React.FC = () => {
     >
       {/* Header stays fixed in place — shifted content slides behind it */}
       <div className="relative z-10">
-        <DiscussionHeader
-          contact={contact}
-          discussion={discussion}
-          onBack={onBack}
-          onSearchToggle={() => setIsSearchOpen(prev => !prev)}
-        />
+        {isSelecting ? (
+          <SelectionHeader
+            count={selectedMessageIds.size}
+            onClear={handleClearSelection}
+            onCopy={handleCopySelected}
+          />
+        ) : (
+          <DiscussionHeader
+            contact={contact}
+            discussion={discussion}
+            onBack={onBack}
+            onSearchToggle={() => setIsSearchOpen(prev => !prev)}
+          />
+        )}
         <SessionIssueBanner
           discussion={discussion}
           outgoingSentCount={outgoingSentCount}
@@ -585,6 +639,9 @@ const Discussion: React.FC = () => {
             onScrollToMessage={handleScrollToMessage}
             onAtBottomChange={handleAtBottomChange}
             highlightedMessageId={searchHighlightId}
+            isSelecting={isSelecting}
+            selectedMessageIds={selectedMessageIds}
+            onToggleSelect={handleToggleSelect}
           />
         </div>
 

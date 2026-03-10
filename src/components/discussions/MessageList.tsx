@@ -57,6 +57,9 @@ interface MessageListProps {
   onScrollToMessage?: (messageId: number) => void;
   onAtBottomChange?: (atBottom: boolean) => void;
   highlightedMessageId?: number | null;
+  isSelecting?: boolean;
+  selectedMessageIds?: Set<number>;
+  onToggleSelect?: (messageId: number) => void;
 }
 
 export interface MessageListHandle {
@@ -83,6 +86,9 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
       onScrollToMessage,
       onAtBottomChange,
       highlightedMessageId,
+      isSelecting,
+      selectedMessageIds,
+      onToggleSelect,
     },
     ref
   ) => {
@@ -261,6 +267,9 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
                 onScrollToMessage={onScrollToMessage}
                 contact={contact}
                 isHighlighted={item.message.id === highlightedMessageId}
+                isSelecting={isSelecting}
+                isSelected={selectedMessageIds?.has(item.message.id)}
+                onToggleSelect={onToggleSelect}
               />
             );
 
@@ -277,6 +286,9 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
         onScrollToMessage,
         contact,
         highlightedMessageId,
+        isSelecting,
+        selectedMessageIds,
+        onToggleSelect,
       ]
     );
 
