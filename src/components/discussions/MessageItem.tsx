@@ -765,7 +765,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
     >
       {/* Selection checkbox */}
       <div
-        className={`shrink-0 flex items-center justify-center transition-all duration-200 ease-out overflow-hidden ${
+        className={`shrink-0 self-center flex items-center justify-center transition-all duration-200 ease-out overflow-hidden ${
           isSelecting ? 'w-7 opacity-100 ml-1' : 'w-0 opacity-0 ml-0'
         }`}
         onClick={e => {
