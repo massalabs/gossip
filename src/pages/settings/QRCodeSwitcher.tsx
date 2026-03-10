@@ -57,8 +57,8 @@ const QRCodeSwitcher: React.FC = () => {
       {activeTab === 'our-code' ? (
         <ShareContact
           onBack={handleBack}
-          userId={userProfile.userId}
-          userName={userProfile.username}
+          userId={userProfile?.userId ?? ''}
+          userName={userProfile?.username ?? ''}
           publicKey={gossip.publicKeys}
           mnsDomains={
             mnsEnabled && mnsDomains.length > 0 ? mnsDomains : undefined
