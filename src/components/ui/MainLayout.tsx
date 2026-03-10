@@ -1,5 +1,9 @@
 import React from 'react';
+import { useLocation } from 'react-router-dom';
 import { useKeyboardVisible } from '../../hooks/useKeyboardVisible';
+import { useUiStore } from '../../stores/uiStore';
+import { shouldShowBottomNav } from '../../constants/pageConfig';
+import BottomNavigation from './BottomNavigation';
 
 interface MainLayoutProps {
   children: React.ReactNode;
@@ -12,6 +16,7 @@ interface MainLayoutProps {
  * Handles:
  * - Bottom safe area inset (when keyboard is not visible)
  * - Flex column layout with scrollable content
+ * - Optional bottom navigation bar (controlled by user preference)
  *
  * Note: The iOS keyboard workaround that shifts the entire app up is handled
  * by IOSKeyboardWrapper at a higher level (in App.tsx), not by this component.
@@ -21,7 +26,15 @@ const MainLayout: React.FC<MainLayoutProps> = ({
   contentClassName = '',
 }) => {
   const { isKeyboardVisible } = useKeyboardVisible();
-  const safeAreaClass = isKeyboardVisible ? '' : 'pb-safe-b';
+  const showBottomNav = useUiStore.use.showBottomNav();
+  const location = useLocation();
+
+  const showNav =
+    showBottomNav &&
+    !isKeyboardVisible &&
+    shouldShowBottomNav(location.pathname);
+
+  const safeAreaClass = isKeyboardVisible || showNav ? '' : 'pb-safe-b';
 
   return (
     <div className="relative h-full flex flex-col">
@@ -30,6 +43,7 @@ const MainLayout: React.FC<MainLayoutProps> = ({
       >
         {children}
       </main>
+      {showNav && <BottomNavigation />}
     </div>
   );
 };

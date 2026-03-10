@@ -109,7 +109,7 @@ const Discussions: React.FC = () => {
     }).length;
 
     return { all: allCount, unread: unreadCount, pending: pendingCount };
-  }, [discussions, gossip, sessionsStatuses]);
+  }, [discussions, gossip.isSessionOpen, sessionsStatuses]);
 
   const menuItems: MenuItem[] = useMemo(
     () => [

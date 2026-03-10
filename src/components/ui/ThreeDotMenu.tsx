@@ -68,6 +68,11 @@ const ThreeDotMenu: React.FC<ThreeDotMenuProps> = ({
         return;
       }
 
+      if (e.key === 'Tab') {
+        close();
+        return;
+      }
+
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         e.preventDefault();
         const menuItems =
@@ -130,7 +135,7 @@ const ThreeDotMenu: React.FC<ThreeDotMenuProps> = ({
         >
           {items.map((item, index) => (
             <button
-              key={item.label}
+              key={index}
               role="menuitem"
               type="button"
               onClick={() => {
