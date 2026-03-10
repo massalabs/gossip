@@ -27,6 +27,7 @@ const Login: React.FC<LoginProps> = React.memo(
     onErrorChange,
   }) => {
     const loadAccount = useAccountStore(state => state.loadAccount);
+    const lockedByUser = useAccountStore(state => state.lockedByUser);
     const navigate = useNavigate();
     const [isLoading, setIsLoading] = useState(false);
     const [password, setPassword] = useState('');
@@ -113,10 +114,11 @@ const Login: React.FC<LoginProps> = React.memo(
 
     // Auto-trigger biometric auth on mount if account (from accountInfo) has biometric auth enabled
     // Only triggers for accountInfo, not selectedAccountInfo (which is handled by the effect above)
+    // Skip if user explicitly locked the app — they should manually unlock
     useEffect(() => {
-      // Skip if already attempted, no accountInfo, or user has manually selected a different account
       if (
         autoAuthAttempted.current ||
+        lockedByUser ||
         !accountInfo ||
         selectedAccountInfo ||
         !biometricMethodAvailable
@@ -133,6 +135,7 @@ const Login: React.FC<LoginProps> = React.memo(
     }, [
       accountInfo,
       selectedAccountInfo,
+      lockedByUser,
       handleBiometricAuth,
       biometricMethodAvailable,
     ]);

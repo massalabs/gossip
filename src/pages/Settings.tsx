@@ -9,7 +9,7 @@ import UserIdDisplay from '../components/ui/UserIdDisplay';
 import CopyClipboard from '../components/ui/CopyClipboard';
 import { ROUTES } from '../constants/routes';
 import {
-  LogOut,
+  Lock,
   Trash2,
   X,
   Bell,
@@ -84,11 +84,11 @@ const Settings = (): React.ReactElement => {
     }
   }, [resetAccount, navigate]);
 
-  const handleLogout = async () => {
+  const handleLockApp = async () => {
     try {
       await logout();
     } catch (error) {
-      console.error('Failed to logout:', error);
+      console.error('Failed to lock app:', error);
     }
   };
 
@@ -317,11 +317,11 @@ const Settings = (): React.ReactElement => {
             variant="outline"
             size="custom"
             className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0 border-b border-border text-foreground"
-            onClick={handleLogout}
+            onClick={handleLockApp}
           >
-            <LogOut className="mr-4" />
+            <Lock className="mr-4" />
             <span className="text-base font-semibold flex-1 text-left">
-              Logout
+              Lock App
             </span>
           </Button>
           <Button
