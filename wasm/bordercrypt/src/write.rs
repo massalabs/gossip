@@ -228,10 +228,6 @@ pub fn write_session_data<S: BlockStorage + KeypairStorage>(
             session.session_version,
         ));
     }
-    if data.is_empty() {
-        return Ok(());
-    }
-
     let data_len = data.len() as u64;
     let old_total = session.total_data_length;
     let new_total = old_total.max(
@@ -240,6 +236,11 @@ pub fn write_session_data<S: BlockStorage + KeypairStorage>(
             .ok_or(BordercryptError::Overflow)?,
     );
     session.total_data_length = new_total;
+
+    // Empty write that doesn't extend the logical length: true no-op.
+    if data.is_empty() && new_total == old_total {
+        return Ok(());
+    }
 
     // Ensure enough blocks exist
     let ps = PLAINTEXT_SIZE as u64;
@@ -252,6 +253,20 @@ pub fn write_session_data<S: BlockStorage + KeypairStorage>(
             / ps
     };
     ensure_block_count(storage, domain, session, required_last_block + 1)?;
+
+    // Empty write that extends total_data_length (spec §13.2):
+    // allocate blocks and re-encrypt block 0 to update the length header.
+    if data.is_empty() {
+        let mut pt = Zeroizing::new(vec![0u8; PLAINTEXT_SIZE]);
+        match decrypt_session_data_block(storage, domain, session, 0) {
+            Ok(existing) => pt.copy_from_slice(existing.as_ref()),
+            Err(_) => rand::rngs::OsRng.fill_bytes(&mut pt[..]),
+        }
+        pt[..LENGTH_HDR_SIZE].copy_from_slice(&new_total.to_be_bytes());
+        let pt_arr: &[u8; PLAINTEXT_SIZE] = pt.as_slice().try_into().expect("pt is PLAINTEXT_SIZE");
+        encrypt_session_data_block(storage, domain, session, 0, pt_arr)?;
+        return Ok(());
+    }
 
     // Map logical data offset to virtual plaintext stream position
     let start_pos = hdr.checked_add(offset).ok_or(BordercryptError::Overflow)?;
@@ -712,13 +727,37 @@ mod tests {
     }
 
     #[test]
-    fn write_empty_is_noop() {
+    fn write_empty_at_zero_is_noop() {
         let mut storage = MemoryStorage::new();
         let (mut session, _) = provision_all_sessions(&mut storage);
 
+        // Empty write at offset 0 with no prior data: true no-op
         write_session_data(&mut storage, DOMAIN, &mut session, 0, &[]).unwrap();
         assert_eq!(session.total_data_length, 0);
         assert_eq!(get_global_block_count(&storage).unwrap(), 0);
+    }
+
+    #[test]
+    fn write_empty_extends_length() {
+        let mut storage = MemoryStorage::new();
+        let (mut session, _) = provision_all_sessions(&mut storage);
+
+        // Empty write at offset > old_total extends the logical length (spec §13.2)
+        write_session_data(&mut storage, DOMAIN, &mut session, 1000, &[]).unwrap();
+        assert_eq!(session.total_data_length, 1000);
+        assert!(get_global_block_count(&storage).unwrap() >= 1);
+
+        // Verify block 0 header was updated: read_total_length should return 1000
+        let total = crate::read::read_total_length(
+            &storage,
+            DOMAIN,
+            session.session_version,
+            session.session_index,
+            &session.pq_rerand_sk,
+            session.root_aead_key.as_ref(),
+        )
+        .unwrap();
+        assert_eq!(total, 1000);
     }
 
     // --- shrink_session_data ---
