@@ -20,6 +20,7 @@ interface MessageContextMenuProps {
     left: number;
     width: number;
     height: number;
+    borderRadius?: string;
   } | null;
 }
 
@@ -109,7 +110,7 @@ const MessageContextMenu: React.FC<MessageContextMenuProps> = ({
             left: bubbleRect.left,
             width: bubbleRect.width,
             height: bubbleRect.height,
-            borderRadius: 24,
+            borderRadius: bubbleRect.borderRadius ?? 24,
             boxShadow:
               '0 0 0 200vmax var(--spotlight-overlay, rgba(255,255,255,0.5))',
           }}

@@ -5,6 +5,8 @@ interface UseLongPressOptions {
   delay?: number;
   threshold?: number;
   disabled?: boolean;
+  /** Skip preventDefault on touchEnd after long press (needed for Android native selection handles) */
+  preventDefaultOnEnd?: boolean;
 }
 
 export function useLongPress({
@@ -12,6 +14,7 @@ export function useLongPress({
   delay = 500,
   threshold = 10,
   disabled = false,
+  preventDefaultOnEnd = true,
 }: UseLongPressOptions) {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const startPos = useRef<{ x: number; y: number } | null>(null);
@@ -63,12 +66,12 @@ export function useLongPress({
       clear();
       // Prevent browser from synthesizing mousedown/click after a long press,
       // which would blur the focused input and dismiss the keyboard.
-      if (longPressTriggered.current) {
+      if (longPressTriggered.current && preventDefaultOnEnd) {
         e.preventDefault();
       }
       startPos.current = null;
     },
-    [clear]
+    [clear, preventDefaultOnEnd]
   );
 
   const onContextMenu = useCallback(

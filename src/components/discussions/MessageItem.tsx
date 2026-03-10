@@ -119,6 +119,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
     left: number;
     width: number;
     height: number;
+    borderRadius?: string;
   } | null>(null);
   const contextMenuOpenRef = useRef(false);
   // Snapshot the keyboard height at touchstart — on iOS the keyboard may start
@@ -154,14 +155,12 @@ const MessageItem: React.FC<MessageItemProps> = ({
     // just overlay the menu at the bottom of the visible area.
     const tall = rect.height > vh * 0.5;
 
-    let tx = 0;
-    let ty = 0;
+    // Subtle diagonal nudge so the bubble feels "selected"
+    const tx = isOutgoing ? -6 : 6;
+    let ty = -6;
     let menuY: number;
 
     if (tall) {
-      // Subtle diagonal nudge so the bubble feels "selected"
-      tx = isOutgoing ? -6 : 6;
-      ty = -6;
       // Try below bubble first; only overlap if it would overflow
       menuY = rect.bottom + gap;
       if (menuY + menuHeight > vh - pad) {
@@ -171,9 +170,9 @@ const MessageItem: React.FC<MessageItemProps> = ({
       // Menu appears right below the bubble
       menuY = rect.bottom + gap;
 
-      // If menu would overflow the viewport, translate bubble up
+      // If menu would overflow the viewport, translate bubble up more
       if (menuY + menuHeight > vh - pad) {
-        ty = -(menuY + menuHeight - (vh - pad));
+        ty -= menuY + menuHeight - (vh - pad);
       }
       // Don't push bubble above viewport
       if (rect.top + ty < pad) {
@@ -189,11 +188,14 @@ const MessageItem: React.FC<MessageItemProps> = ({
         ? { right: window.innerWidth - rect.right }
         : { left: rect.left }),
     });
+    // Read the actual computed border-radius so the spotlight hole matches exactly
+    const computed = getComputedStyle(bubbleRef.current);
     setBubbleRect({
       top: rect.top + ty,
       left: rect.left + tx,
       width: rect.width,
       height: rect.height,
+      borderRadius: `${computed.borderTopLeftRadius} ${computed.borderTopRightRadius} ${computed.borderBottomRightRadius} ${computed.borderBottomLeftRadius}`,
     });
     contextMenuOpenRef.current = true;
     setIsContextMenuOpen(true);
@@ -220,6 +222,10 @@ const MessageItem: React.FC<MessageItemProps> = ({
       bubbleRef.current.style as unknown as Record<string, string>
     ).webkitUserSelect = 'text';
     setIsTextSelectable(true);
+
+    // On Android, skip programmatic selection — the native contextmenu event
+    // will fire right after and show selection handles ("picos") natively.
+    if (Capacitor.getPlatform() === 'android') return;
 
     requestAnimationFrame(() => {
       const pos = longPressPosRef.current;
@@ -268,9 +274,25 @@ const MessageItem: React.FC<MessageItemProps> = ({
     };
   }, [isTextSelectable, clearTextSelection]);
 
+  const isAndroid = Capacitor.getPlatform() === 'android';
   const longPress = useLongPress({
     onLongPress: enableTextSelection,
+    // On Android, don't preventDefault on touchEnd — it interferes with native selection handles
+    preventDefaultOnEnd: !isAndroid,
   });
+
+  // On Android, let the native contextmenu event through when text selection
+  // is active so the browser shows selection handles.
+  const handleContextMenu = useCallback(
+    (e: React.MouseEvent) => {
+      if (isAndroid && longPress.longPressTriggered.current) {
+        // Don't prevent default — let native selection handles appear
+        return;
+      }
+      longPress.onContextMenu(e);
+    },
+    [isAndroid, longPress]
+  );
   // Suppress click after gestures (swipe / long-press / scroll)
   const suppressClickRef = useRef(false);
 
@@ -626,7 +648,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
-      onContextMenu={longPress.onContextMenu}
+      onContextMenu={handleContextMenu}
       role="listitem"
       aria-label={`${isOutgoing ? 'Sent' : 'Received'} message`}
     >
@@ -642,7 +664,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
       )}
       <div
         ref={combinedBubbleRef}
-        className={`relative max-w-[80%] sm:max-w-[70%] md:max-w-[65%] lg:max-w-[60%] px-3.5 py-3 font-normal text-[15px] leading-tight animate-bubble-in ${isTextSelectable ? 'select-text' : 'select-none'} ${isContextMenuOpen ? 'rounded-3xl' : borderRadiusClass} ${
+        className={`relative max-w-[80%] sm:max-w-[70%] md:max-w-[65%] lg:max-w-[60%] px-3.5 py-3 font-normal text-[15px] leading-tight animate-bubble-in ${isTextSelectable ? 'select-text' : 'select-none'} ${borderRadiusClass} ${
           isOutgoing
             ? 'ml-auto mr-3 bg-accent text-accent-foreground'
             : `${contact ? '' : 'ml-3'} mr-auto bg-surface-secondary text-card-foreground`
