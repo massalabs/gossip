@@ -8,9 +8,14 @@ import React, {
 import {
   CornerUpLeft,
   Share,
+  Copy,
+  ChevronDown,
   Check as CheckIcon,
   AlertTriangle,
 } from 'react-feather';
+import { useLongPress } from '../../hooks/useLongPress';
+import MessageContextMenu from '../ui/MessageContextMenu';
+import type { MessageContextMenuItem } from '../ui/MessageContextMenu';
 import { formatTime } from '../../utils/timeUtils';
 import {
   Message,
@@ -21,6 +26,8 @@ import {
 import { useGossipSdk } from '../../hooks/useGossipSdk';
 import { parseLinks, openUrl } from '../../utils/linkUtils';
 import { useMarkMessageAsRead } from '../../hooks/useMarkMessageAsRead';
+import { getKeyboardHeight } from '../../hooks/useKeyboardVisible';
+import { Capacitor } from '@capacitor/core';
 import ContactAvatar from '../avatar/ContactAvatar';
 import type { Contact } from '@massalabs/gossip-sdk';
 
@@ -78,15 +85,263 @@ const MessageItem: React.FC<MessageItemProps> = ({
 
   // Swipe gesture state
   const [swipeOffset, setSwipeOffset] = useState(0);
+  const swipeOffsetRef = useRef(0);
   const [isAnimatingBack, setIsAnimatingBack] = useState(false);
+  const animTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const touchStartX = useRef<number | null>(null);
   const touchStartY = useRef<number | null>(null);
   const isSwiping = useRef(false);
   const swipeCompleted = useRef(false);
   // Handle automatic message read marking
-  const messageRef = useMarkMessageAsRead(message);
+  const markAsReadRef = useMarkMessageAsRead(message);
+  const bubbleRef = useRef<HTMLDivElement>(null);
+  const combinedBubbleRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      bubbleRef.current = node;
+      markAsReadRef.current = node;
+    },
+    [markAsReadRef]
+  );
   const touchSlopExceeded = useRef(false);
   const hasTriggeredHaptic = useRef(false);
+
+  // Context menu state
+  const [isContextMenuOpen, setIsContextMenuOpen] = useState(false);
+  const [contextMenuTranslateX, setContextMenuTranslateX] = useState(0);
+  const [contextMenuTranslateY, setContextMenuTranslateY] = useState(0);
+  const [menuPosition, setMenuPosition] = useState<{
+    top: number;
+    left?: number;
+    right?: number;
+  } | null>(null);
+  const [bubbleRect, setBubbleRect] = useState<{
+    top: number;
+    left: number;
+    width: number;
+    height: number;
+    borderRadius?: string;
+  } | null>(null);
+  const contextMenuOpenRef = useRef(false);
+  // Snapshot the keyboard height at touchstart — on iOS the keyboard may start
+  // dismissing during the 500ms long-press delay, zeroing the live value before
+  // openContextMenu fires.
+  const kbHeightSnapshotRef = useRef(0);
+
+  const openContextMenu = useCallback(() => {
+    if (!bubbleRef.current || contextMenuOpenRef.current) return;
+    const rect = bubbleRef.current.getBoundingClientRect();
+    let itemCount = 1; // Copy always present
+    if (canReply) itemCount++;
+    if (canForward) itemCount++;
+    const menuHeight = itemCount * 44;
+    const gap = 8;
+    const sab =
+      parseFloat(
+        getComputedStyle(document.documentElement).getPropertyValue('--sab')
+      ) || 0;
+    const pad = 16 + sab;
+    // On Android, clientHeight/visualViewport already shrink with the keyboard.
+    // On iOS they don't, so we subtract the keyboard height manually.
+    // Use the snapshot taken at touchstart to avoid stale values.
+    const kbAdjust =
+      Capacitor.getPlatform() === 'ios' ? kbHeightSnapshotRef.current : 0;
+    const vh = Math.min(
+      document.documentElement.clientHeight,
+      window.visualViewport?.height ?? Infinity,
+      window.innerHeight - kbAdjust
+    );
+
+    // For tall bubbles that take up most of the viewport, don't translate —
+    // just overlay the menu at the bottom of the visible area.
+    const tall = rect.height > vh * 0.5;
+
+    // Subtle diagonal nudge so the bubble feels "selected"
+    const tx = isOutgoing ? -6 : 6;
+    let ty = -6;
+    let menuY: number;
+
+    if (tall) {
+      // Try below bubble first; only overlap if it would overflow
+      menuY = rect.bottom + gap;
+      if (menuY + menuHeight > vh - pad) {
+        menuY = vh - pad - menuHeight;
+      }
+    } else {
+      // Menu appears right below the bubble
+      menuY = rect.bottom + gap;
+
+      // If menu would overflow the viewport, translate bubble up more
+      if (menuY + menuHeight > vh - pad) {
+        ty -= menuY + menuHeight - (vh - pad);
+      }
+      // Don't push bubble above viewport
+      if (rect.top + ty < pad) {
+        ty = pad - rect.top;
+      }
+    }
+
+    setContextMenuTranslateX(tx);
+    setContextMenuTranslateY(ty);
+    setMenuPosition({
+      top: menuY,
+      ...(isOutgoing
+        ? { right: window.innerWidth - rect.right }
+        : { left: rect.left }),
+    });
+    // Read the actual computed border-radius so the spotlight hole matches exactly
+    const computed = getComputedStyle(bubbleRef.current);
+    setBubbleRect({
+      top: rect.top + ty,
+      left: rect.left + tx,
+      width: rect.width,
+      height: rect.height,
+      borderRadius: `${computed.borderTopLeftRadius} ${computed.borderTopRightRadius} ${computed.borderBottomRightRadius} ${computed.borderBottomLeftRadius}`,
+    });
+    contextMenuOpenRef.current = true;
+    setIsContextMenuOpen(true);
+  }, [canReply, canForward, isOutgoing]);
+
+  const closeContextMenu = useCallback(() => {
+    contextMenuOpenRef.current = false;
+    setIsContextMenuOpen(false);
+    setContextMenuTranslateX(0);
+    setContextMenuTranslateY(0);
+    setMenuPosition(null);
+    setBubbleRect(null);
+  }, []);
+
+  // Close context menu if the list scrolls (e.g. desktop mouse wheel)
+  useEffect(() => {
+    if (!isContextMenuOpen) return;
+    const scroller = bubbleRef.current?.closest('[data-virtuoso-scroller]');
+    if (!scroller) return;
+    const onScroll = () => closeContextMenu();
+    scroller.addEventListener('scroll', onScroll, { passive: true });
+    return () => scroller.removeEventListener('scroll', onScroll);
+  }, [isContextMenuOpen, closeContextMenu]);
+
+  // Text selection on long press
+  const [isTextSelectable, setIsTextSelectable] = useState(false);
+  const longPressPosRef = useRef<{ x: number; y: number } | null>(null);
+
+  const enableTextSelection = useCallback(() => {
+    if (!bubbleRef.current || contextMenuOpenRef.current) return;
+    // Enable selection immediately so caretRangeFromPoint works
+    bubbleRef.current.style.userSelect = 'text';
+    (
+      bubbleRef.current.style as unknown as Record<string, string>
+    ).webkitUserSelect = 'text';
+    setIsTextSelectable(true);
+
+    // On Android, skip programmatic selection — the native contextmenu event
+    // will fire right after and show selection handles ("picos") natively.
+    if (Capacitor.getPlatform() === 'android') return;
+
+    requestAnimationFrame(() => {
+      const pos = longPressPosRef.current;
+      if (!pos) return;
+      const range = document.caretRangeFromPoint(pos.x, pos.y);
+      if (!range) return;
+      const sel = window.getSelection();
+      if (!sel) return;
+      sel.removeAllRanges();
+      sel.addRange(range);
+      try {
+        sel.modify('move', 'backward', 'word');
+        sel.modify('extend', 'forward', 'word');
+      } catch {
+        // modify not available — selection stays at caret
+      }
+    });
+  }, []);
+
+  const clearTextSelection = useCallback(() => {
+    window.getSelection()?.removeAllRanges();
+    setIsTextSelectable(false);
+    if (bubbleRef.current) {
+      bubbleRef.current.style.userSelect = '';
+      (
+        bubbleRef.current.style as unknown as Record<string, string>
+      ).webkitUserSelect = '';
+    }
+  }, []);
+
+  // Deselect when tapping outside the bubble
+  useEffect(() => {
+    if (!isTextSelectable) return;
+    const handleOutsideTouch = (e: TouchEvent) => {
+      if (bubbleRef.current && !bubbleRef.current.contains(e.target as Node)) {
+        clearTextSelection();
+      }
+    };
+    // Delay so the long-press touchend doesn't immediately clear
+    const timer = setTimeout(() => {
+      document.addEventListener('touchstart', handleOutsideTouch);
+    }, 100);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('touchstart', handleOutsideTouch);
+    };
+  }, [isTextSelectable, clearTextSelection]);
+
+  const isAndroid = Capacitor.getPlatform() === 'android';
+  const longPress = useLongPress({
+    onLongPress: enableTextSelection,
+    // On Android, don't preventDefault on touchEnd — it interferes with native selection handles
+    preventDefaultOnEnd: !isAndroid,
+  });
+
+  // On Android, let the native contextmenu event through when text selection
+  // is active so the browser shows selection handles.
+  const handleContextMenu = useCallback(
+    (e: React.MouseEvent) => {
+      if (isAndroid && longPress.longPressTriggered.current) {
+        // Don't prevent default — let native selection handles appear
+        return;
+      }
+      longPress.onContextMenu(e);
+    },
+    [isAndroid, longPress]
+  );
+  // Suppress click after gestures (swipe / long-press / scroll)
+  const suppressClickRef = useRef(false);
+
+  // Context menu items — depend on stable scalars, not the full message object
+  const contextMenuItems = useMemo<MessageContextMenuItem[]>(() => {
+    const items: MessageContextMenuItem[] = [];
+    if (onReplyTo) {
+      items.push({
+        label: 'Reply',
+        icon: <CornerUpLeft className="w-4 h-4" />,
+        onClick: () => onReplyTo(message),
+      });
+    }
+    if (onForward) {
+      items.push({
+        label: 'Forward',
+        icon: <Share className="w-4 h-4" />,
+        onClick: () => onForward(message),
+      });
+    }
+    items.push({
+      label: 'Copy',
+      icon: <Copy className="w-4 h-4" />,
+      onClick: () => {
+        navigator.clipboard.writeText(message.content).catch(() => {
+          /* clipboard not available */
+        });
+      },
+    });
+    return items;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onReplyTo, onForward, message.id, message.content]);
+
+  // Clean up animation timer on unmount
+  useEffect(() => {
+    return () => {
+      if (animTimerRef.current) clearTimeout(animTimerRef.current);
+    };
+  }, []);
 
   // Load original message if this is a reply or forward
   useEffect(() => {
@@ -148,30 +403,36 @@ const MessageItem: React.FC<MessageItemProps> = ({
     sdk,
   ]);
 
-  const handleDoubleClick = useCallback(
-    (e: React.MouseEvent) => {
-      e.preventDefault();
-      if (canReply && onReplyTo) {
-        onReplyTo(message);
-      }
-    },
-    [canReply, onReplyTo, message]
-  );
+  const handleBubbleClick = useCallback(() => {
+    if (suppressClickRef.current) {
+      suppressClickRef.current = false;
+      return;
+    }
+    if (isTextSelectable) {
+      clearTextSelection();
+      return;
+    }
+    openContextMenu();
+  }, [openContextMenu, isTextSelectable, clearTextSelection]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      if ((e.key === 'Enter' || e.key === ' ') && canReply && onReplyTo) {
+      if (e.key === 'F10' && e.shiftKey) {
         e.preventDefault();
-        onReplyTo(message);
+        openContextMenu();
       }
     },
-    [canReply, onReplyTo, message]
+    [openContextMenu]
   );
 
   const handleTouchStart = useCallback(
     (e: React.TouchEvent) => {
-      if (!canReply && !canForward) return;
+      // Snapshot keyboard height before it can dismiss during long-press delay
+      kbHeightSnapshotRef.current = getKeyboardHeight();
       const touch = e.touches[0];
+      longPressPosRef.current = { x: touch.clientX, y: touch.clientY };
+      longPress.onTouchStart(e);
+      if (isTextSelectable || (!canReply && !canForward)) return;
       touchStartX.current = touch.clientX;
       touchStartY.current = touch.clientY;
       isSwiping.current = false;
@@ -180,11 +441,12 @@ const MessageItem: React.FC<MessageItemProps> = ({
       hasTriggeredHaptic.current = false;
       setIsAnimatingBack(false);
     },
-    [canReply, canForward]
+    [isTextSelectable, canReply, canForward, longPress]
   );
 
   const handleTouchMove = useCallback(
     (e: React.TouchEvent) => {
+      longPress.onTouchMove(e);
       if (!canReply && !canForward) return;
       if (touchStartX.current === null || touchStartY.current === null) return;
 
@@ -209,6 +471,8 @@ const MessageItem: React.FC<MessageItemProps> = ({
       }
 
       if (isHorizontalSwipe) {
+        // Prevent iOS from scrolling the parent container during swipe
+        e.preventDefault();
         isSwiping.current = true;
         const resistance = isOutgoing
           ? SWIPE_RESISTANCE_OUTGOING
@@ -217,71 +481,93 @@ const MessageItem: React.FC<MessageItemProps> = ({
           ? SWIPE_MAX_DISTANCE_OUTGOING
           : SWIPE_MAX_DISTANCE;
         const rawSwipe = deltaX * resistance;
-        const clampedSwipe = Math.max(
-          -maxDistance,
-          Math.min(rawSwipe, maxDistance)
-        );
+        // Clamp to >= 0 (right-swipe only, no left-swipe)
+        const clampedSwipe = Math.max(0, Math.min(rawSwipe, maxDistance));
+        swipeOffsetRef.current = clampedSwipe;
         setSwipeOffset(clampedSwipe);
 
         // Trigger haptic when crossing the threshold
         const threshold = isOutgoing
           ? SWIPE_THRESHOLD_OUTGOING
           : SWIPE_THRESHOLD;
-        if (
-          Math.abs(clampedSwipe) >= threshold &&
-          !hasTriggeredHaptic.current
-        ) {
+        if (clampedSwipe >= threshold && !hasTriggeredHaptic.current) {
           hasTriggeredHaptic.current = true;
         }
       } else if (Math.abs(deltaX) > 5 || Math.abs(deltaY) > 5) {
         setSwipeOffset(0);
       }
     },
-    [canReply, canForward, isOutgoing]
+    [canReply, canForward, isOutgoing, longPress]
   );
 
-  const handleTouchEnd = useCallback(() => {
-    if (!canReply && !canForward) {
+  const handleTouchEnd = useCallback(
+    (e: React.TouchEvent) => {
+      longPress.onTouchEnd(e);
+
+      if (!canReply && !canForward) {
+        setSwipeOffset(0);
+        touchStartX.current = null;
+        touchStartY.current = null;
+        isSwiping.current = false;
+        touchSlopExceeded.current = false;
+        return;
+      }
+
+      // If long-press fired, suppress tap and reset
+      if (longPress.longPressTriggered.current) {
+        suppressClickRef.current = true;
+        setIsAnimatingBack(true);
+        swipeOffsetRef.current = 0;
+        setSwipeOffset(0);
+        touchStartX.current = null;
+        touchStartY.current = null;
+        isSwiping.current = false;
+        touchSlopExceeded.current = false;
+        hasTriggeredHaptic.current = false;
+        if (animTimerRef.current) clearTimeout(animTimerRef.current);
+        animTimerRef.current = setTimeout(() => setIsAnimatingBack(false), 300);
+        return;
+      }
+
+      const threshold = isOutgoing ? SWIPE_THRESHOLD_OUTGOING : SWIPE_THRESHOLD;
+      const isRightSwipeCompleted = swipeOffsetRef.current >= threshold;
+
+      if (isRightSwipeCompleted && onReplyTo) {
+        onReplyTo(message);
+        swipeCompleted.current = true;
+      }
+
+      // Suppress tap after any swipe gesture
+      if (touchSlopExceeded.current || isSwiping.current) {
+        suppressClickRef.current = true;
+      }
+
+      // Animate back with spring effect
+      setIsAnimatingBack(true);
+      swipeOffsetRef.current = 0;
       setSwipeOffset(0);
       touchStartX.current = null;
       touchStartY.current = null;
       isSwiping.current = false;
       touchSlopExceeded.current = false;
-      return;
-    }
+      hasTriggeredHaptic.current = false;
 
-    const threshold = isOutgoing ? SWIPE_THRESHOLD_OUTGOING : SWIPE_THRESHOLD;
-    const isRightSwipeCompleted = swipeOffset >= threshold;
-    const isLeftSwipeCompleted = swipeOffset <= -threshold;
+      // Remove animation class after animation completes
+      if (animTimerRef.current) clearTimeout(animTimerRef.current);
+      animTimerRef.current = setTimeout(() => setIsAnimatingBack(false), 300);
+    },
+    [canReply, canForward, isOutgoing, onReplyTo, message, longPress]
+  );
 
-    if (isRightSwipeCompleted && onReplyTo) {
-      onReplyTo(message);
-      swipeCompleted.current = true;
-    } else if (isLeftSwipeCompleted && onForward) {
-      onForward(message);
-      swipeCompleted.current = true;
-    }
-
-    // Animate back with spring effect
-    setIsAnimatingBack(true);
+  const handleTouchCancel = useCallback(() => {
+    longPress.onTouchCancel();
     setSwipeOffset(0);
+    swipeOffsetRef.current = 0;
     touchStartX.current = null;
     touchStartY.current = null;
     isSwiping.current = false;
     touchSlopExceeded.current = false;
-    hasTriggeredHaptic.current = false;
-
-    // Remove animation class after animation completes
-    setTimeout(() => setIsAnimatingBack(false), 300);
-  }, [
-    canReply,
-    canForward,
-    isOutgoing,
-    swipeOffset,
-    onReplyTo,
-    onForward,
-    message,
-  ]);
+  }, [longPress]);
 
   const handleReplyContextClick = useCallback(
     (e: React.MouseEvent) => {
@@ -379,9 +665,12 @@ const MessageItem: React.FC<MessageItemProps> = ({
     <div
       id={id}
       className={`flex items-end gap-1 ${isOutgoing ? 'justify-end' : 'justify-start'} group relative ${spacingClass} ${isHighlighted ? 'search-highlight' : ''}`}
-      onTouchStart={canReply ? handleTouchStart : undefined}
-      onTouchMove={canReply ? handleTouchMove : undefined}
-      onTouchEnd={canReply ? handleTouchEnd : undefined}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+      onTouchCancel={handleTouchCancel}
+      onContextMenu={handleContextMenu}
+      style={{ touchAction: 'manipulation' }}
       role="listitem"
       aria-label={`${isOutgoing ? 'Sent' : 'Received'} message`}
     >
@@ -396,29 +685,31 @@ const MessageItem: React.FC<MessageItemProps> = ({
         </div>
       )}
       <div
-        ref={messageRef}
-        className={`relative max-w-[80%] sm:max-w-[70%] md:max-w-[65%] lg:max-w-[60%] px-3.5 py-3 font-normal text-[15px] leading-tight animate-bubble-in ${borderRadiusClass} ${
+        ref={combinedBubbleRef}
+        className={`relative max-w-[80%] sm:max-w-[70%] md:max-w-[65%] lg:max-w-[60%] px-3.5 py-3 font-normal text-[15px] leading-tight animate-bubble-in ${isTextSelectable ? 'select-text' : 'select-none'} ${borderRadiusClass} ${
           isOutgoing
             ? 'ml-auto mr-3 bg-accent text-accent-foreground'
             : `${contact ? '' : 'ml-3'} mr-auto bg-surface-secondary text-card-foreground`
         } ${
-          canReply
-            ? 'cursor-pointer hover:opacity-90 transition-opacity focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2'
-            : ''
-        }`}
-        onDoubleClick={handleDoubleClick}
+          canReply ? 'cursor-pointer focus:outline-none' : ''
+        } ${isContextMenuOpen ? 'shadow-lg' : ''}`}
+        onClick={handleBubbleClick}
         onKeyDown={handleKeyDown}
-        tabIndex={canReply ? 0 : undefined}
-        role={canReply ? 'button' : undefined}
-        aria-label={canReply ? 'Double-tap to reply' : undefined}
+        tabIndex={0}
+        role="button"
+        aria-label="Tap for actions"
         style={{
-          transform:
-            swipeOffset !== 0
+          transform: isContextMenuOpen
+            ? `translate(${contextMenuTranslateX}px, ${contextMenuTranslateY}px)`
+            : swipeOffset !== 0
               ? `translateX(${swipeOffset}px)`
               : 'translateX(0)',
-          transition: isAnimatingBack
-            ? 'transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)'
-            : 'none',
+          filter: isContextMenuOpen ? 'brightness(0.95)' : undefined,
+          transition: isContextMenuOpen
+            ? 'transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s ease-out, border-radius 0.3s ease-out, filter 0.2s ease-out'
+            : isAnimatingBack
+              ? 'transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)'
+              : 'none',
         }}
       >
         {/* Reply indicator (right swipe) */}
@@ -446,37 +737,6 @@ const MessageItem: React.FC<MessageItemProps> = ({
           </div>
         )}
 
-        {/* Forward indicator (left swipe) */}
-        {swipeOffset < -indicatorThreshold && canForward && (
-          <div
-            className={`absolute right-0 top-0 bottom-0 flex items-center justify-center ${
-              isOutgoing ? 'bg-accent/20' : 'bg-card/20'
-            } rounded-r-2xl`}
-            style={{
-              width: `${Math.min(
-                Math.abs(swipeOffset),
-                SWIPE_INDICATOR_MAX_WIDTH
-              )}px`,
-              opacity: Math.min(
-                Math.abs(swipeOffset) / SWIPE_INDICATOR_MAX_WIDTH,
-                1
-              ),
-              transition: isAnimatingBack ? 'all 0.3s ease-out' : 'none',
-            }}
-            aria-hidden="true"
-          >
-            <Share
-              className={`w-5 h-5 text-muted-foreground transition-transform ${
-                Math.abs(swipeOffset) >=
-                (isOutgoing ? SWIPE_THRESHOLD_OUTGOING : SWIPE_THRESHOLD)
-                  ? 'scale-110'
-                  : 'scale-100'
-              }`}
-              aria-hidden="true"
-            />
-          </div>
-        )}
-
         {/* Reply Context */}
         {message.replyTo && (
           <div
@@ -486,7 +746,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
                 : 'border-card-foreground/30'
             } ${originalNotFound ? 'border-destructive/50' : ''} ${
               message.replyTo.originalMsgId && onScrollToMessage
-                ? 'cursor-pointer hover:bg-black/5 dark:hover:bg-white/5 rounded-r transition-colors active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2'
+                ? 'cursor-pointer hover:bg-black/5 dark:hover:bg-white/5 rounded-r transition-colors active:scale-[0.98] focus:outline-none'
                 : ''
             }`}
             {...(message.replyTo.originalMsgId && onScrollToMessage
@@ -571,7 +831,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
                 : 'border-card-foreground/30'
             } ${
               canNavigateToForwarded
-                ? 'cursor-pointer hover:bg-black/5 dark:hover:bg-white/5 rounded-r transition-colors active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2'
+                ? 'cursor-pointer hover:bg-black/5 dark:hover:bg-white/5 rounded-r transition-colors active:scale-[0.98] focus:outline-none'
                 : ''
             }`}
             {...(canNavigateToForwarded
@@ -714,7 +974,29 @@ const MessageItem: React.FC<MessageItemProps> = ({
             )}
           </div>
         )}
+        {/* Hover arrow for desktop context menu */}
+        <button
+          type="button"
+          onClick={e => {
+            e.stopPropagation();
+            openContextMenu();
+          }}
+          className="absolute top-1.5 right-2 p-0.5 opacity-0 group-hover:opacity-100 transition-opacity hidden md:flex items-center justify-center"
+          aria-label="Message actions"
+        >
+          <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
+        </button>
       </div>
+
+      <MessageContextMenu
+        items={contextMenuItems}
+        isOpen={isContextMenuOpen}
+        onClose={closeContextMenu}
+        isOutgoing={isOutgoing}
+        position={menuPosition}
+        translateY={contextMenuTranslateY}
+        bubbleRect={bubbleRect}
+      />
     </div>
   );
 };

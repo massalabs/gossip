@@ -19,9 +19,13 @@ interface UiStoreState {
   headerIsScrolled: boolean;
   setHeaderIsScrolled: (isScrolled: boolean) => void;
 
-  // Bottom navigation visibility (kept for potential future use)
+  // Bottom navigation visibility
   bottomNavVisible: boolean;
   setBottomNavVisible: (visible: boolean) => void;
+
+  // User preference: show bottom navigation bar
+  showBottomNav: boolean;
+  setShowBottomNav: (show: boolean) => void;
 }
 
 const useUiStoreBase = create<UiStoreState>()(
@@ -52,12 +56,19 @@ const useUiStoreBase = create<UiStoreState>()(
       setBottomNavVisible: (visible: boolean) => {
         set({ bottomNavVisible: visible });
       },
+
+      // User preference: show bottom navigation bar
+      showBottomNav: false,
+      setShowBottomNav: (show: boolean) => {
+        set({ showBottomNav: show });
+      },
     }),
     {
       name: STORAGE_KEYS.THEME,
       storage: createJSONStorage(() => localStorage),
       partialize: state => ({
         theme: state.theme,
+        showBottomNav: state.showBottomNav,
       }),
     }
   )

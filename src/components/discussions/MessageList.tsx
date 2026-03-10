@@ -1,4 +1,10 @@
-import React, { useRef, useCallback, useEffect } from 'react';
+import React, {
+  useRef,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
 import { MessageDirection, Message } from '@massalabs/gossip-sdk';
 import type { Discussion, Contact } from '@massalabs/gossip-sdk';
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
@@ -26,9 +32,6 @@ import {
 
 // Number of messages to show above the first unread message when scrolling to it
 const MESSAGES_ABOVE_UNREAD = 3;
-
-// Delay in milliseconds before initial scroll positioning to ensure messages are loaded
-const INITIAL_SCROLL_DELAY_MS = 100;
 
 // =============================================================================
 // Types
@@ -74,8 +77,6 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
     const virtuosoRef = useRef<VirtuosoHandle>(null);
     const prevMessageCountRef = useRef<number>(0);
     const isAtBottomRef = useRef<boolean>(true);
-    const initialPositioningDoneRef = useRef<boolean>(false);
-    // Store latest values in refs to avoid stale closures in setTimeout
     const messagesRef = useRef<Message[]>(messages);
     const virtualItemsRef = useRef<VirtualItem[]>([]);
 
@@ -90,90 +91,82 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
     // Find the first unread message for visual indicator and initial positioning
     const firstUnreadMessage = findFirstUnreadMessage(messages);
 
-    // Handle initial positioning and scroll to bottom when new messages are added
+    // Compute initial position so Virtuoso renders at the right place instantly
+    // (no visible scroll animation on entering a discussion)
+    const initialTopMostItemIndex = useMemo(() => {
+      if (virtualItems.length === 0) return 0;
+      if (firstUnreadMessage) {
+        const idx = virtualItems.findIndex(
+          item =>
+            item.type === 'message' && item.message.id === firstUnreadMessage.id
+        );
+        if (idx >= 0) return Math.max(0, idx - MESSAGES_ABOVE_UNREAD);
+      }
+      return virtualItems.length - 1;
+    }, [virtualItems, firstUnreadMessage]);
+
+    // Hide the list until Virtuoso has finished its initial positioning pass.
+    // Without this, the user sees a brief flash of items at the wrong scroll
+    // position (and the scroll-to-bottom button flickers).
+    const [ready, setReady] = useState(false);
+    const readyRef = useRef(false);
+    const prevDiscussionIdRef = useRef(discussion?.id);
+
+    // Synchronous reset during render so the container is hidden BEFORE
+    // the DOM update — prevents a single visible frame at the wrong position.
+    if (prevDiscussionIdRef.current !== discussion?.id) {
+      prevDiscussionIdRef.current = discussion?.id;
+      readyRef.current = false;
+      if (ready) setReady(false);
+    }
+
+    // After Virtuoso mounts and positions, reveal the list
+    useEffect(() => {
+      if (readyRef.current) return;
+      if (virtualItems.length === 0) return;
+      const id = setTimeout(() => {
+        readyRef.current = true;
+        setReady(true);
+      }, 50);
+      return () => clearTimeout(id);
+    }, [discussion?.id, virtualItems.length]);
+
+    // Reset message count tracking when switching discussions
+    useEffect(() => {
+      prevMessageCountRef.current = 0;
+    }, [discussion?.id]);
+
+    // Scroll to bottom when new messages arrive (not on initial load)
     useEffect(() => {
       const prevCount = prevMessageCountRef.current;
       const currentCount = messages.length;
-
-      // If this is the initial load and we haven't positioned yet, wait a bit then position
-      if (
-        currentCount > 0 &&
-        prevCount === 0 &&
-        !initialPositioningDoneRef.current
-      ) {
-        // Add a delay to ensure messages are fully loaded and Virtuoso is ready
-        const timeoutId = setTimeout(() => {
-          // Use refs to get latest values inside timeout to avoid stale closures
-          const currentMessages = messagesRef.current;
-          const currentVirtualItems = virtualItemsRef.current;
-          const currentFirstUnreadMessage =
-            findFirstUnreadMessage(currentMessages);
-
-          if (!initialPositioningDoneRef.current) {
-            initialPositioningDoneRef.current = true;
-
-            if (currentFirstUnreadMessage) {
-              // Scroll to the first unread message
-              const unreadVirtualIndex = currentVirtualItems.findIndex(
-                item =>
-                  item.type === 'message' &&
-                  item.message.id === currentFirstUnreadMessage.id
-              );
-              if (unreadVirtualIndex >= 0) {
-                const targetIndex = Math.max(
-                  0,
-                  unreadVirtualIndex - MESSAGES_ABOVE_UNREAD
-                );
-                virtuosoRef.current?.scrollToIndex({
-                  index: targetIndex,
-                  behavior: 'auto', // Use auto for initial positioning
-                });
-              }
-            } else {
-              // No unread messages, scroll to bottom
-              virtuosoRef.current?.scrollToIndex({
-                index: currentVirtualItems.length - 1,
-                behavior: 'auto', // Use auto for initial positioning
-              });
-            }
-          }
-        }, INITIAL_SCROLL_DELAY_MS);
-
-        return () => clearTimeout(timeoutId);
-      }
-      // Scroll to bottom when new messages are added
-      else if (currentCount > prevCount) {
-        // Check if the newest message is outgoing (sent by user) - always scroll for sent messages
-        const currentMessages = messagesRef.current;
-        const currentVirtualItems = virtualItemsRef.current;
-        const newestMessage = currentMessages[currentMessages.length - 1];
-        const shouldScrollToBottom =
-          newestMessage?.direction === MessageDirection.OUTGOING ||
-          isAtBottomRef.current;
-
-        if (shouldScrollToBottom) {
-          requestAnimationFrame(() => {
-            virtuosoRef.current?.scrollToIndex({
-              index: currentVirtualItems.length - 1,
-              behavior: 'smooth',
-            });
-          });
-        }
-      }
-
       prevMessageCountRef.current = currentCount;
-    }, [messages.length, virtualItems.length, firstUnreadMessage?.id]);
 
-    // Reset initial positioning when switching between discussions
-    useEffect(() => {
-      initialPositioningDoneRef.current = false;
-    }, [discussion?.id]);
+      if (prevCount === 0 || currentCount <= prevCount) return;
 
-    // Track if user is at bottom
+      const newestMessage = messagesRef.current[messagesRef.current.length - 1];
+      const shouldScrollToBottom =
+        newestMessage?.direction === MessageDirection.OUTGOING ||
+        isAtBottomRef.current;
+
+      if (shouldScrollToBottom) {
+        requestAnimationFrame(() => {
+          virtuosoRef.current?.scrollToIndex({
+            index: virtualItemsRef.current.length - 1,
+            behavior: 'smooth',
+          });
+        });
+      }
+    }, [messages.length, virtualItems.length]);
+
+    // Track if user is at bottom — suppress during initial positioning
+    // to prevent the scroll-to-bottom button from flashing.
     const handleAtBottomStateChange = useCallback(
       (atBottom: boolean) => {
         isAtBottomRef.current = atBottom;
-        onAtBottomChange?.(atBottom);
+        if (readyRef.current) {
+          onAtBottomChange?.(atBottom);
+        }
       },
       [onAtBottomChange]
     );
@@ -265,15 +258,19 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
 
     // Main render
     return (
-      <div className="h-full flex flex-col overflow-hidden min-h-0">
+      <div
+        className="h-full flex flex-col overflow-hidden min-h-0"
+        style={{ visibility: ready ? 'visible' : 'hidden' }}
+      >
         {virtualItems.length > 0 && (
           <Virtuoso
+            key={discussion?.id}
             ref={virtuosoRef}
             style={{ flex: 1 }}
             className="pt-6"
             totalCount={virtualItems.length}
             itemContent={itemContent}
-            alignToBottom={false} // We handle positioning manually
+            initialTopMostItemIndex={initialTopMostItemIndex}
             atBottomThreshold={150}
             atBottomStateChange={handleAtBottomStateChange}
             increaseViewportBy={{ top: 200, bottom: 200 }}

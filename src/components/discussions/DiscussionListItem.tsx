@@ -1,13 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { Contact, SessionStatus } from '@massalabs/gossip-sdk';
 import type { Discussion } from '@massalabs/gossip-sdk';
+import { Edit2 } from 'react-feather';
 import ContactAvatar from '../avatar/ContactAvatar';
 import { formatRelativeTime } from '../../utils/timeUtils';
 import { formatUserId } from '@massalabs/gossip-sdk';
 import BaseModal from '../ui/BaseModal';
 import ContactNameModal from '../ui/ContactNameModal';
+import ContextMenu from '../ui/ContextMenu';
 import Button from '../ui/Button';
 import { useDiscussionStore } from '../../stores/discussionStore';
+import { useLongPress } from '../../hooks/useLongPress';
 
 export type LastMessageInfo = { content: string; timestamp: Date } | undefined;
 
@@ -18,6 +21,7 @@ interface DiscussionListItemProps {
   onSelect: (discussion: Discussion) => void;
   onAccept: (discussion: Discussion, newName?: string) => void;
   onRefuse: (discussion: Discussion) => void;
+  onEditName?: (discussion: Discussion, newName: string) => void;
 }
 
 const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
@@ -27,9 +31,12 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
   onSelect,
   onAccept,
   onRefuse,
+  onEditName,
 }) => {
   const [proposedName, setProposedName] = useState(contact.name || '');
   const [isRefuseModalOpen, setIsRefuseModalOpen] = useState(false);
+  const [isContextMenuOpen, setIsContextMenuOpen] = useState(false);
+  const [isEditNameModalOpen, setIsEditNameModalOpen] = useState(false);
   // Re-render trigger to update relative time display every minute
   const [_updateKey, setUpdateKey] = useState(0);
 
@@ -110,6 +117,18 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
     sessionsStatuses.get(discussion.contactUserId) ===
     SessionStatus.SelfRequested;
 
+  const isPending = isPendingIncoming || isPendingOutgoing;
+
+  const longPress = useLongPress({
+    onLongPress: () => setIsContextMenuOpen(true),
+    disabled: isPending,
+  });
+
+  const handleClick = () => {
+    if (longPress.longPressTriggered.current) return;
+    onSelect(discussion);
+  };
+
   return (
     <div
       key={discussion.id}
@@ -121,11 +140,15 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
         } p-4 transition-colors `}
         {...(!isPendingIncoming
           ? {
-              onClick: () => onSelect(discussion),
+              onClick: handleClick,
               role: 'button',
               tabIndex: 0,
             }
           : {})}
+        onTouchStart={longPress.onTouchStart}
+        onTouchMove={longPress.onTouchMove}
+        onTouchEnd={longPress.onTouchEnd}
+        onContextMenu={longPress.onContextMenu}
       >
         <div className="flex items-center space-x-3">
           <ContactAvatar contact={contact} size={12} />
@@ -275,6 +298,35 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Long-press context menu */}
+      <ContextMenu
+        items={[
+          {
+            label: 'Edit Name',
+            icon: <Edit2 className="w-4 h-4" />,
+            onClick: () => setIsEditNameModalOpen(true),
+          },
+        ]}
+        isOpen={isContextMenuOpen}
+        onClose={() => setIsContextMenuOpen(false)}
+      />
+
+      {/* Edit name modal */}
+      <ContactNameModal
+        isOpen={isEditNameModalOpen}
+        onClose={() => setIsEditNameModalOpen(false)}
+        title="Edit discussion name"
+        initialName={discussion.customName || contact.name}
+        confirmLabel="Save"
+        allowEmpty
+        onConfirm={name => {
+          setIsEditNameModalOpen(false);
+          if (onEditName) {
+            onEditName(discussion, name?.trim() || '');
+          }
+        }}
+      />
     </div>
   );
 };

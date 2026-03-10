@@ -22,6 +22,7 @@ import { useGossipSdk } from '../hooks/useGossipSdk';
 import { isDifferentDay } from '../utils/timeUtils';
 import { useUiStore } from '../stores/uiStore';
 import SessionIssueBanner from '../components/discussions/SessionIssueBanner';
+import { useKeyboardVisible } from '../hooks/useKeyboardVisible';
 
 // Debug test message constants
 const TEST_MESSAGE_COUNT = 50;
@@ -152,6 +153,19 @@ const Discussion: React.FC = () => {
   const handleAtBottomChange = useCallback((atBottom: boolean) => {
     setShowScrollToBottom(!atBottom);
   }, []);
+
+  // On iOS, when the keyboard opens the body resizes but Virtuoso doesn't
+  // adjust the scroll position — the last messages end up behind the keyboard.
+  // Scroll to bottom after layout settles, but only if user was already there.
+  const { isKeyboardVisible } = useKeyboardVisible();
+  useEffect(() => {
+    if (!isKeyboardVisible) return;
+    if (!messageListRef.current?.isAtBottom) return;
+    const id = setTimeout(() => {
+      messageListRef.current?.scrollToBottom();
+    }, 350);
+    return () => clearTimeout(id);
+  }, [isKeyboardVisible]);
 
   // Track timeout for message highlight
   const highlightTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -486,7 +500,18 @@ const Discussion: React.FC = () => {
   if (!contact) return null;
 
   return (
-    <div className="h-full app-max-w mx-auto bg-card flex flex-col relative">
+    <div
+      className="h-full app-max-w mx-auto bg-card flex flex-col relative select-none"
+      style={{ WebkitTouchCallout: 'none' }}
+      onMouseDown={e => {
+        // Prevent taps from stealing focus / dismissing keyboard,
+        // unless the tap target is itself a focusable input element.
+        const tag = (e.target as HTMLElement).tagName;
+        if (tag !== 'INPUT' && tag !== 'TEXTAREA') {
+          e.preventDefault();
+        }
+      }}
+    >
       <DiscussionHeader
         contact={contact}
         discussion={discussion}

@@ -68,6 +68,11 @@ const ThreeDotMenu: React.FC<ThreeDotMenuProps> = ({
         return;
       }
 
+      if (e.key === 'Tab') {
+        close();
+        return;
+      }
+
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         e.preventDefault();
         const menuItems =
@@ -126,27 +131,27 @@ const ThreeDotMenu: React.FC<ThreeDotMenuProps> = ({
           ref={menuRef}
           role="menu"
           aria-label={triggerLabel}
-          className="absolute right-0 top-full mt-2 min-w-[200px] max-w-[280px] bg-card border border-border rounded-xl shadow-xl z-50 origin-top-right animate-menu-open overflow-hidden"
+          className="absolute right-0 top-full mt-2 min-w-[200px] max-w-[280px] bg-card border border-border rounded-lg shadow-xl z-50 origin-top-right animate-menu-open overflow-hidden"
         >
-          {items.map(item => (
+          {items.map((item, index) => (
             <button
-              key={item.label}
+              key={index}
               role="menuitem"
               type="button"
               onClick={() => {
-                close();
                 item.onClick();
+                close();
               }}
-              className={`hover-fill w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-left ${
+              className={`hover-fill w-full flex items-center justify-between gap-3 px-4 py-3 text-sm font-medium text-left ${
                 item.danger ? 'text-destructive' : 'text-foreground'
-              }`}
+              } ${index < items.length - 1 ? 'border-b border-border' : ''}`}
             >
+              <span className="relative">{item.label}</span>
               {item.icon && (
-                <span className="relative w-5 h-5 shrink-0 flex items-center justify-center">
+                <span className="w-6 h-6 rounded-full bg-accent text-accent-foreground dark:bg-muted dark:text-accent shrink-0 flex items-center justify-center [&>svg]:w-3.5 [&>svg]:h-3.5">
                   {item.icon}
                 </span>
               )}
-              <span className="relative">{item.label}</span>
             </button>
           ))}
         </div>

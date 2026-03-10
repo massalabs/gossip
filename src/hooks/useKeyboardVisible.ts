@@ -1,21 +1,58 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import type React from 'react';
 import { Keyboard, KeyboardInfo } from '@capacitor/keyboard';
 import { Capacitor } from '@capacitor/core';
+
+// ---------------------------------------------------------------------------
+// Module-level singleton — tracks keyboard height independently of any React
+// component lifecycle.  This lets code that mounts *after* the keyboard is
+// already open read the correct height via `getKeyboardHeight()`.
+// ---------------------------------------------------------------------------
+let _kbHeight = 0;
+let _kbListenersReady = false;
+
+function setupKeyboardTracking() {
+  if (_kbListenersReady || !Capacitor.isNativePlatform()) return;
+  _kbListenersReady = true;
+  Keyboard.addListener('keyboardWillShow', (info: KeyboardInfo) => {
+    _kbHeight = info.keyboardHeight;
+  });
+  Keyboard.addListener('keyboardWillHide', () => {
+    _kbHeight = 0;
+  });
+}
+
+/**
+ * Returns the current keyboard height (px) without needing a React hook.
+ * Safe to call from event handlers, callbacks, or components that mounted
+ * after the keyboard was already open.
+ */
+export function getKeyboardHeight(): number {
+  setupKeyboardTracking();
+  return _kbHeight;
+}
 
 /**
  * Hook to detect if the virtual keyboard  * Uses the @capacitor/keyboard plugin for native keyboard events.
  * Uses 'keyboardWillShow/Hide' events for instant response (before animation).
  * Falls back to visualViewport API for web.
  *
+ * `isKeyboardVisibleRef` is a ref updated synchronously from native events,
+ * suitable for use inside event handlers (e.g. onBlur) where React state
+ * may already be stale.
+ *
  * @see https://capacitorjs.com/docs/apis/keyboard
  */
 export function useKeyboardVisible(): {
   isKeyboardVisible: boolean;
+  isKeyboardVisibleRef: React.RefObject<boolean>;
   keyboardHeight: number;
+  keyboardHeightRef: React.RefObject<number>;
 } {
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const isKeyboardVisibleRef = useRef(false);
+  const keyboardHeightRef = useRef(0);
 
   useEffect(() => {
     // Use Capacitor Keyboard plugin on native platforms
@@ -25,12 +62,16 @@ export function useKeyboardVisible(): {
       const showListener = Keyboard.addListener(
         'keyboardWillShow',
         (info: KeyboardInfo) => {
+          isKeyboardVisibleRef.current = true;
+          keyboardHeightRef.current = info.keyboardHeight;
           setIsKeyboardVisible(true);
           setKeyboardHeight(info.keyboardHeight);
         }
       );
 
       const hideListener = Keyboard.addListener('keyboardWillHide', () => {
+        isKeyboardVisibleRef.current = false;
+        keyboardHeightRef.current = 0;
         setIsKeyboardVisible(false);
         setKeyboardHeight(0);
       });
@@ -52,6 +93,8 @@ export function useKeyboardVisible(): {
     const handleResize = () => {
       const heightDiff = window.innerHeight - visualViewport.height;
       const isVisible = heightDiff > KEYBOARD_THRESHOLD;
+      isKeyboardVisibleRef.current = isVisible;
+      keyboardHeightRef.current = isVisible ? heightDiff : 0;
       setIsKeyboardVisible(isVisible);
       setKeyboardHeight(isVisible ? heightDiff : 0);
     };
@@ -64,7 +107,12 @@ export function useKeyboardVisible(): {
     };
   }, []);
 
-  return { isKeyboardVisible, keyboardHeight };
+  return {
+    isKeyboardVisible,
+    isKeyboardVisibleRef,
+    keyboardHeight,
+    keyboardHeightRef,
+  };
 }
 
 /**
