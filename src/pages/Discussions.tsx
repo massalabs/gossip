@@ -35,8 +35,6 @@ const Discussions: React.FC = () => {
   const setFilter = useDiscussionStore(s => s.setFilter);
   const sessionsStatuses = useDiscussionStore(s => s.sessionsStatuses);
   const isOnline = useOnlineStore(s => s.isOnline);
-  const isApiReachable = useOnlineStore(s => s.isApiReachable);
-  const isConnected = isOnline && isApiReachable;
   // Callback ref: triggers re-render when scroll container is mounted
   const [scrollContainer, setScrollContainer] = useState<HTMLDivElement | null>(
     null
@@ -138,8 +136,8 @@ const Discussions: React.FC = () => {
   const headerContent = (
     <div className="flex items-center justify-between w-full">
       <div className="flex items-center gap-3">
-        {isConnected && <UserProfileAvatar name={username} size={10} />}
-        {isConnected ? (
+        {isOnline && <UserProfileAvatar name={username} size={10} />}
+        {isOnline ? (
           <h1 className="text-xl font-semibold text-foreground">Gossip</h1>
         ) : (
           <h1 className="text-xl font-semibold text-accent">

@@ -326,15 +326,17 @@ class GossipSdk {
 
     // Publish gossip ID (public key) on messageProtocol so the user is discoverable.
     // Non-blocking: login must succeed even when the API is unreachable.
-    this._auth!
-      .publishPublicKey(session.ourPk, session.userIdEncoded, queries)
-      .catch((err) => {
-        this.eventEmitter.emit(
-          SdkEventType.ERROR,
-          err instanceof Error ? err : new Error(String(err)),
-          'publishPublicKey'
-        );
-      });
+    this._auth!.publishPublicKey(
+      session.ourPk,
+      session.userIdEncoded,
+      queries
+    ).catch(err => {
+      this.eventEmitter.emit(
+        SdkEventType.ERROR,
+        err instanceof Error ? err : new Error(String(err)),
+        'publishPublicKey'
+      );
+    });
     // Now set refreshService on services (circular dependency resolved via setter)
     this._discussion.setRefreshService(this._refresh);
     this._message.setRefreshService(this._refresh);

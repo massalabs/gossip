@@ -4,9 +4,8 @@ import { useOnlineStore } from '../../stores/useOnlineStore';
 
 const ConnectionBanner: React.FC = () => {
   const isOnline = useOnlineStore(s => s.isOnline);
-  const isApiReachable = useOnlineStore(s => s.isApiReachable);
 
-  if (isOnline && isApiReachable) return null;
+  if (isOnline) return null;
 
   return (
     <div className="flex items-center justify-center gap-2 px-4 py-1.5 bg-warning/15 text-warning text-xs font-medium">
