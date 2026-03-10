@@ -518,7 +518,6 @@ const Discussion: React.FC = () => {
         onBack={onBack}
         onSearchToggle={() => setIsSearchOpen(prev => !prev)}
       />
-      <ConnectionBanner />
       <SessionIssueBanner
         discussion={discussion}
         outgoingSentCount={outgoingSentCount}

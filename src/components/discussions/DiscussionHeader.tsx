@@ -9,6 +9,7 @@ import Button from '../ui/Button';
 import BackButton from '../ui/BackButton';
 import HeaderBar from '../ui/HeaderBar';
 import { ROUTES } from '../../constants/routes';
+import { useOnlineStore } from '../../stores/useOnlineStore';
 
 interface DiscussionHeaderProps {
   contact?: Contact | null | undefined;
@@ -28,6 +29,9 @@ const DiscussionHeader: React.FC<DiscussionHeaderProps> = ({
 }) => {
   const sessionsStatuses = useDiscussionStore(s => s.sessionsStatuses);
   const navigate = useNavigate();
+  const isOnline = useOnlineStore(s => s.isOnline);
+  const isApiReachable = useOnlineStore(s => s.isApiReachable);
+  const isConnected = isOnline && isApiReachable;
 
   // Header with title (for list view with custom title)
   if (title && !contact) {
@@ -104,7 +108,12 @@ const DiscussionHeader: React.FC<DiscussionHeaderProps> = ({
             <h1 className="text-xl font-semibold text-foreground truncate leading-tight">
               {displayName}
             </h1>
-            {isPendingOutgoing && (
+            {!isConnected && (
+              <p className="text-xs font-light text-accent truncate">
+                Waiting for connection...
+              </p>
+            )}
+            {isConnected && isPendingOutgoing && (
               <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-accent text-accent-foreground border border-border">
                 Waiting approval
               </span>
