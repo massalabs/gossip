@@ -133,7 +133,7 @@ const Popover: React.FC<PopoverProps> = ({
       <button
         type="button"
         onClick={() => setShowPopover(!showPopover)}
-        className="w-6 h-6 flex items-center justify-center rounded-full bg-secondary hover:bg-secondary/80 active:bg-secondary/60 text-muted-foreground transition-colors touch-manipulation"
+        className="w-6 h-6 flex items-center justify-center rounded-full text-muted-foreground hover:text-foreground transition-colors touch-manipulation"
         aria-label={ariaLabel}
       >
         <HelpCircle className="w-4 h-4" />
