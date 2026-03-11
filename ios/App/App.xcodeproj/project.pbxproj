@@ -20,6 +20,7 @@
 		FAA8F09D2EE6EA6400CE65AE /* MyViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAA8F09C2EE6EA6400CE65AE /* MyViewController.swift */; };
 		FAA8F0A02EE6F1C000CE65AE /* NetworkObserverPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAA8F09F2EE6F1C000CE65AE /* NetworkObserverPlugin.swift */; };
 		FAB0FFE22EF01BB300832215 /* GossipShareExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = FAB0FFD82EF01BB300832215 /* GossipShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		FA11BB012F00A00000000001 /* SSLBypassPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA11BB002F00A00000000001 /* SSLBypassPlugin.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -62,6 +63,7 @@
 		FAA8F0902EE6E27F00CE65AE /* BackgroundRefreshPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundRefreshPlugin.swift; sourceTree = "<group>"; };
 		FAA8F09C2EE6EA6400CE65AE /* MyViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MyViewController.swift; sourceTree = "<group>"; };
 		FAA8F09F2EE6F1C000CE65AE /* NetworkObserverPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkObserverPlugin.swift; sourceTree = "<group>"; };
+		FA11BB002F00A00000000001 /* SSLBypassPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSLBypassPlugin.swift; sourceTree = "<group>"; };
 		FAB0FFD82EF01BB300832215 /* GossipShareExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = GossipShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		FAB0FFE82EF01C8600832215 /* Gossip.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Gossip.entitlements; sourceTree = "<group>"; };
 		FC68EB0AF532CFC21C3344DD /* Pods-Gossip.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Gossip.debug.xcconfig"; path = "Pods/Target Support Files/Pods-Gossip/Pods-Gossip.debug.xcconfig"; sourceTree = "<group>"; };
@@ -140,6 +142,7 @@
 			isa = PBXGroup;
 			children = (
 				FAA8F09C2EE6EA6400CE65AE /* MyViewController.swift */,
+				FA11BB002F00A00000000001 /* SSLBypassPlugin.swift */,
 				FAA8F0862EE6DCD100CE65AE /* plugins */,
 				50379B222058CBB4000EE86E /* capacitor.config.json */,
 				504EC3071FED79650016851F /* AppDelegate.swift */,
@@ -350,6 +353,7 @@
 				FAA8F0912EE6E27F00CE65AE /* BackgroundRefreshPlugin.swift in Sources */,
 				FAA8F0A02EE6F1C000CE65AE /* NetworkObserverPlugin.swift in Sources */,
 				FAA8F09D2EE6EA6400CE65AE /* MyViewController.swift in Sources */,
+				FA11BB012F00A00000000001 /* SSLBypassPlugin.swift in Sources */,
 				504EC3081FED79650016851F /* AppDelegate.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

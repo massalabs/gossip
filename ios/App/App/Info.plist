@@ -93,9 +93,5 @@
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
-	<key>WKAppBoundDomains</key>
-	<array>
-		<string>localhost</string>
-	</array>
 </dict>
 </plist>
