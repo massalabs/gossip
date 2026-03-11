@@ -75,6 +75,6 @@ android/app/src/main/res/mipmap-*/ic_launcher_background.png
 # Test artifacts
 test/**/__screenshots__/
 
-# Git worktrees
-.worktrees/.claude/
+# Git worktrees & Claude Code
+.worktrees/
 .claude/
