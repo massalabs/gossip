@@ -101,8 +101,8 @@ const NewContact: React.FC = () => {
       rightAction={
         <button
           onClick={handleSubmit}
-          className={`text-foreground hover:text-primary transition-colors ${
-            isAddDisabled ? 'opacity-50 cursor-not-allowed' : ''
+          className={`font-semibold text-primary hover:text-primary/80 transition-colors ${
+            isAddDisabled ? 'opacity-30 cursor-not-allowed' : ''
           }`}
           aria-disabled={isAddDisabled}
           aria-label="Add contact"
