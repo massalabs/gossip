@@ -324,6 +324,61 @@ The app uses these Capacitor plugins:
 2. Clear derived data
 3. Reinstall pods: `cd ios/App && pod deintegrate && pod install`
 
+## Android Development
+
+### Live Reload on Device (Wi-Fi)
+
+Run the app on a physical Android device over Wi-Fi with hot reload — no cable needed after initial ADB setup.
+
+#### Prerequisites
+
+- **ADB** installed (`android-platform-tools`)
+- Phone and computer on the **same Wi-Fi network**
+- USB debugging enabled on the phone (Settings > Developer Options > USB Debugging)
+
+#### First-Time Setup: Connect ADB over Wi-Fi
+
+Connect your phone via USB once, then switch to Wi-Fi:
+
+```bash
+# With USB plugged in:
+adb tcpip 5555
+adb connect <phone-ip>:5555
+
+# Unplug USB. Verify:
+adb devices
+```
+
+#### Run with Hot Reload
+
+```bash
+npm run cap:dev:android -- <phone-ip>:5555
+```
+
+This single command:
+
+1. Detects your local IP
+2. Builds the SDK
+3. Syncs Capacitor with your dev server URL
+4. Deploys the app to your phone
+5. Starts Vite with hot reload
+
+Edit any file and see changes instantly on your phone.
+
+#### How It Works
+
+The app uses the Web Crypto API (`crypto.subtle`) which requires HTTPS (a "secure context"). Vite serves over HTTPS via `vite-plugin-mkcert` using a self-signed certificate. Android WebView normally rejects self-signed certs, so in **debug builds only**, the WebView is configured to accept them (`MainActivity.java` + `network_security_config.xml`). None of this affects production builds.
+
+#### Capacitor Commands
+
+| Command                     | Description                                  |
+| --------------------------- | -------------------------------------------- |
+| `npm run cap:dev:android`   | Live reload on Android device over Wi-Fi     |
+| `npm run cap:sync:android`  | Build web assets and sync to Android project |
+| `npm run cap:open:android`  | Open Android project in Android Studio       |
+| `npm run cap:run:android`   | Build, sync, and run on Android device       |
+| `npm run cap:build:android` | Build web assets and sync to Android         |
+
 ## Contributing
 
 1. Fork the repository

@@ -12,6 +12,10 @@ const config: CapacitorConfig = {
     scrollEnabled: false, // Disable webview scrolling - we handle scrolling in app content
     allowsLinkPreview: false,
   },
+  // Live reload: set DEV_SERVER_URL env var to enable (see scripts/dev-android.sh)
+  ...(process.env.DEV_SERVER_URL
+    ? { server: { url: process.env.DEV_SERVER_URL, cleartext: true } }
+    : {}),
   plugins: {
     // Keyboard plugin configuration
     Keyboard: {
