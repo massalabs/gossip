@@ -22,6 +22,8 @@ use crate::unlock::UnlockedSession;
 /// Writes the genuine ciphertext for the target session and
 /// rerandomizes (or covers) the same block index in all other sessions.
 /// Session update order is randomized to prevent timing correlation.
+///
+/// NOTE: This assumes `storage.write_block` is atomic at `BLOCK_SIZE` granularity.
 pub fn encrypt_session_data_block<S: BlockStorage + KeypairStorage>(
     storage: &mut S,
     domain: &str,
@@ -49,7 +51,8 @@ pub fn encrypt_session_data_block<S: BlockStorage + KeypairStorage>(
 
     let mut cur_aad_root = String::new();
     for i in indices {
-        let cur_session = SessionIndex::new(i).expect("index within SESSION_COUNT");
+        let cur_session =
+            SessionIndex::new(i).expect(&format!("{i} >= SESSION_COUNT: {SESSION_COUNT}"));
         // Read version/pk for ALL sessions (including target) for timing uniformity per spec §11.2
         let (cur_version, cur_pk_bytes) = read_session_version_and_pk(storage, cur_session)?;
         let cur_pk = PqPublicKey::from_bytes(&cur_pk_bytes)?;
@@ -90,7 +93,8 @@ pub fn encrypt_session_data_block<S: BlockStorage + KeypairStorage>(
 pub fn get_global_block_count<S: BlockStorage>(storage: &S) -> Result<u64> {
     let mut max_count = 0u64;
     for i in 0..SESSION_COUNT as u8 {
-        let session = SessionIndex::new(i).expect("index within SESSION_COUNT");
+        let session =
+            SessionIndex::new(i).expect(&format!("{i} >= SESSION_COUNT: {SESSION_COUNT}"));
         let count = storage.block_count(session)?;
         max_count = max_count.max(count);
     }
@@ -109,7 +113,8 @@ pub fn repair_blockstream_lengths<S: BlockStorage + KeypairStorage>(
     let mut cur_aad_root = String::new();
 
     for i in 0..SESSION_COUNT as u8 {
-        let session = SessionIndex::new(i).expect("index within SESSION_COUNT");
+        let session =
+            SessionIndex::new(i).expect(&format!("{i} >= SESSION_COUNT: {SESSION_COUNT}"));
         let mut count = storage.block_count(session)?;
 
         while count < global_count {
@@ -162,7 +167,8 @@ fn extend_blockstream_with_session_block<S: BlockStorage + KeypairStorage>(
 
     let mut cur_aad_root = String::new();
     for i in indices {
-        let cur_session = SessionIndex::new(i).expect("index within SESSION_COUNT");
+        let cur_session =
+            SessionIndex::new(i).expect(&format!("{i} >= SESSION_COUNT: {SESSION_COUNT}"));
         // Read version/pk for ALL sessions (including target) for timing uniformity per spec §12.3
         let (cur_version, cur_pk_bytes) = read_session_version_and_pk(storage, cur_session)?;
         let cur_pk = PqPublicKey::from_bytes(&cur_pk_bytes)?;
@@ -177,6 +183,7 @@ fn extend_blockstream_with_session_block<S: BlockStorage + KeypairStorage>(
         );
 
         if cur_session == session.session_index {
+            // Genuine block content is random padding; header is set only for block 0.
             let mut pt = Zeroizing::new(vec![0u8; PLAINTEXT_SIZE]);
             rand::rngs::OsRng.fill_bytes(&mut pt[..]);
             if block_index == 0 {
@@ -190,8 +197,10 @@ fn extend_blockstream_with_session_block<S: BlockStorage + KeypairStorage>(
                 session.root_aead_key.as_ref(),
                 block_index,
             );
-            let pt_arr: &[u8; PLAINTEXT_SIZE] =
-                pt.as_slice().try_into().expect("pt is PLAINTEXT_SIZE");
+            let pt_arr: &[u8; PLAINTEXT_SIZE] = pt
+                .as_slice()
+                .try_into()
+                .expect(&format!("{} != PLAINTEXT_SIZE", pt.len()));
             let ct = encrypt_block(&session.pq_rerand_pk, &aead_sk, &aad_root, pt_arr);
             let ct_arr: &[u8; BLOCK_SIZE] = ct
                 .as_slice()
@@ -228,6 +237,10 @@ pub fn write_session_data<S: BlockStorage + KeypairStorage>(
             session.session_version,
         ));
     }
+    if data.is_empty() {
+        return Ok(());
+    }
+
     let data_len = data.len() as u64;
     let old_total = session.total_data_length;
     let new_total = old_total.max(
@@ -236,11 +249,6 @@ pub fn write_session_data<S: BlockStorage + KeypairStorage>(
             .ok_or(BordercryptError::Overflow)?,
     );
     session.total_data_length = new_total;
-
-    // Empty write that doesn't extend the logical length: true no-op.
-    if data.is_empty() && new_total == old_total {
-        return Ok(());
-    }
 
     // Ensure enough blocks exist
     let ps = PLAINTEXT_SIZE as u64;
@@ -253,20 +261,6 @@ pub fn write_session_data<S: BlockStorage + KeypairStorage>(
             / ps
     };
     ensure_block_count(storage, domain, session, required_last_block + 1)?;
-
-    // Empty write that extends total_data_length (spec §13.2):
-    // allocate blocks and re-encrypt block 0 to update the length header.
-    if data.is_empty() {
-        let mut pt = Zeroizing::new(vec![0u8; PLAINTEXT_SIZE]);
-        match decrypt_session_data_block(storage, domain, session, 0) {
-            Ok(existing) => pt.copy_from_slice(existing.as_ref()),
-            Err(_) => rand::rngs::OsRng.fill_bytes(&mut pt[..]),
-        }
-        pt[..LENGTH_HDR_SIZE].copy_from_slice(&new_total.to_be_bytes());
-        let pt_arr: &[u8; PLAINTEXT_SIZE] = pt.as_slice().try_into().expect("pt is PLAINTEXT_SIZE");
-        encrypt_session_data_block(storage, domain, session, 0, pt_arr)?;
-        return Ok(());
-    }
 
     // Map logical data offset to virtual plaintext stream position
     let start_pos = hdr.checked_add(offset).ok_or(BordercryptError::Overflow)?;
@@ -286,6 +280,7 @@ pub fn write_session_data<S: BlockStorage + KeypairStorage>(
 
         let w_start = start_pos.max(block_start_pos);
         let w_end = end_pos_excl.min(block_end_pos);
+        assert!(w_start < w_end);
 
         // Full overwrite optimization: skip decrypt for non-block-0 fully overwritten blocks
         let full_overwrite = w_start == block_start_pos && w_end == block_end_pos && b != 0;
@@ -311,7 +306,10 @@ pub fn write_session_data<S: BlockStorage + KeypairStorage>(
             pt[..LENGTH_HDR_SIZE].copy_from_slice(&new_total.to_be_bytes());
         }
 
-        let pt_arr: &[u8; PLAINTEXT_SIZE] = pt.as_slice().try_into().expect("pt is PLAINTEXT_SIZE");
+        let pt_arr: &[u8; PLAINTEXT_SIZE] = pt
+            .as_slice()
+            .try_into()
+            .expect(&format!("{} != PLAINTEXT_SIZE", pt.len()));
         encrypt_session_data_block(storage, domain, session, b, pt_arr)?;
     }
 
@@ -390,7 +388,10 @@ pub fn shrink_session_data<S: BlockStorage + KeypairStorage>(
         rand::rngs::OsRng.fill_bytes(&mut pt[tail_start_usize..]);
     }
 
-    let pt_arr: &[u8; PLAINTEXT_SIZE] = pt.as_slice().try_into().expect("pt is PLAINTEXT_SIZE");
+    let pt_arr: &[u8; PLAINTEXT_SIZE] = pt
+        .as_slice()
+        .try_into()
+        .expect(&format!("{} != PLAINTEXT_SIZE", pt.len()));
     encrypt_session_data_block(storage, domain, session, new_last_block, pt_arr)?;
 
     // If block 0 was not the new last block, also update block 0's length header
@@ -401,8 +402,10 @@ pub fn shrink_session_data<S: BlockStorage + KeypairStorage>(
             Err(_) => rand::rngs::OsRng.fill_bytes(&mut pt0[..]),
         }
         pt0[..LENGTH_HDR_SIZE].copy_from_slice(&new_total.to_be_bytes());
-        let pt0_arr: &[u8; PLAINTEXT_SIZE] =
-            pt0.as_slice().try_into().expect("pt0 is PLAINTEXT_SIZE");
+        let pt0_arr: &[u8; PLAINTEXT_SIZE] = pt0
+            .as_slice()
+            .try_into()
+            .expect(&format!("{} != PLAINTEXT_SIZE", pt0.len()));
         encrypt_session_data_block(storage, domain, session, 0, pt0_arr)?;
     }
 
@@ -413,7 +416,8 @@ pub fn shrink_session_data<S: BlockStorage + KeypairStorage>(
         indices.shuffle(&mut rand::rngs::OsRng);
 
         for i in indices {
-            let cur_session = SessionIndex::new(i).expect("index within SESSION_COUNT");
+            let cur_session =
+                SessionIndex::new(i).expect(&format!("{i} >= SESSION_COUNT: {SESSION_COUNT}"));
             let (cur_version, cur_pk_bytes) = read_session_version_and_pk(storage, cur_session)?;
             let cur_pk = PqPublicKey::from_bytes(&cur_pk_bytes)?;
 
@@ -726,38 +730,110 @@ mod tests {
         assert_eq!(&*result, &data);
     }
 
+    // --- Edge cases for required_last_block calculation (review comment #9) ---
+
     #[test]
-    fn write_empty_at_zero_is_noop() {
+    fn write_single_byte() {
         let mut storage = MemoryStorage::new();
         let (mut session, _) = provision_all_sessions(&mut storage);
 
-        // Empty write at offset 0 with no prior data: true no-op
-        write_session_data(&mut storage, DOMAIN, &mut session, 0, &[]).unwrap();
-        assert_eq!(session.total_data_length, 0);
-        assert_eq!(get_global_block_count(&storage).unwrap(), 0);
+        // 1 byte of data: last byte at virtual pos LENGTH_HDR_SIZE + 0 → block 0
+        write_session_data(&mut storage, DOMAIN, &mut session, 0, &[0x42]).unwrap();
+        assert_eq!(session.total_data_length, 1);
+        assert_eq!(get_global_block_count(&storage).unwrap(), 1);
+
+        let result = read_session_data(&storage, DOMAIN, &session, 0, 1).unwrap();
+        assert_eq!(&*result, &[0x42]);
     }
 
     #[test]
-    fn write_empty_extends_length() {
+    fn write_fills_block_0_exactly() {
         let mut storage = MemoryStorage::new();
         let (mut session, _) = provision_all_sessions(&mut storage);
 
-        // Empty write at offset > old_total extends the logical length (spec §13.2)
-        write_session_data(&mut storage, DOMAIN, &mut session, 1000, &[]).unwrap();
-        assert_eq!(session.total_data_length, 1000);
-        assert!(get_global_block_count(&storage).unwrap() >= 1);
+        // Exactly fill block 0's data area (PLAINTEXT_SIZE - LENGTH_HDR_SIZE bytes)
+        let max_b0 = PLAINTEXT_SIZE - LENGTH_HDR_SIZE;
+        let data = vec![0xAA; max_b0];
+        write_session_data(&mut storage, DOMAIN, &mut session, 0, &data).unwrap();
 
-        // Verify block 0 header was updated: read_total_length should return 1000
-        let total = crate::read::read_total_length(
-            &storage,
-            DOMAIN,
-            session.session_version,
-            session.session_index,
-            &session.pq_rerand_sk,
-            session.root_aead_key.as_ref(),
-        )
-        .unwrap();
-        assert_eq!(total, 1000);
+        assert_eq!(session.total_data_length, max_b0 as u64);
+        assert_eq!(get_global_block_count(&storage).unwrap(), 1);
+
+        let result = read_session_data(&storage, DOMAIN, &session, 0, max_b0).unwrap();
+        assert_eq!(&*result, &data);
+    }
+
+    #[test]
+    fn write_one_byte_spills_to_block_1() {
+        let mut storage = MemoryStorage::new();
+        let (mut session, _) = provision_all_sessions(&mut storage);
+
+        // One byte past block 0's data area → must allocate block 1
+        let spill = PLAINTEXT_SIZE - LENGTH_HDR_SIZE + 1;
+        let data = vec![0xBB; spill];
+        write_session_data(&mut storage, DOMAIN, &mut session, 0, &data).unwrap();
+
+        assert_eq!(session.total_data_length, spill as u64);
+        assert_eq!(get_global_block_count(&storage).unwrap(), 2);
+
+        let result = read_session_data(&storage, DOMAIN, &session, 0, spill).unwrap();
+        assert_eq!(&*result, &data);
+    }
+
+    #[test]
+    fn write_fills_block_1_exactly() {
+        let mut storage = MemoryStorage::new();
+        let (mut session, _) = provision_all_sessions(&mut storage);
+
+        // Fill blocks 0 and 1 exactly: LENGTH_HDR_SIZE + data = 2 * PLAINTEXT_SIZE
+        let exact_two = 2 * PLAINTEXT_SIZE - LENGTH_HDR_SIZE;
+        let data = vec![0xCC; exact_two];
+        write_session_data(&mut storage, DOMAIN, &mut session, 0, &data).unwrap();
+
+        assert_eq!(session.total_data_length, exact_two as u64);
+        assert_eq!(get_global_block_count(&storage).unwrap(), 2);
+
+        let result = read_session_data(&storage, DOMAIN, &session, 0, exact_two).unwrap();
+        assert_eq!(&*result, &data);
+    }
+
+    #[test]
+    fn write_one_byte_spills_to_block_2() {
+        let mut storage = MemoryStorage::new();
+        let (mut session, _) = provision_all_sessions(&mut storage);
+
+        // One byte past two full blocks → must allocate block 2
+        let spill = 2 * PLAINTEXT_SIZE - LENGTH_HDR_SIZE + 1;
+        let data = vec![0xDD; spill];
+        write_session_data(&mut storage, DOMAIN, &mut session, 0, &data).unwrap();
+
+        assert_eq!(session.total_data_length, spill as u64);
+        assert_eq!(get_global_block_count(&storage).unwrap(), 3);
+
+        let result = read_session_data(&storage, DOMAIN, &session, 0, spill).unwrap();
+        assert_eq!(&*result, &data);
+    }
+
+    #[test]
+    fn write_empty_is_always_noop() {
+        let mut storage = MemoryStorage::new();
+        let (mut session, _) = provision_all_sessions(&mut storage);
+
+        // Empty write at offset 0: no-op
+        write_session_data(&mut storage, DOMAIN, &mut session, 0, &[]).unwrap();
+        assert_eq!(session.total_data_length, 0);
+        assert_eq!(get_global_block_count(&storage).unwrap(), 0);
+
+        // Empty write at offset > old_total: still a no-op (no ftruncate semantics)
+        write_session_data(&mut storage, DOMAIN, &mut session, 1000, &[]).unwrap();
+        assert_eq!(session.total_data_length, 0);
+        assert_eq!(get_global_block_count(&storage).unwrap(), 0);
+
+        // After real data, empty write at higher offset: no-op
+        write_session_data(&mut storage, DOMAIN, &mut session, 0, &[0xAA; 50]).unwrap();
+        assert_eq!(session.total_data_length, 50);
+        write_session_data(&mut storage, DOMAIN, &mut session, 9999, &[]).unwrap();
+        assert_eq!(session.total_data_length, 50);
     }
 
     // --- shrink_session_data ---
