@@ -13,6 +13,7 @@ mod read;
 pub mod storage;
 mod types;
 mod unlock;
+mod write;
 
 pub use block::{create_cover_block, decrypt_block, encrypt_block, rerandomize_block};
 pub use constants::{
@@ -31,3 +32,7 @@ pub use pq::{
 pub use read::{decrypt_session_data_block, read_session_data, read_total_length};
 pub use types::SessionIndex;
 pub use unlock::{UnlockedSession, unlock_session};
+pub use write::{
+    encrypt_session_data_block, ensure_block_count, get_global_block_count,
+    repair_blockstream_lengths, shrink_session_data, write_session_data,
+};
