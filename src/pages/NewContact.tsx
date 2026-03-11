@@ -101,8 +101,10 @@ const NewContact: React.FC = () => {
       rightAction={
         <button
           onClick={handleSubmit}
-          className={`font-semibold text-primary hover:text-primary/80 transition-colors ${
-            isAddDisabled ? 'opacity-30 cursor-not-allowed' : ''
+          className={`font-semibold bg-accent text-primary-foreground px-4 py-1.5 rounded-full transition-colors ${
+            isAddDisabled
+              ? 'opacity-30 cursor-not-allowed'
+              : 'hover:bg-accent/80 active:bg-accent/60'
           }`}
           aria-disabled={isAddDisabled}
           aria-label="Add contact"
@@ -228,27 +230,29 @@ const NewContact: React.FC = () => {
         </div>
       </div>
 
-      {/* Scan QR Code and File Options */}
-      <div className="flex gap-3 mb-6">
-        <button
-          onClick={() => setShowScanner(true)}
-          className="flex-1 flex items-center justify-center gap-2 text-primary hover:text-primary/80 transition-colors py-3"
-          aria-label="Scan QR code"
-        >
-          <QrCodeIcon className="w-5 h-5" />
-          <span className="text-base font-medium">Scan QR code</span>
-        </button>
+      {/* Scan QR Code and File Options — hidden when a valid gossip ID is entered */}
+      {!(userId.value.trim() && !userId.error) && (
+        <div className="flex gap-3 mb-6">
+          <button
+            onClick={() => setShowScanner(true)}
+            className="flex-1 flex items-center justify-center gap-2 text-primary hover:text-primary/80 transition-colors py-3"
+            aria-label="Scan QR code"
+          >
+            <QrCodeIcon className="w-5 h-5" />
+            <span className="text-base font-medium">Scan QR code</span>
+          </button>
 
-        <button
-          onClick={() => fileInputRef.current?.click()}
-          disabled={fileState.isLoading}
-          className="flex-1 flex items-center justify-center gap-2 text-muted-foreground hover:text-foreground transition-colors py-3 disabled:opacity-50 disabled:cursor-not-allowed"
-          aria-label="Import from file"
-        >
-          <Upload className="w-5 h-5" />
-          <span className="text-base font-medium">Import from file</span>
-        </button>
-      </div>
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={fileState.isLoading}
+            className="flex-1 flex items-center justify-center gap-2 text-muted-foreground hover:text-foreground transition-colors py-3 disabled:opacity-50 disabled:cursor-not-allowed"
+            aria-label="Import from file"
+          >
+            <Upload className="w-5 h-5" />
+            <span className="text-base font-medium">Import from file</span>
+          </button>
+        </div>
+      )}
 
       {/* Message Field */}
       <div className="bg-card rounded-xl border border-border p-4 mb-6">
