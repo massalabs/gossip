@@ -1,4 +1,10 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, {
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+  useMemo,
+} from 'react';
 import { useAccountStore } from '../stores/accountStore';
 import { UserProfile } from '@massalabs/gossip-sdk';
 import { biometricService } from '../services/biometricService';
@@ -9,6 +15,7 @@ import RoundedInput from '../components/ui/RoundedInput';
 import { useNavigate } from 'react-router-dom';
 import { ROUTES } from '../constants/routes';
 import { PrivacyGraphic } from '../components/graphics';
+import { useDevAutoLogin } from '../hooks/useDevAutoLogin';
 
 interface LoginProps {
   onCreateNewAccount: () => void;
@@ -139,6 +146,17 @@ const Login: React.FC<LoginProps> = React.memo(
       handleBiometricAuth,
       biometricMethodAvailable,
     ]);
+
+    // Dev auto-login: skip password prompt in dev mode
+    const devAutoLoginCallbacks = useMemo(
+      () => ({
+        onSuccess: onAccountSelected,
+        onError: (msg: string) => onErrorChange?.(msg),
+        setLoading: setIsLoading,
+      }),
+      [onAccountSelected, onErrorChange]
+    );
+    useDevAutoLogin(currentAccount, devAutoLoginCallbacks);
 
     const handlePasswordAuth = async (
       e?: React.MouseEvent | React.KeyboardEvent
