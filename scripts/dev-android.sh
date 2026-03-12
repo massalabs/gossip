@@ -30,16 +30,30 @@ set -e
 DEVICE="$1"
 
 if [ -z "$DEVICE" ]; then
-  echo "ERROR: Missing device target." >&2
-  echo "" >&2
-  echo "Usage: $0 <device>" >&2
-  echo "" >&2
-  echo "Find your device target with:" >&2
-  echo "  adb devices" >&2
-  echo "" >&2
-  echo "Example:" >&2
-  echo "  $0 10.26.239.15:5555" >&2
-  exit 1
+  # Try to load ANDROID_DEVICES from .env before failing
+  if [ -f ".env" ]; then
+    # shellcheck disable=SC2046
+    ANDROID_DEVICES_FROM_ENV=$(grep '^ANDROID_DEVICES=' .env | tail -n 1 | cut -d '=' -f2- | tr -d '"' | tr -d "'")
+    if [ -n "$ANDROID_DEVICES_FROM_ENV" ]; then
+      DEVICE="$ANDROID_DEVICES_FROM_ENV"
+      echo "[dev-android] Using ANDROID_DEVICES from .env: ${DEVICE}"
+    fi
+  fi
+
+  if [ -z "$DEVICE" ]; then
+    echo "ERROR: Missing device target." >&2
+    echo "" >&2
+    echo "Usage: $0 <device>" >&2
+    echo "" >&2
+    echo "Find your device target with:" >&2
+    echo "  adb devices" >&2
+    echo "" >&2
+    echo "Example:" >&2
+    echo "  $0 10.26.239.15:5555" >&2
+    echo "" >&2
+    echo "Or set ANDROID_DEVICES in your .env file." >&2
+    exit 1
+  fi
 fi
 
 # Detect local IP

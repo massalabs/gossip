@@ -3,7 +3,7 @@
 # Live reload on iOS device over Wi-Fi.
 #
 # Usage:
-#   scripts/dev-ios.sh [device-name]
+#   scripts/dev-ios.sh <device-name>
 #
 # Prerequisites:
 #   1. iPhone on the same Wi-Fi network as your Mac
@@ -27,6 +27,29 @@ set -e
 
 DEVICE="$1"
 
+if [ -z "$DEVICE" ]; then
+  # Try to load IOS_DEVICES from .env before failing
+  if [ -f ".env" ]; then
+    IOS_DEVICES_FROM_ENV=$(grep '^IOS_DEVICES=' .env | tail -n 1 | cut -d '=' -f2- | tr -d '"' | tr -d "'")
+    if [ -n "$IOS_DEVICES_FROM_ENV" ]; then
+      DEVICE="$IOS_DEVICES_FROM_ENV"
+      echo "[dev-ios] Using IOS_DEVICES from .env: ${DEVICE}"
+    fi
+  fi
+
+  if [ -z "$DEVICE" ]; then
+    echo "ERROR: Missing device target." >&2
+    echo "" >&2
+    echo "Usage: $0 <device-name>" >&2
+    echo "" >&2
+    echo "List available devices with:" >&2
+    echo "  npx cap run ios --list" >&2
+    echo "" >&2
+    echo "Or set IOS_DEVICES in your .env file." >&2
+    exit 1
+  fi
+fi
+
 # Detect local IP
 LOCAL_IP=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null)
 if [ -z "$LOCAL_IP" ]; then
@@ -48,14 +71,8 @@ npx cap sync ios
 
 # Deploy to device
 echo "[dev-ios] Deploying to device..."
-if [ -n "$DEVICE" ]; then
-  echo "[dev-ios] Target device: ${DEVICE}"
-  npx cap run ios --target "$DEVICE"
-else
-  echo "[dev-ios] No target specified, opening Xcode..."
-  echo "[dev-ios] Select your device in Xcode and hit Run (Cmd+R)."
-  npx cap open ios &
-fi
+echo "[dev-ios] Target device: ${DEVICE}"
+npx cap run ios --target "$DEVICE"
 
 # Start Vite dev server (foreground — Ctrl+C to stop)
 echo ""
