@@ -1,29 +1,18 @@
 import React from 'react';
-import { useIOSKeyboardWorkaround } from '../../hooks/useKeyboardVisible';
 
 /**
- * Wrapper component that handles iOS keyboard resize workaround.
- * Resizes the entire app when keyboard is visible on iOS to prevent
- * content from being pushed off-screen due to slow keyboard resize.
+ * Wrapper that resizes the app when the keyboard is visible.
+ * Uses the --keyboard-height CSS variable set directly from the native keyboard
+ * event listener (no React in the resize path = zero frame delay).
  *
- * Instead of translating, we resize the height so all content remains visible.
- *
- * See: https://github.com/ionic-team/capacitor-keyboard/issues/19
+ * On devices where the OS handles resize (e.g. Samsung), --keyboard-height
+ * stays at 0px so no double offset occurs.
  */
 const IOSKeyboardWrapper: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
-  const { active, keyboardHeight } = useIOSKeyboardWorkaround();
-
   return (
-    <div
-      className="w-full h-full flex flex-col transition-[height] duration-300 ease-out"
-      style={
-        active ? { height: `calc(100dvh - ${keyboardHeight}px)` } : undefined
-      }
-    >
-      {children}
-    </div>
+    <div className="w-full flex flex-col keyboard-aware-height">{children}</div>
   );
 };
 

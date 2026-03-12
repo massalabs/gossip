@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef } from 'react';
-import type React from 'react';
 import { Keyboard, KeyboardInfo } from '@capacitor/keyboard';
 import { Capacitor } from '@capacitor/core';
 
@@ -14,13 +13,44 @@ let _kbListenersReady = false;
 function setupKeyboardTracking() {
   if (_kbListenersReady || !Capacitor.isNativePlatform()) return;
   _kbListenersReady = true;
+
+  // Lock viewport height before keyboard opens.
+  // On Samsung/iOS the OS shrinks the WebView when keyboard opens, which would
+  // shrink 100dvh and cause ghost gap (double-offset: OS resize + our transform).
+  // By locking to a pixel value, the container stays full-height and only the
+  // CSS transform moves content up.
+  document.documentElement.style.setProperty(
+    '--viewport-height',
+    `${window.innerHeight}px`
+  );
+
+  // Update baseline when keyboard is closed (handles orientation changes)
+  window.addEventListener('resize', () => {
+    if (_kbHeight === 0) {
+      document.documentElement.style.setProperty(
+        '--viewport-height',
+        `${window.innerHeight}px`
+      );
+    }
+  });
+
   Keyboard.addListener('keyboardWillShow', (info: KeyboardInfo) => {
     _kbHeight = info.keyboardHeight;
+    document.documentElement.style.setProperty(
+      '--keyboard-height',
+      `${info.keyboardHeight}px`
+    );
   });
+
   Keyboard.addListener('keyboardWillHide', () => {
     _kbHeight = 0;
+    document.documentElement.style.setProperty('--keyboard-height', '0px');
   });
 }
+
+// Initialize tracking immediately so the CSS variable is set
+// before any component mounts.
+setupKeyboardTracking();
 
 /**
  * Returns the current keyboard height (px) without needing a React hook.
@@ -28,7 +58,6 @@ function setupKeyboardTracking() {
  * after the keyboard was already open.
  */
 export function getKeyboardHeight(): number {
-  setupKeyboardTracking();
   return _kbHeight;
 }
 
@@ -112,64 +141,5 @@ export function useKeyboardVisible(): {
     isKeyboardVisibleRef,
     keyboardHeight,
     keyboardHeightRef,
-  };
-}
-
-/**
- * iOS-specific keyboard layout workaround helper.
- *
- * Returns an object with:
- * - active: true only on iOS native when the keyboard is visible
- * - keyboardHeight: the height of the keyboard in pixels
- *
- * Use this to apply layout workarounds (e.g. fixed heights, positioning) to avoid
- * slow/late keyboard resize issues in the iOS WebView.
- *
- * See: https://github.com/ionic-team/capacitor-keyboard/issues/19
- */
-export function useIOSKeyboardWorkaround(): {
-  active: boolean;
-  keyboardHeight: number;
-} {
-  const { isKeyboardVisible, keyboardHeight } = useKeyboardVisible();
-  const isIOS = Capacitor.getPlatform() === 'ios';
-  return {
-    active: isIOS && isKeyboardVisible,
-    keyboardHeight: isIOS ? keyboardHeight : 0,
-  };
-}
-
-/**
- * Hook that returns styles for fixed-positioned elements to handle iOS keyboard
- * and safe areas (Android/iOS notches, gesture areas).
- *
- * Use this hook on any element with `position: fixed` to automatically adjust
- * its height when the keyboard is visible on iOS, while respecting safe areas.
- *
- * @returns React.CSSProperties object with height adjustment accounting for
- *          keyboard and safe areas
- *
- * Example:
- * ```tsx
- * const styles = useFixedKeyboardStyles();
- * <div className="fixed inset-0 pt-safe-t pb-safe-b" style={styles}>
- *   {content}
- * </div>
- * ```
- */
-export function useFixedKeyboardStyles(): React.CSSProperties {
-  const { active, keyboardHeight } = useIOSKeyboardWorkaround();
-
-  // useIOSKeyboardWorkaround already handles iOS platform check
-  // If not iOS, active will be false and keyboardHeight will be 0
-  if (!active) {
-    return {};
-  }
-
-  return {
-    // Calculate height only accounting for keyboard
-    // Safe areas are handled by padding (pt-safe-t, pb-safe-b) in the component
-    height: `calc(100dvh - ${keyboardHeight}px)`,
-    transition: 'height 300ms ease-out',
   };
 }

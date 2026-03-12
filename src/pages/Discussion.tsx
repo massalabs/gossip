@@ -22,7 +22,6 @@ import { useGossipSdk } from '../hooks/useGossipSdk';
 import { isDifferentDay } from '../utils/timeUtils';
 import { useUiStore } from '../stores/uiStore';
 import SessionIssueBanner from '../components/discussions/SessionIssueBanner';
-import { useKeyboardVisible } from '../hooks/useKeyboardVisible';
 
 // Debug test message constants
 const TEST_MESSAGE_COUNT = 50;
@@ -153,19 +152,6 @@ const Discussion: React.FC = () => {
   const handleAtBottomChange = useCallback((atBottom: boolean) => {
     setShowScrollToBottom(!atBottom);
   }, []);
-
-  // On iOS, when the keyboard opens the body resizes but Virtuoso doesn't
-  // adjust the scroll position — the last messages end up behind the keyboard.
-  // Scroll to bottom after layout settles, but only if user was already there.
-  const { isKeyboardVisible } = useKeyboardVisible();
-  useEffect(() => {
-    if (!isKeyboardVisible) return;
-    if (!messageListRef.current?.isAtBottom) return;
-    const id = setTimeout(() => {
-      messageListRef.current?.scrollToBottom();
-    }, 350);
-    return () => clearTimeout(id);
-  }, [isKeyboardVisible]);
 
   // Track timeout for message highlight
   const highlightTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -318,17 +304,10 @@ const Discussion: React.FC = () => {
     setForwardPreviewText(null);
   }, []);
 
-  // Handle input focus - scroll to bottom after keyboard appears
   const handleInputFocus = useCallback(() => {
-    // Delay to let the keyboard animation start and layout adjust
-    setTimeout(() => {
-      scrollToBottom();
-    }, 150);
-    // Second scroll after keyboard is fully open
-    setTimeout(() => {
-      scrollToBottom();
-    }, 350);
-  }, [scrollToBottom]);
+    // No forced scroll — let the container resize naturally.
+    // Virtuoso maintains scroll position when the container shrinks.
+  }, []);
 
   const handleScrollToMessage = useCallback(
     (messageId: number) => {
@@ -501,7 +480,7 @@ const Discussion: React.FC = () => {
 
   return (
     <div
-      className="h-full app-max-w mx-auto bg-card flex flex-col relative select-none"
+      className="h-full app-max-w mx-auto bg-card flex flex-col relative select-none overflow-hidden"
       style={{ WebkitTouchCallout: 'none' }}
       onMouseDown={e => {
         // Prevent taps from stealing focus / dismissing keyboard,
@@ -512,77 +491,84 @@ const Discussion: React.FC = () => {
         }
       }}
     >
-      <DiscussionHeader
-        contact={contact}
-        discussion={discussion}
-        onBack={onBack}
-        onSearchToggle={() => setIsSearchOpen(prev => !prev)}
-      />
-      <SessionIssueBanner
-        discussion={discussion}
-        outgoingSentCount={outgoingSentCount}
-      />
-      {isSearchOpen && (
-        <MessageSearch
-          messages={messages}
-          onScrollToMessage={handleScrollToMessage}
-          onHighlightChange={setSearchHighlightId}
-          onClose={() => {
-            setIsSearchOpen(false);
-            setSearchHighlightId(null);
-          }}
-        />
-      )}
-
-      <div
-        ref={messageListContainerRef}
-        className="flex-1 min-h-0 overflow-hidden"
-      >
-        <MessageList
-          ref={messageListRef}
-          messages={messages}
-          discussion={discussion}
+      {/* Header stays fixed in place — shifted content slides behind it */}
+      <div className="relative z-10">
+        <DiscussionHeader
           contact={contact}
-          isLoading={isLoading || isDiscussionLoading}
-          onReplyTo={handleReplyToMessage}
-          onForward={handleForwardMessage}
-          onScrollToMessage={handleScrollToMessage}
-          onAtBottomChange={handleAtBottomChange}
-          highlightedMessageId={searchHighlightId}
+          discussion={discussion}
+          onBack={onBack}
+          onSearchToggle={() => setIsSearchOpen(prev => !prev)}
         />
+        <SessionIssueBanner
+          discussion={discussion}
+          outgoingSentCount={outgoingSentCount}
+        />
+        {isSearchOpen && (
+          <MessageSearch
+            messages={messages}
+            onScrollToMessage={handleScrollToMessage}
+            onHighlightChange={setSearchHighlightId}
+            onClose={() => {
+              setIsSearchOpen(false);
+              setSearchHighlightId(null);
+            }}
+          />
+        )}
       </div>
 
-      <ScrollToBottomButton
-        onClick={scrollToBottom}
-        isVisible={showScrollToBottom}
-      />
-
-      {/* Debug test button - only show when debug mode is enabled */}
-      {showDebugOption && (
-        <div className="absolute bottom-32 right-4 z-10">
-          <button
-            onClick={handleSendTestMessages}
-            disabled={isSendingTestMessages}
-            className={`w-12 h-12 rounded-full bg-orange-500 hover:bg-orange-600 disabled:bg-orange-300 text-white shadow-lg border border-border flex items-center justify-center text-xs font-bold transition-all ${
-              isSendingTestMessages ? 'animate-pulse' : ''
-            }`}
-            title={`Send ${TEST_MESSAGE_COUNT} test messages (Debug)`}
-          >
-            {isSendingTestMessages ? '...' : TEST_MESSAGE_COUNT.toString()}
-          </button>
+      {/* Content shifts up via CSS transform when keyboard opens.
+          Messages slide behind the header. No scroll manipulation needed. */}
+      <div className="flex-1 min-h-0 flex flex-col keyboard-shift-content">
+        <div
+          ref={messageListContainerRef}
+          className="flex-1 min-h-0 overflow-hidden"
+        >
+          <MessageList
+            ref={messageListRef}
+            messages={messages}
+            discussion={discussion}
+            contact={contact}
+            isLoading={isLoading || isDiscussionLoading}
+            onReplyTo={handleReplyToMessage}
+            onForward={handleForwardMessage}
+            onScrollToMessage={handleScrollToMessage}
+            onAtBottomChange={handleAtBottomChange}
+            highlightedMessageId={searchHighlightId}
+          />
         </div>
-      )}
 
-      <MessageInput
-        onSend={handleSendMessage}
-        replyingTo={replyingTo}
-        onCancelReply={handleCancelReply}
-        initialValue={forwardFromMessageId ? undefined : inputPrefill}
-        forwardPreview={forwardFromMessageId ? forwardPreviewText : null}
-        forwardMode={forwardPreviewMode}
-        onCancelForward={handleCancelForward}
-        onFocus={handleInputFocus}
-      />
+        <ScrollToBottomButton
+          onClick={scrollToBottom}
+          isVisible={showScrollToBottom}
+        />
+
+        {/* Debug test button - only show when debug mode is enabled */}
+        {showDebugOption && (
+          <div className="absolute bottom-32 right-4 z-10">
+            <button
+              onClick={handleSendTestMessages}
+              disabled={isSendingTestMessages}
+              className={`w-12 h-12 rounded-full bg-orange-500 hover:bg-orange-600 disabled:bg-orange-300 text-white shadow-lg border border-border flex items-center justify-center text-xs font-bold transition-all ${
+                isSendingTestMessages ? 'animate-pulse' : ''
+              }`}
+              title={`Send ${TEST_MESSAGE_COUNT} test messages (Debug)`}
+            >
+              {isSendingTestMessages ? '...' : TEST_MESSAGE_COUNT.toString()}
+            </button>
+          </div>
+        )}
+
+        <MessageInput
+          onSend={handleSendMessage}
+          replyingTo={replyingTo}
+          onCancelReply={handleCancelReply}
+          initialValue={forwardFromMessageId ? undefined : inputPrefill}
+          forwardPreview={forwardFromMessageId ? forwardPreviewText : null}
+          forwardMode={forwardPreviewMode}
+          onCancelForward={handleCancelForward}
+          onFocus={handleInputFocus}
+        />
+      </div>
     </div>
   );
 };

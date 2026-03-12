@@ -449,9 +449,11 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         useDiscussionStore.getState().cleanup();
         useMessageStore.getState().cleanup();
 
-        const currentProfile = await getActiveOrFirstProfile();
-        if (currentProfile?.userId != null) {
-          await getSdk().profiles.delete(currentProfile.userId);
+        // Clear all DB tables (conversations, contacts, profiles, seekers, etc.)
+        try {
+          await getSdk().clearAllTables();
+        } catch {
+          // SQLite might not be initialized
         }
 
         set(clearAccountState());
