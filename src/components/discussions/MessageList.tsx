@@ -191,6 +191,28 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
       },
     }));
 
+    // Stable key per virtual item — prevents Virtuoso from confusing items
+    // when the list shifts (new messages, status changes, etc.)
+    const computeItemKey = useCallback(
+      (index: number) => {
+        const item: VirtualItem | undefined = virtualItems[index];
+        if (!item) return index;
+        switch (item.type) {
+          case 'announcement':
+            return `announcement-${index}`;
+          case 'date':
+            return item.key;
+          case 'spacer':
+            return 'spacer';
+          case 'message':
+            return `msg-${item.message.id}`;
+          default:
+            return index;
+        }
+      },
+      [virtualItems]
+    );
+
     // Render individual item
     const itemContent = useCallback(
       (index: number) => {
@@ -269,6 +291,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
             style={{ flex: 1 }}
             className="pt-6"
             totalCount={virtualItems.length}
+            computeItemKey={computeItemKey}
             itemContent={itemContent}
             initialTopMostItemIndex={initialTopMostItemIndex}
             atBottomThreshold={150}
