@@ -26,6 +26,13 @@
     --sab: 0px;
     --sal: 0px;
     --sar: 0px;
+    --keyboard-height: 0px;
+    /* Available height above the keyboard. Uses --viewport-height (locked at
+       initial window height by JS) so OS resize doesn't cause double-offset.
+       Use on any fixed/modal element that must fit above the keyboard. */
+    --available-height: calc(
+      var(--viewport-height, 100dvh) - var(--keyboard-height, 0px)
+    );
     --header-height: 3.5rem;
     --bottom-nav-height: 4rem;
     --header-padding: 1.5rem;
@@ -215,6 +222,26 @@
       /* Reserve space only on scrollbar side to prevent layout shift without creating both-side gutters */
       scrollbar-gutter: stable;
     }
+  }
+
+  /* Keyboard-aware layout: uses --keyboard-height CSS variable set directly
+     from the native keyboard event listener, bypassing React entirely.
+     On devices where the OS handles resize (Samsung), --keyboard-height stays 0. */
+  .keyboard-aware-height {
+    height: var(--viewport-height, 100dvh);
+  }
+
+  /* Content area below a sticky header: shifts up via GPU-accelerated transform
+     when keyboard opens. Header stays in place, content slides behind it. */
+  .keyboard-shift-content {
+    transform: translateY(calc(-1 * var(--keyboard-height, 0px)));
+    will-change: transform;
+  }
+
+  /* Add top padding to Virtuoso scroller so user can scroll up to reach
+     messages that shifted off-screen behind the header. */
+  .keyboard-shift-content [data-virtuoso-scroller] {
+    padding-top: var(--keyboard-height, 0px);
   }
 
   /* Ensure pointer cursor on all buttons */

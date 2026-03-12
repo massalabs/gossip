@@ -10,6 +10,7 @@ import android.net.http.SslError;
 import android.os.Build;
 import android.os.Bundle;
 import android.util.Log;
+import android.view.WindowManager;
 import android.webkit.SslErrorHandler;
 import android.webkit.WebView;
 import com.getcapacitor.BridgeActivity;
@@ -30,6 +31,17 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(BackgroundRunnerStoragePlugin.class);
         
         super.onCreate(savedInstanceState);
+
+        // Samsung (OneUI) ignores adjustNothing and always resizes the WebView.
+        // Use adjustResize on Samsung so the OS handles keyboard layout natively.
+        // Other OEMs (Xiaomi/MIUI) respect adjustNothing — we handle layout via CSS transform.
+        // KeyboardResize.Native in capacitor.config.ts ensures Capacitor doesn't override this.
+        String manufacturer = Build.MANUFACTURER.toLowerCase();
+        if (manufacturer.contains("samsung")) {
+            getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+        } else {
+            getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING);
+        }
 
         // Set transparent status and navigation bars
         WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
