@@ -46,6 +46,9 @@ export interface Message {
     originalContent?: string;
     originalContactId?: Uint8Array;
   };
+  deleteOf?: {
+    originalMsgId: Uint8Array;
+  };
 }
 
 export interface UserProfile {
@@ -112,6 +115,7 @@ export enum MessageType {
   FILE = 'file',
   AUDIO = 'audio',
   VIDEO = 'video',
+  DELETED = 'deleted',
 }
 
 export interface ReadyAnnouncement {

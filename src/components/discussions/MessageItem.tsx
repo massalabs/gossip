@@ -12,6 +12,7 @@ import {
   ChevronDown,
   Check as CheckIcon,
   AlertTriangle,
+  Trash2,
 } from 'react-feather';
 import { useLongPress } from '../../hooks/useLongPress';
 import MessageContextMenu from '../ui/MessageContextMenu';
@@ -21,6 +22,7 @@ import {
   Message,
   MessageStatus,
   MessageDirection,
+  MessageType,
   encodeUserId,
 } from '@massalabs/gossip-sdk';
 import { useGossipSdk } from '../../hooks/useGossipSdk';
@@ -53,6 +55,7 @@ interface MessageItemProps {
   onReplyTo?: (message: Message) => void;
   onScrollToMessage?: (messageId: number) => void;
   onForward?: (message: Message) => void;
+  onDelete?: (message: Message) => void;
   id?: string;
   showTimestamp?: boolean;
   isFirstInGroup?: boolean;
@@ -67,6 +70,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
   onReplyTo,
   onScrollToMessage,
   onForward,
+  onDelete,
   id,
   showTimestamp = true,
   isFirstInGroup = true,
@@ -79,6 +83,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
   const canReply = !!onReplyTo;
   const canForward = !!onForward;
   const isOutgoing = message.direction === MessageDirection.OUTGOING;
+  const isDeleted = message.type === MessageType.DELETED;
   const [originalMessage, setOriginalMessage] = useState<Message | null>(null);
   const [isLoadingOriginal, setIsLoadingOriginal] = useState(false);
   const [originalNotFound, setOriginalNotFound] = useState(false);
@@ -309,32 +314,50 @@ const MessageItem: React.FC<MessageItemProps> = ({
   // Context menu items — depend on stable scalars, not the full message object
   const contextMenuItems = useMemo<MessageContextMenuItem[]>(() => {
     const items: MessageContextMenuItem[] = [];
-    if (onReplyTo) {
+    if (onReplyTo && !isDeleted) {
       items.push({
         label: 'Reply',
         icon: <CornerUpLeft className="w-4 h-4" />,
         onClick: () => onReplyTo(message),
       });
     }
-    if (onForward) {
+    if (onForward && !isDeleted) {
       items.push({
         label: 'Forward',
         icon: <Share className="w-4 h-4" />,
         onClick: () => onForward(message),
       });
     }
-    items.push({
-      label: 'Copy',
-      icon: <Copy className="w-4 h-4" />,
-      onClick: () => {
-        navigator.clipboard.writeText(message.content).catch(() => {
-          /* clipboard not available */
-        });
-      },
-    });
+    if (!isDeleted) {
+      items.push({
+        label: 'Copy',
+        icon: <Copy className="w-4 h-4" />,
+        onClick: () => {
+          navigator.clipboard.writeText(message.content).catch(() => {
+            /* clipboard not available */
+          });
+        },
+      });
+    }
+    if (onDelete && isOutgoing && !isDeleted && message.id != null) {
+      items.push({
+        label: 'Delete',
+        icon: <Trash2 className="w-4 h-4" />,
+        danger: true,
+        onClick: () => onDelete(message),
+      });
+    }
     return items;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onReplyTo, onForward, message.id, message.content]);
+  }, [
+    onReplyTo,
+    onForward,
+    onDelete,
+    isOutgoing,
+    isDeleted,
+    message.id,
+    message.content,
+  ]);
 
   // Clean up animation timer on unmount
   useEffect(() => {
@@ -691,8 +714,10 @@ const MessageItem: React.FC<MessageItemProps> = ({
             ? 'ml-auto mr-3 bg-accent text-accent-foreground'
             : `${contact ? '' : 'ml-3'} mr-auto bg-surface-secondary text-card-foreground`
         } ${
-          canReply ? 'cursor-pointer focus:outline-none' : ''
-        } ${isContextMenuOpen ? 'shadow-lg' : ''}`}
+          !isDeleted && canReply ? 'cursor-pointer focus:outline-none' : ''
+        } ${isContextMenuOpen ? 'shadow-lg' : ''} ${
+          isDeleted ? 'opacity-80' : ''
+        }`}
         onClick={handleBubbleClick}
         onKeyDown={handleKeyDown}
         tabIndex={0}
@@ -916,30 +941,36 @@ const MessageItem: React.FC<MessageItemProps> = ({
         )}
 
         {/* Message Content */}
-        <p className="whitespace-pre-wrap wrap-break-word pr-6">
-          {parsedLinks.map((segment, index) => {
-            if (segment.type === 'link') {
-              return (
-                <a
-                  key={index}
-                  href={segment.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={handleLinkClick}
-                  aria-label={`${segment.content} (opens in a new tab)`}
-                  className="underline hover:opacity-80 transition-opacity break-all cursor-pointer"
-                  style={{
-                    textDecorationColor: 'currentColor',
-                    textDecorationThickness: '1px',
-                  }}
-                >
-                  {segment.content}
-                </a>
-              );
-            }
-            return <span key={index}>{segment.content}</span>;
-          })}
-        </p>
+        {isDeleted ? (
+          <p className="whitespace-pre-wrap wrap-break-word pr-6 italic text-muted-foreground text-[13px]">
+            Message deleted
+          </p>
+        ) : (
+          <p className="whitespace-pre-wrap wrap-break-word pr-6">
+            {parsedLinks.map((segment, index) => {
+              if (segment.type === 'link') {
+                return (
+                  <a
+                    key={index}
+                    href={segment.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={handleLinkClick}
+                    aria-label={`${segment.content} (opens in a new tab)`}
+                    className="underline hover:opacity-80 transition-opacity break-all cursor-pointer"
+                    style={{
+                      textDecorationColor: 'currentColor',
+                      textDecorationThickness: '1px',
+                    }}
+                  >
+                    {segment.content}
+                  </a>
+                );
+              }
+              return <span key={index}>{segment.content}</span>;
+            })}
+          </p>
+        )}
 
         {/* Timestamp and Status */}
         {(showTimestamp || isOutgoing) && (
