@@ -44,6 +44,7 @@
     "cap:dev:ios": "scripts/dev-ios.sh",
     "cap:dev:android": "scripts/dev-android.sh",
     "cap:dev:all": "scripts/dev-all.sh",
+    "cap:dev:scan": "scripts/dev-scan.sh",
     "cap:run:android": "npm run build && cap sync android && cap run android",
     "cap:run:all": "npm run build && cap sync ios && cap sync android && cap run ios && cap run android",
     "cap:copy": "cap copy",

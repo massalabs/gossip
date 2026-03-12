@@ -4,6 +4,7 @@ import { useAccountStore } from '../stores/accountStore';
 import OnboardingFlow from '../components/OnboardingFlow';
 import AccountImport from '../components/account/AccountImport';
 import AccountCreation from '../components/account/AccountCreation';
+import { getDevAccounts } from '../hooks/useDevAutoLogin';
 
 /**
  * Routes for onboarding flow (when no account exists)
@@ -20,6 +21,19 @@ export const Onboarding: React.FC<{
   onShowImportChange: (show: boolean) => void;
 }> = ({ showImport, onShowImportChange }) => {
   const [showAccountCreation, setShowAccountCreation] = useState(false);
+
+  // Dev mode: show account picker instead of onboarding
+  const devAccounts = getDevAccounts();
+  if (devAccounts.length > 0) {
+    const DevAccountPicker = React.lazy(
+      () => import('../components/dev/DevAccountPicker')
+    );
+    return (
+      <React.Suspense fallback={null}>
+        <DevAccountPicker accounts={devAccounts} />
+      </React.Suspense>
+    );
+  }
 
   if (showImport) {
     return (

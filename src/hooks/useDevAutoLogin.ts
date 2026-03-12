@@ -4,6 +4,7 @@ import { UserProfile } from '@massalabs/gossip-sdk';
 
 /**
  * Dev-only hook: auto-login with VITE_DEV_PASSWORD on hot reload.
+ * If no account exists but VITE_DEV_ACCOUNTS is set, triggers the dev account picker.
  * Tree-shaken out of production builds (guarded by import.meta.env.DEV).
  */
 export function useDevAutoLogin(
@@ -38,4 +39,33 @@ export function useDevAutoLogin(
       })
       .finally(() => callbacks.setLoading(false));
   }, [account, loadAccount, callbacks]);
+}
+
+export interface DevAccount {
+  name: string;
+  mnemonic: string;
+}
+
+/**
+ * Parse VITE_DEV_ACCOUNTS env var.
+ * Format: JSON array of {name, mnemonic} objects.
+ */
+export function getDevAccounts(): DevAccount[] {
+  if (!import.meta.env.DEV) return [];
+  const raw = import.meta.env.VITE_DEV_ACCOUNTS;
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (a: unknown): a is DevAccount =>
+        typeof a === 'object' &&
+        a !== null &&
+        typeof (a as DevAccount).name === 'string' &&
+        typeof (a as DevAccount).mnemonic === 'string'
+    );
+  } catch {
+    console.error('[dev] Failed to parse VITE_DEV_ACCOUNTS');
+    return [];
+  }
 }
