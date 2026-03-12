@@ -147,8 +147,14 @@ await sdk.messages.sendText(contactId, 'Hello!', {
 // Fetch new messages from server
 const fetchResult = await sdk.messages.fetch();
 
-// Get all messages for a given contact
+// Get all messages for a given contact (raw, protocol-level view)
 const messages = await sdk.messages.getMessages(contactId);
+
+// Get only user-visible messages for a contact
+// - Excludes KEEP_ALIVE protocol pings
+// - Excludes outgoing delete control messages (empty content)
+// - Ordered by ascending database id
+const visibleMessages = await sdk.messages.getVisibleMessages(contactId);
 
 // Mark a specific message (by DB ID) as read
 await sdk.messages.markAsRead(messageId);

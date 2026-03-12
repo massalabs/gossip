@@ -102,6 +102,102 @@ async function insertTestContactAndDiscussion(
 describe('MessageService', () => {
   beforeEach(clearAllTables);
 
+  it('getMessages returns all rows while getVisibleMessages filters to user-visible subset', async () => {
+    const testQueries = getTestQueries();
+
+    // Insert a mix of messages for the same owner/contact
+    const visibleId1 = await testQueries.messages.insert({
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: 'First visible',
+      type: MessageType.TEXT,
+      direction: MessageDirection.INCOMING,
+      status: MessageStatus.DELIVERED,
+      timestamp: new Date('2024-01-02T00:00:00Z'),
+    });
+
+    // KEEP_ALIVE should be filtered out
+    const keepAliveId = await testQueries.messages.insert({
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: '',
+      type: MessageType.KEEP_ALIVE,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.SENT,
+      timestamp: new Date('2024-01-03T00:00:00Z'),
+    });
+
+    // Outgoing delete control with empty content should be filtered out
+    const deleteControlId = await testQueries.messages.insert({
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: '',
+      type: MessageType.DELETED,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.SENT,
+      timestamp: new Date('2024-01-04T00:00:00Z'),
+    });
+
+    // Outgoing deleted message with non-empty content should remain visible
+    const visibleDeletedId = await testQueries.messages.insert({
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: '[Message deleted]',
+      type: MessageType.DELETED,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.SENT,
+      timestamp: new Date('2024-01-05T00:00:00Z'),
+    });
+
+    const visibleId2 = await testQueries.messages.insert({
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: 'Second visible',
+      type: MessageType.TEXT,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.SENT,
+      timestamp: new Date('2024-01-01T00:00:00Z'), // Earlier timestamp than first visible
+    });
+
+    const service = new MessageService(
+      new MockMessageProtocol(),
+      createMockSession(),
+      new SdkEventEmitter(),
+      defaultSdkConfig,
+      testQueries
+    );
+
+    // Raw messages should include all 5 rows, ordered by timestamp then id
+    const allMessages = await service.getMessages(CONTACT_USER_ID);
+    const allIds = allMessages.map(m => m.id);
+    expect(allIds).toEqual([
+      visibleId2, // 2024-01-01
+      visibleId1, // 2024-01-02
+      keepAliveId, // 2024-01-03
+      deleteControlId, // 2024-01-04
+      visibleDeletedId, // 2024-01-05
+    ]);
+
+    // Visible messages should filter out KEEP_ALIVE and delete control rows
+    const visibleMessages = await service.getVisibleMessages(CONTACT_USER_ID);
+    const visibleIds = visibleMessages.map(m => m.id);
+
+    // Only the three visible messages should be returned
+    expect(visibleIds).toEqual([visibleId1, visibleDeletedId, visibleId2]);
+
+    // Sanity-check types and contents
+    expect(visibleMessages.map(m => m.type)).toEqual([
+      MessageType.TEXT,
+      MessageType.DELETED,
+      MessageType.TEXT,
+    ]);
+    expect(visibleMessages.map(m => m.content)).toEqual([
+      'First visible',
+      '[Message deleted]',
+      'Second visible',
+    ]);
+  });
+
   it('finds message by seeker', async () => {
     const seeker = new Uint8Array(32).fill(5);
     await getTestQueries().messages.insert({

@@ -109,21 +109,9 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
         // Fetch messages for all contacts
         const newMap = new Map<string, Message[]>();
         for (const contactUserId of contactUserIds) {
-          const allMessages = await sdk.messages.getMessages(contactUserId);
-          const filtered = allMessages
-            .filter(
-              m =>
-                m.type !== MessageType.KEEP_ALIVE &&
-                // Filter out delete control messages (empty content, outgoing)
-                !(
-                  m.type === MessageType.DELETED &&
-                  m.direction === MessageDirection.OUTGOING &&
-                  m.content === ''
-                )
-            )
-            .sort((a, b) => (a.id ?? 0) - (b.id ?? 0));
-          if (filtered.length > 0) {
-            newMap.set(contactUserId, filtered);
+          const messages = await sdk.messages.getVisibleMessages(contactUserId);
+          if (messages.length > 0) {
+            newMap.set(contactUserId, messages);
           }
         }
 
