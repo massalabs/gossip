@@ -238,12 +238,6 @@
     will-change: transform;
   }
 
-  /* Add top padding to Virtuoso scroller so user can scroll up to reach
-     messages that shifted off-screen behind the header. */
-  .keyboard-shift-content [data-virtuoso-scroller] {
-    padding-top: var(--keyboard-height, 0px);
-  }
-
   /* Ensure pointer cursor on all buttons */
   button,
   [type='button'],

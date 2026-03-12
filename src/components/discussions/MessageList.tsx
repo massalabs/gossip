@@ -33,6 +33,14 @@ import {
 // Number of messages to show above the first unread message when scrolling to it
 const MESSAGES_ABOVE_UNREAD = 3;
 
+// Stable Virtuoso components object — created once, never changes.
+// The Header renders a spacer whose height tracks --keyboard-height via CSS variable,
+// so when the keyboard opens the list gains scrollable space at the top for messages
+// that shifted behind the header via the CSS transform.
+const virtuosoComponents = {
+  Header: () => <div style={{ height: 'var(--keyboard-height, 0px)' }} />,
+};
+
 // =============================================================================
 // Types
 // =============================================================================
@@ -297,6 +305,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
             atBottomThreshold={150}
             atBottomStateChange={handleAtBottomStateChange}
             increaseViewportBy={{ top: 200, bottom: 200 }}
+            components={virtuosoComponents}
           />
         )}
       </div>
