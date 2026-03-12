@@ -62,6 +62,7 @@ CREATE TABLE `messages` (
 	`seeker` blob,
 	`replyTo` text,
 	`forwardOf` text,
+	`deleteOf` text,
 	`encryptedMessage` blob,
 	`whenToSend` integer
 );

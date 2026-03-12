@@ -25,6 +25,7 @@ import {
   serializeReplyMessage,
   serializeForwardMessage,
   serializeKeepAliveMessage,
+  serializeDeleteMessage,
   deserializeMessage,
 } from '../utils/messageSerialization.js';
 import { encodeToBase64, decodeFromBase64 } from '../utils/base64.js';
@@ -100,6 +101,27 @@ function deserializeForwardOf(
   };
 }
 
+/** Serialize deleteOf to JSON string for SQLite storage. */
+function serializeDeleteOf(
+  deleteOf: { originalMsgId: Uint8Array } | undefined
+): string | null {
+  if (!deleteOf) return null;
+  return JSON.stringify({
+    originalMsgId: encodeToBase64(deleteOf.originalMsgId),
+  });
+}
+
+/** Deserialize deleteOf from JSON string. */
+function deserializeDeleteOf(
+  json: string | null
+): { originalMsgId: Uint8Array } | undefined {
+  if (!json) return undefined;
+  const parsed = JSON.parse(json);
+  return {
+    originalMsgId: decodeFromBase64(parsed.originalMsgId),
+  };
+}
+
 /** Serialize metadata to JSON string. */
 function serializeMetadata(
   metadata: Record<string, unknown> | undefined
@@ -133,6 +155,7 @@ export function rowToMessage(row: MessageRow): Message {
     seeker: row.seeker ?? undefined,
     replyTo: deserializeReplyTo(row.replyTo),
     forwardOf: deserializeForwardOf(row.forwardOf),
+    deleteOf: deserializeDeleteOf(row.deleteOf ?? null),
     encryptedMessage: row.encryptedMessage ?? undefined,
     whenToSend: row.whenToSend ?? undefined,
   };
@@ -162,6 +185,9 @@ interface Decrypted {
   forwardOf?: {
     originalContent: string;
     originalContactId?: Uint8Array;
+  };
+  deleteOf?: {
+    originalMsgId: Uint8Array;
   };
   encryptedMessage: Uint8Array;
   type: MessageType;
@@ -323,6 +349,7 @@ export class MessageService {
       seeker: message.seeker,
       replyTo: serializeReplyTo(message.replyTo),
       forwardOf: serializeForwardOf(message.forwardOf),
+      deleteOf: serializeDeleteOf(message.deleteOf),
       encryptedMessage: message.encryptedMessage,
       whenToSend: message.whenToSend,
     });
@@ -377,6 +404,8 @@ export class MessageService {
             continue;
           }
 
+          // Delete control messages are handled at storage time; keep them in decrypted array
+
           if (
             !deserialized.messageId ||
             deserialized.messageId.length !== MESSAGE_ID_SIZE
@@ -396,6 +425,7 @@ export class MessageService {
             type: deserialized.type,
             replyTo: deserialized.replyTo,
             forwardOf: deserialized.forwardOf,
+            deleteOf: deserialized.deleteOf,
           });
         } catch (deserializationError) {
           log.error('deserialization failed', {
@@ -426,6 +456,33 @@ export class MessageService {
     const storedIds: number[] = [];
 
     for (const message of decrypted) {
+      // Handle delete control messages by updating the referenced message in-place
+      if (
+        message.type === MessageType.DELETED &&
+        message.deleteOf?.originalMsgId
+      ) {
+        const target = await this.findMessageByMsgId(
+          message.deleteOf.originalMsgId,
+          ownerUserId,
+          message.senderId
+        );
+
+        if (!target || !target.id) {
+          log.warn('delete target not found', {
+            originalMsgId: encodeToBase64(message.deleteOf.originalMsgId),
+          });
+          continue;
+        }
+
+        await this.queries.messages.updateById(target.id, {
+          content: '[Message deleted]',
+          type: MessageType.DELETED,
+        });
+
+        // Do not insert a new message row for delete control messages
+        continue;
+      }
+
       const discussion = await this.queries.discussions.getByOwnerAndContact(
         ownerUserId,
         message.senderId
@@ -690,6 +747,19 @@ export class MessageService {
       return {
         success: true,
         data: serializeKeepAliveMessage(),
+      };
+    } else if (message.type === MessageType.DELETED && message.deleteOf) {
+      // Serialize a delete control message targeting an existing messageId
+      const originalMsgId = message.deleteOf.originalMsgId;
+      if (!originalMsgId || originalMsgId.length !== MESSAGE_ID_SIZE) {
+        return {
+          success: false,
+          error: 'Original messageId is required for delete messages',
+        };
+      }
+      return {
+        success: true,
+        data: serializeDeleteMessage(originalMsgId, message.messageId!),
       };
     } else if (message.forwardOf) {
       try {
@@ -1065,6 +1135,57 @@ export class MessageService {
   /** Fetch and decrypt messages from the protocol (alias) */
   async fetch(): Promise<MessageResult> {
     return this.fetchMessages();
+  }
+
+  /**
+   * Delete an outgoing message by its database ID.
+   * Marks the local message as deleted and enqueues a delete control message
+   * so the peer can mark their copy as deleted as well.
+   */
+  async deleteMessage(id: number): Promise<boolean> {
+    const row = await this.queries.messages.getById(id);
+    if (!row) {
+      return false;
+    }
+
+    // Only allow deleting our own outgoing messages
+    if (row.direction !== MessageDirection.OUTGOING) {
+      return false;
+    }
+
+    if (!row.messageId) {
+      throw new Error('Cannot delete a message that has no messageId');
+    }
+
+    const ownerUserId = this.session.userIdEncoded;
+
+    // Mark the original message as deleted locally
+    await this.queries.messages.updateById(id, {
+      content: '[Message deleted]',
+      type: MessageType.DELETED,
+    });
+
+    // Enqueue a delete control message to notify the peer
+    const controlMessage: Omit<Message, 'id'> = {
+      ownerUserId,
+      contactUserId: row.contactUserId,
+      content: '',
+      type: MessageType.DELETED,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.WAITING_SESSION,
+      timestamp: new Date(),
+      deleteOf: {
+        originalMsgId: row.messageId,
+      },
+    };
+
+    const result = await this.send(controlMessage);
+    if (!result.success) {
+      throw new Error(result.error ?? 'Failed to enqueue delete message');
+    }
+
+    await this.refreshService?.stateUpdate();
+    return true;
   }
 
   // Mark a message as read. Returns true if the message has been marked as read, false if it was already marked as read or doesn't exist.

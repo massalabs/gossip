@@ -402,6 +402,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "deleteOf": {
+          "name": "deleteOf",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "encryptedMessage": {
           "name": "encryptedMessage",
           "type": "blob",

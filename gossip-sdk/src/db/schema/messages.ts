@@ -19,6 +19,7 @@ export const messages = sqliteTable(
     seeker: bytes('seeker'),
     replyTo: text('replyTo'),
     forwardOf: text('forwardOf'),
+    deleteOf: text('deleteOf'),
     encryptedMessage: bytes('encryptedMessage'),
     whenToSend: integer('whenToSend', { mode: 'timestamp_ms' }),
   },

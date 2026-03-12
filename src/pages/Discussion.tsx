@@ -295,6 +295,22 @@ const Discussion: React.FC = () => {
     [navigate, setPendingForwardMessageId, setPendingSharedContent]
   );
 
+  const handleDeleteMessage = useCallback(
+    async (message: Message) => {
+      if (!message.id) return;
+      try {
+        const deleted = await gossip.messages.deleteMessage(message.id);
+        if (!deleted) {
+          toast.error('Unable to delete message');
+        }
+      } catch (error) {
+        toast.error('Failed to delete message');
+        console.error('Failed to delete message:', error);
+      }
+    },
+    [gossip]
+  );
+
   const handleCancelReply = useCallback(() => {
     setReplyingTo(null);
   }, []);
@@ -531,6 +547,7 @@ const Discussion: React.FC = () => {
             isLoading={isLoading || isDiscussionLoading}
             onReplyTo={handleReplyToMessage}
             onForward={handleForwardMessage}
+            onDelete={handleDeleteMessage}
             onScrollToMessage={handleScrollToMessage}
             onAtBottomChange={handleAtBottomChange}
             highlightedMessageId={searchHighlightId}

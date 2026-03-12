@@ -6,6 +6,7 @@ export enum MessageType {
   MESSAGE_TYPE_REPLY = 1,
   MESSAGE_TYPE_FORWARD = 2,
   MESSAGE_TYPE_KEEP_ALIVE = 3,
+  MESSAGE_TYPE_DELETE = 4,
 }
 
 export interface Message {

@@ -267,6 +267,56 @@ describe('Messaging Flow', () => {
       expect(bobAllMessages[1].status).toBe(MessageStatus.SENT);
     });
 
+    it('Alice deletes a message and Bob sees it as deleted with preserved timestamp', async () => {
+      // Setup session between Alice and Bob
+      await setupSession(aliceSdk, bobSdk, 'Bob', 'Alice');
+
+      // Alice sends a message to Bob
+      const sendResult = await aliceSdk.messages.send({
+        ownerUserId: aliceSdk.userId,
+        contactUserId: bobSdk.userId,
+        content: 'Message to be deleted',
+        type: MessageType.TEXT,
+        direction: MessageDirection.OUTGOING,
+        status: MessageStatus.WAITING_SESSION,
+        timestamp: new Date(),
+      });
+      expect(sendResult.success).toBe(true);
+
+      // Bob fetches and receives the message
+      const fetchResult = await bobSdk.messages.fetch();
+      expect(fetchResult.success).toBe(true);
+      const bobMessagesBefore = await bobSdk.messages.getMessages(
+        aliceSdk.userId
+      );
+      expect(bobMessagesBefore.length).toBe(1);
+      const bobMsgBefore = bobMessagesBefore[0];
+      expect(bobMsgBefore.content).toBe('Message to be deleted');
+      const originalTimestamp = bobMsgBefore.timestamp;
+
+      // Alice deletes the message locally and sends a delete control message
+      const aliceMessages = await aliceSdk.messages.getMessages(bobSdk.userId);
+      expect(aliceMessages.length).toBe(1);
+      const aliceMsg = aliceMessages[0];
+      expect(aliceMsg.id).toBeDefined();
+      const deleteResult = await aliceSdk.messages.deleteMessage(aliceMsg.id!);
+      expect(deleteResult).toBe(true);
+
+      // Bob fetches delete control message and applies deletion
+      const fetchDeleteResult = await bobSdk.messages.fetch();
+      expect(fetchDeleteResult.success).toBe(true);
+
+      const bobMessagesAfter = await bobSdk.messages.getMessages(
+        aliceSdk.userId
+      );
+      expect(bobMessagesAfter.length).toBe(1);
+      const bobMsgAfter = bobMessagesAfter[0];
+      expect(bobMsgAfter.type).toBe(MessageType.DELETED);
+      expect(bobMsgAfter.content).toBe('[Message deleted]');
+      // Timestamp should be preserved to keep ordering
+      expect(bobMsgAfter.timestamp.getTime()).toBe(originalTimestamp.getTime());
+    });
+
     it('Alice send announcement and send 2 message before Bob accept, Bob accept and receive messages', async () => {
       // Create contacts
       const aliceBobContact: Omit<Contact, 'id'> = {
