@@ -146,7 +146,7 @@ describe('IOSKeyboardWrapper', () => {
     }
   });
 
-  it('applies transition classes for smooth height changes', async () => {
+  it('uses keyboard-aware-height for CSS variable driven sizing', async () => {
     await render(
       <IOSKeyboardWrapper>
         <div data-testid="content">Content</div>
@@ -158,9 +158,7 @@ describe('IOSKeyboardWrapper', () => {
 
     if (wrapper) {
       const className = wrapper.className;
-      expect(className).toContain('transition-[height]');
-      expect(className).toContain('duration-300');
-      expect(className).toContain('ease-out');
+      expect(className).toContain('keyboard-aware-height');
     }
   });
 
@@ -179,7 +177,7 @@ describe('IOSKeyboardWrapper', () => {
       expect(className).toContain('flex');
       expect(className).toContain('flex-col');
       expect(className).toContain('w-full');
-      expect(className).toContain('h-full');
+      expect(className).toContain('keyboard-aware-height');
     }
   });
 });
