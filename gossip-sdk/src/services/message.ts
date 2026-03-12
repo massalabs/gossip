@@ -1088,9 +1088,20 @@ export class MessageService {
     return row ? rowToMessage(row) : undefined;
   }
 
-  /** Get all messages for a contact (using session owner) */
+  /** Get all messages for a contact (using session owner).
+   *  NOTE: This returns raw rows without UI-level filtering.
+   */
   async getMessages(contactUserId: string): Promise<Message[]> {
     const rows = await this.queries.messages.getByOwnerAndContact(
+      this.session.userIdEncoded,
+      contactUserId
+    );
+    return rows.map(rowToMessage);
+  }
+
+  /** Get only user-visible messages for a contact (filtered + ordered). */
+  async getVisibleMessages(contactUserId: string): Promise<Message[]> {
+    const rows = await this.queries.messages.getVisibleByOwnerAndContact(
       this.session.userIdEncoded,
       contactUserId
     );

@@ -1,4 +1,4 @@
-import { eq, and, sql, inArray, asc } from 'drizzle-orm';
+import { eq, and, or, sql, inArray, asc, ne } from 'drizzle-orm';
 import * as schema from '../schema/index.js';
 import type { DatabaseConnection } from '../sqlite.js';
 import { MessageDirection, MessageStatus, MessageType } from '../../db/db.js';
@@ -31,6 +31,29 @@ export class MessageQueries {
         )
       )
       .orderBy(asc(schema.messages.timestamp), asc(schema.messages.id))
+      .all();
+  }
+
+  async getVisibleByOwnerAndContact(
+    ownerUserId: string,
+    contactUserId: string
+  ): Promise<MessageRow[]> {
+    return this.conn.db
+      .select()
+      .from(schema.messages)
+      .where(
+        and(
+          eq(schema.messages.ownerUserId, ownerUserId),
+          eq(schema.messages.contactUserId, contactUserId),
+          ne(schema.messages.type, MessageType.KEEP_ALIVE),
+          or(
+            ne(schema.messages.type, MessageType.DELETED),
+            ne(schema.messages.direction, MessageDirection.OUTGOING),
+            ne(schema.messages.content, '')
+          )
+        )
+      )
+      .orderBy(asc(schema.messages.id))
       .all();
   }
 
@@ -185,7 +208,6 @@ export class MessageQueries {
     ownerUserId: string,
     contactUserId: string
   ): Promise<void> {
-    const statuses = [MessageStatus.READY, MessageStatus.SENT];
     await this.conn.db
       .update(schema.messages)
       .set({
@@ -198,7 +220,10 @@ export class MessageQueries {
           eq(schema.messages.ownerUserId, ownerUserId),
           eq(schema.messages.contactUserId, contactUserId),
           eq(schema.messages.direction, MessageDirection.OUTGOING),
-          statuses ? inArray(schema.messages.status, statuses) : undefined
+          inArray(schema.messages.status, [
+            MessageStatus.READY,
+            MessageStatus.SENT,
+          ])
         )
       );
 
