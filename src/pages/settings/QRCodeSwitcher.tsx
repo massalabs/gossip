@@ -25,8 +25,10 @@ const QRCodeSwitcher: React.FC = () => {
   }, [navigate]);
 
   const handleScanSuccess = useCallback(
-    (scannedUserId: string) => {
-      navigate(ROUTES.newContact(), { state: { userId: scannedUserId } });
+    (scannedUserId: string, scannedName?: string) => {
+      navigate(ROUTES.newContact(), {
+        state: { userId: scannedUserId, name: scannedName },
+      });
     },
     [navigate]
   );

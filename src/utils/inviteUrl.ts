@@ -37,7 +37,7 @@ function getGossipDomain(): string {
  *   • Open the PWA if installed
  *   • Open the web app otherwise
  */
-export function generateDeepLinkUrl(userId: string): string {
+export function generateDeepLinkUrl(userId: string, name?: string): string {
   if (!userId?.trim()) {
     throw new Error('userId is required');
   }
@@ -45,5 +45,9 @@ export function generateDeepLinkUrl(userId: string): string {
   const base = getGossipDomain();
   const safeId = encodeURIComponent(userId.trim());
 
-  return `${base}/${AppRoute.invite}/${safeId}`;
+  let url = `${base}/${AppRoute.invite}/${safeId}`;
+  if (name?.trim()) {
+    url += `?name=${encodeURIComponent(name.trim())}`;
+  }
+  return url;
 }

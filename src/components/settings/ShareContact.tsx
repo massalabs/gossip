@@ -49,13 +49,17 @@ const ShareContact: React.FC<ShareContactProps> = ({
   const [copiedLink, setCopiedLink] = useState(false);
   const [isSharingLink, setIsSharingLink] = useState(false);
   const [isSharingQR, setIsSharingQR] = useState(false);
+  const [includeUsername, setIncludeUsername] = useState(false);
   const [canShareViaOtherApp, setCanShareViaOtherApp] = useState(false);
   const copiedLinkTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
     null
   );
   const { shareFileContact, fileState } = useFileShareContact();
   const navigate = useNavigate();
-  const deepLinkUrl = useMemo(() => generateDeepLinkUrl(userId), [userId]);
+  const deepLinkUrl = useMemo(
+    () => generateDeepLinkUrl(userId, includeUsername ? userName : undefined),
+    [userId, includeUsername, userName]
+  );
   const isExportDisabled = !publicKey || fileState.isLoading;
 
   const handleShareFile = useCallback(() => {
@@ -141,6 +145,18 @@ const ShareContact: React.FC<ShareContactProps> = ({
           </>
         }
       />
+
+      <label className="flex items-center gap-3 cursor-pointer mb-4">
+        <input
+          type="checkbox"
+          checked={includeUsername}
+          onChange={e => setIncludeUsername(e.target.checked)}
+          className="w-5 h-5 rounded border-border text-primary focus:ring-primary"
+        />
+        <span className="text-sm text-foreground">
+          Include my name in the invite
+        </span>
+      </label>
 
       <ShareContactQR
         deepLinkUrl={deepLinkUrl}
