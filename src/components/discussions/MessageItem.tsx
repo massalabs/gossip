@@ -131,6 +131,9 @@ const MessageItem: React.FC<MessageItemProps> = ({
     height: number;
     borderRadius?: string;
   } | null>(null);
+  const [contextMenuPlacement, setContextMenuPlacement] = useState<
+    'above' | 'below'
+  >('below');
   const contextMenuOpenRef = useRef(false);
   // Snapshot the keyboard height at touchstart — on iOS the keyboard may start
   // dismissing during the 500ms long-press delay, zeroing the live value before
@@ -140,19 +143,21 @@ const MessageItem: React.FC<MessageItemProps> = ({
   const openContextMenu = useCallback(() => {
     if (!bubbleRef.current || contextMenuOpenRef.current) return;
     const rect = bubbleRef.current.getBoundingClientRect();
-    let itemCount = 1; // Copy always present
-    if (canReply) itemCount++;
-    if (canForward) itemCount++;
-    const menuHeight = itemCount * 44;
+    const itemCount =
+      (canReply && !isDeleted ? 1 : 0) +
+        (canForward && !isDeleted ? 1 : 0) +
+        (!isDeleted ? 1 : 0) +
+        (onEdit && isOutgoing && !isDeleted && message.id != null ? 1 : 0) +
+        (onDelete && isOutgoing && !isDeleted && message.id != null ? 1 : 0) ||
+      1;
+    const rowH = 48;
+    const menuHeight = Math.max(itemCount * rowH, rowH);
     const gap = 8;
     const sab =
       parseFloat(
         getComputedStyle(document.documentElement).getPropertyValue('--sab')
       ) || 0;
     const pad = 16 + sab;
-    // On Android, clientHeight/visualViewport already shrink with the keyboard.
-    // On iOS they don't, so we subtract the keyboard height manually.
-    // Use the snapshot taken at touchstart to avoid stale values.
     const kbAdjust =
       Capacitor.getPlatform() === 'ios' ? kbHeightSnapshotRef.current : 0;
     const vh = Math.min(
@@ -160,36 +165,44 @@ const MessageItem: React.FC<MessageItemProps> = ({
       window.visualViewport?.height ?? Infinity,
       window.innerHeight - kbAdjust
     );
-
-    // For tall bubbles that take up most of the viewport, don't translate —
-    // just overlay the menu at the bottom of the visible area.
+    const viewportBottom = vh - pad;
     const tall = rect.height > vh * 0.5;
 
-    // Subtle diagonal nudge so the bubble feels "selected"
     const tx = isOutgoing ? -6 : 6;
     let ty = -6;
     let menuY: number;
+    let placement: 'above' | 'below' = 'below';
+
+    const placeBelow = rect.bottom + gap;
+    const placeAbove = rect.top - gap - menuHeight;
+    const fitsBelow = placeBelow + menuHeight <= viewportBottom;
+    const fitsAbove = placeAbove >= pad;
 
     if (tall) {
-      // Try below bubble first; only overlap if it would overflow
-      menuY = rect.bottom + gap;
-      if (menuY + menuHeight > vh - pad) {
-        menuY = vh - pad - menuHeight;
+      menuY = placeBelow;
+      if (!fitsBelow) {
+        if (fitsAbove) {
+          menuY = placeAbove;
+          placement = 'above';
+        } else {
+          menuY = Math.max(pad, viewportBottom - menuHeight);
+        }
       }
     } else {
-      // Menu appears right below the bubble
-      menuY = rect.bottom + gap;
-
-      // If menu would overflow the viewport, translate bubble up more
-      if (menuY + menuHeight > vh - pad) {
-        ty -= menuY + menuHeight - (vh - pad);
+      if (fitsBelow) {
+        menuY = placeBelow;
+      } else if (fitsAbove) {
+        menuY = placeAbove;
+        placement = 'above';
+      } else {
+        menuY = Math.max(pad, viewportBottom - menuHeight);
+        const overflow = placeBelow + menuHeight - viewportBottom;
+        ty -= Math.min(overflow, Math.max(0, rect.bottom - pad - 80));
       }
-      // Don't push bubble above viewport
-      if (rect.top + ty < pad) {
-        ty = pad - rect.top;
-      }
+      if (rect.top + ty < pad) ty = pad - rect.top;
     }
 
+    setContextMenuPlacement(placement);
     setContextMenuTranslateX(tx);
     setContextMenuTranslateY(ty);
     setMenuPosition({
@@ -209,7 +222,15 @@ const MessageItem: React.FC<MessageItemProps> = ({
     });
     contextMenuOpenRef.current = true;
     setIsContextMenuOpen(true);
-  }, [canReply, canForward, isOutgoing]);
+  }, [
+    canReply,
+    canForward,
+    isOutgoing,
+    isDeleted,
+    onEdit,
+    onDelete,
+    message.id,
+  ]);
 
   const closeContextMenu = useCallback(() => {
     contextMenuOpenRef.current = false;
@@ -218,6 +239,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
     setContextMenuTranslateY(0);
     setMenuPosition(null);
     setBubbleRect(null);
+    setContextMenuPlacement('below');
   }, []);
 
   // Close context menu if the list scrolls (e.g. desktop mouse wheel)
@@ -1052,6 +1074,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
         onClose={closeContextMenu}
         isOutgoing={isOutgoing}
         position={menuPosition}
+        placement={contextMenuPlacement}
         translateY={contextMenuTranslateY}
         bubbleRect={bubbleRect}
       />

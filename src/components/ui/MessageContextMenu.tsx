@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 
 export interface MessageContextMenuItem {
@@ -8,12 +8,16 @@ export interface MessageContextMenuItem {
   danger?: boolean;
 }
 
+export type MessageContextMenuPlacement = 'above' | 'below';
+
 interface MessageContextMenuProps {
   items: MessageContextMenuItem[];
   isOpen: boolean;
   onClose: () => void;
   isOutgoing: boolean;
   position: { top: number; left?: number; right?: number } | null;
+  /** Where the menu was placed relative to the bubble (affects animation origin). */
+  placement?: MessageContextMenuPlacement;
   translateY?: number;
   bubbleRect?: {
     top: number;
@@ -30,15 +34,19 @@ const MessageContextMenu: React.FC<MessageContextMenuProps> = ({
   onClose,
   isOutgoing,
   position,
+  placement = 'below',
   translateY = 0,
   bubbleRect,
 }) => {
   const [mounted, setMounted] = useState(false);
   const [touchReady, setTouchReady] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  /** Final top after layout — keeps menu fully in viewport when estimate was short. */
+  const [adjustedTop, setAdjustedTop] = useState<number | null>(null);
 
   useEffect(() => {
     if (isOpen) {
+      setAdjustedTop(null);
       const id = requestAnimationFrame(() => setMounted(true));
       // Short delay so the opening tap doesn't accidentally hit a menu item
       const timer = setTimeout(() => setTouchReady(true), 120);
@@ -49,7 +57,30 @@ const MessageContextMenu: React.FC<MessageContextMenuProps> = ({
     }
     setMounted(false);
     setTouchReady(false);
+    setAdjustedTop(null);
   }, [isOpen]);
+
+  // After layout, nudge menu up if measured height overflows bottom (estimate can be low).
+  useLayoutEffect(() => {
+    if (!isOpen || !position || !mounted) return;
+    const sab =
+      parseFloat(
+        getComputedStyle(document.documentElement).getPropertyValue('--sab')
+      ) || 0;
+    const pad = 16 + sab;
+    const vh = Math.min(
+      document.documentElement.clientHeight,
+      window.visualViewport?.height ?? Infinity,
+      window.innerHeight
+    );
+    const viewportBottom = vh - pad;
+    const el = menuRef.current;
+    if (!el) return;
+    const { height, top } = el.getBoundingClientRect();
+    if (top + height <= viewportBottom && top >= pad - 1) return;
+    const nextTop = Math.max(pad, viewportBottom - height);
+    setAdjustedTop(nextTop);
+  }, [isOpen, position, mounted, items.length]);
 
   // Keyboard: Escape + arrow navigation
   useEffect(() => {
@@ -89,6 +120,16 @@ const MessageContextMenu: React.FC<MessageContextMenuProps> = ({
   }, [isOpen, onClose]);
 
   if (!isOpen || !position) return null;
+
+  const menuTop = adjustedTop ?? position.top;
+  const transformOrigin =
+    placement === 'above'
+      ? isOutgoing
+        ? 'bottom right'
+        : 'bottom left'
+      : isOutgoing
+        ? 'top right'
+        : 'top left';
 
   return createPortal(
     <div className="fixed inset-0 z-1000">
@@ -132,11 +173,11 @@ const MessageContextMenu: React.FC<MessageContextMenuProps> = ({
           mounted ? 'opacity-100' : 'opacity-0 scale-95'
         } ${touchReady ? '' : 'pointer-events-none'}`}
         style={{
-          top: position.top,
+          top: menuTop,
           ...(position.left !== undefined ? { left: position.left } : {}),
           ...(position.right !== undefined ? { right: position.right } : {}),
           transform: `translateY(${translateY}px) ${mounted ? 'scale(1)' : 'scale(0.95)'}`,
-          transformOrigin: isOutgoing ? 'top right' : 'top left',
+          transformOrigin,
           transition:
             'transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s ease-out',
         }}
