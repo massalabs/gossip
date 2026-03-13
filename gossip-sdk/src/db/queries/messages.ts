@@ -45,12 +45,16 @@ export class MessageQueries {
         and(
           eq(schema.messages.ownerUserId, ownerUserId),
           eq(schema.messages.contactUserId, contactUserId),
+          // Hide keep-alive messages from UI
           ne(schema.messages.type, MessageType.KEEP_ALIVE),
+          // Hide delete control messages (outgoing DELETED with empty content)
           or(
             ne(schema.messages.type, MessageType.DELETED),
             ne(schema.messages.direction, MessageDirection.OUTGOING),
             ne(schema.messages.content, '')
-          )
+          ),
+          // Hide edit control messages tagged via metadata.control === 'edit'
+          sql`(metadata IS NULL OR metadata NOT LIKE '%"control":"edit"%')`
         )
       )
       .orderBy(asc(schema.messages.id))

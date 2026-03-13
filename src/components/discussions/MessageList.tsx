@@ -53,6 +53,7 @@ interface MessageListProps {
   onReplyTo?: (message: Message) => void;
   onForward?: (message: Message) => void;
   onDelete?: (message: Message) => void;
+  onEdit?: (message: Message) => void;
   onScrollToMessage?: (messageId: number) => void;
   onAtBottomChange?: (atBottom: boolean) => void;
   highlightedMessageId?: number | null;
@@ -78,6 +79,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
       onReplyTo,
       onForward,
       onDelete,
+      onEdit,
       onScrollToMessage,
       onAtBottomChange,
       highlightedMessageId,
@@ -255,6 +257,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
                 onReplyTo={onReplyTo}
                 onForward={onForward}
                 onDelete={onDelete}
+                onEdit={onEdit}
                 onScrollToMessage={onScrollToMessage}
                 contact={contact}
                 isHighlighted={item.message.id === highlightedMessageId}
@@ -270,6 +273,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
         onReplyTo,
         onForward,
         onDelete,
+        onEdit,
         onScrollToMessage,
         contact,
         highlightedMessageId,

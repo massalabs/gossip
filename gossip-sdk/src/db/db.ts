@@ -49,6 +49,9 @@ export interface Message {
   deleteOf?: {
     originalMsgId: Uint8Array;
   };
+  editOf?: {
+    originalMsgId: Uint8Array;
+  };
 }
 
 export interface UserProfile {

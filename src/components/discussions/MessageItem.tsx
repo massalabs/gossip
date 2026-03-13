@@ -56,6 +56,7 @@ interface MessageItemProps {
   onScrollToMessage?: (messageId: number) => void;
   onForward?: (message: Message) => void;
   onDelete?: (message: Message) => void;
+  onEdit?: (message: Message) => void;
   id?: string;
   showTimestamp?: boolean;
   isFirstInGroup?: boolean;
@@ -71,6 +72,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
   onScrollToMessage,
   onForward,
   onDelete,
+  onEdit,
   id,
   showTimestamp = true,
   isFirstInGroup = true,
@@ -84,6 +86,9 @@ const MessageItem: React.FC<MessageItemProps> = ({
   const canForward = !!onForward;
   const isOutgoing = message.direction === MessageDirection.OUTGOING;
   const isDeleted = message.type === MessageType.DELETED;
+  const isEdited =
+    !!message.metadata &&
+    (message.metadata as { edited?: boolean }).edited === true;
   const [originalMessage, setOriginalMessage] = useState<Message | null>(null);
   const [isLoadingOriginal, setIsLoadingOriginal] = useState(false);
   const [originalNotFound, setOriginalNotFound] = useState(false);
@@ -337,6 +342,13 @@ const MessageItem: React.FC<MessageItemProps> = ({
             /* clipboard not available */
           });
         },
+      });
+    }
+    if (onEdit && isOutgoing && !isDeleted && message.id != null) {
+      items.push({
+        label: 'Edit',
+        icon: <CornerUpLeft className="w-4 h-4" />,
+        onClick: () => onEdit(message),
       });
     }
     if (onDelete && isOutgoing && !isDeleted && message.id != null) {
@@ -972,8 +984,9 @@ const MessageItem: React.FC<MessageItemProps> = ({
           </p>
         )}
 
-        {/* Timestamp and Status */}
-        {(showTimestamp || isOutgoing) && (
+        {/* Timestamp, Edited Label and Status — incoming "edited" must show even when
+            showTimestamp is false (grouped bubble); otherwise receivers never see it. */}
+        {(showTimestamp || isOutgoing || isEdited) && (
           <div
             className={`flex items-center justify-end gap-1.5 mt-1.5 ${
               isOutgoing ? 'text-accent-foreground/80' : 'text-muted-foreground'
@@ -983,6 +996,9 @@ const MessageItem: React.FC<MessageItemProps> = ({
               <span className="text-[11px] font-medium">
                 {formatTime(message.timestamp)}
               </span>
+            )}
+            {isEdited && (
+              <span className="text-[10px] italic opacity-75 ml-1">edited</span>
             )}
             {isOutgoing && (
               <div

@@ -311,10 +311,161 @@ describe('Messaging Flow', () => {
       );
       expect(bobMessagesAfter.length).toBe(1);
       const bobMsgAfter = bobMessagesAfter[0];
+      // Same DB row as before — no extra incoming row for delete control
+      expect(bobMsgAfter.id).toBe(bobMsgBefore.id);
       expect(bobMsgAfter.type).toBe(MessageType.DELETED);
       expect(bobMsgAfter.content).toBe('[Message deleted]');
       // Timestamp should be preserved to keep ordering
       expect(bobMsgAfter.timestamp.getTime()).toBe(originalTimestamp.getTime());
+
+      const bobVisible = await bobSdk.messages.getVisibleMessages(
+        aliceSdk.userId
+      );
+      expect(bobVisible.length).toBe(1);
+      expect(bobVisible[0].id).toBe(bobMsgBefore.id);
+      expect(bobVisible[0].type).toBe(MessageType.DELETED);
+      expect(bobVisible[0].content).toBe('[Message deleted]');
+    });
+
+    it('receiver applies delete on first message when grouped (second msg same burst)', async () => {
+      await setupSession(aliceSdk, bobSdk, 'Bob', 'Alice');
+      const t0 = new Date();
+      await aliceSdk.messages.send({
+        ownerUserId: aliceSdk.userId,
+        contactUserId: bobSdk.userId,
+        content: 'First',
+        type: MessageType.TEXT,
+        direction: MessageDirection.OUTGOING,
+        status: MessageStatus.WAITING_SESSION,
+        timestamp: t0,
+      });
+      await aliceSdk.messages.send({
+        ownerUserId: aliceSdk.userId,
+        contactUserId: bobSdk.userId,
+        content: 'Second',
+        type: MessageType.TEXT,
+        direction: MessageDirection.OUTGOING,
+        status: MessageStatus.WAITING_SESSION,
+        timestamp: new Date(t0.getTime() + 1000),
+      });
+      expect((await bobSdk.messages.fetch()).success).toBe(true);
+      const bobBefore = await bobSdk.messages.getVisibleMessages(
+        aliceSdk.userId
+      );
+      expect(bobBefore.length).toBe(2);
+      const firstId = bobBefore[0].id!;
+      const secondId = bobBefore[1].id!;
+      const firstTimestamp = bobBefore[0].timestamp.getTime();
+      expect(bobBefore[0].content).toBe('First');
+      expect(bobBefore[1].content).toBe('Second');
+
+      const aliceRows = await aliceSdk.messages.getMessages(bobSdk.userId);
+      const firstOutgoing = aliceRows.find(m => m.content === 'First');
+      expect(firstOutgoing?.id).toBeDefined();
+      // Receiver cannot delete incoming copy (outgoing-only API)
+      expect(await bobSdk.messages.deleteMessage(firstId)).toBe(false);
+      expect(await aliceSdk.messages.deleteMessage(firstOutgoing!.id!)).toBe(
+        true
+      );
+
+      expect((await bobSdk.messages.fetch()).success).toBe(true);
+      const bobAfter = await bobSdk.messages.getVisibleMessages(
+        aliceSdk.userId
+      );
+      expect(bobAfter.length).toBe(2);
+      const firstAfter = bobAfter.find(m => m.id === firstId);
+      const secondAfter = bobAfter.find(m => m.id === secondId);
+      expect(firstAfter).toBeDefined();
+      expect(secondAfter).toBeDefined();
+      expect(firstAfter!.type).toBe(MessageType.DELETED);
+      expect(firstAfter!.content).toBe('[Message deleted]');
+      expect(firstAfter!.timestamp.getTime()).toBe(firstTimestamp);
+      expect(secondAfter!.content).toBe('Second');
+      expect(secondAfter!.type).toBe(MessageType.TEXT);
+    });
+
+    it('Alice edits a message and Bob still has one row with updated content and edited flag', async () => {
+      await setupSession(aliceSdk, bobSdk, 'Bob', 'Alice');
+
+      const sendResult = await aliceSdk.messages.send({
+        ownerUserId: aliceSdk.userId,
+        contactUserId: bobSdk.userId,
+        content: 'Original text',
+        type: MessageType.TEXT,
+        direction: MessageDirection.OUTGOING,
+        status: MessageStatus.WAITING_SESSION,
+        timestamp: new Date(),
+      });
+      expect(sendResult.success).toBe(true);
+
+      expect((await bobSdk.messages.fetch()).success).toBe(true);
+      const bobBefore = await bobSdk.messages.getMessages(aliceSdk.userId);
+      expect(bobBefore.length).toBe(1);
+      expect(bobBefore[0].content).toBe('Original text');
+      const originalTimestamp = bobBefore[0].timestamp;
+      const originalDbId = bobBefore[0].id;
+
+      const aliceMsgs = await aliceSdk.messages.getMessages(bobSdk.userId);
+      expect(aliceMsgs.length).toBe(1);
+      const editOk = await aliceSdk.messages.editMessage(
+        aliceMsgs[0].id!,
+        'Edited text'
+      );
+      expect(editOk).toBe(true);
+
+      expect((await bobSdk.messages.fetch()).success).toBe(true);
+      const bobAfter = await bobSdk.messages.getMessages(aliceSdk.userId);
+      // Receiver must not get a second chat bubble: still one visible incoming row
+      expect(bobAfter.length).toBe(1);
+      expect(bobAfter[0].id).toBe(originalDbId);
+      expect(bobAfter[0].content).toBe('Edited text');
+      expect(bobAfter[0].metadata?.edited).toBe(true);
+      expect(bobAfter[0].timestamp.getTime()).toBe(originalTimestamp.getTime());
+    });
+
+    it('receiver stores edited on first message when it is grouped (second msg same burst)', async () => {
+      await setupSession(aliceSdk, bobSdk, 'Bob', 'Alice');
+      const t0 = new Date();
+      await aliceSdk.messages.send({
+        ownerUserId: aliceSdk.userId,
+        contactUserId: bobSdk.userId,
+        content: 'First',
+        type: MessageType.TEXT,
+        direction: MessageDirection.OUTGOING,
+        status: MessageStatus.WAITING_SESSION,
+        timestamp: t0,
+      });
+      await aliceSdk.messages.send({
+        ownerUserId: aliceSdk.userId,
+        contactUserId: bobSdk.userId,
+        content: 'Second',
+        type: MessageType.TEXT,
+        direction: MessageDirection.OUTGOING,
+        status: MessageStatus.WAITING_SESSION,
+        timestamp: new Date(t0.getTime() + 1000),
+      });
+      expect((await bobSdk.messages.fetch()).success).toBe(true);
+      const bobRows = await bobSdk.messages.getVisibleMessages(aliceSdk.userId);
+      expect(bobRows.length).toBe(2);
+      const firstId = bobRows[0].id!;
+      expect(bobRows[0].content).toBe('First');
+      expect(bobRows[0].metadata?.edited).toBeFalsy();
+
+      const aliceRows = await aliceSdk.messages.getMessages(bobSdk.userId);
+      const firstOutgoing = aliceRows.find(m => m.content === 'First');
+      expect(firstOutgoing?.id).toBeDefined();
+      expect(
+        await aliceSdk.messages.editMessage(firstOutgoing!.id!, 'First edited')
+      ).toBe(true);
+
+      expect((await bobSdk.messages.fetch()).success).toBe(true);
+      const bobAfter = await bobSdk.messages.getVisibleMessages(
+        aliceSdk.userId
+      );
+      expect(bobAfter.length).toBe(2);
+      const updated = bobAfter.find(m => m.id === firstId);
+      expect(updated?.content).toBe('First edited');
+      expect(updated?.metadata?.edited).toBe(true);
     });
 
     it('Alice send announcement and send 2 message before Bob accept, Bob accept and receive messages', async () => {

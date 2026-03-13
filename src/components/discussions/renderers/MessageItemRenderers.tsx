@@ -105,6 +105,7 @@ interface MessageRendererProps {
   onReplyTo?: (message: Message) => void;
   onForward?: (message: Message) => void;
   onDelete?: (message: Message) => void;
+  onEdit?: (message: Message) => void;
   onScrollToMessage?: (messageId: number) => void;
   contact?: Pick<Contact, 'name' | 'avatar'>;
   isHighlighted?: boolean;
@@ -117,6 +118,7 @@ export const MessageRenderer: React.FC<MessageRendererProps> = ({
   onReplyTo,
   onForward,
   onDelete,
+  onEdit,
   onScrollToMessage,
   contact,
   isHighlighted,
@@ -131,6 +133,7 @@ export const MessageRenderer: React.FC<MessageRendererProps> = ({
         onReplyTo={onReplyTo}
         onForward={onForward}
         onDelete={onDelete}
+        onEdit={onEdit}
         onScrollToMessage={onScrollToMessage}
         showTimestamp={showTimestamp}
         isFirstInGroup={groupInfo.isFirstInGroup}

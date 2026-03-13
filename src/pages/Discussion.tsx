@@ -136,6 +136,7 @@ const Discussion: React.FC = () => {
 
   // Reply state
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
+  const [editingMessage, setEditingMessage] = useState<Message | null>(null);
 
   // Scroll to bottom button visibility
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
@@ -265,6 +266,7 @@ const Discussion: React.FC = () => {
           forwardFromMessageId
         );
         setReplyingTo(null);
+        setEditingMessage(null);
         if (forwardFromMessageId !== undefined) {
           setForwardFromMessageId(undefined);
         }
@@ -282,6 +284,7 @@ const Discussion: React.FC = () => {
 
   const handleReplyToMessage = useCallback((message: Message) => {
     setReplyingTo(message);
+    setEditingMessage(null);
   }, []);
 
   const handleForwardMessage = useCallback(
@@ -294,6 +297,12 @@ const Discussion: React.FC = () => {
     },
     [navigate, setPendingForwardMessageId, setPendingSharedContent]
   );
+
+  const handleEditMessage = useCallback((message: Message) => {
+    setEditingMessage(message);
+    setReplyingTo(null);
+    setInputPrefill(message.content);
+  }, []);
 
   const handleDeleteMessage = useCallback(
     async (message: Message) => {
@@ -315,10 +324,34 @@ const Discussion: React.FC = () => {
     setReplyingTo(null);
   }, []);
 
+  const handleCancelEdit = useCallback(() => {
+    setEditingMessage(null);
+    setInputPrefill(undefined);
+  }, []);
+
   const handleCancelForward = useCallback(() => {
     setForwardFromMessageId(undefined);
     setForwardPreviewText(null);
   }, []);
+
+  const handleConfirmEdit = useCallback(
+    async (newContent: string, message: Message) => {
+      if (!message.id) return;
+      try {
+        const ok = await gossip.messages.editMessage(message.id, newContent);
+        if (!ok) {
+          toast.error('Unable to edit message');
+        }
+      } catch (error) {
+        toast.error('Failed to edit message');
+        console.error('Failed to edit message:', error);
+      } finally {
+        setEditingMessage(null);
+        setInputPrefill(undefined);
+      }
+    },
+    [gossip]
+  );
 
   const handleInputFocus = useCallback(() => {
     // No forced scroll — let the container resize naturally.
@@ -548,6 +581,7 @@ const Discussion: React.FC = () => {
             onReplyTo={handleReplyToMessage}
             onForward={handleForwardMessage}
             onDelete={handleDeleteMessage}
+            onEdit={handleEditMessage}
             onScrollToMessage={handleScrollToMessage}
             onAtBottomChange={handleAtBottomChange}
             highlightedMessageId={searchHighlightId}
@@ -584,6 +618,9 @@ const Discussion: React.FC = () => {
           forwardMode={forwardPreviewMode}
           onCancelForward={handleCancelForward}
           onFocus={handleInputFocus}
+          editingMessage={editingMessage}
+          onCancelEdit={handleCancelEdit}
+          onConfirmEdit={handleConfirmEdit}
         />
       </div>
     </div>

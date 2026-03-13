@@ -13,6 +13,7 @@ import {
 
 export const MESSAGE_TYPE_KEEP_ALIVE = ProtoMessageType.MESSAGE_TYPE_KEEP_ALIVE;
 export const MESSAGE_TYPE_DELETE = ProtoMessageType.MESSAGE_TYPE_DELETE;
+export const MESSAGE_TYPE_EDIT = ProtoMessageType.MESSAGE_TYPE_EDIT;
 
 export interface DeserializedMessage {
   content: string;
@@ -25,6 +26,9 @@ export interface DeserializedMessage {
     originalContactId?: Uint8Array;
   };
   deleteOf?: {
+    originalMsgId: Uint8Array;
+  };
+  editOf?: {
     originalMsgId: Uint8Array;
   };
   type: MessageType;
@@ -153,6 +157,36 @@ export function serializeDeleteMessage(
 }
 
 /**
+ * Serialize an edit control message
+ *
+ * Format: protobuf Message with citedMsgId set to the original messageId and
+ * content carrying the new text.
+ *
+ * @param newContent - The updated message content
+ * @param originalMsgId - The messageId of the message being edited
+ * @param messageId - 12-byte random message ID for the control message
+ * @returns Serialized edit message bytes
+ */
+export function serializeEditMessage(
+  newContent: string,
+  originalMsgId: Uint8Array,
+  messageId: Uint8Array
+): Uint8Array {
+  if (messageId.length !== MESSAGE_ID_SIZE) {
+    throw new Error(`messageId must be ${MESSAGE_ID_SIZE} bytes`);
+  }
+  if (originalMsgId.length !== MESSAGE_ID_SIZE) {
+    throw new Error(`originalMsgId must be ${MESSAGE_ID_SIZE} bytes`);
+  }
+  return ProtoMessage.encode({
+    messageType: ProtoMessageType.MESSAGE_TYPE_EDIT,
+    messageId,
+    content: newContent,
+    citedMsgId: originalMsgId,
+  });
+}
+
+/**
  * Deserialize a message from bytes
  *
  * @param buffer - The serialized message bytes
@@ -181,6 +215,7 @@ export function deserializeMessage(buffer: Uint8Array): DeserializedMessage {
 
   let replyTo = undefined;
   let deleteOf = undefined;
+  let editOf = undefined;
 
   if (protoType === ProtoMessageType.MESSAGE_TYPE_REPLY) {
     if (citedMsgId && citedMsgId.length === MESSAGE_ID_SIZE) {
@@ -202,6 +237,18 @@ export function deserializeMessage(buffer: Uint8Array): DeserializedMessage {
     } else {
       throw new Error(
         `invalid message format: message of type delete but citedMsgId empty or not correct size (${MESSAGE_ID_SIZE})`
+      );
+    }
+  }
+
+  if (protoType === ProtoMessageType.MESSAGE_TYPE_EDIT) {
+    if (citedMsgId && citedMsgId.length === MESSAGE_ID_SIZE) {
+      editOf = {
+        originalMsgId: citedMsgId,
+      };
+    } else {
+      throw new Error(
+        `invalid message format: message of type edit but citedMsgId empty or not correct size (${MESSAGE_ID_SIZE})`
       );
     }
   }
@@ -230,6 +277,7 @@ export function deserializeMessage(buffer: Uint8Array): DeserializedMessage {
     replyTo,
     forwardOf,
     deleteOf,
+    editOf,
     type:
       protoType === ProtoMessageType.MESSAGE_TYPE_DELETE
         ? MessageType.DELETED

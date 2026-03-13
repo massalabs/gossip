@@ -56,10 +56,13 @@ const messagesChanged = (
     existing.some((existingMsg, index) => {
       const newMsg = newMessages[index];
       if (!newMsg) return true; // New message added
+      const editedA = !!(existingMsg.metadata as { edited?: boolean })?.edited;
+      const editedB = !!(newMsg.metadata as { edited?: boolean })?.edited;
       return (
         existingMsg.id !== newMsg.id ||
         existingMsg.content !== newMsg.content ||
-        existingMsg.status !== newMsg.status
+        existingMsg.status !== newMsg.status ||
+        editedA !== editedB
       );
     })
   );

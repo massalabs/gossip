@@ -14,6 +14,9 @@ interface MessageInputProps {
   forwardPreview?: string | null;
   onCancelForward?: () => void;
   forwardMode?: 'forward' | 'reply';
+  editingMessage?: Message | null;
+  onCancelEdit?: () => void;
+  onConfirmEdit?: (newContent: string, message: Message) => void;
 }
 type MessageInputEvent = React.MouseEvent | React.KeyboardEvent;
 
@@ -30,6 +33,9 @@ const MessageInput: React.FC<MessageInputProps> = ({
   forwardPreview,
   onCancelForward,
   forwardMode = 'forward',
+  editingMessage,
+  onCancelEdit,
+  onConfirmEdit,
 }) => {
   const [newMessage, setNewMessage] = useState(initialValue || '');
   const [isTextareaMultiline, setIsTextareaMultiline] = useState(false);
@@ -109,7 +115,11 @@ const MessageInput: React.FC<MessageInputProps> = ({
       const cleanedMessage = newMessage.trim();
       if (cleanedMessage.length === 0 && !isForwarding) return;
 
-      onSend(cleanedMessage, replyToId);
+      if (editingMessage && onConfirmEdit) {
+        onConfirmEdit(cleanedMessage, editingMessage);
+      } else {
+        onSend(cleanedMessage, replyToId);
+      }
 
       resetTextarea();
 
@@ -125,6 +135,8 @@ const MessageInput: React.FC<MessageInputProps> = ({
       resetTextarea,
       sendButtonDisabled,
       isForwarding,
+      editingMessage,
+      onConfirmEdit,
     ]
   );
 
@@ -205,6 +217,43 @@ const MessageInput: React.FC<MessageInputProps> = ({
       }}
       onClick={focusTextarea}
     >
+      {/* Editing Preview with animation */}
+      <div
+        className={`overflow-hidden transition-all duration-200 ease-out ${
+          editingMessage
+            ? 'max-h-16 opacity-100 mb-2'
+            : 'max-h-0 opacity-0 mb-0'
+        }`}
+      >
+        {editingMessage && (
+          <div className="px-3 py-2 bg-muted/50 border-l-2 border-primary rounded-r-lg">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex-1 min-w-0">
+                <p className="text-[10px] text-muted-foreground font-medium mb-0.5">
+                  Editing message
+                </p>
+                <p className="text-xs text-foreground/80 truncate">
+                  {editingMessage.content}
+                </p>
+              </div>
+              {onCancelEdit && (
+                <button
+                  onMouseDown={e => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onCancelEdit();
+                  }}
+                  className="shrink-0 p-1.5 hover:bg-muted rounded-full transition-colors active:scale-90"
+                  aria-label="Cancel edit"
+                >
+                  <X className="w-4 h-4 text-muted-foreground" />
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* Reply Preview with animation */}
       <div
         className={`overflow-hidden transition-all duration-200 ease-out ${
