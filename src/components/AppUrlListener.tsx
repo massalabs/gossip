@@ -44,7 +44,7 @@ export const AppUrlListener: React.FC = () => {
         const invitePath = extractInvitePath(url);
         if (!invitePath) return;
 
-        const parsed = parseInvite(invitePath);
+        const parsed = parseInvite(url);
         await setPendingDeepLinkInfo(parsed);
 
         // Reset browser history URL so React Router can control navigation

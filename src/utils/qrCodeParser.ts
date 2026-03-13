@@ -6,6 +6,7 @@ const INVITE_REGEX = new RegExp(`^/${AppRoute.invite}/([^/#?\\s]+)$`, 'i');
 
 export interface ParsedInvite {
   userId: string;
+  name?: string;
 }
 
 export function parseInvite(input: string): ParsedInvite {
@@ -26,9 +27,27 @@ export function parseInvite(input: string): ParsedInvite {
     throw new Error(result.error || 'Invalid user ID format');
   }
 
+  // Extract optional name from query string (clamped to 100 chars)
+  const rawName = extractQueryParam(input, 'name');
+  const name = rawName ? rawName.slice(0, 100) : null;
+
   return {
     userId,
+    ...(name && { name }),
   };
+}
+
+/**
+ * Extract a query parameter value from any URL-like string.
+ */
+function extractQueryParam(input: string, param: string): string | null {
+  const qIndex = input.indexOf('?');
+  if (qIndex === -1) return null;
+
+  const search = input.slice(qIndex);
+  const params = new URLSearchParams(search.split('#')[0]);
+  const value = params.get(param);
+  return value || null;
 }
 
 /**

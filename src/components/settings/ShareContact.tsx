@@ -7,7 +7,7 @@ import React, {
 } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { UserPublicKeys } from '@massalabs/gossip-sdk';
-import { Check, Copy, FileText, Link2, Share2 } from 'react-feather';
+import { Check, Edit2, FileText, Link2, Send } from 'react-feather';
 import toast from 'react-hot-toast';
 import { useFileShareContact } from '../../hooks/useFileShareContact';
 import { ROUTES } from '../../constants/routes';
@@ -20,7 +20,8 @@ import PageHeader from '../ui/PageHeader';
 import PageLayout from '../ui/PageLayout';
 import Button from '../ui/Button';
 import BaseModal from '../ui/BaseModal';
-import Notice from '../account/PrivacyNotice';
+import ContactNameModal from '../ui/ContactNameModal';
+import Toggle from '../ui/Toggle';
 import { generateDeepLinkUrl } from '../../utils/inviteUrl';
 import ShareContactQR from './ShareContactQR';
 import Popover from '../ui/Popover';
@@ -44,18 +45,24 @@ const ShareContact: React.FC<ShareContactProps> = ({
   showPageFrame = true,
 }) => {
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
-  const [isLinkPanelOpen, setIsLinkPanelOpen] = useState(false);
   const [isFilePanelOpen, setIsFilePanelOpen] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
   const [isSharingLink, setIsSharingLink] = useState(false);
   const [isSharingQR, setIsSharingQR] = useState(false);
+  const [includeUsername, setIncludeUsername] = useState(false);
+  const [sharedUsername, setSharedUsername] = useState(userName);
+  const [isUsernameModalOpen, setIsUsernameModalOpen] = useState(false);
   const [canShareViaOtherApp, setCanShareViaOtherApp] = useState(false);
   const copiedLinkTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
     null
   );
   const { shareFileContact, fileState } = useFileShareContact();
   const navigate = useNavigate();
-  const deepLinkUrl = useMemo(() => generateDeepLinkUrl(userId), [userId]);
+  const deepLinkUrl = useMemo(
+    () =>
+      generateDeepLinkUrl(userId, includeUsername ? sharedUsername : undefined),
+    [userId, includeUsername, sharedUsername]
+  );
   const isExportDisabled = !publicKey || fileState.isLoading;
 
   const handleShareFile = useCallback(() => {
@@ -122,26 +129,8 @@ const ShareContact: React.FC<ShareContactProps> = ({
   }, []);
 
   const content = (
-    <>
-      <Notice
-        tone="warning"
-        className="mb-4"
-        title="Invitation expiry"
-        content={
-          <>
-            Invitations will expire 2 weeks after your last connection to the
-            app (except invitations shared by file).{' '}
-            <span className="relative inline-flex align-middle ml-1">
-              <Popover
-                position={PopoverPosition.BOTTOM}
-                message="Each time you open the app, invitations validity are renewed
-                    if more than 24 hours have passed since the last renewal."
-              />
-            </span>
-          </>
-        }
-      />
-
+    <div className="flex flex-col gap-4">
+      {/* Hero: QR code */}
       <ShareContactQR
         deepLinkUrl={deepLinkUrl}
         userId={userId}
@@ -149,85 +138,104 @@ const ShareContact: React.FC<ShareContactProps> = ({
         onQRCodeGenerated={setQrDataUrl}
       />
 
-      <div className="mt-4 grid grid-cols-3 gap-3">
-        <button
-          type="button"
-          onClick={() => setIsLinkPanelOpen(true)}
-          className="flex flex-col items-center gap-2"
-        >
-          <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-card border border-border hover:bg-muted/60 transition-colors">
-            <Link2 className="h-5 w-5 text-foreground" />
-          </span>
-          <span className="text-sm text-muted-foreground">Link</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={handleShareQR}
-          disabled={!qrDataUrl || isSharingQR}
-          className="flex flex-col items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-card border border-border hover:bg-muted/60 transition-colors">
-            <Share2 className="h-5 w-5 text-foreground" />
-          </span>
-          <span className="text-sm text-muted-foreground">
-            {isSharingQR ? 'Sharing...' : 'Share'}
-          </span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setIsFilePanelOpen(true)}
-          className="flex flex-col items-center gap-2"
-        >
-          <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-card border border-border hover:bg-muted/60 transition-colors">
-            <FileText className="h-5 w-5 text-foreground" />
-          </span>
-          <span className="text-sm text-muted-foreground">File</span>
-        </button>
+      {/* Include username toggle + editable name */}
+      <div className="rounded-xl border border-border bg-card overflow-hidden">
+        <div className="flex items-center justify-between h-11 px-3">
+          <span className="text-sm text-foreground">Include username</span>
+          <Toggle
+            checked={includeUsername}
+            onChange={setIncludeUsername}
+            ariaLabel="Include username in the invite"
+          />
+        </div>
+        {includeUsername && (
+          <>
+            <div className="border-t border-border" />
+            <button
+              type="button"
+              onClick={() => setIsUsernameModalOpen(true)}
+              className="flex items-center justify-between gap-2 h-11 px-3 w-full hover:bg-accent/5 active:scale-[0.98] transition-all"
+            >
+              <span className="text-sm text-foreground truncate">
+                {sharedUsername || userName}
+              </span>
+              <Edit2 className="w-4 h-4 text-muted-foreground shrink-0" />
+            </button>
+          </>
+        )}
       </div>
 
-      <BaseModal
-        isOpen={isLinkPanelOpen}
-        onClose={() => setIsLinkPanelOpen(false)}
-        title="Invitation link"
-      >
-        <div className="space-y-4">
-          <div className="rounded-xl border border-border bg-card px-3 py-3 break-all text-sm text-foreground">
-            {deepLinkUrl}
-          </div>
+      <ContactNameModal
+        isOpen={isUsernameModalOpen}
+        title="Edit shared username"
+        initialName={sharedUsername || userName}
+        confirmLabel="Save"
+        onConfirm={name => {
+          if (name) setSharedUsername(name);
+          setIsUsernameModalOpen(false);
+        }}
+        onClose={() => setIsUsernameModalOpen(false)}
+      />
+
+      {/* Actions */}
+      <div className="flex flex-col gap-2">
+        <Button
+          variant="outline"
+          size="custom"
+          className="w-full h-11 flex items-center px-3 rounded-xl"
+          onClick={handleCopyLink}
+        >
+          {copiedLink ? (
+            <Check className="w-5 h-5 mr-3 text-success" />
+          ) : (
+            <Link2 className="w-5 h-5 mr-3" />
+          )}
+          <span
+            className={`text-sm font-normal flex-1 text-left ${copiedLink ? 'text-success' : ''}`}
+          >
+            {copiedLink ? 'Link copied!' : 'Copy invite link'}
+          </span>
+        </Button>
+
+        <div className="grid grid-cols-2 gap-2">
           <Button
             variant="outline"
             size="custom"
-            className="w-full h-[54px] flex items-center px-4 justify-start rounded-xl"
-            onClick={handleCopyLink}
+            className="h-11 flex items-center justify-center gap-2 rounded-xl"
+            onClick={canShareViaOtherApp ? handleShareLink : handleShareQR}
+            disabled={
+              canShareViaOtherApp ? isSharingLink : !qrDataUrl || isSharingQR
+            }
+            loading={isSharingLink || isSharingQR}
           >
-            {copiedLink ? (
-              <Check className="w-5 h-5 mr-4 text-success" />
-            ) : (
-              <Copy className="w-5 h-5 mr-4" />
-            )}
-            <span
-              className={`text-base font-normal flex-1 text-left ${copiedLink ? 'text-success' : ''}`}
-            >
-              {copiedLink ? 'Invitation Link Copied!' : 'Copy Invitation Link'}
-            </span>
+            <Send className="w-4 h-4" />
+            <span className="text-sm font-normal">Share</span>
           </Button>
+
           <Button
             variant="outline"
             size="custom"
-            className="w-full h-[54px] flex items-center px-4 justify-start rounded-xl"
-            onClick={handleShareLink}
-            disabled={isSharingLink || !canShareViaOtherApp}
-            loading={isSharingLink}
+            className="h-11 flex items-center justify-center gap-2 rounded-xl"
+            onClick={() => setIsFilePanelOpen(true)}
           >
-            <Share2 className="w-5 h-5 mr-4" />
-            <span className="text-base font-normal flex-1 text-left">
-              Share Invitation Link
-            </span>
+            <FileText className="w-4 h-4" />
+            <span className="text-sm font-normal">File</span>
           </Button>
         </div>
-      </BaseModal>
+      </div>
+
+      {/* Expiry hint */}
+      <p className="text-xs text-muted-foreground text-center leading-relaxed">
+        Invitations expire 2 weeks after your last connection.
+        <br />
+        File invitations don&apos;t expire.{' '}
+        <span className="relative inline-flex align-middle ml-0.5">
+          <Popover
+            position={PopoverPosition.TOP}
+            message="Each time you open the app, invitation validity is renewed if more than 24 hours have passed since the last renewal."
+          />
+        </span>
+      </p>
 
       <BaseModal
         isOpen={isFilePanelOpen}
@@ -269,7 +277,7 @@ const ShareContact: React.FC<ShareContactProps> = ({
           )}
         </div>
       </BaseModal>
-    </>
+    </div>
   );
 
   if (!showPageFrame) {

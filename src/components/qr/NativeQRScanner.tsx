@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import {
   CapacitorBarcodeScanner,
   CapacitorBarcodeScannerTypeHint,
@@ -10,7 +10,13 @@ const NativeQRScanner: React.FC<QRScannerProps> = ({
   onError,
   onClose,
 }) => {
+  const scanStartedRef = useRef(false);
+
   useEffect(() => {
+    // Guard against StrictMode double-mount opening the scanner twice
+    if (scanStartedRef.current) return;
+    scanStartedRef.current = true;
+
     const startNativeScanner = async () => {
       try {
         const result = await CapacitorBarcodeScanner.scanBarcode({
