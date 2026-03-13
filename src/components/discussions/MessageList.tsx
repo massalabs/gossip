@@ -222,8 +222,11 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
             return item.key;
           case 'spacer':
             return 'spacer';
-          case 'message':
-            return `msg-${item.message.id}`;
+          case 'message': {
+            if (item.message.id != null) return `msg-${item.message.id}`;
+            const tempKey = `${item.message.timestamp.getTime()}-${item.message.direction}-${item.message.content.slice(0, 16)}`;
+            return `msg-temp-${tempKey}`;
+          }
           default:
             return index;
         }
@@ -256,7 +259,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
           case 'message':
             return (
               <MessageRenderer
-                key={item.message.id}
+                key={item.message.id ?? `temp-msg-${index}`}
                 message={item.message}
                 showTimestamp={item.showTimestamp}
                 groupInfo={item.groupInfo}
@@ -268,7 +271,10 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
                 contact={contact}
                 isHighlighted={item.message.id === highlightedMessageId}
                 isSelecting={isSelecting}
-                isSelected={selectedMessageIds?.has(item.message.id!)}
+                isSelected={
+                  item.message.id != null &&
+                  selectedMessageIds?.has(item.message.id)
+                }
                 onToggleSelect={onToggleSelect}
               />
             );

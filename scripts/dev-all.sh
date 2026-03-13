@@ -98,10 +98,12 @@ if [ ${#ANDROIDS[@]} -gt 0 ]; then
 fi
 
 if [ ${#IOSES[@]} -gt 0 ]; then
-  IOS_TARGETS=$(npx cap run ios --list 2>/dev/null || true)
+  # Capacitor --list can miss real devices on some setups.
+  # Use Xcode destinations as the source of truth for connected/buildable iOS devices.
+  IOS_DESTINATIONS=$(cd ios/App && xcodebuild -workspace App.xcworkspace -scheme Gossip -showdestinations 2>/dev/null || true)
   CONNECTED_IOSES=()
   for device in "${IOSES[@]}"; do
-    if echo "$IOS_TARGETS" | grep -qF "$device"; then
+    if echo "$IOS_DESTINATIONS" | grep -qF "id:${device}," || echo "$IOS_DESTINATIONS" | grep -qF "name:${device}"; then
       CONNECTED_IOSES+=("$device")
     else
       echo "[dev-all] SKIP iOS: ${device} (not connected)"

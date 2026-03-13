@@ -326,7 +326,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
     if (isSelecting && isSelected) {
       enableTextSelection();
     } else {
-      onToggleSelect?.(message.id!);
+      if (message.id != null) onToggleSelect?.(message.id);
     }
   }, [
     isSelecting,
@@ -482,13 +482,14 @@ const MessageItem: React.FC<MessageItemProps> = ({
 
   const handleBubbleClick = useCallback(
     (e: React.MouseEvent) => {
-      if (isSelecting) {
-        e.stopPropagation();
-        onToggleSelect?.(message.id!);
-        return;
-      }
       if (suppressClickRef.current) {
         suppressClickRef.current = false;
+        e.stopPropagation();
+        return;
+      }
+      if (isSelecting) {
+        e.stopPropagation();
+        if (message.id != null) onToggleSelect?.(message.id);
         return;
       }
       if (isTextSelectable) {
@@ -769,7 +770,16 @@ const MessageItem: React.FC<MessageItemProps> = ({
       }}
       role="listitem"
       aria-label={`${isOutgoing ? 'Sent' : 'Received'} message`}
-      onClick={isSelecting ? () => onToggleSelect?.(message.id!) : undefined}
+      onClick={
+        isSelecting
+          ? () => {
+              if (!suppressClickRef.current && message.id != null) {
+                onToggleSelect?.(message.id);
+              }
+              suppressClickRef.current = false;
+            }
+          : undefined
+      }
     >
       {/* Selection checkbox — absolutely positioned to avoid affecting flex layout */}
       <div
@@ -778,7 +788,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
         }`}
         onClick={e => {
           e.stopPropagation();
-          onToggleSelect?.(message.id!);
+          if (message.id != null) onToggleSelect?.(message.id);
         }}
         data-testid="select-checkbox"
       >

@@ -23,7 +23,6 @@ import { isDifferentDay } from '../utils/timeUtils';
 import { useUiStore } from '../stores/uiStore';
 import SessionIssueBanner from '../components/discussions/SessionIssueBanner';
 import SelectionHeader from '../components/discussions/SelectionHeader';
-import { useKeyboardVisible } from '../hooks/useKeyboardVisible';
 
 // Debug test message constants
 const TEST_MESSAGE_COUNT = 50;
@@ -174,10 +173,10 @@ const Discussion: React.FC = () => {
 
     try {
       await navigator.clipboard.writeText(text);
+      handleClearSelection();
     } catch {
-      // Silent fail
+      toast.error('Failed to copy selected messages');
     }
-    handleClearSelection();
   }, [messages, selectedMessageIds, discussion, contact, handleClearSelection]);
 
   // Reply state
@@ -206,6 +205,19 @@ const Discussion: React.FC = () => {
   // Ref to the MessageList for imperative scrolling
   const messageListRef = useRef<MessageListHandle>(null);
   const messageListContainerRef = useRef<HTMLDivElement>(null);
+
+  // Measure input area height so ScrollToBottomButton sits just above it
+  const inputAreaRef = useRef<HTMLDivElement>(null);
+  const [inputAreaHeight, setInputAreaHeight] = useState(0);
+  useEffect(() => {
+    const el = inputAreaRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([entry]) => {
+      setInputAreaHeight(entry.contentRect.height);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   // Find Virtuoso's scroll container and set up header scroll detection
   useEffect(() => {
@@ -296,6 +308,11 @@ const Discussion: React.FC = () => {
     }
   }, [contact?.userId, setCurrentContact]);
 
+  // Reset message selection when switching discussions
+  useEffect(() => {
+    handleClearSelection();
+  }, [contact?.userId, handleClearSelection]);
+
   // Scroll to bottom utility - uses the virtuoso ref
   const scrollToBottom = useCallback(() => {
     messageListRef.current?.scrollToBottom();
@@ -303,6 +320,7 @@ const Discussion: React.FC = () => {
 
   const handleSendMessage = useCallback(
     async (text: string, replyToId?: number) => {
+      if (isSelecting) return;
       if (!contact?.userId) return;
       try {
         await sendMessage(
@@ -325,12 +343,15 @@ const Discussion: React.FC = () => {
         console.error('Failed to send message:', error);
       }
     },
-    [sendMessage, contact?.userId, forwardFromMessageId]
+    [isSelecting, sendMessage, contact?.userId, forwardFromMessageId]
   );
 
   const handleReplyToMessage = useCallback((message: Message) => {
     setReplyingTo(message);
     setEditingMessage(null);
+    // Clear forward preview — reply and forward are mutually exclusive
+    setForwardFromMessageId(undefined);
+    setForwardPreviewText(null);
   }, []);
 
   const handleForwardMessage = useCallback(
@@ -516,6 +537,8 @@ const Discussion: React.FC = () => {
         return;
       }
 
+      // Clear reply — reply and forward are mutually exclusive
+      setReplyingTo(null);
       const original = await gossip.messages.get(forwardFromMessageId);
       if (!cancelled) {
         setForwardPreviewText(original?.content ?? null);
@@ -648,6 +671,7 @@ const Discussion: React.FC = () => {
         <ScrollToBottomButton
           onClick={scrollToBottom}
           isVisible={showScrollToBottom}
+          bottomOffset={isSelecting ? 0 : inputAreaHeight}
         />
 
         {/* Debug test button - only show when debug mode is enabled */}
@@ -666,19 +690,34 @@ const Discussion: React.FC = () => {
           </div>
         )}
 
-        <MessageInput
-          onSend={handleSendMessage}
-          replyingTo={replyingTo}
-          onCancelReply={handleCancelReply}
-          initialValue={forwardFromMessageId ? undefined : inputPrefill}
-          forwardPreview={forwardFromMessageId ? forwardPreviewText : null}
-          forwardMode={forwardPreviewMode}
-          onCancelForward={handleCancelForward}
-          onFocus={handleInputFocus}
-          editingMessage={editingMessage}
-          onCancelEdit={handleCancelEdit}
-          onConfirmEdit={handleConfirmEdit}
-        />
+        <div
+          ref={inputAreaRef}
+          className={`transition-all duration-300 ease-out ${
+            isSelecting ? 'pointer-events-none opacity-0' : 'opacity-100'
+          }`}
+          style={{
+            transform: isSelecting
+              ? `translateY(${inputAreaHeight}px)`
+              : 'translateY(0)',
+            marginBottom: isSelecting ? `-${inputAreaHeight}px` : '0px',
+          }}
+          aria-hidden={isSelecting}
+        >
+          <MessageInput
+            onSend={handleSendMessage}
+            disabled={isSelecting}
+            replyingTo={replyingTo}
+            onCancelReply={handleCancelReply}
+            initialValue={forwardFromMessageId ? undefined : inputPrefill}
+            forwardPreview={forwardFromMessageId ? forwardPreviewText : null}
+            forwardMode={forwardPreviewMode}
+            onCancelForward={handleCancelForward}
+            onFocus={handleInputFocus}
+            editingMessage={editingMessage}
+            onCancelEdit={handleCancelEdit}
+            onConfirmEdit={handleConfirmEdit}
+          />
+        </div>
       </div>
     </div>
   );

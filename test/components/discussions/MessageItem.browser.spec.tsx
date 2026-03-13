@@ -2,6 +2,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import React from 'react';
+import { act } from 'react';
 import { render } from 'vitest-browser-react';
 import { page, userEvent } from 'vitest/browser';
 import {
@@ -133,47 +134,138 @@ describe('MessageItem', () => {
       const el = page.getByRole('listitem').element() as HTMLElement;
 
       // Simulate left swipe
-      el.dispatchEvent(
-        new TouchEvent('touchstart', {
-          bubbles: true,
-          touches: [
-            new Touch({
-              identifier: 0,
-              target: el,
-              clientX: 200,
-              clientY: 100,
-            }),
-          ],
-        })
-      );
-      el.dispatchEvent(
-        new TouchEvent('touchmove', {
-          bubbles: true,
-          touches: [
-            new Touch({
-              identifier: 0,
-              target: el,
-              clientX: 100,
-              clientY: 100,
-            }),
-          ],
-        })
-      );
-      el.dispatchEvent(
-        new TouchEvent('touchend', {
-          bubbles: true,
-          changedTouches: [
-            new Touch({
-              identifier: 0,
-              target: el,
-              clientX: 100,
-              clientY: 100,
-            }),
-          ],
-        })
-      );
+      await act(async () => {
+        el.dispatchEvent(
+          new TouchEvent('touchstart', {
+            bubbles: true,
+            touches: [
+              new Touch({
+                identifier: 0,
+                target: el,
+                clientX: 200,
+                clientY: 100,
+              }),
+            ],
+          })
+        );
+        el.dispatchEvent(
+          new TouchEvent('touchmove', {
+            bubbles: true,
+            touches: [
+              new Touch({
+                identifier: 0,
+                target: el,
+                clientX: 100,
+                clientY: 100,
+              }),
+            ],
+          })
+        );
+        el.dispatchEvent(
+          new TouchEvent('touchend', {
+            bubbles: true,
+            changedTouches: [
+              new Touch({
+                identifier: 0,
+                target: el,
+                clientX: 100,
+                clientY: 100,
+              }),
+            ],
+          })
+        );
+      });
 
       expect(onForward).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('multi-select', () => {
+    it('shows selection checkbox when selecting is enabled', async () => {
+      render(
+        <MessageItem
+          message={makeMessage()}
+          isSelecting={true}
+          isSelected={false}
+          onToggleSelect={vi.fn()}
+        />
+      );
+
+      const listItem = page.getByRole('listitem').element() as HTMLElement;
+      const checkbox = listItem.querySelector(
+        '[data-testid="select-checkbox"]'
+      ) as HTMLElement | null;
+      expect(checkbox).toBeTruthy();
+    });
+
+    it('toggles selection on bubble click and does not open context menu', async () => {
+      const onToggleSelect = vi.fn();
+      render(
+        <MessageItem
+          message={makeMessage()}
+          isSelecting={true}
+          isSelected={false}
+          onToggleSelect={onToggleSelect}
+          onReplyTo={vi.fn()}
+          onForward={vi.fn()}
+        />
+      );
+
+      await userEvent.click(
+        page.getByRole('button', { name: 'Tap for actions' })
+      );
+
+      expect(onToggleSelect).toHaveBeenCalledWith(1);
+      await expect.element(page.getByRole('menu')).not.toBeInTheDocument();
+    });
+
+    it('toggles selection on row click in selecting mode', async () => {
+      const onToggleSelect = vi.fn();
+      render(
+        <MessageItem
+          message={makeMessage()}
+          isSelecting={true}
+          isSelected={false}
+          onToggleSelect={onToggleSelect}
+        />
+      );
+
+      await userEvent.click(page.getByRole('listitem'));
+      expect(onToggleSelect).toHaveBeenCalledWith(1);
+    });
+
+    it('does not call onToggleSelect when message.id is missing', async () => {
+      const onToggleSelect = vi.fn();
+      render(
+        <MessageItem
+          message={makeMessage({ id: undefined })}
+          isSelecting={true}
+          isSelected={false}
+          onToggleSelect={onToggleSelect}
+        />
+      );
+
+      await userEvent.click(
+        page.getByRole('button', { name: 'Tap for actions' })
+      );
+      await userEvent.click(page.getByRole('listitem'));
+      expect(onToggleSelect).not.toHaveBeenCalled();
+    });
+
+    it('hides desktop message actions button while selecting', async () => {
+      render(
+        <MessageItem
+          message={makeMessage()}
+          isSelecting={true}
+          isSelected={false}
+          onToggleSelect={vi.fn()}
+          onReplyTo={vi.fn()}
+        />
+      );
+
+      await expect
+        .element(page.getByRole('button', { name: 'Message actions' }))
+        .not.toBeInTheDocument();
     });
   });
 });

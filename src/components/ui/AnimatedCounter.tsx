@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 interface AnimatedCounterProps {
   value: number;
@@ -12,21 +12,28 @@ const AnimatedCounter: React.FC<AnimatedCounterProps> = ({
   value,
   className = '',
 }) => {
-  const [trackedValue, setTrackedValue] = useState(0);
-  const [animPrev, setAnimPrev] = useState(0);
+  const [trackedValue, setTrackedValue] = useState(value);
+  const [animPrev, setAnimPrev] = useState(value);
   const [direction, setDirection] = useState<'up' | 'down'>('down');
   const [isAnimating, setIsAnimating] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  if (value !== trackedValue) {
+  useEffect(() => {
+    if (value === trackedValue) return;
+
     setDirection(value > trackedValue ? 'down' : 'up');
     setAnimPrev(trackedValue);
     setTrackedValue(value);
     setIsAnimating(true);
-
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => setIsAnimating(false), 220);
-  }
+  }, [value, trackedValue]);
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, []);
 
   // Slide out: center → up (for 'down' direction) or center → down (for 'up' direction)
   // const slideOut =
