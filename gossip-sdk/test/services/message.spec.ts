@@ -198,6 +198,140 @@ describe('MessageService', () => {
     ]);
   });
 
+  it('editMessage updates outgoing message content and marks as edited', async () => {
+    const testQueries = getTestQueries();
+
+    await insertTestContactAndDiscussion();
+
+    // Insert an outgoing text message with a messageId
+    const msgId = await testQueries.messages.insert({
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: 'Original content',
+      type: MessageType.TEXT,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.SENT,
+      timestamp: new Date('2024-01-01T00:00:00Z'),
+      messageId: new Uint8Array(12).fill(7),
+    });
+
+    const service = new MessageService(
+      new MockMessageProtocol(),
+      createMockSession(),
+      new SdkEventEmitter(),
+      defaultSdkConfig,
+      testQueries
+    );
+
+    const result = await service.editMessage(msgId, 'Edited content');
+    expect(result).toBe(true);
+
+    const updated = await testQueries.messages.getById(msgId);
+    expect(updated?.content).toBe('Edited content');
+    expect(updated?.timestamp?.getTime()).toBe(
+      new Date('2024-01-01T00:00:00Z').getTime()
+    );
+
+    const parsedMetadata = updated?.metadata
+      ? JSON.parse(updated.metadata)
+      : {};
+    expect(parsedMetadata.edited).toBe(true);
+
+    // Control row must persist editOf so send queue serializes MESSAGE_TYPE_EDIT
+    const all = await testQueries.messages.getByOwnerAndContact(
+      OWNER_USER_ID,
+      CONTACT_USER_ID
+    );
+    const controlRow = all.find(
+      r => r.metadata && r.metadata.includes('"control":"edit"')
+    );
+    expect(controlRow).toBeDefined();
+    expect(controlRow!.editOf).toBeTruthy();
+    const editOfParsed = JSON.parse(controlRow!.editOf!);
+    expect(editOfParsed.originalMsgId).toBeDefined();
+    expect(Buffer.from(new Uint8Array(12).fill(7))).toEqual(
+      Buffer.from(
+        Uint8Array.from(Buffer.from(editOfParsed.originalMsgId, 'base64'))
+      )
+    );
+  });
+
+  it('editMessage returns false for incoming messages and does not modify the row', async () => {
+    const testQueries = getTestQueries();
+    await insertTestContactAndDiscussion();
+
+    const msgId = await testQueries.messages.insert({
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: 'From peer',
+      type: MessageType.TEXT,
+      direction: MessageDirection.INCOMING,
+      status: MessageStatus.DELIVERED,
+      timestamp: new Date('2024-06-01T12:00:00Z'),
+      messageId: new Uint8Array(12).fill(9),
+    });
+
+    const service = new MessageService(
+      new MockMessageProtocol(),
+      createMockSession(),
+      new SdkEventEmitter(),
+      defaultSdkConfig,
+      testQueries
+    );
+
+    expect(await service.editMessage(msgId, 'Hacked')).toBe(false);
+
+    const row = await testQueries.messages.getById(msgId);
+    expect(row?.content).toBe('From peer');
+    expect(row?.direction).toBe(MessageDirection.INCOMING);
+    expect(row?.metadata).toBeFalsy();
+    const rows = await testQueries.messages.getByOwnerAndContact(
+      OWNER_USER_ID,
+      CONTACT_USER_ID
+    );
+    expect(
+      rows.filter(r => r.metadata?.includes?.('"control":"edit"'))
+    ).toHaveLength(0);
+  });
+
+  it('deleteMessage returns false for incoming messages and does not modify the row', async () => {
+    const testQueries = getTestQueries();
+    await insertTestContactAndDiscussion();
+
+    const msgId = await testQueries.messages.insert({
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: 'From peer',
+      type: MessageType.TEXT,
+      direction: MessageDirection.INCOMING,
+      status: MessageStatus.DELIVERED,
+      timestamp: new Date('2024-06-01T12:00:00Z'),
+      messageId: new Uint8Array(12).fill(8),
+    });
+
+    const service = new MessageService(
+      new MockMessageProtocol(),
+      createMockSession(),
+      new SdkEventEmitter(),
+      defaultSdkConfig,
+      testQueries
+    );
+
+    expect(await service.deleteMessage(msgId)).toBe(false);
+
+    const row = await testQueries.messages.getById(msgId);
+    expect(row?.content).toBe('From peer');
+    expect(row?.type).toBe(MessageType.TEXT);
+    expect(row?.direction).toBe(MessageDirection.INCOMING);
+    const rows = await testQueries.messages.getByOwnerAndContact(
+      OWNER_USER_ID,
+      CONTACT_USER_ID
+    );
+    expect(
+      rows.filter(r => r.type === MessageType.DELETED && r.content === '')
+    ).toHaveLength(0);
+  });
+
   it('finds message by seeker', async () => {
     const seeker = new Uint8Array(32).fill(5);
     await getTestQueries().messages.insert({

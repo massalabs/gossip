@@ -10,6 +10,7 @@ import {
   serializeForwardMessage,
   serializeKeepAliveMessage,
   serializeDeleteMessage,
+  serializeEditMessage,
   deserializeMessage,
 } from '../../src/utils/messageSerialization';
 
@@ -59,6 +60,18 @@ describe('message serialization', () => {
     const deserialized = deserializeMessage(serialized);
     expect(deserialized.type).toBe(MessageType.DELETED);
     expect(deserialized.deleteOf?.originalMsgId).toEqual(originalMsgId);
+  });
+
+  it('serializes and deserializes edit messages', () => {
+    const serialized = serializeEditMessage(
+      'edited content',
+      originalMsgId,
+      messageId
+    );
+    const deserialized = deserializeMessage(serialized);
+    expect(deserialized.type).toBe(MessageType.TEXT);
+    expect(deserialized.content).toBe('edited content');
+    expect(deserialized.editOf?.originalMsgId).toEqual(originalMsgId);
   });
 
   it('serializes forward without additional content', () => {

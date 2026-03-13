@@ -26,6 +26,7 @@ import {
   serializeForwardMessage,
   serializeKeepAliveMessage,
   serializeDeleteMessage,
+  serializeEditMessage,
   deserializeMessage,
 } from '../utils/messageSerialization.js';
 import { encodeToBase64, decodeFromBase64 } from '../utils/base64.js';
@@ -122,6 +123,25 @@ function deserializeDeleteOf(
   };
 }
 
+function serializeEditOf(
+  editOf: { originalMsgId: Uint8Array } | undefined
+): string | null {
+  if (!editOf) return null;
+  return JSON.stringify({
+    originalMsgId: encodeToBase64(editOf.originalMsgId),
+  });
+}
+
+function deserializeEditOf(
+  json: string | null
+): { originalMsgId: Uint8Array } | undefined {
+  if (!json) return undefined;
+  const parsed = JSON.parse(json);
+  return {
+    originalMsgId: decodeFromBase64(parsed.originalMsgId),
+  };
+}
+
 /** Serialize metadata to JSON string. */
 function serializeMetadata(
   metadata: Record<string, unknown> | undefined
@@ -156,6 +176,7 @@ export function rowToMessage(row: MessageRow): Message {
     replyTo: deserializeReplyTo(row.replyTo),
     forwardOf: deserializeForwardOf(row.forwardOf),
     deleteOf: deserializeDeleteOf(row.deleteOf ?? null),
+    editOf: deserializeEditOf(row.editOf ?? null),
     encryptedMessage: row.encryptedMessage ?? undefined,
     whenToSend: row.whenToSend ?? undefined,
   };
@@ -187,6 +208,9 @@ interface Decrypted {
     originalContactId?: Uint8Array;
   };
   deleteOf?: {
+    originalMsgId: Uint8Array;
+  };
+  editOf?: {
     originalMsgId: Uint8Array;
   };
   encryptedMessage: Uint8Array;
@@ -350,6 +374,7 @@ export class MessageService {
       replyTo: serializeReplyTo(message.replyTo),
       forwardOf: serializeForwardOf(message.forwardOf),
       deleteOf: serializeDeleteOf(message.deleteOf),
+      editOf: serializeEditOf(message.editOf),
       encryptedMessage: message.encryptedMessage,
       whenToSend: message.whenToSend,
     });
@@ -426,6 +451,7 @@ export class MessageService {
             replyTo: deserialized.replyTo,
             forwardOf: deserialized.forwardOf,
             deleteOf: deserialized.deleteOf,
+            editOf: deserialized.editOf,
           });
         } catch (deserializationError) {
           log.error('deserialization failed', {
@@ -480,6 +506,35 @@ export class MessageService {
         });
 
         // Do not insert a new message row for delete control messages
+        continue;
+      }
+
+      // Handle edit control messages by updating the referenced message in-place
+      if (message.editOf?.originalMsgId) {
+        const target = await this.findMessageByMsgId(
+          message.editOf.originalMsgId,
+          ownerUserId,
+          message.senderId
+        );
+
+        if (!target || !target.id) {
+          log.warn('edit target not found', {
+            originalMsgId: encodeToBase64(message.editOf.originalMsgId),
+          });
+          continue;
+        }
+
+        const mergedMetadata = {
+          ...(target.metadata ?? {}),
+          edited: true,
+        };
+
+        await this.queries.messages.updateById(target.id, {
+          content: message.content,
+          metadata: serializeMetadata(mergedMetadata),
+        });
+
+        // Do not insert a new message row for edit control messages
         continue;
       }
 
@@ -760,6 +815,23 @@ export class MessageService {
       return {
         success: true,
         data: serializeDeleteMessage(originalMsgId, message.messageId!),
+      };
+    } else if (message.editOf) {
+      const originalMsgId = message.editOf.originalMsgId;
+      if (!originalMsgId || originalMsgId.length !== MESSAGE_ID_SIZE) {
+        return {
+          success: false,
+          error: 'Original messageId is required for edit messages',
+        };
+      }
+
+      return {
+        success: true,
+        data: serializeEditMessage(
+          message.content,
+          originalMsgId,
+          message.messageId!
+        ),
       };
     } else if (message.forwardOf) {
       try {
@@ -1193,6 +1265,67 @@ export class MessageService {
     const result = await this.send(controlMessage);
     if (!result.success) {
       throw new Error(result.error ?? 'Failed to enqueue delete message');
+    }
+
+    await this.refreshService?.stateUpdate();
+    return true;
+  }
+
+  /**
+   * Edit an outgoing message by its database ID.
+   * Updates the local content (preserving timestamp) and enqueues an edit
+   * control message so the peer can update their copy as well.
+   */
+  async editMessage(id: number, newContent: string): Promise<boolean> {
+    const row = await this.queries.messages.getById(id);
+    if (!row) {
+      return false;
+    }
+
+    // Only allow editing our own outgoing messages
+    if (row.direction !== MessageDirection.OUTGOING) {
+      return false;
+    }
+
+    if (!row.messageId || row.messageId.length !== MESSAGE_ID_SIZE) {
+      throw new Error('Cannot edit a message that has no valid messageId');
+    }
+
+    const ownerUserId = this.session.userIdEncoded;
+
+    // Merge existing metadata with edited flag
+    const existingMetadata = deserializeMetadata(row.metadata) ?? {};
+    const mergedMetadata = {
+      ...existingMetadata,
+      edited: true,
+    };
+
+    // Update the original message content locally, preserving timestamp
+    await this.queries.messages.updateById(id, {
+      content: newContent,
+      metadata: serializeMetadata(mergedMetadata),
+    });
+
+    // Enqueue an edit control message to notify the peer
+    const controlMessage: Omit<Message, 'id'> = {
+      ownerUserId,
+      contactUserId: row.contactUserId,
+      content: newContent,
+      type: MessageType.TEXT,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.WAITING_SESSION,
+      timestamp: new Date(),
+      editOf: {
+        originalMsgId: row.messageId,
+      },
+      metadata: {
+        control: 'edit',
+      },
+    };
+
+    const result = await this.send(controlMessage);
+    if (!result.success) {
+      throw new Error(result.error ?? 'Failed to enqueue edit message');
     }
 
     await this.refreshService?.stateUpdate();

@@ -42,4 +42,10 @@ export const MIGRATIONS: EmbeddedMigration[] = [
       'CREATE INDEX `userProfile_status_idx` ON `userProfile` (`status`);',
     ],
   },
+  {
+    idx: 1,
+    tag: '0001_messages_edit_of',
+    when: 1740000000000,
+    statements: ['ALTER TABLE `messages` ADD COLUMN `editOf` text;'],
+  },
 ];
