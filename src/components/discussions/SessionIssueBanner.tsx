@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import Popover from '../ui/Popover';
 import { Discussion, SessionStatus } from '@massalabs/gossip-sdk';
 import { useDiscussionStore } from '../../stores/discussionStore';
@@ -12,6 +13,7 @@ const SessionIssueBanner: React.FC<SessionIssueBannerProps> = ({
   discussion,
   outgoingSentCount,
 }) => {
+  const { t } = useTranslation('discussions');
   const sessionsStatuses = useDiscussionStore(s => s.sessionsStatuses);
   const sessionStatus = discussion
     ? sessionsStatuses.get(discussion.contactUserId)
@@ -22,13 +24,10 @@ const SessionIssueBanner: React.FC<SessionIssueBannerProps> = ({
 
   return (
     <div className="w-full rounded-md border border-border bg-muted px-2 py-1.5 text-xs text-muted-foreground flex items-start gap-2">
-      <span className="flex-1">
-        You have sent many messages that have not been acknowledged yet. For
-        security, no more messages will be sent until a reply is received.
-      </span>
+      <span className="flex-1">{t('session_issue.message')}</span>
       <Popover
-        ariaLabel="Why wait for a reply?"
-        message={`Receiving a message from the peer allows the encryption key to be renewed. If an attacker gets your current key, they could decrypt your last ${outgoingSentCount} sent messages.`}
+        ariaLabel={t('session_issue.info_label')}
+        message={t('session_issue.info_message', { count: outgoingSentCount })}
       />
     </div>
   );

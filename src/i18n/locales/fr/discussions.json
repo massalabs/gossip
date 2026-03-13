@@ -13,9 +13,12 @@
   "message_input": {
     "replying_to": "En réponse à",
     "forwarding": "Transfert du message",
+    "editing": "Modification du message",
     "placeholder": "Écrire un message",
     "cancel_reply": "Annuler la réponse",
     "cancel_forward": "Annuler le transfert",
+    "cancel_edit": "Annuler la modification",
+    "input_label": "Saisie du message",
     "send": "Envoyer le message"
   },
   "message": {
@@ -25,7 +28,9 @@
   },
   "list_item": {
     "set_contact_name": "Définir le nom du contact",
-    "refuse_connection": "Refuser la connexion ?"
+    "refuse_connection": "Refuser la connexion ?",
+    "edit_name": "Modifier le nom",
+    "edit_name_title": "Modifier le nom de la discussion"
   },
   "scroll_to_bottom": "Aller aux derniers messages",
   "search": {
@@ -36,7 +41,100 @@
     "no_results": "Aucun résultat",
     "result_count": "{{current}}/{{total}}"
   },
+  "selection": {
+    "clear": "Effacer la sélection",
+    "copy_messages": "Copier les messages sélectionnés",
+    "delete_messages": "Supprimer les messages sélectionnés"
+  },
   "failed_to_send": "Échec de l'envoi du message",
+  "failed_to_copy_selected": "Échec de la copie des messages sélectionnés",
+  "failed_to_delete_selected": "Échec de la suppression de certains messages sélectionnés",
+  "unable_to_delete": "Impossible de supprimer le message",
+  "failed_to_delete": "Échec de la suppression du message",
+  "unable_to_edit": "Impossible de modifier le message",
+  "failed_to_edit": "Échec de la modification du message",
+  "copy_you": "Vous",
   "test_messages_sent": "{{count}} messages de test envoyés !",
-  "test_messages_failed": "Échec de l'envoi de certains messages de test"
+  "test_messages_failed": "Échec de l'envoi de certains messages de test",
+  "settings": {
+    "title": "Paramètres de la discussion",
+    "loading": "Chargement de la discussion…",
+    "name_section": "Nom de la discussion",
+    "edit_name": "Modifier le nom de la discussion",
+    "reset_connection": "Réinitialiser la connexion",
+    "reset_description": "Si vous pensez être déconnecté de votre correspondant, vous pouvez réinitialiser la connexion. Certains messages pourront être renvoyés, mais votre historique sera conservé.",
+    "reconnected": "Reconnecté !",
+    "participants": "Participants",
+    "no_participants": "Aucun participant trouvé"
+  },
+  "new_discussion": {
+    "title": "Nouvelle discussion",
+    "new_contact": "Nouveau contact",
+    "new_group": "Nouveau groupe (bientôt disponible)",
+    "coming_soon": "Bientôt disponible",
+    "contacts": "Contacts",
+    "search_contacts": "Rechercher des contacts",
+    "loading_contacts": "Chargement des contacts…",
+    "no_contacts": "Aucun contact pour le moment",
+    "no_contacts_hint": "Appuyez sur <strong>\"Nouveau contact\"</strong> pour en ajouter un",
+    "no_search_results": "Aucun contact ne correspond à votre recherche",
+    "edit_contact": "Modifier le contact"
+  },
+  "header": {
+    "contact_not_found": "Contact introuvable",
+    "waiting_approval": "En attente d'approbation",
+    "discussion_settings": "Paramètres de la discussion",
+    "search_messages": "Rechercher dans les messages"
+  },
+  "list": {
+    "no_results": "Aucun résultat trouvé",
+    "user_id": "ID utilisateur :",
+    "accept": "Accepter",
+    "refuse": "Refuser",
+    "set_contact_name": "Définir le nom du contact",
+    "refuse_title": "Refuser la connexion ?",
+    "refuse_body": "Refuser fermera cette demande de discussion."
+  },
+  "empty": {
+    "no_discussions": "Aucune discussion pour le moment",
+    "no_discussions_hint": "Démarrez une discussion en appuyant sur le bouton <strong>+</strong>",
+    "no_messages": "Aucun message pour le moment",
+    "no_messages_hint": "Lancez la conversation en envoyant votre premier message"
+  },
+  "initializing": {
+    "title": "Initialisation de la discussion sécurisée",
+    "subtitle": "Mise en place du chiffrement de bout en bout..."
+  },
+  "loading_messages": "Chargement des messages...",
+  "message_item": {
+    "double_tap_reply": "Appuyez deux fois pour répondre",
+    "sent_message": "Message envoyé",
+    "received_message": "Message reçu",
+    "original_not_found_title": "Message original introuvable",
+    "original_not_found_short": "(Original introuvable)",
+    "original_message": "Message original",
+    "forwarded_message": "Message transféré :",
+    "sending": "Envoi",
+    "sent": "Envoyé",
+    "delivered": "Distribué",
+    "jump_to_original": "Appuyez pour aller au message original",
+    "status": "Statut : {{status}}",
+    "actions_menu": "Actions du message",
+    "link_opens_new_tab": "{{content}} (ouvre dans un nouvel onglet)",
+    "deleted": "Message supprimé",
+    "edited": "modifié",
+    "reply": "Répondre",
+    "forward": "Transférer",
+    "copy": "Copier",
+    "edit": "Modifier",
+    "delete": "Supprimer"
+  },
+  "session_issue": {
+    "message": "Vous avez envoyé de nombreux messages qui n'ont pas encore été confirmés. Par sécurité, aucun autre message ne sera envoyé tant qu'une réponse ne sera pas reçue.",
+    "info_label": "Pourquoi attendre une réponse ?",
+    "info_message": "La réception d'un message du correspondant permet de renouveler la clé de chiffrement. Si un attaquant obtient votre clé actuelle, il pourrait déchiffrer vos {{count}} derniers messages envoyés."
+  },
+  "filter_label": "Filtrer les discussions",
+  "waiting_connection": "En attente de connexion...",
+  "announcement": "Annonce"
 }

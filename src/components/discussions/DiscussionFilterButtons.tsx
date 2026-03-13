@@ -38,7 +38,7 @@ const DiscussionFilterButtons: React.FC<DiscussionFilterButtonsProps> = ({
     <div className={`px-2 mb-3 ${className}`}>
       <div
         role="group"
-        aria-label="Filter discussions"
+        aria-label={t('filter_label')}
         className="flex items-center gap-2"
       >
         {filterOptions.map(option => (

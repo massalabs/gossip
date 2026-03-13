@@ -11,6 +11,7 @@ import enWallet from './locales/en/wallet.json';
 import enOnboarding from './locales/en/onboarding.json';
 import enErrors from './locales/en/errors.json';
 import enTime from './locales/en/time.json';
+import enContacts from './locales/en/contacts.json';
 
 // FR
 import frCommon from './locales/fr/common.json';
@@ -21,6 +22,7 @@ import frWallet from './locales/fr/wallet.json';
 import frOnboarding from './locales/fr/onboarding.json';
 import frErrors from './locales/fr/errors.json';
 import frTime from './locales/fr/time.json';
+import frContacts from './locales/fr/contacts.json';
 
 // ZH-CN
 import zhCommon from './locales/zh-CN/common.json';
@@ -31,6 +33,7 @@ import zhWallet from './locales/zh-CN/wallet.json';
 import zhOnboarding from './locales/zh-CN/onboarding.json';
 import zhErrors from './locales/zh-CN/errors.json';
 import zhTime from './locales/zh-CN/time.json';
+import zhContacts from './locales/zh-CN/contacts.json';
 
 // RU
 import ruCommon from './locales/ru/common.json';
@@ -41,6 +44,7 @@ import ruWallet from './locales/ru/wallet.json';
 import ruOnboarding from './locales/ru/onboarding.json';
 import ruErrors from './locales/ru/errors.json';
 import ruTime from './locales/ru/time.json';
+import ruContacts from './locales/ru/contacts.json';
 
 export const SUPPORTED_LANGUAGES = ['en', 'fr', 'zh-CN', 'ru'] as const;
 export type SupportedLanguage = (typeof SUPPORTED_LANGUAGES)[number];
@@ -62,6 +66,7 @@ const resources = {
     onboarding: enOnboarding,
     errors: enErrors,
     time: enTime,
+    contacts: enContacts,
   },
   fr: {
     common: frCommon,
@@ -72,6 +77,7 @@ const resources = {
     onboarding: frOnboarding,
     errors: frErrors,
     time: frTime,
+    contacts: frContacts,
   },
   'zh-CN': {
     common: zhCommon,
@@ -82,6 +88,7 @@ const resources = {
     onboarding: zhOnboarding,
     errors: zhErrors,
     time: zhTime,
+    contacts: zhContacts,
   },
   ru: {
     common: ruCommon,
@@ -92,6 +99,7 @@ const resources = {
     onboarding: ruOnboarding,
     errors: ruErrors,
     time: ruTime,
+    contacts: ruContacts,
   },
 };
 
@@ -111,19 +119,17 @@ i18n
       'onboarding',
       'errors',
       'time',
+      'contacts',
     ],
 
     interpolation: {
-      escapeValue: true,
+      escapeValue: false, // React already handles XSS
     },
 
     detection: {
       order: ['navigator'],
       caches: [],
     },
-
-    saveMissing: false,
-    missingKeyHandler: false,
   });
 
 export default i18n;

@@ -58,5 +58,74 @@
   },
   "language": {
     "title": "Language"
+  },
+  "backup": {
+    "title": "Account Backup",
+    "method": "Backup Method",
+    "mnemonic": "Mnemonic",
+    "private_key": "Private Key",
+    "enter_password": "Enter your password",
+    "password_placeholder": "Enter your password",
+    "show_backup": "Show Backup",
+    "mnemonic_title": "24-Word Mnemonic",
+    "never_share": "Never share this information. Anyone with it can access your account.",
+    "private_key_warning": "<strong>Warning:</strong> This Massa private key cannot be used to restore your Gossip account. Use this only for external wallet compatibility. To restore your Gossip account, you must use the 24-word mnemonic phrase.",
+    "password_required": "Password is required",
+    "show_failed": "Failed to show backup information"
+  },
+  "debug": {
+    "title": "Debug",
+    "show_debug": "Show Debug Options",
+    "show_console": "Show Console Button",
+    "disable_screenshot": "Disable screenshot protection",
+    "reset_app": "Reset App",
+    "clear_messages": "Clear Messages & Contacts",
+    "clear_cache": "Clear Cache & Database"
+  },
+  "security": {
+    "title": "Security",
+    "native_only": "Security settings are only available on native platforms (Android and iOS)."
+  },
+  "web3": {
+    "title": "Web3",
+    "enable_mns": "Enable MNS",
+    "toggle_mns": "Toggle MNS support",
+    "mns_description": "MNS (Massa Name System) is a decentralized naming service that maps human-readable domain names (like 'alice.massa') to any data like gossip IDs. When enabled, you can use MNS domains to identify and contact other users.",
+    "mns_manage": "Create and manage your MNS here:",
+    "mns_link_label": "mns.massa (opens in a new tab)",
+    "privacy_title": "Privacy & Trust Considerations",
+    "privacy_body": "MNS domains link names to your gossip ID and thus to the MNS owner's Massa address. This creates a public association between your identity and blockchain addresses.",
+    "trust_body": "Resolving MNS domains requires trusting the Massa RPC response. The RPC endpoint could potentially provide incorrect or malicious resolution data."
+  },
+  "background_sync": {
+    "title": "Background Sync",
+    "checking": "Checking...",
+    "optimized": "Optimized",
+    "needs_attention": "Needs attention",
+    "background_refresh": "Background App Refresh",
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "restricted": "Restricted",
+    "unknown": "Unknown",
+    "low_power": "Low Power Mode",
+    "on": "On",
+    "off": "Off",
+    "open_settings": "Open Settings",
+    "battery_optimization": "Battery optimization disabled",
+    "yes": "Yes",
+    "no": "No",
+    "android_restriction": "Android background restriction",
+    "not_restricted": "Not restricted",
+    "miui_note": "(MIUI may still restrict)",
+    "disable_battery": "Disable Battery Optimization",
+    "enable_autostart": "Enable AutoStart (MIUI)",
+    "learn_more": "Learn more about battery optimization for your device",
+    "debug_info": "Debug Info",
+    "refresh_status": "Refresh Status"
+  },
+  "pwa": {
+    "offline_ready": "App ready to work offline",
+    "update_available": "New content available, click on reload button to update.",
+    "reload": "Reload"
   }
 }

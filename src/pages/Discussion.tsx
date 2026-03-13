@@ -185,7 +185,9 @@ const Discussion: React.FC = () => {
     const text = selected
       .map(m => {
         const sender =
-          m.direction === MessageDirection.OUTGOING ? 'You' : contactName;
+          m.direction === MessageDirection.OUTGOING
+            ? t('copy_you')
+            : contactName;
         return `${sender}\n${m.content}`;
       })
       .join('\n\n');
@@ -194,9 +196,16 @@ const Discussion: React.FC = () => {
       await navigator.clipboard.writeText(text);
       handleClearSelection();
     } catch {
-      toast.error('Failed to copy selected messages');
+      toast.error(t('failed_to_copy_selected'));
     }
-  }, [messages, selectedMessageIds, discussion, contact, handleClearSelection]);
+  }, [
+    messages,
+    selectedMessageIds,
+    discussion,
+    contact,
+    handleClearSelection,
+    t,
+  ]);
 
   const handleDeleteSelected = useCallback(async () => {
     if (!canDeleteSelected || selectedMessages.length === 0) return;
@@ -235,9 +244,9 @@ const Discussion: React.FC = () => {
 
     handleClearSelection();
     if (failedMessageIds.length > 0) {
-      toast.error('Failed to delete some selected messages');
+      toast.error(t('failed_to_delete_selected'));
     }
-  }, [canDeleteSelected, selectedMessages, gossip, handleClearSelection]);
+  }, [canDeleteSelected, selectedMessages, gossip, handleClearSelection, t]);
 
   // Reply state
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
@@ -438,14 +447,14 @@ const Discussion: React.FC = () => {
       try {
         const deleted = await gossip.messages.deleteMessage(message.id);
         if (!deleted) {
-          toast.error('Unable to delete message');
+          toast.error(t('unable_to_delete'));
         }
       } catch (error) {
-        toast.error('Failed to delete message');
+        toast.error(t('failed_to_delete'));
         console.error('Failed to delete message:', error);
       }
     },
-    [gossip]
+    [gossip, t]
   );
 
   const handleCancelReply = useCallback(() => {
@@ -468,17 +477,17 @@ const Discussion: React.FC = () => {
       try {
         const ok = await gossip.messages.editMessage(message.id, newContent);
         if (!ok) {
-          toast.error('Unable to edit message');
+          toast.error(t('unable_to_edit'));
         }
       } catch (error) {
-        toast.error('Failed to edit message');
+        toast.error(t('failed_to_edit'));
         console.error('Failed to edit message:', error);
       } finally {
         setEditingMessage(null);
         setInputPrefill(undefined);
       }
     },
-    [gossip]
+    [gossip, t]
   );
 
   const handleInputFocus = useCallback(() => {

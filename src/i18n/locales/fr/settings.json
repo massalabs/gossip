@@ -58,5 +58,74 @@
   },
   "language": {
     "title": "Langue"
+  },
+  "backup": {
+    "title": "Sauvegarde du compte",
+    "method": "Méthode de sauvegarde",
+    "mnemonic": "Phrase mnémonique",
+    "private_key": "Clé privée",
+    "enter_password": "Saisissez votre mot de passe",
+    "password_placeholder": "Saisissez votre mot de passe",
+    "show_backup": "Afficher la sauvegarde",
+    "mnemonic_title": "Phrase mnémonique de 24 mots",
+    "never_share": "Ne partagez jamais ces informations. Toute personne y ayant accès peut accéder à votre compte.",
+    "private_key_warning": "<strong>Attention :</strong> Cette clé privée Massa ne peut pas être utilisée pour restaurer votre compte Gossip. Utilisez-la uniquement pour la compatibilité avec des portefeuilles externes. Pour restaurer votre compte Gossip, vous devez utiliser la phrase mnémonique de 24 mots.",
+    "password_required": "Le mot de passe est requis",
+    "show_failed": "Échec de l'affichage des informations de sauvegarde"
+  },
+  "debug": {
+    "title": "Débogage",
+    "show_debug": "Afficher les options de débogage",
+    "show_console": "Afficher le bouton de console",
+    "disable_screenshot": "Désactiver la protection des captures d'écran",
+    "reset_app": "Réinitialiser l'application",
+    "clear_messages": "Effacer les messages et contacts",
+    "clear_cache": "Vider le cache et la base de données"
+  },
+  "security": {
+    "title": "Sécurité",
+    "native_only": "Les paramètres de sécurité sont uniquement disponibles sur les plateformes natives (Android et iOS)."
+  },
+  "web3": {
+    "title": "Web3",
+    "enable_mns": "Activer MNS",
+    "toggle_mns": "Activer/désactiver le support MNS",
+    "mns_description": "MNS (Massa Name System) est un service de nommage décentralisé qui associe des noms de domaine lisibles (comme 'alice.massa') à des données telles que les identifiants Gossip. Lorsqu'il est activé, vous pouvez utiliser des domaines MNS pour identifier et contacter d'autres utilisateurs.",
+    "mns_manage": "Créez et gérez votre MNS ici :",
+    "mns_link_label": "mns.massa (s'ouvre dans un nouvel onglet)",
+    "privacy_title": "Confidentialité et considérations de confiance",
+    "privacy_body": "Les domaines MNS associent des noms à votre identifiant Gossip et donc à l'adresse Massa du propriétaire du MNS. Cela crée une association publique entre votre identité et vos adresses blockchain.",
+    "trust_body": "La résolution des domaines MNS nécessite de faire confiance à la réponse du RPC Massa. Le point d'accès RPC pourrait potentiellement fournir des données de résolution incorrectes ou malveillantes."
+  },
+  "background_sync": {
+    "title": "Synchronisation en arrière-plan",
+    "checking": "Vérification...",
+    "optimized": "Optimisé",
+    "needs_attention": "Action requise",
+    "background_refresh": "Actualisation en arrière-plan",
+    "enabled": "Activé",
+    "disabled": "Désactivé",
+    "restricted": "Restreint",
+    "unknown": "Inconnu",
+    "low_power": "Mode économie d'énergie",
+    "on": "Activé",
+    "off": "Désactivé",
+    "open_settings": "Ouvrir les paramètres",
+    "battery_optimization": "Optimisation de la batterie désactivée",
+    "yes": "Oui",
+    "no": "Non",
+    "android_restriction": "Restriction Android en arrière-plan",
+    "not_restricted": "Non restreint",
+    "miui_note": "(MIUI peut quand même restreindre)",
+    "disable_battery": "Désactiver l'optimisation de la batterie",
+    "enable_autostart": "Activer le démarrage automatique (MIUI)",
+    "learn_more": "En savoir plus sur l'optimisation de la batterie pour votre appareil",
+    "debug_info": "Infos de débogage",
+    "refresh_status": "Actualiser le statut"
+  },
+  "pwa": {
+    "offline_ready": "Application prête à fonctionner hors ligne",
+    "update_available": "Nouveau contenu disponible, cliquez sur le bouton de rechargement pour mettre à jour.",
+    "reload": "Recharger"
   }
 }

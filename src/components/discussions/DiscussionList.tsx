@@ -1,5 +1,6 @@
 import React, { useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { Virtuoso } from 'react-virtuoso';
 import toast from 'react-hot-toast';
 
@@ -93,6 +94,7 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
   scrollParent,
   filter = 'all',
 }) => {
+  const { t } = useTranslation('discussions');
   const navigate = useNavigate();
   const gossip = useGossipSdk();
 
@@ -210,7 +212,9 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
     if (isSearching) {
       return (
         <div className="py-8 text-center">
-          <p className="text-sm text-muted-foreground">No results found</p>
+          <p className="text-sm text-muted-foreground">
+            {t('list.no_results')}
+          </p>
         </div>
       );
     }

@@ -5,6 +5,7 @@ import React, {
   useMemo,
   useCallback,
 } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   CornerUpLeft,
   Share,
@@ -88,6 +89,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
   isSelected = false,
   onToggleSelect,
 }) => {
+  const { t } = useTranslation('discussions');
   const sdk = useGossipSdk();
   const isOutgoing = message.direction === MessageDirection.OUTGOING;
   const isDeleted = message.type === MessageType.DELETED;
@@ -383,21 +385,21 @@ const MessageItem: React.FC<MessageItemProps> = ({
     const items: MessageContextMenuItem[] = [];
     if (onReplyTo && !isDeleted) {
       items.push({
-        label: 'Reply',
+        label: t('message_item.reply'),
         icon: <CornerUpLeft className="w-4 h-4" />,
         onClick: () => onReplyTo(message),
       });
     }
     if (onForward && !isDeleted) {
       items.push({
-        label: 'Forward',
+        label: t('message_item.forward'),
         icon: <Share className="w-4 h-4" />,
         onClick: () => onForward(message),
       });
     }
     if (!isDeleted) {
       items.push({
-        label: 'Copy',
+        label: t('message_item.copy'),
         icon: <Copy className="w-4 h-4" />,
         onClick: () => {
           navigator.clipboard.writeText(message.content).catch(() => {
@@ -408,14 +410,14 @@ const MessageItem: React.FC<MessageItemProps> = ({
     }
     if (onEdit && isOutgoing && !isDeleted && message.id != null) {
       items.push({
-        label: 'Edit',
+        label: t('message_item.edit'),
         icon: <CornerUpLeft className="w-4 h-4" />,
         onClick: () => onEdit(message),
       });
     }
     if (onDelete && isOutgoing && !isDeleted && message.id != null) {
       items.push({
-        label: 'Delete',
+        label: t('message_item.delete'),
         icon: <Trash2 className="w-4 h-4" />,
         danger: true,
         onClick: () => onDelete(message),
@@ -793,7 +795,11 @@ const MessageItem: React.FC<MessageItemProps> = ({
       onContextMenu={handleContextMenu}
       style={{ touchAction: 'manipulation' }}
       role="listitem"
-      aria-label={`${isOutgoing ? 'Sent' : 'Received'} message`}
+      aria-label={
+        isOutgoing
+          ? t('message_item.sent_message')
+          : t('message_item.received_message')
+      }
       onClick={
         isSelecting
           ? () => {
@@ -874,7 +880,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
         onKeyDown={handleKeyDown}
         tabIndex={isDeleted ? -1 : 0}
         role={isDeleted ? undefined : 'button'}
-        aria-label={isDeleted ? undefined : 'Tap for actions'}
+        aria-label={isDeleted ? undefined : t('message_item.double_tap_reply')}
         style={{
           transform: isContextMenuOpen
             ? `translate(${contextMenuTranslateX}px, ${contextMenuTranslateY}px)`
@@ -932,7 +938,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
                   onKeyDown: handleReplyContextKeyDown,
                   tabIndex: 0,
                   role: 'button',
-                  'aria-label': 'Tap to jump to original message',
+                  'aria-label': t('message_item.jump_to_original'),
                 }
               : {})}
           >
@@ -940,14 +946,14 @@ const MessageItem: React.FC<MessageItemProps> = ({
               <div className="flex items-center gap-1 mb-2">
                 <span
                   className="inline-flex items-center gap-1"
-                  title="Original message not found"
+                  title={t('message_item.original_not_found_title')}
                 >
                   <AlertTriangle
                     className="w-3.5 h-3.5 text-destructive shrink-0"
                     aria-hidden="true"
                   />
                   <span className="text-xs text-destructive md:hidden">
-                    (Original not found)
+                    {t('message_item.original_not_found_short')}
                   </span>
                 </span>
               </div>
@@ -960,7 +966,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
                     : 'text-muted-foreground/80'
                 }`}
               >
-                &nbsp;
+                {t('common:loading')}
               </p>
             ) : (
               <p
@@ -980,7 +986,9 @@ const MessageItem: React.FC<MessageItemProps> = ({
                             target="_blank"
                             rel="noopener noreferrer"
                             onClick={handleLinkClick}
-                            aria-label={`${segment.content} (opens in a new tab)`}
+                            aria-label={t('message_item.link_opens_new_tab', {
+                              content: segment.content,
+                            })}
                             className="underline hover:opacity-80 transition-opacity break-all cursor-pointer"
                             style={{
                               textDecorationColor: 'currentColor',
@@ -993,7 +1001,8 @@ const MessageItem: React.FC<MessageItemProps> = ({
                       }
                       return <span key={index}>{segment.content}</span>;
                     })
-                  : originalMessage?.content || 'Original message'}
+                  : originalMessage?.content ||
+                    t('message_item.original_message')}
               </p>
             )}
           </div>
@@ -1017,31 +1026,20 @@ const MessageItem: React.FC<MessageItemProps> = ({
                   onKeyDown: handleReplyContextKeyDown,
                   tabIndex: 0,
                   role: 'button',
-                  'aria-label': 'Tap to jump to original message',
+                  'aria-label': t('message_item.jump_to_original'),
                 }
               : {})}
           >
             {isLoadingOriginal ? (
-              <>
-                <p
-                  className={`text-[11px] font-medium mb-0.5 ${
-                    isOutgoing
-                      ? 'text-accent-foreground/80'
-                      : 'text-muted-foreground/80'
-                  }`}
-                >
-                  &nbsp;
-                </p>
-                <p
-                  className={`text-xs truncate ${
-                    isOutgoing
-                      ? 'text-accent-foreground/80'
-                      : 'text-muted-foreground/80'
-                  }`}
-                >
-                  &nbsp;
-                </p>
-              </>
+              <p
+                className={`text-xs ${
+                  isOutgoing
+                    ? 'text-accent-foreground/80'
+                    : 'text-muted-foreground/80'
+                }`}
+              >
+                {t('common:loading')}
+              </p>
             ) : (
               <>
                 <p
@@ -1051,7 +1049,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
                       : 'text-muted-foreground/80'
                   }`}
                 >
-                  Forwarded message:
+                  {t('message_item.forwarded_message')}
                 </p>
                 <p
                   className={`text-xs truncate ${
@@ -1070,7 +1068,9 @@ const MessageItem: React.FC<MessageItemProps> = ({
                               target="_blank"
                               rel="noopener noreferrer"
                               onClick={handleLinkClick}
-                              aria-label={`${segment.content} (opens in a new tab)`}
+                              aria-label={t('message_item.link_opens_new_tab', {
+                                content: segment.content,
+                              })}
                               className="underline hover:opacity-80 transition-opacity break-all cursor-pointer"
                               style={{
                                 textDecorationColor: 'currentColor',
@@ -1085,7 +1085,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
                       })
                     : originalMessage?.content ||
                       message.forwardOf.originalContent ||
-                      'Original message'}
+                      t('message_item.original_message')}
                 </p>
               </>
             )}
@@ -1095,7 +1095,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
         {/* Message Content */}
         {isDeleted ? (
           <p className="whitespace-pre-wrap wrap-break-word pr-6 italic text-muted-foreground text-[13px]">
-            Message deleted
+            {t('message_item.deleted')}
           </p>
         ) : (
           <p className="whitespace-pre-wrap wrap-break-word pr-6">
@@ -1108,7 +1108,9 @@ const MessageItem: React.FC<MessageItemProps> = ({
                     target="_blank"
                     rel="noopener noreferrer"
                     onClick={handleLinkClick}
-                    aria-label={`${segment.content} (opens in a new tab)`}
+                    aria-label={t('message_item.link_opens_new_tab', {
+                      content: segment.content,
+                    })}
                     className="underline hover:opacity-80 transition-opacity break-all cursor-pointer"
                     style={{
                       textDecorationColor: 'currentColor',
@@ -1138,12 +1140,16 @@ const MessageItem: React.FC<MessageItemProps> = ({
               </span>
             )}
             {isEdited && (
-              <span className="text-[10px] italic opacity-75 ml-1">edited</span>
+              <span className="text-[10px] italic opacity-75 ml-1">
+                {t('message_item.edited')}
+              </span>
             )}
             {isOutgoing && (
               <div
                 className="flex items-center gap-1"
-                aria-label={`Status: ${message.status}`}
+                aria-label={t('message_item.status', {
+                  status: message.status,
+                })}
               >
                 {(message.status === MessageStatus.WAITING_SESSION ||
                   message.status === MessageStatus.READY) && (
@@ -1152,17 +1158,22 @@ const MessageItem: React.FC<MessageItemProps> = ({
                       className="w-2.5 h-2.5 border border-current border-t-transparent rounded-full animate-spin"
                       aria-hidden="true"
                     />
-                    <span className="text-[10px] font-medium">Sending</span>
+                    <span className="text-[10px] font-medium">
+                      {t('message_item.sending')}
+                    </span>
                   </div>
                 )}
                 {message.status === MessageStatus.SENT && (
-                  <CheckIcon className="w-3.5 h-3.5" aria-label="Sent" />
+                  <CheckIcon
+                    className="w-3.5 h-3.5"
+                    aria-label={t('message_item.sent')}
+                  />
                 )}
                 {(message.status === MessageStatus.DELIVERED ||
                   message.status === MessageStatus.READ) && (
                   <div
                     className="relative inline-flex items-center w-4 h-3.5"
-                    aria-label="Delivered"
+                    aria-label={t('message_item.delivered')}
                   >
                     <CheckIcon className="w-3.5 h-3.5 absolute left-0" />
                     <CheckIcon className="w-3.5 h-3.5 absolute left-[5px] top-[1.5px]" />
@@ -1181,7 +1192,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
               openContextMenu();
             }}
             className="absolute top-1.5 right-2 p-0.5 opacity-0 group-hover:opacity-100 transition-opacity hidden md:flex items-center justify-center"
-            aria-label="Message actions"
+            aria-label={t('message_item.actions_menu')}
           >
             <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
           </button>

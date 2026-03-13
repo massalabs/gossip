@@ -32,7 +32,7 @@ const ScrollToBottomButton: React.FC<ScrollToBottomButtonProps> = ({
         size="custom"
         className="w-12 h-12 bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg border border-border"
         onClick={onClick}
-        ariaLabel="Scroll to bottom"
+        ariaLabel={t('scroll_to_bottom')}
         title={t('scroll_to_bottom')}
         tabIndex={isVisible ? 0 : -1}
       >

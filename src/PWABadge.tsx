@@ -1,10 +1,12 @@
 import './PWABadge.css';
 
 import { useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useRegisterSW } from 'virtual:pwa-register/react';
 import Button from './components/ui/Button';
 
 function PWABadge() {
+  const { t } = useTranslation('settings');
   // check for updates every hour
   const period = 60 * 60 * 1000;
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -50,11 +52,9 @@ function PWABadge() {
         <div className="PWABadge-toast">
           <div className="PWABadge-message">
             {offlineReady ? (
-              <span id="toast-message">App ready to work offline</span>
+              <span id="toast-message">{t('pwa.offline_ready')}</span>
             ) : (
-              <span id="toast-message">
-                New content available, click on reload button to update.
-              </span>
+              <span id="toast-message">{t('pwa.update_available')}</span>
             )}
           </div>
           <div className="PWABadge-buttons">
@@ -65,7 +65,7 @@ function PWABadge() {
                 variant="ghost"
                 size="custom"
               >
-                Reload
+                {t('pwa.reload')}
               </Button>
             )}
             <Button
@@ -74,7 +74,7 @@ function PWABadge() {
               variant="ghost"
               size="custom"
             >
-              Close
+              {t('common:close')}
             </Button>
           </div>
         </div>

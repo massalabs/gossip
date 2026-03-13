@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import BaseModal from '../components/ui/BaseModal';
 import PageLayout from '../components/ui/PageLayout';

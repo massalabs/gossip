@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { X, Copy, Trash2 } from 'react-feather';
 import HeaderBar from '../ui/HeaderBar';
 import Button from '../ui/Button';
@@ -19,6 +20,7 @@ const SelectionHeader: React.FC<SelectionHeaderProps> = ({
   onDelete,
   canDelete = true,
 }) => {
+  const { t } = useTranslation('discussions');
   return (
     <HeaderBar>
       <div className="flex items-center w-full gap-3">
@@ -26,7 +28,7 @@ const SelectionHeader: React.FC<SelectionHeaderProps> = ({
           onClick={onClear}
           variant="circular"
           size="custom"
-          ariaLabel="Clear selection"
+          ariaLabel={t('selection.clear')}
           className="w-8 h-8 flex items-center justify-center"
         >
           <X className="w-5 h-5 text-muted-foreground" />
@@ -37,7 +39,7 @@ const SelectionHeader: React.FC<SelectionHeaderProps> = ({
           onClick={onCopy}
           variant="circular"
           size="custom"
-          ariaLabel="Copy selected messages"
+          ariaLabel={t('selection.copy_messages')}
           className="w-8 h-8 flex items-center justify-center"
         >
           <Copy className="w-5 h-5 text-muted-foreground" />
@@ -47,7 +49,7 @@ const SelectionHeader: React.FC<SelectionHeaderProps> = ({
             onClick={onDelete}
             variant="circular"
             size="custom"
-            ariaLabel="Delete selected messages"
+            ariaLabel={t('selection.delete_messages')}
             className="w-8 h-8 flex items-center justify-center"
           >
             <Trash2 className="w-5 h-5 text-destructive" />

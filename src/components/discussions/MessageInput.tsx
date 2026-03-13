@@ -232,7 +232,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
             <div className="flex items-start justify-between gap-2">
               <div className="flex-1 min-w-0">
                 <p className="text-[10px] text-muted-foreground font-medium mb-0.5">
-                  Editing message
+                  {t('message_input.editing')}
                 </p>
                 <p className="text-xs text-foreground/80 truncate">
                   {editingMessage.content}
@@ -246,7 +246,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
                     onCancelEdit();
                   }}
                   className="shrink-0 p-1.5 hover:bg-muted rounded-full transition-colors active:scale-90"
-                  aria-label="Cancel edit"
+                  aria-label={t('message_input.cancel_edit')}
                 >
                   <X className="w-4 h-4 text-muted-foreground" />
                 </button>
@@ -355,7 +355,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
             autoCapitalize="sentences"
             spellCheck={true}
             enterKeyHint="send"
-            aria-label="Message input"
+            aria-label={t('message_input.input_label')}
             className={`flex-1 bg-transparent text-foreground placeholder:text-muted-foreground
                        leading-relaxed resize-none p-0 m-0 focus:outline-none outline-none
                        scrollbar-transparent select-text touch-auto

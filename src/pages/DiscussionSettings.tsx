@@ -6,6 +6,7 @@ import React, {
   useState,
 } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { useDiscussionStore } from '../stores/discussionStore';
 import ContactAvatar from '../components/avatar/ContactAvatar';
 import ContactNameModal from '../components/ui/ContactNameModal';
@@ -19,6 +20,7 @@ import type { Contact } from '@massalabs/gossip-sdk';
 import { useGossipSdk } from '../hooks/useGossipSdk';
 
 const DiscussionSettings: React.FC = () => {
+  const { t } = useTranslation('discussions');
   const { discussionId } = useParams();
   const navigate = useNavigate();
   const gossip = useGossipSdk();
@@ -140,7 +142,9 @@ const DiscussionSettings: React.FC = () => {
       <div className="bg-background flex items-center justify-center h-full">
         <div className="text-center">
           <div className="w-8 h-8 border-2 border-border border-t-primary rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-sm text-muted-foreground">Loading discussion…</p>
+          <p className="text-sm text-muted-foreground">
+            {t('settings.loading')}
+          </p>
         </div>
       </div>
     );
@@ -149,7 +153,7 @@ const DiscussionSettings: React.FC = () => {
   return (
     <PageLayout
       header={
-        <PageHeader title="Discussion Settings" onBack={() => navigate(-1)} />
+        <PageHeader title={t('settings.title')} onBack={() => navigate(-1)} />
       }
       className="app-max-w mx-auto"
       contentClassName="pt-4 px-6 pb-6"
@@ -157,7 +161,7 @@ const DiscussionSettings: React.FC = () => {
       {/* Discussion Name Section */}
       <div className="mb-6">
         <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
-          Discussion Name
+          {t('settings.name_section')}
         </h2>
         <div className="bg-background border border-border rounded-xl p-4">
           <div className="flex items-center justify-between">
@@ -175,7 +179,7 @@ const DiscussionSettings: React.FC = () => {
                 variant="ghost"
                 size="custom"
                 className="p-2 hover:bg-muted rounded-lg transition-colors"
-                title="Edit discussion name"
+                title={t('settings.edit_name')}
               >
                 <Edit2 className="w-4 h-4 text-muted-foreground" />
               </Button>
@@ -187,13 +191,11 @@ const DiscussionSettings: React.FC = () => {
       {/* Reset Connection Section */}
       <div className="mb-6">
         <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
-          Reset Connection
+          {t('settings.reset_connection')}
         </h2>
         <div className="bg-background border border-border rounded-xl p-4">
           <p className="text-sm text-muted-foreground mb-3">
-            If you think you're disconnected from your peer, you can reset the
-            connection. Some messages may be resent but your history will be
-            preserved.
+            {t('settings.reset_description')}
           </p>
           <Button
             onClick={handleResetConnection}
@@ -205,7 +207,9 @@ const DiscussionSettings: React.FC = () => {
             ) : (
               <RotateCw className="w-4 h-4 mr-2" />
             )}
-            {reconnectSuccess ? 'Reconnected!' : 'Reset Connection'}
+            {reconnectSuccess
+              ? t('settings.reconnected')
+              : t('settings.reset_connection')}
           </Button>
         </div>
       </div>
@@ -213,7 +217,7 @@ const DiscussionSettings: React.FC = () => {
       {/* Participants Section */}
       <div>
         <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
-          Participants
+          {t('settings.participants')}
         </h2>
         <div className="bg-background border border-border rounded-xl divide-y divide-border">
           {participants.map(contact => (
@@ -233,7 +237,7 @@ const DiscussionSettings: React.FC = () => {
           ))}
           {participants.length === 0 && (
             <div className="p-4 text-center text-sm text-muted-foreground">
-              No participants found
+              {t('settings.no_participants')}
             </div>
           )}
         </div>
@@ -242,9 +246,9 @@ const DiscussionSettings: React.FC = () => {
       <ContactNameModal
         isOpen={isNameModalOpen}
         onClose={() => setIsNameModalOpen(false)}
-        title="Edit discussion name"
+        title={t('settings.edit_name')}
         initialName={proposedName}
-        confirmLabel="Save"
+        confirmLabel={t('common:save')}
         allowEmpty
         error={nameError}
         onConfirm={async name => {

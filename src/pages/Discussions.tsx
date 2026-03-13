@@ -1,10 +1,4 @@
-import React, {
-  useCallback,
-  useRef,
-  useState,
-  useEffect,
-  useMemo,
-} from 'react';
+import React, { useCallback, useState, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import DiscussionListPanel from '../components/discussions/DiscussionList';
 import DiscussionFilterButtons from '../components/discussions/DiscussionFilterButtons';
@@ -151,7 +145,7 @@ const Discussions: React.FC = () => {
           </h1>
         ) : (
           <h1 className="text-xl font-semibold text-accent">
-            Waiting for connection...
+            {t('waiting_connection')}
           </h1>
         )}
       </div>
