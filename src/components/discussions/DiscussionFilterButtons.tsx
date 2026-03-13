@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { DiscussionFilter } from '../../stores/discussionStore';
 
 interface DiscussionFilterButtonsProps {
@@ -18,14 +19,19 @@ const DiscussionFilterButtons: React.FC<DiscussionFilterButtonsProps> = ({
   filterCounts,
   className = '',
 }) => {
+  const { t } = useTranslation('discussions');
   const filterOptions: Array<{
     value: DiscussionFilter;
     label: string;
     count: number;
   }> = [
-    { value: 'all', label: 'All', count: filterCounts.all },
-    { value: 'unread', label: 'Unread', count: filterCounts.unread },
-    { value: 'pending', label: 'Pending', count: filterCounts.pending },
+    { value: 'all', label: t('filter.all'), count: filterCounts.all },
+    { value: 'unread', label: t('filter.unread'), count: filterCounts.unread },
+    {
+      value: 'pending',
+      label: t('filter.pending'),
+      count: filterCounts.pending,
+    },
   ];
 
   return (

@@ -1,0 +1,13 @@
+{
+  "share_invitation_failed": "分享邀请失败，请重试。",
+  "share_qr_failed": "分享二维码失败，请重试。",
+  "qr_parse_failed": "解析二维码失败：{{message}}",
+  "qr_scan_failed": "扫描二维码失败：{{error}}",
+  "cannot_add_self": "不能添加自己为联系人",
+  "user_already_registered": "用户已注册",
+  "invalid_invite": "无效的邀请",
+  "send_message_failed": "消息发送失败",
+  "share_logs_failed": "分享日志失败",
+  "invalid_password": "密码错误",
+  "password_required": "请输入密码"
+}

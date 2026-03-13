@@ -1,0 +1,62 @@
+{
+  "title": "设置",
+  "profile": "个人资料",
+  "edit_username": "修改用户名",
+  "name_label": "名称：",
+  "account_name": "账户名称",
+  "user_id_label": "用户 ID：",
+  "copy_mns_domain": "复制 MNS 域名",
+  "menu": {
+    "account_backup": "账户备份",
+    "share_contact": "分享联系方式",
+    "notifications": "通知",
+    "appearance": "外观",
+    "language": "语言",
+    "web3": "Web3",
+    "about": "关于",
+    "debug": "调试",
+    "logout": "退出登录"
+  },
+  "delete_account": {
+    "button": "删除账户",
+    "title": "删除账户",
+    "confirm": "确定要删除此账户吗？",
+    "warning": "此操作无法撤销"
+  },
+  "edit_username_modal": {
+    "title": "修改用户名",
+    "placeholder": "输入用户名",
+    "username_label": "用户名",
+    "username_taken": "该用户名已被使用，请选择其他用户名。",
+    "username_check_failed": "无法验证用户名是否可用，请重试。",
+    "update_failed": "更新用户名失败，请重试。",
+    "checking": "正在检查可用性...",
+    "saving": "保存中...",
+    "test_notification": "测试通知"
+  },
+  "share_contact_qr": {
+    "copy_mns": "点击复制 MNS 域名",
+    "copy_user_id": "点击复制用户 ID",
+    "qr_alt": "您的联系方式二维码"
+  },
+  "appearance": {
+    "title": "外观"
+  },
+  "about": {
+    "title": "关于",
+    "version": "版本",
+    "build_id": "构建 ID"
+  },
+  "notifications": {
+    "title": "通知",
+    "not_supported": "此设备不支持通知功能。",
+    "toggle": "开关通知",
+    "blocked": "已屏蔽",
+    "enable": "启用",
+    "requesting": "请求中...",
+    "blocked_message": "通知已被屏蔽，请在浏览器设置中启用。"
+  },
+  "language": {
+    "title": "语言"
+  }
+}

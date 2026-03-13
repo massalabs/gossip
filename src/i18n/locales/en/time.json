@@ -1,0 +1,8 @@
+{
+  "now": "now",
+  "yesterday": "Yesterday",
+  "today": "Today",
+  "today_at": "Today at {{time}}",
+  "yesterday_at": "Yesterday at {{time}}",
+  "days_ago": "{{count}} days ago"
+}

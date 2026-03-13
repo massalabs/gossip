@@ -1,0 +1,50 @@
+{
+  "title": "PORTEFEUILLE",
+  "refresh": "Actualiser le solde et les prix",
+  "address": "Adresse",
+  "copy_address": "Copier l'adresse",
+  "swap_coming_soon": "La fonctionnalité d'échange sera bientôt disponible !",
+  "send_label": "envoyer",
+  "receive_label": "recevoir",
+  "swap_label": "échanger",
+  "send": {
+    "title": "Envoyer",
+    "select_token": "Sélectionner un jeton",
+    "recipient_placeholder": "Saisir l'adresse du destinataire",
+    "recipient_label": "Adresse du destinataire",
+    "network_fee": "Frais de réseau",
+    "amount": "Montant",
+    "available": "Disponible :",
+    "recipient_required": "L'adresse du destinataire est requise",
+    "invalid_recipient": "Format d'adresse du destinataire invalide",
+    "amount_required": "Le montant doit être supérieur à 0",
+    "select_token_required": "Veuillez sélectionner un jeton",
+    "insufficient_balance": "Solde insuffisant",
+    "processing": "Transaction en cours...",
+    "sending": "Envoi en cours...",
+    "failed": "Échec de la transaction : {{error}}"
+  },
+  "receive": {
+    "title": "Recevoir",
+    "your_address": "Votre adresse",
+    "copied": "Copié !",
+    "share_with_contact": "Partager avec un contact",
+    "info": "Partagez cette adresse pour recevoir des paiements. N'envoyez que des MAS et des jetons compatibles à cette adresse.",
+    "share_coming_soon": "La fonctionnalité de partage sera bientôt disponible !"
+  },
+  "fees": {
+    "title": "Avancé",
+    "description": "Les frais de gas servent à rémunérer les validateurs de blocs et à maximiser les chances de validation de votre transaction. C'est un pourboire pour ceux qui soutiennent le réseau blockchain.",
+    "preset": "Prédéfini",
+    "low": "Bas (0.01 MAS)",
+    "low_desc": "Confirmation plus lente",
+    "standard": "Standard (0.03 MAS)",
+    "standard_desc": "Recommandé",
+    "high": "Élevé (0.1 MAS)",
+    "high_desc": "Confirmation rapide",
+    "custom": "Frais personnalisés",
+    "custom_placeholder": "Frais personnalisés",
+    "custom_hint": "Saisir les frais en MAS",
+    "confirm_fees": "Confirmer les frais"
+  }
+}

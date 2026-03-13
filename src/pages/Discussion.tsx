@@ -1,4 +1,5 @@
 import React, { useEffect, useCallback, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useDiscussion } from '../hooks/useDiscussion';
 import { useAppStore } from '../stores/appStore';
@@ -29,6 +30,7 @@ const TEST_MESSAGE_COUNT = 50;
 const TEST_MESSAGE_BATCH_DELAY_MS = 100;
 
 const Discussion: React.FC = () => {
+  const { t } = useTranslation('discussions');
   const gossip = useGossipSdk();
   const { userId } = useParams();
   const navigate = useNavigate();
@@ -398,11 +400,11 @@ const Discussion: React.FC = () => {
         setForwardPreviewText(null);
         // Scroll to bottom after sending (handled automatically by followOutput)
       } catch (error) {
-        toast.error('Failed to send message');
+        toast.error(t('failed_to_send'));
         console.error('Failed to send message:', error);
       }
     },
-    [isSelecting, sendMessage, contact?.userId, forwardFromMessageId]
+    [isSelecting, sendMessage, contact?.userId, forwardFromMessageId, t]
   );
 
   const handleReplyToMessage = useCallback((message: Message) => {
@@ -644,14 +646,14 @@ const Discussion: React.FC = () => {
           );
         }
       }
-      toast.success(`Sent ${TEST_MESSAGE_COUNT} test messages!`);
+      toast.success(t('test_messages_sent', { count: TEST_MESSAGE_COUNT }));
     } catch (error) {
-      toast.error('Failed to send some test messages');
+      toast.error(t('test_messages_failed'));
       console.error('Failed to send test messages:', error);
     } finally {
       setIsSendingTestMessages(false);
     }
-  }, [contact?.userId, sendMessage, isSendingTestMessages]);
+  }, [contact?.userId, sendMessage, isSendingTestMessages, t]);
 
   if (!contact) return null;
 

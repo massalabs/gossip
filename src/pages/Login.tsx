@@ -5,6 +5,7 @@ import React, {
   useCallback,
   useMemo,
 } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useAccountStore } from '../stores/accountStore';
 import { UserProfile } from '@massalabs/gossip-sdk';
 import { biometricService } from '../services/biometricService';
@@ -33,6 +34,7 @@ const Login: React.FC<LoginProps> = React.memo(
     persistentError = null,
     onErrorChange,
   }) => {
+    const { t } = useTranslation('auth');
     const loadAccount = useAccountStore(state => state.loadAccount);
     const lockedByUser = useAccountStore(state => state.lockedByUser);
     const navigate = useNavigate();
@@ -169,7 +171,7 @@ const Login: React.FC<LoginProps> = React.memo(
 
       try {
         if (!password.trim()) {
-          onErrorChange?.('Password is required');
+          onErrorChange?.(t('login.password_required'));
           setIsLoading(false);
           return;
         }
@@ -184,7 +186,7 @@ const Login: React.FC<LoginProps> = React.memo(
         }
       } catch (error) {
         console.error('Password authentication failed:', error);
-        const errorMessage = 'Invalid password. Please try again.';
+        const errorMessage = t('login.invalid_password');
         onErrorChange?.(errorMessage);
         setPassword('');
         if (window.location.pathname !== ROUTES.welcome()) {
@@ -260,17 +262,17 @@ const Login: React.FC<LoginProps> = React.memo(
               <h1 className="text-[28px] md:text-[32px] font-semibold tracking-tight text-gray-900 dark:text-white">
                 {displayUsername ? (
                   <>
-                    Welcome back,{' '}
+                    {t('login.welcome_back')}{' '}
                     <span className="text-blue-700 dark:text-blue-400 text-4xl">
                       {displayUsername}
                     </span>
                   </>
                 ) : (
-                  'Welcome to Gossip'
+                  t('login.welcome')
                 )}
               </h1>
               <p className="text-sm text-gray-600 dark:text-gray-400">
-                Sign in quickly and securely.
+                {t('login.sign_in')}
               </p>
             </div>
           </div>
@@ -289,11 +291,11 @@ const Login: React.FC<LoginProps> = React.memo(
                   fullWidth
                   className="h-[51px] rounded-full text-sm font-medium"
                 >
-                  {!isLoading && <span>Login with biometrics</span>}
+                  {!isLoading && <span>{t('login.biometric_auth')}</span>}
                 </Button>
                 {!biometricMethodAvailable && (
                   <p className="text-xs text-amber-700 dark:text-amber-400">
-                    Biometrics not detected. We will try anyway.
+                    {t('login.biometric_not_detected')}
                   </p>
                 )}
               </div>
@@ -317,7 +319,7 @@ const Login: React.FC<LoginProps> = React.memo(
                       handlePasswordAuth(e);
                     }
                   }}
-                  placeholder="Password"
+                  placeholder={t('login.password')}
                   error={!!persistentError}
                   disabled={isLoading}
                 />
@@ -330,7 +332,7 @@ const Login: React.FC<LoginProps> = React.memo(
                   fullWidth
                   className="h-[51px] rounded-full disabled:bg-primary/20"
                 >
-                  {!isLoading && <span>Login</span>}
+                  {!isLoading && <span>{t('login.login')}</span>}
                 </Button>
               </div>
             )}
@@ -351,7 +353,7 @@ const Login: React.FC<LoginProps> = React.memo(
                 fullWidth
                 className="h-[51px] rounded-full text-sm"
               >
-                Switch account
+                {t('login.switch_account')}
               </Button>
               <div className="grid grid-cols-2 gap-2">
                 <Button
@@ -360,7 +362,7 @@ const Login: React.FC<LoginProps> = React.memo(
                   size="custom"
                   className="h-[51px] rounded-full text-sm"
                 >
-                  Create new account
+                  {t('login.create_account')}
                 </Button>
                 <Button
                   onClick={() => setShowAccountImport(true)}
@@ -368,7 +370,7 @@ const Login: React.FC<LoginProps> = React.memo(
                   size="custom"
                   className="h-[51px] rounded-full text-sm"
                 >
-                  Import with Mnemonic
+                  {t('login.import_mnemonic')}
                 </Button>
               </div>
             </div>

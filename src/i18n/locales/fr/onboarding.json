@@ -1,0 +1,19 @@
+{
+  "welcome": {
+    "title": "Bienvenue sur Gossip !",
+    "description": "Votre messagerie privée conçue pour des conversations sécurisées et chiffrées de bout en bout. Communiquez en toute confiance."
+  },
+  "privacy": {
+    "title": "Vie privée avant tout",
+    "description": "Tous vos messages sont chiffrés et stockés localement sur votre appareil. Vos conversations restent privées, toujours."
+  },
+  "get_started": {
+    "title": "C'est parti !",
+    "description": "Créez votre compte en quelques secondes et commencez à communiquer en toute sécurité."
+  },
+  "create_account": "Créer un nouveau compte",
+  "import_mnemonic": "Importer depuis un mnémonique",
+  "back": "Retour",
+  "get_started_button": "Commencer",
+  "next": "Suivant"
+}

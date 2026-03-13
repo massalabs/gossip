@@ -1,0 +1,62 @@
+{
+  "title": "Settings",
+  "profile": "Profile",
+  "edit_username": "Edit username",
+  "name_label": "Name:",
+  "account_name": "Account name",
+  "user_id_label": "User ID:",
+  "copy_mns_domain": "Copy MNS domain",
+  "menu": {
+    "account_backup": "Account Backup",
+    "share_contact": "Share Contact",
+    "notifications": "Notifications",
+    "appearance": "Appearance",
+    "language": "Language",
+    "web3": "Web3",
+    "about": "About",
+    "debug": "Debug",
+    "logout": "Logout"
+  },
+  "delete_account": {
+    "button": "Delete Account",
+    "title": "Delete account",
+    "confirm": "Are you sure you want to delete this account?",
+    "warning": "This action cannot be undone"
+  },
+  "edit_username_modal": {
+    "title": "Edit Username",
+    "placeholder": "Enter username",
+    "username_label": "Username",
+    "username_taken": "This username is already in use. Please choose another.",
+    "username_check_failed": "Unable to verify username availability. Please try again.",
+    "update_failed": "Failed to update username. Please try again.",
+    "checking": "Checking availability...",
+    "saving": "Saving...",
+    "test_notification": "Test Notification"
+  },
+  "share_contact_qr": {
+    "copy_mns": "Click to copy MNS domain",
+    "copy_user_id": "Click to copy user ID",
+    "qr_alt": "Your contact QR code"
+  },
+  "appearance": {
+    "title": "Appearance"
+  },
+  "about": {
+    "title": "About",
+    "version": "Version",
+    "build_id": "Build ID"
+  },
+  "notifications": {
+    "title": "Notifications",
+    "not_supported": "Notifications are not supported on this device.",
+    "toggle": "Toggle notifications",
+    "blocked": "Blocked",
+    "enable": "Enable",
+    "requesting": "Requesting...",
+    "blocked_message": "Notifications are blocked. Please enable them in your browser settings."
+  },
+  "language": {
+    "title": "Language"
+  }
+}

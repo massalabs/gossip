@@ -1,0 +1,42 @@
+{
+  "title": "Gossip",
+  "share_contact": "分享我的联系方式",
+  "share_to_discussion": "分享内容到会话",
+  "share_select": "选择一个会话来分享内容。",
+  "cancel_sharing": "取消分享",
+  "start_new": "发起新会话",
+  "filter": {
+    "all": "全部",
+    "unread": "未读",
+    "pending": "待处理"
+  },
+  "message_input": {
+    "replying_to": "回复",
+    "forwarding": "转发消息",
+    "placeholder": "输入消息",
+    "cancel_reply": "取消回复",
+    "cancel_forward": "取消转发",
+    "send": "发送消息"
+  },
+  "message": {
+    "sent": "已发送",
+    "delivered": "已送达",
+    "original_not_found": "未找到原始消息"
+  },
+  "list_item": {
+    "set_contact_name": "设置联系人名称",
+    "refuse_connection": "拒绝连接？"
+  },
+  "scroll_to_bottom": "滚动到最新消息",
+  "search": {
+    "placeholder": "搜索消息...",
+    "previous": "上一个匹配",
+    "next": "下一个匹配",
+    "close": "关闭搜索",
+    "no_results": "无结果",
+    "result_count": "{{current}}/{{total}}"
+  },
+  "failed_to_send": "消息发送失败",
+  "test_messages_sent": "已发送 {{count}} 条测试消息！",
+  "test_messages_failed": "部分测试消息发送失败"
+}

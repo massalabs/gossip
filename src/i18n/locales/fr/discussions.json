@@ -1,0 +1,42 @@
+{
+  "title": "Gossip",
+  "share_contact": "Partager mon contact",
+  "share_to_discussion": "Partager du contenu dans une discussion",
+  "share_select": "Sélectionnez une discussion ci-dessous pour partager le contenu.",
+  "cancel_sharing": "Annuler le partage",
+  "start_new": "Nouvelle discussion",
+  "filter": {
+    "all": "Toutes",
+    "unread": "Non lues",
+    "pending": "En attente"
+  },
+  "message_input": {
+    "replying_to": "En réponse à",
+    "forwarding": "Transfert du message",
+    "placeholder": "Écrire un message",
+    "cancel_reply": "Annuler la réponse",
+    "cancel_forward": "Annuler le transfert",
+    "send": "Envoyer le message"
+  },
+  "message": {
+    "sent": "Envoyé",
+    "delivered": "Distribué",
+    "original_not_found": "Message original introuvable"
+  },
+  "list_item": {
+    "set_contact_name": "Définir le nom du contact",
+    "refuse_connection": "Refuser la connexion ?"
+  },
+  "scroll_to_bottom": "Aller aux derniers messages",
+  "search": {
+    "placeholder": "Rechercher dans les messages...",
+    "previous": "Résultat précédent",
+    "next": "Résultat suivant",
+    "close": "Fermer la recherche",
+    "no_results": "Aucun résultat",
+    "result_count": "{{current}}/{{total}}"
+  },
+  "failed_to_send": "Échec de l'envoi du message",
+  "test_messages_sent": "{{count}} messages de test envoyés !",
+  "test_messages_failed": "Échec de l'envoi de certains messages de test"
+}

@@ -73,6 +73,7 @@ export const ROUTES = {
   settingsSecurity: route(`/${AppRoute.settings}/security`),
   settingsNotifications: route(`/${AppRoute.settings}/notifications`),
   settingsAppearance: route(`/${AppRoute.settings}/appearance`),
+  settingsLanguage: route(`/${AppRoute.settings}/language`),
   settingsAbout: route(`/${AppRoute.settings}/about`),
   settingsDebug: route(`/${AppRoute.settings}/debug`),
   settingsAccountBackup: route(`/${AppRoute.settings}/account-backup`),

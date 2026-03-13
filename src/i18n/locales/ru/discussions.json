@@ -1,0 +1,42 @@
+{
+  "title": "Gossip",
+  "share_contact": "Поделиться моим контактом",
+  "share_to_discussion": "Поделиться содержимым в чат",
+  "share_select": "Выберите чат ниже, чтобы поделиться содержимым.",
+  "cancel_sharing": "Отменить отправку",
+  "start_new": "Начать новый чат",
+  "filter": {
+    "all": "Все",
+    "unread": "Непрочитанные",
+    "pending": "Ожидающие"
+  },
+  "message_input": {
+    "replying_to": "Ответ для",
+    "forwarding": "Пересылка сообщения",
+    "placeholder": "Введите сообщение",
+    "cancel_reply": "Отменить ответ",
+    "cancel_forward": "Отменить пересылку",
+    "send": "Отправить сообщение"
+  },
+  "message": {
+    "sent": "Отправлено",
+    "delivered": "Доставлено",
+    "original_not_found": "Исходное сообщение не найдено"
+  },
+  "list_item": {
+    "set_contact_name": "Задать имя контакта",
+    "refuse_connection": "Отклонить запрос на связь?"
+  },
+  "scroll_to_bottom": "К последним сообщениям",
+  "search": {
+    "placeholder": "Поиск сообщений...",
+    "previous": "Предыдущее совпадение",
+    "next": "Следующее совпадение",
+    "close": "Закрыть поиск",
+    "no_results": "Ничего не найдено",
+    "result_count": "{{current}}/{{total}}"
+  },
+  "failed_to_send": "Не удалось отправить сообщение",
+  "test_messages_sent": "Отправлено тестовых сообщений: {{count}}!",
+  "test_messages_failed": "Не удалось отправить некоторые тестовые сообщения"
+}

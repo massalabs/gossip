@@ -1,0 +1,62 @@
+{
+  "title": "Paramètres",
+  "profile": "Profil",
+  "edit_username": "Modifier le nom d'utilisateur",
+  "name_label": "Nom :",
+  "account_name": "Nom du compte",
+  "user_id_label": "ID utilisateur :",
+  "copy_mns_domain": "Copier le domaine MNS",
+  "menu": {
+    "account_backup": "Sauvegarde du compte",
+    "share_contact": "Partager le contact",
+    "notifications": "Notifications",
+    "appearance": "Apparence",
+    "language": "Langue",
+    "web3": "Web3",
+    "about": "À propos",
+    "debug": "Débogage",
+    "logout": "Déconnexion"
+  },
+  "delete_account": {
+    "button": "Supprimer le compte",
+    "title": "Supprimer le compte",
+    "confirm": "Êtes-vous sûr de vouloir supprimer ce compte ?",
+    "warning": "Cette action est irréversible"
+  },
+  "edit_username_modal": {
+    "title": "Modifier le nom d'utilisateur",
+    "placeholder": "Saisir un nom d'utilisateur",
+    "username_label": "Nom d'utilisateur",
+    "username_taken": "Ce nom d'utilisateur est déjà utilisé. Veuillez en choisir un autre.",
+    "username_check_failed": "Impossible de vérifier la disponibilité du nom d'utilisateur. Veuillez réessayer.",
+    "update_failed": "Échec de la mise à jour du nom d'utilisateur. Veuillez réessayer.",
+    "checking": "Vérification de la disponibilité...",
+    "saving": "Enregistrement...",
+    "test_notification": "Notification de test"
+  },
+  "share_contact_qr": {
+    "copy_mns": "Cliquez pour copier le domaine MNS",
+    "copy_user_id": "Cliquez pour copier l'ID utilisateur",
+    "qr_alt": "Votre QR code de contact"
+  },
+  "appearance": {
+    "title": "Apparence"
+  },
+  "about": {
+    "title": "À propos",
+    "version": "Version",
+    "build_id": "ID de build"
+  },
+  "notifications": {
+    "title": "Notifications",
+    "not_supported": "Les notifications ne sont pas prises en charge sur cet appareil.",
+    "toggle": "Activer/désactiver les notifications",
+    "blocked": "Bloquées",
+    "enable": "Activer",
+    "requesting": "Demande en cours...",
+    "blocked_message": "Les notifications sont bloquées. Veuillez les activer dans les paramètres de votre navigateur."
+  },
+  "language": {
+    "title": "Langue"
+  }
+}

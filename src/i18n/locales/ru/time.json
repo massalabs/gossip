@@ -1,0 +1,8 @@
+{
+  "now": "сейчас",
+  "yesterday": "Вчера",
+  "today": "Сегодня",
+  "today_at": "Сегодня в {{time}}",
+  "yesterday_at": "Вчера в {{time}}",
+  "days_ago": "{{count}} дн. назад"
+}

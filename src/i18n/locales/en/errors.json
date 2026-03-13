@@ -1,0 +1,13 @@
+{
+  "share_invitation_failed": "Failed to share invitation. Please try again.",
+  "share_qr_failed": "Failed to share QR code. Please try again.",
+  "qr_parse_failed": "Failed to parse QR code: {{message}}",
+  "qr_scan_failed": "Failed to scan QR code: {{error}}",
+  "cannot_add_self": "You cannot add yourself as a contact",
+  "user_already_registered": "User already registered",
+  "invalid_invite": "Invalid invite",
+  "send_message_failed": "Failed to send message",
+  "share_logs_failed": "Failed to share logs",
+  "invalid_password": "Invalid password",
+  "password_required": "Password is required"
+}

@@ -1,0 +1,24 @@
+{
+  "cancel": "Annuler",
+  "confirm": "Confirmer",
+  "delete": "Supprimer",
+  "save": "Enregistrer",
+  "continue": "Continuer",
+  "back": "Retour",
+  "next": "Suivant",
+  "close": "Fermer",
+  "copy": "Copier",
+  "share": "Partager",
+  "loading": "Chargement...",
+  "search": "Rechercher...",
+  "clear_search": "Effacer la recherche",
+  "error_boundary": {
+    "title": "Un problème est survenu",
+    "fallback": "Une erreur inattendue s'est produite",
+    "reload": "Recharger la page"
+  },
+  "copied_to_clipboard": "Copié dans le presse-papiers !",
+  "contact_name": "Nom du contact",
+  "enter_name": "Saisir un nom",
+  "introduce_yourself": "Présentez-vous ou ajoutez du contexte à votre demande de contact..."
+}

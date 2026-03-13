@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { Navigation } from 'react-feather';
 import PageLayout from '../../components/ui/PageLayout';
@@ -10,6 +11,7 @@ import { useUiStore } from '../../stores/uiStore';
 import { ROUTES } from '../../constants/routes';
 
 const AppearanceSettings: React.FC = () => {
+  const { t } = useTranslation('settings');
   const navigate = useNavigate();
   const { theme, setTheme, resolvedTheme } = useTheme();
   const showBottomNav = useUiStore.use.showBottomNav();
@@ -21,7 +23,7 @@ const AppearanceSettings: React.FC = () => {
 
   return (
     <PageLayout
-      header={<PageHeader title="Appearance" onBack={handleBack} />}
+      header={<PageHeader title={t('appearance.title')} onBack={handleBack} />}
       className="app-max-w mx-auto"
       contentClassName="px-6 py-6 space-y-6"
     >

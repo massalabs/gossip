@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { ChevronDown } from 'react-feather';
 import Button from '../ui/Button';
 
@@ -15,6 +16,7 @@ const ScrollToBottomButton: React.FC<ScrollToBottomButtonProps> = ({
   isVisible,
   bottomOffset = 0,
 }) => {
+  const { t } = useTranslation('discussions');
   return (
     <div
       className={`absolute right-4 z-10 transition-all duration-200 ${
@@ -31,7 +33,7 @@ const ScrollToBottomButton: React.FC<ScrollToBottomButtonProps> = ({
         className="w-12 h-12 bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg border border-border"
         onClick={onClick}
         ariaLabel="Scroll to bottom"
-        title="Scroll to latest messages"
+        title={t('scroll_to_bottom')}
         tabIndex={isVisible ? 0 : -1}
       >
         <ChevronDown size={20} />

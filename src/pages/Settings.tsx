@@ -1,4 +1,5 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import BaseModal from '../components/ui/BaseModal';
 import PageLayout from '../components/ui/PageLayout';
 import PageHeader from '../components/ui/PageHeader';
@@ -20,6 +21,7 @@ import {
   User,
   Edit2,
   Globe,
+  Type,
 } from 'react-feather';
 import { useNavigate } from 'react-router-dom';
 
@@ -41,6 +43,7 @@ const REQUIRED_TAPS = 7;
 const TAP_TIMEOUT_MS = 2000; // Reset counter after 2 seconds of inactivity
 
 const Settings = (): React.ReactElement => {
+  const { t } = useTranslation('settings');
   const gossip = useGossipSdk();
   const {
     userProfile,
@@ -126,7 +129,7 @@ const Settings = (): React.ReactElement => {
     <PageLayout
       header={
         <PageHeader
-          title="Settings"
+          title={t('title')}
           onBack={() => navigate(ROUTES.discussions())}
         />
       }
@@ -139,7 +142,7 @@ const Settings = (): React.ReactElement => {
           <button
             onClick={handleProfileImageTap}
             className="cursor-pointer focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 rounded-full transition-opacity active:opacity-70"
-            aria-label="Profile"
+            aria-label={t('profile')}
           >
             <div className="w-16 h-16 p-2.5 rounded-full bg-primary flex items-center justify-center">
               <img
@@ -151,14 +154,16 @@ const Settings = (): React.ReactElement => {
           </button>
           <div className="flex-1 min-w-0">
             <div className="mb-2 flex items-center gap-2">
-              <p className="text-xs text-muted-foreground shrink-0">Name:</p>
+              <p className="text-xs text-muted-foreground shrink-0">
+                {t('name_label')}
+              </p>
               <h3 className="text-base font-semibold text-foreground truncate">
-                {userProfile?.username || 'Account name'}
+                {userProfile?.username || t('account_name')}
               </h3>
               <button
                 onClick={() => setIsUsernameModalOpen(true)}
                 className="shrink-0 p-1 rounded-lg hover:bg-muted transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
-                aria-label="Edit username"
+                aria-label={t('edit_username')}
               >
                 <Edit2 className="w-3.5 h-3.5 text-muted-foreground" />
               </button>
@@ -178,7 +183,7 @@ const Settings = (): React.ReactElement => {
                         </p>
                         <CopyClipboard
                           text={domain}
-                          title="Copy MNS domain"
+                          title={t('copy_mns_domain')}
                           iconSize="w-3.5 h-3.5"
                         />
                       </div>
@@ -187,7 +192,7 @@ const Settings = (): React.ReactElement => {
                 ) : (
                   <div className="flex items-center gap-2 min-w-0">
                     <p className="text-xs text-muted-foreground shrink-0">
-                      User ID:
+                      {t('user_id_label')}
                     </p>
                     <UserIdDisplay
                       userId={userProfile.userId}
@@ -221,7 +226,7 @@ const Settings = (): React.ReactElement => {
           >
             <User className="mr-4" />
             <span className="text-base font-semibold flex-1 text-left">
-              Account Backup
+              {t('menu.account_backup')}
             </span>
             {mnemonicBackupInfo?.backedUp && (
               <div className="w-2 h-2 bg-success rounded-full ml-auto"></div>
@@ -235,7 +240,7 @@ const Settings = (): React.ReactElement => {
           >
             <Share2 className="mr-4" />
             <span className="text-base font-semibold flex-1 text-left">
-              Share Contact
+              {t('menu.share_contact')}
             </span>
           </Button>
         </div>
@@ -250,18 +255,29 @@ const Settings = (): React.ReactElement => {
           >
             <Bell className="mr-4" />
             <span className="text-base font-semibold flex-1 text-left">
-              Notifications
+              {t('menu.notifications')}
+            </span>
+          </Button>
+          <Button
+            variant="outline"
+            size="custom"
+            className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0 border-b border-border"
+            onClick={() => navigate(ROUTES.settingsAppearance())}
+          >
+            <Moon className="mr-4" />
+            <span className="text-base font-semibold flex-1 text-left">
+              {t('menu.appearance')}
             </span>
           </Button>
           <Button
             variant="outline"
             size="custom"
             className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0"
-            onClick={() => navigate(ROUTES.settingsAppearance())}
+            onClick={() => navigate(ROUTES.settingsLanguage())}
           >
-            <Moon className="mr-4" />
+            <Type className="mr-4" />
             <span className="text-base font-semibold flex-1 text-left">
-              Appearance
+              {t('menu.language')}
             </span>
           </Button>
         </div>
@@ -276,7 +292,7 @@ const Settings = (): React.ReactElement => {
           >
             <Globe className="mr-4" />
             <span className="text-base font-semibold flex-1 text-left">
-              Web3
+              {t('menu.web3')}
             </span>
           </Button>
         </div>
@@ -293,7 +309,7 @@ const Settings = (): React.ReactElement => {
           >
             <Info className="mr-4" />
             <span className="text-base font-semibold flex-1 text-left">
-              About
+              {t('menu.about')}
             </span>
           </Button>
           {showDebugOption && (
@@ -305,7 +321,7 @@ const Settings = (): React.ReactElement => {
             >
               <SettingsIconFeather className="mr-4" />
               <span className="text-base font-semibold flex-1 text-left">
-                Debug
+                {t('menu.debug')}
               </span>
             </Button>
           )}
@@ -321,7 +337,7 @@ const Settings = (): React.ReactElement => {
           >
             <Lock className="mr-4" />
             <span className="text-base font-semibold flex-1 text-left">
-              Lock App
+              {t('menu.logout')}
             </span>
           </Button>
           <Button
@@ -332,7 +348,7 @@ const Settings = (): React.ReactElement => {
           >
             <Trash2 className="mr-4" />
             <span className="text-base font-semibold flex-1 text-left">
-              Delete Account
+              {t('delete_account.button')}
             </span>
           </Button>
         </div>
@@ -340,7 +356,7 @@ const Settings = (): React.ReactElement => {
       <BaseModal
         isOpen={isResetModalOpen}
         onClose={() => setIsResetModalOpen(false)}
-        title="Delete account"
+        title={t('delete_account.title')}
       >
         <div className="space-y-6">
           <div className="flex flex-col items-center mb-4">
@@ -353,10 +369,10 @@ const Settings = (): React.ReactElement => {
           </div>
           <div className="space-y-2 text-center">
             <p className="text-sm text-foreground">
-              Are you sure you want to delete this account?
+              {t('delete_account.confirm')}
             </p>
             <p className="text-sm text-muted-foreground">
-              This action cannot be undone
+              {t('delete_account.warning')}
             </p>
           </div>
           <div className="flex gap-3">
@@ -366,7 +382,7 @@ const Settings = (): React.ReactElement => {
               size="custom"
               className="flex-1 h-12 rounded-full font-medium"
             >
-              Cancel
+              {t('common:cancel')}
             </Button>
             <button
               onClick={async () => {
@@ -376,7 +392,7 @@ const Settings = (): React.ReactElement => {
               className="flex-1 h-12 rounded-full font-medium text-white hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
               style={{ backgroundColor: 'var(--high-danger-red)' }}
             >
-              Delete
+              {t('common:delete')}
             </button>
           </div>
         </div>

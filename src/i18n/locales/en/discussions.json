@@ -1,0 +1,42 @@
+{
+  "title": "Gossip",
+  "share_contact": "Share my contact",
+  "share_to_discussion": "Share content to discussion",
+  "share_select": "Select a discussion below to share the content.",
+  "cancel_sharing": "Cancel sharing",
+  "start_new": "Start new discussion",
+  "filter": {
+    "all": "All",
+    "unread": "Unread",
+    "pending": "Pending"
+  },
+  "message_input": {
+    "replying_to": "Replying to",
+    "forwarding": "Forwarding message",
+    "placeholder": "Type a message",
+    "cancel_reply": "Cancel reply",
+    "cancel_forward": "Cancel forward",
+    "send": "Send message"
+  },
+  "message": {
+    "sent": "Sent",
+    "delivered": "Delivered",
+    "original_not_found": "Original message not found"
+  },
+  "list_item": {
+    "set_contact_name": "Set contact name",
+    "refuse_connection": "Refuse connection?"
+  },
+  "scroll_to_bottom": "Scroll to latest messages",
+  "search": {
+    "placeholder": "Search messages...",
+    "previous": "Previous match",
+    "next": "Next match",
+    "close": "Close search",
+    "no_results": "No results",
+    "result_count": "{{current}}/{{total}}"
+  },
+  "failed_to_send": "Failed to send message",
+  "test_messages_sent": "Sent {{count}} test messages!",
+  "test_messages_failed": "Failed to send some test messages"
+}
