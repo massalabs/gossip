@@ -97,12 +97,8 @@ pub fn allocate_session<S: BlockStorage + KeypairStorage>(
     rand::rngs::OsRng.fill_bytes(&mut nonce_bytes);
     let nonce = crypto_aead::Nonce::from(nonce_bytes);
     let sk_wrap_aead_key = crypto_aead::Key::from(*sk_wrap_key);
-    let sk_ct = crypto_aead::encrypt(
-        &sk_wrap_aead_key,
-        &nonce,
-        &pq_rerand_sk.to_bytes(),
-        sk_wrap_aad.as_bytes(),
-    );
+    let sk_bytes = Zeroizing::new(pq_rerand_sk.to_bytes());
+    let sk_ct = crypto_aead::encrypt(&sk_wrap_aead_key, &nonce, &sk_bytes, sk_wrap_aad.as_bytes());
 
     // Write keypair file
     let kf = KeypairFile {
