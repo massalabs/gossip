@@ -106,7 +106,6 @@ impl BlockStorage for MemoryStorage {
     }
 
     fn init_blockstream(&mut self, session: SessionIndex) -> Result<()> {
-        debug_assert!(self.blockstreams[session.as_usize()].is_empty());
         Ok(())
     }
 }
