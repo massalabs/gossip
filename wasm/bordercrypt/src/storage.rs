@@ -27,6 +27,11 @@ pub trait BlockStorage {
 
     /// Flush writes to durable storage for a session.
     fn fsync(&self, session: SessionIndex) -> Result<()>;
+
+    /// Create an empty blockstream for a session (length 0).
+    ///
+    /// Called during provisioning. No-op if the blockstream already exists.
+    fn init_blockstream(&mut self, session: SessionIndex) -> Result<()>;
 }
 
 /// Keypair file storage for session keypair files.
@@ -97,6 +102,10 @@ impl BlockStorage for MemoryStorage {
     }
 
     fn fsync(&self, _session: SessionIndex) -> Result<()> {
+        Ok(())
+    }
+
+    fn init_blockstream(&mut self, session: SessionIndex) -> Result<()> {
         Ok(())
     }
 }
@@ -217,6 +226,15 @@ mod fs_backend {
             let file = File::open(self.blocks_path(session))?;
             file.sync_all()?;
             Ok(())
+        }
+
+        fn init_blockstream(&mut self, session: SessionIndex) -> Result<()> {
+            let path = self.blocks_path(session);
+            match OpenOptions::new().create_new(true).write(true).open(&path) {
+                Ok(_) => Ok(()),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+                Err(e) => Err(e.into()),
+            }
         }
     }
 

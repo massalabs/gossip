@@ -5,6 +5,39 @@ use zeroize::Zeroizing;
 use crate::domain::{block_aead_key_label, block_kdf_salt, block_scope};
 use crate::types::SessionIndex;
 
+/// Derived session keys from a password.
+pub struct SessionKeys {
+    pub sk_wrap_key: Zeroizing<[u8; crypto_aead::KEY_SIZE]>,
+    pub root_aead_key: Zeroizing<[u8; crypto_aead::KEY_SIZE]>,
+}
+
+/// Derive session keys (sk_wrap_key, root_aead_key) from a password and domain.
+pub fn derive_session_keys(domain: &str, password: &[u8]) -> SessionKeys {
+    let salt = crate::domain::password_kdf_salt(domain);
+    let mut root_key = Zeroizing::new([0u8; 32]);
+    crypto_password_kdf::derive(password, salt.as_bytes(), root_key.as_mut());
+
+    let root_kdf_salt = crate::domain::root_kdf_salt(domain);
+    let expander = {
+        let mut extract = crypto_kdf::Extract::new(root_kdf_salt.as_bytes());
+        extract.input_item(root_key.as_ref());
+        extract.finalize()
+    };
+
+    let sk_wrap_label = crate::domain::sk_wrap_key_label(domain);
+    let mut sk_wrap_key = Zeroizing::new([0u8; crypto_aead::KEY_SIZE]);
+    expander.expand(sk_wrap_label.as_bytes(), sk_wrap_key.as_mut());
+
+    let root_aead_label = crate::domain::root_aead_key_label(domain);
+    let mut root_aead_key = Zeroizing::new([0u8; crypto_aead::KEY_SIZE]);
+    expander.expand(root_aead_label.as_bytes(), root_aead_key.as_mut());
+
+    SessionKeys {
+        sk_wrap_key,
+        root_aead_key,
+    }
+}
+
 /// Derive the per-block AEAD key and block scope for a given session and block index.
 ///
 /// Returns `(aead_key, block_scope)` where `block_scope` is the domain-separated
