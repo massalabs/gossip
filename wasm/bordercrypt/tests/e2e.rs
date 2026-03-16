@@ -1,6 +1,6 @@
 //! End-to-end integration tests for bordercrypt v2.
 
-use bordercrypt::storage::{BlockStorage, MemoryStorage};
+use bordercrypt::storage::{BlockStorage, KeypairStorage, MemoryStorage};
 use bordercrypt::{
     PLAINTEXT_SIZE, SESSION_COUNT, SessionIndex, allocate_session, cover_traffic_tick,
     get_global_block_count, provision_storage, read_session_data, shrink_session_data,
@@ -454,5 +454,155 @@ fn e2e_unused_session_survives_other_writes() {
         let ua = unlock_session(&storage, DOMAIN, b"alice").unwrap();
         let ra = read_session_data(&storage, DOMAIN, &ua, 0, 500).unwrap();
         assert_eq!(&*ra, &[0xAB; 500]);
+    });
+}
+
+// --- Plausible deniability & security ---
+
+/// Scenario 17: Provisioned and allocated keypair files must have identical sizes.
+///
+/// This is the key plausible deniability invariant: an observer with disk
+/// access cannot distinguish provisioned (dummy) slots from allocated (real)
+/// slots by file size alone.
+#[test]
+fn e2e_keypair_file_sizes_indistinguishable() {
+    run(|| {
+        let mut storage = MemoryStorage::new();
+        provision_storage(&mut storage).unwrap();
+
+        let provisioned_size = storage
+            .read_keypair(SessionIndex::new(0).unwrap())
+            .unwrap()
+            .len();
+
+        // Allocate one slot
+        let slot = SessionIndex::new(2).unwrap();
+        allocate_session(&mut storage, DOMAIN, slot, b"pw").unwrap();
+
+        // All keypair files must have the same size
+        for i in 0..SESSION_COUNT as u8 {
+            let s = SessionIndex::new(i).unwrap();
+            let size = storage.read_keypair(s).unwrap().len();
+            assert_eq!(
+                size, provisioned_size,
+                "session {i} keypair file size differs — breaks plausible deniability"
+            );
+        }
+    });
+}
+
+/// Scenario 18: Re-allocating a slot invalidates the old password.
+#[test]
+fn e2e_reallocate_slot_invalidates_old_password() {
+    run(|| {
+        let mut storage = MemoryStorage::new();
+        provision_storage(&mut storage).unwrap();
+
+        let slot = SessionIndex::new(0).unwrap();
+        let mut sess = allocate_session(&mut storage, DOMAIN, slot, b"old-pw").unwrap();
+        write_session_data(&mut storage, DOMAIN, &mut sess, 0, b"secret").unwrap();
+
+        // Re-allocate same slot with new password
+        allocate_session(&mut storage, DOMAIN, slot, b"new-pw").unwrap();
+
+        // Old password must fail
+        assert!(unlock_session(&storage, DOMAIN, b"old-pw").is_err());
+
+        // New password works, but old data is gone
+        let new_sess = unlock_session(&storage, DOMAIN, b"new-pw").unwrap();
+        assert_eq!(new_sess.total_data_length, 0);
+    });
+}
+
+// --- Robustness ---
+
+/// Scenario 19: Shrink then grow past the original size.
+///
+/// Freed blocks (now cover) must be correctly overwritten with genuine data.
+#[test]
+fn e2e_shrink_then_grow_past_original() {
+    run(|| {
+        let mut storage = MemoryStorage::new();
+        provision_storage(&mut storage).unwrap();
+
+        let slot = SessionIndex::new(0).unwrap();
+        let mut session = allocate_session(&mut storage, DOMAIN, slot, b"pw").unwrap();
+
+        write_session_data(&mut storage, DOMAIN, &mut session, 0, &[0xAA; 200]).unwrap();
+        shrink_session_data(&mut storage, DOMAIN, &mut session, 50).unwrap();
+
+        // Grow past original 200 bytes
+        let big_data: Vec<u8> = (0..500).map(|i| (i % 256) as u8).collect();
+        write_session_data(&mut storage, DOMAIN, &mut session, 0, &big_data).unwrap();
+
+        let result = read_session_data(&storage, DOMAIN, &session, 0, 500).unwrap();
+        assert_eq!(&*result, &big_data);
+    });
+}
+
+/// Scenario 20: All SESSION_COUNT slots allocated and independently readable.
+#[test]
+fn e2e_all_slots_allocated() {
+    run(|| {
+        let mut storage = MemoryStorage::new();
+        provision_storage(&mut storage).unwrap();
+
+        let passwords: Vec<Vec<u8>> = (0..SESSION_COUNT)
+            .map(|i| format!("password-{i}").into_bytes())
+            .collect();
+
+        for i in 0..SESSION_COUNT as u8 {
+            let slot = SessionIndex::new(i).unwrap();
+            let mut sess =
+                allocate_session(&mut storage, DOMAIN, slot, &passwords[i as usize]).unwrap();
+            let tag = format!("data-from-session-{i}");
+            write_session_data(&mut storage, DOMAIN, &mut sess, 0, tag.as_bytes()).unwrap();
+        }
+
+        for i in 0..SESSION_COUNT as u8 {
+            let sess = unlock_session(&storage, DOMAIN, &passwords[i as usize]).unwrap();
+            assert_eq!(sess.session_index.as_u8(), i);
+            let expected = format!("data-from-session-{i}");
+            let result =
+                read_session_data(&storage, DOMAIN, &sess, 0, expected.len()).unwrap();
+            assert_eq!(&*result, expected.as_bytes());
+        }
+    });
+}
+
+/// Scenario 21: Cover traffic eventually touches all sessions.
+///
+/// The existing test (scenario 15) checks "all changed" after 10 ticks,
+/// but this uses 50 ticks to be statistically robust — with 1 block and
+/// 5 sessions, each tick rerandomizes ALL sessions, so even 1 tick suffices.
+/// We verify no session is ever skipped.
+#[test]
+fn e2e_cover_traffic_touches_all_sessions() {
+    run(|| {
+        let mut storage = MemoryStorage::new();
+        provision_storage(&mut storage).unwrap();
+
+        let slot = SessionIndex::new(0).unwrap();
+        let mut session = allocate_session(&mut storage, DOMAIN, slot, b"pw").unwrap();
+        write_session_data(&mut storage, DOMAIN, &mut session, 0, b"x").unwrap();
+
+        let mut before = Vec::new();
+        for i in 0..SESSION_COUNT as u8 {
+            let s = SessionIndex::new(i).unwrap();
+            before.push(storage.read_block(s, 0).unwrap());
+        }
+
+        for _ in 0..50 {
+            cover_traffic_tick(&mut storage, DOMAIN).unwrap();
+        }
+
+        for i in 0..SESSION_COUNT as u8 {
+            let s = SessionIndex::new(i).unwrap();
+            let after = storage.read_block(s, 0).unwrap();
+            assert_ne!(
+                *after, *before[i as usize],
+                "session {i} was never touched by cover traffic"
+            );
+        }
     });
 }
