@@ -22,6 +22,31 @@ pub struct KeypairFile {
 }
 
 impl KeypairFile {
+    /// Build a keypair file by AEAD-wrapping a secret key.
+    ///
+    /// Generates a random nonce and encrypts `sk_plaintext` under
+    /// `wrap_key` with the given `aad`. Works for both real allocations
+    /// (password-derived key, domain AAD) and dummy provisioning
+    /// (throwaway key, empty AAD).
+    pub fn build_wrapped(
+        version: u32,
+        pq_pk_bytes: Vec<u8>,
+        wrap_key: &crypto_aead::Key,
+        sk_plaintext: &[u8],
+        aad: &[u8],
+    ) -> Self {
+        let mut sk_nonce = [0u8; crypto_aead::NONCE_SIZE];
+        rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut sk_nonce);
+        let nonce = crypto_aead::Nonce::from(sk_nonce);
+        let sk_ct = crypto_aead::encrypt(wrap_key, &nonce, sk_plaintext, aad);
+        Self {
+            version,
+            pq_pk: pq_pk_bytes,
+            sk_nonce,
+            sk_ct,
+        }
+    }
+
     /// Serialize to binary format.
     #[must_use]
     pub fn serialize(&self) -> Vec<u8> {
