@@ -21,16 +21,20 @@ export const Onboarding: React.FC<{
   onShowImportChange: (show: boolean) => void;
 }> = ({ showImport, onShowImportChange }) => {
   const [showAccountCreation, setShowAccountCreation] = useState(false);
+  const [skipDevPicker, setSkipDevPicker] = useState(false);
 
   // Dev mode: show account picker instead of onboarding
   const devAccounts = getDevAccounts();
-  if (devAccounts.length > 0) {
+  if (devAccounts.length > 0 && !skipDevPicker) {
     const DevAccountPicker = React.lazy(
       () => import('../components/dev/DevAccountPicker')
     );
     return (
       <React.Suspense fallback={null}>
-        <DevAccountPicker accounts={devAccounts} />
+        <DevAccountPicker
+          accounts={devAccounts}
+          onSkip={() => setSkipDevPicker(true)}
+        />
       </React.Suspense>
     );
   }

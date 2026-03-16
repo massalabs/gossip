@@ -22,6 +22,7 @@ import { useGossipSdk } from '../hooks/useGossipSdk';
 import { isDifferentDay } from '../utils/timeUtils';
 import { useUiStore } from '../stores/uiStore';
 import SessionIssueBanner from '../components/discussions/SessionIssueBanner';
+import SelectionHeader from '../components/discussions/SelectionHeader';
 
 // Debug test message constants
 const TEST_MESSAGE_COUNT = 50;
@@ -134,6 +135,108 @@ const Discussion: React.FC = () => {
   // Track previous contact userId to prevent unnecessary updates
   const prevContactUserIdRef = useRef<string | null>(null);
 
+  // Multi-select state
+  const [selectedMessageIds, setSelectedMessageIds] = useState<Set<number>>(
+    new Set()
+  );
+  const isSelecting = selectedMessageIds.size > 0;
+  const selectedMessages = React.useMemo(
+    () =>
+      messages.filter(
+        // Keep this as != null (not truthy) so message id 0 remains valid.
+        m => m.id != null && selectedMessageIds.has(m.id)
+      ),
+    [messages, selectedMessageIds]
+  );
+  const canDeleteSelected = React.useMemo(
+    () =>
+      selectedMessages.length > 0 &&
+      selectedMessages.every(
+        message => message.direction === MessageDirection.OUTGOING
+      ),
+    [selectedMessages]
+  );
+
+  const handleToggleSelect = useCallback((messageId: number) => {
+    setSelectedMessageIds(prev => {
+      const next = new Set(prev);
+      if (next.has(messageId)) {
+        next.delete(messageId);
+      } else {
+        next.add(messageId);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleClearSelection = useCallback(() => {
+    setSelectedMessageIds(new Set());
+  }, []);
+
+  const handleCopySelected = useCallback(async () => {
+    const selected = messages
+      // Keep this as != null (not truthy) so message id 0 remains valid.
+      .filter(m => m.id != null && selectedMessageIds.has(m.id))
+      .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+
+    const contactName = discussion?.customName || contact?.name || 'Unknown';
+    const text = selected
+      .map(m => {
+        const sender =
+          m.direction === MessageDirection.OUTGOING ? 'You' : contactName;
+        return `${sender}\n${m.content}`;
+      })
+      .join('\n\n');
+
+    try {
+      await navigator.clipboard.writeText(text);
+      handleClearSelection();
+    } catch {
+      toast.error('Failed to copy selected messages');
+    }
+  }, [messages, selectedMessageIds, discussion, contact, handleClearSelection]);
+
+  const handleDeleteSelected = useCallback(async () => {
+    if (!canDeleteSelected || selectedMessages.length === 0) return;
+
+    const failedMessageIds: number[] = [];
+    const deletedMessageIds: number[] = [];
+    for (const message of selectedMessages) {
+      if (message.id == null) continue;
+      try {
+        const deleted = await gossip.messages.deleteMessage(message.id);
+        if (!deleted) {
+          failedMessageIds.push(message.id);
+          console.error('[multi-delete] deleteMessage returned false', {
+            messageId: message.id,
+          });
+        } else {
+          deletedMessageIds.push(message.id);
+        }
+      } catch (error) {
+        failedMessageIds.push(message.id);
+        console.error('[multi-delete] deleteMessage threw', {
+          messageId: message.id,
+          error,
+        });
+      }
+    }
+
+    if (failedMessageIds.length > 0) {
+      console.error('[multi-delete] partial failure summary', {
+        selectedCount: selectedMessages.length,
+        deletedCount: deletedMessageIds.length,
+        failedCount: failedMessageIds.length,
+        failedMessageIds,
+      });
+    }
+
+    handleClearSelection();
+    if (failedMessageIds.length > 0) {
+      toast.error('Failed to delete some selected messages');
+    }
+  }, [canDeleteSelected, selectedMessages, gossip, handleClearSelection]);
+
   // Reply state
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
   const [editingMessage, setEditingMessage] = useState<Message | null>(null);
@@ -160,6 +263,20 @@ const Discussion: React.FC = () => {
   // Ref to the MessageList for imperative scrolling
   const messageListRef = useRef<MessageListHandle>(null);
   const messageListContainerRef = useRef<HTMLDivElement>(null);
+
+  // Measure input area height so ScrollToBottomButton sits just above it
+  const inputAreaRef = useRef<HTMLDivElement>(null);
+  const [inputAreaHeight, setInputAreaHeight] = useState(0);
+  useEffect(() => {
+    const el = inputAreaRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([entry]) => {
+      const nextHeight = entry.contentRect.height;
+      setInputAreaHeight(prev => (prev === nextHeight ? prev : nextHeight));
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   // Find Virtuoso's scroll container and set up header scroll detection
   useEffect(() => {
@@ -250,6 +367,11 @@ const Discussion: React.FC = () => {
     }
   }, [contact?.userId, setCurrentContact]);
 
+  // Reset message selection when switching discussions
+  useEffect(() => {
+    handleClearSelection();
+  }, [contact?.userId, handleClearSelection]);
+
   // Scroll to bottom utility - uses the virtuoso ref
   const scrollToBottom = useCallback(() => {
     messageListRef.current?.scrollToBottom();
@@ -257,6 +379,7 @@ const Discussion: React.FC = () => {
 
   const handleSendMessage = useCallback(
     async (text: string, replyToId?: number) => {
+      if (isSelecting) return;
       if (!contact?.userId) return;
       try {
         await sendMessage(
@@ -279,12 +402,15 @@ const Discussion: React.FC = () => {
         console.error('Failed to send message:', error);
       }
     },
-    [sendMessage, contact?.userId, forwardFromMessageId]
+    [isSelecting, sendMessage, contact?.userId, forwardFromMessageId]
   );
 
   const handleReplyToMessage = useCallback((message: Message) => {
     setReplyingTo(message);
     setEditingMessage(null);
+    // Clear forward preview — reply and forward are mutually exclusive
+    setForwardFromMessageId(undefined);
+    setForwardPreviewText(null);
   }, []);
 
   const handleForwardMessage = useCallback(
@@ -470,6 +596,8 @@ const Discussion: React.FC = () => {
         return;
       }
 
+      // Clear reply — reply and forward are mutually exclusive
+      setReplyingTo(null);
       const original = await gossip.messages.get(forwardFromMessageId);
       if (!cancelled) {
         setForwardPreviewText(original?.content ?? null);
@@ -542,12 +670,22 @@ const Discussion: React.FC = () => {
     >
       {/* Header stays fixed in place — shifted content slides behind it */}
       <div className="relative z-10">
-        <DiscussionHeader
-          contact={contact}
-          discussion={discussion}
-          onBack={onBack}
-          onSearchToggle={() => setIsSearchOpen(prev => !prev)}
-        />
+        {isSelecting ? (
+          <SelectionHeader
+            count={selectedMessageIds.size}
+            onClear={handleClearSelection}
+            onCopy={handleCopySelected}
+            onDelete={handleDeleteSelected}
+            canDelete={canDeleteSelected}
+          />
+        ) : (
+          <DiscussionHeader
+            contact={contact}
+            discussion={discussion}
+            onBack={onBack}
+            onSearchToggle={() => setIsSearchOpen(prev => !prev)}
+          />
+        )}
         <SessionIssueBanner
           discussion={discussion}
           outgoingSentCount={outgoingSentCount}
@@ -585,12 +723,16 @@ const Discussion: React.FC = () => {
             onScrollToMessage={handleScrollToMessage}
             onAtBottomChange={handleAtBottomChange}
             highlightedMessageId={searchHighlightId}
+            isSelecting={isSelecting}
+            selectedMessageIds={selectedMessageIds}
+            onToggleSelect={handleToggleSelect}
           />
         </div>
 
         <ScrollToBottomButton
           onClick={scrollToBottom}
           isVisible={showScrollToBottom}
+          bottomOffset={isSelecting ? 0 : inputAreaHeight}
         />
 
         {/* Debug test button - only show when debug mode is enabled */}
@@ -609,19 +751,34 @@ const Discussion: React.FC = () => {
           </div>
         )}
 
-        <MessageInput
-          onSend={handleSendMessage}
-          replyingTo={replyingTo}
-          onCancelReply={handleCancelReply}
-          initialValue={forwardFromMessageId ? undefined : inputPrefill}
-          forwardPreview={forwardFromMessageId ? forwardPreviewText : null}
-          forwardMode={forwardPreviewMode}
-          onCancelForward={handleCancelForward}
-          onFocus={handleInputFocus}
-          editingMessage={editingMessage}
-          onCancelEdit={handleCancelEdit}
-          onConfirmEdit={handleConfirmEdit}
-        />
+        <div
+          ref={inputAreaRef}
+          className={`transition-all duration-300 ease-out ${
+            isSelecting ? 'pointer-events-none opacity-0' : 'opacity-100'
+          }`}
+          style={{
+            transform: isSelecting
+              ? `translateY(${inputAreaHeight}px)`
+              : 'translateY(0)',
+            marginBottom: isSelecting ? `-${inputAreaHeight}px` : '0px',
+          }}
+          aria-hidden={isSelecting}
+        >
+          <MessageInput
+            onSend={handleSendMessage}
+            disabled={isSelecting}
+            replyingTo={replyingTo}
+            onCancelReply={handleCancelReply}
+            initialValue={forwardFromMessageId ? undefined : inputPrefill}
+            forwardPreview={forwardFromMessageId ? forwardPreviewText : null}
+            forwardMode={forwardPreviewMode}
+            onCancelForward={handleCancelForward}
+            onFocus={handleInputFocus}
+            editingMessage={editingMessage}
+            onCancelEdit={handleCancelEdit}
+            onConfirmEdit={handleConfirmEdit}
+          />
+        </div>
       </div>
     </div>
   );

@@ -109,6 +109,9 @@ interface MessageRendererProps {
   onScrollToMessage?: (messageId: number) => void;
   contact?: Pick<Contact, 'name' | 'avatar'>;
   isHighlighted?: boolean;
+  isSelecting?: boolean;
+  isSelected?: boolean;
+  onToggleSelect?: (messageId: number) => void;
 }
 
 export const MessageRenderer: React.FC<MessageRendererProps> = ({
@@ -122,11 +125,16 @@ export const MessageRenderer: React.FC<MessageRendererProps> = ({
   onScrollToMessage,
   contact,
   isHighlighted,
+  isSelecting,
+  isSelected,
+  onToggleSelect,
 }) => {
   const isIncoming = message.direction === MessageDirection.INCOMING;
 
   return (
-    <div className="px-4 md:px-6 lg:px-8">
+    <div
+      className={`px-4 md:px-6 lg:px-8 transition-colors duration-150 ${isSelecting && isSelected ? 'bg-accent/10' : ''}`}
+    >
       <MessageItem
         id={`message-${message.id}`}
         message={message}
@@ -141,6 +149,9 @@ export const MessageRenderer: React.FC<MessageRendererProps> = ({
         showAvatar={isIncoming && groupInfo.isLastInGroup}
         contact={isIncoming ? contact : undefined}
         isHighlighted={isHighlighted}
+        isSelecting={isSelecting}
+        isSelected={isSelected}
+        onToggleSelect={onToggleSelect}
       />
     </div>
   );

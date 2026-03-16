@@ -57,6 +57,9 @@ interface MessageListProps {
   onScrollToMessage?: (messageId: number) => void;
   onAtBottomChange?: (atBottom: boolean) => void;
   highlightedMessageId?: number | null;
+  isSelecting?: boolean;
+  selectedMessageIds?: Set<number>;
+  onToggleSelect?: (messageId: number) => void;
 }
 
 export interface MessageListHandle {
@@ -83,6 +86,9 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
       onScrollToMessage,
       onAtBottomChange,
       highlightedMessageId,
+      isSelecting,
+      selectedMessageIds,
+      onToggleSelect,
     },
     ref
   ) => {
@@ -216,8 +222,11 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
             return item.key;
           case 'spacer':
             return 'spacer';
-          case 'message':
-            return `msg-${item.message.id}`;
+          case 'message': {
+            if (item.message.id != null) return `msg-${item.message.id}`;
+            const tempKey = `${item.message.timestamp.getTime()}-${item.message.direction}-${item.message.content.slice(0, 16)}`;
+            return `msg-temp-${tempKey}`;
+          }
           default:
             return index;
         }
@@ -250,7 +259,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
           case 'message':
             return (
               <MessageRenderer
-                key={item.message.id}
+                key={item.message.id ?? `temp-msg-${index}`}
                 message={item.message}
                 showTimestamp={item.showTimestamp}
                 groupInfo={item.groupInfo}
@@ -261,6 +270,12 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
                 onScrollToMessage={onScrollToMessage}
                 contact={contact}
                 isHighlighted={item.message.id === highlightedMessageId}
+                isSelecting={isSelecting}
+                isSelected={
+                  item.message.id != null &&
+                  selectedMessageIds?.has(item.message.id)
+                }
+                onToggleSelect={onToggleSelect}
               />
             );
 
@@ -277,6 +292,9 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
         onScrollToMessage,
         contact,
         highlightedMessageId,
+        isSelecting,
+        selectedMessageIds,
+        onToggleSelect,
       ]
     );
 

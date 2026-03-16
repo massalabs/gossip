@@ -2,13 +2,16 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import React from 'react';
+import { act } from 'react';
 import { render } from 'vitest-browser-react';
 import { page, userEvent } from 'vitest/browser';
 import {
   MessageDirection,
   MessageStatus,
+  MessageType,
   type Message,
 } from '@massalabs/gossip-sdk';
+import { Capacitor } from '@capacitor/core';
 
 vi.mock('../../../src/hooks/useGossipSdk', () => ({
   useGossipSdk: () => ({ isSessionOpen: false }),
@@ -117,6 +120,24 @@ describe('MessageItem', () => {
       const btn = page.getByRole('button', { name: 'Message actions' });
       await expect.element(btn).toBeInTheDocument();
     });
+
+    it('does not expose actions for deleted messages', async () => {
+      render(
+        <MessageItem
+          message={makeMessage({ type: MessageType.DELETED })}
+          onReplyTo={vi.fn()}
+          onForward={vi.fn()}
+        />
+      );
+
+      await expect
+        .element(page.getByRole('button', { name: 'Tap for actions' }))
+        .not.toBeInTheDocument();
+      await expect
+        .element(page.getByRole('button', { name: 'Message actions' }))
+        .not.toBeInTheDocument();
+      await expect.element(page.getByRole('menu')).not.toBeInTheDocument();
+    });
   });
 
   describe('swipe gestures', () => {
@@ -133,47 +154,391 @@ describe('MessageItem', () => {
       const el = page.getByRole('listitem').element() as HTMLElement;
 
       // Simulate left swipe
-      el.dispatchEvent(
-        new TouchEvent('touchstart', {
-          bubbles: true,
-          touches: [
-            new Touch({
-              identifier: 0,
-              target: el,
-              clientX: 200,
-              clientY: 100,
-            }),
-          ],
-        })
-      );
-      el.dispatchEvent(
-        new TouchEvent('touchmove', {
-          bubbles: true,
-          touches: [
-            new Touch({
-              identifier: 0,
-              target: el,
-              clientX: 100,
-              clientY: 100,
-            }),
-          ],
-        })
-      );
-      el.dispatchEvent(
-        new TouchEvent('touchend', {
-          bubbles: true,
-          changedTouches: [
-            new Touch({
-              identifier: 0,
-              target: el,
-              clientX: 100,
-              clientY: 100,
-            }),
-          ],
-        })
-      );
+      await act(async () => {
+        el.dispatchEvent(
+          new TouchEvent('touchstart', {
+            bubbles: true,
+            touches: [
+              new Touch({
+                identifier: 0,
+                target: el,
+                clientX: 200,
+                clientY: 100,
+              }),
+            ],
+          })
+        );
+        el.dispatchEvent(
+          new TouchEvent('touchmove', {
+            bubbles: true,
+            touches: [
+              new Touch({
+                identifier: 0,
+                target: el,
+                clientX: 100,
+                clientY: 100,
+              }),
+            ],
+          })
+        );
+        el.dispatchEvent(
+          new TouchEvent('touchend', {
+            bubbles: true,
+            changedTouches: [
+              new Touch({
+                identifier: 0,
+                target: el,
+                clientX: 100,
+                clientY: 100,
+              }),
+            ],
+          })
+        );
+      });
 
       expect(onForward).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('multi-select', () => {
+    it('does not toggle selection for deleted messages', async () => {
+      const onToggleSelect = vi.fn();
+      render(
+        <MessageItem
+          message={makeMessage({ type: MessageType.DELETED })}
+          isSelecting={true}
+          isSelected={false}
+          onToggleSelect={onToggleSelect}
+        />
+      );
+
+      await userEvent.click(page.getByRole('listitem'));
+      expect(onToggleSelect).not.toHaveBeenCalled();
+    });
+
+    it('does not immediately deselect after Android long-press', async () => {
+      const platformSpy = vi
+        .spyOn(Capacitor, 'getPlatform')
+        .mockReturnValue('android');
+      const onToggleSelect = vi.fn();
+
+      const SelectionHarness: React.FC = () => {
+        const [selected, setSelected] = React.useState<Set<number>>(new Set());
+        const toggle = (messageId: number) => {
+          onToggleSelect(messageId);
+          setSelected(prev => {
+            const next = new Set(prev);
+            if (next.has(messageId)) {
+              next.delete(messageId);
+            } else {
+              next.add(messageId);
+            }
+            return next;
+          });
+        };
+
+        return (
+          <MessageItem
+            message={makeMessage()}
+            isSelecting={selected.size > 0}
+            isSelected={selected.has(1)}
+            onToggleSelect={toggle}
+          />
+        );
+      };
+
+      render(<SelectionHarness />);
+
+      const row = page.getByRole('listitem').element() as HTMLElement;
+      const bubble = page
+        .getByRole('button', {
+          name: 'Tap for actions',
+        })
+        .element() as HTMLElement;
+
+      await act(async () => {
+        row.dispatchEvent(
+          new TouchEvent('touchstart', {
+            bubbles: true,
+            touches: [
+              new Touch({
+                identifier: 0,
+                target: row,
+                clientX: 120,
+                clientY: 80,
+              }),
+            ],
+          })
+        );
+        await new Promise(resolve => setTimeout(resolve, 550));
+        row.dispatchEvent(
+          new TouchEvent('touchend', {
+            bubbles: true,
+            changedTouches: [
+              new Touch({
+                identifier: 0,
+                target: row,
+                clientX: 120,
+                clientY: 80,
+              }),
+            ],
+          })
+        );
+
+        // Emulate the synthesized click that can happen immediately after
+        // long-press on Android.
+        bubble.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+
+      expect(onToggleSelect).toHaveBeenCalledTimes(1);
+      platformSpy.mockRestore();
+    });
+
+    it('does not toggle from checkbox during post-long-press suppression window', async () => {
+      const platformSpy = vi
+        .spyOn(Capacitor, 'getPlatform')
+        .mockReturnValue('android');
+      const onToggleSelect = vi.fn();
+
+      const SelectionHarness: React.FC = () => {
+        const [selected, setSelected] = React.useState<Set<number>>(new Set());
+        const toggle = (messageId: number) => {
+          onToggleSelect(messageId);
+          setSelected(prev => {
+            const next = new Set(prev);
+            if (next.has(messageId)) {
+              next.delete(messageId);
+            } else {
+              next.add(messageId);
+            }
+            return next;
+          });
+        };
+
+        return (
+          <MessageItem
+            message={makeMessage()}
+            isSelecting={selected.size > 0}
+            isSelected={selected.has(1)}
+            onToggleSelect={toggle}
+          />
+        );
+      };
+
+      render(<SelectionHarness />);
+      const row = page.getByRole('listitem').element() as HTMLElement;
+
+      await act(async () => {
+        row.dispatchEvent(
+          new TouchEvent('touchstart', {
+            bubbles: true,
+            touches: [
+              new Touch({
+                identifier: 0,
+                target: row,
+                clientX: 120,
+                clientY: 80,
+              }),
+            ],
+          })
+        );
+        await new Promise(resolve => setTimeout(resolve, 550));
+        row.dispatchEvent(
+          new TouchEvent('touchend', {
+            bubbles: true,
+            changedTouches: [
+              new Touch({
+                identifier: 0,
+                target: row,
+                clientX: 120,
+                clientY: 80,
+              }),
+            ],
+          })
+        );
+      });
+
+      const checkbox = row.querySelector(
+        '[data-testid="select-checkbox"]'
+      ) as HTMLElement;
+      checkbox.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+      expect(onToggleSelect).toHaveBeenCalledTimes(1);
+      platformSpy.mockRestore();
+    });
+
+    it('ignores duplicate long-press trigger in the same gesture window', async () => {
+      const platformSpy = vi
+        .spyOn(Capacitor, 'getPlatform')
+        .mockReturnValue('android');
+      const onToggleSelect = vi.fn();
+
+      const SelectionHarness: React.FC = () => {
+        const [selected, setSelected] = React.useState<Set<number>>(new Set());
+        const toggle = (messageId: number) => {
+          onToggleSelect(messageId);
+          setSelected(prev => {
+            const next = new Set(prev);
+            if (next.has(messageId)) {
+              next.delete(messageId);
+            } else {
+              next.add(messageId);
+            }
+            return next;
+          });
+        };
+
+        return (
+          <MessageItem
+            message={makeMessage()}
+            isSelecting={selected.size > 0}
+            isSelected={selected.has(1)}
+            onToggleSelect={toggle}
+            onReplyTo={vi.fn()}
+          />
+        );
+      };
+
+      render(<SelectionHarness />);
+      const row = page.getByRole('listitem').element() as HTMLElement;
+
+      await act(async () => {
+        row.dispatchEvent(
+          new TouchEvent('touchstart', {
+            bubbles: true,
+            touches: [
+              new Touch({
+                identifier: 0,
+                target: row,
+                clientX: 120,
+                clientY: 80,
+              }),
+            ],
+          })
+        );
+        await new Promise(resolve => setTimeout(resolve, 550));
+        row.dispatchEvent(
+          new TouchEvent('touchend', {
+            bubbles: true,
+            changedTouches: [
+              new Touch({
+                identifier: 0,
+                target: row,
+                clientX: 120,
+                clientY: 80,
+              }),
+            ],
+          })
+        );
+
+        // Simulate an extra contextmenu-triggered long-press callback.
+        row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true }));
+      });
+
+      expect(onToggleSelect).toHaveBeenCalledTimes(1);
+      platformSpy.mockRestore();
+    });
+
+    it('shows selection checkbox when selecting is enabled', async () => {
+      render(
+        <MessageItem
+          message={makeMessage()}
+          isSelecting={true}
+          isSelected={false}
+          onToggleSelect={vi.fn()}
+        />
+      );
+
+      const listItem = page.getByRole('listitem').element() as HTMLElement;
+      const checkbox = listItem.querySelector(
+        '[data-testid="select-checkbox"]'
+      ) as HTMLElement | null;
+      expect(checkbox).toBeTruthy();
+    });
+
+    it('toggles selection on bubble click and does not open context menu', async () => {
+      const onToggleSelect = vi.fn();
+      render(
+        <MessageItem
+          message={makeMessage()}
+          isSelecting={true}
+          isSelected={false}
+          onToggleSelect={onToggleSelect}
+          onReplyTo={vi.fn()}
+          onForward={vi.fn()}
+        />
+      );
+
+      await userEvent.click(
+        page.getByRole('button', { name: 'Tap for actions' })
+      );
+
+      expect(onToggleSelect).toHaveBeenCalledWith(1);
+      await expect.element(page.getByRole('menu')).not.toBeInTheDocument();
+    });
+
+    it('toggles selection on row click in selecting mode', async () => {
+      const onToggleSelect = vi.fn();
+      render(
+        <MessageItem
+          message={makeMessage()}
+          isSelecting={true}
+          isSelected={false}
+          onToggleSelect={onToggleSelect}
+        />
+      );
+
+      await userEvent.click(page.getByRole('listitem'));
+      expect(onToggleSelect).toHaveBeenCalledWith(1);
+    });
+
+    it('does not call onToggleSelect when message.id is missing', async () => {
+      const onToggleSelect = vi.fn();
+      render(
+        <MessageItem
+          message={makeMessage({ id: undefined })}
+          isSelecting={true}
+          isSelected={false}
+          onToggleSelect={onToggleSelect}
+        />
+      );
+
+      await userEvent.click(
+        page.getByRole('button', { name: 'Tap for actions' })
+      );
+      await userEvent.click(page.getByRole('listitem'));
+      expect(onToggleSelect).not.toHaveBeenCalled();
+    });
+
+    it('calls onToggleSelect when message.id is 0', async () => {
+      const onToggleSelect = vi.fn();
+      render(
+        <MessageItem
+          message={makeMessage({ id: 0 })}
+          isSelecting={true}
+          isSelected={false}
+          onToggleSelect={onToggleSelect}
+        />
+      );
+
+      await userEvent.click(page.getByRole('listitem'));
+      expect(onToggleSelect).toHaveBeenCalledWith(0);
+    });
+
+    it('hides desktop message actions button while selecting', async () => {
+      render(
+        <MessageItem
+          message={makeMessage()}
+          isSelecting={true}
+          isSelected={false}
+          onToggleSelect={vi.fn()}
+          onReplyTo={vi.fn()}
+        />
+      );
+
+      await expect
+        .element(page.getByRole('button', { name: 'Message actions' }))
+        .not.toBeInTheDocument();
     });
   });
 });

@@ -49,6 +49,7 @@ const SWIPE_INDICATOR_THRESHOLD_OUTGOING = 6;
 // Touch slop - prevents unintentional triggers when scrolling
 const TOUCH_SLOP = 15;
 const TOUCH_SLOP_OUTGOING = 12;
+const POST_GESTURE_SUPPRESS_MS = 700;
 
 interface MessageItemProps {
   message: Message;
@@ -64,6 +65,9 @@ interface MessageItemProps {
   showAvatar?: boolean;
   contact?: Pick<Contact, 'name' | 'avatar'>;
   isHighlighted?: boolean;
+  isSelecting?: boolean;
+  isSelected?: boolean;
+  onToggleSelect?: (messageId: number) => void;
 }
 
 const MessageItem: React.FC<MessageItemProps> = ({
@@ -80,12 +84,15 @@ const MessageItem: React.FC<MessageItemProps> = ({
   showAvatar = false,
   contact,
   isHighlighted = false,
+  isSelecting = false,
+  isSelected = false,
+  onToggleSelect,
 }) => {
   const sdk = useGossipSdk();
-  const canReply = !!onReplyTo;
-  const canForward = !!onForward;
   const isOutgoing = message.direction === MessageDirection.OUTGOING;
   const isDeleted = message.type === MessageType.DELETED;
+  const canReply = !!onReplyTo && !isDeleted;
+  const canForward = !!onForward && !isDeleted;
   const isEdited =
     !!message.metadata &&
     (message.metadata as { edited?: boolean }).edited === true;
@@ -141,7 +148,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
   const kbHeightSnapshotRef = useRef(0);
 
   const openContextMenu = useCallback(() => {
-    if (!bubbleRef.current || contextMenuOpenRef.current) return;
+    if (!bubbleRef.current || contextMenuOpenRef.current || isDeleted) return;
     const rect = bubbleRef.current.getBoundingClientRect();
     const itemCount =
       (canReply && !isDeleted ? 1 : 0) +
@@ -255,6 +262,10 @@ const MessageItem: React.FC<MessageItemProps> = ({
   // Text selection on long press
   const [isTextSelectable, setIsTextSelectable] = useState(false);
   const longPressPosRef = useRef<{ x: number; y: number } | null>(null);
+  // Suppress click after gestures (swipe / long-press / scroll)
+  const suppressClickRef = useRef(false);
+  const suppressClicksUntilRef = useRef(0);
+  const lastLongPressAtRef = useRef(0);
 
   const enableTextSelection = useCallback(() => {
     if (!bubbleRef.current || contextMenuOpenRef.current) return;
@@ -316,9 +327,37 @@ const MessageItem: React.FC<MessageItemProps> = ({
     };
   }, [isTextSelectable, clearTextSelection]);
 
+  const handleLongPress = useCallback(() => {
+    if (isDeleted) return;
+    const now = Date.now();
+    // Some Android devices can trigger long-press callback twice for one gesture
+    // (timer + contextmenu path). Ignore duplicates in a short window.
+    if (now - lastLongPressAtRef.current < POST_GESTURE_SUPPRESS_MS) {
+      return;
+    }
+    lastLongPressAtRef.current = now;
+
+    // Guard against Android synthesized clicks firing right after long-press.
+    suppressClickRef.current = true;
+    suppressClicksUntilRef.current = now + POST_GESTURE_SUPPRESS_MS;
+
+    if (isSelecting && isSelected) {
+      enableTextSelection();
+    } else {
+      if (message.id != null) onToggleSelect?.(message.id);
+    }
+  }, [
+    isSelecting,
+    isSelected,
+    enableTextSelection,
+    onToggleSelect,
+    message.id,
+    isDeleted,
+  ]);
+
   const isAndroid = Capacitor.getPlatform() === 'android';
   const longPress = useLongPress({
-    onLongPress: enableTextSelection,
+    onLongPress: handleLongPress,
     // On Android, don't preventDefault on touchEnd — it interferes with native selection handles
     preventDefaultOnEnd: !isAndroid,
   });
@@ -327,17 +366,18 @@ const MessageItem: React.FC<MessageItemProps> = ({
   // is active so the browser shows selection handles.
   const handleContextMenu = useCallback(
     (e: React.MouseEvent) => {
+      if (isDeleted) {
+        e.preventDefault();
+        return;
+      }
       if (isAndroid && longPress.longPressTriggered.current) {
         // Don't prevent default — let native selection handles appear
         return;
       }
       longPress.onContextMenu(e);
     },
-    [isAndroid, longPress]
+    [isAndroid, longPress, isDeleted]
   );
-  // Suppress click after gestures (swipe / long-press / scroll)
-  const suppressClickRef = useRef(false);
-
   // Context menu items — depend on stable scalars, not the full message object
   const contextMenuItems = useMemo<MessageContextMenuItem[]>(() => {
     const items: MessageContextMenuItem[] = [];
@@ -460,36 +500,56 @@ const MessageItem: React.FC<MessageItemProps> = ({
     sdk,
   ]);
 
-  const handleBubbleClick = useCallback(() => {
-    if (suppressClickRef.current) {
-      suppressClickRef.current = false;
-      return;
-    }
-    if (isTextSelectable) {
-      clearTextSelection();
-      return;
-    }
-    openContextMenu();
-  }, [openContextMenu, isTextSelectable, clearTextSelection]);
+  const handleBubbleClick = useCallback(
+    (e: React.MouseEvent) => {
+      if (isDeleted) return;
+      const inSuppressionWindow = Date.now() < suppressClicksUntilRef.current;
+      if (suppressClickRef.current || inSuppressionWindow) {
+        // After a long-press/swipe we must consume this click here; otherwise it
+        // bubbles to the row and toggles selection back immediately on some Android devices.
+        e.stopPropagation();
+        suppressClickRef.current = false;
+        return;
+      }
+      if (isSelecting) {
+        // Let the row onClick handle selection toggling to keep one toggle path.
+        return;
+      }
+      if (isTextSelectable) {
+        clearTextSelection();
+        return;
+      }
+      openContextMenu();
+    },
+    [
+      openContextMenu,
+      isTextSelectable,
+      clearTextSelection,
+      isSelecting,
+      isDeleted,
+    ]
+  );
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
+      if (isDeleted) return;
       if (e.key === 'F10' && e.shiftKey) {
         e.preventDefault();
         openContextMenu();
       }
     },
-    [openContextMenu]
+    [openContextMenu, isDeleted]
   );
 
   const handleTouchStart = useCallback(
     (e: React.TouchEvent) => {
+      if (isDeleted) return;
       // Snapshot keyboard height before it can dismiss during long-press delay
       kbHeightSnapshotRef.current = getKeyboardHeight();
       const touch = e.touches[0];
       longPressPosRef.current = { x: touch.clientX, y: touch.clientY };
       longPress.onTouchStart(e);
-      if (isTextSelectable || (!canReply && !canForward)) return;
+      if (isSelecting || isTextSelectable || (!canReply && !canForward)) return;
       touchStartX.current = touch.clientX;
       touchStartY.current = touch.clientY;
       isSwiping.current = false;
@@ -498,11 +558,12 @@ const MessageItem: React.FC<MessageItemProps> = ({
       hasTriggeredHaptic.current = false;
       setIsAnimatingBack(false);
     },
-    [isTextSelectable, canReply, canForward, longPress]
+    [isSelecting, isTextSelectable, canReply, canForward, longPress, isDeleted]
   );
 
   const handleTouchMove = useCallback(
     (e: React.TouchEvent) => {
+      if (isDeleted) return;
       longPress.onTouchMove(e);
       if (!canReply && !canForward) return;
       if (touchStartX.current === null || touchStartY.current === null) return;
@@ -554,11 +615,12 @@ const MessageItem: React.FC<MessageItemProps> = ({
         setSwipeOffset(0);
       }
     },
-    [canReply, canForward, isOutgoing, longPress]
+    [canReply, canForward, isOutgoing, longPress, isDeleted]
   );
 
   const handleTouchEnd = useCallback(
     (e: React.TouchEvent) => {
+      if (isDeleted) return;
       longPress.onTouchEnd(e);
 
       if (!canReply && !canForward) {
@@ -573,6 +635,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
       // If long-press fired, suppress tap and reset
       if (longPress.longPressTriggered.current) {
         suppressClickRef.current = true;
+        suppressClicksUntilRef.current = Date.now() + POST_GESTURE_SUPPRESS_MS;
         setIsAnimatingBack(true);
         swipeOffsetRef.current = 0;
         setSwipeOffset(0);
@@ -597,6 +660,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
       // Suppress tap after any swipe gesture
       if (touchSlopExceeded.current || isSwiping.current) {
         suppressClickRef.current = true;
+        suppressClicksUntilRef.current = Date.now() + POST_GESTURE_SUPPRESS_MS;
       }
 
       // Animate back with spring effect
@@ -613,7 +677,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
       if (animTimerRef.current) clearTimeout(animTimerRef.current);
       animTimerRef.current = setTimeout(() => setIsAnimatingBack(false), 300);
     },
-    [canReply, canForward, isOutgoing, onReplyTo, message, longPress]
+    [canReply, canForward, isOutgoing, onReplyTo, message, longPress, isDeleted]
   );
 
   const handleTouchCancel = useCallback(() => {
@@ -721,7 +785,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
   return (
     <div
       id={id}
-      className={`flex items-end gap-1 ${isOutgoing ? 'justify-end' : 'justify-start'} group relative ${spacingClass} ${isHighlighted ? 'search-highlight' : ''}`}
+      className={`flex items-end gap-1 ${isOutgoing ? 'justify-end' : 'justify-start'} group relative ${spacingClass} ${isHighlighted ? 'search-highlight' : ''} ${isSelecting ? 'cursor-pointer pl-8' : 'pl-0'} transition-[padding-left] duration-200 ease-out`}
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
@@ -730,7 +794,61 @@ const MessageItem: React.FC<MessageItemProps> = ({
       style={{ touchAction: 'manipulation' }}
       role="listitem"
       aria-label={`${isOutgoing ? 'Sent' : 'Received'} message`}
+      onClick={
+        isSelecting
+          ? () => {
+              const inSuppressionWindow =
+                Date.now() < suppressClicksUntilRef.current;
+              if (
+                !suppressClickRef.current &&
+                !inSuppressionWindow &&
+                !isDeleted &&
+                message.id != null
+              ) {
+                onToggleSelect?.(message.id);
+              }
+              suppressClickRef.current = false;
+            }
+          : undefined
+      }
     >
+      {/* Selection checkbox — absolutely positioned to avoid affecting flex layout */}
+      <div
+        className={`absolute left-1 top-0 bottom-0 flex items-center justify-center transition-opacity duration-200 ease-out ${
+          isSelecting
+            ? isDeleted
+              ? 'opacity-0 pointer-events-none'
+              : 'opacity-100'
+            : 'opacity-0 pointer-events-none'
+        }`}
+        onClick={e => {
+          e.stopPropagation();
+          const inSuppressionWindow =
+            Date.now() < suppressClicksUntilRef.current;
+          if (suppressClickRef.current || inSuppressionWindow) {
+            suppressClickRef.current = false;
+            return;
+          }
+          if (isDeleted) return;
+          if (message.id != null) onToggleSelect?.(message.id);
+        }}
+        data-testid="select-checkbox"
+      >
+        <div
+          className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors duration-150 ${
+            isSelected
+              ? 'bg-accent border-accent'
+              : 'border-muted-foreground/40 bg-transparent'
+          }`}
+        >
+          {isSelected && (
+            <CheckIcon
+              className="w-3 h-3 text-accent-foreground"
+              strokeWidth={3}
+            />
+          )}
+        </div>
+      </div>
       {/* Incoming avatar or spacer */}
       {!isOutgoing && contact && (
         <div className="w-8 shrink-0 ml-1">
@@ -754,9 +872,9 @@ const MessageItem: React.FC<MessageItemProps> = ({
         }`}
         onClick={handleBubbleClick}
         onKeyDown={handleKeyDown}
-        tabIndex={0}
-        role="button"
-        aria-label="Tap for actions"
+        tabIndex={isDeleted ? -1 : 0}
+        role={isDeleted ? undefined : 'button'}
+        aria-label={isDeleted ? undefined : 'Tap for actions'}
         style={{
           transform: isContextMenuOpen
             ? `translate(${contextMenuTranslateX}px, ${contextMenuTranslateY}px)`
@@ -1055,17 +1173,19 @@ const MessageItem: React.FC<MessageItemProps> = ({
           </div>
         )}
         {/* Hover arrow for desktop context menu */}
-        <button
-          type="button"
-          onClick={e => {
-            e.stopPropagation();
-            openContextMenu();
-          }}
-          className="absolute top-1.5 right-2 p-0.5 opacity-0 group-hover:opacity-100 transition-opacity hidden md:flex items-center justify-center"
-          aria-label="Message actions"
-        >
-          <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
-        </button>
+        {!isSelecting && !isDeleted && (
+          <button
+            type="button"
+            onClick={e => {
+              e.stopPropagation();
+              openContextMenu();
+            }}
+            className="absolute top-1.5 right-2 p-0.5 opacity-0 group-hover:opacity-100 transition-opacity hidden md:flex items-center justify-center"
+            aria-label="Message actions"
+          >
+            <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
+          </button>
+        )}
       </div>
 
       <MessageContextMenu

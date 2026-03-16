@@ -2,12 +2,17 @@ import React, { useState } from 'react';
 import { useAccountStore } from '../../stores/accountStore';
 import { useAppStore } from '../../stores/appStore';
 import { DevAccount } from '../../hooks/useDevAutoLogin';
+import Button from '../ui/Button';
 
 interface DevAccountPickerProps {
   accounts: DevAccount[];
+  onSkip?: () => void;
 }
 
-const DevAccountPicker: React.FC<DevAccountPickerProps> = ({ accounts }) => {
+const DevAccountPicker: React.FC<DevAccountPickerProps> = ({
+  accounts,
+  onSkip,
+}) => {
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const restoreAccountFromMnemonic = useAccountStore(
@@ -49,6 +54,17 @@ const DevAccountPicker: React.FC<DevAccountPickerProps> = ({ accounts }) => {
         </div>
 
         <div className="space-y-3">
+          {onSkip && (
+            <Button
+              variant="outline"
+              fullWidth
+              disabled={loading !== null}
+              onClick={onSkip}
+              className="rounded-2xl"
+            >
+              Continue normal onboarding
+            </Button>
+          )}
           {accounts.map(account => (
             <button
               key={account.name}
