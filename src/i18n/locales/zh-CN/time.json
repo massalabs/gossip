@@ -1,0 +1,8 @@
+{
+  "now": "刚刚",
+  "yesterday": "昨天",
+  "today": "今天",
+  "today_at": "今天 {{time}}",
+  "yesterday_at": "昨天 {{time}}",
+  "days_ago": "{{count}} 天前"
+}

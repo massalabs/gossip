@@ -1,4 +1,5 @@
 import React, { useState, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
 import PageLayout from '../../components/ui/PageLayout';
@@ -15,6 +16,7 @@ import { ROUTES } from '../../constants/routes';
 import { Bell } from 'react-feather';
 
 const NotificationsSettings: React.FC = () => {
+  const { t } = useTranslation('settings');
   const navigate = useNavigate();
   const showDebugOption = useAppStore(s => s.showDebugOption);
   const [notificationPrefs, setNotificationPrefs] =
@@ -45,13 +47,15 @@ const NotificationsSettings: React.FC = () => {
   if (!notificationService.isSupported()) {
     return (
       <PageLayout
-        header={<PageHeader title="Notifications" onBack={handleBack} />}
+        header={
+          <PageHeader title={t('notifications.title')} onBack={handleBack} />
+        }
         className="app-max-w mx-auto"
         contentClassName="px-6 py-6"
       >
         <div className="bg-card rounded-xl border border-border p-4">
           <p className="text-sm text-muted-foreground">
-            Notifications are not supported on this device.
+            {t('notifications.not_supported')}
           </p>
         </div>
       </PageLayout>
@@ -60,7 +64,9 @@ const NotificationsSettings: React.FC = () => {
 
   return (
     <PageLayout
-      header={<PageHeader title="Notifications" onBack={handleBack} />}
+      header={
+        <PageHeader title={t('notifications.title')} onBack={handleBack} />
+      }
       className="app-max-w mx-auto"
       contentClassName="px-6 py-6"
     >
@@ -68,16 +74,18 @@ const NotificationsSettings: React.FC = () => {
         <div className="h-[54px] flex items-center px-4 justify-start w-full border-b border-border">
           <Bell className="text-foreground mr-4" />
           <span className="text-base font-medium text-foreground flex-1 text-left">
-            Notifications
+            {t('notifications.title')}
           </span>
           {notificationPrefs.permission.granted ? (
             <Toggle
               checked={notificationPrefs.enabled}
               onChange={handleNotificationToggle}
-              ariaLabel="Toggle notifications"
+              ariaLabel={t('notifications.toggle')}
             />
           ) : notificationPrefs.permission.denied ? (
-            <span className="text-xs text-muted-foreground">Blocked</span>
+            <span className="text-xs text-muted-foreground">
+              {t('notifications.blocked')}
+            </span>
           ) : (
             <Button
               variant="primary"
@@ -85,15 +93,16 @@ const NotificationsSettings: React.FC = () => {
               onClick={handleRequestNotificationPermission}
               disabled={isRequestingPermission}
             >
-              {isRequestingPermission ? 'Requesting...' : 'Enable'}
+              {isRequestingPermission
+                ? t('notifications.requesting')
+                : t('notifications.enable')}
             </Button>
           )}
         </div>
         {notificationPrefs.permission.denied && (
           <div className="px-4 py-4">
             <p className="text-xs text-muted-foreground">
-              Notifications are blocked. Please enable them in your browser
-              settings.
+              {t('notifications.blocked_message')}
             </p>
           </div>
         )}
@@ -115,7 +124,7 @@ const NotificationsSettings: React.FC = () => {
             >
               <Bell className="mr-4" />
               <span className="text-base font-medium flex-1 text-left">
-                Test Notification
+                {t('edit_username_modal.test_notification')}
               </span>
             </Button>
           )}

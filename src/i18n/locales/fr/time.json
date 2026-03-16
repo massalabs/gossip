@@ -1,0 +1,8 @@
+{
+  "now": "maintenant",
+  "yesterday": "Hier",
+  "today": "Aujourd'hui",
+  "today_at": "Aujourd'hui à {{time}}",
+  "yesterday_at": "Hier à {{time}}",
+  "days_ago": "Il y a {{count}} jours"
+}

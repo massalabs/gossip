@@ -1,0 +1,19 @@
+{
+  "welcome": {
+    "title": "Welcome to Gossip!",
+    "description": "Your private messenger designed for secure, end-to-end encrypted conversations. Connect with confidence."
+  },
+  "privacy": {
+    "title": "Privacy by Design",
+    "description": "All your messages are encrypted and stored locally on your device. Your conversations stay private, always."
+  },
+  "get_started": {
+    "title": "Let's Get Started!",
+    "description": "Create your account in seconds and start connecting with people securely."
+  },
+  "create_account": "Create New Account",
+  "import_mnemonic": "Import from Mnemonic",
+  "back": "Back",
+  "get_started_button": "Get Started",
+  "next": "Next"
+}

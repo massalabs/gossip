@@ -1,4 +1,5 @@
 import React, { useCallback, useState, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import DiscussionListPanel from '../components/discussions/DiscussionList';
 import DiscussionFilterButtons from '../components/discussions/DiscussionFilterButtons';
 import { useAccountStore } from '../stores/accountStore';
@@ -20,6 +21,7 @@ import { SessionStatus } from '@massalabs/gossip-sdk';
 import { useOnlineStore } from '../stores/useOnlineStore';
 
 const Discussions: React.FC = () => {
+  const { t } = useTranslation('discussions');
   const gossip = useGossipSdk();
   const navigate = useNavigate();
   const isLoading = useAccountStore(s => s.isLoading);
@@ -128,7 +130,7 @@ const Discussions: React.FC = () => {
     return (
       <div className="bg-background flex items-center justify-center h-full">
         <PrivacyGraphic size={120} loading={true} />
-        <p className="text-muted-foreground mt-4">Loading...</p>
+        <p className="text-muted-foreground mt-4">{t('common:loading')}</p>
       </div>
     );
   }
@@ -138,18 +140,20 @@ const Discussions: React.FC = () => {
       <div className="flex items-center gap-3">
         {isOnline && <UserProfileAvatar name={username} size={10} />}
         {isOnline ? (
-          <h1 className="text-xl font-semibold text-foreground">Gossip</h1>
+          <h1 className="text-xl font-semibold text-foreground">
+            {t('title')}
+          </h1>
         ) : (
           <h1 className="text-xl font-semibold text-accent">
-            Waiting for connection...
+            {t('waiting_connection')}
           </h1>
         )}
       </div>
       <div className="flex items-center gap-2">
         <button
           onClick={() => navigate(ROUTES.settingsShareContact())}
-          aria-label="Share my contact"
-          title="Share my contact"
+          aria-label={t('share_contact')}
+          title={t('share_contact')}
           className="w-8 h-8 flex items-center justify-center rounded-full hover:opacity-70 active:opacity-50"
         >
           <QrCodeIcon className="w-5 h-5 text-accent" />
@@ -172,16 +176,16 @@ const Discussions: React.FC = () => {
           <div className="flex items-start justify-between gap-3">
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium text-foreground mb-1">
-                Share content to discussion
+                {t('share_to_discussion')}
               </p>
               <p className="text-xs text-muted-foreground">
-                Select a discussion below to share the content.
+                {t('share_select')}
               </p>
             </div>
             <button
               onClick={handleCancelShare}
               className="shrink-0 p-1 hover:bg-accent rounded transition-colors"
-              aria-label="Cancel sharing"
+              aria-label={t('cancel_sharing')}
             >
               <X className="w-4 h-4 text-muted-foreground" />
             </button>
@@ -192,8 +196,8 @@ const Discussions: React.FC = () => {
         <SearchBar
           value={searchQuery}
           onChange={setQuery}
-          placeholder="Search..."
-          aria-label="Search"
+          placeholder={t('common:search')}
+          aria-label={t('common:search')}
         />
       </div>
       {/* Filter buttons - only show when not searching */}
@@ -219,7 +223,7 @@ const Discussions: React.FC = () => {
         variant="primary"
         size="custom"
         className="absolute bottom-3 right-4 h-14 w-14 rounded-full flex items-center gap-2 shadow-lg hover:shadow-xl transition-shadow z-50"
-        title="Start new discussion"
+        title={t('start_new')}
       >
         <Plus className="text-primary-foreground shrink-0" />
       </Button>

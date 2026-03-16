@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { parseInvite } from '../../utils/qrCodeParser';
 import toast from 'react-hot-toast';
 import { Capacitor } from '@capacitor/core';
@@ -12,6 +13,7 @@ interface ScanQRCodeProps {
 }
 
 const ScanQRCode: React.FC<ScanQRCodeProps> = ({ onBack, onScanSuccess }) => {
+  const { t } = useTranslation('errors');
   const [isProcessing, setIsProcessing] = useState(false);
   const isNative = Capacitor.isNativePlatform();
 
@@ -51,7 +53,7 @@ const ScanQRCode: React.FC<ScanQRCodeProps> = ({ onBack, onScanSuccess }) => {
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Invalid QR code format';
-      toast.error(`Failed to parse QR code: ${message}`);
+      toast.error(t('qr_parse_failed', { message }));
     } finally {
       setIsProcessing(false);
     }
@@ -59,7 +61,7 @@ const ScanQRCode: React.FC<ScanQRCodeProps> = ({ onBack, onScanSuccess }) => {
 
   const handleError = (err: string) => {
     if (!err.includes('process was cancelled')) {
-      toast.error(`Failed to scan QR code: ${err}`);
+      toast.error(t('qr_scan_failed', { error: err }));
     }
     onBack();
   };

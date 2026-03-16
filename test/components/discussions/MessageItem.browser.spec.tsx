@@ -57,7 +57,7 @@ describe('MessageItem', () => {
 
       // Click the bubble to open context menu
       await userEvent.click(
-        page.getByRole('button', { name: 'Tap for actions' })
+        page.getByRole('button', { name: 'Double-tap to reply' })
       );
 
       const menu = page.getByRole('menu');
@@ -79,7 +79,7 @@ describe('MessageItem', () => {
       render(<MessageItem message={makeMessage()} onReplyTo={onReplyTo} />);
 
       await userEvent.click(
-        page.getByRole('button', { name: 'Tap for actions' })
+        page.getByRole('button', { name: 'Double-tap to reply' })
       );
 
       await userEvent.click(page.getByRole('menuitem', { name: 'Reply' }));
@@ -91,7 +91,7 @@ describe('MessageItem', () => {
       render(<MessageItem message={makeMessage()} onForward={onForward} />);
 
       await userEvent.click(
-        page.getByRole('button', { name: 'Tap for actions' })
+        page.getByRole('button', { name: 'Double-tap to reply' })
       );
 
       await userEvent.click(page.getByRole('menuitem', { name: 'Forward' }));
@@ -106,7 +106,7 @@ describe('MessageItem', () => {
       render(<MessageItem message={makeMessage({ content: 'Copy me' })} />);
 
       await userEvent.click(
-        page.getByRole('button', { name: 'Tap for actions' })
+        page.getByRole('button', { name: 'Double-tap to reply' })
       );
 
       await userEvent.click(page.getByRole('menuitem', { name: 'Copy' }));
@@ -131,7 +131,7 @@ describe('MessageItem', () => {
       );
 
       await expect
-        .element(page.getByRole('button', { name: 'Tap for actions' }))
+        .element(page.getByRole('button', { name: 'Double-tap to reply' }))
         .not.toBeInTheDocument();
       await expect
         .element(page.getByRole('button', { name: 'Message actions' }))
@@ -252,7 +252,7 @@ describe('MessageItem', () => {
       const row = page.getByRole('listitem').element() as HTMLElement;
       const bubble = page
         .getByRole('button', {
-          name: 'Tap for actions',
+          name: 'Double-tap to reply',
         })
         .element() as HTMLElement;
 
@@ -470,7 +470,7 @@ describe('MessageItem', () => {
       );
 
       await userEvent.click(
-        page.getByRole('button', { name: 'Tap for actions' })
+        page.getByRole('button', { name: 'Double-tap to reply' })
       );
 
       expect(onToggleSelect).toHaveBeenCalledWith(1);
@@ -504,7 +504,7 @@ describe('MessageItem', () => {
       );
 
       await userEvent.click(
-        page.getByRole('button', { name: 'Tap for actions' })
+        page.getByRole('button', { name: 'Double-tap to reply' })
       );
       await userEvent.click(page.getByRole('listitem'));
       expect(onToggleSelect).not.toHaveBeenCalled();

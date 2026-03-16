@@ -10,6 +10,7 @@ import Settings from '../pages/Settings';
 import SecuritySettings from '../pages/settings/SecuritySettings';
 import NotificationsSettings from '../pages/settings/NotificationsSettings';
 import AppearanceSettings from '../pages/settings/AppearanceSettings';
+import LanguageSettings from '../pages/settings/LanguageSettings';
 import AboutSettings from '../pages/settings/AboutSettings';
 import DebugSettings from '../pages/settings/DebugSettings';
 import AccountBackupPage from '../pages/settings/AccountBackupPage';
@@ -58,6 +59,10 @@ export const AuthenticatedRoutes: React.FC = () => {
         <Route
           path={ROUTES.settingsAppearance()}
           element={<AppearanceSettings />}
+        />
+        <Route
+          path={ROUTES.settingsLanguage()}
+          element={<LanguageSettings />}
         />
         <Route path={ROUTES.settingsAbout()} element={<AboutSettings />} />
         <Route path={ROUTES.settingsDebug()} element={<DebugSettings />} />

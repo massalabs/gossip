@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ChevronUp, ChevronDown, X } from 'react-feather';
 import { Message } from '@massalabs/gossip-sdk';
 
@@ -17,6 +18,7 @@ const MessageSearch: React.FC<MessageSearchProps> = ({
   onHighlightChange,
   onClose,
 }) => {
+  const { t } = useTranslation('discussions');
   const [query, setQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const [matches, setMatches] = useState<Message[]>([]);
@@ -112,21 +114,24 @@ const MessageSearch: React.FC<MessageSearchProps> = ({
         value={query}
         onChange={e => setQuery(e.target.value)}
         onKeyDown={handleKeyDown}
-        placeholder="Search messages..."
+        placeholder={t('search.placeholder')}
         className="flex-1 min-w-0 px-3 py-1.5 text-sm bg-muted rounded-lg border border-border text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
       />
       {query && (
         <span className="text-xs text-muted-foreground whitespace-nowrap">
           {matches.length > 0
-            ? `${currentIndex + 1}/${matches.length}`
-            : 'No results'}
+            ? t('search.result_count', {
+                current: currentIndex + 1,
+                total: matches.length,
+              })
+            : t('search.no_results')}
         </span>
       )}
       <button
         onClick={navigatePrev}
         disabled={matches.length === 0}
         className="p-1.5 rounded-lg hover:bg-muted disabled:opacity-30 transition-colors"
-        aria-label="Previous match"
+        aria-label={t('search.previous')}
       >
         <ChevronUp className="w-4 h-4 text-foreground" />
       </button>
@@ -134,7 +139,7 @@ const MessageSearch: React.FC<MessageSearchProps> = ({
         onClick={navigateNext}
         disabled={matches.length === 0}
         className="p-1.5 rounded-lg hover:bg-muted disabled:opacity-30 transition-colors"
-        aria-label="Next match"
+        aria-label={t('search.next')}
       >
         <ChevronDown className="w-4 h-4 text-foreground" />
       </button>
@@ -149,7 +154,7 @@ const MessageSearch: React.FC<MessageSearchProps> = ({
           onClose();
         }}
         className="p-1.5 rounded-lg hover:bg-muted transition-colors"
-        aria-label="Close search"
+        aria-label={t('search.close')}
       >
         <X className="w-4 h-4 text-foreground" />
       </button>

@@ -1,6 +1,8 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 
 const InitializingState: React.FC = () => {
+  const { t } = useTranslation('discussions');
   return (
     <div className="flex items-center justify-center h-full">
       <div className="flex flex-col items-center gap-4">
@@ -16,10 +18,10 @@ const InitializingState: React.FC = () => {
         </div>
         <div className="text-center">
           <p className="text-[15px] font-semibold text-gray-900 dark:text-white mb-1">
-            Initializing secure discussion
+            {t('initializing.title')}
           </p>
           <p className="text-[13px] text-gray-500 dark:text-gray-400">
-            Setting up end-to-end encryption...
+            {t('initializing.subtitle')}
           </p>
         </div>
       </div>

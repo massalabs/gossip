@@ -1,0 +1,13 @@
+{
+  "share_invitation_failed": "Échec du partage de l'invitation. Veuillez réessayer.",
+  "share_qr_failed": "Échec du partage du QR code. Veuillez réessayer.",
+  "qr_parse_failed": "Échec de la lecture du QR code : {{message}}",
+  "qr_scan_failed": "Échec du scan du QR code : {{error}}",
+  "cannot_add_self": "Vous ne pouvez pas vous ajouter vous-même comme contact",
+  "user_already_registered": "Utilisateur déjà enregistré",
+  "invalid_invite": "Invitation invalide",
+  "send_message_failed": "Échec de l'envoi du message",
+  "share_logs_failed": "Échec du partage des logs",
+  "invalid_password": "Mot de passe incorrect",
+  "password_required": "Le mot de passe est requis"
+}

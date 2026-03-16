@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import BaseModal from '../ui/BaseModal';
 import Button from '../ui/Button';
 import { useKeyDown } from '../../hooks/useKeyDown';
@@ -20,6 +21,7 @@ const UsernameEditModal: React.FC<UsernameEditModalProps> = ({
   onConfirm,
   onClose,
 }) => {
+  const { t } = useTranslation('settings');
   const gossip = useGossipSdk();
   const [username, setUsername] = useState(currentUsername);
   const [error, setError] = useState<string | null>(null);
@@ -93,7 +95,7 @@ const UsernameEditModal: React.FC<UsernameEditModalProps> = ({
         );
 
         if (taken) {
-          setError('This username is already in use. Please choose another.');
+          setError(t('edit_username_modal.username_taken'));
           setIsValidating(false);
           return false;
         }
@@ -105,13 +107,13 @@ const UsernameEditModal: React.FC<UsernameEditModalProps> = ({
         setError(
           err instanceof Error
             ? err.message
-            : 'Unable to verify username availability. Please try again.'
+            : t('edit_username_modal.username_check_failed')
         );
         setIsValidating(false);
         return false;
       }
     },
-    [gossip]
+    [gossip, t]
   );
 
   const handleUsernameChange = useCallback(
@@ -201,12 +203,12 @@ const UsernameEditModal: React.FC<UsernameEditModalProps> = ({
       setError(
         err instanceof Error
           ? err.message
-          : 'Failed to update username. Please try again.'
+          : t('edit_username_modal.update_failed')
       );
     } finally {
       setIsSubmitting(false);
     }
-  }, [username, validateUsername]);
+  }, [username, validateUsername, t]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -246,11 +248,15 @@ const UsernameEditModal: React.FC<UsernameEditModalProps> = ({
   }, [isOpen, onEnter]);
 
   return (
-    <BaseModal isOpen={isOpen} onClose={onClose} title="Edit Username">
+    <BaseModal
+      isOpen={isOpen}
+      onClose={onClose}
+      title={t('edit_username_modal.title')}
+    >
       <div className="space-y-4">
         <div>
           <label className="block text-sm font-medium text-foreground mb-1">
-            Username
+            {t('edit_username_modal.username_label')}
           </label>
           <input
             type="text"
@@ -260,7 +266,7 @@ const UsernameEditModal: React.FC<UsernameEditModalProps> = ({
             onKeyDown={handleKeyDown}
             disabled={isSubmitting}
             className="w-full h-11 px-3 rounded-lg border border-border bg-card dark:bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50 disabled:cursor-not-allowed"
-            placeholder="Enter username"
+            placeholder={t('edit_username_modal.placeholder')}
             enterKeyHint="done"
           />
           {error && (
@@ -270,7 +276,7 @@ const UsernameEditModal: React.FC<UsernameEditModalProps> = ({
           )}
           {isValidating && !error && (
             <p className="mt-1 text-xs text-muted-foreground">
-              Checking availability...
+              {t('edit_username_modal.checking')}
             </p>
           )}
         </div>
@@ -282,7 +288,7 @@ const UsernameEditModal: React.FC<UsernameEditModalProps> = ({
             className="flex-1 h-11 rounded-xl text-sm font-medium"
             disabled={isSubmitting || isValidating || username.trim() === ''}
           >
-            {isSubmitting ? 'Saving...' : 'Save'}
+            {isSubmitting ? t('edit_username_modal.saving') : t('common:save')}
           </Button>
           <Button
             onClick={onClose}
@@ -291,7 +297,7 @@ const UsernameEditModal: React.FC<UsernameEditModalProps> = ({
             className="flex-1 h-11 rounded-lg font-semibold"
             disabled={isSubmitting}
           >
-            Cancel
+            {t('common:cancel')}
           </Button>
         </div>
       </div>

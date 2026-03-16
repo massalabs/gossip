@@ -1,4 +1,5 @@
 import React, { useMemo, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Message,
   MessageDirection,
@@ -23,6 +24,7 @@ export const AnnouncementRenderer: React.FC<AnnouncementRendererProps> = ({
   content,
   direction,
 }) => {
+  const { t } = useTranslation('discussions');
   const handleLinkClick = useCallback(
     (e: React.MouseEvent<HTMLAnchorElement>) => {
       e.preventDefault();
@@ -49,7 +51,7 @@ export const AnnouncementRenderer: React.FC<AnnouncementRendererProps> = ({
     >
       <div className="max-w-[85%] sm:max-w-[75%] md:max-w-[70%] px-4 py-3 rounded-2xl text-sm leading-tight bg-muted text-foreground border-l-2 border-primary">
         <p className="text-xs font-medium opacity-60 mb-1.5 italic">
-          Announcement
+          {t('announcement')}
         </p>
         <p className="whitespace-pre-wrap wrap-break-word">
           {parsedLinks.map((segment, index) => {
@@ -61,7 +63,9 @@ export const AnnouncementRenderer: React.FC<AnnouncementRendererProps> = ({
                   target="_blank"
                   rel="noopener noreferrer"
                   onClick={handleLinkClick}
-                  aria-label={`${segment.content} (opens in a new tab)`}
+                  aria-label={t('message_item.link_opens_new_tab', {
+                    content: segment.content,
+                  })}
                   className="underline hover:opacity-80 transition-opacity break-all cursor-pointer"
                   style={{
                     textDecorationColor: 'currentColor',

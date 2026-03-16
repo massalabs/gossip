@@ -9,6 +9,7 @@ import { useNavigate } from 'react-router-dom';
 import { UserPublicKeys } from '@massalabs/gossip-sdk';
 import { Check, Edit2, FileText, Link2, Send } from 'react-feather';
 import toast from 'react-hot-toast';
+import { useTranslation } from 'react-i18next';
 import { useFileShareContact } from '../../hooks/useFileShareContact';
 import { ROUTES } from '../../constants/routes';
 import {
@@ -44,6 +45,8 @@ const ShareContact: React.FC<ShareContactProps> = ({
   mnsDomains,
   showPageFrame = true,
 }) => {
+  const { t } = useTranslation('contacts');
+  // Note: we keep a single QR/file-sharing view for now, no tab switcher.
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [isFilePanelOpen, setIsFilePanelOpen] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
@@ -286,7 +289,7 @@ const ShareContact: React.FC<ShareContactProps> = ({
 
   return (
     <PageLayout
-      header={<PageHeader title="Share Contact" onBack={onBack} />}
+      header={<PageHeader title={t('share_contact')} onBack={onBack} />}
       className="app-max-w mx-auto"
       contentClassName="px-6 py-4"
     >

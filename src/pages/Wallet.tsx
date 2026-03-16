@@ -1,4 +1,5 @@
 import React, { useCallback, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   ArrowDownCircle,
   Repeat,
@@ -26,6 +27,7 @@ const Wallet: React.FC = () => {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isSendModalOpen, setIsSendModalOpen] = useState(false);
   const [isReceiveModalOpen, setIsReceiveModalOpen] = useState(false);
+  const { t } = useTranslation('wallet');
 
   const handleRefresh = useCallback(async () => {
     setIsRefreshing(true);
@@ -49,14 +51,14 @@ const Wallet: React.FC = () => {
         {/* Header */}
         <div className="px-6 py-4 flex justify-between items-center">
           <h1 className="text-2xl font-semibold text-black dark:text-white">
-            WALLET
+            {t('title')}
           </h1>
           <Button
             onClick={handleRefresh}
             disabled={isLoading || isRefreshing}
             variant="icon"
             size="custom"
-            title="Refresh balance and prices"
+            title={t('refresh')}
             className="p-2"
           >
             <RefreshCcw
@@ -69,12 +71,12 @@ const Wallet: React.FC = () => {
         {fullAddress && (
           <div className="px-6 -mt-2">
             <div className="flex items-center justify-between text-xs text-gray-600 dark:text-gray-300">
-              <span className="uppercase tracking-wide">Address</span>
+              <span className="uppercase tracking-wide">{t('address')}</span>
               <div className="flex items-center gap-2">
                 <span className="px-2 py-1 rounded-md bg-gray-100 dark:bg-gray-800">
                   {displayAddress}
                 </span>
-                <CopyClipboard text={fullAddress} title="Copy address" />
+                <CopyClipboard text={fullAddress} title={t('copy_address')} />
               </div>
             </div>
           </div>
@@ -83,7 +85,7 @@ const Wallet: React.FC = () => {
         {/* Total Balance */}
         <div className="px-6 py-4 text-center">
           <div className="text-4xl font-semibold text-black dark:text-white">
-            {isLoading ? 'Loading...' : `$${totalValueUsd.toFixed(2)}`}
+            {isLoading ? t('common:loading') : `$${totalValueUsd.toFixed(2)}`}
           </div>
         </div>
 
@@ -99,7 +101,7 @@ const Wallet: React.FC = () => {
                 <ArrowUpCircle className="w-5 h-5 text-gray-800 dark:text-gray-100" />
               </div>
               <span className="text-xs font-medium text-black dark:text-white">
-                send
+                {t('send_label')}
               </span>
             </button>
 
@@ -112,14 +114,14 @@ const Wallet: React.FC = () => {
                 <ArrowDownCircle className="w-5 h-5 text-gray-800 dark:text-gray-100" />
               </div>
               <span className="text-xs font-medium text-black dark:text-white">
-                receive
+                {t('receive_label')}
               </span>
             </button>
 
             {/* Swap Button */}
             <button
               onClick={() =>
-                toast.success('Swap functionality will be implemented soon!', {
+                toast.success(t('swap_coming_soon'), {
                   className: 'bg-card text-foreground',
                   duration: 1000,
                 })
@@ -130,7 +132,7 @@ const Wallet: React.FC = () => {
                 <Repeat className="w-5 h-5 text-gray-800 dark:text-gray-100" />
               </div>
               <span className="text-xs font-medium text-black dark:text-white">
-                swap
+                {t('swap_label')}
               </span>
             </button>
           </div>
@@ -158,7 +160,7 @@ const Wallet: React.FC = () => {
                     </div>
                     <div className="text-sm font-medium text-[#b2b2b2] dark:text-gray-400">
                       {isLoading
-                        ? 'Loading...'
+                        ? t('common:loading')
                         : `${formatAmount(token.balance ?? 0n, token.decimals).preview} ${token.ticker}`}
                     </div>
                   </div>
@@ -166,7 +168,7 @@ const Wallet: React.FC = () => {
                   {/* Token Value */}
                   <div className="text-sm font-semibold text-black dark:text-white">
                     {isLoading
-                      ? 'Loading...'
+                      ? t('common:loading')
                       : token.valueUsd != null
                         ? `$${token.valueUsd.toFixed(2)}`
                         : 'N/A'}

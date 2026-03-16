@@ -1,0 +1,24 @@
+{
+  "cancel": "Cancel",
+  "confirm": "Confirm",
+  "delete": "Delete",
+  "save": "Save",
+  "continue": "Continue",
+  "back": "Back",
+  "next": "Next",
+  "close": "Close",
+  "copy": "Copy",
+  "share": "Share",
+  "loading": "Loading...",
+  "search": "Search...",
+  "clear_search": "Clear search",
+  "error_boundary": {
+    "title": "Something went wrong",
+    "fallback": "An unexpected error occurred",
+    "reload": "Reload Page"
+  },
+  "copied_to_clipboard": "Copied to clipboard!",
+  "contact_name": "Contact name",
+  "enter_name": "Enter a name",
+  "introduce_yourself": "Introduce yourself or add context to your contact request..."
+}

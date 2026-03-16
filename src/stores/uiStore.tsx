@@ -3,6 +3,7 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import { createSelectors } from './utils/createSelectors';
 import { STORAGE_KEYS } from '../utils/localStorage';
 import { resolveTheme } from '../utils/themeUtils';
+import i18n, { type SupportedLanguage } from '../i18n';
 
 export type Theme = 'light' | 'dark' | 'system';
 export type ResolvedTheme = 'light' | 'dark';
@@ -12,6 +13,10 @@ interface UiStoreState {
   resolvedTheme: ResolvedTheme;
   setTheme: (theme: Theme) => void;
   setResolvedTheme: (theme: ResolvedTheme) => void;
+
+  // Language state
+  language: SupportedLanguage;
+  setLanguage: (lang: SupportedLanguage) => void;
 
   // Header visibility and scroll state
   headerVisible: boolean;
@@ -39,6 +44,15 @@ const useUiStoreBase = create<UiStoreState>()(
       },
       setResolvedTheme: (resolvedTheme: 'light' | 'dark') => {
         set({ resolvedTheme });
+      },
+
+      // Language state
+      language: (i18n.language?.startsWith('zh')
+        ? 'zh-CN'
+        : i18n.language?.substring(0, 2) || 'en') as SupportedLanguage,
+      setLanguage: (language: SupportedLanguage) => {
+        i18n.changeLanguage(language);
+        set({ language });
       },
 
       // Header visibility and scroll state
@@ -69,7 +83,13 @@ const useUiStoreBase = create<UiStoreState>()(
       partialize: state => ({
         theme: state.theme,
         showBottomNav: state.showBottomNav,
+        language: state.language,
       }),
+      onRehydrateStorage: () => state => {
+        if (state?.language && state.language !== i18n.language) {
+          i18n.changeLanguage(state.language);
+        }
+      },
     }
   )
 );

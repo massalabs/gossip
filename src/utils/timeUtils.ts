@@ -1,6 +1,12 @@
 /**
  * Time utility functions for formatting and manipulating dates
  */
+import i18n from '../i18n';
+
+/** Get the current i18n locale for Intl APIs */
+function getLocale(): string {
+  return i18n.language || 'en';
+}
 
 /**
  * Format a date to show relative time for discussion list items.
@@ -19,22 +25,25 @@ export function formatRelativeTime(date: Date): string {
   const diff = now.getTime() - date.getTime();
   const minutes = Math.floor(diff / 60000);
 
-  if (minutes < 1) return 'now';
+  if (minutes < 1) return i18n.t('time:now');
   if (minutes < 60) return `${minutes}m`;
 
   if (isToday(date)) return formatTime(date);
-  if (isYesterday(date)) return 'Yesterday';
+  if (isYesterday(date)) return i18n.t('time:yesterday');
 
   const days = Math.floor(diff / 86400000);
   if (days < 7) {
-    return date.toLocaleDateString('en-US', { weekday: 'long' });
+    return date.toLocaleDateString(getLocale(), { weekday: 'long' });
   }
 
   if (date.getFullYear() === now.getFullYear()) {
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    return date.toLocaleDateString(getLocale(), {
+      month: 'short',
+      day: 'numeric',
+    });
   }
 
-  return date.toLocaleDateString('en-US', {
+  return date.toLocaleDateString(getLocale(), {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
@@ -47,7 +56,7 @@ export function formatRelativeTime(date: Date): string {
  * @returns Formatted time string
  */
 export function formatTime(date: Date): string {
-  return new Intl.DateTimeFormat('en-US', {
+  return new Intl.DateTimeFormat(getLocale(), {
     hour: '2-digit',
     minute: '2-digit',
     hour12: false,
@@ -108,11 +117,11 @@ export function isYesterday(date: Date): boolean {
  */
 export function formatDetailedRelativeTime(date: Date): string {
   if (isToday(date)) {
-    return `Today at ${formatTime(date)}`;
+    return i18n.t('time:today_at', { time: formatTime(date) });
   }
 
   if (isYesterday(date)) {
-    return `Yesterday at ${formatTime(date)}`;
+    return i18n.t('time:yesterday_at', { time: formatTime(date) });
   }
 
   const now = new Date();
@@ -120,7 +129,7 @@ export function formatDetailedRelativeTime(date: Date): string {
   const days = Math.floor(diff / 86400000);
 
   if (days < 7) {
-    return `${days} days ago`;
+    return i18n.t('time:days_ago', { count: days });
   }
 
   return formatDate(date);
@@ -132,7 +141,7 @@ export function formatDetailedRelativeTime(date: Date): string {
  * @returns Timestamp string in format "HH:MM:SS"
  */
 export function createTimestamp(date: Date = new Date()): string {
-  return date.toLocaleTimeString('en-US', {
+  return date.toLocaleTimeString(getLocale(), {
     hour12: false,
     hour: '2-digit',
     minute: '2-digit',
@@ -147,11 +156,11 @@ export function createTimestamp(date: Date = new Date()): string {
  */
 export function formatDateSeparator(date: Date): string {
   if (isToday(date)) {
-    return 'Today';
+    return i18n.t('time:today');
   }
 
   if (isYesterday(date)) {
-    return 'Yesterday';
+    return i18n.t('time:yesterday');
   }
 
   const now = new Date();
@@ -162,19 +171,19 @@ export function formatDateSeparator(date: Date): string {
   // For dates within the last week (in the past), show day name
   // Only apply this logic for past dates (diff >= 0) to avoid misleading future date display
   if (diff >= 0 && days < 7) {
-    return date.toLocaleDateString('en-US', { weekday: 'long' });
+    return date.toLocaleDateString(getLocale(), { weekday: 'long' });
   }
 
   // For future dates, show the full date to avoid confusion
   if (diff < 0) {
     // Future date - show full date format
     if (date.getFullYear() === now.getFullYear()) {
-      return date.toLocaleDateString('en-US', {
+      return date.toLocaleDateString(getLocale(), {
         month: 'long',
         day: 'numeric',
       });
     }
-    return date.toLocaleDateString('en-US', {
+    return date.toLocaleDateString(getLocale(), {
       month: 'long',
       day: 'numeric',
       year: 'numeric',
@@ -183,14 +192,14 @@ export function formatDateSeparator(date: Date): string {
 
   // For dates within the current year, show month and day
   if (date.getFullYear() === now.getFullYear()) {
-    return date.toLocaleDateString('en-US', {
+    return date.toLocaleDateString(getLocale(), {
       month: 'long',
       day: 'numeric',
     });
   }
 
   // For older dates, show full date
-  return date.toLocaleDateString('en-US', {
+  return date.toLocaleDateString(getLocale(), {
     month: 'long',
     day: 'numeric',
     year: 'numeric',

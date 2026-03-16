@@ -1,5 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { ChevronLeft, Search } from 'react-feather';
 import { Contact, SessionStatus } from '@massalabs/gossip-sdk';
 import type { Discussion } from '@massalabs/gossip-sdk';
@@ -27,6 +28,7 @@ const DiscussionHeader: React.FC<DiscussionHeaderProps> = ({
   onSearchToggle,
   title,
 }) => {
+  const { t } = useTranslation('discussions');
   const sessionsStatuses = useDiscussionStore(s => s.sessionsStatuses);
   const navigate = useNavigate();
   const isOnline = useOnlineStore(s => s.isOnline);
@@ -49,7 +51,9 @@ const DiscussionHeader: React.FC<DiscussionHeaderProps> = ({
         <div className="flex items-center w-full">
           <BackButton />
           <div className="flex-1">
-            <p className="text-muted-foreground">Contact not found</p>
+            <p className="text-muted-foreground">
+              {t('header.contact_not_found')}
+            </p>
           </div>
         </div>
       </HeaderBar>
@@ -85,7 +89,7 @@ const DiscussionHeader: React.FC<DiscussionHeaderProps> = ({
             onClick={onBack}
             variant="circular"
             size="custom"
-            ariaLabel="Back"
+            ariaLabel={t('common:back')}
             className="w-8 h-8 flex items-center justify-center"
           >
             <ChevronLeft className="w-5 h-5 text-muted-foreground" />
@@ -94,7 +98,7 @@ const DiscussionHeader: React.FC<DiscussionHeaderProps> = ({
         <button
           onClick={handleHeaderClick}
           className="flex items-center flex-1 min-w-0 gap-3 group hover:opacity-80 transition-opacity active:opacity-70"
-          title="Discussion settings"
+          title={t('header.discussion_settings')}
         >
           <div className="relative">
             <ContactAvatar contact={contact} size={12} />
@@ -108,12 +112,12 @@ const DiscussionHeader: React.FC<DiscussionHeaderProps> = ({
             </h1>
             {!isOnline && (
               <p className="text-xs font-light text-accent truncate">
-                Waiting for connection...
+                {t('waiting_connection')}
               </p>
             )}
             {isOnline && isPendingOutgoing && (
               <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-accent text-accent-foreground border border-border">
-                Waiting approval
+                {t('header.waiting_approval')}
               </span>
             )}
           </div>
@@ -123,7 +127,7 @@ const DiscussionHeader: React.FC<DiscussionHeaderProps> = ({
             onClick={onSearchToggle}
             variant="circular"
             size="custom"
-            ariaLabel="Search messages"
+            ariaLabel={t('header.search_messages')}
             className="w-8 h-8 flex items-center justify-center shrink-0"
           >
             <Search className="w-5 h-5 text-muted-foreground" />

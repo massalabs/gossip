@@ -1,4 +1,5 @@
 import React, { useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import PageLayout from '../../components/ui/PageLayout';
 import PageHeader from '../../components/ui/PageHeader';
@@ -17,6 +18,7 @@ import {
 } from 'react-feather';
 
 const DebugSettings: React.FC = () => {
+  const { t } = useTranslation('settings');
   const navigate = useNavigate();
   const showDebugOption = useAppStore(s => s.showDebugOption);
   const setShowDebugOption = useAppStore(s => s.setShowDebugOption);
@@ -60,7 +62,7 @@ const DebugSettings: React.FC = () => {
 
   return (
     <PageLayout
-      header={<PageHeader title="Debug" onBack={handleBack} />}
+      header={<PageHeader title={t('debug.title')} onBack={handleBack} />}
       className="app-max-w mx-auto"
       contentClassName="px-6 py-6"
     >
@@ -70,13 +72,13 @@ const DebugSettings: React.FC = () => {
             <div className="flex items-center flex-1">
               <SettingsIconFeather className="text-foreground mr-4" />
               <span className="text-base font-medium text-foreground flex-1 text-left">
-                Show Debug Options
+                {t('debug.show_debug')}
               </span>
             </div>
             <Toggle
               checked={showDebugOption}
               onChange={setShowDebugOption}
-              ariaLabel="Show debug options"
+              ariaLabel={t('debug.show_debug')}
             />
           </div>
           {showDebugOption && (
@@ -85,26 +87,26 @@ const DebugSettings: React.FC = () => {
                 <div className="flex items-center flex-1">
                   <Terminal className="text-foreground mr-4" size={20} />
                   <span className="text-base font-medium text-foreground flex-1 text-left">
-                    Show Console Button
+                    {t('debug.show_console')}
                   </span>
                 </div>
                 <Toggle
                   checked={debugOverlayVisible}
                   onChange={setDebugOverlayVisible}
-                  ariaLabel="Show console button"
+                  ariaLabel={t('debug.show_console')}
                 />
               </div>
               <div className="h-[54px] flex items-center px-4 justify-between border-b border-border">
                 <div className="flex items-center flex-1">
                   <SettingsIconFeather className="text-foreground mr-4" />
                   <span className="text-base font-medium text-foreground flex-1 text-left">
-                    Disable screenshot protection
+                    {t('debug.disable_screenshot')}
                   </span>
                 </div>
                 <Toggle
                   checked={disableNativeScreenshot}
                   onChange={setDisableNativeScreenshot}
-                  ariaLabel="Disable screenshot protection"
+                  ariaLabel={t('debug.disable_screenshot')}
                 />
               </div>
             </>
@@ -117,7 +119,7 @@ const DebugSettings: React.FC = () => {
           >
             <AlertTriangle className="mr-4" />
             <span className="text-base font-medium flex-1 text-left">
-              Reset App
+              {t('debug.reset_app')}
             </span>
           </Button>
           <Button
@@ -128,7 +130,7 @@ const DebugSettings: React.FC = () => {
           >
             <AlertTriangle className="mr-4" />
             <span className="text-base font-medium flex-1 text-left">
-              Clear Messages & Contacts
+              {t('debug.clear_messages')}
             </span>
           </Button>
         </div>
@@ -142,7 +144,7 @@ const DebugSettings: React.FC = () => {
           >
             <AlertTriangle className="mr-4" />
             <span className="text-base font-medium flex-1 text-left">
-              Clear Cache & Database
+              {t('debug.clear_cache')}
             </span>
           </Button>
         )}

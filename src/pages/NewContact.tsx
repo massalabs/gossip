@@ -1,14 +1,15 @@
 import React, { useCallback, useRef, useState, useEffect } from 'react';
+import { useTranslation, Trans } from 'react-i18next';
 import { useNavigate, useLocation } from 'react-router-dom';
 import BaseModal from '../components/ui/BaseModal';
 import Button from '../components/ui/Button';
 import { useContactForm } from '../hooks/useContactForm';
 import ErrorDisplay from '../components/account/ErrorDisplay';
 import ScanQRCode from '../components/settings/ScanQRCode';
-import Notice from '../components/account/PrivacyNotice';
+
 import { useAccountStore } from '../stores/accountStore';
 import { useAppStore } from '../stores/appStore';
-import { Upload, CheckCircle } from 'react-feather';
+import { Upload, CheckCircle, Info } from 'react-feather';
 import { formatUserId } from '@massalabs/gossip-sdk';
 import QrCodeIcon from '../components/ui/customIcons/QrCodeIcon';
 import PageLayout from '../components/ui/PageLayout';
@@ -16,6 +17,7 @@ import PageHeader from '../components/ui/PageHeader';
 import ConnectionBanner from '../components/ui/ConnectionBanner';
 
 const NewContact: React.FC = () => {
+  const { t } = useTranslation('contacts');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
   const { state } = useLocation();
@@ -47,10 +49,12 @@ const NewContact: React.FC = () => {
 
   const getDefaultMessage = useCallback((): string => {
     if (userProfile?.username) {
-      return `Hi! I'm ${userProfile.username} and I'd like to connect with you.`;
+      return t('new_contact.default_message', {
+        username: userProfile.username,
+      });
     }
-    return "Hi! I'd like to connect with you.";
-  }, [userProfile?.username]);
+    return t('new_contact.default_message_anonymous');
+  }, [userProfile?.username, t]);
 
   useEffect(() => {
     if (!state?.userId) return;
@@ -102,7 +106,7 @@ const NewContact: React.FC = () => {
 
   const headerContent = (
     <PageHeader
-      title="New contact"
+      title={t('new_contact.title')}
       onBack={handleBack}
       rightAction={
         <button
@@ -113,9 +117,9 @@ const NewContact: React.FC = () => {
               : 'hover:bg-accent/80 active:bg-accent/60'
           }`}
           aria-disabled={isAddDisabled}
-          aria-label="Add contact"
+          aria-label={t('new_contact.add_contact')}
         >
-          {isSubmitting ? 'Adding...' : 'Add'}
+          {isSubmitting ? t('new_contact.adding') : t('new_contact.add')}
         </button>
       }
     />
@@ -137,7 +141,7 @@ const NewContact: React.FC = () => {
             type="text"
             value={name.value}
             onChange={e => handleNameChange(e.target.value)}
-            placeholder="Username"
+            placeholder={t('new_contact.username_placeholder')}
             className="w-full bg-transparent text-foreground placeholder-muted-foreground focus:outline-none"
             aria-describedby={name.error ? 'contact-name-error' : undefined}
           />
@@ -161,12 +165,14 @@ const NewContact: React.FC = () => {
               value={userId.value}
               onChange={e => handleUserIdChange(e.target.value)}
               placeholder={
-                mnsEnabled ? 'Gossip address or name.massa' : 'Gossip address'
+                mnsEnabled
+                  ? t('new_contact.address_mns_placeholder')
+                  : t('new_contact.address_placeholder')
               }
               aria-label={
                 mnsEnabled
-                  ? 'Gossip address or name.massa (MNS domain)'
-                  : 'Gossip address'
+                  ? t('new_contact.address_mns_label')
+                  : t('new_contact.address_label')
               }
               className="w-full bg-transparent text-foreground placeholder-muted-foreground focus:outline-none pr-10"
               aria-describedby={
@@ -183,8 +189,8 @@ const NewContact: React.FC = () => {
                   className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin"
                   aria-label={
                     mnsState.isResolving
-                      ? 'Resolving MNS domain'
-                      : 'Loading public key'
+                      ? t('new_contact.resolving_mns')
+                      : t('new_contact.loading_public_key')
                   }
                 />
               </div>
@@ -193,7 +199,7 @@ const NewContact: React.FC = () => {
               <div className="absolute right-0 top-1/2 -translate-y-1/2">
                 <CheckCircle
                   className="w-5 h-5 text-success"
-                  aria-label="MNS domain resolved"
+                  aria-label={t('new_contact.mns_resolved')}
                 />
               </div>
             )}
@@ -206,11 +212,10 @@ const NewContact: React.FC = () => {
               aria-live="polite"
               role="status"
             >
-              <span className="font-medium">{mnsState.resolvedDomain}</span>{' '}
-              resolved to{' '}
-              <span className="text-muted-foreground">
-                {formatUserId(mnsState.resolvedGossipId, 6, 4)}
-              </span>
+              {t('new_contact.mns_resolved_to', {
+                domain: mnsState.resolvedDomain,
+                id: formatUserId(mnsState.resolvedGossipId, 6, 4),
+              })}
             </div>
           )}
           {/* Default helper text */}
@@ -220,8 +225,8 @@ const NewContact: React.FC = () => {
               className="mt-1.5 text-xs text-muted-foreground"
             >
               {mnsEnabled
-                ? 'Enter a Gossip ID or MNS domain (e.g., alice.massa)'
-                : 'Enter a Gossip ID'}
+                ? t('new_contact.address_mns_helper')
+                : t('new_contact.address_helper')}
             </p>
           )}
           {userId.error && (
@@ -242,20 +247,24 @@ const NewContact: React.FC = () => {
           <button
             onClick={() => setShowScanner(true)}
             className="flex-1 flex items-center justify-center gap-2 text-primary hover:text-primary/80 transition-colors py-3"
-            aria-label="Scan QR code"
+            aria-label={t('new_contact.scan_qr')}
           >
             <QrCodeIcon className="w-5 h-5" />
-            <span className="text-base font-medium">Scan QR code</span>
+            <span className="text-base font-medium">
+              {t('new_contact.scan_qr')}
+            </span>
           </button>
 
           <button
             onClick={() => fileInputRef.current?.click()}
             disabled={fileState.isLoading}
             className="flex-1 flex items-center justify-center gap-2 text-muted-foreground hover:text-foreground transition-colors py-3 disabled:opacity-50 disabled:cursor-not-allowed"
-            aria-label="Import from file"
+            aria-label={t('new_contact.import_file')}
           >
             <Upload className="w-5 h-5" />
-            <span className="text-base font-medium">Import from file</span>
+            <span className="text-base font-medium">
+              {t('new_contact.import_file')}
+            </span>
           </button>
         </div>
       )}
@@ -266,7 +275,7 @@ const NewContact: React.FC = () => {
           htmlFor="contact-message"
           className="block text-sm font-medium text-foreground mb-2"
         >
-          Announcement message:
+          {t('new_contact.announcement_label')}
         </label>
         <textarea
           id="contact-message"
@@ -276,7 +285,7 @@ const NewContact: React.FC = () => {
           rows={3}
           maxLength={500}
           className="w-full bg-transparent text-foreground placeholder-muted-foreground focus:outline-none resize-none"
-          aria-label="Announcement message (optional)"
+          aria-label={t('new_contact.announcement_aria')}
         />
         {message.value && (
           <div className="flex items-center justify-end mt-2">
@@ -297,11 +306,11 @@ const NewContact: React.FC = () => {
             className="w-5 h-5 rounded border-border text-primary focus:ring-primary"
           />
           <span className="text-sm font-medium text-foreground">
-            Share my username
+            {t('new_contact.share_username')}
           </span>
         </label>
         <p className="text-xs text-muted-foreground mt-1 ml-8">
-          The recipient will see this name when they receive your request
+          {t('new_contact.share_username_hint')}
         </p>
         {shareUsername && (
           <div className="mt-3">
@@ -309,31 +318,32 @@ const NewContact: React.FC = () => {
               type="text"
               value={customUsername}
               onChange={e => handleCustomUsernameChange(e.target.value)}
-              placeholder="Enter username to share"
+              placeholder={t('new_contact.share_username_placeholder')}
               className="w-full bg-muted/50 text-foreground placeholder-muted-foreground focus:outline-none rounded-lg px-3 py-2 text-sm"
-              aria-label="Username to share with contact"
+              aria-label={t('new_contact.share_username_aria')}
               maxLength={50}
             />
           </div>
         )}
       </div>
 
-      {/* Privacy Notice */}
-      <Notice
-        className="mb-6"
-        title="Privacy notice"
-        content={
-          <>
-            This message is sent with your contact request announcement and has{' '}
-            <span className="font-medium text-foreground">reduced privacy</span>{' '}
-            compared to regular Gossip messages. Unlike regular messages, if
-            your keys are compromised in the future, this message could be
-            decrypted. Use it for introductions or context, but avoid sharing
-            sensitive information. Send private details through regular messages
-            after the contact accepts your request.
-          </>
-        }
-      />
+      <div className="bg-muted/30 border border-border rounded-xl p-4 mb-6">
+        <div className="flex items-start gap-2">
+          <Info className="w-4 h-4 text-muted-foreground mt-0.5 shrink-0" />
+          <div className="flex-1">
+            <p className="text-xs font-medium text-foreground mb-1">
+              {t('privacy_notice.title')}
+            </p>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              <Trans
+                i18nKey="privacy_notice.body"
+                ns="contacts"
+                components={{ strong: <strong /> }}
+              />
+            </p>
+          </div>
+        </div>
+      </div>
 
       {/* Hidden file input for file import */}
       <input
@@ -343,7 +353,7 @@ const NewContact: React.FC = () => {
         className="hidden"
         onChange={handleFileImport}
         disabled={fileState.isLoading}
-        aria-label="Import contact from YAML file"
+        aria-label={t('new_contact.import_file_aria')}
       />
       {fileState.error && (
         <p className="text-sm text-destructive mt-2 text-center" role="alert">
@@ -357,18 +367,16 @@ const NewContact: React.FC = () => {
       <BaseModal
         isOpen={isDiscardModalOpen}
         onClose={handleCancel}
-        title="Discard changes?"
+        title={t('discard_modal.title')}
       >
         <div className="space-y-4">
-          <p className="text-sm text-foreground">
-            Unsaved changes will be lost.
-          </p>
+          <p className="text-sm text-foreground">{t('discard_modal.body')}</p>
           <div className="flex gap-3">
             <Button onClick={handleDiscard} variant="danger" className="flex-1">
-              Discard
+              {t('discard_modal.discard')}
             </Button>
             <Button onClick={handleCancel} variant="ghost" className="flex-1">
-              Keep editing
+              {t('discard_modal.keep_editing')}
             </Button>
           </div>
         </div>

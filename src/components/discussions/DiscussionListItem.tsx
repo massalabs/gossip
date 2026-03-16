@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Contact, SessionStatus } from '@massalabs/gossip-sdk';
 import type { Discussion } from '@massalabs/gossip-sdk';
 import { Edit2 } from 'react-feather';
@@ -33,6 +34,7 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
   onRefuse,
   onEditName,
 }) => {
+  const { t } = useTranslation('discussions');
   const [proposedName, setProposedName] = useState(contact.name || '');
   const [isRefuseModalOpen, setIsRefuseModalOpen] = useState(false);
   const [isContextMenuOpen, setIsContextMenuOpen] = useState(false);
@@ -160,7 +162,7 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
               <div className="flex items-center gap-2">
                 {isPendingOutgoing && (
                   <span className="inline-flex items-center px-2 rounded-full text-[10px] font-medium bg-badge text-badge-foreground border border-badge-border">
-                    Waiting approval
+                    {t('header.waiting_approval')}
                   </span>
                 )}
                 {lastMessage && (
@@ -180,7 +182,7 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
                   </div>
                 )}
                 <p className="mt-2 text-[11px] text-muted-foreground">
-                  <span className="whitespace-nowrap">User ID:</span>{' '}
+                  <span className="whitespace-nowrap">{t('list.user_id')}</span>{' '}
                   <span className="break-all">
                     {formatUserId(contact.userId)}
                   </span>
@@ -198,7 +200,7 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
                     size="custom"
                     className="px-2.5 py-1 text-xs font-medium rounded border border-primary text-primary hover:bg-primary/10"
                   >
-                    Accept
+                    {t('list.accept')}
                   </Button>
                   <Button
                     onClick={() => {
@@ -208,7 +210,7 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
                     size="custom"
                     className="px-2.5 py-1 text-xs font-medium rounded border border-border text-foreground hover:bg-accent"
                   >
-                    Refuse
+                    {t('list.refuse')}
                   </Button>
                   {discussion.unreadCount > 0 && (
                     <span className="ml-auto inline-flex items-center justify-center px-2 py-1 text-[10px] font-bold leading-none text-primary-foreground bg-primary rounded-full">
@@ -225,9 +227,9 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
                       setModalOpen(discussion.id, false);
                     }
                   }}
-                  title="Set contact name"
+                  title={t('list.set_contact_name')}
                   initialName={proposedName}
-                  confirmLabel="Continue"
+                  confirmLabel={t('common:continue')}
                   allowEmpty
                   showSkip
                   onConfirm={name => {
@@ -253,11 +255,11 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
                 <BaseModal
                   isOpen={isRefuseModalOpen}
                   onClose={() => setIsRefuseModalOpen(false)}
-                  title="Refuse connection?"
+                  title={t('list.refuse_title')}
                 >
                   <div className="space-y-4">
                     <p className="text-sm text-foreground">
-                      Refusing will close this discussion request.
+                      {t('list.refuse_body')}
                     </p>
                     <div className="flex gap-3">
                       <Button
@@ -269,7 +271,7 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
                         size="custom"
                         className="flex-1 h-11 rounded-lg font-semibold"
                       >
-                        Refuse
+                        {t('list.refuse')}
                       </Button>
                       <Button
                         onClick={() => setIsRefuseModalOpen(false)}
@@ -277,7 +279,7 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
                         size="custom"
                         className="flex-1 h-11 rounded-lg font-semibold"
                       >
-                        Cancel
+                        {t('common:cancel')}
                       </Button>
                     </div>
                   </div>
@@ -303,7 +305,7 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
       <ContextMenu
         items={[
           {
-            label: 'Edit Name',
+            label: t('list_item.edit_name'),
             icon: <Edit2 className="w-4 h-4" />,
             onClick: () => setIsEditNameModalOpen(true),
           },
@@ -316,9 +318,9 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
       <ContactNameModal
         isOpen={isEditNameModalOpen}
         onClose={() => setIsEditNameModalOpen(false)}
-        title="Edit discussion name"
+        title={t('list_item.edit_name_title')}
         initialName={discussion.customName || contact.name}
-        confirmLabel="Save"
+        confirmLabel={t('common:save')}
         allowEmpty
         onConfirm={name => {
           setIsEditNameModalOpen(false);

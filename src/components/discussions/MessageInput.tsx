@@ -1,4 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Send, X } from 'react-feather';
 import { Capacitor } from '@capacitor/core';
 import { Message } from '@massalabs/gossip-sdk';
@@ -37,6 +38,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
   onCancelEdit,
   onConfirmEdit,
 }) => {
+  const { t } = useTranslation('discussions');
   const [newMessage, setNewMessage] = useState(initialValue || '');
   const [isTextareaMultiline, setIsTextareaMultiline] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -230,7 +232,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
             <div className="flex items-start justify-between gap-2">
               <div className="flex-1 min-w-0">
                 <p className="text-[10px] text-muted-foreground font-medium mb-0.5">
-                  Editing message
+                  {t('message_input.editing')}
                 </p>
                 <p className="text-xs text-foreground/80 truncate">
                   {editingMessage.content}
@@ -244,7 +246,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
                     onCancelEdit();
                   }}
                   className="shrink-0 p-1.5 hover:bg-muted rounded-full transition-colors active:scale-90"
-                  aria-label="Cancel edit"
+                  aria-label={t('message_input.cancel_edit')}
                 >
                   <X className="w-4 h-4 text-muted-foreground" />
                 </button>
@@ -265,7 +267,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
             <div className="flex items-start justify-between gap-2">
               <div className="flex-1 min-w-0">
                 <p className="text-[10px] text-muted-foreground font-medium mb-0.5">
-                  Replying to
+                  {t('message_input.replying_to')}
                 </p>
                 <p className="text-xs text-foreground/80 truncate">
                   {replyingTo.content}
@@ -275,7 +277,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
                 <button
                   onMouseDown={handleCancelReply}
                   className="shrink-0 p-1.5 hover:bg-muted rounded-full transition-colors active:scale-90"
-                  aria-label="Cancel reply"
+                  aria-label={t('message_input.cancel_reply')}
                 >
                   <X className="w-4 h-4 text-muted-foreground" />
                 </button>
@@ -299,8 +301,8 @@ const MessageInput: React.FC<MessageInputProps> = ({
               <div className="flex-1 min-w-0">
                 <p className="text-[10px] text-muted-foreground font-medium mb-0.5">
                   {forwardMode === 'reply'
-                    ? 'Replying to'
-                    : 'Forwarding message'}
+                    ? t('message_input.replying_to')
+                    : t('message_input.forwarding')}
                 </p>
                 <p className="text-xs text-foreground/80 truncate">
                   {forwardPreview}
@@ -310,7 +312,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
                 <button
                   onMouseDown={handleCancelForward}
                   className="shrink-0 p-1.5 hover:bg-muted rounded-full transition-colors active:scale-90"
-                  aria-label="Cancel forward"
+                  aria-label={t('message_input.cancel_forward')}
                 >
                   <X className="w-4 h-4 text-muted-foreground" />
                 </button>
@@ -346,14 +348,14 @@ const MessageInput: React.FC<MessageInputProps> = ({
               (e.target as HTMLElement).focus({ preventScroll: true });
               isRefocusingRef.current = false;
             }}
-            placeholder="Type a message"
+            placeholder={t('message_input.placeholder')}
             rows={1}
             inputMode="text"
             autoComplete="off"
             autoCapitalize="sentences"
             spellCheck={true}
             enterKeyHint="send"
-            aria-label="Message input"
+            aria-label={t('message_input.input_label')}
             className={`flex-1 bg-transparent text-foreground placeholder:text-muted-foreground
                        leading-relaxed resize-none p-0 m-0 focus:outline-none outline-none
                        scrollbar-transparent select-text touch-auto
@@ -368,8 +370,8 @@ const MessageInput: React.FC<MessageInputProps> = ({
               shadow-md hover:shadow-lg transition-all duration-200
               active:scale-90 ${sendButtonDisabled ? 'bg-muted text-muted-foreground' : 'bg-primary text-primary-foreground'}
               `}
-          title="Send message"
-          aria-label="Send message"
+          title={t('message_input.send')}
+          aria-label={t('message_input.send')}
         >
           <Send className="w-4 h-4 md:w-5 md:h-5" />
         </button>

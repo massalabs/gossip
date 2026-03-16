@@ -1,0 +1,140 @@
+{
+  "title": "Gossip",
+  "share_contact": "Share my contact",
+  "share_to_discussion": "Share content to discussion",
+  "share_select": "Select a discussion below to share the content.",
+  "cancel_sharing": "Cancel sharing",
+  "start_new": "Start new discussion",
+  "filter": {
+    "all": "All",
+    "unread": "Unread",
+    "pending": "Pending"
+  },
+  "message_input": {
+    "replying_to": "Replying to",
+    "forwarding": "Forwarding message",
+    "editing": "Editing message",
+    "placeholder": "Type a message",
+    "cancel_reply": "Cancel reply",
+    "cancel_forward": "Cancel forward",
+    "cancel_edit": "Cancel edit",
+    "input_label": "Message input",
+    "send": "Send message"
+  },
+  "message": {
+    "sent": "Sent",
+    "delivered": "Delivered",
+    "original_not_found": "Original message not found"
+  },
+  "list_item": {
+    "set_contact_name": "Set contact name",
+    "refuse_connection": "Refuse connection?",
+    "edit_name": "Edit Name",
+    "edit_name_title": "Edit discussion name"
+  },
+  "scroll_to_bottom": "Scroll to latest messages",
+  "search": {
+    "placeholder": "Search messages...",
+    "previous": "Previous match",
+    "next": "Next match",
+    "close": "Close search",
+    "no_results": "No results",
+    "result_count": "{{current}}/{{total}}"
+  },
+  "selection": {
+    "clear": "Clear selection",
+    "copy_messages": "Copy selected messages",
+    "delete_messages": "Delete selected messages"
+  },
+  "failed_to_send": "Failed to send message",
+  "failed_to_copy_selected": "Failed to copy selected messages",
+  "failed_to_delete_selected": "Failed to delete some selected messages",
+  "unable_to_delete": "Unable to delete message",
+  "failed_to_delete": "Failed to delete message",
+  "unable_to_edit": "Unable to edit message",
+  "failed_to_edit": "Failed to edit message",
+  "copy_you": "You",
+  "test_messages_sent": "Sent {{count}} test messages!",
+  "test_messages_failed": "Failed to send some test messages",
+  "settings": {
+    "title": "Discussion Settings",
+    "loading": "Loading discussion…",
+    "name_section": "Discussion Name",
+    "edit_name": "Edit discussion name",
+    "reset_connection": "Reset Connection",
+    "reset_description": "If you think you're disconnected from your peer, you can reset the connection. Some messages may be resent but your history will be preserved.",
+    "reconnected": "Reconnected!",
+    "participants": "Participants",
+    "no_participants": "No participants found"
+  },
+  "new_discussion": {
+    "title": "New discussion",
+    "new_contact": "New contact",
+    "new_group": "New group (coming soon)",
+    "coming_soon": "Coming soon",
+    "contacts": "Contacts",
+    "search_contacts": "Search contacts",
+    "loading_contacts": "Loading contacts…",
+    "no_contacts": "No contacts yet",
+    "no_contacts_hint": "Tap <strong>\"New contact\"</strong> to add one",
+    "no_search_results": "No contacts match your search",
+    "edit_contact": "Edit contact"
+  },
+  "header": {
+    "contact_not_found": "Contact not found",
+    "waiting_approval": "Waiting approval",
+    "discussion_settings": "Discussion settings",
+    "search_messages": "Search messages"
+  },
+  "list": {
+    "no_results": "No results found",
+    "user_id": "User ID:",
+    "accept": "Accept",
+    "refuse": "Refuse",
+    "set_contact_name": "Set contact name",
+    "refuse_title": "Refuse connection?",
+    "refuse_body": "Refusing will close this discussion request."
+  },
+  "empty": {
+    "no_discussions": "No discussions yet",
+    "no_discussions_hint": "Start a discussion by tapping the <strong>+</strong> button",
+    "no_messages": "No messages yet",
+    "no_messages_hint": "Start the conversation by sending your first message"
+  },
+  "initializing": {
+    "title": "Initializing secure discussion",
+    "subtitle": "Setting up end-to-end encryption..."
+  },
+  "loading_messages": "Loading messages...",
+  "message_item": {
+    "double_tap_reply": "Double-tap to reply",
+    "sent_message": "Sent message",
+    "received_message": "Received message",
+    "original_not_found_title": "Original message not found",
+    "original_not_found_short": "(Original not found)",
+    "original_message": "Original message",
+    "forwarded_message": "Forwarded message:",
+    "sending": "Sending",
+    "sent": "Sent",
+    "delivered": "Delivered",
+    "jump_to_original": "Tap to jump to original message",
+    "status": "Status: {{status}}",
+    "actions_menu": "Message actions",
+    "link_opens_new_tab": "{{content}} (opens in a new tab)",
+    "deleted": "Message deleted",
+    "edited": "edited",
+    "reply": "Reply",
+    "forward": "Forward",
+    "copy": "Copy",
+    "edit": "Edit",
+    "delete": "Delete"
+  },
+  "session_issue": {
+    "message": "You have sent many messages that have not been acknowledged yet. For security, no more messages will be sent until a reply is received.",
+    "info_label": "Why wait for a reply?",
+    "info_message": "Receiving a message from the peer allows the encryption key to be renewed. If an attacker gets your current key, they could decrypt your last {{count}} sent messages."
+  },
+  "filter_label": "Filter discussions",
+  "waiting_connection": "Waiting for connection...",
+  "announcement": "Announcement"
+}

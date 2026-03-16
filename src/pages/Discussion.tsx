@@ -1,4 +1,5 @@
 import React, { useEffect, useCallback, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useDiscussion } from '../hooks/useDiscussion';
 import { useAppStore } from '../stores/appStore';
@@ -29,6 +30,7 @@ const TEST_MESSAGE_COUNT = 50;
 const TEST_MESSAGE_BATCH_DELAY_MS = 100;
 
 const Discussion: React.FC = () => {
+  const { t } = useTranslation('discussions');
   const gossip = useGossipSdk();
   const { userId } = useParams();
   const navigate = useNavigate();
@@ -183,7 +185,9 @@ const Discussion: React.FC = () => {
     const text = selected
       .map(m => {
         const sender =
-          m.direction === MessageDirection.OUTGOING ? 'You' : contactName;
+          m.direction === MessageDirection.OUTGOING
+            ? t('copy_you')
+            : contactName;
         return `${sender}\n${m.content}`;
       })
       .join('\n\n');
@@ -192,9 +196,16 @@ const Discussion: React.FC = () => {
       await navigator.clipboard.writeText(text);
       handleClearSelection();
     } catch {
-      toast.error('Failed to copy selected messages');
+      toast.error(t('failed_to_copy_selected'));
     }
-  }, [messages, selectedMessageIds, discussion, contact, handleClearSelection]);
+  }, [
+    messages,
+    selectedMessageIds,
+    discussion,
+    contact,
+    handleClearSelection,
+    t,
+  ]);
 
   const handleDeleteSelected = useCallback(async () => {
     if (!canDeleteSelected || selectedMessages.length === 0) return;
@@ -233,9 +244,9 @@ const Discussion: React.FC = () => {
 
     handleClearSelection();
     if (failedMessageIds.length > 0) {
-      toast.error('Failed to delete some selected messages');
+      toast.error(t('failed_to_delete_selected'));
     }
-  }, [canDeleteSelected, selectedMessages, gossip, handleClearSelection]);
+  }, [canDeleteSelected, selectedMessages, gossip, handleClearSelection, t]);
 
   // Reply state
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
@@ -398,11 +409,11 @@ const Discussion: React.FC = () => {
         setForwardPreviewText(null);
         // Scroll to bottom after sending (handled automatically by followOutput)
       } catch (error) {
-        toast.error('Failed to send message');
+        toast.error(t('failed_to_send'));
         console.error('Failed to send message:', error);
       }
     },
-    [isSelecting, sendMessage, contact?.userId, forwardFromMessageId]
+    [isSelecting, sendMessage, contact?.userId, forwardFromMessageId, t]
   );
 
   const handleReplyToMessage = useCallback((message: Message) => {
@@ -436,14 +447,14 @@ const Discussion: React.FC = () => {
       try {
         const deleted = await gossip.messages.deleteMessage(message.id);
         if (!deleted) {
-          toast.error('Unable to delete message');
+          toast.error(t('unable_to_delete'));
         }
       } catch (error) {
-        toast.error('Failed to delete message');
+        toast.error(t('failed_to_delete'));
         console.error('Failed to delete message:', error);
       }
     },
-    [gossip]
+    [gossip, t]
   );
 
   const handleCancelReply = useCallback(() => {
@@ -466,17 +477,17 @@ const Discussion: React.FC = () => {
       try {
         const ok = await gossip.messages.editMessage(message.id, newContent);
         if (!ok) {
-          toast.error('Unable to edit message');
+          toast.error(t('unable_to_edit'));
         }
       } catch (error) {
-        toast.error('Failed to edit message');
+        toast.error(t('failed_to_edit'));
         console.error('Failed to edit message:', error);
       } finally {
         setEditingMessage(null);
         setInputPrefill(undefined);
       }
     },
-    [gossip]
+    [gossip, t]
   );
 
   const handleInputFocus = useCallback(() => {
@@ -644,14 +655,14 @@ const Discussion: React.FC = () => {
           );
         }
       }
-      toast.success(`Sent ${TEST_MESSAGE_COUNT} test messages!`);
+      toast.success(t('test_messages_sent', { count: TEST_MESSAGE_COUNT }));
     } catch (error) {
-      toast.error('Failed to send some test messages');
+      toast.error(t('test_messages_failed'));
       console.error('Failed to send test messages:', error);
     } finally {
       setIsSendingTestMessages(false);
     }
-  }, [contact?.userId, sendMessage, isSendingTestMessages]);
+  }, [contact?.userId, sendMessage, isSendingTestMessages, t]);
 
   if (!contact) return null;
 

@@ -1,3 +1,4 @@
+import './i18n';
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter, useMatch } from 'react-router-dom';
 import { useAccountStore } from './stores/accountStore';
