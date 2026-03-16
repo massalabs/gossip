@@ -25,7 +25,7 @@ pub use domain::{
     root_aead_key_label, root_kdf_salt, session_scope, sk_wrap_aad, sk_wrap_key_label,
 };
 pub use error::{BordercryptError, Result};
-pub use kdf::derive_block_aead_key;
+pub use kdf::{SessionKeys, derive_block_aead_key, derive_session_keys};
 pub use keypair::{KeypairFile, read_session_keypair, read_session_version_and_pk};
 pub use lifecycle::{allocate_session, cover_traffic_tick, provision_storage};
 pub use pq::{
@@ -38,3 +38,17 @@ pub use write::{
     encrypt_session_data_block, ensure_block_count, get_global_block_count,
     repair_blockstream_lengths, shrink_session_data, write_session_data,
 };
+
+/// Run a test closure on a thread with a 4 MiB stack.
+///
+/// PQ (ML-KEM) operations use large stack allocations that can overflow
+/// the default Rust test thread stack (~2 MiB on macOS).
+#[cfg(test)]
+pub(crate) fn run_with_stack<F: FnOnce() + Send + 'static>(f: F) {
+    std::thread::Builder::new()
+        .stack_size(4 * 1024 * 1024)
+        .spawn(f)
+        .unwrap()
+        .join()
+        .unwrap();
+}

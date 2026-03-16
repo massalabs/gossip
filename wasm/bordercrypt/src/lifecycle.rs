@@ -9,6 +9,7 @@ use crate::block::{create_cover_block, rerandomize_block};
 use crate::constants::{LENGTH_HDR_SIZE, PLAINTEXT_SIZE, SESSION_COUNT};
 use crate::domain;
 use crate::error::{BordercryptError, Result};
+use crate::kdf::derive_session_keys;
 use crate::keypair::{KeypairFile, read_session_version_and_pk};
 use crate::pq::{PqPublicKey, PqSecretKey, pq_keygen};
 use crate::storage::{BlockStorage, KeypairStorage};
@@ -30,12 +31,8 @@ pub fn provision_storage<S: BlockStorage + KeypairStorage>(storage: &mut S) -> R
         let (pk, _sk) = pq_keygen();
         // _sk is dropped at end of loop iteration; its Drop impl zeroizes
 
-        let mut sk_nonce = [0u8; crypto_aead::NONCE_SIZE];
-        rand::rngs::OsRng.fill_bytes(&mut sk_nonce);
-
-        // Encrypt random plaintext under a random throwaway key so sk_ct
-        // is a structurally valid AEAD ciphertext, indistinguishable from
-        // an allocated slot's sk_ct.
+        // Random throwaway key — slot is structurally valid AEAD ciphertext
+        // but impossible to unlock with any password.
         let dummy_wrap_key = crypto_aead::Key::from({
             let mut k = Zeroizing::new([0u8; crypto_aead::KEY_SIZE]);
             rand::rngs::OsRng.fill_bytes(k.as_mut());
@@ -43,15 +40,8 @@ pub fn provision_storage<S: BlockStorage + KeypairStorage>(storage: &mut S) -> R
         });
         let mut dummy_sk = Zeroizing::new(vec![0u8; PqSecretKey::byte_size()]);
         rand::rngs::OsRng.fill_bytes(dummy_sk.as_mut());
-        let nonce = crypto_aead::Nonce::from(sk_nonce);
-        let sk_ct = crypto_aead::encrypt(&dummy_wrap_key, &nonce, &dummy_sk, b"");
 
-        let kf = KeypairFile {
-            version: 0,
-            pq_pk: pk.to_bytes(),
-            sk_nonce,
-            sk_ct,
-        };
+        let kf = KeypairFile::build_wrapped(0, pk.to_bytes(), &dummy_wrap_key, &dummy_sk, b"");
         storage.write_keypair(slot, &kf.serialize())?;
         storage.init_blockstream(slot)?;
     }
@@ -71,44 +61,20 @@ pub fn allocate_session<S: BlockStorage + KeypairStorage>(
 ) -> Result<UnlockedSession> {
     let (pq_rerand_pk, pq_rerand_sk) = pq_keygen();
 
-    // Derive keys from password (same flow as unlock)
-    let salt = domain::password_kdf_salt(domain);
-    let mut root_key = Zeroizing::new([0u8; 32]);
-    crypto_password_kdf::derive(password, salt.as_bytes(), root_key.as_mut());
+    let keys = derive_session_keys(domain, password);
 
-    let root_kdf_salt = domain::root_kdf_salt(domain);
-    let expander = {
-        let mut extract = crypto_kdf::Extract::new(root_kdf_salt.as_bytes());
-        extract.input_item(root_key.as_ref());
-        extract.finalize()
-    };
-
-    let sk_wrap_label = domain::sk_wrap_key_label(domain);
-    let mut sk_wrap_key = Zeroizing::new([0u8; crypto_aead::KEY_SIZE]);
-    expander.expand(sk_wrap_label.as_bytes(), sk_wrap_key.as_mut());
-
-    let root_aead_label = domain::root_aead_key_label(domain);
-    let mut root_aead_key = Zeroizing::new([0u8; crypto_aead::KEY_SIZE]);
-    expander.expand(root_aead_label.as_bytes(), root_aead_key.as_mut());
-
-    // AEAD-wrap the secret key
     let version: u32 = 0;
     let sk_wrap_aad = domain::sk_wrap_aad(domain, version, slot);
-
-    let mut nonce_bytes = [0u8; crypto_aead::NONCE_SIZE];
-    rand::rngs::OsRng.fill_bytes(&mut nonce_bytes);
-    let nonce = crypto_aead::Nonce::from(nonce_bytes);
-    let sk_wrap_aead_key = crypto_aead::Key::from(*sk_wrap_key);
+    let sk_wrap_aead_key = crypto_aead::Key::from(*keys.sk_wrap_key);
     let sk_bytes = Zeroizing::new(pq_rerand_sk.to_bytes());
-    let sk_ct = crypto_aead::encrypt(&sk_wrap_aead_key, &nonce, &sk_bytes, sk_wrap_aad.as_bytes());
 
-    // Write keypair file
-    let kf = KeypairFile {
+    let kf = KeypairFile::build_wrapped(
         version,
-        pq_pk: pq_rerand_pk.to_bytes(),
-        sk_nonce: nonce_bytes,
-        sk_ct,
-    };
+        pq_rerand_pk.to_bytes(),
+        &sk_wrap_aead_key,
+        &sk_bytes,
+        sk_wrap_aad.as_bytes(),
+    );
     storage.write_keypair(slot, &kf.serialize())?;
 
     let session = UnlockedSession {
@@ -116,7 +82,7 @@ pub fn allocate_session<S: BlockStorage + KeypairStorage>(
         session_version: version,
         pq_rerand_pk,
         pq_rerand_sk,
-        root_aead_key,
+        root_aead_key: keys.root_aead_key,
         total_data_length: 0,
     };
 
@@ -188,6 +154,7 @@ pub fn cover_traffic_tick<S: BlockStorage + KeypairStorage>(
 mod tests {
     use super::*;
     use crate::read::read_session_data;
+    use crate::run_with_stack;
     use crate::storage::MemoryStorage;
     use crate::unlock::unlock_session;
     use crate::write::write_session_data;
@@ -198,237 +165,231 @@ mod tests {
 
     #[test]
     fn provision_creates_all_slots() {
-        let mut storage = MemoryStorage::new();
-        provision_storage(&mut storage).unwrap();
+        run_with_stack(|| {
+            let mut storage = MemoryStorage::new();
+            provision_storage(&mut storage).unwrap();
 
-        for i in 0..SESSION_COUNT as u8 {
-            let s = SessionIndex::new(i).unwrap();
-            // Each slot should have a readable keypair file
-            let data = storage.read_keypair(s).unwrap();
-            let kf = KeypairFile::deserialize(&data).unwrap();
-            assert_eq!(kf.version, 0);
-            assert_eq!(kf.pq_pk.len(), PqPublicKey::byte_size());
-        }
+            for i in 0..SESSION_COUNT as u8 {
+                let s = SessionIndex::new(i).unwrap();
+                let data = storage.read_keypair(s).unwrap();
+                let kf = KeypairFile::deserialize(&data).unwrap();
+                assert_eq!(kf.version, 0);
+                assert_eq!(kf.pq_pk.len(), PqPublicKey::byte_size());
+            }
+        });
     }
 
     #[test]
     fn provision_pk_valid() {
-        let mut storage = MemoryStorage::new();
-        provision_storage(&mut storage).unwrap();
+        run_with_stack(|| {
+            let mut storage = MemoryStorage::new();
+            provision_storage(&mut storage).unwrap();
 
-        for i in 0..SESSION_COUNT as u8 {
-            let s = SessionIndex::new(i).unwrap();
-            let (_, pk_bytes) = read_session_version_and_pk(&storage, s).unwrap();
-            // Should be parseable as a valid public key
-            let pk = PqPublicKey::from_bytes(&pk_bytes).unwrap();
-            // Should work for cover block creation
-            let cover = create_cover_block(&pk, "test_aad");
-            assert_eq!(cover.len(), BLOCK_SIZE);
-        }
+            for i in 0..SESSION_COUNT as u8 {
+                let s = SessionIndex::new(i).unwrap();
+                let (_, pk_bytes) = read_session_version_and_pk(&storage, s).unwrap();
+                let pk = PqPublicKey::from_bytes(&pk_bytes).unwrap();
+                let cover = create_cover_block(&pk, "test_aad");
+                assert_eq!(cover.len(), BLOCK_SIZE);
+            }
+        });
     }
 
     #[test]
     fn provision_not_unlockable() {
-        let mut storage = MemoryStorage::new();
-        provision_storage(&mut storage).unwrap();
+        run_with_stack(|| {
+            let mut storage = MemoryStorage::new();
+            provision_storage(&mut storage).unwrap();
 
-        // No password should unlock any slot
-        let result = unlock_session(&storage, DOMAIN, b"any-password");
-        assert!(result.is_err());
+            let result = unlock_session(&storage, DOMAIN, b"any-password");
+            assert!(result.is_err());
+        });
     }
 
     #[test]
     fn allocate_then_unlock() {
-        let mut storage = MemoryStorage::new();
-        provision_storage(&mut storage).unwrap();
+        run_with_stack(|| {
+            let mut storage = MemoryStorage::new();
+            provision_storage(&mut storage).unwrap();
 
-        let slot = SessionIndex::new(2).unwrap();
-        let password = b"test-password";
-        let session = allocate_session(&mut storage, DOMAIN, slot, password).unwrap();
-        assert_eq!(session.session_index, slot);
+            let slot = SessionIndex::new(2).unwrap();
+            let password = b"test-password";
+            let session = allocate_session(&mut storage, DOMAIN, slot, password).unwrap();
+            assert_eq!(session.session_index, slot);
 
-        let unlocked = unlock_session(&storage, DOMAIN, password).unwrap();
-        assert_eq!(unlocked.session_index, slot);
+            let unlocked = unlock_session(&storage, DOMAIN, password).unwrap();
+            assert_eq!(unlocked.session_index, slot);
+        });
     }
 
     #[test]
     fn allocate_wrong_password_fails() {
-        let mut storage = MemoryStorage::new();
-        provision_storage(&mut storage).unwrap();
+        run_with_stack(|| {
+            let mut storage = MemoryStorage::new();
+            provision_storage(&mut storage).unwrap();
 
-        let slot = SessionIndex::new(0).unwrap();
-        allocate_session(&mut storage, DOMAIN, slot, b"correct").unwrap();
+            let slot = SessionIndex::new(0).unwrap();
+            allocate_session(&mut storage, DOMAIN, slot, b"correct").unwrap();
 
-        let result = unlock_session(&storage, DOMAIN, b"wrong");
-        assert!(result.is_err());
+            let result = unlock_session(&storage, DOMAIN, b"wrong");
+            assert!(result.is_err());
+        });
     }
 
     #[test]
     fn allocate_changes_pk() {
-        let mut storage = MemoryStorage::new();
-        provision_storage(&mut storage).unwrap();
+        run_with_stack(|| {
+            let mut storage = MemoryStorage::new();
+            provision_storage(&mut storage).unwrap();
 
-        let slot = SessionIndex::new(0).unwrap();
-        let (_, old_pk) = read_session_version_and_pk(&storage, slot).unwrap();
+            let slot = SessionIndex::new(0).unwrap();
+            let (_, old_pk) = read_session_version_and_pk(&storage, slot).unwrap();
 
-        allocate_session(&mut storage, DOMAIN, slot, b"password").unwrap();
+            allocate_session(&mut storage, DOMAIN, slot, b"password").unwrap();
 
-        let (_, new_pk) = read_session_version_and_pk(&storage, slot).unwrap();
-        assert_ne!(old_pk, new_pk);
+            let (_, new_pk) = read_session_version_and_pk(&storage, slot).unwrap();
+            assert_ne!(old_pk, new_pk);
+        });
     }
 
     #[test]
     fn two_sessions_different_passwords() {
-        std::thread::Builder::new()
-            .stack_size(4 * 1024 * 1024)
-            .spawn(|| {
-                let mut storage = MemoryStorage::new();
-                provision_storage(&mut storage).unwrap();
+        run_with_stack(|| {
+            let mut storage = MemoryStorage::new();
+            provision_storage(&mut storage).unwrap();
 
-                let s0 = SessionIndex::new(0).unwrap();
-                let s3 = SessionIndex::new(3).unwrap();
-                allocate_session(&mut storage, DOMAIN, s0, b"password-one").unwrap();
-                allocate_session(&mut storage, DOMAIN, s3, b"password-two").unwrap();
+            let s0 = SessionIndex::new(0).unwrap();
+            let s3 = SessionIndex::new(3).unwrap();
+            allocate_session(&mut storage, DOMAIN, s0, b"password-one").unwrap();
+            allocate_session(&mut storage, DOMAIN, s3, b"password-two").unwrap();
 
-                let u1 = unlock_session(&storage, DOMAIN, b"password-one").unwrap();
-                assert_eq!(u1.session_index, s0);
+            let u1 = unlock_session(&storage, DOMAIN, b"password-one").unwrap();
+            assert_eq!(u1.session_index, s0);
 
-                let u2 = unlock_session(&storage, DOMAIN, b"password-two").unwrap();
-                assert_eq!(u2.session_index, s3);
-            })
-            .unwrap()
-            .join()
-            .unwrap();
+            let u2 = unlock_session(&storage, DOMAIN, b"password-two").unwrap();
+            assert_eq!(u2.session_index, s3);
+        });
     }
 
     #[test]
     fn allocate_writes_genuine_block_0() {
-        let mut storage = MemoryStorage::new();
-        provision_storage(&mut storage).unwrap();
+        run_with_stack(|| {
+            let mut storage = MemoryStorage::new();
+            provision_storage(&mut storage).unwrap();
 
-        let slot = SessionIndex::new(0).unwrap();
-        allocate_session(&mut storage, DOMAIN, slot, b"pw").unwrap();
+            let slot = SessionIndex::new(0).unwrap();
+            allocate_session(&mut storage, DOMAIN, slot, b"pw").unwrap();
 
-        // Block 0 should exist and be decryptable
-        let unlocked = unlock_session(&storage, DOMAIN, b"pw").unwrap();
-        assert_eq!(unlocked.total_data_length, 0);
+            let unlocked = unlock_session(&storage, DOMAIN, b"pw").unwrap();
+            assert_eq!(unlocked.total_data_length, 0);
+        });
     }
 
     #[test]
     fn allocate_after_other_session_has_blocks() {
-        std::thread::Builder::new()
-            .stack_size(4 * 1024 * 1024)
-            .spawn(|| {
-                let mut storage = MemoryStorage::new();
-                provision_storage(&mut storage).unwrap();
+        run_with_stack(|| {
+            let mut storage = MemoryStorage::new();
+            provision_storage(&mut storage).unwrap();
 
-                // Session 0 allocates and writes data (creates blocks for all sessions)
-                let s0 = SessionIndex::new(0).unwrap();
-                let mut sess0 =
-                    allocate_session(&mut storage, DOMAIN, s0, b"password-one").unwrap();
-                write_session_data(&mut storage, DOMAIN, &mut sess0, 0, &[0xAB; 100]).unwrap();
+            let s0 = SessionIndex::new(0).unwrap();
+            let mut sess0 = allocate_session(&mut storage, DOMAIN, s0, b"password-one").unwrap();
+            write_session_data(&mut storage, DOMAIN, &mut sess0, 0, &[0xAB; 100]).unwrap();
 
-                // Session 2 allocates later — blocks already exist from session 0
-                let s2 = SessionIndex::new(2).unwrap();
-                allocate_session(&mut storage, DOMAIN, s2, b"password-two").unwrap();
+            let s2 = SessionIndex::new(2).unwrap();
+            allocate_session(&mut storage, DOMAIN, s2, b"password-two").unwrap();
 
-                // Session 2 must still be unlockable (block 0 is genuine, not a cover)
-                let unlocked = unlock_session(&storage, DOMAIN, b"password-two").unwrap();
-                assert_eq!(unlocked.session_index, s2);
-                assert_eq!(unlocked.total_data_length, 0);
+            let unlocked = unlock_session(&storage, DOMAIN, b"password-two").unwrap();
+            assert_eq!(unlocked.session_index, s2);
+            assert_eq!(unlocked.total_data_length, 0);
 
-                // Session 0 is still unlockable too
-                let u0 = unlock_session(&storage, DOMAIN, b"password-one").unwrap();
-                assert_eq!(u0.session_index, s0);
-                assert_eq!(u0.total_data_length, 100);
-            })
-            .unwrap()
-            .join()
-            .unwrap();
+            let u0 = unlock_session(&storage, DOMAIN, b"password-one").unwrap();
+            assert_eq!(u0.session_index, s0);
+            assert_eq!(u0.total_data_length, 100);
+        });
     }
 
     #[test]
     fn cover_tick_after_allocate_before_write() {
-        let mut storage = MemoryStorage::new();
-        provision_storage(&mut storage).unwrap();
+        run_with_stack(|| {
+            let mut storage = MemoryStorage::new();
+            provision_storage(&mut storage).unwrap();
 
-        let slot = SessionIndex::new(0).unwrap();
-        allocate_session(&mut storage, DOMAIN, slot, b"pw").unwrap();
+            let slot = SessionIndex::new(0).unwrap();
+            allocate_session(&mut storage, DOMAIN, slot, b"pw").unwrap();
 
-        // Cover traffic runs before any user write
-        for _ in 0..10 {
-            cover_traffic_tick(&mut storage, DOMAIN).unwrap();
-        }
+            for _ in 0..10 {
+                cover_traffic_tick(&mut storage, DOMAIN).unwrap();
+            }
 
-        // Session must still be unlockable
-        let unlocked = unlock_session(&storage, DOMAIN, b"pw").unwrap();
-        assert_eq!(unlocked.total_data_length, 0);
+            let unlocked = unlock_session(&storage, DOMAIN, b"pw").unwrap();
+            assert_eq!(unlocked.total_data_length, 0);
+        });
     }
 
     // --- commit 16: cover_traffic_tick ---
 
     #[test]
     fn cover_tick_empty_storage() {
-        let mut storage = MemoryStorage::new();
-        provision_storage(&mut storage).unwrap();
+        run_with_stack(|| {
+            let mut storage = MemoryStorage::new();
+            provision_storage(&mut storage).unwrap();
 
-        // No blocks -> should be a no-op
-        cover_traffic_tick(&mut storage, DOMAIN).unwrap();
+            cover_traffic_tick(&mut storage, DOMAIN).unwrap();
+        });
     }
 
     #[test]
     fn cover_tick_changes_blocks() {
-        let mut storage = MemoryStorage::new();
-        provision_storage(&mut storage).unwrap();
+        run_with_stack(|| {
+            let mut storage = MemoryStorage::new();
+            provision_storage(&mut storage).unwrap();
 
-        let slot = SessionIndex::new(0).unwrap();
-        let mut session = allocate_session(&mut storage, DOMAIN, slot, b"pw").unwrap();
+            let slot = SessionIndex::new(0).unwrap();
+            let mut session = allocate_session(&mut storage, DOMAIN, slot, b"pw").unwrap();
 
-        let data = vec![0xAB; 100];
-        write_session_data(&mut storage, DOMAIN, &mut session, 0, &data).unwrap();
+            let data = vec![0xAB; 100];
+            write_session_data(&mut storage, DOMAIN, &mut session, 0, &data).unwrap();
 
-        // Record ciphertexts before cover tick
-        let mut before = Vec::new();
-        for i in 0..SESSION_COUNT as u8 {
-            let s = SessionIndex::new(i).unwrap();
-            before.push(storage.read_block(s, 0).unwrap());
-        }
-
-        // Run enough ticks to likely hit block 0 (there's only 1 block)
-        for _ in 0..5 {
-            cover_traffic_tick(&mut storage, DOMAIN).unwrap();
-        }
-
-        // At least some blocks should have changed
-        let mut changed = false;
-        for i in 0..SESSION_COUNT as u8 {
-            let s = SessionIndex::new(i).unwrap();
-            let after = storage.read_block(s, 0).unwrap();
-            if *after != *before[i as usize] {
-                changed = true;
+            let mut before = Vec::new();
+            for i in 0..SESSION_COUNT as u8 {
+                let s = SessionIndex::new(i).unwrap();
+                before.push(storage.read_block(s, 0).unwrap());
             }
-        }
-        assert!(changed, "cover tick should change at least some blocks");
+
+            for _ in 0..5 {
+                cover_traffic_tick(&mut storage, DOMAIN).unwrap();
+            }
+
+            let mut changed = false;
+            for i in 0..SESSION_COUNT as u8 {
+                let s = SessionIndex::new(i).unwrap();
+                let after = storage.read_block(s, 0).unwrap();
+                if *after != *before[i as usize] {
+                    changed = true;
+                }
+            }
+            assert!(changed, "cover tick should change at least some blocks");
+        });
     }
 
     #[test]
     fn cover_tick_preserves_genuine() {
-        let mut storage = MemoryStorage::new();
-        provision_storage(&mut storage).unwrap();
+        run_with_stack(|| {
+            let mut storage = MemoryStorage::new();
+            provision_storage(&mut storage).unwrap();
 
-        let slot = SessionIndex::new(0).unwrap();
-        let mut session = allocate_session(&mut storage, DOMAIN, slot, b"pw").unwrap();
+            let slot = SessionIndex::new(0).unwrap();
+            let mut session = allocate_session(&mut storage, DOMAIN, slot, b"pw").unwrap();
 
-        let data = vec![0xCD; 100];
-        write_session_data(&mut storage, DOMAIN, &mut session, 0, &data).unwrap();
+            let data = vec![0xCD; 100];
+            write_session_data(&mut storage, DOMAIN, &mut session, 0, &data).unwrap();
 
-        // Run many cover ticks
-        for _ in 0..10 {
-            cover_traffic_tick(&mut storage, DOMAIN).unwrap();
-        }
+            for _ in 0..10 {
+                cover_traffic_tick(&mut storage, DOMAIN).unwrap();
+            }
 
-        // Data should still be readable
-        let result = read_session_data(&storage, DOMAIN, &session, 0, 100).unwrap();
-        assert_eq!(&*result, &data);
+            let result = read_session_data(&storage, DOMAIN, &session, 0, 100).unwrap();
+            assert_eq!(&*result, &data);
+        });
     }
 }
