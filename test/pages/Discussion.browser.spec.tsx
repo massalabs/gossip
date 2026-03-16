@@ -9,7 +9,21 @@ import { MessageDirection, MessageStatus } from '@massalabs/gossip-sdk';
 const mockNavigate = vi.fn();
 const mockSendMessage = vi.fn().mockResolvedValue(undefined);
 const mockSetCurrentContact = vi.fn();
+const mockDeleteMessage = vi.fn().mockResolvedValue(true);
 let latestOnSend: ((text: string) => void | Promise<void>) | null = null;
+let mockMessages = [
+  {
+    id: 1,
+    msgId: 1,
+    contactUserId: 'contact-1',
+    ownerUserId: 'owner-1',
+    content: 'Hello',
+    direction: MessageDirection.INCOMING,
+    status: MessageStatus.DELIVERED,
+    timestamp: new Date('2025-01-01T12:00:00Z'),
+    unread: false,
+  },
+];
 
 vi.mock('react-router-dom', () => ({
   useParams: () => ({ userId: 'contact-1' }),
@@ -23,7 +37,10 @@ vi.mock('../../src/hooks/useDiscussion', () => ({
 
 vi.mock('../../src/hooks/useGossipSdk', () => ({
   useGossipSdk: () => ({
-    messages: { get: vi.fn().mockResolvedValue(null) },
+    messages: {
+      get: vi.fn().mockResolvedValue(null),
+      deleteMessage: mockDeleteMessage,
+    },
   }),
 }));
 
@@ -64,19 +81,7 @@ vi.mock('../../src/stores/messageStore', () => ({
   useMessageStore: (selector: (state: unknown) => unknown) =>
     selector({
       setCurrentContact: mockSetCurrentContact,
-      getMessagesForContact: () => [
-        {
-          id: 1,
-          msgId: 1,
-          contactUserId: 'contact-1',
-          ownerUserId: 'owner-1',
-          content: 'Hello',
-          direction: MessageDirection.INCOMING,
-          status: MessageStatus.DELIVERED,
-          timestamp: new Date('2025-01-01T12:00:00Z'),
-          unread: false,
-        },
-      ],
+      getMessagesForContact: () => mockMessages,
       isLoading: false,
       sendMessage: mockSendMessage,
     }),
@@ -87,8 +92,23 @@ vi.mock('../../src/components/discussions/DiscussionHeader', () => ({
 }));
 
 vi.mock('../../src/components/discussions/SelectionHeader', () => ({
-  default: ({ count }: { count: number }) => (
-    <div data-testid="selection-header">Selecting {count}</div>
+  default: ({
+    count,
+    onDelete,
+    canDelete,
+  }: {
+    count: number;
+    onDelete?: () => void;
+    canDelete?: boolean;
+  }) => (
+    <div data-testid="selection-header">
+      Selecting {count}
+      {canDelete ? (
+        <button type="button" aria-label="mock multi delete" onClick={onDelete}>
+          Delete selected
+        </button>
+      ) : null}
+    </div>
   ),
 }));
 
@@ -155,7 +175,21 @@ describe('Discussion multi-select input behavior', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockSendMessage.mockResolvedValue(undefined);
+    mockDeleteMessage.mockResolvedValue(true);
     latestOnSend = null;
+    mockMessages = [
+      {
+        id: 1,
+        msgId: 1,
+        contactUserId: 'contact-1',
+        ownerUserId: 'owner-1',
+        content: 'Hello',
+        direction: MessageDirection.INCOMING,
+        status: MessageStatus.DELIVERED,
+        timestamp: new Date('2025-01-01T12:00:00Z'),
+        unread: false,
+      },
+    ];
   });
 
   it('hides input and blocks send while selecting', async () => {
@@ -175,5 +209,56 @@ describe('Discussion multi-select input behavior', () => {
 
     await Promise.resolve(latestOnSend?.('Blocked send'));
     expect(mockSendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('hides multi-delete action when selected message is incoming', async () => {
+    await render(<Discussion />);
+
+    await userEvent.click(
+      page.getByRole('button', { name: 'toggle message selection' })
+    );
+    await expect
+      .element(page.getByTestId('selection-header'))
+      .toBeInTheDocument();
+
+    await expect
+      .element(page.getByRole('button', { name: 'mock multi delete' }))
+      .not.toBeInTheDocument();
+
+    expect(mockDeleteMessage).not.toHaveBeenCalled();
+  });
+
+  it('deletes selected messages when all selected messages are outgoing', async () => {
+    mockMessages = [
+      {
+        id: 1,
+        msgId: 1,
+        contactUserId: 'contact-1',
+        ownerUserId: 'owner-1',
+        content: 'Hello',
+        direction: MessageDirection.OUTGOING,
+        status: MessageStatus.SENT,
+        timestamp: new Date('2025-01-01T12:00:00Z'),
+        unread: false,
+      },
+    ];
+
+    await render(<Discussion />);
+
+    await userEvent.click(
+      page.getByRole('button', { name: 'toggle message selection' })
+    );
+    await expect
+      .element(page.getByTestId('selection-header'))
+      .toBeInTheDocument();
+
+    await userEvent.click(
+      page.getByRole('button', { name: 'mock multi delete' })
+    );
+
+    expect(mockDeleteMessage).toHaveBeenCalledWith(1);
+    await expect
+      .element(page.getByTestId('selection-header'))
+      .not.toBeInTheDocument();
   });
 });

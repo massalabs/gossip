@@ -140,6 +140,22 @@ const Discussion: React.FC = () => {
     new Set()
   );
   const isSelecting = selectedMessageIds.size > 0;
+  const selectedMessages = React.useMemo(
+    () =>
+      messages.filter(
+        // Keep this as != null (not truthy) so message id 0 remains valid.
+        m => m.id != null && selectedMessageIds.has(m.id)
+      ),
+    [messages, selectedMessageIds]
+  );
+  const canDeleteSelected = React.useMemo(
+    () =>
+      selectedMessages.length > 0 &&
+      selectedMessages.every(
+        message => message.direction === MessageDirection.OUTGOING
+      ),
+    [selectedMessages]
+  );
 
   const handleToggleSelect = useCallback((messageId: number) => {
     setSelectedMessageIds(prev => {
@@ -159,6 +175,7 @@ const Discussion: React.FC = () => {
 
   const handleCopySelected = useCallback(async () => {
     const selected = messages
+      // Keep this as != null (not truthy) so message id 0 remains valid.
       .filter(m => m.id != null && selectedMessageIds.has(m.id))
       .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
 
@@ -178,6 +195,47 @@ const Discussion: React.FC = () => {
       toast.error('Failed to copy selected messages');
     }
   }, [messages, selectedMessageIds, discussion, contact, handleClearSelection]);
+
+  const handleDeleteSelected = useCallback(async () => {
+    if (!canDeleteSelected || selectedMessages.length === 0) return;
+
+    const failedMessageIds: number[] = [];
+    const deletedMessageIds: number[] = [];
+    for (const message of selectedMessages) {
+      if (message.id == null) continue;
+      try {
+        const deleted = await gossip.messages.deleteMessage(message.id);
+        if (!deleted) {
+          failedMessageIds.push(message.id);
+          console.error('[multi-delete] deleteMessage returned false', {
+            messageId: message.id,
+          });
+        } else {
+          deletedMessageIds.push(message.id);
+        }
+      } catch (error) {
+        failedMessageIds.push(message.id);
+        console.error('[multi-delete] deleteMessage threw', {
+          messageId: message.id,
+          error,
+        });
+      }
+    }
+
+    if (failedMessageIds.length > 0) {
+      console.error('[multi-delete] partial failure summary', {
+        selectedCount: selectedMessages.length,
+        deletedCount: deletedMessageIds.length,
+        failedCount: failedMessageIds.length,
+        failedMessageIds,
+      });
+    }
+
+    handleClearSelection();
+    if (failedMessageIds.length > 0) {
+      toast.error('Failed to delete some selected messages');
+    }
+  }, [canDeleteSelected, selectedMessages, gossip, handleClearSelection]);
 
   // Reply state
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
@@ -213,7 +271,8 @@ const Discussion: React.FC = () => {
     const el = inputAreaRef.current;
     if (!el) return;
     const ro = new ResizeObserver(([entry]) => {
-      setInputAreaHeight(entry.contentRect.height);
+      const nextHeight = entry.contentRect.height;
+      setInputAreaHeight(prev => (prev === nextHeight ? prev : nextHeight));
     });
     ro.observe(el);
     return () => ro.disconnect();
@@ -616,6 +675,8 @@ const Discussion: React.FC = () => {
             count={selectedMessageIds.size}
             onClear={handleClearSelection}
             onCopy={handleCopySelected}
+            onDelete={handleDeleteSelected}
+            canDelete={canDeleteSelected}
           />
         ) : (
           <DiscussionHeader

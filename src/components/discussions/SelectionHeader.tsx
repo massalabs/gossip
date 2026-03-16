@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, Copy } from 'react-feather';
+import { X, Copy, Trash2 } from 'react-feather';
 import HeaderBar from '../ui/HeaderBar';
 import Button from '../ui/Button';
 import AnimatedCounter from '../ui/AnimatedCounter';
@@ -8,12 +8,16 @@ interface SelectionHeaderProps {
   count: number;
   onClear: () => void;
   onCopy: () => void;
+  onDelete: () => void;
+  canDelete?: boolean;
 }
 
 const SelectionHeader: React.FC<SelectionHeaderProps> = ({
   count,
   onClear,
   onCopy,
+  onDelete,
+  canDelete = true,
 }) => {
   return (
     <HeaderBar>
@@ -38,6 +42,17 @@ const SelectionHeader: React.FC<SelectionHeaderProps> = ({
         >
           <Copy className="w-5 h-5 text-muted-foreground" />
         </Button>
+        {canDelete ? (
+          <Button
+            onClick={onDelete}
+            variant="circular"
+            size="custom"
+            ariaLabel="Delete selected messages"
+            className="w-8 h-8 flex items-center justify-center"
+          >
+            <Trash2 className="w-5 h-5 text-destructive" />
+          </Button>
+        ) : null}
       </div>
     </HeaderBar>
   );

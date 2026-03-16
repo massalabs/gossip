@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 
 interface AnimatedCounterProps {
   value: number;
@@ -8,6 +8,11 @@ interface AnimatedCounterProps {
 const baseSpan =
   'absolute inset-0 flex items-center text-lg font-semibold text-foreground tabular-nums';
 
+interface CounterStyle extends React.CSSProperties {
+  '--counter-end'?: string;
+  '--counter-start'?: string;
+}
+
 const AnimatedCounter: React.FC<AnimatedCounterProps> = ({
   value,
   className = '',
@@ -16,7 +21,6 @@ const AnimatedCounter: React.FC<AnimatedCounterProps> = ({
   const [animPrev, setAnimPrev] = useState(value);
   const [direction, setDirection] = useState<'up' | 'down'>('down');
   const [isAnimating, setIsAnimating] = useState(false);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (value === trackedValue) return;
@@ -25,24 +29,24 @@ const AnimatedCounter: React.FC<AnimatedCounterProps> = ({
     setAnimPrev(trackedValue);
     setTrackedValue(value);
     setIsAnimating(true);
-    if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => setIsAnimating(false), 220);
   }, [value, trackedValue]);
 
   useEffect(() => {
-    return () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
-    };
-  }, []);
+    if (!isAnimating) return;
+    // Safety fallback: end animation state even if animation events are skipped.
+    const fallback = setTimeout(() => setIsAnimating(false), 260);
+    return () => clearTimeout(fallback);
+  }, [isAnimating]);
 
-  // Slide out: center → up (for 'down' direction) or center → down (for 'up' direction)
-  // const slideOut =
-  //   direction === 'down'
-  //     ? 'translateY(0) -> translateY(-100%)'
-  //     : 'translateY(0) -> translateY(100%)';
-  // Slide in: bottom → center (for 'down') or top → center (for 'up')
-  const slideInFrom =
-    direction === 'down' ? 'translateY(100%)' : 'translateY(-100%)';
+  const oldValueStyle: CounterStyle = {
+    animation: `counter-out 0.2s ease-out forwards`,
+    '--counter-end': direction === 'down' ? '-100%' : '100%',
+  };
+  const newValueStyle: CounterStyle = {
+    animation: `counter-in 0.2s ease-out forwards`,
+    '--counter-start':
+      direction === 'down' ? 'translateY(100%)' : 'translateY(-100%)',
+  };
 
   return (
     <div className={`relative overflow-hidden h-7 min-w-[1ch] ${className}`}>
@@ -50,24 +54,14 @@ const AnimatedCounter: React.FC<AnimatedCounterProps> = ({
       {isAnimating && (
         <>
           {/* Old value slides out */}
-          <span
-            className={baseSpan}
-            style={{
-              animation: `counter-out 0.2s ease-out forwards`,
-              // @ts-expect-error CSS custom property
-              '--counter-end': direction === 'down' ? '-100%' : '100%',
-            }}
-          >
+          <span className={baseSpan} style={oldValueStyle}>
             {animPrev}
           </span>
           {/* New value slides in */}
           <span
             className={baseSpan}
-            style={{
-              animation: `counter-in 0.2s ease-out forwards`,
-              // @ts-expect-error CSS custom property
-              '--counter-start': slideInFrom,
-            }}
+            style={newValueStyle}
+            onAnimationEnd={() => setIsAnimating(false)}
           >
             {value}
           </span>
