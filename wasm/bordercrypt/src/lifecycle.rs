@@ -6,7 +6,7 @@ use zeroize::Zeroizing;
 
 use crate::BLOCK_SIZE;
 use crate::block::{create_cover_block, rerandomize_block};
-use crate::constants::{AEAD_TAG_SIZE, LENGTH_HDR_SIZE, PLAINTEXT_SIZE, SESSION_COUNT};
+use crate::constants::{LENGTH_HDR_SIZE, PLAINTEXT_SIZE, SESSION_COUNT};
 use crate::domain;
 use crate::error::{BordercryptError, Result};
 use crate::keypair::{KeypairFile, read_session_version_and_pk};
@@ -19,24 +19,32 @@ use crate::write::{encrypt_session_data_block, ensure_block_count, repair_blocks
 /// Initialize all session slots with valid but non-unlockable keypairs.
 ///
 /// Each slot gets a real public key (needed for rerand/cover), but the
-/// secret key is discarded. `sk_nonce` and `sk_ct` are filled with
-/// random bytes, making the slot impossible to unlock with any password
-/// while remaining structurally indistinguishable from an allocated
-/// slot's keypair file. Empty blockstreams (length 0) are created for
-/// each slot.
+/// secret key is discarded and `sk_ct` is a valid AEAD ciphertext under
+/// a random throwaway key, making the slot impossible to unlock with
+/// any password while remaining structurally indistinguishable from
+/// an allocated slot's `sk_ct`. Empty blockstreams (length 0) are
+/// created for each slot.
 pub fn provision_storage<S: BlockStorage + KeypairStorage>(storage: &mut S) -> Result<()> {
     for i in 0..SESSION_COUNT as u8 {
         let slot = SessionIndex::new(i).unwrap();
-        let (pk, _) = pq_keygen();
+        let (pk, _sk) = pq_keygen();
+        // _sk is dropped at end of loop iteration; its Drop impl zeroizes
 
-        // Store sk_nonce and sk_ct as random bytes so the slot is not
-        // unlockable by any password. Size matches an allocated slot's
-        // AEAD-encrypted secret key for indistinguishability.
         let mut sk_nonce = [0u8; crypto_aead::NONCE_SIZE];
         rand::rngs::OsRng.fill_bytes(&mut sk_nonce);
 
-        let mut sk_ct = vec![0u8; PqSecretKey::byte_size() + AEAD_TAG_SIZE];
-        rand::rngs::OsRng.fill_bytes(&mut sk_ct);
+        // Encrypt random plaintext under a random throwaway key so sk_ct
+        // is a structurally valid AEAD ciphertext, indistinguishable from
+        // an allocated slot's sk_ct.
+        let dummy_wrap_key = crypto_aead::Key::from({
+            let mut k = Zeroizing::new([0u8; crypto_aead::KEY_SIZE]);
+            rand::rngs::OsRng.fill_bytes(k.as_mut());
+            *k
+        });
+        let mut dummy_sk = Zeroizing::new(vec![0u8; PqSecretKey::byte_size()]);
+        rand::rngs::OsRng.fill_bytes(dummy_sk.as_mut());
+        let nonce = crypto_aead::Nonce::from(sk_nonce);
+        let sk_ct = crypto_aead::encrypt(&dummy_wrap_key, &nonce, &dummy_sk, b"");
 
         let kf = KeypairFile {
             version: 0,
