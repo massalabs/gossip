@@ -450,6 +450,7 @@ mod tests {
     use crate::keypair::KeypairFile;
     use crate::pq::{PqPublicKey, PqSecretKey, pq_keygen};
     use crate::read::read_session_data;
+    use crate::run_with_stack;
     use crate::storage::MemoryStorage;
 
     const DOMAIN: &str = "test";
@@ -464,21 +465,16 @@ mod tests {
             let (pk, sk) = pq_keygen();
             let session = SessionIndex::new(i).unwrap();
 
-            // Write a dummy keypair file (version 0, no real encryption of sk)
             let aad = domain::sk_wrap_aad(DOMAIN, 0, session);
-            let mut nonce_bytes = [0u8; crypto_aead::NONCE_SIZE];
-            rand::rngs::OsRng.fill_bytes(&mut nonce_bytes);
-            let nonce = crypto_aead::Nonce::from(nonce_bytes);
-            // Use a fixed wrap key for testing
             let wrap_key = crypto_aead::Key::from([0xBB; crypto_aead::KEY_SIZE]);
-            let sk_ct = crypto_aead::encrypt(&wrap_key, &nonce, &sk.to_bytes(), aad.as_bytes());
 
-            let kf = KeypairFile {
-                version: 0,
-                pq_pk: pk.to_bytes(),
-                sk_nonce: nonce_bytes,
-                sk_ct,
-            };
+            let kf = KeypairFile::build_wrapped(
+                0,
+                pk.to_bytes(),
+                &wrap_key,
+                &sk.to_bytes(),
+                aad.as_bytes(),
+            );
             storage.write_keypair(session, &kf.serialize()).unwrap();
             all_keys.push((pk, sk));
         }
@@ -501,527 +497,581 @@ mod tests {
 
     #[test]
     fn write_then_read_block() {
-        let mut storage = MemoryStorage::new();
-        let (session, _) = provision_all_sessions(&mut storage);
+        run_with_stack(|| {
+            let mut storage = MemoryStorage::new();
+            let (session, _) = provision_all_sessions(&mut storage);
 
-        // All sessions need at least 1 block
-        ensure_block_count(&mut storage, DOMAIN, &session, 1).unwrap();
+            // All sessions need at least 1 block
+            ensure_block_count(&mut storage, DOMAIN, &session, 1).unwrap();
 
-        let mut pt = [0u8; PLAINTEXT_SIZE];
-        pt[0] = 0x42;
-        pt[PLAINTEXT_SIZE - 1] = 0xFF;
-        encrypt_session_data_block(&mut storage, DOMAIN, &session, 0, &pt).unwrap();
+            let mut pt = [0u8; PLAINTEXT_SIZE];
+            pt[0] = 0x42;
+            pt[PLAINTEXT_SIZE - 1] = 0xFF;
+            encrypt_session_data_block(&mut storage, DOMAIN, &session, 0, &pt).unwrap();
 
-        let decrypted =
-            crate::read::decrypt_session_data_block(&storage, DOMAIN, &session, 0).unwrap();
-        assert_eq!(*decrypted, pt);
+            let decrypted =
+                crate::read::decrypt_session_data_block(&storage, DOMAIN, &session, 0).unwrap();
+            assert_eq!(*decrypted, pt);
+        });
     }
 
     #[test]
     fn all_sessions_updated() {
-        let mut storage = MemoryStorage::new();
-        let (session, _) = provision_all_sessions(&mut storage);
+        run_with_stack(|| {
+            let mut storage = MemoryStorage::new();
+            let (session, _) = provision_all_sessions(&mut storage);
 
-        ensure_block_count(&mut storage, DOMAIN, &session, 1).unwrap();
+            ensure_block_count(&mut storage, DOMAIN, &session, 1).unwrap();
 
-        let pt = [0u8; PLAINTEXT_SIZE];
-        encrypt_session_data_block(&mut storage, DOMAIN, &session, 0, &pt).unwrap();
+            let pt = [0u8; PLAINTEXT_SIZE];
+            encrypt_session_data_block(&mut storage, DOMAIN, &session, 0, &pt).unwrap();
 
-        // All 5 sessions should have at least 1 block
-        for i in 0..SESSION_COUNT as u8 {
-            let s = SessionIndex::new(i).unwrap();
-            assert!(storage.block_count(s).unwrap() >= 1);
-        }
+            // All 5 sessions should have at least 1 block
+            for i in 0..SESSION_COUNT as u8 {
+                let s = SessionIndex::new(i).unwrap();
+                assert!(storage.block_count(s).unwrap() >= 1);
+            }
+        });
     }
 
     #[test]
     fn other_sessions_rerandomized() {
-        let mut storage = MemoryStorage::new();
-        let (session, _) = provision_all_sessions(&mut storage);
+        run_with_stack(|| {
+            let mut storage = MemoryStorage::new();
+            let (session, _) = provision_all_sessions(&mut storage);
 
-        // First ensure blocks exist (this creates initial cover blocks for all sessions)
-        ensure_block_count(&mut storage, DOMAIN, &session, 1).unwrap();
+            // First ensure blocks exist (this creates initial cover blocks for all sessions)
+            ensure_block_count(&mut storage, DOMAIN, &session, 1).unwrap();
 
-        // Read original ciphertexts for non-target sessions
-        let mut original_cts = Vec::new();
-        for i in 1..SESSION_COUNT as u8 {
-            let s = SessionIndex::new(i).unwrap();
-            original_cts.push(storage.read_block(s, 0).unwrap());
-        }
+            // Read original ciphertexts for non-target sessions
+            let mut original_cts = Vec::new();
+            for i in 1..SESSION_COUNT as u8 {
+                let s = SessionIndex::new(i).unwrap();
+                original_cts.push(storage.read_block(s, 0).unwrap());
+            }
 
-        // Write a block to session 0
-        let pt = [0x42; PLAINTEXT_SIZE];
-        encrypt_session_data_block(&mut storage, DOMAIN, &session, 0, &pt).unwrap();
+            // Write a block to session 0
+            let pt = [0x42; PLAINTEXT_SIZE];
+            encrypt_session_data_block(&mut storage, DOMAIN, &session, 0, &pt).unwrap();
 
-        // Non-target sessions should have different ciphertexts (rerandomized)
-        for (idx, i) in (1..SESSION_COUNT as u8).enumerate() {
-            let s = SessionIndex::new(i).unwrap();
-            let new_ct = storage.read_block(s, 0).unwrap();
-            assert_ne!(
-                *new_ct, *original_cts[idx],
-                "session {i} was not rerandomized"
-            );
-        }
+            // Non-target sessions should have different ciphertexts (rerandomized)
+            for (idx, i) in (1..SESSION_COUNT as u8).enumerate() {
+                let s = SessionIndex::new(i).unwrap();
+                let new_ct = storage.read_block(s, 0).unwrap();
+                assert_ne!(
+                    *new_ct, *original_cts[idx],
+                    "session {i} was not rerandomized"
+                );
+            }
 
-        // But the rerandomized blocks should still be decryptable by their respective sessions
-        // (cover blocks from extend aren't decryptable with session 0 keys, and we don't have
-        // other sessions' AEAD keys, so we just verify the ciphertexts changed)
+            // But the rerandomized blocks should still be decryptable by their respective sessions
+            // (cover blocks from extend aren't decryptable with session 0 keys, and we don't have
+            // other sessions' AEAD keys, so we just verify the ciphertexts changed)
+        });
     }
 
     // --- commit 13: blockstream extension and repair ---
 
     #[test]
     fn repair_aligns_lengths() {
-        let mut storage = MemoryStorage::new();
-        let (session, _) = provision_all_sessions(&mut storage);
+        run_with_stack(|| {
+            let mut storage = MemoryStorage::new();
+            let (session, _) = provision_all_sessions(&mut storage);
 
-        // Manually create uneven block counts
-        ensure_block_count(&mut storage, DOMAIN, &session, 3).unwrap();
+            // Manually create uneven block counts
+            ensure_block_count(&mut storage, DOMAIN, &session, 3).unwrap();
 
-        // Manually append extra blocks to session 1
-        let s1 = SessionIndex::new(1).unwrap();
-        let (_, pk_bytes) = read_session_version_and_pk(&storage, s1).unwrap();
-        let pk = PqPublicKey::from_bytes(&pk_bytes).unwrap();
-        let cover = create_cover_block(&pk, "dummy");
-        let ct_arr: &[u8; BLOCK_SIZE] = cover.as_slice().try_into().unwrap();
-        storage.append_block(s1, ct_arr).unwrap();
-        storage.append_block(s1, ct_arr).unwrap();
+            // Manually append extra blocks to session 1
+            let s1 = SessionIndex::new(1).unwrap();
+            let (_, pk_bytes) = read_session_version_and_pk(&storage, s1).unwrap();
+            let pk = PqPublicKey::from_bytes(&pk_bytes).unwrap();
+            let cover = create_cover_block(&pk, "dummy");
+            let ct_arr: &[u8; BLOCK_SIZE] = cover.as_slice().try_into().unwrap();
+            storage.append_block(s1, ct_arr).unwrap();
+            storage.append_block(s1, ct_arr).unwrap();
 
-        // Session 1 now has 5, others have 3
-        assert_eq!(storage.block_count(s1).unwrap(), 5);
+            // Session 1 now has 5, others have 3
+            assert_eq!(storage.block_count(s1).unwrap(), 5);
 
-        repair_blockstream_lengths(&mut storage, DOMAIN).unwrap();
+            repair_blockstream_lengths(&mut storage, DOMAIN).unwrap();
 
-        // All sessions should now have 5 blocks
-        for i in 0..SESSION_COUNT as u8 {
-            let s = SessionIndex::new(i).unwrap();
-            assert_eq!(storage.block_count(s).unwrap(), 5);
-        }
+            // All sessions should now have 5 blocks
+            for i in 0..SESSION_COUNT as u8 {
+                let s = SessionIndex::new(i).unwrap();
+                assert_eq!(storage.block_count(s).unwrap(), 5);
+            }
+        });
     }
 
     #[test]
     fn extend_adds_to_all() {
-        let mut storage = MemoryStorage::new();
-        let (session, _) = provision_all_sessions(&mut storage);
+        run_with_stack(|| {
+            let mut storage = MemoryStorage::new();
+            let (session, _) = provision_all_sessions(&mut storage);
 
-        ensure_block_count(&mut storage, DOMAIN, &session, 1).unwrap();
+            ensure_block_count(&mut storage, DOMAIN, &session, 1).unwrap();
 
-        for i in 0..SESSION_COUNT as u8 {
-            let s = SessionIndex::new(i).unwrap();
-            assert_eq!(storage.block_count(s).unwrap(), 1);
-        }
+            for i in 0..SESSION_COUNT as u8 {
+                let s = SessionIndex::new(i).unwrap();
+                assert_eq!(storage.block_count(s).unwrap(), 1);
+            }
+        });
     }
 
     #[test]
     fn ensure_idempotent() {
-        let mut storage = MemoryStorage::new();
-        let (session, _) = provision_all_sessions(&mut storage);
+        run_with_stack(|| {
+            let mut storage = MemoryStorage::new();
+            let (session, _) = provision_all_sessions(&mut storage);
 
-        ensure_block_count(&mut storage, DOMAIN, &session, 3).unwrap();
-        let count_before = get_global_block_count(&storage).unwrap();
+            ensure_block_count(&mut storage, DOMAIN, &session, 3).unwrap();
+            let count_before = get_global_block_count(&storage).unwrap();
 
-        ensure_block_count(&mut storage, DOMAIN, &session, 3).unwrap();
-        let count_after = get_global_block_count(&storage).unwrap();
+            ensure_block_count(&mut storage, DOMAIN, &session, 3).unwrap();
+            let count_after = get_global_block_count(&storage).unwrap();
 
-        assert_eq!(count_before, count_after);
+            assert_eq!(count_before, count_after);
+        });
     }
 
     // --- commit 14: write_session_data ---
 
     #[test]
     fn write_then_read_roundtrip() {
-        let mut storage = MemoryStorage::new();
-        let (mut session, _) = provision_all_sessions(&mut storage);
+        run_with_stack(|| {
+            let mut storage = MemoryStorage::new();
+            let (mut session, _) = provision_all_sessions(&mut storage);
 
-        let data = b"hello, bordercrypt!";
-        write_session_data(&mut storage, DOMAIN, &mut session, 0, data).unwrap();
+            let data = b"hello, bordercrypt!";
+            write_session_data(&mut storage, DOMAIN, &mut session, 0, data).unwrap();
 
-        let result = read_session_data(&storage, DOMAIN, &session, 0, data.len()).unwrap();
-        assert_eq!(&*result, data);
+            let result = read_session_data(&storage, DOMAIN, &session, 0, data.len()).unwrap();
+            assert_eq!(&*result, data);
+        });
     }
 
     #[test]
     fn write_extends_storage() {
-        let mut storage = MemoryStorage::new();
-        let (mut session, _) = provision_all_sessions(&mut storage);
+        run_with_stack(|| {
+            let mut storage = MemoryStorage::new();
+            let (mut session, _) = provision_all_sessions(&mut storage);
 
-        assert_eq!(get_global_block_count(&storage).unwrap(), 0);
+            assert_eq!(get_global_block_count(&storage).unwrap(), 0);
 
-        let data = vec![0xAB; 100];
-        write_session_data(&mut storage, DOMAIN, &mut session, 0, &data).unwrap();
+            let data = vec![0xAB; 100];
+            write_session_data(&mut storage, DOMAIN, &mut session, 0, &data).unwrap();
 
-        assert!(get_global_block_count(&storage).unwrap() >= 1);
+            assert!(get_global_block_count(&storage).unwrap() >= 1);
+        });
     }
 
     #[test]
     fn write_updates_total_length() {
-        let mut storage = MemoryStorage::new();
-        let (mut session, _) = provision_all_sessions(&mut storage);
+        run_with_stack(|| {
+            let mut storage = MemoryStorage::new();
+            let (mut session, _) = provision_all_sessions(&mut storage);
 
-        let data = vec![0; 200];
-        write_session_data(&mut storage, DOMAIN, &mut session, 0, &data).unwrap();
+            let data = vec![0; 200];
+            write_session_data(&mut storage, DOMAIN, &mut session, 0, &data).unwrap();
 
-        assert_eq!(session.total_data_length, 200);
+            assert_eq!(session.total_data_length, 200);
+        });
     }
 
     #[test]
     fn partial_overwrite() {
-        let mut storage = MemoryStorage::new();
-        let (mut session, _) = provision_all_sessions(&mut storage);
+        run_with_stack(|| {
+            let mut storage = MemoryStorage::new();
+            let (mut session, _) = provision_all_sessions(&mut storage);
 
-        // Write initial data
-        let initial = vec![0xAA; 100];
-        write_session_data(&mut storage, DOMAIN, &mut session, 0, &initial).unwrap();
+            // Write initial data
+            let initial = vec![0xAA; 100];
+            write_session_data(&mut storage, DOMAIN, &mut session, 0, &initial).unwrap();
 
-        // Overwrite bytes 25..75
-        let patch = vec![0xBB; 50];
-        write_session_data(&mut storage, DOMAIN, &mut session, 25, &patch).unwrap();
+            // Overwrite bytes 25..75
+            let patch = vec![0xBB; 50];
+            write_session_data(&mut storage, DOMAIN, &mut session, 25, &patch).unwrap();
 
-        let result = read_session_data(&storage, DOMAIN, &session, 0, 100).unwrap();
-        assert_eq!(&result[..25], &[0xAA; 25]);
-        assert_eq!(&result[25..75], &[0xBB; 50]);
-        assert_eq!(&result[75..100], &[0xAA; 25]);
+            let result = read_session_data(&storage, DOMAIN, &session, 0, 100).unwrap();
+            assert_eq!(&result[..25], &[0xAA; 25]);
+            assert_eq!(&result[25..75], &[0xBB; 50]);
+            assert_eq!(&result[75..100], &[0xAA; 25]);
+        });
     }
 
     #[test]
     fn write_block_0_preserves_header() {
-        let mut storage = MemoryStorage::new();
-        let (mut session, _) = provision_all_sessions(&mut storage);
+        run_with_stack(|| {
+            let mut storage = MemoryStorage::new();
+            let (mut session, _) = provision_all_sessions(&mut storage);
 
-        let data = vec![0xCC; 50];
-        write_session_data(&mut storage, DOMAIN, &mut session, 0, &data).unwrap();
+            let data = vec![0xCC; 50];
+            write_session_data(&mut storage, DOMAIN, &mut session, 0, &data).unwrap();
 
-        // Read total length from block 0 header
-        let total = crate::read::read_total_length(
-            &storage,
-            DOMAIN,
-            session.session_version,
-            session.session_index,
-            &session.pq_rerand_sk,
-            session.root_aead_key.as_ref(),
-        )
-        .unwrap();
-        assert_eq!(total, 50);
+            // Read total length from block 0 header
+            let total = crate::read::read_total_length(
+                &storage,
+                DOMAIN,
+                session.session_version,
+                session.session_index,
+                &session.pq_rerand_sk,
+                session.root_aead_key.as_ref(),
+            )
+            .unwrap();
+            assert_eq!(total, 50);
+        });
     }
 
     #[test]
     fn append_pattern() {
-        let mut storage = MemoryStorage::new();
-        let (mut session, _) = provision_all_sessions(&mut storage);
+        run_with_stack(|| {
+            let mut storage = MemoryStorage::new();
+            let (mut session, _) = provision_all_sessions(&mut storage);
 
-        write_session_data(&mut storage, DOMAIN, &mut session, 0, b"hello").unwrap();
-        write_session_data(&mut storage, DOMAIN, &mut session, 5, b" world").unwrap();
+            write_session_data(&mut storage, DOMAIN, &mut session, 0, b"hello").unwrap();
+            write_session_data(&mut storage, DOMAIN, &mut session, 5, b" world").unwrap();
 
-        let result = read_session_data(&storage, DOMAIN, &session, 0, 11).unwrap();
-        assert_eq!(&*result, b"hello world");
+            let result = read_session_data(&storage, DOMAIN, &session, 0, 11).unwrap();
+            assert_eq!(&*result, b"hello world");
+        });
     }
 
     #[test]
     fn write_cross_block() {
-        let mut storage = MemoryStorage::new();
-        let (mut session, _) = provision_all_sessions(&mut storage);
+        run_with_stack(|| {
+            let mut storage = MemoryStorage::new();
+            let (mut session, _) = provision_all_sessions(&mut storage);
 
-        // Write data that spans multiple blocks
-        let data_len = PLAINTEXT_SIZE * 2;
-        let data: Vec<u8> = (0..data_len).map(|i| (i % 256) as u8).collect();
-        write_session_data(&mut storage, DOMAIN, &mut session, 0, &data).unwrap();
+            // Write data that spans multiple blocks
+            let data_len = PLAINTEXT_SIZE * 2;
+            let data: Vec<u8> = (0..data_len).map(|i| (i % 256) as u8).collect();
+            write_session_data(&mut storage, DOMAIN, &mut session, 0, &data).unwrap();
 
-        let result = read_session_data(&storage, DOMAIN, &session, 0, data_len).unwrap();
-        assert_eq!(&*result, &data);
+            let result = read_session_data(&storage, DOMAIN, &session, 0, data_len).unwrap();
+            assert_eq!(&*result, &data);
+        });
     }
 
     // --- Edge cases for required_last_block calculation (review comment #9) ---
 
     #[test]
     fn write_single_byte() {
-        let mut storage = MemoryStorage::new();
-        let (mut session, _) = provision_all_sessions(&mut storage);
+        run_with_stack(|| {
+            let mut storage = MemoryStorage::new();
+            let (mut session, _) = provision_all_sessions(&mut storage);
 
-        // 1 byte of data: last byte at virtual pos LENGTH_HDR_SIZE + 0 → block 0
-        write_session_data(&mut storage, DOMAIN, &mut session, 0, &[0x42]).unwrap();
-        assert_eq!(session.total_data_length, 1);
-        assert_eq!(get_global_block_count(&storage).unwrap(), 1);
+            // 1 byte of data: last byte at virtual pos LENGTH_HDR_SIZE + 0 -> block 0
+            write_session_data(&mut storage, DOMAIN, &mut session, 0, &[0x42]).unwrap();
+            assert_eq!(session.total_data_length, 1);
+            assert_eq!(get_global_block_count(&storage).unwrap(), 1);
 
-        let result = read_session_data(&storage, DOMAIN, &session, 0, 1).unwrap();
-        assert_eq!(&*result, &[0x42]);
+            let result = read_session_data(&storage, DOMAIN, &session, 0, 1).unwrap();
+            assert_eq!(&*result, &[0x42]);
+        });
     }
 
     #[test]
     fn write_fills_block_0_exactly() {
-        let mut storage = MemoryStorage::new();
-        let (mut session, _) = provision_all_sessions(&mut storage);
+        run_with_stack(|| {
+            let mut storage = MemoryStorage::new();
+            let (mut session, _) = provision_all_sessions(&mut storage);
 
-        // Exactly fill block 0's data area (PLAINTEXT_SIZE - LENGTH_HDR_SIZE bytes)
-        let max_b0 = PLAINTEXT_SIZE - LENGTH_HDR_SIZE;
-        let data = vec![0xAA; max_b0];
-        write_session_data(&mut storage, DOMAIN, &mut session, 0, &data).unwrap();
+            // Exactly fill block 0's data area (PLAINTEXT_SIZE - LENGTH_HDR_SIZE bytes)
+            let max_b0 = PLAINTEXT_SIZE - LENGTH_HDR_SIZE;
+            let data = vec![0xAA; max_b0];
+            write_session_data(&mut storage, DOMAIN, &mut session, 0, &data).unwrap();
 
-        assert_eq!(session.total_data_length, max_b0 as u64);
-        assert_eq!(get_global_block_count(&storage).unwrap(), 1);
+            assert_eq!(session.total_data_length, max_b0 as u64);
+            assert_eq!(get_global_block_count(&storage).unwrap(), 1);
 
-        let result = read_session_data(&storage, DOMAIN, &session, 0, max_b0).unwrap();
-        assert_eq!(&*result, &data);
+            let result = read_session_data(&storage, DOMAIN, &session, 0, max_b0).unwrap();
+            assert_eq!(&*result, &data);
+        });
     }
 
     #[test]
     fn write_one_byte_spills_to_block_1() {
-        let mut storage = MemoryStorage::new();
-        let (mut session, _) = provision_all_sessions(&mut storage);
+        run_with_stack(|| {
+            let mut storage = MemoryStorage::new();
+            let (mut session, _) = provision_all_sessions(&mut storage);
 
-        // One byte past block 0's data area → must allocate block 1
-        let spill = PLAINTEXT_SIZE - LENGTH_HDR_SIZE + 1;
-        let data = vec![0xBB; spill];
-        write_session_data(&mut storage, DOMAIN, &mut session, 0, &data).unwrap();
+            // One byte past block 0's data area -> must allocate block 1
+            let spill = PLAINTEXT_SIZE - LENGTH_HDR_SIZE + 1;
+            let data = vec![0xBB; spill];
+            write_session_data(&mut storage, DOMAIN, &mut session, 0, &data).unwrap();
 
-        assert_eq!(session.total_data_length, spill as u64);
-        assert_eq!(get_global_block_count(&storage).unwrap(), 2);
+            assert_eq!(session.total_data_length, spill as u64);
+            assert_eq!(get_global_block_count(&storage).unwrap(), 2);
 
-        let result = read_session_data(&storage, DOMAIN, &session, 0, spill).unwrap();
-        assert_eq!(&*result, &data);
+            let result = read_session_data(&storage, DOMAIN, &session, 0, spill).unwrap();
+            assert_eq!(&*result, &data);
+        });
     }
 
     #[test]
     fn write_fills_block_1_exactly() {
-        let mut storage = MemoryStorage::new();
-        let (mut session, _) = provision_all_sessions(&mut storage);
+        run_with_stack(|| {
+            let mut storage = MemoryStorage::new();
+            let (mut session, _) = provision_all_sessions(&mut storage);
 
-        // Fill blocks 0 and 1 exactly: LENGTH_HDR_SIZE + data = 2 * PLAINTEXT_SIZE
-        let exact_two = 2 * PLAINTEXT_SIZE - LENGTH_HDR_SIZE;
-        let data = vec![0xCC; exact_two];
-        write_session_data(&mut storage, DOMAIN, &mut session, 0, &data).unwrap();
+            // Fill blocks 0 and 1 exactly: LENGTH_HDR_SIZE + data = 2 * PLAINTEXT_SIZE
+            let exact_two = 2 * PLAINTEXT_SIZE - LENGTH_HDR_SIZE;
+            let data = vec![0xCC; exact_two];
+            write_session_data(&mut storage, DOMAIN, &mut session, 0, &data).unwrap();
 
-        assert_eq!(session.total_data_length, exact_two as u64);
-        assert_eq!(get_global_block_count(&storage).unwrap(), 2);
+            assert_eq!(session.total_data_length, exact_two as u64);
+            assert_eq!(get_global_block_count(&storage).unwrap(), 2);
 
-        let result = read_session_data(&storage, DOMAIN, &session, 0, exact_two).unwrap();
-        assert_eq!(&*result, &data);
+            let result = read_session_data(&storage, DOMAIN, &session, 0, exact_two).unwrap();
+            assert_eq!(&*result, &data);
+        });
     }
 
     #[test]
     fn write_one_byte_spills_to_block_2() {
-        let mut storage = MemoryStorage::new();
-        let (mut session, _) = provision_all_sessions(&mut storage);
+        run_with_stack(|| {
+            let mut storage = MemoryStorage::new();
+            let (mut session, _) = provision_all_sessions(&mut storage);
 
-        // One byte past two full blocks → must allocate block 2
-        let spill = 2 * PLAINTEXT_SIZE - LENGTH_HDR_SIZE + 1;
-        let data = vec![0xDD; spill];
-        write_session_data(&mut storage, DOMAIN, &mut session, 0, &data).unwrap();
+            // One byte past two full blocks -> must allocate block 2
+            let spill = 2 * PLAINTEXT_SIZE - LENGTH_HDR_SIZE + 1;
+            let data = vec![0xDD; spill];
+            write_session_data(&mut storage, DOMAIN, &mut session, 0, &data).unwrap();
 
-        assert_eq!(session.total_data_length, spill as u64);
-        assert_eq!(get_global_block_count(&storage).unwrap(), 3);
+            assert_eq!(session.total_data_length, spill as u64);
+            assert_eq!(get_global_block_count(&storage).unwrap(), 3);
 
-        let result = read_session_data(&storage, DOMAIN, &session, 0, spill).unwrap();
-        assert_eq!(&*result, &data);
+            let result = read_session_data(&storage, DOMAIN, &session, 0, spill).unwrap();
+            assert_eq!(&*result, &data);
+        });
     }
 
     #[test]
     fn write_empty_is_always_noop() {
-        let mut storage = MemoryStorage::new();
-        let (mut session, _) = provision_all_sessions(&mut storage);
+        run_with_stack(|| {
+            let mut storage = MemoryStorage::new();
+            let (mut session, _) = provision_all_sessions(&mut storage);
 
-        // Empty write at offset 0: no-op
-        write_session_data(&mut storage, DOMAIN, &mut session, 0, &[]).unwrap();
-        assert_eq!(session.total_data_length, 0);
-        assert_eq!(get_global_block_count(&storage).unwrap(), 0);
+            // Empty write at offset 0: no-op
+            write_session_data(&mut storage, DOMAIN, &mut session, 0, &[]).unwrap();
+            assert_eq!(session.total_data_length, 0);
+            assert_eq!(get_global_block_count(&storage).unwrap(), 0);
 
-        // Empty write at offset > old_total: still a no-op (no ftruncate semantics)
-        write_session_data(&mut storage, DOMAIN, &mut session, 1000, &[]).unwrap();
-        assert_eq!(session.total_data_length, 0);
-        assert_eq!(get_global_block_count(&storage).unwrap(), 0);
+            // Empty write at offset > old_total: still a no-op (no ftruncate semantics)
+            write_session_data(&mut storage, DOMAIN, &mut session, 1000, &[]).unwrap();
+            assert_eq!(session.total_data_length, 0);
+            assert_eq!(get_global_block_count(&storage).unwrap(), 0);
 
-        // After real data, empty write at higher offset: no-op
-        write_session_data(&mut storage, DOMAIN, &mut session, 0, &[0xAA; 50]).unwrap();
-        assert_eq!(session.total_data_length, 50);
-        write_session_data(&mut storage, DOMAIN, &mut session, 9999, &[]).unwrap();
-        assert_eq!(session.total_data_length, 50);
+            // After real data, empty write at higher offset: no-op
+            write_session_data(&mut storage, DOMAIN, &mut session, 0, &[0xAA; 50]).unwrap();
+            assert_eq!(session.total_data_length, 50);
+            write_session_data(&mut storage, DOMAIN, &mut session, 9999, &[]).unwrap();
+            assert_eq!(session.total_data_length, 50);
+        });
     }
 
     // --- shrink_session_data ---
 
     #[test]
     fn shrink_no_op_when_not_smaller() {
-        let mut storage = MemoryStorage::new();
-        let (mut session, _) = provision_all_sessions(&mut storage);
+        run_with_stack(|| {
+            let mut storage = MemoryStorage::new();
+            let (mut session, _) = provision_all_sessions(&mut storage);
 
-        let data = vec![0xAA; 100];
-        write_session_data(&mut storage, DOMAIN, &mut session, 0, &data).unwrap();
+            let data = vec![0xAA; 100];
+            write_session_data(&mut storage, DOMAIN, &mut session, 0, &data).unwrap();
 
-        // Same size: no-op
-        shrink_session_data(&mut storage, DOMAIN, &mut session, 100).unwrap();
-        assert_eq!(session.total_data_length, 100);
+            // Same size: no-op
+            shrink_session_data(&mut storage, DOMAIN, &mut session, 100).unwrap();
+            assert_eq!(session.total_data_length, 100);
 
-        // Larger size: no-op
-        shrink_session_data(&mut storage, DOMAIN, &mut session, 200).unwrap();
-        assert_eq!(session.total_data_length, 100);
+            // Larger size: no-op
+            shrink_session_data(&mut storage, DOMAIN, &mut session, 200).unwrap();
+            assert_eq!(session.total_data_length, 100);
+        });
     }
 
     #[test]
     fn shrink_updates_total_length() {
-        let mut storage = MemoryStorage::new();
-        let (mut session, _) = provision_all_sessions(&mut storage);
+        run_with_stack(|| {
+            let mut storage = MemoryStorage::new();
+            let (mut session, _) = provision_all_sessions(&mut storage);
 
-        let data = vec![0xAA; 100];
-        write_session_data(&mut storage, DOMAIN, &mut session, 0, &data).unwrap();
+            let data = vec![0xAA; 100];
+            write_session_data(&mut storage, DOMAIN, &mut session, 0, &data).unwrap();
 
-        shrink_session_data(&mut storage, DOMAIN, &mut session, 50).unwrap();
-        assert_eq!(session.total_data_length, 50);
+            shrink_session_data(&mut storage, DOMAIN, &mut session, 50).unwrap();
+            assert_eq!(session.total_data_length, 50);
 
-        let total = crate::read::read_total_length(
-            &storage,
-            DOMAIN,
-            session.session_version,
-            session.session_index,
-            &session.pq_rerand_sk,
-            session.root_aead_key.as_ref(),
-        )
-        .unwrap();
-        assert_eq!(total, 50);
+            let total = crate::read::read_total_length(
+                &storage,
+                DOMAIN,
+                session.session_version,
+                session.session_index,
+                &session.pq_rerand_sk,
+                session.root_aead_key.as_ref(),
+            )
+            .unwrap();
+            assert_eq!(total, 50);
+        });
     }
 
     #[test]
     fn shrink_preserves_remaining_data() {
-        let mut storage = MemoryStorage::new();
-        let (mut session, _) = provision_all_sessions(&mut storage);
+        run_with_stack(|| {
+            let mut storage = MemoryStorage::new();
+            let (mut session, _) = provision_all_sessions(&mut storage);
 
-        let data: Vec<u8> = (0..200).map(|i| (i % 256) as u8).collect();
-        write_session_data(&mut storage, DOMAIN, &mut session, 0, &data).unwrap();
+            let data: Vec<u8> = (0..200).map(|i| (i % 256) as u8).collect();
+            write_session_data(&mut storage, DOMAIN, &mut session, 0, &data).unwrap();
 
-        shrink_session_data(&mut storage, DOMAIN, &mut session, 100).unwrap();
+            shrink_session_data(&mut storage, DOMAIN, &mut session, 100).unwrap();
 
-        let result = read_session_data(&storage, DOMAIN, &session, 0, 100).unwrap();
-        assert_eq!(&*result, &data[..100]);
+            let result = read_session_data(&storage, DOMAIN, &session, 0, 100).unwrap();
+            assert_eq!(&*result, &data[..100]);
+        });
     }
 
     #[test]
     fn shrink_freed_blocks_become_cover() {
-        let mut storage = MemoryStorage::new();
-        let (mut session, _) = provision_all_sessions(&mut storage);
+        run_with_stack(|| {
+            let mut storage = MemoryStorage::new();
+            let (mut session, _) = provision_all_sessions(&mut storage);
 
-        // Write enough data to span multiple blocks
-        let data_len = PLAINTEXT_SIZE * 3;
-        let data = vec![0xBB; data_len];
-        write_session_data(&mut storage, DOMAIN, &mut session, 0, &data).unwrap();
+            // Write enough data to span multiple blocks
+            let data_len = PLAINTEXT_SIZE * 3;
+            let data = vec![0xBB; data_len];
+            write_session_data(&mut storage, DOMAIN, &mut session, 0, &data).unwrap();
 
-        // Shrink to fit in 1 block
-        shrink_session_data(&mut storage, DOMAIN, &mut session, 10).unwrap();
+            // Shrink to fit in 1 block
+            shrink_session_data(&mut storage, DOMAIN, &mut session, 10).unwrap();
 
-        // Blocks beyond new_last_block should no longer be decryptable
-        // (they are now cover blocks with throwaway AEAD keys)
-        let result = decrypt_session_data_block(&storage, DOMAIN, &session, 2);
-        assert!(result.is_err());
+            // Blocks beyond new_last_block should no longer be decryptable
+            // (they are now cover blocks with throwaway AEAD keys)
+            let result = decrypt_session_data_block(&storage, DOMAIN, &session, 2);
+            assert!(result.is_err());
+        });
     }
 
     #[test]
     fn shrink_all_sessions_updated_at_freed_indices() {
-        let mut storage = MemoryStorage::new();
-        let (mut session, _) = provision_all_sessions(&mut storage);
+        run_with_stack(|| {
+            let mut storage = MemoryStorage::new();
+            let (mut session, _) = provision_all_sessions(&mut storage);
 
-        let data_len = PLAINTEXT_SIZE * 3;
-        let data = vec![0xCC; data_len];
-        write_session_data(&mut storage, DOMAIN, &mut session, 0, &data).unwrap();
+            let data_len = PLAINTEXT_SIZE * 3;
+            let data = vec![0xCC; data_len];
+            write_session_data(&mut storage, DOMAIN, &mut session, 0, &data).unwrap();
 
-        // Snapshot block 2 for all sessions before shrink
-        let mut before = Vec::new();
-        for i in 0..SESSION_COUNT as u8 {
-            let s = SessionIndex::new(i).unwrap();
-            before.push(storage.read_block(s, 2).unwrap());
-        }
+            // Snapshot block 2 for all sessions before shrink
+            let mut before = Vec::new();
+            for i in 0..SESSION_COUNT as u8 {
+                let s = SessionIndex::new(i).unwrap();
+                before.push(storage.read_block(s, 2).unwrap());
+            }
 
-        // Shrink to 1 block — blocks 1 and 2 become freed
-        shrink_session_data(&mut storage, DOMAIN, &mut session, 10).unwrap();
+            // Shrink to 1 block -- blocks 1 and 2 become freed
+            shrink_session_data(&mut storage, DOMAIN, &mut session, 10).unwrap();
 
-        // All sessions should have changed ciphertexts at the freed index
-        for i in 0..SESSION_COUNT as u8 {
-            let s = SessionIndex::new(i).unwrap();
-            let after = storage.read_block(s, 2).unwrap();
-            assert_ne!(
-                *after, *before[i as usize],
-                "session {i} block 2 was not updated during shrink"
-            );
-        }
+            // All sessions should have changed ciphertexts at the freed index
+            for i in 0..SESSION_COUNT as u8 {
+                let s = SessionIndex::new(i).unwrap();
+                let after = storage.read_block(s, 2).unwrap();
+                assert_ne!(
+                    *after, *before[i as usize],
+                    "session {i} block 2 was not updated during shrink"
+                );
+            }
+        });
     }
 
     #[test]
     fn shrink_to_zero() {
-        let mut storage = MemoryStorage::new();
-        let (mut session, _) = provision_all_sessions(&mut storage);
+        run_with_stack(|| {
+            let mut storage = MemoryStorage::new();
+            let (mut session, _) = provision_all_sessions(&mut storage);
 
-        let data = vec![0xDD; 100];
-        write_session_data(&mut storage, DOMAIN, &mut session, 0, &data).unwrap();
+            let data = vec![0xDD; 100];
+            write_session_data(&mut storage, DOMAIN, &mut session, 0, &data).unwrap();
 
-        shrink_session_data(&mut storage, DOMAIN, &mut session, 0).unwrap();
-        assert_eq!(session.total_data_length, 0);
+            shrink_session_data(&mut storage, DOMAIN, &mut session, 0).unwrap();
+            assert_eq!(session.total_data_length, 0);
 
-        let total = crate::read::read_total_length(
-            &storage,
-            DOMAIN,
-            session.session_version,
-            session.session_index,
-            &session.pq_rerand_sk,
-            session.root_aead_key.as_ref(),
-        )
-        .unwrap();
-        assert_eq!(total, 0);
+            let total = crate::read::read_total_length(
+                &storage,
+                DOMAIN,
+                session.session_version,
+                session.session_index,
+                &session.pq_rerand_sk,
+                session.root_aead_key.as_ref(),
+            )
+            .unwrap();
+            assert_eq!(total, 0);
 
-        // Blockstream length unchanged
-        assert!(get_global_block_count(&storage).unwrap() >= 1);
+            // Blockstream length unchanged
+            assert!(get_global_block_count(&storage).unwrap() >= 1);
+        });
     }
 
     #[test]
     fn shrink_cross_block_boundary() {
-        let mut storage = MemoryStorage::new();
-        let (mut session, _) = provision_all_sessions(&mut storage);
+        run_with_stack(|| {
+            let mut storage = MemoryStorage::new();
+            let (mut session, _) = provision_all_sessions(&mut storage);
 
-        // Write across 3 blocks
-        let data_len = PLAINTEXT_SIZE * 3;
-        let data: Vec<u8> = (0..data_len).map(|i| (i % 256) as u8).collect();
-        write_session_data(&mut storage, DOMAIN, &mut session, 0, &data).unwrap();
+            // Write across 3 blocks
+            let data_len = PLAINTEXT_SIZE * 3;
+            let data: Vec<u8> = (0..data_len).map(|i| (i % 256) as u8).collect();
+            write_session_data(&mut storage, DOMAIN, &mut session, 0, &data).unwrap();
 
-        let blocks_before = get_global_block_count(&storage).unwrap();
+            let blocks_before = get_global_block_count(&storage).unwrap();
 
-        // Shrink to 1.5 blocks worth of data
-        let new_size = PLAINTEXT_SIZE + PLAINTEXT_SIZE / 2;
-        shrink_session_data(&mut storage, DOMAIN, &mut session, new_size as u64).unwrap();
+            // Shrink to 1.5 blocks worth of data
+            let new_size = PLAINTEXT_SIZE + PLAINTEXT_SIZE / 2;
+            shrink_session_data(&mut storage, DOMAIN, &mut session, new_size as u64).unwrap();
 
-        // Blockstream length unchanged (blocks never removed)
-        assert_eq!(get_global_block_count(&storage).unwrap(), blocks_before);
+            // Blockstream length unchanged (blocks never removed)
+            assert_eq!(get_global_block_count(&storage).unwrap(), blocks_before);
 
-        // Data in the remaining range is intact
-        let result = read_session_data(&storage, DOMAIN, &session, 0, new_size).unwrap();
-        assert_eq!(&*result, &data[..new_size]);
+            // Data in the remaining range is intact
+            let result = read_session_data(&storage, DOMAIN, &session, 0, new_size).unwrap();
+            assert_eq!(&*result, &data[..new_size]);
+        });
     }
 
     #[test]
     fn shrink_partial_block_tail_randomized() {
-        let mut storage = MemoryStorage::new();
-        let (mut session, _) = provision_all_sessions(&mut storage);
+        run_with_stack(|| {
+            let mut storage = MemoryStorage::new();
+            let (mut session, _) = provision_all_sessions(&mut storage);
 
-        // Fill exactly 1 block worth of data
-        let data = vec![0xEE; PLAINTEXT_SIZE - LENGTH_HDR_SIZE];
-        write_session_data(&mut storage, DOMAIN, &mut session, 0, &data).unwrap();
+            // Fill exactly 1 block worth of data
+            let data = vec![0xEE; PLAINTEXT_SIZE - LENGTH_HDR_SIZE];
+            write_session_data(&mut storage, DOMAIN, &mut session, 0, &data).unwrap();
 
-        // Read the full plaintext of block 0 before shrink
-        let pt_before = decrypt_session_data_block(&storage, DOMAIN, &session, 0).unwrap();
+            // Read the full plaintext of block 0 before shrink
+            let pt_before = decrypt_session_data_block(&storage, DOMAIN, &session, 0).unwrap();
 
-        // Shrink to half the data
-        let half = (PLAINTEXT_SIZE - LENGTH_HDR_SIZE) / 2;
-        shrink_session_data(&mut storage, DOMAIN, &mut session, half as u64).unwrap();
+            // Shrink to half the data
+            let half = (PLAINTEXT_SIZE - LENGTH_HDR_SIZE) / 2;
+            shrink_session_data(&mut storage, DOMAIN, &mut session, half as u64).unwrap();
 
-        // Read the full plaintext of block 0 after shrink
-        let pt_after = decrypt_session_data_block(&storage, DOMAIN, &session, 0).unwrap();
+            // Read the full plaintext of block 0 after shrink
+            let pt_after = decrypt_session_data_block(&storage, DOMAIN, &session, 0).unwrap();
 
-        // The data portion should match
-        assert_eq!(
-            &pt_after[LENGTH_HDR_SIZE..LENGTH_HDR_SIZE + half],
-            &pt_before[LENGTH_HDR_SIZE..LENGTH_HDR_SIZE + half]
-        );
+            // The data portion should match
+            assert_eq!(
+                &pt_after[LENGTH_HDR_SIZE..LENGTH_HDR_SIZE + half],
+                &pt_before[LENGTH_HDR_SIZE..LENGTH_HDR_SIZE + half]
+            );
 
-        // The tail portion should differ (randomized)
-        let tail_before = &pt_before[LENGTH_HDR_SIZE + half..];
-        let tail_after = &pt_after[LENGTH_HDR_SIZE + half..];
-        assert_ne!(
-            tail_before, tail_after,
-            "tail should be randomized after shrink"
-        );
+            // The tail portion should differ (randomized)
+            let tail_before = &pt_before[LENGTH_HDR_SIZE + half..];
+            let tail_after = &pt_after[LENGTH_HDR_SIZE + half..];
+            assert_ne!(
+                tail_before, tail_after,
+                "tail should be randomized after shrink"
+            );
+        });
     }
 }
