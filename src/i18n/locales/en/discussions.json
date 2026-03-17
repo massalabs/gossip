@@ -29,6 +29,8 @@
   "list_item": {
     "set_contact_name": "Set contact name",
     "refuse_connection": "Refuse connection?",
+    "pin_discussion": "Pin",
+    "unpin_discussion": "Unpin",
     "edit_name": "Edit Name",
     "edit_name_title": "Edit discussion name"
   },

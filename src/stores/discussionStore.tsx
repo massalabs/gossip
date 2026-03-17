@@ -110,7 +110,14 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
           return 2;
         };
 
+        const getPinnedPriority = (discussion: Discussion): number =>
+          discussion.pinned ? 0 : 1;
+
         const sortedDiscussions = discussionsList.sort((a, b) => {
+          // Pinned first
+          const pinnedDiff = getPinnedPriority(a) - getPinnedPriority(b);
+          if (pinnedDiff !== 0) return pinnedDiff;
+
           if (isSessionOpen) {
             const statusDiff =
               getStatusPriority(get().sessionsStatuses.get(a.contactUserId)!) -

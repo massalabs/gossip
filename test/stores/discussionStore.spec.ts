@@ -35,6 +35,7 @@ const defaultDiscussion: Discussion = {
   killedNextRetryAt: null,
   saturatedRetryAt: null,
   saturatedRetryDone: false,
+  pinned: false,
 };
 
 // Mock sdkStore so getSdk() does not throw. The polling callback calls
@@ -279,5 +280,87 @@ describe('DiscussionStore', () => {
       timestamp: msgTimestamp,
     });
     expect(lastMessages.has('contact-no-msg')).toBe(false);
+  });
+
+  it('places pinned discussions before unpinned regardless of recency', async () => {
+    mockSdk.isSessionOpen = true;
+
+    const recentUnpinned = {
+      ...defaultDiscussion,
+      id: 1,
+      ownerUserId,
+      contactUserId: 'recent-unpinned',
+      pinned: false,
+      lastMessageTimestamp: new Date('2024-06-01'),
+    };
+
+    const olderPinned = {
+      ...defaultDiscussion,
+      id: 2,
+      ownerUserId,
+      contactUserId: 'older-pinned',
+      pinned: true,
+      lastMessageTimestamp: new Date('2024-01-01'),
+    };
+
+    mockSdk.discussions.list.mockResolvedValue([
+      recentUnpinned,
+      olderPinned,
+    ] as Discussion[]);
+
+    useDiscussionStore.getState().init();
+    await waitForPolling();
+
+    const discussions = useDiscussionStore.getState().discussions;
+    expect(discussions).toHaveLength(2);
+    expect(discussions[0].contactUserId).toBe('older-pinned');
+    expect(discussions[1].contactUserId).toBe('recent-unpinned');
+  });
+
+  it('keeps multiple pinned discussions on top and sorts them by recency', async () => {
+    mockSdk.isSessionOpen = true;
+
+    const olderPinned = {
+      ...defaultDiscussion,
+      id: 1,
+      ownerUserId,
+      contactUserId: 'older-pinned',
+      pinned: true,
+      lastMessageTimestamp: new Date('2024-01-01'),
+    };
+
+    const newerPinned = {
+      ...defaultDiscussion,
+      id: 2,
+      ownerUserId,
+      contactUserId: 'newer-pinned',
+      pinned: true,
+      lastMessageTimestamp: new Date('2024-06-01'),
+    };
+
+    const unpinned = {
+      ...defaultDiscussion,
+      id: 3,
+      ownerUserId,
+      contactUserId: 'unpinned',
+      pinned: false,
+      lastMessageTimestamp: new Date('2024-07-01'),
+    };
+
+    mockSdk.discussions.list.mockResolvedValue([
+      unpinned,
+      olderPinned,
+      newerPinned,
+    ] as Discussion[]);
+
+    useDiscussionStore.getState().init();
+    await waitForPolling();
+
+    const discussions = useDiscussionStore.getState().discussions;
+    expect(discussions.map(d => d.contactUserId)).toEqual([
+      'newer-pinned',
+      'older-pinned',
+      'unpinned',
+    ]);
   });
 });

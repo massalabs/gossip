@@ -203,6 +203,7 @@ export interface Discussion {
   lastMessageContent: string | null;
   lastMessageTimestamp: Date | null;
   unreadCount: number;
+  pinned: boolean; // Whether the discussion is pinned to the top of the list
 
   // Session recovery state (persisted to throttle resets)
   killedNextRetryAt?: Date | null;
