@@ -16,8 +16,11 @@ import {
   Trash2,
 } from 'react-feather';
 import { useLongPress } from '../../hooks/useLongPress';
-import MessageContextMenu from '../ui/MessageContextMenu';
-import type { MessageContextMenuItem } from '../ui/MessageContextMenu';
+import MessageContextMenu, {
+  type MessageContextMenuItem,
+  type ReactionGroup as ContextMenuReactionGroup,
+} from '../ui/MessageContextMenu';
+import EmojiPickerModal from '../ui/EmojiPickerModal';
 import { formatTime } from '../../utils/timeUtils';
 import {
   Message,
@@ -59,6 +62,13 @@ interface MessageItemProps {
   onForward?: (message: Message) => void;
   onDelete?: (message: Message) => void;
   onEdit?: (message: Message) => void;
+  onReact?: (message: Message, emoji: string) => void;
+  onToggleReaction?: (
+    message: Message,
+    emoji: string,
+    myReactionId?: number
+  ) => void;
+  reactions?: ContextMenuReactionGroup[];
   id?: string;
   showTimestamp?: boolean;
   isFirstInGroup?: boolean;
@@ -78,6 +88,9 @@ const MessageItem: React.FC<MessageItemProps> = ({
   onForward,
   onDelete,
   onEdit,
+  onReact,
+  onToggleReaction,
+  reactions = [],
   id,
   showTimestamp = true,
   isFirstInGroup = true,
@@ -143,6 +156,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
   const [contextMenuPlacement, setContextMenuPlacement] = useState<
     'above' | 'below'
   >('below');
+  const [isEmojiPickerOpen, setIsEmojiPickerOpen] = useState(false);
   const contextMenuOpenRef = useRef(false);
   // Snapshot the keyboard height at touchstart — on iOS the keyboard may start
   // dismissing during the 500ms long-press delay, zeroing the live value before
@@ -753,8 +767,12 @@ const MessageItem: React.FC<MessageItemProps> = ({
   );
 
   // Calculate spacing based on grouping
-  // Last message in group gets more margin to separate from next group
-  const spacingClass = isLastInGroup ? 'mb-1' : 'mb-0.5';
+  // Last message in group gets more margin to separate from next group.
+  // When reactions are present (overlaid at the bottom of the bubble),
+  // add extra space so they don't overlap the next message row.
+  const baseSpacingClass = isLastInGroup ? 'mb-1' : 'mb-0.5';
+  const spacingClass =
+    reactions.length > 0 ? (isLastInGroup ? 'mb-4' : 'mb-3') : baseSpacingClass;
 
   // Memoize border radius calculation
   const borderRadiusClass = useMemo(() => {
@@ -1125,12 +1143,11 @@ const MessageItem: React.FC<MessageItemProps> = ({
             })}
           </p>
         )}
-
         {/* Timestamp, Edited Label and Status — incoming "edited" must show even when
             showTimestamp is false (grouped bubble); otherwise receivers never see it. */}
         {(showTimestamp || isOutgoing || isEdited) && (
           <div
-            className={`flex items-center justify-end gap-1.5 mt-1.5 ${
+            className={`flex items-center justify-end gap-1.5 mt-1.5 pr-10 ${
               isOutgoing ? 'text-accent-foreground/80' : 'text-muted-foreground'
             }`}
           >
@@ -1183,6 +1200,37 @@ const MessageItem: React.FC<MessageItemProps> = ({
             )}
           </div>
         )}
+        {/* Reactions chips overlaid at the bottom of the bubble, like WhatsApp/Telegram */}
+        {reactions.length > 0 && (
+          <div
+            className={`absolute -bottom-2 ${
+              isOutgoing ? 'right-3' : 'right-3'
+            } flex flex-wrap gap-1`}
+          >
+            {reactions.map(reaction => (
+              <button
+                key={reaction.emoji}
+                type="button"
+                onClick={e => {
+                  e.stopPropagation();
+                  onToggleReaction?.(
+                    message,
+                    reaction.emoji,
+                    reaction.myReactionId
+                  );
+                }}
+                className={`text-[11px] px-1.5 py-0.5 rounded-full border shadow-sm bg-card/95 backdrop-blur ${
+                  reaction.myReactionId
+                    ? 'border-accent text-foreground'
+                    : 'border-border text-foreground'
+                }`}
+              >
+                {reaction.emoji}
+                {reaction.count > 1 ? ` ${reaction.count}` : ''}
+              </button>
+            ))}
+          </div>
+        )}
         {/* Hover arrow for desktop context menu */}
         {!isSelecting && !isDeleted && (
           <button
@@ -1208,6 +1256,22 @@ const MessageItem: React.FC<MessageItemProps> = ({
         placement={contextMenuPlacement}
         translateY={contextMenuTranslateY}
         bubbleRect={bubbleRect}
+        reactions={reactions}
+        onSelectEmoji={emoji => {
+          onReact?.(message, emoji);
+        }}
+        onOpenEmojiPicker={() => {
+          setIsEmojiPickerOpen(true);
+          closeContextMenu();
+        }}
+      />
+      <EmojiPickerModal
+        isOpen={isEmojiPickerOpen}
+        onClose={() => setIsEmojiPickerOpen(false)}
+        title={t('message_item.add_reaction')}
+        onSelectEmoji={emoji => {
+          onReact?.(message, emoji);
+        }}
       />
     </div>
   );

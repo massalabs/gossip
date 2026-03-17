@@ -52,6 +52,9 @@ export interface Message {
   editOf?: {
     originalMsgId: Uint8Array;
   };
+  reactionOf?: {
+    originalMsgId: Uint8Array;
+  };
 }
 
 export interface UserProfile {
@@ -119,6 +122,7 @@ export enum MessageType {
   AUDIO = 'audio',
   VIDEO = 'video',
   DELETED = 'deleted',
+  REACTION = 'reaction',
 }
 
 export interface ReadyAnnouncement {

@@ -16,6 +16,8 @@ const POLL_INTERVAL_MS = 3000;
 interface MessageStoreState {
   // Messages keyed by contactUserId (Map for efficient lookups)
   messagesByContact: Map<string, Message[]>;
+  // Reactions keyed by contactUserId (all non-deleted REACTION messages)
+  reactionsByContact: Map<string, Message[]>;
   // Current contact being viewed
   currentContactUserId: string | null;
   // Loading state (only one discussion can be viewed at a time)
@@ -39,8 +41,24 @@ interface MessageStoreState {
     forwardFromMessageId?: number
   ) => Promise<void>;
   getMessagesForContact: (contactUserId: string) => Message[];
+  getReactionsForMessage: (
+    contactUserId: string,
+    messageDbId: number
+  ) => ReactionGroup[];
+  sendReaction: (
+    contactUserId: string,
+    emoji: string,
+    messageDbId: number
+  ) => Promise<void>;
+  removeReaction: (reactionDbId: number) => Promise<void>;
   clearMessages: (contactUserId: string) => void;
   cleanup: () => void;
+}
+
+export interface ReactionGroup {
+  emoji: string;
+  count: number;
+  myReactionId?: number;
 }
 
 // Empty array constant to avoid creating new arrays on each call
@@ -71,6 +89,7 @@ const messagesChanged = (
 const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
   // Initial state
   messagesByContact: new Map(),
+  reactionsByContact: new Map(),
   currentContactUserId: null,
   isLoading: false,
   isSending: false,
@@ -110,36 +129,62 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
         const contactUserIds = discussions.map(d => d.contactUserId);
 
         // Fetch messages for all contacts
-        const newMap = new Map<string, Message[]>();
+        const newMessagesMap = new Map<string, Message[]>();
+        const newReactionsMap = new Map<string, Message[]>();
         for (const contactUserId of contactUserIds) {
           const messages = await sdk.messages.getVisibleMessages(contactUserId);
+          const reactions = await sdk.messages.getReactions(contactUserId);
           if (messages.length > 0) {
-            newMap.set(contactUserId, messages);
+            newMessagesMap.set(contactUserId, messages);
+          }
+          if (reactions.length > 0) {
+            newReactionsMap.set(contactUserId, reactions);
           }
         }
 
         // Check for changes before updating to avoid unnecessary sets
         let hasChanges = false;
-        const currentMap = get().messagesByContact;
+        const currentMessagesMap = get().messagesByContact;
+        const currentReactionsMap = get().reactionsByContact;
 
-        newMap.forEach((msgs, contactId) => {
+        newMessagesMap.forEach((msgs, contactId) => {
           if (!hasChanges) {
-            const existing = currentMap.get(contactId) || [];
+            const existing = currentMessagesMap.get(contactId) || [];
             if (messagesChanged(existing, msgs)) {
               hasChanges = true;
             }
           }
         });
 
-        // Also check for removed contacts
+        // Also check reactions changes
         if (!hasChanges) {
-          currentMap.forEach((_, contactId) => {
-            if (!newMap.has(contactId)) hasChanges = true;
+          newReactionsMap.forEach((rxns, contactId) => {
+            if (!hasChanges) {
+              const existing = currentReactionsMap.get(contactId) || [];
+              if (messagesChanged(existing, rxns)) {
+                hasChanges = true;
+              }
+            }
+          });
+        }
+
+        // Also check for removed contacts / reactions
+        if (!hasChanges) {
+          currentMessagesMap.forEach((_, contactId) => {
+            if (!newMessagesMap.has(contactId)) hasChanges = true;
+          });
+        }
+        if (!hasChanges) {
+          currentReactionsMap.forEach((_, contactId) => {
+            if (!newReactionsMap.has(contactId)) hasChanges = true;
           });
         }
 
         if (hasChanges) {
-          set({ messagesByContact: newMap });
+          set({
+            messagesByContact: newMessagesMap,
+            reactionsByContact: newReactionsMap,
+          });
         }
       } catch (error) {
         console.error('Messages fetch error:', error);
@@ -290,11 +335,133 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
     return get().messagesByContact.get(contactUserId) || EMPTY_MESSAGES;
   },
 
+  sendReaction: async (
+    contactUserId: string,
+    emoji: string,
+    messageDbId: number
+  ) => {
+    const messages =
+      get().messagesByContact.get(contactUserId) || EMPTY_MESSAGES;
+    const target = messages.find(m => m.id === messageDbId);
+    if (!target || !target.messageId) {
+      console.warn('Cannot react to message without messageId');
+      return;
+    }
+    const sdk = getSdk();
+    await sdk.messages.sendReaction(contactUserId, emoji, target.messageId);
+  },
+
+  removeReaction: async (reactionDbId: number) => {
+    const sdk = getSdk();
+    // Look up the reaction to know which original message it targets
+    const reaction = await sdk.messages.get(reactionDbId);
+    if (
+      !reaction ||
+      reaction.type !== MessageType.REACTION ||
+      !reaction.reactionOf?.originalMsgId
+    ) {
+      // Fallback: just delete this row
+      await sdk.messages.deleteMessage(reactionDbId);
+      return;
+    }
+
+    const originalMsgId = reaction.reactionOf.originalMsgId;
+    const allReactions = await sdk.messages.getReactions(
+      reaction.contactUserId
+    );
+
+    // Delete all of *our* reactions for this original message so nothing is
+    // left after the user taps to remove their reaction, regardless of how
+    // many times they've reacted before.
+    const targets = allReactions.filter(
+      r =>
+        r.direction === MessageDirection.OUTGOING &&
+        r.reactionOf?.originalMsgId &&
+        r.reactionOf.originalMsgId.length === originalMsgId.length &&
+        r.reactionOf.originalMsgId.every((b, i) => b === originalMsgId[i]) &&
+        r.id != null
+    );
+
+    if (targets.length === 0) {
+      await sdk.messages.deleteMessage(reactionDbId);
+      return;
+    }
+
+    for (const r of targets) {
+      await sdk.messages.deleteMessage(r.id!);
+    }
+  },
+
+  // Get aggregated reactions for a specific message in a contact
+  getReactionsForMessage: (contactUserId: string, messageDbId: number) => {
+    const reactions =
+      get().reactionsByContact.get(contactUserId) || EMPTY_MESSAGES;
+    const messages =
+      get().messagesByContact.get(contactUserId) || EMPTY_MESSAGES;
+    const target = messages.find(m => m.id === messageDbId);
+    if (!target || !target.messageId) return [];
+
+    // With a single peer per discussion and ordered delivery, there can be at
+    // most one meaningful reaction per user. Pick the *latest* reaction for
+    // each direction (INCOMING / OUTGOING), then aggregate by emoji.
+    let latestIncoming: Message | undefined;
+    let latestOutgoing: Message | undefined;
+
+    for (const reaction of reactions) {
+      if (!reaction.reactionOf?.originalMsgId) continue;
+      if (
+        reaction.reactionOf.originalMsgId.length === target.messageId.length &&
+        reaction.reactionOf.originalMsgId.every(
+          (b, i) => b === target.messageId![i]
+        )
+      ) {
+        if (reaction.direction === MessageDirection.OUTGOING) {
+          if (
+            !latestOutgoing ||
+            reaction.timestamp > latestOutgoing.timestamp
+          ) {
+            latestOutgoing = reaction;
+          }
+        } else if (reaction.direction === MessageDirection.INCOMING) {
+          if (
+            !latestIncoming ||
+            reaction.timestamp > latestIncoming.timestamp
+          ) {
+            latestIncoming = reaction;
+          }
+        }
+      }
+    }
+
+    const effective: Message[] = [];
+    if (latestIncoming) effective.push(latestIncoming);
+    if (latestOutgoing) effective.push(latestOutgoing);
+
+    const groups = new Map<string, ReactionGroup>();
+    for (const r of effective) {
+      const key = r.content;
+      const existing = groups.get(key) ?? { emoji: key, count: 0 };
+      const isMine = r.direction === MessageDirection.OUTGOING && r.id != null;
+      groups.set(key, {
+        emoji: key,
+        count: existing.count + 1,
+        myReactionId: isMine ? r.id : existing.myReactionId,
+      });
+    }
+
+    return Array.from(groups.values());
+  },
+
   // Clear messages for a contact
   clearMessages: (contactUserId: string) => {
-    const newMap = new Map(get().messagesByContact);
-    newMap.delete(contactUserId);
-    set({ messagesByContact: newMap });
+    const newMessagesMap = new Map(get().messagesByContact);
+    const newReactionsMap = new Map(get().reactionsByContact);
+    newMessagesMap.delete(contactUserId);
+    newReactionsMap.delete(contactUserId);
+    set({
+      messagesByContact: newMessagesMap,
+      reactionsByContact: newReactionsMap,
+    });
   },
 
   cleanup: () => {
@@ -319,6 +486,7 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
       eventHandler: null,
       cancelDebounce: null,
       messagesByContact: new Map(),
+      reactionsByContact: new Map(),
       currentContactUserId: null,
       isLoading: false,
       isSending: false,

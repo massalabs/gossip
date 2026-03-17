@@ -127,7 +127,10 @@
     "forward": "Transférer",
     "copy": "Copier",
     "edit": "Modifier",
-    "delete": "Supprimer"
+    "delete": "Supprimer",
+    "react": "Réagir",
+    "add_reaction": "Ajouter une réaction",
+    "more_emojis": "Plus d’emojis"
   },
   "session_issue": {
     "message": "Vous avez envoyé de nombreux messages qui n'ont pas encore été confirmés. Par sécurité, aucun autre message ne sera envoyé tant qu'une réponse ne sera pas reçue.",

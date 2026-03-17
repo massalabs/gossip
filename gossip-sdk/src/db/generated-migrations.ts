@@ -56,4 +56,10 @@ export const MIGRATIONS: EmbeddedMigration[] = [
       'ALTER TABLE `discussions` ADD COLUMN `pinned` integer NOT NULL DEFAULT 0;',
     ],
   },
+  {
+    idx: 3,
+    tag: '0003_messages_reaction_of',
+    when: 1742000000000,
+    statements: ['ALTER TABLE `messages` ADD COLUMN `reactionOf` text;'],
+  },
 ];

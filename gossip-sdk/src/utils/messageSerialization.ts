@@ -31,6 +31,9 @@ export interface DeserializedMessage {
   editOf?: {
     originalMsgId: Uint8Array;
   };
+  reactionOf?: {
+    originalMsgId: Uint8Array;
+  };
   type: MessageType;
 }
 
@@ -186,6 +189,25 @@ export function serializeEditMessage(
   });
 }
 
+export function serializeReactionMessage(
+  emoji: string,
+  originalMsgId: Uint8Array,
+  messageId: Uint8Array
+): Uint8Array {
+  if (messageId.length !== MESSAGE_ID_SIZE) {
+    throw new Error(`messageId must be ${MESSAGE_ID_SIZE} bytes`);
+  }
+  if (originalMsgId.length !== MESSAGE_ID_SIZE) {
+    throw new Error(`originalMsgId must be ${MESSAGE_ID_SIZE} bytes`);
+  }
+  return ProtoMessage.encode({
+    messageType: ProtoMessageType.MESSAGE_TYPE_REACTION,
+    messageId,
+    content: emoji,
+    citedMsgId: originalMsgId,
+  });
+}
+
 /**
  * Deserialize a message from bytes
  *
@@ -216,6 +238,7 @@ export function deserializeMessage(buffer: Uint8Array): DeserializedMessage {
   let replyTo = undefined;
   let deleteOf = undefined;
   let editOf = undefined;
+  let reactionOf = undefined;
 
   if (protoType === ProtoMessageType.MESSAGE_TYPE_REPLY) {
     if (citedMsgId && citedMsgId.length === MESSAGE_ID_SIZE) {
@@ -253,6 +276,18 @@ export function deserializeMessage(buffer: Uint8Array): DeserializedMessage {
     }
   }
 
+  if (protoType === ProtoMessageType.MESSAGE_TYPE_REACTION) {
+    if (citedMsgId && citedMsgId.length === MESSAGE_ID_SIZE) {
+      reactionOf = {
+        originalMsgId: citedMsgId,
+      };
+    } else {
+      throw new Error(
+        `invalid message format: message of type reaction but citedMsgId empty or not correct size (${MESSAGE_ID_SIZE})`
+      );
+    }
+  }
+
   let forwardOf = undefined;
   if (protoType === ProtoMessageType.MESSAGE_TYPE_FORWARD) {
     if (
@@ -278,9 +313,12 @@ export function deserializeMessage(buffer: Uint8Array): DeserializedMessage {
     forwardOf,
     deleteOf,
     editOf,
+    reactionOf,
     type:
       protoType === ProtoMessageType.MESSAGE_TYPE_DELETE
         ? MessageType.DELETED
-        : MessageType.TEXT,
+        : protoType === ProtoMessageType.MESSAGE_TYPE_REACTION
+          ? MessageType.REACTION
+          : MessageType.TEXT,
   };
 }

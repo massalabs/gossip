@@ -11,6 +11,7 @@ import {
   serializeKeepAliveMessage,
   serializeDeleteMessage,
   serializeEditMessage,
+  serializeReactionMessage,
   deserializeMessage,
 } from '../../src/utils/messageSerialization';
 
@@ -72,6 +73,15 @@ describe('message serialization', () => {
     expect(deserialized.type).toBe(MessageType.TEXT);
     expect(deserialized.content).toBe('edited content');
     expect(deserialized.editOf?.originalMsgId).toEqual(originalMsgId);
+  });
+
+  it('serializes and deserializes reaction messages', () => {
+    const serialized = serializeReactionMessage('❤️', originalMsgId, messageId);
+    const deserialized = deserializeMessage(serialized);
+    expect(deserialized.type).toBe(MessageType.REACTION);
+    expect(deserialized.content).toBe('❤️');
+    expect(deserialized.reactionOf?.originalMsgId).toEqual(originalMsgId);
+    expect(deserialized.messageId).toEqual(messageId);
   });
 
   it('serializes forward without additional content', () => {

@@ -129,7 +129,10 @@
     "forward": "Forward",
     "copy": "Copy",
     "edit": "Edit",
-    "delete": "Delete"
+    "delete": "Delete",
+    "react": "React",
+    "add_reaction": "Add reaction",
+    "more_emojis": "More emojis"
   },
   "session_issue": {
     "message": "You have sent many messages that have not been acknowledged yet. For security, no more messages will be sent until a reply is received.",

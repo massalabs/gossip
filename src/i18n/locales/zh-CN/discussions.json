@@ -127,7 +127,10 @@
     "forward": "转发",
     "copy": "复制",
     "edit": "编辑",
-    "delete": "删除"
+    "delete": "删除",
+    "react": "表情回应",
+    "add_reaction": "添加表情回应",
+    "more_emojis": "更多表情"
   },
   "session_issue": {
     "message": "您已发送了许多尚未确认的消息。出于安全考虑，在收到回复之前不会再发送新消息。",

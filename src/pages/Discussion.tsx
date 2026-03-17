@@ -121,6 +121,9 @@ const Discussion: React.FC = () => {
   const messages = useMessageStore(s =>
     contact ? s.getMessagesForContact(contact.userId) : []
   );
+  const getReactionsForMessage = useMessageStore(s => s.getReactionsForMessage);
+  const sendReaction = useMessageStore(s => s.sendReaction);
+  const removeReaction = useMessageStore(s => s.removeReaction);
   const outgoingSentCount = React.useMemo(
     () =>
       messages.filter(
@@ -731,6 +734,26 @@ const Discussion: React.FC = () => {
             onForward={handleForwardMessage}
             onDelete={handleDeleteMessage}
             onEdit={handleEditMessage}
+            onReact={(message, emoji) => {
+              if (!message.id) return;
+              sendReaction(contact.userId, emoji, message.id).catch(err => {
+                console.error('Failed to send reaction', err);
+              });
+            }}
+            getReactionsForMessage={messageId =>
+              getReactionsForMessage(contact.userId, messageId)
+            }
+            onToggleReaction={(message, emoji, myReactionId) => {
+              if (myReactionId) {
+                removeReaction(myReactionId).catch(err => {
+                  console.error('Failed to remove reaction', err);
+                });
+              } else if (message.id) {
+                sendReaction(contact.userId, emoji, message.id).catch(err => {
+                  console.error('Failed to send reaction', err);
+                });
+              }
+            }}
             onScrollToMessage={handleScrollToMessage}
             onAtBottomChange={handleAtBottomChange}
             highlightedMessageId={searchHighlightId}

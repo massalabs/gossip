@@ -159,6 +159,17 @@ describe('MessageService', () => {
       timestamp: new Date('2024-01-01T00:00:00Z'), // Earlier timestamp than first visible
     });
 
+    // Reaction row should be hidden from visible messages
+    const reactionId = await testQueries.messages.insert({
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: '👍',
+      type: MessageType.REACTION,
+      direction: MessageDirection.INCOMING,
+      status: MessageStatus.DELIVERED,
+      timestamp: new Date('2024-01-06T00:00:00Z'),
+    });
+
     const service = new MessageService(
       new MockMessageProtocol(),
       createMockSession(),
@@ -167,7 +178,25 @@ describe('MessageService', () => {
       testQueries
     );
 
-    // Raw messages should include all 5 rows, ordered by timestamp then id
+    // Deleted reaction row should also be hidden from visible messages
+    const deletedReactionId = await testQueries.messages.insert({
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: '[Message deleted]',
+      type: MessageType.DELETED,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.SENT,
+      timestamp: new Date('2024-01-07T00:00:00Z'),
+      // Deleted reactions are stored as DELETED rows that still carry reactionOf,
+      // so the UI query can exclude them from chat bubbles.
+      reactionOf: JSON.stringify({
+        originalMsgId: Buffer.from(new Uint8Array(12).fill(99)).toString(
+          'base64'
+        ),
+      }),
+    });
+
+    // Raw messages should include all 7 rows, ordered by timestamp then id
     const allMessages = await service.getMessages(CONTACT_USER_ID);
     const allIds = allMessages.map(m => m.id);
     expect(allIds).toEqual([
@@ -176,9 +205,12 @@ describe('MessageService', () => {
       keepAliveId, // 2024-01-03
       deleteControlId, // 2024-01-04
       visibleDeletedId, // 2024-01-05
+      reactionId, // 2024-01-06
+      deletedReactionId, // 2024-01-07
     ]);
 
-    // Visible messages should filter out KEEP_ALIVE and delete control rows
+    // Visible messages should filter out KEEP_ALIVE, delete control rows, reactions,
+    // and deleted reaction rows
     const visibleMessages = await service.getVisibleMessages(CONTACT_USER_ID);
     const visibleIds = visibleMessages.map(m => m.id);
 
@@ -332,6 +364,148 @@ describe('MessageService', () => {
     ).toHaveLength(0);
   });
 
+  it('deleteMessage on a reaction only deletes the reaction row and keeps original message visible', async () => {
+    const testQueries = getTestQueries();
+    await insertTestContactAndDiscussion();
+
+    // Original text message that will be reacted to
+    const originalMsgIdBytes = new Uint8Array(12).fill(11);
+    const originalRowId = await testQueries.messages.insert({
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: 'Original message',
+      type: MessageType.TEXT,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.SENT,
+      timestamp: new Date('2024-07-01T10:00:00Z'),
+      messageId: originalMsgIdBytes,
+    });
+
+    // Outgoing reaction row
+    const reactionRowId = await testQueries.messages.insert({
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: '👍',
+      type: MessageType.REACTION,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.SENT,
+      timestamp: new Date('2024-07-01T10:01:00Z'),
+      messageId: new Uint8Array(12).fill(12),
+      reactionOf: JSON.stringify({
+        originalMsgId: Buffer.from(originalMsgIdBytes).toString('base64'),
+      }),
+    });
+
+    const service = new MessageService(
+      new MockMessageProtocol(),
+      createMockSession(),
+      new SdkEventEmitter(),
+      defaultSdkConfig,
+      testQueries
+    );
+
+    // Simulate tapping on own reaction chip → delete the reaction message
+    const deleted = await service.deleteMessage(reactionRowId);
+    expect(deleted).toBe(true);
+
+    const allRows = await testQueries.messages.getByOwnerAndContact(
+      OWNER_USER_ID,
+      CONTACT_USER_ID
+    );
+    const originalRow = allRows.find(r => r.id === originalRowId);
+    const reactionRow = allRows.find(r => r.id === reactionRowId);
+
+    // Original message content/type must be unchanged
+    expect(originalRow?.content).toBe('Original message');
+    expect(originalRow?.type).toBe(MessageType.TEXT);
+
+    // Reaction row should now be marked DELETED with "[Message deleted]"
+    expect(reactionRow?.type).toBe(MessageType.DELETED);
+    expect(reactionRow?.content).toBe('[Message deleted]');
+
+    // getVisibleMessages must not surface the deleted reaction as a bubble
+    const visible = await service.getVisibleMessages(CONTACT_USER_ID);
+    const visibleIds = visible.map(m => m.id);
+    expect(visibleIds).toEqual([originalRowId]);
+    expect(visible[0].content).toBe('Original message');
+  });
+
+  it('sendReaction inserts reaction rows without updating discussion last message, even with multiple reactions', async () => {
+    const testQueries = getTestQueries();
+    await insertTestContactAndDiscussion();
+
+    // Insert a base text message with a messageId to react to
+    const originalMessageIdBytes = new Uint8Array(12).fill(5);
+    const baseMsgId = await testQueries.messages.insert({
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: 'Base message',
+      type: MessageType.TEXT,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.SENT,
+      timestamp: new Date('2024-07-01T12:00:00Z'),
+      messageId: originalMessageIdBytes,
+    });
+
+    const service = new MessageService(
+      new MockMessageProtocol(),
+      createMockSession(),
+      new SdkEventEmitter(),
+      defaultSdkConfig,
+      testQueries
+    );
+
+    const discussionBefore = await testQueries.discussions.getByOwnerAndContact(
+      OWNER_USER_ID,
+      CONTACT_USER_ID
+    );
+
+    const result = await service.sendReaction(
+      CONTACT_USER_ID,
+      '😀',
+      originalMessageIdBytes
+    );
+    expect(result.success).toBe(true);
+
+    // Send a second reaction that "overrides" the first one at the UI level
+    const result2 = await service.sendReaction(
+      CONTACT_USER_ID,
+      '😂',
+      originalMessageIdBytes
+    );
+    expect(result2.success).toBe(true);
+
+    const allRows = await testQueries.messages.getByOwnerAndContact(
+      OWNER_USER_ID,
+      CONTACT_USER_ID
+    );
+    const baseRow = allRows.find(r => r.id === baseMsgId);
+    const reactionRows = allRows.filter(r => r.type === MessageType.REACTION);
+    expect(baseRow).toBeDefined();
+    expect(reactionRows).toHaveLength(2);
+    expect(reactionRows.map(r => r.content).sort()).toEqual(['😀', '😂']);
+    reactionRows.forEach(r => {
+      expect(r.direction).toBe(MessageDirection.OUTGOING);
+      expect(r.status).toBe(MessageStatus.WAITING_SESSION);
+      expect(r.reactionOf).toBeTruthy();
+      const parsed = JSON.parse(r.reactionOf!);
+      expect(parsed.originalMsgId).toBeDefined();
+    });
+
+    const discussionAfter = await testQueries.discussions.getByOwnerAndContact(
+      OWNER_USER_ID,
+      CONTACT_USER_ID
+    );
+
+    // lastMessage* should still reference the base message, not the reaction
+    expect(discussionAfter?.lastMessageId).toBe(
+      discussionBefore?.lastMessageId
+    );
+    expect(discussionAfter?.lastMessageContent).toBe(
+      discussionBefore?.lastMessageContent
+    );
+  });
+
   it('finds message by seeker', async () => {
     const seeker = new Uint8Array(32).fill(5);
     await getTestQueries().messages.insert({
@@ -356,6 +530,56 @@ describe('MessageService', () => {
 
     expect(message).toBeDefined();
     expect(message?.content).toBe('Hello');
+  });
+
+  it('getReactions returns only reaction rows for a contact', async () => {
+    const testQueries = getTestQueries();
+    await insertTestContactAndDiscussion();
+
+    // Non-reaction row
+    await testQueries.messages.insert({
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: 'Hello',
+      type: MessageType.TEXT,
+      direction: MessageDirection.INCOMING,
+      status: MessageStatus.DELIVERED,
+      timestamp: new Date(),
+    });
+
+    // Reaction rows
+    const reaction1Id = await testQueries.messages.insert({
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: '👍',
+      type: MessageType.REACTION,
+      direction: MessageDirection.INCOMING,
+      status: MessageStatus.DELIVERED,
+      timestamp: new Date('2024-08-01T00:00:00Z'),
+    });
+
+    const reaction2Id = await testQueries.messages.insert({
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: '❤️',
+      type: MessageType.REACTION,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.SENT,
+      timestamp: new Date('2024-08-01T00:01:00Z'),
+    });
+
+    const service = new MessageService(
+      new MockMessageProtocol(),
+      createMockSession(),
+      new SdkEventEmitter(),
+      defaultSdkConfig,
+      testQueries
+    );
+
+    const reactions = await service.getReactions(CONTACT_USER_ID);
+    const ids = reactions.map(r => r.id);
+    expect(ids).toEqual([reaction1Id, reaction2Id]);
+    expect(reactions.every(r => r.type === MessageType.REACTION)).toBe(true);
   });
 
   it('returns undefined for missing seeker', async () => {

@@ -111,6 +111,17 @@ interface MessageRendererProps {
   onDelete?: (message: Message) => void;
   onEdit?: (message: Message) => void;
   onScrollToMessage?: (messageId: number) => void;
+  onReact?: (message: Message, emoji: string) => void;
+  onToggleReaction?: (
+    message: Message,
+    emoji: string,
+    myReactionId?: number
+  ) => void;
+  getReactionsForMessage?: (messageDbId: number) => {
+    emoji: string;
+    count: number;
+    myReactionId?: number;
+  }[];
   contact?: Pick<Contact, 'name' | 'avatar'>;
   isHighlighted?: boolean;
   isSelecting?: boolean;
@@ -127,6 +138,9 @@ export const MessageRenderer: React.FC<MessageRendererProps> = ({
   onDelete,
   onEdit,
   onScrollToMessage,
+  onReact,
+  onToggleReaction,
+  getReactionsForMessage,
   contact,
   isHighlighted,
   isSelecting,
@@ -134,6 +148,10 @@ export const MessageRenderer: React.FC<MessageRendererProps> = ({
   onToggleSelect,
 }) => {
   const isIncoming = message.direction === MessageDirection.INCOMING;
+  const reactions =
+    message.id != null && getReactionsForMessage
+      ? getReactionsForMessage(message.id)
+      : [];
 
   return (
     <div
@@ -147,6 +165,9 @@ export const MessageRenderer: React.FC<MessageRendererProps> = ({
         onDelete={onDelete}
         onEdit={onEdit}
         onScrollToMessage={onScrollToMessage}
+        onReact={onReact}
+        onToggleReaction={onToggleReaction}
+        reactions={reactions}
         showTimestamp={showTimestamp}
         isFirstInGroup={groupInfo.isFirstInGroup}
         isLastInGroup={groupInfo.isLastInGroup}
