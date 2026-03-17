@@ -27,6 +27,26 @@ export function toSortedDiscussions(rows: DiscussionRow[]): Discussion[] {
   });
 }
 
+export async function updateDiscussionPin(
+  discussionId: number,
+  pinned: boolean,
+  queries: Queries
+): Promise<{ success: boolean; message?: string }> {
+  try {
+    const discussion = await queries.discussions.getById(discussionId);
+    if (!discussion)
+      return { success: false, message: 'Discussion not found.' };
+    await queries.discussions.updateById(discussionId, { pinned });
+    return { success: true };
+  } catch (e) {
+    console.error('updateDiscussionPin failed', e);
+    return {
+      success: false,
+      message: 'Failed to update pin. Please try again.',
+    };
+  }
+}
+
 export type UpdateDiscussionNameResult =
   | { success: true; trimmedName: string | undefined }
   | {

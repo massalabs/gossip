@@ -31,6 +31,7 @@ export const discussions = sqliteTable(
       mode: 'timestamp_ms',
     }),
     unreadCount: integer('unreadCount').notNull().default(0),
+    pinned: integer('pinned', { mode: 'boolean' }).notNull().default(false),
     killedNextRetryAt: integer('killedNextRetryAt', { mode: 'timestamp_ms' }),
     saturatedRetryAt: integer('saturatedRetryAt', { mode: 'timestamp_ms' }),
     saturatedRetryDone: integer('saturatedRetryDone', { mode: 'boolean' })

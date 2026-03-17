@@ -163,6 +163,20 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
     [gossip]
   );
 
+  const handleTogglePin = useCallback(
+    async (discussion: Discussion) => {
+      if (!discussion.id) return;
+      const result = await gossip.discussions.pin(
+        discussion.id,
+        !discussion.pinned
+      );
+      if (!result.success) {
+        toast.error(result.message || 'Failed to pin discussion');
+      }
+    },
+    [gossip]
+  );
+
   // Virtuoso item renderer
   const renderItem = useCallback(
     (index: number) => {
@@ -196,6 +210,7 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
                 onAccept={handleAccept}
                 onRefuse={() => handleRefuse(item.discussion)}
                 onEditName={handleEditName}
+                onTogglePin={handleTogglePin}
               />
             </div>
           );
@@ -204,7 +219,14 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
           return null;
       }
     },
-    [virtualItems, onSelect, handleAccept, handleRefuse, handleEditName]
+    [
+      virtualItems,
+      onSelect,
+      handleAccept,
+      handleRefuse,
+      handleEditName,
+      handleTogglePin,
+    ]
   );
 
   // Empty states

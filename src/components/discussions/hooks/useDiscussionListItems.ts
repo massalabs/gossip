@@ -223,13 +223,18 @@ export function useVirtualItems(
         });
       } else {
         // 'all' - show all discussions respecting the store's sorting order
-        // The store already sorts by status priority (PENDING first) and activity time
-        // We just need to separate into sections while preserving that order
+        // The store already sorts by pinned, then status priority (PENDING first), then activity time
+        // We separate into sections while preserving that order
+        const pinnedDiscussions: Discussion[] = [];
         const pendingDiscussions: Discussion[] = [];
         const activeDiscussions: Discussion[] = [];
 
-        // filteredDiscussions is already sorted by the store (status priority + activity time)
+        // filteredDiscussions is already sorted by the store
         filteredDiscussions.forEach(discussion => {
+          if (discussion.pinned) {
+            pinnedDiscussions.push(discussion);
+            return;
+          }
           const status = sessionsStatuses.get(discussion.contactUserId);
           if (
             status != null &&
@@ -249,6 +254,28 @@ export function useVirtualItems(
             activeDiscussions.push(discussion);
           }
         });
+
+        // Add pinned section if any
+        if (pinnedDiscussions.length > 0) {
+          items.push({
+            type: 'header',
+            label: 'Pinned',
+            key: 'header-pinned',
+          });
+
+          pinnedDiscussions.forEach(discussion => {
+            const contact = contactsMap.get(discussion.contactUserId);
+            if (contact) {
+              items.push({
+                type: 'discussion',
+                discussion,
+                contact,
+                lastMessage: lastMessages.get(discussion.contactUserId),
+                isSelected: discussion.contactUserId === activeUserId,
+              });
+            }
+          });
+        }
 
         // Add pending section if any
         if (pendingDiscussions.length > 0) {

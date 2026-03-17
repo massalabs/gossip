@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Contact, SessionStatus } from '@massalabs/gossip-sdk';
 import type { Discussion } from '@massalabs/gossip-sdk';
-import { Edit2 } from 'react-feather';
+import { Bookmark, Edit2 } from 'react-feather';
 import ContactAvatar from '../avatar/ContactAvatar';
 import { formatRelativeTime } from '../../utils/timeUtils';
 import { formatUserId } from '@massalabs/gossip-sdk';
@@ -23,6 +23,7 @@ interface DiscussionListItemProps {
   onAccept: (discussion: Discussion, newName?: string) => void;
   onRefuse: (discussion: Discussion) => void;
   onEditName?: (discussion: Discussion, newName: string) => void;
+  onTogglePin?: (discussion: Discussion) => void;
 }
 
 const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
@@ -33,6 +34,7 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
   onAccept,
   onRefuse,
   onEditName,
+  onTogglePin,
 }) => {
   const { t } = useTranslation('discussions');
   const [proposedName, setProposedName] = useState(contact.name || '');
@@ -156,8 +158,11 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
           <ContactAvatar contact={contact} size={12} />
           <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-medium text-foreground truncate">
+              <h3 className="text-sm font-medium text-foreground truncate flex items-center gap-1">
                 {discussion.customName || contact.name}
+                {discussion.pinned && (
+                  <Bookmark className="w-3 h-3 text-muted-foreground flex-shrink-0" />
+                )}
               </h3>
               <div className="flex items-center gap-2">
                 {isPendingOutgoing && (
@@ -304,6 +309,13 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
       {/* Long-press context menu */}
       <ContextMenu
         items={[
+          {
+            label: discussion.pinned
+              ? t('list_item.unpin_discussion')
+              : t('list_item.pin_discussion'),
+            icon: <Bookmark className="w-4 h-4" />,
+            onClick: () => onTogglePin?.(discussion),
+          },
           {
             label: t('list_item.edit_name'),
             icon: <Edit2 className="w-4 h-4" />,

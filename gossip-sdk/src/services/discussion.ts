@@ -17,6 +17,7 @@ import {
   toDiscussion,
   toSortedDiscussions,
   updateDiscussionName,
+  updateDiscussionPin,
   type UpdateDiscussionNameResult,
 } from '../utils/discussions.js';
 import {
@@ -429,5 +430,10 @@ export class DiscussionService {
     name: string | undefined
   ): Promise<UpdateDiscussionNameResult> {
     return updateDiscussionName(discussionId, name, this.queries);
+  }
+
+  /** Pin or unpin a discussion */
+  pin(discussionId: number, pinned: boolean) {
+    return updateDiscussionPin(discussionId, pinned, this.queries);
   }
 }
