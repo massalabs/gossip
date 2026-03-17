@@ -47,6 +47,9 @@ export class MessageQueries {
           eq(schema.messages.contactUserId, contactUserId),
           // Hide keep-alive messages from UI
           ne(schema.messages.type, MessageType.KEEP_ALIVE),
+          // Hide reaction messages (and any deleted reaction rows) from main message list
+          ne(schema.messages.type, MessageType.REACTION),
+          sql`reactionOf IS NULL`,
           // Hide delete control messages (outgoing DELETED with empty content)
           or(
             ne(schema.messages.type, MessageType.DELETED),
@@ -58,6 +61,24 @@ export class MessageQueries {
         )
       )
       .orderBy(asc(schema.messages.id))
+      .all();
+  }
+
+  async getReactionsByOwnerAndContact(
+    ownerUserId: string,
+    contactUserId: string
+  ): Promise<MessageRow[]> {
+    return this.conn.db
+      .select()
+      .from(schema.messages)
+      .where(
+        and(
+          eq(schema.messages.ownerUserId, ownerUserId),
+          eq(schema.messages.contactUserId, contactUserId),
+          eq(schema.messages.type, MessageType.REACTION)
+        )
+      )
+      .orderBy(asc(schema.messages.timestamp), asc(schema.messages.id))
       .all();
   }
 

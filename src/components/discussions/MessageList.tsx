@@ -60,6 +60,17 @@ interface MessageListProps {
   isSelecting?: boolean;
   selectedMessageIds?: Set<number>;
   onToggleSelect?: (messageId: number) => void;
+  onReact?: (message: Message, emoji: string) => void;
+  onToggleReaction?: (
+    message: Message,
+    emoji: string,
+    myReactionId?: number
+  ) => void;
+  getReactionsForMessage?: (messageDbId: number) => {
+    emoji: string;
+    count: number;
+    myReactionId?: number;
+  }[];
 }
 
 export interface MessageListHandle {
@@ -89,6 +100,9 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
       isSelecting,
       selectedMessageIds,
       onToggleSelect,
+      onReact,
+      onToggleReaction,
+      getReactionsForMessage,
     },
     ref
   ) => {
@@ -268,6 +282,9 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
                 onDelete={onDelete}
                 onEdit={onEdit}
                 onScrollToMessage={onScrollToMessage}
+                onReact={onReact}
+                onToggleReaction={onToggleReaction}
+                getReactionsForMessage={getReactionsForMessage}
                 contact={contact}
                 isHighlighted={item.message.id === highlightedMessageId}
                 isSelecting={isSelecting}
@@ -290,6 +307,9 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
         onDelete,
         onEdit,
         onScrollToMessage,
+        onReact,
+        onToggleReaction,
+        getReactionsForMessage,
         contact,
         highlightedMessageId,
         isSelecting,

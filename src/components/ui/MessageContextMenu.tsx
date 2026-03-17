@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
+import { useTranslation } from 'react-i18next';
 
 export interface MessageContextMenuItem {
   label: string;
@@ -9,6 +10,12 @@ export interface MessageContextMenuItem {
 }
 
 export type MessageContextMenuPlacement = 'above' | 'below';
+
+export interface ReactionGroup {
+  emoji: string;
+  count: number;
+  myReactionId?: number;
+}
 
 interface MessageContextMenuProps {
   items: MessageContextMenuItem[];
@@ -26,6 +33,9 @@ interface MessageContextMenuProps {
     height: number;
     borderRadius?: string;
   } | null;
+  reactions?: ReactionGroup[];
+  onSelectEmoji?: (emoji: string) => void;
+  onOpenEmojiPicker?: () => void;
 }
 
 const MessageContextMenu: React.FC<MessageContextMenuProps> = ({
@@ -37,7 +47,11 @@ const MessageContextMenu: React.FC<MessageContextMenuProps> = ({
   placement = 'below',
   translateY = 0,
   bubbleRect,
+  reactions,
+  onSelectEmoji,
+  onOpenEmojiPicker,
 }) => {
+  const { t } = useTranslation('discussions');
   const [mounted, setMounted] = useState(false);
   const [touchReady, setTouchReady] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -131,6 +145,8 @@ const MessageContextMenu: React.FC<MessageContextMenuProps> = ({
         ? 'top right'
         : 'top left';
 
+  const DEFAULT_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
+
   return createPortal(
     <div className="fixed inset-0 z-1000">
       {/* Click handler layer */}
@@ -182,6 +198,49 @@ const MessageContextMenu: React.FC<MessageContextMenuProps> = ({
             'transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s ease-out',
         }}
       >
+        {(reactions || onOpenEmojiPicker) && (
+          <div className="flex items-center gap-2 px-4 py-2 border-b border-border bg-card">
+            <div className="flex flex-wrap gap-1 flex-1">
+              {DEFAULT_EMOJIS.map(emoji => {
+                const match = reactions?.find(r => r.emoji === emoji);
+                const isMine = !!match?.myReactionId;
+                const count = match?.count ?? 0;
+                return (
+                  <button
+                    key={emoji}
+                    type="button"
+                    onClick={e => {
+                      e.stopPropagation();
+                      onSelectEmoji?.(emoji);
+                      onClose();
+                    }}
+                    className={`px-2 py-0.5 text-sm rounded-full border transition-colors ${
+                      isMine
+                        ? 'bg-accent/20 border-accent text-foreground'
+                        : 'bg-surface-secondary border-border text-foreground'
+                    }`}
+                  >
+                    {emoji}
+                    {count > 1 ? ` ${count}` : ''}
+                  </button>
+                );
+              })}
+            </div>
+            {onOpenEmojiPicker && (
+              <button
+                type="button"
+                onClick={e => {
+                  e.stopPropagation();
+                  onOpenEmojiPicker();
+                }}
+                className="w-8 h-8 flex items-center justify-center rounded-full border border-border bg-card text-foreground text-lg leading-none"
+                aria-label={t('message_item.more_emojis')}
+              >
+                +
+              </button>
+            )}
+          </div>
+        )}
         {items.map((item, index) => (
           <button
             key={item.label}

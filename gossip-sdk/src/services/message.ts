@@ -27,6 +27,7 @@ import {
   serializeKeepAliveMessage,
   serializeDeleteMessage,
   serializeEditMessage,
+  serializeReactionMessage,
   deserializeMessage,
 } from '../utils/messageSerialization.js';
 import { encodeToBase64, decodeFromBase64 } from '../utils/base64.js';
@@ -142,6 +143,25 @@ function deserializeEditOf(
   };
 }
 
+function serializeReactionOf(
+  reactionOf: { originalMsgId: Uint8Array } | undefined
+): string | null {
+  if (!reactionOf) return null;
+  return JSON.stringify({
+    originalMsgId: encodeToBase64(reactionOf.originalMsgId),
+  });
+}
+
+function deserializeReactionOf(
+  json: string | null
+): { originalMsgId: Uint8Array } | undefined {
+  if (!json) return undefined;
+  const parsed = JSON.parse(json);
+  return {
+    originalMsgId: decodeFromBase64(parsed.originalMsgId),
+  };
+}
+
 /** Serialize metadata to JSON string. */
 function serializeMetadata(
   metadata: Record<string, unknown> | undefined
@@ -177,6 +197,7 @@ export function rowToMessage(row: MessageRow): Message {
     forwardOf: deserializeForwardOf(row.forwardOf),
     deleteOf: deserializeDeleteOf(row.deleteOf ?? null),
     editOf: deserializeEditOf(row.editOf ?? null),
+    reactionOf: deserializeReactionOf(row.reactionOf ?? null),
     encryptedMessage: row.encryptedMessage ?? undefined,
     whenToSend: row.whenToSend ?? undefined,
   };
@@ -211,6 +232,9 @@ interface Decrypted {
     originalMsgId: Uint8Array;
   };
   editOf?: {
+    originalMsgId: Uint8Array;
+  };
+  reactionOf?: {
     originalMsgId: Uint8Array;
   };
   encryptedMessage: Uint8Array;
@@ -375,6 +399,7 @@ export class MessageService {
       forwardOf: serializeForwardOf(message.forwardOf),
       deleteOf: serializeDeleteOf(message.deleteOf),
       editOf: serializeEditOf(message.editOf),
+      reactionOf: serializeReactionOf(message.reactionOf),
       encryptedMessage: message.encryptedMessage,
       whenToSend: message.whenToSend,
     });
@@ -384,7 +409,11 @@ export class MessageService {
       message.contactUserId
     );
 
-    if (discussion && message.type !== MessageType.KEEP_ALIVE) {
+    if (
+      discussion &&
+      message.type !== MessageType.KEEP_ALIVE &&
+      message.type !== MessageType.REACTION
+    ) {
       await this.queries.discussions.updateById(discussion.id, {
         lastMessageId: messageId,
         lastMessageContent: message.content,
@@ -452,6 +481,7 @@ export class MessageService {
             forwardOf: deserialized.forwardOf,
             deleteOf: deserialized.deleteOf,
             editOf: deserialized.editOf,
+            reactionOf: deserialized.reactionOf,
           });
         } catch (deserializationError) {
           log.error('deserialization failed', {
@@ -535,6 +565,42 @@ export class MessageService {
         });
 
         // Do not insert a new message row for edit control messages
+        continue;
+      }
+
+      // Handle reaction messages by inserting a separate row
+      if (
+        message.type === MessageType.REACTION &&
+        message.reactionOf?.originalMsgId
+      ) {
+        const discussion = await this.queries.discussions.getByOwnerAndContact(
+          ownerUserId,
+          message.senderId
+        );
+
+        if (!discussion) {
+          log.error('no discussion for incoming reaction message', {
+            senderId: message.senderId,
+            preview: message.content.slice(0, 16),
+          });
+          continue;
+        }
+
+        const id = await this.queries.messages.insert({
+          messageId: message.messageId,
+          ownerUserId,
+          contactUserId: discussion.contactUserId,
+          content: message.content,
+          type: MessageType.REACTION,
+          direction: MessageDirection.INCOMING,
+          status: MessageStatus.DELIVERED,
+          timestamp: message.sentAt,
+          metadata: serializeMetadata({}),
+          reactionOf: serializeReactionOf(message.reactionOf),
+        });
+
+        storedIds.push(id);
+        // Do not update discussion lastMessageContent for reactions
         continue;
       }
 
@@ -851,6 +917,23 @@ export class MessageService {
           error: 'Failed to serialize forward message',
         };
       }
+    } else if (message.type === MessageType.REACTION && message.reactionOf) {
+      const originalMsgId = message.reactionOf.originalMsgId;
+      if (!originalMsgId || originalMsgId.length !== MESSAGE_ID_SIZE) {
+        return {
+          success: false,
+          error: 'Original messageId is required for reaction messages',
+        };
+      }
+
+      return {
+        success: true,
+        data: serializeReactionMessage(
+          message.content,
+          originalMsgId,
+          message.messageId!
+        ),
+      };
     } else {
       // Regular message with type tag
       return {
@@ -1180,6 +1263,15 @@ export class MessageService {
     return rows.map(rowToMessage);
   }
 
+  /** Get all non-deleted reaction messages for a contact. */
+  async getReactions(contactUserId: string): Promise<Message[]> {
+    const rows = await this.queries.messages.getReactionsByOwnerAndContact(
+      this.session.userIdEncoded,
+      contactUserId
+    );
+    return rows.map(rowToMessage);
+  }
+
   /** Send a message, queued via QueueManager if available */
   async send(message: Omit<Message, 'id'>): Promise<SendMessageResult> {
     if (this.queueManager) {
@@ -1269,6 +1361,26 @@ export class MessageService {
 
     await this.refreshService?.stateUpdate();
     return true;
+  }
+
+  async sendReaction(
+    contactUserId: string,
+    emoji: string,
+    originalMsgId: Uint8Array
+  ): Promise<SendMessageResult> {
+    const message: Omit<Message, 'id'> = {
+      ownerUserId: this.session.userIdEncoded,
+      contactUserId,
+      content: emoji,
+      type: MessageType.REACTION,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.WAITING_SESSION,
+      timestamp: new Date(),
+      reactionOf: { originalMsgId },
+    };
+    const result = await this.send(message);
+    await this.refreshService?.stateUpdate();
+    return result;
   }
 
   /**
