@@ -17,7 +17,7 @@ import ThreeDotMenu, { MenuItem } from '../components/ui/ThreeDotMenu';
 import { ROUTES } from '../constants/routes';
 import { useDiscussionStore } from '../stores/discussionStore';
 import { useGossipSdk } from '../hooks/useGossipSdk';
-import { SessionStatus } from '@massalabs/gossip-sdk';
+import { SessionStatus, SELF_CONTACT_ID } from '@massalabs/gossip-sdk';
 import { useOnlineStore } from '../stores/useOnlineStore';
 
 const Discussions: React.FC = () => {
@@ -44,6 +44,19 @@ const Discussions: React.FC = () => {
 
   const handleSelectDiscussion = useCallback(
     (contactUserId: string) => {
+      if (contactUserId === SELF_CONTACT_ID) {
+        if (pendingForwardMessageId != null) {
+          navigate(ROUTES.selfDiscussion(), {
+            state: { forwardFromMessageId: pendingForwardMessageId },
+            replace: false,
+          });
+          setPendingSharedContent(null);
+          setPendingForwardMessageId(null);
+        } else {
+          navigate(ROUTES.selfDiscussion());
+        }
+        return;
+      }
       // If there's pending shared content, pass it as prefilled message
       if (pendingSharedContent) {
         const state =
