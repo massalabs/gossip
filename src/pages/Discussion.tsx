@@ -671,7 +671,7 @@ const Discussion: React.FC = () => {
 
   return (
     <div
-      className="h-full app-max-w mx-auto bg-card flex flex-col relative select-none overflow-hidden"
+      className="h-full app-max-w mx-auto bg-discussion-pattern flex flex-col relative select-none overflow-hidden"
       style={{ WebkitTouchCallout: 'none' }}
       onMouseDown={e => {
         // Prevent taps from stealing focus / dismissing keyboard,

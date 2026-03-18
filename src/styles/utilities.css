@@ -263,6 +263,29 @@
     }
   }
 
+  /* Discussion page tiling background pattern (light/dark variants) */
+  .bg-discussion-pattern {
+    position: relative;
+    background-color: var(--card);
+    isolation: isolate;
+  }
+
+  .bg-discussion-pattern::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background-image: url('../assets/backgrounds/bg-discussion-light.svg');
+    background-repeat: repeat;
+    background-size: 120px 120px;
+    opacity: 0.5;
+    pointer-events: none;
+  }
+
+  :is(.dark *).bg-discussion-pattern::before {
+    background-image: url('../assets/backgrounds/bg-discussion-dark.svg');
+  }
+
   @media (prefers-reduced-motion: reduce) {
     * {
       animation-duration: 0.01ms !important;
