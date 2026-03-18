@@ -1,5 +1,10 @@
 import { create } from 'zustand';
-import { Contact, SessionStatus, SdkEventType } from '@massalabs/gossip-sdk';
+import {
+  Contact,
+  SessionStatus,
+  SdkEventType,
+  SELF_CONTACT_ID,
+} from '@massalabs/gossip-sdk';
 import type { Discussion } from '@massalabs/gossip-sdk';
 import { getSdk } from './sdkStore';
 import { createSelectors } from './utils/createSelectors';
@@ -70,6 +75,7 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
         if (isSessionOpen && get().sessionsStatuses.size === 0) {
           const statusMap = new Map<string, SessionStatus>();
           for (const d of discussionsList) {
+            if (d.contactUserId === SELF_CONTACT_ID) continue;
             statusMap.set(
               d.contactUserId,
               sdk.discussions.getStatus(d.contactUserId)

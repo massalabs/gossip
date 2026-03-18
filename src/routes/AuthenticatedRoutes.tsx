@@ -22,6 +22,7 @@ import { usePendingDeepLink } from '../hooks/usePendingDeepLink';
 import { usePendingSharedContent } from '../hooks/usePendingSharedContent';
 // import { useAppStateRefresh } from '../hooks/useAppStateRefresh';
 import { ROUTES } from '../constants/routes';
+import SelfDiscussion from '../pages/SelfDiscussion';
 import MainLayout from '../components/ui/MainLayout';
 
 /**
@@ -44,6 +45,7 @@ export const AuthenticatedRoutes: React.FC = () => {
         <Route path={ROUTES.contact()} element={<Contact />} />
         <Route path={ROUTES.contactShare()} element={<ContactSharePage />} />
         <Route path={ROUTES.discussion()} element={<Discussion />} />
+        <Route path={ROUTES.selfDiscussion()} element={<SelfDiscussion />} />
         <Route
           path={ROUTES.discussionSettings()}
           element={<DiscussionSettings />}

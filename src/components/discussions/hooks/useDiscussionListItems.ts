@@ -3,11 +3,13 @@ import {
   Contact,
   DiscussionDirection,
   SessionStatus,
+  SELF_CONTACT_ID,
 } from '@massalabs/gossip-sdk';
 import type { Discussion } from '@massalabs/gossip-sdk';
 import { useDiscussionStore } from '../../../stores/discussionStore';
 import { LastMessageInfo } from '../DiscussionListItem';
 import { DiscussionFilter } from '../../../stores/discussionStore';
+import i18n from '../../../i18n';
 
 // =============================================================================
 // Types
@@ -67,15 +69,27 @@ export function useFilteredDiscussions(
     const query = searchQuery.toLowerCase().trim();
     return discussions.filter(discussion => {
       const contact = contactsMap.get(discussion.contactUserId);
-      if (!contact) return false;
 
-      const displayName = discussion.customName || contact.name || '';
-      const userId = contact.userId || '';
+      let displayName = '';
+      let userId = '';
 
-      return (
-        displayName.toLowerCase().includes(query) ||
-        userId.toLowerCase().includes(query)
-      );
+      if (!contact) {
+        // Special-case self discussion: it has no contact entry but should still
+        // be searchable by its localized title ("My Notes", etc.).
+        if (discussion.contactUserId !== SELF_CONTACT_ID) {
+          return false;
+        }
+        displayName = i18n.t('discussions:selfDiscussion.title') ?? '';
+        userId = SELF_CONTACT_ID;
+      } else {
+        displayName = discussion.customName || contact.name || '';
+        userId = contact.userId || '';
+      }
+
+      const nameLc = displayName.toLowerCase();
+      const userIdLc = userId.toLowerCase();
+
+      return nameLc.includes(query) || userIdLc.includes(query);
     });
   }, [discussions, contactsMap, searchQuery]);
 }
@@ -115,6 +129,28 @@ export function useVirtualItems(
   return useMemo(() => {
     const items: VirtualItem[] = [];
 
+    const getContactForDiscussion = (
+      discussion: Discussion
+    ): Contact | undefined => {
+      const existing = contactsMap.get(discussion.contactUserId);
+      if (existing) return existing;
+      if (discussion.contactUserId === SELF_CONTACT_ID) {
+        // Synthetic contact for self-discussion; UI ignores name and avatar and
+        // uses i18n + special rendering instead.
+        return {
+          ownerUserId: discussion.ownerUserId,
+          userId: SELF_CONTACT_ID,
+          name: '',
+          avatar: null,
+          publicKeys: new Uint8Array(0),
+          isOnline: false,
+          lastSeen: discussion.updatedAt ?? discussion.createdAt,
+          createdAt: discussion.createdAt,
+        } as Contact;
+      }
+      return undefined;
+    };
+
     // In search mode, show sections for discussions and contacts
     if (isSearching) {
       // Discussions section
@@ -126,7 +162,7 @@ export function useVirtualItems(
         });
 
         filteredDiscussions.forEach(discussion => {
-          const contact = contactsMap.get(discussion.contactUserId);
+          const contact = getContactForDiscussion(discussion);
           if (contact) {
             items.push({
               type: 'discussion',
@@ -235,6 +271,10 @@ export function useVirtualItems(
             pinnedDiscussions.push(discussion);
             return;
           }
+          if (discussion.contactUserId === SELF_CONTACT_ID) {
+            activeDiscussions.push(discussion);
+            return;
+          }
           const status = sessionsStatuses.get(discussion.contactUserId);
           if (
             status != null &&
@@ -264,7 +304,7 @@ export function useVirtualItems(
           });
 
           pinnedDiscussions.forEach(discussion => {
-            const contact = contactsMap.get(discussion.contactUserId);
+            const contact = getContactForDiscussion(discussion);
             if (contact) {
               items.push({
                 type: 'discussion',
@@ -286,7 +326,7 @@ export function useVirtualItems(
           });
 
           pendingDiscussions.forEach(discussion => {
-            const contact = contactsMap.get(discussion.contactUserId);
+            const contact = getContactForDiscussion(discussion);
             if (contact) {
               items.push({
                 type: 'discussion',
@@ -308,7 +348,7 @@ export function useVirtualItems(
           });
 
           activeDiscussions.forEach(discussion => {
-            const contact = contactsMap.get(discussion.contactUserId);
+            const contact = getContactForDiscussion(discussion);
             if (contact) {
               items.push({
                 type: 'discussion',
@@ -324,7 +364,7 @@ export function useVirtualItems(
 
       // For 'pending' and 'unread' filters, show discussions directly without headers
       discussionsToShow.forEach(discussion => {
-        const contact = contactsMap.get(discussion.contactUserId);
+        const contact = getContactForDiscussion(discussion);
         if (contact) {
           items.push({
             type: 'discussion',

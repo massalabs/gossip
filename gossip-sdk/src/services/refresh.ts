@@ -23,6 +23,7 @@ import { Logger } from '../utils/logs.js';
 import { SdkEventEmitter, SdkEventType } from '../core/SdkEventEmitter.js';
 import type { SdkConfig } from '../config/sdk.js';
 import * as schema from '../db/schema/index.js';
+import { SELF_CONTACT_ID } from './selfMessage.js';
 
 const logger = new Logger('RefreshService');
 
@@ -86,6 +87,9 @@ export class RefreshService {
     const discussions = toSortedDiscussions(allRows);
 
     for (const discussion of discussions) {
+      if (discussion.contactUserId === SELF_CONTACT_ID) {
+        continue;
+      }
       const peerId = decodeUserId(discussion.contactUserId);
       const status = this.session.peerSessionStatus(peerId);
       const previous = this.sessionStatusMap.get(discussion.contactUserId);
@@ -140,7 +144,9 @@ export class RefreshService {
 
       // Step 0: cleanup orphaned sessions
       const discussionPeerIds = new Set(
-        discussions.map(discussion => discussion.contactUserId)
+        discussions
+          .filter(discussion => discussion.contactUserId !== SELF_CONTACT_ID)
+          .map(discussion => discussion.contactUserId)
       );
       const sessionPeers = this.session.peerList();
       for (const peerId of sessionPeers) {
@@ -158,6 +164,9 @@ export class RefreshService {
       const keepAlivePeerIds = refreshResult.map(peer => encodeUserId(peer));
 
       for (const discussion of discussions) {
+        if (discussion.contactUserId === SELF_CONTACT_ID) {
+          continue;
+        }
         const peerId = decodeUserId(discussion.contactUserId);
         const status = this.session.peerSessionStatus(peerId);
         await this.handleSessionStatus(discussion, status);
@@ -169,6 +178,9 @@ export class RefreshService {
       const discussionsAfterRefresh = toSortedDiscussions(refreshRows);
       const activePendingDiscussions = discussionsAfterRefresh.filter(
         discussion => {
+          if (discussion.contactUserId === SELF_CONTACT_ID) {
+            return false;
+          }
           const status = this.session.peerSessionStatus(
             decodeUserId(discussion.contactUserId)
           );
@@ -198,6 +210,9 @@ export class RefreshService {
       );
       const keepAliveSet = new Set(keepAlivePeerIds);
       for (const discussion of activeEstablishedDiscussions) {
+        if (discussion.contactUserId === SELF_CONTACT_ID) {
+          continue;
+        }
         if (!discussion.weAccepted) continue;
 
         // Send keep alive message if needed

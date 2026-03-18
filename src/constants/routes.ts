@@ -55,6 +55,7 @@ export enum AppRoute {
   contact = 'contact',
   discussion = 'discussion',
   discussions = 'discussions',
+  selfDiscussion = 'self-discussion',
 }
 
 export const ROUTES = {
@@ -83,6 +84,8 @@ export const ROUTES = {
   // Actions
   newContact: route(`/${AppRoute.newContact}`),
   newDiscussion: route(`/${AppRoute.newDiscussion}`),
+
+  selfDiscussion: route(`/${AppRoute.selfDiscussion}`),
 
   // Dynamic routes
   contact: route(`/${AppRoute.contact}/:userId`),

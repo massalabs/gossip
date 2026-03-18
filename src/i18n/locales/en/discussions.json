@@ -108,6 +108,11 @@
     "subtitle": "Setting up end-to-end encryption..."
   },
   "loading_messages": "Loading messages...",
+  "selfDiscussion": {
+    "title": "My Notes",
+    "placeholder": "Write a note...",
+    "emptyState": "Your private notes will appear here"
+  },
   "message_item": {
     "double_tap_reply": "Double-tap to reply",
     "sent_message": "Sent message",

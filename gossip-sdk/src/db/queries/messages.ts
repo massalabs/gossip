@@ -147,6 +147,12 @@ export class MessageQueries {
       );
   }
 
+  async deleteById(id: number): Promise<void> {
+    await this.conn.db
+      .delete(schema.messages)
+      .where(eq(schema.messages.id, id));
+  }
+
   async deleteDeliveredKeepAlive(ownerUserId: string): Promise<void> {
     await this.conn.db
       .delete(schema.messages)
