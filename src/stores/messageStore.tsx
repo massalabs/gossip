@@ -330,6 +330,13 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
     // Fire-and-forget — all async work runs in the background.
     void (async () => {
       try {
+        // Verify discussion still exists (guards against deletion during
+        // the fire-and-forget window — same check dev had before optimistic).
+        const discussion = await getSdk().discussions.get(contactUserId);
+        if (!discussion) {
+          throw new Error('Discussion not found');
+        }
+
         let replyTo: Message['replyTo'] = undefined;
         let forwardOf: Message['forwardOf'] = undefined;
 
@@ -392,7 +399,11 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
         }
       } catch (error) {
         console.error('Failed to send message:', error);
-        // Remove the optimistic message so the user doesn't see a phantom
+        // sdk.messages.send() handles retries internally — if encryption or
+        // network fails, the message stays in DB and is resent by stateUpdate.
+        // A throw here means the message couldn't even be inserted into DB
+        // (catastrophic). Remove the optimistic message so the user doesn't
+        // see a phantom that will never be delivered.
         set(state => {
           const msgs = state.messagesByContact.get(contactUserId);
           if (!msgs) return state;

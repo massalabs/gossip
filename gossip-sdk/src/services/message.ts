@@ -780,20 +780,6 @@ export class MessageService {
 
     log.info('sending message', { messageType: message.type });
 
-    // Verify the discussion still exists before encrypting/sending.
-    // Guards against races where the discussion is deleted between the
-    // UI action and the actual send.
-    const discussion = await this.queries.discussions.getByOwnerAndContact(
-      message.ownerUserId,
-      message.contactUserId
-    );
-    if (!discussion) {
-      return {
-        success: false,
-        error: 'No discussion found for this contact',
-      };
-    }
-
     // Generate a random messageId for deduplication (not for keep-alive)
     const randomMessageId =
       message.type !== MessageType.KEEP_ALIVE

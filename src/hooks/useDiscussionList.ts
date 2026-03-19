@@ -4,6 +4,7 @@ import { useDiscussionStore } from '../stores/discussionStore';
 import { useGossipSdk } from './useGossipSdk';
 import type { Discussion } from '@massalabs/gossip-sdk';
 import { SessionStatus } from '@massalabs/gossip-sdk';
+import toast from 'react-hot-toast';
 export const useDiscussionList = () => {
   const gossip = useGossipSdk();
   const userProfile = useAccountStore(s => s.userProfile);
@@ -26,6 +27,7 @@ export const useDiscussionList = () => {
           await gossip.discussions.accept(discussion);
         } catch (error) {
           console.error('Failed to accept discussion:', error);
+          toast.error('Failed to accept discussion. Please try again.');
           // Revert optimistic Active back to PeerRequested
           const store = useDiscussionStore.getState();
           const nextStatuses = new Map(store.sessionsStatuses);

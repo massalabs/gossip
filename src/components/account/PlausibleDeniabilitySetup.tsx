@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Shield, CheckCircle, Plus, Check, ArrowRight } from 'react-feather';
 import PageHeader from '../ui/PageHeader';
@@ -11,32 +11,29 @@ import { clearPendingMainCredentials } from '../../stores/pendingAccountSetup';
 
 const MAX_SLOTS = 5;
 // Bordercrypt slot indices are 0-based; UI slot numbers are 1-based display labels
-const BORDERCRYPT_SLOTS = Array.from({ length: MAX_SLOTS }, (_, i) => i);
-
-interface PendingAccount {
-  username: string;
-  password: string;
-}
+const ALL_SLOTS = Array.from({ length: MAX_SLOTS }, (_, i) => i);
 
 interface SlotAssignment {
   slotNumber: number;
   username: string;
 }
 
-type Phase = 'collecting' | 'creating' | 'summary';
+type Phase = 'initializing' | 'collecting' | 'creating' | 'summary';
 
 interface PlausibleDeniabilitySetupProps {
-  mainCredentials: PendingAccount;
+  mainCredentials: { username: string; password: string };
   onComplete: () => void;
 }
 
-function shuffleArray<T>(arr: T[]): T[] {
-  const result = [...arr];
-  for (let i = result.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [result[i], result[j]] = [result[j], result[i]];
-  }
-  return result;
+/** Pick a random element from `available`, return it and the remaining array. */
+function pickRandomSlot(available: number[]): {
+  slot: number;
+  remaining: number[];
+} {
+  const idx = Math.floor(Math.random() * available.length);
+  const slot = available[idx];
+  const remaining = available.filter((_, i) => i !== idx);
+  return { slot, remaining };
 }
 
 const PlausibleDeniabilitySetup: React.FC<PlausibleDeniabilitySetupProps> = ({
@@ -47,47 +44,88 @@ const PlausibleDeniabilitySetup: React.FC<PlausibleDeniabilitySetupProps> = ({
   const initializeAccount = useAccountStore(s => s.initializeAccount);
   const createHiddenAccount = useAccountStore(s => s.createHiddenAccount);
 
-  const [phase, setPhase] = useState<Phase>('collecting');
-  const [accounts, setAccounts] = useState<PendingAccount[]>([mainCredentials]);
+  const [phase, setPhase] = useState<Phase>('initializing');
+  const [createdAccounts, setCreatedAccounts] = useState<SlotAssignment[]>([]);
+  const [availableSlots, setAvailableSlots] = useState<number[]>(ALL_SLOTS);
   const [addingAccount, setAddingAccount] = useState(false);
-  const [slotAssignments, setSlotAssignments] = useState<SlotAssignment[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
 
-  const canAddMore = accounts.length < MAX_SLOTS;
-  const hasHiddenAccounts = accounts.length > 1;
+  // Guard against double-execution of the init effect in StrictMode
+  const initStarted = useRef(false);
 
-  const handleAddAccount = (creds: { username: string; password: string }) => {
-    setAccounts(prev => [...prev, creds]);
+  const canAddMore = createdAccounts.length < MAX_SLOTS;
+
+  // --- Phase: initializing --- Create the main account immediately on mount
+  useEffect(() => {
+    if (initStarted.current) return;
+    initStarted.current = true;
+
+    const createMainAccount = async () => {
+      try {
+        // Pick a random slot for the main account
+        const { slot, remaining } = pickRandomSlot(availableSlots);
+
+        await initializeAccount(
+          mainCredentials.username,
+          mainCredentials.password
+        );
+
+        // Password used — clear immediately
+        clearPendingMainCredentials();
+
+        setCreatedAccounts([
+          { slotNumber: slot + 1, username: mainCredentials.username },
+        ]);
+        setAvailableSlots(remaining);
+        setPhase('collecting');
+      } catch (err) {
+        setError(err instanceof Error ? err.message : t('create.failed'));
+        // Stay on initializing so the user sees the error; they can go back
+        setPhase('collecting');
+      }
+    };
+
+    void createMainAccount();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // --- Handle adding a hidden account (called by HiddenAccountCreation) ---
+  const handleAddAccount = async (creds: {
+    username: string;
+    password: string;
+  }) => {
     setAddingAccount(false);
+    setIsCreating(true);
+    setError(null);
+
+    try {
+      // Pick a random slot from the remaining available slots
+      const { slot, remaining } = pickRandomSlot(availableSlots);
+
+      await createHiddenAccount(slot, creds.username, creds.password);
+      // Password used and discarded — creds goes out of scope
+
+      setCreatedAccounts(prev => [
+        ...prev,
+        { slotNumber: slot + 1, username: creds.username },
+      ]);
+      setAvailableSlots(remaining);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('create.failed'));
+      // Already-created accounts are preserved — only this one failed
+    } finally {
+      setIsCreating(false);
+    }
   };
 
-  const createAccounts = async () => {
+  // --- "Done" button: lock bordercrypt + show summary ---
+  const finalize = async () => {
     setPhase('creating');
     setIsCreating(true);
     setError(null);
 
     try {
-      // Randomly assign bordercrypt slots (0-based) to accounts
-      const bcSlots = shuffleArray(BORDERCRYPT_SLOTS);
-      // UI display uses 1-based slot numbers
-      const assignments: SlotAssignment[] = accounts.map((acc, i) => ({
-        slotNumber: bcSlots[i] + 1,
-        username: acc.username,
-      }));
-
-      // Create the main account (allocates bordercrypt slot 0)
-      await initializeAccount(accounts[0].username, accounts[0].password);
-
-      // Create hidden accounts in their own bordercrypt slots
-      for (let i = 1; i < accounts.length; i++) {
-        await createHiddenAccount(
-          bcSlots[i],
-          accounts[i].username,
-          accounts[i].password
-        );
-      }
-
       // Lock and redirect to login
       const sdk = getSdk();
       if (sdk.isSessionOpen) {
@@ -103,29 +141,36 @@ const PlausibleDeniabilitySetup: React.FC<PlausibleDeniabilitySetupProps> = ({
         isLoading: false,
       });
 
-      setSlotAssignments(assignments);
       setPhase('summary');
     } catch (err) {
       setError(err instanceof Error ? err.message : t('create.failed'));
       setPhase('collecting');
     } finally {
-      clearPendingMainCredentials();
       setIsCreating(false);
     }
   };
 
+  // --- "Skip" / back button: if main account already created, just complete ---
   const handleSkip = async () => {
-    setIsCreating(true);
-    setError(null);
-
-    try {
-      await initializeAccount(accounts[0].username, accounts[0].password);
+    if (createdAccounts.length === 0) {
+      // Main account not created yet (init failed) — try creating it now
+      setIsCreating(true);
+      setError(null);
+      try {
+        await initializeAccount(
+          mainCredentials.username,
+          mainCredentials.password
+        );
+        clearPendingMainCredentials();
+        onComplete();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : t('create.failed'));
+      } finally {
+        setIsCreating(false);
+      }
+    } else {
+      // Main account already exists — just complete without PD
       onComplete();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t('create.failed'));
-    } finally {
-      clearPendingMainCredentials();
-      setIsCreating(false);
     }
   };
 
@@ -139,7 +184,25 @@ const PlausibleDeniabilitySetup: React.FC<PlausibleDeniabilitySetupProps> = ({
     );
   }
 
-  // Phase: creating accounts (spinner)
+  // Phase: initializing (creating main account spinner)
+  if (phase === 'initializing') {
+    return (
+      <PageLayout
+        header={<PageHeader title={t('plausible_deniability.title')} />}
+        className="app-max-w mx-auto"
+        contentClassName="flex items-center justify-center"
+      >
+        <div className="text-center">
+          <div className="w-8 h-8 border-2 border-muted border-t-primary rounded-full animate-spin mx-auto mb-4" />
+          <p className="text-muted-foreground">
+            {t('plausible_deniability.creating')}
+          </p>
+        </div>
+      </PageLayout>
+    );
+  }
+
+  // Phase: creating (locking bordercrypt spinner)
   if (phase === 'creating') {
     return (
       <PageLayout
@@ -175,7 +238,7 @@ const PlausibleDeniabilitySetup: React.FC<PlausibleDeniabilitySetupProps> = ({
         </div>
 
         <div className="bg-card rounded-xl border border-border p-4 mb-8">
-          {slotAssignments.map(assignment => (
+          {createdAccounts.map(assignment => (
             <div
               key={assignment.slotNumber}
               className="flex items-center justify-between py-3 px-2"
@@ -209,6 +272,8 @@ const PlausibleDeniabilitySetup: React.FC<PlausibleDeniabilitySetupProps> = ({
   }
 
   // Phase: collecting accounts (no slot numbers)
+  const hasHiddenAccounts = createdAccounts.length > 1;
+
   return (
     <PageLayout
       header={
@@ -234,7 +299,7 @@ const PlausibleDeniabilitySetup: React.FC<PlausibleDeniabilitySetupProps> = ({
 
       {/* Accounts list — no slot numbers during collection */}
       <div className="mb-6">
-        {accounts.map((acc, idx) => (
+        {createdAccounts.map((acc, idx) => (
           <div key={idx} className="flex items-center py-3 px-2">
             <CheckCircle className="w-4 h-4 text-green-500 mr-3 shrink-0" />
             <span className="text-sm text-foreground font-medium">
@@ -258,6 +323,7 @@ const PlausibleDeniabilitySetup: React.FC<PlausibleDeniabilitySetupProps> = ({
             variant="outline"
             size="custom"
             fullWidth
+            disabled={isCreating}
             className="h-12 rounded-full text-sm font-medium gap-2"
           >
             <Plus className="w-4 h-4" />
@@ -267,7 +333,7 @@ const PlausibleDeniabilitySetup: React.FC<PlausibleDeniabilitySetupProps> = ({
 
         {hasHiddenAccounts ? (
           <Button
-            onClick={createAccounts}
+            onClick={finalize}
             variant="primary"
             size="custom"
             fullWidth
