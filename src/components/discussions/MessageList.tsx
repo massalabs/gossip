@@ -11,6 +11,7 @@ import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 
 import LoadingState from './LoadingState';
 import EmptyState from './EmptyState';
+import ScrollToBottomButton from './ScrollToBottomButton';
 
 import {
   VirtualItem,
@@ -33,14 +34,6 @@ import {
 // Number of messages to show above the first unread message when scrolling to it
 const MESSAGES_ABOVE_UNREAD = 3;
 
-// Stable Virtuoso components object — created once, never changes.
-// The Header renders a spacer whose height tracks --keyboard-height via CSS variable,
-// so when the keyboard opens the list gains scrollable space at the top for messages
-// that shifted behind the header via the CSS transform.
-const virtuosoComponents = {
-  Header: () => <div style={{ height: 'var(--keyboard-height, 0px)' }} />,
-};
-
 // =============================================================================
 // Types
 // =============================================================================
@@ -56,6 +49,8 @@ interface MessageListProps {
   onEdit?: (message: Message) => void;
   onScrollToMessage?: (messageId: number) => void;
   onAtBottomChange?: (atBottom: boolean) => void;
+  onScrollToBottom?: () => void;
+  showScrollToBottom?: boolean;
   highlightedMessageId?: number | null;
   isSelecting?: boolean;
   selectedMessageIds?: Set<number>;
@@ -96,6 +91,8 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
       onEdit,
       onScrollToMessage,
       onAtBottomChange,
+      onScrollToBottom,
+      showScrollToBottom = false,
       highlightedMessageId,
       isSelecting,
       selectedMessageIds,
@@ -335,7 +332,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
     // Main render
     return (
       <div
-        className="h-full flex flex-col overflow-hidden min-h-0"
+        className="relative h-full flex flex-col overflow-hidden min-h-0"
         style={{ visibility: ready ? 'visible' : 'hidden' }}
       >
         {virtualItems.length > 0 && (
@@ -351,7 +348,13 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
             atBottomThreshold={150}
             atBottomStateChange={handleAtBottomStateChange}
             increaseViewportBy={{ top: 200, bottom: 200 }}
-            components={virtuosoComponents}
+            // components={virtuosoComponents}
+          />
+        )}
+        {onScrollToBottom && (
+          <ScrollToBottomButton
+            onClick={onScrollToBottom}
+            isVisible={showScrollToBottom}
           />
         )}
       </div>

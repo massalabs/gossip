@@ -32,7 +32,7 @@ import {
 import { useGossipSdk } from '../../hooks/useGossipSdk';
 import { parseLinks, openUrl } from '../../utils/linkUtils';
 import { useMarkMessageAsRead } from '../../hooks/useMarkMessageAsRead';
-import { getKeyboardHeight } from '../../hooks/useKeyboardVisible';
+import { useKeyboardStore } from '../../stores/keyboardStore';
 import { Capacitor } from '@capacitor/core';
 import ContactAvatar from '../avatar/ContactAvatar';
 import type { Contact } from '@massalabs/gossip-sdk';
@@ -561,7 +561,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
     (e: React.TouchEvent) => {
       if (isDeleted) return;
       // Snapshot keyboard height before it can dismiss during long-press delay
-      kbHeightSnapshotRef.current = getKeyboardHeight();
+      kbHeightSnapshotRef.current = useKeyboardStore.getState().height;
       const touch = e.touches[0];
       longPressPosRef.current = { x: touch.clientX, y: touch.clientY };
       longPress.onTouchStart(e);

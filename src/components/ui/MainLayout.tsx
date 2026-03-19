@@ -1,6 +1,6 @@
 import React from 'react';
 import { useLocation } from 'react-router-dom';
-import { useKeyboardVisible } from '../../hooks/useKeyboardVisible';
+import { useKeyboardStore } from '../../stores/keyboardStore';
 import { useUiStore } from '../../stores/uiStore';
 import { shouldShowBottomNav } from '../../constants/pageConfig';
 import BottomNavigation from './BottomNavigation';
@@ -19,13 +19,13 @@ interface MainLayoutProps {
  * - Optional bottom navigation bar (controlled by user preference)
  *
  * Note: The iOS keyboard workaround that shifts the entire app up is handled
- * by IOSKeyboardWrapper at a higher level (in App.tsx), not by this component.
+ * by KeyboardAwareWrapper at a higher level (in App.tsx), not by this component.
  */
 const MainLayout: React.FC<MainLayoutProps> = ({
   children,
   contentClassName = '',
 }) => {
-  const { isKeyboardVisible } = useKeyboardVisible();
+  const isKeyboardVisible = useKeyboardStore(s => s.isVisible);
   const showBottomNav = useUiStore.use.showBottomNav();
   const location = useLocation();
 

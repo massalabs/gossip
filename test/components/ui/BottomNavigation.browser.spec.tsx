@@ -7,7 +7,7 @@ import { page } from 'vitest/browser';
 import { MemoryRouter } from 'react-router-dom';
 import BottomNavigation from '../../../src/components/ui/BottomNavigation';
 
-// Mock Capacitor (used by useKeyboardVisible)
+// Mock Capacitor (used by keyboardStore)
 vi.mock('@capacitor/core', () => ({
   Capacitor: {
     getPlatform: vi.fn(() => 'web'),

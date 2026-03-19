@@ -14,6 +14,7 @@ export default tseslint.config(
       'gossip-sdk/src/assets/generated',
       'android/**',
       'ios/**',
+      '.worktrees/**',
     ],
   },
   {
