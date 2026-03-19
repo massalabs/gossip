@@ -225,11 +225,10 @@
     }
   }
 
-  /* Keyboard-aware layout — platform-adaptive via --available-height:
-     - iOS:  --viewport-height locked + --keyboard-offset subtracted → height shrinks
-     - Android: --viewport-height follows OS resize + --keyboard-offset = 0 → OS handles it
-     No transform or height transition — flex layout adjusts instantly,
-     native keyboard animation provides visual smoothness. */
+  /* Keyboard-aware layout via --available-height:
+     Both iOS and Android use adjustNothing/KeyboardResize.None — the OS does
+     not resize the WebView. --viewport-height is locked and --keyboard-offset
+     shrinks the layout when the keyboard opens. */
   .keyboard-aware-height {
     height: var(--available-height, 100dvh);
   }

@@ -16,6 +16,7 @@ import { useDiscussionScrollToMessage } from '../hooks/useDiscussionScrollToMess
 import { useHeaderScrollDetection } from '../hooks/useHeaderScrollDetection';
 import { useForwardPreview } from '../hooks/useForwardPreview';
 import { useDiscussionActions } from '../hooks/useDiscussionActions';
+import { useKeyboardStore } from '../stores/keyboardStore';
 import DiscussionTopSection from '../components/discussions/DiscussionTopSection';
 import DiscussionDebugButton from '../components/discussions/DiscussionDebugButton';
 import MessageInput from '../components/discussions/MessageInput';
@@ -150,9 +151,21 @@ const Discussion: React.FC = () => {
     setSearchHighlightId(null);
   }, []);
 
+  const atBottomRef = useRef(true);
   const handleAtBottomChange = useCallback((atBottom: boolean) => {
+    atBottomRef.current = atBottom;
     setShowScrollToBottom(!atBottom);
   }, []);
+
+  // Scroll to bottom when keyboard opens so newest messages stay visible
+  const isKeyboardVisible = useKeyboardStore(s => s.isVisible);
+  useEffect(() => {
+    if (isKeyboardVisible && atBottomRef.current) {
+      requestAnimationFrame(() => {
+        messageListRef.current?.scrollToBottom();
+      });
+    }
+  }, [isKeyboardVisible]);
 
   const messageListRef = useRef<MessageListHandle>(null);
   const messageListContainerRef = useRef<HTMLDivElement>(null);
