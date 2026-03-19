@@ -25,6 +25,9 @@
 
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/lib/ios.sh"
+
 DEVICE="$1"
 
 if [ -z "$DEVICE" ]; then
@@ -70,9 +73,8 @@ echo "[dev-ios] Syncing iOS..."
 npx cap sync ios
 
 # Deploy to device
-echo "[dev-ios] Deploying to device..."
-echo "[dev-ios] Target device: ${DEVICE}"
-npx cap run ios --target "$DEVICE"
+echo "[dev-ios] Deploying to device: ${DEVICE}"
+ios_build_and_deploy "$DEVICE"
 
 # Start Vite dev server (foreground — Ctrl+C to stop)
 echo ""

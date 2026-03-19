@@ -29,6 +29,7 @@
     "postinstall": "patch-package",
     "prepare": "husky",
     "wasm:build": "wasm-pack build --out-dir ../../gossip-sdk/src/assets/generated/wasm --target web wasm/main && rm -f gossip-sdk/src/assets/generated/wasm/.gitignore",
+    "wasm:build:bordercrypt": "wasm-pack build --out-dir ../../gossip-sdk/src/assets/generated/wasm-bordercrypt --target web wasm/bordercrypt -- --features wasm && rm -f gossip-sdk/src/assets/generated/wasm-bordercrypt/.gitignore",
     "wasm:test": "cargo test --workspace --manifest-path wasm/Cargo.toml --all-features --all-targets --verbose",
     "wasm:clean": "rm -rf gossip-sdk/src/assets/generated/wasm",
     "cap:sync": "cap sync",

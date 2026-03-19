@@ -2,6 +2,9 @@
 
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/lib/ios.sh"
+
 DEVICE="$1"
 
 if [ -z "$DEVICE" ]; then
@@ -18,6 +21,6 @@ echo "[run-ios-device] Building and running on device: $DEVICE"
 echo "[run-ios-device] Building web assets..."
 npm run build
 
-# Run on device (cap run ios already handles sync automatically)
-echo "[run-ios-device] Running on device: $DEVICE"
-npx cap run ios --target "$DEVICE"
+# Build and deploy to device
+echo "[run-ios-device] Deploying to device: $DEVICE"
+ios_build_and_deploy "$DEVICE"

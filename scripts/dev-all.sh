@@ -20,6 +20,9 @@
 #   scripts/dev-all.sh 10.26.239.15:5555 "iPhone de Ben"
 #   scripts/dev-all.sh 10.26.239.15:5555   # iOS opens Xcode
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/lib/ios.sh"
+
 # Read a var from .env safely (handles special chars like apostrophes)
 read_env() {
   local key="$1"
@@ -166,15 +169,16 @@ deploy_android() {
 }
 
 deploy_ios() {
-  if [ ${#IOSES[@]} -gt 0 ]; then
-    for device in "${IOSES[@]}"; do
-      echo "[dev-all] Building + deploying to iOS: ${device}..."
-      npx cap run ios --target "$device" --no-sync || echo "[dev-all] WARNING: iOS deploy failed for ${device}"
-    done
-  else
+  if [ ${#IOSES[@]} -eq 0 ]; then
     echo "[dev-all] No iOS devices specified, opening Xcode..."
     npx cap open ios
+    return
   fi
+
+  for device in "${IOSES[@]}"; do
+    echo "[dev-all] Building + deploying to iOS: ${device}..."
+    ios_build_and_deploy "$device" || echo "[dev-all] WARNING: iOS deploy failed for ${device}"
+  done
 }
 
 # Run Android and iOS deploys in parallel (sequential within each platform)

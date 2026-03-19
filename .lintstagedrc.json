@@ -1,4 +1,5 @@
 {
   "*.{ts,tsx}": ["eslint --max-warnings 0 --no-warn-ignored"],
-  "*.{js,jsx,ts,tsx,json,css,md}": ["prettier --check"]
+  "*.{js,jsx,ts,tsx,json,css,md}": ["prettier --check"],
+  "*.rs": ["cargo fmt --manifest-path wasm/bordercrypt/Cargo.toml -- --check"]
 }
