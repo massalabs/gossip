@@ -5,7 +5,7 @@ import { PrivacyGraphic } from '../graphics';
 const EmptyState: React.FC = () => {
   const { t } = useTranslation('discussions');
   return (
-    <div className="flex flex-col items-center justify-center h-full py-16 px-6">
+    <div className="flex flex-col items-center justify-center h-full px-6">
       <div className="mb-6">
         <PrivacyGraphic size={96} />
       </div>

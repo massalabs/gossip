@@ -21,7 +21,7 @@ import { Onboarding } from './pages/Onboarding.tsx';
 import { AppUrlListener } from './components/AppUrlListener';
 import { toastOptions } from './utils/toastOptions.ts';
 import LoadingScreen from './components/ui/LoadingScreen.tsx';
-import IOSKeyboardWrapper from './components/ui/IOSKeyboardWrapper';
+import KeyboardAwareWrapper from './components/ui/KeyboardAwareWrapper';
 import { ROUTES } from './constants/routes';
 import { useOnlineStore } from './stores/useOnlineStore.tsx';
 import { useTheme } from './hooks/useTheme.ts';
@@ -98,14 +98,14 @@ function App() {
   return (
     <BrowserRouter>
       <ErrorBoundary>
-        <IOSKeyboardWrapper>
+        <KeyboardAwareWrapper>
           <AppUrlListener />
           <AppContent />
           <DebugConsole />
           {/* <div className="hidden">
             <PWABadge />
           </div> */}
-        </IOSKeyboardWrapper>
+        </KeyboardAwareWrapper>
         <Toaster position="top-center" toastOptions={toastOptions} />
       </ErrorBoundary>
     </BrowserRouter>

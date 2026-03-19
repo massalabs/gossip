@@ -1,9 +1,12 @@
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useRef, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Send, X } from 'react-feather';
+import { Send } from 'react-feather';
+import InputPreviewBanner from './InputPreviewBanner';
 import { Capacitor } from '@capacitor/core';
 import { Message } from '@massalabs/gossip-sdk';
-import { useKeyboardVisible } from '../../hooks/useKeyboardVisible';
+import { useKeyboardStore } from '../../stores/keyboardStore';
+import { useAutoResizeTextarea } from '../../hooks/useAutoResizeTextarea';
+import { useInitialValue } from '../../hooks/useInitialValue';
 
 interface MessageInputProps {
   onSend: (message: string, replyToId?: number) => void;
@@ -18,11 +21,9 @@ interface MessageInputProps {
   editingMessage?: Message | null;
   onCancelEdit?: () => void;
   onConfirmEdit?: (newContent: string, message: Message) => void;
+  containerRef?: React.RefObject<HTMLDivElement | null>;
+  isSelecting?: boolean;
 }
-type MessageInputEvent = React.MouseEvent | React.KeyboardEvent;
-
-type CancelReplyEvent = React.MouseEvent;
-type CancelForwardEvent = React.MouseEvent;
 
 const MessageInput: React.FC<MessageInputProps> = ({
   onSend,
@@ -37,80 +38,37 @@ const MessageInput: React.FC<MessageInputProps> = ({
   editingMessage,
   onCancelEdit,
   onConfirmEdit,
+  containerRef,
+  isSelecting = false,
 }) => {
   const { t } = useTranslation('discussions');
-  const [newMessage, setNewMessage] = useState(initialValue || '');
-  const [isTextareaMultiline, setIsTextareaMultiline] = useState(false);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const prevInitialValueRef = useRef(initialValue);
-  const hasInitialFocusRef = useRef(false);
-  const { isKeyboardVisibleRef } = useKeyboardVisible();
   const isRefocusingRef = useRef(false);
+
+  const {
+    textareaRef,
+    value: newMessage,
+    isMultiline: isTextareaMultiline,
+    reset: resetTextarea,
+    handleChange: handleTextareaChange,
+    focusOnBackground: focusTextarea,
+    resize: autoResizeTextarea,
+    setValue: setNewMessage,
+  } = useAutoResizeTextarea(initialValue);
+
+  useInitialValue({
+    initialValue,
+    textareaRef,
+    setValue: setNewMessage,
+    currentValue: newMessage,
+    resize: autoResizeTextarea,
+  });
+
   const isForwarding = !!forwardPreview;
   const sendButtonDisabled = disabled || (!newMessage.trim() && !isForwarding);
-
-  const autoResizeTextarea = useCallback(() => {
-    const el = textareaRef.current;
-    if (!el) return;
-
-    el.style.height = 'auto';
-    const maxHeight = 128;
-    const newHeight = Math.min(el.scrollHeight, maxHeight);
-    el.style.height = `${newHeight}px`;
-
-    const lineHeight = parseFloat(getComputedStyle(el).lineHeight || '20');
-    const isVisuallyMultiline = el.scrollHeight > lineHeight * 1.2;
-    setIsTextareaMultiline(isVisuallyMultiline);
-  }, []);
-
-  // Update state when initialValue prop changes
-  useEffect(() => {
-    if (initialValue !== prevInitialValueRef.current) {
-      prevInitialValueRef.current = initialValue;
-      if (initialValue !== undefined) {
-        setNewMessage(initialValue);
-        hasInitialFocusRef.current = false;
-      }
-    }
-  }, [initialValue]);
-
-  // Handle focus and cursor positioning when initialValue is first set
-  useEffect(() => {
-    if (
-      initialValue &&
-      !hasInitialFocusRef.current &&
-      textareaRef.current &&
-      newMessage === initialValue
-    ) {
-      hasInitialFocusRef.current = true;
-
-      const timeoutId = setTimeout(() => {
-        if (textareaRef.current) {
-          autoResizeTextarea();
-          textareaRef.current.focus();
-          textareaRef.current.setSelectionRange(
-            initialValue.length,
-            initialValue.length
-          );
-        }
-      }, 100);
-
-      return () => clearTimeout(timeoutId);
-    }
-  }, [initialValue, newMessage, autoResizeTextarea]);
-
-  const resetTextarea = useCallback(() => {
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto';
-    }
-    setIsTextareaMultiline(false);
-    setNewMessage('');
-  }, []);
-
   const replyToId = replyingTo?.id;
 
   const handleSendMessage = useCallback(
-    (e: MessageInputEvent) => {
+    (e: React.MouseEvent | React.KeyboardEvent) => {
       e.preventDefault();
 
       if (sendButtonDisabled) return;
@@ -125,7 +83,6 @@ const MessageInput: React.FC<MessageInputProps> = ({
 
       resetTextarea();
 
-      // Refocus the textarea after sending
       requestAnimationFrame(() => {
         textareaRef.current?.focus();
       });
@@ -139,15 +96,13 @@ const MessageInput: React.FC<MessageInputProps> = ({
       isForwarding,
       editingMessage,
       onConfirmEdit,
+      textareaRef,
     ]
   );
 
   const handleTextareaKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      // Web-only: Enter sends, Shift+Enter inserts newline
       if (Capacitor.isNativePlatform()) return;
-
-      // Don't send while composing (IME)
       if (e.nativeEvent.isComposing) return;
 
       if (e.key === 'Enter' && !e.shiftKey) {
@@ -157,170 +112,40 @@ const MessageInput: React.FC<MessageInputProps> = ({
     [handleSendMessage]
   );
 
-  const handleCancelReply = useCallback(
-    (e: CancelReplyEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      if (!onCancelReply) return;
-      onCancelReply();
-    },
-    [onCancelReply]
-  );
-
-  const handleCancelForward = useCallback(
-    (e: CancelForwardEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      if (!onCancelForward) return;
-      onCancelForward();
-    },
-    [onCancelForward]
-  );
-
-  const focusTextarea = useCallback((e: React.MouseEvent) => {
-    // Only focus if clicking on container background, not the textarea itself
-    if (e.target === e.currentTarget) {
-      e.preventDefault();
-      textareaRef.current?.focus();
-    }
-  }, []);
-
-  const cursorPositionRef = useRef<number | null>(null);
-
-  const handleTextareaChange = useCallback(
-    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-      cursorPositionRef.current = e.target.selectionStart;
-      setNewMessage(e.target.value);
-      autoResizeTextarea();
-    },
-    [autoResizeTextarea]
-  );
-
-  useEffect(() => {
-    if (textareaRef.current && cursorPositionRef.current !== null) {
-      textareaRef.current.setSelectionRange(
-        cursorPositionRef.current,
-        cursorPositionRef.current
-      );
-    }
-  }, [newMessage]);
-
-  const safeAreaBottom =
-    Capacitor.getPlatform() === 'android'
-      ? 'max(min(var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 12px)), 16px), 12px)' // Android: clamp to max 16px, min 12px
-      : 'max(env(safe-area-inset-bottom, 12px), 12px)';
-
   return (
     <div
-      className="bg-card border-t border-border px-4 md:px-8 py-3 md:py-4"
-      style={{
-        // Safe area padding for notched devices and gesture areas
-        paddingBottom: safeAreaBottom,
-      }}
+      ref={containerRef}
+      className={`bg-card border-t border-border px-4 md:px-8 py-3 md:py-4 transition-opacity duration-300 ease-out transform-gpu ${
+        isSelecting ? 'pointer-events-none opacity-0' : 'opacity-100'
+      }`}
       onClick={focusTextarea}
+      aria-hidden={isSelecting}
     >
-      {/* Editing Preview with animation */}
-      <div
-        className={`overflow-hidden transition-all duration-200 ease-out ${
-          editingMessage
-            ? 'max-h-16 opacity-100 mb-2'
-            : 'max-h-0 opacity-0 mb-0'
-        }`}
-      >
-        {editingMessage && (
-          <div className="px-3 py-2 bg-muted/50 border-l-2 border-primary rounded-r-lg">
-            <div className="flex items-start justify-between gap-2">
-              <div className="flex-1 min-w-0">
-                <p className="text-[10px] text-muted-foreground font-medium mb-0.5">
-                  {t('message_input.editing')}
-                </p>
-                <p className="text-xs text-foreground/80 truncate">
-                  {editingMessage.content}
-                </p>
-              </div>
-              {onCancelEdit && (
-                <button
-                  onMouseDown={e => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    onCancelEdit();
-                  }}
-                  className="shrink-0 p-1.5 hover:bg-muted rounded-full transition-colors active:scale-90"
-                  aria-label={t('message_input.cancel_edit')}
-                >
-                  <X className="w-4 h-4 text-muted-foreground" />
-                </button>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Reply Preview with animation */}
-      <div
-        className={`overflow-hidden transition-all duration-200 ease-out ${
-          replyingTo ? 'max-h-20 opacity-100 mb-2' : 'max-h-0 opacity-0 mb-0'
-        }`}
-      >
-        {replyingTo && (
-          <div className="px-3 py-2 bg-muted/50 border-l-2 border-primary rounded-r-lg">
-            <div className="flex items-start justify-between gap-2">
-              <div className="flex-1 min-w-0">
-                <p className="text-[10px] text-muted-foreground font-medium mb-0.5">
-                  {t('message_input.replying_to')}
-                </p>
-                <p className="text-xs text-foreground/80 truncate">
-                  {replyingTo.content}
-                </p>
-              </div>
-              {onCancelReply && (
-                <button
-                  onMouseDown={handleCancelReply}
-                  className="shrink-0 p-1.5 hover:bg-muted rounded-full transition-colors active:scale-90"
-                  aria-label={t('message_input.cancel_reply')}
-                >
-                  <X className="w-4 h-4 text-muted-foreground" />
-                </button>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Forward Preview with animation */}
-      <div
-        className={`overflow-hidden transition-all duration-200 ease-out ${
-          forwardPreview
-            ? 'max-h-20 opacity-100 mb-2'
-            : 'max-h-0 opacity-0 mb-0'
-        }`}
-      >
-        {forwardPreview && (
-          <div className="px-3 py-2 bg-muted/50 border-l-2 border-primary rounded-r-lg">
-            <div className="flex items-start justify-between gap-2">
-              <div className="flex-1 min-w-0">
-                <p className="text-[10px] text-muted-foreground font-medium mb-0.5">
-                  {forwardMode === 'reply'
-                    ? t('message_input.replying_to')
-                    : t('message_input.forwarding')}
-                </p>
-                <p className="text-xs text-foreground/80 truncate">
-                  {forwardPreview}
-                </p>
-              </div>
-              {onCancelForward && (
-                <button
-                  onMouseDown={handleCancelForward}
-                  className="shrink-0 p-1.5 hover:bg-muted rounded-full transition-colors active:scale-90"
-                  aria-label={t('message_input.cancel_forward')}
-                >
-                  <X className="w-4 h-4 text-muted-foreground" />
-                </button>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
+      <InputPreviewBanner
+        isVisible={!!editingMessage}
+        label={t('message_input.editing')}
+        content={editingMessage?.content ?? ''}
+        onCancel={onCancelEdit}
+        cancelAriaLabel={t('message_input.cancel_edit')}
+      />
+      <InputPreviewBanner
+        isVisible={!!replyingTo}
+        label={t('message_input.replying_to')}
+        content={replyingTo?.content ?? ''}
+        onCancel={onCancelReply}
+        cancelAriaLabel={t('message_input.cancel_reply')}
+      />
+      <InputPreviewBanner
+        isVisible={!!forwardPreview}
+        label={
+          forwardMode === 'reply'
+            ? t('message_input.replying_to')
+            : t('message_input.forwarding')
+        }
+        content={forwardPreview ?? ''}
+        onCancel={onCancelForward}
+        cancelAriaLabel={t('message_input.cancel_forward')}
+      />
 
       <div className="flex items-end gap-2 md:gap-3">
         <div
@@ -339,7 +164,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
               onFocus?.();
             }}
             onBlur={e => {
-              if (!isKeyboardVisibleRef.current) return;
+              if (!useKeyboardStore.getState().isVisible) return;
               const next = e.relatedTarget as HTMLElement | null;
               if (next?.tagName === 'INPUT' || next?.tagName === 'TEXTAREA')
                 return;

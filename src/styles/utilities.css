@@ -263,7 +263,9 @@
     }
   }
 
-  /* Discussion page tiling background pattern (light/dark variants) */
+  /* Discussion page tiling background pattern (light/dark variants).
+     Uses a pseudo-element so we can apply opacity to the pattern only,
+     without affecting child content. */
   .bg-discussion-pattern {
     position: relative;
     background-color: var(--card);

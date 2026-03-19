@@ -5,7 +5,7 @@ import NavButton from './NavButton';
 import GossipIcon from './customIcons/gossip-icon';
 import { ROUTES } from '../../constants/routes';
 import { useUiStore } from '../../stores/uiStore';
-import { useKeyboardVisible } from '../../hooks/useKeyboardVisible';
+import { useKeyboardStore } from '../../stores/keyboardStore';
 
 type BottomNavigationTab = 'discussions' | 'settings';
 
@@ -13,7 +13,7 @@ const BottomNavigation: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const setBottomNavVisible = useUiStore(s => s.setBottomNavVisible);
-  const { isKeyboardVisible } = useKeyboardVisible();
+  const isKeyboardVisible = useKeyboardStore(s => s.isVisible);
 
   useEffect(() => {
     setBottomNavVisible(true);

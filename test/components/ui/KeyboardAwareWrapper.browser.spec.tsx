@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import React from 'react';
 import { render } from 'vitest-browser-react';
 import { page } from 'vitest/browser';
-import IOSKeyboardWrapper from '../../../src/components/ui/IOSKeyboardWrapper';
+import KeyboardAwareWrapper from '../../../src/components/ui/KeyboardAwareWrapper';
 import * as CapacitorCore from '@capacitor/core';
 import * as CapacitorKeyboard from '@capacitor/keyboard';
 import { wait } from '../../helpers/utils';
@@ -23,10 +23,9 @@ vi.mock('@capacitor/keyboard', () => ({
   },
 }));
 
-describe('IOSKeyboardWrapper', () => {
+describe('KeyboardAwareWrapper', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Reset visualViewport if it exists
     if (window.visualViewport) {
       Object.defineProperty(window, 'innerHeight', {
         writable: true,
@@ -42,9 +41,9 @@ describe('IOSKeyboardWrapper', () => {
 
   it('renders children correctly', async () => {
     await render(
-      <IOSKeyboardWrapper>
+      <KeyboardAwareWrapper>
         <div data-testid="child">Test Content</div>
-      </IOSKeyboardWrapper>
+      </KeyboardAwareWrapper>
     );
 
     const child = page.getByTestId('child');
@@ -54,9 +53,9 @@ describe('IOSKeyboardWrapper', () => {
 
   it('applies full height when keyboard is not active', async () => {
     await render(
-      <IOSKeyboardWrapper>
+      <KeyboardAwareWrapper>
         <div data-testid="content">Content</div>
-      </IOSKeyboardWrapper>
+      </KeyboardAwareWrapper>
     );
 
     const content = page.getByTestId('content');
@@ -64,19 +63,15 @@ describe('IOSKeyboardWrapper', () => {
 
     if (wrapper) {
       const style = window.getComputedStyle(wrapper);
-      // Should be 100vh when keyboard is not active
       expect(style.height).toBeDefined();
-      // Height should be set (either 100vh or calculated value)
       expect(style.height).not.toBe('auto');
     }
   });
 
   it('applies reduced height when keyboard is active on iOS', async () => {
-    // Mock iOS platform
     vi.mocked(CapacitorCore.Capacitor.getPlatform).mockReturnValue('ios');
     vi.mocked(CapacitorCore.Capacitor.isNativePlatform).mockReturnValue(true);
 
-    // Mock keyboard listener to simulate keyboard show
     let showCallback: ((info: { keyboardHeight: number }) => void) | null =
       null;
     vi.mocked(CapacitorKeyboard.Keyboard.addListener).mockImplementation(
@@ -93,15 +88,13 @@ describe('IOSKeyboardWrapper', () => {
     );
 
     await render(
-      <IOSKeyboardWrapper>
+      <KeyboardAwareWrapper>
         <div data-testid="content">Content</div>
-      </IOSKeyboardWrapper>
+      </KeyboardAwareWrapper>
     );
 
-    // Wait for mock to be called and callback to be set
     await wait(10);
 
-    // Simulate keyboard showing with 300px height
     const callback = showCallback;
     if (callback) {
       (callback as (info: { keyboardHeight: number }) => void)({
@@ -109,7 +102,6 @@ describe('IOSKeyboardWrapper', () => {
       });
     }
 
-    // Wait for state update
     await wait(100);
 
     const content = page.getByTestId('content');
@@ -117,22 +109,18 @@ describe('IOSKeyboardWrapper', () => {
 
     if (wrapper) {
       const style = window.getComputedStyle(wrapper);
-      // Should be reduced by keyboard height
-      // Note: In browser tests, we can't easily test the exact calc() value
-      // but we can verify the component structure and that it responds to keyboard events
       expect(style.height).toBeDefined();
     }
   });
 
   it('does not apply keyboard workaround on non-iOS platforms', async () => {
-    // Mock web platform
     vi.mocked(CapacitorCore.Capacitor.getPlatform).mockReturnValue('web');
     vi.mocked(CapacitorCore.Capacitor.isNativePlatform).mockReturnValue(false);
 
     await render(
-      <IOSKeyboardWrapper>
+      <KeyboardAwareWrapper>
         <div data-testid="content">Content</div>
-      </IOSKeyboardWrapper>
+      </KeyboardAwareWrapper>
     );
 
     const content = page.getByTestId('content');
@@ -140,7 +128,6 @@ describe('IOSKeyboardWrapper', () => {
 
     if (wrapper) {
       const style = window.getComputedStyle(wrapper);
-      // Should use full height on non-iOS
       expect(style.height).toBeDefined();
       expect(style.height).not.toBe('auto');
     }
@@ -148,9 +135,9 @@ describe('IOSKeyboardWrapper', () => {
 
   it('uses keyboard-aware-height for CSS variable driven sizing', async () => {
     await render(
-      <IOSKeyboardWrapper>
+      <KeyboardAwareWrapper>
         <div data-testid="content">Content</div>
-      </IOSKeyboardWrapper>
+      </KeyboardAwareWrapper>
     );
 
     const content = page.getByTestId('content');
@@ -164,9 +151,9 @@ describe('IOSKeyboardWrapper', () => {
 
   it('maintains flex column layout', async () => {
     await render(
-      <IOSKeyboardWrapper>
+      <KeyboardAwareWrapper>
         <div data-testid="content">Content</div>
-      </IOSKeyboardWrapper>
+      </KeyboardAwareWrapper>
     );
 
     const content = page.getByTestId('content');

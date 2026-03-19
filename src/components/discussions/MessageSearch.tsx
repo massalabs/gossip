@@ -128,6 +128,7 @@ const MessageSearch: React.FC<MessageSearchProps> = ({
         </span>
       )}
       <button
+        onPointerDown={e => e.preventDefault()}
         onClick={navigatePrev}
         disabled={matches.length === 0}
         className="p-1.5 rounded-lg hover:bg-muted disabled:opacity-30 transition-colors"
@@ -136,6 +137,7 @@ const MessageSearch: React.FC<MessageSearchProps> = ({
         <ChevronUp className="w-4 h-4 text-foreground" />
       </button>
       <button
+        onPointerDown={e => e.preventDefault()}
         onClick={navigateNext}
         disabled={matches.length === 0}
         className="p-1.5 rounded-lg hover:bg-muted disabled:opacity-30 transition-colors"
@@ -144,13 +146,11 @@ const MessageSearch: React.FC<MessageSearchProps> = ({
         <ChevronDown className="w-4 h-4 text-foreground" />
       </button>
       <button
-        onMouseDown={e => {
+        onPointerDown={e => {
           e.preventDefault();
-          // Focus textarea before search unmounts to keep keyboard open
-          const textarea = document.querySelector(
-            'textarea[aria-label="Message input"]'
-          ) as HTMLElement;
-          textarea?.focus({ preventScroll: true });
+          (document.querySelector('textarea') as HTMLElement)?.focus({
+            preventScroll: true,
+          });
           onClose();
         }}
         className="p-1.5 rounded-lg hover:bg-muted transition-colors"
