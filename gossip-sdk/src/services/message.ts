@@ -770,10 +770,6 @@ export class MessageService {
 
   async sendMessage(message: Message): Promise<SendMessageResult> {
     const log = logger.forMethod('sendMessage');
-    log.info('queueing message', {
-      messageType: message.type,
-    });
-
     const peerId = decodeUserId(message.contactUserId);
     if (peerId.length !== 32) {
       return {
@@ -782,13 +778,20 @@ export class MessageService {
       };
     }
 
-    // Look up discussion
+    log.info('sending message', { messageType: message.type });
+
+    // Verify the discussion still exists before encrypting/sending.
+    // Guards against races where the discussion is deleted between the
+    // UI action and the actual send.
     const discussion = await this.queries.discussions.getByOwnerAndContact(
       message.ownerUserId,
       message.contactUserId
     );
     if (!discussion) {
-      return { success: false, error: 'Discussion not found' };
+      return {
+        success: false,
+        error: 'No discussion found for this contact',
+      };
     }
 
     // Generate a random messageId for deduplication (not for keep-alive)
@@ -798,12 +801,47 @@ export class MessageService {
         : undefined;
     message.messageId = randomMessageId;
 
-    // Add message as WAITING_SESSION
+    // Fast path: encrypt inline and insert as READY, skipping the
+    // WAITING_SESSION → stateUpdate → getSendQueue → encrypt → READY cycle.
+    // Falls back to WAITING_SESSION if encrypt fails (session not active).
+    //
+    // NOTE: This intentionally duplicates the encrypt-and-send logic from
+    // stateUpdate's queue path. The duplication is accepted for perf: the
+    // fast path avoids a full stateUpdate round-trip and DB re-read, cutting
+    // send latency roughly in half for the common case.
+    let encryptedMessage: Uint8Array | undefined;
+    let seeker: Uint8Array | undefined;
+    let serializedContent: Uint8Array | undefined;
+    let insertStatus = MessageStatus.WAITING_SESSION;
+
+    try {
+      const serializeResult = await this.serializeMessage(message);
+      if (serializeResult.success) {
+        serializedContent = serializeResult.data;
+        const sendOutput = await this.session.sendMessage(
+          peerId,
+          serializedContent
+        );
+        if (sendOutput) {
+          encryptedMessage = sendOutput.data;
+          seeker = sendOutput.seeker;
+          insertStatus = MessageStatus.READY;
+        }
+      }
+    } catch {
+      // Encrypt failed — fall back to WAITING_SESSION (stateUpdate will retry)
+    }
+
     let messageId: number;
     try {
       messageId = await this.addMessageAndUpdateDiscussion({
         ...message,
-        status: MessageStatus.WAITING_SESSION,
+        status: insertStatus,
+        encryptedMessage,
+        seeker,
+        serializedContent,
+        whenToSend:
+          insertStatus === MessageStatus.READY ? new Date() : undefined,
       });
     } catch (error) {
       return {
@@ -811,22 +849,56 @@ export class MessageService {
         error: 'Failed to add message to database, got error: ' + error,
       };
     }
+    log.info('message inserted', { messageId, status: insertStatus });
 
-    const queuedMessage = {
-      ...message,
-      id: messageId,
-      status: MessageStatus.WAITING_SESSION,
-    };
+    // If already READY, send on network immediately
+    if (insertStatus === MessageStatus.READY && encryptedMessage && seeker) {
+      try {
+        await this.messageProtocol.sendMessage({
+          seeker,
+          ciphertext: encryptedMessage,
+        });
+        // Fire-and-forget DB update — don't block on dbLock.
+        // The UI already shows SENT via the optimistic update in the store.
+        this.queries.messages
+          .updateById(messageId, {
+            status: MessageStatus.SENT,
+            encryptedMessage: null,
+            serializedContent: null,
+            whenToSend: null,
+          })
+          .catch(e =>
+            log.error('Failed to update message to SENT', { error: e })
+          );
 
-    /*
-    Trigger a state update to send the new message.
-    If the stateUpdate function is already running, it will be skipped.
-    */
+        try {
+          this.eventEmitter.emit(SdkEventType.MESSAGE_SENT, {
+            ...message,
+            id: messageId,
+            status: MessageStatus.SENT,
+          });
+        } catch {
+          // ignore event emission errors
+        }
+
+        return {
+          success: true,
+          message: { ...message, id: messageId, status: MessageStatus.SENT },
+        };
+      } catch (error) {
+        log.error('network send failed, message stays in READY for retry', {
+          messageId,
+          error,
+        });
+      }
+    }
+
+    // Fallback: trigger stateUpdate to process via the queue
     await this.refreshService?.stateUpdate();
 
     return {
       success: true,
-      message: queuedMessage,
+      message: { ...message, id: messageId, status: insertStatus },
     };
   }
 

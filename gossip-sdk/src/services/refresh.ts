@@ -173,6 +173,7 @@ export class RefreshService {
       }
 
       // Step 2: send announcements
+      // Re-query only if sessions were created/renewed (state may have changed)
       const refreshRows =
         await this.queries.discussions.getByOwner(ownerUserId);
       const discussionsAfterRefresh = toSortedDiscussions(refreshRows);

@@ -208,15 +208,24 @@ class GossipSdk {
 
     console.log('[GossipSdk] Initializing SQLite');
     this._conn = await DatabaseConnection.create({ storage: options.storage });
-    this._queries = new Queries(this._conn);
 
-    console.log('[GossipSdk] SQLite initialized');
+    if (this._conn.isOpen) {
+      this._queries = new Queries(this._conn);
+      console.log('[GossipSdk] SQLite initialized');
+    } else {
+      console.log(
+        '[GossipSdk] SQLite deferred — bordercrypt needs credentials'
+      );
+    }
+
     // Create message protocol
     const messageProtocol = createMessageProtocol();
 
     // Create services that don't need a session
     this._auth = new AuthService(createAuthProtocol());
-    this._profile = new ProfileService(this._queries);
+    if (this._conn.isOpen) {
+      this._profile = new ProfileService(this._queries!);
+    }
 
     this.state = {
       status: SdkStatus.INITIALIZED,
@@ -479,6 +488,69 @@ class GossipSdk {
       throw new Error('SDK not initialized. Call init() first.');
     }
     await this._conn.clearConversationTables();
+  }
+
+  // ─── Bordercrypt ─────────────────────────────────────────────
+
+  /** True when bordercrypt has existing data that needs unlock before DB is usable. */
+  get needsUnlock(): boolean {
+    return this._conn?.needsUnlock ?? false;
+  }
+
+  /** True when the database is ready for queries (migrations run, Drizzle created). */
+  get dbReady(): boolean {
+    return this._queries !== null;
+  }
+
+  private requireConn(): DatabaseConnection {
+    if (!this._conn) {
+      throw new Error('SDK not initialized. Call init() first.');
+    }
+    return this._conn;
+  }
+
+  async bordercryptProvision(): Promise<void> {
+    await this.requireConn().bordercryptProvision();
+  }
+
+  async bordercryptAllocate(
+    slot: number,
+    password: string,
+    forceInit = false
+  ): Promise<void> {
+    const conn = this.requireConn();
+    await conn.bordercryptAllocate(slot, password, forceInit);
+    // Complete deferred init: create queries and profile service now that DB is ready
+    if (!this._queries) {
+      this._queries = new Queries(conn);
+      this._profile = new ProfileService(this._queries);
+      console.log(
+        '[GossipSdk] Deferred queries/profile service created after allocate'
+      );
+    }
+  }
+
+  async bordercryptUnlock(password: string): Promise<boolean> {
+    const conn = this.requireConn();
+    const unlocked = await conn.bordercryptUnlock(password);
+    // Complete deferred init: create queries and profile service now that DB is ready
+    if (unlocked && !this._queries) {
+      this._queries = new Queries(conn);
+      this._profile = new ProfileService(this._queries);
+      console.log(
+        '[GossipSdk] Deferred queries/profile service created after unlock'
+      );
+    }
+    return unlocked;
+  }
+
+  async bordercryptLock(): Promise<void> {
+    await this.requireConn().bordercryptLock();
+  }
+
+  /** Force-flush deferred VFS writes + storage persistence. */
+  async flush(): Promise<void> {
+    await this.requireConn().flush();
   }
 
   /**
