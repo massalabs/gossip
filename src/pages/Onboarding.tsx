@@ -4,8 +4,7 @@ import { useAccountStore } from '../stores/accountStore';
 import OnboardingFlow from '../components/OnboardingFlow';
 import AccountImport from '../components/account/AccountImport';
 import AccountCreation from '../components/account/AccountCreation';
-import ToSAcceptance from '../components/ToSAcceptance';
-import { getDevAccounts } from '../hooks/useDevAutoLogin';
+import { setPendingMainCredentials } from '../stores/pendingAccountSetup';
 
 /**
  * Routes for onboarding flow (when no account exists)
@@ -22,29 +21,6 @@ export const Onboarding: React.FC<{
   onShowImportChange: (show: boolean) => void;
 }> = ({ showImport, onShowImportChange }) => {
   const [showAccountCreation, setShowAccountCreation] = useState(false);
-  const [skipDevPicker, setSkipDevPicker] = useState(false);
-  const tosAccepted = useAppStore.use.tosAccepted();
-  const setTosAccepted = useAppStore.use.setTosAccepted();
-
-  if (!tosAccepted) {
-    return <ToSAcceptance onAccept={() => setTosAccepted(true)} />;
-  }
-
-  // Dev mode: show account picker instead of onboarding
-  const devAccounts = getDevAccounts();
-  if (devAccounts.length > 0 && !skipDevPicker) {
-    const DevAccountPicker = React.lazy(
-      () => import('../components/dev/DevAccountPicker')
-    );
-    return (
-      <React.Suspense fallback={null}>
-        <DevAccountPicker
-          accounts={devAccounts}
-          onSkip={() => setSkipDevPicker(true)}
-        />
-      </React.Suspense>
-    );
-  }
 
   if (showImport) {
     return (
@@ -60,9 +36,11 @@ export const Onboarding: React.FC<{
   if (showAccountCreation) {
     return (
       <AccountCreation
-        onComplete={() => {
-          useAppStore.getState().setIsInitialized(true);
+        onCollect={(username, password) => {
+          setPendingMainCredentials({ username, password });
+          useAppStore.getState().setShowPlausibleDeniabilitySetup(true);
         }}
+        onComplete={() => {}}
         onBack={() => {
           void (async () => {
             // Check if there are any existing accounts

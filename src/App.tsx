@@ -18,18 +18,27 @@ import { setupServiceWorker } from './services/serviceWorkerSetup';
 import { AuthenticatedRoutes } from './routes/AuthenticatedRoutes';
 import { UnauthenticatedRoutes } from './routes/UnauthenticatedRoutes';
 import { Onboarding } from './pages/Onboarding.tsx';
+import PlausibleDeniabilitySetup from './components/account/PlausibleDeniabilitySetup';
+import {
+  getPendingMainCredentials,
+  clearPendingMainCredentials,
+} from './stores/pendingAccountSetup';
 import { AppUrlListener } from './components/AppUrlListener';
 import { toastOptions } from './utils/toastOptions.ts';
 import LoadingScreen from './components/ui/LoadingScreen.tsx';
 import KeyboardAwareWrapper from './components/ui/KeyboardAwareWrapper';
 import { ROUTES } from './constants/routes';
 import { useOnlineStore } from './stores/useOnlineStore.tsx';
+import { getSdk } from './stores/sdkStore';
 import { useTheme } from './hooks/useTheme.ts';
 import { useScreenshotProtection } from './hooks/useScreenshotProtection';
 
 const AppContent: React.FC = () => {
   const { isLoading, userProfile } = useAccountStore();
   const { isInitialized } = useAppStore();
+  const showPlausibleDeniabilitySetup = useAppStore(
+    s => s.showPlausibleDeniabilitySetup
+  );
   const [showImport, setShowImport] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
   useProfileLoader();
@@ -44,6 +53,25 @@ const AppContent: React.FC = () => {
       console.error('Failed to setup service worker:', error);
     });
   }, []); // Only run once on mount
+
+  // Plausible deniability setup — MUST be checked first.
+  // initializeAccount (called inside PDS) sets isLoading=true which would
+  // trigger the loading screen and unmount PDS, losing its state.
+  if (showPlausibleDeniabilitySetup) {
+    const creds = getPendingMainCredentials();
+    if (creds) {
+      return (
+        <PlausibleDeniabilitySetup
+          mainCredentials={creds}
+          onComplete={() => {
+            clearPendingMainCredentials();
+            useAppStore.getState().setShowPlausibleDeniabilitySetup(false);
+            // initializeAccount (called inside PDS) already sets isInitialized
+          }}
+        />
+      );
+    }
+  }
 
   if (isLoading && !isInitialized && !userProfile) {
     return <LoadingScreen />;
@@ -89,8 +117,19 @@ function App() {
 
     void initialize();
 
+    // Flush deferred DB writes when the app goes to background
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        getSdk()
+          .flush()
+          .catch(() => {});
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+
     return () => {
       cleanup?.();
+      document.removeEventListener('visibilitychange', onVisibilityChange);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

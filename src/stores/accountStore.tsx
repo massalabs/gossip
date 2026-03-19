@@ -161,6 +161,11 @@ interface AccountState {
     iCloudSync?: boolean
   ) => Promise<void>;
   initializeAccount: (username: string, password: string) => Promise<void>;
+  createHiddenAccount: (
+    slot: number,
+    username: string,
+    password: string
+  ) => Promise<void>;
   loadAccount: (password?: string, userId?: string) => Promise<void>;
   restoreAccountFromMnemonic: (
     username: string,
@@ -226,14 +231,58 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       });
   };
 
-  // Helper to persist session blob to DB
+  // Helper to persist session blob to DB.
+  // Leading-edge coalescing: the FIRST call flushes immediately (no delay),
+  // rapid subsequent calls within the window share that same flush.
+  // This avoids the 200ms wait on single sends while still batching bursts.
+  const PERSIST_COALESCE_MS = 150;
   const createOnPersist = (_userId: string) => {
-    return async (blob: Uint8Array, _key: EncryptionKey) => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let latestBlob: Uint8Array | null = null;
+    let pendingResolves: (() => void)[] = [];
+    let flushInProgress = false;
+
+    const flush = async () => {
+      timer = null;
+      if (flushInProgress) return; // another flush will pick up latestBlob
+      flushInProgress = true;
+
+      const blob = latestBlob;
+      const resolves = pendingResolves;
+      latestBlob = null;
+      pendingResolves = [];
+
       const current = get().userProfile;
-      if (!current) return;
+      if (!current || !blob) {
+        resolves.forEach(r => r());
+        flushInProgress = false;
+        return;
+      }
       const updated = { ...current, session: blob, updatedAt: new Date() };
       await getSdk().profiles.save(updated);
       set({ userProfile: updated });
+      resolves.forEach(r => r());
+      flushInProgress = false;
+
+      // If new blobs arrived during flush, schedule another
+      if (latestBlob) {
+        timer = setTimeout(flush, PERSIST_COALESCE_MS);
+      }
+    };
+
+    return async (blob: Uint8Array, _key: EncryptionKey) => {
+      latestBlob = blob;
+      return new Promise<void>(resolve => {
+        pendingResolves.push(resolve);
+        if (!timer && !flushInProgress) {
+          // Leading edge: flush immediately on first call
+          void flush();
+        } else if (!timer) {
+          // Flush in progress: schedule coalesced follow-up
+          timer = setTimeout(flush, PERSIST_COALESCE_MS);
+        }
+        // else: timer already scheduled, blob will be picked up
+      });
     };
   };
 
@@ -254,6 +303,10 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
 
         // Ensure any existing session is closed before creating new account
         await cleanupSession();
+
+        // Initialize encrypted storage with this password
+        const sdk = getSdk();
+        await sdk.bordercryptAllocate(0, password);
 
         const mnemonic = generateMnemonic(256);
 
@@ -310,6 +363,57 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         set({ isLoading: false });
         throw error;
       }
+    },
+
+    createHiddenAccount: async (
+      slot: number,
+      username: string,
+      password: string
+    ) => {
+      const sdk = getSdk();
+
+      if (sdk.isSessionOpen) {
+        await sdk.closeSession();
+      }
+
+      // Drain pending DB queries from async subscribers before switching slots.
+      // No dedicated awaitDbIdle() exists; profiles.getCount() is a cheap read
+      // that serialises behind the dbLock, guaranteeing all prior writes have
+      // settled before we switch bordercrypt slots.
+      try {
+        await sdk.profiles.getCount();
+      } catch {
+        // Ignore — the goal is to serialise against dbLock, not use the result.
+      }
+
+      await sdk.bordercryptAllocate(slot, password, true);
+
+      const mnemonic = generateMnemonic(256);
+      const keys = await generateUserKeys(mnemonic);
+      const userIdBytes = keys.public_keys().derive_id();
+      const userId = encodeUserId(userIdBytes);
+
+      const { encryptionKey, security } = await provisionAccount(
+        username,
+        mnemonic,
+        userIdBytes,
+        { useBiometrics: false, password }
+      );
+
+      // No-op onPersist is safe: this session is ephemeral — we only open it to
+      // write the profile, then closeSession() handles the final persist.
+      // No markDirty()/persistIfNeeded() calls occur between open and close.
+      await sdk.openSession({
+        mnemonic,
+        encryptionKey,
+        onPersist: async () => {},
+      });
+      const session = sdk.getEncryptedSession();
+
+      await sdk.profiles.createOrUpdate(username, userId, security, session);
+      await sdk.announcements.skipHistorical();
+
+      await sdk.closeSession();
     },
 
     restoreAccountFromMnemonic: async (
@@ -385,10 +489,20 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       try {
         set({ isLoading: true });
 
+        const sdk = getSdk();
+
+        // Unlock encrypted storage first — DB may be deferred until after unlock
+        if (password && sdk.needsUnlock) {
+          const unlocked = await sdk.bordercryptUnlock(password);
+          if (!unlocked) {
+            throw new Error('Failed to unlock encrypted storage');
+          }
+        }
+
         // If userId is provided, load that specific account, otherwise use active or first
         let profile: UserProfile | null;
         if (userId) {
-          profile = await getSdk().profiles.get(userId);
+          profile = await sdk.profiles.get(userId);
         } else {
           profile = await getActiveOrFirstProfile();
         }
@@ -476,7 +590,12 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         await cleanupSession();
         useDiscussionStore.getState().cleanup();
         useMessageStore.getState().cleanup();
-        useSelfMessageStore.getState().clearMessages();
+        // Lock encrypted storage
+        try {
+          await getSdk().bordercryptLock();
+        } catch {
+          // Bordercrypt not initialized — ignore
+        }
         // Clear in-memory state but keep data in database
         // Keep isInitialized true so user goes to login screen
         // Set lockedByUser to skip biometric auto-login on the login screen

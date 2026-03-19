@@ -165,12 +165,15 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
       prevMessageCountRef.current = 0;
     }, [discussion?.id]);
 
-    // Scroll to bottom when new messages arrive (not on initial load)
+    // Scroll to bottom only when a genuinely new message is added.
+    // Depends only on messages.length — NOT virtualItems.length which
+    // changes on date separator / key updates and causes spurious scrolls.
     useEffect(() => {
       const prevCount = prevMessageCountRef.current;
       const currentCount = messages.length;
       prevMessageCountRef.current = currentCount;
 
+      // Skip initial load and message replacements (same or fewer count)
       if (prevCount === 0 || currentCount <= prevCount) return;
 
       const newestMessage = messagesRef.current[messagesRef.current.length - 1];
@@ -186,7 +189,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
           });
         });
       }
-    }, [messages.length, virtualItems.length]);
+    }, [messages.length]);
 
     // Track if user is at bottom — suppress during initial positioning
     // to prevent the scroll-to-bottom button from flashing.
@@ -234,9 +237,16 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
           case 'spacer':
             return 'spacer';
           case 'message': {
-            if (item.message.id != null) return `msg-${item.message.id}`;
-            const tempKey = `${item.message.timestamp.getTime()}-${item.message.direction}-${item.message.content.slice(0, 16)}`;
-            return `msg-temp-${tempKey}`;
+            const msg = item.message;
+            // Outgoing messages use content-based keys so the key stays
+            // stable when an optimistic message (id < 0) is replaced by
+            // its confirmed counterpart (id > 0). Without this, Virtuoso
+            // unmounts + remounts the item, causing a visible flicker.
+            if (msg.direction === MessageDirection.OUTGOING) {
+              return `msg-out-${msg.timestamp.getTime()}-${msg.content.slice(0, 32)}`;
+            }
+            if (msg.id != null) return `msg-${msg.id}`;
+            return `msg-temp-${msg.timestamp.getTime()}-${msg.content.slice(0, 16)}`;
           }
           default:
             return index;

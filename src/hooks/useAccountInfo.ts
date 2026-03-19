@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useAccountStore } from '../stores/accountStore';
 import { useAppStore } from '../stores/appStore';
 import { UserProfile } from '@massalabs/gossip-sdk';
+import { getSdk } from '../stores/sdkStore';
 
 /**
  * Hook to load existing account info to show username in WelcomeBack when unauthenticated
@@ -15,6 +16,11 @@ export function useAccountInfo() {
   useEffect(() => {
     (async () => {
       try {
+        // DB not ready yet (bordercrypt deferred) — can't query profiles
+        if (!getSdk().dbReady) {
+          setExistingAccountInfo(null);
+          return;
+        }
         if (isInitialized && !userProfile) {
           const info = await useAccountStore
             .getState()

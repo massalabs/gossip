@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Contact } from '@massalabs/gossip-sdk';
+import { Contact, DiscussionDirection } from '@massalabs/gossip-sdk';
+import type { Discussion } from '@massalabs/gossip-sdk';
 import { useAccountStore } from '../stores/accountStore';
 import { useAppStore } from '../stores/appStore';
+import { useDiscussionStore } from '../stores/discussionStore';
 import {
   validateUserIdFormat,
   validateUsernameFormat,
@@ -416,32 +418,65 @@ export function useContactForm() {
         createdAt: new Date(),
       };
 
-      const result = await gossip.contacts.add(
-        effectiveUserId,
-        trimmedName,
-        publicKeys
-      );
-      if (!result.success && result.error) {
-        console.error('Failed to add contact:', result.error);
-        setGeneralError('Failed to add contact. Please try again.');
-        return;
-      }
-
       const payload: AnnouncementPayload = {
         username: shareUsername ? customUsername.trim() : undefined,
         message: message.value.trim(),
       };
 
-      try {
-        await gossip.discussions.start(contact, payload);
-      } catch (e) {
-        console.error(
-          'Failed to initialize discussion after contact creation:',
-          e
-        );
-      }
+      // Optimistic: add discussion to store and navigate immediately
+      const now = new Date();
+      const optimisticDiscussion: Discussion = {
+        ownerUserId: userProfile.userId,
+        contactUserId: effectiveUserId,
+        weAccepted: true,
+        sendAnnouncement: null,
+        direction: DiscussionDirection.INITIATED,
+        nextSeeker: null,
+        initiationAnnouncement: null,
+        announcementMessage: null,
+        lastSyncTimestamp: null,
+        customName: null,
+        lastMessageId: null,
+        lastMessageContent: null,
+        lastMessageTimestamp: null,
+        unreadCount: 0,
+        saturatedRetryDone: false,
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      useDiscussionStore
+        .getState()
+        .optimisticAddDiscussion(optimisticDiscussion, contact as Contact);
 
       navigate(ROUTES.default());
+
+      // SDK calls in background
+      (async () => {
+        try {
+          const result = await gossip.contacts.add(
+            effectiveUserId,
+            trimmedName,
+            publicKeys
+          );
+          if (!result.success && result.error) {
+            console.error('Failed to add contact:', result.error);
+            toast.error(result.error);
+            useDiscussionStore
+              .getState()
+              .removeOptimisticDiscussion(effectiveUserId);
+            return;
+          }
+
+          await gossip.discussions.start(contact, payload);
+        } catch (e) {
+          console.error('Failed to start discussion:', e);
+          toast.error('Failed to add contact. Please try again.');
+          useDiscussionStore
+            .getState()
+            .removeOptimisticDiscussion(effectiveUserId);
+        }
+      })();
     } catch (err) {
       console.error(err);
       setGeneralError('Failed to add contact. Please try again.');

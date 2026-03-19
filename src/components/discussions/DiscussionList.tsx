@@ -133,8 +133,8 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
 
   // Handlers
   const handleAccept = useCallback(
-    async (discussion: Discussion, newName?: string) => {
-      await handleAcceptDiscussionRequest(discussion, newName);
+    (discussion: Discussion, newName?: string) => {
+      handleAcceptDiscussionRequest(discussion, newName);
       navigate(ROUTES.discussion({ userId: discussion.contactUserId }));
     },
     [handleAcceptDiscussionRequest, navigate]

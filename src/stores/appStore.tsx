@@ -35,6 +35,9 @@ interface AppStoreState {
   // App initialization state (whether app has checked for existing accounts)
   isInitialized: boolean;
   setIsInitialized: (value: boolean) => void;
+  // Transient flag: show plausible deniability setup after account creation
+  showPlausibleDeniabilitySetup: boolean;
+  setShowPlausibleDeniabilitySetup: (show: boolean) => void;
   // Pending deep link
   pendingDeepLinkInfo: ParsedInvite | null;
   setPendingDeepLinkInfo: (value: ParsedInvite | null) => void;
@@ -94,6 +97,11 @@ const useAppStoreBase = create<AppStoreState>()(
       isInitialized: false,
       setIsInitialized: (value: boolean) => {
         set({ isInitialized: value });
+      },
+      // Transient: show plausible deniability after account creation (not persisted)
+      showPlausibleDeniabilitySetup: false,
+      setShowPlausibleDeniabilitySetup: (show: boolean) => {
+        set({ showPlausibleDeniabilitySetup: show });
       },
       // Pending deep link
       pendingDeepLinkInfo: null,

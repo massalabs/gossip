@@ -1168,34 +1168,25 @@ const MessageItem: React.FC<MessageItemProps> = ({
                   status: message.status,
                 })}
               >
-                {(message.status === MessageStatus.WAITING_SESSION ||
-                  message.status === MessageStatus.READY) && (
-                  <div className="flex items-center gap-1">
-                    <div
-                      className="w-2.5 h-2.5 border border-current border-t-transparent rounded-full animate-spin"
-                      aria-hidden="true"
+                {/* Fixed-size container — prevents bubble resize when check appears */}
+                <div className="w-3.5 h-3.5">
+                  {message.status === MessageStatus.SENT && message.id > 0 && (
+                    <CheckIcon
+                      className="w-3.5 h-3.5"
+                      aria-label={t('message_item.sent')}
                     />
-                    <span className="text-[10px] font-medium">
-                      {t('message_item.sending')}
-                    </span>
-                  </div>
-                )}
-                {message.status === MessageStatus.SENT && (
-                  <CheckIcon
-                    className="w-3.5 h-3.5"
-                    aria-label={t('message_item.sent')}
-                  />
-                )}
-                {(message.status === MessageStatus.DELIVERED ||
-                  message.status === MessageStatus.READ) && (
-                  <div
-                    className="relative inline-flex items-center w-4 h-3.5"
-                    aria-label={t('message_item.delivered')}
-                  >
-                    <CheckIcon className="w-3.5 h-3.5 absolute left-0" />
-                    <CheckIcon className="w-3.5 h-3.5 absolute left-[5px] top-[1.5px]" />
-                  </div>
-                )}
+                  )}
+                  {(message.status === MessageStatus.DELIVERED ||
+                    message.status === MessageStatus.READ) && (
+                    <div
+                      className="relative inline-flex items-center w-4 h-3.5"
+                      aria-label={t('message_item.delivered')}
+                    >
+                      <CheckIcon className="w-3.5 h-3.5 absolute left-0" />
+                      <CheckIcon className="w-3.5 h-3.5 absolute left-[5px] top-[1.5px]" />
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </div>

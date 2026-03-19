@@ -36,6 +36,9 @@ interface DiscussionStoreState {
   setModalOpen: (discussionId: number, isOpen: boolean) => void;
   isModalOpen: (discussionId: number) => boolean;
   setFilter: (filter: DiscussionFilter) => void;
+  optimisticAcceptDiscussion: (contactUserId: string) => void;
+  optimisticAddDiscussion: (discussion: Discussion, contact: Contact) => void;
+  removeOptimisticDiscussion: (contactUserId: string) => void;
 }
 
 const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
@@ -291,6 +294,40 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
 
   isModalOpen: (discussionId: number) => {
     return get().openNameModals.has(discussionId);
+  },
+
+  optimisticAcceptDiscussion: (contactUserId: string) => {
+    set(state => {
+      const next = new Map(state.sessionsStatuses);
+      next.set(contactUserId, SessionStatus.Active);
+      return { sessionsStatuses: next };
+    });
+  },
+
+  optimisticAddDiscussion: (discussion: Discussion, contact: Contact) => {
+    set(state => {
+      const nextStatuses = new Map(state.sessionsStatuses);
+      nextStatuses.set(discussion.contactUserId, SessionStatus.SelfRequested);
+      return {
+        discussions: [discussion, ...state.discussions],
+        contacts: [...state.contacts, contact],
+        sessionsStatuses: nextStatuses,
+      };
+    });
+  },
+
+  removeOptimisticDiscussion: (contactUserId: string) => {
+    set(state => {
+      const nextStatuses = new Map(state.sessionsStatuses);
+      nextStatuses.delete(contactUserId);
+      return {
+        discussions: state.discussions.filter(
+          d => d.contactUserId !== contactUserId
+        ),
+        contacts: state.contacts.filter(c => c.userId !== contactUserId),
+        sessionsStatuses: nextStatuses,
+      };
+    });
   },
 
   setFilter: (filter: DiscussionFilter) => {
