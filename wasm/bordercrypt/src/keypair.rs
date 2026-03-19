@@ -5,13 +5,15 @@
 //! [version: u32 BE] [pq_pk: PK_SIZE bytes] [sk_nonce: 16 bytes] [sk_ct: remaining]
 //! ```
 
+use crate::constants::AEAD_TAG_SIZE;
 use crate::error::{BordercryptError, Result};
 use crate::pq::PqPublicKey;
 use crate::storage::KeypairStorage;
 use crate::types::SessionIndex;
 
-/// Minimum byte size of a valid keypair file (header only, no `sk_ct`).
-const MIN_SIZE: usize = 4 + PqPublicKey::byte_size() + crypto_aead::NONCE_SIZE;
+/// Minimum byte size of a valid keypair file.
+/// Includes at least `AEAD_TAG_SIZE` bytes for `sk_ct` (the AEAD tag alone).
+const MIN_SIZE: usize = 4 + PqPublicKey::byte_size() + crypto_aead::NONCE_SIZE + AEAD_TAG_SIZE;
 
 /// Serialized keypair file for a session.
 pub struct KeypairFile {
@@ -142,7 +144,7 @@ mod tests {
             version: 0x01020304,
             pq_pk: vec![0; PqPublicKey::byte_size()],
             sk_nonce: [0; crypto_aead::NONCE_SIZE],
-            sk_ct: vec![],
+            sk_ct: vec![0; AEAD_TAG_SIZE + 1],
         };
         let bytes = kf.serialize();
         assert_eq!(&bytes[..4], &[0x01, 0x02, 0x03, 0x04]);
@@ -157,5 +159,10 @@ mod tests {
     #[test]
     fn deserialize_empty() {
         assert!(KeypairFile::deserialize(&[]).is_err());
+    }
+
+    #[test]
+    fn pk_size_matches_pq_rerand() {
+        assert_eq!(PqPublicKey::byte_size(), 4 * pq_rerand::params::N * 4);
     }
 }

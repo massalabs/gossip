@@ -3,6 +3,12 @@ name = "bordercrypt"
 version.workspace = true
 edition.workspace = true
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+wasm = ["dep:wasm-bindgen", "dep:js-sys", "dep:console_error_panic_hook"]
+
 [dependencies]
 crypto-aead = { path = "../crypto-aead" }
 crypto-kdf = { path = "../crypto-kdf" }
@@ -11,6 +17,10 @@ pq-rerand = { git = "https://github.com/massalabs/pq-rerand", rev = "1d5f9d1afd6
 rand = "0.8"
 thiserror = "2"
 zeroize = { version = "1.8", features = ["derive"] }
+
+wasm-bindgen = { version = "0.2", optional = true }
+js-sys = { version = "0.3", optional = true }
+console_error_panic_hook = { version = "0.1", optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.2", features = ["js"] }

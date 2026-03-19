@@ -14,6 +14,8 @@ mod read;
 pub mod storage;
 mod types;
 mod unlock;
+#[cfg(target_arch = "wasm32")]
+mod wasm_api;
 mod write;
 
 pub use block::{create_cover_block, decrypt_block, encrypt_block, rerandomize_block};

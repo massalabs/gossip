@@ -260,6 +260,114 @@ mod fs_backend {
 #[cfg(not(target_arch = "wasm32"))]
 pub use fs_backend::FsStorage;
 
+#[cfg(target_arch = "wasm32")]
+mod wasm_backend {
+    use wasm_bindgen::prelude::*;
+
+    use super::*;
+
+    #[wasm_bindgen]
+    extern "C" {
+        #[wasm_bindgen(js_name = "bordercryptReadBlock")]
+        fn js_read_block(session: u8, block: u32) -> Vec<u8>;
+
+        #[wasm_bindgen(js_name = "bordercryptWriteBlock")]
+        fn js_write_block(session: u8, block: u32, data: &[u8]);
+
+        #[wasm_bindgen(js_name = "bordercryptAppendBlock")]
+        fn js_append_block(session: u8, data: &[u8]);
+
+        #[wasm_bindgen(js_name = "bordercryptBlockCount")]
+        fn js_block_count(session: u8) -> u32;
+
+        #[wasm_bindgen(js_name = "bordercryptFsync")]
+        fn js_fsync(session: u8);
+
+        #[wasm_bindgen(js_name = "bordercryptReadKeypair")]
+        fn js_read_keypair(session: u8) -> Vec<u8>;
+
+        #[wasm_bindgen(js_name = "bordercryptWriteKeypair")]
+        fn js_write_keypair(session: u8, data: &[u8]);
+    }
+
+    /// Storage backend for WASM — delegates to JS callbacks for OPFS I/O.
+    pub struct WasmStorage;
+
+    impl WasmStorage {
+        #[must_use]
+        pub fn new() -> Self {
+            Self
+        }
+    }
+
+    impl Default for WasmStorage {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
+    impl BlockStorage for WasmStorage {
+        fn read_block(&self, session: SessionIndex, block: u64) -> Result<Box<[u8; BLOCK_SIZE]>> {
+            let block_u32 = u32::try_from(block).map_err(|_| BordercryptError::Overflow)?;
+            let data = js_read_block(session.as_u8(), block_u32);
+            if data.len() != BLOCK_SIZE {
+                return Err(BordercryptError::CorruptedBlock);
+            }
+            let mut buf = Box::new([0u8; BLOCK_SIZE]);
+            buf.copy_from_slice(&data);
+            Ok(buf)
+        }
+
+        fn write_block(
+            &mut self,
+            session: SessionIndex,
+            block: u64,
+            data: &[u8; BLOCK_SIZE],
+        ) -> Result<()> {
+            let block_u32 = u32::try_from(block).map_err(|_| BordercryptError::Overflow)?;
+            js_write_block(session.as_u8(), block_u32, data);
+            Ok(())
+        }
+
+        fn append_block(&mut self, session: SessionIndex, data: &[u8; BLOCK_SIZE]) -> Result<()> {
+            js_append_block(session.as_u8(), data);
+            Ok(())
+        }
+
+        fn block_count(&self, session: SessionIndex) -> Result<u64> {
+            Ok(u64::from(js_block_count(session.as_u8())))
+        }
+
+        fn fsync(&self, session: SessionIndex) -> Result<()> {
+            js_fsync(session.as_u8());
+            Ok(())
+        }
+
+        fn init_blockstream(&mut self, _session: SessionIndex) -> Result<()> {
+            // JS backends (OPFS/IDB) create blockstreams during worker init.
+            Ok(())
+        }
+    }
+
+    impl KeypairStorage for WasmStorage {
+        fn read_keypair(&self, session: SessionIndex) -> Result<Zeroizing<Vec<u8>>> {
+            let data = js_read_keypair(session.as_u8());
+            if data.is_empty() {
+                return Err(BordercryptError::Storage("keypair not found".into()));
+            }
+            Ok(Zeroizing::new(data))
+        }
+
+        fn write_keypair(&mut self, session: SessionIndex, data: &[u8]) -> Result<()> {
+            js_write_keypair(session.as_u8(), data);
+            Ok(())
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+pub use wasm_backend::WasmStorage;
+
 #[cfg(test)]
 mod tests {
     use super::*;

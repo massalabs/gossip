@@ -1,0 +1,8 @@
+[env]
+# pq-rerand uses large polynomial arrays ([u32; 4096] = 16 KB each) internally.
+# Debug builds without inlining accumulate these across nested function calls,
+# exceeding the default 8 MB test thread stack.
+RUST_MIN_STACK = "33554432"
+
+[target.wasm32-unknown-unknown]
+rustflags = ["-C", "link-args=-z stack-size=4194304"]

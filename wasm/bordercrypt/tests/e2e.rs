@@ -563,8 +563,7 @@ fn e2e_all_slots_allocated() {
             let sess = unlock_session(&storage, DOMAIN, &passwords[i as usize]).unwrap();
             assert_eq!(sess.session_index.as_u8(), i);
             let expected = format!("data-from-session-{i}");
-            let result =
-                read_session_data(&storage, DOMAIN, &sess, 0, expected.len()).unwrap();
+            let result = read_session_data(&storage, DOMAIN, &sess, 0, expected.len()).unwrap();
             assert_eq!(&*result, expected.as_bytes());
         }
     });
