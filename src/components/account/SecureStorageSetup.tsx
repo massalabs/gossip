@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Shield, CheckCircle, Plus, Check, ArrowRight } from 'react-feather';
+import { Shield, CheckCircle, Plus, Check } from 'react-feather';
 import PageHeader from '../ui/PageHeader';
 import PageLayout from '../ui/PageLayout';
 import Button from '../ui/Button';
@@ -110,7 +110,9 @@ const SecureStorageSetup: React.FC<SecureStorageSetupProps> = ({
 
   const handleSkip = async () => {
     if (createdAccounts.length > 1) {
-      // Hidden accounts exist — must lock secure storage before leaving
+      // Hidden accounts exist — confirm before locking
+      const confirmed = window.confirm(t('secure_storage.confirm_lock'));
+      if (!confirmed) return;
       await finalize();
     } else {
       // Only main account, no hidden — stay authenticated
@@ -161,22 +163,12 @@ const SecureStorageSetup: React.FC<SecureStorageSetupProps> = ({
         </div>
 
         <div className="bg-card rounded-xl border border-border p-4 mb-8">
-          {createdAccounts.map(assignment => (
-            <div
-              key={assignment.slotNumber}
-              className="flex items-center justify-between py-3 px-2"
-            >
+          {createdAccounts.map((assignment, idx) => (
+            <div key={idx} className="flex items-center py-3 px-2">
+              <CheckCircle className="w-4 h-4 text-green-500 mr-3 shrink-0" />
               <span className="text-sm font-medium text-foreground">
                 {assignment.username}
               </span>
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <ArrowRight className="w-3 h-3" />
-                <span>
-                  {t('secure_storage.slot', {
-                    number: assignment.slotNumber,
-                  })}
-                </span>
-              </div>
             </div>
           ))}
         </div>
