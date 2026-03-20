@@ -51,7 +51,10 @@ const HiddenAccountCreation: React.FC<HiddenAccountCreationProps> = ({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!canSubmit) return;
-    onComplete({ username, password });
+    const creds = { username, password };
+    setPassword('');
+    setConfirmPassword('');
+    onComplete(creds);
   };
 
   return (

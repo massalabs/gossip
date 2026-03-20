@@ -107,14 +107,14 @@ export class SecureStorageStandalone {
 
   allocate(slot: number, password: string): void {
     this.require().allocateSession(slot, new TextEncoder().encode(password));
-    console.log(`[SecureStorage] Session allocated in slot ${slot}`);
+    console.debug('[SecureStorage] Session allocated');
   }
 
   unlock(password: string): boolean {
     const result = this.require().unlockSession(
       new TextEncoder().encode(password)
     );
-    console.log(`[SecureStorage] Unlock: ${result ? 'success' : 'no match'}`);
+    console.debug(`[SecureStorage] Unlock: ${result ? 'success' : 'no match'}`);
     return result;
   }
 

@@ -19,14 +19,14 @@
  *   cover     → run one cover traffic round
  */
 
-console.error('[BC-Worker-DBG] Worker module starting');
+console.debug('[BC-Worker] Worker module starting');
 
 import * as SQLite from 'wa-sqlite';
 import { execStatements } from './exec-utils.js';
 import { BLOCK_SIZE, SESSION_COUNT } from './secure-storage-constants.js';
 import type { SecureStorageVFS } from './secure-storage-vfs.js';
 
-console.error('[BC-Worker-DBG] Imports done');
+console.debug('[BC-Worker] Imports done');
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -533,9 +533,7 @@ addEventListener('message', async (e: MessageEvent) => {
         }
 
         secureStorageWasm.allocateSession(slot, password);
-        console.log(
-          `[BC-Worker] allocate slot=${slot}, session now unlocked=${secureStorageWasm.isUnlocked()}`
-        );
+        console.debug('[BC-Worker] session allocated');
 
         // Reopen SQLite with a fresh handle for the new slot
         if (sqlite3 && dbHandle === null) {
@@ -574,7 +572,7 @@ addEventListener('message', async (e: MessageEvent) => {
         }
 
         const unlocked = secureStorageWasm.unlockSession(password);
-        console.log(`[BC-Worker] unlock result=${unlocked}`);
+        console.debug(`[BC-Worker] unlock result=${unlocked}`);
 
         // Reopen SQLite with a fresh handle for the unlocked slot
         if (unlocked && sqlite3 && dbHandle === null) {

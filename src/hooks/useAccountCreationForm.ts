@@ -121,6 +121,10 @@ export function useAccountCreationForm({
 
         await getSdk().flush();
 
+        // Clear sensitive data from state ASAP
+        setPassword('');
+        setConfirmPassword('');
+
         onAccountCreated({
           username,
           useBiometrics: !usePassword && biometricAvailable,

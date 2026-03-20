@@ -135,6 +135,7 @@ const Login: React.FC<LoginProps> = React.memo(
         }
 
         await loadAccount(password);
+        setPassword('');
 
         const state = useAccountStore.getState();
         if (state.userProfile) {
