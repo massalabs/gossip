@@ -333,10 +333,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         // Ensure any existing session is closed before creating new account
         await cleanupSession();
 
-        // Initialize encrypted storage with this password
         const sdk = getSdk();
-        await sdk.secureStorageAllocate(0, password);
-
         const mnemonic = generateMnemonic(256);
 
         // Generate keys for Massa wallet (SDK generates its own internally)
@@ -358,12 +355,17 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           }
         );
 
-        // Open SDK session
-        await getSdk().openSession({
+        const sessionOpts = {
           mnemonic,
           encryptionKey,
           onPersist: createOnPersist(userId),
-        });
+        };
+
+        if (sdk.isSecureStorage) {
+          await sdk.openSecureSession(0, password, sessionOpts);
+        } else {
+          await sdk.openSession(sessionOpts);
+        }
 
         const session = getSdk().getEncryptedSession();
 
@@ -417,8 +419,6 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         // Ignore — the goal is to serialise against dbLock, not use the result.
       }
 
-      await sdk.secureStorageAllocate(slot, password, true);
-
       const mnemonic = generateMnemonic(256);
       const keys = await generateUserKeys(mnemonic);
       const userIdBytes = keys.public_keys().derive_id();
@@ -434,11 +434,16 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       // No-op onPersist is safe: this session is ephemeral — we only open it to
       // write the profile, then closeSession() handles the final persist.
       // No markDirty()/persistIfNeeded() calls occur between open and close.
-      await sdk.openSession({
-        mnemonic,
-        encryptionKey,
-        onPersist: async () => {},
-      });
+      await sdk.openSecureSession(
+        slot,
+        password,
+        {
+          mnemonic,
+          encryptionKey,
+          onPersist: async () => {},
+        },
+        true
+      );
       const session = sdk.getEncryptedSession();
 
       await sdk.profiles.createOrUpdate(username, userId, security, session);
@@ -532,12 +537,6 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           if (biometricKey) {
             const { encodeToBase64 } = await import('@massalabs/gossip-sdk');
             unlockPassword = encodeToBase64(biometricKey.to_bytes());
-            console.log(
-              '[BC-DEBUG] unlock password length:',
-              unlockPassword.length,
-              'first8:',
-              unlockPassword.slice(0, 8)
-            );
           } else if (password) {
             unlockPassword = password;
           }
@@ -644,11 +643,8 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         await cleanupSession();
         useDiscussionStore.getState().cleanup();
         useMessageStore.getState().cleanup();
-        // Lock encrypted storage
-        try {
+        if (getSdk().isSecureStorage) {
           await getSdk().secureStorageLock();
-        } catch {
-          // Secure storage not initialized — ignore
         }
         // Clear in-memory state but keep data in database
         // Keep isInitialized true so user goes to login screen
@@ -705,23 +701,19 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           }
         );
 
-        // Convert biometric key to secure storage password
-        const { encodeToBase64 } = await import('@massalabs/gossip-sdk');
-        const biometricPassword = encodeToBase64(encryptionKey.to_bytes());
-        console.log(
-          '[BC-DEBUG] allocate password length:',
-          biometricPassword.length,
-          'first8:',
-          biometricPassword.slice(0, 8)
-        );
-        await getSdk().secureStorageAllocate(0, biometricPassword);
-
-        // Open SDK session
-        await getSdk().openSession({
+        const sessionOpts = {
           mnemonic,
           encryptionKey,
           onPersist: createOnPersist(userId),
-        });
+        };
+
+        if (getSdk().isSecureStorage) {
+          const { encodeToBase64 } = await import('@massalabs/gossip-sdk');
+          const biometricPassword = encodeToBase64(encryptionKey.to_bytes());
+          await getSdk().openSecureSession(0, biometricPassword, sessionOpts);
+        } else {
+          await getSdk().openSession(sessionOpts);
+        }
 
         const session = getSdk().getEncryptedSession();
 

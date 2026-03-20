@@ -62,6 +62,7 @@ interface DbState {
   drizzleDb: GossipDatabase | null;
   dbLock: Promise<unknown>;
   inTransaction: boolean;
+  isSecureStorage: boolean;
   secureStorageWasm: SecureStorageWasmModule | null;
   secureStorageVfs: { flushDirtyPages(): void } | null;
   needsUnlock: boolean;
@@ -79,6 +80,7 @@ function createDefaultState(): DbState {
     drizzleDb: null,
     dbLock: Promise.resolve(),
     inTransaction: false,
+    isSecureStorage: false,
     secureStorageWasm: null,
     secureStorageVfs: null,
     needsUnlock: false,
@@ -166,6 +168,11 @@ export class DatabaseConnection {
 
   get isOpen(): boolean {
     return this.state.drizzleDb !== null;
+  }
+
+  /** True when this connection uses encrypted secure storage. */
+  get isSecureStorage(): boolean {
+    return this.state.isSecureStorage;
   }
 
   /** True when secure storage has existing data that needs unlock before DB is usable. */
@@ -334,6 +341,7 @@ export class DatabaseConnection {
       }
 
       case 'secureStorage': {
+        this.state.isSecureStorage = true;
         if (storage.backend === 'node-fs') {
           await this.initSecureStorageNodeFs(storage);
         } else {

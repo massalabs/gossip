@@ -492,6 +492,11 @@ class GossipSdk {
 
   // ─── Secure Storage ──────────────────────────────────────────
 
+  /** True when this SDK instance uses encrypted secure storage. */
+  get isSecureStorage(): boolean {
+    return this._conn?.isSecureStorage ?? false;
+  }
+
   /** True when secure storage has existing data that needs unlock before DB is usable. */
   get needsUnlock(): boolean {
     return this._conn?.needsUnlock ?? false;
@@ -507,6 +512,20 @@ class GossipSdk {
       throw new Error('SDK not initialized. Call init() first.');
     }
     return this._conn;
+  }
+
+  /**
+   * Allocate a secure storage slot and open a session.
+   * Combines secureStorageAllocate + openSession in a single call.
+   */
+  async openSecureSession(
+    slot: number,
+    password: string,
+    options: OpenSessionOptions,
+    forceInit = false
+  ): Promise<void> {
+    await this.secureStorageAllocate(slot, password, forceInit);
+    await this.openSession(options);
   }
 
   async secureStorageProvision(): Promise<void> {
