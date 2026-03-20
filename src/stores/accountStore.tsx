@@ -167,7 +167,6 @@ interface AccountState {
   userProfile: UserProfile | null;
   encryptionKey: EncryptionKey | null;
   isLoading: boolean;
-  lockedByUser: boolean;
   webauthnSupported: boolean;
   platformAuthenticatorAvailable: boolean;
   account: Account | null;
@@ -594,7 +593,6 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           account,
           encryptionKey,
           isLoading: false,
-          lockedByUser: false,
         });
 
         // Fetch MNS domains if MNS is enabled
@@ -648,8 +646,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         }
         // Clear in-memory state but keep data in database
         // Keep isInitialized true so user goes to login screen
-        // Set lockedByUser to skip biometric auto-login on the login screen
-        set({ ...clearAccountState(), lockedByUser: true });
+        set(clearAccountState());
       } catch (error) {
         console.error('Error logging out:', error);
         set({ isLoading: false });

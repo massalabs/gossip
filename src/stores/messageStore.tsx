@@ -104,7 +104,6 @@ interface MessageStoreState {
   reactionsByContact: Map<string, Message[]>;
   currentContactUserId: string | null;
   isLoading: boolean;
-  isSending: boolean;
   pollTimer: ReturnType<typeof setInterval> | null;
   eventHandler: (() => void) | null;
   cancelDebounce: (() => void) | null;
@@ -144,7 +143,6 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
   reactionsByContact: new Map(),
   currentContactUserId: null,
   isLoading: false,
-  isSending: false,
   pollTimer: null,
   eventHandler: null,
   cancelDebounce: null,
@@ -564,7 +562,6 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
       reactionsByContact: new Map(),
       currentContactUserId: null,
       isLoading: false,
-      isSending: false,
     });
   },
 }));

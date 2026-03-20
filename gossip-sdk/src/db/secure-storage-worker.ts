@@ -30,6 +30,20 @@ console.debug('[BC-Worker] Imports done');
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+async function execSqlStatements(
+  db: ReturnType<typeof SQLite.Factory>,
+  handle: number,
+  sql: string
+): Promise<void> {
+  const stmts = sql
+    .split(';')
+    .map(s => s.trim())
+    .filter(Boolean);
+  for (const stmt of stmts) {
+    await db.exec(handle, stmt);
+  }
+}
+
 let sqlite3: ReturnType<typeof SQLite.Factory> | null = null;
 let dbHandle: number | null = null;
 let secureStorageWasm: any = null;
@@ -368,14 +382,7 @@ async function openSqlite(
   console.log('[BC-Worker] database opened');
 
   if (initSql) {
-    const stmts = initSql
-      .split(';')
-      .map(s => s.trim())
-      .filter(Boolean);
-    for (const stmt of stmts) {
-      console.log(`[BC-Worker] init: ${stmt.substring(0, 80)}`);
-      await sqlite3.exec(dbHandle, stmt);
-    }
+    await execSqlStatements(sqlite3, dbHandle, initSql);
     console.log('[BC-Worker] init SQL done');
   }
 }
@@ -539,13 +546,7 @@ addEventListener('message', async (e: MessageEvent) => {
         if (sqlite3 && dbHandle === null) {
           dbHandle = await sqlite3.open_v2('gossip.db');
           if (initSqlPermanent) {
-            const stmts = initSqlPermanent
-              .split(';')
-              .map(s => s.trim())
-              .filter(Boolean);
-            for (const stmt of stmts) {
-              await sqlite3.exec(dbHandle, stmt);
-            }
+            await execSqlStatements(sqlite3, dbHandle, initSqlPermanent);
           }
         } else if (!sqlite3) {
           console.log('[BC-Worker] opening deferred SQLite after allocate');
@@ -578,13 +579,7 @@ addEventListener('message', async (e: MessageEvent) => {
         if (unlocked && sqlite3 && dbHandle === null) {
           dbHandle = await sqlite3.open_v2('gossip.db');
           if (initSqlPermanent) {
-            const stmts = initSqlPermanent
-              .split(';')
-              .map(s => s.trim())
-              .filter(Boolean);
-            for (const stmt of stmts) {
-              await sqlite3.exec(dbHandle, stmt);
-            }
+            await execSqlStatements(sqlite3, dbHandle, initSqlPermanent);
           }
         } else if (unlocked && !sqlite3) {
           console.log('[BC-Worker] opening deferred SQLite after unlock');
