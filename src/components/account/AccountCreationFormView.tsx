@@ -37,6 +37,26 @@ const AccountCreationFormView: React.FC<AccountCreationFormViewProps> = ({
   handleSubmit,
   handleICloudSyncChoice,
 }) => {
+  if (isSubmitting) {
+    return (
+      <PageLayout
+        header={<PageHeader title={t('create.title')} />}
+        className="app-max-w mx-auto"
+        contentClassName="flex items-center justify-center"
+      >
+        <div className="text-center">
+          <div className="w-10 h-10 border-2 border-muted border-t-primary rounded-full animate-spin mx-auto mb-6" />
+          <h2 className="text-lg font-medium text-foreground mb-2">
+            {t('create.creating')}
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            {t('create.creating_info')}
+          </p>
+        </div>
+      </PageLayout>
+    );
+  }
+
   return (
     <PageLayout
       header={<PageHeader title={t('create.title')} onBack={onBack} />}
