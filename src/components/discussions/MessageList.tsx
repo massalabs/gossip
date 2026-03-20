@@ -238,12 +238,11 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
             return 'spacer';
           case 'message': {
             const msg = item.message;
-            // Outgoing messages use content-based keys so the key stays
-            // stable when an optimistic message (id < 0) is replaced by
-            // its confirmed counterpart (id > 0). Without this, Virtuoso
-            // unmounts + remounts the item, causing a visible flicker.
-            if (msg.direction === MessageDirection.OUTGOING) {
-              return `msg-out-${msg.timestamp.getTime()}-${msg.content.slice(0, 32)}`;
+            // Outgoing optimistic messages (negative id) use their unique id.
+            // Confirmed messages use DB id. This avoids duplicate keys when
+            // both the pending and confirmed versions coexist briefly.
+            if (msg.id != null && msg.id < 0) {
+              return `msg-pending-${msg.id}`;
             }
             if (msg.id != null) return `msg-${msg.id}`;
             return `msg-temp-${msg.timestamp.getTime()}-${msg.content.slice(0, 16)}`;
