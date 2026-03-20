@@ -441,6 +441,7 @@ export function useContactForm() {
         lastMessageTimestamp: null,
         unreadCount: 0,
         saturatedRetryDone: false,
+        pinned: false,
         createdAt: now,
         updatedAt: now,
       };

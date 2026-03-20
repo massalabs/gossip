@@ -8,7 +8,6 @@ import { InvitePage } from '../pages/InvitePage';
 import { UserProfile } from '@massalabs/gossip-sdk';
 import { ROUTES } from '../constants/routes';
 import MainLayout from '../components/ui/MainLayout';
-import { setPendingMainCredentials } from '../stores/pendingAccountSetup';
 
 interface UnauthenticatedRoutesProps {
   existingAccountInfo: UserProfile | null;
@@ -36,11 +35,6 @@ export const UnauthenticatedRoutes: React.FC<UnauthenticatedRoutesProps> = ({
   const handleCreateNewAccount = () => {
     onLoginErrorChange(null);
     navigate(ROUTES.setup());
-  };
-
-  const handleNewAccountCollect = (username: string, password: string) => {
-    setPendingMainCredentials({ username, password });
-    useAppStore.getState().setShowPlausibleDeniabilitySetup(true);
   };
 
   const handleNewAccountBack = async () => {
@@ -78,8 +72,7 @@ export const UnauthenticatedRoutes: React.FC<UnauthenticatedRoutesProps> = ({
           path={ROUTES.setup()}
           element={
             <AccountCreation
-              onCollect={handleNewAccountCollect}
-              onComplete={() => {}}
+              onComplete={() => navigate(ROUTES.welcome(), { replace: true })}
               onBack={handleNewAccountBack}
             />
           }

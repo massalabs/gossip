@@ -1,18 +1,18 @@
 /**
- * Bordercrypt Node.js backend — registers node:fs callbacks for
- * bordercrypt WASM and returns the initialized WASM module.
+ * Secure storage Node.js backend — registers node:fs callbacks for
+ * the WASM module and returns the initialized module.
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import { BLOCK_SIZE, SESSION_COUNT } from './bordercrypt-constants.js';
+import { BLOCK_SIZE, SESSION_COUNT } from './secure-storage-constants.js';
 
 interface FsHandle {
   fd: number;
   path: string;
 }
 
-export async function initBordercryptNodeFs(
+export async function initSecureStorageNodeFs(
   dirPath: string,
   domain?: string
 ): Promise<any> {
@@ -36,6 +36,7 @@ export async function initBordercryptNodeFs(
     keypairFds.push({ fd: fs.openSync(kpPath, 'r+'), path: kpPath });
   }
 
+  // WASM FFI callbacks — names must match Rust extern declarations
   const g = globalThis as any;
 
   g.bordercryptReadBlock = (session: number, block: number): Uint8Array => {
@@ -85,7 +86,7 @@ export async function initBordercryptNodeFs(
     fs.fsyncSync(keypairFds[session].fd);
   };
 
-  // Load and init bordercrypt WASM
+  // Load and init secure storage WASM
   const { createRequire } = await import('node:module');
   const require = createRequire(import.meta.url);
 

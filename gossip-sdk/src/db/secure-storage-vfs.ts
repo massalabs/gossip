@@ -1,17 +1,17 @@
 /**
- * Bordercrypt VFS for wa-sqlite.
+ * Secure Storage VFS for wa-sqlite.
  *
- * Routes SQLite I/O through the bordercrypt WASM module, which
+ * Routes SQLite I/O through the secure storage WASM module, which
  * encrypts/decrypts data blocks and delegates raw storage to OPFS
  * or node:fs via JS callbacks.
  *
  * Journal/WAL/temp files are handled in-memory. The main database
- * file goes through bordercrypt (requires an unlocked session).
+ * file goes through secure storage (requires an unlocked session).
  *
  * ## Write coalescing
  *
  * Each `wasm.writeData()` call triggers a full decrypt-modify-reencrypt
- * cycle on every bordercrypt block touched (× 5 sessions for pq-rerand
+ * cycle on every secure storage block touched (× 5 sessions for pq-rerand
  * rerandomization). Without coalescing, two SQLite page writes to the
  * same block trigger two independent encrypt cycles.
  *
@@ -40,27 +40,27 @@
 import * as VFS from 'wa-sqlite/src/VFS.js';
 
 /**
- * SQLite page size for bordercrypt databases.
+ * SQLite page size for secure storage databases.
  *
  * PLAINTEXT_SIZE is 15840 bytes — the largest power-of-2 page that fits
  * within a single block without straddling is 8192 (≈1.93 pages/block).
  * This halves the number of xWrite→encrypt cycles vs the default 4096.
  */
-export const BORDERCRYPT_PAGE_SIZE = 8192;
+export const SECURE_STORAGE_PAGE_SIZE = 8192;
 
-interface BordercryptWasm {
+interface SecureStorageWasm {
   readData(offset: number, len: number): Uint8Array;
   writeData(offset: number, data: Uint8Array): void;
   getDataSize(): number;
   isUnlocked(): boolean;
 }
 
-const log = (...args: unknown[]) => console.log('[BordercryptVFS]', ...args);
+const log = (...args: unknown[]) => console.log('[SecureStorageVFS]', ...args);
 
-export class BordercryptVFS extends VFS.Base {
-  name = 'bordercrypt';
+export class SecureStorageVFS extends VFS.Base {
+  name = 'secureStorage';
 
-  private wasm: BordercryptWasm;
+  private wasm: SecureStorageWasm;
   private mainFileId: number | null = null;
 
   // In-memory journal/temp files (fileId → { data, size })
@@ -74,7 +74,7 @@ export class BordercryptVFS extends VFS.Base {
   // (WASM getDataSize() becomes authoritative again).
   private bufferedFileEnd = 0;
 
-  constructor(wasm: BordercryptWasm) {
+  constructor(wasm: SecureStorageWasm) {
     super();
     this.mxPathName = 255;
     this.wasm = wasm;
@@ -284,13 +284,13 @@ export class BordercryptVFS extends VFS.Base {
    * each trigger a separate decrypt-modify-reencrypt cycle.
    */
   xSectorSize(_fileId: number): number {
-    return BORDERCRYPT_PAGE_SIZE;
+    return SECURE_STORAGE_PAGE_SIZE;
   }
 
   /**
    * Device capability hints for SQLite's write optimizer.
    *
-   * - SAFE_APPEND:  appends never corrupt prior data (bordercrypt extends
+   * - SAFE_APPEND:  appends never corrupt prior data (secure storage extends
    *                 the blockstream atomically via appendBlock).
    * - SEQUENTIAL:   writes are executed in order (single-threaded WASM).
    */
@@ -316,7 +316,7 @@ export class BordercryptVFS extends VFS.Base {
    *
    * Called by the worker after each SQL execution, and internally on
    * xSync / xClose. Contiguous dirty pages are merged into a single
-   * `writeData()` call so the Rust layer processes each bordercrypt
+   * `writeData()` call so the Rust layer processes each secure storage
    * block exactly once.
    */
   flushDirtyPages(): void {

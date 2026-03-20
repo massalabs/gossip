@@ -214,7 +214,7 @@ class GossipSdk {
       console.log('[GossipSdk] SQLite initialized');
     } else {
       console.log(
-        '[GossipSdk] SQLite deferred — bordercrypt needs credentials'
+        '[GossipSdk] SQLite deferred — secure storage needs credentials'
       );
     }
 
@@ -490,9 +490,9 @@ class GossipSdk {
     await this._conn.clearConversationTables();
   }
 
-  // ─── Bordercrypt ─────────────────────────────────────────────
+  // ─── Secure Storage ──────────────────────────────────────────
 
-  /** True when bordercrypt has existing data that needs unlock before DB is usable. */
+  /** True when secure storage has existing data that needs unlock before DB is usable. */
   get needsUnlock(): boolean {
     return this._conn?.needsUnlock ?? false;
   }
@@ -509,17 +509,17 @@ class GossipSdk {
     return this._conn;
   }
 
-  async bordercryptProvision(): Promise<void> {
-    await this.requireConn().bordercryptProvision();
+  async secureStorageProvision(): Promise<void> {
+    await this.requireConn().secureStorageProvision();
   }
 
-  async bordercryptAllocate(
+  async secureStorageAllocate(
     slot: number,
     password: string,
     forceInit = false
   ): Promise<void> {
     const conn = this.requireConn();
-    await conn.bordercryptAllocate(slot, password, forceInit);
+    await conn.secureStorageAllocate(slot, password, forceInit);
     // Complete deferred init: create queries and profile service now that DB is ready
     if (!this._queries) {
       this._queries = new Queries(conn);
@@ -530,9 +530,9 @@ class GossipSdk {
     }
   }
 
-  async bordercryptUnlock(password: string): Promise<boolean> {
+  async secureStorageUnlock(password: string): Promise<boolean> {
     const conn = this.requireConn();
-    const unlocked = await conn.bordercryptUnlock(password);
+    const unlocked = await conn.secureStorageUnlock(password);
     // Complete deferred init: create queries and profile service now that DB is ready
     if (unlocked && !this._queries) {
       this._queries = new Queries(conn);
@@ -544,8 +544,8 @@ class GossipSdk {
     return unlocked;
   }
 
-  async bordercryptLock(): Promise<void> {
-    await this.requireConn().bordercryptLock();
+  async secureStorageLock(): Promise<void> {
+    await this.requireConn().secureStorageLock();
   }
 
   /** Force-flush deferred VFS writes + storage persistence. */

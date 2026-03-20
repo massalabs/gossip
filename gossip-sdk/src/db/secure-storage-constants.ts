@@ -1,4 +1,4 @@
-/** Bordercrypt block size in bytes — must match the Rust BLOCK_SIZE constant. */
+/** Secure storage block size in bytes — must match the Rust BLOCK_SIZE constant. */
 export const BLOCK_SIZE = 65536;
 
 /** Number of session slots — must match the Rust SESSION_COUNT constant. */

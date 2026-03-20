@@ -18,34 +18,31 @@ import { setupServiceWorker } from './services/serviceWorkerSetup';
 import { AuthenticatedRoutes } from './routes/AuthenticatedRoutes';
 import { UnauthenticatedRoutes } from './routes/UnauthenticatedRoutes';
 import { Onboarding } from './pages/Onboarding.tsx';
-import PlausibleDeniabilitySetup from './components/account/PlausibleDeniabilitySetup';
-import {
-  getPendingMainCredentials,
-  clearPendingMainCredentials,
-} from './stores/pendingAccountSetup';
 import { AppUrlListener } from './components/AppUrlListener';
 import { toastOptions } from './utils/toastOptions.ts';
 import LoadingScreen from './components/ui/LoadingScreen.tsx';
 import KeyboardAwareWrapper from './components/ui/KeyboardAwareWrapper';
 import { ROUTES } from './constants/routes';
-import { useOnlineStore } from './stores/useOnlineStore.tsx';
-import { getSdk } from './stores/sdkStore';
-import { useTheme } from './hooks/useTheme.ts';
-import { useScreenshotProtection } from './hooks/useScreenshotProtection';
+import { useAppInit } from './hooks/useAppInit';
 
 const AppContent: React.FC = () => {
-  const { isLoading, userProfile } = useAccountStore();
-  const { isInitialized } = useAppStore();
-  const showPlausibleDeniabilitySetup = useAppStore(
-    s => s.showPlausibleDeniabilitySetup
-  );
-  const [showImport, setShowImport] = useState(false);
-  const [loginError, setLoginError] = useState<string | null>(null);
   useProfileLoader();
   useStoreInit(); // Initialize all stores when user profile is available
+
+  const { isLoading, userProfile } = useAccountStore();
+  const isInitialized = useAppStore(s => s.isInitialized);
   const existingAccountInfo = useAccountInfo();
 
+  const [loginError, setLoginError] = useState<string | null>(null);
+
   const inviteMatch = useMatch(ROUTES.invite());
+  const isOnboarding = !isInitialized && !inviteMatch;
+  const isAuthenticated = !!userProfile;
+  // Pending = initial profile load only. Guards against flashing Login/Onboarding
+  // before useProfileLoader determines the correct state.
+  // !isInitialized: once isInitialized is set (by useProfileLoader or secure storage setup),
+  // isPending is permanently false — login attempts (loadAccount) won't unmount Login.
+  const isPending = !isInitialized && isLoading && !userProfile;
 
   // Setup service worker: register, listen for messages, start sync scheduler, and initialize background sync
   useEffect(() => {
@@ -54,41 +51,18 @@ const AppContent: React.FC = () => {
     });
   }, []); // Only run once on mount
 
-  // Plausible deniability setup — MUST be checked first.
-  // initializeAccount (called inside PDS) sets isLoading=true which would
-  // trigger the loading screen and unmount PDS, losing its state.
-  if (showPlausibleDeniabilitySetup) {
-    const creds = getPendingMainCredentials();
-    if (creds) {
-      return (
-        <PlausibleDeniabilitySetup
-          mainCredentials={creds}
-          onComplete={() => {
-            clearPendingMainCredentials();
-            useAppStore.getState().setShowPlausibleDeniabilitySetup(false);
-            // initializeAccount (called inside PDS) already sets isInitialized
-          }}
-        />
-      );
-    }
+  // Onboarding owns the full account-creation flow (including secure storage setup).
+  // Must be checked before isPending: initializeAccount sets isLoading=true mid-flow,
+  // and showing LoadingScreen would unmount Onboarding and lose its state.
+  if (isOnboarding) {
+    return <Onboarding />;
   }
 
-  if (isLoading && !isInitialized && !userProfile) {
+  if (isPending) {
     return <LoadingScreen />;
   }
 
-  // For invite links, we bypass onboarding so the user lands on the invite page.
-  //
-  // Design note: If a user manually navigates to an invite URL before initialization completes,
-  // the onboarding flow is skipped and the invite page is shown directly. This is to handle the
-  // case where a user has the phone app and doesn't necessarily need to create an account on web or pwa.
-  if (!isInitialized && !inviteMatch) {
-    return (
-      <Onboarding showImport={showImport} onShowImportChange={setShowImport} />
-    );
-  }
-
-  if (userProfile) {
+  if (isAuthenticated) {
     return <AuthenticatedRoutes />;
   }
 
@@ -102,37 +76,7 @@ const AppContent: React.FC = () => {
 };
 
 function App() {
-  const { initTheme } = useTheme();
-  const { initOnlineStore } = useOnlineStore();
-  useScreenshotProtection();
-
-  useEffect(() => {
-    let cleanup: (() => void) | undefined;
-
-    const initialize = async () => {
-      const cleanupFn = await initTheme();
-      cleanup = cleanupFn;
-      await initOnlineStore();
-    };
-
-    void initialize();
-
-    // Flush deferred DB writes when the app goes to background
-    const onVisibilityChange = () => {
-      if (document.visibilityState === 'hidden') {
-        getSdk()
-          .flush()
-          .catch(() => {});
-      }
-    };
-    document.addEventListener('visibilitychange', onVisibilityChange);
-
-    return () => {
-      cleanup?.();
-      document.removeEventListener('visibilitychange', onVisibilityChange);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  useAppInit();
 
   return (
     <BrowserRouter>
@@ -141,9 +85,6 @@ function App() {
           <AppUrlListener />
           <AppContent />
           <DebugConsole />
-          {/* <div className="hidden">
-            <PWABadge />
-          </div> */}
         </KeyboardAwareWrapper>
         <Toaster position="top-center" toastOptions={toastOptions} />
       </ErrorBoundary>

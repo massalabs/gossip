@@ -7,10 +7,9 @@ import Button from '../ui/Button';
 import HiddenAccountCreation from './HiddenAccountCreation';
 import { useAccountStore } from '../../stores/accountStore';
 import { getSdk } from '../../stores/sdkStore';
-import { clearPendingMainCredentials } from '../../stores/pendingAccountSetup';
+import type { SecureStorageSetupCredentials } from '../../stores/secureStorageSetupContext';
 
 const MAX_SLOTS = 5;
-// Bordercrypt slot indices are 0-based; UI slot numbers are 1-based display labels
 const ALL_SLOTS = Array.from({ length: MAX_SLOTS }, (_, i) => i);
 
 interface SlotAssignment {
@@ -20,12 +19,11 @@ interface SlotAssignment {
 
 type Phase = 'initializing' | 'collecting' | 'creating' | 'summary';
 
-interface PlausibleDeniabilitySetupProps {
-  mainCredentials: { username: string; password: string };
+interface SecureStorageSetupProps {
+  mainCredentials: SecureStorageSetupCredentials;
   onComplete: () => void;
 }
 
-/** Pick a random element from `available`, return it and the remaining array. */
 function pickRandomSlot(available: number[]): {
   slot: number;
   remaining: number[];
@@ -36,43 +34,67 @@ function pickRandomSlot(available: number[]): {
   return { slot, remaining };
 }
 
-const PlausibleDeniabilitySetup: React.FC<PlausibleDeniabilitySetupProps> = ({
+const SecureStorageSetup: React.FC<SecureStorageSetupProps> = ({
   mainCredentials,
   onComplete,
 }) => {
   const { t } = useTranslation('auth');
   const initializeAccount = useAccountStore(s => s.initializeAccount);
+  const initializeAccountWithBiometrics = useAccountStore(
+    s => s.initializeAccountWithBiometrics
+  );
   const createHiddenAccount = useAccountStore(s => s.createHiddenAccount);
 
-  const [phase, setPhase] = useState<Phase>('initializing');
-  const [createdAccounts, setCreatedAccounts] = useState<SlotAssignment[]>([]);
-  const [availableSlots, setAvailableSlots] = useState<number[]>(ALL_SLOTS);
+  const [phase, setPhase] = useState<Phase>(() =>
+    mainCredentials.alreadyCreated ? 'collecting' : 'initializing'
+  );
+  const [createdAccounts, setCreatedAccounts] = useState<SlotAssignment[]>(
+    () =>
+      mainCredentials.alreadyCreated
+        ? [{ slotNumber: 1, username: mainCredentials.username }]
+        : []
+  );
+  const [availableSlots, setAvailableSlots] = useState<number[]>(() =>
+    mainCredentials.alreadyCreated ? [1, 2, 3, 4] : ALL_SLOTS
+  );
   const [addingAccount, setAddingAccount] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
 
-  // Guard against double-execution of the init effect in StrictMode
   const initStarted = useRef(false);
 
   const canAddMore = createdAccounts.length < MAX_SLOTS;
 
-  // --- Phase: initializing --- Create the main account immediately on mount
   useEffect(() => {
     if (initStarted.current) return;
     initStarted.current = true;
 
+    if (mainCredentials.alreadyCreated) {
+      setCreatedAccounts([
+        { slotNumber: 1, username: mainCredentials.username },
+      ]);
+      setAvailableSlots([1, 2, 3, 4]);
+      setPhase('collecting');
+      return;
+    }
+
     const createMainAccount = async () => {
       try {
-        // Pick a random slot for the main account
         const { slot, remaining } = pickRandomSlot(availableSlots);
 
-        await initializeAccount(
-          mainCredentials.username,
-          mainCredentials.password
-        );
+        if (mainCredentials.useBiometrics) {
+          await initializeAccountWithBiometrics(
+            mainCredentials.username,
+            mainCredentials.iCloudSync
+          );
+        } else {
+          await initializeAccount(
+            mainCredentials.username,
+            mainCredentials.password!
+          );
+        }
 
-        // Password used — clear immediately
-        clearPendingMainCredentials();
+        await getSdk().flush();
 
         setCreatedAccounts([
           { slotNumber: slot + 1, username: mainCredentials.username },
@@ -81,7 +103,6 @@ const PlausibleDeniabilitySetup: React.FC<PlausibleDeniabilitySetupProps> = ({
         setPhase('collecting');
       } catch (err) {
         setError(err instanceof Error ? err.message : t('create.failed'));
-        // Stay on initializing so the user sees the error; they can go back
         setPhase('collecting');
       }
     };
@@ -90,7 +111,6 @@ const PlausibleDeniabilitySetup: React.FC<PlausibleDeniabilitySetupProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // --- Handle adding a hidden account (called by HiddenAccountCreation) ---
   const handleAddAccount = async (creds: {
     username: string;
     password: string;
@@ -100,11 +120,11 @@ const PlausibleDeniabilitySetup: React.FC<PlausibleDeniabilitySetupProps> = ({
     setError(null);
 
     try {
-      // Pick a random slot from the remaining available slots
       const { slot, remaining } = pickRandomSlot(availableSlots);
 
       await createHiddenAccount(slot, creds.username, creds.password);
-      // Password used and discarded — creds goes out of scope
+
+      await getSdk().flush();
 
       setCreatedAccounts(prev => [
         ...prev,
@@ -113,27 +133,23 @@ const PlausibleDeniabilitySetup: React.FC<PlausibleDeniabilitySetupProps> = ({
       setAvailableSlots(remaining);
     } catch (err) {
       setError(err instanceof Error ? err.message : t('create.failed'));
-      // Already-created accounts are preserved — only this one failed
     } finally {
       setIsCreating(false);
     }
   };
 
-  // --- "Done" button: lock bordercrypt + show summary ---
   const finalize = async () => {
     setPhase('creating');
     setIsCreating(true);
     setError(null);
 
     try {
-      // Lock and redirect to login
       const sdk = getSdk();
       if (sdk.isSessionOpen) {
         await sdk.closeSession();
       }
-      await sdk.bordercryptLock();
+      await sdk.secureStorageLock();
 
-      // Clear in-memory state — user will pick an account from login screen
       useAccountStore.setState({
         userProfile: null,
         encryptionKey: null,
@@ -150,31 +166,45 @@ const PlausibleDeniabilitySetup: React.FC<PlausibleDeniabilitySetupProps> = ({
     }
   };
 
-  // --- "Skip" / back button: if main account already created, just complete ---
   const handleSkip = async () => {
     if (createdAccounts.length === 0) {
-      // Main account not created yet (init failed) — try creating it now
+      if (mainCredentials.alreadyCreated) {
+        onComplete();
+        return;
+      }
+      if (!mainCredentials.password && !mainCredentials.useBiometrics) {
+        setError(t('create.failed'));
+        return;
+      }
       setIsCreating(true);
       setError(null);
       try {
-        await initializeAccount(
-          mainCredentials.username,
-          mainCredentials.password
-        );
-        clearPendingMainCredentials();
+        if (mainCredentials.useBiometrics) {
+          await initializeAccountWithBiometrics(
+            mainCredentials.username,
+            mainCredentials.iCloudSync
+          );
+        } else {
+          await initializeAccount(
+            mainCredentials.username,
+            mainCredentials.password!
+          );
+        }
         onComplete();
       } catch (err) {
         setError(err instanceof Error ? err.message : t('create.failed'));
       } finally {
         setIsCreating(false);
       }
+    } else if (createdAccounts.length > 1) {
+      // Hidden accounts exist — must lock secure storage before leaving
+      await finalize();
     } else {
-      // Main account already exists — just complete without PD
+      // Only main account, no hidden — stay authenticated
       onComplete();
     }
   };
 
-  // Sub-screen: adding a hidden account
   if (addingAccount) {
     return (
       <HiddenAccountCreation
@@ -184,7 +214,6 @@ const PlausibleDeniabilitySetup: React.FC<PlausibleDeniabilitySetupProps> = ({
     );
   }
 
-  // Phase: initializing (creating main account spinner)
   if (phase === 'initializing') {
     return (
       <PageLayout
@@ -202,7 +231,6 @@ const PlausibleDeniabilitySetup: React.FC<PlausibleDeniabilitySetupProps> = ({
     );
   }
 
-  // Phase: creating (locking bordercrypt spinner)
   if (phase === 'creating') {
     return (
       <PageLayout
@@ -220,7 +248,6 @@ const PlausibleDeniabilitySetup: React.FC<PlausibleDeniabilitySetupProps> = ({
     );
   }
 
-  // Phase: summary (slot assignments)
   if (phase === 'summary') {
     return (
       <PageLayout
@@ -271,7 +298,6 @@ const PlausibleDeniabilitySetup: React.FC<PlausibleDeniabilitySetupProps> = ({
     );
   }
 
-  // Phase: collecting accounts (no slot numbers)
   const hasHiddenAccounts = createdAccounts.length > 1;
 
   return (
@@ -285,7 +311,6 @@ const PlausibleDeniabilitySetup: React.FC<PlausibleDeniabilitySetupProps> = ({
       className="app-max-w mx-auto"
       contentClassName="p-4"
     >
-      {/* Info box */}
       <div className="p-4 border rounded-lg bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800 mb-6">
         <div className="flex items-start gap-3">
           <div className="shrink-0 mt-0.5">
@@ -297,7 +322,6 @@ const PlausibleDeniabilitySetup: React.FC<PlausibleDeniabilitySetupProps> = ({
         </div>
       </div>
 
-      {/* Accounts list — no slot numbers during collection */}
       <div className="mb-6">
         {createdAccounts.map((acc, idx) => (
           <div key={idx} className="flex items-center py-3 px-2">
@@ -315,7 +339,6 @@ const PlausibleDeniabilitySetup: React.FC<PlausibleDeniabilitySetupProps> = ({
         </div>
       )}
 
-      {/* Actions */}
       <div className="space-y-3">
         {canAddMore && (
           <Button
@@ -361,4 +384,4 @@ const PlausibleDeniabilitySetup: React.FC<PlausibleDeniabilitySetupProps> = ({
   );
 };
 
-export default PlausibleDeniabilitySetup;
+export default SecureStorageSetup;

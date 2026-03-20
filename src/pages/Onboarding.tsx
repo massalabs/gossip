@@ -4,7 +4,8 @@ import { useAccountStore } from '../stores/accountStore';
 import OnboardingFlow from '../components/OnboardingFlow';
 import AccountImport from '../components/account/AccountImport';
 import AccountCreation from '../components/account/AccountCreation';
-import { setPendingMainCredentials } from '../stores/pendingAccountSetup';
+import SecureStorageSetup from '../components/account/SecureStorageSetup';
+import type { SecureStorageSetupCredentials } from '../stores/secureStorageSetupContext';
 
 /**
  * Routes for onboarding flow (when no account exists)
@@ -16,17 +17,29 @@ import { setPendingMainCredentials } from '../stores/pendingAccountSetup';
  * The rest of the app uses React Router for proper browser navigation support.
  * This is acceptable for a one-time onboarding experience
  */
-export const Onboarding: React.FC<{
-  showImport: boolean;
-  onShowImportChange: (show: boolean) => void;
-}> = ({ showImport, onShowImportChange }) => {
+export const Onboarding: React.FC = () => {
+  const [showImport, setShowImport] = useState(false);
   const [showAccountCreation, setShowAccountCreation] = useState(false);
+  const [secureStorageCreds, setSecureStorageCreds] =
+    useState<SecureStorageSetupCredentials | null>(null);
 
   if (showImport) {
     return (
       <AccountImport
-        onBack={() => onShowImportChange(false)}
+        onBack={() => setShowImport(false)}
         onComplete={() => {
+          useAppStore.getState().setIsInitialized(true);
+        }}
+      />
+    );
+  }
+
+  if (secureStorageCreds) {
+    return (
+      <SecureStorageSetup
+        mainCredentials={secureStorageCreds}
+        onComplete={() => {
+          setSecureStorageCreds(null);
           useAppStore.getState().setIsInitialized(true);
         }}
       />
@@ -36,22 +49,21 @@ export const Onboarding: React.FC<{
   if (showAccountCreation) {
     return (
       <AccountCreation
-        onCollect={(username, password) => {
-          setPendingMainCredentials({ username, password });
-          useAppStore.getState().setShowPlausibleDeniabilitySetup(true);
+        onComplete={creds => {
+          if (creds) {
+            setSecureStorageCreds(creds);
+          } else {
+            useAppStore.getState().setIsInitialized(true);
+          }
         }}
-        onComplete={() => {}}
         onBack={() => {
           void (async () => {
-            // Check if there are any existing accounts
             const hasAny = await useAccountStore
               .getState()
               .hasExistingAccount();
             if (hasAny) {
-              // If accounts exist, go to login flow
               useAppStore.getState().setIsInitialized(true);
             } else {
-              // Otherwise go back to onboarding
               setShowAccountCreation(false);
             }
           })();
@@ -63,7 +75,7 @@ export const Onboarding: React.FC<{
   return (
     <OnboardingFlow
       onComplete={() => setShowAccountCreation(true)}
-      onImportMnemonic={() => onShowImportChange(true)}
+      onImportMnemonic={() => setShowImport(true)}
     />
   );
 };

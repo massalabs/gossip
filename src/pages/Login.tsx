@@ -1,7 +1,7 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAccountStore } from '../stores/accountStore';
-import { UserProfile } from '@massalabs/gossip-sdk';
+import { UserProfile, EncryptionKey } from '@massalabs/gossip-sdk';
 import AccountImport from '../components/account/AccountImport';
 import Button from '../components/ui/Button';
 import RoundedInput from '../components/ui/RoundedInput';
@@ -9,11 +9,14 @@ import { useNavigate } from 'react-router-dom';
 import { ROUTES } from '../constants/routes';
 import { PrivacyGraphic } from '../components/graphics';
 import { useDevAutoLogin } from '../hooks/useDevAutoLogin';
+import { biometricService } from '../services/biometricService';
+import { useAppStore } from '../stores/appStore';
+import {
+  BIOMETRIC_STORAGE_KEY,
+  BIOMETRIC_SALT,
+  WEBAUTHN_CREDENTIAL_ID_KEY,
+} from '../constants/biometric';
 
-// Biometric auth was intentionally removed as part of the bordercrypt migration.
-// Bordercrypt requires a password to derive the slot key on every unlock;
-// biometric auth cannot provide the password, so it is no longer a valid path.
-// Existing users who had biometric auth will be prompted for their password.
 interface LoginProps {
   onCreateNewAccount: () => void;
   onAccountSelected: () => void;
@@ -36,6 +39,69 @@ const Login: React.FC<LoginProps> = React.memo(
     const [isLoading, setIsLoading] = useState(false);
     const [password, setPassword] = useState('');
     const [showAccountImport, setShowAccountImport] = useState(false);
+    const biometricEnabled = useAppStore(s => s.biometricEnabled);
+    const [biometricAvailable, setBiometricAvailable] = useState(false);
+    const [biometricMethod, setBiometricMethod] = useState<
+      'capacitor' | 'webauthn' | 'none'
+    >('none');
+
+    useEffect(() => {
+      if (biometricEnabled) {
+        biometricService
+          .checkAvailability()
+          .then(({ available, method }) => {
+            setBiometricAvailable(available);
+            setBiometricMethod(method ?? 'none');
+          })
+          .catch(() => {});
+      }
+    }, [biometricEnabled]);
+
+    const handleBiometricAuth = async () => {
+      setIsLoading(true);
+      onErrorChange?.(null);
+
+      try {
+        const webauthnCredentialId =
+          biometricMethod === 'webauthn'
+            ? (localStorage.getItem(WEBAUTHN_CREDENTIAL_ID_KEY) ?? undefined)
+            : undefined;
+
+        const result = await biometricService.authenticate(
+          biometricMethod as 'capacitor' | 'webauthn',
+          biometricMethod === 'capacitor'
+            ? BIOMETRIC_STORAGE_KEY
+            : webauthnCredentialId,
+          biometricMethod === 'webauthn' ? BIOMETRIC_SALT : undefined
+        );
+
+        if (!result.success || !result.data?.encryptionKey) {
+          throw new Error(result.error || 'Biometric authentication failed');
+        }
+
+        const encryptionKey: EncryptionKey = result.data.encryptionKey;
+        await loadAccount(undefined, undefined, encryptionKey);
+
+        const state = useAccountStore.getState();
+        if (state.userProfile) {
+          onAccountSelected();
+        } else {
+          throw new Error('Failed to load account');
+        }
+      } catch (error) {
+        console.error('Biometric authentication failed:', error);
+        onErrorChange?.(
+          error instanceof Error
+            ? error.message
+            : 'Biometric authentication failed'
+        );
+        if (window.location.pathname !== ROUTES.welcome()) {
+          navigate(ROUTES.welcome());
+        }
+      } finally {
+        setIsLoading(false);
+      }
+    };
 
     // Dev auto-login: skip password prompt in dev mode
     const devAutoLoginCallbacks = useMemo(
@@ -115,6 +181,27 @@ const Login: React.FC<LoginProps> = React.memo(
 
           <div className="w-full max-w-md space-y-2">
             <div className="space-y-2">
+              {biometricEnabled && biometricAvailable && (
+                <>
+                  <Button
+                    type="button"
+                    onClick={handleBiometricAuth}
+                    disabled={isLoading}
+                    variant="outline"
+                    fullWidth
+                    className="h-[51px] rounded-full"
+                  >
+                    <span>{t('login.biometric', 'Use biometric')}</span>
+                  </Button>
+                  <div className="flex items-center gap-3 my-2">
+                    <div className="flex-1 border-t border-border" />
+                    <span className="text-xs text-muted-foreground">
+                      {t('login.or', 'or')}
+                    </span>
+                    <div className="flex-1 border-t border-border" />
+                  </div>
+                </>
+              )}
               <RoundedInput
                 type="password"
                 value={password}

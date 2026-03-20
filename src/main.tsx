@@ -104,7 +104,7 @@ Promise.all([
     protocolBaseUrl: protocolConfig.baseUrl,
     config: { polling: { enabled: true } },
     storage: {
-      type: 'bordercrypt',
+      type: 'secureStorage',
       path: 'gossip-db',
       domain: 'gossip',
       wasmUrl: waSqliteWasmUrl,

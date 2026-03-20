@@ -1170,12 +1170,13 @@ const MessageItem: React.FC<MessageItemProps> = ({
               >
                 {/* Fixed-size container — prevents bubble resize when check appears */}
                 <div className="w-3.5 h-3.5">
-                  {message.status === MessageStatus.SENT && message.id > 0 && (
-                    <CheckIcon
-                      className="w-3.5 h-3.5"
-                      aria-label={t('message_item.sent')}
-                    />
-                  )}
+                  {message.status === MessageStatus.SENT &&
+                    (message.id ?? 0) > 0 && (
+                      <CheckIcon
+                        className="w-3.5 h-3.5"
+                        aria-label={t('message_item.sent')}
+                      />
+                    )}
                   {(message.status === MessageStatus.DELIVERED ||
                     message.status === MessageStatus.READ) && (
                     <div

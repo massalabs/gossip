@@ -5,7 +5,7 @@
  * Five execution paths:
  *   - Browser/OPFS (opfsPath set): Web Worker + AccessHandlePoolVFS — fast, single-tab.
  *   - Browser/IDB (idbName set): Web Worker + IDBBatchAtomicVFS — multi-tab safe.
- *   - Browser/Bordercrypt: Web Worker + BordercryptVFS — encrypted OPFS storage.
+ *   - Browser/Secure storage: Web Worker + SecureStorageVFS — encrypted OPFS storage.
  *   - Node.js file (path set): In-process + NodeFsVFS — file persistence via node:fs.
  *   - In-memory (tests): :memory: in-process — no persistence, fast, isolated.
  *
@@ -29,7 +29,7 @@ export type StorageConfig =
   | { type: 'node-fs'; path: string }
   | { type: 'memory'; wasmBinary?: ArrayBuffer }
   | {
-      type: 'bordercrypt';
+      type: 'secureStorage';
       path: string;
       domain?: string;
       wasmUrl?: string;
@@ -46,7 +46,7 @@ export interface InitDbOptions {
 // ---------------------------------------------------------------------------
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-type BordercryptWasmModule = any;
+type SecureStorageWasmModule = any;
 
 interface DbState {
   worker: Worker | null;
@@ -62,8 +62,8 @@ interface DbState {
   drizzleDb: GossipDatabase | null;
   dbLock: Promise<unknown>;
   inTransaction: boolean;
-  bordercryptWasm: BordercryptWasmModule | null;
-  bordercryptVfs: { flushDirtyPages(): void } | null;
+  secureStorageWasm: SecureStorageWasmModule | null;
+  secureStorageVfs: { flushDirtyPages(): void } | null;
   needsUnlock: boolean;
 }
 
@@ -79,8 +79,8 @@ function createDefaultState(): DbState {
     drizzleDb: null,
     dbLock: Promise.resolve(),
     inTransaction: false,
-    bordercryptWasm: null,
-    bordercryptVfs: null,
+    secureStorageWasm: null,
+    secureStorageVfs: null,
     needsUnlock: false,
   };
 }
@@ -102,14 +102,14 @@ const PRAGMAS = `
 `;
 
 /**
- * Additional PRAGMAs for the bordercrypt VFS, appended after PRAGMAS.
+ * Additional PRAGMAs for the secure storage VFS, appended after PRAGMAS.
  *
- * page_size=8192 — largest power-of-2 that fits within a single bordercrypt
+ * page_size=8192 — largest power-of-2 that fits within a single secure storage
  *   block (PLAINTEXT_SIZE=15840), halving write amplification vs default 4096.
  *   Must be set before any tables are created (new DB) or followed by VACUUM
  *   (existing DB).
  *
- * cache_size=-8000 — 8 MB page cache. Bordercrypt decryption is expensive
+ * cache_size=-8000 — 8 MB page cache. Secure storage decryption is expensive
  *   (PQ crypto per block), so a larger cache significantly reduces re-reads.
  *
  * secure_delete=ON — zeros freed pages before re-encryption, preventing
@@ -118,7 +118,7 @@ const PRAGMAS = `
  * locking_mode=EXCLUSIVE — single-writer (one unlocked session), avoids
  *   lock/unlock overhead on every transaction.
  */
-const PRAGMAS_BORDERCRYPT = `
+const PRAGMAS_SECURE_STORAGE = `
   PRAGMA page_size=8192;
   PRAGMA journal_mode=MEMORY;
   PRAGMA synchronous=OFF;
@@ -168,7 +168,7 @@ export class DatabaseConnection {
     return this.state.drizzleDb !== null;
   }
 
-  /** True when bordercrypt has existing data that needs unlock before DB is usable. */
+  /** True when secure storage has existing data that needs unlock before DB is usable. */
   get needsUnlock(): boolean {
     return this.state.needsUnlock;
   }
@@ -256,7 +256,7 @@ export class DatabaseConnection {
       params
     );
     // Flush coalesced VFS writes after each SQL execution (Node.js path)
-    this.state.bordercryptVfs?.flushDirtyPages();
+    this.state.secureStorageVfs?.flushDirtyPages();
     return rows;
   }
 
@@ -333,11 +333,11 @@ export class DatabaseConnection {
         break;
       }
 
-      case 'bordercrypt': {
+      case 'secureStorage': {
         if (storage.backend === 'node-fs') {
-          await this.initBordercryptNodeFs(storage);
+          await this.initSecureStorageNodeFs(storage);
         } else {
-          await this.initBordercryptWorker(storage);
+          await this.initSecureStorageWorker(storage);
         }
         break;
       }
@@ -358,13 +358,13 @@ export class DatabaseConnection {
       }
     }
 
-    // Bordercrypt always defers SQLite open until allocate/unlock
-    if (storage.type === 'bordercrypt') return;
+    // Secure storage always defers SQLite open until allocate/unlock
+    if (storage.type === 'secureStorage') return;
 
     await this.finalizeDatabaseInit();
   }
 
-  /** Run migrations and create Drizzle instance. Called after init or after bordercrypt unlock. */
+  /** Run migrations and create Drizzle instance. Called after init or after secure storage unlock. */
   private async finalizeDatabaseInit(): Promise<void> {
     await runMigrations(
       (sql, params) => this.execRaw(sql, params),
@@ -374,11 +374,11 @@ export class DatabaseConnection {
     this.state.drizzleDb = this.createDrizzleInstance();
   }
 
-  private async initBordercryptWorker(
-    storage: Extract<StorageConfig, { type: 'bordercrypt' }>
+  private async initSecureStorageWorker(
+    storage: Extract<StorageConfig, { type: 'secureStorage' }>
   ): Promise<void> {
     this.state.worker = new Worker(
-      new URL('./bordercrypt-worker.ts', import.meta.url),
+      new URL('./secure-storage-worker.ts', import.meta.url),
       { type: 'module' }
     );
     this.state.worker.onmessage = this.handleWorkerMessage;
@@ -391,13 +391,13 @@ export class DatabaseConnection {
         domain: storage.domain,
         backend: storage.backend,
         wasmUrl: storage.wasmUrl,
-        initSql: PRAGMAS_BORDERCRYPT,
+        initSql: PRAGMAS_SECURE_STORAGE,
       });
 
       if (result.needsUnlock) {
         this.state.needsUnlock = true;
         console.log(
-          '[DatabaseConnection] bordercrypt needs unlock — deferring SQLite'
+          '[DatabaseConnection] secure storage needs unlock — deferring SQLite'
         );
       }
     } catch (err) {
@@ -411,8 +411,8 @@ export class DatabaseConnection {
     }
   }
 
-  private async initBordercryptNodeFs(
-    storage: Extract<StorageConfig, { type: 'bordercrypt' }>
+  private async initSecureStorageNodeFs(
+    storage: Extract<StorageConfig, { type: 'secureStorage' }>
   ): Promise<void> {
     const { readFileSync } = await import('node:fs');
     const { dirname, resolve } = await import('node:path');
@@ -430,21 +430,21 @@ export class DatabaseConnection {
     });
     this.state.sqlite3 = SQLite.Factory(module);
 
-    // Load bordercrypt WASM + register node:fs callbacks
-    const { initBordercryptNodeFs: initBcNodeFs } =
-      await import('./bordercrypt-node-fs.js');
+    // Load secure storage WASM + register node:fs callbacks
+    const { initSecureStorageNodeFs: initBcNodeFs } =
+      await import('./secure-storage-node-fs.js');
     const bcWasm = await initBcNodeFs(storage.path, storage.domain);
 
     // Register VFS
-    const { BordercryptVFS } = await import('./bordercrypt-vfs.js');
-    const bcVfs = new BordercryptVFS(bcWasm);
+    const { SecureStorageVFS } = await import('./secure-storage-vfs.js');
+    const bcVfs = new SecureStorageVFS(bcWasm);
     this.state.sqlite3.vfs_register(bcVfs as unknown as SQLiteVFS, true);
     this.state.dbHandle = await this.state.sqlite3.open_v2('gossip.db');
     this.state.useWorker = false;
-    this.state.bordercryptWasm = bcWasm;
-    this.state.bordercryptVfs = bcVfs;
+    this.state.secureStorageWasm = bcWasm;
+    this.state.secureStorageVfs = bcVfs;
 
-    await this.state.sqlite3.exec(this.state.dbHandle, PRAGMAS_BORDERCRYPT);
+    await this.state.sqlite3.exec(this.state.dbHandle, PRAGMAS_SECURE_STORAGE);
   }
 
   // ─── Public methods ────────────────────────────────────────────
@@ -504,22 +504,22 @@ export class DatabaseConnection {
     });
   }
 
-  // ─── Bordercrypt operations ──────────────────────────────────
+  // ─── Secure storage operations ──────────────────────────────────
 
-  private requireBordercrypt(): BordercryptWasmModule {
-    if (this.state.bordercryptWasm) return this.state.bordercryptWasm;
-    throw new Error('Not a bordercrypt connection');
+  private requireSecureStorage(): SecureStorageWasmModule {
+    if (this.state.secureStorageWasm) return this.state.secureStorageWasm;
+    throw new Error('Not a secure storage connection');
   }
 
-  async bordercryptProvision(): Promise<void> {
+  async secureStorageProvision(): Promise<void> {
     if (this.state.useWorker) {
       await this.postToWorker({ type: 'provision' });
     } else {
-      this.requireBordercrypt().provisionStorage();
+      this.requireSecureStorage().provisionStorage();
     }
   }
 
-  async bordercryptAllocate(
+  async secureStorageAllocate(
     slot: number,
     password: string,
     forceInit = false
@@ -529,15 +529,19 @@ export class DatabaseConnection {
       await this.postToWorker({ type: 'allocate', slot, password: pw }, [
         pw.buffer,
       ]);
-      // First use or forced (new slot with empty DB): run migrations + create Drizzle
+      // Worker closes and reopens SQLite on every allocate. A second allocate used to
+      // skip finalizeDatabaseInit when drizzleDb already existed, leaving a fresh empty
+      // file without schema → "no such table". Migrations are idempotent (see migrate.ts).
+      await runMigrations(
+        (sql, params) => this.execRaw(sql, params),
+        fn => this.withTransaction(fn)
+      );
+      await this.flush();
       if (!this.state.drizzleDb || forceInit) {
-        console.log(
-          `[DatabaseConnection] finalizing DB after allocate (slot=${slot}, force=${forceInit})`
-        );
-        await this.finalizeDatabaseInit();
+        this.state.drizzleDb = this.createDrizzleInstance();
       }
     } else {
-      this.requireBordercrypt().allocateSession(
+      this.requireSecureStorage().allocateSession(
         slot,
         new TextEncoder().encode(password)
       );
@@ -545,25 +549,27 @@ export class DatabaseConnection {
     this.state.needsUnlock = false;
   }
 
-  async bordercryptUnlock(password: string): Promise<boolean> {
+  async secureStorageUnlock(password: string): Promise<boolean> {
     if (this.state.useWorker) {
       const pw = new TextEncoder().encode(password);
       const result = await this.postToWorker({ type: 'unlock', password: pw }, [
         pw.buffer,
       ]);
       if (result.unlocked) {
-        // Run migrations and create Drizzle if not yet initialized
+        // Same as allocate: worker reopened SQLite — ensure schema is present.
+        await runMigrations(
+          (sql, params) => this.execRaw(sql, params),
+          fn => this.withTransaction(fn)
+        );
+        await this.flush();
         if (!this.state.drizzleDb) {
-          console.log(
-            '[DatabaseConnection] unlock succeeded — finalizing DB init'
-          );
-          await this.finalizeDatabaseInit();
+          this.state.drizzleDb = this.createDrizzleInstance();
         }
         this.state.needsUnlock = false;
       }
       return result.unlocked;
     }
-    return this.requireBordercrypt().unlockSession(
+    return this.requireSecureStorage().unlockSession(
       new TextEncoder().encode(password)
     );
   }
@@ -576,21 +582,21 @@ export class DatabaseConnection {
     // In-process path flushes synchronously in execRawInProcess
   }
 
-  async bordercryptLock(): Promise<void> {
+  async secureStorageLock(): Promise<void> {
     if (this.state.useWorker) {
       await this.postToWorker({ type: 'lock' });
     } else {
-      this.requireBordercrypt().lockSession();
+      this.requireSecureStorage().lockSession();
     }
     // Session is locked — next loadAccount must unlock before querying
     this.state.needsUnlock = true;
   }
 
-  async bordercryptCoverTick(): Promise<void> {
+  async secureStorageCoverTick(): Promise<void> {
     if (this.state.useWorker) {
       await this.postToWorker({ type: 'cover' });
     } else {
-      this.requireBordercrypt().coverTrafficTick();
+      this.requireSecureStorage().coverTrafficTick();
     }
   }
 

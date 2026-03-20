@@ -15,6 +15,11 @@ import { getSdk } from './sdkStore';
 import { isWebAuthnSupported } from '../crypto/webauthn';
 import { biometricService } from '../services/biometricService';
 import {
+  BIOMETRIC_STORAGE_KEY,
+  BIOMETRIC_SALT,
+  WEBAUTHN_CREDENTIAL_ID_KEY,
+} from '../constants/biometric';
+import {
   Provider,
   Account,
   PrivateKey,
@@ -107,13 +112,15 @@ async function buildSecurityFromBiometrics(
     throw new Error('Mnemonic is required for account creation');
   }
 
-  const salt = (await generateNonce()).to_bytes();
-  // Use the unified biometric service to create credentials
+  const mnemonicSalt = (await generateNonce()).to_bytes();
+  // Use fixed BIOMETRIC_SALT for WebAuthn PRF — must match login.
+  // The random mnemonicSalt is only for mnemonic encryption (stored in security.encKeySalt).
   const credentialResult = await biometricService.createCredential(
     `Gossip:${username}`,
     userIdBytes,
-    salt,
-    iCloudSync
+    BIOMETRIC_SALT,
+    iCloudSync,
+    BIOMETRIC_STORAGE_KEY
   );
 
   if (!credentialResult.success || !credentialResult.data) {
@@ -124,7 +131,16 @@ async function buildSecurityFromBiometrics(
 
   const { credentialId, encryptionKey, authMethod } = credentialResult.data;
 
-  const { encryptedData } = await encrypt(mnemonic, encryptionKey, salt);
+  // Persist credential ID outside secure storage so Login can use it before unlock
+  if (credentialId) {
+    localStorage.setItem(WEBAUTHN_CREDENTIAL_ID_KEY, credentialId);
+  }
+
+  const { encryptedData } = await encrypt(
+    mnemonic,
+    encryptionKey,
+    mnemonicSalt
+  );
 
   const mnemonicBackup: UserProfile['security']['mnemonicBackup'] = {
     encryptedMnemonic: encryptedData,
@@ -140,7 +156,7 @@ async function buildSecurityFromBiometrics(
         }
       : undefined,
     iCloudSync,
-    encKeySalt: salt,
+    encKeySalt: mnemonicSalt,
     mnemonicBackup,
   };
 
@@ -158,15 +174,24 @@ interface AccountState {
   provider: Provider | null;
   initializeAccountWithBiometrics: (
     username: string,
-    iCloudSync?: boolean
+    iCloudSync?: boolean,
+    opts?: { setInitialized?: boolean }
   ) => Promise<void>;
-  initializeAccount: (username: string, password: string) => Promise<void>;
+  initializeAccount: (
+    username: string,
+    password: string,
+    opts?: { setInitialized?: boolean }
+  ) => Promise<void>;
   createHiddenAccount: (
     slot: number,
     username: string,
     password: string
   ) => Promise<void>;
-  loadAccount: (password?: string, userId?: string) => Promise<void>;
+  loadAccount: (
+    password?: string,
+    userId?: string,
+    biometricKey?: EncryptionKey
+  ) => Promise<void>;
   restoreAccountFromMnemonic: (
     username: string,
     mnemonic: string,
@@ -297,7 +322,11 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
     account: null,
     provider: null,
     // Actions
-    initializeAccount: async (username: string, password: string) => {
+    initializeAccount: async (
+      username: string,
+      password: string,
+      opts?: { setInitialized?: boolean }
+    ) => {
       try {
         set({ isLoading: true });
 
@@ -306,7 +335,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
 
         // Initialize encrypted storage with this password
         const sdk = getSdk();
-        await sdk.bordercryptAllocate(0, password);
+        await sdk.secureStorageAllocate(0, password);
 
         const mnemonic = generateMnemonic(256);
 
@@ -348,7 +377,9 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         // Skip historical announcements AFTER profile is persisted
         await getSdk().announcements.skipHistorical();
 
-        useAppStore.getState().setIsInitialized(true);
+        if (opts?.setInitialized !== false) {
+          useAppStore.getState().setIsInitialized(true);
+        }
         set({
           userProfile: profile,
           encryptionKey,
@@ -379,14 +410,14 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       // Drain pending DB queries from async subscribers before switching slots.
       // No dedicated awaitDbIdle() exists; profiles.getCount() is a cheap read
       // that serialises behind the dbLock, guaranteeing all prior writes have
-      // settled before we switch bordercrypt slots.
+      // settled before we switch secure storage slots.
       try {
         await sdk.profiles.getCount();
       } catch {
         // Ignore — the goal is to serialise against dbLock, not use the result.
       }
 
-      await sdk.bordercryptAllocate(slot, password, true);
+      await sdk.secureStorageAllocate(slot, password, true);
 
       const mnemonic = generateMnemonic(256);
       const keys = await generateUserKeys(mnemonic);
@@ -485,17 +516,36 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       }
     },
 
-    loadAccount: async (password?: string, userId?: string) => {
+    loadAccount: async (
+      password?: string,
+      userId?: string,
+      biometricKey?: EncryptionKey
+    ) => {
       try {
         set({ isLoading: true });
 
         const sdk = getSdk();
 
         // Unlock encrypted storage first — DB may be deferred until after unlock
-        if (password && sdk.needsUnlock) {
-          const unlocked = await sdk.bordercryptUnlock(password);
-          if (!unlocked) {
-            throw new Error('Failed to unlock encrypted storage');
+        if (sdk.needsUnlock) {
+          let unlockPassword: string | undefined;
+          if (biometricKey) {
+            const { encodeToBase64 } = await import('@massalabs/gossip-sdk');
+            unlockPassword = encodeToBase64(biometricKey.to_bytes());
+            console.log(
+              '[BC-DEBUG] unlock password length:',
+              unlockPassword.length,
+              'first8:',
+              unlockPassword.slice(0, 8)
+            );
+          } else if (password) {
+            unlockPassword = password;
+          }
+          if (unlockPassword) {
+            const unlocked = await sdk.secureStorageUnlock(unlockPassword);
+            if (!unlocked) {
+              throw new Error('Failed to unlock encrypted storage');
+            }
           }
         }
 
@@ -511,7 +561,11 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           throw new Error('No user profile found');
         }
 
-        const { mnemonic, encryptionKey } = await auth(profile, password);
+        const { mnemonic, encryptionKey } = await auth(
+          profile,
+          password,
+          biometricKey
+        );
 
         // Generate keys for Massa wallet
         const keys = await generateUserKeys(mnemonic);
@@ -592,9 +646,9 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         useMessageStore.getState().cleanup();
         // Lock encrypted storage
         try {
-          await getSdk().bordercryptLock();
+          await getSdk().secureStorageLock();
         } catch {
-          // Bordercrypt not initialized — ignore
+          // Secure storage not initialized — ignore
         }
         // Clear in-memory state but keep data in database
         // Keep isInitialized true so user goes to login screen
@@ -614,7 +668,8 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
     // Biometric-based account initialization
     initializeAccountWithBiometrics: async (
       username: string,
-      iCloudSync = false
+      iCloudSync = false,
+      opts?: { setInitialized?: boolean }
     ) => {
       try {
         set({ isLoading: true });
@@ -650,6 +705,17 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           }
         );
 
+        // Convert biometric key to secure storage password
+        const { encodeToBase64 } = await import('@massalabs/gossip-sdk');
+        const biometricPassword = encodeToBase64(encryptionKey.to_bytes());
+        console.log(
+          '[BC-DEBUG] allocate password length:',
+          biometricPassword.length,
+          'first8:',
+          biometricPassword.slice(0, 8)
+        );
+        await getSdk().secureStorageAllocate(0, biometricPassword);
+
         // Open SDK session
         await getSdk().openSession({
           mnemonic,
@@ -669,7 +735,10 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         // Skip historical announcements AFTER profile is persisted
         await getSdk().announcements.skipHistorical();
 
-        useAppStore.getState().setIsInitialized(true);
+        if (opts?.setInitialized !== false) {
+          useAppStore.getState().setIsInitialized(true);
+        }
+        useAppStore.getState().setBiometricEnabled(true);
         set({
           userProfile: profile,
           encryptionKey,

@@ -1,16 +1,16 @@
 /**
- * Standalone bordercrypt manager — loads the WASM module independently
+ * Standalone secure storage manager — loads the WASM module independently
  * of SQLite, using in-memory storage callbacks.
  *
- * This allows testing the full bordercrypt lifecycle (provision, allocate,
+ * This allows testing the full secure storage lifecycle (provision, allocate,
  * unlock, lock, cover traffic) without routing SQLite through the VFS.
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import { BLOCK_SIZE, SESSION_COUNT } from './bordercrypt-constants.js';
+import { BLOCK_SIZE, SESSION_COUNT } from './secure-storage-constants.js';
 
-interface BordercryptModule {
+interface SecureStorageModule {
   initBordercrypt(domain: string): void;
   provisionStorage(): void;
   allocateSession(slot: number, password: Uint8Array): void;
@@ -22,7 +22,7 @@ interface BordercryptModule {
 }
 
 /**
- * In-memory storage for bordercrypt blocks and keypairs.
+ * In-memory storage for secure storage blocks and keypairs.
  * Registers synchronous callbacks on globalThis for the WASM module.
  */
 class MemoryBackend {
@@ -37,6 +37,7 @@ class MemoryBackend {
   }
 
   register(): void {
+    // WASM FFI callbacks — names must match Rust extern declarations
     const g = globalThis as any;
 
     g.bordercryptReadBlock = (session: number, block: number): Uint8Array => {
@@ -76,8 +77,8 @@ class MemoryBackend {
   }
 }
 
-export class BordercryptStandalone {
-  private module: BordercryptModule | null = null;
+export class SecureStorageStandalone {
+  private module: SecureStorageModule | null = null;
   private backend: MemoryBackend | null = null;
 
   async init(domain: string = 'gossip'): Promise<void> {
@@ -91,35 +92,35 @@ export class BordercryptStandalone {
     await mod.default();
     mod.initBordercrypt(domain);
     this.module = mod;
-    console.log('[Bordercrypt] WASM module loaded');
+    console.log('[SecureStorage] WASM module loaded');
   }
 
-  private require(): BordercryptModule {
-    if (!this.module) throw new Error('Bordercrypt not initialized');
+  private require(): SecureStorageModule {
+    if (!this.module) throw new Error('SecureStorage not initialized');
     return this.module;
   }
 
   provision(): void {
     this.require().provisionStorage();
-    console.log('[Bordercrypt] Storage provisioned');
+    console.log('[SecureStorage] Storage provisioned');
   }
 
   allocate(slot: number, password: string): void {
     this.require().allocateSession(slot, new TextEncoder().encode(password));
-    console.log(`[Bordercrypt] Session allocated in slot ${slot}`);
+    console.log(`[SecureStorage] Session allocated in slot ${slot}`);
   }
 
   unlock(password: string): boolean {
     const result = this.require().unlockSession(
       new TextEncoder().encode(password)
     );
-    console.log(`[Bordercrypt] Unlock: ${result ? 'success' : 'no match'}`);
+    console.log(`[SecureStorage] Unlock: ${result ? 'success' : 'no match'}`);
     return result;
   }
 
   lock(): void {
     this.require().lockSession();
-    console.log('[Bordercrypt] Session locked');
+    console.log('[SecureStorage] Session locked');
   }
 
   get unlocked(): boolean {

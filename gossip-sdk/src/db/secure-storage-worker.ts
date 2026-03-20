@@ -1,7 +1,7 @@
 /**
- * Bordercrypt Web Worker — encrypted SQLite via wa-sqlite + bordercrypt WASM.
+ * Secure Storage Web Worker — encrypted SQLite via wa-sqlite + WASM.
  *
- * Loads both WASM modules, registers storage callbacks for bordercrypt,
+ * Loads both WASM modules, registers storage callbacks,
  * then opens an encrypted SQLite database.
  *
  * Supports two storage backends:
@@ -19,17 +19,21 @@
  *   cover     → run one cover traffic round
  */
 
+console.error('[BC-Worker-DBG] Worker module starting');
+
 import * as SQLite from 'wa-sqlite';
 import { execStatements } from './exec-utils.js';
-import { BLOCK_SIZE, SESSION_COUNT } from './bordercrypt-constants.js';
-import type { BordercryptVFS } from './bordercrypt-vfs.js';
+import { BLOCK_SIZE, SESSION_COUNT } from './secure-storage-constants.js';
+import type { SecureStorageVFS } from './secure-storage-vfs.js';
+
+console.error('[BC-Worker-DBG] Imports done');
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 let sqlite3: ReturnType<typeof SQLite.Factory> | null = null;
 let dbHandle: number | null = null;
-let bordercryptWasm: any = null;
-let vfs: BordercryptVFS | null = null;
+let secureStorageWasm: any = null;
+let vfs: SecureStorageVFS | null = null;
 
 // Saved init config for deferred SQLite open after unlock
 let savedInitSql: string | null = null;
@@ -65,7 +69,7 @@ function assertSession(session: number): void {
   }
 }
 
-function registerBordercryptCallbacks(): void {
+function registerSecureStorageCallbacks(): void {
   const g = globalThis as any;
 
   g.bordercryptReadBlock = (session: number, block: number): Uint8Array => {
@@ -355,8 +359,8 @@ async function openSqlite(
   sqlite3 = SQLite.Factory(module);
   console.log('[BC-Worker] wa-sqlite loaded');
 
-  const { BordercryptVFS } = await import('./bordercrypt-vfs.js');
-  vfs = new BordercryptVFS(bordercryptWasm);
+  const { SecureStorageVFS } = await import('./secure-storage-vfs.js');
+  vfs = new SecureStorageVFS(secureStorageWasm);
   sqlite3.vfs_register(vfs as never, true);
   console.log('[BC-Worker] VFS registered');
 
@@ -379,7 +383,7 @@ async function openSqlite(
 // ── Deferred flush ──────────────────────────────────────────────
 // Instead of flushing VFS dirty pages + IDB after every SQL exec,
 // batch them on a 500ms timer. This dramatically reduces the number
-// of bordercrypt encrypt cycles (each page × 5 sessions).
+// of secure storage encrypt cycles (each page × 5 sessions).
 // Flush is forced on lock, close, allocate, and unlock.
 
 const FLUSH_INTERVAL_MS = 500;
@@ -435,7 +439,7 @@ addEventListener('message', async (e: MessageEvent) => {
         console.log('[BC-Worker] init start', { dirPath, domain, backend });
 
         // 1. Register storage callbacks
-        registerBordercryptCallbacks();
+        registerSecureStorageCallbacks();
 
         // 2. Initialize storage backend
         if (backend === 'idb') {
@@ -450,17 +454,17 @@ addEventListener('message', async (e: MessageEvent) => {
           console.log('[BC-Worker] OPFS backend ready');
         }
 
-        // 3. Load bordercrypt WASM
+        // 3. Load secure storage WASM
         const bcModule = await import(
           /* @vite-ignore */
           '../assets/generated/wasm-bordercrypt/bordercrypt.js'
         );
         await bcModule.default();
-        bordercryptWasm = bcModule;
-        console.log('[BC-Worker] bordercrypt WASM loaded');
+        secureStorageWasm = bcModule;
+        console.log('[BC-Worker] secure storage WASM loaded');
 
-        // 4. Initialize bordercrypt
-        bordercryptWasm.initBordercrypt(domain || 'gossip');
+        // 4. Initialize secure storage
+        secureStorageWasm.initBordercrypt(domain || 'gossip');
 
         // 5. Always defer SQLite — it needs an unlocked session
         savedInitSql = initSql || null;
@@ -478,7 +482,7 @@ addEventListener('message', async (e: MessageEvent) => {
           console.log(
             '[BC-Worker] first use — provisioning storage, SQLite deferred until allocate'
           );
-          bordercryptWasm.provisionStorage();
+          secureStorageWasm.provisionStorage();
           post({ id, type: 'init-result', success: true, needsUnlock: false });
         }
         break;
@@ -500,8 +504,9 @@ addEventListener('message', async (e: MessageEvent) => {
       }
 
       case 'provision': {
-        if (!bordercryptWasm) throw new Error('Bordercrypt not initialized');
-        bordercryptWasm.provisionStorage();
+        if (!secureStorageWasm)
+          throw new Error('SecureStorage not initialized');
+        secureStorageWasm.provisionStorage();
         console.log('[BC-Worker] provision done');
         post({ id, type: 'provision-result', success: true });
         break;
@@ -512,7 +517,8 @@ addEventListener('message', async (e: MessageEvent) => {
           slot: number;
           password: Uint8Array;
         };
-        if (!bordercryptWasm) throw new Error('Bordercrypt not initialized');
+        if (!secureStorageWasm)
+          throw new Error('SecureStorage not initialized');
 
         // Flush all pending writes BEFORE switching slots.
         flushNow();
@@ -526,9 +532,9 @@ addEventListener('message', async (e: MessageEvent) => {
           dbHandle = null;
         }
 
-        bordercryptWasm.allocateSession(slot, password);
+        secureStorageWasm.allocateSession(slot, password);
         console.log(
-          `[BC-Worker] allocate slot=${slot}, session now unlocked=${bordercryptWasm.isUnlocked()}`
+          `[BC-Worker] allocate slot=${slot}, session now unlocked=${secureStorageWasm.isUnlocked()}`
         );
 
         // Reopen SQLite with a fresh handle for the new slot
@@ -557,7 +563,8 @@ addEventListener('message', async (e: MessageEvent) => {
 
       case 'unlock': {
         const { password } = e.data as { password: Uint8Array };
-        if (!bordercryptWasm) throw new Error('Bordercrypt not initialized');
+        if (!secureStorageWasm)
+          throw new Error('SecureStorage not initialized');
 
         // Flush all pending writes before switching slots.
         flushNow();
@@ -566,7 +573,7 @@ addEventListener('message', async (e: MessageEvent) => {
           dbHandle = null;
         }
 
-        const unlocked = bordercryptWasm.unlockSession(password);
+        const unlocked = secureStorageWasm.unlockSession(password);
         console.log(`[BC-Worker] unlock result=${unlocked}`);
 
         // Reopen SQLite with a fresh handle for the unlocked slot
@@ -595,9 +602,10 @@ addEventListener('message', async (e: MessageEvent) => {
 
       case 'lock': {
         flushNow();
+        if (storage) storage.flushAll();
 
-        if (bordercryptWasm) {
-          bordercryptWasm.lockSession();
+        if (secureStorageWasm) {
+          secureStorageWasm.lockSession();
           console.log('[BC-Worker] session locked');
         }
         post({ id, type: 'lock-result' });
@@ -605,9 +613,10 @@ addEventListener('message', async (e: MessageEvent) => {
       }
 
       case 'cover': {
-        if (!bordercryptWasm) throw new Error('Bordercrypt not initialized');
+        if (!secureStorageWasm)
+          throw new Error('SecureStorage not initialized');
         flushNow(); // flush pending writes before cover rerandomizes blocks
-        bordercryptWasm.coverTrafficTick();
+        secureStorageWasm.coverTrafficTick();
         if (storage) storage.flushAll();
         post({ id, type: 'cover-result' });
         break;
@@ -627,9 +636,9 @@ addEventListener('message', async (e: MessageEvent) => {
         }
         sqlite3 = null;
         vfs = null;
-        if (bordercryptWasm) {
-          bordercryptWasm.lockSession();
-          bordercryptWasm = null;
+        if (secureStorageWasm) {
+          secureStorageWasm.lockSession();
+          secureStorageWasm = null;
         }
         if (storage) {
           storage.close();

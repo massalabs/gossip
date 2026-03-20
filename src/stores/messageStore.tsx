@@ -22,7 +22,7 @@ const EMPTY_MESSAGES: Message[] = [];
 /** Check if a DB message confirms an optimistic one. */
 const isConfirmed = (opt: Message, db: Message): boolean => {
   // Prefer exact ID match (set after SDK send returns the real DB id)
-  if (opt.id < 0 && db.id === -opt.id) return true;
+  if (opt.id != null && opt.id < 0 && db.id === -opt.id) return true;
   // Fallback: content + direction + narrow timestamp window
   return (
     db.content === opt.content &&
@@ -52,7 +52,7 @@ function mergeWithOptimistic(
   getState: () => MessageStoreState
 ): Message[] {
   const current = getState().messagesByContact.get(contactUserId) || [];
-  const optimistic = current.filter(m => m.id < 0);
+  const optimistic = current.filter(m => m.id != null && m.id < 0);
   if (optimistic.length === 0) return dbMessages;
 
   // For confirmed messages: keep DB version but don't downgrade status

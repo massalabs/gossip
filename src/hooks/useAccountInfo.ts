@@ -16,7 +16,7 @@ export function useAccountInfo() {
   useEffect(() => {
     (async () => {
       try {
-        // DB not ready yet (bordercrypt deferred) — can't query profiles
+        // DB not ready yet (secure storage deferred) — can't query profiles
         if (!getSdk().dbReady) {
           setExistingAccountInfo(null);
           return;

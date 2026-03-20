@@ -242,7 +242,8 @@ export class BiometricService {
     username: string,
     userId: Uint8Array,
     salt: Uint8Array,
-    syncToiCloud = false
+    syncToiCloud = false,
+    storageKey?: string
   ): Promise<BiometricCreationResult> {
     // For native platforms, create biometric credentials without WebAuthn browser APIs
     if (this.capacitorAvailable) {
@@ -256,9 +257,14 @@ export class BiometricService {
         // Generate a new encryption key
         const encryptionKey = await generateEncryptionKey();
 
-        // Store the encryption key securely
-        const userIdStr = encodeUserId(userId);
-        await this.storeEncryptionKey(userIdStr, encryptionKey, syncToiCloud);
+        // Store the encryption key under a fixed storage key (not userId).
+        // Using userId would leak identity info and break plausible deniability.
+        // The constant BIOMETRIC_STORAGE_KEY is used at both store and retrieve time.
+        await this.storeEncryptionKey(
+          storageKey ?? encodeUserId(userId),
+          encryptionKey,
+          syncToiCloud
+        );
 
         return {
           success: true,

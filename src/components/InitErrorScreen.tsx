@@ -14,7 +14,7 @@ export default function InitErrorScreen({ error }: { error: InitError }) {
       for (const db of dbs) {
         if (db.name?.startsWith('gossip-')) indexedDB.deleteDatabase(db.name);
       }
-      // Clear OPFS bordercrypt blocks/keypairs so next launch starts fresh
+      // Clear OPFS secure storage blocks/keypairs so next launch starts fresh
       try {
         const root = await navigator.storage.getDirectory();
         // @ts-expect-error entries() exists in modern browsers
