@@ -4,6 +4,7 @@ import { useAccountStore } from '../stores/accountStore';
 import OnboardingFlow from '../components/OnboardingFlow';
 import AccountImport from '../components/account/AccountImport';
 import AccountCreation from '../components/account/AccountCreation';
+import ToSAcceptance from '../components/ToSAcceptance';
 import { getDevAccounts } from '../hooks/useDevAutoLogin';
 
 /**
@@ -22,6 +23,12 @@ export const Onboarding: React.FC<{
 }> = ({ showImport, onShowImportChange }) => {
   const [showAccountCreation, setShowAccountCreation] = useState(false);
   const [skipDevPicker, setSkipDevPicker] = useState(false);
+  const tosAccepted = useAppStore.use.tosAccepted();
+  const setTosAccepted = useAppStore.use.setTosAccepted();
+
+  if (!tosAccepted) {
+    return <ToSAcceptance onAccept={() => setTosAccepted(true)} />;
+  }
 
   // Dev mode: show account picker instead of onboarding
   const devAccounts = getDevAccounts();
