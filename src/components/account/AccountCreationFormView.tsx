@@ -22,6 +22,7 @@ const AccountCreationFormView: React.FC<AccountCreationFormViewProps> = ({
   isSubmitting,
   error,
   biometricAvailable,
+  biometricChecked,
   usePassword,
   setUsePassword,
   showICloudModal,
@@ -53,6 +54,18 @@ const AccountCreationFormView: React.FC<AccountCreationFormViewProps> = ({
             {t('create.creating_info')}
           </p>
         </div>
+      </PageLayout>
+    );
+  }
+
+  if (!biometricChecked) {
+    return (
+      <PageLayout
+        header={<PageHeader title={t('create.title')} onBack={onBack} />}
+        className="app-max-w mx-auto"
+        contentClassName="flex items-center justify-center"
+      >
+        <div className="w-8 h-8 border-2 border-muted border-t-primary rounded-full animate-spin" />
       </PageLayout>
     );
   }

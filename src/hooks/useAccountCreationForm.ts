@@ -34,7 +34,8 @@ export function useAccountCreationForm({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [biometricAvailable, setBiometricAvailable] = useState(false);
-  const [usePassword, setUsePassword] = useState(true);
+  const [biometricChecked, setBiometricChecked] = useState(false);
+  const [usePassword, setUsePassword] = useState(false);
   const [showICloudModal, setShowICloudModal] = useState(false);
   const [showPasswords, setShowPasswords] = useState(false);
 
@@ -63,20 +64,28 @@ export function useAccountCreationForm({
     const checkBiometricMethods = async () => {
       try {
         const { available } = await biometricService.checkAvailability();
-        if (!available) return;
+        if (!available) {
+          setUsePassword(true);
+          setBiometricChecked(true);
+          return;
+        }
 
         // Don't offer biometric if a credential already exists —
         // only one biometric credential is stored, creating another would overwrite it.
         const alreadyExists = await biometricService.hasExistingCredential(
           BIOMETRIC_STORAGE_KEY
         );
-        if (alreadyExists) return;
+        if (alreadyExists) {
+          setUsePassword(true);
+          setBiometricChecked(true);
+          return;
+        }
 
         setBiometricAvailable(true);
-        setUsePassword(false);
+        setBiometricChecked(true);
       } catch (_err) {
-        setBiometricAvailable(false);
         setUsePassword(true);
+        setBiometricChecked(true);
       }
     };
 
@@ -193,6 +202,7 @@ export function useAccountCreationForm({
     isSubmitting,
     error,
     biometricAvailable,
+    biometricChecked,
     usePassword,
     setUsePassword,
     showICloudModal,

@@ -69,10 +69,10 @@ interface StorageBackend {
   blockCount(session: number): number;
   fsync(session: number): void;
   hasDirty(): boolean;
-  flushAll(): void;
+  flushAll(): void | Promise<void>;
   readKeypair(session: number): Uint8Array;
   writeKeypair(session: number, data: Uint8Array): void;
-  close(): void;
+  close(): void | Promise<void>;
 }
 
 let storage: StorageBackend | null = null;
@@ -195,6 +195,7 @@ class OpfsBackend implements StorageBackend {
 
   flushAll(): void {
     for (const h of this.blockHandles) h.flush();
+    for (const h of this.keypairHandles) h.flush();
   }
 
   readKeypair(session: number): Uint8Array {
@@ -202,14 +203,14 @@ class OpfsBackend implements StorageBackend {
     const size = handle.getSize();
     if (size === 0) return new Uint8Array(0);
     const buf = new Uint8Array(size);
-    handle.read(buf);
+    handle.read(buf, { at: 0 });
     return buf;
   }
 
   writeKeypair(session: number, data: Uint8Array): void {
     const handle = this.keypairHandles[session];
     handle.truncate(0);
-    handle.write(data);
+    handle.write(data, { at: 0 });
     handle.flush();
   }
 
@@ -293,11 +294,13 @@ class IdbBackend implements StorageBackend {
     return this.dirtySessions.size > 0;
   }
 
-  flushAll(): void {
+  async flushAll(): Promise<void> {
+    const promises: Promise<void>[] = [];
     for (const session of this.dirtySessions) {
-      this.persistSession(session);
+      promises.push(this.persistSession(session));
     }
     this.dirtySessions.clear();
+    await Promise.all(promises);
   }
 
   readKeypair(session: number): Uint8Array {
@@ -306,11 +309,12 @@ class IdbBackend implements StorageBackend {
 
   writeKeypair(session: number, data: Uint8Array): void {
     this.keypairs[session] = new Uint8Array(data);
-    this.persistKeypair(session);
+    // Fire-and-forget — durability ensured by flushAll() before lock/close
+    void this.persistKeypair(session);
   }
 
-  close(): void {
-    this.flushAll();
+  async close(): Promise<void> {
+    await this.flushAll();
     if (this.db) {
       this.db.close();
       this.db = null;
@@ -319,18 +323,18 @@ class IdbBackend implements StorageBackend {
     this.keypairs = [];
   }
 
-  private persistSession(session: number): void {
+  private async persistSession(session: number): Promise<void> {
     const arr = this.blocks[session];
     const total = arr.length * BLOCK_SIZE;
     const buf = new Uint8Array(total);
     for (let i = 0; i < arr.length; i++) {
       buf.set(arr[i], i * BLOCK_SIZE);
     }
-    this.idbPut(`blocks_${session}`, buf);
+    await this.idbPut(`blocks_${session}`, buf);
   }
 
-  private persistKeypair(session: number): void {
-    this.idbPut(`keypair_${session}`, this.keypairs[session]);
+  private async persistKeypair(session: number): Promise<void> {
+    await this.idbPut(`keypair_${session}`, this.keypairs[session]);
   }
 
   private openDb(): Promise<IDBDatabase> {
@@ -353,9 +357,13 @@ class IdbBackend implements StorageBackend {
     });
   }
 
-  private idbPut(key: string, value: unknown): void {
-    const tx = this.db!.transaction('data', 'readwrite');
-    tx.objectStore('data').put(value, key);
+  private idbPut(key: string, value: unknown): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const tx = this.db!.transaction('data', 'readwrite');
+      tx.objectStore('data').put(value, key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
   }
 }
 
@@ -401,13 +409,13 @@ function scheduleFlush(): void {
   flushTimer = setTimeout(flushNow, FLUSH_INTERVAL_MS);
 }
 
-function flushNow(): void {
+async function flushNow(): Promise<void> {
   if (flushTimer) {
     clearTimeout(flushTimer);
     flushTimer = null;
   }
   if (vfs) vfs.flushDirtyPages();
-  if (storage && storage.hasDirty()) storage.flushAll();
+  if (storage && storage.hasDirty()) await storage.flushAll();
 }
 
 // ── SQL execution ───────────────────────────────────────────────
@@ -435,7 +443,15 @@ async function execSql(
 
 // ── Message handler ─────────────────────────────────────────────
 
-addEventListener('message', async (e: MessageEvent) => {
+// Serialize all message handling — prevent interleaved async operations
+// (e.g., exec + lock racing) that could corrupt state.
+let pendingOp: Promise<void> = Promise.resolve();
+
+addEventListener('message', (e: MessageEvent) => {
+  pendingOp = pendingOp.then(() => handleMessage(e)).catch(() => {});
+});
+
+async function handleMessage(e: MessageEvent): Promise<void> {
   const { id, type } = e.data;
 
   try {
@@ -490,6 +506,7 @@ addEventListener('message', async (e: MessageEvent) => {
             '[BC-Worker] first use — provisioning storage, SQLite deferred until allocate'
           );
           secureStorageWasm.provisionStorage();
+          if (storage) await storage.flushAll();
           post({ id, type: 'init-result', success: true, needsUnlock: false });
         }
         break;
@@ -514,6 +531,7 @@ addEventListener('message', async (e: MessageEvent) => {
         if (!secureStorageWasm)
           throw new Error('SecureStorage not initialized');
         secureStorageWasm.provisionStorage();
+        if (storage) await storage.flushAll();
         console.log('[BC-Worker] provision done');
         post({ id, type: 'provision-result', success: true });
         break;
@@ -528,7 +546,7 @@ addEventListener('message', async (e: MessageEvent) => {
           throw new Error('SecureStorage not initialized');
 
         // Flush all pending writes BEFORE switching slots.
-        flushNow();
+        await flushNow();
 
         // Close SQLite before switching slots — SQLite's internal state
         // (page cache, schema info, file format) is bound to the previous
@@ -540,6 +558,7 @@ addEventListener('message', async (e: MessageEvent) => {
         }
 
         secureStorageWasm.allocateSession(slot, password);
+        if (storage) await storage.flushAll();
         console.debug('[BC-Worker] session allocated');
 
         // Reopen SQLite with a fresh handle for the new slot
@@ -554,7 +573,7 @@ addEventListener('message', async (e: MessageEvent) => {
           savedInitSql = null;
           savedWasmUrl = null;
         }
-        if (storage) storage.flushAll();
+        if (storage) await storage.flushAll();
 
         post({ id, type: 'allocate-result', success: true });
         break;
@@ -566,7 +585,7 @@ addEventListener('message', async (e: MessageEvent) => {
           throw new Error('SecureStorage not initialized');
 
         // Flush all pending writes before switching slots.
-        flushNow();
+        await flushNow();
         if (sqlite3 && dbHandle !== null) {
           await sqlite3.close(dbHandle);
           dbHandle = null;
@@ -587,15 +606,23 @@ addEventListener('message', async (e: MessageEvent) => {
           savedInitSql = null;
           savedWasmUrl = null;
         }
-        if (unlocked && storage) storage.flushAll();
+        if (unlocked && storage) await storage.flushAll();
 
         post({ id, type: 'unlock-result', unlocked });
         break;
       }
 
       case 'lock': {
-        flushNow();
-        if (storage) storage.flushAll();
+        // Flush all pending writes while keys are still available
+        await flushNow();
+        if (storage) await storage.flushAll();
+
+        // Close SQLite BEFORE zeroing keys — xClose triggers flushDirtyPages()
+        // which needs encryption keys to write data correctly
+        if (sqlite3 && dbHandle !== null) {
+          await sqlite3.close(dbHandle);
+          dbHandle = null;
+        }
 
         if (secureStorageWasm) {
           secureStorageWasm.lockSession();
@@ -608,36 +635,58 @@ addEventListener('message', async (e: MessageEvent) => {
       case 'cover': {
         if (!secureStorageWasm)
           throw new Error('SecureStorage not initialized');
-        flushNow(); // flush pending writes before cover rerandomizes blocks
+        await flushNow(); // flush pending writes before cover rerandomizes blocks
         secureStorageWasm.coverTrafficTick();
-        if (storage) storage.flushAll();
+        if (storage) await storage.flushAll();
         post({ id, type: 'cover-result' });
         break;
       }
 
       case 'flush': {
-        flushNow();
+        await flushNow();
         post({ id, type: 'flush-result' });
         break;
       }
 
       case 'close': {
-        flushNow();
-        if (dbHandle !== null && sqlite3) {
-          await sqlite3.close(dbHandle);
-          dbHandle = null;
+        // Best-effort cleanup — always null refs even if individual steps fail
+        try {
+          await flushNow();
+        } catch {
+          /* best effort */
         }
+        try {
+          if (dbHandle !== null && sqlite3) {
+            await sqlite3.close(dbHandle);
+          }
+        } catch {
+          /* best effort */
+        }
+        dbHandle = null;
         sqlite3 = null;
         vfs = null;
         if (secureStorageWasm) {
-          secureStorageWasm.lockSession();
+          try {
+            secureStorageWasm.lockSession();
+          } catch {
+            /* best effort */
+          }
           secureStorageWasm = null;
         }
         if (storage) {
-          storage.close();
+          try {
+            await storage.close();
+          } catch {
+            /* best effort */
+          }
           storage = null;
         }
         post({ id, type: 'close-result' });
+        break;
+      }
+
+      default: {
+        post({ id, type: 'error', message: `Unknown message type: ${type}` });
         break;
       }
     }
@@ -650,4 +699,4 @@ addEventListener('message', async (e: MessageEvent) => {
           : String(err);
     post({ id, type: 'error', message: msg });
   }
-});
+}
