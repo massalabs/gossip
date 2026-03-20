@@ -315,7 +315,6 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
     userProfile: null,
     encryptionKey: null,
     isLoading: true,
-    lockedByUser: false,
     webauthnSupported: isWebAuthnSupported(),
     platformAuthenticatorAvailable: false,
     account: null,

@@ -45,8 +45,16 @@ export interface InitDbOptions {
 // Internal state shape
 // ---------------------------------------------------------------------------
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type SecureStorageWasmModule = any;
+interface SecureStorageWasmModule {
+  initBordercrypt(domain: string): void;
+  provisionStorage(): void;
+  allocateSession(slot: number, password: Uint8Array): void;
+  unlockSession(password: Uint8Array): boolean;
+  lockSession(): void;
+  isUnlocked(): boolean;
+  coverTrafficTick(): void;
+  getDataSize(): number;
+}
 
 interface DbState {
   worker: Worker | null;

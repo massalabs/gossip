@@ -41,6 +41,8 @@ const SecureStorageSetup: React.FC<SecureStorageSetupProps> = ({
   const createHiddenAccount = useAccountStore(s => s.createHiddenAccount);
 
   const [phase, setPhase] = useState<Phase>('collecting');
+  // slotNumber is 1-indexed for display (slot + 1). Main account is in storage slot 0.
+  // availableSlots are 0-indexed storage slots passed to createHiddenAccount.
   const [createdAccounts, setCreatedAccounts] = useState<SlotAssignment[]>([
     { slotNumber: 1, username: mainCredentials.username },
   ]);

@@ -114,6 +114,7 @@ export class SecureStorageVFS extends VFS.Base {
     pData_: { size: number; value: Uint8Array },
     iOffset: number
   ): number {
+    // wa-sqlite types pData as { size, value } but actually passes a bare Uint8Array
     const pData = pData_ as unknown as Uint8Array;
 
     // Handle in-memory journal/temp files
@@ -204,6 +205,7 @@ export class SecureStorageVFS extends VFS.Base {
     pData_: { size: number; value: Uint8Array },
     iOffset: number
   ): number {
+    // wa-sqlite types pData as { size, value } but actually passes a bare Uint8Array
     const pData = pData_ as unknown as Uint8Array;
 
     // Handle in-memory journal/temp files

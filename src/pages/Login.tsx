@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAccountStore } from '../stores/accountStore';
 import { UserProfile, EncryptionKey } from '@massalabs/gossip-sdk';
@@ -61,7 +61,7 @@ const Login: React.FC<LoginProps> = React.memo(
       checkBiometric().catch(() => {});
     }, []);
 
-    const handleBiometricAuth = async () => {
+    const handleBiometricAuth = useCallback(async () => {
       setIsLoading(true);
       onErrorChange?.(null);
 
@@ -105,7 +105,13 @@ const Login: React.FC<LoginProps> = React.memo(
       } finally {
         setIsLoading(false);
       }
-    };
+    }, [
+      biometricMethod,
+      loadAccount,
+      onAccountSelected,
+      onErrorChange,
+      navigate,
+    ]);
 
     // Dev auto-login: skip password prompt in dev mode
     const devAutoLoginCallbacks = useMemo(
