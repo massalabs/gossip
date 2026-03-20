@@ -128,14 +128,14 @@ const SecureStorageSetup: React.FC<SecureStorageSetupProps> = ({
   if (phase === 'initializing' || phase === 'creating') {
     return (
       <PageLayout
-        header={<PageHeader title={t('plausible_deniability.title')} />}
+        header={<PageHeader title={t('secure_storage.title')} />}
         className="app-max-w mx-auto"
         contentClassName="flex items-center justify-center"
       >
         <div className="text-center">
           <div className="w-8 h-8 border-2 border-muted border-t-primary rounded-full animate-spin mx-auto mb-4" />
           <p className="text-muted-foreground">
-            {t('plausible_deniability.creating')}
+            {t('secure_storage.creating')}
           </p>
         </div>
       </PageLayout>
@@ -145,7 +145,7 @@ const SecureStorageSetup: React.FC<SecureStorageSetupProps> = ({
   if (phase === 'summary') {
     return (
       <PageLayout
-        header={<PageHeader title={t('plausible_deniability.title')} />}
+        header={<PageHeader title={t('secure_storage.title')} />}
         className="app-max-w mx-auto"
         contentClassName="p-4"
       >
@@ -154,7 +154,7 @@ const SecureStorageSetup: React.FC<SecureStorageSetupProps> = ({
             <CheckCircle className="w-8 h-8 text-green-500" />
           </div>
           <h2 className="text-xl font-semibold text-foreground">
-            {t('plausible_deniability.summary_title')}
+            {t('secure_storage.summary_title')}
           </h2>
         </div>
 
@@ -170,7 +170,7 @@ const SecureStorageSetup: React.FC<SecureStorageSetupProps> = ({
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <ArrowRight className="w-3 h-3" />
                 <span>
-                  {t('plausible_deniability.slot', {
+                  {t('secure_storage.slot', {
                     number: assignment.slotNumber,
                   })}
                 </span>
@@ -186,7 +186,7 @@ const SecureStorageSetup: React.FC<SecureStorageSetupProps> = ({
           fullWidth
           className="h-12 rounded-full text-sm font-medium"
         >
-          {t('plausible_deniability.continue')}
+          {t('secure_storage.continue')}
         </Button>
       </PageLayout>
     );
@@ -197,10 +197,7 @@ const SecureStorageSetup: React.FC<SecureStorageSetupProps> = ({
   return (
     <PageLayout
       header={
-        <PageHeader
-          title={t('plausible_deniability.title')}
-          onBack={handleSkip}
-        />
+        <PageHeader title={t('secure_storage.title')} onBack={handleSkip} />
       }
       className="app-max-w mx-auto"
       contentClassName="p-4"
@@ -211,7 +208,7 @@ const SecureStorageSetup: React.FC<SecureStorageSetupProps> = ({
             <Shield className="h-5 w-5 text-blue-500" />
           </div>
           <p className="text-sm text-blue-700 dark:text-blue-300 leading-relaxed">
-            {t('plausible_deniability.info')}
+            {t('secure_storage.info')}
           </p>
         </div>
       </div>
@@ -244,7 +241,7 @@ const SecureStorageSetup: React.FC<SecureStorageSetupProps> = ({
             className="h-12 rounded-full text-sm font-medium gap-2"
           >
             <Plus className="w-4 h-4" />
-            {t('plausible_deniability.add_hidden')}
+            {t('secure_storage.add_hidden')}
           </Button>
         )}
 
@@ -258,7 +255,7 @@ const SecureStorageSetup: React.FC<SecureStorageSetupProps> = ({
             className="h-12 rounded-full text-sm font-medium gap-2"
           >
             <Check className="w-4 h-4" />
-            {t('plausible_deniability.done')}
+            {t('secure_storage.done')}
           </Button>
         ) : (
           <Button
@@ -270,7 +267,7 @@ const SecureStorageSetup: React.FC<SecureStorageSetupProps> = ({
             loading={isCreating}
             className="h-12 rounded-full text-sm font-medium"
           >
-            {!isCreating && t('plausible_deniability.skip')}
+            {!isCreating && t('secure_storage.skip')}
           </Button>
         )}
       </div>

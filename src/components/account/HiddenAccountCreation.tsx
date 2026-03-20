@@ -59,12 +59,14 @@ const HiddenAccountCreation: React.FC<HiddenAccountCreationProps> = ({
 
   return (
     <PageLayout
-      header={<PageHeader title={t('hidden_account.title')} onBack={onBack} />}
+      header={
+        <PageHeader title={t('secure_storage_hidden.title')} onBack={onBack} />
+      }
       className="app-max-w mx-auto"
       contentClassName="p-4"
     >
       <p className="text-sm text-muted-foreground mb-6">
-        {t('hidden_account.description')}
+        {t('secure_storage_hidden.description')}
       </p>
 
       <div className="bg-background rounded-lg p-6 space-y-6">
@@ -136,7 +138,7 @@ const HiddenAccountCreation: React.FC<HiddenAccountCreationProps> = ({
                 <AlertTriangle className="h-5 w-5 text-amber-500" />
               </div>
               <p className="text-sm text-amber-700 dark:text-amber-300 leading-relaxed">
-                {t('hidden_account.warning')}
+                {t('secure_storage_hidden.warning')}
               </p>
             </div>
           </div>
@@ -150,7 +152,7 @@ const HiddenAccountCreation: React.FC<HiddenAccountCreationProps> = ({
             className="h-11 rounded-full text-sm font-medium flex items-center justify-center gap-2"
           >
             <Zap className="w-5 h-5" />
-            <span>{t('hidden_account.create')}</span>
+            <span>{t('secure_storage_hidden.create')}</span>
           </Button>
         </form>
       </div>
