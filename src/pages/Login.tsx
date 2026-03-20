@@ -10,7 +10,6 @@ import { ROUTES } from '../constants/routes';
 import { PrivacyGraphic } from '../components/graphics';
 import { useDevAutoLogin } from '../hooks/useDevAutoLogin';
 import { biometricService } from '../services/biometricService';
-import { useAppStore } from '../stores/appStore';
 import {
   BIOMETRIC_STORAGE_KEY,
   BIOMETRIC_SALT,
@@ -39,23 +38,28 @@ const Login: React.FC<LoginProps> = React.memo(
     const [isLoading, setIsLoading] = useState(false);
     const [password, setPassword] = useState('');
     const [showAccountImport, setShowAccountImport] = useState(false);
-    const biometricEnabled = useAppStore(s => s.biometricEnabled);
     const [biometricAvailable, setBiometricAvailable] = useState(false);
     const [biometricMethod, setBiometricMethod] = useState<
       'capacitor' | 'webauthn' | 'none'
     >('none');
 
     useEffect(() => {
-      if (biometricEnabled) {
-        biometricService
-          .checkAvailability()
-          .then(({ available, method }) => {
-            setBiometricAvailable(available);
-            setBiometricMethod(method ?? 'none');
-          })
-          .catch(() => {});
-      }
-    }, [biometricEnabled]);
+      const checkBiometric = async () => {
+        const { available, method } =
+          await biometricService.checkAvailability();
+        if (!available) return;
+
+        // Only show biometric login if a credential actually exists
+        const exists = await biometricService.hasExistingCredential(
+          BIOMETRIC_STORAGE_KEY
+        );
+        if (!exists) return;
+
+        setBiometricAvailable(true);
+        setBiometricMethod(method ?? 'none');
+      };
+      checkBiometric().catch(() => {});
+    }, []);
 
     const handleBiometricAuth = async () => {
       setIsLoading(true);
@@ -181,7 +185,7 @@ const Login: React.FC<LoginProps> = React.memo(
 
           <div className="w-full max-w-md space-y-2">
             <div className="space-y-2">
-              {biometricEnabled && biometricAvailable && (
+              {biometricAvailable && (
                 <>
                   <Button
                     type="button"

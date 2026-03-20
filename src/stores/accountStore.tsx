@@ -730,7 +730,6 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         if (opts?.setInitialized !== false) {
           useAppStore.getState().setIsInitialized(true);
         }
-        useAppStore.getState().setBiometricEnabled(true);
         set({
           userProfile: profile,
           encryptionKey,

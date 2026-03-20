@@ -54,9 +54,6 @@ interface AppStoreState {
     userProfile: UserProfile | null,
     provider: Provider | null
   ) => Promise<void>;
-  // Biometric unlock enabled
-  biometricEnabled: boolean;
-  setBiometricEnabled: (enabled: boolean) => void;
 }
 
 const useAppStoreBase = create<AppStoreState>()(
@@ -127,11 +124,6 @@ const useAppStoreBase = create<AppStoreState>()(
       setMnsDomains: (domains: string[]) => {
         set({ mnsDomains: domains });
       },
-      // Biometric unlock
-      biometricEnabled: false,
-      setBiometricEnabled: (enabled: boolean) => {
-        set({ biometricEnabled: enabled });
-      },
       fetchMnsDomains: async (
         userProfile: UserProfile | null,
         provider: Provider | null
@@ -168,7 +160,6 @@ const useAppStoreBase = create<AppStoreState>()(
         mnsEnabled: state.mnsEnabled,
         mnsDomains: state.mnsDomains,
         disableNativeScreenshot: state.disableNativeScreenshot,
-        biometricEnabled: state.biometricEnabled,
       }),
     }
   )

@@ -151,6 +151,31 @@ export class BiometricService {
     }
   }
 
+  /**
+   * Check if a biometric credential already exists (runtime probe, no persisted flag).
+   * - Capacitor: tries to read the key from Secure Enclave (survives localStorage clear)
+   * - Web: checks WEBAUTHN_CREDENTIAL_ID_KEY in localStorage
+   */
+  public async hasExistingCredential(storageKey: string): Promise<boolean> {
+    if (this.capacitorAvailable) {
+      try {
+        const key = this.getEncryptionKeyStorageKey(storageKey);
+        const value = await SecureStorage.get(key);
+        return !!value;
+      } catch {
+        return false;
+      }
+    }
+
+    if (this.isWebAuthnSupported) {
+      const { WEBAUTHN_CREDENTIAL_ID_KEY } =
+        await import('../constants/biometric');
+      return localStorage.getItem(WEBAUTHN_CREDENTIAL_ID_KEY) !== null;
+    }
+
+    return false;
+  }
+
   private checkCapacitorAvailability(): boolean {
     try {
       return (

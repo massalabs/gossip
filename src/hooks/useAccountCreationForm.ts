@@ -8,7 +8,7 @@ import {
   validateUsernameFormat,
 } from '@massalabs/gossip-sdk';
 import { biometricService } from '../services/biometricService';
-import { useAppStore } from '../stores/appStore';
+import { BIOMETRIC_STORAGE_KEY } from '../constants/biometric';
 
 export interface AccountCreationCreatedContext {
   username: string;
@@ -59,18 +59,21 @@ export function useAccountCreationForm({
 
   const isIOS = Capacitor.getPlatform() === 'ios';
 
-  const biometricAlreadyUsed = useAppStore(s => s.biometricEnabled);
-
   useEffect(() => {
-    // If a biometric account already exists, don't offer biometric again —
-    // only one biometric credential is stored, creating another would overwrite it.
-    if (biometricAlreadyUsed) return;
-
     const checkBiometricMethods = async () => {
       try {
         const { available } = await biometricService.checkAvailability();
-        setBiometricAvailable(available);
-        setUsePassword(!available);
+        if (!available) return;
+
+        // Don't offer biometric if a credential already exists —
+        // only one biometric credential is stored, creating another would overwrite it.
+        const alreadyExists = await biometricService.hasExistingCredential(
+          BIOMETRIC_STORAGE_KEY
+        );
+        if (alreadyExists) return;
+
+        setBiometricAvailable(true);
+        setUsePassword(false);
       } catch (_err) {
         setBiometricAvailable(false);
         setUsePassword(true);
@@ -78,7 +81,7 @@ export function useAccountCreationForm({
     };
 
     void checkBiometricMethods();
-  }, [biometricAlreadyUsed]);
+  }, []);
 
   const handleUsernameChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
