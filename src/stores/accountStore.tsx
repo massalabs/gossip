@@ -535,12 +535,6 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           if (biometricKey) {
             const { encodeToBase64 } = await import('@massalabs/gossip-sdk');
             unlockPassword = encodeToBase64(biometricKey.to_bytes());
-            console.log(
-              '[DBG-UNLOCK] pw length:',
-              unlockPassword.length,
-              'hash:',
-              unlockPassword.slice(-8)
-            );
           } else if (password) {
             unlockPassword = password;
           }
@@ -712,12 +706,6 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         if (getSdk().isSecureStorage) {
           const { encodeToBase64 } = await import('@massalabs/gossip-sdk');
           const biometricPassword = encodeToBase64(encryptionKey.to_bytes());
-          console.log(
-            '[DBG-ALLOCATE] pw length:',
-            biometricPassword.length,
-            'hash:',
-            biometricPassword.slice(-8)
-          );
           await getSdk().openSecureSession(0, biometricPassword, sessionOpts);
         } else {
           await getSdk().openSession(sessionOpts);
