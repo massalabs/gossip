@@ -14,6 +14,9 @@ interface DebugButtonPosition {
 }
 
 interface AppStoreState {
+  // Terms of Service acceptance
+  tosAccepted: boolean;
+  setTosAccepted: (value: boolean) => void;
   // Network config (read by accountStore)
   networkName: NetworkName;
   setNetworkName: (networkName: NetworkName) => void;
@@ -56,6 +59,11 @@ interface AppStoreState {
 const useAppStoreBase = create<AppStoreState>()(
   persist(
     (set, get) => ({
+      // Terms of Service acceptance
+      tosAccepted: false,
+      setTosAccepted: (value: boolean) => {
+        set({ tosAccepted: value });
+      },
       // Network config
       networkName: NetworkName.Buildnet,
       setNetworkName: (networkName: NetworkName) => {
@@ -143,6 +151,7 @@ const useAppStoreBase = create<AppStoreState>()(
       name: STORAGE_KEYS.APP_STORE,
       storage: createJSONStorage(() => localStorage),
       partialize: state => ({
+        tosAccepted: state.tosAccepted,
         showDebugOption: state.showDebugOption,
         debugOverlayVisible: state.debugOverlayVisible,
         debugButtonPosition: state.debugButtonPosition,
