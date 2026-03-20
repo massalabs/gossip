@@ -91,6 +91,11 @@ const AccountImport: React.FC<AccountImportProps> = ({
         });
       }
 
+      // Clear sensitive data from state
+      setMnemonic('');
+      setPassword('');
+      setConfirmPassword('');
+
       onComplete();
     } catch (error) {
       console.error('Error importing account:', error);

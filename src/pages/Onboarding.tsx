@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { useAppStore } from '../stores/appStore';
 import { useAccountStore } from '../stores/accountStore';
 import OnboardingFlow from '../components/OnboardingFlow';
@@ -22,6 +22,28 @@ export const Onboarding: React.FC = () => {
   const [showAccountCreation, setShowAccountCreation] = useState(false);
   const [secureStorageCreds, setSecureStorageCreds] =
     useState<SecureStorageSetupCredentials | null>(null);
+
+  const handleAccountCreated = useCallback(
+    (creds?: SecureStorageSetupCredentials) => {
+      if (creds) {
+        setSecureStorageCreds(creds);
+      } else {
+        useAppStore.getState().setIsInitialized(true);
+      }
+    },
+    []
+  );
+
+  const handleAccountCreationBack = useCallback(() => {
+    void (async () => {
+      const hasAny = await useAccountStore.getState().hasExistingAccount();
+      if (hasAny) {
+        useAppStore.getState().setIsInitialized(true);
+      } else {
+        setShowAccountCreation(false);
+      }
+    })();
+  }, []);
 
   if (showImport) {
     return (
@@ -49,25 +71,8 @@ export const Onboarding: React.FC = () => {
   if (showAccountCreation) {
     return (
       <AccountCreation
-        onComplete={creds => {
-          if (creds) {
-            setSecureStorageCreds(creds);
-          } else {
-            useAppStore.getState().setIsInitialized(true);
-          }
-        }}
-        onBack={() => {
-          void (async () => {
-            const hasAny = await useAccountStore
-              .getState()
-              .hasExistingAccount();
-            if (hasAny) {
-              useAppStore.getState().setIsInitialized(true);
-            } else {
-              setShowAccountCreation(false);
-            }
-          })();
-        }}
+        onComplete={handleAccountCreated}
+        onBack={handleAccountCreationBack}
       />
     );
   }

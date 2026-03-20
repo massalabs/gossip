@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Shield, CheckCircle, Plus, Check, ArrowRight } from 'react-feather';
 import PageHeader from '../ui/PageHeader';
@@ -10,7 +10,6 @@ import { getSdk } from '../../stores/sdkStore';
 import type { SecureStorageSetupCredentials } from '../../stores/secureStorageSetupContext';
 
 const MAX_SLOTS = 5;
-const ALL_SLOTS = Array.from({ length: MAX_SLOTS }, (_, i) => i);
 
 interface SlotAssignment {
   slotNumber: number;
@@ -39,77 +38,18 @@ const SecureStorageSetup: React.FC<SecureStorageSetupProps> = ({
   onComplete,
 }) => {
   const { t } = useTranslation('auth');
-  const initializeAccount = useAccountStore(s => s.initializeAccount);
-  const initializeAccountWithBiometrics = useAccountStore(
-    s => s.initializeAccountWithBiometrics
-  );
   const createHiddenAccount = useAccountStore(s => s.createHiddenAccount);
 
-  const [phase, setPhase] = useState<Phase>(() =>
-    mainCredentials.alreadyCreated ? 'collecting' : 'initializing'
-  );
-  const [createdAccounts, setCreatedAccounts] = useState<SlotAssignment[]>(
-    () =>
-      mainCredentials.alreadyCreated
-        ? [{ slotNumber: 1, username: mainCredentials.username }]
-        : []
-  );
-  const [availableSlots, setAvailableSlots] = useState<number[]>(() =>
-    mainCredentials.alreadyCreated ? [1, 2, 3, 4] : ALL_SLOTS
-  );
+  const [phase, setPhase] = useState<Phase>('collecting');
+  const [createdAccounts, setCreatedAccounts] = useState<SlotAssignment[]>([
+    { slotNumber: 1, username: mainCredentials.username },
+  ]);
+  const [availableSlots, setAvailableSlots] = useState<number[]>([1, 2, 3, 4]);
   const [addingAccount, setAddingAccount] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
 
-  const initStarted = useRef(false);
-
   const canAddMore = createdAccounts.length < MAX_SLOTS;
-
-  useEffect(() => {
-    if (initStarted.current) return;
-    initStarted.current = true;
-
-    if (mainCredentials.alreadyCreated) {
-      setCreatedAccounts([
-        { slotNumber: 1, username: mainCredentials.username },
-      ]);
-      setAvailableSlots([1, 2, 3, 4]);
-      setPhase('collecting');
-      return;
-    }
-
-    const createMainAccount = async () => {
-      try {
-        const { slot, remaining } = pickRandomSlot(availableSlots);
-
-        if (mainCredentials.useBiometrics) {
-          await initializeAccountWithBiometrics(
-            mainCredentials.username,
-            mainCredentials.iCloudSync
-          );
-        } else {
-          await initializeAccount(
-            mainCredentials.username,
-            mainCredentials.password!
-          );
-        }
-
-        await getSdk().flush();
-
-        setCreatedAccounts([
-          { slotNumber: slot + 1, username: mainCredentials.username },
-        ]);
-        setAvailableSlots(remaining);
-        setPhase('collecting');
-      } catch (err) {
-        setError(err instanceof Error ? err.message : t('create.failed'));
-        setPhase('collecting');
-      }
-    };
-
-    void createMainAccount();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const handleAddAccount = async (creds: {
     username: string;
@@ -167,36 +107,7 @@ const SecureStorageSetup: React.FC<SecureStorageSetupProps> = ({
   };
 
   const handleSkip = async () => {
-    if (createdAccounts.length === 0) {
-      if (mainCredentials.alreadyCreated) {
-        onComplete();
-        return;
-      }
-      if (!mainCredentials.password && !mainCredentials.useBiometrics) {
-        setError(t('create.failed'));
-        return;
-      }
-      setIsCreating(true);
-      setError(null);
-      try {
-        if (mainCredentials.useBiometrics) {
-          await initializeAccountWithBiometrics(
-            mainCredentials.username,
-            mainCredentials.iCloudSync
-          );
-        } else {
-          await initializeAccount(
-            mainCredentials.username,
-            mainCredentials.password!
-          );
-        }
-        onComplete();
-      } catch (err) {
-        setError(err instanceof Error ? err.message : t('create.failed'));
-      } finally {
-        setIsCreating(false);
-      }
-    } else if (createdAccounts.length > 1) {
+    if (createdAccounts.length > 1) {
       // Hidden accounts exist — must lock secure storage before leaving
       await finalize();
     } else {
@@ -214,24 +125,7 @@ const SecureStorageSetup: React.FC<SecureStorageSetupProps> = ({
     );
   }
 
-  if (phase === 'initializing') {
-    return (
-      <PageLayout
-        header={<PageHeader title={t('plausible_deniability.title')} />}
-        className="app-max-w mx-auto"
-        contentClassName="flex items-center justify-center"
-      >
-        <div className="text-center">
-          <div className="w-8 h-8 border-2 border-muted border-t-primary rounded-full animate-spin mx-auto mb-4" />
-          <p className="text-muted-foreground">
-            {t('plausible_deniability.creating')}
-          </p>
-        </div>
-      </PageLayout>
-    );
-  }
-
-  if (phase === 'creating') {
+  if (phase === 'initializing' || phase === 'creating') {
     return (
       <PageLayout
         header={<PageHeader title={t('plausible_deniability.title')} />}
