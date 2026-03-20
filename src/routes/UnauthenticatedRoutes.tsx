@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useCallback } from 'react';
 import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { useAccountStore } from '../stores/accountStore';
 import { useAppStore } from '../stores/appStore';
@@ -37,6 +37,11 @@ export const UnauthenticatedRoutes: React.FC<UnauthenticatedRoutesProps> = ({
     navigate(ROUTES.setup());
   };
 
+  const handleNewAccountComplete = useCallback(
+    () => navigate(ROUTES.welcome(), { replace: true }),
+    [navigate]
+  );
+
   const handleNewAccountBack = async () => {
     try {
       const hasAny = await useAccountStore.getState().hasExistingAccount();
@@ -72,7 +77,7 @@ export const UnauthenticatedRoutes: React.FC<UnauthenticatedRoutesProps> = ({
           path={ROUTES.setup()}
           element={
             <AccountCreation
-              onComplete={() => navigate(ROUTES.welcome(), { replace: true })}
+              onComplete={handleNewAccountComplete}
               onBack={handleNewAccountBack}
             />
           }

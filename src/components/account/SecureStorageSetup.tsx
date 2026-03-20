@@ -199,7 +199,10 @@ const SecureStorageSetup: React.FC<SecureStorageSetupProps> = ({
   return (
     <PageLayout
       header={
-        <PageHeader title={t('secure_storage.title')} onBack={handleSkip} />
+        <PageHeader
+          title={t('secure_storage.title')}
+          onBack={isCreating ? undefined : handleSkip}
+        />
       }
       className="app-max-w mx-auto"
       contentClassName="p-4"
@@ -233,6 +236,12 @@ const SecureStorageSetup: React.FC<SecureStorageSetupProps> = ({
       )}
 
       <div className="space-y-3">
+        {!canAddMore && (
+          <p className="text-sm text-muted-foreground text-center">
+            {t('secure_storage.max_reached')}
+          </p>
+        )}
+
         {canAddMore && (
           <Button
             onClick={() => setAddingAccount(true)}
@@ -254,10 +263,15 @@ const SecureStorageSetup: React.FC<SecureStorageSetupProps> = ({
             size="custom"
             fullWidth
             disabled={isCreating}
+            loading={isCreating}
             className="h-12 rounded-full text-sm font-medium gap-2"
           >
-            <Check className="w-4 h-4" />
-            {t('secure_storage.done')}
+            {!isCreating && (
+              <>
+                <Check className="w-4 h-4" />
+                {t('secure_storage.done')}
+              </>
+            )}
           </Button>
         ) : (
           <Button

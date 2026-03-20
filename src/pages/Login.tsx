@@ -198,16 +198,17 @@ const Login: React.FC<LoginProps> = React.memo(
                     type="button"
                     onClick={handleBiometricAuth}
                     disabled={isLoading}
+                    loading={isLoading}
                     variant="outline"
                     fullWidth
                     className="h-[51px] rounded-full"
                   >
-                    <span>{t('login.biometric', 'Use biometric')}</span>
+                    {!isLoading && <span>{t('login.biometric')}</span>}
                   </Button>
                   <div className="flex items-center gap-3 my-2">
                     <div className="flex-1 border-t border-border" />
                     <span className="text-xs text-muted-foreground">
-                      {t('login.or', 'or')}
+                      {t('login.or')}
                     </span>
                     <div className="flex-1 border-t border-border" />
                   </div>
@@ -271,6 +272,37 @@ const Login: React.FC<LoginProps> = React.memo(
                 {t('login.import_mnemonic')}
               </Button>
             </div>
+
+            {import.meta.env.DEV && (
+              <Button
+                onClick={async () => {
+                  const dbs = await indexedDB.databases();
+                  for (const db of dbs) {
+                    if (db.name?.startsWith('gossip-'))
+                      indexedDB.deleteDatabase(db.name);
+                  }
+                  try {
+                    const root = await navigator.storage.getDirectory();
+                    // @ts-expect-error entries() exists in modern browsers
+                    for await (const [name] of root.entries()) {
+                      if (name.startsWith('gossip')) {
+                        await root.removeEntry(name, { recursive: true });
+                      }
+                    }
+                  } catch {
+                    // OPFS not available
+                  }
+                  localStorage.clear();
+                  window.location.reload();
+                }}
+                variant="outline"
+                size="custom"
+                fullWidth
+                className="h-[51px] rounded-full text-sm text-destructive border-destructive/30"
+              >
+                [DEV] Reset all data
+              </Button>
+            )}
           </div>
         </div>
       </div>

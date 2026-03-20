@@ -80,10 +80,10 @@ const HiddenAccountCreation: React.FC<HiddenAccountCreationProps> = ({
               value={username}
               onChange={handleUsernameChange}
               placeholder={t('create.enter_username')}
-              error={!!usernameError}
+              error={username.length > 0 && !!usernameError}
               maxLength={20}
             />
-            {usernameError && (
+            {username.length > 0 && usernameError && (
               <p className="text-red-500 dark:text-red-400 text-xs mt-1">
                 {usernameError}
               </p>
@@ -99,12 +99,12 @@ const HiddenAccountCreation: React.FC<HiddenAccountCreationProps> = ({
               value={password}
               onChange={handlePasswordChange}
               placeholder={t('create.enter_password')}
-              error={!!passwordError}
+              error={password.length > 0 && !!passwordError}
               showPasswordToggle={true}
               showPassword={showPasswords}
               onShowPasswordChange={setShowPasswords}
             />
-            {passwordError && (
+            {password.length > 0 && passwordError && (
               <p className="text-red-500 dark:text-red-400 text-xs mt-1">
                 {passwordError}
               </p>
