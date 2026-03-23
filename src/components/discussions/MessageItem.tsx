@@ -55,6 +55,24 @@ const TOUCH_SLOP = 15;
 const TOUCH_SLOP_OUTGOING = 12;
 const POST_GESTURE_SUPPRESS_MS = 700;
 
+const ClockIcon: React.FC<{
+  className?: string;
+  'aria-label'?: string;
+}> = props => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    viewBox="0 0 16 16"
+    fill="currentColor"
+    {...props}
+  >
+    <path
+      fillRule="evenodd"
+      d="M8 15A7 7 0 1 0 8 1a7 7 0 0 0 0 14Zm.75-10.25a.75.75 0 0 0-1.5 0V8c0 .2.08.39.22.53l2 2a.75.75 0 1 0 1.06-1.06L8.75 7.69V4.75Z"
+      clipRule="evenodd"
+    />
+  </svg>
+);
+
 interface MessageItemProps {
   message: Message;
   onReplyTo?: (message: Message) => void;
@@ -1170,6 +1188,13 @@ const MessageItem: React.FC<MessageItemProps> = ({
               >
                 {/* Fixed-size container — prevents bubble resize when check appears */}
                 <div className="w-3.5 h-3.5">
+                  {/* Pending — optimistic message not yet confirmed */}
+                  {(message.id ?? 0) < 0 && (
+                    <ClockIcon
+                      className="w-3.5 h-3.5 opacity-60"
+                      aria-label={t('message_item.pending')}
+                    />
+                  )}
                   {message.status === MessageStatus.SENT &&
                     (message.id ?? 0) > 0 && (
                       <CheckIcon

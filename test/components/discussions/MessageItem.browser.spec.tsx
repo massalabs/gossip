@@ -556,7 +556,7 @@ describe('MessageItem', () => {
       return root.querySelector<HTMLElement>(`[aria-label*="${status}"]`);
     }
 
-    it('shows no check icon for optimistic message (negative id)', async () => {
+    it('shows clock icon for optimistic message (negative id)', async () => {
       render(
         <MessageItem
           message={makeMessage({
@@ -573,10 +573,16 @@ describe('MessageItem', () => {
       // Status container should exist (outgoing message)
       expect(statusDiv).not.toBeNull();
 
-      // The fixed-size inner container should be empty — no check icon
-      // because (message.id ?? 0) > 0 is false for id = -1
+      // Clock icon should be present — exactly one SVG (the ClockIcon,
+      // not a CheckIcon) because (message.id ?? 0) < 0
       const svgs = statusDiv!.querySelectorAll('svg');
-      expect(svgs.length).toBe(0);
+      expect(svgs.length).toBe(1);
+
+      // The SVG should have an aria-label containing "pending" or "Sending"
+      // (depending on whether i18n resolves the key or returns the raw value)
+      const svg = svgs[0];
+      const label = svg.getAttribute('aria-label') ?? '';
+      expect(label.length).toBeGreaterThan(0);
     });
 
     it('shows single check for confirmed SENT message', async () => {
