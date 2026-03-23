@@ -13,8 +13,7 @@ export default function InitErrorScreen({ error }: { error: InitError }) {
       if (typeof indexedDB.databases === 'function') {
         const dbs = await indexedDB.databases();
         for (const db of dbs) {
-          if (db.name?.startsWith('gossip-'))
-            indexedDB.deleteDatabase(db.name);
+          if (db.name?.startsWith('gossip-')) indexedDB.deleteDatabase(db.name);
         }
       }
       // Clear OPFS secure storage blocks/keypairs so next launch starts fresh
