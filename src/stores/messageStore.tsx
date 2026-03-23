@@ -211,7 +211,6 @@ interface MessageStoreState {
     messageDbId: number
   ) => void;
   removeReaction: (contactUserId: string, reactionDbId: number) => void;
-  retryMessage: (contactUserId: string, failedMessageId: number) => void;
   clearMessages: (contactUserId: string) => void;
   cleanup: () => void;
 }
@@ -472,7 +471,7 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
 
         const result = await getSdk().messages.send(message);
 
-        if (result.success && result.message?.id) {
+        if (result.message?.id) {
           const realMsg = result.message;
           pendingToRealId.set(optimisticMessage.id!, realMsg.id!);
 
@@ -523,20 +522,31 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
             newMap.set(contactUserId, updated);
             return { messagesByContact: newMap };
           });
+        } else if (!result.success) {
+          // SDK could not persist the message at all (no DB row).
+          // This is a permanent error — mark as FAILED.
+          console.error('Failed to send message:', result.error);
+          set(state => {
+            const msgs = state.messagesByContact.get(contactUserId);
+            if (!msgs) return state;
+            const idx = msgs.findIndex(m => m.id === optimisticMessage.id);
+            if (idx === -1) return state;
+            const updated = [...msgs];
+            updated[idx] = { ...msgs[idx], status: MessageStatus.FAILED };
+            const newMap = new Map(state.messagesByContact);
+            newMap.set(contactUserId, updated);
+            return { messagesByContact: newMap };
+          });
         }
+        // If result.message exists but !result.success, the SDK persisted
+        // the message with WAITING_SESSION — it will be sent automatically
+        // on the next stateUpdate. Keep the clock icon (optimistic stays).
       } catch (error) {
+        // Unexpected throw (not a structured SDK error).
+        // The message may or may not be persisted. Keep it as optimistic
+        // (clock icon) — the next poll will either confirm it or it will
+        // stay pending. Don't mark as FAILED for transient errors.
         console.error('Failed to send message:', error);
-        set(state => {
-          const msgs = state.messagesByContact.get(contactUserId);
-          if (!msgs) return state;
-          const idx = msgs.findIndex(m => m.id === optimisticMessage.id);
-          if (idx === -1) return state;
-          const updated = [...msgs];
-          updated[idx] = { ...msgs[idx], status: MessageStatus.FAILED };
-          const newMap = new Map(state.messagesByContact);
-          newMap.set(contactUserId, updated);
-          return { messagesByContact: newMap };
-        });
       }
     })();
   },
@@ -743,83 +753,6 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
     }
 
     return Array.from(groups.values());
-  },
-
-  retryMessage: (contactUserId: string, failedMessageId: number) => {
-    const msgs = get().messagesByContact.get(contactUserId);
-    if (!msgs) return;
-    const idx = msgs.findIndex(m => m.id === failedMessageId);
-    if (idx === -1) return;
-    const failedMsg = msgs[idx];
-    if (failedMsg.status !== MessageStatus.FAILED) return;
-
-    // Reset status to SENT (shows clock icon again)
-    const updated = [...msgs];
-    updated[idx] = { ...failedMsg, status: MessageStatus.SENT };
-    const newMap = new Map(get().messagesByContact);
-    newMap.set(contactUserId, updated);
-    set({ messagesByContact: newMap });
-
-    // Re-run the send logic in the background
-    void (async () => {
-      try {
-        const { userProfile } = useAccountStore.getState();
-        if (!userProfile?.userId || !getSdk().isSessionOpen) {
-          throw new Error('Cannot retry: session not open');
-        }
-
-        const discussion = await getSdk().discussions.get(contactUserId);
-        if (!discussion) {
-          throw new Error('Discussion not found');
-        }
-
-        const message: Omit<Message, 'id'> = {
-          ownerUserId: userProfile.userId,
-          contactUserId,
-          content: failedMsg.content,
-          type: MessageType.TEXT,
-          direction: MessageDirection.OUTGOING,
-          status: MessageStatus.WAITING_SESSION,
-          timestamp: failedMsg.timestamp,
-        };
-
-        const result = await getSdk().messages.send(message);
-
-        if (result.success && result.message?.id) {
-          const realMsg = result.message;
-          pendingToRealId.set(failedMessageId, realMsg.id!);
-
-          set(state => {
-            const current = state.messagesByContact.get(contactUserId);
-            if (!current) return state;
-            const i = current.findIndex(m => m.id === failedMessageId);
-            if (i === -1) return state;
-            const kept =
-              statusRank(current[i].status) > statusRank(realMsg.status)
-                ? current[i].status
-                : realMsg.status;
-            const swapped = [...current];
-            swapped[i] = { ...realMsg, status: kept };
-            const map = new Map(state.messagesByContact);
-            map.set(contactUserId, swapped);
-            return { messagesByContact: map };
-          });
-        }
-      } catch (error) {
-        console.error('Retry failed:', error);
-        set(state => {
-          const current = state.messagesByContact.get(contactUserId);
-          if (!current) return state;
-          const i = current.findIndex(m => m.id === failedMessageId);
-          if (i === -1) return state;
-          const marked = [...current];
-          marked[i] = { ...current[i], status: MessageStatus.FAILED };
-          const map = new Map(state.messagesByContact);
-          map.set(contactUserId, marked);
-          return { messagesByContact: map };
-        });
-      }
-    })();
   },
 
   clearMessages: (contactUserId: string) => {

@@ -137,14 +137,34 @@ describe('Optimistic messaging integration', () => {
     await expect.element(page.getByTestId('msg-42')).toBeInTheDocument();
   });
 
-  it('message shows FAILED status on SDK error', async () => {
+  it('message stays pending (clock) on transient SDK error', async () => {
+    // Transient errors (throws) keep the message as optimistic —
+    // the SDK will retry via stateUpdate.
     mockSdk.messages.send.mockRejectedValue(new Error('Network error'));
 
     render(<TestHarness contactUserId={contactUserId} />);
 
     await userEvent.click(page.getByText('Send'));
 
-    // Wait for FAILED status
+    // Wait for the catch to run, then verify status stays SENT (not FAILED)
+    await vi.waitFor(async () => {
+      const items = page.getByRole('listitem');
+      const el = items.element() as HTMLElement;
+      expect(el.dataset.status).toBe('sent');
+    });
+  });
+
+  it('message shows FAILED only for permanent SDK errors', async () => {
+    // SDK returns { success: false } with no message — permanent error.
+    mockSdk.messages.send.mockResolvedValue({
+      success: false,
+      error: 'Discussion not found',
+    });
+
+    render(<TestHarness contactUserId={contactUserId} />);
+
+    await userEvent.click(page.getByText('Send'));
+
     await vi.waitFor(async () => {
       const items = page.getByRole('listitem');
       const el = items.element() as HTMLElement;
