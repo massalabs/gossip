@@ -1013,6 +1013,96 @@ describe('ordering and reference stability', () => {
   });
 });
 
+// ── Duplicate content bug ────────────────────────────────────────
+
+describe('duplicate content messages', () => {
+  const contactUserId = 'contact-1';
+
+  beforeEach(() => {
+    useMessageStore.setState({
+      messagesByContact: new Map(),
+      reactionsByContact: new Map(),
+      currentContactUserId: null,
+      isLoading: false,
+      pollTimer: null,
+      eventHandler: null,
+      cancelDebounce: null,
+      isInitializing: false,
+    } as unknown as ReturnType<(typeof useMessageStore)['getState']>);
+
+    mockSdk.isSessionOpen = true;
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    useMessageStore.getState().cleanup();
+  });
+
+  it('same-content optimistic messages are not falsely confirmed by a single DB match', async () => {
+    // Simulate the real scenario: 3 identical messages sent within ms.
+    // First one confirmed (id swapped), other two still in-flight.
+    // A poll returns only the first from DB.
+    // The fallback heuristic in isConfirmed() must NOT falsely match
+    // the unconfirmed messages to the same DB message.
+
+    const now = Date.now();
+
+    // First message already confirmed in store (swapped to real id=100)
+    const confirmedMsg: Message = makeMessage({
+      id: 100,
+      content: 'a',
+      timestamp: new Date(now),
+    });
+
+    // Two optimistic messages still in-flight (SDK hasn't returned)
+    const opt2: Message = {
+      id: -2,
+      ownerUserId: 'test-user-id',
+      contactUserId,
+      content: 'a',
+      type: MessageType.TEXT,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.SENT,
+      timestamp: new Date(now + 10), // 10ms later
+    };
+    const opt3: Message = {
+      id: -3,
+      ownerUserId: 'test-user-id',
+      contactUserId,
+      content: 'a',
+      type: MessageType.TEXT,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.SENT,
+      timestamp: new Date(now + 20), // 20ms later
+    };
+
+    // Store state: 1 confirmed + 2 optimistic
+    useMessageStore.setState({
+      ...useMessageStore.getState(),
+      messagesByContact: new Map([[contactUserId, [confirmedMsg, opt2, opt3]]]),
+    });
+
+    // Poll returns only the confirmed message from DB
+    // (with matching timestamp — within 5s window)
+    mockSdk.discussions.list.mockResolvedValue([{ contactUserId }]);
+    mockSdk.messages.getVisibleMessages.mockResolvedValue([
+      { ...confirmedMsg }, // fresh copy from DB
+    ]);
+    mockSdk.messages.getReactions.mockResolvedValue([]);
+
+    await useMessageStore.getState().init();
+
+    const msgs = useMessageStore
+      .getState()
+      .messagesByContact.get(contactUserId)!;
+
+    // ALL 3 messages must survive: 1 confirmed (id=100) + 2 optimistic (id<0)
+    expect(msgs).toHaveLength(3);
+    expect(msgs.filter(m => m.id! > 0)).toHaveLength(1);
+    expect(msgs.filter(m => m.id! < 0)).toHaveLength(2);
+  });
+});
+
 // ── Optimistic reactions ─────────────────────────────────────────
 
 describe('optimistic reactions', () => {

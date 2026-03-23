@@ -41,12 +41,11 @@ const pendingToRealId = new Map<number, number>();
 const isConfirmed = (opt: Message, db: Message): boolean => {
   const realId = pendingToRealId.get(opt.id!);
   if (realId != null) return db.id === realId;
-  // Fallback: content + direction + narrow timestamp window
-  return (
-    db.content === opt.content &&
-    db.direction === opt.direction &&
-    Math.abs(db.timestamp.getTime() - opt.timestamp.getTime()) < 5000
-  );
+  // No fallback heuristic — pendingToRealId is the only reliable source.
+  // A content-based fallback causes false positives when multiple messages
+  // have the same content (e.g. "a", "a", "a"), making them disappear
+  // during poll reconciliation.
+  return false;
 };
 
 /**
