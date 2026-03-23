@@ -363,7 +363,7 @@ describe('sendMessage optimistic flow', () => {
     expect(merged[0].content).toBe('Hello optimistic');
   });
 
-  it('removes optimistic message on SDK success', async () => {
+  it('keeps optimistic message after SDK success (removed on next poll)', async () => {
     const realMessage: Message = {
       id: 42,
       ownerUserId: 'test-user-id',
@@ -383,14 +383,25 @@ describe('sendMessage optimistic flow', () => {
 
     await useMessageStore.getState().sendMessage(contactUserId, 'Hello swap');
 
-    // Wait for the fire-and-forget to remove the optimistic message
+    // Wait for the fire-and-forget to set pendingToRealId (key transferred)
     await vi.waitFor(() => {
-      const opts = useMessageStore
-        .getState()
-        .optimisticByContact.get(contactUserId);
-      // Optimistic layer should be empty (or undefined) after SDK confirms
-      expect(opts ?? []).toHaveLength(0);
+      // The stable key for real id 42 should now be seq-based (transferred)
+      expect(getStableKey(42)).toMatch(/^msg-seq-/);
     });
+
+    // Optimistic stays in the layer until the next poll cleans it up
+    const opts = useMessageStore
+      .getState()
+      .optimisticByContact.get(contactUserId);
+    expect(opts).toHaveLength(1);
+    expect(opts![0].id).toBeLessThan(0);
+
+    // Merged view still shows the message (optimistic, since confirmed is empty)
+    const merged = useMessageStore
+      .getState()
+      .getMessagesForContact(contactUserId);
+    expect(merged).toHaveLength(1);
+    expect(merged[0].content).toBe('Hello swap');
   });
 
   it('keeps message as pending (clock) on transient SDK error', async () => {
@@ -689,20 +700,29 @@ describe('ordering and reference stability', () => {
 
     await useMessageStore.getState().sendMessage(contactUserId, 'No dupes');
 
-    // Wait for SDK confirm (optimistic removed)
+    // Wait for SDK confirm (pendingToRealId set, key transferred)
     await vi.waitFor(() => {
-      const opts = useMessageStore
-        .getState()
-        .optimisticByContact.get(contactUserId);
-      expect(opts ?? []).toHaveLength(0);
+      expect(getStableKey(42)).toMatch(/^msg-seq-/);
     });
 
-    // Now poll also returns id=42 in confirmed
+    // Optimistic still present (stays until poll cleanup)
+    const optsBefore = useMessageStore
+      .getState()
+      .optimisticByContact.get(contactUserId);
+    expect(optsBefore).toHaveLength(1);
+
+    // Now poll returns id=42 in confirmed — triggers cleanup
     mockSdk.discussions.list.mockResolvedValue([{ contactUserId }]);
     mockSdk.messages.getVisibleMessages.mockResolvedValue([realMsg]);
     mockSdk.messages.getReactions.mockResolvedValue([]);
 
     await useMessageStore.getState().init();
+
+    // After poll: optimistic cleaned up, confirmed has the real message
+    const optsAfter = useMessageStore
+      .getState()
+      .optimisticByContact.get(contactUserId);
+    expect(optsAfter ?? []).toHaveLength(0);
 
     const msgs = useMessageStore
       .getState()
@@ -866,17 +886,15 @@ describe('mergeMessages via getMessagesForContact', () => {
   });
 
   it('excludes optimistic when confirmed has the mapped real id', async () => {
-    // Simulate: sendMessage completed, optimistic still present, but confirmed
-    // already has the real message from a poll.
+    // Simulate: sendMessage completed, optimistic still present, confirmed
+    // now has the real message. The merge should exclude the optimistic.
     const realMsg = makeMessage({
       id: 42,
       content: 'real msg',
       timestamp: new Date('2024-01-01T10:00:00Z'),
     });
 
-    // Set up: confirmed has the real message, optimistic still has the pending one
-    // We need pendingToRealId to be set. We'll achieve this by going through
-    // the real sendMessage flow.
+    // Go through the real sendMessage flow so pendingToRealId is set
     mockSdk.discussions.get.mockResolvedValue({ contactUserId });
     mockSdk.messages.send.mockResolvedValue({
       success: true,
@@ -885,21 +903,25 @@ describe('mergeMessages via getMessagesForContact', () => {
 
     await useMessageStore.getState().sendMessage(contactUserId, 'real msg');
 
-    // Wait for optimistic to be removed
+    // Wait for SDK confirm (pendingToRealId set, key transferred)
     await vi.waitFor(() => {
-      const opts = useMessageStore
-        .getState()
-        .optimisticByContact.get(contactUserId);
-      expect(opts ?? []).toHaveLength(0);
+      expect(getStableKey(42)).toMatch(/^msg-seq-/);
     });
 
-    // Now simulate poll adding the confirmed message
+    // Optimistic is still in the layer (new behavior)
+    const opts = useMessageStore
+      .getState()
+      .optimisticByContact.get(contactUserId);
+    expect(opts).toHaveLength(1);
+
+    // Simulate poll adding the confirmed message to confirmed layer
     useMessageStore.setState({
       ...useMessageStore.getState(),
       confirmedByContact: new Map([[contactUserId, [realMsg]]]),
     });
 
-    // Merged view should have exactly 1 message
+    // Merged view: optimistic is excluded because pendingToRealId maps it
+    // to id=42 which exists in confirmed. Only the confirmed version shows.
     const msgs = useMessageStore
       .getState()
       .getMessagesForContact(contactUserId);
@@ -969,13 +991,16 @@ describe('getStableKey', () => {
       .optimisticByContact.get(contactUserId)!;
     const keyBefore = getStableKey(optsBefore[0].id!);
 
-    // Wait for optimistic removal (SDK success)
+    // Wait for SDK success (pendingToRealId set, key transferred to real id)
     await vi.waitFor(() => {
-      const opts = useMessageStore
-        .getState()
-        .optimisticByContact.get(contactUserId);
-      expect(opts ?? []).toHaveLength(0);
+      expect(getStableKey(42)).toMatch(/^msg-seq-/);
     });
+
+    // Optimistic still present (stays until poll)
+    const optsAfter = useMessageStore
+      .getState()
+      .optimisticByContact.get(contactUserId);
+    expect(optsAfter).toHaveLength(1);
 
     // Key for real id=42 must be the SAME (stable key transferred)
     const keyAfter = getStableKey(42);
