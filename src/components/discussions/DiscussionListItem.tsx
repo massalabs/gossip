@@ -1,10 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Contact, SessionStatus, SELF_CONTACT_ID } from '@massalabs/gossip-sdk';
+import { Contact, SessionStatus } from '@massalabs/gossip-sdk';
 import type { Discussion } from '@massalabs/gossip-sdk';
 import { Bookmark, Edit2 } from 'react-feather';
 import ContactAvatar from '../avatar/ContactAvatar';
-import { BookOpen } from 'react-feather';
 import { formatRelativeTime } from '../../utils/timeUtils';
 import { formatUserId } from '@massalabs/gossip-sdk';
 import BaseModal from '../ui/BaseModal';
@@ -156,19 +155,11 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
         onContextMenu={longPress.onContextMenu}
       >
         <div className="flex items-center space-x-3">
-          {discussion.contactUserId === SELF_CONTACT_ID ? (
-            <div className="w-12 h-12 rounded-full bg-accent/20 flex items-center justify-center">
-              <BookOpen className="w-6 h-6 text-accent" />
-            </div>
-          ) : (
-            <ContactAvatar contact={contact} size={12} />
-          )}
+          <ContactAvatar contact={contact} size={12} />
           <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-medium text-foreground truncate flex items-center gap-1">
-                {discussion.contactUserId === SELF_CONTACT_ID
-                  ? t('selfDiscussion.title')
-                  : discussion.customName || contact.name}
+                {discussion.customName || contact.name}
                 {discussion.pinned && (
                   <Bookmark className="w-3 h-3 text-muted-foreground flex-shrink-0" />
                 )}
@@ -301,11 +292,9 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
               </>
             ) : (
               <div className="flex items-center justify-between mt-1">
-                {discussion.contactUserId !== SELF_CONTACT_ID && (
-                  <p className="text-sm text-muted-foreground truncate">
-                    {lastMessage?.content || ''}
-                  </p>
-                )}
+                <p className="text-sm text-muted-foreground truncate">
+                  {lastMessage?.content || ''}
+                </p>
                 {discussion.unreadCount > 0 && (
                   <span className="inline-flex items-center justify-center px-2 py-1 text-xs font-bold leading-none text-primary-foreground bg-primary rounded-full">
                     {discussion.unreadCount}

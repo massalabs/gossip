@@ -29,7 +29,6 @@ import { getActiveOrFirstProfile } from './utils/getAccount';
 import { auth } from './utils/auth';
 import { useDiscussionStore } from './discussionStore';
 import { useMessageStore } from './messageStore';
-import { useSelfMessageStore } from './selfMessageStore';
 
 type accountProvisionResult = {
   encryptionKey: EncryptionKey;
@@ -449,7 +448,6 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         await cleanupSession();
         useDiscussionStore.getState().cleanup();
         useMessageStore.getState().cleanup();
-        useSelfMessageStore.getState().clearMessages();
 
         // Clear all DB tables (conversations, contacts, profiles, seekers, etc.)
         try {
@@ -476,7 +474,6 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         await cleanupSession();
         useDiscussionStore.getState().cleanup();
         useMessageStore.getState().cleanup();
-        useSelfMessageStore.getState().clearMessages();
         // Clear in-memory state but keep data in database
         // Keep isInitialized true so user goes to login screen
         // Set lockedByUser to skip biometric auto-login on the login screen

@@ -61,7 +61,6 @@ import { RefreshService } from './services/refresh.js';
 import { AuthService } from './services/auth.js';
 import { ProfileService } from './services/profile.js';
 import { ContactService } from './services/contact.js';
-import { SelfMessageService } from './services/selfMessage.js';
 import {
   validateUserIdFormat,
   validateUsernameFormat,
@@ -177,7 +176,6 @@ class GossipSdk {
   private _message: MessageService | null = null;
   private _refresh: RefreshService | null = null;
   private _contact: ContactService | null = null;
-  private _selfMessage: SelfMessageService | null = null;
 
   // ─────────────────────────────────────────────────────────────────
   // Lifecycle
@@ -326,13 +324,6 @@ class GossipSdk {
       this.config
     );
 
-    this._selfMessage = new SelfMessageService(
-      queries,
-      session.userIdEncoded,
-      encryptionKey
-    );
-    await this._selfMessage.ensureDiscussionExists();
-
     // Publish gossip ID (public key) on messageProtocol so the user is discoverable.
     // Non-blocking: login must succeed even when the API is unreachable.
     this._auth!.publishPublicKey(
@@ -399,7 +390,6 @@ class GossipSdk {
     this._message = null;
     this._refresh = null;
     this._contact = null;
-    this._selfMessage = null;
 
     // Clear message queues
     this.messageQueues.clear();
@@ -547,15 +537,6 @@ class GossipSdk {
       throw new Error('Contact service not initialized');
     }
     return this._contact;
-  }
-
-  /** Self-message service */
-  get selfMessages(): SelfMessageService {
-    this.requireSession();
-    if (!this._selfMessage) {
-      throw new Error('Self-message service not initialized');
-    }
-    return this._selfMessage;
   }
 
   /**

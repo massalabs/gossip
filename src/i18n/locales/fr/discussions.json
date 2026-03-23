@@ -106,11 +106,6 @@
     "subtitle": "Mise en place du chiffrement de bout en bout..."
   },
   "loading_messages": "Chargement des messages...",
-  "selfDiscussion": {
-    "title": "Mes notes",
-    "placeholder": "Écrivez une note...",
-    "emptyState": "Vos notes privées apparaîtront ici"
-  },
   "message_item": {
     "double_tap_reply": "Appuyez deux fois pour répondre",
     "sent_message": "Message envoyé",

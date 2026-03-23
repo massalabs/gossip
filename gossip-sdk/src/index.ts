@@ -28,4 +28,3 @@ export * from './wasm/index.js';
 export * from './db/db.js';
 export * from './db/queries/index.js';
 export * from './db/sqlite.js';
-export { SELF_CONTACT_ID } from './services/selfMessage.js';
