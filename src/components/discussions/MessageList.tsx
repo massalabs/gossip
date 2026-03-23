@@ -240,13 +240,13 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
             return 'spacer';
           case 'message': {
             const msg = item.message;
-            // Outgoing messages use content-based keys so the key stays
-            // stable when a pending message (id < 0) is promoted to its
-            // confirmed counterpart (id > 0). Without this, Virtuoso
-            // unmounts + remounts the item, causing a visible scroll jump.
-            if (msg.direction === MessageDirection.OUTGOING) {
-              return `msg-out-${msg.timestamp.getTime()}-${msg.content.slice(0, 32)}`;
-            }
+            // Key must be unique AND stable across the optimistic→confirmed
+            // id swap. We use timestamp + id: the swap now preserves the
+            // optimistic timestamp (see messageStore), so timestamp stays
+            // constant. The id changes (-N → real), but combined with the
+            // stable timestamp it keeps the item at the same position.
+            // Previous content-based key caused collisions when sending the
+            // same text multiple times (e.g. "a", "a", "a").
             if (msg.id != null) return `msg-${msg.id}`;
             return `msg-temp-${msg.timestamp.getTime()}-${msg.content.slice(0, 16)}`;
           }

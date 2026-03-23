@@ -523,6 +523,48 @@ describe('sendMessage optimistic flow', () => {
     expect(msgs![0].status).toBe(MessageStatus.SENT);
   });
 
+  it('preserves optimistic timestamp during id swap', async () => {
+    const optimisticTimestamp = new Date('2025-06-01T12:00:00.000Z');
+    vi.setSystemTime(optimisticTimestamp);
+
+    const sdkTimestamp = new Date('2025-06-01T12:00:00.500Z'); // 500ms later
+    const realMessage: Message = {
+      id: 77,
+      ownerUserId: 'test-user-id',
+      contactUserId,
+      content: 'Timestamp test',
+      type: MessageType.TEXT,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.WAITING_SESSION,
+      timestamp: sdkTimestamp,
+    };
+
+    mockSdk.discussions.get.mockResolvedValue({ contactUserId });
+    mockSdk.messages.send.mockResolvedValue({
+      success: true,
+      message: realMessage,
+    });
+
+    await useMessageStore
+      .getState()
+      .sendMessage(contactUserId, 'Timestamp test');
+
+    await vi.waitFor(() => {
+      const msgs = useMessageStore
+        .getState()
+        .messagesByContact.get(contactUserId);
+      expect(msgs![0].id).toBe(77);
+    });
+
+    const msgs = useMessageStore
+      .getState()
+      .messagesByContact.get(contactUserId);
+    // Timestamp must stay as the optimistic one, NOT the SDK's
+    expect(msgs![0].timestamp.getTime()).toBe(optimisticTimestamp.getTime());
+
+    vi.useRealTimers();
+  });
+
   it('does not send when content is empty', async () => {
     await useMessageStore.getState().sendMessage(contactUserId, '   ');
 

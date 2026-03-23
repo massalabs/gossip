@@ -478,6 +478,9 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
 
           // Swap optimistic → confirmed immediately.
           // Keep the higher status so the check doesn't flicker.
+          // Preserve the optimistic timestamp so the Virtuoso key stays
+          // stable (key = timestamp + content). Using the SDK's timestamp
+          // would change the key, causing unmount/remount and a visual flash.
           set(state => {
             const msgs = state.messagesByContact.get(contactUserId);
             if (!msgs) return state;
@@ -488,7 +491,12 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
                 ? msgs[idx].status
                 : realMsg.status;
             const updated = [...msgs];
-            updated[idx] = { ...realMsg, status: kept };
+            updated[idx] = {
+              ...msgs[idx],
+              id: realMsg.id,
+              messageId: realMsg.messageId,
+              status: kept,
+            };
             const newMap = new Map(state.messagesByContact);
             newMap.set(contactUserId, updated);
             return { messagesByContact: newMap };
