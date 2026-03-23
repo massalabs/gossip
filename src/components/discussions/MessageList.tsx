@@ -249,10 +249,20 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
       }
     }, []);
 
-    // Render individual item
+    // Render individual item — uses refs for data that changes on every
+    // poll (virtualItems, highlightedMessageId, selectedMessageIds) so
+    // the callback identity stays stable. A new itemContent function
+    // makes Virtuoso re-render every visible item and recalculate scroll.
+    const highlightedMessageIdRef = useRef(highlightedMessageId);
+    highlightedMessageIdRef.current = highlightedMessageId;
+    const selectedMessageIdsRef = useRef(selectedMessageIds);
+    selectedMessageIdsRef.current = selectedMessageIds;
+    const isSelectingRef = useRef(isSelecting);
+    isSelectingRef.current = isSelecting;
+
     const itemContent = useCallback(
       (index: number) => {
-        const item: VirtualItem | undefined = virtualItems[index];
+        const item: VirtualItem | undefined = virtualItemsRef.current[index];
         if (!item) return null;
 
         switch (item.type) {
@@ -272,13 +282,9 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
             return <SpacerRenderer key="spacer" />;
 
           case 'message': {
-            // Outgoing messages use content-based key (stable across
-            // pending→confirmed id change, prevents unmount/remount).
             const msg = item.message;
             const reactKey =
-              msg.direction === MessageDirection.OUTGOING
-                ? `msg-out-${msg.timestamp.getTime()}-${msg.content.slice(0, 32)}`
-                : (msg.id ?? `temp-msg-${index}`);
+              msg.id != null ? getStableKey(msg.id) : `temp-msg-${index}`;
             return (
               <MessageRenderer
                 key={reactKey}
@@ -294,11 +300,10 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
                 onToggleReaction={onToggleReaction}
                 getReactionsForMessage={getReactionsForMessage}
                 contact={contact}
-                isHighlighted={item.message.id === highlightedMessageId}
-                isSelecting={isSelecting}
+                isHighlighted={msg.id === highlightedMessageIdRef.current}
+                isSelecting={isSelectingRef.current}
                 isSelected={
-                  item.message.id != null &&
-                  selectedMessageIds?.has(item.message.id)
+                  msg.id != null && selectedMessageIdsRef.current?.has(msg.id)
                 }
                 onToggleSelect={onToggleSelect}
               />
@@ -310,20 +315,15 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
         }
       },
       [
-        virtualItems,
         onReplyTo,
         onForward,
         onDelete,
         onEdit,
-
         onScrollToMessage,
         onReact,
         onToggleReaction,
         getReactionsForMessage,
         contact,
-        highlightedMessageId,
-        isSelecting,
-        selectedMessageIds,
         onToggleSelect,
       ]
     );
