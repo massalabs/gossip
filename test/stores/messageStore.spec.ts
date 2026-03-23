@@ -17,11 +17,13 @@ const mockSdk = {
     getVisibleMessages: vi.fn(async () => [] as Message[]),
     getReactions: vi.fn(async () => [] as Message[]),
     get: vi.fn(async () => undefined as unknown as Message | undefined),
+    send: vi.fn(async () => ({ success: true })),
     sendReaction: vi.fn(async () => ({ success: true })),
     deleteMessage: vi.fn(async () => true),
   },
   discussions: {
     list: vi.fn(async () => []),
+    get: vi.fn(async () => undefined),
   },
   on: vi.fn(),
   off: vi.fn(),
@@ -303,5 +305,154 @@ describe('MessageStore reactions', () => {
     expect(mockSdk.messages.deleteMessage).toHaveBeenCalledTimes(2);
     expect(mockSdk.messages.deleteMessage).toHaveBeenCalledWith(reaction1.id);
     expect(mockSdk.messages.deleteMessage).toHaveBeenCalledWith(reaction2.id);
+  });
+});
+
+describe('sendMessage optimistic flow', () => {
+  const contactUserId = 'contact-1';
+
+  beforeEach(() => {
+    useMessageStore.setState({
+      messagesByContact: new Map(),
+      reactionsByContact: new Map(),
+      currentContactUserId: null,
+      isLoading: false,
+      pollTimer: null,
+      eventHandler: null,
+      cancelDebounce: null,
+      isInitializing: false,
+    } as unknown as ReturnType<(typeof useMessageStore)['getState']>);
+
+    mockSdk.isSessionOpen = true;
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    useMessageStore.getState().cleanup();
+  });
+
+  it('adds message to store immediately with negative id', async () => {
+    // SDK send never resolves — simulates in-flight request
+    mockSdk.discussions.get.mockReturnValue(
+      new Promise(() => {}) as Promise<undefined>
+    );
+
+    await useMessageStore
+      .getState()
+      .sendMessage(contactUserId, 'Hello optimistic');
+
+    const msgs = useMessageStore
+      .getState()
+      .messagesByContact.get(contactUserId);
+    expect(msgs).toHaveLength(1);
+    expect(msgs![0].id).toBeLessThan(0);
+    expect(msgs![0].content).toBe('Hello optimistic');
+    expect(msgs![0].status).toBe(MessageStatus.SENT);
+    expect(msgs![0].direction).toBe(MessageDirection.OUTGOING);
+  });
+
+  it('swaps negative id for real id on SDK success', async () => {
+    const realMessage: Message = {
+      id: 42,
+      ownerUserId: 'test-user-id',
+      contactUserId,
+      content: 'Hello swap',
+      type: MessageType.TEXT,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.SENT,
+      timestamp: new Date(),
+    };
+
+    mockSdk.discussions.get.mockResolvedValue({ contactUserId });
+    mockSdk.messages.send.mockResolvedValue({
+      success: true,
+      message: realMessage,
+    });
+
+    await useMessageStore.getState().sendMessage(contactUserId, 'Hello swap');
+
+    // The fire-and-forget async block runs in the background.
+    // Wait until the store has the swapped message with real id.
+    await vi.waitFor(() => {
+      const msgs = useMessageStore
+        .getState()
+        .messagesByContact.get(contactUserId);
+      expect(msgs).toHaveLength(1);
+      expect(msgs![0].id).toBe(42);
+    });
+  });
+
+  it('removes message from store on SDK error', async () => {
+    mockSdk.discussions.get.mockRejectedValue(new Error('network error'));
+
+    await useMessageStore.getState().sendMessage(contactUserId, 'Will fail');
+
+    // After the fire-and-forget block catches the error, the message is removed.
+    await vi.waitFor(() => {
+      const msgs = useMessageStore
+        .getState()
+        .messagesByContact.get(contactUserId);
+      expect(msgs).toHaveLength(0);
+    });
+  });
+
+  it('preserves higher status on swap (no downgrade)', async () => {
+    const realMessage: Message = {
+      id: 99,
+      ownerUserId: 'test-user-id',
+      contactUserId,
+      content: 'Status test',
+      type: MessageType.TEXT,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.WAITING_SESSION, // lower status from SDK
+      timestamp: new Date(),
+    };
+
+    mockSdk.discussions.get.mockResolvedValue({ contactUserId });
+    mockSdk.messages.send.mockResolvedValue({
+      success: true,
+      message: realMessage,
+    });
+
+    await useMessageStore.getState().sendMessage(contactUserId, 'Status test');
+
+    // Wait for the swap
+    await vi.waitFor(() => {
+      const msgs = useMessageStore
+        .getState()
+        .messagesByContact.get(contactUserId);
+      expect(msgs).toHaveLength(1);
+      expect(msgs![0].id).toBe(99);
+    });
+
+    // Status should remain SENT (higher rank), not downgrade to WAITING_SESSION
+    const msgs = useMessageStore
+      .getState()
+      .messagesByContact.get(contactUserId);
+    expect(msgs![0].status).toBe(MessageStatus.SENT);
+  });
+
+  it('does not send when content is empty', async () => {
+    await useMessageStore.getState().sendMessage(contactUserId, '   ');
+
+    const msgs = useMessageStore
+      .getState()
+      .messagesByContact.get(contactUserId);
+    expect(msgs).toBeUndefined();
+    expect(mockSdk.messages.send).not.toHaveBeenCalled();
+  });
+
+  it('does not send when session is closed', async () => {
+    mockSdk.isSessionOpen = false;
+
+    await useMessageStore
+      .getState()
+      .sendMessage(contactUserId, 'Should not send');
+
+    const msgs = useMessageStore
+      .getState()
+      .messagesByContact.get(contactUserId);
+    expect(msgs).toBeUndefined();
+    expect(mockSdk.messages.send).not.toHaveBeenCalled();
   });
 });
