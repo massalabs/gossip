@@ -541,4 +541,101 @@ describe('MessageItem', () => {
         .not.toBeInTheDocument();
     });
   });
+
+  describe('status indicators', () => {
+    /**
+     * Helper: find the status container inside the rendered listitem.
+     *
+     * The status container is an outer div with an aria-label that includes the
+     * message status value (e.g. "sent", "delivered"). We locate it by scanning
+     * for an aria-label that contains the raw status string, which works
+     * regardless of the browser locale (the status enum value is interpolated
+     * verbatim into the translated template).
+     */
+    function getStatusContainer(root: HTMLElement, status: string) {
+      return root.querySelector<HTMLElement>(`[aria-label*="${status}"]`);
+    }
+
+    it('shows no check icon for optimistic message (negative id)', async () => {
+      render(
+        <MessageItem
+          message={makeMessage({
+            id: -1,
+            direction: MessageDirection.OUTGOING,
+            status: MessageStatus.SENT,
+          })}
+        />
+      );
+
+      const listItem = page.getByRole('listitem').element() as HTMLElement;
+      const statusDiv = getStatusContainer(listItem, 'sent');
+
+      // Status container should exist (outgoing message)
+      expect(statusDiv).not.toBeNull();
+
+      // The fixed-size inner container should be empty — no check icon
+      // because (message.id ?? 0) > 0 is false for id = -1
+      const svgs = statusDiv!.querySelectorAll('svg');
+      expect(svgs.length).toBe(0);
+    });
+
+    it('shows single check for confirmed SENT message', async () => {
+      render(
+        <MessageItem
+          message={makeMessage({
+            id: 42,
+            direction: MessageDirection.OUTGOING,
+            status: MessageStatus.SENT,
+          })}
+        />
+      );
+
+      const listItem = page.getByRole('listitem').element() as HTMLElement;
+      const statusDiv = getStatusContainer(listItem, 'sent');
+
+      expect(statusDiv).not.toBeNull();
+
+      // Single check: exactly one SVG (the CheckIcon)
+      const svgs = statusDiv!.querySelectorAll('svg');
+      expect(svgs.length).toBe(1);
+    });
+
+    it('shows double check for DELIVERED message', async () => {
+      render(
+        <MessageItem
+          message={makeMessage({
+            id: 42,
+            direction: MessageDirection.OUTGOING,
+            status: MessageStatus.DELIVERED,
+          })}
+        />
+      );
+
+      const listItem = page.getByRole('listitem').element() as HTMLElement;
+      const statusDiv = getStatusContainer(listItem, 'delivered');
+
+      expect(statusDiv).not.toBeNull();
+
+      // Double check: two SVGs (two CheckIcons stacked)
+      const svgs = statusDiv!.querySelectorAll('svg');
+      expect(svgs.length).toBe(2);
+    });
+
+    it('shows no status indicator for incoming messages', async () => {
+      render(
+        <MessageItem
+          message={makeMessage({
+            id: 42,
+            direction: MessageDirection.INCOMING,
+            status: MessageStatus.DELIVERED,
+          })}
+        />
+      );
+
+      const listItem = page.getByRole('listitem').element() as HTMLElement;
+      // For incoming messages, no status container should be rendered
+      const statusDiv = getStatusContainer(listItem, 'delivered');
+      expect(statusDiv).toBeNull();
+    });
+  });
 });
