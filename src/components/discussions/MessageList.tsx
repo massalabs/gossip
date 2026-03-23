@@ -8,6 +8,7 @@ import React, {
 import { MessageDirection, Message } from '@massalabs/gossip-sdk';
 import type { Discussion, Contact } from '@massalabs/gossip-sdk';
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
+import { getStableKey } from '../../stores/messageStore';
 
 import LoadingState from './LoadingState';
 import EmptyState from './EmptyState';
@@ -240,7 +241,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
           return 'spacer';
         case 'message': {
           const msg = item.message;
-          if (msg.id != null) return `msg-${msg.id}`;
+          if (msg.id != null) return getStableKey(msg.id);
           return `msg-temp-${msg.timestamp.getTime()}-${msg.content.slice(0, 16)}`;
         }
         default:

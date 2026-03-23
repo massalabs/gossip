@@ -37,6 +37,21 @@ const statusRank = (s: string): number => STATUS_RANK[s] ?? -1;
  */
 const pendingToRealId = new Map<number, number>();
 
+/**
+ * Stable key for Virtuoso: maps message id → sequence number.
+ * The sequence number is assigned once when the optimistic message is
+ * created and transferred to the real id during the swap. This ensures
+ * Virtuoso sees the same key across the id change, preventing
+ * unmount/remount flicker.
+ */
+const clientSeq = new Map<number, number>();
+
+/** Get a stable Virtuoso key for any message id. */
+export const getStableKey = (msgId: number): string => {
+  const seq = clientSeq.get(msgId);
+  return seq != null ? `msg-seq-${seq}` : `msg-${msgId}`;
+};
+
 /** Check if a DB message confirms an optimistic one. */
 const isConfirmed = (opt: Message, db: Message): boolean => {
   const realId = pendingToRealId.get(opt.id!);
@@ -402,6 +417,7 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
       return;
 
     // Optimistic UI FIRST — zero await before showing the message.
+    const seq = ++optimisticIdCounter;
     const optimisticMessage: Message = {
       ownerUserId: userProfile.userId,
       contactUserId,
@@ -410,8 +426,9 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
       direction: MessageDirection.OUTGOING,
       status: MessageStatus.SENT,
       timestamp: new Date(),
-      id: -++optimisticIdCounter,
+      id: -seq,
     };
+    clientSeq.set(-seq, seq);
 
     const currentMessages = get().messagesByContact.get(contactUserId) || [];
     const newMap = new Map(get().messagesByContact);
@@ -474,12 +491,13 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
         if (result.message?.id) {
           const realMsg = result.message;
           pendingToRealId.set(optimisticMessage.id!, realMsg.id!);
+          // Transfer stable key: seq stays the same across id change
+          const seqVal = clientSeq.get(optimisticMessage.id!);
+          if (seqVal != null) {
+            clientSeq.set(realMsg.id!, seqVal);
+            clientSeq.delete(optimisticMessage.id!);
+          }
 
-          // Swap optimistic → confirmed immediately.
-          // Keep the higher status so the check doesn't flicker.
-          // Preserve the optimistic timestamp so the Virtuoso key stays
-          // stable (key = timestamp + content). Using the SDK's timestamp
-          // would change the key, causing unmount/remount and a visual flash.
           set(state => {
             const msgs = state.messagesByContact.get(contactUserId);
             if (!msgs) return state;
@@ -772,6 +790,7 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
       }
     }
     pendingToRealId.clear();
+    clientSeq.clear();
     set({
       pollTimer: null,
       eventHandler: null,
