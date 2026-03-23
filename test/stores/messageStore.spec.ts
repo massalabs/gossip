@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   useMessageStore,
+  getStableKey,
   type ReactionGroup,
 } from '../../src/stores/messageStore';
 import {
@@ -999,6 +1000,125 @@ describe('ordering and reference stability', () => {
     // Message survives thanks to pendingToRealId keeping it
     expect(msgs).toHaveLength(1);
     expect(msgs[0].id).toBe(42);
+  });
+});
+
+// ── Stable keys (clientSeq) ──────────────────────────────────────
+
+describe('getStableKey', () => {
+  const contactUserId = 'contact-1';
+
+  beforeEach(() => {
+    useMessageStore.setState({
+      messagesByContact: new Map(),
+      reactionsByContact: new Map(),
+      currentContactUserId: null,
+      isLoading: false,
+      pollTimer: null,
+      eventHandler: null,
+      cancelDebounce: null,
+      isInitializing: false,
+    } as unknown as ReturnType<(typeof useMessageStore)['getState']>);
+
+    mockSdk.isSessionOpen = true;
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    useMessageStore.getState().cleanup();
+  });
+
+  it('returns stable key for optimistic message', async () => {
+    mockSdk.messages.send.mockReturnValue(new Promise(() => {}));
+    mockSdk.discussions.get.mockResolvedValue({ contactUserId });
+
+    await useMessageStore.getState().sendMessage(contactUserId, 'key test');
+
+    const msgs = useMessageStore
+      .getState()
+      .messagesByContact.get(contactUserId)!;
+    const optId = msgs[0].id!;
+
+    // Optimistic message should have a seq-based key
+    const key = getStableKey(optId);
+    expect(key).toMatch(/^msg-seq-\d+$/);
+  });
+
+  it('key stays the same after id swap', async () => {
+    mockSdk.discussions.get.mockResolvedValue({ contactUserId });
+    mockSdk.messages.send.mockResolvedValue({
+      success: true,
+      message: makeMessage({
+        id: 42,
+        content: 'key test',
+        timestamp: new Date(),
+      }),
+    });
+
+    await useMessageStore.getState().sendMessage(contactUserId, 'key test');
+
+    // Capture key before swap
+    const msgsBefore = useMessageStore
+      .getState()
+      .messagesByContact.get(contactUserId)!;
+    const keyBefore = getStableKey(msgsBefore[0].id!);
+
+    // Wait for swap
+    await vi.waitFor(() => {
+      const msgs = useMessageStore
+        .getState()
+        .messagesByContact.get(contactUserId)!;
+      expect(msgs[0].id).toBe(42);
+    });
+
+    // Key after swap must be the SAME
+    const keyAfter = getStableKey(42);
+    expect(keyAfter).toBe(keyBefore);
+  });
+
+  it('each message gets a unique stable key', async () => {
+    mockSdk.messages.send.mockReturnValue(new Promise(() => {}));
+    mockSdk.discussions.get.mockResolvedValue({ contactUserId });
+
+    await useMessageStore.getState().sendMessage(contactUserId, 'a');
+    await useMessageStore.getState().sendMessage(contactUserId, 'a');
+    await useMessageStore.getState().sendMessage(contactUserId, 'a');
+
+    const msgs = useMessageStore
+      .getState()
+      .messagesByContact.get(contactUserId)!;
+
+    const keys = msgs.map(m => getStableKey(m.id!));
+    // All keys unique even though content is identical
+    expect(new Set(keys).size).toBe(3);
+    // All are seq-based
+    keys.forEach(k => expect(k).toMatch(/^msg-seq-\d+$/));
+  });
+
+  it('incoming messages use plain id key (no seq)', () => {
+    // Incoming messages never go through optimistic flow
+    const key = getStableKey(99);
+    expect(key).toBe('msg-99');
+  });
+
+  it('cleanup clears all seq mappings', async () => {
+    mockSdk.messages.send.mockReturnValue(new Promise(() => {}));
+    mockSdk.discussions.get.mockResolvedValue({ contactUserId });
+
+    await useMessageStore.getState().sendMessage(contactUserId, 'test');
+
+    const msgs = useMessageStore
+      .getState()
+      .messagesByContact.get(contactUserId)!;
+    const optId = msgs[0].id!;
+
+    // Before cleanup: seq key
+    expect(getStableKey(optId)).toMatch(/^msg-seq-/);
+
+    useMessageStore.getState().cleanup();
+
+    // After cleanup: falls back to plain id key
+    expect(getStableKey(optId)).toBe(`msg-${optId}`);
   });
 });
 
