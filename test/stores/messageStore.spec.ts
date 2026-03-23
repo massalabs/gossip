@@ -1012,3 +1012,259 @@ describe('ordering and reference stability', () => {
     expect(msgs[0].id).toBe(42);
   });
 });
+
+// ── Optimistic reactions ─────────────────────────────────────────
+
+describe('optimistic reactions', () => {
+  const contactUserId = 'contact-1';
+  const messageId = new Uint8Array(12).fill(42);
+
+  /** A confirmed text message that reactions target. */
+  const baseMessage: Message = {
+    id: 1,
+    messageId,
+    ownerUserId: 'test-user-id',
+    contactUserId,
+    content: 'Hello',
+    type: MessageType.TEXT,
+    direction: MessageDirection.INCOMING,
+    status: MessageStatus.DELIVERED,
+    timestamp: new Date('2024-01-01T10:00:00Z'),
+  };
+
+  beforeEach(() => {
+    useMessageStore.setState({
+      messagesByContact: new Map([[contactUserId, [baseMessage]]]),
+      reactionsByContact: new Map(),
+      currentContactUserId: null,
+      isLoading: false,
+      pollTimer: null,
+      eventHandler: null,
+      cancelDebounce: null,
+      isInitializing: false,
+    } as unknown as ReturnType<(typeof useMessageStore)['getState']>);
+
+    mockSdk.isSessionOpen = true;
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    useMessageStore.getState().cleanup();
+  });
+
+  it('reaction appears immediately in store with negative id', () => {
+    // SDK sendReaction never resolves — simulates in-flight request
+    mockSdk.messages.sendReaction.mockReturnValue(new Promise(() => {}));
+
+    useMessageStore
+      .getState()
+      .sendReaction(contactUserId, '👍', baseMessage.id!);
+
+    const reactions = useMessageStore
+      .getState()
+      .reactionsByContact.get(contactUserId);
+    expect(reactions).toHaveLength(1);
+    expect(reactions![0].id).toBeLessThan(0);
+    expect(reactions![0].content).toBe('👍');
+    expect(reactions![0].type).toBe(MessageType.REACTION);
+    expect(reactions![0].direction).toBe(MessageDirection.OUTGOING);
+    expect(reactions![0].reactionOf?.originalMsgId).toEqual(messageId);
+  });
+
+  it('reaction swaps to real id on SDK success', async () => {
+    const realReaction: Message = {
+      id: 99,
+      ownerUserId: 'test-user-id',
+      contactUserId,
+      content: '❤️',
+      type: MessageType.REACTION,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.SENT,
+      timestamp: new Date(),
+      reactionOf: { originalMsgId: messageId },
+    };
+
+    mockSdk.messages.sendReaction.mockResolvedValue({
+      success: true,
+      message: realReaction,
+    });
+
+    useMessageStore
+      .getState()
+      .sendReaction(contactUserId, '❤️', baseMessage.id!);
+
+    // Immediately: optimistic reaction with negative id
+    const reactionsImmediate = useMessageStore
+      .getState()
+      .reactionsByContact.get(contactUserId);
+    expect(reactionsImmediate).toHaveLength(1);
+    expect(reactionsImmediate![0].id).toBeLessThan(0);
+
+    // After fire-and-forget resolves: swapped to real id
+    await vi.waitFor(() => {
+      const reactions = useMessageStore
+        .getState()
+        .reactionsByContact.get(contactUserId);
+      expect(reactions).toHaveLength(1);
+      expect(reactions![0].id).toBe(99);
+    });
+  });
+
+  it('reaction is rolled back on SDK error', async () => {
+    mockSdk.messages.sendReaction.mockRejectedValue(new Error('network error'));
+
+    useMessageStore
+      .getState()
+      .sendReaction(contactUserId, '😂', baseMessage.id!);
+
+    // Immediately: optimistic reaction exists
+    const reactionsImmediate = useMessageStore
+      .getState()
+      .reactionsByContact.get(contactUserId);
+    expect(reactionsImmediate).toHaveLength(1);
+    expect(reactionsImmediate![0].id).toBeLessThan(0);
+    expect(reactionsImmediate![0].content).toBe('😂');
+
+    // After error: reaction is rolled back (removed)
+    await vi.waitFor(() => {
+      const reactions = useMessageStore
+        .getState()
+        .reactionsByContact.get(contactUserId);
+      expect(reactions).toHaveLength(0);
+    });
+  });
+
+  it('optimistic reaction survives poll until confirmed', async () => {
+    // SDK sendReaction never resolves — stays optimistic
+    mockSdk.messages.sendReaction.mockReturnValue(new Promise(() => {}));
+
+    useMessageStore
+      .getState()
+      .sendReaction(contactUserId, '🔥', baseMessage.id!);
+
+    // Verify optimistic reaction is in store
+    const reactionsBefore = useMessageStore
+      .getState()
+      .reactionsByContact.get(contactUserId);
+    expect(reactionsBefore).toHaveLength(1);
+    expect(reactionsBefore![0].id).toBeLessThan(0);
+
+    // Poll returns empty reactions from DB
+    mockSdk.discussions.list.mockResolvedValue([{ contactUserId }]);
+    mockSdk.messages.getVisibleMessages.mockResolvedValue([baseMessage]);
+    mockSdk.messages.getReactions.mockResolvedValue([]);
+
+    await useMessageStore.getState().init();
+
+    // Optimistic reaction survives the poll
+    const reactionsAfter = useMessageStore
+      .getState()
+      .reactionsByContact.get(contactUserId);
+    expect(reactionsAfter).toHaveLength(1);
+    expect(reactionsAfter![0].id).toBeLessThan(0);
+    expect(reactionsAfter![0].content).toBe('🔥');
+  });
+
+  it('removeReaction removes from store immediately', () => {
+    // Set up a confirmed reaction in the store
+    const confirmedReaction: Message = {
+      id: 50,
+      ownerUserId: 'test-user-id',
+      contactUserId,
+      content: '👍',
+      type: MessageType.REACTION,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.SENT,
+      timestamp: new Date(),
+      reactionOf: { originalMsgId: messageId },
+    };
+
+    useMessageStore.setState({
+      ...useMessageStore.getState(),
+      reactionsByContact: new Map([[contactUserId, [confirmedReaction]]]),
+    });
+
+    // Mock SDK calls to never resolve (so we only test the synchronous removal)
+    mockSdk.messages.get.mockReturnValue(new Promise(() => {}));
+
+    useMessageStore.getState().removeReaction(contactUserId, 50);
+
+    // Reaction is gone immediately
+    const reactions = useMessageStore
+      .getState()
+      .reactionsByContact.get(contactUserId);
+    expect(reactions).toHaveLength(0);
+  });
+
+  it('removeReaction rolls back on SDK delete error', async () => {
+    const confirmedReaction: Message = {
+      id: 50,
+      ownerUserId: 'test-user-id',
+      contactUserId,
+      content: '👍',
+      type: MessageType.REACTION,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.SENT,
+      timestamp: new Date(),
+      reactionOf: { originalMsgId: messageId },
+    };
+
+    useMessageStore.setState({
+      ...useMessageStore.getState(),
+      reactionsByContact: new Map([[contactUserId, [confirmedReaction]]]),
+    });
+
+    // SDK get rejects — triggers rollback
+    mockSdk.messages.get.mockRejectedValue(new Error('db error'));
+
+    useMessageStore.getState().removeReaction(contactUserId, 50);
+
+    // Immediately: removed from store
+    const reactionsImmediate = useMessageStore
+      .getState()
+      .reactionsByContact.get(contactUserId);
+    expect(reactionsImmediate).toHaveLength(0);
+
+    // After error: rolled back (re-added)
+    await vi.waitFor(() => {
+      const reactions = useMessageStore
+        .getState()
+        .reactionsByContact.get(contactUserId);
+      expect(reactions).toHaveLength(1);
+      expect(reactions![0].id).toBe(50);
+      expect(reactions![0].content).toBe('👍');
+    });
+  });
+
+  it('removing optimistic reaction (negative id) does not call SDK', () => {
+    // Add an optimistic reaction directly to the store
+    const optimisticReaction: Message = {
+      id: -77,
+      ownerUserId: 'test-user-id',
+      contactUserId,
+      content: '😮',
+      type: MessageType.REACTION,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.SENT,
+      timestamp: new Date(),
+      reactionOf: { originalMsgId: messageId },
+    };
+
+    useMessageStore.setState({
+      ...useMessageStore.getState(),
+      reactionsByContact: new Map([[contactUserId, [optimisticReaction]]]),
+    });
+
+    useMessageStore.getState().removeReaction(contactUserId, -77);
+
+    // Reaction is removed from store
+    const reactions = useMessageStore
+      .getState()
+      .reactionsByContact.get(contactUserId);
+    expect(reactions).toHaveLength(0);
+
+    // No SDK calls — negative id means no DB row to delete
+    expect(mockSdk.messages.get).not.toHaveBeenCalled();
+    expect(mockSdk.messages.deleteMessage).not.toHaveBeenCalled();
+  });
+});
