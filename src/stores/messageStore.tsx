@@ -263,7 +263,7 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
     // ── Targeted fetch (active contact only) ─────────────────
     let isFetchingSingle = false;
     const fetchForContact = async (contactUserId: string) => {
-      if (isFetchingSingle) return;
+      if (isFetchingSingle || activeSendCount > 0) return;
       isFetchingSingle = true;
       try {
         const sdk = getSdk();
@@ -288,7 +288,7 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
     // ── Full fetch (all contacts — polling fallback) ─────────
     let isFetching = false;
     const fetchAll = async () => {
-      if (isFetching) return;
+      if (isFetching || activeSendCount > 0) return;
       isFetching = true;
       try {
         const sdk = getSdk();
@@ -800,6 +800,7 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
     }
     pendingToRealId.clear();
     clientSeq.clear();
+    activeSendCount = 0;
     set({
       pollTimer: null,
       eventHandler: null,
