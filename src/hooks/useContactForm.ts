@@ -189,6 +189,16 @@ export function useContactForm() {
           // Fetch public key for the resolved gossip ID
           const publicKey = await getPublicKey(resolvedGossipId);
 
+          const existing = await gossip.contacts.get(resolvedGossipId);
+          if (existing) {
+            setUserId(prev => ({
+              ...prev,
+              error: 'This user is already in your contacts',
+              loading: false,
+            }));
+            return;
+          }
+
           setPublicKeys(publicKey);
           setUserId(prev => ({ ...prev, loading: false }));
           return;
@@ -234,6 +244,17 @@ export function useContactForm() {
 
       try {
         const publicKey = await getPublicKey(trimmed);
+
+        const existing = await gossip.contacts.get(trimmed);
+        if (existing) {
+          setUserId(prev => ({
+            ...prev,
+            error: 'This user is already in your contacts',
+            loading: false,
+          }));
+          return;
+        }
+
         setPublicKeys(publicKey);
         setUserId(prev => ({ ...prev, loading: false }));
       } catch (error) {
@@ -244,7 +265,7 @@ export function useContactForm() {
         }));
       }
     },
-    [getPublicKey, userProfile?.userId, mnsEnabled]
+    [getPublicKey, gossip.contacts, userProfile?.userId, mnsEnabled]
   );
 
   const handleMessageChange = useCallback((value: string) => {
