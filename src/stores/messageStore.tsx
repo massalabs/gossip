@@ -59,8 +59,33 @@ export const getStableKey = (msgId: number): string => {
  * are dropped — the confirmed version wins. Remaining optimistic messages
  * are appended and the result is sorted by timestamp.
  */
-function mergeMessages(confirmed: Message[], optimistic: Message[]): Message[] {
+/**
+ * Memoized merge cache — prevents creating a new array reference on
+ * every getMessagesForContact() call, which would trigger infinite
+ * re-renders via Zustand's useSyncExternalStore.
+ */
+const mergeCache = new Map<
+  string,
+  { confirmed: Message[]; optimistic: Message[]; result: Message[] }
+>();
+
+function mergeMessages(
+  contactUserId: string,
+  confirmed: Message[],
+  optimistic: Message[]
+): Message[] {
+  // Fast path: no optimistic → return confirmed directly (stable ref)
   if (optimistic.length === 0) return confirmed;
+
+  // Check cache: same inputs → same output (stable ref)
+  const cached = mergeCache.get(contactUserId);
+  if (
+    cached &&
+    cached.confirmed === confirmed &&
+    cached.optimistic === optimistic
+  ) {
+    return cached.result;
+  }
 
   const confirmedIds = new Set<number>();
   for (const m of confirmed) if (m.id != null) confirmedIds.add(m.id);
@@ -71,11 +96,17 @@ function mergeMessages(confirmed: Message[], optimistic: Message[]): Message[] {
     return true;
   });
 
-  if (pending.length === 0) return confirmed;
+  // All optimistic confirmed → return confirmed directly
+  if (pending.length === 0) {
+    mergeCache.set(contactUserId, { confirmed, optimistic, result: confirmed });
+    return confirmed;
+  }
 
-  return [...confirmed, ...pending].sort(
+  const result = [...confirmed, ...pending].sort(
     (a, b) => a.timestamp.getTime() - b.timestamp.getTime()
   );
+  mergeCache.set(contactUserId, { confirmed, optimistic, result });
+  return result;
 }
 
 /** Field-level comparison for confirmed messages (avoids spurious re-renders). */
@@ -512,7 +543,7 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
       get().confirmedByContact.get(contactUserId) || EMPTY_MESSAGES;
     const optimistic =
       get().optimisticByContact.get(contactUserId) || EMPTY_MESSAGES;
-    return mergeMessages(confirmed, optimistic);
+    return mergeMessages(contactUserId, confirmed, optimistic);
   },
 
   sendReaction: (contactUserId: string, emoji: string, messageDbId: number) => {
@@ -746,6 +777,7 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
     }
     pendingToRealId.clear();
     clientSeq.clear();
+    mergeCache.clear();
     set({
       pollTimer: null,
       eventHandler: null,
