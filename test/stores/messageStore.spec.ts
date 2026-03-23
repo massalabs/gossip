@@ -618,6 +618,38 @@ describe('reconciliation with polling', () => {
     expect(msgsAfterPoll![0].id).toBeLessThan(0);
     expect(msgsAfterPoll![0].content).toBe('Optimistic survivor');
   });
+
+  it('failed messages are preserved during reconciliation', async () => {
+    const failedMsg: Message = {
+      id: -5,
+      ownerUserId: 'test-user-id',
+      contactUserId,
+      content: 'Failed msg',
+      type: MessageType.TEXT,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.FAILED,
+      timestamp: new Date(),
+    };
+
+    useMessageStore.setState({
+      ...useMessageStore.getState(),
+      messagesByContact: new Map([[contactUserId, [failedMsg]]]),
+    });
+
+    // Poll returns empty — message not in DB
+    mockSdk.discussions.list.mockResolvedValue([{ contactUserId }]);
+    mockSdk.messages.getVisibleMessages.mockResolvedValue([]);
+    mockSdk.messages.getReactions.mockResolvedValue([]);
+
+    await useMessageStore.getState().init();
+
+    const msgs = useMessageStore
+      .getState()
+      .messagesByContact.get(contactUserId);
+    expect(msgs).toHaveLength(1);
+    expect(msgs![0].status).toBe(MessageStatus.FAILED);
+    expect(msgs![0].id).toBe(-5);
+  });
 });
 
 describe('ordering and reference stability', () => {
