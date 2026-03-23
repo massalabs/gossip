@@ -103,12 +103,12 @@ export default {
         'header-safe': 'calc(var(--sat) + var(--header-height, 3.5rem))',
         // Bottom nav + safe area
         'nav-safe': 'calc(var(--sab) + var(--bottom-nav-height, 4rem))',
-        // Padding pour header et bottom nav
+        // Padding for header and bottom nav
         'header-padding': 'var(--header-padding, 1.5rem)',
         'nav-padding': 'var(--nav-padding, 1.5rem)',
       },
 
-      // Pour top/bottom/left/right (fixed positioning)
+      // For top/bottom/left/right (fixed positioning)
       inset: {
         'safe-t': 'var(--sat)',
         'safe-b': 'var(--sab)',
@@ -116,11 +116,11 @@ export default {
         'safe-r': 'var(--sar)',
       },
 
-      // Pour min-height, height
+      // For min-height, height
       height: {
         'safe-t': 'var(--sat)',
         'safe-b': 'var(--sab)',
-        // Hauteur écran moins les safe areas
+        // Screen height minus safe areas
         'screen-safe': 'calc(100dvh - var(--sat) - var(--sab))',
         'bottom-nav': 'var(--bottom-nav-height, 4rem)',
         header: 'var(--header-height, 3.5rem)',
@@ -135,7 +135,7 @@ export default {
       },
 
       // ============================================
-      // ANIMATIONS (inchangé)
+      // ANIMATIONS (unchanged)
       // ============================================
       keyframes: {
         'spin-reverse': {

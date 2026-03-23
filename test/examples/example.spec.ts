@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { describe, it, expect } from 'vitest';
 import { ROUTES } from '../../src/constants/routes';
 import { encodeUserId, formatUserId } from '@massalabs/gossip-sdk';

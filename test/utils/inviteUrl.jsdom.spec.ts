@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { DEWEB_DEV_INVITE_DOMAIN } from '../../src/constants/links';
 import { AppRoute } from '../../src/constants/routes';

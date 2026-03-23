@@ -108,7 +108,7 @@ i18n
   .use(initReactI18next)
   .init({
     resources,
-    // Désactive le message console Locize / i18next (voir node_modules/i18next … showSupportNotice)
+    // Disable Locize / i18next console notice (see node_modules/i18next … showSupportNotice)
     showSupportNotice: false,
     fallbackLng: 'en',
     defaultNS: 'common',

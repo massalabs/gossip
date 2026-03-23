@@ -21,6 +21,7 @@ export default defineConfig({
     // The extension resolves paths relative to the config file location
     setupFiles: [resolve(__dirname, 'test/setup.ts')],
     include: ['test/**/*.{test,spec}.{js,ts,jsx,tsx}'],
+    exclude: ['test/**/*.browser.spec.*'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
