@@ -10,7 +10,8 @@
     "confirm": "Êtes-vous sûr de vouloir supprimer <strong>{{name}}</strong> de vos contacts ? Cela supprimera également tous les messages et discussions avec ce contact. Cette action est irréversible.",
     "removing": "Suppression...",
     "remove": "Supprimer",
-    "failed": "Échec de la suppression du contact. Veuillez réessayer."
+    "failed": "Échec de la suppression du contact. Veuillez réessayer.",
+    "rename_failed": "Échec du renommage du contact. Veuillez réessayer."
   },
   "name_empty": "Le nom ne peut pas être vide.",
   "new_contact": {

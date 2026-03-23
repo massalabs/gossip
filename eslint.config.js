@@ -15,6 +15,7 @@ export default tseslint.config(
       'android/**',
       'ios/**',
       '.worktrees/**',
+      '.claude/worktrees/**',
     ],
   },
   {

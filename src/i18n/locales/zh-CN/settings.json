@@ -71,7 +71,7 @@
     "never_share": "切勿分享此信息。任何拥有此信息的人都可以访问您的账户。",
     "private_key_warning": "<strong>警告：</strong>此 Massa 私钥无法用于恢复您的 Gossip 账户。仅在需要外部钱包兼容时使用。要恢复您的 Gossip 账户，必须使用 24 位助记词。",
     "password_required": "需要输入密码",
-    "show_failed": "显示备份信息失败"
+    "show_failed": "显示备份信息失败，请重试。"
   },
   "debug": {
     "title": "调试",

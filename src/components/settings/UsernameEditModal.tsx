@@ -104,11 +104,8 @@ const UsernameEditModal: React.FC<UsernameEditModalProps> = ({
         setIsValidating(false);
         return true;
       } catch (err) {
-        setError(
-          err instanceof Error
-            ? err.message
-            : t('edit_username_modal.username_check_failed')
-        );
+        console.error('Username validation failed:', err);
+        setError(t('edit_username_modal.username_check_failed'));
         setIsValidating(false);
         return false;
       }
@@ -200,11 +197,8 @@ const UsernameEditModal: React.FC<UsernameEditModalProps> = ({
       await onConfirmRef.current(trimmed);
       onCloseRef.current();
     } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : t('edit_username_modal.update_failed')
-      );
+      console.error('Username update failed:', err);
+      setError(t('edit_username_modal.update_failed'));
     } finally {
       setIsSubmitting(false);
     }

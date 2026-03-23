@@ -94,7 +94,7 @@ const AccountImport: React.FC<AccountImportProps> = ({
       onComplete();
     } catch (error) {
       console.error('Error importing account:', error);
-      setError(error instanceof Error ? error.message : t('import.failed'));
+      setError(t('import.failed'));
     } finally {
       setIsImporting(false);
     }

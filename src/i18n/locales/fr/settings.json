@@ -71,7 +71,7 @@
     "never_share": "Ne partagez jamais ces informations. Toute personne y ayant accès peut accéder à votre compte.",
     "private_key_warning": "<strong>Attention :</strong> Cette clé privée Massa ne peut pas être utilisée pour restaurer votre compte Gossip. Utilisez-la uniquement pour la compatibilité avec des portefeuilles externes. Pour restaurer votre compte Gossip, vous devez utiliser la phrase mnémonique de 24 mots.",
     "password_required": "Le mot de passe est requis",
-    "show_failed": "Échec de l'affichage des informations de sauvegarde"
+    "show_failed": "Échec de l'affichage des informations de sauvegarde. Veuillez réessayer."
   },
   "debug": {
     "title": "Débogage",

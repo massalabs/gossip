@@ -267,8 +267,8 @@ const SendModal: React.FC<SendModalProps> = ({
       if (loadingToast) {
         toast.dismiss(loadingToast);
       }
-      const errorMessage = err instanceof Error ? err.message : '';
-      toast.error(t('send.failed', { error: errorMessage }));
+      console.error('Transaction failed:', err);
+      toast.error(t('send.failed'));
     }
   }, [
     resetModalState,

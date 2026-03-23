@@ -22,7 +22,7 @@
     "insufficient_balance": "Solde insuffisant",
     "processing": "Transaction en cours...",
     "sending": "Envoi en cours...",
-    "failed": "Échec de la transaction : {{error}}"
+    "failed": "Échec de la transaction. Veuillez réessayer."
   },
   "receive": {
     "title": "Recevoir",

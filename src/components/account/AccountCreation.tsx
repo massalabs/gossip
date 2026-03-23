@@ -102,8 +102,8 @@ const AccountCreation: React.FC<AccountCreationProps> = ({
 
       onComplete();
     } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : t('create.failed');
-      setError(errorMsg);
+      console.error('Error creating account:', err);
+      setError(t('create.failed'));
       setIsCreating(false);
       setAccountCreationStarted(false);
     }

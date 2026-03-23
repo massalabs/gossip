@@ -22,7 +22,7 @@
     "insufficient_balance": "余额不足",
     "processing": "正在处理交易...",
     "sending": "发送中...",
-    "failed": "交易失败：{{error}}"
+    "failed": "交易失败，请重试。"
   },
   "receive": {
     "title": "接收",

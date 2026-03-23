@@ -56,12 +56,10 @@ export function useFileShareContact() {
         mimeType: 'text/yaml;charset=utf-8',
       });
     } catch (e) {
+      console.error('Failed to share file:', e);
       setFileState(prev => ({
         ...prev,
-        error:
-          e instanceof Error
-            ? `Failed to share file: ${e.message}`
-            : 'Failed to share file',
+        error: 'Failed to share file. Please try again.',
       }));
     }
   }, []);
@@ -89,9 +87,10 @@ export function useFileShareContact() {
           try {
             bytes = decodeFromBase64(data.userPubKeys);
           } catch (e) {
+            console.error('Invalid userPubKeys format:', e);
             setFileState(prev => ({
               ...prev,
-              error: 'Invalid userPubKeys format. Expected base64 string: ' + e,
+              error: 'Invalid contact file format. Please check the file.',
             }));
             return null;
           }
@@ -100,7 +99,7 @@ export function useFileShareContact() {
         } else {
           setFileState(prev => ({
             ...prev,
-            error: 'Invalid userPubKeys format.',
+            error: 'Invalid contact file format. Please check the file.',
           }));
           return null;
         }
@@ -109,9 +108,10 @@ export function useFileShareContact() {
         setFileState(prev => ({ ...prev, fileContact: contact }));
         return contact;
       } catch (e) {
+        console.error('Failed to import file:', e);
         setFileState(prev => ({
           ...prev,
-          error: `Failed to import file: ${e instanceof Error ? e.message : 'Unknown error'}`,
+          error: 'Failed to import file. Please check the file format.',
         }));
         return null;
       } finally {

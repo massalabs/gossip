@@ -1,8 +1,8 @@
 {
   "share_invitation_failed": "Failed to share invitation. Please try again.",
   "share_qr_failed": "Failed to share QR code. Please try again.",
-  "qr_parse_failed": "Failed to parse QR code: {{message}}",
-  "qr_scan_failed": "Failed to scan QR code: {{error}}",
+  "qr_parse_failed": "Invalid QR code. Please try again.",
+  "qr_scan_failed": "Failed to scan QR code. Please try again.",
   "cannot_add_self": "You cannot add yourself as a contact",
   "user_already_registered": "User already registered",
   "invalid_invite": "Invalid invite",

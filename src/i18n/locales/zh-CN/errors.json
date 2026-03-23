@@ -1,8 +1,8 @@
 {
   "share_invitation_failed": "分享邀请失败，请重试。",
   "share_qr_failed": "分享二维码失败，请重试。",
-  "qr_parse_failed": "解析二维码失败：{{message}}",
-  "qr_scan_failed": "扫描二维码失败：{{error}}",
+  "qr_parse_failed": "无效的二维码，请重试。",
+  "qr_scan_failed": "扫描二维码失败，请重试。",
   "cannot_add_self": "不能添加自己为联系人",
   "user_already_registered": "用户已注册",
   "invalid_invite": "无效的邀请",

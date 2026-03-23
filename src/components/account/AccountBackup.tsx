@@ -45,7 +45,8 @@ const AccountBackup: React.FC<AccountBackupProps> = ({ onBack }) => {
       setBackupInfo(backupInfo);
       setPrivateKeyString(backupInfo.account.privateKey.toString());
     } catch (e) {
-      const message = e instanceof Error ? e.message : t('backup.show_failed');
+      console.error('Error showing backup:', e);
+      const message = t('backup.show_failed');
       setError(message);
       setPasswordError(message);
     } finally {

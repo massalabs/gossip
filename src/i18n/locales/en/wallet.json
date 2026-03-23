@@ -22,7 +22,7 @@
     "insufficient_balance": "Insufficient balance",
     "processing": "Processing transaction...",
     "sending": "Sending...",
-    "failed": "Transaction failed: {{error}}"
+    "failed": "Transaction failed. Please try again."
   },
   "receive": {
     "title": "Receive",

@@ -203,9 +203,11 @@ export function useContactForm() {
           setUserId(prev => ({ ...prev, loading: false }));
           return;
         } catch (error) {
+          console.error('Failed to fetch public key:', error);
           setUserId(prev => ({
             ...prev,
-            error: error instanceof Error ? error.message : String(error),
+            error:
+              'Unable to load public key for this user ID. Please check it.',
             loading: false,
           }));
           return;
@@ -258,9 +260,10 @@ export function useContactForm() {
         setPublicKeys(publicKey);
         setUserId(prev => ({ ...prev, loading: false }));
       } catch (error) {
+        console.error('Failed to fetch public key:', error);
         setUserId(prev => ({
           ...prev,
-          error: error instanceof Error ? error.message : String(error),
+          error: 'Unable to load public key for this user ID. Please check it.',
           loading: false,
         }));
       }
@@ -419,7 +422,8 @@ export function useContactForm() {
         publicKeys
       );
       if (!result.success && result.error) {
-        setGeneralError(result.error);
+        console.error('Failed to add contact:', result.error);
+        setGeneralError('Failed to add contact. Please try again.');
         return;
       }
 

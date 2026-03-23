@@ -84,10 +84,11 @@ export function useAllowance(options: UseAllowanceOptions) {
 
         setState(prev => ({ ...prev, isPending: false, error: null }));
       } catch (error) {
+        console.error(`Failed to ${operationType} allowance:`, error);
         setState(prev => ({
           ...prev,
           error: {
-            message: `Failed to ${operationType} allowance: ${error instanceof Error ? error.message : 'Unknown error'}`,
+            message: `Failed to ${operationType} allowance. Please try again.`,
           },
         }));
       } finally {

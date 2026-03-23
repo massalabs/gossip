@@ -131,9 +131,10 @@ class MnsService {
         };
       }
 
+      console.error('Failed to resolve MNS domain:', message);
       return {
         success: false,
-        error: `Failed to resolve MNS domain: ${message}`,
+        error: 'Failed to resolve MNS domain. Please try again.',
       };
     }
   }

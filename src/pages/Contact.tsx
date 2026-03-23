@@ -73,14 +73,15 @@ const Contact: React.FC = () => {
       if (!contact) return;
       const result = await gossip.contacts.updateName(contact.userId, name);
       if (!result.success) {
-        setNameError(result.message);
+        console.error('Failed to update contact name:', result.message);
+        setNameError(t('remove_modal.rename_failed'));
         return;
       }
       setDisplayName(result.trimmedName);
       setIsNameModalOpen(false);
       setShowSuccessCheck(true);
     },
-    [gossip, contact]
+    [gossip, contact, t]
   );
 
   // Hide success check after 3 seconds
@@ -102,7 +103,8 @@ const Contact: React.FC = () => {
     try {
       const result = await gossip.contacts.delete(contact.userId);
       if (!result.success) {
-        setDeleteError(result.message);
+        console.error('Failed to delete contact:', result.message);
+        setDeleteError(t('remove_modal.failed'));
         setIsDeleting(false);
         return;
       }

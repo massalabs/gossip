@@ -10,7 +10,8 @@
     "confirm": "确定要将 <strong>{{name}}</strong> 从联系人中移除吗？这将同时删除与该联系人的所有消息和会话。此操作无法撤销。",
     "removing": "移除中...",
     "remove": "移除",
-    "failed": "删除联系人失败，请重试。"
+    "failed": "删除联系人失败，请重试。",
+    "rename_failed": "重命名联系人失败，请重试。"
   },
   "name_empty": "名称不能为空。",
   "new_contact": {

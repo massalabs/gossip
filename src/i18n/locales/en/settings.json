@@ -71,7 +71,7 @@
     "never_share": "Never share this information. Anyone with it can access your account.",
     "private_key_warning": "<strong>Warning:</strong> This Massa private key cannot be used to restore your Gossip account. Use this only for external wallet compatibility. To restore your Gossip account, you must use the 24-word mnemonic phrase.",
     "password_required": "Password is required",
-    "show_failed": "Failed to show backup information"
+    "show_failed": "Failed to show backup information. Please try again."
   },
   "debug": {
     "title": "Debug",

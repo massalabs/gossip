@@ -76,8 +76,9 @@ export function useHandleOperation(): UseHandleOperationResult {
           status === OperationStatus.Error ||
           status === OperationStatus.SpeculativeError
         ) {
+          console.error('Operation failed with status:', status);
           const error = {
-            message: `Operation failed with status: ${status}`,
+            message: 'Operation failed. Please try again.',
             status,
           };
           setState(prev => ({ ...prev, isPending: false, error }));
@@ -87,8 +88,9 @@ export function useHandleOperation(): UseHandleOperationResult {
         reset();
         return null;
       } catch (err) {
+        console.error('Operation error:', err);
         const error = {
-          message: err instanceof Error ? err.message : 'Unexpected error',
+          message: 'Operation failed. Please try again.',
         };
 
         setState(prev => ({ ...prev, isPending: false, error }));

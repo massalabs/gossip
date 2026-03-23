@@ -10,7 +10,8 @@
     "confirm": "Are you sure you want to remove <strong>{{name}}</strong> from your contacts? This will also delete all messages and discussions with this contact. This action cannot be undone.",
     "removing": "Removing...",
     "remove": "Remove",
-    "failed": "Failed to delete contact. Please try again."
+    "failed": "Failed to delete contact. Please try again.",
+    "rename_failed": "Failed to rename contact. Please try again."
   },
   "name_empty": "Name cannot be empty.",
   "new_contact": {

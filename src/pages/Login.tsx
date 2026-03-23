@@ -86,11 +86,8 @@ const Login: React.FC<LoginProps> = React.memo(
         await loadAccount(undefined, currentAccount?.userId);
         onAccountSelected();
       } catch (error) {
-        onErrorChange?.(
-          error instanceof Error
-            ? error.message
-            : 'Biometric authentication failed'
-        );
+        console.error('Biometric authentication failed:', error);
+        onErrorChange?.(t('login.biometric_failed'));
       } finally {
         setIsLoading(false);
       }
@@ -100,6 +97,7 @@ const Login: React.FC<LoginProps> = React.memo(
       onErrorChange,
       loadAccount,
       onAccountSelected,
+      t,
     ]);
 
     // Auto-trigger biometric auth when account is selected from account picker
