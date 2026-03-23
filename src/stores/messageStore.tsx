@@ -20,15 +20,6 @@ let activeSendCount = 0;
 
 const EMPTY_MESSAGES: Message[] = [];
 
-/** Status ranking — never downgrade visually. */
-const STATUS_RANK: Record<string, number> = {
-  [MessageStatus.WAITING_SESSION]: 0,
-  [MessageStatus.READY]: 1,
-  [MessageStatus.SENT]: 2,
-  [MessageStatus.DELIVERED]: 3,
-  [MessageStatus.READ]: 4,
-};
-
 /**
  * Reliable mapping from optimistic id (negative) → real DB id.
  * Set when the SDK send returns; used by mergeMessages to match
