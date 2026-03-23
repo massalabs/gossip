@@ -14,6 +14,7 @@ import { getSdk } from './sdkStore';
 const POLL_INTERVAL_MS = 3000;
 const EVENT_DEBOUNCE_MS = 30;
 let optimisticIdCounter = 0;
+let activeSendCount = 0;
 
 // ── Helpers ────────────────────────────────────────────────────
 
@@ -214,7 +215,7 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
     // ── Targeted fetch (active contact only) ─────────────────
     let isFetchingSingle = false;
     const fetchForContact = async (contactUserId: string) => {
-      if (isFetchingSingle) return;
+      if (isFetchingSingle || activeSendCount > 0) return;
       isFetchingSingle = true;
       try {
         const sdk = getSdk();
@@ -268,7 +269,7 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
     // ── Full fetch (all contacts — polling fallback) ─────────
     let isFetching = false;
     const fetchAll = async () => {
-      if (isFetching) return;
+      if (isFetching || activeSendCount > 0) return;
       isFetching = true;
       try {
         const sdk = getSdk();
@@ -390,6 +391,7 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
 
     let debounceTimer: ReturnType<typeof setTimeout> | null = null;
     const onEvent = () => {
+      if (activeSendCount > 0) return;
       if (debounceTimer) clearTimeout(debounceTimer);
       const active = get().currentContactUserId;
       debounceTimer = setTimeout(
@@ -456,6 +458,10 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
     set({ optimisticByContact: newOptMap });
 
     // Fire-and-forget — all async work runs in the background.
+    // Guard fetches while sends are in-flight: the SDK writes to DB
+    // before returning, so a poll could see the DB message before
+    // pendingToRealId is set, causing a temporary duplicate.
+    activeSendCount++;
     void (async () => {
       try {
         const discussion = await getSdk().discussions.get(contactUserId);
@@ -534,6 +540,8 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
         // (clock icon) — the next poll will either confirm it or it will
         // stay pending. Don't mark as FAILED for transient errors.
         console.error('Failed to send message:', error);
+      } finally {
+        activeSendCount--;
       }
     })();
   },
@@ -778,6 +786,7 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
     pendingToRealId.clear();
     clientSeq.clear();
     mergeCache.clear();
+    activeSendCount = 0;
     set({
       pollTimer: null,
       eventHandler: null,
