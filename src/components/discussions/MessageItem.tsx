@@ -55,6 +55,42 @@ const TOUCH_SLOP = 15;
 const TOUCH_SLOP_OUTGOING = 12;
 const POST_GESTURE_SUPPRESS_MS = 700;
 
+const ClockIcon: React.FC<{
+  className?: string;
+  'aria-label'?: string;
+}> = props => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    viewBox="0 0 16 16"
+    fill="currentColor"
+    {...props}
+  >
+    <path
+      fillRule="evenodd"
+      d="M8 15A7 7 0 1 0 8 1a7 7 0 0 0 0 14Zm.75-10.25a.75.75 0 0 0-1.5 0V8c0 .2.08.39.22.53l2 2a.75.75 0 1 0 1.06-1.06L8.75 7.69V4.75Z"
+      clipRule="evenodd"
+    />
+  </svg>
+);
+
+const LockIcon: React.FC<{
+  className?: string;
+  'aria-label'?: string;
+}> = props => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    viewBox="0 0 16 16"
+    fill="currentColor"
+    {...props}
+  >
+    <path
+      fillRule="evenodd"
+      d="M8 1a3.5 3.5 0 0 0-3.5 3.5V7A1.5 1.5 0 0 0 3 8.5v4A1.5 1.5 0 0 0 4.5 14h7a1.5 1.5 0 0 0 1.5-1.5v-4A1.5 1.5 0 0 0 11.5 7V4.5A3.5 3.5 0 0 0 8 1Zm2 6V4.5a2 2 0 1 0-4 0V7h4Z"
+      clipRule="evenodd"
+    />
+  </svg>
+);
+
 interface MessageItemProps {
   message: Message;
   onReplyTo?: (message: Message) => void;
@@ -1168,34 +1204,43 @@ const MessageItem: React.FC<MessageItemProps> = ({
                   status: message.status,
                 })}
               >
-                {(message.status === MessageStatus.WAITING_SESSION ||
-                  message.status === MessageStatus.READY) && (
-                  <div className="flex items-center gap-1">
-                    <div
-                      className="w-2.5 h-2.5 border border-current border-t-transparent rounded-full animate-spin"
-                      aria-hidden="true"
+                {/* Fixed-size container — prevents bubble resize when check appears */}
+                <div className="w-3.5 h-3.5">
+                  {/* 🕐 Pending — optimistic, not yet in DB */}
+                  {(message.id ?? 0) < 0 && (
+                    <ClockIcon
+                      className="w-3.5 h-3.5 opacity-60"
+                      aria-label={t('message_item.pending')}
                     />
-                    <span className="text-[10px] font-medium">
-                      {t('message_item.sending')}
-                    </span>
-                  </div>
-                )}
-                {message.status === MessageStatus.SENT && (
-                  <CheckIcon
-                    className="w-3.5 h-3.5"
-                    aria-label={t('message_item.sent')}
-                  />
-                )}
-                {(message.status === MessageStatus.DELIVERED ||
-                  message.status === MessageStatus.READ) && (
-                  <div
-                    className="relative inline-flex items-center w-4 h-3.5"
-                    aria-label={t('message_item.delivered')}
-                  >
-                    <CheckIcon className="w-3.5 h-3.5 absolute left-0" />
-                    <CheckIcon className="w-3.5 h-3.5 absolute left-[5px] top-[1.5px]" />
-                  </div>
-                )}
+                  )}
+                  {/* 🔒 Encrypting — in DB, being encrypted/queued */}
+                  {(message.id ?? 0) > 0 &&
+                    (message.status === MessageStatus.WAITING_SESSION ||
+                      message.status === MessageStatus.READY) && (
+                      <LockIcon
+                        className="w-3.5 h-3.5 opacity-60"
+                        aria-label={t('message_item.encrypting')}
+                      />
+                    )}
+                  {/* ✓ Sent — on the network */}
+                  {(message.id ?? 0) > 0 &&
+                    message.status === MessageStatus.SENT && (
+                      <CheckIcon
+                        className="w-3.5 h-3.5"
+                        aria-label={t('message_item.sent')}
+                      />
+                    )}
+                  {(message.status === MessageStatus.DELIVERED ||
+                    message.status === MessageStatus.READ) && (
+                    <div
+                      className="relative inline-flex items-center w-4 h-3.5"
+                      aria-label={t('message_item.delivered')}
+                    >
+                      <CheckIcon className="w-3.5 h-3.5 absolute left-0" />
+                      <CheckIcon className="w-3.5 h-3.5 absolute left-[5px] top-[1.5px]" />
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </div>

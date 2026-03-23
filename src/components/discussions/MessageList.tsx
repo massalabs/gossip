@@ -8,6 +8,7 @@ import React, {
 import { MessageDirection, Message } from '@massalabs/gossip-sdk';
 import type { Discussion, Contact } from '@massalabs/gossip-sdk';
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
+import { getStableKey } from '../../stores/messageStore';
 
 import LoadingState from './LoadingState';
 import EmptyState from './EmptyState';
@@ -47,6 +48,7 @@ interface MessageListProps {
   onForward?: (message: Message) => void;
   onDelete?: (message: Message) => void;
   onEdit?: (message: Message) => void;
+
   onScrollToMessage?: (messageId: number) => void;
   onAtBottomChange?: (atBottom: boolean) => void;
   onScrollToBottom?: () => void;
@@ -89,6 +91,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
       onForward,
       onDelete,
       onEdit,
+
       onScrollToMessage,
       onAtBottomChange,
       onScrollToBottom,
@@ -165,12 +168,15 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
       prevMessageCountRef.current = 0;
     }, [discussion?.id]);
 
-    // Scroll to bottom when new messages arrive (not on initial load)
+    // Scroll to bottom only when a genuinely new message is added.
+    // Depends only on messages.length — NOT virtualItems.length which
+    // changes on date separator / key updates and causes spurious scrolls.
     useEffect(() => {
       const prevCount = prevMessageCountRef.current;
       const currentCount = messages.length;
       prevMessageCountRef.current = currentCount;
 
+      // Skip initial load and message replacements (same or fewer count)
       if (prevCount === 0 || currentCount <= prevCount) return;
 
       const newestMessage = messagesRef.current[messagesRef.current.length - 1];
@@ -186,7 +192,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
           });
         });
       }
-    }, [messages.length, virtualItems.length]);
+    }, [messages.length]);
 
     // Track if user is at bottom — suppress during initial positioning
     // to prevent the scroll-to-bottom button from flashing.
@@ -220,35 +226,43 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
       },
     }));
 
-    // Stable key per virtual item — prevents Virtuoso from confusing items
-    // when the list shifts (new messages, status changes, etc.)
-    const computeItemKey = useCallback(
-      (index: number) => {
-        const item: VirtualItem | undefined = virtualItems[index];
-        if (!item) return index;
-        switch (item.type) {
-          case 'announcement':
-            return `announcement-${index}`;
-          case 'date':
-            return item.key;
-          case 'spacer':
-            return 'spacer';
-          case 'message': {
-            if (item.message.id != null) return `msg-${item.message.id}`;
-            const tempKey = `${item.message.timestamp.getTime()}-${item.message.direction}-${item.message.content.slice(0, 16)}`;
-            return `msg-temp-${tempKey}`;
-          }
-          default:
-            return index;
+    // Stable key per virtual item — uses a ref so the callback identity
+    // never changes. Recreating this function on every data change would
+    // make Virtuoso re-layout and shift scroll position on status updates.
+    const computeItemKey = useCallback((index: number) => {
+      const item: VirtualItem | undefined = virtualItemsRef.current[index];
+      if (!item) return index;
+      switch (item.type) {
+        case 'announcement':
+          return `announcement-${index}`;
+        case 'date':
+          return item.key;
+        case 'spacer':
+          return 'spacer';
+        case 'message': {
+          const msg = item.message;
+          if (msg.id != null) return getStableKey(msg.id);
+          return `msg-temp-${msg.timestamp.getTime()}-${msg.content.slice(0, 16)}`;
         }
-      },
-      [virtualItems]
-    );
+        default:
+          return index;
+      }
+    }, []);
 
-    // Render individual item
+    // Render individual item — uses refs for data that changes on every
+    // poll (virtualItems, highlightedMessageId, selectedMessageIds) so
+    // the callback identity stays stable. A new itemContent function
+    // makes Virtuoso re-render every visible item and recalculate scroll.
+    const highlightedMessageIdRef = useRef(highlightedMessageId);
+    highlightedMessageIdRef.current = highlightedMessageId;
+    const selectedMessageIdsRef = useRef(selectedMessageIds);
+    selectedMessageIdsRef.current = selectedMessageIds;
+    const isSelectingRef = useRef(isSelecting);
+    isSelectingRef.current = isSelecting;
+
     const itemContent = useCallback(
       (index: number) => {
-        const item: VirtualItem | undefined = virtualItems[index];
+        const item: VirtualItem | undefined = virtualItemsRef.current[index];
         if (!item) return null;
 
         switch (item.type) {
@@ -267,11 +281,14 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
           case 'spacer':
             return <SpacerRenderer key="spacer" />;
 
-          case 'message':
+          case 'message': {
+            const msg = item.message;
+            const reactKey =
+              msg.id != null ? getStableKey(msg.id) : `temp-msg-${index}`;
             return (
               <MessageRenderer
-                key={item.message.id ?? `temp-msg-${index}`}
-                message={item.message}
+                key={reactKey}
+                message={msg}
                 showTimestamp={item.showTimestamp}
                 groupInfo={item.groupInfo}
                 onReplyTo={onReplyTo}
@@ -283,22 +300,21 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
                 onToggleReaction={onToggleReaction}
                 getReactionsForMessage={getReactionsForMessage}
                 contact={contact}
-                isHighlighted={item.message.id === highlightedMessageId}
-                isSelecting={isSelecting}
+                isHighlighted={msg.id === highlightedMessageIdRef.current}
+                isSelecting={isSelectingRef.current}
                 isSelected={
-                  item.message.id != null &&
-                  selectedMessageIds?.has(item.message.id)
+                  msg.id != null && selectedMessageIdsRef.current?.has(msg.id)
                 }
                 onToggleSelect={onToggleSelect}
               />
             );
+          }
 
           default:
             return null;
         }
       },
       [
-        virtualItems,
         onReplyTo,
         onForward,
         onDelete,
@@ -308,9 +324,6 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
         onToggleReaction,
         getReactionsForMessage,
         contact,
-        highlightedMessageId,
-        isSelecting,
-        selectedMessageIds,
         onToggleSelect,
       ]
     );

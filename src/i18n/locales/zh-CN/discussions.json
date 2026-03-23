@@ -115,6 +115,8 @@
     "original_message": "原始消息",
     "forwarded_message": "转发的消息：",
     "sending": "发送中",
+    "pending": "发送中",
+    "encrypting": "加密中",
     "sent": "已发送",
     "delivered": "已送达",
     "jump_to_original": "点击跳转到原始消息",
