@@ -6,10 +6,8 @@ export interface InitError {
 }
 
 export function parseInitError(error: unknown): InitError {
-  const msg =
-    error instanceof Error && typeof error.message === 'string'
-      ? error.message
-      : '';
+  const msg = error instanceof Error ? error.message : String(error);
+  const name = error instanceof DOMException ? error.name : '';
 
   if (
     msg.includes('createSyncAccessHandle') ||
@@ -25,8 +23,8 @@ export function parseInitError(error: unknown): InitError {
   }
 
   if (
-    msg.includes('less than the existing version') ||
-    msg.includes('VersionError')
+    name === 'VersionError' ||
+    msg.includes('less than the existing version')
   ) {
     return {
       title: 'Database version conflict',

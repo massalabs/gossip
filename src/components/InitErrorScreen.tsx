@@ -9,10 +9,13 @@ export default function InitErrorScreen({ error }: { error: InitError }) {
   const handleAction = async () => {
     setLoading(true);
     if (error.showClear) {
-      // Clear IDB databases
-      const dbs = await indexedDB.databases();
-      for (const db of dbs) {
-        if (db.name?.startsWith('gossip-')) indexedDB.deleteDatabase(db.name);
+      // Clear IDB databases (databases() not available in Safari < 17)
+      if (typeof indexedDB.databases === 'function') {
+        const dbs = await indexedDB.databases();
+        for (const db of dbs) {
+          if (db.name?.startsWith('gossip-'))
+            indexedDB.deleteDatabase(db.name);
+        }
       }
       // Clear OPFS secure storage blocks/keypairs so next launch starts fresh
       try {
