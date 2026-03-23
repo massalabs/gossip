@@ -154,8 +154,9 @@ describe('Optimistic messaging integration', () => {
     });
   });
 
-  it('message shows FAILED only for permanent SDK errors', async () => {
-    // SDK returns { success: false } with no message — permanent error.
+  it('message stays pending even for SDK { success: false }', async () => {
+    // SDK returns { success: false } with no message — infra error.
+    // Message stays pending (clock), no FAILED state.
     mockSdk.messages.send.mockResolvedValue({
       success: false,
       error: 'Discussion not found',
@@ -168,7 +169,7 @@ describe('Optimistic messaging integration', () => {
     await vi.waitFor(async () => {
       const items = page.getByRole('listitem');
       const el = items.element() as HTMLElement;
-      expect(el.dataset.status).toBe('failed');
+      expect(el.dataset.status).toBe('sent');
     });
   });
 });

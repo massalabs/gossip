@@ -405,25 +405,25 @@ describe('sendMessage optimistic flow', () => {
     });
   });
 
-  it('marks message as FAILED only when SDK cannot persist it', async () => {
-    // SDK returns { success: false, message: undefined } — the message
-    // was NOT persisted to DB. This is a permanent error.
+  it('keeps message as pending when SDK cannot persist it', async () => {
+    // SDK returns { success: false } with no message — programming/infra
+    // error. Keep as pending (clock icon), don't mark FAILED.
     mockSdk.discussions.get.mockResolvedValue({ contactUserId });
     mockSdk.messages.send.mockResolvedValue({
       success: false,
       error: 'Discussion not found',
     });
 
-    await useMessageStore
-      .getState()
-      .sendMessage(contactUserId, 'Permanent fail');
+    await useMessageStore.getState().sendMessage(contactUserId, 'Infra error');
 
     await vi.waitFor(() => {
       const msgs = useMessageStore
         .getState()
         .messagesByContact.get(contactUserId);
       expect(msgs).toHaveLength(1);
-      expect(msgs![0].status).toBe(MessageStatus.FAILED);
+      // Stays SENT (pending/clock), not FAILED
+      expect(msgs![0].status).toBe(MessageStatus.SENT);
+      expect(msgs![0].id).toBeLessThan(0);
     });
   });
 
@@ -638,38 +638,6 @@ describe('reconciliation with polling', () => {
     expect(msgsAfterPoll).toHaveLength(1);
     expect(msgsAfterPoll![0].id).toBeLessThan(0);
     expect(msgsAfterPoll![0].content).toBe('Optimistic survivor');
-  });
-
-  it('failed messages are preserved during reconciliation', async () => {
-    const failedMsg: Message = {
-      id: -5,
-      ownerUserId: 'test-user-id',
-      contactUserId,
-      content: 'Failed msg',
-      type: MessageType.TEXT,
-      direction: MessageDirection.OUTGOING,
-      status: MessageStatus.FAILED,
-      timestamp: new Date(),
-    };
-
-    useMessageStore.setState({
-      ...useMessageStore.getState(),
-      messagesByContact: new Map([[contactUserId, [failedMsg]]]),
-    });
-
-    // Poll returns empty — message not in DB
-    mockSdk.discussions.list.mockResolvedValue([{ contactUserId }]);
-    mockSdk.messages.getVisibleMessages.mockResolvedValue([]);
-    mockSdk.messages.getReactions.mockResolvedValue([]);
-
-    await useMessageStore.getState().init();
-
-    const msgs = useMessageStore
-      .getState()
-      .messagesByContact.get(contactUserId);
-    expect(msgs).toHaveLength(1);
-    expect(msgs![0].status).toBe(MessageStatus.FAILED);
-    expect(msgs![0].id).toBe(-5);
   });
 });
 

@@ -523,24 +523,12 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
             return { messagesByContact: newMap };
           });
         } else if (!result.success) {
-          // SDK could not persist the message at all (no DB row).
-          // This is a permanent error — mark as FAILED.
+          // SDK could not persist the message (invalid userId, no
+          // discussion, DB error). These are programming/infra errors
+          // that shouldn't happen in normal use. Log and keep the
+          // message as pending — no FAILED state for the user.
           console.error('Failed to send message:', result.error);
-          set(state => {
-            const msgs = state.messagesByContact.get(contactUserId);
-            if (!msgs) return state;
-            const idx = msgs.findIndex(m => m.id === optimisticMessage.id);
-            if (idx === -1) return state;
-            const updated = [...msgs];
-            updated[idx] = { ...msgs[idx], status: MessageStatus.FAILED };
-            const newMap = new Map(state.messagesByContact);
-            newMap.set(contactUserId, updated);
-            return { messagesByContact: newMap };
-          });
         }
-        // If result.message exists but !result.success, the SDK persisted
-        // the message with WAITING_SESSION — it will be sent automatically
-        // on the next stateUpdate. Keep the clock icon (optimistic stays).
       } catch (error) {
         // Unexpected throw (not a structured SDK error).
         // The message may or may not be persisted. Keep it as optimistic
