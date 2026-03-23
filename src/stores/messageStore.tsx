@@ -29,8 +29,6 @@ const STATUS_RANK: Record<string, number> = {
   [MessageStatus.READ]: 4,
 };
 
-const _statusRank = (s: string): number => STATUS_RANK[s] ?? -1;
-
 /**
  * Reliable mapping from optimistic id (negative) → real DB id.
  * Set when the SDK send returns; used by mergeMessages to match
