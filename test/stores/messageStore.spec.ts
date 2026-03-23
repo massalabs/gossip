@@ -459,3 +459,388 @@ describe('sendMessage optimistic flow', () => {
     expect(mockSdk.messages.send).not.toHaveBeenCalled();
   });
 });
+
+// ── Helpers for reconciliation / ordering tests ──────────────────
+
+function makeMessage(overrides: Partial<Message> & { id: number }): Message {
+  return {
+    ownerUserId: 'test-user-id',
+    contactUserId: 'contact-1',
+    content: `msg-${overrides.id}`,
+    type: MessageType.TEXT,
+    direction: MessageDirection.OUTGOING,
+    status: MessageStatus.SENT,
+    timestamp: new Date(),
+    ...overrides,
+  };
+}
+
+describe('reconciliation with polling', () => {
+  const contactUserId = 'contact-1';
+
+  beforeEach(() => {
+    useMessageStore.setState({
+      messagesByContact: new Map(),
+      reactionsByContact: new Map(),
+      currentContactUserId: null,
+      isLoading: false,
+      pollTimer: null,
+      eventHandler: null,
+      cancelDebounce: null,
+      isInitializing: false,
+    } as unknown as ReturnType<(typeof useMessageStore)['getState']>);
+
+    mockSdk.isSessionOpen = true;
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    useMessageStore.getState().cleanup();
+  });
+
+  it('optimistic message survives poll until confirmed', async () => {
+    // SDK send never resolves — simulates in-flight request
+    mockSdk.discussions.get.mockReturnValue(
+      new Promise(() => {}) as Promise<undefined>
+    );
+
+    await useMessageStore
+      .getState()
+      .sendMessage(contactUserId, 'Optimistic survivor');
+
+    // Verify optimistic message is in store
+    const msgsBeforePoll = useMessageStore
+      .getState()
+      .messagesByContact.get(contactUserId);
+    expect(msgsBeforePoll).toHaveLength(1);
+    expect(msgsBeforePoll![0].id).toBeLessThan(0);
+
+    // Now call init() — poll returns empty DB (message not yet persisted)
+    mockSdk.discussions.list.mockResolvedValue([{ contactUserId }]);
+    mockSdk.messages.getVisibleMessages.mockResolvedValue([]);
+    mockSdk.messages.getReactions.mockResolvedValue([]);
+
+    await useMessageStore.getState().init();
+
+    // The optimistic message should survive the poll
+    const msgsAfterPoll = useMessageStore
+      .getState()
+      .messagesByContact.get(contactUserId);
+    expect(msgsAfterPoll).toHaveLength(1);
+    expect(msgsAfterPoll![0].id).toBeLessThan(0);
+    expect(msgsAfterPoll![0].content).toBe('Optimistic survivor');
+  });
+});
+
+describe('ordering and reference stability', () => {
+  const contactUserId = 'contact-1';
+
+  beforeEach(() => {
+    useMessageStore.setState({
+      messagesByContact: new Map(),
+      reactionsByContact: new Map(),
+      currentContactUserId: null,
+      isLoading: false,
+      pollTimer: null,
+      eventHandler: null,
+      cancelDebounce: null,
+      isInitializing: false,
+    } as unknown as ReturnType<(typeof useMessageStore)['getState']>);
+
+    mockSdk.isSessionOpen = true;
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    useMessageStore.getState().cleanup();
+  });
+
+  it('rapid sends preserve chronological order', async () => {
+    // SDK send never resolves — all stay optimistic
+    mockSdk.discussions.get.mockReturnValue(
+      new Promise(() => {}) as Promise<undefined>
+    );
+
+    for (let i = 0; i < 5; i++) {
+      await useMessageStore
+        .getState()
+        .sendMessage(contactUserId, `Message ${i}`);
+    }
+
+    const msgs = useMessageStore
+      .getState()
+      .messagesByContact.get(contactUserId)!;
+
+    expect(msgs).toHaveLength(5);
+
+    // All have unique negative IDs
+    const ids = msgs.map(m => m.id!);
+    expect(new Set(ids).size).toBe(5);
+    ids.forEach(id => expect(id).toBeLessThan(0));
+
+    // Non-decreasing timestamps (chronological order)
+    for (let i = 1; i < msgs.length; i++) {
+      expect(msgs[i].timestamp.getTime()).toBeGreaterThanOrEqual(
+        msgs[i - 1].timestamp.getTime()
+      );
+    }
+
+    // Content in order
+    for (let i = 0; i < 5; i++) {
+      expect(msgs[i].content).toBe(`Message ${i}`);
+    }
+  });
+
+  it('confirmed messages maintain order after id swap', async () => {
+    const realMsg1: Message = makeMessage({
+      id: 100,
+      content: 'First',
+      timestamp: new Date('2024-01-01T10:00:00Z'),
+    });
+    const realMsg2: Message = makeMessage({
+      id: 101,
+      content: 'Second',
+      timestamp: new Date('2024-01-01T10:01:00Z'),
+    });
+
+    mockSdk.discussions.get.mockResolvedValue({ contactUserId });
+    let sendCount = 0;
+    mockSdk.messages.send.mockImplementation(async () => {
+      sendCount++;
+      return {
+        success: true,
+        message: sendCount === 1 ? realMsg1 : realMsg2,
+      };
+    });
+
+    await useMessageStore.getState().sendMessage(contactUserId, 'First');
+    await useMessageStore.getState().sendMessage(contactUserId, 'Second');
+
+    // Wait for both swaps to complete
+    await vi.waitFor(() => {
+      const msgs = useMessageStore
+        .getState()
+        .messagesByContact.get(contactUserId)!;
+      expect(msgs).toHaveLength(2);
+      expect(msgs[0].id).toBe(100);
+      expect(msgs[1].id).toBe(101);
+    });
+
+    const msgs = useMessageStore
+      .getState()
+      .messagesByContact.get(contactUserId)!;
+    expect(msgs[0].content).toBe('First');
+    expect(msgs[1].content).toBe('Second');
+  });
+
+  it('poll returns same data — returns same array reference (no re-render)', async () => {
+    const dbMsg = makeMessage({
+      id: 50,
+      content: 'Hello from DB',
+      status: MessageStatus.DELIVERED,
+      timestamp: new Date('2024-01-01T10:00:00Z'),
+    });
+
+    // Set up store with this message already in it
+    useMessageStore.setState({
+      ...useMessageStore.getState(),
+      messagesByContact: new Map([[contactUserId, [dbMsg]]]),
+    });
+
+    const refBefore = useMessageStore
+      .getState()
+      .messagesByContact.get(contactUserId)!;
+
+    // Poll returns identical data
+    mockSdk.discussions.list.mockResolvedValue([{ contactUserId }]);
+    mockSdk.messages.getVisibleMessages.mockResolvedValue([dbMsg]);
+    mockSdk.messages.getReactions.mockResolvedValue([]);
+
+    await useMessageStore.getState().init();
+
+    const refAfter = useMessageStore
+      .getState()
+      .messagesByContact.get(contactUserId)!;
+
+    // Same array reference — reconcile detected no changes
+    expect(refAfter).toBe(refBefore);
+  });
+
+  it('poll with status upgrade returns new reference but preserves order', async () => {
+    const msg1 = makeMessage({
+      id: 60,
+      content: 'First',
+      status: MessageStatus.SENT,
+      timestamp: new Date('2024-01-01T10:00:00Z'),
+    });
+    const msg2 = makeMessage({
+      id: 61,
+      content: 'Second',
+      status: MessageStatus.SENT,
+      timestamp: new Date('2024-01-01T10:01:00Z'),
+    });
+
+    // Store already has both messages
+    useMessageStore.setState({
+      ...useMessageStore.getState(),
+      messagesByContact: new Map([[contactUserId, [msg1, msg2]]]),
+    });
+
+    const originalMsg1Ref = useMessageStore
+      .getState()
+      .messagesByContact.get(contactUserId)![0];
+
+    // Poll returns msg1 unchanged, msg2 upgraded to DELIVERED
+    const msg2Upgraded = { ...msg2, status: MessageStatus.DELIVERED };
+    mockSdk.discussions.list.mockResolvedValue([{ contactUserId }]);
+    mockSdk.messages.getVisibleMessages.mockResolvedValue([msg1, msg2Upgraded]);
+    mockSdk.messages.getReactions.mockResolvedValue([]);
+
+    await useMessageStore.getState().init();
+
+    const msgs = useMessageStore
+      .getState()
+      .messagesByContact.get(contactUserId)!;
+
+    // Order preserved
+    expect(msgs).toHaveLength(2);
+    expect(msgs[0].id).toBe(60);
+    expect(msgs[1].id).toBe(61);
+
+    // Unchanged message is the SAME reference
+    expect(msgs[0]).toBe(originalMsg1Ref);
+
+    // Upgraded message has new status
+    expect(msgs[1].status).toBe(MessageStatus.DELIVERED);
+  });
+
+  it('no duplicates when SDK confirms and poll returns same message', async () => {
+    const realMsg: Message = makeMessage({
+      id: 42,
+      content: 'No dupes',
+      timestamp: new Date('2024-01-01T10:00:00Z'),
+    });
+
+    mockSdk.discussions.get.mockResolvedValue({ contactUserId });
+    mockSdk.messages.send.mockResolvedValue({
+      success: true,
+      message: realMsg,
+    });
+
+    await useMessageStore.getState().sendMessage(contactUserId, 'No dupes');
+
+    // Wait for SDK confirm (swap optimistic → real id=42)
+    await vi.waitFor(() => {
+      const msgs = useMessageStore
+        .getState()
+        .messagesByContact.get(contactUserId)!;
+      expect(msgs[0].id).toBe(42);
+    });
+
+    // Now poll also returns id=42
+    mockSdk.discussions.list.mockResolvedValue([{ contactUserId }]);
+    mockSdk.messages.getVisibleMessages.mockResolvedValue([realMsg]);
+    mockSdk.messages.getReactions.mockResolvedValue([]);
+
+    await useMessageStore.getState().init();
+
+    const msgs = useMessageStore
+      .getState()
+      .messagesByContact.get(contactUserId)!;
+
+    // Exactly 1 message, no duplicate
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0].id).toBe(42);
+  });
+
+  it('optimistic messages stay at correct position relative to DB messages during poll', async () => {
+    const oldDbMsg = makeMessage({
+      id: 10,
+      content: 'Old DB message',
+      timestamp: new Date('2024-01-01T09:00:00Z'),
+    });
+    const recentDbMsg = makeMessage({
+      id: 11,
+      content: 'Recent DB message',
+      timestamp: new Date('2024-01-01T10:00:00Z'),
+    });
+
+    // Store has 2 DB messages + 1 optimistic (newest)
+    const optimisticMsg: Message = {
+      id: -999,
+      ownerUserId: 'test-user-id',
+      contactUserId,
+      content: 'Optimistic newest',
+      type: MessageType.TEXT,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.SENT,
+      timestamp: new Date('2024-01-01T11:00:00Z'),
+    };
+
+    useMessageStore.setState({
+      ...useMessageStore.getState(),
+      messagesByContact: new Map([
+        [contactUserId, [oldDbMsg, recentDbMsg, optimisticMsg]],
+      ]),
+    });
+
+    // Poll returns only the 2 DB messages (optimistic not persisted yet)
+    mockSdk.discussions.list.mockResolvedValue([{ contactUserId }]);
+    mockSdk.messages.getVisibleMessages.mockResolvedValue([
+      oldDbMsg,
+      recentDbMsg,
+    ]);
+    mockSdk.messages.getReactions.mockResolvedValue([]);
+
+    await useMessageStore.getState().init();
+
+    const msgs = useMessageStore
+      .getState()
+      .messagesByContact.get(contactUserId)!;
+
+    // All 3 present: old, recent, optimistic
+    expect(msgs).toHaveLength(3);
+    expect(msgs[0].id).toBe(10);
+    expect(msgs[1].id).toBe(11);
+    expect(msgs[2].id).toBe(-999);
+  });
+
+  it('race: poll with stale data does not drop recently-swapped message', async () => {
+    const realMsg: Message = makeMessage({
+      id: 42,
+      content: 'Race msg',
+      timestamp: new Date('2024-01-01T10:00:00Z'),
+    });
+
+    mockSdk.discussions.get.mockResolvedValue({ contactUserId });
+    mockSdk.messages.send.mockResolvedValue({
+      success: true,
+      message: realMsg,
+    });
+
+    await useMessageStore.getState().sendMessage(contactUserId, 'Race msg');
+
+    // Wait for SDK confirm (swap to real id=42)
+    await vi.waitFor(() => {
+      const msgs = useMessageStore
+        .getState()
+        .messagesByContact.get(contactUserId)!;
+      expect(msgs[0].id).toBe(42);
+    });
+
+    // Poll returns EMPTY (stale data — hasn't caught up)
+    mockSdk.discussions.list.mockResolvedValue([{ contactUserId }]);
+    mockSdk.messages.getVisibleMessages.mockResolvedValue([]);
+    mockSdk.messages.getReactions.mockResolvedValue([]);
+
+    await useMessageStore.getState().init();
+
+    const msgs = useMessageStore
+      .getState()
+      .messagesByContact.get(contactUserId)!;
+
+    // Message survives thanks to pendingToRealId keeping it
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0].id).toBe(42);
+  });
+});
