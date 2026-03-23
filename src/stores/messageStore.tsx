@@ -191,11 +191,15 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
 
         const dbMessages = await sdk.messages.getVisibleMessages(contactUserId);
 
-        // Clean up pendingToRealId entries when DB has the real id
+        // Clean up pendingToRealId + optimistic when DB confirms
         const dbIdSet = new Set<number>();
         for (const m of dbMessages) if (m.id != null) dbIdSet.add(m.id);
+        const confirmedOptIds: number[] = [];
         for (const [optId, realId] of pendingToRealId) {
-          if (dbIdSet.has(realId)) pendingToRealId.delete(optId);
+          if (dbIdSet.has(realId)) {
+            pendingToRealId.delete(optId);
+            confirmedOptIds.push(optId);
+          }
         }
 
         const current =
@@ -204,6 +208,24 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
           const newMap = new Map(get().confirmedByContact);
           newMap.set(contactUserId, dbMessages);
           set({ confirmedByContact: newMap });
+        }
+
+        // Clean up confirmed optimistic entries
+        if (confirmedOptIds.length > 0) {
+          set(state => {
+            const opts = state.optimisticByContact.get(contactUserId);
+            if (!opts) return state;
+            const idSet = new Set(confirmedOptIds);
+            const filtered = opts.filter(m => !idSet.has(m.id!));
+            if (filtered.length === opts.length) return state;
+            const newMap = new Map(state.optimisticByContact);
+            if (filtered.length === 0) {
+              newMap.delete(contactUserId);
+            } else {
+              newMap.set(contactUserId, filtered);
+            }
+            return { optimisticByContact: newMap };
+          });
         }
       } catch (error) {
         console.error('Messages fetch error:', error);
@@ -224,17 +246,24 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
         const discussions = await sdk.discussions.list();
         const newConfirmedMap = new Map<string, Message[]>();
         const newReactionsMap = new Map<string, Message[]>();
+        // Track which optimistic IDs were confirmed by this poll, per contact
+        const confirmedOptByContact = new Map<string, number[]>();
 
         for (const d of discussions) {
           const dbMessages = await sdk.messages.getVisibleMessages(
             d.contactUserId
           );
 
-          // Clean up pendingToRealId entries when DB has the real id
+          // Clean up pendingToRealId when DB has the real id
           const dbIdSet = new Set<number>();
           for (const m of dbMessages) if (m.id != null) dbIdSet.add(m.id);
           for (const [optId, realId] of pendingToRealId) {
-            if (dbIdSet.has(realId)) pendingToRealId.delete(optId);
+            if (dbIdSet.has(realId)) {
+              pendingToRealId.delete(optId);
+              const list = confirmedOptByContact.get(d.contactUserId) || [];
+              list.push(optId);
+              confirmedOptByContact.set(d.contactUserId, list);
+            }
           }
 
           if (dbMessages.length > 0) {
@@ -293,6 +322,29 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
           if (msgsChanged) updates.confirmedByContact = newConfirmedMap;
           if (rxnsChanged) updates.reactionsByContact = newReactionsMap;
           set(updates);
+        }
+
+        // Clean up optimistic entries that are now confirmed in DB
+        if (confirmedOptByContact.size > 0) {
+          set(state => {
+            const newOptMap = new Map(state.optimisticByContact);
+            let changed = false;
+            for (const [cid, optIds] of confirmedOptByContact) {
+              const opts = newOptMap.get(cid);
+              if (!opts) continue;
+              const idSet = new Set(optIds);
+              const filtered = opts.filter(m => !idSet.has(m.id!));
+              if (filtered.length !== opts.length) {
+                changed = true;
+                if (filtered.length === 0) {
+                  newOptMap.delete(cid);
+                } else {
+                  newOptMap.set(cid, filtered);
+                }
+              }
+            }
+            return changed ? { optimisticByContact: newOptMap } : state;
+          });
         }
       } catch (error) {
         console.error('Messages fetch error:', error);
@@ -434,20 +486,10 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
             clientSeq.set(realMsg.id!, seqVal);
             clientSeq.delete(optimisticMessage.id!);
           }
-
-          // Remove the optimistic message — next poll adds confirmed version
-          set(state => {
-            const opts = state.optimisticByContact.get(contactUserId);
-            if (!opts) return state;
-            const filtered = opts.filter(m => m.id !== optimisticMessage.id);
-            const newMap = new Map(state.optimisticByContact);
-            if (filtered.length === 0) {
-              newMap.delete(contactUserId);
-            } else {
-              newMap.set(contactUserId, filtered);
-            }
-            return { optimisticByContact: newMap };
-          });
+          // Don't remove the optimistic message here. The merge function
+          // will exclude it once the confirmed version appears in the next
+          // poll. The poll cleanup removes it from optimisticByContact
+          // when it cleans up the pendingToRealId entry.
         } else if (!result.success) {
           // SDK could not persist the message (invalid userId, no
           // discussion, DB error). These are programming/infra errors

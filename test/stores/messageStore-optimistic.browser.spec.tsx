@@ -50,7 +50,14 @@ import { useMessageStore } from '../../src/stores/messageStore';
 const TestHarness: React.FC<{ contactUserId: string }> = ({
   contactUserId,
 }) => {
-  const messages = useMessageStore(s => s.getMessagesForContact(contactUserId));
+  // Subscribe to both layers so React re-renders when either changes
+  const confirmed = useMessageStore(s => s.confirmedByContact);
+  const optimistic = useMessageStore(s => s.optimisticByContact);
+  const getMessages = useMessageStore(s => s.getMessagesForContact);
+  // Force re-render dependency on both maps (Zustand shallow compare)
+  void confirmed;
+  void optimistic;
+  const messages = getMessages(contactUserId);
   const sendMessage = useMessageStore(s => s.sendMessage);
 
   return (
@@ -78,7 +85,8 @@ describe('Optimistic messaging integration', () => {
 
   beforeEach(() => {
     useMessageStore.setState({
-      messagesByContact: new Map(),
+      confirmedByContact: new Map(),
+      optimisticByContact: new Map(),
       reactionsByContact: new Map(),
       currentContactUserId: null,
       isLoading: false,
@@ -112,7 +120,7 @@ describe('Optimistic messaging integration', () => {
     expect(item.element().textContent).toContain('status:sent');
   });
 
-  it('message id swaps to positive after SDK confirms', async () => {
+  it('message stays visible after SDK confirms (pending until poll)', async () => {
     const realMessage: Message = {
       id: 42,
       ownerUserId: 'test-user-id',
@@ -133,8 +141,12 @@ describe('Optimistic messaging integration', () => {
 
     await userEvent.click(page.getByText('Send'));
 
-    // Wait for the swap
-    await expect.element(page.getByTestId('msg-42')).toBeInTheDocument();
+    // Message stays visible with its optimistic id (pending until poll confirms)
+    // It's NOT removed — the merge keeps it because confirmed doesn't have id=42 yet
+    await vi.waitFor(async () => {
+      const item = page.getByText(/Test message/);
+      expect(item.element()).toBeTruthy();
+    });
   });
 
   it('message stays pending (clock) on transient SDK error', async () => {
