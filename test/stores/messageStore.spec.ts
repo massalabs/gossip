@@ -1143,6 +1143,117 @@ describe('duplicate content messages', () => {
     expect(msgs.filter(m => m.id! > 0)).toHaveLength(1);
     expect(msgs.filter(m => m.id! < 0)).toHaveLength(2);
   });
+
+  it('no duplicate ids when poll adds DB message before swap completes', async () => {
+    // Race condition: poll returns real id=74 BEFORE the SDK send callback
+    // runs the swap. After reconcile, store has [id=74(DB), id=-5(unconfirmed)].
+    // Then swap tries to replace id=-5 with id=74 → must not create a duplicate.
+
+    const now = Date.now();
+
+    // Simulate post-reconcile state: DB message already in store + optimistic still present
+    const dbMsg: Message = makeMessage({
+      id: 74,
+      content: 'race test',
+      status: MessageStatus.WAITING_SESSION,
+      timestamp: new Date(now),
+    });
+    const optMsg: Message = {
+      id: -5,
+      ownerUserId: 'test-user-id',
+      contactUserId,
+      content: 'race test',
+      type: MessageType.TEXT,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.SENT,
+      timestamp: new Date(now),
+    };
+
+    useMessageStore.setState({
+      ...useMessageStore.getState(),
+      messagesByContact: new Map([[contactUserId, [dbMsg, optMsg]]]),
+    });
+
+    // Now simulate what sendMessage's fire-and-forget does after SDK returns:
+    // It calls set() to swap the optimistic message.
+    mockSdk.discussions.get.mockResolvedValue({ contactUserId });
+    mockSdk.messages.send.mockResolvedValue({
+      success: true,
+      message: { ...dbMsg },
+    });
+
+    // Trigger a real send — the store already has both messages,
+    // and the send will try to swap id=-5 to id=74.
+    // We do this by calling sendMessage which creates a NEW optimistic msg,
+    // so instead let's test the swap logic directly by sending and
+    // manipulating the store state before the swap runs.
+
+    // Simpler approach: directly invoke sendMessage. The fire-and-forget
+    // will find id=-5 does NOT exist (sendMessage creates a NEW optimistic id).
+    // So let's just test via the store's internal swap logic.
+
+    // Actually, the cleanest way: use sendMessage and set up the state
+    // so that a poll-added message exists when the swap callback runs.
+    // We can do this by sending, then injecting the DB message before
+    // the SDK resolves.
+
+    // Use a controlled promise for the SDK send
+    let resolveSend!: (v: { success: boolean; message: Message }) => void;
+    mockSdk.messages.send.mockReturnValue(
+      new Promise(r => {
+        resolveSend = r;
+      })
+    );
+
+    // Reset store
+    useMessageStore.setState({
+      ...useMessageStore.getState(),
+      messagesByContact: new Map(),
+    });
+
+    await useMessageStore.getState().sendMessage(contactUserId, 'race test');
+
+    // Store has one optimistic message
+    const msgsAfterSend = useMessageStore
+      .getState()
+      .messagesByContact.get(contactUserId)!;
+    expect(msgsAfterSend).toHaveLength(1);
+    const optId = msgsAfterSend[0].id!;
+    expect(optId).toBeLessThan(0);
+
+    // Simulate poll adding the DB message (race: DB got it before SDK returned)
+    const realDbMsg = makeMessage({
+      id: 74,
+      content: 'race test',
+      status: MessageStatus.WAITING_SESSION,
+      timestamp: msgsAfterSend[0].timestamp,
+    });
+    useMessageStore.setState({
+      ...useMessageStore.getState(),
+      messagesByContact: new Map([
+        [contactUserId, [realDbMsg, msgsAfterSend[0]]],
+      ]),
+    });
+
+    // Now resolve the SDK send — the swap callback will run
+    resolveSend({ success: true, message: { ...realDbMsg } });
+
+    // Wait for the swap to complete
+    await vi.waitFor(() => {
+      const msgs = useMessageStore
+        .getState()
+        .messagesByContact.get(contactUserId)!;
+      // Must be exactly 1 message, NOT 2 with the same id
+      expect(msgs).toHaveLength(1);
+    });
+
+    const finalMsgs = useMessageStore
+      .getState()
+      .messagesByContact.get(contactUserId)!;
+    expect(finalMsgs[0].id).toBe(74);
+    // Status should be SENT (preserved from optimistic, higher than WAITING_SESSION)
+    expect(finalMsgs[0].status).toBe(MessageStatus.SENT);
+  });
 });
 
 // ── Optimistic reactions ─────────────────────────────────────────

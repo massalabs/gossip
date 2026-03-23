@@ -486,17 +486,39 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
             if (!msgs) return state;
             const idx = msgs.findIndex(m => m.id === optimisticMessage.id);
             if (idx === -1) return state;
-            const kept =
-              statusRank(msgs[idx].status) > statusRank(realMsg.status)
-                ? msgs[idx].status
-                : realMsg.status;
+
             const updated = [...msgs];
-            updated[idx] = {
-              ...msgs[idx],
-              id: realMsg.id,
-              messageId: realMsg.messageId,
-              status: kept,
-            };
+
+            // Race: a poll may have already added the DB message (with
+            // the real id) while this send was in-flight. If so, just
+            // drop the optimistic duplicate and preserve the DB version.
+            const existingRealIdx = msgs.findIndex(
+              m => m.id === realMsg.id && m.id !== optimisticMessage.id
+            );
+            if (existingRealIdx !== -1) {
+              const kept =
+                statusRank(msgs[idx].status) >
+                statusRank(msgs[existingRealIdx].status)
+                  ? msgs[idx].status
+                  : msgs[existingRealIdx].status;
+              updated[existingRealIdx] = {
+                ...msgs[existingRealIdx],
+                status: kept,
+              };
+              updated.splice(idx, 1);
+            } else {
+              const kept =
+                statusRank(msgs[idx].status) > statusRank(realMsg.status)
+                  ? msgs[idx].status
+                  : realMsg.status;
+              updated[idx] = {
+                ...msgs[idx],
+                id: realMsg.id,
+                messageId: realMsg.messageId,
+                status: kept,
+              };
+            }
+
             const newMap = new Map(state.messagesByContact);
             newMap.set(contactUserId, updated);
             return { messagesByContact: newMap };
