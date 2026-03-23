@@ -9,7 +9,6 @@ import { protocolConfig } from './config/protocol';
 import { Capacitor } from '@capacitor/core';
 import waSqliteWasmUrl from 'wa-sqlite/dist/wa-sqlite.wasm?url';
 import waSqliteAsyncWasmUrl from 'wa-sqlite/dist/wa-sqlite-async.wasm?url';
-import { secureStorageEnabled } from './config/features';
 import InitErrorScreen from './components/InitErrorScreen';
 import { parseInitError } from './utils/initError';
 
@@ -105,17 +104,9 @@ Promise.all([
   createSdk({
     protocolBaseUrl: protocolConfig.baseUrl,
     config: { polling: { enabled: true } },
-    storage: secureStorageEnabled
-      ? {
-          type: 'secureStorage',
-          path: 'gossip-db',
-          domain: 'gossip',
-          wasmUrl: waSqliteWasmUrl,
-          backend: isNative ? 'opfs' : 'idb',
-        }
-      : isNative
-        ? { type: 'opfs', path: '/gossip-db', wasmUrl: waSqliteWasmUrl }
-        : { type: 'idb', name: 'gossip-db', wasmUrl: waSqliteAsyncWasmUrl },
+    storage: isNative
+      ? { type: 'opfs', path: '/gossip-db', wasmUrl: waSqliteWasmUrl }
+      : { type: 'idb', name: 'gossip-db', wasmUrl: waSqliteAsyncWasmUrl },
   }),
   initSafeArea(),
 ])

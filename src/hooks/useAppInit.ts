@@ -1,11 +1,10 @@
 import { useEffect } from 'react';
 import { useTheme } from './useTheme';
 import { useOnlineStore } from '../stores/useOnlineStore';
-import { getSdk } from '../stores/sdkStore';
 import { useScreenshotProtection } from './useScreenshotProtection';
 
 /**
- * Initializes app-level concerns: theme, online status, and DB flush on background.
+ * Initializes app-level concerns: theme, online status.
  */
 export function useAppInit() {
   const { initTheme } = useTheme();
@@ -25,18 +24,8 @@ export function useAppInit() {
 
     void init();
 
-    const onVisibilityChange = () => {
-      if (document.visibilityState === 'hidden') {
-        getSdk()
-          .flush()
-          .catch(e => console.warn('[flush] error on background:', e));
-      }
-    };
-    document.addEventListener('visibilitychange', onVisibilityChange);
-
     return () => {
       cleanup?.();
-      document.removeEventListener('visibilitychange', onVisibilityChange);
     };
   }, [initTheme, initOnlineStore]);
 }
