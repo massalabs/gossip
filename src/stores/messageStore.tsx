@@ -14,6 +14,7 @@ import { getSdk } from './sdkStore';
 const POLL_INTERVAL_MS = 3000;
 const EVENT_DEBOUNCE_MS = 30;
 let optimisticIdCounter = 0;
+let activeSendCount = 0;
 
 // ── Helpers ────────────────────────────────────────────────────
 
@@ -372,6 +373,11 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
 
     let debounceTimer: ReturnType<typeof setTimeout> | null = null;
     const onEvent = () => {
+      // Skip event-driven fetches while sends are in-flight.
+      // The SDK emits MESSAGE_SENT during send() — fetching at that
+      // point would add the DB message before the swap runs, creating
+      // a temporary duplicate. The swap handles the update directly.
+      if (activeSendCount > 0) return;
       if (debounceTimer) clearTimeout(debounceTimer);
       const active = get().currentContactUserId;
       debounceTimer = setTimeout(
@@ -436,6 +442,7 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
     set({ messagesByContact: newMap });
 
     // Fire-and-forget — all async work runs in the background.
+    activeSendCount++;
     void (async () => {
       try {
         const discussion = await getSdk().discussions.get(contactUserId);
@@ -553,6 +560,8 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
         // (clock icon) — the next poll will either confirm it or it will
         // stay pending. Don't mark as FAILED for transient errors.
         console.error('Failed to send message:', error);
+      } finally {
+        activeSendCount--;
       }
     })();
   },
