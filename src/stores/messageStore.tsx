@@ -19,18 +19,6 @@ let optimisticIdCounter = 0;
 
 const EMPTY_MESSAGES: Message[] = [];
 
-/** Check if a DB message confirms an optimistic one. */
-const isConfirmed = (opt: Message, db: Message): boolean => {
-  // Prefer exact ID match (set after SDK send returns the real DB id)
-  if (opt.id != null && opt.id < 0 && db.id === -opt.id) return true;
-  // Fallback: content + direction + narrow timestamp window
-  return (
-    db.content === opt.content &&
-    db.direction === opt.direction &&
-    Math.abs(db.timestamp.getTime() - opt.timestamp.getTime()) < 5000
-  );
-};
-
 /** Status ranking — never downgrade visually. */
 const STATUS_RANK: Record<string, number> = {
   [MessageStatus.WAITING_SESSION]: 0,
@@ -40,59 +28,155 @@ const STATUS_RANK: Record<string, number> = {
   [MessageStatus.READ]: 4,
 };
 
+const statusRank = (s: string): number => STATUS_RANK[s] ?? -1;
+
 /**
- * Merge DB results with unconfirmed optimistic messages from the store.
- * - Reads the LATEST store state at merge time (race-safe).
- * - Never downgrades status (optimistic SENT stays SENT even if DB says READY).
- * - Sorts by timestamp for stable order.
+ * Reliable mapping from optimistic id (negative) → real DB id.
+ * Set when the SDK send returns; used by mergeWithOptimistic to match
+ * optimistic messages to their DB counterparts without heuristics.
  */
-function mergeWithOptimistic(
+const pendingToRealId = new Map<number, number>();
+
+/** Check if a DB message confirms an optimistic one. */
+const isConfirmed = (opt: Message, db: Message): boolean => {
+  const realId = pendingToRealId.get(opt.id!);
+  if (realId != null) return db.id === realId;
+  // Fallback: content + direction + narrow timestamp window
+  return (
+    db.content === opt.content &&
+    db.direction === opt.direction &&
+    Math.abs(db.timestamp.getTime() - opt.timestamp.getTime()) < 5000
+  );
+};
+
+/**
+ * Reconcile DB results with the current store array.
+ *
+ * Key property: **preserves existing JS references** when a message hasn't
+ * visibly changed.  This prevents Virtuoso from re-measuring unchanged items,
+ * which eliminates scroll jumps on routine polls.
+ *
+ * - Confirmed (id > 0) messages are matched by DB id; the existing store
+ *   object is kept when id / content / status / edited are identical.
+ * - Status is never downgraded — if the store already shows a higher status
+ *   the store object is kept as-is.
+ * - Unconfirmed optimistic messages (id < 0) are appended at the end.
+ */
+function reconcile(
   contactUserId: string,
   dbMessages: Message[],
   getState: () => MessageStoreState
 ): Message[] {
   const current = getState().messagesByContact.get(contactUserId) || [];
-  const optimistic = current.filter(m => m.id != null && m.id < 0);
-  if (optimistic.length === 0) return dbMessages;
 
-  // For confirmed messages: keep DB version but don't downgrade status
-  const result = dbMessages.map(db => {
-    const matchedOpt = optimistic.find(opt => isConfirmed(opt, db));
-    if (
-      matchedOpt &&
-      (STATUS_RANK[matchedOpt.status] ?? 0) > (STATUS_RANK[db.status] ?? 0)
-    ) {
-      return { ...db, status: matchedOpt.status };
+  // Index confirmed messages currently in the store by their DB id
+  const storeById = new Map<number, Message>();
+  const optimistic: Message[] = [];
+  for (const m of current) {
+    if (m.id != null && m.id < 0) {
+      optimistic.push(m);
+    } else if (m.id != null) {
+      storeById.set(m.id, m);
     }
+  }
+
+  // Index DB messages by id for fast lookup
+  const dbIdSet = new Set<number>();
+  for (const m of dbMessages) if (m.id != null) dbIdSet.add(m.id);
+
+  // Build the result from DB messages, reusing store objects when possible
+  const result: Message[] = dbMessages.map(db => {
+    if (db.id == null) return db;
+    const existing = storeById.get(db.id);
+    if (!existing) return db;
+
+    // Never downgrade status — keep the store version if it's higher
+    if (statusRank(existing.status) > statusRank(db.status)) {
+      return existing;
+    }
+
+    // If nothing visible changed, return the SAME reference
+    const editedE = !!(existing.metadata as { edited?: boolean })?.edited;
+    const editedD = !!(db.metadata as { edited?: boolean })?.edited;
+    if (
+      existing.id === db.id &&
+      existing.content === db.content &&
+      existing.status === db.status &&
+      editedE === editedD
+    ) {
+      return existing;
+    }
+
     return db;
   });
 
-  // Append unconfirmed optimistic messages
-  const unconfirmed = optimistic.filter(
-    opt => !dbMessages.some(db => isConfirmed(opt, db))
-  );
-  if (unconfirmed.length > 0) {
-    result.push(...unconfirmed);
+  let needsSort = false;
+
+  // Append unconfirmed optimistic messages (id < 0, no DB match yet)
+  if (optimistic.length > 0) {
+    const unconfirmed = optimistic.filter(
+      opt => !dbMessages.some(db => isConfirmed(opt, db))
+    );
+    if (unconfirmed.length > 0) {
+      result.push(...unconfirmed);
+      needsSort = true;
+    }
   }
 
-  // Sort by timestamp for stable order
-  result.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+  // Preserve recently-swapped messages whose real id isn't in DB yet.
+  // This covers the race: SDK returned (swap happened) but the poll
+  // fetched stale data that doesn't include the new message.
+  for (const [optId, realId] of pendingToRealId) {
+    if (dbIdSet.has(realId)) {
+      // DB caught up — clean up mapping
+      pendingToRealId.delete(optId);
+    } else {
+      // DB hasn't caught up — keep the store version if we have it
+      const existing = storeById.get(realId);
+      if (existing) {
+        result.push(existing);
+        needsSort = true;
+      }
+    }
+  }
+
+  if (needsSort) {
+    result.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+  }
+
+  // Return the SAME array reference if nothing changed.
+  // This is critical: it prevents Zustand selectors from seeing a new
+  // reference, which would trigger React re-renders and Virtuoso re-layout.
+  if (
+    result.length === current.length &&
+    result.every((m, i) => m === current[i])
+  ) {
+    return current;
+  }
 
   return result;
 }
 
 const messagesChanged = (existing: Message[], incoming: Message[]): boolean => {
+  if (existing === incoming) return false;
+  if (incoming.length !== existing.length) return true;
+  return existing.some((msg, i) => msg !== incoming[i]);
+};
+
+/** Field-level comparison for reactions (always new objects from DB). */
+const reactionsChanged = (
+  existing: Message[],
+  incoming: Message[]
+): boolean => {
+  if (existing === incoming) return false;
   if (incoming.length !== existing.length) return true;
   return existing.some((msg, i) => {
     const other = incoming[i];
     if (!other) return true;
-    const editedA = !!(msg.metadata as { edited?: boolean })?.edited;
-    const editedB = !!(other.metadata as { edited?: boolean })?.edited;
     return (
       msg.id !== other.id ||
       msg.content !== other.content ||
-      msg.status !== other.status ||
-      editedA !== editedB
+      msg.status !== other.status
     );
   });
 };
@@ -126,8 +210,9 @@ interface MessageStoreState {
     contactUserId: string,
     emoji: string,
     messageDbId: number
-  ) => Promise<void>;
-  removeReaction: (reactionDbId: number) => Promise<void>;
+  ) => void;
+  removeReaction: (contactUserId: string, reactionDbId: number) => void;
+  retryMessage: (contactUserId: string, failedMessageId: number) => void;
   clearMessages: (contactUserId: string) => void;
   cleanup: () => void;
 }
@@ -171,12 +256,12 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
         if (!sdk.isSessionOpen) return;
 
         const dbMessages = await sdk.messages.getVisibleMessages(contactUserId);
-        const merged = mergeWithOptimistic(contactUserId, dbMessages, get);
+        const reconciled = reconcile(contactUserId, dbMessages, get);
 
         const current = get().messagesByContact.get(contactUserId) || [];
-        if (messagesChanged(current, merged)) {
+        if (messagesChanged(current, reconciled)) {
           const newMap = new Map(get().messagesByContact);
-          newMap.set(contactUserId, merged);
+          newMap.set(contactUserId, reconciled);
           set({ messagesByContact: newMap });
         }
       } catch (error) {
@@ -196,59 +281,70 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
         if (!sdk.isSessionOpen) return;
 
         const discussions = await sdk.discussions.list();
-        const mergedMap = new Map<string, Message[]>();
+        const reconciledMap = new Map<string, Message[]>();
         const newReactionsMap = new Map<string, Message[]>();
 
         for (const d of discussions) {
           const dbMessages = await sdk.messages.getVisibleMessages(
             d.contactUserId
           );
-          const merged = mergeWithOptimistic(d.contactUserId, dbMessages, get);
-          if (merged.length > 0) {
-            mergedMap.set(d.contactUserId, merged);
+          const reconciled = reconcile(d.contactUserId, dbMessages, get);
+          if (reconciled.length > 0) {
+            reconciledMap.set(d.contactUserId, reconciled);
           }
-          const reactions = await sdk.messages.getReactions(d.contactUserId);
+          const dbReactions = await sdk.messages.getReactions(d.contactUserId);
+          // Preserve unconfirmed optimistic reactions (negative IDs)
+          // so they survive the poll until the SDK call returns.
+          const currentRxns =
+            get().reactionsByContact.get(d.contactUserId) || [];
+          const optimisticRxns = currentRxns.filter(
+            r => r.id != null && r.id < 0
+          );
+          const reactions =
+            optimisticRxns.length > 0
+              ? [...dbReactions, ...optimisticRxns]
+              : dbReactions;
           if (reactions.length > 0) {
             newReactionsMap.set(d.contactUserId, reactions);
           }
         }
 
+        // Check messages and reactions independently — only update
+        // what actually changed to avoid spurious re-renders.
         const latestMap = get().messagesByContact;
         const currentReactionsMap = get().reactionsByContact;
-        let hasChanges = false;
 
-        mergedMap.forEach((msgs, cid) => {
-          if (!hasChanges) {
+        let msgsChanged = false;
+        reconciledMap.forEach((msgs, cid) => {
+          if (!msgsChanged) {
             const existing = latestMap.get(cid) || [];
-            if (messagesChanged(existing, msgs)) hasChanges = true;
+            if (messagesChanged(existing, msgs)) msgsChanged = true;
           }
         });
-
-        if (!hasChanges) {
-          newReactionsMap.forEach((rxns, cid) => {
-            if (!hasChanges) {
-              const existing = currentReactionsMap.get(cid) || [];
-              if (messagesChanged(existing, rxns)) hasChanges = true;
-            }
-          });
-        }
-
-        if (!hasChanges) {
+        if (!msgsChanged) {
           latestMap.forEach((_, cid) => {
-            if (!mergedMap.has(cid)) hasChanges = true;
-          });
-        }
-        if (!hasChanges) {
-          currentReactionsMap.forEach((_, cid) => {
-            if (!newReactionsMap.has(cid)) hasChanges = true;
+            if (!reconciledMap.has(cid)) msgsChanged = true;
           });
         }
 
-        if (hasChanges) {
-          set({
-            messagesByContact: mergedMap,
-            reactionsByContact: newReactionsMap,
+        let rxnsChanged = false;
+        newReactionsMap.forEach((rxns, cid) => {
+          if (!rxnsChanged) {
+            const existing = currentReactionsMap.get(cid) || [];
+            if (reactionsChanged(existing, rxns)) rxnsChanged = true;
+          }
+        });
+        if (!rxnsChanged) {
+          currentReactionsMap.forEach((_, cid) => {
+            if (!newReactionsMap.has(cid)) rxnsChanged = true;
           });
+        }
+
+        if (msgsChanged || rxnsChanged) {
+          const updates: Partial<MessageStoreState> = {};
+          if (msgsChanged) updates.messagesByContact = reconciledMap;
+          if (rxnsChanged) updates.reactionsByContact = newReactionsMap;
+          set(updates);
         }
       } catch (error) {
         console.error('Messages fetch error:', error);
@@ -308,7 +404,6 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
       return;
 
     // Optimistic UI FIRST — zero await before showing the message.
-    // All async work (discussion lookup, reply lookup, SDK send) happens after.
     const optimisticMessage: Message = {
       ownerUserId: userProfile.userId,
       contactUserId,
@@ -328,8 +423,6 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
     // Fire-and-forget — all async work runs in the background.
     void (async () => {
       try {
-        // Verify discussion still exists (guards against deletion during
-        // the fire-and-forget window — same check dev had before optimistic).
         const discussion = await getSdk().discussions.get(contactUserId);
         if (!discussion) {
           throw new Error('Discussion not found');
@@ -380,16 +473,23 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
 
         const result = await getSdk().messages.send(message);
 
-        // Tag the optimistic message with the real DB id so
-        // isConfirmed() uses exact ID matching instead of content heuristics.
         if (result.success && result.message?.id) {
-          const realId = result.message.id;
+          const realMsg = result.message;
+          pendingToRealId.set(optimisticMessage.id!, realMsg.id!);
+
+          // Swap optimistic → confirmed immediately.
+          // Keep the higher status so the check doesn't flicker.
           set(state => {
             const msgs = state.messagesByContact.get(contactUserId);
             if (!msgs) return state;
-            const updated = msgs.map(m =>
-              m.id === optimisticMessage.id ? { ...m, id: -realId } : m
-            );
+            const idx = msgs.findIndex(m => m.id === optimisticMessage.id);
+            if (idx === -1) return state;
+            const kept =
+              statusRank(msgs[idx].status) > statusRank(realMsg.status)
+                ? msgs[idx].status
+                : realMsg.status;
+            const updated = [...msgs];
+            updated[idx] = { ...realMsg, status: kept };
             const newMap = new Map(state.messagesByContact);
             newMap.set(contactUserId, updated);
             return { messagesByContact: newMap };
@@ -397,17 +497,15 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
         }
       } catch (error) {
         console.error('Failed to send message:', error);
-        // sdk.messages.send() handles retries internally — if encryption or
-        // network fails, the message stays in DB and is resent by stateUpdate.
-        // A throw here means the message couldn't even be inserted into DB
-        // (catastrophic). Remove the optimistic message so the user doesn't
-        // see a phantom that will never be delivered.
         set(state => {
           const msgs = state.messagesByContact.get(contactUserId);
           if (!msgs) return state;
-          const filtered = msgs.filter(m => m.id !== optimisticMessage.id);
+          const idx = msgs.findIndex(m => m.id === optimisticMessage.id);
+          if (idx === -1) return state;
+          const updated = [...msgs];
+          updated[idx] = { ...msgs[idx], status: MessageStatus.FAILED };
           const newMap = new Map(state.messagesByContact);
-          newMap.set(contactUserId, filtered);
+          newMap.set(contactUserId, updated);
           return { messagesByContact: newMap };
         });
       }
@@ -418,11 +516,7 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
     return get().messagesByContact.get(contactUserId) || EMPTY_MESSAGES;
   },
 
-  sendReaction: async (
-    contactUserId: string,
-    emoji: string,
-    messageDbId: number
-  ) => {
+  sendReaction: (contactUserId: string, emoji: string, messageDbId: number) => {
     const messages =
       get().messagesByContact.get(contactUserId) || EMPTY_MESSAGES;
     const target = messages.find(m => m.id === messageDbId);
@@ -430,44 +524,140 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
       console.warn('Cannot react to message without messageId');
       return;
     }
-    const sdk = getSdk();
-    await sdk.messages.sendReaction(contactUserId, emoji, target.messageId);
+
+    const { userProfile } = useAccountStore.getState();
+    if (!userProfile?.userId) return;
+
+    // Optimistic UI — show reaction immediately.
+    const optimisticReaction: Message = {
+      id: -++optimisticIdCounter,
+      ownerUserId: userProfile.userId,
+      contactUserId,
+      content: emoji,
+      type: MessageType.REACTION,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.SENT,
+      timestamp: new Date(),
+      reactionOf: { originalMsgId: target.messageId },
+    };
+
+    const currentReactions = get().reactionsByContact.get(contactUserId) || [];
+    const newReactionsMap = new Map(get().reactionsByContact);
+    newReactionsMap.set(contactUserId, [
+      ...currentReactions,
+      optimisticReaction,
+    ]);
+    set({ reactionsByContact: newReactionsMap });
+
+    // Fire-and-forget SDK call.
+    void (async () => {
+      try {
+        const result = await getSdk().messages.sendReaction(
+          contactUserId,
+          emoji,
+          target.messageId!
+        );
+        if (result.success && result.message?.id) {
+          // Swap optimistic → confirmed.
+          set(state => {
+            const reactions = state.reactionsByContact.get(contactUserId);
+            if (!reactions) return state;
+            const idx = reactions.findIndex(
+              r => r.id === optimisticReaction.id
+            );
+            if (idx === -1) return state;
+            const updated = [...reactions];
+            updated[idx] = result.message!;
+            const newMap = new Map(state.reactionsByContact);
+            newMap.set(contactUserId, updated);
+            return { reactionsByContact: newMap };
+          });
+        }
+      } catch (error) {
+        console.error('Failed to send reaction:', error);
+        // Rollback — remove optimistic reaction.
+        set(state => {
+          const reactions = state.reactionsByContact.get(contactUserId);
+          if (!reactions) return state;
+          const filtered = reactions.filter(
+            r => r.id !== optimisticReaction.id
+          );
+          const newMap = new Map(state.reactionsByContact);
+          newMap.set(contactUserId, filtered);
+          return { reactionsByContact: newMap };
+        });
+      }
+    })();
   },
 
-  removeReaction: async (reactionDbId: number) => {
-    const sdk = getSdk();
-    const reaction = await sdk.messages.get(reactionDbId);
-    if (
-      !reaction ||
-      reaction.type !== MessageType.REACTION ||
-      !reaction.reactionOf?.originalMsgId
-    ) {
-      await sdk.messages.deleteMessage(reactionDbId);
-      return;
+  removeReaction: (contactUserId: string, reactionDbId: number) => {
+    // Optimistic UI — remove from store immediately.
+    const currentReactions = get().reactionsByContact.get(contactUserId) || [];
+    const removedReaction = currentReactions.find(r => r.id === reactionDbId);
+
+    if (removedReaction) {
+      const newReactionsMap = new Map(get().reactionsByContact);
+      newReactionsMap.set(
+        contactUserId,
+        currentReactions.filter(r => r.id !== reactionDbId)
+      );
+      set({ reactionsByContact: newReactionsMap });
     }
 
-    const originalMsgId = reaction.reactionOf.originalMsgId;
-    const allReactions = await sdk.messages.getReactions(
-      reaction.contactUserId
-    );
+    // Optimistic reactions (negative ID) have no DB row — done.
+    if (reactionDbId < 0) return;
 
-    const targets = allReactions.filter(
-      r =>
-        r.direction === MessageDirection.OUTGOING &&
-        r.reactionOf?.originalMsgId &&
-        r.reactionOf.originalMsgId.length === originalMsgId.length &&
-        r.reactionOf.originalMsgId.every((b, i) => b === originalMsgId[i]) &&
-        r.id != null
-    );
+    // Fire-and-forget SDK delete.
+    void (async () => {
+      try {
+        const sdk = getSdk();
+        const reaction = await sdk.messages.get(reactionDbId);
+        if (
+          !reaction ||
+          reaction.type !== MessageType.REACTION ||
+          !reaction.reactionOf?.originalMsgId
+        ) {
+          await sdk.messages.deleteMessage(reactionDbId);
+          return;
+        }
 
-    if (targets.length === 0) {
-      await sdk.messages.deleteMessage(reactionDbId);
-      return;
-    }
+        const originalMsgId = reaction.reactionOf.originalMsgId;
+        const allReactions = await sdk.messages.getReactions(
+          reaction.contactUserId
+        );
 
-    for (const r of targets) {
-      await sdk.messages.deleteMessage(r.id!);
-    }
+        const targets = allReactions.filter(
+          r =>
+            r.direction === MessageDirection.OUTGOING &&
+            r.reactionOf?.originalMsgId &&
+            r.reactionOf.originalMsgId.length === originalMsgId.length &&
+            r.reactionOf.originalMsgId.every(
+              (b, i) => b === originalMsgId[i]
+            ) &&
+            r.id != null
+        );
+
+        if (targets.length === 0) {
+          await sdk.messages.deleteMessage(reactionDbId);
+          return;
+        }
+
+        for (const r of targets) {
+          await sdk.messages.deleteMessage(r.id!);
+        }
+      } catch (error) {
+        console.error('Failed to remove reaction:', error);
+        // Rollback — re-add reaction to store.
+        if (removedReaction) {
+          set(state => {
+            const reactions = state.reactionsByContact.get(contactUserId) || [];
+            const newMap = new Map(state.reactionsByContact);
+            newMap.set(contactUserId, [...reactions, removedReaction]);
+            return { reactionsByContact: newMap };
+          });
+        }
+      }
+    })();
   },
 
   getReactionsForMessage: (contactUserId: string, messageDbId: number) => {
@@ -526,6 +716,83 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
     return Array.from(groups.values());
   },
 
+  retryMessage: (contactUserId: string, failedMessageId: number) => {
+    const msgs = get().messagesByContact.get(contactUserId);
+    if (!msgs) return;
+    const idx = msgs.findIndex(m => m.id === failedMessageId);
+    if (idx === -1) return;
+    const failedMsg = msgs[idx];
+    if (failedMsg.status !== MessageStatus.FAILED) return;
+
+    // Reset status to SENT (shows clock icon again)
+    const updated = [...msgs];
+    updated[idx] = { ...failedMsg, status: MessageStatus.SENT };
+    const newMap = new Map(get().messagesByContact);
+    newMap.set(contactUserId, updated);
+    set({ messagesByContact: newMap });
+
+    // Re-run the send logic in the background
+    void (async () => {
+      try {
+        const { userProfile } = useAccountStore.getState();
+        if (!userProfile?.userId || !getSdk().isSessionOpen) {
+          throw new Error('Cannot retry: session not open');
+        }
+
+        const discussion = await getSdk().discussions.get(contactUserId);
+        if (!discussion) {
+          throw new Error('Discussion not found');
+        }
+
+        const message: Omit<Message, 'id'> = {
+          ownerUserId: userProfile.userId,
+          contactUserId,
+          content: failedMsg.content,
+          type: MessageType.TEXT,
+          direction: MessageDirection.OUTGOING,
+          status: MessageStatus.WAITING_SESSION,
+          timestamp: failedMsg.timestamp,
+        };
+
+        const result = await getSdk().messages.send(message);
+
+        if (result.success && result.message?.id) {
+          const realMsg = result.message;
+          pendingToRealId.set(failedMessageId, realMsg.id!);
+
+          set(state => {
+            const current = state.messagesByContact.get(contactUserId);
+            if (!current) return state;
+            const i = current.findIndex(m => m.id === failedMessageId);
+            if (i === -1) return state;
+            const kept =
+              statusRank(current[i].status) > statusRank(realMsg.status)
+                ? current[i].status
+                : realMsg.status;
+            const swapped = [...current];
+            swapped[i] = { ...realMsg, status: kept };
+            const map = new Map(state.messagesByContact);
+            map.set(contactUserId, swapped);
+            return { messagesByContact: map };
+          });
+        }
+      } catch (error) {
+        console.error('Retry failed:', error);
+        set(state => {
+          const current = state.messagesByContact.get(contactUserId);
+          if (!current) return state;
+          const i = current.findIndex(m => m.id === failedMessageId);
+          if (i === -1) return state;
+          const marked = [...current];
+          marked[i] = { ...current[i], status: MessageStatus.FAILED };
+          const map = new Map(state.messagesByContact);
+          map.set(contactUserId, marked);
+          return { messagesByContact: map };
+        });
+      }
+    })();
+  },
+
   clearMessages: (contactUserId: string) => {
     const newMessagesMap = new Map(get().messagesByContact);
     const newReactionsMap = new Map(get().reactionsByContact);
@@ -554,6 +821,7 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
         // SDK might not be available during cleanup
       }
     }
+    pendingToRealId.clear();
     set({
       pollTimer: null,
       eventHandler: null,

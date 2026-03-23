@@ -95,6 +95,7 @@ const Discussion: React.FC = () => {
   const removeReaction = useMessageStore(s => s.removeReaction);
   const isLoading = useMessageStore(s => s.isLoading);
   const sendMessage = useMessageStore(s => s.sendMessage);
+  const retryMessage = useMessageStore(s => s.retryMessage);
 
   const prevContactUserIdRef = useRef<string | null>(null);
 
@@ -208,6 +209,15 @@ const Discussion: React.FC = () => {
     handleClearSelection();
   }, [contact?.userId, handleClearSelection]);
 
+  const handleRetry = useCallback(
+    (message: Message) => {
+      if (contact?.userId && message.id != null) {
+        retryMessage(contact.userId, message.id);
+      }
+    },
+    [contact?.userId, retryMessage]
+  );
+
   const scrollToBottom = useCallback(() => {
     messageListRef.current?.scrollToBottom();
   }, []);
@@ -306,24 +316,19 @@ const Discussion: React.FC = () => {
             onForward={handleForwardMessage}
             onDelete={handleDeleteMessage}
             onEdit={handleEditMessage}
+            onRetry={handleRetry}
             onReact={(message, emoji) => {
               if (!message.id) return;
-              sendReaction(contact.userId, emoji, message.id).catch(err => {
-                console.error('Failed to send reaction', err);
-              });
+              sendReaction(contact.userId, emoji, message.id);
             }}
             getReactionsForMessage={messageId =>
               getReactionsForMessage(contact.userId, messageId)
             }
             onToggleReaction={(message, emoji, myReactionId) => {
               if (myReactionId) {
-                removeReaction(myReactionId).catch(err => {
-                  console.error('Failed to remove reaction', err);
-                });
+                removeReaction(contact.userId, myReactionId);
               } else if (message.id) {
-                sendReaction(contact.userId, emoji, message.id).catch(err => {
-                  console.error('Failed to send reaction', err);
-                });
+                sendReaction(contact.userId, emoji, message.id);
               }
             }}
             onScrollToMessage={handleScrollToMessage}

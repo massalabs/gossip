@@ -627,6 +627,61 @@ describe('MessageItem', () => {
       expect(svgs.length).toBe(2);
     });
 
+    it('shows error icon for failed message', async () => {
+      render(
+        <MessageItem
+          message={makeMessage({
+            id: -5,
+            direction: MessageDirection.OUTGOING,
+            status: MessageStatus.FAILED,
+          })}
+          onRetry={vi.fn()}
+        />
+      );
+
+      const listItem = page.getByRole('listitem').element() as HTMLElement;
+      const statusDiv = getStatusContainer(listItem, 'failed');
+
+      expect(statusDiv).not.toBeNull();
+
+      // Should have a button for retry
+      const retryBtn = statusDiv!.querySelector('button');
+      expect(retryBtn).not.toBeNull();
+
+      // The button should contain an SVG (the ExclamationIcon)
+      const svgs = retryBtn!.querySelectorAll('svg');
+      expect(svgs.length).toBe(1);
+
+      // The button should have the text-destructive class (red)
+      expect(retryBtn!.classList.contains('text-destructive')).toBe(true);
+    });
+
+    it('calls onRetry when tapping error icon', async () => {
+      const onRetry = vi.fn();
+      const failedMessage = makeMessage({
+        id: -5,
+        direction: MessageDirection.OUTGOING,
+        status: MessageStatus.FAILED,
+      });
+
+      render(<MessageItem message={failedMessage} onRetry={onRetry} />);
+
+      const listItem = page.getByRole('listitem').element() as HTMLElement;
+      const statusDiv = getStatusContainer(listItem, 'failed');
+      expect(statusDiv).not.toBeNull();
+
+      // Click the retry button inside the status container
+      const retryBtn = statusDiv!.querySelector('button');
+      expect(retryBtn).not.toBeNull();
+
+      await act(async () => {
+        retryBtn!.click();
+      });
+
+      expect(onRetry).toHaveBeenCalledOnce();
+      expect(onRetry).toHaveBeenCalledWith(failedMessage);
+    });
+
     it('shows no status indicator for incoming messages', async () => {
       render(
         <MessageItem

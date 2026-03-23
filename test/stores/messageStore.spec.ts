@@ -385,17 +385,105 @@ describe('sendMessage optimistic flow', () => {
     });
   });
 
-  it('removes message from store on SDK error', async () => {
+  it('marks message as FAILED on SDK error instead of removing', async () => {
     mockSdk.discussions.get.mockRejectedValue(new Error('network error'));
 
     await useMessageStore.getState().sendMessage(contactUserId, 'Will fail');
 
-    // After the fire-and-forget block catches the error, the message is removed.
+    // After the fire-and-forget block catches the error, the message stays with FAILED status.
     await vi.waitFor(() => {
       const msgs = useMessageStore
         .getState()
         .messagesByContact.get(contactUserId);
-      expect(msgs).toHaveLength(0);
+      expect(msgs).toHaveLength(1);
+      expect(msgs![0].status).toBe(MessageStatus.FAILED);
+      expect(msgs![0].content).toBe('Will fail');
+      expect(msgs![0].id).toBeLessThan(0);
+    });
+  });
+
+  it('retryMessage re-sends failed message and swaps id on success', async () => {
+    // First: send a message that fails
+    mockSdk.discussions.get.mockRejectedValue(new Error('network error'));
+
+    await useMessageStore.getState().sendMessage(contactUserId, 'Retry me');
+
+    // Wait for FAILED status
+    let failedId: number;
+    await vi.waitFor(() => {
+      const msgs = useMessageStore
+        .getState()
+        .messagesByContact.get(contactUserId);
+      expect(msgs).toHaveLength(1);
+      expect(msgs![0].status).toBe(MessageStatus.FAILED);
+      failedId = msgs![0].id!;
+    });
+
+    // Now set up SDK to succeed on retry
+    const realMessage: Message = {
+      id: 77,
+      ownerUserId: 'test-user-id',
+      contactUserId,
+      content: 'Retry me',
+      type: MessageType.TEXT,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.SENT,
+      timestamp: new Date(),
+    };
+    mockSdk.discussions.get.mockResolvedValue({ contactUserId });
+    mockSdk.messages.send.mockResolvedValue({
+      success: true,
+      message: realMessage,
+    });
+
+    // Retry
+    useMessageStore.getState().retryMessage(contactUserId, failedId!);
+
+    // Immediately after retry call, status should be SENT (pending)
+    const msgsImmediate = useMessageStore
+      .getState()
+      .messagesByContact.get(contactUserId);
+    expect(msgsImmediate).toHaveLength(1);
+    expect(msgsImmediate![0].status).toBe(MessageStatus.SENT);
+
+    // Wait for the swap to complete
+    await vi.waitFor(() => {
+      const msgs = useMessageStore
+        .getState()
+        .messagesByContact.get(contactUserId);
+      expect(msgs).toHaveLength(1);
+      expect(msgs![0].id).toBe(77);
+    });
+  });
+
+  it('retryMessage marks FAILED again on second failure', async () => {
+    // Send a message that fails
+    mockSdk.discussions.get.mockRejectedValue(new Error('network error'));
+
+    await useMessageStore.getState().sendMessage(contactUserId, 'Double fail');
+
+    let failedId: number;
+    await vi.waitFor(() => {
+      const msgs = useMessageStore
+        .getState()
+        .messagesByContact.get(contactUserId);
+      expect(msgs).toHaveLength(1);
+      expect(msgs![0].status).toBe(MessageStatus.FAILED);
+      failedId = msgs![0].id!;
+    });
+
+    // Retry but SDK fails again
+    mockSdk.discussions.get.mockRejectedValue(new Error('still broken'));
+
+    useMessageStore.getState().retryMessage(contactUserId, failedId!);
+
+    // Wait for FAILED status to return
+    await vi.waitFor(() => {
+      const msgs = useMessageStore
+        .getState()
+        .messagesByContact.get(contactUserId);
+      expect(msgs).toHaveLength(1);
+      expect(msgs![0].status).toBe(MessageStatus.FAILED);
     });
   });
 

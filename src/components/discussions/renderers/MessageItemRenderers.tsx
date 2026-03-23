@@ -110,6 +110,7 @@ interface MessageRendererProps {
   onForward?: (message: Message) => void;
   onDelete?: (message: Message) => void;
   onEdit?: (message: Message) => void;
+  onRetry?: (message: Message) => void;
   onScrollToMessage?: (messageId: number) => void;
   onReact?: (message: Message, emoji: string) => void;
   onToggleReaction?: (
@@ -137,6 +138,7 @@ export const MessageRenderer: React.FC<MessageRendererProps> = ({
   onForward,
   onDelete,
   onEdit,
+  onRetry,
   onScrollToMessage,
   onReact,
   onToggleReaction,
@@ -164,6 +166,7 @@ export const MessageRenderer: React.FC<MessageRendererProps> = ({
         onForward={onForward}
         onDelete={onDelete}
         onEdit={onEdit}
+        onRetry={onRetry}
         onScrollToMessage={onScrollToMessage}
         onReact={onReact}
         onToggleReaction={onToggleReaction}

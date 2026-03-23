@@ -73,6 +73,24 @@ const ClockIcon: React.FC<{
   </svg>
 );
 
+const ExclamationIcon: React.FC<{
+  className?: string;
+  'aria-label'?: string;
+}> = props => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    viewBox="0 0 16 16"
+    fill="currentColor"
+    {...props}
+  >
+    <path
+      fillRule="evenodd"
+      d="M8 15A7 7 0 1 0 8 1a7 7 0 0 0 0 14ZM8 4a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 8 4Zm0 8a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z"
+      clipRule="evenodd"
+    />
+  </svg>
+);
+
 interface MessageItemProps {
   message: Message;
   onReplyTo?: (message: Message) => void;
@@ -80,6 +98,7 @@ interface MessageItemProps {
   onForward?: (message: Message) => void;
   onDelete?: (message: Message) => void;
   onEdit?: (message: Message) => void;
+  onRetry?: (message: Message) => void;
   onReact?: (message: Message, emoji: string) => void;
   onToggleReaction?: (
     message: Message,
@@ -106,6 +125,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
   onForward,
   onDelete,
   onEdit,
+  onRetry,
   onReact,
   onToggleReaction,
   reactions = [],
@@ -1188,13 +1208,31 @@ const MessageItem: React.FC<MessageItemProps> = ({
               >
                 {/* Fixed-size container — prevents bubble resize when check appears */}
                 <div className="w-3.5 h-3.5">
-                  {/* Pending — optimistic message not yet confirmed */}
-                  {(message.id ?? 0) < 0 && (
-                    <ClockIcon
-                      className="w-3.5 h-3.5 opacity-60"
-                      aria-label={t('message_item.pending')}
-                    />
+                  {/* Failed — tap to retry */}
+                  {message.status === MessageStatus.FAILED && (
+                    <button
+                      type="button"
+                      onClick={e => {
+                        e.stopPropagation();
+                        onRetry?.(message);
+                      }}
+                      className="flex items-center gap-1 text-destructive"
+                      aria-label={t('message_item.retry')}
+                    >
+                      <ExclamationIcon
+                        className="w-3.5 h-3.5"
+                        aria-label={t('message_item.failed')}
+                      />
+                    </button>
                   )}
+                  {/* Pending — optimistic message not yet confirmed */}
+                  {message.status !== MessageStatus.FAILED &&
+                    (message.id ?? 0) < 0 && (
+                      <ClockIcon
+                        className="w-3.5 h-3.5 opacity-60"
+                        aria-label={t('message_item.pending')}
+                      />
+                    )}
                   {message.status === MessageStatus.SENT &&
                     (message.id ?? 0) > 0 && (
                       <CheckIcon

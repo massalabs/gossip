@@ -47,6 +47,7 @@ interface MessageListProps {
   onForward?: (message: Message) => void;
   onDelete?: (message: Message) => void;
   onEdit?: (message: Message) => void;
+  onRetry?: (message: Message) => void;
   onScrollToMessage?: (messageId: number) => void;
   onAtBottomChange?: (atBottom: boolean) => void;
   onScrollToBottom?: () => void;
@@ -89,6 +90,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
       onForward,
       onDelete,
       onEdit,
+      onRetry,
       onScrollToMessage,
       onAtBottomChange,
       onScrollToBottom,
@@ -238,11 +240,12 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
             return 'spacer';
           case 'message': {
             const msg = item.message;
-            // Outgoing optimistic messages (negative id) use their unique id.
-            // Confirmed messages use DB id. This avoids duplicate keys when
-            // both the pending and confirmed versions coexist briefly.
-            if (msg.id != null && msg.id < 0) {
-              return `msg-pending-${msg.id}`;
+            // Outgoing messages use content-based keys so the key stays
+            // stable when a pending message (id < 0) is promoted to its
+            // confirmed counterpart (id > 0). Without this, Virtuoso
+            // unmounts + remounts the item, causing a visible scroll jump.
+            if (msg.direction === MessageDirection.OUTGOING) {
+              return `msg-out-${msg.timestamp.getTime()}-${msg.content.slice(0, 32)}`;
             }
             if (msg.id != null) return `msg-${msg.id}`;
             return `msg-temp-${msg.timestamp.getTime()}-${msg.content.slice(0, 16)}`;
@@ -276,17 +279,25 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
           case 'spacer':
             return <SpacerRenderer key="spacer" />;
 
-          case 'message':
+          case 'message': {
+            // Outgoing messages use content-based key (stable across
+            // pending→confirmed id change, prevents unmount/remount).
+            const msg = item.message;
+            const reactKey =
+              msg.direction === MessageDirection.OUTGOING
+                ? `msg-out-${msg.timestamp.getTime()}-${msg.content.slice(0, 32)}`
+                : (msg.id ?? `temp-msg-${index}`);
             return (
               <MessageRenderer
-                key={item.message.id ?? `temp-msg-${index}`}
-                message={item.message}
+                key={reactKey}
+                message={msg}
                 showTimestamp={item.showTimestamp}
                 groupInfo={item.groupInfo}
                 onReplyTo={onReplyTo}
                 onForward={onForward}
                 onDelete={onDelete}
                 onEdit={onEdit}
+                onRetry={onRetry}
                 onScrollToMessage={onScrollToMessage}
                 onReact={onReact}
                 onToggleReaction={onToggleReaction}
@@ -301,6 +312,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
                 onToggleSelect={onToggleSelect}
               />
             );
+          }
 
           default:
             return null;
@@ -312,6 +324,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
         onForward,
         onDelete,
         onEdit,
+        onRetry,
         onScrollToMessage,
         onReact,
         onToggleReaction,
