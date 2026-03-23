@@ -768,7 +768,10 @@ export class MessageService {
     }
   }
 
-  async sendMessage(message: Message): Promise<SendMessageResult> {
+  async sendMessage(
+    message: Message,
+    awaitProcessing = true
+  ): Promise<SendMessageResult> {
     const log = logger.forMethod('sendMessage');
     log.info('queueing message', {
       messageType: message.type,
@@ -822,7 +825,11 @@ export class MessageService {
     Trigger a state update to send the new message.
     If the stateUpdate function is already running, it will be skipped.
     */
-    await this.refreshService?.stateUpdate();
+    if (awaitProcessing) {
+      await this.refreshService?.stateUpdate();
+    } else {
+      void this.refreshService?.stateUpdate();
+    }
 
     return {
       success: true,
@@ -1272,14 +1279,26 @@ export class MessageService {
     return rows.map(rowToMessage);
   }
 
-  /** Send a message, queued via QueueManager if available */
-  async send(message: Omit<Message, 'id'>): Promise<SendMessageResult> {
+  /**
+   * Send a message, queued via QueueManager if available.
+   *
+   * @param options.awaitProcessing - If false, returns immediately after
+   *   persisting the message to DB (WAITING_SESSION) without waiting for
+   *   encryption and network delivery. The stateUpdate runs in the
+   *   background. This lets the caller set id mappings before any events
+   *   fire, preventing UI race conditions. Default: true (backward compat).
+   */
+  async send(
+    message: Omit<Message, 'id'>,
+    options?: { awaitProcessing?: boolean }
+  ): Promise<SendMessageResult> {
+    const awaitProcessing = options?.awaitProcessing ?? true;
     if (this.queueManager) {
       return this.queueManager.enqueue(message.contactUserId, () =>
-        this.sendMessage(message)
+        this.sendMessage(message, awaitProcessing)
       );
     }
-    return this.sendMessage(message);
+    return this.sendMessage(message, awaitProcessing);
   }
 
   /**
