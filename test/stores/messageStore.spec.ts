@@ -925,6 +925,54 @@ describe('ordering and reference stability', () => {
     expect(msgs[2].id).toBe(-999);
   });
 
+  it('poll during in-flight send preserves message reference for existing messages', async () => {
+    const contactUserId = 'contact-1';
+
+    // Existing DB message
+    const dbMsg = makeMessage({
+      id: 1,
+      content: 'Existing',
+      direction: MessageDirection.INCOMING,
+      status: MessageStatus.DELIVERED,
+      timestamp: new Date('2024-01-01T10:00:00Z'),
+    });
+
+    useMessageStore.setState({
+      ...useMessageStore.getState(),
+      messagesByContact: new Map([[contactUserId, [dbMsg]]]),
+    });
+
+    // SDK send never resolves — simulates in-flight send
+    mockSdk.messages.send.mockReturnValue(new Promise(() => {}));
+    mockSdk.discussions.get.mockResolvedValue({ contactUserId });
+
+    await useMessageStore.getState().sendMessage(contactUserId, 'New msg');
+
+    const msgsBeforePoll = useMessageStore
+      .getState()
+      .messagesByContact.get(contactUserId)!;
+    expect(msgsBeforePoll).toHaveLength(2);
+
+    // Poll fires — returns only the DB message (optimistic not in DB yet)
+    mockSdk.discussions.list.mockResolvedValue([{ contactUserId }]);
+    mockSdk.messages.getVisibleMessages.mockResolvedValue([dbMsg]);
+    mockSdk.messages.getReactions.mockResolvedValue([]);
+
+    await useMessageStore.getState().init();
+
+    const msgsAfterPoll = useMessageStore
+      .getState()
+      .messagesByContact.get(contactUserId)!;
+
+    // Both messages should still be present
+    expect(msgsAfterPoll).toHaveLength(2);
+    expect(msgsAfterPoll[0].id).toBe(1);
+    expect(msgsAfterPoll[1].id).toBeLessThan(0);
+
+    // Key check: is the existing DB message the SAME reference? (no unnecessary re-render)
+    expect(msgsAfterPoll[0]).toBe(msgsBeforePoll[0]);
+  });
+
   it('race: poll with stale data does not drop recently-swapped message', async () => {
     const realMsg: Message = makeMessage({
       id: 42,
