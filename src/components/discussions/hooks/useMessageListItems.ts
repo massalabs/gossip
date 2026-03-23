@@ -111,7 +111,7 @@ export function useVirtualItems(
         items.push({
           type: 'date',
           date: message.timestamp,
-          key: `date-${message.id}`,
+          key: `date-${message.timestamp.toISOString().slice(0, 10)}`,
         });
       }
 

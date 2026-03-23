@@ -23,7 +23,6 @@ interface MessageInputProps {
   onConfirmEdit?: (newContent: string, message: Message) => void;
   containerRef?: React.RefObject<HTMLDivElement | null>;
   isSelecting?: boolean;
-  placeholderKey?: string;
 }
 
 const MessageInput: React.FC<MessageInputProps> = ({
@@ -41,7 +40,6 @@ const MessageInput: React.FC<MessageInputProps> = ({
   onConfirmEdit,
   containerRef,
   isSelecting = false,
-  placeholderKey,
 }) => {
   const { t } = useTranslation('discussions');
   const isRefocusingRef = useRef(false);
@@ -175,7 +173,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
               (e.target as HTMLElement).focus({ preventScroll: true });
               isRefocusingRef.current = false;
             }}
-            placeholder={t(placeholderKey ?? 'message_input.placeholder')}
+            placeholder={t('message_input.placeholder')}
             rows={1}
             inputMode="text"
             autoComplete="off"
