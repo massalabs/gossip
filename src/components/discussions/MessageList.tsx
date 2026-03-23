@@ -225,37 +225,28 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
       },
     }));
 
-    // Stable key per virtual item — prevents Virtuoso from confusing items
-    // when the list shifts (new messages, status changes, etc.)
-    const computeItemKey = useCallback(
-      (index: number) => {
-        const item: VirtualItem | undefined = virtualItems[index];
-        if (!item) return index;
-        switch (item.type) {
-          case 'announcement':
-            return `announcement-${index}`;
-          case 'date':
-            return item.key;
-          case 'spacer':
-            return 'spacer';
-          case 'message': {
-            const msg = item.message;
-            // Key must be unique AND stable across the optimistic→confirmed
-            // id swap. We use timestamp + id: the swap now preserves the
-            // optimistic timestamp (see messageStore), so timestamp stays
-            // constant. The id changes (-N → real), but combined with the
-            // stable timestamp it keeps the item at the same position.
-            // Previous content-based key caused collisions when sending the
-            // same text multiple times (e.g. "a", "a", "a").
-            if (msg.id != null) return `msg-${msg.id}`;
-            return `msg-temp-${msg.timestamp.getTime()}-${msg.content.slice(0, 16)}`;
-          }
-          default:
-            return index;
+    // Stable key per virtual item — uses a ref so the callback identity
+    // never changes. Recreating this function on every data change would
+    // make Virtuoso re-layout and shift scroll position on status updates.
+    const computeItemKey = useCallback((index: number) => {
+      const item: VirtualItem | undefined = virtualItemsRef.current[index];
+      if (!item) return index;
+      switch (item.type) {
+        case 'announcement':
+          return `announcement-${index}`;
+        case 'date':
+          return item.key;
+        case 'spacer':
+          return 'spacer';
+        case 'message': {
+          const msg = item.message;
+          if (msg.id != null) return `msg-${msg.id}`;
+          return `msg-temp-${msg.timestamp.getTime()}-${msg.content.slice(0, 16)}`;
         }
-      },
-      [virtualItems]
-    );
+        default:
+          return index;
+      }
+    }, []);
 
     // Render individual item
     const itemContent = useCallback(
