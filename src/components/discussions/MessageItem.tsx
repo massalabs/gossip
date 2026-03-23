@@ -1233,8 +1233,13 @@ const MessageItem: React.FC<MessageItemProps> = ({
                         aria-label={t('message_item.pending')}
                       />
                     )}
-                  {message.status === MessageStatus.SENT &&
-                    (message.id ?? 0) > 0 && (
+                  {/* Single check — message persisted (any pre-delivery status).
+                      WAITING_SESSION and READY are SDK-internal states the user
+                      shouldn't distinguish from SENT. */}
+                  {(message.id ?? 0) > 0 &&
+                    message.status !== MessageStatus.DELIVERED &&
+                    message.status !== MessageStatus.READ &&
+                    message.status !== MessageStatus.FAILED && (
                       <CheckIcon
                         className="w-3.5 h-3.5"
                         aria-label={t('message_item.sent')}
