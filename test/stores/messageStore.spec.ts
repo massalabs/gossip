@@ -298,11 +298,14 @@ describe('MessageStore reactions', () => {
     ]);
     mockSdk.messages.deleteMessage.mockClear();
 
-    await useMessageStore.getState().removeReaction(reaction2.id!);
+    useMessageStore.getState().removeReaction(contactUserId, reaction2.id!);
+
+    // removeReaction is fire-and-forget — wait for the async SDK calls
+    await vi.waitFor(() => {
+      expect(mockSdk.messages.deleteMessage).toHaveBeenCalledTimes(2);
+    });
 
     expect(mockSdk.messages.get).toHaveBeenCalledWith(reaction2.id);
-    // Both outgoing reactions should be deleted, incoming left alone
-    expect(mockSdk.messages.deleteMessage).toHaveBeenCalledTimes(2);
     expect(mockSdk.messages.deleteMessage).toHaveBeenCalledWith(reaction1.id);
     expect(mockSdk.messages.deleteMessage).toHaveBeenCalledWith(reaction2.id);
   });
