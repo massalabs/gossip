@@ -1640,7 +1640,9 @@ describe('session break in session manager', () => {
     const establishSpy = vi.spyOn(aliceAnnouncementService, 'establishSession');
 
     await new Promise(resolve => setTimeout(resolve, 350));
-    const now = Date.now();
+    // Capture now before updateState to avoid races where updateState
+    // completes within the same millisecond tick.
+    const now = Date.now() - 1;
     await aliceSdk.updateState();
 
     const discussion = await aliceSdk.discussions.get(bobSdk.userId);

@@ -9,6 +9,9 @@ import { protocolConfig } from './config/protocol';
 import { Capacitor } from '@capacitor/core';
 import waSqliteWasmUrl from 'wa-sqlite/dist/wa-sqlite.wasm?url';
 import waSqliteAsyncWasmUrl from 'wa-sqlite/dist/wa-sqlite-async.wasm?url';
+import { secureStorageEnabled } from './config/features';
+import InitErrorScreen from './components/InitErrorScreen';
+import { parseInitError } from './utils/initError';
 
 // Polyfill for Buffer
 import { Buffer } from 'buffer';
@@ -96,21 +99,30 @@ enableDebugLogger();
 // }
 
 const isNative = Capacitor.isNativePlatform();
+const root = createRoot(document.getElementById('root')!);
 
 Promise.all([
   createSdk({
     protocolBaseUrl: protocolConfig.baseUrl,
     config: { polling: { enabled: true } },
-    storage: isNative
-      ? { type: 'opfs', path: '/gossip-db', wasmUrl: waSqliteWasmUrl }
-      : { type: 'idb', name: 'gossip-db', wasmUrl: waSqliteAsyncWasmUrl },
+    storage: secureStorageEnabled
+      ? {
+          type: 'secureStorage',
+          path: 'gossip-db',
+          domain: 'gossip',
+          wasmUrl: waSqliteWasmUrl,
+          backend: isNative ? 'opfs' : 'idb',
+        }
+      : isNative
+        ? { type: 'opfs', path: '/gossip-db', wasmUrl: waSqliteWasmUrl }
+        : { type: 'idb', name: 'gossip-db', wasmUrl: waSqliteAsyncWasmUrl },
   }),
   initSafeArea(),
 ])
   .then(([sdk]) => {
     useSdkStore.getState().setSdk(sdk);
 
-    createRoot(document.getElementById('root')!).render(
+    root.render(
       <StrictMode>
         <App />
       </StrictMode>
@@ -118,11 +130,11 @@ Promise.all([
   })
   .catch(error => {
     console.error('[Gossip] Failed to initialize:', error);
-    const message =
-      typeof error?.message === 'string' &&
-      (error.message.includes('createSyncAccessHandle') ||
-        error.message.includes('another open Access Handle'))
-        ? 'Another tab may have this app open. Please close other tabs and refresh.'
-        : 'Failed to start. Please restart the app.';
-    document.getElementById('root')!.textContent = message;
+    const initError = parseInitError(error);
+
+    root.render(
+      <StrictMode>
+        <InitErrorScreen error={initError} />
+      </StrictMode>
+    );
   });

@@ -3,6 +3,9 @@
 # Scan for available Android (ADB) and iOS devices.
 # Outputs ready-to-paste .env lines.
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/lib/ios.sh"
+
 echo "[scan] Looking for devices..."
 echo ""
 
@@ -23,17 +26,13 @@ fi
 
 echo ""
 
-# --- iOS: connected devices (via Capacitor) ---
+# --- iOS: connected devices (USB + wireless) ---
 IOS_LIST=()
-while IFS= read -r line; do
-  [ -z "$line" ] && continue
-  udid=$(echo "$line" | grep -oE '[0-9A-Fa-f]{8}-[0-9A-Fa-f]{16}')
+ios_print_devices
+while IFS= read -r udid; do
   [ -z "$udid" ] && continue
-  echo "$line" | grep -qi 'simulator' && continue
-  name=$(echo "$line" | awk -F'  +' '{print $1}' | xargs)
-  echo "  iOS: ${name}  (${udid})"
   IOS_LIST+=("$udid")
-done < <(npx cap run ios --list 2>/dev/null | tail -n +3)
+done < <(ios_list_devices)
 
 echo ""
 echo "--- Paste into .env ---"

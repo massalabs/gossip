@@ -43,7 +43,8 @@ class ErrorBoundary extends Component<Props, State> {
               {i18n.t('common:error_boundary.title')}
             </h1>
             <p className="text-muted-foreground mb-6">
-              {i18n.t('common:error_boundary.fallback')}
+              {this.state.error?.message ||
+                i18n.t('common:error_boundary.fallback')}
             </p>
             <Button
               onClick={() => window.location.reload()}

@@ -38,29 +38,48 @@ function initKeyboardTracking() {
   );
 
   if (Capacitor.isNativePlatform()) {
-    // Both iOS (KeyboardResize.None) and Android (adjustNothing in manifest)
-    // prevent the OS from resizing the WebView. We lock --viewport-height
-    // and use --keyboard-offset to shrink the layout ourselves.
-    // This ensures consistent behavior across all OEMs (Samsung, Xiaomi, etc.).
-    window.addEventListener('resize', () => {
-      if (useKeyboardStore.getState().height === 0) {
+    if (platform === 'android') {
+      // Android: `resize` config is iOS-only, so the OS always resizes the
+      // WebView when the keyboard opens. We let --viewport-height follow the
+      // OS resize and keep --keyboard-offset at 0 (no transform needed).
+      window.addEventListener('resize', () => {
         const h = window.innerHeight;
         useKeyboardStore.setState({ viewportHeight: h });
         setCssVar('--viewport-height', `${h}px`);
-      }
-    });
+      });
 
-    Keyboard.addListener('keyboardWillShow', (info: KeyboardInfo) => {
-      updateState(true, info.keyboardHeight);
-      setCssVar('--keyboard-height', `${info.keyboardHeight}px`);
-      setCssVar('--keyboard-offset', `${info.keyboardHeight}px`);
-    });
+      Keyboard.addListener('keyboardWillShow', (info: KeyboardInfo) => {
+        updateState(true, info.keyboardHeight);
+        setCssVar('--keyboard-height', `${info.keyboardHeight}px`);
+      });
 
-    Keyboard.addListener('keyboardWillHide', () => {
-      updateState(false, 0);
-      setCssVar('--keyboard-height', '0px');
-      setCssVar('--keyboard-offset', '0px');
-    });
+      Keyboard.addListener('keyboardWillHide', () => {
+        updateState(false, 0);
+        setCssVar('--keyboard-height', '0px');
+      });
+    } else {
+      // iOS: KeyboardResize.None prevents OS resize, so we lock
+      // --viewport-height and use --keyboard-offset for a GPU transform.
+      window.addEventListener('resize', () => {
+        if (useKeyboardStore.getState().height === 0) {
+          const h = window.innerHeight;
+          useKeyboardStore.setState({ viewportHeight: h });
+          setCssVar('--viewport-height', `${h}px`);
+        }
+      });
+
+      Keyboard.addListener('keyboardWillShow', (info: KeyboardInfo) => {
+        updateState(true, info.keyboardHeight);
+        setCssVar('--keyboard-height', `${info.keyboardHeight}px`);
+        setCssVar('--keyboard-offset', `${info.keyboardHeight}px`);
+      });
+
+      Keyboard.addListener('keyboardWillHide', () => {
+        updateState(false, 0);
+        setCssVar('--keyboard-height', '0px');
+        setCssVar('--keyboard-offset', '0px');
+      });
+    }
 
     return;
   }

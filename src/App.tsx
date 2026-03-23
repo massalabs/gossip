@@ -23,9 +23,7 @@ import { toastOptions } from './utils/toastOptions.ts';
 import LoadingScreen from './components/ui/LoadingScreen.tsx';
 import KeyboardAwareWrapper from './components/ui/KeyboardAwareWrapper';
 import { ROUTES } from './constants/routes';
-import { useOnlineStore } from './stores/useOnlineStore.tsx';
-import { useTheme } from './hooks/useTheme.ts';
-import { useScreenshotProtection } from './hooks/useScreenshotProtection';
+import { useAppInit } from './hooks/useAppInit';
 
 const AppContent: React.FC = () => {
   const { isLoading, userProfile } = useAccountStore();
@@ -74,26 +72,7 @@ const AppContent: React.FC = () => {
 };
 
 function App() {
-  const { initTheme } = useTheme();
-  const { initOnlineStore } = useOnlineStore();
-  useScreenshotProtection();
-
-  useEffect(() => {
-    let cleanup: (() => void) | undefined;
-
-    const initialize = async () => {
-      const cleanupFn = await initTheme();
-      cleanup = cleanupFn;
-      await initOnlineStore();
-    };
-
-    void initialize();
-
-    return () => {
-      cleanup?.();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  useAppInit();
 
   return (
     <BrowserRouter>
@@ -102,9 +81,6 @@ function App() {
           <AppUrlListener />
           <AppContent />
           <DebugConsole />
-          {/* <div className="hidden">
-            <PWABadge />
-          </div> */}
         </KeyboardAwareWrapper>
         <Toaster position="top-center" toastOptions={toastOptions} />
       </ErrorBoundary>
