@@ -215,7 +215,7 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
     // ── Targeted fetch (active contact only) ─────────────────
     let isFetchingSingle = false;
     const fetchForContact = async (contactUserId: string) => {
-      if (isFetchingSingle || activeSendCount > 0) return;
+      if (isFetchingSingle) return;
       isFetchingSingle = true;
       try {
         const sdk = getSdk();
@@ -269,7 +269,7 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
     // ── Full fetch (all contacts — polling fallback) ─────────
     let isFetching = false;
     const fetchAll = async () => {
-      if (isFetching || activeSendCount > 0) return;
+      if (isFetching) return;
       isFetching = true;
       try {
         const sdk = getSdk();
@@ -527,6 +527,17 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
           // will exclude it once the confirmed version appears in the next
           // poll. The poll cleanup removes it from optimisticByContact
           // when it cleans up the pendingToRealId entry.
+          //
+          // Touch the optimistic layer to bust the merge cache — if a poll
+          // already added the confirmed version (race), the merge will now
+          // exclude the optimistic immediately instead of showing a duplicate.
+          set(state => {
+            const opts = state.optimisticByContact.get(contactUserId);
+            if (!opts) return state;
+            const newMap = new Map(state.optimisticByContact);
+            newMap.set(contactUserId, [...opts]);
+            return { optimisticByContact: newMap };
+          });
         } else if (!result.success) {
           // SDK could not persist the message (invalid userId, no
           // discussion, DB error). These are programming/infra errors
