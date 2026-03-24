@@ -26,7 +26,14 @@ export type StorageConfig =
   | { type: 'opfs'; path: string; wasmUrl?: string }
   | { type: 'idb'; name: string; wasmUrl?: string }
   | { type: 'node-fs'; path: string }
-  | { type: 'memory'; wasmBinary?: ArrayBuffer };
+  | { type: 'memory'; wasmBinary?: ArrayBuffer }
+  | {
+      type: 'secureStorage';
+      domain: string;
+      /** IDB or OPFS backend for encrypted storage. */
+      backend: 'idb' | 'opfs';
+      wasmUrl?: string;
+    };
 
 export interface InitDbOptions {
   /** Storage backend selection. Defaults to in-memory. */
@@ -277,6 +284,36 @@ export class DatabaseConnection {
         await this.state.sqlite3.exec(this.state.dbHandle, PRAGMAS);
         break;
       }
+
+      case 'secureStorage': {
+        // Secure storage defers SQLite open until allocate/unlock.
+        // Only init the WASM module and bordercrypt state here.
+        this.state.worker = new Worker(
+          new URL('./secure-storage-worker.ts', import.meta.url),
+          { type: 'module' }
+        );
+        this.state.worker.onmessage = this.handleWorkerMessage;
+        this.state.useWorker = true;
+
+        try {
+          await this.postToWorker({
+            type: 'init',
+            domain: storage.domain,
+            backend: storage.backend,
+            wasmUrl: storage.wasmUrl,
+          });
+        } catch (err) {
+          if (this.state.worker) {
+            this.state.worker.terminate();
+            this.state.worker = null;
+          }
+          this.state.useWorker = false;
+          this.state.pending.clear();
+          throw err;
+        }
+        // Don't run migrations or create drizzle yet — need unlock first.
+        return;
+      }
     }
 
     await runMigrations(
@@ -342,6 +379,62 @@ export class DatabaseConnection {
       await this.db.delete(schema.activeSeekers);
       await this.db.delete(schema.announcementCursors);
     });
+  }
+
+  // ─── Secure storage lifecycle ──────────────────────────────────
+
+  /** Provision all 5 session slots (secure storage only). */
+  async secureStorageProvision(): Promise<void> {
+    await this.postToWorker({ type: 'provision' });
+  }
+
+  /** Allocate a session in `slot`, auto-unlock, open DB, run migrations. */
+  async secureStorageAllocate(
+    slot: number,
+    password: Uint8Array
+  ): Promise<void> {
+    await this.postToWorker({
+      type: 'allocate',
+      slot,
+      password: Array.from(password),
+    });
+    await this.finalize();
+  }
+
+  /** Unlock a session by password, open DB, run migrations. Returns false if wrong password. */
+  async secureStorageUnlock(password: Uint8Array): Promise<boolean> {
+    const result = await this.postToWorker({
+      type: 'unlock',
+      password: Array.from(password),
+    });
+    if (!result.ok) return false;
+    await this.finalize();
+    return true;
+  }
+
+  /** Lock the session: flush, close DB, zeroize keys. */
+  async secureStorageLock(): Promise<void> {
+    await this.postToWorker({ type: 'lock' });
+    this.state.drizzleDb = null;
+  }
+
+  /** Run one round of cover traffic (secure storage only). */
+  async secureStorageCoverTick(): Promise<void> {
+    await this.postToWorker({ type: 'cover' });
+  }
+
+  /** Explicit flush to backing store (secure storage only). */
+  async secureStorageFlush(): Promise<void> {
+    await this.postToWorker({ type: 'flush' });
+  }
+
+  /** Run migrations and create the Drizzle instance (called after allocate/unlock). */
+  private async finalize(): Promise<void> {
+    await runMigrations(
+      (sql, params) => this.execRaw(sql, params),
+      fn => this.withTransaction(fn)
+    );
+    this.state.drizzleDb = this.createDrizzleInstance();
   }
 
   async clearConversationTables(): Promise<void> {
