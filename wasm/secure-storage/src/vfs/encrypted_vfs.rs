@@ -1,12 +1,11 @@
-//! Encrypted VFS backed by bordercrypt block storage.
+//! Encrypted VFS backed by secure-storage block encryption.
 //!
 //! SQLite pages are encrypted/decrypted transparently using
-//! `write_session_data` / `read_session_data` from the bordercrypt crate.
+//! `write_session_data` / `read_session_data`.
 //!
-//! Three storage backends:
-//! - **Memory + IDB**: RAM cache with fire-and-forget IndexedDB persistence.
-//! - **OPFS**: direct synchronous I/O via `SyncAccessHandle` (Capacitor/Worker).
-//! - **OPFS + WAL**: crash-safe OPFS with write-ahead log.
+//! Two storage backends:
+//! - **Memory**: RAM only, no persistence (tests).
+//! - **OPFS + WAL**: crash-safe OPFS with write-ahead log (production).
 
 use std::cell::RefCell;
 use std::ffi::{CStr, CString};
@@ -26,74 +25,15 @@ use crate::storage::{BlockStorage, KeypairStorage, MemoryStorage};
 use crate::types::SessionIndex;
 use crate::unlock::UnlockedSession;
 
-use super::opfs_storage::OpfsBlockStorage;
 use super::opfs_wal_storage::OpfsWalStorage;
 
 /// VFS name used for registration with SQLite.
-pub const VFS_NAME: &str = "bordercrypt-enc";
-
-const IDB_NAME: &str = "bordercrypt-storage";
-const IDB_VERSION: u32 = 1;
-const IDB_STORE: &str = "data";
-
-// ── Inline JS helpers for IndexedDB ──────────────────────────────────
-
-#[wasm_bindgen(inline_js = "
-export function encIdbOpen(name, version, storeName) {
-    return new Promise((resolve, reject) => {
-        const req = indexedDB.open(name, version);
-        req.onupgradeneeded = () => {
-            const db = req.result;
-            if (!db.objectStoreNames.contains(storeName)) {
-                db.createObjectStore(storeName);
-            }
-        };
-        req.onsuccess = () => resolve(req.result);
-        req.onerror = () => reject(req.error);
-    });
-}
-
-export function encIdbGet(db, storeName, key) {
-    return new Promise((resolve, reject) => {
-        const tx = db.transaction(storeName, 'readonly');
-        const store = tx.objectStore(storeName);
-        const req = store.get(key);
-        req.onsuccess = () => resolve(req.result);
-        req.onerror = () => reject(req.error);
-    });
-}
-
-export function encIdbPut(db, storeName, key, value) {
-    return new Promise((resolve, reject) => {
-        const tx = db.transaction(storeName, 'readwrite');
-        const store = tx.objectStore(storeName);
-        store.put(value, key);
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
-    });
-}
-")]
-extern "C" {
-    #[wasm_bindgen(catch)]
-    async fn encIdbOpen(name: &str, version: u32, store_name: &str) -> Result<JsValue, JsValue>;
-
-    #[wasm_bindgen(catch)]
-    async fn encIdbGet(db: &JsValue, store_name: &str, key: &str) -> Result<JsValue, JsValue>;
-
-    #[wasm_bindgen(catch)]
-    async fn encIdbPut(
-        db: &JsValue,
-        store_name: &str,
-        key: &str,
-        value: &JsValue,
-    ) -> Result<JsValue, JsValue>;
-}
+pub const VFS_NAME: &str = "secure-storage-enc";
 
 // ── Backend enum ─────────────────────────────────────────────────────
 
 pub(crate) enum Backend {
     Memory(MemoryStorage),
-    Opfs(OpfsBlockStorage),
     OpfsWal(OpfsWalStorage),
 }
 
@@ -101,7 +41,6 @@ macro_rules! delegate {
     ($self:ident, $method:ident ( $($arg:expr),* )) => {
         match $self {
             Backend::Memory(s) => s.$method($($arg),*),
-            Backend::Opfs(s) => s.$method($($arg),*),
             Backend::OpfsWal(s) => s.$method($($arg),*),
         }
     };
@@ -143,8 +82,6 @@ struct VfsState {
     backend: Backend,
     domain: String,
     session: Option<UnlockedSession>,
-    /// IDB handle — only used for Memory backend.
-    idb_handle: Option<JsValue>,
 }
 
 thread_local! {
@@ -191,70 +128,15 @@ fn io_methods() -> &'static sqlite3_io_methods {
 
 // ── Public: lifecycle ────────────────────────────────────────────────
 
-/// Create state with in-memory backend (no persistence).
+/// Create state with in-memory backend (no persistence, tests only).
 pub fn init_memory(domain: &str) {
     STATE.with(|s| {
         *s.borrow_mut() = Some(VfsState {
             backend: Backend::Memory(MemoryStorage::new()),
             domain: domain.to_string(),
             session: None,
-            idb_handle: None,
         });
     });
-}
-
-/// Create state with in-memory backend + IndexedDB persistence.
-pub async fn init_idb(domain: &str) -> Result<(), JsValue> {
-    init_memory(domain);
-    let db = encIdbOpen(IDB_NAME, IDB_VERSION, IDB_STORE).await?;
-
-    let mut blocks_data = Vec::with_capacity(SESSION_COUNT);
-    let mut keypair_data = Vec::with_capacity(SESSION_COUNT);
-    for i in 0..SESSION_COUNT {
-        blocks_data.push(encIdbGet(&db, IDB_STORE, &format!("blocks_{i}")).await?);
-        keypair_data.push(encIdbGet(&db, IDB_STORE, &format!("keypair_{i}")).await?);
-    }
-
-    STATE.with(|s| {
-        let mut s = s.borrow_mut();
-        let st = s.as_mut().ok_or_else(|| JsValue::from_str("not initialized"))?;
-        let mem = match &mut st.backend {
-            Backend::Memory(m) => m,
-            _ => return Err(JsValue::from_str("wrong backend")),
-        };
-        for i in 0..SESSION_COUNT {
-            let idx = SessionIndex::new(i as u8).unwrap();
-            let bv = &blocks_data[i];
-            if !bv.is_undefined() && !bv.is_null() {
-                let arr = js_sys::Uint8Array::new(bv);
-                let data = arr.to_vec();
-                mem.import_blocks(idx, &data)
-                    .map_err(|e| JsValue::from_str(&e.to_string()))?;
-            }
-            let kv = &keypair_data[i];
-            if !kv.is_undefined() && !kv.is_null() {
-                let arr = js_sys::Uint8Array::new(kv);
-                let data = arr.to_vec();
-                mem.import_keypair(idx, &data);
-            }
-        }
-        st.idb_handle = Some(db);
-        Ok(())
-    })
-}
-
-/// Create state with OPFS backend (sync I/O, Worker only).
-pub async fn init_opfs(domain: &str) -> Result<(), JsValue> {
-    let storage = OpfsBlockStorage::open("bordercrypt").await?;
-    STATE.with(|s| {
-        *s.borrow_mut() = Some(VfsState {
-            backend: Backend::Opfs(storage),
-            domain: domain.to_string(),
-            session: None,
-            idb_handle: None,
-        });
-    });
-    Ok(())
 }
 
 /// Create state with OPFS + WAL backend (crash-safe, Worker only).
@@ -265,7 +147,6 @@ pub async fn init_opfs_wal(domain: &str) -> Result<(), JsValue> {
             backend: Backend::OpfsWal(storage),
             domain: domain.to_string(),
             session: None,
-            idb_handle: None,
         });
     });
     Ok(())
@@ -356,60 +237,9 @@ pub fn register() {
 
 /// Flush encrypted data to backing store (awaitable).
 ///
-/// - Memory backend: persists all sessions to IndexedDB.
-/// - OPFS backend: flushes all sync access handles.
+/// - Memory backend: no-op (no persistence).
+/// - OpfsWal backend: flushes WAL to OPFS for all sessions.
 pub async fn flush() -> Result<(), JsValue> {
-    let backend_kind = STATE.with(|s| {
-        s.borrow().as_ref().map(|st| match &st.backend {
-            Backend::Memory(_) => 0u8,
-            Backend::Opfs(_) | Backend::OpfsWal(_) => 1,
-        })
-    });
-
-    match backend_kind {
-        Some(0) => flush_idb().await,
-        Some(_) => flush_opfs(),
-        None => Err(JsValue::from_str("not initialized")),
-    }
-}
-
-async fn flush_idb() -> Result<(), JsValue> {
-    let (db, blocks, keypairs) = STATE.with(|s| {
-        let s = s.borrow();
-        let st = s.as_ref().ok_or_else(|| JsValue::from_str("not initialized"))?;
-        let db = st
-            .idb_handle
-            .clone()
-            .ok_or_else(|| JsValue::from_str("IDB not open"))?;
-        let mem = match &st.backend {
-            Backend::Memory(m) => m,
-            _ => return Err(JsValue::from_str("wrong backend")),
-        };
-        let mut bl = Vec::with_capacity(SESSION_COUNT);
-        let mut kp: Vec<Zeroizing<Vec<u8>>> = Vec::with_capacity(SESSION_COUNT);
-        for i in 0..SESSION_COUNT {
-            let idx = SessionIndex::new(i as u8).unwrap();
-            bl.push(mem.export_blocks(idx));
-            kp.push(Zeroizing::new(mem.export_keypair(idx).to_vec()));
-        }
-        Ok::<_, JsValue>((db, bl, kp))
-    })?;
-
-    for i in 0..SESSION_COUNT {
-        let ba = js_sys::Uint8Array::new_with_length(blocks[i].len() as u32);
-        ba.copy_from(&blocks[i]);
-        encIdbPut(&db, IDB_STORE, &format!("blocks_{i}"), &ba).await?;
-
-        if !keypairs[i].is_empty() {
-            let ka = js_sys::Uint8Array::new_with_length(keypairs[i].len() as u32);
-            ka.copy_from(keypairs[i].as_slice());
-            encIdbPut(&db, IDB_STORE, &format!("keypair_{i}"), &ka).await?;
-        }
-    }
-    Ok(())
-}
-
-fn flush_opfs() -> Result<(), JsValue> {
     STATE.with(|s| {
         let s = s.borrow();
         let st = s.as_ref().ok_or_else(|| JsValue::from_str("not initialized"))?;
@@ -617,65 +447,21 @@ unsafe extern "C" fn x_truncate(file: *mut sqlite3_file, size: i64) -> c_int {
 }
 
 unsafe extern "C" fn x_sync(_file: *mut sqlite3_file, _flags: c_int) -> c_int {
+    // For OpfsWal: synchronous 3-phase flush on the active session.
+    // For Memory: no-op (no persistence).
     STATE.with(|s| {
         let s = s.borrow();
         let st = match s.as_ref() {
             Some(st) => st,
             None => return SQLITE_OK as c_int,
         };
-
-        match &st.backend {
-            Backend::OpfsWal(_) => {
-                // OPFS+WAL: synchronous 3-phase flush on the active session.
-                if let Some(session) = &st.session {
-                    if st.backend.fsync(session.session_index).is_err() {
-                        return SQLITE_IOERR as c_int;
-                    }
-                }
-            }
-            Backend::Opfs(_) => {
-                // Direct OPFS: already persisted in-band via write_block.
-            }
-            Backend::Memory(m) => {
-                // Fire-and-forget IDB persist for Memory backend.
-                // Returns SQLITE_OK before the IDB write completes — data can be
-                // lost if the tab closes between return and IDB commit. The explicit
-                // `flushEncrypted()` call in lockSession compensates.
-                if let Some(db) = st.idb_handle.clone() {
-                    let mut bl = Vec::with_capacity(SESSION_COUNT);
-                    let mut kp: Vec<Zeroizing<Vec<u8>>> = Vec::with_capacity(SESSION_COUNT);
-                    for i in 0..SESSION_COUNT {
-                        let idx = SessionIndex::new(i as u8).unwrap();
-                        bl.push(m.export_blocks(idx));
-                        kp.push(Zeroizing::new(m.export_keypair(idx).to_vec()));
-                    }
-                    wasm_bindgen_futures::spawn_local(async move {
-                        for i in 0..SESSION_COUNT {
-                            let ba =
-                                js_sys::Uint8Array::new_with_length(bl[i].len() as u32);
-                            ba.copy_from(&bl[i]);
-                            let _ =
-                                encIdbPut(&db, IDB_STORE, &format!("blocks_{i}"), &ba).await;
-
-                            if !kp[i].is_empty() {
-                                let ka = js_sys::Uint8Array::new_with_length(
-                                    kp[i].len() as u32,
-                                );
-                                ka.copy_from(kp[i].as_slice());
-                                let _ = encIdbPut(
-                                    &db,
-                                    IDB_STORE,
-                                    &format!("keypair_{i}"),
-                                    &ka,
-                                )
-                                .await;
-                            }
-                        }
-                    });
+        if let Backend::OpfsWal(_) = &st.backend {
+            if let Some(session) = &st.session {
+                if st.backend.fsync(session.session_index).is_err() {
+                    return SQLITE_IOERR as c_int;
                 }
             }
         }
-
         SQLITE_OK as c_int
     })
 }

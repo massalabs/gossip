@@ -1,38 +1,15 @@
-//! wasm-bindgen exports for the bordercrypt database.
+//! wasm-bindgen exports for the secure-storage database.
 
 use wasm_bindgen::prelude::*;
 
 use crate::db::{self, SqlValue};
-use crate::vfs::{encrypted_vfs, idb_vfs, memory_vfs};
+use crate::vfs::encrypted_vfs;
 
-// ── Non-encrypted database (memory / idb) ────────────────────────────
+// ── Encrypted database (secure-storage) ─────────────────────────────
 
-/// Initialise a non-encrypted database on the given backend.
+/// Initialise secure-storage encrypted storage.
 ///
-/// `backend`: `"memory"` or `"idb"`.
-#[wasm_bindgen(js_name = initDatabase)]
-pub async fn init_database(backend: &str) -> Result<(), JsValue> {
-    console_error_panic_hook::set_once();
-
-    match backend {
-        "memory" => {
-            memory_vfs::register();
-            db::open(memory_vfs::VFS_NAME).map_err(|e| JsValue::from_str(&e.to_string()))
-        }
-        "idb" => {
-            idb_vfs::restore().await?;
-            idb_vfs::register();
-            db::open(idb_vfs::VFS_NAME).map_err(|e| JsValue::from_str(&e.to_string()))
-        }
-        _ => Err(JsValue::from_str(&format!("unknown backend: {backend}"))),
-    }
-}
-
-// ── Encrypted database (bordercrypt) ─────────────────────────────────
-
-/// Initialise bordercrypt encrypted storage.
-///
-/// `backend`: `"memory"` (no persistence), `"idb"`, `"opfs"`, or `"opfs-wal"`.
+/// `backend`: `"memory"` (no persistence), `"idb"`, or `"opfs-wal"`.
 #[wasm_bindgen(js_name = initSecureStorage)]
 pub async fn init_secure_storage(domain: &str, backend: &str) -> Result<(), JsValue> {
     console_error_panic_hook::set_once();
@@ -40,8 +17,6 @@ pub async fn init_secure_storage(domain: &str, backend: &str) -> Result<(), JsVa
         "memory" => {
             encrypted_vfs::init_memory(domain);
         }
-        "idb" => encrypted_vfs::init_idb(domain).await?,
-        "opfs" => encrypted_vfs::init_opfs(domain).await?,
         "opfs-wal" => encrypted_vfs::init_opfs_wal(domain).await?,
         _ => return Err(JsValue::from_str(&format!("unknown backend: {backend}"))),
     }
@@ -98,7 +73,7 @@ pub fn cover_traffic_tick() -> Result<(), JsValue> {
     encrypted_vfs::cover_tick()
 }
 
-// ── Shared: SQL execution ────────────────────────────────────────────
+// ── SQL execution ───────────────────────────────────────────────────
 
 /// Execute a SQL statement with bind parameters.
 ///
@@ -115,12 +90,6 @@ pub fn execute(sql: &str, params: JsValue) -> Result<JsValue, JsValue> {
 #[wasm_bindgen(js_name = closeDatabase)]
 pub fn close_database() -> Result<(), JsValue> {
     db::close().map_err(|e| JsValue::from_str(&e.to_string()))
-}
-
-/// Flush pending writes to IndexedDB (non-encrypted IDB VFS).
-#[wasm_bindgen(js_name = flushIdb)]
-pub async fn flush_idb() -> Result<(), JsValue> {
-    idb_vfs::flush().await
 }
 
 /// Flush encrypted data to backing store (IDB or OPFS).
