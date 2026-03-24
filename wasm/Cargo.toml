@@ -11,7 +11,7 @@ members = [
     "auth",
     "sessions",
     "main",
-    "bordercrypt"
+    "secure-storage"
 ]
 
 [workspace.package]

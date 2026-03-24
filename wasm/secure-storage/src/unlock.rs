@@ -4,7 +4,7 @@ use rand::seq::SliceRandom;
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 use crate::domain;
-use crate::error::{BordercryptError, Result};
+use crate::error::{SecureStorageError, Result};
 use crate::kdf::derive_session_keys;
 use crate::keypair::read_session_keypair;
 use crate::pq::{PqPublicKey, PqSecretKey};
@@ -92,7 +92,7 @@ pub fn unlock_session<S: BlockStorage + KeypairStorage>(
         }
     }
 
-    result.ok_or(BordercryptError::InvalidPassword)
+    result.ok_or(SecureStorageError::InvalidPassword)
 }
 
 #[cfg(test)]

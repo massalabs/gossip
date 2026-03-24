@@ -1,8 +1,8 @@
-//! Storage abstraction for bordercrypt.
+//! Storage abstraction for secureStorage.
 
 use zeroize::Zeroizing;
 
-use crate::{BLOCK_SIZE, BordercryptError, Result, SESSION_COUNT, SessionIndex};
+use crate::{BLOCK_SIZE, SecureStorageError, Result, SESSION_COUNT, SessionIndex};
 
 /// Block-level storage for session blockstream files.
 ///
@@ -70,11 +70,11 @@ impl MemoryStorage {
 impl BlockStorage for MemoryStorage {
     fn read_block(&self, session: SessionIndex, block: u64) -> Result<Box<[u8; BLOCK_SIZE]>> {
         let session_blockstreams = &self.blockstreams[session.as_usize()];
-        let idx = usize::try_from(block).map_err(|_| BordercryptError::Overflow)?;
+        let idx = usize::try_from(block).map_err(|_| SecureStorageError::Overflow)?;
         session_blockstreams
             .get(idx)
             .cloned()
-            .ok_or(BordercryptError::OutOfBounds)
+            .ok_or(SecureStorageError::OutOfBounds)
     }
 
     fn write_block(
@@ -84,9 +84,9 @@ impl BlockStorage for MemoryStorage {
         data: &[u8; BLOCK_SIZE],
     ) -> Result<()> {
         let session_blockstreams = &mut self.blockstreams[session.as_usize()];
-        let idx = usize::try_from(block).map_err(|_| BordercryptError::Overflow)?;
+        let idx = usize::try_from(block).map_err(|_| SecureStorageError::Overflow)?;
         if idx >= session_blockstreams.len() {
-            return Err(BordercryptError::OutOfBounds);
+            return Err(SecureStorageError::OutOfBounds);
         }
         *session_blockstreams[idx] = *data;
         Ok(())
@@ -114,7 +114,7 @@ impl KeypairStorage for MemoryStorage {
     fn read_keypair(&self, session: SessionIndex) -> Result<Zeroizing<Vec<u8>>> {
         let data = &self.keypairs[session.as_usize()];
         if data.is_empty() {
-            return Err(BordercryptError::Storage("keypair not found".into()));
+            return Err(SecureStorageError::Storage("keypair not found".into()));
         }
         Ok(Zeroizing::new(data.clone()))
     }
@@ -172,12 +172,12 @@ mod fs_backend {
             let mut file = File::open(self.blocks_path(session))?;
             let offset = block
                 .checked_mul(BLOCK_SIZE as u64)
-                .ok_or(BordercryptError::Overflow)?;
+                .ok_or(SecureStorageError::Overflow)?;
             file.seek(SeekFrom::Start(offset))?;
 
             let mut buf = Box::new([0u8; BLOCK_SIZE]);
             file.read_exact(buf.as_mut())
-                .map_err(|_| BordercryptError::OutOfBounds)?;
+                .map_err(|_| SecureStorageError::OutOfBounds)?;
             Ok(buf)
         }
 
@@ -189,7 +189,7 @@ mod fs_backend {
         ) -> Result<()> {
             let count = self.block_count(session)?;
             if block >= count {
-                return Err(BordercryptError::OutOfBounds);
+                return Err(SecureStorageError::OutOfBounds);
             }
 
             let mut file = OpenOptions::new()
@@ -198,7 +198,7 @@ mod fs_backend {
 
             let offset = block
                 .checked_mul(BLOCK_SIZE as u64)
-                .ok_or(BordercryptError::Overflow)?;
+                .ok_or(SecureStorageError::Overflow)?;
             file.seek(SeekFrom::Start(offset))?;
             file.write_all(data)?;
             Ok(())
@@ -217,7 +217,7 @@ mod fs_backend {
             let len = metadata.len();
             let block_size = BLOCK_SIZE as u64;
             if len % block_size != 0 {
-                return Err(BordercryptError::CorruptedBlock);
+                return Err(SecureStorageError::CorruptedBlock);
             }
             Ok(len / block_size)
         }
@@ -242,9 +242,9 @@ mod fs_backend {
         fn read_keypair(&self, session: SessionIndex) -> Result<Zeroizing<Vec<u8>>> {
             let data = fs::read(self.keypair_path(session)).map_err(|e| {
                 if e.kind() == std::io::ErrorKind::NotFound {
-                    BordercryptError::Storage("keypair not found".into())
+                    SecureStorageError::Storage("keypair not found".into())
                 } else {
-                    BordercryptError::Io(e)
+                    SecureStorageError::Io(e)
                 }
             })?;
             Ok(Zeroizing::new(data))
