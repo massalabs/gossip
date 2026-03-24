@@ -250,4 +250,153 @@ mod tests {
         assert_eq!(parsed[0].payload.len(), BLOCK_SIZE);
         assert_eq!(parsed[1].file_offset, BLOCK_SIZE as u64);
     }
+
+    // ── Edge-case tests ──────────────────────────────────────────────
+
+    #[test]
+    fn seq_numbers_monotonic() {
+        let mut wal = Wal::new();
+        wal.record_write(0, &[1]);
+        wal.record_write(0, &[2]);
+        wal.record_write(0, &[3]);
+        let bytes = wal.to_bytes();
+        let parsed = Wal::parse_wal_bytes(&bytes);
+        assert_eq!(parsed[0].seq, 0);
+        assert_eq!(parsed[1].seq, 1);
+        assert_eq!(parsed[2].seq, 2);
+    }
+
+    #[test]
+    fn corrupted_first_entry_returns_empty() {
+        let mut wal = Wal::new();
+        wal.record_write(0, &[1; 50]);
+        let mut bytes = wal.to_bytes();
+        // Corrupt CRC of entry 0
+        let crc_offset = ENTRY_HEADER_SIZE + 50;
+        bytes[crc_offset] ^= 0xFF;
+        let parsed = Wal::parse_wal_bytes(&bytes);
+        assert!(parsed.is_empty());
+    }
+
+    #[test]
+    fn header_only_no_payload_or_crc() {
+        // Just 20 bytes of header, no payload or CRC
+        let bytes = vec![0u8; ENTRY_HEADER_SIZE];
+        let parsed = Wal::parse_wal_bytes(&bytes);
+        // Length field is 0, so payload is 0 bytes, needs 4 more for CRC
+        // 20 + 0 + 4 = 24 > 20 → truncated → empty
+        assert!(parsed.is_empty());
+    }
+
+    #[test]
+    fn zero_length_payload_valid() {
+        let mut wal = Wal::new();
+        wal.record_write(42, &[]);
+        let bytes = wal.to_bytes();
+        let parsed = Wal::parse_wal_bytes(&bytes);
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].file_offset, 42);
+        assert!(parsed[0].payload.is_empty());
+        assert_eq!(parsed[0].length, 0);
+    }
+
+    #[test]
+    fn partial_header_returns_empty() {
+        let parsed = Wal::parse_wal_bytes(&[0u8; 10]);
+        assert!(parsed.is_empty());
+    }
+
+    #[test]
+    fn one_byte_short_of_complete_entry() {
+        let mut wal = Wal::new();
+        wal.record_write(0, &[0xAB; 32]);
+        let mut bytes = wal.to_bytes();
+        // Remove 1 byte from the end (CRC is incomplete)
+        bytes.pop();
+        let parsed = Wal::parse_wal_bytes(&bytes);
+        assert!(parsed.is_empty());
+    }
+
+    #[test]
+    fn corrupted_payload_detected_by_crc() {
+        let mut wal = Wal::new();
+        wal.record_write(0, &[0xAA; 100]);
+        let mut bytes = wal.to_bytes();
+        // Flip a byte in the payload (not the CRC)
+        bytes[ENTRY_HEADER_SIZE + 50] ^= 0xFF;
+        let parsed = Wal::parse_wal_bytes(&bytes);
+        assert!(parsed.is_empty());
+    }
+
+    #[test]
+    fn valid_prefix_survives_truncation_mid_second_entry() {
+        let mut wal = Wal::new();
+        wal.record_write(0, &[1; 100]);
+        wal.record_write(1000, &[2; 200]);
+        wal.record_write(2000, &[3; 50]);
+        let mut bytes = wal.to_bytes();
+        // Truncate in the middle of entry 3's payload
+        let entry3_start = (ENTRY_HEADER_SIZE + 100 + ENTRY_TRAILER_SIZE)
+            + (ENTRY_HEADER_SIZE + 200 + ENTRY_TRAILER_SIZE);
+        bytes.truncate(entry3_start + ENTRY_HEADER_SIZE + 25); // mid-payload
+        let parsed = Wal::parse_wal_bytes(&bytes);
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[0].payload, vec![1; 100]);
+        assert_eq!(parsed[1].payload, vec![2; 200]);
+    }
+
+    #[test]
+    fn overwrite_same_offset_last_write_wins() {
+        let mut wal = Wal::new();
+        wal.record_write(0, &[1; 10]);
+        wal.record_write(0, &[2; 10]);
+        wal.record_write(0, &[3; 10]);
+        let bytes = wal.to_bytes();
+        let parsed = Wal::parse_wal_bytes(&bytes);
+        assert_eq!(parsed.len(), 3);
+        // All three are valid — consumer must pick last write per offset
+        assert_eq!(parsed[2].payload, vec![3; 10]);
+    }
+
+    #[test]
+    fn crc32_not_trivially_zero() {
+        let mut wal = Wal::new();
+        wal.record_write(0, &[0; 100]);
+        let entries = wal.entries();
+        // CRC of all-zero data should not be zero
+        assert_ne!(entries[0].crc32, 0);
+    }
+
+    #[test]
+    fn max_u64_offset_and_seq() {
+        let crc = WalEntry::compute_crc32(u64::MAX, u64::MAX, 0, &[]);
+        let entry = WalEntry {
+            seq: u64::MAX,
+            file_offset: u64::MAX,
+            length: 0,
+            payload: vec![],
+            crc32: crc,
+        };
+        let bytes = entry.to_bytes();
+        let parsed = Wal::parse_wal_bytes(&bytes);
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].seq, u64::MAX);
+        assert_eq!(parsed[0].file_offset, u64::MAX);
+    }
+
+    #[test]
+    fn clear_then_reuse() {
+        let mut wal = Wal::new();
+        wal.record_write(0, &[1; 10]);
+        wal.record_write(100, &[2; 20]);
+        wal.clear();
+        assert!(wal.is_empty());
+        // Seq continues from where it left off
+        wal.record_write(200, &[3; 30]);
+        let bytes = wal.to_bytes();
+        let parsed = Wal::parse_wal_bytes(&bytes);
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].seq, 2); // seq 0, 1 were used before clear
+        assert_eq!(parsed[0].file_offset, 200);
+    }
 }
