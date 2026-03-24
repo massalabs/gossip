@@ -14,6 +14,7 @@ mod read;
 pub mod storage;
 mod types;
 mod unlock;
+pub(crate) mod wal;
 mod write;
 
 #[cfg(all(target_arch = "wasm32", feature = "wasm"))]
