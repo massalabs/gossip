@@ -55,6 +55,7 @@ interface DbState {
   sqlite3: ReturnType<typeof SQLite.Factory> | null;
   dbHandle: number | null;
   useWorker: boolean;
+  isSecureStorage: boolean;
   drizzleDb: GossipDatabase | null;
   dbLock: Promise<unknown>;
   inTransaction: boolean;
@@ -69,6 +70,7 @@ function createDefaultState(): DbState {
     sqlite3: null,
     dbHandle: null,
     useWorker: false,
+    isSecureStorage: false,
     drizzleDb: null,
     dbLock: Promise.resolve(),
     inTransaction: false,
@@ -119,6 +121,10 @@ export class DatabaseConnection {
 
   get isOpen(): boolean {
     return this.state.drizzleDb !== null;
+  }
+
+  get isSecureStorage(): boolean {
+    return this.state.isSecureStorage;
   }
 
   // ─── Raw SQL execution ─────────────────────────────────────────
@@ -311,6 +317,7 @@ export class DatabaseConnection {
           this.state.pending.clear();
           throw err;
         }
+        this.state.isSecureStorage = true;
         // Don't run migrations or create drizzle yet — need unlock first.
         return;
       }
@@ -391,21 +398,24 @@ export class DatabaseConnection {
   /** Allocate a session in `slot`, auto-unlock, open DB, run migrations. */
   async secureStorageAllocate(
     slot: number,
-    password: Uint8Array
+    password: string,
+    _forceInit = false
   ): Promise<void> {
+    const pwBytes = new TextEncoder().encode(password);
     await this.postToWorker({
       type: 'allocate',
       slot,
-      password: Array.from(password),
+      password: Array.from(pwBytes),
     });
     await this.finalize();
   }
 
   /** Unlock a session by password, open DB, run migrations. Returns false if wrong password. */
-  async secureStorageUnlock(password: Uint8Array): Promise<boolean> {
+  async secureStorageUnlock(password: string): Promise<boolean> {
+    const pwBytes = new TextEncoder().encode(password);
     const result = await this.postToWorker({
       type: 'unlock',
-      password: Array.from(password),
+      password: Array.from(pwBytes),
     });
     if (!result.ok) return false;
     await this.finalize();

@@ -494,6 +494,74 @@ class GossipSdk {
   }
 
   // ─────────────────────────────────────────────────────────────────
+  // Secure Storage
+  // ─────────────────────────────────────────────────────────────────
+
+  get isSecureStorage(): boolean {
+    return this._conn?.isSecureStorage ?? false;
+  }
+
+  private requireConn(): DatabaseConnection {
+    if (!this._conn) {
+      throw new Error('SDK not initialized. Call init() first.');
+    }
+    return this._conn;
+  }
+
+  async secureStorageProvision(): Promise<void> {
+    await this.requireConn().secureStorageProvision();
+  }
+
+  async secureStorageAllocate(
+    slot: number,
+    password: string,
+    forceInit = false
+  ): Promise<void> {
+    const conn = this.requireConn();
+    await conn.secureStorageAllocate(slot, password, forceInit);
+    if (!this._queries) {
+      this._queries = new Queries(conn);
+      this._profile = new ProfileService(this._queries);
+    }
+  }
+
+  async secureStorageUnlock(password: string): Promise<boolean> {
+    const conn = this.requireConn();
+    const unlocked = await conn.secureStorageUnlock(password);
+    if (unlocked && !this._queries) {
+      this._queries = new Queries(conn);
+      this._profile = new ProfileService(this._queries);
+    }
+    return unlocked;
+  }
+
+  async secureStorageLock(): Promise<void> {
+    await this.requireConn().secureStorageLock();
+  }
+
+  /** Whether the database needs an unlock before queries can run. */
+  get needsUnlock(): boolean {
+    return this._conn?.isSecureStorage === true && !this._conn.isOpen;
+  }
+
+  /** Force-flush deferred VFS writes + storage persistence. */
+  async flush(): Promise<void> {
+    if (this._conn?.isSecureStorage) {
+      await this._conn.secureStorageFlush();
+    }
+  }
+
+  async openSecureSession(
+    slot: number,
+    password: string,
+    options: OpenSessionOptions,
+    forceInit = false
+  ): Promise<void> {
+    await this.secureStorageAllocate(slot, password, forceInit);
+    await this.openSession(options);
+  }
+
+  // ─────────────────────────────────────────────────────────────────
   // Services (accessible only when session is open)
   // ─────────────────────────────────────────────────────────────────
 

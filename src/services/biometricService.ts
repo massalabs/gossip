@@ -151,6 +151,31 @@ export class BiometricService {
     }
   }
 
+  /**
+   * Check if a biometric credential already exists (runtime probe, no persisted flag).
+   * - Capacitor: tries to read the key from Secure Enclave (survives localStorage clear)
+   * - Web: checks WEBAUTHN_CREDENTIAL_ID_KEY in localStorage
+   */
+  public async hasExistingCredential(storageKey: string): Promise<boolean> {
+    if (this.capacitorAvailable) {
+      try {
+        const key = this.getEncryptionKeyStorageKey(storageKey);
+        const value = await SecureStorage.get(key);
+        return !!value;
+      } catch {
+        return false;
+      }
+    }
+
+    if (this.isWebAuthnSupported) {
+      const { WEBAUTHN_CREDENTIAL_ID_KEY } =
+        await import('../constants/biometric');
+      return localStorage.getItem(WEBAUTHN_CREDENTIAL_ID_KEY) !== null;
+    }
+
+    return false;
+  }
+
   private checkCapacitorAvailability(): boolean {
     try {
       return (
@@ -242,7 +267,8 @@ export class BiometricService {
     username: string,
     userId: Uint8Array,
     salt: Uint8Array,
-    syncToiCloud = false
+    syncToiCloud = false,
+    storageKey?: string
   ): Promise<BiometricCreationResult> {
     // For native platforms, create biometric credentials without WebAuthn browser APIs
     if (this.capacitorAvailable) {
@@ -256,9 +282,14 @@ export class BiometricService {
         // Generate a new encryption key
         const encryptionKey = await generateEncryptionKey();
 
-        // Store the encryption key securely
-        const userIdStr = encodeUserId(userId);
-        await this.storeEncryptionKey(userIdStr, encryptionKey, syncToiCloud);
+        // Store the encryption key under a fixed storage key (not userId).
+        // Using userId would leak identity info and break plausible deniability.
+        // The constant BIOMETRIC_STORAGE_KEY is used at both store and retrieve time.
+        await this.storeEncryptionKey(
+          storageKey ?? encodeUserId(userId),
+          encryptionKey,
+          syncToiCloud
+        );
 
         return {
           success: true,

@@ -1,11 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { useAppStore } from '../stores/appStore';
 import { useAccountStore } from '../stores/accountStore';
 import OnboardingFlow from '../components/OnboardingFlow';
 import AccountImport from '../components/account/AccountImport';
 import AccountCreation from '../components/account/AccountCreation';
-import ToSAcceptance from '../components/ToSAcceptance';
-import { getDevAccounts } from '../hooks/useDevAutoLogin';
+import SecureStorageSetup from '../components/account/SecureStorageSetup';
+import type { SecureStorageSetupCredentials } from '../stores/secureStorageSetupContext';
 
 /**
  * Routes for onboarding flow (when no account exists)
@@ -17,40 +17,51 @@ import { getDevAccounts } from '../hooks/useDevAutoLogin';
  * The rest of the app uses React Router for proper browser navigation support.
  * This is acceptable for a one-time onboarding experience
  */
-export const Onboarding: React.FC<{
-  showImport: boolean;
-  onShowImportChange: (show: boolean) => void;
-}> = ({ showImport, onShowImportChange }) => {
+export const Onboarding: React.FC = () => {
+  const [showImport, setShowImport] = useState(false);
   const [showAccountCreation, setShowAccountCreation] = useState(false);
-  const [skipDevPicker, setSkipDevPicker] = useState(false);
-  const tosAccepted = useAppStore.use.tosAccepted();
-  const setTosAccepted = useAppStore.use.setTosAccepted();
+  const [secureStorageCreds, setSecureStorageCreds] =
+    useState<SecureStorageSetupCredentials | null>(null);
 
-  if (!tosAccepted) {
-    return <ToSAcceptance onAccept={() => setTosAccepted(true)} />;
-  }
+  const handleAccountCreated = useCallback(
+    (creds?: SecureStorageSetupCredentials) => {
+      if (creds) {
+        setSecureStorageCreds(creds);
+      } else {
+        useAppStore.getState().setIsInitialized(true);
+      }
+    },
+    []
+  );
 
-  // Dev mode: show account picker instead of onboarding
-  const devAccounts = getDevAccounts();
-  if (devAccounts.length > 0 && !skipDevPicker) {
-    const DevAccountPicker = React.lazy(
-      () => import('../components/dev/DevAccountPicker')
-    );
-    return (
-      <React.Suspense fallback={null}>
-        <DevAccountPicker
-          accounts={devAccounts}
-          onSkip={() => setSkipDevPicker(true)}
-        />
-      </React.Suspense>
-    );
-  }
+  const handleAccountCreationBack = useCallback(() => {
+    void (async () => {
+      const hasAny = await useAccountStore.getState().hasExistingAccount();
+      if (hasAny) {
+        useAppStore.getState().setIsInitialized(true);
+      } else {
+        setShowAccountCreation(false);
+      }
+    })();
+  }, []);
 
   if (showImport) {
     return (
       <AccountImport
-        onBack={() => onShowImportChange(false)}
+        onBack={() => setShowImport(false)}
         onComplete={() => {
+          useAppStore.getState().setIsInitialized(true);
+        }}
+      />
+    );
+  }
+
+  if (secureStorageCreds) {
+    return (
+      <SecureStorageSetup
+        mainCredentials={secureStorageCreds}
+        onComplete={() => {
+          setSecureStorageCreds(null);
           useAppStore.getState().setIsInitialized(true);
         }}
       />
@@ -60,24 +71,8 @@ export const Onboarding: React.FC<{
   if (showAccountCreation) {
     return (
       <AccountCreation
-        onComplete={() => {
-          useAppStore.getState().setIsInitialized(true);
-        }}
-        onBack={() => {
-          void (async () => {
-            // Check if there are any existing accounts
-            const hasAny = await useAccountStore
-              .getState()
-              .hasExistingAccount();
-            if (hasAny) {
-              // If accounts exist, go to login flow
-              useAppStore.getState().setIsInitialized(true);
-            } else {
-              // Otherwise go back to onboarding
-              setShowAccountCreation(false);
-            }
-          })();
-        }}
+        onComplete={handleAccountCreated}
+        onBack={handleAccountCreationBack}
       />
     );
   }
@@ -85,7 +80,7 @@ export const Onboarding: React.FC<{
   return (
     <OnboardingFlow
       onComplete={() => setShowAccountCreation(true)}
-      onImportMnemonic={() => onShowImportChange(true)}
+      onImportMnemonic={() => setShowImport(true)}
     />
   );
 };
