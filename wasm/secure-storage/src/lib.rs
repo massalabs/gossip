@@ -1,4 +1,4 @@
-//! Bordercrypt v2 on-device encrypted storage.
+//! SecureStorage v2 on-device encrypted storage.
 //!
 //! Spec: <https://github.com/massalabs/gossip/discussions/380>
 
@@ -24,7 +24,7 @@ pub use domain::{
     block_aead_aad, block_aead_key_label, block_kdf_salt, block_scope, password_kdf_salt, root,
     root_aead_key_label, root_kdf_salt, session_scope, sk_wrap_aad, sk_wrap_key_label,
 };
-pub use error::{BordercryptError, Result};
+pub use error::{SecureStorageError, Result};
 pub use kdf::{SessionKeys, derive_block_aead_key, derive_session_keys};
 pub use keypair::{KeypairFile, read_session_keypair, read_session_version_and_pk};
 pub use lifecycle::{allocate_session, cover_traffic_tick, provision_storage};

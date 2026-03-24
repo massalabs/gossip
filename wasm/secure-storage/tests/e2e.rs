@@ -1,7 +1,7 @@
-//! End-to-end integration tests for bordercrypt v2.
+//! End-to-end integration tests for secureStorage v2.
 
-use bordercrypt::storage::{BlockStorage, KeypairStorage, MemoryStorage};
-use bordercrypt::{
+use secureStorage::storage::{BlockStorage, KeypairStorage, MemoryStorage};
+use secureStorage::{
     PLAINTEXT_SIZE, SESSION_COUNT, SessionIndex, allocate_session, cover_traffic_tick,
     get_global_block_count, provision_storage, read_session_data, shrink_session_data,
     unlock_session, write_session_data,
@@ -139,7 +139,7 @@ fn e2e_corruption_heals_on_write() {
 
         // Corrupt a block of another session (session 1, block 0)
         let s1 = SessionIndex::new(1).unwrap();
-        let corrupted = Box::new([0xFF; bordercrypt::BLOCK_SIZE]);
+        let corrupted = Box::new([0xFF; secureStorage::BLOCK_SIZE]);
         storage.write_block(s1, 0, &corrupted).unwrap();
 
         // Write at the same block index — should heal the corrupted block via cover
@@ -151,7 +151,7 @@ fn e2e_corruption_heals_on_write() {
 
         // Session 1's block should be a valid ciphertext (rerandomized or cover)
         let s1_block = storage.read_block(s1, 0).unwrap();
-        assert_ne!(*s1_block, [0xFF; bordercrypt::BLOCK_SIZE]);
+        assert_ne!(*s1_block, [0xFF; secureStorage::BLOCK_SIZE]);
     });
 }
 
