@@ -1,7 +1,7 @@
-import { encIdbGet, encIdbOpen, encIdbPut } from './snippets/bordercrypt-47f1a20ac143b64b/inline0.js';
-import { opfsOpenDir, opfsOpenSync } from './snippets/bordercrypt-47f1a20ac143b64b/inline1.js';
+import { opfsOpenDir, opfsOpenSync } from './snippets/bordercrypt-47f1a20ac143b64b/inline0.js';
+import { encIdbGet, encIdbOpen, encIdbPut } from './snippets/bordercrypt-47f1a20ac143b64b/inline1.js';
 import { idbGetAllKeys, idbGet, idbOpen, idbPut } from './snippets/bordercrypt-47f1a20ac143b64b/inline2.js';
-import * as __wbg_star0 from './snippets/bordercrypt-47f1a20ac143b64b/inline1.js';
+import * as __wbg_star0 from './snippets/bordercrypt-47f1a20ac143b64b/inline0.js';
 
 let wasm;
 
@@ -369,11 +369,11 @@ export function unlockSession(password) {
 }
 
 function __wbg_adapter_6(arg0, arg1, arg2) {
-    wasm.closure684_externref_shim(arg0, arg1, arg2);
+    wasm.closure685_externref_shim(arg0, arg1, arg2);
 }
 
 function __wbg_adapter_84(arg0, arg1, arg2, arg3) {
-    wasm.closure708_externref_shim(arg0, arg1, arg2, arg3);
+    wasm.closure709_externref_shim(arg0, arg1, arg2, arg3);
 }
 
 const EXPECTED_RESPONSE_TYPES = new Set(['basic', 'cors', 'default']);
@@ -756,11 +756,6 @@ function __wbg_get_imports() {
         const ret = getStringFromWasm0(arg0, arg1);
         return ret;
     };
-    imports.wbg.__wbindgen_cast_77712001c9e5f876 = function(arg0, arg1) {
-        // Cast intrinsic for `Closure(Closure { dtor_idx: 683, function: Function { arguments: [Externref], shim_idx: 684, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-        const ret = makeMutClosure(arg0, arg1, 683, __wbg_adapter_6);
-        return ret;
-    };
     imports.wbg.__wbindgen_cast_cb9088102bce6b30 = function(arg0, arg1) {
         // Cast intrinsic for `Ref(Slice(U8)) -> NamedExternref("Uint8Array")`.
         const ret = getArrayU8FromWasm0(arg0, arg1);
@@ -769,6 +764,11 @@ function __wbg_get_imports() {
     imports.wbg.__wbindgen_cast_d6cd19b81560fd6e = function(arg0) {
         // Cast intrinsic for `F64 -> Externref`.
         const ret = arg0;
+        return ret;
+    };
+    imports.wbg.__wbindgen_cast_deffec06918fae3a = function(arg0, arg1) {
+        // Cast intrinsic for `Closure(Closure { dtor_idx: 684, function: Function { arguments: [Externref], shim_idx: 685, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+        const ret = makeMutClosure(arg0, arg1, 684, __wbg_adapter_6);
         return ret;
     };
     imports.wbg.__wbindgen_init_externref_table = function() {
@@ -781,7 +781,7 @@ function __wbg_get_imports() {
         table.set(offset + 3, false);
         ;
     };
-    imports['./snippets/bordercrypt-47f1a20ac143b64b/inline1.js'] = __wbg_star0;
+    imports['./snippets/bordercrypt-47f1a20ac143b64b/inline0.js'] = __wbg_star0;
 
     return imports;
 }

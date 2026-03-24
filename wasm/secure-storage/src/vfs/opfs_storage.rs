@@ -89,15 +89,6 @@ impl OpfsBlockStorage {
         })
     }
 
-    /// Close all sync access handles.
-    pub fn close(&self) {
-        for h in &self.block_handles {
-            opfsClose(h);
-        }
-        for h in &self.keypair_handles {
-            opfsClose(h);
-        }
-    }
 }
 
 impl BlockStorage for OpfsBlockStorage {

@@ -68,9 +68,11 @@ pub fn open(vfs_name: &str) -> Result<(), BordercryptError> {
 
     exec_pragma(db, "PRAGMA page_size = 8192")?;
     exec_pragma(db, "PRAGMA journal_mode = MEMORY")?;
+    // No fsync at SQLite level — the VFS manages its own persistence.
     exec_pragma(db, "PRAGMA synchronous = OFF")?;
     exec_pragma(db, "PRAGMA cache_size = -8000")?;
     exec_pragma(db, "PRAGMA locking_mode = EXCLUSIVE")?;
+    exec_pragma(db, "PRAGMA trusted_schema = OFF")?;
 
     DB.with(|cell| *cell.borrow_mut() = Some(db));
     Ok(())
@@ -129,8 +131,7 @@ fn execute_on(
                 SqlValue::Text(s) => {
                     let cs =
                         CString::new(s.as_str()).map_err(|e| BordercryptError::Sqlite(e.to_string()))?;
-                    // SQLITE_STATIC (None) — CString stays alive in _text_keep.
-                    let r = sqlite3_bind_text(stmt, idx, cs.as_ptr(), -1, None);
+                    let r = sqlite3_bind_text(stmt, idx, cs.as_ptr(), -1, SQLITE_TRANSIENT());
                     _text_keep.push(cs);
                     r
                 }
@@ -139,7 +140,7 @@ fn execute_on(
                     idx,
                     b.as_ptr() as *const c_void,
                     b.len() as c_int,
-                    None,
+                    SQLITE_TRANSIENT(),
                 ),
             }
         };

@@ -1,34 +1,36 @@
 
-export function encIdbOpen(name, version, storeName) {
-    return new Promise((resolve, reject) => {
-        const req = indexedDB.open(name, version);
-        req.onupgradeneeded = () => {
-            const db = req.result;
-            if (!db.objectStoreNames.contains(storeName)) {
-                db.createObjectStore(storeName);
-            }
-        };
-        req.onsuccess = () => resolve(req.result);
-        req.onerror = () => reject(req.error);
-    });
+export async function opfsOpenDir(name) {
+    const root = await navigator.storage.getDirectory();
+    return root.getDirectoryHandle(name, { create: true });
 }
 
-export function encIdbGet(db, storeName, key) {
-    return new Promise((resolve, reject) => {
-        const tx = db.transaction(storeName, 'readonly');
-        const store = tx.objectStore(storeName);
-        const req = store.get(key);
-        req.onsuccess = () => resolve(req.result);
-        req.onerror = () => reject(req.error);
-    });
+export async function opfsOpenSync(dir, fileName) {
+    const file = await dir.getFileHandle(fileName, { create: true });
+    return file.createSyncAccessHandle();
 }
 
-export function encIdbPut(db, storeName, key, value) {
-    return new Promise((resolve, reject) => {
-        const tx = db.transaction(storeName, 'readwrite');
-        const store = tx.objectStore(storeName);
-        store.put(value, key);
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
-    });
+export function opfsRead(handle, offset, length) {
+    const buf = new Uint8Array(length);
+    handle.read(buf, { at: offset });
+    return buf;
+}
+
+export function opfsWrite(handle, offset, data) {
+    handle.write(data, { at: offset });
+}
+
+export function opfsFlush(handle) {
+    handle.flush();
+}
+
+export function opfsGetSize(handle) {
+    return handle.getSize();
+}
+
+export function opfsTruncate(handle, size) {
+    handle.truncate(size);
+}
+
+export function opfsClose(handle) {
+    handle.close();
 }

@@ -440,7 +440,19 @@ unsafe extern "C" fn x_open(
     }
 }
 
-unsafe extern "C" fn x_close(_file: *mut sqlite3_file) -> c_int {
+unsafe extern "C" fn x_close(file: *mut sqlite3_file) -> c_int {
+    unsafe {
+        let f = &*(file as *const EncFile);
+        if f.kind == KIND_AUX {
+            AUX.with(|a| {
+                let mut a = a.borrow_mut();
+                if let Some(v) = a.get_mut(f.aux_id as usize) {
+                    // Release memory; the slot stays to preserve aux_id indices.
+                    *v = Vec::new();
+                }
+            });
+        }
+    }
     SQLITE_OK as c_int
 }
 
@@ -451,6 +463,8 @@ unsafe extern "C" fn x_read(
     offset: i64,
 ) -> c_int {
     unsafe {
+        debug_assert!(amt >= 0, "x_read: negative amt");
+        debug_assert!(offset >= 0, "x_read: negative offset");
         let f = &*(file as *const EncFile);
         let n = amt as usize;
         let off = offset as u64;
@@ -525,6 +539,8 @@ unsafe extern "C" fn x_write(
     offset: i64,
 ) -> c_int {
     unsafe {
+        debug_assert!(amt >= 0, "x_write: negative amt");
+        debug_assert!(offset >= 0, "x_write: negative offset");
         let f = &*(file as *const EncFile);
         let n = amt as usize;
         let src = std::slice::from_raw_parts(buf as *const u8, n);
@@ -567,6 +583,7 @@ unsafe extern "C" fn x_write(
 }
 
 unsafe extern "C" fn x_truncate(file: *mut sqlite3_file, size: i64) -> c_int {
+    debug_assert!(size >= 0, "x_truncate: negative size");
     let f = unsafe { &*(file as *const EncFile) };
     if f.kind == KIND_MAIN {
         STATE.with(|s| {
@@ -585,6 +602,9 @@ unsafe extern "C" fn x_truncate(file: *mut sqlite3_file, size: i64) -> c_int {
 
 unsafe extern "C" fn x_sync(_file: *mut sqlite3_file, _flags: c_int) -> c_int {
     // Fire-and-forget IDB persist for Memory backend.
+    // Returns SQLITE_OK before the IDB write completes — data can be lost
+    // if the tab closes between return and IDB commit. The explicit
+    // `flushEncrypted()` call in lockSession compensates.
     // OPFS backend: data already persisted via fsync in write_session_data.
     let snapshot = STATE.with(|s| {
         let s = s.borrow();

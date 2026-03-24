@@ -130,11 +130,19 @@ pub async fn flush_encrypted() -> Result<(), JsValue> {
 
 // ── JS ↔ Rust conversion ────────────────────────────────────────────
 
+/// SQLite default limit for bind parameters.
+const MAX_PARAMS: u32 = 999;
+/// Maximum blob/text size accepted from JS (16 MB).
+const MAX_PARAM_BYTES: usize = 16 * 1024 * 1024;
+
 fn parse_params(val: &JsValue) -> Result<Vec<SqlValue>, JsValue> {
     if val.is_null() || val.is_undefined() {
         return Ok(Vec::new());
     }
     let arr = js_sys::Array::from(val);
+    if arr.length() > MAX_PARAMS {
+        return Err(JsValue::from_str("too many parameters"));
+    }
     let mut out = Vec::with_capacity(arr.length() as usize);
     for i in 0..arr.length() {
         out.push(js_to_sql(&arr.get(i))?);
@@ -146,8 +154,14 @@ fn js_to_sql(v: &JsValue) -> Result<SqlValue, JsValue> {
     if v.is_null() || v.is_undefined() {
         Ok(SqlValue::Null)
     } else if let Some(s) = v.as_string() {
+        if s.len() > MAX_PARAM_BYTES {
+            return Err(JsValue::from_str("text param too large"));
+        }
         Ok(SqlValue::Text(s))
     } else if let Some(n) = v.as_f64() {
+        if n.is_nan() || n.is_infinite() {
+            return Err(JsValue::from_str("NaN/Infinity not supported"));
+        }
         if n.fract() == 0.0 && (i64::MIN as f64..=i64::MAX as f64).contains(&n) {
             Ok(SqlValue::Integer(n as i64))
         } else {
@@ -155,6 +169,9 @@ fn js_to_sql(v: &JsValue) -> Result<SqlValue, JsValue> {
         }
     } else if v.is_instance_of::<js_sys::Uint8Array>() {
         let a = js_sys::Uint8Array::new(v);
+        if a.length() as usize > MAX_PARAM_BYTES {
+            return Err(JsValue::from_str("blob param too large"));
+        }
         Ok(SqlValue::Blob(a.to_vec()))
     } else {
         Err(JsValue::from_str("unsupported param type"))
@@ -195,6 +212,8 @@ fn result_to_js(r: &db::QueryResult) -> JsValue {
 fn sql_to_js(v: &SqlValue) -> JsValue {
     match v {
         SqlValue::Null => JsValue::NULL,
+        // JS Number loses precision for |n| > 2^53. Acceptable: Drizzle
+        // ORM only uses integers within safe JS range.
         SqlValue::Integer(n) => JsValue::from_f64(*n as f64),
         SqlValue::Real(f) => JsValue::from_f64(*f),
         SqlValue::Text(s) => JsValue::from_str(s),
