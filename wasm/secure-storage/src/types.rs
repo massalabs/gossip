@@ -1,7 +1,7 @@
 use zeroize::Zeroize;
 
 use crate::constants::SESSION_COUNT;
-use crate::error::{BordercryptError, Result};
+use crate::error::{SecureStorageError, Result};
 
 const _: () = assert!(SESSION_COUNT <= u8::MAX as usize + 1);
 
@@ -15,7 +15,7 @@ impl SessionIndex {
         if (index as usize) < SESSION_COUNT {
             Ok(Self(index))
         } else {
-            Err(BordercryptError::InvalidSessionIndex(index))
+            Err(SecureStorageError::InvalidSessionIndex(index))
         }
     }
 
