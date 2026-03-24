@@ -10,16 +10,16 @@ use std::fmt::Write as _;
 
 use crate::types::SessionIndex;
 
-/// Root domain: `{domain}:bordercrypt`
+/// Root domain: `{domain}:secureStorage`
 #[must_use]
 pub fn root(domain: &str) -> String {
-    format!("{domain}:bordercrypt")
+    format!("{domain}:secureStorage")
 }
 
 /// Session scope: `{root}:session:v{version}:i{index}`
 #[must_use]
 pub fn session_scope(domain: &str, version: u32, index: SessionIndex) -> String {
-    format!("{domain}:bordercrypt:session:v{version}:i{}", index.as_u8())
+    format!("{domain}:secureStorage:session:v{version}:i{}", index.as_u8())
 }
 
 /// Block scope: `{session_scope}:b{block_index}`
@@ -30,7 +30,7 @@ pub fn block_scope(buf: &mut String, domain: &str, version: u32, index: SessionI
     // String::write_fmt is infallible
     let _ = write!(
         buf,
-        "{domain}:bordercrypt:session:v{version}:i{}:b{block}",
+        "{domain}:secureStorage:session:v{version}:i{}:b{block}",
         index.as_u8()
     );
 }
@@ -38,7 +38,7 @@ pub fn block_scope(buf: &mut String, domain: &str, version: u32, index: SessionI
 /// Salt for password KDF: `{root}:password_kdf`
 #[must_use]
 pub fn password_kdf_salt(domain: &str) -> String {
-    format!("{domain}:bordercrypt:password_kdf")
+    format!("{domain}:secureStorage:password_kdf")
 }
 
 /// Salt for root KDF: `{domain}:kdf:salt`
@@ -51,7 +51,7 @@ pub fn root_kdf_salt(domain: &str) -> String {
 #[must_use]
 pub fn sk_wrap_aad(domain: &str, version: u32, index: SessionIndex) -> String {
     format!(
-        "{domain}:bordercrypt:session:v{version}:i{}:pq_sk_wrap",
+        "{domain}:secureStorage:session:v{version}:i{}:pq_sk_wrap",
         index.as_u8()
     )
 }
@@ -69,7 +69,7 @@ pub fn block_kdf_salt(
     buf.clear();
     let _ = write!(
         buf,
-        "{domain}:bordercrypt:session:v{version}:i{}:b{block}:kdf:salt",
+        "{domain}:secureStorage:session:v{version}:i{}:b{block}:kdf:salt",
         index.as_u8()
     );
 }
@@ -87,7 +87,7 @@ pub fn block_aead_key_label(
     buf.clear();
     let _ = write!(
         buf,
-        "{domain}:bordercrypt:session:v{version}:i{}:b{block}:kdf:block_aead_key",
+        "{domain}:secureStorage:session:v{version}:i{}:b{block}:kdf:block_aead_key",
         index.as_u8()
     );
 }
@@ -105,7 +105,7 @@ pub fn block_aead_aad(
     buf.clear();
     let _ = write!(
         buf,
-        "{domain}:bordercrypt:session:v{version}:i{}:b{block}:block_aead",
+        "{domain}:secureStorage:session:v{version}:i{}:b{block}:block_aead",
         index.as_u8()
     );
 }
@@ -113,13 +113,13 @@ pub fn block_aead_aad(
 /// Label for sk_wrap_key derivation: `{root}:kdf:sk_wrap_key`
 #[must_use]
 pub fn sk_wrap_key_label(domain: &str) -> String {
-    format!("{domain}:bordercrypt:kdf:sk_wrap_key")
+    format!("{domain}:secureStorage:kdf:sk_wrap_key")
 }
 
 /// Label for root_aead_key derivation: `{root}:kdf:root_aead_key`
 #[must_use]
 pub fn root_aead_key_label(domain: &str) -> String {
-    format!("{domain}:bordercrypt:kdf:root_aead_key")
+    format!("{domain}:secureStorage:kdf:root_aead_key")
 }
 
 #[cfg(test)]
@@ -128,7 +128,7 @@ mod tests {
 
     #[test]
     fn test_root_format() {
-        assert_eq!(root("app:ns"), "app:ns:bordercrypt");
+        assert_eq!(root("app:ns"), "app:ns:secureStorage");
     }
 
     #[test]
@@ -136,7 +136,7 @@ mod tests {
         let idx = SessionIndex::new(2).unwrap();
         assert_eq!(
             session_scope("app:ns", 1, idx),
-            "app:ns:bordercrypt:session:v1:i2"
+            "app:ns:secureStorage:session:v1:i2"
         );
     }
 
@@ -145,14 +145,14 @@ mod tests {
         let idx = SessionIndex::new(0).unwrap();
         let mut buf = String::new();
         block_scope(&mut buf, "app:ns", 0, idx, 42);
-        assert_eq!(buf, "app:ns:bordercrypt:session:v0:i0:b42");
+        assert_eq!(buf, "app:ns:secureStorage:session:v0:i0:b42");
     }
 
     #[test]
     fn test_password_kdf_salt() {
         assert_eq!(
             password_kdf_salt("app:ns"),
-            "app:ns:bordercrypt:password_kdf"
+            "app:ns:secureStorage:password_kdf"
         );
     }
 
@@ -166,7 +166,7 @@ mod tests {
         let idx = SessionIndex::new(1).unwrap();
         assert_eq!(
             sk_wrap_aad("app:ns", 0, idx),
-            "app:ns:bordercrypt:session:v0:i1:pq_sk_wrap"
+            "app:ns:secureStorage:session:v0:i1:pq_sk_wrap"
         );
     }
 
@@ -175,7 +175,7 @@ mod tests {
         let idx = SessionIndex::new(0).unwrap();
         let mut buf = String::new();
         block_kdf_salt(&mut buf, "app:ns", 0, idx, 5);
-        assert_eq!(buf, "app:ns:bordercrypt:session:v0:i0:b5:kdf:salt");
+        assert_eq!(buf, "app:ns:secureStorage:session:v0:i0:b5:kdf:salt");
     }
 
     #[test]
@@ -185,7 +185,7 @@ mod tests {
         block_aead_key_label(&mut buf, "app:ns", 0, idx, 5);
         assert_eq!(
             buf,
-            "app:ns:bordercrypt:session:v0:i0:b5:kdf:block_aead_key"
+            "app:ns:secureStorage:session:v0:i0:b5:kdf:block_aead_key"
         );
     }
 
@@ -194,14 +194,14 @@ mod tests {
         let idx = SessionIndex::new(0).unwrap();
         let mut buf = String::new();
         block_aead_aad(&mut buf, "app:ns", 0, idx, 5);
-        assert_eq!(buf, "app:ns:bordercrypt:session:v0:i0:b5:block_aead");
+        assert_eq!(buf, "app:ns:secureStorage:session:v0:i0:b5:block_aead");
     }
 
     #[test]
     fn test_sk_wrap_key_label() {
         assert_eq!(
             sk_wrap_key_label("app:ns"),
-            "app:ns:bordercrypt:kdf:sk_wrap_key"
+            "app:ns:secureStorage:kdf:sk_wrap_key"
         );
     }
 
@@ -209,7 +209,7 @@ mod tests {
     fn test_root_aead_key_label() {
         assert_eq!(
             root_aead_key_label("app:ns"),
-            "app:ns:bordercrypt:kdf:root_aead_key"
+            "app:ns:secureStorage:kdf:root_aead_key"
         );
     }
 
