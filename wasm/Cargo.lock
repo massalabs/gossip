@@ -151,28 +151,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "secureStorage"
-version = "0.1.0"
-dependencies = [
- "console_error_panic_hook",
- "crypto-aead",
- "crypto-kdf",
- "crypto-password-kdf",
- "getrandom 0.2.16",
- "js-sys",
- "pq-rerand",
- "rand 0.8.5",
- "sqlite-wasm-rs",
- "tempfile",
- "thiserror 2.0.18",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "wasm-bindgen-test",
- "web-sys",
- "zeroize",
-]
-
-[[package]]
 name = "bs58"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1196,6 +1174,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "93fc1dc3aaa9bfed95e02e6eadabb4baf7e3078b0bd1b4d7b6b0b68378900502"
 dependencies = [
  "winapi-util",
+]
+
+[[package]]
+name = "secureStorage"
+version = "0.1.0"
+dependencies = [
+ "console_error_panic_hook",
+ "crypto-aead",
+ "crypto-kdf",
+ "crypto-password-kdf",
+ "getrandom 0.2.16",
+ "js-sys",
+ "pq-rerand",
+ "rand 0.8.5",
+ "sqlite-wasm-rs",
+ "tempfile",
+ "thiserror 2.0.18",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "wasm-bindgen-test",
+ "web-sys",
+ "zeroize",
 ]
 
 [[package]]

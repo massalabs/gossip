@@ -286,7 +286,7 @@ pub fn unlock(password: &[u8]) -> Result<bool, JsValue> {
                 st.session = Some(session);
                 Ok(true)
             }
-            Err(crate::BordercryptError::InvalidPassword) => Ok(false),
+            Err(crate::SecureStorageError::InvalidPassword) => Ok(false),
             Err(e) => Err(JsValue::from_str(&e.to_string())),
         }
     })

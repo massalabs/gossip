@@ -7,7 +7,7 @@ use wasm_bindgen::prelude::*;
 use zeroize::Zeroizing;
 
 use crate::constants::{BLOCK_SIZE, SESSION_COUNT};
-use crate::error::{BordercryptError, Result};
+use crate::error::{SecureStorageError, Result};
 use crate::storage::{BlockStorage, KeypairStorage};
 use crate::types::SessionIndex;
 
@@ -96,10 +96,10 @@ impl BlockStorage for OpfsBlockStorage {
         let handle = &self.block_handles[session.as_usize()];
         let offset = block
             .checked_mul(BLOCK_SIZE as u64)
-            .ok_or(BordercryptError::Overflow)?;
+            .ok_or(SecureStorageError::Overflow)?;
         let file_size = opfsGetSize(handle) as u64;
         if offset + BLOCK_SIZE as u64 > file_size {
-            return Err(BordercryptError::OutOfBounds);
+            return Err(SecureStorageError::OutOfBounds);
         }
         let data = opfsRead(handle, offset as f64, BLOCK_SIZE as f64);
         let arr = js_sys::Uint8Array::new(&data);
@@ -117,7 +117,7 @@ impl BlockStorage for OpfsBlockStorage {
         let handle = &self.block_handles[session.as_usize()];
         let offset = block
             .checked_mul(BLOCK_SIZE as u64)
-            .ok_or(BordercryptError::Overflow)?;
+            .ok_or(SecureStorageError::Overflow)?;
         let arr = js_sys::Uint8Array::new_with_length(BLOCK_SIZE as u32);
         arr.copy_from(data);
         opfsWrite(handle, offset as f64, &arr);
@@ -137,7 +137,7 @@ impl BlockStorage for OpfsBlockStorage {
         let handle = &self.block_handles[session.as_usize()];
         let size = opfsGetSize(handle) as u64;
         if size % BLOCK_SIZE as u64 != 0 {
-            return Err(BordercryptError::CorruptedBlock);
+            return Err(SecureStorageError::CorruptedBlock);
         }
         Ok(size / BLOCK_SIZE as u64)
     }
@@ -158,7 +158,7 @@ impl KeypairStorage for OpfsBlockStorage {
         let handle = &self.keypair_handles[session.as_usize()];
         let size = opfsGetSize(handle) as usize;
         if size == 0 {
-            return Err(BordercryptError::Storage("keypair not found".into()));
+            return Err(SecureStorageError::Storage("keypair not found".into()));
         }
         let data = opfsRead(handle, 0.0, size as f64);
         let arr = js_sys::Uint8Array::new(&data);

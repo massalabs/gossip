@@ -9,7 +9,7 @@ use std::os::raw::{c_char, c_int, c_void};
 
 use sqlite_wasm_rs::*;
 
-use crate::BordercryptError;
+use crate::SecureStorageError;
 
 thread_local! {
     static DB: RefCell<Option<*mut sqlite3>> = const { RefCell::new(None) };
@@ -39,14 +39,14 @@ pub struct QueryResult {
 // ── Public API ───────────────────────────────────────────────────────
 
 /// Open a SQLite database on the given VFS and run default PRAGMAs.
-pub fn open(vfs_name: &str) -> Result<(), BordercryptError> {
+pub fn open(vfs_name: &str) -> Result<(), SecureStorageError> {
     // Use a unique name per open to avoid SQLite's internal file cache
     // after close/reopen cycles. The VFS handles all persistence.
     static OPEN_COUNT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
     let n = OPEN_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let c_name = CString::new(format!("bordercrypt_{n}.db"))
-        .map_err(|e| BordercryptError::Sqlite(e.to_string()))?;
-    let c_vfs = CString::new(vfs_name).map_err(|e| BordercryptError::Sqlite(e.to_string()))?;
+        .map_err(|e| SecureStorageError::Sqlite(e.to_string()))?;
+    let c_vfs = CString::new(vfs_name).map_err(|e| SecureStorageError::Sqlite(e.to_string()))?;
 
     let mut db: *mut sqlite3 = std::ptr::null_mut();
     let rc = unsafe {
@@ -63,7 +63,7 @@ pub fn open(vfs_name: &str) -> Result<(), BordercryptError> {
         if !db.is_null() {
             unsafe { sqlite3_close(db) };
         }
-        return Err(BordercryptError::Sqlite(msg));
+        return Err(SecureStorageError::Sqlite(msg));
     }
 
     exec_pragma(db, "PRAGMA page_size = 8192")?;
@@ -82,23 +82,23 @@ pub fn open(vfs_name: &str) -> Result<(), BordercryptError> {
 }
 
 /// Execute a SQL statement with bind parameters.
-pub fn execute(sql: &str, params: &[SqlValue]) -> Result<QueryResult, BordercryptError> {
+pub fn execute(sql: &str, params: &[SqlValue]) -> Result<QueryResult, SecureStorageError> {
     DB.with(|cell| {
         let borrow = cell.borrow();
         match *borrow {
             Some(db) => execute_on(db, sql, params),
-            None => Err(BordercryptError::Sqlite("database not open".into())),
+            None => Err(SecureStorageError::Sqlite("database not open".into())),
         }
     })
 }
 
 /// Close the database. No-op if already closed.
-pub fn close() -> Result<(), BordercryptError> {
+pub fn close() -> Result<(), SecureStorageError> {
     DB.with(|cell| {
         if let Some(db) = cell.borrow_mut().take() {
             let rc = unsafe { sqlite3_close(db) };
             if rc != SQLITE_OK as c_int {
-                return Err(BordercryptError::Sqlite(format!("close failed: {rc}")));
+                return Err(SecureStorageError::Sqlite(format!("close failed: {rc}")));
             }
         }
         Ok(())
@@ -111,15 +111,15 @@ fn execute_on(
     db: *mut sqlite3,
     sql: &str,
     params: &[SqlValue],
-) -> Result<QueryResult, BordercryptError> {
-    let c_sql = CString::new(sql).map_err(|e| BordercryptError::Sqlite(e.to_string()))?;
+) -> Result<QueryResult, SecureStorageError> {
+    let c_sql = CString::new(sql).map_err(|e| SecureStorageError::Sqlite(e.to_string()))?;
     let mut stmt: *mut sqlite3_stmt = std::ptr::null_mut();
     let mut tail: *const c_char = std::ptr::null();
 
     let rc =
         unsafe { sqlite3_prepare_v2(db, c_sql.as_ptr(), -1, &mut stmt, &mut tail) };
     if rc != SQLITE_OK as c_int {
-        return Err(BordercryptError::Sqlite(unsafe { errmsg(db) }));
+        return Err(SecureStorageError::Sqlite(unsafe { errmsg(db) }));
     }
 
     // Bind — keep CStrings alive until finalize.
@@ -133,7 +133,7 @@ fn execute_on(
                 SqlValue::Real(v) => sqlite3_bind_double(stmt, idx, *v),
                 SqlValue::Text(s) => {
                     let cs =
-                        CString::new(s.as_str()).map_err(|e| BordercryptError::Sqlite(e.to_string()))?;
+                        CString::new(s.as_str()).map_err(|e| SecureStorageError::Sqlite(e.to_string()))?;
                     let r = sqlite3_bind_text(stmt, idx, cs.as_ptr(), -1, SQLITE_TRANSIENT());
                     _text_keep.push(cs);
                     r
@@ -149,7 +149,7 @@ fn execute_on(
         };
         if rc != SQLITE_OK as c_int {
             unsafe { sqlite3_finalize(stmt) };
-            return Err(BordercryptError::Sqlite(unsafe { errmsg(db) }));
+            return Err(SecureStorageError::Sqlite(unsafe { errmsg(db) }));
         }
     }
 
@@ -178,7 +178,7 @@ fn execute_on(
         } else {
             let msg = unsafe { errmsg(db) };
             unsafe { sqlite3_finalize(stmt) };
-            return Err(BordercryptError::Sqlite(msg));
+            return Err(SecureStorageError::Sqlite(msg));
         }
     }
 
@@ -228,11 +228,11 @@ unsafe fn read_col(stmt: *mut sqlite3_stmt, idx: c_int) -> SqlValue {
     }
 }
 
-fn exec_pragma(db: *mut sqlite3, sql: &str) -> Result<(), BordercryptError> {
-    let c = CString::new(sql).map_err(|e| BordercryptError::Sqlite(e.to_string()))?;
+fn exec_pragma(db: *mut sqlite3, sql: &str) -> Result<(), SecureStorageError> {
+    let c = CString::new(sql).map_err(|e| SecureStorageError::Sqlite(e.to_string()))?;
     let rc = unsafe { sqlite3_exec(db, c.as_ptr(), None, std::ptr::null_mut(), std::ptr::null_mut()) };
     if rc != SQLITE_OK as c_int {
-        return Err(BordercryptError::Sqlite(unsafe { errmsg(db) }));
+        return Err(SecureStorageError::Sqlite(unsafe { errmsg(db) }));
     }
     Ok(())
 }

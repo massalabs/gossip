@@ -81,7 +81,7 @@ impl MemoryStorage {
     /// Import block data from a flat byte vector for a session.
     pub fn import_blocks(&mut self, session: SessionIndex, data: &[u8]) -> Result<()> {
         if !data.is_empty() && data.len() % BLOCK_SIZE != 0 {
-            return Err(BordercryptError::CorruptedBlock);
+            return Err(SecureStorageError::CorruptedBlock);
         }
         let blocks = &mut self.blockstreams[session.as_usize()];
         blocks.clear();
