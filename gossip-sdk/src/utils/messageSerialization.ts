@@ -14,6 +14,8 @@ import {
 export const MESSAGE_TYPE_KEEP_ALIVE = ProtoMessageType.MESSAGE_TYPE_KEEP_ALIVE;
 export const MESSAGE_TYPE_DELETE = ProtoMessageType.MESSAGE_TYPE_DELETE;
 export const MESSAGE_TYPE_EDIT = ProtoMessageType.MESSAGE_TYPE_EDIT;
+export const MESSAGE_TYPE_RETENTION_POLICY =
+  ProtoMessageType.MESSAGE_TYPE_RETENTION_POLICY;
 
 export interface DeserializedMessage {
   content: string;
@@ -209,6 +211,21 @@ export function serializeReactionMessage(
 }
 
 /**
+ * Serialize a retention policy control message
+ *
+ * @param durationSeconds - Retention duration in seconds (0 to disable)
+ * @returns Serialized retention policy message bytes
+ */
+export function serializeRetentionPolicyMessage(
+  durationSeconds: number
+): Uint8Array {
+  return ProtoMessage.encode({
+    messageType: ProtoMessageType.MESSAGE_TYPE_RETENTION_POLICY,
+    content: String(durationSeconds),
+  });
+}
+
+/**
  * Deserialize a message from bytes
  *
  * @param buffer - The serialized message bytes
@@ -228,6 +245,13 @@ export function deserializeMessage(buffer: Uint8Array): DeserializedMessage {
     return {
       content: '',
       type: MessageType.KEEP_ALIVE,
+    };
+  }
+
+  if (protoType === ProtoMessageType.MESSAGE_TYPE_RETENTION_POLICY) {
+    return {
+      content: decoded.content ?? '0',
+      type: MessageType.RETENTION_POLICY,
     };
   }
 

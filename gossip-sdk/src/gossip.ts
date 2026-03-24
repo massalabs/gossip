@@ -316,6 +316,8 @@ class GossipSdk {
       queries
     );
 
+    this._discussion.setMessageService(this._message);
+
     this._refresh = new RefreshService(
       this._message,
       this._discussion,

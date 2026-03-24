@@ -52,6 +52,22 @@ export class DiscussionQueries {
       .where(eq(schema.discussions.id, id));
   }
 
+  async updateByOwnerAndContact(
+    ownerUserId: string,
+    contactUserId: string,
+    data: Partial<DiscussionInsert>
+  ): Promise<void> {
+    await this.conn.db
+      .update(schema.discussions)
+      .set(data)
+      .where(
+        and(
+          eq(schema.discussions.ownerUserId, ownerUserId),
+          eq(schema.discussions.contactUserId, contactUserId)
+        )
+      );
+  }
+
   async deleteById(id: number): Promise<void> {
     await this.conn.db
       .delete(schema.discussions)

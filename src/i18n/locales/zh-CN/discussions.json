@@ -65,7 +65,17 @@
     "reset_description": "如果你认为与对方的连接已断开，可以重置连接。部分消息可能会被重新发送，但聊天记录将会保留。",
     "reconnected": "已重新连接！",
     "participants": "参与者",
-    "no_participants": "未找到参与者"
+    "no_participants": "未找到参与者",
+    "auto_delete": "自动删除消息",
+    "auto_delete_description": "消息将在选定时间后自动删除。",
+    "auto_delete_current": "删除时间",
+    "auto_delete_off": "关闭",
+    "auto_delete_5m": "5分钟",
+    "auto_delete_1h": "1小时",
+    "auto_delete_8h": "8小时",
+    "auto_delete_1d": "1天",
+    "auto_delete_1w": "1周",
+    "auto_delete_1mo": "1个月"
   },
   "new_discussion": {
     "title": "新会话",
@@ -84,7 +94,8 @@
     "contact_not_found": "未找到联系人",
     "waiting_approval": "等待批准",
     "discussion_settings": "会话设置",
-    "search_messages": "搜索消息"
+    "search_messages": "搜索消息",
+    "auto_delete_active": "{{duration}}后删除"
   },
   "list": {
     "no_results": "未找到结果",
@@ -137,6 +148,7 @@
     "info_label": "为什么需要等待回复？",
     "info_message": "收到对方的消息可以更新加密密钥。如果攻击者获得了您当前的密钥，他们可以解密您最近发送的 {{count}} 条消息。"
   },
+  "retention_separator": "自动删除已启用：{{duration}}",
   "filter_label": "筛选会话",
   "waiting_connection": "等待连接...",
   "announcement": "通告"

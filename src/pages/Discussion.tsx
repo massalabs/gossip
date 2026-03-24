@@ -67,7 +67,12 @@ const Discussion: React.FC = () => {
     createdAt: new Date(),
   };
 
-  const { discussion, isLoading: isDiscussionLoading } = useDiscussion({
+  const {
+    discussion,
+    anyDiscussionId,
+    anyDiscussionRetentionDuration,
+    isLoading: isDiscussionLoading,
+  } = useDiscussion({
     contact: safeContact,
   });
 
@@ -271,6 +276,8 @@ const Discussion: React.FC = () => {
       <DiscussionTopSection
         contact={contact}
         discussion={discussion}
+        anyDiscussionId={anyDiscussionId}
+        anyDiscussionRetentionDuration={anyDiscussionRetentionDuration}
         onBack={onBack}
         outgoingSentCount={outgoingSentCount}
         selection={{
