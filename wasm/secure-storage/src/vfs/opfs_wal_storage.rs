@@ -147,7 +147,17 @@ impl OpfsWalStorage {
     /// Crash recovery for one session: replay valid WAL entries, then truncate WAL.
     fn recover(&self, session_idx: usize) -> std::result::Result<(), JsValue> {
         let wal_handle = &self.wal_handles[session_idx];
+        let db_handle = &self.block_handles[session_idx];
         let wal_size = walOpfsGetSize(wal_handle) as usize;
+        let db_size = walOpfsGetSize(db_handle) as u64;
+
+        web_sys::console::log_1(
+            &format!(
+                "[WAL recovery] session {session_idx}: wal_size={wal_size}, db_size={db_size}"
+            )
+            .into(),
+        );
+
         if wal_size == 0 {
             return Ok(());
         }
@@ -160,15 +170,42 @@ impl OpfsWalStorage {
         // Parse valid entries.
         let entries = Wal::parse_wal_bytes(&wal_data);
 
-        // Apply to DB file.
-        let db_handle = &self.block_handles[session_idx];
+        web_sys::console::log_1(
+            &format!(
+                "[WAL recovery] session {session_idx}: parsed {}/{wal_size} bytes → {} valid entries",
+                entries.iter().map(|e| 24 + e.payload.len()).sum::<usize>(),
+                entries.len(),
+            )
+            .into(),
+        );
+
+        // Apply to DB file — block 0 last (same ordering as flush_session).
+        let mut block0_entry = None;
         for entry in &entries {
+            if entry.file_offset == 0 {
+                block0_entry = Some(entry);
+                continue;
+            }
             let arr = js_sys::Uint8Array::new_with_length(entry.length);
             arr.copy_from(&entry.payload);
             walOpfsWrite(db_handle, entry.file_offset as f64, &arr);
         }
         if !entries.is_empty() {
+            if let Some(entry) = block0_entry {
+                walOpfsFlush(db_handle);
+                let arr = js_sys::Uint8Array::new_with_length(entry.length);
+                arr.copy_from(&entry.payload);
+                walOpfsWrite(db_handle, 0.0, &arr);
+            }
             walOpfsFlush(db_handle);
+            let new_db_size = walOpfsGetSize(db_handle) as u64;
+            web_sys::console::log_1(
+                &format!(
+                    "[WAL recovery] session {session_idx}: applied {} entries, db_size {db_size} → {new_db_size}",
+                    entries.len(),
+                )
+                .into(),
+            );
         }
 
         // Truncate WAL.
@@ -185,6 +222,7 @@ impl OpfsWalStorage {
             return Ok(());
         }
 
+        let n_entries = wals[session_idx].entries().len();
         let wal_handle = &self.wal_handles[session_idx];
         let db_handle = &self.block_handles[session_idx];
 
@@ -197,10 +235,26 @@ impl OpfsWalStorage {
         walOpfsFlush(wal_handle);
 
         // Phase 2: Apply entries to DB file.
-        for entry in wals[session_idx].entries() {
+        // Write block 0 LAST — it contains total_data_length and is required
+        // for unlock. If we crash mid-apply, the old block 0 remains valid
+        // and the session can still be unlocked (we just lose this transaction).
+        let entries = wals[session_idx].entries();
+        let mut block0_entry = None;
+        for entry in entries {
+            if entry.file_offset == 0 {
+                block0_entry = Some(entry);
+                continue;
+            }
             let arr = js_sys::Uint8Array::new_with_length(entry.length);
             arr.copy_from(&entry.payload);
             walOpfsWrite(db_handle, entry.file_offset as f64, &arr);
+        }
+        // Flush non-block-0 writes first, then write block 0.
+        if let Some(entry) = block0_entry {
+            walOpfsFlush(db_handle);
+            let arr = js_sys::Uint8Array::new_with_length(entry.length);
+            arr.copy_from(&entry.payload);
+            walOpfsWrite(db_handle, 0.0, &arr);
         }
         walOpfsFlush(db_handle);
 
@@ -211,6 +265,14 @@ impl OpfsWalStorage {
         walOpfsTruncate(wal_handle, 0.0);
         walOpfsFlush(wal_handle);
         self.wals.borrow_mut()[session_idx].clear();
+
+        web_sys::console::log_1(
+            &format!(
+                "[WAL flush] session {session_idx}: {n_entries} entries, {} bytes",
+                n_entries * BLOCK_SIZE,
+            )
+            .into(),
+        );
 
         Ok(())
     }

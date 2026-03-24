@@ -168,8 +168,20 @@ async function handleMessage(e: MessageEvent): Promise<void> {
 
         const moduleArg: Record<string, unknown> = {};
         if (wasmUrl) moduleArg.locateFile = () => wasmUrl;
+        let t0 = performance.now();
         await init(moduleArg);
-        await initBordercrypt(domain, backend);
+        console.log(
+          '[SecureStorageWorker] wasm init:',
+          (performance.now() - t0) | 0,
+          'ms'
+        );
+        t0 = performance.now();
+        await initSecureStorage(domain, backend);
+        console.log(
+          '[SecureStorageWorker] initSecureStorage:',
+          (performance.now() - t0) | 0,
+          'ms'
+        );
 
         // IDB check can happen after init (no locking issue).
         if (backend === 'idb') {
@@ -178,7 +190,13 @@ async function handleMessage(e: MessageEvent): Promise<void> {
 
         if (!needsUnlock) {
           // First launch: provision empty slots so allocate can work.
+          t0 = performance.now();
           provisionStorage();
+          console.log(
+            '[SecureStorageWorker] provision:',
+            (performance.now() - t0) | 0,
+            'ms'
+          );
         }
         console.log('[SecureStorageWorker] needsUnlock:', needsUnlock);
         post({ id, type: 'init-result', needsUnlock, backend });
@@ -194,10 +212,22 @@ async function handleMessage(e: MessageEvent): Promise<void> {
       case 'allocate': {
         const { slot, password } = e.data;
         const pw = new Uint8Array(password);
+        let t1 = performance.now();
         allocateSession(slot, pw);
+        console.log(
+          '[SecureStorageWorker] allocate:',
+          (performance.now() - t1) | 0,
+          'ms'
+        );
         pw.fill(0);
-        // Flush immediately so IDB has data before any lock/reload.
+        // Flush immediately so backing store has data before any lock/reload.
+        t1 = performance.now();
         await flushEncrypted();
+        console.log(
+          '[SecureStorageWorker] flush:',
+          (performance.now() - t1) | 0,
+          'ms'
+        );
         startFlushTimer();
         post({ id, type: 'allocate-result' });
         break;
