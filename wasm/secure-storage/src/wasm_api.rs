@@ -32,9 +32,9 @@ pub async fn init_database(backend: &str) -> Result<(), JsValue> {
 
 /// Initialise bordercrypt encrypted storage.
 ///
-/// `backend`: `"memory"` (no persistence), `"idb"`, or `"opfs"`.
-#[wasm_bindgen(js_name = initBordercrypt)]
-pub async fn init_bordercrypt(domain: &str, backend: &str) -> Result<(), JsValue> {
+/// `backend`: `"memory"` (no persistence), `"idb"`, `"opfs"`, or `"opfs-wal"`.
+#[wasm_bindgen(js_name = initSecureStorage)]
+pub async fn init_secure_storage(domain: &str, backend: &str) -> Result<(), JsValue> {
     console_error_panic_hook::set_once();
     match backend {
         "memory" => {
@@ -42,6 +42,7 @@ pub async fn init_bordercrypt(domain: &str, backend: &str) -> Result<(), JsValue
         }
         "idb" => encrypted_vfs::init_idb(domain).await?,
         "opfs" => encrypted_vfs::init_opfs(domain).await?,
+        "opfs-wal" => encrypted_vfs::init_opfs_wal(domain).await?,
         _ => return Err(JsValue::from_str(&format!("unknown backend: {backend}"))),
     }
     // Register VFS once during init — it persists across open/close cycles.

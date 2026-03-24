@@ -3,9 +3,10 @@
 //! SQLite pages are encrypted/decrypted transparently using
 //! `write_session_data` / `read_session_data` from the bordercrypt crate.
 //!
-//! Two storage backends:
+//! Three storage backends:
 //! - **Memory + IDB**: RAM cache with fire-and-forget IndexedDB persistence.
 //! - **OPFS**: direct synchronous I/O via `SyncAccessHandle` (Capacitor/Worker).
+//! - **OPFS + WAL**: crash-safe OPFS with write-ahead log.
 
 use std::cell::RefCell;
 use std::ffi::{CStr, CString};
@@ -26,6 +27,7 @@ use crate::types::SessionIndex;
 use crate::unlock::UnlockedSession;
 
 use super::opfs_storage::OpfsBlockStorage;
+use super::opfs_wal_storage::OpfsWalStorage;
 
 /// VFS name used for registration with SQLite.
 pub const VFS_NAME: &str = "bordercrypt-enc";
@@ -92,6 +94,7 @@ extern "C" {
 pub(crate) enum Backend {
     Memory(MemoryStorage),
     Opfs(OpfsBlockStorage),
+    OpfsWal(OpfsWalStorage),
 }
 
 macro_rules! delegate {
@@ -99,6 +102,7 @@ macro_rules! delegate {
         match $self {
             Backend::Memory(s) => s.$method($($arg),*),
             Backend::Opfs(s) => s.$method($($arg),*),
+            Backend::OpfsWal(s) => s.$method($($arg),*),
         }
     };
 }
@@ -253,6 +257,20 @@ pub async fn init_opfs(domain: &str) -> Result<(), JsValue> {
     Ok(())
 }
 
+/// Create state with OPFS + WAL backend (crash-safe, Worker only).
+pub async fn init_opfs_wal(domain: &str) -> Result<(), JsValue> {
+    let storage = OpfsWalStorage::open("secureStorage").await?;
+    STATE.with(|s| {
+        *s.borrow_mut() = Some(VfsState {
+            backend: Backend::OpfsWal(storage),
+            domain: domain.to_string(),
+            session: None,
+            idb_handle: None,
+        });
+    });
+    Ok(())
+}
+
 /// Provision all 5 session slots.
 pub fn provision() -> Result<(), JsValue> {
     STATE.with(|s| {
@@ -341,16 +359,17 @@ pub fn register() {
 /// - Memory backend: persists all sessions to IndexedDB.
 /// - OPFS backend: flushes all sync access handles.
 pub async fn flush() -> Result<(), JsValue> {
-    let is_memory = STATE.with(|s| {
-        s.borrow()
-            .as_ref()
-            .map_or(false, |st| matches!(st.backend, Backend::Memory(_)))
+    let backend_kind = STATE.with(|s| {
+        s.borrow().as_ref().map(|st| match &st.backend {
+            Backend::Memory(_) => 0u8,
+            Backend::Opfs(_) | Backend::OpfsWal(_) => 1,
+        })
     });
 
-    if is_memory {
-        flush_idb().await
-    } else {
-        flush_opfs()
+    match backend_kind {
+        Some(0) => flush_idb().await,
+        Some(_) => flush_opfs(),
+        None => Err(JsValue::from_str("not initialized")),
     }
 }
 
@@ -394,16 +413,13 @@ fn flush_opfs() -> Result<(), JsValue> {
     STATE.with(|s| {
         let s = s.borrow();
         let st = s.as_ref().ok_or_else(|| JsValue::from_str("not initialized"))?;
-        match &st.backend {
-            Backend::Opfs(opfs) => {
-                for i in 0..SESSION_COUNT {
-                    let idx = SessionIndex::new(i as u8).unwrap();
-                    opfs.fsync(idx).map_err(|e| JsValue::from_str(&e.to_string()))?;
-                }
-                Ok(())
-            }
-            _ => Err(JsValue::from_str("wrong backend")),
+        for i in 0..SESSION_COUNT {
+            let idx = SessionIndex::new(i as u8).unwrap();
+            st.backend
+                .fsync(idx)
+                .map_err(|e| JsValue::from_str(&e.to_string()))?;
         }
+        Ok(())
     })
 }
 
@@ -601,45 +617,67 @@ unsafe extern "C" fn x_truncate(file: *mut sqlite3_file, size: i64) -> c_int {
 }
 
 unsafe extern "C" fn x_sync(_file: *mut sqlite3_file, _flags: c_int) -> c_int {
-    // Fire-and-forget IDB persist for Memory backend.
-    // Returns SQLITE_OK before the IDB write completes — data can be lost
-    // if the tab closes between return and IDB commit. The explicit
-    // `flushEncrypted()` call in lockSession compensates.
-    // OPFS backend: data already persisted via fsync in write_session_data.
-    let snapshot = STATE.with(|s| {
+    STATE.with(|s| {
         let s = s.borrow();
-        let st = s.as_ref()?;
-        let db = st.idb_handle.clone()?;
-        let mem = match &st.backend {
-            Backend::Memory(m) => m,
-            Backend::Opfs(_) => return None, // OPFS persists in-band
+        let st = match s.as_ref() {
+            Some(st) => st,
+            None => return SQLITE_OK as c_int,
         };
-        let mut bl = Vec::with_capacity(SESSION_COUNT);
-        let mut kp: Vec<Zeroizing<Vec<u8>>> = Vec::with_capacity(SESSION_COUNT);
-        for i in 0..SESSION_COUNT {
-            let idx = SessionIndex::new(i as u8).unwrap();
-            bl.push(mem.export_blocks(idx));
-            kp.push(Zeroizing::new(mem.export_keypair(idx).to_vec()));
-        }
-        Some((db, bl, kp))
-    });
 
-    if let Some((db, blocks, keypairs)) = snapshot {
-        wasm_bindgen_futures::spawn_local(async move {
-            for i in 0..SESSION_COUNT {
-                let ba = js_sys::Uint8Array::new_with_length(blocks[i].len() as u32);
-                ba.copy_from(&blocks[i]);
-                let _ = encIdbPut(&db, IDB_STORE, &format!("blocks_{i}"), &ba).await;
-
-                if !keypairs[i].is_empty() {
-                    let ka = js_sys::Uint8Array::new_with_length(keypairs[i].len() as u32);
-                    ka.copy_from(keypairs[i].as_slice());
-                    let _ = encIdbPut(&db, IDB_STORE, &format!("keypair_{i}"), &ka).await;
+        match &st.backend {
+            Backend::OpfsWal(_) => {
+                // OPFS+WAL: synchronous 3-phase flush on the active session.
+                if let Some(session) = &st.session {
+                    if st.backend.fsync(session.session_index).is_err() {
+                        return SQLITE_IOERR as c_int;
+                    }
                 }
             }
-        });
-    }
-    SQLITE_OK as c_int
+            Backend::Opfs(_) => {
+                // Direct OPFS: already persisted in-band via write_block.
+            }
+            Backend::Memory(m) => {
+                // Fire-and-forget IDB persist for Memory backend.
+                // Returns SQLITE_OK before the IDB write completes — data can be
+                // lost if the tab closes between return and IDB commit. The explicit
+                // `flushEncrypted()` call in lockSession compensates.
+                if let Some(db) = st.idb_handle.clone() {
+                    let mut bl = Vec::with_capacity(SESSION_COUNT);
+                    let mut kp: Vec<Zeroizing<Vec<u8>>> = Vec::with_capacity(SESSION_COUNT);
+                    for i in 0..SESSION_COUNT {
+                        let idx = SessionIndex::new(i as u8).unwrap();
+                        bl.push(m.export_blocks(idx));
+                        kp.push(Zeroizing::new(m.export_keypair(idx).to_vec()));
+                    }
+                    wasm_bindgen_futures::spawn_local(async move {
+                        for i in 0..SESSION_COUNT {
+                            let ba =
+                                js_sys::Uint8Array::new_with_length(bl[i].len() as u32);
+                            ba.copy_from(&bl[i]);
+                            let _ =
+                                encIdbPut(&db, IDB_STORE, &format!("blocks_{i}"), &ba).await;
+
+                            if !kp[i].is_empty() {
+                                let ka = js_sys::Uint8Array::new_with_length(
+                                    kp[i].len() as u32,
+                                );
+                                ka.copy_from(kp[i].as_slice());
+                                let _ = encIdbPut(
+                                    &db,
+                                    IDB_STORE,
+                                    &format!("keypair_{i}"),
+                                    &ka,
+                                )
+                                .await;
+                            }
+                        }
+                    });
+                }
+            }
+        }
+
+        SQLITE_OK as c_int
+    })
 }
 
 unsafe extern "C" fn x_file_size(file: *mut sqlite3_file, size: *mut i64) -> c_int {
