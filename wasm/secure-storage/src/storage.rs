@@ -67,6 +67,43 @@ impl MemoryStorage {
     }
 }
 
+impl MemoryStorage {
+    /// Export all block data for a session as a flat byte vector.
+    pub fn export_blocks(&self, session: SessionIndex) -> Vec<u8> {
+        let blocks = &self.blockstreams[session.as_usize()];
+        let mut data = Vec::with_capacity(blocks.len() * BLOCK_SIZE);
+        for block in blocks {
+            data.extend_from_slice(block.as_ref());
+        }
+        data
+    }
+
+    /// Import block data from a flat byte vector for a session.
+    pub fn import_blocks(&mut self, session: SessionIndex, data: &[u8]) -> Result<()> {
+        if !data.is_empty() && data.len() % BLOCK_SIZE != 0 {
+            return Err(BordercryptError::CorruptedBlock);
+        }
+        let blocks = &mut self.blockstreams[session.as_usize()];
+        blocks.clear();
+        for chunk in data.chunks_exact(BLOCK_SIZE) {
+            let mut block = Box::new([0u8; BLOCK_SIZE]);
+            block.copy_from_slice(chunk);
+            blocks.push(block);
+        }
+        Ok(())
+    }
+
+    /// Export keypair data for a session.
+    pub fn export_keypair(&self, session: SessionIndex) -> &[u8] {
+        &self.keypairs[session.as_usize()]
+    }
+
+    /// Import keypair data for a session.
+    pub fn import_keypair(&mut self, session: SessionIndex, data: &[u8]) {
+        self.keypairs[session.as_usize()] = data.to_vec();
+    }
+}
+
 impl BlockStorage for MemoryStorage {
     fn read_block(&self, session: SessionIndex, block: u64) -> Result<Box<[u8; BLOCK_SIZE]>> {
         let session_blockstreams = &self.blockstreams[session.as_usize()];

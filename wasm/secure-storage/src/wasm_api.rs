@@ -3,11 +3,13 @@
 use wasm_bindgen::prelude::*;
 
 use crate::db::{self, SqlValue};
-use crate::vfs::{idb_vfs, memory_vfs};
+use crate::vfs::{encrypted_vfs, idb_vfs, memory_vfs};
 
-/// Initialise the database engine on the given backend.
+// ── Non-encrypted database (memory / idb) ────────────────────────────
+
+/// Initialise a non-encrypted database on the given backend.
 ///
-/// `backend` must be one of `"memory"`, `"idb"`, or `"opfs"`.
+/// `backend`: `"memory"` or `"idb"`.
 #[wasm_bindgen(js_name = initDatabase)]
 pub async fn init_database(backend: &str) -> Result<(), JsValue> {
     console_error_panic_hook::set_once();
@@ -26,10 +28,67 @@ pub async fn init_database(backend: &str) -> Result<(), JsValue> {
     }
 }
 
+// ── Encrypted database (bordercrypt) ─────────────────────────────────
+
+/// Initialise bordercrypt encrypted storage.
+///
+/// `backend`: `"memory"` (no IDB persistence) or `"idb"`.
+#[wasm_bindgen(js_name = initBordercrypt)]
+pub async fn init_bordercrypt(domain: &str, backend: &str) -> Result<(), JsValue> {
+    console_error_panic_hook::set_once();
+    encrypted_vfs::init(domain);
+    if backend == "idb" {
+        encrypted_vfs::restore_idb().await?;
+    }
+    Ok(())
+}
+
+/// Provision all 5 session slots.
+#[wasm_bindgen(js_name = provisionStorage)]
+pub fn provision_storage() -> Result<(), JsValue> {
+    encrypted_vfs::provision()
+}
+
+/// Allocate a session in `slot` with `password`, open SQLite.
+#[wasm_bindgen(js_name = allocateSession)]
+pub fn allocate_session(slot: u8, password: &[u8]) -> Result<(), JsValue> {
+    encrypted_vfs::allocate(slot, password)?;
+    encrypted_vfs::register();
+    db::open(encrypted_vfs::VFS_NAME).map_err(|e| JsValue::from_str(&e.to_string()))
+}
+
+/// Unlock a session by password, open SQLite. Returns false if wrong password.
+#[wasm_bindgen(js_name = unlockSession)]
+pub fn unlock_session(password: &[u8]) -> Result<bool, JsValue> {
+    let ok = encrypted_vfs::unlock(password)?;
+    if ok {
+        encrypted_vfs::register();
+        db::open(encrypted_vfs::VFS_NAME).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    }
+    Ok(ok)
+}
+
+/// Lock the session: close SQLite, flush to IDB, zeroize keys.
+#[wasm_bindgen(js_name = lockSession)]
+pub async fn lock_session() -> Result<(), JsValue> {
+    db::close().map_err(|e| JsValue::from_str(&e.to_string()))?;
+    encrypted_vfs::flush_idb().await?;
+    encrypted_vfs::lock();
+    Ok(())
+}
+
+/// Run one round of cover traffic.
+#[wasm_bindgen(js_name = coverTrafficTick)]
+pub fn cover_traffic_tick() -> Result<(), JsValue> {
+    encrypted_vfs::cover_tick()
+}
+
+// ── Shared: SQL execution ────────────────────────────────────────────
+
 /// Execute a SQL statement with bind parameters.
 ///
 /// `params` is a JS `Array` of values (null, number, string, Uint8Array).
-/// Returns a JS object: `{ columns, rows, lastInsertRowId, changes }`.
+/// Returns `{ columns, rows, lastInsertRowId, changes }`.
 #[wasm_bindgen]
 pub fn execute(sql: &str, params: JsValue) -> Result<JsValue, JsValue> {
     let ps = parse_params(&params)?;
@@ -43,12 +102,16 @@ pub fn close_database() -> Result<(), JsValue> {
     db::close().map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
-/// Flush all pending writes to IndexedDB (awaitable).
-///
-/// Called before lock / close to ensure durability.
-#[wasm_bindgen]
-pub async fn flush() -> Result<(), JsValue> {
+/// Flush pending writes to IndexedDB (non-encrypted IDB VFS).
+#[wasm_bindgen(js_name = flushIdb)]
+pub async fn flush_idb() -> Result<(), JsValue> {
     idb_vfs::flush().await
+}
+
+/// Flush encrypted data to IndexedDB.
+#[wasm_bindgen(js_name = flushEncrypted)]
+pub async fn flush_encrypted() -> Result<(), JsValue> {
+    encrypted_vfs::flush_idb().await
 }
 
 // ── JS ↔ Rust conversion ────────────────────────────────────────────
