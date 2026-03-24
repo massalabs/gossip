@@ -4,7 +4,7 @@ use zeroize::Zeroizing;
 
 use crate::block::decrypt_block;
 use crate::constants::{LENGTH_HDR_SIZE, PLAINTEXT_SIZE};
-use crate::error::{BordercryptError, Result};
+use crate::error::{SecureStorageError, Result};
 use crate::kdf::derive_block_aead_key;
 use crate::pq::PqSecretKey;
 use crate::storage::BlockStorage;
@@ -22,7 +22,7 @@ fn _decrypt_session_data_block<S: BlockStorage>(
     block_index: u64,
 ) -> Result<Zeroizing<[u8; PLAINTEXT_SIZE]>> {
     if session_version != 0 {
-        return Err(BordercryptError::UnsupportedVersion(session_version));
+        return Err(SecureStorageError::UnsupportedVersion(session_version));
     }
     let block_ct = storage.read_block(session_index, block_index)?;
     let (aead_sk, aad_root) = derive_block_aead_key(
@@ -80,7 +80,7 @@ pub fn read_total_length<S: BlockStorage>(
     )?;
     let length_bytes: [u8; 8] = plaintext[..LENGTH_HDR_SIZE]
         .try_into()
-        .map_err(|_| BordercryptError::CorruptedBlock)?;
+        .map_err(|_| SecureStorageError::CorruptedBlock)?;
     Ok(u64::from_be_bytes(length_bytes))
 }
 
@@ -104,21 +104,21 @@ pub fn read_session_data<S: BlockStorage>(
 
     let end = offset
         .checked_add(length as u64)
-        .ok_or(BordercryptError::Overflow)?;
+        .ok_or(SecureStorageError::Overflow)?;
     if end > session.total_data_length {
-        return Err(BordercryptError::OutOfBounds);
+        return Err(SecureStorageError::OutOfBounds);
     }
 
     let ps = PLAINTEXT_SIZE as u64;
     let hdr = LENGTH_HDR_SIZE as u64;
 
-    let start_pos = hdr.checked_add(offset).ok_or(BordercryptError::Overflow)?;
-    let end_pos_excl = hdr.checked_add(end).ok_or(BordercryptError::Overflow)?;
+    let start_pos = hdr.checked_add(offset).ok_or(SecureStorageError::Overflow)?;
+    let end_pos_excl = hdr.checked_add(end).ok_or(SecureStorageError::Overflow)?;
 
     let first_block = start_pos / ps;
     let last_block = end_pos_excl
         .checked_sub(1)
-        .ok_or(BordercryptError::Overflow)?
+        .ok_or(SecureStorageError::Overflow)?
         / ps;
 
     let mut result = Zeroizing::new(Vec::with_capacity(length));
@@ -128,10 +128,10 @@ pub fn read_session_data<S: BlockStorage>(
 
         let block_start = block_idx
             .checked_mul(ps)
-            .ok_or(BordercryptError::Overflow)?;
+            .ok_or(SecureStorageError::Overflow)?;
         let block_end = block_start
             .checked_add(ps)
-            .ok_or(BordercryptError::Overflow)?;
+            .ok_or(SecureStorageError::Overflow)?;
         let take_start = (start_pos.max(block_start) - block_start) as usize;
         let take_end = (end_pos_excl.min(block_end) - block_start) as usize;
 
