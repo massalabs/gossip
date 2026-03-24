@@ -208,7 +208,11 @@ class GossipSdk {
 
     console.log('[GossipSdk] Initializing SQLite');
     this._conn = await DatabaseConnection.create({ storage: options.storage });
-    this._queries = new Queries(this._conn);
+
+    // Defer queries/profile creation for secure storage (DB not ready until unlock).
+    if (this._conn.isOpen) {
+      this._queries = new Queries(this._conn);
+    }
 
     console.log('[GossipSdk] SQLite initialized');
     // Create message protocol
@@ -216,7 +220,7 @@ class GossipSdk {
 
     // Create services that don't need a session
     this._auth = new AuthService(createAuthProtocol());
-    this._profile = new ProfileService(this._queries);
+    this._profile = this._queries ? new ProfileService(this._queries) : null;
 
     this.state = {
       status: SdkStatus.INITIALIZED,
@@ -537,11 +541,18 @@ class GossipSdk {
 
   async secureStorageLock(): Promise<void> {
     await this.requireConn().secureStorageLock();
+    this._queries = null;
+    this._profile = null;
+  }
+
+  /** True when the database is ready for queries (migrations run, Drizzle created). */
+  get dbReady(): boolean {
+    return this._queries !== null;
   }
 
   /** Whether the database needs an unlock before queries can run. */
   get needsUnlock(): boolean {
-    return this._conn?.isSecureStorage === true && !this._conn.isOpen;
+    return this._conn?.needsUnlock ?? false;
   }
 
   /** Force-flush deferred VFS writes + storage persistence. */

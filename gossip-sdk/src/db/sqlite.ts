@@ -56,6 +56,7 @@ interface DbState {
   dbHandle: number | null;
   useWorker: boolean;
   isSecureStorage: boolean;
+  needsUnlock: boolean;
   drizzleDb: GossipDatabase | null;
   dbLock: Promise<unknown>;
   inTransaction: boolean;
@@ -71,6 +72,7 @@ function createDefaultState(): DbState {
     dbHandle: null,
     useWorker: false,
     isSecureStorage: false,
+    needsUnlock: false,
     drizzleDb: null,
     dbLock: Promise.resolve(),
     inTransaction: false,
@@ -125,6 +127,10 @@ export class DatabaseConnection {
 
   get isSecureStorage(): boolean {
     return this.state.isSecureStorage;
+  }
+
+  get needsUnlock(): boolean {
+    return this.state.needsUnlock;
   }
 
   // ─── Raw SQL execution ─────────────────────────────────────────
@@ -302,12 +308,15 @@ export class DatabaseConnection {
         this.state.useWorker = true;
 
         try {
-          await this.postToWorker({
+          const initResult = await this.postToWorker({
             type: 'init',
             domain: storage.domain,
             backend: storage.backend,
             wasmUrl: storage.wasmUrl,
           });
+          if (initResult?.needsUnlock) {
+            this.state.needsUnlock = true;
+          }
         } catch (err) {
           if (this.state.worker) {
             this.state.worker.terminate();
@@ -407,6 +416,7 @@ export class DatabaseConnection {
       slot,
       password: Array.from(pwBytes),
     });
+    this.state.needsUnlock = false;
     await this.finalize();
   }
 
@@ -418,6 +428,7 @@ export class DatabaseConnection {
       password: Array.from(pwBytes),
     });
     if (!result.ok) return false;
+    this.state.needsUnlock = false;
     await this.finalize();
     return true;
   }
@@ -426,6 +437,7 @@ export class DatabaseConnection {
   async secureStorageLock(): Promise<void> {
     await this.postToWorker({ type: 'lock' });
     this.state.drizzleDb = null;
+    this.state.needsUnlock = true;
   }
 
   /** Run one round of cover traffic (secure storage only). */

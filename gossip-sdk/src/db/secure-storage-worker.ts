@@ -30,6 +30,37 @@ import init, {
   flushEncrypted,
 } from '../assets/generated/wasm-bordercrypt/bordercrypt.js';
 
+/** Check if the bordercrypt IDB store has any data (= previously provisioned). */
+async function idbHasData(): Promise<boolean> {
+  return new Promise((resolve) => {
+    try {
+      const req = indexedDB.open('bordercrypt-storage', 1);
+      req.onupgradeneeded = () => {
+        // DB just created → no data.
+        resolve(false);
+        req.result.close();
+      };
+      req.onsuccess = () => {
+        const db = req.result;
+        try {
+          const tx = db.transaction('data', 'readonly');
+          const store = tx.objectStore('data');
+          const countReq = store.count();
+          countReq.onsuccess = () => resolve(countReq.result > 0);
+          countReq.onerror = () => resolve(false);
+        } catch {
+          resolve(false);
+        } finally {
+          db.close();
+        }
+      };
+      req.onerror = () => resolve(false);
+    } catch {
+      resolve(false);
+    }
+  });
+}
+
 const post: (data: unknown) => void = (
   globalThis as unknown as { postMessage(data: unknown): void }
 ).postMessage.bind(globalThis);
@@ -60,7 +91,19 @@ async function handleMessage(e: MessageEvent): Promise<void> {
         if (wasmUrl) moduleArg.locateFile = () => wasmUrl;
         await init(moduleArg);
         await initBordercrypt(domain, backend);
-        post({ id, type: 'init-result' });
+
+        // Check if IDB has existing data (= needs unlock) or is fresh (= needs onboarding).
+        let needsUnlock = false;
+        if (backend === 'idb') {
+          needsUnlock = await idbHasData();
+        }
+        // For OPFS, we'd check file sizes, but that's handled inside WASM.
+
+        if (!needsUnlock) {
+          // First launch: provision empty slots so allocate can work.
+          provisionStorage();
+        }
+        post({ id, type: 'init-result', needsUnlock });
         break;
       }
 
@@ -73,13 +116,17 @@ async function handleMessage(e: MessageEvent): Promise<void> {
       case 'allocate': {
         const { slot, password } = e.data;
         allocateSession(slot, new Uint8Array(password));
+        // Flush immediately so IDB has data before any lock/reload.
+        await flushEncrypted();
         post({ id, type: 'allocate-result' });
         break;
       }
 
       case 'unlock': {
         const { password } = e.data;
+        console.log('[Worker] unlock: calling unlockSession...');
         const ok = unlockSession(new Uint8Array(password));
+        console.log('[Worker] unlock: result =', ok);
         post({ id, type: 'unlock-result', ok });
         break;
       }
@@ -123,7 +170,9 @@ async function handleMessage(e: MessageEvent): Promise<void> {
       }
     }
   } catch (err) {
-    post({ id, type: 'error', message: (err as Error).message });
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('[SecureStorageWorker] Error:', type, message, err);
+    post({ id, type: 'error', message });
   }
 }
 

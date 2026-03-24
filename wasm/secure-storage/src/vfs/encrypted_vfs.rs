@@ -223,13 +223,15 @@ pub async fn init_idb(domain: &str) -> Result<(), JsValue> {
             let bv = &blocks_data[i];
             if !bv.is_undefined() && !bv.is_null() {
                 let arr = js_sys::Uint8Array::new(bv);
-                mem.import_blocks(idx, &arr.to_vec())
+                let data = arr.to_vec();
+                mem.import_blocks(idx, &data)
                     .map_err(|e| JsValue::from_str(&e.to_string()))?;
             }
             let kv = &keypair_data[i];
             if !kv.is_undefined() && !kv.is_null() {
                 let arr = js_sys::Uint8Array::new(kv);
-                mem.import_keypair(idx, &arr.to_vec());
+                let data = arr.to_vec();
+                mem.import_keypair(idx, &data);
             }
         }
         st.idb_handle = Some(db);
@@ -650,14 +652,12 @@ unsafe extern "C" fn x_access(
     result: *mut c_int,
 ) -> c_int {
     unsafe {
-        *result = STATE.with(|s| {
-            s.borrow()
-                .as_ref()
-                .and_then(|st| st.session.as_ref())
-                .map_or(0, |session| {
-                    if session.total_data_length > 0 { 1 } else { 0 }
-                })
-        });
+        // Always report "file does not exist". This prevents SQLite from
+        // attempting hot-journal or WAL recovery on auxiliary files that
+        // our VFS doesn't actually persist. The main database is opened
+        // via xOpen + xFileSize (which returns the correct size), so
+        // returning 0 here does not prevent opening existing databases.
+        *result = 0;
         SQLITE_OK as c_int
     }
 }

@@ -31,6 +31,7 @@
     "wasm:build": "wasm-pack build --out-dir ../../gossip-sdk/src/assets/generated/wasm --target web wasm/main && rm -f gossip-sdk/src/assets/generated/wasm/.gitignore",
     "wasm:test": "cargo test --workspace --manifest-path wasm/Cargo.toml --all-features --all-targets --verbose",
     "wasm:clean": "rm -rf gossip-sdk/src/assets/generated/wasm",
+    "wasm:build:bordercrypt": "cd wasm && cargo build -p bordercrypt --target wasm32-unknown-unknown --features wasm --release && cd .. && wasm-bindgen wasm/target/wasm32-unknown-unknown/release/bordercrypt.wasm --out-dir gossip-sdk/src/assets/generated/wasm-bordercrypt --target web --typescript",
     "cap:sync": "cap sync",
     "cap:sync:ios": "cap sync ios",
     "cap:sync:android": "cap sync android",

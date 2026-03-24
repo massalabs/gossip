@@ -40,8 +40,12 @@ pub struct QueryResult {
 
 /// Open a SQLite database on the given VFS and run default PRAGMAs.
 pub fn open(vfs_name: &str) -> Result<(), BordercryptError> {
-    let c_name =
-        CString::new("bordercrypt.db").map_err(|e| BordercryptError::Sqlite(e.to_string()))?;
+    // Use a unique name per open to avoid SQLite's internal file cache
+    // after close/reopen cycles. The VFS handles all persistence.
+    static OPEN_COUNT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let n = OPEN_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let c_name = CString::new(format!("bordercrypt_{n}.db"))
+        .map_err(|e| BordercryptError::Sqlite(e.to_string()))?;
     let c_vfs = CString::new(vfs_name).map_err(|e| BordercryptError::Sqlite(e.to_string()))?;
 
     let mut db: *mut sqlite3 = std::ptr::null_mut();
