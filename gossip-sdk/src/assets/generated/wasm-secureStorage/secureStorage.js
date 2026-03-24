@@ -1,18 +1,7 @@
 import {
-  opfsOpenDir,
-  opfsOpenSync,
+  walOpfsOpenDir,
+  walOpfsOpenSync,
 } from './snippets/secureStorage-310da76a09381a60/inline0.js';
-import {
-  encIdbGet,
-  encIdbOpen,
-  encIdbPut,
-} from './snippets/secureStorage-310da76a09381a60/inline1.js';
-import {
-  idbGetAllKeys,
-  idbGet,
-  idbOpen,
-  idbPut,
-} from './snippets/secureStorage-310da76a09381a60/inline2.js';
 import * as __wbg_star0 from './snippets/secureStorage-310da76a09381a60/inline0.js';
 
 let wasm;
@@ -247,41 +236,6 @@ function makeMutClosure(arg0, arg1, dtor, f) {
   CLOSURE_DTORS.register(real, state, state);
   return real;
 }
-/**
- * Flush encrypted data to backing store (IDB or OPFS).
- * @returns {Promise<void>}
- */
-export function flushEncrypted() {
-  const ret = wasm.flushEncrypted();
-  return ret;
-}
-
-/**
- * Initialise a non-encrypted database on the given backend.
- *
- * `backend`: `"memory"` or `"idb"`.
- * @param {string} backend
- * @returns {Promise<void>}
- */
-export function initDatabase(backend) {
-  const ptr0 = passStringToWasm0(
-    backend,
-    wasm.__wbindgen_malloc,
-    wasm.__wbindgen_realloc
-  );
-  const len0 = WASM_VECTOR_LEN;
-  const ret = wasm.initDatabase(ptr0, len0);
-  return ret;
-}
-
-/**
- * Flush pending writes to IndexedDB (non-encrypted IDB VFS).
- * @returns {Promise<void>}
- */
-export function flushIdb() {
-  const ret = wasm.flushIdb();
-  return ret;
-}
 
 function takeFromExternrefTable0(idx) {
   const value = wasm.__wbindgen_export_2.get(idx);
@@ -289,10 +243,10 @@ function takeFromExternrefTable0(idx) {
   return value;
 }
 /**
- * Run one round of cover traffic.
+ * Provision all 5 session slots.
  */
-export function coverTrafficTick() {
-  const ret = wasm.coverTrafficTick();
+export function provisionStorage() {
+  const ret = wasm.provisionStorage();
   if (ret[1]) {
     throw takeFromExternrefTable0(ret[0]);
   }
@@ -320,34 +274,14 @@ export function unlockSession(password) {
 }
 
 /**
- * Close the database and release resources.
- */
-export function closeDatabase() {
-  const ret = wasm.closeDatabase();
-  if (ret[1]) {
-    throw takeFromExternrefTable0(ret[0]);
-  }
-}
-
-/**
- * Provision all 5 session slots.
- */
-export function provisionStorage() {
-  const ret = wasm.provisionStorage();
-  if (ret[1]) {
-    throw takeFromExternrefTable0(ret[0]);
-  }
-}
-
-/**
- * Initialise bordercrypt encrypted storage.
+ * Initialise secure-storage encrypted storage.
  *
- * `backend`: `"memory"` (no persistence), `"idb"`, or `"opfs"`.
+ * `backend`: `"memory"` (no persistence), `"idb"`, or `"opfs-wal"`.
  * @param {string} domain
  * @param {string} backend
  * @returns {Promise<void>}
  */
-export function initBordercrypt(domain, backend) {
+export function initSecureStorage(domain, backend) {
   const ptr0 = passStringToWasm0(
     domain,
     wasm.__wbindgen_malloc,
@@ -360,8 +294,22 @@ export function initBordercrypt(domain, backend) {
     wasm.__wbindgen_realloc
   );
   const len1 = WASM_VECTOR_LEN;
-  const ret = wasm.initBordercrypt(ptr0, len0, ptr1, len1);
+  const ret = wasm.initSecureStorage(ptr0, len0, ptr1, len1);
   return ret;
+}
+
+/**
+ * Allocate a session in `slot` with `password`, open SQLite.
+ * @param {number} slot
+ * @param {Uint8Array} password
+ */
+export function allocateSession(slot, password) {
+  const ptr0 = passArray8ToWasm0(password, wasm.__wbindgen_malloc);
+  const len0 = WASM_VECTOR_LEN;
+  const ret = wasm.allocateSession(slot, ptr0, len0);
+  if (ret[1]) {
+    throw takeFromExternrefTable0(ret[0]);
+  }
 }
 
 /**
@@ -388,20 +336,6 @@ export function execute(sql, params) {
 }
 
 /**
- * Allocate a session in `slot` with `password`, open SQLite.
- * @param {number} slot
- * @param {Uint8Array} password
- */
-export function allocateSession(slot, password) {
-  const ptr0 = passArray8ToWasm0(password, wasm.__wbindgen_malloc);
-  const len0 = WASM_VECTOR_LEN;
-  const ret = wasm.allocateSession(slot, ptr0, len0);
-  if (ret[1]) {
-    throw takeFromExternrefTable0(ret[0]);
-  }
-}
-
-/**
  * Lock the session: close SQLite, flush to backing store, zeroize keys.
  * @returns {Promise<void>}
  */
@@ -410,12 +344,41 @@ export function lockSession() {
   return ret;
 }
 
-function __wbg_adapter_10(arg0, arg1, arg2) {
-  wasm.closure685_externref_shim(arg0, arg1, arg2);
+/**
+ * Close the database and release resources.
+ */
+export function closeDatabase() {
+  const ret = wasm.closeDatabase();
+  if (ret[1]) {
+    throw takeFromExternrefTable0(ret[0]);
+  }
 }
 
-function __wbg_adapter_84(arg0, arg1, arg2, arg3) {
-  wasm.closure709_externref_shim(arg0, arg1, arg2, arg3);
+/**
+ * Run one round of cover traffic.
+ */
+export function coverTrafficTick() {
+  const ret = wasm.coverTrafficTick();
+  if (ret[1]) {
+    throw takeFromExternrefTable0(ret[0]);
+  }
+}
+
+/**
+ * Flush encrypted data to backing store (IDB or OPFS).
+ * @returns {Promise<void>}
+ */
+export function flushEncrypted() {
+  const ret = wasm.flushEncrypted();
+  return ret;
+}
+
+function __wbg_adapter_6(arg0, arg1, arg2) {
+  wasm.closure645_externref_shim(arg0, arg1, arg2);
+}
+
+function __wbg_adapter_68(arg0, arg1, arg2, arg3) {
+  wasm.closure669_externref_shim(arg0, arg1, arg2, arg3);
 }
 
 const EXPECTED_RESPONSE_TYPES = new Set(['basic', 'cors', 'default']);
@@ -475,37 +438,6 @@ function __wbg_get_imports() {
     const ret = arg0.crypto;
     return ret;
   };
-  imports.wbg.__wbg_encIdbGet_e89885a5f4a65890 = function () {
-    return handleError(function (arg0, arg1, arg2, arg3, arg4) {
-      const ret = encIdbGet(
-        arg0,
-        getStringFromWasm0(arg1, arg2),
-        getStringFromWasm0(arg3, arg4)
-      );
-      return ret;
-    }, arguments);
-  };
-  imports.wbg.__wbg_encIdbOpen_9227586129a8dd42 = function () {
-    return handleError(function (arg0, arg1, arg2, arg3, arg4) {
-      const ret = encIdbOpen(
-        getStringFromWasm0(arg0, arg1),
-        arg2 >>> 0,
-        getStringFromWasm0(arg3, arg4)
-      );
-      return ret;
-    }, arguments);
-  };
-  imports.wbg.__wbg_encIdbPut_5b177859e4e0c561 = function () {
-    return handleError(function (arg0, arg1, arg2, arg3, arg4, arg5) {
-      const ret = encIdbPut(
-        arg0,
-        getStringFromWasm0(arg1, arg2),
-        getStringFromWasm0(arg3, arg4),
-        arg5
-      );
-      return ret;
-    }, arguments);
-  };
   imports.wbg.__wbg_error_7534b8e9a36f1ab4 = function (arg0, arg1) {
     let deferred0_0;
     let deferred0_1;
@@ -516,9 +448,6 @@ function __wbg_get_imports() {
     } finally {
       wasm.__wbindgen_free(deferred0_0, deferred0_1, 1);
     }
-  };
-  imports.wbg.__wbg_error_99981e16d476aa5c = function (arg0) {
-    console.error(arg0);
   };
   imports.wbg.__wbg_from_88bc52ce20ba6318 = function (arg0) {
     const ret = Array.from(arg0);
@@ -574,43 +503,6 @@ function __wbg_get_imports() {
     const ret = arg0[arg1 >>> 0];
     return ret;
   };
-  imports.wbg.__wbg_idbGetAllKeys_d0d043e6eb32b31e = function () {
-    return handleError(function (arg0, arg1, arg2) {
-      const ret = idbGetAllKeys(arg0, getStringFromWasm0(arg1, arg2));
-      return ret;
-    }, arguments);
-  };
-  imports.wbg.__wbg_idbGet_1bef8a7bc59a3639 = function () {
-    return handleError(function (arg0, arg1, arg2, arg3, arg4) {
-      const ret = idbGet(
-        arg0,
-        getStringFromWasm0(arg1, arg2),
-        getStringFromWasm0(arg3, arg4)
-      );
-      return ret;
-    }, arguments);
-  };
-  imports.wbg.__wbg_idbOpen_a26eb937bc787c1f = function () {
-    return handleError(function (arg0, arg1, arg2, arg3, arg4) {
-      const ret = idbOpen(
-        getStringFromWasm0(arg0, arg1),
-        arg2 >>> 0,
-        getStringFromWasm0(arg3, arg4)
-      );
-      return ret;
-    }, arguments);
-  };
-  imports.wbg.__wbg_idbPut_c81accab3fed2302 = function () {
-    return handleError(function (arg0, arg1, arg2, arg3, arg4, arg5) {
-      const ret = idbPut(
-        arg0,
-        getStringFromWasm0(arg1, arg2),
-        getStringFromWasm0(arg3, arg4),
-        arg5
-      );
-      return ret;
-    }, arguments);
-  };
   imports.wbg.__wbg_instanceof_Uint8Array_9a8378d955933db7 = function (arg0) {
     let result;
     try {
@@ -632,6 +524,9 @@ function __wbg_get_imports() {
   imports.wbg.__wbg_length_9d771c54845e987f = function (arg0) {
     const ret = arg0.length;
     return ret;
+  };
+  imports.wbg.__wbg_log_6c7b5f4f00b8ce3f = function (arg0) {
+    console.log(arg0);
   };
   imports.wbg.__wbg_msCrypto_a61aeb35a24c1329 = function (arg0) {
     const ret = arg0.msCrypto;
@@ -656,7 +551,7 @@ function __wbg_get_imports() {
         const a = state0.a;
         state0.a = 0;
         try {
-          return __wbg_adapter_84(a, state0.b, arg0, arg1);
+          return __wbg_adapter_68(a, state0.b, arg0, arg1);
         } finally {
           state0.a = a;
         }
@@ -698,18 +593,6 @@ function __wbg_get_imports() {
   imports.wbg.__wbg_node_905d3e251edff8a2 = function (arg0) {
     const ret = arg0.node;
     return ret;
-  };
-  imports.wbg.__wbg_opfsOpenDir_423dade2e214267f = function () {
-    return handleError(function (arg0, arg1) {
-      const ret = opfsOpenDir(getStringFromWasm0(arg0, arg1));
-      return ret;
-    }, arguments);
-  };
-  imports.wbg.__wbg_opfsOpenSync_9ff2943ce8cbb56f = function () {
-    return handleError(function (arg0, arg1, arg2) {
-      const ret = opfsOpenSync(arg0, getStringFromWasm0(arg1, arg2));
-      return ret;
-    }, arguments);
   };
   imports.wbg.__wbg_process_dc0fbacc7c1c06f7 = function (arg0) {
     const ret = arg0.process;
@@ -814,6 +697,18 @@ function __wbg_get_imports() {
     const ret = arg0.versions;
     return ret;
   };
+  imports.wbg.__wbg_walOpfsOpenDir_8323d1ee4209d1bd = function () {
+    return handleError(function (arg0, arg1) {
+      const ret = walOpfsOpenDir(getStringFromWasm0(arg0, arg1));
+      return ret;
+    }, arguments);
+  };
+  imports.wbg.__wbg_walOpfsOpenSync_35add342a0cddded = function () {
+    return handleError(function (arg0, arg1, arg2) {
+      const ret = walOpfsOpenSync(arg0, getStringFromWasm0(arg1, arg2));
+      return ret;
+    }, arguments);
+  };
   imports.wbg.__wbg_wbindgencbdrop_eb10308566512b88 = function (arg0) {
     const obj = arg0.original;
     if (obj.cnt-- == 1) {
@@ -886,6 +781,11 @@ function __wbg_get_imports() {
     const ret = getStringFromWasm0(arg0, arg1);
     return ret;
   };
+  imports.wbg.__wbindgen_cast_326a745d77808cae = function (arg0, arg1) {
+    // Cast intrinsic for `Closure(Closure { dtor_idx: 644, function: Function { arguments: [Externref], shim_idx: 645, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+    const ret = makeMutClosure(arg0, arg1, 644, __wbg_adapter_6);
+    return ret;
+  };
   imports.wbg.__wbindgen_cast_cb9088102bce6b30 = function (arg0, arg1) {
     // Cast intrinsic for `Ref(Slice(U8)) -> NamedExternref("Uint8Array")`.
     const ret = getArrayU8FromWasm0(arg0, arg1);
@@ -894,11 +794,6 @@ function __wbg_get_imports() {
   imports.wbg.__wbindgen_cast_d6cd19b81560fd6e = function (arg0) {
     // Cast intrinsic for `F64 -> Externref`.
     const ret = arg0;
-    return ret;
-  };
-  imports.wbg.__wbindgen_cast_deffec06918fae3a = function (arg0, arg1) {
-    // Cast intrinsic for `Closure(Closure { dtor_idx: 684, function: Function { arguments: [Externref], shim_idx: 685, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-    const ret = makeMutClosure(arg0, arg1, 684, __wbg_adapter_10);
     return ret;
   };
   imports.wbg.__wbindgen_init_externref_table = function () {

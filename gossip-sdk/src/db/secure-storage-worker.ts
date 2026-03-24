@@ -19,7 +19,7 @@
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — generated WASM module path resolved at build time
 import init, {
-  initBordercrypt,
+  initSecureStorage,
   provisionStorage,
   allocateSession,
   unlockSession,
@@ -28,7 +28,7 @@ import init, {
   closeDatabase,
   coverTrafficTick,
   flushEncrypted,
-} from '../assets/generated/wasm-bordercrypt/bordercrypt.js';
+} from '../assets/generated/wasm-secureStorage/secureStorage.js';
 
 /** Check if the bordercrypt IDB store has any data (= previously provisioned). */
 async function idbHasData(): Promise<boolean> {

@@ -1,35 +1,35 @@
-export async function opfsOpenDir(name) {
+export async function walOpfsOpenDir(name) {
   const root = await navigator.storage.getDirectory();
   return root.getDirectoryHandle(name, { create: true });
 }
 
-export async function opfsOpenSync(dir, fileName) {
+export async function walOpfsOpenSync(dir, fileName) {
   const file = await dir.getFileHandle(fileName, { create: true });
   return file.createSyncAccessHandle();
 }
 
-export function opfsRead(handle, offset, length) {
+export function walOpfsRead(handle, offset, length) {
   const buf = new Uint8Array(length);
   handle.read(buf, { at: offset });
   return buf;
 }
 
-export function opfsWrite(handle, offset, data) {
+export function walOpfsWrite(handle, offset, data) {
   handle.write(data, { at: offset });
 }
 
-export function opfsFlush(handle) {
+export function walOpfsFlush(handle) {
   handle.flush();
 }
 
-export function opfsGetSize(handle) {
+export function walOpfsGetSize(handle) {
   return handle.getSize();
 }
 
-export function opfsTruncate(handle, size) {
+export function walOpfsTruncate(handle, size) {
   handle.truncate(size);
 }
 
-export function opfsClose(handle) {
+export function walOpfsClose(handle) {
   handle.close();
 }

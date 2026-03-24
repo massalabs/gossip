@@ -1,41 +1,26 @@
 /* tslint:disable */
 /* eslint-disable */
 /**
- * Flush encrypted data to backing store (IDB or OPFS).
+ * Provision all 5 session slots.
  */
-export function flushEncrypted(): Promise<void>;
-/**
- * Initialise a non-encrypted database on the given backend.
- *
- * `backend`: `"memory"` or `"idb"`.
- */
-export function initDatabase(backend: string): Promise<void>;
-/**
- * Flush pending writes to IndexedDB (non-encrypted IDB VFS).
- */
-export function flushIdb(): Promise<void>;
-/**
- * Run one round of cover traffic.
- */
-export function coverTrafficTick(): void;
+export function provisionStorage(): void;
 /**
  * Unlock a session by password, open SQLite. Returns false if wrong password.
  */
 export function unlockSession(password: Uint8Array): boolean;
 /**
- * Close the database and release resources.
- */
-export function closeDatabase(): void;
-/**
- * Provision all 5 session slots.
- */
-export function provisionStorage(): void;
-/**
- * Initialise bordercrypt encrypted storage.
+ * Initialise secure-storage encrypted storage.
  *
- * `backend`: `"memory"` (no persistence), `"idb"`, or `"opfs"`.
+ * `backend`: `"memory"` (no persistence), `"idb"`, or `"opfs-wal"`.
  */
-export function initBordercrypt(domain: string, backend: string): Promise<void>;
+export function initSecureStorage(
+  domain: string,
+  backend: string
+): Promise<void>;
+/**
+ * Allocate a session in `slot` with `password`, open SQLite.
+ */
+export function allocateSession(slot: number, password: Uint8Array): void;
 /**
  * Execute a SQL statement with bind parameters.
  *
@@ -44,13 +29,21 @@ export function initBordercrypt(domain: string, backend: string): Promise<void>;
  */
 export function execute(sql: string, params: any): any;
 /**
- * Allocate a session in `slot` with `password`, open SQLite.
- */
-export function allocateSession(slot: number, password: Uint8Array): void;
-/**
  * Lock the session: close SQLite, flush to backing store, zeroize keys.
  */
 export function lockSession(): Promise<void>;
+/**
+ * Close the database and release resources.
+ */
+export function closeDatabase(): void;
+/**
+ * Run one round of cover traffic.
+ */
+export function coverTrafficTick(): void;
+/**
+ * Flush encrypted data to backing store (IDB or OPFS).
+ */
+export function flushEncrypted(): Promise<void>;
 
 export type InitInput =
   | RequestInfo
@@ -70,9 +63,12 @@ export interface InitOutput {
   readonly coverTrafficTick: () => [number, number];
   readonly execute: (a: number, b: number, c: any) => [number, number, number];
   readonly flushEncrypted: () => any;
-  readonly flushIdb: () => any;
-  readonly initBordercrypt: (a: number, b: number, c: number, d: number) => any;
-  readonly initDatabase: (a: number, b: number) => any;
+  readonly initSecureStorage: (
+    a: number,
+    b: number,
+    c: number,
+    d: number
+  ) => any;
   readonly lockSession: () => any;
   readonly provisionStorage: () => [number, number];
   readonly unlockSession: (a: number, b: number) => [number, number, number];
@@ -104,8 +100,8 @@ export interface InitOutput {
   ) => number;
   readonly __wbindgen_export_6: WebAssembly.Table;
   readonly __externref_table_dealloc: (a: number) => void;
-  readonly closure685_externref_shim: (a: number, b: number, c: any) => void;
-  readonly closure709_externref_shim: (
+  readonly closure645_externref_shim: (a: number, b: number, c: any) => void;
+  readonly closure669_externref_shim: (
     a: number,
     b: number,
     c: any,

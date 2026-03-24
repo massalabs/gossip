@@ -14,14 +14,12 @@ export const execute: (
   c: any
 ) => [number, number, number];
 export const flushEncrypted: () => any;
-export const flushIdb: () => any;
-export const initBordercrypt: (
+export const initSecureStorage: (
   a: number,
   b: number,
   c: number,
   d: number
 ) => any;
-export const initDatabase: (a: number, b: number) => any;
 export const lockSession: () => any;
 export const provisionStorage: () => [number, number];
 export const unlockSession: (a: number, b: number) => [number, number, number];
@@ -53,8 +51,8 @@ export const __wbindgen_realloc: (
 ) => number;
 export const __wbindgen_export_6: WebAssembly.Table;
 export const __externref_table_dealloc: (a: number) => void;
-export const closure685_externref_shim: (a: number, b: number, c: any) => void;
-export const closure709_externref_shim: (
+export const closure645_externref_shim: (a: number, b: number, c: any) => void;
+export const closure669_externref_shim: (
   a: number,
   b: number,
   c: any,
