@@ -277,6 +277,20 @@ impl OpfsWalStorage {
         Ok(())
     }
 
+    /// Flush the WAL for a session to OPFS (three-phase commit).
+    /// Called from x_sync and explicit flushEncrypted, NOT from BlockStorage::fsync.
+    pub fn commit(&self, session: SessionIndex) -> Result<()> {
+        self.flush_session(session.as_usize())
+    }
+
+    /// Flush all sessions.
+    pub fn commit_all(&self) -> Result<()> {
+        for i in 0..SESSION_COUNT {
+            self.flush_session(i)?;
+        }
+        Ok(())
+    }
+
     /// Compute the file offset for a block in a given session.
     fn block_offset(block: u64) -> Result<u64> {
         block
@@ -342,8 +356,11 @@ impl BlockStorage for OpfsWalStorage {
         Ok(self.block_counts.borrow()[session.as_usize()])
     }
 
-    fn fsync(&self, session: SessionIndex) -> Result<()> {
-        self.flush_session(session.as_usize())
+    fn fsync(&self, _session: SessionIndex) -> Result<()> {
+        // No-op: writes are buffered in the in-memory WAL.
+        // The actual OPFS flush happens in flush_session(), called
+        // from x_sync (at COMMIT) or the explicit flushEncrypted().
+        Ok(())
     }
 
     fn init_blockstream(&mut self, session: SessionIndex) -> Result<()> {

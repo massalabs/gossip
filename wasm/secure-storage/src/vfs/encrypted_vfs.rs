@@ -238,18 +238,17 @@ pub fn register() {
 /// Flush encrypted data to backing store (awaitable).
 ///
 /// - Memory backend: no-op (no persistence).
-/// - OpfsWal backend: flushes WAL to OPFS for all sessions.
+/// - OpfsWal backend: three-phase WAL commit for all sessions.
 pub async fn flush() -> Result<(), JsValue> {
     STATE.with(|s| {
         let s = s.borrow();
         let st = s.as_ref().ok_or_else(|| JsValue::from_str("not initialized"))?;
-        for i in 0..SESSION_COUNT {
-            let idx = SessionIndex::new(i as u8).unwrap();
-            st.backend
-                .fsync(idx)
-                .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        match &st.backend {
+            Backend::OpfsWal(wal) => wal
+                .commit_all()
+                .map_err(|e| JsValue::from_str(&e.to_string())),
+            Backend::Memory(_) => Ok(()),
         }
-        Ok(())
     })
 }
 
@@ -447,7 +446,7 @@ unsafe extern "C" fn x_truncate(file: *mut sqlite3_file, size: i64) -> c_int {
 }
 
 unsafe extern "C" fn x_sync(_file: *mut sqlite3_file, _flags: c_int) -> c_int {
-    // For OpfsWal: synchronous 3-phase flush on the active session.
+    // For OpfsWal: three-phase WAL commit on the active session.
     // For Memory: no-op (no persistence).
     STATE.with(|s| {
         let s = s.borrow();
@@ -455,9 +454,9 @@ unsafe extern "C" fn x_sync(_file: *mut sqlite3_file, _flags: c_int) -> c_int {
             Some(st) => st,
             None => return SQLITE_OK as c_int,
         };
-        if let Backend::OpfsWal(_) = &st.backend {
+        if let Backend::OpfsWal(wal) = &st.backend {
             if let Some(session) = &st.session {
-                if st.backend.fsync(session.session_index).is_err() {
+                if wal.commit(session.session_index).is_err() {
                     return SQLITE_IOERR as c_int;
                 }
             }
