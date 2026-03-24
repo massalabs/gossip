@@ -606,3 +606,220 @@ fn e2e_cover_traffic_touches_all_sessions() {
         }
     });
 }
+
+// ── WAL crash recovery simulation tests ──────────────────────────────
+//
+// These test the WAL module's crash recovery logic by simulating the
+// three-phase flush protocol at the MemoryStorage level. We manually
+// build WAL entries, serialize them, simulate a "crash" by dropping
+// state, then replay the WAL onto fresh storage.
+
+use secureStorage::wal::Wal;
+use secureStorage::constants::BLOCK_SIZE;
+
+/// Helper: export all blocks+keypairs from storage into a flat snapshot
+/// that can be loaded into fresh MemoryStorage.
+fn snapshot_storage(storage: &MemoryStorage) -> (Vec<Vec<u8>>, Vec<Vec<u8>>) {
+    let mut blocks = Vec::with_capacity(SESSION_COUNT);
+    let mut keypairs = Vec::with_capacity(SESSION_COUNT);
+    for i in 0..SESSION_COUNT as u8 {
+        let idx = SessionIndex::new(i).unwrap();
+        blocks.push(storage.export_blocks(idx));
+        keypairs.push(storage.export_keypair(idx).to_vec());
+    }
+    (blocks, keypairs)
+}
+
+/// Helper: import a snapshot into fresh MemoryStorage.
+fn restore_storage(blocks: &[Vec<u8>], keypairs: &[Vec<u8>]) -> MemoryStorage {
+    let mut storage = MemoryStorage::new();
+    for i in 0..SESSION_COUNT as u8 {
+        let idx = SessionIndex::new(i).unwrap();
+        if !blocks[i as usize].is_empty() {
+            storage.import_blocks(idx, &blocks[i as usize]).unwrap();
+        }
+        if !keypairs[i as usize].is_empty() {
+            storage.import_keypair(idx, &keypairs[i as usize]);
+        }
+    }
+    storage
+}
+
+/// Crash scenario A: WAL written to "disk" but DB not updated.
+/// Recovery should replay all WAL entries and restore the data.
+#[test]
+fn e2e_wal_crash_after_wal_write_before_db_apply() {
+    run(|| {
+        let mut storage = MemoryStorage::new();
+        provision_storage(&mut storage).unwrap();
+
+        let slot = SessionIndex::new(0).unwrap();
+        let mut session = allocate_session(&mut storage, DOMAIN, slot, b"crash-test-a").unwrap();
+
+        // Write some data
+        let data = vec![0xAA; 5000];
+        write_session_data(&mut storage, DOMAIN, &mut session, 0, &data).unwrap();
+
+        // Snapshot the DB state BEFORE we write more data
+        let (pre_blocks, pre_keypairs) = snapshot_storage(&storage);
+
+        // Write more data (this is the transaction that will "crash")
+        let data2 = vec![0xBB; 3000];
+        write_session_data(&mut storage, DOMAIN, &mut session, 5000, &data2).unwrap();
+
+        // Build WAL entries: the diff between pre and post storage
+        let (post_blocks, _) = snapshot_storage(&storage);
+        let mut wal = Wal::new();
+        for i in 0..SESSION_COUNT as u8 {
+            let idx = SessionIndex::new(i).unwrap();
+            let pre_count = pre_blocks[i as usize].len() / BLOCK_SIZE;
+            let post_count = post_blocks[i as usize].len() / BLOCK_SIZE;
+            for b in 0..post_count {
+                let offset = b * BLOCK_SIZE;
+                let post_block = &post_blocks[i as usize][offset..offset + BLOCK_SIZE];
+                if b >= pre_count
+                    || &pre_blocks[i as usize][offset..offset + BLOCK_SIZE] != post_block
+                {
+                    wal.record_write(
+                        (i as u64) * 1_000_000 + b as u64 * BLOCK_SIZE as u64,
+                        post_block,
+                    );
+                }
+            }
+        }
+
+        // Serialize WAL (this is the "WAL on disk" state)
+        let wal_bytes = wal.to_bytes();
+        assert!(!wal_bytes.is_empty(), "WAL should have entries");
+
+        // SIMULATE CRASH: restore from pre-crash snapshot (DB not updated)
+        let mut recovered = restore_storage(&pre_blocks, &pre_keypairs);
+
+        // Replay WAL entries
+        let entries = Wal::parse_wal_bytes(&wal_bytes);
+        assert!(!entries.is_empty(), "WAL should parse valid entries");
+
+        // Apply entries to recovered storage
+        for entry in &entries {
+            // Decode session index and block from our encoding
+            let session_idx = (entry.file_offset / 1_000_000) as u8;
+            let block_offset = entry.file_offset % 1_000_000;
+            let block_idx = block_offset / BLOCK_SIZE as u64;
+            let idx = SessionIndex::new(session_idx).unwrap();
+
+            // Ensure block count covers this block
+            while recovered.block_count(idx).unwrap() <= block_idx {
+                let empty = [0u8; BLOCK_SIZE];
+                recovered.append_block(idx, &empty).unwrap();
+            }
+
+            let block_arr: &[u8; BLOCK_SIZE] = entry.payload.as_slice().try_into().unwrap();
+            recovered.write_block(idx, block_idx, block_arr).unwrap();
+        }
+
+        // Verify: unlock should work and data should be complete
+        let unlocked = unlock_session(&recovered, DOMAIN, b"crash-test-a").unwrap();
+        assert_eq!(unlocked.total_data_length, 8000);
+        let read_back = read_session_data(&recovered, DOMAIN, &unlocked, 0, 8000).unwrap();
+        assert_eq!(&read_back[..5000], &vec![0xAA; 5000][..]);
+        assert_eq!(&read_back[5000..], &vec![0xBB; 3000][..]);
+    });
+}
+
+/// Crash scenario B: WAL truncated mid-write (partial WAL on disk).
+/// Recovery should replay only the valid prefix.
+#[test]
+fn e2e_wal_truncated_mid_write() {
+    run(|| {
+        let mut wal = Wal::new();
+        let block1 = vec![0x11; BLOCK_SIZE];
+        let block2 = vec![0x22; BLOCK_SIZE];
+        let block3 = vec![0x33; BLOCK_SIZE];
+        wal.record_write(0, &block1);
+        wal.record_write(BLOCK_SIZE as u64, &block2);
+        wal.record_write(2 * BLOCK_SIZE as u64, &block3);
+
+        let mut bytes = wal.to_bytes();
+        // Truncate mid-way through entry 3
+        let entry3_start = 2 * (24 + BLOCK_SIZE);
+        bytes.truncate(entry3_start + 100); // partial entry 3
+
+        let parsed = Wal::parse_wal_bytes(&bytes);
+        assert_eq!(parsed.len(), 2, "only first 2 entries should survive");
+        assert_eq!(parsed[0].payload, block1);
+        assert_eq!(parsed[1].payload, block2);
+    });
+}
+
+/// Crash scenario C: CRC corruption in middle of WAL.
+/// Entries before corruption are valid, rest discarded.
+#[test]
+fn e2e_wal_crc_corruption_mid_file() {
+    run(|| {
+        let mut wal = Wal::new();
+        let block1 = vec![0x11; BLOCK_SIZE];
+        let block2 = vec![0x22; BLOCK_SIZE];
+        let block3 = vec![0x33; BLOCK_SIZE];
+        wal.record_write(0, &block1);
+        wal.record_write(BLOCK_SIZE as u64, &block2);
+        wal.record_write(2 * BLOCK_SIZE as u64, &block3);
+
+        let mut bytes = wal.to_bytes();
+        // Corrupt a byte in entry 2's payload
+        let entry2_payload_start = 24 + BLOCK_SIZE + 20; // after entry1 + header2
+        bytes[entry2_payload_start + 50] ^= 0xFF;
+
+        let parsed = Wal::parse_wal_bytes(&bytes);
+        assert_eq!(parsed.len(), 1, "only first entry before corruption");
+        assert_eq!(parsed[0].payload, block1);
+    });
+}
+
+/// Idempotency: replaying the same WAL twice produces identical state.
+#[test]
+fn e2e_wal_replay_idempotent() {
+    run(|| {
+        let mut wal = Wal::new();
+        let block = vec![0xAA; BLOCK_SIZE];
+        wal.record_write(0, &block);
+        wal.record_write(BLOCK_SIZE as u64, &block);
+        let bytes = wal.to_bytes();
+
+        let entries = Wal::parse_wal_bytes(&bytes);
+
+        // Apply twice to same storage
+        let mut storage = MemoryStorage::new();
+        let idx = SessionIndex::new(0).unwrap();
+
+        for _ in 0..2 {
+            for entry in &entries {
+                let block_idx = entry.file_offset / BLOCK_SIZE as u64;
+                while storage.block_count(idx).unwrap() <= block_idx {
+                    let empty = [0u8; BLOCK_SIZE];
+                    storage.append_block(idx, &empty).unwrap();
+                }
+                let arr: &[u8; BLOCK_SIZE] = entry.payload.as_slice().try_into().unwrap();
+                storage.write_block(idx, block_idx, arr).unwrap();
+            }
+        }
+
+        assert_eq!(storage.block_count(idx).unwrap(), 2);
+        let b0 = storage.read_block(idx, 0).unwrap();
+        let expected: &[u8; BLOCK_SIZE] = block.as_slice().try_into().unwrap();
+        assert_eq!(&*b0, expected);
+    });
+}
+
+/// Empty WAL: recovery is a no-op.
+#[test]
+fn e2e_wal_empty_recovery() {
+    run(|| {
+        let parsed = Wal::parse_wal_bytes(&[]);
+        assert!(parsed.is_empty());
+
+        // Fresh storage should be unaffected
+        let storage = MemoryStorage::new();
+        let idx = SessionIndex::new(0).unwrap();
+        assert_eq!(storage.block_count(idx).unwrap(), 0);
+    });
+}

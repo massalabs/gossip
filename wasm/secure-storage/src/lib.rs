@@ -3,7 +3,7 @@
 //! Spec: <https://github.com/massalabs/gossip/discussions/380>
 
 mod block;
-mod constants;
+pub mod constants;
 mod domain;
 mod error;
 mod kdf;
@@ -14,7 +14,7 @@ mod read;
 pub mod storage;
 mod types;
 mod unlock;
-pub(crate) mod wal;
+pub mod wal;
 mod write;
 
 #[cfg(all(target_arch = "wasm32", feature = "wasm"))]
