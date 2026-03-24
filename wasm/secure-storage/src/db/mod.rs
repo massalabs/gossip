@@ -68,8 +68,10 @@ pub fn open(vfs_name: &str) -> Result<(), BordercryptError> {
 
     exec_pragma(db, "PRAGMA page_size = 8192")?;
     exec_pragma(db, "PRAGMA journal_mode = MEMORY")?;
-    // No fsync at SQLite level — the VFS manages its own persistence.
-    exec_pragma(db, "PRAGMA synchronous = OFF")?;
+    // NORMAL: SQLite calls xSync after each COMMIT, triggering the
+    // fire-and-forget IDB persist in x_sync. OFF would skip xSync
+    // entirely, leaving data only in RAM until an explicit flush.
+    exec_pragma(db, "PRAGMA synchronous = NORMAL")?;
     exec_pragma(db, "PRAGMA cache_size = -8000")?;
     exec_pragma(db, "PRAGMA locking_mode = EXCLUSIVE")?;
     exec_pragma(db, "PRAGMA trusted_schema = OFF")?;
