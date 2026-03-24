@@ -65,11 +65,15 @@ async function idbHasData(): Promise<boolean> {
 async function opfsHasData(): Promise<boolean> {
   try {
     const root = await navigator.storage.getDirectory();
-    const dir = await root.getDirectoryHandle('secureStorage', { create: false });
+    const dir = await root.getDirectoryHandle('secureStorage', {
+      create: false,
+    });
     // Check if any session block file has non-zero size.
     for (let i = 0; i < 5; i++) {
       try {
-        const fh = await dir.getFileHandle(`session_${i}.blocks`, { create: false });
+        const fh = await dir.getFileHandle(`session_${i}.blocks`, {
+          create: false,
+        });
         const file = await fh.getFile();
         if (file.size > 0) return true;
       } catch {
@@ -153,24 +157,30 @@ async function handleMessage(e: MessageEvent): Promise<void> {
         const { domain, wasmUrl } = e.data;
         // Auto-detect best backend if not explicitly provided.
         const backend: string = e.data.backend ?? (await detectBackend());
+        console.log('[SecureStorageWorker] backend:', backend);
+
+        // Check OPFS data BEFORE init — SyncAccessHandle locks prevent
+        // getFile() from working after initSecureStorage opens handles.
+        let needsUnlock = false;
+        if (backend === 'opfs-wal' || backend === 'opfs') {
+          needsUnlock = await opfsHasData();
+        }
 
         const moduleArg: Record<string, unknown> = {};
         if (wasmUrl) moduleArg.locateFile = () => wasmUrl;
         await init(moduleArg);
         await initBordercrypt(domain, backend);
 
-        // Check if backing store has existing data (= needs unlock).
-        let needsUnlock = false;
+        // IDB check can happen after init (no locking issue).
         if (backend === 'idb') {
           needsUnlock = await idbHasData();
-        } else if (backend === 'opfs-wal' || backend === 'opfs') {
-          needsUnlock = await opfsHasData();
         }
 
         if (!needsUnlock) {
           // First launch: provision empty slots so allocate can work.
           provisionStorage();
         }
+        console.log('[SecureStorageWorker] needsUnlock:', needsUnlock);
         post({ id, type: 'init-result', needsUnlock, backend });
         break;
       }
