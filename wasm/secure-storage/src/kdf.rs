@@ -1,4 +1,4 @@
-//! Key derivation for bordercrypt.
+//! Key derivation for secureStorage.
 
 use zeroize::Zeroizing;
 
@@ -135,6 +135,6 @@ mod tests {
     #[test]
     fn returns_block_scope() {
         let (_key, scope) = derive_block_aead_key("app", 0, idx(2), &ROOT_KEY, 5);
-        assert_eq!(scope, "app:bordercrypt:session:v0:i2:b5");
+        assert_eq!(scope, "app:secureStorage:session:v0:i2:b5");
     }
 }

@@ -8,7 +8,7 @@ use rand::RngCore;
 use zeroize::Zeroizing;
 
 use crate::constants::{AEAD_TAG_SIZE, BLOCK_SIZE, PLAINTEXT_SIZE};
-use crate::error::{BordercryptError, Result};
+use crate::error::{SecureStorageError, Result};
 use crate::pq::{PQ_MSG_SIZE, PqPublicKey, PqSecretKey, pq_decrypt, pq_encrypt, pq_rerand};
 
 const BLOCK_AEAD_SUFFIX: &str = ":block_aead";
@@ -52,19 +52,19 @@ pub fn decrypt_block(
 
     let nonce = crypto_aead::Nonce::from(
         <[u8; crypto_aead::NONCE_SIZE]>::try_from(&msg[..crypto_aead::NONCE_SIZE])
-            .map_err(|_| BordercryptError::CorruptedBlock)?,
+            .map_err(|_| SecureStorageError::CorruptedBlock)?,
     );
     let aead_ct = &msg[crypto_aead::NONCE_SIZE..];
     let key = crypto_aead::Key::from(*aead_key);
 
     let plaintext_vec = Zeroizing::new(
         crypto_aead::decrypt(&key, &nonce, aead_ct, aad.as_bytes())
-            .ok_or(BordercryptError::CorruptedBlock)?,
+            .ok_or(SecureStorageError::CorruptedBlock)?,
     );
 
     let mut plaintext = Zeroizing::new([0u8; PLAINTEXT_SIZE]);
     if plaintext_vec.len() != PLAINTEXT_SIZE {
-        return Err(BordercryptError::CorruptedBlock);
+        return Err(SecureStorageError::CorruptedBlock);
     }
     plaintext.copy_from_slice(&plaintext_vec);
     Ok(plaintext)
@@ -126,7 +126,7 @@ mod tests {
         key
     }
 
-    const AAD_ROOT: &str = "test:bordercrypt:session:v0:i0:b0";
+    const AAD_ROOT: &str = "test:secureStorage:session:v0:i0:b0";
 
     // --- encrypt / decrypt ---
 

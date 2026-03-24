@@ -8,7 +8,7 @@ use crate::BLOCK_SIZE;
 use crate::block::{create_cover_block, rerandomize_block};
 use crate::constants::{LENGTH_HDR_SIZE, PLAINTEXT_SIZE, SESSION_COUNT};
 use crate::domain;
-use crate::error::{BordercryptError, Result};
+use crate::error::{SecureStorageError, Result};
 use crate::kdf::derive_session_keys;
 use crate::keypair::{KeypairFile, read_session_version_and_pk};
 use crate::pq::{PqPublicKey, PqSecretKey, pq_keygen};
@@ -142,7 +142,7 @@ pub fn cover_traffic_tick<S: BlockStorage + KeypairStorage>(
         let ct_arr: &[u8; BLOCK_SIZE] = new_ct
             .as_slice()
             .try_into()
-            .map_err(|_| BordercryptError::CorruptedBlock)?;
+            .map_err(|_| SecureStorageError::CorruptedBlock)?;
         storage.write_block(cur_session, block_index, ct_arr)?;
         storage.fsync(cur_session)?;
     }
