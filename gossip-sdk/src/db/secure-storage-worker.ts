@@ -65,6 +65,39 @@ const post: (data: unknown) => void = (
   globalThis as unknown as { postMessage(data: unknown): void }
 ).postMessage.bind(globalThis);
 
+// Periodic flush timer — persists encrypted blocks to IDB every 2s.
+// synchronous=OFF means SQLite never calls xSync, so this is the only
+// automatic persistence path. Explicit flushes on lock/background also exist.
+const FLUSH_INTERVAL_MS = 2000;
+let flushTimer: ReturnType<typeof setInterval> | null = null;
+let dirty = false;
+
+function markDirty() {
+  dirty = true;
+}
+
+function startFlushTimer() {
+  stopFlushTimer();
+  flushTimer = setInterval(async () => {
+    if (dirty) {
+      dirty = false;
+      try {
+        await flushEncrypted();
+      } catch {
+        // Flush failed — will retry on next interval.
+        dirty = true;
+      }
+    }
+  }, FLUSH_INTERVAL_MS);
+}
+
+function stopFlushTimer() {
+  if (flushTimer !== null) {
+    clearInterval(flushTimer);
+    flushTimer = null;
+  }
+}
+
 // Sequential message queue (same pattern as sqlite-worker.ts)
 const queue: Array<{ e: MessageEvent; resolve: () => void }> = [];
 let processing = false;
@@ -120,6 +153,7 @@ async function handleMessage(e: MessageEvent): Promise<void> {
         pw.fill(0);
         // Flush immediately so IDB has data before any lock/reload.
         await flushEncrypted();
+        startFlushTimer();
         post({ id, type: 'allocate-result' });
         break;
       }
@@ -129,11 +163,13 @@ async function handleMessage(e: MessageEvent): Promise<void> {
         const pw = new Uint8Array(password);
         const ok = unlockSession(pw);
         pw.fill(0);
+        if (ok) startFlushTimer();
         post({ id, type: 'unlock-result', ok });
         break;
       }
 
       case 'lock': {
+        stopFlushTimer();
         await lockSession();
         post({ id, type: 'lock-result' });
         break;
@@ -142,6 +178,7 @@ async function handleMessage(e: MessageEvent): Promise<void> {
       case 'exec': {
         const { sql, params } = e.data;
         const result = execute(sql, params ?? []);
+        markDirty();
         post({
           id,
           type: 'exec-result',
@@ -166,6 +203,7 @@ async function handleMessage(e: MessageEvent): Promise<void> {
       }
 
       case 'close': {
+        stopFlushTimer();
         closeDatabase();
         post({ id, type: 'close-result' });
         break;
