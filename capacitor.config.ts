@@ -17,6 +17,11 @@ const config: CapacitorConfig = {
     ? { server: { url: process.env.DEV_SERVER_URL, cleartext: true } }
     : {}),
   plugins: {
+    PrivacyScreen: {
+      enable: true,
+      imageName: 'Splash',
+      contentMode: 'scaleAspectFill',
+    },
     // Keyboard plugin configuration
     Keyboard: {
       resize: KeyboardResize.None,
