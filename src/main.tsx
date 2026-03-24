@@ -109,7 +109,7 @@ Promise.all([
       ? {
           type: 'secureStorage',
           domain: 'gossip',
-          backend: isNative ? 'opfs' : 'idb',
+          backend: 'opfs-wal',
         }
       : isNative
         ? { type: 'opfs', path: '/gossip-db', wasmUrl: waSqliteWasmUrl }
