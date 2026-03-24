@@ -65,7 +65,17 @@
     "reset_description": "Si vous pensez être déconnecté de votre correspondant, vous pouvez réinitialiser la connexion. Certains messages pourront être renvoyés, mais votre historique sera conservé.",
     "reconnected": "Reconnecté !",
     "participants": "Participants",
-    "no_participants": "Aucun participant trouvé"
+    "no_participants": "Aucun participant trouvé",
+    "auto_delete": "Suppression automatique",
+    "auto_delete_description": "Les messages seront automatiquement supprimés après la durée sélectionnée.",
+    "auto_delete_current": "Supprimer après",
+    "auto_delete_off": "Désactivé",
+    "auto_delete_5m": "5 minutes",
+    "auto_delete_1h": "1 heure",
+    "auto_delete_8h": "8 heures",
+    "auto_delete_1d": "1 jour",
+    "auto_delete_1w": "1 semaine",
+    "auto_delete_1mo": "1 mois"
   },
   "new_discussion": {
     "title": "Nouvelle discussion",
@@ -84,7 +94,8 @@
     "contact_not_found": "Contact introuvable",
     "waiting_approval": "En attente d'approbation",
     "discussion_settings": "Paramètres de la discussion",
-    "search_messages": "Rechercher dans les messages"
+    "search_messages": "Rechercher dans les messages",
+    "auto_delete_active": "Suppression après {{duration}}"
   },
   "list": {
     "no_results": "Aucun résultat trouvé",
@@ -142,6 +153,7 @@
     "info_label": "Pourquoi attendre une réponse ?",
     "info_message": "La réception d'un message du correspondant permet de renouveler la clé de chiffrement. Si un attaquant obtient votre clé actuelle, il pourrait déchiffrer vos {{count}} derniers messages envoyés."
   },
+  "retention_separator": "Suppression automatique activée : {{duration}}",
   "filter_label": "Filtrer les discussions",
   "waiting_connection": "En attente de connexion...",
   "announcement": "Annonce"

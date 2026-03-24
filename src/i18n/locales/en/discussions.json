@@ -67,7 +67,17 @@
     "reset_description": "If you think you're disconnected from your peer, you can reset the connection. Some messages may be resent but your history will be preserved.",
     "reconnected": "Reconnected!",
     "participants": "Participants",
-    "no_participants": "No participants found"
+    "no_participants": "No participants found",
+    "auto_delete": "Auto-delete messages",
+    "auto_delete_description": "Messages will be automatically deleted after the selected time.",
+    "auto_delete_current": "Delete after",
+    "auto_delete_off": "Off",
+    "auto_delete_5m": "5 minutes",
+    "auto_delete_1h": "1 hour",
+    "auto_delete_8h": "8 hours",
+    "auto_delete_1d": "1 day",
+    "auto_delete_1w": "1 week",
+    "auto_delete_1mo": "1 month"
   },
   "new_discussion": {
     "title": "New discussion",
@@ -86,7 +96,8 @@
     "contact_not_found": "Contact not found",
     "waiting_approval": "Waiting approval",
     "discussion_settings": "Discussion settings",
-    "search_messages": "Search messages"
+    "search_messages": "Search messages",
+    "auto_delete_active": "Deletes after {{duration}}"
   },
   "list": {
     "no_results": "No results found",
@@ -144,6 +155,7 @@
     "info_label": "Why wait for a reply?",
     "info_message": "Receiving a message from the peer allows the encryption key to be renewed. If an attacker gets your current key, they could decrypt your last {{count}} sent messages."
   },
+  "retention_separator": "Auto-delete enabled: {{duration}}",
   "filter_label": "Filter discussions",
   "waiting_connection": "Waiting for connection...",
   "announcement": "Announcement"

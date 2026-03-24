@@ -22,6 +22,7 @@ export enum SdkEventType {
   SESSION_ACCEPTED = 'sessionAccepted',
   SEEKERS_UPDATED = 'seekersUpdated',
   SESSION_STATUS_CHANGED = 'sessionStatusChanged',
+  DISCUSSION_UPDATED = 'discussionUpdated',
   ERROR = 'error',
 }
 
@@ -42,6 +43,7 @@ export interface SdkEventHandlers {
     contactUserId: string,
     status: SessionStatus
   ) => void;
+  [SdkEventType.DISCUSSION_UPDATED]: (contactUserId: string) => void;
   [SdkEventType.ERROR]: (error: Error, context: string) => void;
 }
 
@@ -82,6 +84,9 @@ export class SdkEventEmitter {
     >(),
     [SdkEventType.SESSION_STATUS_CHANGED]: new Set<
       SdkEventHandlers[SdkEventType.SESSION_STATUS_CHANGED]
+    >(),
+    [SdkEventType.DISCUSSION_UPDATED]: new Set<
+      SdkEventHandlers[SdkEventType.DISCUSSION_UPDATED]
     >(),
     [SdkEventType.ERROR]: new Set<SdkEventHandlers[SdkEventType.ERROR]>(),
   };
