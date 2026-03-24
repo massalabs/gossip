@@ -319,6 +319,7 @@ pub fn register() {
 
         let mut vfs = *default;
         let name = CString::new(VFS_NAME).unwrap();
+        // Intentional leak -- VFS name must outlive SQLite
         vfs.zName = name.into_raw();
         vfs.szOsFile = size_of::<EncFile>() as c_int;
         vfs.xOpen = Some(x_open);
@@ -326,6 +327,7 @@ pub fn register() {
         vfs.xAccess = Some(x_access);
         vfs.xFullPathname = Some(x_full_pathname);
 
+        // Intentional leak -- VFS struct must outlive SQLite
         let ptr = Box::into_raw(Box::new(vfs));
         let rc = sqlite3_vfs_register(ptr, 0);
         assert_eq!(rc, SQLITE_OK as c_int, "encrypted VFS registration failed");
@@ -365,11 +367,11 @@ async fn flush_idb() -> Result<(), JsValue> {
             _ => return Err(JsValue::from_str("wrong backend")),
         };
         let mut bl = Vec::with_capacity(SESSION_COUNT);
-        let mut kp = Vec::with_capacity(SESSION_COUNT);
+        let mut kp: Vec<Zeroizing<Vec<u8>>> = Vec::with_capacity(SESSION_COUNT);
         for i in 0..SESSION_COUNT {
             let idx = SessionIndex::new(i as u8).unwrap();
             bl.push(mem.export_blocks(idx));
-            kp.push(mem.export_keypair(idx).to_vec());
+            kp.push(Zeroizing::new(mem.export_keypair(idx).to_vec()));
         }
         Ok::<_, JsValue>((db, bl, kp))
     })?;
@@ -381,7 +383,7 @@ async fn flush_idb() -> Result<(), JsValue> {
 
         if !keypairs[i].is_empty() {
             let ka = js_sys::Uint8Array::new_with_length(keypairs[i].len() as u32);
-            ka.copy_from(&keypairs[i]);
+            ka.copy_from(keypairs[i].as_slice());
             encIdbPut(&db, IDB_STORE, &format!("keypair_{i}"), &ka).await?;
         }
     }
@@ -593,11 +595,11 @@ unsafe extern "C" fn x_sync(_file: *mut sqlite3_file, _flags: c_int) -> c_int {
             Backend::Opfs(_) => return None, // OPFS persists in-band
         };
         let mut bl = Vec::with_capacity(SESSION_COUNT);
-        let mut kp = Vec::with_capacity(SESSION_COUNT);
+        let mut kp: Vec<Zeroizing<Vec<u8>>> = Vec::with_capacity(SESSION_COUNT);
         for i in 0..SESSION_COUNT {
             let idx = SessionIndex::new(i as u8).unwrap();
             bl.push(mem.export_blocks(idx));
-            kp.push(mem.export_keypair(idx).to_vec());
+            kp.push(Zeroizing::new(mem.export_keypair(idx).to_vec()));
         }
         Some((db, bl, kp))
     });
@@ -611,7 +613,7 @@ unsafe extern "C" fn x_sync(_file: *mut sqlite3_file, _flags: c_int) -> c_int {
 
                 if !keypairs[i].is_empty() {
                     let ka = js_sys::Uint8Array::new_with_length(keypairs[i].len() as u32);
-                    ka.copy_from(&keypairs[i]);
+                    ka.copy_from(keypairs[i].as_slice());
                     let _ = encIdbPut(&db, IDB_STORE, &format!("keypair_{i}"), &ka).await;
                 }
             }

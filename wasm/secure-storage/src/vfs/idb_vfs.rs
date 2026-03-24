@@ -175,6 +175,7 @@ pub fn register() {
 
         let mut vfs = *default;
         let name = CString::new(VFS_NAME).unwrap();
+        // Intentional leak -- VFS name must outlive SQLite
         vfs.zName = name.into_raw();
         vfs.szOsFile = size_of::<IdbFile>() as c_int;
         vfs.xOpen = Some(x_open);
@@ -182,6 +183,7 @@ pub fn register() {
         vfs.xAccess = Some(x_access);
         vfs.xFullPathname = Some(x_full_pathname);
 
+        // Intentional leak -- VFS struct must outlive SQLite
         let ptr = Box::into_raw(Box::new(vfs));
         let rc = sqlite3_vfs_register(ptr, 0);
         assert_eq!(rc, SQLITE_OK as c_int, "IDB VFS registration failed");

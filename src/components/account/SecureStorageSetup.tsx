@@ -27,7 +27,9 @@ function pickRandomSlot(available: number[]): {
   slot: number;
   remaining: number[];
 } {
-  const idx = Math.floor(Math.random() * available.length);
+  const arr = new Uint32Array(1);
+  crypto.getRandomValues(arr);
+  const idx = arr[0] % available.length;
   const slot = available[idx];
   const remaining = available.filter((_, i) => i !== idx);
   return { slot, remaining };

@@ -416,6 +416,7 @@ export class DatabaseConnection {
       slot,
       password: Array.from(pwBytes),
     });
+    pwBytes.fill(0);
     this.state.needsUnlock = false;
     await this.finalize();
   }
@@ -427,6 +428,7 @@ export class DatabaseConnection {
       type: 'unlock',
       password: Array.from(pwBytes),
     });
+    pwBytes.fill(0);
     if (!result.ok) return false;
     this.state.needsUnlock = false;
     await this.finalize();

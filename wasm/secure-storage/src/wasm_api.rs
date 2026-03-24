@@ -61,7 +61,10 @@ pub fn allocate_session(slot: u8, password: &[u8]) -> Result<(), JsValue> {
     // Close any existing DB before switching sessions to avoid leaking handles.
     let _ = db::close();
     encrypted_vfs::allocate(slot, password)?;
-    db::open(encrypted_vfs::VFS_NAME).map_err(|e| JsValue::from_str(&e.to_string()))
+    db::open(encrypted_vfs::VFS_NAME).map_err(|e| {
+        encrypted_vfs::lock();
+        JsValue::from_str(&e.to_string())
+    })
 }
 
 /// Unlock a session by password, open SQLite. Returns false if wrong password.
@@ -71,7 +74,10 @@ pub fn unlock_session(password: &[u8]) -> Result<bool, JsValue> {
     let _ = db::close();
     let ok = encrypted_vfs::unlock(password)?;
     if ok {
-        db::open(encrypted_vfs::VFS_NAME).map_err(|e| JsValue::from_str(&e.to_string()))?;
+        db::open(encrypted_vfs::VFS_NAME).map_err(|e| {
+            encrypted_vfs::lock();
+            JsValue::from_str(&e.to_string())
+        })?;
     }
     Ok(ok)
 }

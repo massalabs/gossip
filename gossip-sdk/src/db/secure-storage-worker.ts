@@ -115,7 +115,9 @@ async function handleMessage(e: MessageEvent): Promise<void> {
 
       case 'allocate': {
         const { slot, password } = e.data;
-        allocateSession(slot, new Uint8Array(password));
+        const pw = new Uint8Array(password);
+        allocateSession(slot, pw);
+        pw.fill(0);
         // Flush immediately so IDB has data before any lock/reload.
         await flushEncrypted();
         post({ id, type: 'allocate-result' });
@@ -124,9 +126,9 @@ async function handleMessage(e: MessageEvent): Promise<void> {
 
       case 'unlock': {
         const { password } = e.data;
-        console.log('[Worker] unlock: calling unlockSession...');
-        const ok = unlockSession(new Uint8Array(password));
-        console.log('[Worker] unlock: result =', ok);
+        const pw = new Uint8Array(password);
+        const ok = unlockSession(pw);
+        pw.fill(0);
         post({ id, type: 'unlock-result', ok });
         break;
       }

@@ -1,5 +1,5 @@
 
-export function encIdbOpen(name, version, storeName) {
+export function idbOpen(name, version, storeName) {
     return new Promise((resolve, reject) => {
         const req = indexedDB.open(name, version);
         req.onupgradeneeded = () => {
@@ -13,7 +13,17 @@ export function encIdbOpen(name, version, storeName) {
     });
 }
 
-export function encIdbGet(db, storeName, key) {
+export function idbGetAllKeys(db, storeName) {
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(storeName, 'readonly');
+        const store = tx.objectStore(storeName);
+        const req = store.getAllKeys();
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+    });
+}
+
+export function idbGet(db, storeName, key) {
     return new Promise((resolve, reject) => {
         const tx = db.transaction(storeName, 'readonly');
         const store = tx.objectStore(storeName);
@@ -23,7 +33,7 @@ export function encIdbGet(db, storeName, key) {
     });
 }
 
-export function encIdbPut(db, storeName, key, value) {
+export function idbPut(db, storeName, key, value) {
     return new Promise((resolve, reject) => {
         const tx = db.transaction(storeName, 'readwrite');
         const store = tx.objectStore(storeName);
