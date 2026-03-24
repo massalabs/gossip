@@ -1,10 +1,10 @@
-/// Unified error type for all bordercrypt operations.
+/// Unified error type for all secureStorage operations.
 ///
 /// Error messages are deliberately generic to avoid leaking information
 /// to an adversary (e.g. no distinction between "bad nonce" and "bad tag").
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
-pub enum BordercryptError {
+pub enum SecureStorageError {
     #[error("invalid password")]
     InvalidPassword,
 
@@ -31,4 +31,4 @@ pub enum BordercryptError {
 }
 
 /// Convenience alias used throughout the crate.
-pub type Result<T> = core::result::Result<T, BordercryptError>;
+pub type Result<T> = core::result::Result<T, SecureStorageError>;
