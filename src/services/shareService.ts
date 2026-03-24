@@ -209,6 +209,42 @@ export async function shareInvitation(
 }
 
 /**
+ * Share a message text using native share sheet on mobile devices,
+ * Web Share API on web browsers, or clipboard as fallback.
+ */
+export async function shareMessage(text: string): Promise<void> {
+  if (!text) return;
+
+  const shareTitle = 'Gossip';
+
+  if (Capacitor.isNativePlatform()) {
+    try {
+      await Share.share({
+        title: shareTitle,
+        text,
+        dialogTitle: shareTitle,
+      });
+      return;
+    } catch (error) {
+      if (isShareCancellation(error)) return;
+      throw error;
+    }
+  }
+
+  if (typeof navigator !== 'undefined' && navigator.share) {
+    try {
+      await navigator.share({ title: shareTitle, text });
+      return;
+    } catch (error) {
+      if (isShareCancellation(error)) return;
+      // Fall through to clipboard
+    }
+  }
+
+  await navigator.clipboard.writeText(text);
+}
+
+/**
  * Share QR code image using native share sheet on mobile devices
  * or Web Share API on web browsers.
  */

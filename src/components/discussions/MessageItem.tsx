@@ -9,12 +9,14 @@ import { useTranslation } from 'react-i18next';
 import {
   CornerUpLeft,
   Share,
+  Share2,
   Copy,
   ChevronDown,
   Check as CheckIcon,
   AlertTriangle,
   Trash2,
 } from 'react-feather';
+import { shareMessage } from '../../services/shareService';
 import { useLongPress } from '../../hooks/useLongPress';
 import MessageContextMenu, {
   type MessageContextMenuItem,
@@ -169,6 +171,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
     const itemCount =
       (canReply && !isDeleted ? 1 : 0) +
         (canForward && !isDeleted ? 1 : 0) +
+        (!isDeleted ? 1 : 0) +
         (!isDeleted ? 1 : 0) +
         (onEdit && isOutgoing && !isDeleted && message.id != null ? 1 : 0) +
         (onDelete && isOutgoing && !isDeleted && message.id != null ? 1 : 0) ||
@@ -409,6 +412,15 @@ const MessageItem: React.FC<MessageItemProps> = ({
         label: t('message_item.forward'),
         icon: <Share className="w-4 h-4" />,
         onClick: () => onForward(message),
+      });
+    }
+    if (!isDeleted) {
+      items.push({
+        label: t('message_item.share'),
+        icon: <Share2 className="w-4 h-4" />,
+        onClick: () => {
+          shareMessage(message.content).catch(() => {});
+        },
       });
     }
     if (!isDeleted) {
