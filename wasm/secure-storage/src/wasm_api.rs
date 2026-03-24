@@ -3,20 +3,24 @@
 use wasm_bindgen::prelude::*;
 
 use crate::db::{self, SqlValue};
-use crate::vfs::memory_vfs;
+use crate::vfs::{idb_vfs, memory_vfs};
 
 /// Initialise the database engine on the given backend.
 ///
 /// `backend` must be one of `"memory"`, `"idb"`, or `"opfs"`.
-/// For Phase 1, only `"memory"` is supported.
 #[wasm_bindgen(js_name = initDatabase)]
-pub fn init_database(backend: &str) -> Result<(), JsValue> {
+pub async fn init_database(backend: &str) -> Result<(), JsValue> {
     console_error_panic_hook::set_once();
 
     match backend {
         "memory" => {
             memory_vfs::register();
             db::open(memory_vfs::VFS_NAME).map_err(|e| JsValue::from_str(&e.to_string()))
+        }
+        "idb" => {
+            idb_vfs::restore().await?;
+            idb_vfs::register();
+            db::open(idb_vfs::VFS_NAME).map_err(|e| JsValue::from_str(&e.to_string()))
         }
         _ => Err(JsValue::from_str(&format!("unknown backend: {backend}"))),
     }
@@ -37,6 +41,14 @@ pub fn execute(sql: &str, params: JsValue) -> Result<JsValue, JsValue> {
 #[wasm_bindgen(js_name = closeDatabase)]
 pub fn close_database() -> Result<(), JsValue> {
     db::close().map_err(|e| JsValue::from_str(&e.to_string()))
+}
+
+/// Flush all pending writes to IndexedDB (awaitable).
+///
+/// Called before lock / close to ensure durability.
+#[wasm_bindgen]
+pub async fn flush() -> Result<(), JsValue> {
+    idb_vfs::flush().await
 }
 
 // ── JS ↔ Rust conversion ────────────────────────────────────────────
@@ -75,14 +87,12 @@ fn js_to_sql(v: &JsValue) -> Result<SqlValue, JsValue> {
 fn result_to_js(r: &db::QueryResult) -> JsValue {
     let obj = js_sys::Object::new();
 
-    // columns
     let cols = js_sys::Array::new();
     for c in &r.columns {
         cols.push(&JsValue::from_str(c));
     }
     js_sys::Reflect::set(&obj, &"columns".into(), &cols).unwrap();
 
-    // rows
     let rows = js_sys::Array::new();
     for row in &r.rows {
         let js_row = js_sys::Array::new();
