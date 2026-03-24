@@ -32,7 +32,7 @@ import init, {
 
 /** Check if the bordercrypt IDB store has any data (= previously provisioned). */
 async function idbHasData(): Promise<boolean> {
-  return new Promise((resolve) => {
+  return new Promise(resolve => {
     try {
       const req = indexedDB.open('bordercrypt-storage', 1);
       req.onupgradeneeded = () => {

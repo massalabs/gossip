@@ -29,7 +29,9 @@ export function useAppInit() {
       if (document.visibilityState === 'hidden') {
         getSdk()
           .flush()
-          .catch((e: unknown) => console.warn('[flush] error on background:', e));
+          .catch((e: unknown) =>
+            console.warn('[flush] error on background:', e)
+          );
       }
     };
     document.addEventListener('visibilitychange', onVisibilityChange);

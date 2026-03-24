@@ -640,6 +640,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         await cleanupSession();
         useDiscussionStore.getState().cleanup();
         useMessageStore.getState().cleanup();
+        useSelfMessageStore.getState().clearMessages();
         if (getSdk().isSecureStorage) {
           await getSdk().secureStorageLock();
         }
