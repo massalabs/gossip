@@ -2,16 +2,10 @@
 //!
 //! SQLite pages are encrypted/decrypted transparently using
 //! `write_session_data` / `read_session_data` from the bordercrypt crate.
-//! Persistence to IndexedDB is fire-and-forget on `xSync`, with an
-//! explicit `flush_idb()` for durability before lock/close.
 //!
-//! Lifecycle:
-//! 1. `init(domain)` — create state
-//! 2. `restore_idb()` — load encrypted blocks from IDB (if any)
-//! 3. `provision()` / `allocate(slot, pw)` / `unlock(pw)` — set up keys
-//! 4. `register()` + `db::open(VFS_NAME)` — open SQLite
-//! 5. `execute(sql, params)` — queries work transparently
-//! 6. `lock()` → close SQLite, flush, zeroize
+//! Two storage backends:
+//! - **Memory + IDB**: RAM cache with fire-and-forget IndexedDB persistence.
+//! - **OPFS**: direct synchronous I/O via `SyncAccessHandle` (Capacitor/Worker).
 
 use std::cell::RefCell;
 use std::ffi::{CStr, CString};
@@ -20,15 +14,18 @@ use std::os::raw::{c_char, c_int, c_void};
 use std::sync::OnceLock;
 
 use wasm_bindgen::prelude::*;
+use zeroize::Zeroizing;
 use sqlite_wasm_rs::{
     sqlite3_file, sqlite3_io_methods, sqlite3_vfs, sqlite3_vfs_find, sqlite3_vfs_register,
     SQLITE_IOERR, SQLITE_IOERR_SHORT_READ, SQLITE_NOTFOUND, SQLITE_OK, SQLITE_OPEN_MAIN_DB,
 };
 
-use crate::constants::SESSION_COUNT;
-use crate::storage::MemoryStorage;
+use crate::constants::{BLOCK_SIZE, SESSION_COUNT};
+use crate::storage::{BlockStorage, KeypairStorage, MemoryStorage};
 use crate::types::SessionIndex;
 use crate::unlock::UnlockedSession;
+
+use super::opfs_storage::OpfsBlockStorage;
 
 /// VFS name used for registration with SQLite.
 pub const VFS_NAME: &str = "bordercrypt-enc";
@@ -90,12 +87,59 @@ extern "C" {
     ) -> Result<JsValue, JsValue>;
 }
 
+// ── Backend enum ─────────────────────────────────────────────────────
+
+pub(crate) enum Backend {
+    Memory(MemoryStorage),
+    Opfs(OpfsBlockStorage),
+}
+
+macro_rules! delegate {
+    ($self:ident, $method:ident ( $($arg:expr),* )) => {
+        match $self {
+            Backend::Memory(s) => s.$method($($arg),*),
+            Backend::Opfs(s) => s.$method($($arg),*),
+        }
+    };
+}
+
+impl BlockStorage for Backend {
+    fn read_block(&self, session: SessionIndex, block: u64) -> crate::Result<Box<[u8; BLOCK_SIZE]>> {
+        delegate!(self, read_block(session, block))
+    }
+    fn write_block(&mut self, session: SessionIndex, block: u64, data: &[u8; BLOCK_SIZE]) -> crate::Result<()> {
+        delegate!(self, write_block(session, block, data))
+    }
+    fn append_block(&mut self, session: SessionIndex, data: &[u8; BLOCK_SIZE]) -> crate::Result<()> {
+        delegate!(self, append_block(session, data))
+    }
+    fn block_count(&self, session: SessionIndex) -> crate::Result<u64> {
+        delegate!(self, block_count(session))
+    }
+    fn fsync(&self, session: SessionIndex) -> crate::Result<()> {
+        delegate!(self, fsync(session))
+    }
+    fn init_blockstream(&mut self, session: SessionIndex) -> crate::Result<()> {
+        delegate!(self, init_blockstream(session))
+    }
+}
+
+impl KeypairStorage for Backend {
+    fn read_keypair(&self, session: SessionIndex) -> crate::Result<Zeroizing<Vec<u8>>> {
+        delegate!(self, read_keypair(session))
+    }
+    fn write_keypair(&mut self, session: SessionIndex, data: &[u8]) -> crate::Result<()> {
+        delegate!(self, write_keypair(session, data))
+    }
+}
+
 // ── State ────────────────────────────────────────────────────────────
 
 struct VfsState {
-    storage: MemoryStorage,
+    backend: Backend,
     domain: String,
     session: Option<UnlockedSession>,
+    /// IDB handle — only used for Memory backend.
     idb_handle: Option<JsValue>,
 }
 
@@ -105,7 +149,6 @@ thread_local! {
     static AUX: RefCell<Vec<Vec<u8>>> = RefCell::new(Vec::new());
 }
 
-/// File kind stored in the VFS file struct.
 const KIND_MAIN: u32 = 1;
 const KIND_AUX: u32 = 2;
 
@@ -113,7 +156,6 @@ const KIND_AUX: u32 = 2;
 struct EncFile {
     base: sqlite3_file,
     kind: u32,
-    /// For auxiliary files: index into AUX vec.
     aux_id: u32,
 }
 
@@ -145,11 +187,11 @@ fn io_methods() -> &'static sqlite3_io_methods {
 
 // ── Public: lifecycle ────────────────────────────────────────────────
 
-/// Create the encrypted VFS state with the given domain.
-pub fn init(domain: &str) {
+/// Create state with in-memory backend (no persistence).
+pub fn init_memory(domain: &str) {
     STATE.with(|s| {
         *s.borrow_mut() = Some(VfsState {
-            storage: MemoryStorage::new(),
+            backend: Backend::Memory(MemoryStorage::new()),
             domain: domain.to_string(),
             session: None,
             idb_handle: None,
@@ -157,11 +199,11 @@ pub fn init(domain: &str) {
     });
 }
 
-/// Load encrypted blocks and keypairs from IndexedDB.
-pub async fn restore_idb() -> Result<(), JsValue> {
+/// Create state with in-memory backend + IndexedDB persistence.
+pub async fn init_idb(domain: &str) -> Result<(), JsValue> {
+    init_memory(domain);
     let db = encIdbOpen(IDB_NAME, IDB_VERSION, IDB_STORE).await?;
 
-    // Read all session data from IDB (async).
     let mut blocks_data = Vec::with_capacity(SESSION_COUNT);
     let mut keypair_data = Vec::with_capacity(SESSION_COUNT);
     for i in 0..SESSION_COUNT {
@@ -169,23 +211,25 @@ pub async fn restore_idb() -> Result<(), JsValue> {
         keypair_data.push(encIdbGet(&db, IDB_STORE, &format!("keypair_{i}")).await?);
     }
 
-    // Import into MemoryStorage (sync).
     STATE.with(|s| {
         let mut s = s.borrow_mut();
         let st = s.as_mut().ok_or_else(|| JsValue::from_str("not initialized"))?;
+        let mem = match &mut st.backend {
+            Backend::Memory(m) => m,
+            _ => return Err(JsValue::from_str("wrong backend")),
+        };
         for i in 0..SESSION_COUNT {
             let idx = SessionIndex::new(i as u8).unwrap();
             let bv = &blocks_data[i];
             if !bv.is_undefined() && !bv.is_null() {
                 let arr = js_sys::Uint8Array::new(bv);
-                st.storage
-                    .import_blocks(idx, &arr.to_vec())
+                mem.import_blocks(idx, &arr.to_vec())
                     .map_err(|e| JsValue::from_str(&e.to_string()))?;
             }
             let kv = &keypair_data[i];
             if !kv.is_undefined() && !kv.is_null() {
                 let arr = js_sys::Uint8Array::new(kv);
-                st.storage.import_keypair(idx, &arr.to_vec());
+                mem.import_keypair(idx, &arr.to_vec());
             }
         }
         st.idb_handle = Some(db);
@@ -193,12 +237,26 @@ pub async fn restore_idb() -> Result<(), JsValue> {
     })
 }
 
-/// Provision all 5 session slots with valid but non-unlockable keypairs.
+/// Create state with OPFS backend (sync I/O, Worker only).
+pub async fn init_opfs(domain: &str) -> Result<(), JsValue> {
+    let storage = OpfsBlockStorage::open("bordercrypt").await?;
+    STATE.with(|s| {
+        *s.borrow_mut() = Some(VfsState {
+            backend: Backend::Opfs(storage),
+            domain: domain.to_string(),
+            session: None,
+            idb_handle: None,
+        });
+    });
+    Ok(())
+}
+
+/// Provision all 5 session slots.
 pub fn provision() -> Result<(), JsValue> {
     STATE.with(|s| {
         let mut s = s.borrow_mut();
         let st = s.as_mut().ok_or_else(|| JsValue::from_str("not initialized"))?;
-        crate::provision_storage(&mut st.storage)
+        crate::provision_storage(&mut st.backend)
             .map_err(|e| JsValue::from_str(&e.to_string()))
     })
 }
@@ -208,9 +266,8 @@ pub fn allocate(slot: u8, password: &[u8]) -> Result<(), JsValue> {
     STATE.with(|s| {
         let mut s = s.borrow_mut();
         let st = s.as_mut().ok_or_else(|| JsValue::from_str("not initialized"))?;
-        let idx =
-            SessionIndex::new(slot).map_err(|e| JsValue::from_str(&e.to_string()))?;
-        let session = crate::allocate_session(&mut st.storage, &st.domain, idx, password)
+        let idx = SessionIndex::new(slot).map_err(|e| JsValue::from_str(&e.to_string()))?;
+        let session = crate::allocate_session(&mut st.backend, &st.domain, idx, password)
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
         st.session = Some(session);
         Ok(())
@@ -222,7 +279,7 @@ pub fn unlock(password: &[u8]) -> Result<bool, JsValue> {
     STATE.with(|s| {
         let mut s = s.borrow_mut();
         let st = s.as_mut().ok_or_else(|| JsValue::from_str("not initialized"))?;
-        match crate::unlock_session(&st.storage, &st.domain, password) {
+        match crate::unlock_session(&st.backend, &st.domain, password) {
             Ok(session) => {
                 st.session = Some(session);
                 Ok(true)
@@ -237,17 +294,17 @@ pub fn unlock(password: &[u8]) -> Result<bool, JsValue> {
 pub fn lock() {
     STATE.with(|s| {
         if let Some(st) = s.borrow_mut().as_mut() {
-            st.session = None; // Drop → ZeroizeOnDrop
+            st.session = None;
         }
     });
 }
 
-/// Run one round of cover traffic (rerandomize a random block).
+/// Run one round of cover traffic.
 pub fn cover_tick() -> Result<(), JsValue> {
     STATE.with(|s| {
         let mut s = s.borrow_mut();
         let st = s.as_mut().ok_or_else(|| JsValue::from_str("not initialized"))?;
-        crate::cover_traffic_tick(&mut st.storage, &st.domain)
+        crate::cover_traffic_tick(&mut st.backend, &st.domain)
             .map_err(|e| JsValue::from_str(&e.to_string()))
     })
 }
@@ -273,11 +330,27 @@ pub fn register() {
     }
 }
 
-// ── Public: IDB persistence ──────────────────────────────────────────
+// ── Public: persistence ──────────────────────────────────────────────
 
-/// Flush all encrypted data to IndexedDB (awaitable).
-pub async fn flush_idb() -> Result<(), JsValue> {
-    // Snapshot synchronously.
+/// Flush encrypted data to backing store (awaitable).
+///
+/// - Memory backend: persists all sessions to IndexedDB.
+/// - OPFS backend: flushes all sync access handles.
+pub async fn flush() -> Result<(), JsValue> {
+    let is_memory = STATE.with(|s| {
+        s.borrow()
+            .as_ref()
+            .map_or(false, |st| matches!(st.backend, Backend::Memory(_)))
+    });
+
+    if is_memory {
+        flush_idb().await
+    } else {
+        flush_opfs()
+    }
+}
+
+async fn flush_idb() -> Result<(), JsValue> {
     let (db, blocks, keypairs) = STATE.with(|s| {
         let s = s.borrow();
         let st = s.as_ref().ok_or_else(|| JsValue::from_str("not initialized"))?;
@@ -285,17 +358,20 @@ pub async fn flush_idb() -> Result<(), JsValue> {
             .idb_handle
             .clone()
             .ok_or_else(|| JsValue::from_str("IDB not open"))?;
+        let mem = match &st.backend {
+            Backend::Memory(m) => m,
+            _ => return Err(JsValue::from_str("wrong backend")),
+        };
         let mut bl = Vec::with_capacity(SESSION_COUNT);
         let mut kp = Vec::with_capacity(SESSION_COUNT);
         for i in 0..SESSION_COUNT {
             let idx = SessionIndex::new(i as u8).unwrap();
-            bl.push(st.storage.export_blocks(idx));
-            kp.push(st.storage.export_keypair(idx).to_vec());
+            bl.push(mem.export_blocks(idx));
+            kp.push(mem.export_keypair(idx).to_vec());
         }
         Ok::<_, JsValue>((db, bl, kp))
     })?;
 
-    // Persist asynchronously.
     for i in 0..SESSION_COUNT {
         let ba = js_sys::Uint8Array::new_with_length(blocks[i].len() as u32);
         ba.copy_from(&blocks[i]);
@@ -308,6 +384,23 @@ pub async fn flush_idb() -> Result<(), JsValue> {
         }
     }
     Ok(())
+}
+
+fn flush_opfs() -> Result<(), JsValue> {
+    STATE.with(|s| {
+        let s = s.borrow();
+        let st = s.as_ref().ok_or_else(|| JsValue::from_str("not initialized"))?;
+        match &st.backend {
+            Backend::Opfs(opfs) => {
+                for i in 0..SESSION_COUNT {
+                    let idx = SessionIndex::new(i as u8).unwrap();
+                    opfs.fsync(idx).map_err(|e| JsValue::from_str(&e.to_string()))?;
+                }
+                Ok(())
+            }
+            _ => Err(JsValue::from_str("wrong backend")),
+        }
+    })
 }
 
 // ── VFS callbacks ────────────────────────────────────────────────────
@@ -326,16 +419,14 @@ unsafe extern "C" fn x_open(
         if flags & SQLITE_OPEN_MAIN_DB as c_int != 0 {
             f.kind = KIND_MAIN;
             f.aux_id = 0;
-            // Main DB entry is created on-demand by xWrite (no separate file data).
         } else {
             f.kind = KIND_AUX;
-            let id = AUX.with(|a| {
+            f.aux_id = AUX.with(|a| {
                 let mut a = a.borrow_mut();
                 let id = a.len() as u32;
                 a.push(Vec::new());
                 id
             });
-            f.aux_id = id;
         }
 
         if !out_flags.is_null() {
@@ -345,9 +436,7 @@ unsafe extern "C" fn x_open(
     }
 }
 
-unsafe extern "C" fn x_close(file: *mut sqlite3_file) -> c_int {
-    // Auxiliary data lives until process end (thread-local); no cleanup needed.
-    let _ = file;
+unsafe extern "C" fn x_close(_file: *mut sqlite3_file) -> c_int {
     SQLITE_OK as c_int
 }
 
@@ -381,24 +470,18 @@ unsafe extern "C" fn x_read(
                     }
                 };
                 if off + n as u64 > session.total_data_length {
-                    // Beyond EOF — short read.
                     let avail = session.total_data_length.saturating_sub(off) as usize;
                     if avail > 0 {
-                        match crate::read_session_data(
-                            &st.storage,
-                            &st.domain,
-                            session,
-                            off,
-                            avail,
-                        ) {
-                            Ok(data) => dst[..avail].copy_from_slice(&data),
-                            Err(_) => {}
+                        if let Ok(data) =
+                            crate::read_session_data(&st.backend, &st.domain, session, off, avail)
+                        {
+                            dst[..avail].copy_from_slice(&data);
                         }
                     }
                     dst[avail..].fill(0);
                     return SQLITE_IOERR_SHORT_READ as c_int;
                 }
-                match crate::read_session_data(&st.storage, &st.domain, session, off, n) {
+                match crate::read_session_data(&st.backend, &st.domain, session, off, n) {
                     Ok(data) => {
                         dst.copy_from_slice(&data);
                         SQLITE_OK as c_int
@@ -410,7 +493,6 @@ unsafe extern "C" fn x_read(
                 }
             })
         } else {
-            // Auxiliary file.
             AUX.with(|a| {
                 let a = a.borrow();
                 let fd = &a[f.aux_id as usize];
@@ -455,7 +537,7 @@ unsafe extern "C" fn x_write(
                     None => return SQLITE_IOERR as c_int,
                 };
                 match crate::write_session_data(
-                    &mut st.storage,
+                    &mut st.backend,
                     &st.domain,
                     session,
                     offset as u64,
@@ -466,7 +548,6 @@ unsafe extern "C" fn x_write(
                 }
             })
         } else {
-            // Auxiliary file.
             AUX.with(|a| {
                 let mut a = a.borrow_mut();
                 let fd = &mut a[f.aux_id as usize];
@@ -484,7 +565,6 @@ unsafe extern "C" fn x_write(
 unsafe extern "C" fn x_truncate(file: *mut sqlite3_file, size: i64) -> c_int {
     let f = unsafe { &*(file as *const EncFile) };
     if f.kind == KIND_MAIN {
-        // SQLite truncation on encrypted storage: update total_data_length.
         STATE.with(|s| {
             let mut s = s.borrow_mut();
             if let Some(st) = s.as_mut() {
@@ -494,26 +574,28 @@ unsafe extern "C" fn x_truncate(file: *mut sqlite3_file, size: i64) -> c_int {
             }
         });
     } else {
-        AUX.with(|a| {
-            let mut a = a.borrow_mut();
-            a[f.aux_id as usize].truncate(size as usize);
-        });
+        AUX.with(|a| a.borrow_mut()[f.aux_id as usize].truncate(size as usize));
     }
     SQLITE_OK as c_int
 }
 
 unsafe extern "C" fn x_sync(_file: *mut sqlite3_file, _flags: c_int) -> c_int {
-    // Fire-and-forget: persist encrypted blocks to IDB.
+    // Fire-and-forget IDB persist for Memory backend.
+    // OPFS backend: data already persisted via fsync in write_session_data.
     let snapshot = STATE.with(|s| {
         let s = s.borrow();
         let st = s.as_ref()?;
         let db = st.idb_handle.clone()?;
+        let mem = match &st.backend {
+            Backend::Memory(m) => m,
+            Backend::Opfs(_) => return None, // OPFS persists in-band
+        };
         let mut bl = Vec::with_capacity(SESSION_COUNT);
         let mut kp = Vec::with_capacity(SESSION_COUNT);
         for i in 0..SESSION_COUNT {
             let idx = SessionIndex::new(i as u8).unwrap();
-            bl.push(st.storage.export_blocks(idx));
-            kp.push(st.storage.export_keypair(idx).to_vec());
+            bl.push(mem.export_blocks(idx));
+            kp.push(mem.export_keypair(idx).to_vec());
         }
         Some((db, bl, kp))
     });
@@ -541,8 +623,8 @@ unsafe extern "C" fn x_file_size(file: *mut sqlite3_file, size: *mut i64) -> c_i
         let f = &*(file as *const EncFile);
         if f.kind == KIND_MAIN {
             *size = STATE.with(|s| {
-                let s = s.borrow();
-                s.as_ref()
+                s.borrow()
+                    .as_ref()
                     .and_then(|st| st.session.as_ref())
                     .map_or(0, |session| session.total_data_length as i64)
             });
@@ -568,10 +650,9 @@ unsafe extern "C" fn x_access(
     result: *mut c_int,
 ) -> c_int {
     unsafe {
-        // Main DB "exists" if a session is unlocked and has data.
         *result = STATE.with(|s| {
-            let s = s.borrow();
-            s.as_ref()
+            s.borrow()
+                .as_ref()
                 .and_then(|st| st.session.as_ref())
                 .map_or(0, |session| {
                     if session.total_data_length > 0 { 1 } else { 0 }

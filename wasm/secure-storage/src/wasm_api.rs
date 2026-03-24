@@ -32,15 +32,19 @@ pub async fn init_database(backend: &str) -> Result<(), JsValue> {
 
 /// Initialise bordercrypt encrypted storage.
 ///
-/// `backend`: `"memory"` (no IDB persistence) or `"idb"`.
+/// `backend`: `"memory"` (no persistence), `"idb"`, or `"opfs"`.
 #[wasm_bindgen(js_name = initBordercrypt)]
 pub async fn init_bordercrypt(domain: &str, backend: &str) -> Result<(), JsValue> {
     console_error_panic_hook::set_once();
-    encrypted_vfs::init(domain);
-    if backend == "idb" {
-        encrypted_vfs::restore_idb().await?;
+    match backend {
+        "memory" => {
+            encrypted_vfs::init_memory(domain);
+            Ok(())
+        }
+        "idb" => encrypted_vfs::init_idb(domain).await,
+        "opfs" => encrypted_vfs::init_opfs(domain).await,
+        _ => Err(JsValue::from_str(&format!("unknown backend: {backend}"))),
     }
-    Ok(())
 }
 
 /// Provision all 5 session slots.
@@ -68,11 +72,11 @@ pub fn unlock_session(password: &[u8]) -> Result<bool, JsValue> {
     Ok(ok)
 }
 
-/// Lock the session: close SQLite, flush to IDB, zeroize keys.
+/// Lock the session: close SQLite, flush to backing store, zeroize keys.
 #[wasm_bindgen(js_name = lockSession)]
 pub async fn lock_session() -> Result<(), JsValue> {
     db::close().map_err(|e| JsValue::from_str(&e.to_string()))?;
-    encrypted_vfs::flush_idb().await?;
+    encrypted_vfs::flush().await?;
     encrypted_vfs::lock();
     Ok(())
 }
@@ -108,10 +112,10 @@ pub async fn flush_idb() -> Result<(), JsValue> {
     idb_vfs::flush().await
 }
 
-/// Flush encrypted data to IndexedDB.
+/// Flush encrypted data to backing store (IDB or OPFS).
 #[wasm_bindgen(js_name = flushEncrypted)]
 pub async fn flush_encrypted() -> Result<(), JsValue> {
-    encrypted_vfs::flush_idb().await
+    encrypted_vfs::flush().await
 }
 
 // ── JS ↔ Rust conversion ────────────────────────────────────────────
