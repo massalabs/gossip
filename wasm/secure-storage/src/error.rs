@@ -26,6 +26,9 @@ pub enum SecureStorageError {
     #[error("storage error: {0}")]
     Storage(String),
 
+    #[error("sqlite error: {0}")]
+    Sqlite(String),
+
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
 }

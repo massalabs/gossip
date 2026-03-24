@@ -16,6 +16,13 @@ mod types;
 mod unlock;
 mod write;
 
+#[cfg(all(target_arch = "wasm32", feature = "wasm"))]
+pub(crate) mod vfs;
+#[cfg(all(target_arch = "wasm32", feature = "wasm"))]
+pub(crate) mod db;
+#[cfg(all(target_arch = "wasm32", feature = "wasm"))]
+mod wasm_api;
+
 pub use block::{create_cover_block, decrypt_block, encrypt_block, rerandomize_block};
 pub use constants::{
     AEAD_TAG_SIZE, BLOCK_SIZE, LENGTH_HDR_SIZE, PLAINTEXT_SIZE, ROOT_BLOCK_KEY_SIZE, SESSION_COUNT,
