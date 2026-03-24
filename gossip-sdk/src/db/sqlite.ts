@@ -30,8 +30,8 @@ export type StorageConfig =
   | {
       type: 'secureStorage';
       domain: string;
-      /** IDB or OPFS backend for encrypted storage. */
-      backend: 'idb' | 'opfs';
+      /** Encrypted storage backend. Omit to auto-detect (prefers opfs-wal). */
+      backend?: 'idb' | 'opfs' | 'opfs-wal';
       wasmUrl?: string;
     };
 

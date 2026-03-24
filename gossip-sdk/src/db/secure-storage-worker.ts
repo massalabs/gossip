@@ -61,6 +61,37 @@ async function idbHasData(): Promise<boolean> {
   });
 }
 
+/** Check if OPFS secureStorage directory has any session data. */
+async function opfsHasData(): Promise<boolean> {
+  try {
+    const root = await navigator.storage.getDirectory();
+    const dir = await root.getDirectoryHandle('secureStorage', { create: false });
+    // Check if any session block file has non-zero size.
+    for (let i = 0; i < 5; i++) {
+      try {
+        const fh = await dir.getFileHandle(`session_${i}.blocks`, { create: false });
+        const file = await fh.getFile();
+        if (file.size > 0) return true;
+      } catch {
+        // File doesn't exist → no data for this session.
+      }
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+/** Detect best available backend: prefer opfs-wal, fall back to idb. */
+async function detectBackend(): Promise<string> {
+  try {
+    await navigator.storage.getDirectory();
+    return 'opfs-wal';
+  } catch {
+    return 'idb';
+  }
+}
+
 const post: (data: unknown) => void = (
   globalThis as unknown as { postMessage(data: unknown): void }
 ).postMessage.bind(globalThis);
@@ -119,24 +150,28 @@ async function handleMessage(e: MessageEvent): Promise<void> {
   try {
     switch (type) {
       case 'init': {
-        const { domain, backend, wasmUrl } = e.data;
+        const { domain, wasmUrl } = e.data;
+        // Auto-detect best backend if not explicitly provided.
+        const backend: string = e.data.backend ?? (await detectBackend());
+
         const moduleArg: Record<string, unknown> = {};
         if (wasmUrl) moduleArg.locateFile = () => wasmUrl;
         await init(moduleArg);
         await initBordercrypt(domain, backend);
 
-        // Check if IDB has existing data (= needs unlock) or is fresh (= needs onboarding).
+        // Check if backing store has existing data (= needs unlock).
         let needsUnlock = false;
         if (backend === 'idb') {
           needsUnlock = await idbHasData();
+        } else if (backend === 'opfs-wal' || backend === 'opfs') {
+          needsUnlock = await opfsHasData();
         }
-        // For OPFS, we'd check file sizes, but that's handled inside WASM.
 
         if (!needsUnlock) {
           // First launch: provision empty slots so allocate can work.
           provisionStorage();
         }
-        post({ id, type: 'init-result', needsUnlock });
+        post({ id, type: 'init-result', needsUnlock, backend });
         break;
       }
 
