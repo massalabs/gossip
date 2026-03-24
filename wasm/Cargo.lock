@@ -151,7 +151,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "bordercrypt"
+name = "secureStorage"
 version = "0.1.0"
 dependencies = [
  "crypto-aead",

@@ -8,7 +8,7 @@ use crate::BLOCK_SIZE;
 use crate::block::{create_cover_block, encrypt_block, rerandomize_block};
 use crate::constants::{LENGTH_HDR_SIZE, PLAINTEXT_SIZE, SESSION_COUNT};
 use crate::domain;
-use crate::error::{BordercryptError, Result};
+use crate::error::{SecureStorageError, Result};
 use crate::kdf::derive_block_aead_key;
 use crate::keypair::read_session_version_and_pk;
 use crate::pq::PqPublicKey;
@@ -32,7 +32,7 @@ pub fn encrypt_session_data_block<S: BlockStorage + KeypairStorage>(
     plaintext: &[u8; PLAINTEXT_SIZE],
 ) -> Result<()> {
     if session.session_version != 0 {
-        return Err(BordercryptError::UnsupportedVersion(
+        return Err(SecureStorageError::UnsupportedVersion(
             session.session_version,
         ));
     }
@@ -70,7 +70,7 @@ pub fn encrypt_session_data_block<S: BlockStorage + KeypairStorage>(
             let ct_arr: &[u8; BLOCK_SIZE] = genuine_ct
                 .as_slice()
                 .try_into()
-                .map_err(|_| BordercryptError::CorruptedBlock)?;
+                .map_err(|_| SecureStorageError::CorruptedBlock)?;
             storage.write_block(cur_session, block_index, ct_arr)?;
         } else {
             let new_ct = match storage.read_block(cur_session, block_index) {
@@ -80,7 +80,7 @@ pub fn encrypt_session_data_block<S: BlockStorage + KeypairStorage>(
             let ct_arr: &[u8; BLOCK_SIZE] = new_ct
                 .as_slice()
                 .try_into()
-                .map_err(|_| BordercryptError::CorruptedBlock)?;
+                .map_err(|_| SecureStorageError::CorruptedBlock)?;
             storage.write_block(cur_session, block_index, ct_arr)?;
         }
         storage.fsync(cur_session)?;
@@ -126,7 +126,7 @@ pub fn repair_blockstream_lengths<S: BlockStorage + KeypairStorage>(
             let ct_arr: &[u8; BLOCK_SIZE] = cover
                 .as_slice()
                 .try_into()
-                .map_err(|_| BordercryptError::CorruptedBlock)?;
+                .map_err(|_| SecureStorageError::CorruptedBlock)?;
             storage.append_block(session, ct_arr)?;
             storage.fsync(session)?;
             count += 1;
@@ -205,14 +205,14 @@ fn extend_blockstream_with_session_block<S: BlockStorage + KeypairStorage>(
             let ct_arr: &[u8; BLOCK_SIZE] = ct
                 .as_slice()
                 .try_into()
-                .map_err(|_| BordercryptError::CorruptedBlock)?;
+                .map_err(|_| SecureStorageError::CorruptedBlock)?;
             storage.append_block(cur_session, ct_arr)?;
         } else {
             let cover = create_cover_block(&cur_pk, &cur_aad_root);
             let ct_arr: &[u8; BLOCK_SIZE] = cover
                 .as_slice()
                 .try_into()
-                .map_err(|_| BordercryptError::CorruptedBlock)?;
+                .map_err(|_| SecureStorageError::CorruptedBlock)?;
             storage.append_block(cur_session, ct_arr)?;
         }
         storage.fsync(cur_session)?;
@@ -233,7 +233,7 @@ pub fn write_session_data<S: BlockStorage + KeypairStorage>(
     data: &[u8],
 ) -> Result<()> {
     if session.session_version != 0 {
-        return Err(BordercryptError::UnsupportedVersion(
+        return Err(SecureStorageError::UnsupportedVersion(
             session.session_version,
         ));
     }
@@ -246,7 +246,7 @@ pub fn write_session_data<S: BlockStorage + KeypairStorage>(
     let new_total = old_total.max(
         offset
             .checked_add(data_len)
-            .ok_or(BordercryptError::Overflow)?,
+            .ok_or(SecureStorageError::Overflow)?,
     );
     session.total_data_length = new_total;
 
@@ -257,21 +257,21 @@ pub fn write_session_data<S: BlockStorage + KeypairStorage>(
         0
     } else {
         hdr.checked_add(new_total - 1)
-            .ok_or(BordercryptError::Overflow)?
+            .ok_or(SecureStorageError::Overflow)?
             / ps
     };
     ensure_block_count(storage, domain, session, required_last_block + 1)?;
 
     // Map logical data offset to virtual plaintext stream position
-    let start_pos = hdr.checked_add(offset).ok_or(BordercryptError::Overflow)?;
+    let start_pos = hdr.checked_add(offset).ok_or(SecureStorageError::Overflow)?;
     let end_pos_excl = start_pos
         .checked_add(data_len)
-        .ok_or(BordercryptError::Overflow)?;
+        .ok_or(SecureStorageError::Overflow)?;
 
     let first_block = start_pos / ps;
     let last_block = end_pos_excl
         .checked_sub(1)
-        .ok_or(BordercryptError::Overflow)?
+        .ok_or(SecureStorageError::Overflow)?
         / ps;
 
     for b in first_block..=last_block {
@@ -329,7 +329,7 @@ pub fn shrink_session_data<S: BlockStorage + KeypairStorage>(
     new_total: u64,
 ) -> Result<()> {
     if session.session_version != 0 {
-        return Err(BordercryptError::UnsupportedVersion(
+        return Err(SecureStorageError::UnsupportedVersion(
             session.session_version,
         ));
     }
@@ -349,14 +349,14 @@ pub fn shrink_session_data<S: BlockStorage + KeypairStorage>(
         0
     } else {
         hdr.checked_add(old_total - 1)
-            .ok_or(BordercryptError::Overflow)?
+            .ok_or(SecureStorageError::Overflow)?
             / ps
     };
     let new_last_block = if new_total == 0 {
         0
     } else {
         hdr.checked_add(new_total - 1)
-            .ok_or(BordercryptError::Overflow)?
+            .ok_or(SecureStorageError::Overflow)?
             / ps
     };
 
@@ -375,16 +375,16 @@ pub fn shrink_session_data<S: BlockStorage + KeypairStorage>(
     // Randomize the unused tail of this block
     let new_data_end_pos = hdr
         .checked_add(new_total)
-        .ok_or(BordercryptError::Overflow)?;
+        .ok_or(SecureStorageError::Overflow)?;
     let block_start_pos = new_last_block
         .checked_mul(ps)
-        .ok_or(BordercryptError::Overflow)?;
+        .ok_or(SecureStorageError::Overflow)?;
     let tail_start = new_data_end_pos
         .checked_sub(block_start_pos)
-        .ok_or(BordercryptError::Overflow)?;
+        .ok_or(SecureStorageError::Overflow)?;
     if tail_start < ps {
         let tail_start_usize =
-            usize::try_from(tail_start).map_err(|_| BordercryptError::Overflow)?;
+            usize::try_from(tail_start).map_err(|_| SecureStorageError::Overflow)?;
         rand::rngs::OsRng.fill_bytes(&mut pt[tail_start_usize..]);
     }
 
@@ -435,7 +435,7 @@ pub fn shrink_session_data<S: BlockStorage + KeypairStorage>(
             let ct_arr: &[u8; BLOCK_SIZE] = new_ct
                 .as_slice()
                 .try_into()
-                .map_err(|_| BordercryptError::CorruptedBlock)?;
+                .map_err(|_| SecureStorageError::CorruptedBlock)?;
             storage.write_block(cur_session, b, ct_arr)?;
             storage.fsync(cur_session)?;
         }
@@ -642,7 +642,7 @@ mod tests {
             let mut storage = MemoryStorage::new();
             let (mut session, _) = provision_all_sessions(&mut storage);
 
-            let data = b"hello, bordercrypt!";
+            let data = b"hello, secureStorage!";
             write_session_data(&mut storage, DOMAIN, &mut session, 0, data).unwrap();
 
             let result = read_session_data(&storage, DOMAIN, &session, 0, data.len()).unwrap();

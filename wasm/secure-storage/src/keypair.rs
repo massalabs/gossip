@@ -5,7 +5,7 @@
 //! [version: u32 BE] [pq_pk: PK_SIZE bytes] [sk_nonce: 16 bytes] [sk_ct: remaining]
 //! ```
 
-use crate::error::{BordercryptError, Result};
+use crate::error::{SecureStorageError, Result};
 use crate::pq::PqPublicKey;
 use crate::storage::KeypairStorage;
 use crate::types::SessionIndex;
@@ -61,7 +61,7 @@ impl KeypairFile {
     /// Deserialize from binary format.
     pub fn deserialize(data: &[u8]) -> Result<Self> {
         if data.len() < MIN_SIZE {
-            return Err(BordercryptError::CorruptedBlock);
+            return Err(SecureStorageError::CorruptedBlock);
         }
 
         let mut offset = 0;
@@ -69,7 +69,7 @@ impl KeypairFile {
         let version = u32::from_be_bytes(
             data[offset..offset + 4]
                 .try_into()
-                .map_err(|_| BordercryptError::CorruptedBlock)?,
+                .map_err(|_| SecureStorageError::CorruptedBlock)?,
         );
         offset += 4;
 
@@ -80,7 +80,7 @@ impl KeypairFile {
         let sk_nonce: [u8; crypto_aead::NONCE_SIZE] = data
             [offset..offset + crypto_aead::NONCE_SIZE]
             .try_into()
-            .map_err(|_| BordercryptError::CorruptedBlock)?;
+            .map_err(|_| SecureStorageError::CorruptedBlock)?;
         offset += crypto_aead::NONCE_SIZE;
 
         let sk_ct = data[offset..].to_vec();

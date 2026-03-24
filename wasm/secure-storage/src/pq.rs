@@ -1,12 +1,12 @@
 //! Wrapper around the `pq_rerand` library.
 //!
 //! Adapts the polynomial-based API to a byte-oriented interface suitable
-//! for bordercrypt's block-level operations.
+//! for secureStorage's block-level operations.
 
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 use crate::constants::BLOCK_SIZE;
-use crate::error::{BordercryptError, Result};
+use crate::error::{SecureStorageError, Result};
 
 /// NTT tables computed at compile time — zero runtime cost.
 const NTT_CTX: pq_rerand::poly::NttContext = pq_rerand::poly::NttContext::new();
@@ -19,7 +19,7 @@ pub const PQ_CT_SIZE: usize = pq_rerand::serialize::SLOT_CT_BYTES;
 
 const _: () = assert!(
     PQ_CT_SIZE == BLOCK_SIZE,
-    "pq-rerand ciphertext slot size must equal bordercrypt block size"
+    "pq-rerand ciphertext slot size must equal secureStorage block size"
 );
 
 /// Post-quantum public key for encryption and re-randomization.
@@ -133,7 +133,7 @@ impl PqPublicKey {
     pub fn from_bytes(data: &[u8]) -> Result<Self> {
         pq_rerand::keygen::PublicKey::from_bytes(data)
             .map(Self)
-            .ok_or(BordercryptError::CorruptedBlock)
+            .ok_or(SecureStorageError::CorruptedBlock)
     }
 }
 
@@ -156,7 +156,7 @@ impl PqSecretKey {
     pub fn from_bytes(data: &[u8]) -> Result<Self> {
         pq_rerand::keygen::SecretKey::from_bytes(data)
             .map(Self)
-            .ok_or(BordercryptError::CorruptedBlock)
+            .ok_or(SecureStorageError::CorruptedBlock)
     }
 }
 
