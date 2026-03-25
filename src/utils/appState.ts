@@ -5,6 +5,7 @@
  */
 
 import { Capacitor } from '@capacitor/core';
+import { App } from '@capacitor/app';
 
 /**
  * Check if the app is currently in the foreground.
@@ -17,7 +18,6 @@ import { Capacitor } from '@capacitor/core';
 export async function isAppInForeground(): Promise<boolean> {
   // Try to use Capacitor if available
   if (Capacitor.isNativePlatform()) {
-    const { App } = await import('@capacitor/app');
     const state = await App.getState();
     return state.isActive;
   }
