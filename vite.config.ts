@@ -120,6 +120,8 @@ export default defineConfig({
   resolve: {
     alias: {
       '@massalabs/gossip-sdk': path.resolve(__dirname, 'gossip-sdk/src'),
+      react: path.resolve(__dirname, 'node_modules/react'),
+      'react-dom': path.resolve(__dirname, 'node_modules/react-dom'),
     },
   },
   assetsInclude: ['**/*.wasm'],
