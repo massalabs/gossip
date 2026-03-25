@@ -15,7 +15,8 @@
     "web3": "Web3",
     "about": "À propos",
     "debug": "Débogage",
-    "logout": "Déconnexion"
+    "logout": "Déconnexion",
+    "privacy": "Confidentialité"
   },
   "delete_account": {
     "button": "Supprimer le compte",
@@ -85,6 +86,11 @@
   "security": {
     "title": "Sécurité",
     "native_only": "Les paramètres de sécurité sont uniquement disponibles sur les plateformes natives (Android et iOS)."
+  },
+  "privacy": {
+    "title": "Confidentialité",
+    "default_retention_title": "Suppression automatique par défaut",
+    "default_retention_description": "Les nouvelles discussions auront automatiquement cette politique de rétention appliquée."
   },
   "web3": {
     "title": "Web3",

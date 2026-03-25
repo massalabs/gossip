@@ -15,7 +15,8 @@
     "web3": "Web3",
     "about": "About",
     "debug": "Debug",
-    "logout": "Logout"
+    "logout": "Logout",
+    "privacy": "Privacy"
   },
   "delete_account": {
     "button": "Delete Account",
@@ -85,6 +86,11 @@
   "security": {
     "title": "Security",
     "native_only": "Security settings are only available on native platforms (Android and iOS)."
+  },
+  "privacy": {
+    "title": "Privacy",
+    "default_retention_title": "Default message auto-delete",
+    "default_retention_description": "New discussions will automatically have this retention policy applied."
   },
   "web3": {
     "title": "Web3",
