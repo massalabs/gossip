@@ -5,7 +5,7 @@ import DiscussionFilterButtons from '../components/discussions/DiscussionFilterB
 import { useAccountStore } from '../stores/accountStore';
 import { useAppStore } from '../stores/appStore';
 import { useNavigate } from 'react-router-dom';
-import { Plus, X, Settings } from 'react-feather';
+import { Plus, X, Settings, Lock } from 'react-feather';
 import Button from '../components/ui/Button';
 import SearchBar from '../components/ui/SearchBar';
 import { useSearch } from '../hooks/useSearch';
@@ -26,6 +26,7 @@ const Discussions: React.FC = () => {
   const navigate = useNavigate();
   const isLoading = useAccountStore(s => s.isLoading);
   const username = useAccountStore(s => s.userProfile?.username);
+  const logout = useAccountStore(s => s.logout);
   const pendingSharedContent = useAppStore(s => s.pendingSharedContent);
   const setPendingSharedContent = useAppStore(s => s.setPendingSharedContent);
   const pendingForwardMessageId = useAppStore(s => s.pendingForwardMessageId);
@@ -135,8 +136,17 @@ const Discussions: React.FC = () => {
         icon: <Settings className="w-5 h-5" />,
         onClick: () => navigate(ROUTES.settings()),
       },
+      { type: 'separator' as const },
+      {
+        label: t('lock_account'),
+        icon: <Lock className="w-5 h-5" />,
+        danger: true,
+        onClick: () => {
+          logout().catch(e => console.error('Failed to lock app:', e));
+        },
+      },
     ],
-    [navigate]
+    [navigate, logout, t]
   );
 
   if (isLoading || !gossip.isSessionOpen) {

@@ -18,11 +18,13 @@ export function useDevAutoLogin(
   const attempted = useRef(false);
   const loadAccount = useAccountStore(s => s.loadAccount);
 
+  const lockedByUser = useAccountStore(s => s.lockedByUser);
+
   useEffect(() => {
     if (!import.meta.env.DEV) return;
 
     const devPassword = import.meta.env.VITE_DEV_PASSWORD;
-    if (!devPassword || attempted.current || !account) return;
+    if (!devPassword || attempted.current || !account || lockedByUser) return;
 
     attempted.current = true;
     callbacks.setLoading(true);
@@ -38,7 +40,7 @@ export function useDevAutoLogin(
         callbacks.onError('Dev auto-login failed. Check VITE_DEV_PASSWORD.');
       })
       .finally(() => callbacks.setLoading(false));
-  }, [account, loadAccount, callbacks]);
+  }, [account, lockedByUser, loadAccount, callbacks]);
 }
 
 export interface DevAccount {

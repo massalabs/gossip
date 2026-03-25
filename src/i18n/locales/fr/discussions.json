@@ -156,5 +156,6 @@
   "retention_separator": "Suppression automatique activée : {{duration}}",
   "filter_label": "Filtrer les discussions",
   "waiting_connection": "En attente de connexion...",
-  "announcement": "Annonce"
+  "announcement": "Annonce",
+  "lock_account": "Verrouiller le compte"
 }

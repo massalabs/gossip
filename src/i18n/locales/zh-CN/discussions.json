@@ -151,5 +151,6 @@
   "retention_separator": "自动删除已启用：{{duration}}",
   "filter_label": "筛选会话",
   "waiting_connection": "等待连接...",
-  "announcement": "通告"
+  "announcement": "通告",
+  "lock_account": "锁定账户"
 }

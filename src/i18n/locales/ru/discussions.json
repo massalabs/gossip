@@ -151,5 +151,6 @@
   "retention_separator": "Автоудаление включено: {{duration}}",
   "filter_label": "Фильтр чатов",
   "waiting_connection": "Ожидание подключения...",
-  "announcement": "Объявление"
+  "announcement": "Объявление",
+  "lock_account": "Заблокировать аккаунт"
 }
