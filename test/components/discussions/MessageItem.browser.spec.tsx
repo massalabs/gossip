@@ -13,6 +13,25 @@ import {
 } from '@massalabs/gossip-sdk';
 import { Capacitor } from '@capacitor/core';
 
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({
+    t: (key: string) => {
+      const translations: Record<string, string> = {
+        'message_item.double_tap_reply': 'Double-tap to reply',
+        'message_item.actions_menu': 'Message actions',
+        'message_item.reply': 'Reply',
+        'message_item.forward': 'Forward',
+        'message_item.copy': 'Copy',
+        'message_item.delete': 'Delete',
+        'message_item.share': 'Share',
+      };
+      return translations[key] ?? key;
+    },
+    i18n: { language: 'en' },
+  }),
+  initReactI18next: { type: '3rdParty', init: () => {} },
+}));
+
 vi.mock('../../../src/hooks/useGossipSdk', () => ({
   useGossipSdk: () => ({ isSessionOpen: false }),
 }));
