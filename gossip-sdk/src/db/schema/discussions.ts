@@ -36,6 +36,9 @@ export const discussions = sqliteTable(
     saturatedRetryAt: integer('saturatedRetryAt', { mode: 'timestamp_ms' }),
     messageRetentionDuration: integer('messageRetentionDuration'),
     retentionPolicySetAt: integer('retentionPolicySetAt'), // nullable, ms timestamp when policy was last configured
+    mutedNotifications: integer('mutedNotifications', { mode: 'boolean' })
+      .notNull()
+      .default(false),
     saturatedRetryDone: integer('saturatedRetryDone', { mode: 'boolean' })
       .notNull()
       .default(false),

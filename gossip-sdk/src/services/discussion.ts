@@ -443,6 +443,14 @@ export class DiscussionService {
     return updateDiscussionPin(discussionId, pinned, this.queries);
   }
 
+  /** Mute or unmute notifications for a discussion */
+  async setMuted(discussionId: number, muted: boolean): Promise<void> {
+    await this.queries.discussions.updateById(discussionId, {
+      mutedNotifications: muted,
+    });
+    await this.refreshService?.stateUpdate();
+  }
+
   /**
    * Set the auto-delete retention policy for a discussion.
    * Updates the local DB and sends a control message to the peer so both sides

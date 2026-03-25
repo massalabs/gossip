@@ -71,4 +71,12 @@ export const MIGRATIONS: EmbeddedMigration[] = [
       'ALTER TABLE `discussions` ADD COLUMN `retentionPolicySetAt` integer;',
     ],
   },
+  {
+    idx: 5,
+    tag: '0005_discussions_muted',
+    when: 1744000000000,
+    statements: [
+      'ALTER TABLE `discussions` ADD COLUMN `mutedNotifications` integer NOT NULL DEFAULT 0;',
+    ],
+  },
 ];
