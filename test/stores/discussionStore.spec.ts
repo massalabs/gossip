@@ -36,6 +36,7 @@ const defaultDiscussion: Discussion = {
   saturatedRetryAt: null,
   saturatedRetryDone: false,
   pinned: false,
+  mutedNotifications: false,
 };
 
 // Mock sdkStore so getSdk() does not throw. The polling callback calls

@@ -13,7 +13,14 @@ import ContactNameModal from '../components/ui/ContactNameModal';
 import Button from '../components/ui/Button';
 import PageHeader from '../components/ui/PageHeader';
 import PageLayout from '../components/ui/PageLayout';
-import { Check, Edit2, ChevronRight, RotateCw } from 'react-feather';
+import {
+  Check,
+  Edit2,
+  ChevronRight,
+  RotateCw,
+  Bell,
+  BellOff,
+} from 'react-feather';
 import { ROUTES } from '../constants/routes';
 import { useManualRenewDiscussion } from '../hooks/useManualRenew';
 import type { Contact } from '@massalabs/gossip-sdk';
@@ -148,6 +155,13 @@ const DiscussionSettings: React.FC = () => {
     [gossip, discussion?.id, discussion?.contactUserId, patchDiscussion]
   );
 
+  const handleToggleMute = useCallback(async () => {
+    if (!discussion?.id) return;
+    const newMuted = !discussion.mutedNotifications;
+    patchDiscussion(discussion.id, { mutedNotifications: newMuted });
+    await gossip.discussions.setMuted(discussion.id, newMuted);
+  }, [gossip, discussion?.id, discussion?.mutedNotifications, patchDiscussion]);
+
   const handleNavigateToContact = useCallback(
     (contact: Contact) => {
       navigate(ROUTES.contact({ userId: contact.userId }));
@@ -251,6 +265,37 @@ const DiscussionSettings: React.FC = () => {
               ? t('settings.reconnected')
               : t('settings.reset_connection')}
           </Button>
+        </div>
+      </div>
+
+      {/* Mute Notifications Section */}
+      <div className="mb-6">
+        <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
+          {t('settings.notifications')}
+        </h2>
+        <div className="bg-background border border-border rounded-xl p-4">
+          <button
+            onClick={handleToggleMute}
+            className="w-full flex items-center justify-between text-sm font-medium text-foreground hover:bg-muted rounded-lg px-3 py-2 transition-colors"
+          >
+            <div className="flex items-center gap-3">
+              {discussion.mutedNotifications ? (
+                <BellOff className="w-4 h-4 text-muted-foreground" />
+              ) : (
+                <Bell className="w-4 h-4 text-muted-foreground" />
+              )}
+              <span>
+                {discussion.mutedNotifications
+                  ? t('settings.unmute_notifications')
+                  : t('settings.mute_notifications')}
+              </span>
+            </div>
+            {discussion.mutedNotifications && (
+              <span className="text-xs text-muted-foreground">
+                {t('settings.muted')}
+              </span>
+            )}
+          </button>
         </div>
       </div>
 

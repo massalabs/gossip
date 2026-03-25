@@ -11,6 +11,14 @@ import {
 } from '@massalabs/gossip-sdk';
 import type { Message } from '@massalabs/gossip-sdk';
 
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({
+    t: (key: string) => key,
+    i18n: { language: 'en' },
+  }),
+  initReactI18next: { type: '3rdParty', init: () => {} },
+}));
+
 vi.mock('../../../src/hooks/useGossipSdk', () => ({
   useGossipSdk: () => ({ isSessionOpen: false }),
 }));
