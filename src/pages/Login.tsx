@@ -87,7 +87,15 @@ const Login: React.FC<LoginProps> = React.memo(
         onAccountSelected();
       } catch (error) {
         console.error('Biometric authentication failed:', error);
-        onErrorChange?.(t('login.biometric_failed'));
+        const message = error instanceof Error ? error.message : '';
+        if (message === 'cancelled') {
+          // User (or system) dismissed the prompt intentionally — clear error, allow retry
+          onErrorChange?.(null);
+        } else if (message === 'biometric_locked') {
+          onErrorChange?.(t('login.biometric_locked'));
+        } else {
+          onErrorChange?.(t('login.biometric_failed'));
+        }
       } finally {
         setIsLoading(false);
       }
