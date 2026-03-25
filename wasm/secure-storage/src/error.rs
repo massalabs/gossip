@@ -3,6 +3,8 @@
 /// Error messages are deliberately generic to avoid leaking information
 /// to an adversary (e.g. no distinction between "bad nonce" and "bad tag").
 #[derive(Debug, thiserror::Error)]
+#[cfg_attr(feature = "native", derive(uniffi::Error))]
+#[cfg_attr(feature = "native", uniffi(flat_error))]
 #[non_exhaustive]
 pub enum SecureStorageError {
     #[error("invalid password")]
@@ -31,6 +33,9 @@ pub enum SecureStorageError {
 
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
+
+    #[error("lock poisoned")]
+    LockPoisoned,
 }
 
 /// Convenience alias used throughout the crate.
