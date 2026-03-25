@@ -17,7 +17,7 @@ mod unlock;
 pub mod wal;
 mod write;
 
-#[cfg(all(target_arch = "wasm32", feature = "wasm"))]
+#[cfg(any(all(target_arch = "wasm32", feature = "wasm"), feature = "native"))]
 pub(crate) mod vfs;
 #[cfg(all(target_arch = "wasm32", feature = "wasm"))]
 pub(crate) mod db;
