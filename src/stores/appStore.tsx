@@ -54,6 +54,9 @@ interface AppStoreState {
     userProfile: UserProfile | null,
     provider: Provider | null
   ) => Promise<void>;
+  // Default retention duration for new discussions (seconds), null = off
+  defaultRetentionDuration: number | null;
+  setDefaultRetentionDuration: (duration: number | null) => void;
 }
 
 const useAppStoreBase = create<AppStoreState>()(
@@ -124,6 +127,11 @@ const useAppStoreBase = create<AppStoreState>()(
       setMnsDomains: (domains: string[]) => {
         set({ mnsDomains: domains });
       },
+      // Default retention duration for new discussions (1 month = 2592000s)
+      defaultRetentionDuration: 2592000,
+      setDefaultRetentionDuration: (duration: number | null) => {
+        set({ defaultRetentionDuration: duration });
+      },
       fetchMnsDomains: async (
         userProfile: UserProfile | null,
         provider: Provider | null
@@ -160,6 +168,7 @@ const useAppStoreBase = create<AppStoreState>()(
         mnsEnabled: state.mnsEnabled,
         mnsDomains: state.mnsDomains,
         disableNativeScreenshot: state.disableNativeScreenshot,
+        defaultRetentionDuration: state.defaultRetentionDuration,
       }),
     }
   )
