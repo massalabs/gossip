@@ -27,7 +27,7 @@ import {
 } from 'react-feather';
 import { useNavigate } from 'react-router-dom';
 
-import { getProfileHead } from '../components/avatar/profileHeads';
+import UserProfileAvatar from '../components/avatar/UserProfileAvatar';
 import { useAppStore } from '../stores/appStore';
 import { useNClicksTrigger } from '../hooks/useNClicksTrigger';
 import AccountBackup from '../components/account/AccountBackup';
@@ -142,17 +142,16 @@ const Settings = (): React.ReactElement => {
       <div className="bg-card rounded-xl border border-border p-6 mb-6">
         <div className="flex items-start gap-4">
           <button
+            type="button"
             onClick={handleProfileImageTap}
             className="cursor-pointer focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 rounded-full transition-opacity active:opacity-70"
             aria-label={t('profile')}
           >
-            <div className="w-16 h-16 p-2.5 rounded-full bg-primary flex items-center justify-center">
-              <img
-                src={getProfileHead(userProfile?.username || '')}
-                className="w-full h-full object-contain"
-                alt="Profile"
-              />
-            </div>
+            <UserProfileAvatar
+              name={userProfile?.username ?? ''}
+              size={10}
+              interactive={false}
+            />
           </button>
           <div className="flex-1 min-w-0">
             <div className="mb-2 flex items-center gap-2">

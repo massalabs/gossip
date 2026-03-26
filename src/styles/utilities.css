@@ -275,7 +275,11 @@
   .bg-discussion-pattern::before {
     content: '';
     position: absolute;
-    inset: 0;
+    top: 0;
+    left: 0;
+    right: 0;
+    min-height: 100vh;
+    min-height: 100dvh;
     z-index: -1;
     background-image: url('../assets/backgrounds/bg-discussion-light.svg');
     background-repeat: repeat;
@@ -286,6 +290,112 @@
 
   :is(.dark *).bg-discussion-pattern::before {
     background-image: url('../assets/backgrounds/bg-discussion-dark.svg');
+  }
+
+  /* Message appearance: fade-in via keyframes on the list row wrapper.
+     Element takes full height immediately so VList measures correctly and
+     smooth-scroll lands in the right place. useLayoutEffect applies the class
+     before first paint — no flash. No transforms on this ancestor to avoid
+     WebKit border-radius painting issues on the child bubble. */
+  @keyframes msg-fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  .msg-appear {
+    animation: msg-fade-in 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  /* Search bar slide-down from under the header */
+  @keyframes slide-down-in {
+    from {
+      opacity: 0;
+      transform: translateY(-100%);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .animate-slide-down-in {
+    animation: slide-down-in 0.25s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  /* Context menu scale-in from tap point (iOS-style) */
+  @keyframes context-menu-in {
+    from {
+      opacity: 0;
+      transform: scale(0.8);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+
+  .animate-context-menu-in {
+    animation: context-menu-in 0.25s cubic-bezier(0.16, 1, 0.3, 1) both;
+    transform-origin: var(--menu-origin, center top);
+  }
+
+  /* Bottom sheet slide-up + fade */
+  @keyframes sheet-slide-up {
+    from {
+      opacity: 0;
+      transform: translateY(100%);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .animate-sheet-slide-up {
+    animation: sheet-slide-up 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  /* Backdrop fade for modals / context menus */
+  @keyframes backdrop-fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  .animate-backdrop-fade-in {
+    animation: backdrop-fade-in 0.2s ease-out both;
+  }
+
+  /* Page slide transitions — CSS animations run on GPU compositor thread,
+     independent of main-thread React rendering. */
+  @keyframes slide-enter-right {
+    from {
+      transform: translateX(100%);
+    }
+    to {
+      transform: translateX(0);
+    }
+  }
+  @keyframes slide-exit-right {
+    from {
+      transform: translateX(0);
+    }
+    to {
+      transform: translateX(100%);
+    }
+  }
+  .animate-slide-enter-right {
+    animation: slide-enter-right 0.4s cubic-bezier(0.32, 0.72, 0, 1) both;
+  }
+  .animate-slide-exit-right {
+    animation: slide-exit-right 0.4s cubic-bezier(0.32, 0.72, 0, 1) both;
   }
 
   @media (prefers-reduced-motion: reduce) {

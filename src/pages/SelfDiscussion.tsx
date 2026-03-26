@@ -9,6 +9,7 @@ import MessageInput from '../components/discussions/MessageInput';
 import { useSelfMessageStore } from '../stores/selfMessageStore';
 import { getSdk } from '../stores/sdkStore';
 import { ROUTES } from '../constants/routes';
+import { useSwipeBack } from '../hooks/useSwipeBack';
 
 const RETENTION_OPTIONS: {
   labelKey: string;
@@ -48,6 +49,7 @@ const SelfDiscussion: React.FC = () => {
   const loadReactions = useSelfMessageStore.use.loadReactions();
 
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
+  const swipeBack = useSwipeBack();
   const [editingMessage, setEditingMessage] = useState<Message | null>(null);
   const [forwardedContent, setForwardedContent] = useState<string | null>(null);
   const [isRetentionModalOpen, setIsRetentionModalOpen] = useState(false);
@@ -119,7 +121,11 @@ const SelfDiscussion: React.FC = () => {
   );
 
   return (
-    <div className="h-full app-max-w mx-auto bg-discussion-pattern flex flex-col relative overflow-hidden">
+    <div
+      className="h-full app-max-w mx-auto bg-discussion-pattern flex flex-col relative overflow-hidden"
+      onTouchStart={swipeBack.onTouchStart}
+      onTouchEnd={swipeBack.onTouchEnd}
+    >
       {/* Header */}
       <div className="px-header-padding pt-safe-t h-header-safe flex items-center gap-3 shrink-0 z-10 bg-card">
         <BackButton />

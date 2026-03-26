@@ -134,7 +134,8 @@ const ThreeDotMenu: React.FC<ThreeDotMenuProps> = ({
           ref={menuRef}
           role="menu"
           aria-label={triggerLabel}
-          className="absolute right-0 top-full mt-2 min-w-[200px] max-w-[280px] bg-card border border-border rounded-2xl shadow-xl z-50 origin-top-right animate-menu-open overflow-hidden"
+          className="absolute right-0 top-full mt-2 min-w-[200px] max-w-[280px] bg-card border border-border rounded-2xl shadow-xl z-50 overflow-hidden animate-context-menu-in"
+          style={{ '--menu-origin': 'top right' } as React.CSSProperties}
         >
           {items.map((item, index) =>
             item.type === 'separator' ? (

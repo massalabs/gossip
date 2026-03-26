@@ -19,6 +19,7 @@ import { useDiscussionStore } from '../stores/discussionStore';
 import { useGossipSdk } from '../hooks/useGossipSdk';
 import { SessionStatus, SELF_CONTACT_ID } from '@massalabs/gossip-sdk';
 import { useOnlineStore } from '../stores/useOnlineStore';
+import { useSwipeFilter } from '../hooks/useSwipeFilter';
 
 const Discussions: React.FC = () => {
   const { t } = useTranslation('discussions');
@@ -38,6 +39,7 @@ const Discussions: React.FC = () => {
   const setFilter = useDiscussionStore(s => s.setFilter);
   const sessionsStatuses = useDiscussionStore(s => s.sessionsStatuses);
   const isOnline = useOnlineStore(s => s.isOnline);
+  const swipeHandlers = useSwipeFilter(filter, setFilter);
   // Callback ref: triggers re-render when scroll container is mounted
   const [scrollContainer, setScrollContainer] = useState<HTMLDivElement | null>(
     null
@@ -190,7 +192,7 @@ const Discussions: React.FC = () => {
     <PageLayout
       header={headerContent}
       className="relative"
-      contentClassName="pt-2 px-2 pb-4"
+      contentClassName="pt-2 px-2 pb-4 flex flex-col"
       onScrollContainerRef={setScrollContainer}
     >
       {/* Show banner when there's pending shared content */}
@@ -223,23 +225,26 @@ const Discussions: React.FC = () => {
           aria-label={t('common:search')}
         />
       </div>
-      {/* Filter buttons - only show when not searching */}
-      {!searchQuery.trim() && (
-        <DiscussionFilterButtons
-          filter={filter}
-          onFilterChange={setFilter}
-          filterCounts={filterCounts}
-        />
-      )}
-      {scrollContainer && (
-        <DiscussionListPanel
-          onSelect={handleSelectDiscussion}
-          headerVariant="link"
-          searchQuery={debouncedSearchQuery}
-          scrollParent={scrollContainer}
-          filter={filter}
-        />
-      )}
+      {/* Swipe left/right to change filter */}
+      <div className="flex-1 min-h-0" {...swipeHandlers}>
+        {/* Filter buttons - only show when not searching */}
+        {!searchQuery.trim() && (
+          <DiscussionFilterButtons
+            filter={filter}
+            onFilterChange={setFilter}
+            filterCounts={filterCounts}
+          />
+        )}
+        {scrollContainer && (
+          <DiscussionListPanel
+            onSelect={handleSelectDiscussion}
+            headerVariant="link"
+            searchQuery={debouncedSearchQuery}
+            scrollParent={scrollContainer}
+            filter={filter}
+          />
+        )}
+      </div>
       {/* Floating button positioned above bottom nav */}
       <Button
         onClick={() => navigate(ROUTES.newDiscussion())}

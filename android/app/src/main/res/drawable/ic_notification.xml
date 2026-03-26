@@ -1,0 +1,14 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="192.39"
+    android:viewportHeight="192.39">
+
+    <group android:translateY="9.5">
+        <!-- Ghost silhouette with eye cutouts (evenOdd makes enclosed sub-paths transparent) -->
+        <path
+            android:fillColor="#FFFFFF"
+            android:fillType="evenOdd"
+            android:pathData="M167.34,22.51C150.55,7.58 126.69,0 96.43,0c-15.12,0 -28.67,1.89 -40.55,5.66c-11.89,3.76 -22.11,9.39 -30.59,16.87C8.51,37.35 0,58.96 0,86.76c0,16.58 3.09,31.01 9.17,42.86c6.01,11.71 15.12,20.99 27.12,27.57l2.35,1.29v11.84l-0.14,3.07c5.06,-1.51 11.44,-2.26 19.3,-2.26h38.63c30.27,0 54.14,-7.43 70.95,-22.08c16.59,-14.48 25.01,-35.44 25.01,-62.29s-8.43,-49.43 -25.05,-64.25Z M36.71,92.92a18.02,18.02 0,1,0 36.04,0a18.02,18.02 0,1,0 -36.04,0Z M84.35,92.92a18.02,18.02 0,1,0 36.04,0a18.02,18.02 0,1,0 -36.04,0Z" />
+    </group>
+</vector>
