@@ -7,6 +7,7 @@ import com.getcapacitor.PluginCall
 import com.getcapacitor.PluginMethod
 import com.getcapacitor.annotation.CapacitorPlugin
 import java.util.concurrent.Executors
+import java.util.concurrent.ThreadFactory
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -28,7 +29,10 @@ import uniffi.secureStorage.SecureStorageException
 @CapacitorPlugin(name = "SecureStorageNative")
 class SecureStoragePlugin : Plugin() {
 
-    private val executor = Executors.newSingleThreadExecutor()
+    // PQ (ML-KEM) crypto needs ~4MB stack; default thread pool has ~512KB.
+    private val executor = Executors.newSingleThreadExecutor(ThreadFactory { r ->
+        Thread(null, r, "secure-storage", 8 * 1024 * 1024)
+    })
 
     @PluginMethod
     fun initSecureStorage(call: PluginCall) {
