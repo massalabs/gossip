@@ -15,7 +15,8 @@
     "web3": "Web3",
     "about": "关于",
     "debug": "调试",
-    "logout": "退出登录"
+    "logout": "退出登录",
+    "security": "安全"
   },
   "delete_account": {
     "button": "删除账户",
@@ -84,7 +85,16 @@
   },
   "security": {
     "title": "安全",
-    "native_only": "安全设置仅在原生平台（Android 和 iOS）上可用。"
+    "native_only": "安全设置仅在原生平台（Android 和 iOS）上可用。",
+    "auto_lock_title": "闲置锁定",
+    "auto_lock_description": "应用在后台运行一段时间后自动锁定。",
+    "auto_lock_current": "锁定时间",
+    "auto_lock_off": "关闭",
+    "auto_lock_1m": "1 分钟",
+    "auto_lock_5m": "5 分钟",
+    "auto_lock_15m": "15 分钟",
+    "auto_lock_30m": "30 分钟",
+    "auto_lock_1h": "1 小时"
   },
   "web3": {
     "title": "Web3",

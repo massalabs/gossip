@@ -57,6 +57,9 @@ interface AppStoreState {
   // Default retention duration for new discussions (seconds), null = off
   defaultRetentionDuration: number | null;
   setDefaultRetentionDuration: (duration: number | null) => void;
+  // Auto-lock timeout (seconds), null = disabled
+  autoLockTimeout: number | null;
+  setAutoLockTimeout: (timeout: number | null) => void;
 }
 
 const useAppStoreBase = create<AppStoreState>()(
@@ -132,6 +135,11 @@ const useAppStoreBase = create<AppStoreState>()(
       setDefaultRetentionDuration: (duration: number | null) => {
         set({ defaultRetentionDuration: duration });
       },
+      // Auto-lock timeout (disabled by default)
+      autoLockTimeout: null,
+      setAutoLockTimeout: (timeout: number | null) => {
+        set({ autoLockTimeout: timeout });
+      },
       fetchMnsDomains: async (
         userProfile: UserProfile | null,
         provider: Provider | null
@@ -169,6 +177,7 @@ const useAppStoreBase = create<AppStoreState>()(
         mnsDomains: state.mnsDomains,
         disableNativeScreenshot: state.disableNativeScreenshot,
         defaultRetentionDuration: state.defaultRetentionDuration,
+        autoLockTimeout: state.autoLockTimeout,
       }),
     }
   )

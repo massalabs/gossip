@@ -26,6 +26,7 @@ import { ROUTES } from './constants/routes';
 import { useOnlineStore } from './stores/useOnlineStore.tsx';
 import { useTheme } from './hooks/useTheme.ts';
 import { useScreenshotProtection } from './hooks/useScreenshotProtection';
+import { useAutoLock } from './hooks/useAutoLock';
 
 const AppContent: React.FC = () => {
   const { isLoading, userProfile } = useAccountStore();
@@ -77,6 +78,7 @@ function App() {
   const { initTheme } = useTheme();
   const { initOnlineStore } = useOnlineStore();
   useScreenshotProtection();
+  useAutoLock();
 
   useEffect(() => {
     let cleanup: (() => void) | undefined;

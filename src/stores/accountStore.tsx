@@ -167,7 +167,7 @@ interface AccountState {
     mnemonic: string,
     opts: { useBiometrics: boolean; password?: string }
   ) => Promise<void>;
-  logout: () => Promise<void>;
+  logout: (options?: { lockedByUser?: boolean }) => Promise<void>;
   resetAccount: () => Promise<void>;
   setLoading: (loading: boolean) => void;
 
@@ -468,7 +468,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       }
     },
 
-    logout: async () => {
+    logout: async (options?: { lockedByUser?: boolean }) => {
       try {
         set({ isLoading: true });
 
@@ -479,8 +479,12 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         useSelfMessageStore.getState().clearMessages();
         // Clear in-memory state but keep data in database
         // Keep isInitialized true so user goes to login screen
-        // Set lockedByUser to skip biometric auto-login on the login screen
-        set({ ...clearAccountState(), lockedByUser: true });
+        // lockedByUser: true (default) skips biometric auto-login on the login screen
+        // lockedByUser: false (auto-lock) allows biometric auto-login on return
+        set({
+          ...clearAccountState(),
+          lockedByUser: options?.lockedByUser ?? true,
+        });
       } catch (error) {
         console.error('Error logging out:', error);
         set({ isLoading: false });

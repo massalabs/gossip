@@ -16,7 +16,8 @@
     "about": "About",
     "debug": "Debug",
     "logout": "Logout",
-    "privacy": "Privacy"
+    "privacy": "Privacy",
+    "security": "Security"
   },
   "delete_account": {
     "button": "Delete Account",
@@ -85,7 +86,16 @@
   },
   "security": {
     "title": "Security",
-    "native_only": "Security settings are only available on native platforms (Android and iOS)."
+    "native_only": "Security settings are only available on native platforms (Android and iOS).",
+    "auto_lock_title": "Inactivity lock",
+    "auto_lock_description": "Automatically lock the app after being in the background for a set period of time.",
+    "auto_lock_current": "Lock after",
+    "auto_lock_off": "Off",
+    "auto_lock_1m": "1 minute",
+    "auto_lock_5m": "5 minutes",
+    "auto_lock_15m": "15 minutes",
+    "auto_lock_30m": "30 minutes",
+    "auto_lock_1h": "1 hour"
   },
   "privacy": {
     "title": "Privacy",

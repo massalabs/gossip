@@ -67,3 +67,23 @@ describe('AccountStore session cleanup', () => {
     expect(selfClearMessages).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('AccountStore logout lockedByUser', () => {
+  it('sets lockedByUser to true by default (manual lock)', async () => {
+    await useAccountStore.getState().logout();
+
+    expect(useAccountStore.getState().lockedByUser).toBe(true);
+  });
+
+  it('sets lockedByUser to false when explicitly passed (auto-lock)', async () => {
+    await useAccountStore.getState().logout({ lockedByUser: false });
+
+    expect(useAccountStore.getState().lockedByUser).toBe(false);
+  });
+
+  it('sets lockedByUser to true when explicitly passed', async () => {
+    await useAccountStore.getState().logout({ lockedByUser: true });
+
+    expect(useAccountStore.getState().lockedByUser).toBe(true);
+  });
+});
