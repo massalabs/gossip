@@ -313,6 +313,19 @@ pub fn write_session_data<S: BlockStorage + KeypairStorage>(
         encrypt_session_data_block(storage, domain, session, b, pt_arr)?;
     }
 
+    // If total_data_length grew and block 0 wasn't already written above,
+    // re-encrypt block 0 to persist the updated length header.
+    if new_total > old_total && first_block > 0 {
+        let mut pt = Zeroizing::new(vec![0u8; PLAINTEXT_SIZE]);
+        match decrypt_session_data_block(storage, domain, session, 0) {
+            Ok(existing) => pt.copy_from_slice(existing.as_ref()),
+            Err(_) => rand::rngs::OsRng.fill_bytes(&mut pt[..]),
+        }
+        pt[..LENGTH_HDR_SIZE].copy_from_slice(&new_total.to_be_bytes());
+        let pt_arr: &[u8; PLAINTEXT_SIZE] = pt.as_slice().try_into().unwrap();
+        encrypt_session_data_block(storage, domain, session, 0, pt_arr)?;
+    }
+
     Ok(())
 }
 

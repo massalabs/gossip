@@ -3,7 +3,7 @@
 //! Spec: <https://github.com/massalabs/gossip/discussions/380>
 
 mod block;
-mod constants;
+pub mod constants;
 mod domain;
 mod error;
 mod kdf;
@@ -14,7 +14,17 @@ mod read;
 pub mod storage;
 mod types;
 mod unlock;
+pub mod wal;
 mod write;
+
+#[cfg(feature = "native")]
+pub(crate) mod vfs;
+
+#[cfg(feature = "native")]
+uniffi::setup_scaffolding!();
+
+#[cfg(feature = "native")]
+mod native_api;
 
 pub use block::{create_cover_block, decrypt_block, encrypt_block, rerandomize_block};
 pub use constants::{
