@@ -51,5 +51,13 @@
     "@scure/bip39": "^2.0.1",
     "drizzle-orm": "^0.45.1",
     "wa-sqlite": "^1.0.0"
+  },
+  "peerDependencies": {
+    "@capacitor/core": ">=5.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@capacitor/core": {
+      "optional": true
+    }
   }
 }
