@@ -52,10 +52,8 @@ pub struct QueryResult {
 fn set_pragmas(conn: &rusqlite::Connection) -> Result<(), SecureStorageError> {
     let map_err = |e: rusqlite::Error| SecureStorageError::Sqlite(e.to_string());
     conn.pragma_update(None, "page_size", 8192).map_err(map_err)?;
-    // NORMAL: SQLite calls x_sync at each COMMIT, triggering our WAL flush.
-    // OFF would skip x_sync entirely, leaving data only in memory.
-    // The WASM path uses OFF + periodic flush timer, but for native we use
-    // NORMAL for simplicity and data safety.
+    // NORMAL: x_sync fires at each COMMIT, draining the plaintext buffer
+    // and encrypting each dirty block once (coalesced writes within a tx).
     conn.pragma_update(None, "synchronous", "NORMAL").map_err(map_err)?;
     conn.pragma_update(None, "cache_size", -8000).map_err(map_err)?;
     conn.pragma_update(None, "locking_mode", "EXCLUSIVE")
@@ -472,7 +470,8 @@ mod tests {
             // DB works
             exec_sql_native("SELECT 1".into(), vec![]).unwrap();
 
-            // Close without locking
+            // Flush pending writes then close without locking
+            flush_native().unwrap();
             close_native().unwrap();
 
             // DB closed -- SQL should fail

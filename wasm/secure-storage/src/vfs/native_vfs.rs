@@ -28,10 +28,21 @@ pub const VFS_NAME: &str = "secure-storage-enc-native";
 
 // ── State ────────────────────────────────────────────────────────────
 
+/// Buffered plaintext write (offset + data), applied at x_sync.
+struct PendingWrite {
+    offset: u64,
+    data: Vec<u8>,
+}
+
 struct VfsState {
     backend: RedbStorage,
     domain: String,
     session: Option<UnlockedSession>,
+    /// Plaintext write buffer. Writes accumulate here during a transaction.
+    /// At x_sync, we determine dirty blocks, encrypt once per block, and commit.
+    pending_writes: Vec<PendingWrite>,
+    /// Tracks the logical file size including pending writes.
+    pending_file_size: u64,
 }
 
 static STATE: OnceLock<Mutex<Option<VfsState>>> = OnceLock::new();
@@ -94,6 +105,8 @@ pub fn init_native(path: &str, domain: &str) -> Result<()> {
         backend: storage,
         domain: domain.to_string(),
         session: None,
+        pending_writes: Vec::new(),
+        pending_file_size: 0,
     });
     Ok(())
 }
@@ -143,6 +156,8 @@ pub fn allocate(slot: u8, password: &[u8]) -> Result<()> {
         .ok_or_else(|| SecureStorageError::Storage("not initialized".into()))?;
     let idx = SessionIndex::new(slot)?;
     let session = crate::allocate_session(&mut st.backend, &st.domain, idx, password)?;
+    st.pending_writes.clear();
+    st.pending_file_size = session.total_data_length;
     st.session = Some(session);
     Ok(())
 }
@@ -156,6 +171,8 @@ pub fn unlock(password: &[u8]) -> Result<bool> {
         .ok_or_else(|| SecureStorageError::Storage("not initialized".into()))?;
     match crate::unlock_session(&st.backend, &st.domain, password) {
         Ok(session) => {
+            st.pending_writes.clear();
+            st.pending_file_size = session.total_data_length;
             st.session = Some(session);
             Ok(true)
         }
@@ -169,6 +186,8 @@ pub fn lock() {
     if let Ok(mut guard) = state_mutex().lock() {
         if let Some(st) = guard.as_mut() {
             st.session = None;
+            st.pending_writes.clear();
+            st.pending_file_size = 0;
         }
     }
 }
@@ -193,14 +212,14 @@ pub fn cover_tick() -> Result<()> {
     crate::cover_traffic_tick(&mut st.backend, &st.domain)
 }
 
-/// Flush encrypted data to backing store.
+/// Flush pending plaintext writes + encrypted blocks to backing store.
 pub fn flush() -> Result<()> {
     let mutex = state_mutex();
     let mut guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
     let st = guard
         .as_mut()
         .ok_or_else(|| SecureStorageError::Storage("not initialized".into()))?;
-    st.backend.commit()
+    flush_pending_writes(st)
 }
 
 /// Open a rusqlite connection using the registered encrypted VFS.
@@ -230,6 +249,43 @@ pub(crate) fn reset_state() {
     }
     if let Ok(mut guard) = aux().lock() {
         guard.clear();
+    }
+}
+
+/// Drain all pending writes through the encryption layer and commit to redb.
+fn flush_pending_writes(st: &mut VfsState) -> Result<()> {
+    if st.pending_writes.is_empty() {
+        return Ok(());
+    }
+    let writes = std::mem::take(&mut st.pending_writes);
+    let file_size = st.pending_file_size;
+    let (backend, domain, session) = match st.session.as_mut() {
+        Some(session) => (&mut st.backend, st.domain.as_str(), session),
+        None => return Err(SecureStorageError::Storage("no session".into())),
+    };
+    for pw in &writes {
+        crate::write_session_data(backend, domain, session, pw.offset, &pw.data)?;
+    }
+    if file_size > session.total_data_length {
+        session.total_data_length = file_size;
+    }
+    st.backend.commit()
+}
+
+/// Apply pending plaintext writes as an overlay on a read buffer.
+/// `dst` covers the byte range `[read_off, read_off + dst.len())`.
+fn apply_pending_overlay(pending: &[PendingWrite], read_off: u64, dst: &mut [u8]) {
+    let read_end = read_off + dst.len() as u64;
+    for pw in pending {
+        let pw_end = pw.offset + pw.data.len() as u64;
+        // Check overlap.
+        if pw.offset < read_end && pw_end > read_off {
+            let src_start = read_off.saturating_sub(pw.offset) as usize;
+            let dst_start = pw.offset.saturating_sub(read_off) as usize;
+            let len = (pw_end.min(read_end) - pw.offset.max(read_off)) as usize;
+            dst[dst_start..dst_start + len]
+                .copy_from_slice(&pw.data[src_start..src_start + len]);
+        }
     }
 }
 
@@ -371,14 +427,20 @@ unsafe extern "C" fn x_write(
                 Some(st) => st,
                 None => return SQLITE_IOERR as c_int,
             };
-            let (backend, domain, session) = match st.session.as_mut() {
-                Some(session) => (&mut st.backend, st.domain.as_str(), session),
-                None => return SQLITE_IOERR as c_int,
-            };
-            match crate::write_session_data(backend, domain, session, offset as u64, src) {
-                Ok(()) => SQLITE_OK as c_int,
-                Err(_) => SQLITE_IOERR as c_int,
+            if st.session.is_none() {
+                return SQLITE_IOERR as c_int;
             }
+            // Buffer the plaintext write — encryption deferred to x_sync.
+            let write_off = offset as u64;
+            let write_end = write_off + n as u64;
+            if write_end > st.pending_file_size {
+                st.pending_file_size = write_end;
+            }
+            st.pending_writes.push(PendingWrite {
+                offset: write_off,
+                data: src.to_vec(),
+            });
+            SQLITE_OK as c_int
         } else {
             let mut a = aux().lock().unwrap();
             let fd = &mut a[f.aux_id as usize];
@@ -398,6 +460,7 @@ unsafe extern "C" fn x_truncate(file: *mut sqlite3_file, size: i64) -> c_int {
     if f.kind == KIND_MAIN {
         let mut guard = state_mutex().lock().unwrap();
         if let Some(st) = guard.as_mut() {
+            st.pending_file_size = size as u64;
             if let Some(session) = st.session.as_mut() {
                 session.total_data_length = size as u64;
             }
@@ -415,10 +478,8 @@ unsafe extern "C" fn x_sync(_file: *mut sqlite3_file, _flags: c_int) -> c_int {
         Some(st) => st,
         None => return SQLITE_OK as c_int,
     };
-    if st.session.is_some() {
-        if st.backend.commit().is_err() {
-            return SQLITE_IOERR as c_int;
-        }
+    if let Err(_) = flush_pending_writes(st) {
+        return SQLITE_IOERR as c_int;
     }
     SQLITE_OK as c_int
 }
@@ -430,8 +491,10 @@ unsafe extern "C" fn x_file_size(file: *mut sqlite3_file, size: *mut i64) -> c_i
             let guard = state_mutex().lock().unwrap();
             *size = guard
                 .as_ref()
-                .and_then(|st| st.session.as_ref())
-                .map_or(0, |session| session.total_data_length as i64);
+                .map_or(0, |st| {
+                    let persisted = st.session.as_ref().map_or(0, |s| s.total_data_length);
+                    persisted.max(st.pending_file_size) as i64
+                });
         } else {
             let a = aux().lock().unwrap();
             *size = a[f.aux_id as usize].len() as i64;
