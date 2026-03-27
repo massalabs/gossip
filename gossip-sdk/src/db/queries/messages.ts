@@ -6,8 +6,15 @@ import { MessageDirection, MessageStatus, MessageType } from '../../db/db.js';
 
 export type MessageRow = typeof schema.messages.$inferSelect;
 export type MessageInsert = typeof schema.messages.$inferInsert;
+type PreparedGetSendQueueQuery = {
+  all(params: {
+    ownerUserId: string;
+    contactUserId: string;
+  }): Promise<MessageRow[]>;
+};
 
 export class MessageQueries {
+  private preparedGetSendQueue?: PreparedGetSendQueueQuery;
   constructor(private conn: DatabaseConnection) {}
 
   async getById(id: number): Promise<MessageRow | undefined> {
@@ -232,22 +239,25 @@ export class MessageQueries {
     ownerUserId: string,
     contactUserId: string
   ): Promise<MessageRow[]> {
-    return this.conn.db
-      .select()
-      .from(schema.messages)
-      .where(
-        and(
-          eq(schema.messages.ownerUserId, ownerUserId),
-          eq(schema.messages.contactUserId, contactUserId),
-          eq(schema.messages.direction, MessageDirection.OUTGOING),
-          inArray(schema.messages.status, [
-            MessageStatus.WAITING_SESSION,
-            MessageStatus.READY,
-          ])
+    if (!this.preparedGetSendQueue) { // prepare the query only once. performance benefit for large queries.
+      this.preparedGetSendQueue = this.conn.db
+        .select()
+        .from(schema.messages)
+        .where(
+          and(
+            eq(schema.messages.ownerUserId, sql.placeholder('ownerUserId')),
+            eq(schema.messages.contactUserId, sql.placeholder('contactUserId')),
+            eq(schema.messages.direction, MessageDirection.OUTGOING),
+            inArray(schema.messages.status, [
+              MessageStatus.WAITING_SESSION,
+              MessageStatus.READY,
+            ])
+          )
         )
-      )
-      .orderBy(asc(schema.messages.timestamp), asc(schema.messages.id))
-      .all();
+        .orderBy(asc(schema.messages.timestamp), asc(schema.messages.id))
+        .prepare()
+    }
+    return await this.preparedGetSendQueue!.all({ ownerUserId, contactUserId });
   }
 
   async getByStatus(

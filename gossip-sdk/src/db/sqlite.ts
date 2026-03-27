@@ -335,6 +335,8 @@ export class DatabaseConnection {
     await this.withTransaction(async () => {
       await this.db.delete(schema.messages);
       await this.db.delete(schema.discussions);
+      await this.db.delete(schema.dms);
+      await this.db.delete(schema.sessions);
       await this.db.delete(schema.contacts);
       await this.db.delete(schema.userProfile);
       await this.db.delete(schema.pendingEncryptedMessages);
@@ -348,6 +350,8 @@ export class DatabaseConnection {
     await this.withTransaction(async () => {
       await this.db.delete(schema.messages);
       await this.db.delete(schema.discussions);
+      await this.db.delete(schema.dms);
+      await this.db.delete(schema.sessions);
       await this.db.delete(schema.contacts);
     });
   }

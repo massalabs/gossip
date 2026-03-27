@@ -5,24 +5,16 @@ import {
   uniqueIndex,
 } from 'drizzle-orm/sqlite-core';
 import type { DiscussionDirection } from '../db';
-import { bytes } from './_helpers.js';
 
-export const discussions = sqliteTable(
-  'discussions',
+export const dms = sqliteTable(
+  'dms',
   {
     id: integer('id').primaryKey({ autoIncrement: true }),
-    ownerUserId: text('ownerUserId').notNull(),
     contactUserId: text('contactUserId').notNull(),
     weAccepted: integer('weAccepted', { mode: 'boolean' })
       .notNull()
       .default(false),
-    announcement_bytes: bytes('announcement_bytes'),
-    when_to_send: integer('when_to_send', {
-      mode: 'timestamp_ms',
-    }),
     direction: text('direction').$type<DiscussionDirection>().notNull(),
-    nextSeeker: bytes('nextSeeker'),
-    initiationAnnouncement: bytes('initiationAnnouncement'),
     announcementMessage: text('announcementMessage'),
     lastSyncTimestamp: integer('lastSyncTimestamp', {
       mode: 'timestamp_ms',
@@ -35,20 +27,10 @@ export const discussions = sqliteTable(
     }),
     unreadCount: integer('unreadCount').notNull().default(0),
     pinned: integer('pinned', { mode: 'boolean' }).notNull().default(false),
-    killedNextRetryAt: integer('killedNextRetryAt', { mode: 'timestamp_ms' }),
-    saturatedRetryAt: integer('saturatedRetryAt', { mode: 'timestamp_ms' }),
     messageRetentionDuration: integer('messageRetentionDuration'),
-    retentionPolicySetAt: integer('retentionPolicySetAt'), // nullable, ms timestamp when policy was last configured
-    saturatedRetryDone: integer('saturatedRetryDone', { mode: 'boolean' })
-      .notNull()
-      .default(false),
+    retentionPolicySetAt: integer('retentionPolicySetAt'),
     createdAt: integer('createdAt', { mode: 'timestamp_ms' }).notNull(),
     updatedAt: integer('updatedAt', { mode: 'timestamp_ms' }).notNull(),
   },
-  table => [
-    uniqueIndex('discussions_owner_contact_idx').on(
-      table.ownerUserId,
-      table.contactUserId
-    ),
-  ]
+  table => [uniqueIndex('dms_contact_idx').on(table.contactUserId)]
 );

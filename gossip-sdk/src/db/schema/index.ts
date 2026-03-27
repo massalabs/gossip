@@ -2,6 +2,8 @@ export { contacts } from './contacts.js';
 export { messages } from './messages.js';
 export { userProfile } from './userProfile.js';
 export { discussions } from './discussions.js';
+export { dms } from './dms.js';
+export { sessions } from './sessions.js';
 export { pendingEncryptedMessages } from './pendingEncryptedMessages.js';
 export { pendingAnnouncements } from './pendingAnnouncements.js';
 export { activeSeekers } from './activeSeekers.js';

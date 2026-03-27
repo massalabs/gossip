@@ -396,7 +396,7 @@ export class MessageService {
       timestamp: message.timestamp,
       metadata: serializeMetadata(message.metadata),
       seeker: message.seeker,
-      replyTo: serializeReplyTo(message.replyTo),
+      replyToMsgId: message.replyToMsgId,
       forwardOf: serializeForwardOf(message.forwardOf),
       deleteOf: serializeDeleteOf(message.deleteOf),
       editOf: serializeEditOf(message.editOf),
@@ -979,33 +979,6 @@ export class MessageService {
         data: serializeRegularMessage(message.content, message.messageId!),
       };
     }
-  }
-
-  async resendMessages(messages: Map<string, Message[]>) {
-    const log = logger.forMethod('resendMessages');
-
-    let totalProcessed = 0;
-
-    for (const [contactId, retryMessages] of messages.entries()) {
-      totalProcessed += retryMessages.length;
-
-      for (const msg of retryMessages) {
-        if (!msg.id) continue;
-        await this.queries.messages.updateById(msg.id, {
-          status: MessageStatus.WAITING_SESSION,
-          encryptedMessage: null,
-          seeker: null,
-          whenToSend: null,
-        });
-      }
-
-      await this.processSendQueueForContact(contactId);
-    }
-
-    log.info('resend completed', {
-      contacts: messages.size,
-      messagesProcessed: totalProcessed,
-    });
   }
 
   /**

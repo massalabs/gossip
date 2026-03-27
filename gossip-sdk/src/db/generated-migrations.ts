@@ -71,4 +71,15 @@ export const MIGRATIONS: EmbeddedMigration[] = [
       'ALTER TABLE `discussions` ADD COLUMN `retentionPolicySetAt` integer;',
     ],
   },
+  {
+    idx: 5,
+    tag: '0005_dms_sessions',
+    when: 1744000000000,
+    statements: [
+      'CREATE TABLE `dms` (\n\t`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,\n\t`contactUserId` text NOT NULL,\n\t`weAccepted` integer DEFAULT false NOT NULL,\n\t`direction` text NOT NULL,\n\t`announcementMessage` text,\n\t`lastSyncTimestamp` integer,\n\t`customName` text,\n\t`lastMessageId` integer,\n\t`lastMessageContent` text,\n\t`lastMessageTimestamp` integer,\n\t`unreadCount` integer DEFAULT 0 NOT NULL,\n\t`pinned` integer NOT NULL DEFAULT 0,\n\t`messageRetentionDuration` integer,\n\t`retentionPolicySetAt` integer,\n\t`createdAt` integer NOT NULL,\n\t`updatedAt` integer NOT NULL\n);',
+      'CREATE UNIQUE INDEX `dms_contact_idx` ON `dms` (`contactUserId`);',
+      'CREATE TABLE `sessions` (\n\t`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,\n\t`contactUserId` text NOT NULL,\n\t`announcement_bytes` blob,\n\t`when_to_send` integer,\n\t`killedNextRetryAt` integer,\n\t`saturatedRetryAt` integer,\n\t`saturatedRetryDone` integer DEFAULT 0 NOT NULL,\n\t`createdAt` integer NOT NULL,\n\t`updatedAt` integer NOT NULL\n);',
+      'CREATE UNIQUE INDEX `sessions_contact_idx` ON `sessions` (`contactUserId`);',
+    ],
+  },
 ];

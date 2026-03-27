@@ -62,6 +62,7 @@ import { AuthService } from './services/auth.js';
 import { ProfileService } from './services/profile.js';
 import { ContactService } from './services/contact.js';
 import { SelfMessageService } from './services/selfMessage.js';
+import { SessionsService } from './services/session/session.js';
 import {
   validateUserIdFormat,
   validateUsernameFormat,
@@ -178,6 +179,7 @@ class GossipSdk {
   private _refresh: RefreshService | null = null;
   private _contact: ContactService | null = null;
   private _selfMessage: SelfMessageService | null = null;
+  private _sessions: SessionsService | null = null;
 
   // ─────────────────────────────────────────────────────────────────
   // Lifecycle
@@ -328,6 +330,14 @@ class GossipSdk {
       this.config
     );
 
+    this._sessions = new SessionsService(
+      session,
+      messageProtocol,
+      this.eventEmitter,
+      config,
+      queries
+    );
+
     this._selfMessage = new SelfMessageService(
       queries,
       session.userIdEncoded,
@@ -402,6 +412,7 @@ class GossipSdk {
     this._refresh = null;
     this._contact = null;
     this._selfMessage = null;
+    this._sessions = null;
 
     // Clear message queues
     this.messageQueues.clear();
@@ -558,6 +569,15 @@ class GossipSdk {
       throw new Error('Self-message service not initialized');
     }
     return this._selfMessage;
+  }
+
+  /** Session service */
+  get sessions(): SessionsService {
+    this.requireSession();
+    if (!this._sessions) {
+      throw new Error('Session service not initialized');
+    }
+    return this._sessions;
   }
 
   /**

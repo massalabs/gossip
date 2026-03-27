@@ -133,58 +133,76 @@ export interface ReadyAnnouncement {
 
 export type SendAnnouncement = null | ReadyAnnouncement;
 
-/** Serialize a SendAnnouncement to a JSON string for SQLite text column */
-export function serializeSendAnnouncement(
-  announcement: ReadyAnnouncement
-): string {
-  return JSON.stringify({
-    announcement_bytes: Array.from(announcement.announcement_bytes),
-    when_to_send: announcement.when_to_send.toISOString(),
-  });
-}
-
-/** Deserialize a SendAnnouncement JSON string from SQLite back to an object.
- *  Throws a descriptive error if the stored JSON is malformed. */
-export function deserializeSendAnnouncement(json: string): ReadyAnnouncement {
-  try {
-    const parsed = JSON.parse(json);
-    if (!parsed || !parsed.announcement_bytes || !parsed.when_to_send) {
-      throw new Error('missing required fields');
-    }
-    return {
-      announcement_bytes: new Uint8Array(parsed.announcement_bytes),
-      when_to_send: new Date(parsed.when_to_send),
-    };
-  } catch (e) {
-    throw new Error(
-      `Failed to deserialize SendAnnouncement: ${e instanceof Error ? e.message : e}`
-    );
-  }
-}
-
 /**
  * Shape required by rowToDiscussion — matches Drizzle's inferred DiscussionRow
  * without importing from schema (avoids circular dependency).
  */
 interface DiscussionRowLike {
-  sendAnnouncement: string | null;
+  announcement_bytes: Uint8Array | null;
+  when_to_send: Date | null;
   announcementMessage: string | null;
   [key: string]: unknown;
 }
 
-/** Convert a Drizzle discussion row to a domain Discussion object.
- *  Deserializes sendAnnouncement from JSON text to SendAnnouncement. */
+/** Convert a Drizzle discussion row to a domain Discussion object. */
 export function rowToDiscussion(row: DiscussionRowLike): Discussion {
+  const sendAnnouncement =
+    row.announcement_bytes !== null && row.when_to_send !== null
+      ? {
+          announcement_bytes: row.announcement_bytes,
+          when_to_send: row.when_to_send,
+        }
+      : null;
+
   return {
     ...row,
-    sendAnnouncement:
-      row.sendAnnouncement !== null
-        ? deserializeSendAnnouncement(row.sendAnnouncement)
-        : null,
+    sendAnnouncement,
     lastAnnouncementMessage: row.announcementMessage ?? undefined,
-  } as Discussion;
+  } as unknown as Discussion;
 }
 
+export interface Session {
+  id?: number;
+  contactUserId: string;
+  announcement_bytes: Uint8Array | null;
+  when_to_send: Date | null;
+
+
+  // Session recovery state (persisted to throttle resets)
+  killedNextRetryAt?: Date | null;
+  saturatedRetryAt?: Date | null;
+  saturatedRetryDone: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface DM {
+  id?: number;
+  contactUserId: string; // Reference to Contact.userId - unique per contact
+
+  // Protocol/Encryption fields
+  /*weAccepted: Whether the user has expressed the will to communicate with the peer
+  i.e. the user has initiated a new discussion or it accepted the discussion initiated by the peer. */
+  weAccepted: boolean;
+  direction: DiscussionDirection; // Whether this user initiated or received the discussion
+  announcementMessage: string | null; // Optional message from incoming announcement (user_data)
+  lastSyncTimestamp: Date | null; // Last time messages were synced from protocol
+
+  // UI/Display fields
+  customName: string | null; // Optional custom name for the discussion (overrides contact name)
+  lastAnnouncementMessage?: string; // Last message from incoming announcement (the last one the user received)
+  lastMessageId: number | null;
+  lastMessageContent: string | null;
+  lastMessageTimestamp: Date | null;
+  unreadCount: number;
+  pinned: boolean; // Whether the discussion is pinned to the top of the list
+  messageRetentionDuration: number | null; // Auto-delete messages older than this (seconds), null = off
+  retentionPolicySetAt: number | null; // Timestamp (ms) when the retention policy was last configured — only messages after this are subject to deletion
+
+  // Timestamps
+  createdAt: Date;
+  updatedAt: Date;
+}
 export interface Discussion {
   id?: number;
   ownerUserId: string; // The current user's userId owning this discussion
