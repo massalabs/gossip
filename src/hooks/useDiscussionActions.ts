@@ -147,7 +147,6 @@ export function useDiscussionActions({
 
   const handleInputFocus = useCallback(() => {
     // No forced scroll — let the container resize naturally.
-    // Virtuoso maintains scroll position when the container shrinks.
   }, []);
 
   return {

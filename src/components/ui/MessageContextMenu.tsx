@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 
@@ -8,8 +8,6 @@ export interface MessageContextMenuItem {
   onClick: () => void;
   danger?: boolean;
 }
-
-export type MessageContextMenuPlacement = 'above' | 'below';
 
 export interface ReactionGroup {
   emoji: string;
@@ -22,17 +20,6 @@ interface MessageContextMenuProps {
   isOpen: boolean;
   onClose: () => void;
   isOutgoing: boolean;
-  position: { top: number; left?: number; right?: number } | null;
-  /** Where the menu was placed relative to the bubble (affects animation origin). */
-  placement?: MessageContextMenuPlacement;
-  translateY?: number;
-  bubbleRect?: {
-    top: number;
-    left: number;
-    width: number;
-    height: number;
-    borderRadius?: string;
-  } | null;
   reactions?: ReactionGroup[];
   onSelectEmoji?: (emoji: string) => void;
   onOpenEmojiPicker?: () => void;
@@ -42,190 +29,82 @@ const MessageContextMenu: React.FC<MessageContextMenuProps> = ({
   items,
   isOpen,
   onClose,
-  isOutgoing,
-  position,
-  placement = 'below',
-  translateY = 0,
-  bubbleRect,
   reactions,
   onSelectEmoji,
   onOpenEmojiPicker,
 }) => {
   const { t } = useTranslation('discussions');
-  const [mounted, setMounted] = useState(false);
   const [touchReady, setTouchReady] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
-  /** Final top after layout — keeps menu fully in viewport when estimate was short. */
-  const [adjustedTop, setAdjustedTop] = useState<number | null>(null);
 
   useEffect(() => {
     if (isOpen) {
-      setAdjustedTop(null);
-      const id = requestAnimationFrame(() => setMounted(true));
-      // Short delay so the opening tap doesn't accidentally hit a menu item
       const timer = setTimeout(() => setTouchReady(true), 120);
-      return () => {
-        cancelAnimationFrame(id);
-        clearTimeout(timer);
-      };
+      return () => clearTimeout(timer);
     }
-    setMounted(false);
     setTouchReady(false);
-    setAdjustedTop(null);
   }, [isOpen]);
 
-  // After layout, nudge menu up if measured height overflows bottom (estimate can be low).
-  useLayoutEffect(() => {
-    if (!isOpen || !position || !mounted) return;
-    const sab =
-      parseFloat(
-        getComputedStyle(document.documentElement).getPropertyValue('--sab')
-      ) || 0;
-    const pad = 16 + sab;
-    const vh = Math.min(
-      document.documentElement.clientHeight,
-      window.visualViewport?.height ?? Infinity,
-      window.innerHeight
-    );
-    const viewportBottom = vh - pad;
-    const el = menuRef.current;
-    if (!el) return;
-    const { height, top } = el.getBoundingClientRect();
-    if (top + height <= viewportBottom && top >= pad - 1) return;
-    const nextTop = Math.max(pad, viewportBottom - height);
-    setAdjustedTop(nextTop);
-  }, [isOpen, position, mounted, items.length]);
-
-  // Keyboard: Escape + arrow navigation
+  // Dismiss on Escape
   useEffect(() => {
     if (!isOpen) return;
-
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onClose();
-        return;
-      }
-
-      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-        e.preventDefault();
-        const menuItems =
-          menuRef.current?.querySelectorAll<HTMLButtonElement>(
-            '[role="menuitem"]'
-          );
-        if (!menuItems?.length) return;
-
-        const currentIndex = Array.from(menuItems).findIndex(
-          el => el === document.activeElement
-        );
-        let nextIndex: number;
-        if (e.key === 'ArrowDown') {
-          nextIndex =
-            currentIndex < menuItems.length - 1 ? currentIndex + 1 : 0;
-        } else {
-          nextIndex =
-            currentIndex > 0 ? currentIndex - 1 : menuItems.length - 1;
-        }
-        menuItems[nextIndex].focus();
-      }
+      if (e.key === 'Escape') onClose();
     };
-
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, onClose]);
 
-  if (!isOpen || !position) return null;
-
-  const menuTop = adjustedTop ?? position.top;
-  const transformOrigin =
-    placement === 'above'
-      ? isOutgoing
-        ? 'bottom right'
-        : 'bottom left'
-      : isOutgoing
-        ? 'top right'
-        : 'top left';
+  if (!isOpen) return null;
 
   const DEFAULT_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
 
   return createPortal(
-    <div className="fixed inset-0 z-1000">
-      {/* Click handler layer */}
+    <div
+      className="fixed left-0 right-0 top-0 z-1000 flex items-center justify-center"
+      style={{ height: 'var(--available-height, 100dvh)' }}
+    >
+      {/* Backdrop — dims screen */}
       <div
-        className={`absolute inset-0 ${touchReady ? '' : 'pointer-events-none'}`}
+        className={`absolute inset-0 bg-black/20 dark:bg-black/40 animate-backdrop-fade-in ${touchReady ? '' : 'pointer-events-none'}`}
+        style={{ height: '100%' }}
         onClick={onClose}
         data-testid="context-menu-backdrop"
       />
 
-      {/* Spotlight overlay — dims everything except the selected bubble */}
-      {bubbleRect ? (
-        <div
-          className={`absolute pointer-events-none transition-opacity duration-300 ${
-            mounted ? 'opacity-100' : 'opacity-0'
-          }`}
-          style={{
-            top: bubbleRect.top,
-            left: bubbleRect.left,
-            width: bubbleRect.width,
-            height: bubbleRect.height,
-            borderRadius: bubbleRect.borderRadius ?? 24,
-            boxShadow:
-              '0 0 0 200vmax var(--spotlight-overlay, rgba(255,255,255,0.5))',
-          }}
-        />
-      ) : (
-        <div
-          className={`absolute inset-0 bg-white/50 dark:bg-black/50 pointer-events-none transition-opacity duration-300 ${
-            mounted ? 'opacity-100' : 'opacity-0'
-          }`}
-        />
-      )}
-
-      {/* Floating menu — positioned right below the bubble */}
+      {/* Centered menu */}
       <div
-        ref={menuRef}
-        role="menu"
-        aria-label="Message actions"
-        className={`fixed min-w-[200px] bg-card border border-border rounded-lg shadow-xl overflow-hidden ${
-          mounted ? 'opacity-100' : 'opacity-0 scale-95'
-        } ${touchReady ? '' : 'pointer-events-none'}`}
-        style={{
-          top: menuTop,
-          ...(position.left !== undefined ? { left: position.left } : {}),
-          ...(position.right !== undefined ? { right: position.right } : {}),
-          transform: `translateY(${translateY}px) ${mounted ? 'scale(1)' : 'scale(0.95)'}`,
-          transformOrigin,
-          transition:
-            'transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s ease-out',
-        }}
+        className="flex flex-col items-center gap-1.5 pointer-events-none animate-context-menu-in px-6"
+        style={{ '--menu-origin': 'center center' } as React.CSSProperties}
       >
+        {/* Emoji reaction bar — wider, sits above the menu */}
         {(reactions || onOpenEmojiPicker) && (
-          <div className="flex items-center gap-2 px-4 py-2 border-b border-border bg-card">
-            <div className="flex flex-wrap gap-1 flex-1">
-              {DEFAULT_EMOJIS.map(emoji => {
-                const match = reactions?.find(r => r.emoji === emoji);
-                const isMine = !!match?.myReactionId;
-                const count = match?.count ?? 0;
-                return (
-                  <button
-                    key={emoji}
-                    type="button"
-                    onClick={e => {
-                      e.stopPropagation();
-                      onSelectEmoji?.(emoji);
-                      onClose();
-                    }}
-                    className={`px-2 py-0.5 text-sm rounded-full border transition-colors ${
-                      isMine
-                        ? 'bg-accent/20 border-accent text-foreground'
-                        : 'bg-surface-secondary border-border text-foreground'
-                    }`}
-                  >
-                    {emoji}
-                    {count > 1 ? ` ${count}` : ''}
-                  </button>
-                );
-              })}
-            </div>
+          <div className="flex items-center gap-1.5 px-2 py-1.5 bg-card border border-border rounded-full shadow-xl pointer-events-auto">
+            {DEFAULT_EMOJIS.map(emoji => {
+              const match = reactions?.find(r => r.emoji === emoji);
+              const isMine = !!match?.myReactionId;
+              const count = match?.count ?? 0;
+              return (
+                <button
+                  key={emoji}
+                  type="button"
+                  onClick={e => {
+                    e.stopPropagation();
+                    onSelectEmoji?.(emoji);
+                    onClose();
+                  }}
+                  className={`w-9 h-9 flex items-center justify-center text-lg rounded-full transition-colors ${
+                    isMine
+                      ? 'bg-accent/20 ring-1 ring-accent'
+                      : 'hover:bg-muted'
+                  }`}
+                >
+                  {emoji}
+                  {count > 1 && (
+                    <span className="text-[10px] ml-0.5">{count}</span>
+                  )}
+                </button>
+              );
+            })}
             {onOpenEmojiPicker && (
               <button
                 type="button"
@@ -233,7 +112,7 @@ const MessageContextMenu: React.FC<MessageContextMenuProps> = ({
                   e.stopPropagation();
                   onOpenEmojiPicker();
                 }}
-                className="w-8 h-8 flex items-center justify-center rounded-full border border-border bg-card text-foreground text-lg leading-none"
+                className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-muted border border-border text-foreground text-lg leading-none"
                 aria-label={t('message_item.more_emojis')}
               >
                 +
@@ -241,27 +120,35 @@ const MessageContextMenu: React.FC<MessageContextMenuProps> = ({
             )}
           </div>
         )}
-        {items.map((item, index) => (
-          <button
-            key={item.label}
-            role="menuitem"
-            type="button"
-            onClick={() => {
-              item.onClick();
-              onClose();
-            }}
-            className={`hover-fill w-full flex items-center justify-between gap-3 px-4 py-3 text-sm font-medium text-left ${
-              item.danger ? 'text-destructive' : 'text-foreground'
-            } ${index < items.length - 1 ? 'border-b border-border' : ''}`}
-          >
-            <span className="relative">{item.label}</span>
-            {item.icon && (
-              <span className="w-6 h-6 rounded-full bg-accent text-accent-foreground dark:bg-muted dark:text-accent shrink-0 flex items-center justify-center [&>svg]:w-3.5 [&>svg]:h-3.5">
-                {item.icon}
-              </span>
-            )}
-          </button>
-        ))}
+
+        {/* Action menu — compact width */}
+        <div
+          role="menu"
+          aria-label="Message actions"
+          className={`min-w-[180px] bg-card border border-border rounded-lg shadow-xl overflow-hidden ${touchReady ? 'pointer-events-auto' : ''}`}
+        >
+          {items.map((item, index) => (
+            <button
+              key={item.label}
+              role="menuitem"
+              type="button"
+              onClick={() => {
+                item.onClick();
+                onClose();
+              }}
+              className={`hover-fill w-full flex items-center justify-between gap-3 px-4 py-3 text-sm font-medium text-left ${
+                item.danger ? 'text-destructive' : 'text-foreground'
+              } ${index < items.length - 1 ? 'border-b border-border' : ''}`}
+            >
+              <span className="relative">{item.label}</span>
+              {item.icon && (
+                <span className="w-6 h-6 rounded-full bg-accent text-accent-foreground dark:bg-muted dark:text-accent shrink-0 flex items-center justify-center [&>svg]:w-3.5 [&>svg]:h-3.5">
+                  {item.icon}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
       </div>
     </div>,
     document.body

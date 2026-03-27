@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { DiscussionFilter } from '../../stores/discussionStore';
 
@@ -20,6 +20,13 @@ const DiscussionFilterButtons: React.FC<DiscussionFilterButtonsProps> = ({
   className = '',
 }) => {
   const { t } = useTranslation('discussions');
+  const containerRef = useRef<HTMLDivElement>(null);
+  const buttonRefs = useRef<Map<DiscussionFilter, HTMLButtonElement>>(
+    new Map()
+  );
+  const [pillStyle, setPillStyle] = useState<React.CSSProperties>({});
+  const [ready, setReady] = useState(false);
+
   const filterOptions: Array<{
     value: DiscussionFilter;
     label: string;
@@ -34,28 +41,65 @@ const DiscussionFilterButtons: React.FC<DiscussionFilterButtonsProps> = ({
     },
   ];
 
+  // Measure active button and position the pill
+  useEffect(() => {
+    const btn = buttonRefs.current.get(filter);
+    if (!btn) return;
+
+    setPillStyle({
+      left: btn.offsetLeft,
+      width: btn.offsetWidth,
+    });
+
+    // Enable transition after first measurement (avoid initial slide)
+    if (!ready) requestAnimationFrame(() => setReady(true));
+  }, [filter, ready, filterCounts]);
+
   return (
     <div className={`px-2 mb-3 ${className}`}>
       <div
+        ref={containerRef}
         role="group"
         aria-label={t('filter_label')}
-        className="flex items-center gap-2"
+        className="relative flex items-center gap-2"
       >
-        {filterOptions.map(option => (
-          <button
-            key={option.value}
-            onClick={() => onFilterChange(option.value)}
-            aria-pressed={filter === option.value}
-            className={`px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 ${
-              filter === option.value
-                ? 'bg-primary text-primary-foreground'
-                : 'bg-muted text-muted-foreground hover:bg-accent hover:text-foreground'
-            }`}
-          >
-            {option.label}
-            {option.count > 0 ? ` ${option.count}` : ''}
-          </button>
-        ))}
+        {/* Sliding pill */}
+        <span
+          className="absolute bg-primary rounded-full"
+          style={{
+            ...pillStyle,
+            height: '100%',
+            top: 0,
+            transition: ready
+              ? 'left 0.25s cubic-bezier(0.4, 0, 0.2, 1), width 0.25s cubic-bezier(0.4, 0, 0.2, 1)'
+              : 'none',
+          }}
+        />
+
+        {filterOptions.map(option => {
+          const isActive = filter === option.value;
+          return (
+            <button
+              key={option.value}
+              ref={el => {
+                if (el) buttonRefs.current.set(option.value, el);
+              }}
+              onClick={() => onFilterChange(option.value)}
+              aria-pressed={isActive}
+              className={`relative z-[1] px-4 py-2 rounded-full text-sm font-medium transition-colors duration-200 ${
+                isActive ? 'text-primary-foreground' : 'text-muted-foreground'
+              }`}
+            >
+              {option.label}
+              {option.count > 0 && (
+                <span className="transition-opacity duration-150">
+                  {' '}
+                  {option.count}
+                </span>
+              )}
+            </button>
+          );
+        })}
       </div>
     </div>
   );

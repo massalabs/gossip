@@ -1,4 +1,4 @@
-import React, { useRef, useCallback } from 'react';
+import React, { useRef, useCallback, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Send } from 'react-feather';
 import InputPreviewBanner from './InputPreviewBanner';
@@ -65,6 +65,23 @@ const MessageInput: React.FC<MessageInputProps> = ({
     resize: autoResizeTextarea,
   });
 
+  // Blur textarea when keyboard hides — on iOS the textarea stays activeElement
+  // after keyboard dismiss, causing any subsequent tap to re-open the keyboard.
+  // Delay to avoid race with focus transfers (e.g. search input → textarea).
+  const isKeyboardVisible = useKeyboardStore(s => s.isVisible);
+  useEffect(() => {
+    if (isKeyboardVisible) return;
+    const timer = setTimeout(() => {
+      if (
+        !useKeyboardStore.getState().isVisible &&
+        document.activeElement === textareaRef.current
+      ) {
+        textareaRef.current?.blur();
+      }
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [isKeyboardVisible, textareaRef]);
+
   const isForwarding = !!forwardPreview;
   const sendButtonDisabled = disabled || (!newMessage.trim() && !isForwarding);
   const replyToId = replyingTo?.id;
@@ -118,7 +135,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
     <div
       ref={containerRef}
       className={`bg-card border-t border-border px-4 md:px-8 py-3 md:py-4 transition-opacity duration-300 ease-out transform-gpu ${
-        isSelecting ? 'pointer-events-none opacity-0' : 'opacity-100'
+        isSelecting ? 'pointer-events-none opacity-50' : 'opacity-100'
       }`}
       onClick={focusTextarea}
       aria-hidden={isSelecting}
@@ -165,16 +182,6 @@ const MessageInput: React.FC<MessageInputProps> = ({
               if (isRefocusingRef.current) return;
               onFocus?.();
             }}
-            onBlur={e => {
-              if (!useKeyboardStore.getState().isVisible) return;
-              const next = e.relatedTarget as HTMLElement | null;
-              if (next?.tagName === 'INPUT' || next?.tagName === 'TEXTAREA')
-                return;
-              if (!(e.target as HTMLElement).isConnected) return;
-              isRefocusingRef.current = true;
-              (e.target as HTMLElement).focus({ preventScroll: true });
-              isRefocusingRef.current = false;
-            }}
             placeholder={t(placeholderKey ?? 'message_input.placeholder')}
             rows={1}
             inputMode="text"
@@ -191,7 +198,10 @@ const MessageInput: React.FC<MessageInputProps> = ({
           />
         </div>
         <button
-          onMouseDown={handleSendMessage}
+          onPointerDown={e => {
+            e.preventDefault(); // prevent textarea blur
+            handleSendMessage(e);
+          }}
           className={`w-9 h-9 md:w-10 md:h-10 shrink-0 
               rounded-full flex items-center justify-center 
               shadow-md hover:shadow-lg transition-all duration-200

@@ -95,8 +95,8 @@
     "react-hot-toast": "^2.6.0",
     "react-i18next": "^16.5.8",
     "react-router-dom": "^7.9.6",
-    "react-virtuoso": "^4.17.0",
     "varint": "^6.0.0",
+    "virtua": "^0.48.8",
     "zustand": "^5.0.8"
   },
   "devDependencies": {

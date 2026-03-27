@@ -148,15 +148,17 @@ const DiscussionHeader: React.FC<DiscussionHeaderProps> = ({
           </div>
         </button>
         {onSearchToggle && (
-          <Button
-            onClick={onSearchToggle}
-            variant="circular"
-            size="custom"
-            ariaLabel={t('header.search_messages')}
-            className="w-8 h-8 flex items-center justify-center shrink-0"
-          >
-            <Search className="w-5 h-5 text-muted-foreground" />
-          </Button>
+          <span onPointerDown={e => e.preventDefault()}>
+            <Button
+              onClick={onSearchToggle}
+              variant="circular"
+              size="custom"
+              ariaLabel={t('header.search_messages')}
+              className="w-8 h-8 flex items-center justify-center shrink-0"
+            >
+              <Search className="w-5 h-5 text-muted-foreground" />
+            </Button>
+          </span>
         )}
       </div>
     </HeaderBar>
