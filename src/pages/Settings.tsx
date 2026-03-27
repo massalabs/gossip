@@ -22,6 +22,8 @@ import {
   Edit2,
   Globe,
   Type,
+  Shield,
+  Clock,
 } from 'react-feather';
 import { useNavigate } from 'react-router-dom';
 
@@ -272,12 +274,34 @@ const Settings = (): React.ReactElement => {
           <Button
             variant="outline"
             size="custom"
-            className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0"
+            className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0 border-b border-border"
             onClick={() => navigate(ROUTES.settingsLanguage())}
           >
             <Type className="mr-4" />
             <span className="text-base font-semibold flex-1 text-left">
               {t('menu.language')}
+            </span>
+          </Button>
+          <Button
+            variant="outline"
+            size="custom"
+            className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0 border-b border-border"
+            onClick={() => navigate(ROUTES.settingsPrivacy())}
+          >
+            <Shield className="mr-4" />
+            <span className="text-base font-semibold flex-1 text-left">
+              {t('menu.privacy')}
+            </span>
+          </Button>
+          <Button
+            variant="outline"
+            size="custom"
+            className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0"
+            onClick={() => navigate(ROUTES.settingsSecurity())}
+          >
+            <Clock className="mr-4" />
+            <span className="text-base font-semibold flex-1 text-left">
+              {t('menu.security')}
             </span>
           </Button>
         </div>

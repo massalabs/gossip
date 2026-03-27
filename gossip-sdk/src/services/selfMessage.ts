@@ -223,6 +223,33 @@ export class SelfMessageService {
     await this.queries.messages.deleteById(reactionId);
   }
 
+  async getRetentionInfo(): Promise<{
+    duration: number | null;
+    setAt: number | null;
+  }> {
+    const row = await this.queries.discussions.getByOwnerAndContact(
+      this.ownerUserId,
+      SELF_CONTACT_ID
+    );
+    return {
+      duration: row?.messageRetentionDuration ?? null,
+      setAt: row?.retentionPolicySetAt ?? null,
+    };
+  }
+
+  async setRetentionPolicy(durationSeconds: number | null): Promise<void> {
+    const duration =
+      durationSeconds != null && durationSeconds > 0 ? durationSeconds : null;
+    await this.queries.discussions.updateByOwnerAndContact(
+      this.ownerUserId,
+      SELF_CONTACT_ID,
+      {
+        messageRetentionDuration: duration,
+        retentionPolicySetAt: duration ? Date.now() : null,
+      }
+    );
+  }
+
   async getReactions(): Promise<
     { id: number; emoji: string; originalMessageId: number }[]
   > {

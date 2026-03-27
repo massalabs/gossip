@@ -29,6 +29,7 @@ import { AnnouncementService } from './announcement.js';
 import { SessionModule } from '../wasm/session.js';
 import { Logger } from '../utils/logs.js';
 import { RefreshService } from './refresh.js';
+import type { MessageService } from './message.js';
 import type { AuthService } from './auth.js';
 import { Result } from '../utils/type.js';
 import { SdkEventEmitter, SdkEventType } from '../core/SdkEventEmitter.js';
@@ -65,6 +66,7 @@ export class DiscussionService {
   private session: SessionModule;
   private eventEmitter: SdkEventEmitter;
   private refreshService?: RefreshService;
+  private messageService?: MessageService;
   private authService?: AuthService;
   private queries: Queries;
 
@@ -84,6 +86,10 @@ export class DiscussionService {
 
   setRefreshService(refreshService: RefreshService): void {
     this.refreshService = refreshService;
+  }
+
+  setMessageService(messageService: MessageService): void {
+    this.messageService = messageService;
   }
 
   setAuthService(authService: AuthService): void {
@@ -435,5 +441,72 @@ export class DiscussionService {
   /** Pin or unpin a discussion */
   pin(discussionId: number, pinned: boolean) {
     return updateDiscussionPin(discussionId, pinned, this.queries);
+  }
+
+  /** Mute or unmute notifications for a discussion */
+  async setMuted(discussionId: number, muted: boolean): Promise<void> {
+    await this.queries.discussions.updateById(discussionId, {
+      mutedNotifications: muted,
+    });
+    await this.refreshService?.stateUpdate();
+  }
+
+  /**
+   * Set the auto-delete retention policy for a discussion.
+   * Updates the local DB and sends a control message to the peer so both sides
+   * apply the same policy (last-write-wins).
+   *
+   * @param contactUserId - The contact user ID of the discussion
+   * @param durationSeconds - Retention duration in seconds, or null to disable
+   */
+  async setRetentionPolicy(
+    contactUserId: string,
+    durationSeconds: number | null
+  ): Promise<void> {
+    const ownerUserId = this.session.userIdEncoded;
+
+    // Update local DB
+    await this.queries.discussions.updateByOwnerAndContact(
+      ownerUserId,
+      contactUserId,
+      {
+        messageRetentionDuration: durationSeconds,
+        retentionPolicySetAt: durationSeconds ? Date.now() : null,
+      }
+    );
+
+    // Send control message to peer so they apply the same policy
+    if (this.messageService) {
+      const encodedDuration =
+        durationSeconds && durationSeconds > 0 ? durationSeconds : 0;
+      await this.messageService.send({
+        ownerUserId,
+        contactUserId,
+        content: String(encodedDuration),
+        type: MessageType.RETENTION_POLICY,
+        direction: MessageDirection.OUTGOING,
+        status: MessageStatus.WAITING_SESSION,
+        timestamp: new Date(),
+      });
+    }
+
+    // Restore the correct lastMessageContent by re-deriving from the last
+    // visible message — the control message must not pollute the preview.
+    const lastVisible =
+      await this.queries.messages.getLastVisibleByOwnerAndContact(
+        ownerUserId,
+        contactUserId
+      );
+    await this.queries.discussions.updateByOwnerAndContact(
+      ownerUserId,
+      contactUserId,
+      {
+        lastMessageContent: lastVisible?.content ?? null,
+        lastMessageTimestamp: lastVisible?.timestamp ?? null,
+        lastMessageId: lastVisible?.id ?? null,
+      }
+    );
+
+    await this.refreshService?.stateUpdate();
   }
 }

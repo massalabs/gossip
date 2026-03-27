@@ -13,7 +13,14 @@ import ContactNameModal from '../components/ui/ContactNameModal';
 import Button from '../components/ui/Button';
 import PageHeader from '../components/ui/PageHeader';
 import PageLayout from '../components/ui/PageLayout';
-import { Check, Edit2, ChevronRight, RotateCw } from 'react-feather';
+import {
+  Check,
+  Edit2,
+  ChevronRight,
+  RotateCw,
+  Bell,
+  BellOff,
+} from 'react-feather';
 import { ROUTES } from '../constants/routes';
 import { useManualRenewDiscussion } from '../hooks/useManualRenew';
 import type { Contact } from '@massalabs/gossip-sdk';
@@ -27,6 +34,7 @@ const DiscussionSettings: React.FC = () => {
 
   const discussions = useDiscussionStore(s => s.discussions);
   const contacts = useDiscussionStore(s => s.contacts);
+  const patchDiscussion = useDiscussionStore(s => s.patchDiscussion);
   const manualRenewDiscussion = useManualRenewDiscussion();
 
   const discussion = useMemo(() => {
@@ -58,6 +66,7 @@ const DiscussionSettings: React.FC = () => {
   const [nameError, setNameError] = useState<string | null>(null);
   const [showSuccessCheck, setShowSuccessCheck] = useState(false);
   const [reconnectSuccess, setReconnectSuccess] = useState(false);
+  const [isRetentionModalOpen, setIsRetentionModalOpen] = useState(false);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
     null
   );
@@ -107,6 +116,51 @@ const DiscussionSettings: React.FC = () => {
     },
     [gossip, discussion?.id]
   );
+
+  const RETENTION_OPTIONS = useMemo(
+    () => [
+      { labelKey: 'settings.auto_delete_off', value: null as number | null },
+      { labelKey: 'settings.auto_delete_5m', value: 300 },
+      { labelKey: 'settings.auto_delete_1h', value: 3600 },
+      { labelKey: 'settings.auto_delete_8h', value: 28800 },
+      { labelKey: 'settings.auto_delete_1d', value: 86400 },
+      { labelKey: 'settings.auto_delete_1w', value: 604800 },
+      { labelKey: 'settings.auto_delete_1mo', value: 2592000 },
+    ],
+    []
+  );
+
+  const currentRetention = discussion?.messageRetentionDuration ?? null;
+
+  const retentionLabel = useMemo(() => {
+    const option = RETENTION_OPTIONS.find(o => o.value === currentRetention);
+    return option ? t(option.labelKey) : t('settings.auto_delete_off');
+  }, [currentRetention, t, RETENTION_OPTIONS]);
+
+  const handleSelectRetention = useCallback(
+    async (value: number | null) => {
+      if (!discussion?.id || !discussion?.contactUserId) return;
+      // Optimistically update the store so the label is instant here and in
+      // the discussion header when navigating back.
+      patchDiscussion(discussion.id, {
+        messageRetentionDuration: value,
+        retentionPolicySetAt: value ? Date.now() : null,
+      });
+      setIsRetentionModalOpen(false);
+      await gossip.discussions.setRetentionPolicy(
+        discussion.contactUserId,
+        value
+      );
+    },
+    [gossip, discussion?.id, discussion?.contactUserId, patchDiscussion]
+  );
+
+  const handleToggleMute = useCallback(async () => {
+    if (!discussion?.id) return;
+    const newMuted = !discussion.mutedNotifications;
+    patchDiscussion(discussion.id, { mutedNotifications: newMuted });
+    await gossip.discussions.setMuted(discussion.id, newMuted);
+  }, [gossip, discussion?.id, discussion?.mutedNotifications, patchDiscussion]);
 
   const handleNavigateToContact = useCallback(
     (contact: Contact) => {
@@ -213,6 +267,88 @@ const DiscussionSettings: React.FC = () => {
           </Button>
         </div>
       </div>
+
+      {/* Mute Notifications Section */}
+      <div className="mb-6">
+        <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
+          {t('settings.notifications')}
+        </h2>
+        <div className="bg-background border border-border rounded-xl p-4">
+          <button
+            onClick={handleToggleMute}
+            className="w-full flex items-center justify-between text-sm font-medium text-foreground hover:bg-muted rounded-lg px-3 py-2 transition-colors"
+          >
+            <div className="flex items-center gap-3">
+              {discussion.mutedNotifications ? (
+                <BellOff className="w-4 h-4 text-muted-foreground" />
+              ) : (
+                <Bell className="w-4 h-4 text-muted-foreground" />
+              )}
+              <span>
+                {discussion.mutedNotifications
+                  ? t('settings.unmute_notifications')
+                  : t('settings.mute_notifications')}
+              </span>
+            </div>
+            {discussion.mutedNotifications && (
+              <span className="text-xs text-muted-foreground">
+                {t('settings.muted')}
+              </span>
+            )}
+          </button>
+        </div>
+      </div>
+
+      {/* Auto-delete Section */}
+      <div className="mb-6">
+        <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
+          {t('settings.auto_delete')}
+        </h2>
+        <div className="bg-background border border-border rounded-xl p-4">
+          <p className="text-sm text-muted-foreground mb-3">
+            {t('settings.auto_delete_description')}
+          </p>
+          <button
+            onClick={() => setIsRetentionModalOpen(true)}
+            className="w-full flex items-center justify-between text-sm font-medium text-foreground hover:bg-muted rounded-lg px-3 py-2 transition-colors"
+          >
+            <span>{t('settings.auto_delete_current')}</span>
+            <span className="text-primary">{retentionLabel}</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Retention picker modal */}
+      {isRetentionModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-black/50"
+          onClick={() => setIsRetentionModalOpen(false)}
+        >
+          <div
+            className="bg-background w-full max-w-md rounded-t-2xl p-6 pb-8"
+            onClick={e => e.stopPropagation()}
+          >
+            <h3 className="text-base font-semibold text-foreground mb-4">
+              {t('settings.auto_delete')}
+            </h3>
+            <div className="flex flex-col gap-1">
+              {RETENTION_OPTIONS.map(option => (
+                <button
+                  key={String(option.value)}
+                  onClick={() => handleSelectRetention(option.value)}
+                  className={`w-full text-left px-4 py-3 rounded-lg text-sm transition-colors ${
+                    currentRetention === option.value
+                      ? 'bg-primary/10 text-primary font-medium'
+                      : 'hover:bg-muted text-foreground'
+                  }`}
+                >
+                  {t(option.labelKey)}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Participants Section */}
       <div>

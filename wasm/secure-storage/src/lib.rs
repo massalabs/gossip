@@ -14,21 +14,14 @@ mod read;
 pub mod storage;
 mod types;
 mod unlock;
-pub mod wal;
 mod write;
 
-#[cfg(any(all(target_arch = "wasm32", feature = "wasm"), feature = "native"))]
+#[cfg(all(target_arch = "wasm32", feature = "wasm"))]
 pub(crate) mod vfs;
 #[cfg(all(target_arch = "wasm32", feature = "wasm"))]
 pub(crate) mod db;
 #[cfg(all(target_arch = "wasm32", feature = "wasm"))]
 mod wasm_api;
-
-#[cfg(feature = "native")]
-uniffi::setup_scaffolding!();
-
-#[cfg(feature = "native")]
-mod native_api;
 
 pub use block::{create_cover_block, decrypt_block, encrypt_block, rerandomize_block};
 pub use constants::{

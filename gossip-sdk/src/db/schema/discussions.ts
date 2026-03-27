@@ -34,6 +34,11 @@ export const discussions = sqliteTable(
     pinned: integer('pinned', { mode: 'boolean' }).notNull().default(false),
     killedNextRetryAt: integer('killedNextRetryAt', { mode: 'timestamp_ms' }),
     saturatedRetryAt: integer('saturatedRetryAt', { mode: 'timestamp_ms' }),
+    messageRetentionDuration: integer('messageRetentionDuration'),
+    retentionPolicySetAt: integer('retentionPolicySetAt'), // nullable, ms timestamp when policy was last configured
+    mutedNotifications: integer('mutedNotifications', { mode: 'boolean' })
+      .notNull()
+      .default(false),
     saturatedRetryDone: integer('saturatedRetryDone', { mode: 'boolean' })
       .notNull()
       .default(false),
