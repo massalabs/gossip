@@ -6,6 +6,10 @@ import {
 } from '@massalabs/gossip-sdk';
 import { biometricService } from '../../services/biometricService';
 import { UserProfile } from '@massalabs/gossip-sdk';
+import {
+  BIOMETRIC_SALT,
+  BIOMETRIC_STORAGE_KEY,
+} from '../../constants/biometric';
 
 export interface AuthResult {
   mnemonic: string;
@@ -38,15 +42,15 @@ export async function auth(
       // For biometric authentication (capacitor or webauthn)
       const userIdOrCredentialId =
         authMethod === 'capacitor'
-          ? profile.userId // For Capacitor: userId to retrieve encryption key from secure storage
-          : profile.security.webauthn?.credentialId; // For WebAuthn: credential ID for PRF
+          ? BIOMETRIC_STORAGE_KEY // Fixed key — matches what biometricService.storeEncryptionKey uses
+          : profile.security.webauthn?.credentialId;
 
       const syncFromiCloud = profile.security.iCloudSync ?? false;
 
       const authResult = await biometricService.authenticate(
         authMethod,
         userIdOrCredentialId,
-        salt,
+        BIOMETRIC_SALT,
         syncFromiCloud
       );
 
