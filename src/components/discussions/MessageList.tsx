@@ -229,11 +229,9 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
         vlistRef.current?.scrollToIndex(initialTopMostItemIndex, {
           align: 'start',
         });
-        requestAnimationFrame(() => {
-          initialScrollDone.current = true;
-          setAnimationsEnabled(true);
-          signalReady();
-        });
+        initialScrollDone.current = true;
+        setAnimationsEnabled(true);
+        signalReady();
       });
     }, [
       discussion?.id,

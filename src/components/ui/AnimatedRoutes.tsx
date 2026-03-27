@@ -50,12 +50,18 @@ const AnimatedRoutes: React.FC<AnimatedRoutesProps> = ({ children }) => {
   );
   // Controls whether the slide animation plays (false = off-screen waiting to render)
   const [slideReady, setSlideReady] = useState(!isOverlay);
+  // Skip animation when returning from a detour (instant mount)
+  const [skipSlideAnim, setSkipSlideAnim] = useState(false);
   // Exit animation: keep old overlay content while animating out
   const [exitContent, setExitContent] = useState<React.ReactNode>(null);
   const overlayContentRef = useRef<React.ReactNode>(null);
 
   // Fade state
   const [fadeIn, setFadeIn] = useState(true);
+
+  // Tracks when user navigates away from a slide route to a non-base page
+  // (e.g. discussion → contact details). When they return, skip the slide animation.
+  const detourFromSlideRef = useRef(false);
 
   // Ready signal from overlay content
   const readyReceivedRef = useRef(false);
@@ -70,8 +76,7 @@ const AnimatedRoutes: React.FC<AnimatedRoutesProps> = ({ children }) => {
       console.log(`[AnimatedRoutes] overlay ready in ${elapsed.toFixed(0)}ms`);
     }
 
-    // Wait 1 frame so the browser paints the rendered content, then slide
-    requestAnimationFrame(() => setSlideReady(true));
+    setSlideReady(true);
   }, []);
 
   // Route change detection
@@ -84,18 +89,55 @@ const AnimatedRoutes: React.FC<AnimatedRoutesProps> = ({ children }) => {
     const entering = isSlideRoute(location.pathname);
     const leaving = isSlideRoute(prev);
 
-    if (entering) {
-      // Push: mount overlay off-screen, wait for ready signal
+    if (import.meta.env.DEV) {
+      console.log('[AnimatedRoutes]', {
+        prev,
+        next: location.pathname,
+        entering,
+        leaving,
+        detour: detourFromSlideRef.current,
+      });
+    }
+
+    // Was the user on a slide route before this detour?
+    const returningFromDetour =
+      entering && !leaving && detourFromSlideRef.current;
+
+    if (returningFromDetour) {
+      detourFromSlideRef.current = false;
+    }
+
+    if (returningFromDetour) {
+      // Returning to a slide route from a detour (contact details, settings, etc.)
+      // → instant mount, no slide animation
+      setSkipSlideAnim(true);
+      setOverlayLocation(location);
+      setSlideReady(true);
+      setExitContent(null);
+    } else if (entering) {
+      // Fresh push from base: mount overlay off-screen, wait for ready signal
+      setSkipSlideAnim(false);
       readyReceivedRef.current = false;
       mountTimeRef.current = performance.now();
       setOverlayLocation(location);
       setSlideReady(false);
       setExitContent(null);
     } else if (leaving) {
-      // Pop: animate out, then remove
-      setExitContent(overlayContentRef.current);
-      setOverlayLocation(null);
-      setSlideReady(false);
+      const goingToBase =
+        location.pathname === '/' || location.pathname === '/discussions';
+      if (goingToBase) {
+        // Pop back to base: slide out
+        detourFromSlideRef.current = false;
+        setExitContent(overlayContentRef.current);
+        setOverlayLocation(null);
+        setSlideReady(false);
+      } else {
+        // Navigating to another page (e.g. contact details): instant swap
+        detourFromSlideRef.current = true;
+        setOverlayLocation(null);
+        setExitContent(null);
+        setSlideReady(false);
+      }
     } else {
       // Fade
       setOverlayLocation(null);
@@ -160,11 +202,12 @@ const AnimatedRoutes: React.FC<AnimatedRoutesProps> = ({ children }) => {
       {/* Overlay — discussion entering */}
       {overlayContent && (
         <div
-          className={`absolute inset-0 ${slideReady ? 'animate-slide-enter-right' : ''}`}
+          className={`absolute inset-0 ${slideReady && !skipSlideAnim ? 'animate-slide-enter-right' : ''}`}
           style={{
-            willChange: 'transform',
+            willChange: skipSlideAnim ? undefined : 'transform',
             zIndex: 10,
-            transform: slideReady ? undefined : 'translateX(100%)',
+            transform:
+              slideReady || skipSlideAnim ? undefined : 'translateX(100%)',
           }}
         >
           {overlayContent}
