@@ -80,7 +80,6 @@ export const ROUTES = {
   settingsAccountBackup: route(`/${AppRoute.settings}/account-backup`),
   settingsShareContact: route(`/${AppRoute.settings}/share-contact`),
   settingsWeb3: route(`/${AppRoute.settings}/web3`),
-  settingsPrivacy: route(`/${AppRoute.settings}/privacy`),
 
   // Actions
   newContact: route(`/${AppRoute.newContact}`),

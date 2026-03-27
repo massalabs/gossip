@@ -1,7 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { ChevronLeft, Clock, Search } from 'react-feather';
+import { ChevronLeft, Search } from 'react-feather';
 import { Contact, SessionStatus } from '@massalabs/gossip-sdk';
 import type { Discussion } from '@massalabs/gossip-sdk';
 import { useDiscussionStore } from '../../stores/discussionStore';
@@ -15,8 +15,6 @@ import { useOnlineStore } from '../../stores/useOnlineStore';
 interface DiscussionHeaderProps {
   contact?: Contact | null | undefined;
   discussion?: Discussion | null;
-  anyDiscussionId?: number | null;
-  anyDiscussionRetentionDuration?: number | null;
   onBack?: () => void;
   onSync?: () => void;
   onSearchToggle?: () => void;
@@ -26,8 +24,6 @@ interface DiscussionHeaderProps {
 const DiscussionHeader: React.FC<DiscussionHeaderProps> = ({
   contact,
   discussion,
-  anyDiscussionId,
-  anyDiscussionRetentionDuration,
   onBack,
   onSearchToggle,
   title,
@@ -74,29 +70,14 @@ const DiscussionHeader: React.FC<DiscussionHeaderProps> = ({
   // Check if discussion is pending outgoing (waiting for approval)
   const isPendingOutgoing = sessionStatus === SessionStatus.SelfRequested;
 
-  const RETENTION_LABELS: Record<number, string> = {
-    300: t('settings.auto_delete_5m'),
-    3600: t('settings.auto_delete_1h'),
-    28800: t('settings.auto_delete_8h'),
-    86400: t('settings.auto_delete_1d'),
-    604800: t('settings.auto_delete_1w'),
-    2592000: t('settings.auto_delete_1mo'),
-  };
-
-  const retentionDuration =
-    discussion?.messageRetentionDuration ??
-    anyDiscussionRetentionDuration ??
-    null;
-  const retentionLabel = retentionDuration
-    ? (RETENTION_LABELS[retentionDuration] ?? String(retentionDuration) + 's')
-    : null;
-
-  const settingsId = discussion?.id ?? anyDiscussionId;
+  // Navigate to discussion settings if discussion exists, otherwise contact page
   const handleHeaderClick = () => {
-    if (settingsId) {
+    if (discussion?.id) {
       navigate(
-        ROUTES.discussionSettings({ discussionId: settingsId.toString() })
+        ROUTES.discussionSettings({ discussionId: discussion.id.toString() })
       );
+    } else {
+      navigate(ROUTES.contact({ userId: contact.userId }));
     }
   };
 
@@ -137,12 +118,6 @@ const DiscussionHeader: React.FC<DiscussionHeaderProps> = ({
             {isOnline && isPendingOutgoing && (
               <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-accent text-accent-foreground border border-border">
                 {t('header.waiting_approval')}
-              </span>
-            )}
-            {retentionLabel && (
-              <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-                <Clock className="w-3 h-3 shrink-0" />
-                {t('header.auto_delete_active', { duration: retentionLabel })}
               </span>
             )}
           </div>

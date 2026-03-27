@@ -1,15 +1,12 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { MoreVertical } from 'react-feather';
 
-export type MenuItem =
-  | {
-      type?: 'item';
-      label: string;
-      icon?: React.ReactNode;
-      onClick: () => void;
-      danger?: boolean;
-    }
-  | { type: 'separator' };
+export interface MenuItem {
+  label: string;
+  icon?: React.ReactNode;
+  onClick: () => void;
+  danger?: boolean;
+}
 
 interface ThreeDotMenuProps {
   items: MenuItem[];
@@ -134,37 +131,29 @@ const ThreeDotMenu: React.FC<ThreeDotMenuProps> = ({
           ref={menuRef}
           role="menu"
           aria-label={triggerLabel}
-          className="absolute right-0 top-full mt-2 min-w-[200px] max-w-[280px] bg-card border border-border rounded-2xl shadow-xl z-50 origin-top-right animate-menu-open overflow-hidden"
+          className="absolute right-0 top-full mt-2 min-w-[200px] max-w-[280px] bg-card border border-border rounded-lg shadow-xl z-50 origin-top-right animate-menu-open overflow-hidden"
         >
-          {items.map((item, index) =>
-            item.type === 'separator' ? (
-              <div
-                key={index}
-                className="border-b border-border"
-                role="separator"
-              />
-            ) : (
-              <button
-                key={index}
-                role="menuitem"
-                type="button"
-                onClick={() => {
-                  item.onClick();
-                  close();
-                }}
-                className={`hover-fill w-full flex items-center justify-between gap-3 px-4 py-3 text-sm font-medium text-left ${
-                  item.danger ? 'text-destructive' : 'text-foreground'
-                }`}
-              >
-                <span className="relative">{item.label}</span>
-                {item.icon && (
-                  <span className="w-6 h-6 rounded-full bg-accent text-accent-foreground dark:bg-muted dark:text-accent shrink-0 flex items-center justify-center [&>svg]:w-3.5 [&>svg]:h-3.5">
-                    {item.icon}
-                  </span>
-                )}
-              </button>
-            )
-          )}
+          {items.map((item, index) => (
+            <button
+              key={index}
+              role="menuitem"
+              type="button"
+              onClick={() => {
+                item.onClick();
+                close();
+              }}
+              className={`hover-fill w-full flex items-center justify-between gap-3 px-4 py-3 text-sm font-medium text-left ${
+                item.danger ? 'text-destructive' : 'text-foreground'
+              } ${index < items.length - 1 ? 'border-b border-border' : ''}`}
+            >
+              <span className="relative">{item.label}</span>
+              {item.icon && (
+                <span className="w-6 h-6 rounded-full bg-accent text-accent-foreground dark:bg-muted dark:text-accent shrink-0 flex items-center justify-center [&>svg]:w-3.5 [&>svg]:h-3.5">
+                  {item.icon}
+                </span>
+              )}
+            </button>
+          ))}
         </div>
       )}
     </div>

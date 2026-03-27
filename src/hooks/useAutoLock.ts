@@ -52,7 +52,7 @@ export function useAutoLock() {
           autoLockTimeout
         )
       ) {
-        logout({ lockedByUser: false });
+        logout();
       }
       backgroundTimestampRef.current = null;
     };

@@ -1,5 +1,4 @@
-import { eq, and, or, sql, inArray, asc, ne, lt, gte } from 'drizzle-orm';
-import type { DiscussionRow } from './discussions.js';
+import { eq, and, or, sql, inArray, asc, ne } from 'drizzle-orm';
 import * as schema from '../schema/index.js';
 import type { DatabaseConnection } from '../sqlite.js';
 import { MessageDirection, MessageStatus, MessageType } from '../../db/db.js';
@@ -48,8 +47,6 @@ export class MessageQueries {
           eq(schema.messages.contactUserId, contactUserId),
           // Hide keep-alive messages from UI
           ne(schema.messages.type, MessageType.KEEP_ALIVE),
-          // Hide retention policy control messages from UI
-          ne(schema.messages.type, MessageType.RETENTION_POLICY),
           // Hide reaction messages (and any deleted reaction rows) from main message list
           ne(schema.messages.type, MessageType.REACTION),
           sql`reactionOf IS NULL`,
@@ -65,34 +62,6 @@ export class MessageQueries {
       )
       .orderBy(asc(schema.messages.id))
       .all();
-  }
-
-  async getLastVisibleByOwnerAndContact(
-    ownerUserId: string,
-    contactUserId: string
-  ): Promise<MessageRow | undefined> {
-    return this.conn.db
-      .select()
-      .from(schema.messages)
-      .where(
-        and(
-          eq(schema.messages.ownerUserId, ownerUserId),
-          eq(schema.messages.contactUserId, contactUserId),
-          ne(schema.messages.type, MessageType.KEEP_ALIVE),
-          ne(schema.messages.type, MessageType.RETENTION_POLICY),
-          ne(schema.messages.type, MessageType.REACTION),
-          sql`reactionOf IS NULL`,
-          or(
-            ne(schema.messages.type, MessageType.DELETED),
-            ne(schema.messages.direction, MessageDirection.OUTGOING),
-            ne(schema.messages.content, '')
-          ),
-          sql`(metadata IS NULL OR metadata NOT LIKE '%"control":"edit"%')`
-        )
-      )
-      .orderBy(sql`${schema.messages.id} DESC`)
-      .limit(1)
-      .get();
   }
 
   async getReactionsByOwnerAndContact(
@@ -339,45 +308,6 @@ export class MessageQueries {
         )
       )
       .all();
-  }
-
-  /**
-   * Hard-delete messages older than each discussion's retention duration.
-   * Only processes discussions that have a non-null messageRetentionDuration.
-   * Skips KEEP_ALIVE and ANNOUNCEMENT types.
-   */
-  async deleteExpiredByOwner(
-    ownerUserId: string,
-    discussions: DiscussionRow[]
-  ): Promise<void> {
-    const now = Date.now();
-
-    for (const discussion of discussions) {
-      if (
-        !discussion.messageRetentionDuration ||
-        discussion.messageRetentionDuration <= 0
-      ) {
-        continue;
-      }
-
-      const expiryTs = now - discussion.messageRetentionDuration * 1000;
-      // Only delete messages that were sent AFTER the policy was activated.
-      // Messages that existed before the policy was set are left untouched.
-      const policySetAt = discussion.retentionPolicySetAt ?? 0;
-
-      await this.conn.db
-        .delete(schema.messages)
-        .where(
-          and(
-            eq(schema.messages.ownerUserId, ownerUserId),
-            eq(schema.messages.contactUserId, discussion.contactUserId),
-            lt(schema.messages.timestamp, new Date(expiryTs)),
-            gte(schema.messages.timestamp, new Date(policySetAt)),
-            ne(schema.messages.type, MessageType.KEEP_ALIVE),
-            ne(schema.messages.type, MessageType.ANNOUNCEMENT)
-          )
-        );
-    }
   }
 
   async findDuplicateIncoming(

@@ -26,8 +26,6 @@ interface DiscussionTopSectionSearchProps {
 interface DiscussionTopSectionProps {
   contact: Contact;
   discussion: Discussion | null;
-  anyDiscussionId: number | null;
-  anyDiscussionRetentionDuration: number | null;
   onBack: () => void;
   outgoingSentCount: number;
   selection: DiscussionTopSectionSelectionProps;
@@ -37,8 +35,6 @@ interface DiscussionTopSectionProps {
 const DiscussionTopSection: React.FC<DiscussionTopSectionProps> = ({
   contact,
   discussion,
-  anyDiscussionId,
-  anyDiscussionRetentionDuration,
   onBack,
   outgoingSentCount,
   selection,
@@ -58,8 +54,6 @@ const DiscussionTopSection: React.FC<DiscussionTopSectionProps> = ({
         <DiscussionHeader
           contact={contact}
           discussion={discussion}
-          anyDiscussionId={anyDiscussionId}
-          anyDiscussionRetentionDuration={anyDiscussionRetentionDuration}
           onBack={onBack}
           onSearchToggle={search.onToggleSearch}
         />

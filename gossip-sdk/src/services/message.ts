@@ -28,7 +28,6 @@ import {
   serializeDeleteMessage,
   serializeEditMessage,
   serializeReactionMessage,
-  serializeRetentionPolicyMessage,
   deserializeMessage,
 } from '../utils/messageSerialization.js';
 import { encodeToBase64, decodeFromBase64 } from '../utils/base64.js';
@@ -413,8 +412,7 @@ export class MessageService {
     if (
       discussion &&
       message.type !== MessageType.KEEP_ALIVE &&
-      message.type !== MessageType.REACTION &&
-      message.type !== MessageType.RETENTION_POLICY
+      message.type !== MessageType.REACTION
     ) {
       await this.queries.discussions.updateById(discussion.id, {
         lastMessageId: messageId,
@@ -567,29 +565,6 @@ export class MessageService {
         });
 
         // Do not insert a new message row for edit control messages
-        continue;
-      }
-
-      // Handle retention policy control messages by updating the discussion setting
-      if (message.type === MessageType.RETENTION_POLICY) {
-        const durationSeconds = parseInt(message.content, 10);
-        const duration =
-          isNaN(durationSeconds) || durationSeconds <= 0
-            ? null
-            : durationSeconds;
-        await this.queries.discussions.updateByOwnerAndContact(
-          ownerUserId,
-          message.senderId,
-          {
-            messageRetentionDuration: duration,
-            retentionPolicySetAt: duration ? Date.now() : null,
-          }
-        );
-        this.eventEmitter.emit(
-          SdkEventType.DISCUSSION_UPDATED,
-          message.senderId
-        );
-        // Do not insert a new message row for retention policy control messages
         continue;
       }
 
@@ -816,10 +791,9 @@ export class MessageService {
       return { success: false, error: 'Discussion not found' };
     }
 
-    // Generate a random messageId for deduplication (not for keep-alive or retention policy)
+    // Generate a random messageId for deduplication (not for keep-alive)
     const randomMessageId =
-      message.type !== MessageType.KEEP_ALIVE &&
-      message.type !== MessageType.RETENTION_POLICY
+      message.type !== MessageType.KEEP_ALIVE
         ? crypto.getRandomValues(new Uint8Array(MESSAGE_ID_SIZE))
         : undefined;
     message.messageId = randomMessageId;
@@ -861,11 +835,7 @@ export class MessageService {
   ): Promise<Result<Uint8Array, string>> {
     const log = logger.forMethod('serializeMessage');
 
-    if (
-      !message.messageId &&
-      message.type !== MessageType.KEEP_ALIVE &&
-      message.type !== MessageType.RETENTION_POLICY
-    ) {
+    if (!message.messageId && message.type !== MessageType.KEEP_ALIVE) {
       return {
         success: false,
         error: 'Message ID is required',
@@ -898,14 +868,6 @@ export class MessageService {
       return {
         success: true,
         data: serializeKeepAliveMessage(),
-      };
-    } else if (message.type === MessageType.RETENTION_POLICY) {
-      const durationSeconds = parseInt(message.content, 10);
-      return {
-        success: true,
-        data: serializeRetentionPolicyMessage(
-          isNaN(durationSeconds) || durationSeconds < 0 ? 0 : durationSeconds
-        ),
       };
     } else if (message.type === MessageType.DELETED && message.deleteOf) {
       // Serialize a delete control message targeting an existing messageId
@@ -1480,24 +1442,6 @@ export class MessageService {
 
     await this.refreshService?.stateUpdate();
     return true;
-  }
-
-  /**
-   * Hard-delete messages that have exceeded their discussion retention duration.
-   * Called periodically from the background refresh cycle.
-   * Emits MESSAGE_RECEIVED if any messages were deleted to trigger UI refresh.
-   */
-  async deleteExpiredMessages(ownerUserId: string): Promise<void> {
-    const allRows = await this.queries.discussions.getByOwner(ownerUserId);
-    const withRetention = allRows.filter(
-      d => d.messageRetentionDuration != null && d.messageRetentionDuration > 0
-    );
-    if (withRetention.length === 0) return;
-
-    await this.queries.messages.deleteExpiredByOwner(
-      ownerUserId,
-      withRetention
-    );
   }
 
   // Mark a message as read. Returns true if the message has been marked as read, false if it was already marked as read or doesn't exist.

@@ -24,7 +24,6 @@ import {
   AnnouncementRenderer,
   DateRenderer,
   MessageRenderer,
-  RetentionSeparatorRenderer,
   SpacerRenderer,
 } from './renderers/MessageItemRenderers';
 
@@ -42,7 +41,6 @@ const MESSAGES_ABOVE_UNREAD = 3;
 interface MessageListProps {
   messages: Message[];
   discussion?: Discussion | null;
-  retentionInfo?: { setAt: number; duration: number } | null;
   contact?: Pick<Contact, 'name' | 'avatar'>;
   isLoading: boolean;
   onReplyTo?: (message: Message) => void;
@@ -85,7 +83,6 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
     {
       messages,
       discussion,
-      retentionInfo,
       contact,
       isLoading,
       onReplyTo,
@@ -114,12 +111,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
 
     // Derived state via hooks
     const messageGroups = useMessageGroups(messages);
-    const virtualItems = useVirtualItems(
-      messages,
-      messageGroups,
-      discussion,
-      retentionInfo
-    );
+    const virtualItems = useVirtualItems(messages, messageGroups, discussion);
 
     // Update refs when values change
     messagesRef.current = messages;
@@ -241,8 +233,6 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
             return item.key;
           case 'spacer':
             return 'spacer';
-          case 'retention-separator':
-            return `retention-separator`;
           case 'message': {
             if (item.message.id != null) return `msg-${item.message.id}`;
             const tempKey = `${item.message.timestamp.getTime()}-${item.message.direction}-${item.message.content.slice(0, 16)}`;
@@ -276,14 +266,6 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
 
           case 'spacer':
             return <SpacerRenderer key="spacer" />;
-
-          case 'retention-separator':
-            return (
-              <RetentionSeparatorRenderer
-                key="retention-separator"
-                retentionDuration={item.retentionDuration}
-              />
-            );
 
           case 'message':
             return (

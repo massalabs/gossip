@@ -16,6 +16,23 @@ export function useProfileLoader() {
       try {
         setLoading(true);
 
+        const sdk = getSdk();
+        // Once isInitialized is true (onboarding completed), never reset it to false.
+        // Secure storage lock clears userProfile but onboarding is still done.
+        const alreadyInitialized = useAppStore.getState().isInitialized;
+
+        // Secure storage: DB isn't ready until allocate/unlock.
+        if (!sdk.dbReady) {
+          if (sdk.needsUnlock) {
+            // Encrypted data on device → user must unlock → Login, not onboarding.
+            useAppStore.getState().setIsInitialized(true);
+          } else if (!alreadyInitialized) {
+            // Empty storage AND never initialized → first open → onboarding.
+            useAppStore.getState().setIsInitialized(false);
+          }
+          return;
+        }
+
         // Add a small delay to ensure database is ready
         await new Promise(resolve =>
           setTimeout(resolve, PROFILE_LOAD_DELAY_MS)
@@ -23,16 +40,18 @@ export function useProfileLoader() {
 
         const state = useAccountStore.getState();
         const existingProfile =
-          state.userProfile || (await getSdk().profiles.getMostRecent());
+          state.userProfile || (await sdk.profiles.getMostRecent());
 
         if (existingProfile) {
           useAppStore.getState().setIsInitialized(true);
-        } else {
+        } else if (!alreadyInitialized) {
           useAppStore.getState().setIsInitialized(false);
         }
       } catch (error) {
         console.error('Error loading user profile from SQLite:', error);
-        useAppStore.getState().setIsInitialized(false);
+        if (!useAppStore.getState().isInitialized) {
+          useAppStore.getState().setIsInitialized(false);
+        }
       } finally {
         setLoading(false);
       }

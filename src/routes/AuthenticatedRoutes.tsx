@@ -16,7 +16,6 @@ import DebugSettings from '../pages/settings/DebugSettings';
 import AccountBackupPage from '../pages/settings/AccountBackupPage';
 import QRCodeSwitcher from '../pages/settings/QRCodeSwitcher';
 import Web3Settings from '../pages/settings/Web3Settings';
-import PrivacySettings from '../pages/settings/PrivacySettings';
 import ContactSharePage from '../pages/ContactSharePage';
 import { InvitePage } from '../pages/InvitePage';
 import { usePendingDeepLink } from '../hooks/usePendingDeepLink';
@@ -78,7 +77,6 @@ export const AuthenticatedRoutes: React.FC = () => {
           element={<QRCodeSwitcher />}
         />
         <Route path={ROUTES.settingsWeb3()} element={<Web3Settings />} />
-        <Route path={ROUTES.settingsPrivacy()} element={<PrivacySettings />} />
         <Route path={ROUTES.settings()} element={<Settings />} />
         <Route path={ROUTES.discussions()} element={<Discussions />} />
 

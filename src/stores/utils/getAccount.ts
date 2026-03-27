@@ -7,5 +7,9 @@ export async function getActiveOrFirstProfile(): Promise<UserProfile | null> {
   const state = useAccountStore.getState();
   if (state.userProfile) return state.userProfile;
 
-  return getSdk().profiles.getMostRecent();
+  const sdk = getSdk();
+  // DB not ready yet (secure storage locked) — can't query.
+  if (!sdk.dbReady) return null;
+
+  return sdk.profiles.getMostRecent();
 }

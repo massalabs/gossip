@@ -36,7 +36,6 @@ interface DiscussionStoreState {
   setModalOpen: (discussionId: number, isOpen: boolean) => void;
   isModalOpen: (discussionId: number) => boolean;
   setFilter: (filter: DiscussionFilter) => void;
-  patchDiscussion: (discussionId: number, patch: Partial<Discussion>) => void;
 }
 
 const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
@@ -196,7 +195,6 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
     sdk.on(SdkEventType.SESSION_ACCEPTED, onEvent);
     sdk.on(SdkEventType.SESSION_RENEWED, onEvent);
     sdk.on(SdkEventType.SESSION_REQUESTED, onEvent);
-    sdk.on(SdkEventType.DISCUSSION_UPDATED, onEvent);
 
     const onSessionStatusChanged = (
       contactUserId: string,
@@ -256,7 +254,6 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
           sdk.off(SdkEventType.SESSION_ACCEPTED, handler);
           sdk.off(SdkEventType.SESSION_RENEWED, handler);
           sdk.off(SdkEventType.SESSION_REQUESTED, handler);
-          sdk.off(SdkEventType.DISCUSSION_UPDATED, handler);
         }
         if (statusHandler) {
           sdk.off(SdkEventType.SESSION_STATUS_CHANGED, statusHandler);
@@ -298,14 +295,6 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
 
   setFilter: (filter: DiscussionFilter) => {
     set({ filter });
-  },
-
-  patchDiscussion: (discussionId: number, patch: Partial<Discussion>) => {
-    set(state => ({
-      discussions: state.discussions.map(d =>
-        d.id === discussionId ? { ...d, ...patch } : d
-      ),
-    }));
   },
 }));
 

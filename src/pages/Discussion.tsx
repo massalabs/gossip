@@ -31,7 +31,6 @@ const Discussion: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const contacts = useDiscussionStore(s => s.contacts);
-  const patchDiscussion = useDiscussionStore(s => s.patchDiscussion);
 
   const locationState = location.state as {
     prefilledMessage?: string;
@@ -68,13 +67,7 @@ const Discussion: React.FC = () => {
     createdAt: new Date(),
   };
 
-  const {
-    discussion,
-    anyDiscussionId,
-    anyDiscussionRetentionDuration,
-    anyDiscussionRetentionPolicySetAt,
-    isLoading: isDiscussionLoading,
-  } = useDiscussion({
+  const { discussion, isLoading: isDiscussionLoading } = useDiscussion({
     contact: safeContact,
   });
 
@@ -91,7 +84,6 @@ const Discussion: React.FC = () => {
   });
 
   const showDebugOption = useAppStore(s => s.showDebugOption);
-  const defaultRetentionDuration = useAppStore(s => s.defaultRetentionDuration);
   const [isSendingTestMessages, setIsSendingTestMessages] = useState(false);
 
   const setCurrentContact = useMessageStore(s => s.setCurrentContact);
@@ -216,37 +208,6 @@ const Discussion: React.FC = () => {
     handleClearSelection();
   }, [contact?.userId, handleClearSelection]);
 
-  // Apply default retention policy to new discussions that have never had one set
-  const hasAppliedDefaultRetentionRef = useRef(false);
-  useEffect(() => {
-    if (hasAppliedDefaultRetentionRef.current) return;
-    if (!userId || anyDiscussionId === null) return;
-    if (defaultRetentionDuration === null) return;
-    // Only apply if no retention policy has ever been configured
-    if (
-      anyDiscussionRetentionDuration !== null ||
-      anyDiscussionRetentionPolicySetAt !== null
-    )
-      return;
-    hasAppliedDefaultRetentionRef.current = true;
-    patchDiscussion(anyDiscussionId, {
-      messageRetentionDuration: defaultRetentionDuration,
-      retentionPolicySetAt: Date.now(),
-    });
-    void gossip.discussions.setRetentionPolicy(
-      userId,
-      defaultRetentionDuration
-    );
-  }, [
-    userId,
-    anyDiscussionId,
-    anyDiscussionRetentionDuration,
-    anyDiscussionRetentionPolicySetAt,
-    defaultRetentionDuration,
-    gossip,
-    patchDiscussion,
-  ]);
-
   const scrollToBottom = useCallback(() => {
     messageListRef.current?.scrollToBottom();
   }, []);
@@ -310,8 +271,6 @@ const Discussion: React.FC = () => {
       <DiscussionTopSection
         contact={contact}
         discussion={discussion}
-        anyDiscussionId={anyDiscussionId}
-        anyDiscussionRetentionDuration={anyDiscussionRetentionDuration}
         onBack={onBack}
         outgoingSentCount={outgoingSentCount}
         selection={{

@@ -1,6 +1,5 @@
 import React, { useMemo, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Clock } from 'react-feather';
 import {
   Message,
   MessageDirection,
@@ -179,42 +178,6 @@ export const MessageRenderer: React.FC<MessageRendererProps> = ({
         isSelected={isSelected}
         onToggleSelect={onToggleSelect}
       />
-    </div>
-  );
-};
-
-// =============================================================================
-// Retention Separator Renderer
-// =============================================================================
-
-const RETENTION_LABELS: Record<number, string> = {
-  300: 'settings.auto_delete_5m',
-  3600: 'settings.auto_delete_1h',
-  28800: 'settings.auto_delete_8h',
-  86400: 'settings.auto_delete_1d',
-  604800: 'settings.auto_delete_1w',
-  2592000: 'settings.auto_delete_1mo',
-};
-
-interface RetentionSeparatorRendererProps {
-  retentionDuration: number;
-}
-
-export const RetentionSeparatorRenderer: React.FC<
-  RetentionSeparatorRendererProps
-> = ({ retentionDuration }) => {
-  const { t } = useTranslation('discussions');
-  const labelKey = RETENTION_LABELS[retentionDuration];
-  const durationLabel = labelKey ? t(labelKey) : `${retentionDuration}s`;
-
-  return (
-    <div className="flex items-center gap-2 px-4 py-2 my-1">
-      <div className="flex-1 h-px bg-border" />
-      <span className="inline-flex items-center gap-1 text-xs text-muted-foreground shrink-0 px-2">
-        <Clock className="w-3 h-3 shrink-0" />
-        {t('retention_separator', { duration: durationLabel })}
-      </span>
-      <div className="flex-1 h-px bg-border" />
     </div>
   );
 };

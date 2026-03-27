@@ -15,9 +15,7 @@
     "web3": "Web3",
     "about": "À propos",
     "debug": "Débogage",
-    "logout": "Déconnexion",
-    "privacy": "Confidentialité",
-    "security": "Sécurité"
+    "logout": "Déconnexion"
   },
   "delete_account": {
     "button": "Supprimer le compte",
@@ -86,21 +84,7 @@
   },
   "security": {
     "title": "Sécurité",
-    "native_only": "Les paramètres de sécurité sont uniquement disponibles sur les plateformes natives (Android et iOS).",
-    "auto_lock_title": "Verrouillage en cas d'inactivité",
-    "auto_lock_description": "Verrouiller automatiquement l'application après une période d'inactivité en arrière-plan.",
-    "auto_lock_current": "Verrouiller après",
-    "auto_lock_off": "Désactivé",
-    "auto_lock_1m": "1 minute",
-    "auto_lock_5m": "5 minutes",
-    "auto_lock_15m": "15 minutes",
-    "auto_lock_30m": "30 minutes",
-    "auto_lock_1h": "1 heure"
-  },
-  "privacy": {
-    "title": "Confidentialité",
-    "default_retention_title": "Suppression automatique par défaut",
-    "default_retention_description": "Les nouvelles discussions auront automatiquement cette politique de rétention appliquée."
+    "native_only": "Les paramètres de sécurité sont uniquement disponibles sur les plateformes natives (Android et iOS)."
   },
   "web3": {
     "title": "Web3",

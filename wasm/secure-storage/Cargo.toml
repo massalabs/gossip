@@ -3,6 +3,25 @@ name = "secureStorage"
 version.workspace = true
 edition.workspace = true
 
+[lib]
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+[features]
+wasm = [
+    "dep:wasm-bindgen",
+    "dep:js-sys",
+    "dep:web-sys",
+    "dep:wasm-bindgen-futures",
+    "dep:console_error_panic_hook",
+    "dep:sqlite-wasm-rs",
+]
+native = [
+    "dep:uniffi",
+    "dep:rusqlite",
+    "dep:sqlite-vfs",
+    "dep:redb",
+]
+
 [dependencies]
 crypto-aead = { path = "../crypto-aead" }
 crypto-kdf = { path = "../crypto-kdf" }
@@ -10,10 +29,29 @@ crypto-password-kdf = { path = "../crypto-password-kdf" }
 pq-rerand = { git = "https://github.com/massalabs/pq-rerand", rev = "1d5f9d1afd6f06383fffc0aa3a362774ba35d45f" }
 rand = "0.8"
 thiserror = "2"
+crc32fast = "1.4"
 zeroize = { version = "1.8", features = ["derive"] }
+
+# WASM-only (gated by `wasm` feature)
+wasm-bindgen = { version = "0.2", optional = true }
+js-sys = { version = "0.3", optional = true }
+web-sys = { version = "0.3", optional = true, features = ["console"] }
+wasm-bindgen-futures = { version = "0.4", optional = true }
+console_error_panic_hook = { version = "0.1", optional = true }
+sqlite-wasm-rs = { version = "0.4", default-features = false, features = ["precompiled"], optional = true }
+
+# Native-only (gated by `native` feature)
+uniffi = { version = "0.31", optional = true }
+rusqlite = { version = "0.39", features = ["bundled"], optional = true }
+sqlite-vfs = { version = "0.2", optional = true }
+redb = { version = "2", optional = true }
+
+[build-dependencies]
+uniffi = { version = "0.31", features = ["build"], optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.2", features = ["js"] }
 
 [dev-dependencies]
 tempfile = "3"
+wasm-bindgen-test = "0.3"

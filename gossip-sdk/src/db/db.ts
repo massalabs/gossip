@@ -123,7 +123,6 @@ export enum MessageType {
   VIDEO = 'video',
   DELETED = 'deleted',
   REACTION = 'reaction',
-  RETENTION_POLICY = 'retention_policy',
 }
 
 export interface ReadyAnnouncement {
@@ -209,9 +208,6 @@ export interface Discussion {
   lastMessageTimestamp: Date | null;
   unreadCount: number;
   pinned: boolean; // Whether the discussion is pinned to the top of the list
-  messageRetentionDuration: number | null; // Auto-delete messages older than this (seconds), null = off
-  retentionPolicySetAt: number | null; // Timestamp (ms) when the retention policy was last configured — only messages after this are subject to deletion
-  mutedNotifications: boolean; // Whether notifications are muted for this discussion
 
   // Session recovery state (persisted to throttle resets)
   killedNextRetryAt?: Date | null;

@@ -39,18 +39,11 @@ export type SpacerItem = {
   type: 'spacer';
 };
 
-export type RetentionSeparatorItem = {
-  type: 'retention-separator';
-  retentionDuration: number;
-  retentionPolicySetAt: number;
-};
-
 export type VirtualItem =
   | AnnouncementItem
   | DateItem
   | MessageVirtualItem
-  | SpacerItem
-  | RetentionSeparatorItem;
+  | SpacerItem;
 
 // =============================================================================
 // Hooks
@@ -88,27 +81,16 @@ function shouldShowTimestamp(
 }
 
 /**
- * Builds the virtualized item list from messages and discussion.
- * Includes: announcement (if exists) + date separators + messages + spacer.
- *
- * @param retentionInfo - Optional retention policy info to inject a separator.
- *   For regular discussions this is derived from the discussion object.
- *   For the self-discussion it can be passed explicitly since no Discussion is available.
+ * Builds the virtualized item list from messages and discussion
+ * Includes: announcement (if exists) + date separators + messages + spacer
  */
 export function useVirtualItems(
   messages: Message[],
   messageGroups: MessageGroupInfo[],
-  discussion?: Discussion | null,
-  retentionInfo?: { setAt: number; duration: number } | null
+  discussion?: Discussion | null
 ): VirtualItem[] {
-  const effectiveSetAt =
-    discussion?.retentionPolicySetAt ?? retentionInfo?.setAt ?? null;
-  const effectiveDuration =
-    discussion?.messageRetentionDuration ?? retentionInfo?.duration ?? null;
-
   return useMemo(() => {
     const items: VirtualItem[] = [];
-    let separatorInserted = false;
 
     messages.forEach((message, index) => {
       const prevMessage = index > 0 ? messages[index - 1] : null;
@@ -120,24 +102,6 @@ export function useVirtualItems(
         isFirstInGroup: true,
         isLastInGroup: true,
       };
-
-      // Inject retention separator at the right position in the timeline
-      if (
-        !separatorInserted &&
-        effectiveSetAt != null &&
-        effectiveDuration != null
-      ) {
-        const prevTs = prevMessage?.timestamp.getTime() ?? -Infinity;
-        const currTs = message.timestamp.getTime();
-        if (prevTs < effectiveSetAt && currTs >= effectiveSetAt) {
-          items.push({
-            type: 'retention-separator',
-            retentionDuration: effectiveDuration,
-            retentionPolicySetAt: effectiveSetAt,
-          });
-          separatorInserted = true;
-        }
-      }
 
       // Show date separator if this is the first message or if the day changed
       if (
@@ -171,29 +135,9 @@ export function useVirtualItems(
       }
     });
 
-    // If all messages are before retentionPolicySetAt (or there are no messages),
-    // still show the separator at the end so the user sees that the policy is active.
-    if (
-      !separatorInserted &&
-      effectiveSetAt != null &&
-      effectiveDuration != null
-    ) {
-      items.push({
-        type: 'retention-separator',
-        retentionDuration: effectiveDuration,
-        retentionPolicySetAt: effectiveSetAt,
-      });
-    }
-
     // Add spacer at the end for safe space above the input
     items.push({ type: 'spacer' });
 
     return items;
-  }, [
-    messages,
-    messageGroups,
-    discussion?.direction,
-    effectiveSetAt,
-    effectiveDuration,
-  ]);
+  }, [messages, messageGroups, discussion?.direction]);
 }
