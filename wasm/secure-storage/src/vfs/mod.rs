@@ -6,6 +6,6 @@ pub mod encrypted_vfs;
 pub mod opfs_wal_storage;
 
 #[cfg(feature = "native")]
-pub mod fs_wal_storage;
+pub mod redb_storage;
 #[cfg(feature = "native")]
 pub mod native_vfs;

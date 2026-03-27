@@ -18,6 +18,39 @@ import { drizzle, type SqliteRemoteDatabase } from 'drizzle-orm/sqlite-proxy';
 import * as schema from './schema/index.js';
 import { runMigrations } from './migrate.js';
 import { execStatements } from './exec-utils.js';
+import type { SecureStorageNativePlugin } from './secure-storage-native.js';
+
+// Lazy-loaded Capacitor references. These are only resolved when
+// `secureStorage` is used on a native platform, so Node.js tests
+// (which use `type: 'memory'`) never trigger the import.
+let _nativePlugin: SecureStorageNativePlugin | null = null;
+
+/** Load the native plugin module (async, first call only). */
+async function ensureNativePlugin(): Promise<void> {
+  if (!_nativePlugin) {
+    const { SecureStorageNative } = await import('./secure-storage-native.js');
+    _nativePlugin = SecureStorageNative;
+  }
+}
+
+/**
+ * Get the native plugin (sync). Must call ensureNativePlugin() first.
+ *
+ * IMPORTANT: Never `await` this return value directly — Capacitor plugin
+ * proxies intercept `.then()` which triggers a native method call error.
+ */
+function getNativePlugin(): SecureStorageNativePlugin {
+  return _nativePlugin!;
+}
+
+async function isNativePlatform(): Promise<boolean> {
+  try {
+    const { Capacitor } = await import('@capacitor/core');
+    return Capacitor.isNativePlatform();
+  } catch {
+    return false;
+  }
+}
 
 export type GossipDatabase = SqliteRemoteDatabase<typeof schema>;
 
@@ -55,6 +88,7 @@ interface DbState {
   sqlite3: ReturnType<typeof SQLite.Factory> | null;
   dbHandle: number | null;
   useWorker: boolean;
+  useNativePlugin: boolean;
   isSecureStorage: boolean;
   needsUnlock: boolean;
   drizzleDb: GossipDatabase | null;
@@ -71,6 +105,7 @@ function createDefaultState(): DbState {
     sqlite3: null,
     dbHandle: null,
     useWorker: false,
+    useNativePlugin: false,
     isSecureStorage: false,
     needsUnlock: false,
     drizzleDb: null,
@@ -191,6 +226,23 @@ export class DatabaseConnection {
     sql: string,
     params: unknown[] = []
   ): Promise<unknown[][]> {
+    if (this.state.useNativePlugin) {
+      const plugin = getNativePlugin();
+      // Convert Uint8Array params to plain number[] for Capacitor bridge.
+      // Capacitor serializes Uint8Array as {"0":119,"1":211,...} (JSON object)
+      // instead of a proper array, which breaks blob storage.
+      const safeParams = params.map(p =>
+        p instanceof Uint8Array ? Array.from(p) : p
+      );
+      const t0 = performance.now();
+      const result = await plugin.execSql({ sql, params: safeParams });
+      const dt = (performance.now() - t0) | 0;
+      if (dt > 50) {
+        console.log(`[NativePerf] execSql(${dt}ms): ${sql.slice(0, 60)}...`);
+      }
+      this.state.lastInsertRowIdCache = result.lastInsertRowId;
+      return result.rows;
+    }
     if (this.state.useWorker) {
       const result = await this.postToWorker({ type: 'exec', sql, params });
       this.state.lastInsertRowIdCache = result.lastInsertRowId;
@@ -298,33 +350,62 @@ export class DatabaseConnection {
       }
 
       case 'secureStorage': {
-        // Secure storage defers SQLite open until allocate/unlock.
-        // Only init the WASM module and bordercrypt state here.
-        this.state.worker = new Worker(
-          new URL('./secure-storage-worker.ts', import.meta.url),
-          { type: 'module' }
-        );
-        this.state.worker.onmessage = this.handleWorkerMessage;
-        this.state.useWorker = true;
-
-        try {
-          const initResult = await this.postToWorker({
-            type: 'init',
+        if (await isNativePlatform()) {
+          // Native (iOS/Android): use Capacitor plugin → compiled Rust.
+          // No worker needed — calls bridge directly to native code.
+          await ensureNativePlugin();
+          const plugin = getNativePlugin();
+          const tInit = performance.now();
+          await plugin.initSecureStorage({
+            path: 'secure-storage',
             domain: storage.domain,
-            backend: storage.backend,
-            wasmUrl: storage.wasmUrl,
           });
-          if (initResult?.needsUnlock) {
-            this.state.needsUnlock = true;
+          console.log(
+            `[NativePerf] initSecureStorage: ${(performance.now() - tInit) | 0}ms`
+          );
+          this.state.useNativePlugin = true;
+
+          const { unlocked } = await plugin.isUnlocked();
+          if (unlocked) {
+            this.state.needsUnlock = false;
+          } else {
+            // Idempotent: provisions if fresh, no-op if keypairs exist.
+            const tProv = performance.now();
+            const { fresh } = await plugin.provisionStorage();
+            console.log(
+              `[NativePerf] provisionStorage: ${(performance.now() - tProv) | 0}ms, fresh=${fresh}`
+            );
+
+            this.state.needsUnlock = !fresh;
           }
-        } catch (err) {
-          if (this.state.worker) {
-            this.state.worker.terminate();
-            this.state.worker = null;
+        } else {
+          // Web: use WASM worker (existing path).
+          this.state.worker = new Worker(
+            new URL('./secure-storage-worker.ts', import.meta.url),
+            { type: 'module' }
+          );
+          this.state.worker.onmessage = this.handleWorkerMessage;
+          this.state.useWorker = true;
+
+          try {
+            const initResult = await this.postToWorker({
+              type: 'init',
+              domain: storage.domain,
+              backend: storage.backend,
+              wasmUrl: storage.wasmUrl,
+            });
+            if (initResult?.needsUnlock) {
+              this.state.needsUnlock = true;
+            }
+          } catch (err) {
+            if (this.state.worker) {
+              this.state.worker.terminate();
+              this.state.worker = null;
+            }
+            this.state.useWorker = false;
+            this.state.pending.clear();
+            throw err;
           }
-          this.state.useWorker = false;
-          this.state.pending.clear();
-          throw err;
         }
         this.state.isSecureStorage = true;
         // Don't run migrations or create drizzle yet — need unlock first.
@@ -343,7 +424,7 @@ export class DatabaseConnection {
   // ─── Public methods ────────────────────────────────────────────
 
   async getLastInsertRowId(): Promise<number> {
-    if (this.state.useWorker) {
+    if (this.state.useNativePlugin || this.state.useWorker) {
       return this.state.lastInsertRowIdCache;
     }
     const rows = await this.execRaw('SELECT last_insert_rowid()');
@@ -375,7 +456,10 @@ export class DatabaseConnection {
   }
 
   async close(): Promise<void> {
-    if (this.state.useWorker && this.state.worker) {
+    if (this.state.useNativePlugin) {
+      const plugin = getNativePlugin();
+      await plugin.close();
+    } else if (this.state.useWorker && this.state.worker) {
       await this.postToWorker({ type: 'close' });
       this.state.worker.terminate();
     } else if (this.state.dbHandle !== null && this.state.sqlite3) {
@@ -401,6 +485,11 @@ export class DatabaseConnection {
 
   /** Provision all 5 session slots (secure storage only). */
   async secureStorageProvision(): Promise<void> {
+    if (this.state.useNativePlugin) {
+      const plugin = getNativePlugin();
+      await plugin.provisionStorage();
+      return;
+    }
     await this.postToWorker({ type: 'provision' });
   }
 
@@ -411,11 +500,23 @@ export class DatabaseConnection {
     _forceInit = false
   ): Promise<void> {
     const pwBytes = new TextEncoder().encode(password);
-    await this.postToWorker({
-      type: 'allocate',
-      slot,
-      password: Array.from(pwBytes),
-    });
+    if (this.state.useNativePlugin) {
+      const plugin = getNativePlugin();
+      const t0 = performance.now();
+      await plugin.allocateSession({
+        slot,
+        password: Array.from(pwBytes),
+      });
+      console.log(
+        `[NativePerf] allocateSession: ${(performance.now() - t0) | 0}ms`
+      );
+    } else {
+      await this.postToWorker({
+        type: 'allocate',
+        slot,
+        password: Array.from(pwBytes),
+      });
+    }
     pwBytes.fill(0);
     this.state.needsUnlock = false;
     await this.finalize();
@@ -424,12 +525,26 @@ export class DatabaseConnection {
   /** Unlock a session by password, open DB, run migrations. Returns false if wrong password. */
   async secureStorageUnlock(password: string): Promise<boolean> {
     const pwBytes = new TextEncoder().encode(password);
-    const result = await this.postToWorker({
-      type: 'unlock',
-      password: Array.from(pwBytes),
-    });
+    let ok: boolean;
+    if (this.state.useNativePlugin) {
+      const plugin = getNativePlugin();
+      const t0 = performance.now();
+      const result = await plugin.unlockSession({
+        password: Array.from(pwBytes),
+      });
+      console.log(
+        `[NativePerf] unlockSession: ${(performance.now() - t0) | 0}ms, unlocked=${result.unlocked}`
+      );
+      ok = result.unlocked;
+    } else {
+      const result = await this.postToWorker({
+        type: 'unlock',
+        password: Array.from(pwBytes),
+      });
+      ok = result.ok;
+    }
     pwBytes.fill(0);
-    if (!result.ok) return false;
+    if (!ok) return false;
     this.state.needsUnlock = false;
     await this.finalize();
     return true;
@@ -437,18 +552,33 @@ export class DatabaseConnection {
 
   /** Lock the session: flush, close DB, zeroize keys. */
   async secureStorageLock(): Promise<void> {
-    await this.postToWorker({ type: 'lock' });
+    if (this.state.useNativePlugin) {
+      const plugin = getNativePlugin();
+      await plugin.lockSession();
+    } else {
+      await this.postToWorker({ type: 'lock' });
+    }
     this.state.drizzleDb = null;
     this.state.needsUnlock = true;
   }
 
   /** Run one round of cover traffic (secure storage only). */
   async secureStorageCoverTick(): Promise<void> {
+    if (this.state.useNativePlugin) {
+      const plugin = getNativePlugin();
+      await plugin.coverTrafficTick();
+      return;
+    }
     await this.postToWorker({ type: 'cover' });
   }
 
   /** Explicit flush to backing store (secure storage only). */
   async secureStorageFlush(): Promise<void> {
+    if (this.state.useNativePlugin) {
+      const plugin = getNativePlugin();
+      await plugin.flush();
+      return;
+    }
     await this.postToWorker({ type: 'flush' });
   }
 

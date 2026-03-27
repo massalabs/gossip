@@ -1,4 +1,4 @@
-//! Encrypted VFS for native (non-WASM) targets, backed by `FsWalStorage`.
+//! Encrypted VFS for native (non-WASM) targets, backed by `RedbStorage`.
 //!
 //! Port of `encrypted_vfs.rs` (WASM) for `rusqlite::ffi`. SQLite pages are
 //! encrypted/decrypted transparently using `write_session_data` /
@@ -10,7 +10,7 @@ use std::ffi::{CStr, CString};
 use std::mem::size_of;
 use std::os::raw::{c_char, c_int, c_void};
 use std::path::Path;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Mutex, Once, OnceLock};
 
 use rusqlite::ffi::{
     sqlite3_file, sqlite3_io_methods, sqlite3_vfs, sqlite3_vfs_find, sqlite3_vfs_register,
@@ -21,17 +21,28 @@ use crate::error::{Result, SecureStorageError};
 use crate::types::SessionIndex;
 use crate::unlock::UnlockedSession;
 
-use super::fs_wal_storage::FsWalStorage;
+use super::redb_storage::RedbStorage;
 
 /// VFS name used for registration with SQLite.
 pub const VFS_NAME: &str = "secure-storage-enc-native";
 
 // ── State ────────────────────────────────────────────────────────────
 
+/// Buffered plaintext write (offset + data), applied at x_sync.
+struct PendingWrite {
+    offset: u64,
+    data: Vec<u8>,
+}
+
 struct VfsState {
-    backend: FsWalStorage,
+    backend: RedbStorage,
     domain: String,
     session: Option<UnlockedSession>,
+    /// Plaintext write buffer. Writes accumulate here during a transaction.
+    /// At x_sync, we determine dirty blocks, encrypt once per block, and commit.
+    pending_writes: Vec<PendingWrite>,
+    /// Tracks the logical file size including pending writes.
+    pending_file_size: u64,
 }
 
 static STATE: OnceLock<Mutex<Option<VfsState>>> = OnceLock::new();
@@ -87,20 +98,24 @@ fn io_methods() -> &'static sqlite3_io_methods {
 
 /// Create state with filesystem + WAL backend.
 pub fn init_native(path: &str, domain: &str) -> Result<()> {
-    let storage = FsWalStorage::open(Path::new(path))?;
+    let storage = RedbStorage::open(Path::new(path))?;
     let mutex = state_mutex();
     let mut guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
     *guard = Some(VfsState {
         backend: storage,
         domain: domain.to_string(),
         session: None,
+        pending_writes: Vec::new(),
+        pending_file_size: 0,
     });
     Ok(())
 }
 
-/// Register the encrypted VFS with SQLite (non-default).
+static REGISTER_VFS: Once = Once::new();
+
+/// Register the encrypted VFS with SQLite (non-default). Idempotent.
 pub fn register() -> Result<()> {
-    unsafe {
+    REGISTER_VFS.call_once(|| unsafe {
         let default = sqlite3_vfs_find(std::ptr::null());
         assert!(!default.is_null(), "default VFS not found");
 
@@ -118,12 +133,12 @@ pub fn register() -> Result<()> {
         let ptr = Box::into_raw(Box::new(vfs));
         let rc = sqlite3_vfs_register(ptr, 0);
         assert_eq!(rc, SQLITE_OK as c_int, "encrypted VFS registration failed");
-    }
+    });
     Ok(())
 }
 
-/// Provision all 5 session slots.
-pub fn provision() -> Result<()> {
+/// Provision all 5 session slots. Returns true if fresh, false if already provisioned.
+pub fn provision() -> Result<bool> {
     let mutex = state_mutex();
     let mut guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
     let st = guard
@@ -141,6 +156,8 @@ pub fn allocate(slot: u8, password: &[u8]) -> Result<()> {
         .ok_or_else(|| SecureStorageError::Storage("not initialized".into()))?;
     let idx = SessionIndex::new(slot)?;
     let session = crate::allocate_session(&mut st.backend, &st.domain, idx, password)?;
+    st.pending_writes.clear();
+    st.pending_file_size = session.total_data_length;
     st.session = Some(session);
     Ok(())
 }
@@ -154,6 +171,8 @@ pub fn unlock(password: &[u8]) -> Result<bool> {
         .ok_or_else(|| SecureStorageError::Storage("not initialized".into()))?;
     match crate::unlock_session(&st.backend, &st.domain, password) {
         Ok(session) => {
+            st.pending_writes.clear();
+            st.pending_file_size = session.total_data_length;
             st.session = Some(session);
             Ok(true)
         }
@@ -167,8 +186,20 @@ pub fn lock() {
     if let Ok(mut guard) = state_mutex().lock() {
         if let Some(st) = guard.as_mut() {
             st.session = None;
+            st.pending_writes.clear();
+            st.pending_file_size = 0;
         }
     }
+}
+
+/// Check whether a session is currently unlocked.
+pub fn is_unlocked() -> Result<bool> {
+    let mutex = state_mutex();
+    let guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
+    let st = guard
+        .as_ref()
+        .ok_or_else(|| SecureStorageError::Storage("not initialized".into()))?;
+    Ok(st.session.is_some())
 }
 
 /// Run one round of cover traffic.
@@ -181,14 +212,14 @@ pub fn cover_tick() -> Result<()> {
     crate::cover_traffic_tick(&mut st.backend, &st.domain)
 }
 
-/// Flush encrypted data to backing store.
+/// Flush pending plaintext writes + encrypted blocks to backing store.
 pub fn flush() -> Result<()> {
     let mutex = state_mutex();
     let mut guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
     let st = guard
         .as_mut()
         .ok_or_else(|| SecureStorageError::Storage("not initialized".into()))?;
-    st.backend.commit_all()
+    flush_pending_writes(st)
 }
 
 /// Open a rusqlite connection using the registered encrypted VFS.
@@ -218,6 +249,99 @@ pub(crate) fn reset_state() {
     }
     if let Ok(mut guard) = aux().lock() {
         guard.clear();
+    }
+}
+
+/// Drain all pending writes through the encryption layer and commit to redb.
+///
+/// Merges all pending writes into a single contiguous buffer so they are
+/// encrypted in one batch (one parallel round of PQ operations), instead of
+/// N sequential rounds. On error, writes are restored for retry.
+fn flush_pending_writes(st: &mut VfsState) -> Result<()> {
+    if st.pending_writes.is_empty() {
+        return Ok(());
+    }
+    // Take writes out — restored on error so they can be retried.
+    let writes = std::mem::take(&mut st.pending_writes);
+    let file_size = st.pending_file_size;
+
+    let result = flush_writes_inner(st, &writes, file_size);
+    if result.is_err() {
+        st.pending_writes = writes;
+    }
+    result
+}
+
+/// Inner flush logic, separated so the caller can restore writes on error.
+fn flush_writes_inner(
+    st: &mut VfsState,
+    writes: &[PendingWrite],
+    file_size: u64,
+) -> Result<()> {
+    let (backend, domain, session) = match st.session.as_mut() {
+        Some(session) => (&mut st.backend, st.domain.as_str(), session),
+        None => return Err(SecureStorageError::Storage("no session".into())),
+    };
+
+    // Find the range spanned by all pending writes.
+    let min_off = writes.iter().map(|pw| pw.offset).min().unwrap();
+    let max_end = writes
+        .iter()
+        .map(|pw| pw.offset + pw.data.len() as u64)
+        .max()
+        .unwrap();
+    let span = (max_end - min_off) as usize;
+
+    if writes.len() == 1 {
+        crate::write_session_data(backend, domain, session, writes[0].offset, &writes[0].data)?;
+    } else {
+        // Merge: read existing data for the span, overlay all writes, flush once.
+        let mut buf = vec![0u8; span];
+
+        // Pre-fill from existing encrypted data (read-through).
+        if session.total_data_length > min_off {
+            let readable = (session.total_data_length - min_off).min(span as u64) as usize;
+            if let Ok(existing) = crate::read_session_data(
+                backend,
+                domain,
+                session,
+                min_off,
+                readable,
+            ) {
+                buf[..readable].copy_from_slice(&existing);
+            }
+        }
+
+        // Apply all pending writes as overlay.
+        for pw in writes {
+            let dst_start = (pw.offset - min_off) as usize;
+            buf[dst_start..dst_start + pw.data.len()].copy_from_slice(&pw.data);
+        }
+
+        // Single write_session_data call → one batch of PQ operations.
+        crate::write_session_data(backend, domain, session, min_off, &buf)?;
+    }
+
+    if file_size > session.total_data_length {
+        session.total_data_length = file_size;
+    }
+    st.backend.commit()
+}
+
+/// Apply pending plaintext writes as an overlay on a read buffer.
+/// `dst` covers the byte range `[read_off, read_off + dst.len())`.
+fn apply_pending_overlay(pending: &[PendingWrite], read_off: u64, dst: &mut [u8]) {
+    let read_end = read_off + dst.len() as u64;
+    for pw in pending {
+        let pw_end = pw.offset + pw.data.len() as u64;
+        // Check overlap.
+        if pw.offset < read_end && pw_end > read_off {
+            let src_start = read_off.saturating_sub(pw.offset) as usize;
+            let dst_start = pw.offset.saturating_sub(read_off) as usize;
+            let len = (pw_end.min(read_end) - pw.offset.max(read_off)) as usize;
+            dst[dst_start..dst_start + len]
+                .copy_from_slice(&pw.data[src_start..src_start + len]);
+        }
     }
 }
 
@@ -298,28 +422,48 @@ unsafe extern "C" fn x_read(
                     return SQLITE_IOERR_SHORT_READ as c_int;
                 }
             };
-            if off + n as u64 > session.total_data_length {
-                let avail = session.total_data_length.saturating_sub(off) as usize;
+            // Use logical size including pending (unflushed) writes.
+            let logical_size = st.pending_file_size.max(session.total_data_length);
+            if off + n as u64 > logical_size {
+                let avail = logical_size.saturating_sub(off) as usize;
                 if avail > 0 {
-                    if let Ok(data) =
-                        crate::read_session_data(&st.backend, &st.domain, session, off, avail)
-                    {
-                        dst[..avail].copy_from_slice(&data);
+                    // Read whatever is persisted.
+                    let persisted = session.total_data_length.saturating_sub(off) as usize;
+                    let from_storage = avail.min(persisted);
+                    if from_storage > 0 {
+                        if let Ok(data) =
+                            crate::read_session_data(&st.backend, &st.domain, session, off, from_storage)
+                        {
+                            dst[..from_storage].copy_from_slice(&data);
+                        }
                     }
                 }
                 dst[avail..].fill(0);
+                // Overlay buffered writes that haven't been flushed yet.
+                apply_pending_overlay(&st.pending_writes, off, dst);
                 return SQLITE_IOERR_SHORT_READ as c_int;
             }
-            match crate::read_session_data(&st.backend, &st.domain, session, off, n) {
-                Ok(data) => {
-                    dst.copy_from_slice(&data);
-                    SQLITE_OK as c_int
+            // Read persisted data, clamped to what's actually encrypted.
+            let persisted_avail = session.total_data_length.saturating_sub(off) as usize;
+            if persisted_avail >= n {
+                match crate::read_session_data(&st.backend, &st.domain, session, off, n) {
+                    Ok(data) => dst.copy_from_slice(&data),
+                    Err(_) => dst.fill(0),
                 }
-                Err(_) => {
-                    dst.fill(0);
-                    SQLITE_IOERR as c_int
+            } else {
+                // Partial persisted data + zero fill for the rest.
+                if persisted_avail > 0 {
+                    if let Ok(data) =
+                        crate::read_session_data(&st.backend, &st.domain, session, off, persisted_avail)
+                    {
+                        dst[..persisted_avail].copy_from_slice(&data);
+                    }
                 }
+                dst[persisted_avail..].fill(0);
             }
+            // Overlay buffered writes on top of persisted data.
+            apply_pending_overlay(&st.pending_writes, off, dst);
+            SQLITE_OK as c_int
         } else {
             let a = aux().lock().unwrap();
             let fd = &a[f.aux_id as usize];
@@ -359,14 +503,20 @@ unsafe extern "C" fn x_write(
                 Some(st) => st,
                 None => return SQLITE_IOERR as c_int,
             };
-            let (backend, domain, session) = match st.session.as_mut() {
-                Some(session) => (&mut st.backend, st.domain.as_str(), session),
-                None => return SQLITE_IOERR as c_int,
-            };
-            match crate::write_session_data(backend, domain, session, offset as u64, src) {
-                Ok(()) => SQLITE_OK as c_int,
-                Err(_) => SQLITE_IOERR as c_int,
+            if st.session.is_none() {
+                return SQLITE_IOERR as c_int;
             }
+            // Buffer the plaintext write — encryption deferred to x_sync.
+            let write_off = offset as u64;
+            let write_end = write_off + n as u64;
+            if write_end > st.pending_file_size {
+                st.pending_file_size = write_end;
+            }
+            st.pending_writes.push(PendingWrite {
+                offset: write_off,
+                data: src.to_vec(),
+            });
+            SQLITE_OK as c_int
         } else {
             let mut a = aux().lock().unwrap();
             let fd = &mut a[f.aux_id as usize];
@@ -386,6 +536,7 @@ unsafe extern "C" fn x_truncate(file: *mut sqlite3_file, size: i64) -> c_int {
     if f.kind == KIND_MAIN {
         let mut guard = state_mutex().lock().unwrap();
         if let Some(st) = guard.as_mut() {
+            st.pending_file_size = size as u64;
             if let Some(session) = st.session.as_mut() {
                 session.total_data_length = size as u64;
             }
@@ -398,17 +549,13 @@ unsafe extern "C" fn x_truncate(file: *mut sqlite3_file, size: i64) -> c_int {
 }
 
 unsafe extern "C" fn x_sync(_file: *mut sqlite3_file, _flags: c_int) -> c_int {
-    // Three-phase WAL commit on the active session.
     let mut guard = state_mutex().lock().unwrap();
     let st = match guard.as_mut() {
         Some(st) => st,
         None => return SQLITE_OK as c_int,
     };
-    if let Some(session) = &st.session {
-        let idx = session.session_index;
-        if st.backend.commit(idx).is_err() {
-            return SQLITE_IOERR as c_int;
-        }
+    if let Err(_) = flush_pending_writes(st) {
+        return SQLITE_IOERR as c_int;
     }
     SQLITE_OK as c_int
 }
@@ -420,8 +567,10 @@ unsafe extern "C" fn x_file_size(file: *mut sqlite3_file, size: *mut i64) -> c_i
             let guard = state_mutex().lock().unwrap();
             *size = guard
                 .as_ref()
-                .and_then(|st| st.session.as_ref())
-                .map_or(0, |session| session.total_data_length as i64);
+                .map_or(0, |st| {
+                    let persisted = st.session.as_ref().map_or(0, |s| s.total_data_length);
+                    persisted.max(st.pending_file_size) as i64
+                });
         } else {
             let a = aux().lock().unwrap();
             *size = a[f.aux_id as usize].len() as i64;
@@ -495,10 +644,7 @@ unsafe extern "C" fn x_device_characteristics(_f: *mut sqlite3_file) -> c_int {
 mod tests {
     use super::*;
     use crate::run_with_stack;
-    use std::sync::Once;
-
-    /// Register the VFS exactly once per process.
-    static REGISTER_VFS: Once = Once::new();
+    use crate::storage::BlockStorage;
 
     /// Serialise tests that share global VFS state.
     static TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -508,9 +654,8 @@ mod tests {
     }
 
     fn ensure_registered() {
-        REGISTER_VFS.call_once(|| {
-            register().unwrap();
-        });
+        // register() is idempotent (uses std::sync::Once internally)
+        register().unwrap();
     }
 
     /// Full setup: init, register VFS, provision, allocate, open DB.
@@ -644,6 +789,409 @@ mod tests {
                     .query_row("SELECT val FROM t WHERE id = 1", [], |row| row.get(0))
                     .unwrap();
                 assert_eq!(val, "committed");
+                drop(conn);
+            }
+        });
+    }
+
+    #[test]
+    fn test_native_vfs_multiple_lock_unlock_cycles() {
+        run_with_stack(|| {
+            let _guard = test_mutex().lock().unwrap();
+            reset_state();
+            ensure_registered();
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().to_str().unwrap().to_string();
+
+            // Initial write.
+            {
+                init_native(&path, "test").unwrap();
+                provision().unwrap();
+                allocate(0, b"pw").unwrap();
+                let conn = open_db().unwrap();
+                conn.execute_batch(
+                    "CREATE TABLE t (id INTEGER PRIMARY KEY, val TEXT);
+                     INSERT INTO t VALUES (1, 'cycle_data');",
+                )
+                .unwrap();
+                drop(conn);
+                flush().unwrap();
+                lock();
+            }
+
+            // Repeat lock/unlock 3 times.
+            for i in 0..3 {
+                reset_state();
+                init_native(&path, "test").unwrap();
+                assert!(unlock(b"pw").unwrap(), "unlock failed on cycle {i}");
+                let conn = open_db().unwrap();
+                let val: String = conn
+                    .query_row("SELECT val FROM t WHERE id = 1", [], |row| row.get(0))
+                    .unwrap();
+                assert_eq!(val, "cycle_data", "data mismatch on cycle {i}");
+                drop(conn);
+                flush().unwrap();
+                lock();
+            }
+        });
+    }
+
+    #[test]
+    fn test_native_vfs_cover_traffic_preserves_data() {
+        run_with_stack(|| {
+            let _guard = test_mutex().lock().unwrap();
+            reset_state();
+            ensure_registered();
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().to_str().unwrap().to_string();
+
+            // Write data.
+            init_native(&path, "test").unwrap();
+            provision().unwrap();
+            allocate(0, b"pw").unwrap();
+            let conn = open_db().unwrap();
+            conn.execute_batch(
+                "CREATE TABLE t (id INTEGER PRIMARY KEY, val TEXT);
+                 INSERT INTO t VALUES (1, 'cover_ok');",
+            )
+            .unwrap();
+            drop(conn);
+            flush().unwrap();
+
+            // Run cover traffic 5 times.
+            for _ in 0..5 {
+                cover_tick().unwrap();
+            }
+
+            flush().unwrap();
+            lock();
+
+            // Reopen and verify.
+            reset_state();
+            init_native(&path, "test").unwrap();
+            assert!(unlock(b"pw").unwrap());
+            let conn = open_db().unwrap();
+            let val: String = conn
+                .query_row("SELECT val FROM t WHERE id = 1", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(val, "cover_ok");
+            drop(conn);
+        });
+    }
+
+    #[test]
+    fn test_native_vfs_provision_idempotent() {
+        run_with_stack(|| {
+            let _guard = test_mutex().lock().unwrap();
+            reset_state();
+            ensure_registered();
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().to_str().unwrap().to_string();
+
+            // First provision + write data.
+            {
+                init_native(&path, "test").unwrap();
+                let fresh = provision().unwrap();
+                assert!(fresh, "first provision should return true (fresh)");
+                allocate(0, b"pw").unwrap();
+                let conn = open_db().unwrap();
+                conn.execute_batch(
+                    "CREATE TABLE t (id INTEGER PRIMARY KEY, val TEXT);
+                     INSERT INTO t VALUES (1, 'idempotent');",
+                )
+                .unwrap();
+                drop(conn);
+                flush().unwrap();
+                lock();
+            }
+
+            // Re-init and provision again — should be no-op.
+            {
+                reset_state();
+                init_native(&path, "test").unwrap();
+                let fresh = provision().unwrap();
+                assert!(!fresh, "second provision should return false (already provisioned)");
+                assert!(unlock(b"pw").unwrap());
+                let conn = open_db().unwrap();
+                let val: String = conn
+                    .query_row("SELECT val FROM t WHERE id = 1", [], |row| row.get(0))
+                    .unwrap();
+                assert_eq!(val, "idempotent");
+                drop(conn);
+            }
+        });
+    }
+
+    #[test]
+    fn test_native_vfs_large_data_persistence() {
+        run_with_stack(|| {
+            let _guard = test_mutex().lock().unwrap();
+            reset_state();
+            ensure_registered();
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().to_str().unwrap().to_string();
+
+            // Write 20 rows with 1KB BLOBs.
+            {
+                init_native(&path, "test").unwrap();
+                provision().unwrap();
+                allocate(0, b"pw").unwrap();
+                let conn = open_db().unwrap();
+                conn.execute_batch("CREATE TABLE blobs (id INTEGER PRIMARY KEY, data BLOB);")
+                    .unwrap();
+                for i in 0..20 {
+                    let blob = vec![(i & 0xFF) as u8; 1024];
+                    conn.execute("INSERT INTO blobs VALUES (?1, ?2)", rusqlite::params![i, blob])
+                        .unwrap();
+                }
+                drop(conn);
+                flush().unwrap();
+                lock();
+            }
+
+            // Reopen and verify all 20 rows.
+            {
+                reset_state();
+                init_native(&path, "test").unwrap();
+                assert!(unlock(b"pw").unwrap());
+                let conn = open_db().unwrap();
+                let count: i64 = conn
+                    .query_row("SELECT COUNT(*) FROM blobs", [], |row| row.get(0))
+                    .unwrap();
+                assert_eq!(count, 20);
+
+                for i in 0..20_i64 {
+                    let blob: Vec<u8> = conn
+                        .query_row(
+                            "SELECT data FROM blobs WHERE id = ?1",
+                            rusqlite::params![i],
+                            |row| row.get(0),
+                        )
+                        .unwrap();
+                    assert_eq!(blob.len(), 1024, "row {i}: wrong blob length");
+                    assert!(
+                        blob.iter().all(|&b| b == (i & 0xFF) as u8),
+                        "row {i}: blob content mismatch"
+                    );
+                }
+                drop(conn);
+            }
+        });
+    }
+
+    /// Find the exact row count where persistence breaks.
+    #[test]
+    fn test_native_vfs_persistence_threshold() {
+        run_with_stack(|| {
+            let _guard = test_mutex().lock().unwrap();
+
+            for num_rows in [10, 50, 100] {
+                reset_state();
+                ensure_registered();
+                let dir = tempfile::tempdir().unwrap();
+                let path = dir.path().to_str().unwrap().to_string();
+
+                // Write
+                {
+                    init_native(&path, "test").unwrap();
+                    provision().unwrap();
+                    allocate(0, b"pw").unwrap();
+                    let conn = open_db().unwrap();
+                    conn.execute_batch(
+                        "CREATE TABLE t (id INTEGER PRIMARY KEY, data BLOB)",
+                    )
+                    .unwrap();
+                    for i in 0..num_rows {
+                        let blob = vec![0xABu8; 1024];
+                        conn.execute(
+                            "INSERT INTO t VALUES (?1, ?2)",
+                            rusqlite::params![i, blob],
+                        )
+                        .unwrap();
+                    }
+                    // Check file_size as seen by SQLite
+                    let page_count: i64 = conn
+                        .query_row("PRAGMA page_count", [], |r| r.get(0))
+                        .unwrap();
+                    let page_size: i64 = conn
+                        .query_row("PRAGMA page_size", [], |r| r.get(0))
+                        .unwrap();
+                    eprintln!(
+                        "rows={num_rows}: page_count={page_count}, page_size={page_size}, \
+                         db_size={}KB, blocks_needed={}",
+                        page_count * page_size / 1024,
+                        (8 + page_count * page_size + 15839) as u64 / 15840
+                    );
+                    drop(conn);
+                    flush().unwrap();
+                    lock();
+                }
+
+                // Reopen and verify
+                {
+                    reset_state();
+                    init_native(&path, "test").unwrap();
+
+                    // Check what's in redb before unlock
+                    {
+                        let guard = state_mutex().lock().unwrap();
+                        let st = guard.as_ref().unwrap();
+                        for s in 0..5u8 {
+                            let si = crate::types::SessionIndex::new(s).unwrap();
+                            let bc = st.backend.block_count(si).unwrap();
+                            eprintln!("  redb session {s}: {bc} blocks");
+                        }
+                    }
+
+                    match unlock(b"pw") {
+                        Ok(true) => {
+                            // Check total_data_length
+                            {
+                                let guard = state_mutex().lock().unwrap();
+                                let st = guard.as_ref().unwrap();
+                                let sess = st.session.as_ref().unwrap();
+                                eprintln!(
+                                    "  unlocked: session={}, total_data_length={}",
+                                    sess.session_index.as_u8(),
+                                    sess.total_data_length
+                                );
+                            }
+
+                            let conn = open_db().unwrap();
+                            // Try a simple integrity check
+                            match conn.query_row(
+                                "PRAGMA integrity_check",
+                                [],
+                                |r| r.get::<_, String>(0),
+                            ) {
+                                Ok(s) => eprintln!("  integrity_check: {s}"),
+                                Err(e) => eprintln!("  integrity_check FAILED: {e}"),
+                            }
+                            match conn.query_row(
+                                "SELECT COUNT(*) FROM t",
+                                [],
+                                |r| r.get::<_, i64>(0),
+                            ) {
+                                Ok(count) => {
+                                    eprintln!("  → reopen OK, count={count}");
+                                    assert_eq!(count, num_rows as i64);
+                                }
+                                Err(e) => {
+                                    eprintln!("  → SELECT FAILED: {e}");
+                                    panic!("SELECT failed at {num_rows} rows: {e}");
+                                }
+                            }
+                            drop(conn);
+                        }
+                        Ok(false) => panic!("unlock returned false at {num_rows} rows"),
+                        Err(e) => panic!("unlock error at {num_rows} rows: {e}"),
+                    }
+                }
+            }
+        });
+    }
+
+    /// Benchmark: SQL INSERT through the full encrypted VFS + redb path.
+    ///
+    /// Run: cargo test --release --features native -p secureStorage bench_native_vfs -- --nocapture --test-threads=1
+    #[test]
+    #[ignore]
+    fn bench_native_vfs_sql_insert() {
+        run_with_stack(|| {
+            let _guard = test_mutex().lock().unwrap();
+            let (_dir, conn) = setup_native_vfs();
+
+            conn.execute_batch("CREATE TABLE t (id INTEGER PRIMARY KEY, val BLOB);")
+                .unwrap();
+
+            // Warm up (creates initial blocks)
+            conn.execute("INSERT INTO t VALUES (0, zeroblob(100))", [])
+                .unwrap();
+
+            // Bench individual INSERTs (100B)
+            const N: usize = 10;
+            let mut times = Vec::with_capacity(N);
+            for i in 1..=N {
+                let t = std::time::Instant::now();
+                conn.execute(
+                    "INSERT INTO t VALUES (?1, zeroblob(100))",
+                    [i as i64],
+                )
+                .unwrap();
+                times.push(t.elapsed().as_micros());
+            }
+            let avg = times.iter().sum::<u128>() / N as u128;
+            let min = *times.iter().min().unwrap();
+            let max = *times.iter().max().unwrap();
+
+            // Bench larger INSERT (4KB)
+            let big: Vec<u8> = vec![0xAB; 4096];
+            let t = std::time::Instant::now();
+            conn.execute(
+                "INSERT INTO t VALUES (?1, ?2)",
+                rusqlite::params![N as i64 + 1, big],
+            )
+            .unwrap();
+            let big_us = t.elapsed().as_micros();
+
+            drop(conn);
+
+            eprintln!();
+            eprintln!("=== Native VFS SQL INSERT (--release) ===");
+            eprintln!("  INSERT 100B blob (n={N}):");
+            eprintln!("    avg: {:>8} µs", avg);
+            eprintln!("    min: {:>8} µs", min);
+            eprintln!("    max: {:>8} µs", max);
+            for (i, t) in times.iter().enumerate() {
+                eprintln!("    [{:>2}]: {:>8} µs", i + 1, t);
+            }
+            eprintln!("  INSERT 4KB blob: {:>8} µs", big_us);
+            eprintln!();
+        });
+    }
+
+    #[test]
+    fn test_native_vfs_wrong_password_after_lock() {
+        run_with_stack(|| {
+            let _guard = test_mutex().lock().unwrap();
+            reset_state();
+            ensure_registered();
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().to_str().unwrap().to_string();
+
+            // Write data.
+            {
+                init_native(&path, "test").unwrap();
+                provision().unwrap();
+                allocate(0, b"pw").unwrap();
+                let conn = open_db().unwrap();
+                conn.execute_batch(
+                    "CREATE TABLE t (id INTEGER PRIMARY KEY, val TEXT);
+                     INSERT INTO t VALUES (1, 'secret');",
+                )
+                .unwrap();
+                drop(conn);
+                flush().unwrap();
+                lock();
+            }
+
+            // Wrong password should fail.
+            {
+                reset_state();
+                init_native(&path, "test").unwrap();
+                let ok = unlock(b"wrong").unwrap();
+                assert!(!ok, "wrong password should return false");
+            }
+
+            // Correct password should succeed.
+            {
+                let ok = unlock(b"pw").unwrap();
+                assert!(ok, "correct password should return true");
+                let conn = open_db().unwrap();
+                let val: String = conn
+                    .query_row("SELECT val FROM t WHERE id = 1", [], |row| row.get(0))
+                    .unwrap();
+                assert_eq!(val, "secret");
                 drop(conn);
             }
         });

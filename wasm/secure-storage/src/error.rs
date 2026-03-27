@@ -36,6 +36,9 @@ pub enum SecureStorageError {
 
     #[error("lock poisoned")]
     LockPoisoned,
+
+    #[error("worker thread panicked")]
+    ThreadPanic,
 }
 
 /// Convenience alias used throughout the crate.

@@ -1,4 +1,9 @@
 //! Write path: encrypt blocks with snapshot resistance and assemble session data.
+//!
+//! PQ crypto operations are parallelized on native targets via [`execute_pq_jobs`].
+//! On WASM (single-threaded), the same function runs sequentially.
+
+use std::collections::HashMap;
 
 use rand::RngCore;
 use rand::seq::SliceRandom;
@@ -17,13 +22,194 @@ use crate::storage::{BlockStorage, KeypairStorage};
 use crate::types::SessionIndex;
 use crate::unlock::UnlockedSession;
 
+// ── Parallel PQ dispatch ─────────────────────────────────────────────
+
+/// Thread stack size for PQ crypto threads (4 MiB).
+const PQ_THREAD_STACK: usize = 4 * 1024 * 1024;
+
+/// A single PQ crypto operation to execute.
+struct PqJob {
+    block_idx: u64,
+    session_idx: u8,
+    pk_bytes: Vec<u8>,
+    op: PqOpKind,
+}
+
+/// The kind of PQ operation: genuine encrypt or rerand/cover.
+enum PqOpKind {
+    Encrypt {
+        aead_sk: Zeroizing<[u8; crypto_aead::KEY_SIZE]>,
+        aad: String,
+        plaintext: [u8; PLAINTEXT_SIZE],
+    },
+    Rerand {
+        aad_root: String,
+        existing: Option<Box<[u8; BLOCK_SIZE]>>,
+    },
+}
+
+/// Execute a single PQ job, returning the ciphertext.
+fn run_pq_job(job: PqJob) -> (u64, u8, Vec<u8>) {
+    let ct = match job.op {
+        PqOpKind::Encrypt { aead_sk, aad, plaintext } => {
+            let pk = PqPublicKey::from_bytes(&job.pk_bytes).unwrap();
+            encrypt_block(&pk, &*aead_sk, &aad, &plaintext)
+        }
+        PqOpKind::Rerand { aad_root, existing } => {
+            let pk = PqPublicKey::from_bytes(&job.pk_bytes).unwrap();
+            match existing {
+                Some(ref block) => rerandomize_block(&pk, block),
+                None => create_cover_block(&pk, &aad_root),
+            }
+        }
+    };
+    (job.block_idx, job.session_idx, ct)
+}
+
+/// Execute PQ jobs in parallel (native) or sequentially (WASM).
+///
+/// Returns a map of `(block_idx, session_idx) → ciphertext` for O(1) lookup.
+/// On native targets, jobs are split across 2 worker threads while the calling
+/// thread also processes a share of the work.
+#[cfg(not(target_arch = "wasm32"))]
+fn execute_pq_jobs(mut jobs: Vec<PqJob>) -> Result<HashMap<(u64, u8), Vec<u8>>> {
+    if jobs.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    // Split into 3 roughly-equal chunks: 2 worker threads + main thread.
+    const EXECUTORS: usize = 3;
+    let chunk_size = (jobs.len() + EXECUTORS - 1) / EXECUTORS;
+    let cs = chunk_size.max(1);
+
+    // Peel off up to 2 chunks for worker threads.
+    let mut worker_chunks: Vec<Vec<PqJob>> = Vec::with_capacity(2);
+    for _ in 0..2 {
+        if jobs.is_empty() {
+            break;
+        }
+        let end = cs.min(jobs.len());
+        worker_chunks.push(jobs.drain(..end).collect());
+    }
+    // Remaining jobs run on the main thread.
+    let main_chunk = jobs;
+
+    // Spawn workers.
+    let mut handles = Vec::with_capacity(worker_chunks.len());
+    for chunk in worker_chunks {
+        let handle = std::thread::Builder::new()
+            .stack_size(PQ_THREAD_STACK)
+            .spawn(move || -> Vec<(u64, u8, Vec<u8>)> {
+                chunk.into_iter().map(run_pq_job).collect()
+            })
+            .map_err(|_| SecureStorageError::ThreadPanic)?;
+        handles.push(handle);
+    }
+
+    // Main thread processes its share concurrently.
+    let mut results = HashMap::with_capacity(main_chunk.len());
+    for (bi, si, ct) in main_chunk.into_iter().map(run_pq_job) {
+        results.insert((bi, si), ct);
+    }
+
+    // Join workers.
+    for h in handles {
+        let worker_results = h.join().map_err(|_| SecureStorageError::ThreadPanic)?;
+        for (bi, si, ct) in worker_results {
+            results.insert((bi, si), ct);
+        }
+    }
+
+    Ok(results)
+}
+
+/// Sequential fallback for WASM (single-threaded).
+#[cfg(target_arch = "wasm32")]
+fn execute_pq_jobs(jobs: Vec<PqJob>) -> Result<HashMap<(u64, u8), Vec<u8>>> {
+    let mut results = HashMap::with_capacity(jobs.len());
+    for (bi, si, ct) in jobs.into_iter().map(run_pq_job) {
+        results.insert((bi, si), ct);
+    }
+    Ok(results)
+}
+
+// ── Block-level encryption with snapshot resistance ──────────────────
+
+/// Build PQ jobs for encrypting one block across all sessions.
+///
+/// Pre-reads all PKs and existing blocks from storage, then returns
+/// the jobs ready for [`execute_pq_jobs`].
+fn build_block_jobs<S: BlockStorage + KeypairStorage>(
+    storage: &S,
+    domain: &str,
+    session: &UnlockedSession,
+    block_index: u64,
+    plaintext: &[u8; PLAINTEXT_SIZE],
+) -> Result<Vec<PqJob>> {
+    let target_idx = session.session_index.as_u8();
+    let (aead_sk, genuine_aad) = derive_block_aead_key(
+        domain,
+        session.session_version,
+        session.session_index,
+        session.root_aead_key.as_ref(),
+        block_index,
+    );
+
+    let mut jobs = Vec::with_capacity(SESSION_COUNT);
+    for i in 0..SESSION_COUNT as u8 {
+        let cur_session = SessionIndex::new(i).unwrap();
+        // Read version/pk for ALL sessions for timing uniformity (spec §11.2).
+        let (cur_version, cur_pk_bytes) = read_session_version_and_pk(storage, cur_session)?;
+        let _ = PqPublicKey::from_bytes(&cur_pk_bytes)?;
+
+        let op = if i == target_idx {
+            PqOpKind::Encrypt {
+                aead_sk: aead_sk.clone(),
+                aad: genuine_aad.clone(),
+                plaintext: *plaintext,
+            }
+        } else {
+            let mut aad_root = String::new();
+            domain::block_scope(&mut aad_root, domain, cur_version, cur_session, block_index);
+            PqOpKind::Rerand {
+                aad_root,
+                existing: storage.read_block(cur_session, block_index).ok(),
+            }
+        };
+        jobs.push(PqJob { block_idx: block_index, session_idx: i, pk_bytes: cur_pk_bytes, op });
+    }
+    Ok(jobs)
+}
+
+/// Write ciphertexts from a results map to storage in shuffled order.
+fn write_results_shuffled<S: BlockStorage>(
+    storage: &mut S,
+    block_index: u64,
+    results: &mut HashMap<(u64, u8), Vec<u8>>,
+) -> Result<()> {
+    let mut write_order: Vec<u8> = (0..SESSION_COUNT as u8).collect();
+    write_order.shuffle(&mut rand::rngs::OsRng);
+
+    for si in write_order {
+        let cur_session = SessionIndex::new(si).unwrap();
+        let ct = results
+            .remove(&(block_index, si))
+            .ok_or(SecureStorageError::CorruptedBlock)?;
+        let ct_arr: &[u8; BLOCK_SIZE] = ct
+            .as_slice()
+            .try_into()
+            .map_err(|_| SecureStorageError::CorruptedBlock)?;
+        storage.write_block(cur_session, block_index, ct_arr)?;
+        storage.fsync(cur_session)?;
+    }
+    Ok(())
+}
+
 /// Encrypt and write a single block with snapshot resistance.
 ///
 /// Writes the genuine ciphertext for the target session and
 /// rerandomizes (or covers) the same block index in all other sessions.
 /// Session update order is randomized to prevent timing correlation.
-///
-/// NOTE: This assumes `storage.write_block` is atomic at `BLOCK_SIZE` granularity.
 pub fn encrypt_session_data_block<S: BlockStorage + KeypairStorage>(
     storage: &mut S,
     domain: &str,
@@ -32,60 +218,39 @@ pub fn encrypt_session_data_block<S: BlockStorage + KeypairStorage>(
     plaintext: &[u8; PLAINTEXT_SIZE],
 ) -> Result<()> {
     if session.session_version != 0 {
-        return Err(SecureStorageError::UnsupportedVersion(
-            session.session_version,
-        ));
+        return Err(SecureStorageError::UnsupportedVersion(session.session_version));
+    }
+    let jobs = build_block_jobs(storage, domain, session, block_index, plaintext)?;
+    let mut results = execute_pq_jobs(jobs)?;
+    write_results_shuffled(storage, block_index, &mut results)
+}
+
+/// Encrypt multiple blocks in one parallel batch.
+///
+/// Collects all (block × session) PQ operations and dispatches them
+/// in a single parallel round for cross-block parallelism.
+fn encrypt_session_data_blocks_batch<S: BlockStorage + KeypairStorage>(
+    storage: &mut S,
+    domain: &str,
+    session: &UnlockedSession,
+    block_plaintexts: &[(u64, [u8; PLAINTEXT_SIZE])],
+) -> Result<()> {
+    if block_plaintexts.is_empty() {
+        return Ok(());
     }
 
-    let (aead_sk, aad_root) = derive_block_aead_key(
-        domain,
-        session.session_version,
-        session.session_index,
-        session.root_aead_key.as_ref(),
-        block_index,
-    );
-    let genuine_ct = encrypt_block(&session.pq_rerand_pk, &aead_sk, &aad_root, plaintext);
-
-    let mut indices: Vec<u8> = (0..SESSION_COUNT as u8).collect();
-    indices.shuffle(&mut rand::rngs::OsRng);
-
-    let mut cur_aad_root = String::new();
-    for i in indices {
-        let cur_session =
-            SessionIndex::new(i).expect(&format!("{i} >= SESSION_COUNT: {SESSION_COUNT}"));
-        // Read version/pk for ALL sessions (including target) for timing uniformity per spec §11.2
-        let (cur_version, cur_pk_bytes) = read_session_version_and_pk(storage, cur_session)?;
-        let cur_pk = PqPublicKey::from_bytes(&cur_pk_bytes)?;
-
-        // Compute cur_aad_root unconditionally for timing uniformity per spec §11.2
-        domain::block_scope(
-            &mut cur_aad_root,
-            domain,
-            cur_version,
-            cur_session,
-            block_index,
-        );
-
-        if cur_session == session.session_index {
-            let ct_arr: &[u8; BLOCK_SIZE] = genuine_ct
-                .as_slice()
-                .try_into()
-                .map_err(|_| SecureStorageError::CorruptedBlock)?;
-            storage.write_block(cur_session, block_index, ct_arr)?;
-        } else {
-            let new_ct = match storage.read_block(cur_session, block_index) {
-                Ok(cur_ct) => rerandomize_block(&cur_pk, &cur_ct),
-                Err(_) => create_cover_block(&cur_pk, &cur_aad_root),
-            };
-            let ct_arr: &[u8; BLOCK_SIZE] = new_ct
-                .as_slice()
-                .try_into()
-                .map_err(|_| SecureStorageError::CorruptedBlock)?;
-            storage.write_block(cur_session, block_index, ct_arr)?;
-        }
-        storage.fsync(cur_session)?;
+    // Collect jobs for all blocks.
+    let mut all_jobs = Vec::with_capacity(block_plaintexts.len() * SESSION_COUNT);
+    for &(bi, ref pt) in block_plaintexts {
+        all_jobs.extend(build_block_jobs(storage, domain, session, bi, pt)?);
     }
 
+    let mut results = execute_pq_jobs(all_jobs)?;
+
+    // Write each block's ciphertexts in shuffled order.
+    for &(bi, _) in block_plaintexts {
+        write_results_shuffled(storage, bi, &mut results)?;
+    }
     Ok(())
 }
 
@@ -162,59 +327,31 @@ fn extend_blockstream_with_session_block<S: BlockStorage + KeypairStorage>(
     repair_blockstream_lengths(storage, domain)?;
     let block_index = get_global_block_count(storage)?;
 
-    let mut indices: Vec<u8> = (0..SESSION_COUNT as u8).collect();
-    indices.shuffle(&mut rand::rngs::OsRng);
+    // Prepare genuine plaintext (random padding, length header if block 0).
+    let mut pt = Zeroizing::new([0u8; PLAINTEXT_SIZE]);
+    rand::rngs::OsRng.fill_bytes(pt.as_mut());
+    if block_index == 0 {
+        pt[..LENGTH_HDR_SIZE].copy_from_slice(&session.total_data_length.to_be_bytes());
+    }
 
-    let mut cur_aad_root = String::new();
-    for i in indices {
-        let cur_session =
-            SessionIndex::new(i).expect(&format!("{i} >= SESSION_COUNT: {SESSION_COUNT}"));
-        // Read version/pk for ALL sessions (including target) for timing uniformity per spec §12.3
-        let (cur_version, cur_pk_bytes) = read_session_version_and_pk(storage, cur_session)?;
-        let cur_pk = PqPublicKey::from_bytes(&cur_pk_bytes)?;
+    // Build and execute PQ jobs (genuine encrypt + cover blocks).
+    let jobs = build_block_jobs(storage, domain, session, block_index, &pt)?;
+    let mut results = execute_pq_jobs(jobs)?;
 
-        // Compute cur_aad_root unconditionally for timing uniformity per spec §12.3
-        domain::block_scope(
-            &mut cur_aad_root,
-            domain,
-            cur_version,
-            cur_session,
-            block_index,
-        );
+    // Append in shuffled order.
+    let mut write_order: Vec<u8> = (0..SESSION_COUNT as u8).collect();
+    write_order.shuffle(&mut rand::rngs::OsRng);
 
-        if cur_session == session.session_index {
-            // Genuine block content is random padding; header is set only for block 0.
-            let mut pt = Zeroizing::new(vec![0u8; PLAINTEXT_SIZE]);
-            rand::rngs::OsRng.fill_bytes(&mut pt[..]);
-            if block_index == 0 {
-                pt[..LENGTH_HDR_SIZE].copy_from_slice(&session.total_data_length.to_be_bytes());
-            }
-
-            let (aead_sk, aad_root) = derive_block_aead_key(
-                domain,
-                session.session_version,
-                cur_session,
-                session.root_aead_key.as_ref(),
-                block_index,
-            );
-            let pt_arr: &[u8; PLAINTEXT_SIZE] = pt
-                .as_slice()
-                .try_into()
-                .expect(&format!("{} != PLAINTEXT_SIZE", pt.len()));
-            let ct = encrypt_block(&session.pq_rerand_pk, &aead_sk, &aad_root, pt_arr);
-            let ct_arr: &[u8; BLOCK_SIZE] = ct
-                .as_slice()
-                .try_into()
-                .map_err(|_| SecureStorageError::CorruptedBlock)?;
-            storage.append_block(cur_session, ct_arr)?;
-        } else {
-            let cover = create_cover_block(&cur_pk, &cur_aad_root);
-            let ct_arr: &[u8; BLOCK_SIZE] = cover
-                .as_slice()
-                .try_into()
-                .map_err(|_| SecureStorageError::CorruptedBlock)?;
-            storage.append_block(cur_session, ct_arr)?;
-        }
+    for si in write_order {
+        let cur_session = SessionIndex::new(si).unwrap();
+        let ct = results
+            .remove(&(block_index, si))
+            .ok_or(SecureStorageError::CorruptedBlock)?;
+        let ct_arr: &[u8; BLOCK_SIZE] = ct
+            .as_slice()
+            .try_into()
+            .map_err(|_| SecureStorageError::CorruptedBlock)?;
+        storage.append_block(cur_session, ct_arr)?;
         storage.fsync(cur_session)?;
     }
 
@@ -274,6 +411,12 @@ pub fn write_session_data<S: BlockStorage + KeypairStorage>(
         .ok_or(SecureStorageError::Overflow)?
         / ps;
 
+    // ── Prepare plaintext for all affected blocks ──
+    // Also include block 0 length-header update if needed.
+    let need_block0_header = new_total > old_total && first_block > 0;
+
+    let mut block_plaintexts: Vec<(u64, [u8; PLAINTEXT_SIZE])> = Vec::new();
+
     for b in first_block..=last_block {
         let block_start_pos = b * ps;
         let block_end_pos = block_start_pos + ps;
@@ -306,12 +449,27 @@ pub fn write_session_data<S: BlockStorage + KeypairStorage>(
             pt[..LENGTH_HDR_SIZE].copy_from_slice(&new_total.to_be_bytes());
         }
 
-        let pt_arr: &[u8; PLAINTEXT_SIZE] = pt
-            .as_slice()
-            .try_into()
-            .expect(&format!("{} != PLAINTEXT_SIZE", pt.len()));
-        encrypt_session_data_block(storage, domain, session, b, pt_arr)?;
+        let mut arr = [0u8; PLAINTEXT_SIZE];
+        arr.copy_from_slice(&pt);
+        block_plaintexts.push((b, arr));
     }
+
+    // If total_data_length grew and block 0 wasn't already written above,
+    // re-encrypt block 0 to persist the updated length header.
+    if need_block0_header {
+        let mut pt = Zeroizing::new(vec![0u8; PLAINTEXT_SIZE]);
+        match decrypt_session_data_block(storage, domain, session, 0) {
+            Ok(existing) => pt.copy_from_slice(existing.as_ref()),
+            Err(_) => rand::rngs::OsRng.fill_bytes(&mut pt[..]),
+        }
+        pt[..LENGTH_HDR_SIZE].copy_from_slice(&new_total.to_be_bytes());
+        let mut arr = [0u8; PLAINTEXT_SIZE];
+        arr.copy_from_slice(&pt);
+        block_plaintexts.push((0, arr));
+    }
+
+    // ── Encrypt all blocks with cross-block parallelism ──
+    encrypt_session_data_blocks_batch(storage, domain, session, &block_plaintexts)?;
 
     Ok(())
 }

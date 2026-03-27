@@ -11,7 +11,8 @@ members = [
     "auth",
     "sessions",
     "main",
-    "secure-storage"
+    "secure-storage",
+    "uniffi-bindgen",
 ]
 
 [workspace.package]
