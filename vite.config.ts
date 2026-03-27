@@ -121,7 +121,6 @@ export default defineConfig({
     alias: {
       '@massalabs/gossip-sdk': path.resolve(__dirname, 'gossip-sdk/src'),
     },
-    dedupe: ['react', 'react-dom'],
   },
   assetsInclude: ['**/*.wasm'],
   server: {
