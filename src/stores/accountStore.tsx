@@ -443,12 +443,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         set({ isLoading: true });
 
         // Capture userId before closing the session (userId requires open session)
-        let accountUserId: string | undefined;
-        try {
-          accountUserId = getSdk().userId;
-        } catch {
-          // Session may already be closed
-        }
+        const accountUserId = getSdk().userId;
 
         // Cleanup session and in-memory stores
         await cleanupSession();
@@ -458,12 +453,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
 
         // Clear only this account's data (not other accounts)
         try {
-          if (accountUserId) {
-            await getSdk().clearAccountData(accountUserId);
-          } else {
-            // Fallback: no userId available, clear all tables
-            await getSdk().clearAllTables();
-          }
+          await getSdk().clearAccountData(accountUserId);
         } catch {
           // SQLite might not be initialized
         }
