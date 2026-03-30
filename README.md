@@ -324,6 +324,86 @@ The app uses these Capacitor plugins:
 2. Clear derived data
 3. Reinstall pods: `cd ios/App && pod deintegrate && pod install`
 
+## Wireless Dev Mode
+
+Hot reload directly on your phone over Wi-Fi. Edit code on your Mac, see changes instantly on the device — no cable needed.
+
+### Android
+
+**One-time setup** — connect ADB over Wi-Fi:
+
+```bash
+# With USB plugged in:
+adb tcpip 5555
+adb connect <phone-ip>:5555
+# Unplug USB. Verify:
+adb devices
+```
+
+**Run:**
+
+```bash
+npm run cap:dev:android -- <device>
+# Example: npm run cap:dev:android -- 10.26.239.15:5555
+```
+
+### iOS
+
+**One-time setup** — enable Wi-Fi debugging in Xcode:
+
+1. Connect iPhone via USB
+2. Xcode → Window → Devices and Simulators → check "Connect via network"
+3. Unplug — device stays visible wirelessly
+
+**Run:**
+
+```bash
+# List available devices
+npm run cap:list:ios
+
+# Run with a specific device
+npm run cap:dev:ios -- "iPhone de Ben"
+
+# Without target — opens Xcode, pick your device
+npm run cap:dev:ios
+```
+
+### How it works
+
+Both scripts:
+
+1. Detect your Mac's local IP
+2. Build the SDK
+3. Set `DEV_SERVER_URL` so the Capacitor WebView points at the Vite dev server
+4. Sync and deploy the app to your device
+5. Start Vite with `--host` (HTTPS via mkcert for `crypto.subtle` support)
+
+Self-signed certs are accepted in debug builds only:
+
+- **Android**: `BridgeWebViewClient` override in `MainActivity.java`
+- **iOS**: `WKNavigationDelegate` override in `MyViewController.swift` (`#if DEBUG`)
+
+### Troubleshooting
+
+- **Android "cannot find symbol BuildConfig"**: Ensure `buildFeatures { buildConfig = true }` in `android/app/build.gradle`
+- **iOS cert rejected**: Make sure you're running a Debug build, not Release
+- **Device not found**: Check `adb devices` (Android) or `npx cap run ios --list` (iOS)
+- **Hot reload not working**: Verify phone and Mac are on the same Wi-Fi network
+
+### All Capacitor Commands
+
+| Command                    | Description                                  |
+| -------------------------- | -------------------------------------------- |
+| `npm run cap:dev:android`  | Live reload on Android device over Wi-Fi     |
+| `npm run cap:dev:ios`      | Live reload on iOS device over Wi-Fi         |
+| `npm run cap:sync:android` | Build web assets and sync to Android project |
+| `npm run cap:sync:ios`     | Build web assets and sync to iOS project     |
+| `npm run cap:run:android`  | Build, sync, and run on Android device       |
+| `npm run cap:run:ios`      | Build, sync, and run on iOS simulator        |
+| `npm run cap:open:android` | Open Android project in Android Studio       |
+| `npm run cap:open:ios`     | Open iOS project in Xcode                    |
+| `npm run cap:list:ios`     | List available iOS devices                   |
+
 ## Contributing
 
 1. Fork the repository

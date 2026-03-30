@@ -1,4 +1,5 @@
 import { useNavigate } from 'react-router-dom';
+import { useTranslation, Trans } from 'react-i18next';
 import { Edit2, Plus, Users, User } from 'react-feather';
 import { useAccountStore } from '../stores/accountStore';
 import Button from '../components/ui/Button';
@@ -11,12 +12,14 @@ import PageHeader from '../components/ui/PageHeader';
 import PageLayout from '../components/ui/PageLayout';
 import { ROUTES } from '../constants/routes';
 import SearchBar from '../components/ui/SearchBar';
+import ConnectionBanner from '../components/ui/ConnectionBanner';
 
 /* TODO: contact list is implemented using corresponding discussions.
 This is a temporary solution to avoid duplicating the contact list code.
 In future we should decouple contact from discussion.
 */
 const NewDiscussion: React.FC = () => {
+  const { t } = useTranslation('discussions');
   const gossip = useGossipSdk();
   const navigate = useNavigate();
   const [contacts, setContacts] = useState<Contact[]>([]);
@@ -33,7 +36,7 @@ const NewDiscussion: React.FC = () => {
         setIsLoading(true);
         const list = userProfile?.userId
           ? await gossip.contacts
-              .list(userProfile.userId)
+              .list()
               .then(arr => arr.sort((a, b) => a.name.localeCompare(b.name)))
           : [];
         if (isMounted) setContacts(list);
@@ -62,10 +65,7 @@ const NewDiscussion: React.FC = () => {
 
   const onSelectContact = async (contact: Contact) => {
     if (!userProfile?.userId) return;
-    const discussion = await gossip.discussions.get(
-      userProfile.userId,
-      contact.userId
-    );
+    const discussion = await gossip.discussions.get(contact.userId);
     if (
       discussion &&
       gossip.discussions.getStatus(contact.userId) === SessionStatus.Active
@@ -76,10 +76,13 @@ const NewDiscussion: React.FC = () => {
 
   return (
     <PageLayout
-      header={<PageHeader title="New discussion" onBack={handleClose} />}
+      header={
+        <PageHeader title={t('new_discussion.title')} onBack={handleClose} />
+      }
       className="app-max-w mx-auto"
       contentClassName="px-6 py-6 space-y-4"
     >
+      <ConnectionBanner />
       {/* Primary actions */}
       <div className="bg-card rounded-xl border border-border overflow-hidden">
         <Button
@@ -90,7 +93,7 @@ const NewDiscussion: React.FC = () => {
         >
           <Plus className="mr-4" />
           <span className="text-base font-normal flex-1 text-left">
-            New contact
+            {t('new_discussion.new_contact')}
           </span>
         </Button>
         <Button
@@ -98,12 +101,12 @@ const NewDiscussion: React.FC = () => {
           variant="outline"
           size="custom"
           disabled
-          title="Coming soon"
+          title={t('new_discussion.coming_soon')}
           className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0 opacity-60 cursor-not-allowed"
         >
           <Users className="mr-4" />
           <span className="text-base font-normal flex-1 text-left">
-            New group (coming soon)
+            {t('new_discussion.new_group')}
           </span>
         </Button>
       </div>
@@ -111,34 +114,41 @@ const NewDiscussion: React.FC = () => {
       {/* Contacts card */}
       <div className="bg-card rounded-xl border border-border overflow-hidden">
         <div className="border-b border-border px-4 py-3 space-y-3">
-          <p className="text-sm font-medium text-foreground">Contacts</p>
+          <p className="text-sm font-medium text-foreground">
+            {t('new_discussion.contacts')}
+          </p>
           <SearchBar
             value={searchQuery}
             onChange={setSearchQuery}
-            placeholder="Search contacts"
+            placeholder={t('new_discussion.search_contacts')}
             className="mt-1"
-            aria-label="Search contacts"
+            aria-label={t('new_discussion.search_contacts')}
           />
         </div>
         <div>
           {isLoading ? (
             <div className="p-6 text-center text-muted-foreground">
-              Loading contacts…
+              {t('new_discussion.loading_contacts')}
             </div>
           ) : contacts.length === 0 ? (
             <div className="p-8 text-center text-muted-foreground">
               <div className="mx-auto mb-3 w-10 h-10 rounded-full bg-muted flex items-center justify-center">
                 <User className="w-5 h-5 text-muted-foreground" />
               </div>
-              <p className="text-sm text-foreground">No contacts yet</p>
+              <p className="text-sm text-foreground">
+                {t('new_discussion.no_contacts')}
+              </p>
               <p className="text-xs mt-1">
-                Tap <span className="font-medium">"New contact"</span> to add
-                one
+                <Trans
+                  i18nKey="new_discussion.no_contacts_hint"
+                  ns="discussions"
+                  components={{ strong: <strong /> }}
+                />
               </p>
             </div>
           ) : filteredContacts.length === 0 ? (
             <div className="p-6 text-center text-muted-foreground">
-              <p className="text-sm">No contacts match your search</p>
+              <p className="text-sm">{t('new_discussion.no_search_results')}</p>
             </div>
           ) : (
             <ul className="max-h-[60vh] overflow-y-auto">
@@ -149,7 +159,7 @@ const NewDiscussion: React.FC = () => {
                       onClick={() => onSelectContact(contact)}
                       variant="ghost"
                       size="custom"
-                      className="flex-1 px-4 py-3 flex items-center gap-3 text-left hover:bg-accent/50 rounded-none border-0 border-b border-border last:border-b-0"
+                      className="hover-fill flex-1 px-4 py-3 flex items-center gap-3 text-left rounded-none border-0 border-b border-border last:border-b-0"
                     >
                       <ContactAvatar contact={contact} size={10} />
                       <div className="flex-1 min-w-0">
@@ -167,8 +177,8 @@ const NewDiscussion: React.FC = () => {
                         navigate(ROUTES.contact({ userId: contact.userId }))
                       }
                       className="shrink-0 p-3 hover:bg-accent/50 transition-colors h-auto flex items-center justify-center border-l border-border"
-                      title="Edit contact"
-                      aria-label="Edit contact"
+                      title={t('new_discussion.edit_contact')}
+                      aria-label={t('new_discussion.edit_contact')}
                     >
                       <Edit2 className="w-5 h-5 text-muted-foreground" />
                     </button>

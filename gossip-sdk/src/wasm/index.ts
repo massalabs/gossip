@@ -6,24 +6,24 @@
  */
 
 // Export modules
-export { SessionModule, sessionStatusToString } from './session';
+export { SessionModule, sessionStatusToString } from './session.js';
 
 // Export initialization functions
 export {
   initializeWasm,
   ensureWasmInitialized,
   startWasmInitialization,
-} from './loader';
+} from './loader.js';
 
-// Export specialized WASM functionality
-export * from './encryption';
-export * from './userKeys';
+export * from './encryption.js';
+export * from './userKeys.js';
 
 export {
   SessionStatus,
+  SessionConfig,
   UserPublicKeys,
   UserSecretKeys,
   SendMessageOutput,
   ReceiveMessageOutput,
   AnnouncementResult,
-} from './bindings';
+} from './bindings.js';

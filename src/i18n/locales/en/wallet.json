@@ -1,0 +1,50 @@
+{
+  "title": "WALLET",
+  "refresh": "Refresh balance and prices",
+  "address": "Address",
+  "copy_address": "Copy address",
+  "swap_coming_soon": "Swap functionality will be implemented soon!",
+  "send_label": "send",
+  "receive_label": "receive",
+  "swap_label": "swap",
+  "send": {
+    "title": "Send",
+    "select_token": "Select Token",
+    "recipient_placeholder": "Enter recipient address",
+    "recipient_label": "Recipient Address",
+    "network_fee": "Network Fee",
+    "amount": "Amount",
+    "available": "Available:",
+    "recipient_required": "Recipient address is required",
+    "invalid_recipient": "Invalid recipient address format",
+    "amount_required": "Amount must be greater than 0",
+    "select_token_required": "Please select a token",
+    "insufficient_balance": "Insufficient balance",
+    "processing": "Processing transaction...",
+    "sending": "Sending...",
+    "failed": "Transaction failed. Please try again."
+  },
+  "receive": {
+    "title": "Receive",
+    "your_address": "Your Address",
+    "copied": "Copied!",
+    "share_with_contact": "Share with Contact",
+    "info": "Share this address to receive payments. Only send MAS and supported tokens to this address.",
+    "share_coming_soon": "Share functionality will be implemented soon!"
+  },
+  "fees": {
+    "title": "Advanced",
+    "description": "You pay gas fees to reward block validators and maximize your chances to see your transaction validated. It is a tip for people that support the blockchain network.",
+    "preset": "Preset",
+    "low": "Low (0.01 MAS)",
+    "low_desc": "Slower confirmation",
+    "standard": "Standard (0.03 MAS)",
+    "standard_desc": "Recommended",
+    "high": "High (0.1 MAS)",
+    "high_desc": "Fast confirmation",
+    "custom": "Custom fees",
+    "custom_placeholder": "Custom fees",
+    "custom_hint": "Enter fee in MAS",
+    "confirm_fees": "Confirm fees"
+  }
+}

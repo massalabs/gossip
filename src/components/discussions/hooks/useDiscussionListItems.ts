@@ -3,11 +3,13 @@ import {
   Contact,
   DiscussionDirection,
   SessionStatus,
+  SELF_CONTACT_ID,
 } from '@massalabs/gossip-sdk';
 import type { Discussion } from '@massalabs/gossip-sdk';
-import { useGossipSdk } from '../../../hooks/useGossipSdk';
+import { useDiscussionStore } from '../../../stores/discussionStore';
 import { LastMessageInfo } from '../DiscussionListItem';
 import { DiscussionFilter } from '../../../stores/discussionStore';
+import i18n from '../../../i18n';
 
 // =============================================================================
 // Types
@@ -67,15 +69,27 @@ export function useFilteredDiscussions(
     const query = searchQuery.toLowerCase().trim();
     return discussions.filter(discussion => {
       const contact = contactsMap.get(discussion.contactUserId);
-      if (!contact) return false;
 
-      const displayName = discussion.customName || contact.name || '';
-      const userId = contact.userId || '';
+      let displayName = '';
+      let userId = '';
 
-      return (
-        displayName.toLowerCase().includes(query) ||
-        userId.toLowerCase().includes(query)
-      );
+      if (!contact) {
+        // Special-case self discussion: it has no contact entry but should still
+        // be searchable by its localized title ("My Notes", etc.).
+        if (discussion.contactUserId !== SELF_CONTACT_ID) {
+          return false;
+        }
+        displayName = i18n.t('discussions:selfDiscussion.title') ?? '';
+        userId = SELF_CONTACT_ID;
+      } else {
+        displayName = discussion.customName || contact.name || '';
+        userId = contact.userId || '';
+      }
+
+      const nameLc = displayName.toLowerCase();
+      const userIdLc = userId.toLowerCase();
+
+      return nameLc.includes(query) || userIdLc.includes(query);
     });
   }, [discussions, contactsMap, searchQuery]);
 }
@@ -111,9 +125,31 @@ export function useVirtualItems(
   isSearching: boolean,
   filter: DiscussionFilter = 'all'
 ): VirtualItem[] {
-  const gossip = useGossipSdk();
+  const sessionsStatuses = useDiscussionStore(s => s.sessionsStatuses);
   return useMemo(() => {
     const items: VirtualItem[] = [];
+
+    const getContactForDiscussion = (
+      discussion: Discussion
+    ): Contact | undefined => {
+      const existing = contactsMap.get(discussion.contactUserId);
+      if (existing) return existing;
+      if (discussion.contactUserId === SELF_CONTACT_ID) {
+        // Synthetic contact for self-discussion; UI ignores name and avatar and
+        // uses i18n + special rendering instead.
+        return {
+          ownerUserId: discussion.ownerUserId,
+          userId: SELF_CONTACT_ID,
+          name: '',
+          avatar: null,
+          publicKeys: new Uint8Array(0),
+          isOnline: false,
+          lastSeen: discussion.updatedAt ?? discussion.createdAt,
+          createdAt: discussion.createdAt,
+        } as Contact;
+      }
+      return undefined;
+    };
 
     // In search mode, show sections for discussions and contacts
     if (isSearching) {
@@ -126,7 +162,7 @@ export function useVirtualItems(
         });
 
         filteredDiscussions.forEach(discussion => {
-          const contact = contactsMap.get(discussion.contactUserId);
+          const contact = getContactForDiscussion(discussion);
           if (contact) {
             items.push({
               type: 'discussion',
@@ -160,11 +196,15 @@ export function useVirtualItems(
         // Sort by direction: RECEIVED first, then INITIATED.
         // Within each direction group, sort by latest activity time (newest first)
         // to maintain the intended ordering from the store.
-        discussionsToShow = filteredDiscussions.filter(d =>
-          [SessionStatus.SelfRequested, SessionStatus.PeerRequested].includes(
-            gossip.discussions.getStatus(d.contactUserId)
-          )
-        );
+        discussionsToShow = filteredDiscussions.filter(d => {
+          const status = sessionsStatuses.get(d.contactUserId);
+          return (
+            status != null &&
+            [SessionStatus.SelfRequested, SessionStatus.PeerRequested].includes(
+              status
+            )
+          );
+        });
 
         discussionsToShow.sort((a, b) => {
           const dirRank = (d: Discussion) =>
@@ -188,11 +228,18 @@ export function useVirtualItems(
         });
       } else if (filter === 'unread') {
         // Show only unread active discussions
-        discussionsToShow = filteredDiscussions.filter(
-          d =>
-            SessionStatus.Active ===
-              gossip.discussions.getStatus(d.contactUserId) && d.unreadCount > 0
-        );
+        discussionsToShow = filteredDiscussions.filter(d => {
+          const status = sessionsStatuses.get(d.contactUserId);
+          return (
+            status != null &&
+            [
+              SessionStatus.Active,
+              SessionStatus.Saturated,
+              SessionStatus.Killed,
+            ].includes(status) &&
+            d.unreadCount > 0
+          );
+        });
 
         // Sort by latest message timestamp (newest first)
         discussionsToShow.sort((a, b) => {
@@ -212,26 +259,63 @@ export function useVirtualItems(
         });
       } else {
         // 'all' - show all discussions respecting the store's sorting order
-        // The store already sorts by status priority (PENDING first) and activity time
-        // We just need to separate into sections while preserving that order
+        // The store already sorts by pinned, then status priority (PENDING first), then activity time
+        // We separate into sections while preserving that order
+        const pinnedDiscussions: Discussion[] = [];
         const pendingDiscussions: Discussion[] = [];
         const activeDiscussions: Discussion[] = [];
 
-        // filteredDiscussions is already sorted by the store (status priority + activity time)
+        // filteredDiscussions is already sorted by the store
         filteredDiscussions.forEach(discussion => {
+          if (discussion.pinned) {
+            pinnedDiscussions.push(discussion);
+            return;
+          }
+          if (discussion.contactUserId === SELF_CONTACT_ID) {
+            activeDiscussions.push(discussion);
+            return;
+          }
+          const status = sessionsStatuses.get(discussion.contactUserId);
           if (
+            status != null &&
             [SessionStatus.SelfRequested, SessionStatus.PeerRequested].includes(
-              gossip.discussions.getStatus(discussion.contactUserId)
+              status
             )
           ) {
             pendingDiscussions.push(discussion);
           } else if (
-            SessionStatus.Active ===
-            gossip.discussions.getStatus(discussion.contactUserId)
+            status != null &&
+            [
+              SessionStatus.Active,
+              SessionStatus.Saturated,
+              SessionStatus.Killed,
+            ].includes(status)
           ) {
             activeDiscussions.push(discussion);
           }
         });
+
+        // Add pinned section if any
+        if (pinnedDiscussions.length > 0) {
+          items.push({
+            type: 'header',
+            label: 'Pinned',
+            key: 'header-pinned',
+          });
+
+          pinnedDiscussions.forEach(discussion => {
+            const contact = getContactForDiscussion(discussion);
+            if (contact) {
+              items.push({
+                type: 'discussion',
+                discussion,
+                contact,
+                lastMessage: lastMessages.get(discussion.contactUserId),
+                isSelected: discussion.contactUserId === activeUserId,
+              });
+            }
+          });
+        }
 
         // Add pending section if any
         if (pendingDiscussions.length > 0) {
@@ -242,7 +326,7 @@ export function useVirtualItems(
           });
 
           pendingDiscussions.forEach(discussion => {
-            const contact = contactsMap.get(discussion.contactUserId);
+            const contact = getContactForDiscussion(discussion);
             if (contact) {
               items.push({
                 type: 'discussion',
@@ -264,7 +348,7 @@ export function useVirtualItems(
           });
 
           activeDiscussions.forEach(discussion => {
-            const contact = contactsMap.get(discussion.contactUserId);
+            const contact = getContactForDiscussion(discussion);
             if (contact) {
               items.push({
                 type: 'discussion',
@@ -280,7 +364,7 @@ export function useVirtualItems(
 
       // For 'pending' and 'unread' filters, show discussions directly without headers
       discussionsToShow.forEach(discussion => {
-        const contact = contactsMap.get(discussion.contactUserId);
+        const contact = getContactForDiscussion(discussion);
         if (contact) {
           items.push({
             type: 'discussion',
@@ -302,6 +386,6 @@ export function useVirtualItems(
     activeUserId,
     isSearching,
     filter,
-    gossip,
+    sessionsStatuses,
   ]);
 }

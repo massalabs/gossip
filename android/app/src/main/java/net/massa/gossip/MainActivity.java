@@ -1,14 +1,20 @@
 package net.massa.gossip;
 
+import net.massa.gossip.BuildConfig;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.net.Uri;
+import android.net.http.SslError;
 import android.os.Build;
 import android.os.Bundle;
 import android.util.Log;
+import android.view.WindowManager;
+import android.webkit.SslErrorHandler;
+import android.webkit.WebView;
 import com.getcapacitor.BridgeActivity;
+import com.getcapacitor.BridgeWebViewClient;
 import org.json.JSONObject;
 import androidx.core.view.WindowCompat;
 
@@ -26,6 +32,17 @@ public class MainActivity extends BridgeActivity {
         
         super.onCreate(savedInstanceState);
 
+        // Samsung (OneUI) ignores adjustNothing and always resizes the WebView.
+        // Use adjustResize on Samsung so the OS handles keyboard layout natively.
+        // Other OEMs (Xiaomi/MIUI) respect adjustNothing — we handle layout via CSS transform.
+        // KeyboardResize.Native in capacitor.config.ts ensures Capacitor doesn't override this.
+        String manufacturer = Build.MANUFACTURER.toLowerCase();
+        if (manufacturer.contains("samsung")) {
+            getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+        } else {
+            getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING);
+        }
+
         // Set transparent status and navigation bars
         WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
         // Set transparent status and navigation bars colors
@@ -39,6 +56,17 @@ public class MainActivity extends BridgeActivity {
         }
 
         
+        // In debug builds, accept self-signed certificates (for live reload dev server)
+        // Extends BridgeWebViewClient to preserve Capacitor's routing, JS bridge, and deep links
+        if (BuildConfig.DEBUG && getBridge() != null && getBridge().getWebView() != null) {
+            getBridge().getWebView().setWebViewClient(new BridgeWebViewClient(getBridge()) {
+                @Override
+                public void onReceivedSslError(WebView view, SslErrorHandler handler, SslError error) {
+                    handler.proceed();
+                }
+            });
+        }
+
         // Handle shared content from other apps after bridge is ready
         if (getBridge() != null && getBridge().getWebView() != null) {
             getBridge().getWebView().post(() -> {

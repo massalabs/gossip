@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ChevronRight } from 'react-feather';
 import { useWalletStore } from '../../stores/walletStore';
 import AddressInput from '../ui/AddressInput';
@@ -35,6 +36,7 @@ const SendModal: React.FC<SendModalProps> = ({
   const [isValidRecipient, setIsValidRecipient] = useState<boolean | null>(
     null
   );
+  const { t } = useTranslation('wallet');
 
   const tokens = useWalletStore.use.tokens();
   const provider = useAccountStore.use.provider();
@@ -116,28 +118,28 @@ const SendModal: React.FC<SendModalProps> = ({
 
   const validateForm = useCallback(() => {
     if (!recipient.trim()) {
-      const errorMsg = 'Recipient address is required';
+      const errorMsg = t('send.recipient_required');
       setError(errorMsg);
       toast.error(errorMsg);
       return false;
     }
 
     if (isValidRecipient === false) {
-      const errorMsg = 'Invalid recipient address format';
+      const errorMsg = t('send.invalid_recipient');
       setError(errorMsg);
       toast.error(errorMsg);
       return false;
     }
 
     if (!amount || parseFloat(amount) <= 0) {
-      const errorMsg = 'Amount must be greater than 0';
+      const errorMsg = t('send.amount_required');
       setError(errorMsg);
       toast.error(errorMsg);
       return false;
     }
 
     if (!selectedToken) {
-      const errorMsg = 'Please select a token';
+      const errorMsg = t('send.select_token_required');
       setError(errorMsg);
       toast.error(errorMsg);
       return false;
@@ -178,6 +180,7 @@ const SendModal: React.FC<SendModalProps> = ({
     getFeeAmount,
     getFeeAmountAtomic,
     isValidRecipient,
+    t,
   ]);
 
   const handleSend = useCallback(() => {
@@ -239,7 +242,7 @@ const SendModal: React.FC<SendModalProps> = ({
         isNative: selectedToken.isNative,
       };
 
-      loadingToast = toast.loading('Processing transaction...', {
+      loadingToast = toast.loading(t('send.processing'), {
         duration: Infinity,
       });
 
@@ -264,9 +267,8 @@ const SendModal: React.FC<SendModalProps> = ({
       if (loadingToast) {
         toast.dismiss(loadingToast);
       }
-      const errorMessage =
-        err instanceof Error ? err.message : 'Transaction failed';
-      toast.error(`Transaction failed: ${errorMessage}`);
+      console.error('Transaction failed:', err);
+      toast.error(t('send.failed'));
     }
   }, [
     resetModalState,
@@ -277,6 +279,7 @@ const SendModal: React.FC<SendModalProps> = ({
     sendAsset,
     recipient,
     refreshBalances,
+    t,
   ]);
 
   const handleCancelConfirmation = useCallback(() => {
@@ -294,24 +297,24 @@ const SendModal: React.FC<SendModalProps> = ({
   const getFeeDisplayText = useCallback(() => {
     if (feeConfig.type === 'preset') {
       const presetLabels = {
-        low: 'Low (0.01 MAS)',
-        standard: 'Standard (0.03 MAS)',
-        high: 'High (0.1 MAS)',
+        low: t('fees.low'),
+        standard: t('fees.standard'),
+        high: t('fees.high'),
       };
       return presetLabels[feeConfig.preset || 'standard'];
     } else {
       return `Custom (${feeConfig.customFee || '0.03'} MAS)`;
     }
-  }, [feeConfig]);
+  }, [feeConfig, t]);
 
   if (!isOpen) return null;
 
   return (
-    <BaseModal isOpen={isOpen} onClose={onClose} title="Send">
+    <BaseModal isOpen={isOpen} onClose={onClose} title={t('send.title')}>
       {/* Token Selector */}
       <div>
         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-          Select Token
+          {t('send.select_token')}
         </label>
         <TokenSelect
           tokens={tokens}
@@ -330,15 +333,15 @@ const SendModal: React.FC<SendModalProps> = ({
           setRecipient(value);
           setError(null);
         }}
-        placeholder="Enter recipient address"
-        label="Recipient Address"
+        placeholder={t('send.recipient_placeholder')}
+        label={t('send.recipient_label')}
         onValidationChange={handleAddressValidationChange}
       />
 
       {/* Fee Configuration */}
       <div>
         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-          Network Fee
+          {t('send.network_fee')}
         </label>
         <Button
           onClick={() => setShowFeeConfig(true)}
@@ -357,7 +360,7 @@ const SendModal: React.FC<SendModalProps> = ({
       {/* Amount */}
       <div>
         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-          Amount
+          {t('send.amount')}
         </label>
         <div className="flex gap-2">
           <input
@@ -426,7 +429,7 @@ const SendModal: React.FC<SendModalProps> = ({
       {/* Action Buttons */}
       <div className="flex gap-3 pt-4">
         <Button onClick={onClose} variant="secondary" fullWidth>
-          Cancel
+          {t('common:cancel')}
         </Button>
         <Button
           onClick={handleSend}
@@ -441,7 +444,7 @@ const SendModal: React.FC<SendModalProps> = ({
           variant="primary"
           fullWidth
         >
-          {isPending ? 'Sending...' : 'Send'}
+          {isPending ? t('send.sending') : t('send.title')}
         </Button>
       </div>
 

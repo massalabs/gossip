@@ -3,7 +3,7 @@
  *
  * Minimal environment setup for SDK tests:
  * - WASM initialization
- * - In-memory SQLite database
+ * - In-memory SQLite database via DatabaseConnection
  * - Shared database cleanup
  */
 
@@ -12,7 +12,13 @@ import { resolve, dirname } from 'path';
 import { createRequire } from 'module';
 import { afterAll, beforeAll } from 'vitest';
 import { initializeWasm } from '../src/wasm/loader';
-import { initDb, closeSqlite, clearAllTables } from '../src/sqlite';
+import { DatabaseConnection } from '../src/db/sqlite';
+import {
+  setTestConnection,
+  setTestWasmBinary,
+  clearAllTables,
+  closeTestDb,
+} from './testDb';
 
 const require = createRequire(import.meta.url);
 const waSqlitePath = dirname(require.resolve('wa-sqlite/package.json'));
@@ -29,13 +35,17 @@ beforeAll(async () => {
     waSqliteWasm.byteOffset,
     waSqliteWasm.byteOffset + waSqliteWasm.byteLength
   );
-  await initDb({ wasmBinary });
+  setTestWasmBinary(wasmBinary);
+  const conn = await DatabaseConnection.create({
+    storage: { type: 'memory', wasmBinary },
+  });
+  setTestConnection(conn);
   await clearAllTables();
 });
 
 afterAll(async () => {
   try {
-    await closeSqlite();
+    await closeTestDb();
   } catch {
     // SQLite might already be closed
   }

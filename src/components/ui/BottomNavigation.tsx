@@ -5,7 +5,7 @@ import NavButton from './NavButton';
 import GossipIcon from './customIcons/gossip-icon';
 import { ROUTES } from '../../constants/routes';
 import { useUiStore } from '../../stores/uiStore';
-import { useKeyboardVisible } from '../../hooks/useKeyboardVisible';
+import { useKeyboardStore } from '../../stores/keyboardStore';
 
 type BottomNavigationTab = 'discussions' | 'settings';
 
@@ -13,7 +13,7 @@ const BottomNavigation: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const setBottomNavVisible = useUiStore(s => s.setBottomNavVisible);
-  const { isKeyboardVisible } = useKeyboardVisible();
+  const isKeyboardVisible = useKeyboardStore(s => s.isVisible);
 
   useEffect(() => {
     setBottomNavVisible(true);
@@ -48,7 +48,7 @@ const BottomNavigation: React.FC = () => {
   }
 
   return (
-    <div className="bg-muted pb-safe-b">
+    <nav className="bg-muted pb-safe-b" aria-label="Main navigation">
       <div className="mx-auto app-max-w flex items-center justify-center h-bottom-nav px-nav-padding">
         <div className="flex items-center justify-center gap-8">
           {navItems.map((item, index) => (
@@ -63,7 +63,7 @@ const BottomNavigation: React.FC = () => {
           ))}
         </div>
       </div>
-    </div>
+    </nav>
   );
 };
 export default BottomNavigation;

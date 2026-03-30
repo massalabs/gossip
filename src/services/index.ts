@@ -12,7 +12,7 @@ import {
   type Contact,
   type Message,
   GossipSdk,
-  setOnSeekersUpdated,
+  MessageType,
 } from '@massalabs/gossip-sdk';
 import { notificationService } from './notifications';
 import { isAppInForeground } from '../utils/appState';
@@ -30,7 +30,7 @@ import { useMessageStore } from '../stores/messageStore';
  */
 export function setupSdkEventHandlers(gossip: GossipSdk): void {
   // Propagate seekers to SW bridge (web) and BackgroundRunner (mobile)
-  setOnSeekersUpdated(seekers => {
+  gossip.on(SdkEventType.SEEKERS_UPDATED, (seekers: Uint8Array[]) => {
     bridgeSet(
       'activeSeekers',
       seekers.map(s => Array.from(s))
@@ -63,6 +63,8 @@ export function setupSdkEventHandlers(gossip: GossipSdk): void {
     // Only notify for incoming messages
     if (message.direction !== MessageDirection.INCOMING) return;
 
+    // Don't notify for keep-alive messages
+    if (message.type === MessageType.KEEP_ALIVE) return;
     // Don't notify if user is currently viewing this discussion
     const currentContact = useMessageStore.getState().currentContactUserId;
     if (currentContact === message.contactUserId) return;
@@ -71,8 +73,13 @@ export function setupSdkEventHandlers(gossip: GossipSdk): void {
     if (foreground) return;
 
     try {
-      const contacts = useDiscussionStore.getState().contacts;
+      const { contacts, discussions } = useDiscussionStore.getState();
       const contact = contacts.find(c => c.userId === message.contactUserId);
+      const discussion = discussions.find(
+        d => d.contactUserId === message.contactUserId
+      );
+      if (discussion?.mutedNotifications) return;
+
       const contactName = contact?.name || 'Someone';
 
       await notificationService.showDiscussionNotification(

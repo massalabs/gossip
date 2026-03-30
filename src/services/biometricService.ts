@@ -361,14 +361,18 @@ export class BiometricService {
       console.error('Biometric authentication failed:', error);
 
       // Handle Capacitor biometric errors
-      if (
-        error instanceof BiometryError &&
-        error.code === BiometryErrorType.userCancel
-      ) {
-        return {
-          success: false,
-          error: 'Authentication was cancelled',
-        };
+      if (error instanceof BiometryError) {
+        if (
+          error.code === BiometryErrorType.userCancel ||
+          error.code === BiometryErrorType.systemCancel ||
+          error.code === BiometryErrorType.appCancel ||
+          error.code === BiometryErrorType.userFallback
+        ) {
+          return { success: false, error: 'cancelled' };
+        }
+        if (error.code === BiometryErrorType.biometryLockout) {
+          return { success: false, error: 'biometric_locked' };
+        }
       }
 
       // Handle WebAuthn DOMException errors
@@ -377,10 +381,7 @@ export class BiometricService {
         (error.name === 'NotAllowedError' ||
           error.message.includes('not allowed'))
       ) {
-        return {
-          success: false,
-          error: 'Authentication was cancelled or timed out',
-        };
+        return { success: false, error: 'cancelled' };
       }
 
       return {

@@ -1,12 +1,12 @@
 /**
  * MessageService unit tests
  *
- * Legacy tests that depended on removed DiscussionStatus and old callbacks were
- * removed. Their behavior is now covered by integration flows in:
+ * Tests message lookup helpers, send-queue behavior under various session
+ * states, contact/discussion validation, and encryption error handling.
+ *
+ * Integration flows (send/receive with real WASM) are covered in:
  * - test/integration/messaging-flow.spec.ts
  * - test/integration/discussion-flow.spec.ts
- *
- * Here we only validate the public SDK wrapper for message lookup helpers.
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
@@ -15,51 +15,29 @@ import {
   MessageStatus,
   MessageDirection,
   MessageType,
-  DiscussionStatus,
   DiscussionDirection,
 } from '../../src/db';
-import type { IMessageProtocol } from '../../src/api/messageProtocol/types';
 import type { SessionModule } from '../../src/wasm/session';
-import { encodeUserId } from '../../src/utils/userId';
+import { encodeUserId, decodeUserId } from '../../src/utils/userId';
 import { SessionStatus } from '../../src/wasm/bindings';
 import { defaultSdkConfig } from '../../src/config/sdk';
 import { SdkEventEmitter } from '../../src/core/SdkEventEmitter';
-import { clearAllTables } from '../../src/sqlite';
-import {
-  insertMessage,
-  getMessageById,
-  getMessagesByOwnerAndContact,
-} from '../../src/queries/messages';
-import {
-  insertDiscussion,
-  getDiscussionByOwnerAndContact,
-} from '../../src/queries/discussions';
-import { insertContact } from '../../src/queries/contacts';
+import { clearAllTables, getTestQueries } from '../testDb';
+import { MockMessageProtocol } from '../mocks';
+import { Queries } from '../../src/db/queries';
 
-const MESSAGE_OWNER_USER_ID = encodeUserId(new Uint8Array(32).fill(11));
-const MESSAGE_CONTACT_USER_ID = encodeUserId(new Uint8Array(32).fill(12));
+const OWNER_USER_ID = encodeUserId(new Uint8Array(32).fill(1));
+const CONTACT_USER_ID = encodeUserId(new Uint8Array(32).fill(2));
+const SEEKER_SIZE = 34;
 
-const MESSAGE_SEEKER_SIZE = 34;
-
-function createMessageProtocol(): IMessageProtocol {
-  return {
-    fetchMessages: vi.fn().mockResolvedValue([]),
-    sendMessage: vi.fn().mockResolvedValue(undefined),
-    sendAnnouncement: vi.fn().mockResolvedValue('counter-123'),
-    fetchAnnouncements: vi.fn().mockResolvedValue([]),
-    fetchPublicKeyByUserId: vi.fn().mockResolvedValue(''),
-    postPublicKey: vi.fn().mockResolvedValue(''),
-    changeNode: vi.fn().mockResolvedValue({ success: true }),
-  } as IMessageProtocol;
-}
-
-function createMessageSession(
+function createMockSession(
   status: SessionStatus = SessionStatus.Active
 ): SessionModule {
+  const ownerBytes = decodeUserId(OWNER_USER_ID);
   return {
     peerSessionStatus: vi.fn().mockReturnValue(status),
     sendMessage: vi.fn().mockReturnValue({
-      seeker: new Uint8Array(MESSAGE_SEEKER_SIZE).fill(1),
+      seeker: new Uint8Array(SEEKER_SIZE).fill(1),
       data: new Uint8Array([1, 2, 3, 4]),
     }),
     feedIncomingMessageBoardRead: vi.fn(),
@@ -69,24 +47,470 @@ function createMessageSession(
       .fn()
       .mockResolvedValue(new Uint8Array([1, 2, 3])),
     toEncryptedBlob: vi.fn(),
-    userIdEncoded: MESSAGE_OWNER_USER_ID,
-    userIdRaw: new Uint8Array(32).fill(11),
-    userId: new Uint8Array(32).fill(11),
+    userIdEncoded: OWNER_USER_ID,
+    userIdRaw: ownerBytes,
+    userId: ownerBytes,
     getMessageBoardReadKeys: vi.fn().mockReturnValue([]),
     cleanup: vi.fn(),
   } as unknown as SessionModule;
 }
 
-const messageFakeSession = createMessageSession();
+function createTestMessage(
+  overrides: Partial<{
+    ownerUserId: string;
+    contactUserId: string;
+    content: string;
+    type: MessageType;
+  }> = {}
+) {
+  return {
+    ownerUserId: overrides.ownerUserId ?? OWNER_USER_ID,
+    contactUserId: overrides.contactUserId ?? CONTACT_USER_ID,
+    content: overrides.content ?? 'Test message',
+    type: overrides.type ?? MessageType.TEXT,
+    direction: MessageDirection.OUTGOING,
+    status: MessageStatus.SENDING,
+    timestamp: new Date(),
+  };
+}
+
+async function insertTestContactAndDiscussion(
+  ownerUserId: string = OWNER_USER_ID,
+  contactUserId: string = CONTACT_USER_ID
+) {
+  await getTestQueries().contacts.insert({
+    ownerUserId,
+    userId: contactUserId,
+    name: 'Test Contact',
+    publicKeys: new Uint8Array(32),
+    isOnline: true,
+    lastSeen: new Date(),
+    createdAt: new Date(),
+  });
+
+  await getTestQueries().discussions.insert({
+    ownerUserId,
+    contactUserId,
+    direction: DiscussionDirection.INITIATED,
+    weAccepted: true,
+    unreadCount: 0,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
+}
 
 describe('MessageService', () => {
   beforeEach(clearAllTables);
 
+  it('getMessages returns all rows while getVisibleMessages filters to user-visible subset', async () => {
+    const testQueries = getTestQueries();
+
+    // Insert a mix of messages for the same owner/contact
+    const visibleId1 = await testQueries.messages.insert({
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: 'First visible',
+      type: MessageType.TEXT,
+      direction: MessageDirection.INCOMING,
+      status: MessageStatus.DELIVERED,
+      timestamp: new Date('2024-01-02T00:00:00Z'),
+    });
+
+    // KEEP_ALIVE should be filtered out
+    const keepAliveId = await testQueries.messages.insert({
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: '',
+      type: MessageType.KEEP_ALIVE,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.SENT,
+      timestamp: new Date('2024-01-03T00:00:00Z'),
+    });
+
+    // Outgoing delete control with empty content should be filtered out
+    const deleteControlId = await testQueries.messages.insert({
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: '',
+      type: MessageType.DELETED,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.SENT,
+      timestamp: new Date('2024-01-04T00:00:00Z'),
+    });
+
+    // Outgoing deleted message with non-empty content should remain visible
+    const visibleDeletedId = await testQueries.messages.insert({
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: '[Message deleted]',
+      type: MessageType.DELETED,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.SENT,
+      timestamp: new Date('2024-01-05T00:00:00Z'),
+    });
+
+    const visibleId2 = await testQueries.messages.insert({
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: 'Second visible',
+      type: MessageType.TEXT,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.SENT,
+      timestamp: new Date('2024-01-01T00:00:00Z'), // Earlier timestamp than first visible
+    });
+
+    // Reaction row should be hidden from visible messages
+    const reactionId = await testQueries.messages.insert({
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: '👍',
+      type: MessageType.REACTION,
+      direction: MessageDirection.INCOMING,
+      status: MessageStatus.DELIVERED,
+      timestamp: new Date('2024-01-06T00:00:00Z'),
+    });
+
+    const service = new MessageService(
+      new MockMessageProtocol(),
+      createMockSession(),
+      new SdkEventEmitter(),
+      defaultSdkConfig,
+      testQueries
+    );
+
+    // Deleted reaction row should also be hidden from visible messages
+    const deletedReactionId = await testQueries.messages.insert({
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: '[Message deleted]',
+      type: MessageType.DELETED,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.SENT,
+      timestamp: new Date('2024-01-07T00:00:00Z'),
+      // Deleted reactions are stored as DELETED rows that still carry reactionOf,
+      // so the UI query can exclude them from chat bubbles.
+      reactionOf: JSON.stringify({
+        originalMsgId: Buffer.from(new Uint8Array(12).fill(99)).toString(
+          'base64'
+        ),
+      }),
+    });
+
+    // Raw messages should include all 7 rows, ordered by timestamp then id
+    const allMessages = await service.getMessages(CONTACT_USER_ID);
+    const allIds = allMessages.map(m => m.id);
+    expect(allIds).toEqual([
+      visibleId2, // 2024-01-01
+      visibleId1, // 2024-01-02
+      keepAliveId, // 2024-01-03
+      deleteControlId, // 2024-01-04
+      visibleDeletedId, // 2024-01-05
+      reactionId, // 2024-01-06
+      deletedReactionId, // 2024-01-07
+    ]);
+
+    // Visible messages should filter out KEEP_ALIVE, delete control rows, reactions,
+    // and deleted reaction rows
+    const visibleMessages = await service.getVisibleMessages(CONTACT_USER_ID);
+    const visibleIds = visibleMessages.map(m => m.id);
+
+    // Only the three visible messages should be returned
+    expect(visibleIds).toEqual([visibleId1, visibleDeletedId, visibleId2]);
+
+    // Sanity-check types and contents
+    expect(visibleMessages.map(m => m.type)).toEqual([
+      MessageType.TEXT,
+      MessageType.DELETED,
+      MessageType.TEXT,
+    ]);
+    expect(visibleMessages.map(m => m.content)).toEqual([
+      'First visible',
+      '[Message deleted]',
+      'Second visible',
+    ]);
+  });
+
+  it('editMessage updates outgoing message content and marks as edited', async () => {
+    const testQueries = getTestQueries();
+
+    await insertTestContactAndDiscussion();
+
+    // Insert an outgoing text message with a messageId
+    const msgId = await testQueries.messages.insert({
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: 'Original content',
+      type: MessageType.TEXT,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.SENT,
+      timestamp: new Date('2024-01-01T00:00:00Z'),
+      messageId: new Uint8Array(12).fill(7),
+    });
+
+    const service = new MessageService(
+      new MockMessageProtocol(),
+      createMockSession(),
+      new SdkEventEmitter(),
+      defaultSdkConfig,
+      testQueries
+    );
+
+    const result = await service.editMessage(msgId, 'Edited content');
+    expect(result).toBe(true);
+
+    const updated = await testQueries.messages.getById(msgId);
+    expect(updated?.content).toBe('Edited content');
+    expect(updated?.timestamp?.getTime()).toBe(
+      new Date('2024-01-01T00:00:00Z').getTime()
+    );
+
+    const parsedMetadata = updated?.metadata
+      ? JSON.parse(updated.metadata)
+      : {};
+    expect(parsedMetadata.edited).toBe(true);
+
+    // Control row must persist editOf so send queue serializes MESSAGE_TYPE_EDIT
+    const all = await testQueries.messages.getByOwnerAndContact(
+      OWNER_USER_ID,
+      CONTACT_USER_ID
+    );
+    const controlRow = all.find(
+      r => r.metadata && r.metadata.includes('"control":"edit"')
+    );
+    expect(controlRow).toBeDefined();
+    expect(controlRow!.editOf).toBeTruthy();
+    const editOfParsed = JSON.parse(controlRow!.editOf!);
+    expect(editOfParsed.originalMsgId).toBeDefined();
+    expect(Buffer.from(new Uint8Array(12).fill(7))).toEqual(
+      Buffer.from(
+        Uint8Array.from(Buffer.from(editOfParsed.originalMsgId, 'base64'))
+      )
+    );
+  });
+
+  it('editMessage returns false for incoming messages and does not modify the row', async () => {
+    const testQueries = getTestQueries();
+    await insertTestContactAndDiscussion();
+
+    const msgId = await testQueries.messages.insert({
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: 'From peer',
+      type: MessageType.TEXT,
+      direction: MessageDirection.INCOMING,
+      status: MessageStatus.DELIVERED,
+      timestamp: new Date('2024-06-01T12:00:00Z'),
+      messageId: new Uint8Array(12).fill(9),
+    });
+
+    const service = new MessageService(
+      new MockMessageProtocol(),
+      createMockSession(),
+      new SdkEventEmitter(),
+      defaultSdkConfig,
+      testQueries
+    );
+
+    expect(await service.editMessage(msgId, 'Hacked')).toBe(false);
+
+    const row = await testQueries.messages.getById(msgId);
+    expect(row?.content).toBe('From peer');
+    expect(row?.direction).toBe(MessageDirection.INCOMING);
+    expect(row?.metadata).toBeFalsy();
+    const rows = await testQueries.messages.getByOwnerAndContact(
+      OWNER_USER_ID,
+      CONTACT_USER_ID
+    );
+    expect(
+      rows.filter(r => r.metadata?.includes?.('"control":"edit"'))
+    ).toHaveLength(0);
+  });
+
+  it('deleteMessage returns false for incoming messages and does not modify the row', async () => {
+    const testQueries = getTestQueries();
+    await insertTestContactAndDiscussion();
+
+    const msgId = await testQueries.messages.insert({
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: 'From peer',
+      type: MessageType.TEXT,
+      direction: MessageDirection.INCOMING,
+      status: MessageStatus.DELIVERED,
+      timestamp: new Date('2024-06-01T12:00:00Z'),
+      messageId: new Uint8Array(12).fill(8),
+    });
+
+    const service = new MessageService(
+      new MockMessageProtocol(),
+      createMockSession(),
+      new SdkEventEmitter(),
+      defaultSdkConfig,
+      testQueries
+    );
+
+    expect(await service.deleteMessage(msgId)).toBe(false);
+
+    const row = await testQueries.messages.getById(msgId);
+    expect(row?.content).toBe('From peer');
+    expect(row?.type).toBe(MessageType.TEXT);
+    expect(row?.direction).toBe(MessageDirection.INCOMING);
+    const rows = await testQueries.messages.getByOwnerAndContact(
+      OWNER_USER_ID,
+      CONTACT_USER_ID
+    );
+    expect(
+      rows.filter(r => r.type === MessageType.DELETED && r.content === '')
+    ).toHaveLength(0);
+  });
+
+  it('deleteMessage on a reaction only deletes the reaction row and keeps original message visible', async () => {
+    const testQueries = getTestQueries();
+    await insertTestContactAndDiscussion();
+
+    // Original text message that will be reacted to
+    const originalMsgIdBytes = new Uint8Array(12).fill(11);
+    const originalRowId = await testQueries.messages.insert({
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: 'Original message',
+      type: MessageType.TEXT,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.SENT,
+      timestamp: new Date('2024-07-01T10:00:00Z'),
+      messageId: originalMsgIdBytes,
+    });
+
+    // Outgoing reaction row
+    const reactionRowId = await testQueries.messages.insert({
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: '👍',
+      type: MessageType.REACTION,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.SENT,
+      timestamp: new Date('2024-07-01T10:01:00Z'),
+      messageId: new Uint8Array(12).fill(12),
+      reactionOf: JSON.stringify({
+        originalMsgId: Buffer.from(originalMsgIdBytes).toString('base64'),
+      }),
+    });
+
+    const service = new MessageService(
+      new MockMessageProtocol(),
+      createMockSession(),
+      new SdkEventEmitter(),
+      defaultSdkConfig,
+      testQueries
+    );
+
+    // Simulate tapping on own reaction chip → delete the reaction message
+    const deleted = await service.deleteMessage(reactionRowId);
+    expect(deleted).toBe(true);
+
+    const allRows = await testQueries.messages.getByOwnerAndContact(
+      OWNER_USER_ID,
+      CONTACT_USER_ID
+    );
+    const originalRow = allRows.find(r => r.id === originalRowId);
+    const reactionRow = allRows.find(r => r.id === reactionRowId);
+
+    // Original message content/type must be unchanged
+    expect(originalRow?.content).toBe('Original message');
+    expect(originalRow?.type).toBe(MessageType.TEXT);
+
+    // Reaction row should now be marked DELETED with "[Message deleted]"
+    expect(reactionRow?.type).toBe(MessageType.DELETED);
+    expect(reactionRow?.content).toBe('[Message deleted]');
+
+    // getVisibleMessages must not surface the deleted reaction as a bubble
+    const visible = await service.getVisibleMessages(CONTACT_USER_ID);
+    const visibleIds = visible.map(m => m.id);
+    expect(visibleIds).toEqual([originalRowId]);
+    expect(visible[0].content).toBe('Original message');
+  });
+
+  it('sendReaction inserts reaction rows without updating discussion last message, even with multiple reactions', async () => {
+    const testQueries = getTestQueries();
+    await insertTestContactAndDiscussion();
+
+    // Insert a base text message with a messageId to react to
+    const originalMessageIdBytes = new Uint8Array(12).fill(5);
+    const baseMsgId = await testQueries.messages.insert({
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: 'Base message',
+      type: MessageType.TEXT,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.SENT,
+      timestamp: new Date('2024-07-01T12:00:00Z'),
+      messageId: originalMessageIdBytes,
+    });
+
+    const service = new MessageService(
+      new MockMessageProtocol(),
+      createMockSession(),
+      new SdkEventEmitter(),
+      defaultSdkConfig,
+      testQueries
+    );
+
+    const discussionBefore = await testQueries.discussions.getByOwnerAndContact(
+      OWNER_USER_ID,
+      CONTACT_USER_ID
+    );
+
+    const result = await service.sendReaction(
+      CONTACT_USER_ID,
+      '😀',
+      originalMessageIdBytes
+    );
+    expect(result.success).toBe(true);
+
+    // Send a second reaction that "overrides" the first one at the UI level
+    const result2 = await service.sendReaction(
+      CONTACT_USER_ID,
+      '😂',
+      originalMessageIdBytes
+    );
+    expect(result2.success).toBe(true);
+
+    const allRows = await testQueries.messages.getByOwnerAndContact(
+      OWNER_USER_ID,
+      CONTACT_USER_ID
+    );
+    const baseRow = allRows.find(r => r.id === baseMsgId);
+    const reactionRows = allRows.filter(r => r.type === MessageType.REACTION);
+    expect(baseRow).toBeDefined();
+    expect(reactionRows).toHaveLength(2);
+    expect(reactionRows.map(r => r.content).sort()).toEqual(['😀', '😂']);
+    reactionRows.forEach(r => {
+      expect(r.direction).toBe(MessageDirection.OUTGOING);
+      expect(r.status).toBe(MessageStatus.WAITING_SESSION);
+      expect(r.reactionOf).toBeTruthy();
+      const parsed = JSON.parse(r.reactionOf!);
+      expect(parsed.originalMsgId).toBeDefined();
+    });
+
+    const discussionAfter = await testQueries.discussions.getByOwnerAndContact(
+      OWNER_USER_ID,
+      CONTACT_USER_ID
+    );
+
+    // lastMessage* should still reference the base message, not the reaction
+    expect(discussionAfter?.lastMessageId).toBe(
+      discussionBefore?.lastMessageId
+    );
+    expect(discussionAfter?.lastMessageContent).toBe(
+      discussionBefore?.lastMessageContent
+    );
+  });
+
   it('finds message by seeker', async () => {
     const seeker = new Uint8Array(32).fill(5);
-    await insertMessage({
-      ownerUserId: MESSAGE_OWNER_USER_ID,
-      contactUserId: MESSAGE_CONTACT_USER_ID,
+    await getTestQueries().messages.insert({
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
       content: 'Hello',
       type: MessageType.TEXT,
       direction: MessageDirection.OUTGOING,
@@ -96,431 +520,198 @@ describe('MessageService', () => {
     });
 
     const service = new MessageService(
-      createMessageProtocol(),
-      messageFakeSession,
-      new SdkEventEmitter()
+      new MockMessageProtocol(),
+      createMockSession(),
+      new SdkEventEmitter(),
+      defaultSdkConfig,
+      getTestQueries()
     );
-    const message = await service.findMessageBySeeker(
-      seeker,
-      MESSAGE_OWNER_USER_ID
-    );
+    const message = await service.findMessageBySeeker(seeker, OWNER_USER_ID);
 
     expect(message).toBeDefined();
     expect(message?.content).toBe('Hello');
+  });
+
+  it('getReactions returns only reaction rows for a contact', async () => {
+    const testQueries = getTestQueries();
+    await insertTestContactAndDiscussion();
+
+    // Non-reaction row
+    await testQueries.messages.insert({
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: 'Hello',
+      type: MessageType.TEXT,
+      direction: MessageDirection.INCOMING,
+      status: MessageStatus.DELIVERED,
+      timestamp: new Date(),
+    });
+
+    // Reaction rows
+    const reaction1Id = await testQueries.messages.insert({
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: '👍',
+      type: MessageType.REACTION,
+      direction: MessageDirection.INCOMING,
+      status: MessageStatus.DELIVERED,
+      timestamp: new Date('2024-08-01T00:00:00Z'),
+    });
+
+    const reaction2Id = await testQueries.messages.insert({
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: '❤️',
+      type: MessageType.REACTION,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.SENT,
+      timestamp: new Date('2024-08-01T00:01:00Z'),
+    });
+
+    const service = new MessageService(
+      new MockMessageProtocol(),
+      createMockSession(),
+      new SdkEventEmitter(),
+      defaultSdkConfig,
+      testQueries
+    );
+
+    const reactions = await service.getReactions(CONTACT_USER_ID);
+    const ids = reactions.map(r => r.id);
+    expect(ids).toEqual([reaction1Id, reaction2Id]);
+    expect(reactions.every(r => r.type === MessageType.REACTION)).toBe(true);
   });
 
   it('returns undefined for missing seeker', async () => {
     const seeker = new Uint8Array(32).fill(9);
 
     const service = new MessageService(
-      createMessageProtocol(),
-      messageFakeSession,
-      new SdkEventEmitter()
+      new MockMessageProtocol(),
+      createMockSession(),
+      new SdkEventEmitter(),
+      defaultSdkConfig,
+      getTestQueries()
     );
-    const message = await service.findMessageBySeeker(
-      seeker,
-      MESSAGE_OWNER_USER_ID
-    );
+    const message = await service.findMessageBySeeker(seeker, OWNER_USER_ID);
 
     expect(message).toBeUndefined();
   });
 
-  describe('sendMessage queues as WAITING_SESSION', () => {
+  describe('sendMessage', () => {
+    let testQueries: Queries;
+    let messageService: MessageService;
+
     beforeEach(async () => {
-      await insertDiscussion({
-        ownerUserId: MESSAGE_OWNER_USER_ID,
-        contactUserId: MESSAGE_CONTACT_USER_ID,
-        direction: DiscussionDirection.INITIATED,
-        status: DiscussionStatus.ACTIVE,
-        unreadCount: 0,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      });
+      testQueries = getTestQueries();
+      messageService = new MessageService(
+        new MockMessageProtocol(),
+        createMockSession(),
+        new SdkEventEmitter(),
+        defaultSdkConfig,
+        testQueries
+      );
     });
 
-    it('should queue message as WAITING_SESSION regardless of session status', async () => {
-      const mockSession = createMessageSession(SessionStatus.NoSession);
-      const service = new MessageService(
-        createMessageProtocol(),
-        mockSession,
-        new SdkEventEmitter()
-      );
+    it.each([
+      SessionStatus.NoSession,
+      SessionStatus.UnknownPeer,
+      SessionStatus.Killed,
+      SessionStatus.PeerRequested,
+      SessionStatus.SelfRequested,
+    ])(
+      'should queue message as WAITING_SESSION when session is %s',
+      async status => {
+        await testQueries.discussions.insert({
+          ownerUserId: OWNER_USER_ID,
+          contactUserId: CONTACT_USER_ID,
+          direction: DiscussionDirection.INITIATED,
+          unreadCount: 0,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        });
 
-      const message = {
-        ownerUserId: MESSAGE_OWNER_USER_ID,
-        contactUserId: MESSAGE_CONTACT_USER_ID,
-        content: 'Test message',
-        type: MessageType.TEXT,
-        direction: MessageDirection.OUTGOING,
-        status: MessageStatus.SENDING,
-        timestamp: new Date(),
-      };
+        messageService = new MessageService(
+          new MockMessageProtocol(),
+          createMockSession(status),
+          new SdkEventEmitter(),
+          defaultSdkConfig,
+          testQueries
+        );
 
-      const result = await service.sendMessage(message);
+        const result = await messageService.sendMessage(createTestMessage());
 
-      expect(result.success).toBe(true);
-      expect(result.message).toBeDefined();
-      expect(result.message?.status).toBe(MessageStatus.WAITING_SESSION);
-      expect(result.message?.id).toBeDefined();
+        expect(result.success).toBe(true);
+        expect(result.message?.status).toBe(MessageStatus.WAITING_SESSION);
 
-      const dbMessage = await getMessageById(result.message!.id!);
-      expect(dbMessage).toBeDefined();
-      expect(dbMessage?.status).toBe(MessageStatus.WAITING_SESSION);
-    });
+        const dbMessage = await testQueries.messages.getById(
+          result.message!.id!
+        );
+        const discussion = await testQueries.discussions.getByOwnerAndContact(
+          OWNER_USER_ID,
+          CONTACT_USER_ID
+        );
 
-    it('should queue message as WAITING_SESSION when session is UnknownPeer', async () => {
-      const mockSession = createMessageSession(SessionStatus.UnknownPeer);
-      const service = new MessageService(
-        createMessageProtocol(),
-        mockSession,
-        new SdkEventEmitter()
-      );
-
-      const message = {
-        ownerUserId: MESSAGE_OWNER_USER_ID,
-        contactUserId: MESSAGE_CONTACT_USER_ID,
-        content: 'Test message',
-        type: MessageType.TEXT,
-        direction: MessageDirection.OUTGOING,
-        status: MessageStatus.SENDING,
-        timestamp: new Date(),
-      };
-
-      const result = await service.sendMessage(message);
-
-      expect(result.success).toBe(true);
-      expect(result.message).toBeDefined();
-
-      const messages = await getMessagesByOwnerAndContact(
-        MESSAGE_OWNER_USER_ID,
-        MESSAGE_CONTACT_USER_ID
-      );
-      expect(messages.length).toBe(1);
-      expect(messages[0].status).toBe(MessageStatus.WAITING_SESSION);
-    });
-
-    it('should queue message as WAITING_SESSION when session is Killed', async () => {
-      const mockSession = createMessageSession(SessionStatus.Killed);
-      const service = new MessageService(
-        createMessageProtocol(),
-        mockSession,
-        new SdkEventEmitter()
-      );
-
-      const message = {
-        ownerUserId: MESSAGE_OWNER_USER_ID,
-        contactUserId: MESSAGE_CONTACT_USER_ID,
-        content: 'Test message',
-        type: MessageType.TEXT,
-        direction: MessageDirection.OUTGOING,
-        status: MessageStatus.SENDING,
-        timestamp: new Date(),
-      };
-
-      const result = await service.sendMessage(message);
-
-      expect(result.success).toBe(true);
-      expect(result.message).toBeDefined();
-      expect(result.message?.status).toBe(MessageStatus.WAITING_SESSION);
-    });
-
-    it('should NOT mark discussion as BROKEN when session is lost', async () => {
-      const mockSession = createMessageSession(SessionStatus.NoSession);
-      const service = new MessageService(
-        createMessageProtocol(),
-        mockSession,
-        new SdkEventEmitter()
-      );
-
-      const message = {
-        ownerUserId: MESSAGE_OWNER_USER_ID,
-        contactUserId: MESSAGE_CONTACT_USER_ID,
-        content: 'Test message',
-        type: MessageType.TEXT,
-        direction: MessageDirection.OUTGOING,
-        status: MessageStatus.SENDING,
-        timestamp: new Date(),
-      };
-
-      await service.sendMessage(message);
-
-      const discussion = await getDiscussionByOwnerAndContact(
-        MESSAGE_OWNER_USER_ID,
-        MESSAGE_CONTACT_USER_ID
-      );
-      expect(discussion?.status).toBe(DiscussionStatus.ACTIVE);
-    });
-
-    it('should queue message as WAITING_SESSION when session is PeerRequested', async () => {
-      const mockSession = createMessageSession(SessionStatus.PeerRequested);
-      const service = new MessageService(
-        createMessageProtocol(),
-        mockSession,
-        new SdkEventEmitter()
-      );
-
-      const message = {
-        ownerUserId: MESSAGE_OWNER_USER_ID,
-        contactUserId: MESSAGE_CONTACT_USER_ID,
-        content: 'Test message',
-        type: MessageType.TEXT,
-        direction: MessageDirection.OUTGOING,
-        status: MessageStatus.SENDING,
-        timestamp: new Date(),
-      };
-
-      const result = await service.sendMessage(message);
-
-      expect(result.success).toBe(true);
-      expect(result.message).toBeDefined();
-      expect(result.message?.status).toBe(MessageStatus.WAITING_SESSION);
-
-      const dbMessage = await getMessageById(result.message!.id!);
-      expect(dbMessage).toBeDefined();
-      expect(dbMessage?.status).toBe(MessageStatus.WAITING_SESSION);
-    });
-
-    it('should queue message as WAITING_SESSION when session is SelfRequested', async () => {
-      const mockSession = createMessageSession(SessionStatus.SelfRequested);
-      const service = new MessageService(
-        createMessageProtocol(),
-        mockSession,
-        new SdkEventEmitter()
-      );
-
-      const message = {
-        ownerUserId: MESSAGE_OWNER_USER_ID,
-        contactUserId: MESSAGE_CONTACT_USER_ID,
-        content: 'Test message',
-        type: MessageType.TEXT,
-        direction: MessageDirection.OUTGOING,
-        status: MessageStatus.SENDING,
-        timestamp: new Date(),
-      };
-
-      const result = await service.sendMessage(message);
-
-      expect(result.success).toBe(true);
-      expect(result.message?.status).toBe(MessageStatus.WAITING_SESSION);
-    });
-  });
-});
-
-// ============================================================================
-// Invalid contactUserId Validation
-// ============================================================================
-
-const EDGE_OWNER_USER_ID = encodeUserId(new Uint8Array(32).fill(1));
-const EDGE_CONTACT_USER_ID = encodeUserId(new Uint8Array(32).fill(2));
-const EDGE_SEEKER_SIZE = 34;
-
-function createEdgeSession(
-  status: SessionStatus = SessionStatus.Active
-): SessionModule {
-  return {
-    peerSessionStatus: vi.fn().mockReturnValue(status),
-    sendMessage: vi.fn().mockResolvedValue({
-      seeker: new Uint8Array(EDGE_SEEKER_SIZE).fill(1),
-      data: new Uint8Array([1, 2, 3, 4]),
-    }),
-    feedIncomingMessageBoardRead: vi.fn(),
-    refresh: vi.fn().mockResolvedValue([]),
-    feedIncomingAnnouncement: vi.fn(),
-    establishOutgoingSession: vi
-      .fn()
-      .mockResolvedValue(new Uint8Array([1, 2, 3])),
-    toEncryptedBlob: vi.fn(),
-    userIdEncoded: EDGE_OWNER_USER_ID,
-    userIdRaw: new Uint8Array(32).fill(1),
-    userId: new Uint8Array(32).fill(1),
-    getMessageBoardReadKeys: vi.fn().mockReturnValue([]),
-    cleanup: vi.fn(),
-  } as unknown as SessionModule;
-}
-
-function createEdgeMessageProtocol(): IMessageProtocol {
-  return {
-    fetchMessages: vi.fn().mockResolvedValue([]),
-    sendMessage: vi.fn().mockResolvedValue(undefined),
-    sendAnnouncement: vi.fn().mockResolvedValue('counter-123'),
-    fetchAnnouncements: vi.fn().mockResolvedValue([]),
-    fetchPublicKeyByUserId: vi.fn().mockResolvedValue(''),
-    postPublicKey: vi.fn().mockResolvedValue(''),
-    changeNode: vi.fn().mockResolvedValue({ success: true }),
-  } as IMessageProtocol;
-}
-
-describe('Invalid contactUserId Validation', () => {
-  let mockSession: SessionModule;
-  let mockProtocol: IMessageProtocol;
-  let messageService: MessageService;
-
-  beforeEach(async () => {
-    await clearAllTables();
-    mockSession = createEdgeSession();
-    mockProtocol = createEdgeMessageProtocol();
-
-    messageService = new MessageService(
-      mockProtocol,
-      mockSession,
-      new SdkEventEmitter(),
-      defaultSdkConfig
+        expect(dbMessage?.status).toBe(MessageStatus.WAITING_SESSION);
+        expect(discussion?.unreadCount).toBe(0);
+        expect(discussion?.lastMessageTimestamp).toBeDefined();
+        expect(discussion?.lastMessageContent).toBe(dbMessage?.content);
+        expect(discussion?.lastMessageId).toBe(dbMessage?.id);
+      }
     );
-  });
 
-  it('should fail when no contact or discussion exists', async () => {
-    const result = await messageService.sendMessage({
-      ownerUserId: EDGE_OWNER_USER_ID,
-      contactUserId: EDGE_CONTACT_USER_ID,
-      content: 'Test message',
-      type: MessageType.TEXT,
-      direction: MessageDirection.OUTGOING,
-      status: MessageStatus.SENDING,
-      timestamp: new Date(),
+    it('discussion should not be updated when sending keep-alive message', async () => {
+      await insertTestContactAndDiscussion();
+      const result = await messageService.sendMessage(
+        createTestMessage({ type: MessageType.KEEP_ALIVE })
+      );
+      expect(result.success).toBe(true);
+      const discussion = await testQueries.discussions.getByOwnerAndContact(
+        OWNER_USER_ID,
+        CONTACT_USER_ID
+      );
+      expect(discussion?.unreadCount).toBe(0);
+      expect(discussion?.lastMessageTimestamp).toBeNull();
+      expect(discussion?.lastMessageContent).toBeNull();
+      expect(discussion?.lastMessageId).toBeNull();
     });
 
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('not found');
-  });
+    it('should fail when no contact or discussion exists', async () => {
+      const result = await messageService.sendMessage(createTestMessage());
 
-  it('should fail when discussion not found', async () => {
-    await insertContact({
-      ownerUserId: EDGE_OWNER_USER_ID,
-      userId: EDGE_CONTACT_USER_ID,
-      name: 'Test Contact',
-      publicKeys: new Uint8Array(32),
-      isOnline: true,
-      lastSeen: new Date(),
-      createdAt: new Date(),
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('not found');
     });
 
-    const result = await messageService.sendMessage({
-      ownerUserId: EDGE_OWNER_USER_ID,
-      contactUserId: EDGE_CONTACT_USER_ID,
-      content: 'Test message',
-      type: MessageType.TEXT,
-      direction: MessageDirection.OUTGOING,
-      status: MessageStatus.SENDING,
-      timestamp: new Date(),
+    it('should fail when discussion not found', async () => {
+      await getTestQueries().contacts.insert({
+        ownerUserId: OWNER_USER_ID,
+        userId: CONTACT_USER_ID,
+        name: 'Test Contact',
+        publicKeys: new Uint8Array(32),
+        isOnline: true,
+        lastSeen: new Date(),
+        createdAt: new Date(),
+      });
+
+      const result = await messageService.sendMessage(createTestMessage());
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Discussion not found');
     });
-
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('Discussion not found');
-  });
-
-  it('should succeed when both contact and discussion exist', async () => {
-    await insertContact({
-      ownerUserId: EDGE_OWNER_USER_ID,
-      userId: EDGE_CONTACT_USER_ID,
-      name: 'Test Contact',
-      publicKeys: new Uint8Array(32),
-      isOnline: true,
-      lastSeen: new Date(),
-      createdAt: new Date(),
-    });
-
-    await insertDiscussion({
-      ownerUserId: EDGE_OWNER_USER_ID,
-      contactUserId: EDGE_CONTACT_USER_ID,
-      direction: DiscussionDirection.INITIATED,
-      status: DiscussionStatus.ACTIVE,
-      unreadCount: 0,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
-
-    const result = await messageService.sendMessage({
-      ownerUserId: EDGE_OWNER_USER_ID,
-      contactUserId: EDGE_CONTACT_USER_ID,
-      content: 'Test message',
-      type: MessageType.TEXT,
-      direction: MessageDirection.OUTGOING,
-      status: MessageStatus.SENDING,
-      timestamp: new Date(),
-    });
-
-    expect(result.success).toBe(true);
   });
 });
-
-// ============================================================================
-// processSendQueueForContact: Encryption Error and Network Error handling
-// ============================================================================
-
-const GAP_OWNER_USER_ID = encodeUserId(new Uint8Array(32).fill(1));
-const GAP_CONTACT_USER_ID = encodeUserId(new Uint8Array(32).fill(2));
-const GAP_SEEKER_SIZE = 34;
-
-function createGapSession(
-  status: SessionStatus = SessionStatus.Active
-): SessionModule {
-  return {
-    peerSessionStatus: vi.fn().mockReturnValue(status),
-    sendMessage: vi.fn().mockReturnValue({
-      seeker: new Uint8Array(GAP_SEEKER_SIZE).fill(1),
-      data: new Uint8Array([1, 2, 3, 4]),
-    }),
-    feedIncomingMessageBoardRead: vi.fn(),
-    refresh: vi.fn().mockResolvedValue([]),
-    feedIncomingAnnouncement: vi.fn(),
-    establishOutgoingSession: vi
-      .fn()
-      .mockResolvedValue(new Uint8Array([1, 2, 3])),
-    toEncryptedBlob: vi.fn(),
-    userIdEncoded: GAP_OWNER_USER_ID,
-    userIdRaw: new Uint8Array(32).fill(1),
-    userId: new Uint8Array(32).fill(1),
-    getMessageBoardReadKeys: vi.fn().mockReturnValue([]),
-    cleanup: vi.fn(),
-  } as unknown as SessionModule;
-}
-
-function createGapMessageProtocol(): IMessageProtocol {
-  return {
-    fetchMessages: vi.fn().mockResolvedValue([]),
-    sendMessage: vi.fn().mockResolvedValue(undefined),
-    sendAnnouncement: vi.fn().mockResolvedValue('counter-123'),
-    fetchAnnouncements: vi.fn().mockResolvedValue([]),
-    fetchPublicKeyByUserId: vi.fn().mockResolvedValue(''),
-    postPublicKey: vi.fn().mockResolvedValue(''),
-    changeNode: vi.fn().mockResolvedValue({ success: true }),
-  } as IMessageProtocol;
-}
 
 describe('processSendQueueForContact: Encryption Error', () => {
   let mockSession: SessionModule;
-  let mockProtocol: IMessageProtocol;
   let messageService: MessageService;
 
   beforeEach(async () => {
-    mockSession = createGapSession();
-    mockProtocol = createGapMessageProtocol();
-
     await clearAllTables();
-
-    await insertContact({
-      ownerUserId: GAP_OWNER_USER_ID,
-      userId: GAP_CONTACT_USER_ID,
-      name: 'Test Contact',
-      publicKeys: new Uint8Array(32),
-      isOnline: true,
-      lastSeen: new Date(),
-      createdAt: new Date(),
-    });
-
-    await insertDiscussion({
-      ownerUserId: GAP_OWNER_USER_ID,
-      contactUserId: GAP_CONTACT_USER_ID,
-      direction: DiscussionDirection.INITIATED,
-      status: DiscussionStatus.ACTIVE,
-      weAccepted: true,
-      unreadCount: 0,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
+    mockSession = createMockSession();
+    await insertTestContactAndDiscussion();
   });
 
-  it('should propagate error when encryption fails in processSendQueueForContact', async () => {
+  it('should propagate error when encryption fails', async () => {
     (mockSession.sendMessage as ReturnType<typeof vi.fn>).mockImplementation(
       () => {
         throw new Error('Encryption failed: invalid session state');
@@ -528,26 +719,17 @@ describe('processSendQueueForContact: Encryption Error', () => {
     );
 
     messageService = new MessageService(
-      mockProtocol,
+      new MockMessageProtocol(),
       mockSession,
       new SdkEventEmitter(),
-      defaultSdkConfig
+      defaultSdkConfig,
+      getTestQueries()
     );
 
-    // First queue a message via sendMessage
-    await messageService.sendMessage({
-      ownerUserId: GAP_OWNER_USER_ID,
-      contactUserId: GAP_CONTACT_USER_ID,
-      content: 'Test message',
-      type: MessageType.TEXT,
-      direction: MessageDirection.OUTGOING,
-      status: MessageStatus.SENDING,
-      timestamp: new Date(),
-    });
+    await messageService.sendMessage(createTestMessage());
 
-    // Then try to process the send queue — encryption will fail
     const processResult = await messageService
-      .processSendQueueForContact(GAP_CONTACT_USER_ID)
+      .processSendQueueForContact(CONTACT_USER_ID)
       .catch((e: Error) => ({ success: false, error: e }));
 
     expect(processResult.success).toBe(false);
@@ -561,35 +743,23 @@ describe('processSendQueueForContact: Encryption Error', () => {
     );
 
     messageService = new MessageService(
-      mockProtocol,
+      new MockMessageProtocol(),
       mockSession,
       new SdkEventEmitter(),
-      defaultSdkConfig
+      defaultSdkConfig,
+      getTestQueries()
     );
 
-    // Queue a message
-    const sendResult = await messageService.sendMessage({
-      ownerUserId: GAP_OWNER_USER_ID,
-      contactUserId: GAP_CONTACT_USER_ID,
-      content: 'Test message',
-      type: MessageType.TEXT,
-      direction: MessageDirection.OUTGOING,
-      status: MessageStatus.SENDING,
-      timestamp: new Date(),
-    });
-
+    const sendResult = await messageService.sendMessage(createTestMessage());
     expect(sendResult.success).toBe(true);
 
-    // Process the queue — encryption will fail
     await messageService
-      .processSendQueueForContact(GAP_CONTACT_USER_ID)
+      .processSendQueueForContact(CONTACT_USER_ID)
       .catch(() => {});
 
-    // Message should remain WAITING_SESSION since encryption failed before
-    // the status could be updated to READY
-    const messages = await getMessagesByOwnerAndContact(
-      GAP_OWNER_USER_ID,
-      GAP_CONTACT_USER_ID
+    const messages = await getTestQueries().messages.getByOwnerAndContact(
+      OWNER_USER_ID,
+      CONTACT_USER_ID
     );
 
     expect(messages.length).toBe(1);
@@ -597,179 +767,65 @@ describe('processSendQueueForContact: Encryption Error', () => {
   });
 });
 
-describe('processSendQueueForContact: Network Error', () => {
-  let mockSession: SessionModule;
-  let mockProtocol: IMessageProtocol;
-  let messageService: MessageService;
-
-  const mockSeeker = new Uint8Array(GAP_SEEKER_SIZE).fill(123);
-  const mockEncryptedData = new Uint8Array([10, 20, 30, 40, 50]);
-
-  beforeEach(async () => {
-    mockSession = createGapSession();
-    mockProtocol = createGapMessageProtocol();
-
-    (mockSession.sendMessage as ReturnType<typeof vi.fn>).mockReturnValue({
-      seeker: mockSeeker,
-      data: mockEncryptedData,
-    });
-
+describe('processSendQueueForContact: Session Not Active', () => {
+  it('should send error if SelfRequested session and keep message queued', async () => {
     await clearAllTables();
+    const mockSession = createMockSession(SessionStatus.SelfRequested);
+    await insertTestContactAndDiscussion();
 
-    await insertContact({
-      ownerUserId: GAP_OWNER_USER_ID,
-      userId: GAP_CONTACT_USER_ID,
-      name: 'Test Contact',
-      publicKeys: new Uint8Array(32),
-      isOnline: true,
-      lastSeen: new Date(),
-      createdAt: new Date(),
-    });
-
-    await insertDiscussion({
-      ownerUserId: GAP_OWNER_USER_ID,
-      contactUserId: GAP_CONTACT_USER_ID,
-      direction: DiscussionDirection.INITIATED,
-      status: DiscussionStatus.ACTIVE,
-      weAccepted: true,
-      unreadCount: 0,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
-  });
-
-  it('should preserve encryptedMessage and keep READY when network send fails', async () => {
-    (mockProtocol.sendMessage as ReturnType<typeof vi.fn>).mockRejectedValue(
-      new Error('Network error: connection refused')
-    );
-
-    messageService = new MessageService(
-      mockProtocol,
+    const messageService = new MessageService(
+      new MockMessageProtocol(),
       mockSession,
       new SdkEventEmitter(),
-      defaultSdkConfig
+      defaultSdkConfig,
+      getTestQueries()
     );
 
-    // Queue message
-    await messageService.sendMessage({
-      ownerUserId: GAP_OWNER_USER_ID,
-      contactUserId: GAP_CONTACT_USER_ID,
-      content: 'Test message',
-      type: MessageType.TEXT,
-      direction: MessageDirection.OUTGOING,
-      status: MessageStatus.SENDING,
-      timestamp: new Date(),
-    });
+    const sendResult = await messageService.sendMessage(createTestMessage());
+    expect(sendResult.success).toBe(true);
 
-    // Process queue — encryption succeeds, network send fails
-    await messageService.processSendQueueForContact(GAP_CONTACT_USER_ID);
+    const processResult =
+      await messageService.processSendQueueForContact(CONTACT_USER_ID);
 
-    const messages = await getMessagesByOwnerAndContact(
-      GAP_OWNER_USER_ID,
-      GAP_CONTACT_USER_ID
+    expect(processResult.success).toBe(false);
+
+    expect(mockSession.sendMessage).not.toHaveBeenCalled();
+
+    const messages = await getTestQueries().messages.getByOwnerAndContact(
+      OWNER_USER_ID,
+      CONTACT_USER_ID
     );
-
-    expect(messages.length).toBe(1);
-    const message = messages[0];
-
-    // Message stays READY with encrypted data preserved and a future whenToSend (retry)
-    expect(message.encryptedMessage).toEqual(mockEncryptedData);
-    expect(message.seeker).toEqual(mockSeeker);
-    expect(message.status).toBe(MessageStatus.READY);
-    expect(message.whenToSend).toBeDefined();
+    expect(messages).toHaveLength(1);
+    expect(messages[0].status).toBe(MessageStatus.WAITING_SESSION);
   });
 
-  it('should NOT mark discussion as BROKEN on network error', async () => {
-    (mockProtocol.sendMessage as ReturnType<typeof vi.fn>).mockRejectedValue(
-      new Error('Network timeout')
-    );
+  it('should skip processing if Saturated session and keep message queued', async () => {
+    await clearAllTables();
+    const mockSession = createMockSession(SessionStatus.Saturated);
+    await insertTestContactAndDiscussion();
 
-    messageService = new MessageService(
-      mockProtocol,
+    const messageService = new MessageService(
+      new MockMessageProtocol(),
       mockSession,
       new SdkEventEmitter(),
-      defaultSdkConfig
+      defaultSdkConfig,
+      getTestQueries()
     );
 
-    // Queue and process
-    await messageService.sendMessage({
-      ownerUserId: GAP_OWNER_USER_ID,
-      contactUserId: GAP_CONTACT_USER_ID,
-      content: 'Test message',
-      type: MessageType.TEXT,
-      direction: MessageDirection.OUTGOING,
-      status: MessageStatus.SENDING,
-      timestamp: new Date(),
-    });
+    const sendResult = await messageService.sendMessage(createTestMessage());
+    expect(sendResult.success).toBe(true);
 
-    await messageService.processSendQueueForContact(GAP_CONTACT_USER_ID);
+    const processResult =
+      await messageService.processSendQueueForContact(CONTACT_USER_ID);
+    expect(processResult.success).toBe(true);
 
-    const discussion = await getDiscussionByOwnerAndContact(
-      GAP_OWNER_USER_ID,
-      GAP_CONTACT_USER_ID
+    expect(mockSession.sendMessage).not.toHaveBeenCalled();
+
+    const messages = await getTestQueries().messages.getByOwnerAndContact(
+      OWNER_USER_ID,
+      CONTACT_USER_ID
     );
-    expect(discussion?.status).toBe(DiscussionStatus.ACTIVE);
-  });
-
-  it('should allow resend after network failure via resendMessages', async () => {
-    (
-      mockProtocol.sendMessage as ReturnType<typeof vi.fn>
-    ).mockRejectedValueOnce(new Error('Network error'));
-
-    messageService = new MessageService(
-      mockProtocol,
-      mockSession,
-      new SdkEventEmitter(),
-      defaultSdkConfig
-    );
-
-    // Queue and process — first attempt fails on network
-    await messageService.sendMessage({
-      ownerUserId: GAP_OWNER_USER_ID,
-      contactUserId: GAP_CONTACT_USER_ID,
-      content: 'Test message',
-      type: MessageType.TEXT,
-      direction: MessageDirection.OUTGOING,
-      status: MessageStatus.SENDING,
-      timestamp: new Date(),
-    });
-
-    await messageService.processSendQueueForContact(GAP_CONTACT_USER_ID);
-
-    const allMsgs = await getMessagesByOwnerAndContact(
-      GAP_OWNER_USER_ID,
-      GAP_CONTACT_USER_ID
-    );
-    expect(allMsgs.length).toBe(1);
-    const failedRow = allMsgs[0];
-
-    expect(failedRow.encryptedMessage).toBeDefined();
-    expect(failedRow.seeker).toBeDefined();
-
-    // Convert to Message shape for resendMessages
-    const failedMessage = {
-      id: failedRow.id,
-      ownerUserId: failedRow.ownerUserId,
-      contactUserId: failedRow.contactUserId,
-      content: failedRow.content,
-      type: failedRow.type as MessageType,
-      direction: failedRow.direction as MessageDirection,
-      status: failedRow.status as MessageStatus,
-      timestamp: failedRow.timestamp,
-      seeker: failedRow.seeker ?? undefined,
-      encryptedMessage: failedRow.encryptedMessage ?? undefined,
-    };
-
-    // Next network send will succeed
-    (
-      mockProtocol.sendMessage as ReturnType<typeof vi.fn>
-    ).mockResolvedValueOnce(undefined);
-
-    const messageMap = new Map([[GAP_CONTACT_USER_ID, [failedMessage]]]);
-    await messageService.resendMessages(messageMap);
-
-    // resendMessages resets to WAITING_SESSION and re-encrypts via processSendQueueForContact
-    // The session.sendMessage should be called again for re-encryption
-    expect(mockSession.sendMessage).toHaveBeenCalledTimes(2); // once for initial, once for resend
+    expect(messages).toHaveLength(1);
+    expect(messages[0].status).toBe(MessageStatus.WAITING_SESSION);
   });
 });

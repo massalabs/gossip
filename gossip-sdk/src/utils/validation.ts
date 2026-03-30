@@ -4,8 +4,8 @@
  * Functions for validating user input like usernames, passwords, and user IDs.
  */
 
-import { isValidUserId } from './userId';
-import { getUserProfileByUsernameLower } from '../queries';
+import { isValidUserId } from './userId.js';
+import { Queries } from '../db/queries/index.js';
 
 export type ValidationResult =
   | { valid: true; error?: never }
@@ -70,10 +70,12 @@ export function validateUsernameFormat(value: string): ValidationResult {
  * @returns Validation result
  */
 export async function validateUsernameAvailability(
-  value: string
+  value: string,
+  queries: Queries
 ): Promise<ValidationResult> {
   try {
-    const existingProfile = await getUserProfileByUsernameLower(value);
+    const existingProfile =
+      await queries.userProfiles.getByUsernameLower(value);
 
     if (existingProfile) {
       return {
@@ -102,14 +104,15 @@ export async function validateUsernameAvailability(
  * @returns Validation result
  */
 export async function validateUsernameFormatAndAvailability(
-  value: string
+  value: string,
+  queries: Queries
 ): Promise<ValidationResult> {
   const result = validateUsernameFormat(value);
   if (!result.valid) {
     return result;
   }
 
-  return await validateUsernameAvailability(value);
+  return await validateUsernameAvailability(value, queries);
 }
 
 /**

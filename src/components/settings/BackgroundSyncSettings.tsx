@@ -8,6 +8,7 @@
  */
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Capacitor, PluginListenerHandle } from '@capacitor/core';
 import { App } from '@capacitor/app';
 import {
@@ -36,6 +37,7 @@ interface BackgroundSyncSettingsProps {
 const BackgroundSyncSettings: React.FC<BackgroundSyncSettingsProps> = ({
   showDebugInfo = false,
 }) => {
+  const { t } = useTranslation('settings');
   // Android state
   const [androidStatus, setAndroidStatus] =
     useState<BackgroundSyncStatus | null>(null);
@@ -218,14 +220,18 @@ const BackgroundSyncSettings: React.FC<BackgroundSyncSettingsProps> = ({
       <div className="h-[54px] flex items-center px-4 justify-start w-full border-b border-border">
         <Battery className="text-foreground mr-4" aria-hidden="true" />
         <span className="text-base font-medium text-foreground flex-1 text-left">
-          Background Sync
+          {t('background_sync.title')}
         </span>
         {isLoading ? (
-          <span className="text-xs text-muted-foreground">Checking...</span>
+          <span className="text-xs text-muted-foreground">
+            {t('background_sync.checking')}
+          </span>
         ) : isReliable ? (
           <div className="flex items-center gap-1.5">
             <Shield className="w-4 h-4 text-success" aria-hidden="true" />
-            <span className="text-xs text-success">Optimized</span>
+            <span className="text-xs text-success">
+              {t('background_sync.optimized')}
+            </span>
           </div>
         ) : hasIssues ? (
           <div className="flex items-center gap-1.5">
@@ -233,7 +239,9 @@ const BackgroundSyncSettings: React.FC<BackgroundSyncSettingsProps> = ({
               className="w-4 h-4 text-warning"
               aria-hidden="true"
             />
-            <span className="text-xs text-warning">Needs attention</span>
+            <span className="text-xs text-warning">
+              {t('background_sync.needs_attention')}
+            </span>
           </div>
         ) : null}
       </div>
@@ -257,23 +265,23 @@ const BackgroundSyncSettings: React.FC<BackgroundSyncSettingsProps> = ({
               {/* Background App Refresh status */}
               <div className="flex items-center justify-between py-1">
                 <span className="text-sm text-muted-foreground">
-                  Background App Refresh
+                  {t('background_sync.background_refresh')}
                 </span>
                 {iosStatus.isBackgroundRefreshEnabled ? (
                   <span className="text-xs font-medium text-success">
-                    Enabled
+                    {t('background_sync.enabled')}
                   </span>
                 ) : iosStatus.backgroundRefreshStatus === 'denied' ? (
                   <span className="text-xs font-medium text-destructive">
-                    Disabled
+                    {t('background_sync.disabled')}
                   </span>
                 ) : iosStatus.backgroundRefreshStatus === 'restricted' ? (
                   <span className="text-xs font-medium text-warning">
-                    Restricted
+                    {t('background_sync.restricted')}
                   </span>
                 ) : (
                   <span className="text-xs font-medium text-muted-foreground">
-                    Unknown
+                    {t('background_sync.unknown')}
                   </span>
                 )}
               </div>
@@ -282,12 +290,16 @@ const BackgroundSyncSettings: React.FC<BackgroundSyncSettingsProps> = ({
               <div className="flex items-center justify-between py-1">
                 <span className="text-sm text-muted-foreground flex items-center gap-1.5">
                   <Zap className="w-3.5 h-3.5" aria-hidden="true" />
-                  Low Power Mode
+                  {t('background_sync.low_power')}
                 </span>
                 {iosStatus.isLowPowerModeEnabled ? (
-                  <span className="text-xs font-medium text-warning">On</span>
+                  <span className="text-xs font-medium text-warning">
+                    {t('background_sync.on')}
+                  </span>
                 ) : (
-                  <span className="text-xs font-medium text-success">Off</span>
+                  <span className="text-xs font-medium text-success">
+                    {t('background_sync.off')}
+                  </span>
                 )}
               </div>
             </div>
@@ -301,7 +313,7 @@ const BackgroundSyncSettings: React.FC<BackgroundSyncSettingsProps> = ({
                   className="w-full"
                   onClick={handleOpenIOSSettings}
                 >
-                  Open Settings
+                  {t('background_sync.open_settings')}
                 </Button>
               </div>
             )}
@@ -322,10 +334,10 @@ const BackgroundSyncSettings: React.FC<BackgroundSyncSettingsProps> = ({
                     variant="link"
                     onClick={handleOpenHelp}
                     className="mt-2 flex items-center gap-1.5 text-sm text-accent p-0 h-auto"
-                    ariaLabel="Learn more about battery optimization for your device"
+                    ariaLabel={t('background_sync.learn_more')}
                   >
                     <ExternalLink className="w-4 h-4" aria-hidden="true" />
-                    Learn more
+                    {t('background_sync.learn_more')}
                   </Button>
                 )}
               </div>
@@ -337,15 +349,15 @@ const BackgroundSyncSettings: React.FC<BackgroundSyncSettingsProps> = ({
                 {/* Battery optimization status */}
                 <div className="flex items-center justify-between py-1">
                   <span className="text-sm text-muted-foreground">
-                    Battery optimization disabled
+                    {t('background_sync.battery_optimization')}
                   </span>
                   {androidStatus.isIgnoringBatteryOptimization ? (
                     <span className="text-xs font-medium text-success">
-                      Yes
+                      {t('background_sync.yes')}
                     </span>
                   ) : (
                     <span className="text-xs font-medium text-destructive">
-                      No
+                      {t('background_sync.no')}
                     </span>
                   )}
                 </div>
@@ -353,22 +365,22 @@ const BackgroundSyncSettings: React.FC<BackgroundSyncSettingsProps> = ({
                 {/* Background restriction status */}
                 <div className="flex items-center justify-between py-1">
                   <span className="text-sm text-muted-foreground">
-                    Android background restriction
+                    {t('background_sync.android_restriction')}
                   </span>
                   {!androidStatus.isBackgroundRestricted ? (
                     <div className="flex flex-col items-end gap-0.5">
                       <span className="text-xs font-medium text-success">
-                        Not restricted
+                        {t('background_sync.not_restricted')}
                       </span>
                       {isXiaomi && (
                         <span className="text-xs text-muted-foreground italic">
-                          (MIUI may still restrict)
+                          {t('background_sync.miui_note')}
                         </span>
                       )}
                     </div>
                   ) : (
                     <span className="text-xs font-medium text-destructive">
-                      Restricted
+                      {t('background_sync.restricted')}
                     </span>
                   )}
                 </div>
@@ -386,7 +398,7 @@ const BackgroundSyncSettings: React.FC<BackgroundSyncSettingsProps> = ({
                     className="w-full"
                     onClick={handleOpenBatterySettings}
                   >
-                    Disable Battery Optimization
+                    {t('background_sync.disable_battery')}
                   </Button>
                 )}
 
@@ -397,9 +409,9 @@ const BackgroundSyncSettings: React.FC<BackgroundSyncSettingsProps> = ({
                     size="sm"
                     className="w-full"
                     onClick={handleOpenAutoStartSettings}
-                    ariaLabel="Open MIUI AutoStart settings for Gossip"
+                    ariaLabel={t('background_sync.enable_autostart')}
                   >
-                    Enable AutoStart (MIUI)
+                    {t('background_sync.enable_autostart')}
                   </Button>
                 )}
               </div>
@@ -411,7 +423,7 @@ const BackgroundSyncSettings: React.FC<BackgroundSyncSettingsProps> = ({
         {showDebugInfo && (
           <div className="mt-3 pt-3 border-t border-border space-y-1">
             <p className="text-xs font-medium text-muted-foreground mb-2">
-              Debug Info
+              {t('background_sync.debug_info')}
             </p>
             <p className="text-xs text-muted-foreground font-mono">
               Platform: {platform}
@@ -464,7 +476,7 @@ const BackgroundSyncSettings: React.FC<BackgroundSyncSettingsProps> = ({
                 disabled={isLoading}
               >
                 <RefreshCcw className="w-4 h-4 mr-2" aria-hidden="true" />
-                Refresh Status
+                {t('background_sync.refresh_status')}
               </Button>
             </div>
           </div>

@@ -1,0 +1,50 @@
+{
+  "title": "钱包",
+  "refresh": "刷新余额和价格",
+  "address": "地址",
+  "copy_address": "复制地址",
+  "swap_coming_soon": "兑换功能即将上线！",
+  "send_label": "发送",
+  "receive_label": "接收",
+  "swap_label": "兑换",
+  "send": {
+    "title": "发送",
+    "select_token": "选择代币",
+    "recipient_placeholder": "输入收款地址",
+    "recipient_label": "收款地址",
+    "network_fee": "网络手续费",
+    "amount": "金额",
+    "available": "可用：",
+    "recipient_required": "请输入收款地址",
+    "invalid_recipient": "收款地址格式无效",
+    "amount_required": "金额必须大于 0",
+    "select_token_required": "请选择代币",
+    "insufficient_balance": "余额不足",
+    "processing": "正在处理交易...",
+    "sending": "发送中...",
+    "failed": "交易失败，请重试。"
+  },
+  "receive": {
+    "title": "接收",
+    "your_address": "您的地址",
+    "copied": "已复制！",
+    "share_with_contact": "分享给联系人",
+    "info": "分享此地址即可接收付款。请仅向此地址发送 MAS 和支持的代币。",
+    "share_coming_soon": "分享功能即将上线！"
+  },
+  "fees": {
+    "title": "高级选项",
+    "description": "您支付的 Gas 费用于奖励区块验证者，并提高您的交易被确认的几率。这是对支持区块链网络的人的小费。",
+    "preset": "预设",
+    "low": "低 (0.01 MAS)",
+    "low_desc": "确认较慢",
+    "standard": "标准 (0.03 MAS)",
+    "standard_desc": "推荐",
+    "high": "高 (0.1 MAS)",
+    "high_desc": "快速确认",
+    "custom": "自定义费用",
+    "custom_placeholder": "自定义费用",
+    "custom_hint": "以 MAS 为单位输入费用",
+    "confirm_fees": "确认费用"
+  }
+}

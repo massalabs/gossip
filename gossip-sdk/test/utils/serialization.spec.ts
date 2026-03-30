@@ -9,6 +9,9 @@ import {
   serializeReplyMessage,
   serializeForwardMessage,
   serializeKeepAliveMessage,
+  serializeDeleteMessage,
+  serializeEditMessage,
+  serializeReactionMessage,
   deserializeMessage,
 } from '../../src/utils/messageSerialization';
 
@@ -51,6 +54,34 @@ describe('message serialization', () => {
     const serialized = serializeKeepAliveMessage();
     const deserialized = deserializeMessage(serialized);
     expect(deserialized.type).toBe(MessageType.KEEP_ALIVE);
+  });
+
+  it('serializes and deserializes delete messages', () => {
+    const serialized = serializeDeleteMessage(originalMsgId, messageId);
+    const deserialized = deserializeMessage(serialized);
+    expect(deserialized.type).toBe(MessageType.DELETED);
+    expect(deserialized.deleteOf?.originalMsgId).toEqual(originalMsgId);
+  });
+
+  it('serializes and deserializes edit messages', () => {
+    const serialized = serializeEditMessage(
+      'edited content',
+      originalMsgId,
+      messageId
+    );
+    const deserialized = deserializeMessage(serialized);
+    expect(deserialized.type).toBe(MessageType.TEXT);
+    expect(deserialized.content).toBe('edited content');
+    expect(deserialized.editOf?.originalMsgId).toEqual(originalMsgId);
+  });
+
+  it('serializes and deserializes reaction messages', () => {
+    const serialized = serializeReactionMessage('❤️', originalMsgId, messageId);
+    const deserialized = deserializeMessage(serialized);
+    expect(deserialized.type).toBe(MessageType.REACTION);
+    expect(deserialized.content).toBe('❤️');
+    expect(deserialized.reactionOf?.originalMsgId).toEqual(originalMsgId);
+    expect(deserialized.messageId).toEqual(messageId);
   });
 
   it('serializes forward without additional content', () => {

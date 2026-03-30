@@ -5,6 +5,7 @@
  */
 
 import type { Message, Discussion, Contact } from '../db';
+import type { SessionStatus } from '../wasm/bindings';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Event Types
@@ -19,6 +20,9 @@ export enum SdkEventType {
   SESSION_CREATED = 'sessionCreated',
   SESSION_RENEWED = 'sessionRenewed',
   SESSION_ACCEPTED = 'sessionAccepted',
+  SEEKERS_UPDATED = 'seekersUpdated',
+  SESSION_STATUS_CHANGED = 'sessionStatusChanged',
+  DISCUSSION_UPDATED = 'discussionUpdated',
   ERROR = 'error',
 }
 
@@ -34,6 +38,12 @@ export interface SdkEventHandlers {
   [SdkEventType.SESSION_CREATED]: (discussion: Discussion) => void;
   [SdkEventType.SESSION_RENEWED]: (discussion: Discussion) => void;
   [SdkEventType.SESSION_ACCEPTED]: (contactUserId: string) => void;
+  [SdkEventType.SEEKERS_UPDATED]: (seekers: Uint8Array[]) => void;
+  [SdkEventType.SESSION_STATUS_CHANGED]: (
+    contactUserId: string,
+    status: SessionStatus
+  ) => void;
+  [SdkEventType.DISCUSSION_UPDATED]: (contactUserId: string) => void;
   [SdkEventType.ERROR]: (error: Error, context: string) => void;
 }
 
@@ -68,6 +78,15 @@ export class SdkEventEmitter {
     >(),
     [SdkEventType.SESSION_ACCEPTED]: new Set<
       SdkEventHandlers[SdkEventType.SESSION_ACCEPTED]
+    >(),
+    [SdkEventType.SEEKERS_UPDATED]: new Set<
+      SdkEventHandlers[SdkEventType.SEEKERS_UPDATED]
+    >(),
+    [SdkEventType.SESSION_STATUS_CHANGED]: new Set<
+      SdkEventHandlers[SdkEventType.SESSION_STATUS_CHANGED]
+    >(),
+    [SdkEventType.DISCUSSION_UPDATED]: new Set<
+      SdkEventHandlers[SdkEventType.DISCUSSION_UPDATED]
     >(),
     [SdkEventType.ERROR]: new Set<SdkEventHandlers[SdkEventType.ERROR]>(),
   };

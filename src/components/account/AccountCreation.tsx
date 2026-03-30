@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 // Removed static logo in favor of animated PrivacyGraphic
 import { Capacitor } from '@capacitor/core';
 import { CheckCircle, Lock, Shield, Zap } from 'react-feather';
@@ -6,8 +7,8 @@ import { useAccountStore } from '../../stores/accountStore';
 import {
   validatePassword,
   validateUsernameFormat,
-  validateUsernameFormatAndAvailability,
 } from '@massalabs/gossip-sdk';
+import { useGossipSdk } from '../../hooks/useGossipSdk';
 import PageHeader from '../ui/PageHeader';
 import PageLayout from '../ui/PageLayout';
 import TabSwitcher from '../ui/TabSwitcher';
@@ -25,6 +26,8 @@ const AccountCreation: React.FC<AccountCreationProps> = ({
   onComplete,
   onBack,
 }) => {
+  const { t } = useTranslation('auth');
+  const gossip = useGossipSdk();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -99,9 +102,8 @@ const AccountCreation: React.FC<AccountCreationProps> = ({
 
       onComplete();
     } catch (err) {
-      const errorMsg =
-        err instanceof Error ? err.message : 'Failed to create account';
-      setError(errorMsg);
+      console.error('Error creating account:', err);
+      setError(t('create.failed'));
       setIsCreating(false);
       setAccountCreationStarted(false);
     }
@@ -112,8 +114,7 @@ const AccountCreation: React.FC<AccountCreationProps> = ({
     e.stopPropagation();
 
     // Handle when user presses enter without triggering blur event
-    const usernameResult =
-      await validateUsernameFormatAndAvailability(username);
+    const usernameResult = await gossip.profiles.validateUsername(username);
 
     if (!usernameResult.valid) {
       setIsUsernameValid(false);
@@ -143,7 +144,7 @@ const AccountCreation: React.FC<AccountCreationProps> = ({
 
   return (
     <PageLayout
-      header={<PageHeader title="Create Account" onBack={onBack} />}
+      header={<PageHeader title={t('create.title')} onBack={onBack} />}
       className="app-max-w mx-auto"
       contentClassName="p-4"
     >
@@ -151,18 +152,18 @@ const AccountCreation: React.FC<AccountCreationProps> = ({
       {biometricAvailable && (
         <div className="mb-6">
           <p className="text-xl font-medium text-black dark:text-white mb-4">
-            Authentication Method
+            {t('create.auth_method')}
           </p>
           <TabSwitcher
             options={[
               {
                 value: 'biometrics',
-                label: 'Biometrics',
+                label: t('create.biometrics'),
                 icon: <Shield className="w-4 h-4" />,
               },
               {
                 value: 'password',
-                label: 'Password',
+                label: t('create.password'),
                 icon: <Lock className="w-4 h-4" />,
               },
             ]}
@@ -175,8 +176,7 @@ const AccountCreation: React.FC<AccountCreationProps> = ({
       {!biometricAvailable && (
         <div className="bg-white dark:bg-gray-800 rounded-lg p-4 mb-4 border border-blue-200 dark:border-blue-800">
           <p className="text-blue-600 dark:text-blue-400 text-sm">
-            Biometric authentication is not supported on this device. Using
-            password authentication instead.
+            {t('create.biometric_not_supported')}
           </p>
         </div>
       )}
@@ -185,13 +185,13 @@ const AccountCreation: React.FC<AccountCreationProps> = ({
         <form onSubmit={handleSubmit} className="space-y-6">
           <div>
             <label className="block text-xl font-medium text-black dark:text-white mb-3">
-              Username
+              {t('create.username')}
             </label>
             <RoundedInput
               type="text"
               value={username}
               onChange={handleUsernameChange}
-              placeholder="Enter username"
+              placeholder={t('create.enter_username')}
               error={!!usernameError}
               maxLength={20}
               disabled={isCreating}
@@ -207,13 +207,13 @@ const AccountCreation: React.FC<AccountCreationProps> = ({
           {usePassword && (
             <div>
               <label className="block text-xl font-medium text-black dark:text-white mb-3">
-                Password
+                {t('create.password')}
               </label>
               <RoundedInput
                 type="password"
                 value={password}
                 onChange={handlePasswordChange}
-                placeholder="Enter password"
+                placeholder={t('create.enter_password')}
                 error={!!passwordError}
                 disabled={isCreating}
                 showPasswordToggle={true}
@@ -232,13 +232,13 @@ const AccountCreation: React.FC<AccountCreationProps> = ({
           {usePassword && (
             <div>
               <label className="block text-xl font-medium text-black dark:text-white mb-3">
-                Confirm Password
+                {t('create.confirm_password_label')}
               </label>
               <RoundedInput
                 type="password"
                 value={confirmPassword}
                 onChange={e => setConfirmPassword(e.target.value)}
-                placeholder="Confirm your password"
+                placeholder={t('create.confirm_password')}
                 error={confirmPassword.length > 0 && !passwordsMatch}
                 disabled={isCreating}
                 showPasswordToggle={false}
@@ -246,7 +246,7 @@ const AccountCreation: React.FC<AccountCreationProps> = ({
               />
               {confirmPassword.length > 0 && !passwordsMatch && (
                 <p className="text-red-500 dark:text-red-400 text-xs mt-1">
-                  Passwords do not match
+                  {t('create.passwords_do_not_match')}
                 </p>
               )}
             </div>
@@ -261,8 +261,8 @@ const AccountCreation: React.FC<AccountCreationProps> = ({
               <div>
                 <p className="text-sm text-green-700 dark:text-green-300 leading-relaxed">
                   {usePassword
-                    ? 'Your account will be secured using a password. Make sure to choose a strong password.'
-                    : 'Your account will be secured using biometric authentication (fingerprint, face ID, or Windows Hello).'}
+                    ? t('create.password_security_info')
+                    : t('create.biometric_security_info')}
                 </p>
               </div>
             </div>
@@ -286,7 +286,7 @@ const AccountCreation: React.FC<AccountCreationProps> = ({
             {!(isCreating || accountCreationStarted) && (
               <>
                 <Zap className="w-5 h-5" />
-                <span>Create Account</span>
+                <span>{t('create.title')}</span>
               </>
             )}
           </Button>

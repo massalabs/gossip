@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Shield, Key, Check as CheckIcon, User, Plus } from 'react-feather';
 import { useAccountStore } from '../../stores/accountStore';
 import { UserProfile } from '@massalabs/gossip-sdk';
@@ -18,6 +19,7 @@ const AccountSelection: React.FC<AccountSelectionProps> = ({
   onCreateNewAccount,
   onAccountSelected,
 }) => {
+  const { t } = useTranslation('auth');
   const { getAllAccounts } = useAccountStore();
   const [accounts, setAccounts] = useState<UserProfile[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -36,11 +38,11 @@ const AccountSelection: React.FC<AccountSelectionProps> = ({
       setAccounts(allProfiles);
     } catch (error) {
       console.error('Error loading accounts:', error);
-      setError('Failed to load accounts. Please try again.');
+      setError(t('select.failed'));
     } finally {
       setIsLoading(false);
     }
-  }, [getAllAccounts]);
+  }, [getAllAccounts, t]);
 
   useEffect(() => {
     loadAccounts();
@@ -55,9 +57,9 @@ const AccountSelection: React.FC<AccountSelectionProps> = ({
   const formatAccountType = (account: UserProfile) => {
     const authMethod = account.security?.authMethod;
     if (authMethod === 'capacitor' || authMethod === 'webauthn') {
-      return 'Biometric';
+      return t('select.biometric');
     } else {
-      return 'Password';
+      return t('select.password');
     }
   };
 
@@ -81,13 +83,13 @@ const AccountSelection: React.FC<AccountSelectionProps> = ({
   if (isLoading) {
     return (
       <PageLayout
-        header={<PageHeader title="Select Account" onBack={onBack} />}
+        header={<PageHeader title={t('select.title')} onBack={onBack} />}
         className="app-max-w mx-auto"
         contentClassName="flex items-center justify-center"
       >
         <div className="text-center">
           <div className="w-8 h-8 border-2 border-muted border-t-primary rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-muted-foreground">Loading accounts...</p>
+          <p className="text-muted-foreground">{t('select.loading')}</p>
         </div>
       </PageLayout>
     );
@@ -95,7 +97,7 @@ const AccountSelection: React.FC<AccountSelectionProps> = ({
 
   return (
     <PageLayout
-      header={<PageHeader title="Select Account" onBack={onBack} />}
+      header={<PageHeader title={t('select.title')} onBack={onBack} />}
       className="app-max-w mx-auto"
       contentClassName="p-4"
     >
@@ -111,11 +113,10 @@ const AccountSelection: React.FC<AccountSelectionProps> = ({
             <User className="w-8 h-8 text-muted-foreground" />
           </div>
           <h3 className="text-xl font-semibold text-foreground mb-2">
-            No Accounts Found
+            {t('select.no_accounts')}
           </h3>
           <p className="text-muted-foreground mb-6">
-            You don't have any accounts yet. Create a new account to get
-            started.
+            {t('select.no_accounts_desc')}
           </p>
           <Button
             onClick={onCreateNewAccount}
@@ -125,7 +126,7 @@ const AccountSelection: React.FC<AccountSelectionProps> = ({
             className="h-12 text-sm font-medium rounded-full"
           >
             <Plus className="w-4 h-4 mr-2" />
-            Create New Account
+            {t('select.create_new')}
           </Button>
         </div>
       ) : (
@@ -139,7 +140,7 @@ const AccountSelection: React.FC<AccountSelectionProps> = ({
             className="h-12 text-sm font-medium rounded-full"
           >
             <Plus className="w-4 h-4 mr-2" />
-            Create New Account
+            {t('select.create_new')}
           </Button>
 
           {/* Account List */}
@@ -161,10 +162,10 @@ const AccountSelection: React.FC<AccountSelectionProps> = ({
                       {account.username}
                     </h3>
                     <p className="text-sm text-muted-foreground">
-                      {formatAccountType(account)} • Created{' '}
+                      {formatAccountType(account)} • {t('select.created')}{' '}
                       {account.createdAt
                         ? formatDate(new Date(account.createdAt))
-                        : 'Unknown'}
+                        : t('select.unknown')}
                     </p>
                   </div>
                   {selectedAccount?.userId === account.userId && (

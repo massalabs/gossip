@@ -11,8 +11,8 @@ import {
   validateUsernameFormatAndAvailability,
   validateUserIdFormat,
 } from '../../src/utils/validation';
-import { getSqliteDb, clearAllTables } from '../../src/sqlite';
-import * as schema from '../../src/schema';
+import { getTestDb, getTestQueries, clearAllTables } from '../testDb';
+import * as schema from '../../src/db/schema';
 
 const VALIDATION_OWNER_USER_ID = encodeUserId(new Uint8Array(32).fill(13));
 
@@ -129,7 +129,7 @@ describe('validation utilities', () => {
     });
 
     it('checks username availability case-insensitively', async () => {
-      const sqliteDb = getSqliteDb();
+      const sqliteDb = getTestDb();
       await sqliteDb.insert(schema.userProfile).values({
         userId: VALIDATION_OWNER_USER_ID,
         username: 'Alice',
@@ -149,17 +149,27 @@ describe('validation utilities', () => {
         updatedAt: new Date(),
       });
 
-      const result = await validateUsernameAvailability('alice');
+      const result = await validateUsernameAvailability(
+        'alice',
+        getTestQueries()
+      );
       expect(result.valid).toBe(false);
     });
   });
 
   describe('validateUsernameFormatAndAvailability', () => {
     it('validates username format and availability', async () => {
-      const invalid = await validateUsernameFormatAndAvailability('ab');
+      const queries = getTestQueries();
+      const invalid = await validateUsernameFormatAndAvailability(
+        'ab',
+        queries
+      );
       expect(invalid.valid).toBe(false);
 
-      const valid = await validateUsernameFormatAndAvailability('validname');
+      const valid = await validateUsernameFormatAndAvailability(
+        'validname',
+        queries
+      );
       expect(valid.valid).toBe(true);
     });
   });

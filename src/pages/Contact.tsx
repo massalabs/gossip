@@ -1,4 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
+import { useTranslation, Trans } from 'react-i18next';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useDiscussionStore } from '../stores/discussionStore';
 import { useMessageStore } from '../stores/messageStore';
@@ -11,15 +12,12 @@ import PageLayout from '../components/ui/PageLayout';
 import UserIdDisplay from '../components/ui/UserIdDisplay';
 import BaseModal from '../components/ui/BaseModal';
 import { Check, Edit2, Trash2 } from 'react-feather';
-import {
-  UserPublicKeys,
-  SessionStatus,
-  updateContactName,
-} from '@massalabs/gossip-sdk';
+import { UserPublicKeys, SessionStatus } from '@massalabs/gossip-sdk';
 import { ROUTES } from '../constants/routes';
 import { useGossipSdk } from '../hooks/useGossipSdk';
 
 const Contact: React.FC = () => {
+  const { t } = useTranslation('contacts');
   const gossip = useGossipSdk();
 
   const { userId } = useParams();
@@ -31,6 +29,7 @@ const Contact: React.FC = () => {
   const discussion = useDiscussionStore(s =>
     s.discussions.find(d => d.contactUserId === userId)
   );
+  const sessionsStatuses = useDiscussionStore(s => s.sessionsStatuses);
 
   // All hooks must be called before early return
   const ownerUserId = useAccountStore(s => s.userProfile?.userId);
@@ -71,17 +70,18 @@ const Contact: React.FC = () => {
 
   const handleSaveName = useCallback(
     async (name: string) => {
-      if (!ownerUserId || !contact) return;
-      const result = await updateContactName(ownerUserId, contact.userId, name);
+      if (!contact) return;
+      const result = await gossip.contacts.updateName(contact.userId, name);
       if (!result.success) {
-        setNameError(result.message);
+        console.error('Failed to update contact name:', result.message);
+        setNameError(t('remove_modal.rename_failed'));
         return;
       }
       setDisplayName(result.trimmedName);
       setIsNameModalOpen(false);
       setShowSuccessCheck(true);
     },
-    [ownerUserId, contact]
+    [gossip, contact, t]
   );
 
   // Hide success check after 3 seconds
@@ -101,9 +101,10 @@ const Contact: React.FC = () => {
     setDeleteError(null);
 
     try {
-      const result = await gossip.contacts.delete(ownerUserId, contact.userId);
+      const result = await gossip.contacts.delete(contact.userId);
       if (!result.success) {
-        setDeleteError(result.message);
+        console.error('Failed to delete contact:', result.message);
+        setDeleteError(t('remove_modal.failed'));
         setIsDeleting(false);
         return;
       }
@@ -115,30 +116,31 @@ const Contact: React.FC = () => {
       navigate('/discussions');
     } catch (error) {
       console.error('Error deleting contact:', error);
-      setDeleteError('Failed to delete contact. Please try again.');
+      setDeleteError(t('remove_modal.failed'));
       setIsDeleting(false);
     }
-  }, [ownerUserId, contact, clearMessages, navigate, gossip]);
+  }, [ownerUserId, contact, clearMessages, navigate, gossip, t]);
 
   if (!contact) {
     return (
       <div className="bg-background flex items-center justify-center h-full">
         <div className="text-center">
           <div className="w-8 h-8 border-2 border-border border-t-primary rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-sm text-muted-foreground">Loading contact…</p>
+          <p className="text-sm text-muted-foreground">{t('loading')}</p>
         </div>
       </div>
     );
   }
 
   const canStart = discussion
-    ? gossip.discussions.getStatus(discussion.contactUserId) ===
+    ? (sessionsStatuses.get(discussion.contactUserId) ??
+        gossip.discussions.getStatus(discussion.contactUserId)) ===
       SessionStatus.Active
     : true;
 
   return (
     <PageLayout
-      header={<PageHeader title="Contact" onBack={() => navigate(-1)} />}
+      header={<PageHeader title={t('title')} onBack={() => navigate(-1)} />}
       className="app-max-w mx-auto"
       contentClassName="pt-4 px-6 pb-6"
     >
@@ -154,7 +156,7 @@ const Contact: React.FC = () => {
               onClick={handleOpenEditName}
               disabled={!canEditName}
               className="shrink-0 p-1 hover:bg-muted rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              title="Edit contact name"
+              title={t('edit_name')}
             >
               <Edit2 className="w-4 h-4 text-muted-foreground" />
             </button>
@@ -187,7 +189,7 @@ const Contact: React.FC = () => {
           fullWidth
           className="h-[46px] rounded-full bg-card border border-border text-card-foreground font-medium hover:bg-muted"
         >
-          Share contact
+          {t('share_contact')}
         </Button>
         {!canStart && discussion && (
           <p className="text-xs text-muted-foreground">
@@ -195,8 +197,11 @@ const Contact: React.FC = () => {
               SessionStatus.PeerRequested,
               SessionStatus.SelfRequested,
             ].includes(
-              gossip.discussions.getStatus(discussion.contactUserId)
-            ) && 'Connection pending. You cannot chat yet.'}
+              (sessionsStatuses.get(discussion.contactUserId) ??
+                gossip.discussions.getStatus(
+                  discussion.contactUserId
+                )) as SessionStatus
+            ) && t('connection_pending')}
           </p>
         )}
         <Button
@@ -207,19 +212,19 @@ const Contact: React.FC = () => {
           className="h-[46px] rounded-full font-medium mt-4"
         >
           <Trash2 className="w-4 h-4 mr-2" />
-          Remove contact
+          {t('remove_contact')}
         </Button>
       </div>
       <ContactNameModal
         isOpen={isNameModalOpen}
         onClose={() => setIsNameModalOpen(false)}
-        title="Edit contact name"
+        title={t('edit_name')}
         initialName={proposedName}
-        confirmLabel="Save"
+        confirmLabel={t('common:save')}
         error={nameError}
         onConfirm={async name => {
           if (name == null) {
-            setNameError('Name cannot be empty.');
+            setNameError(t('name_empty'));
             return;
           }
           await handleSaveName(name);
@@ -234,13 +239,16 @@ const Contact: React.FC = () => {
             setDeleteError(null);
           }
         }}
-        title="Remove contact?"
+        title={t('remove_modal.title')}
       >
         <div className="space-y-4">
           <p className="text-sm text-foreground">
-            Are you sure you want to remove <strong>{displayName}</strong> from
-            your contacts? This will also delete all messages and discussions
-            with this contact. This action cannot be undone.
+            <Trans
+              i18nKey="remove_modal.confirm"
+              ns="contacts"
+              values={{ name: displayName }}
+              components={{ strong: <strong /> }}
+            />
           </p>
           {deleteError && (
             <p className="text-sm text-destructive">{deleteError}</p>
@@ -254,7 +262,9 @@ const Contact: React.FC = () => {
               size="custom"
               className="flex-1 h-11 rounded-full font-medium"
             >
-              {isDeleting ? 'Removing...' : 'Remove'}
+              {isDeleting
+                ? t('remove_modal.removing')
+                : t('remove_modal.remove')}
             </Button>
             <Button
               onClick={() => {
@@ -266,7 +276,7 @@ const Contact: React.FC = () => {
               size="custom"
               className="flex-1 h-11 rounded-full font-medium"
             >
-              Cancel
+              {t('common:cancel')}
             </Button>
           </div>
         </div>

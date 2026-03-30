@@ -16,8 +16,8 @@ import {
   SessionConfig,
   AnnouncementResult,
   UserKeys,
-} from './bindings';
-import { encodeUserId } from '../utils/userId';
+} from './bindings.js';
+import { encodeUserId } from '../utils/userId.js';
 
 export class SessionModule {
   private sessionManager: SessionManagerWrapper | null = null;

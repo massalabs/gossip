@@ -138,7 +138,8 @@ const config = new SessionConfig(
   60000, // max_incoming_message_future_millis (1 minute)
   604800000, // max_session_inactivity_millis (1 week)
   86400000, // keep_alive_interval_millis (1 day)
-  10000 // max_session_lag_length
+  10000, // max_session_lag_length
+  8 // max_keep_alive_peer_lag_length
 );
 ```
 

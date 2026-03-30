@@ -2,7 +2,7 @@
  * Test Setup File (Node/jsdom environments)
  *
  * This file runs before all Node/jsdom tests and sets up:
- * - SQLite in-memory database for testing
+ * - SQLite in-memory database for testing via DatabaseConnection
  * - Global test utilities and mocks
  * - Shared setup from setup.shared.ts
  */
@@ -14,7 +14,7 @@ import { readFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { createRequire } from 'module';
 import { afterEach, beforeAll, afterAll, vi } from 'vitest';
-import { initDb, closeSqlite, clearAllTables } from '@massalabs/gossip-sdk';
+import { DatabaseConnection } from '@massalabs/gossip-sdk';
 
 const require = createRequire(import.meta.url);
 const waSqlitePath = dirname(require.resolve('wa-sqlite/package.json'));
@@ -31,19 +31,34 @@ vi.mock('../src/services/notifications', () => ({
   },
 }));
 
+/**
+ * Shared test database connection.
+ * Initialized in beforeAll, available via getTestConnection().
+ */
+let _testConnection: DatabaseConnection | null = null;
+
+export function getTestConnection(): DatabaseConnection {
+  if (!_testConnection) {
+    throw new Error('Test DB not initialized. beforeAll has not run yet.');
+  }
+  return _testConnection;
+}
+
 // Initialize SQLite before all tests
 beforeAll(async () => {
   const wasmBinary = waSqliteWasm.buffer.slice(
     waSqliteWasm.byteOffset,
     waSqliteWasm.byteOffset + waSqliteWasm.byteLength
   );
-  await initDb({ wasmBinary });
+  _testConnection = await DatabaseConnection.create({
+    storage: { type: 'memory', wasmBinary },
+  });
 });
 
 // Clean up between tests to avoid state leakage
 afterEach(async () => {
   try {
-    await clearAllTables();
+    await _testConnection?.clearAllTables();
   } catch {
     // Ignore errors - database might already be closed
   }
@@ -51,7 +66,8 @@ afterEach(async () => {
 
 afterAll(async () => {
   try {
-    await closeSqlite();
+    await _testConnection?.close();
+    _testConnection = null;
   } catch {
     // SQLite might already be closed
   }

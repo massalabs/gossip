@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Check as CheckIcon, Copy, Share2 } from 'react-feather';
 import { useAccountStore } from '../../stores/accountStore';
 import Button from '../ui/Button';
@@ -15,6 +16,7 @@ interface ReceiveModalProps {
 const ReceiveModal: React.FC<ReceiveModalProps> = ({ isOpen, onClose }) => {
   const { account } = useAccountStore();
   const [copied, setCopied] = useState(false);
+  const { t } = useTranslation('wallet');
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const fullAddress = account?.address?.toString() ?? '';
@@ -45,18 +47,18 @@ const ReceiveModal: React.FC<ReceiveModalProps> = ({ isOpen, onClose }) => {
 
   const handleShare = () => {
     // Placeholder for share functionality
-    toast.success('Share functionality will be implemented soon!', {
+    toast.success(t('receive.share_coming_soon'), {
       className: 'bg-card text-foreground',
       duration: 1000,
     });
   };
 
   return (
-    <BaseModal isOpen={isOpen} onClose={onClose} title="Receive">
+    <BaseModal isOpen={isOpen} onClose={onClose} title={t('receive.title')}>
       {/* Address Section */}
       <div>
         <label className="block text-sm font-medium text-foreground mb-2">
-          Your Address
+          {t('receive.your_address')}
         </label>
         <div className="flex items-center gap-2">
           <div className="flex-1 p-3 bg-input border border-border rounded-xl">
@@ -76,12 +78,12 @@ const ReceiveModal: React.FC<ReceiveModalProps> = ({ isOpen, onClose }) => {
             {copied ? (
               <div className="flex items-center gap-2">
                 <CheckIcon className="w-4 h-4" />
-                Copied!
+                {t('receive.copied')}
               </div>
             ) : (
               <div className="flex items-center gap-2">
                 <Copy className="w-4 h-4" />
-                Copy
+                {t('common:copy')}
               </div>
             )}
           </Button>
@@ -97,16 +99,13 @@ const ReceiveModal: React.FC<ReceiveModalProps> = ({ isOpen, onClose }) => {
           className="flex items-center justify-center gap-2"
         >
           <Share2 className="w-5 h-5" />
-          Share with Contact
+          {t('receive.share_with_contact')}
         </Button>
       </div>
 
       {/* Info Text */}
       <div className="text-center">
-        <p className="text-sm text-muted-foreground">
-          Share this address to receive payments. Only send MAS and supported
-          tokens to this address.
-        </p>
+        <p className="text-sm text-muted-foreground">{t('receive.info')}</p>
       </div>
     </BaseModal>
   );

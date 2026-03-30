@@ -6,13 +6,9 @@ import {
   validateUsernameAvailability,
   validateUsernameFormatAndAvailability,
 } from '../../../gossip-sdk/src/utils/validation';
-import {
-  initDb,
-  closeSqlite,
-  getSqliteDb,
-  clearAllTables,
-} from '../../../gossip-sdk/src/sqlite';
-import * as schema from '../../../gossip-sdk/src/schema';
+import { DatabaseConnection } from '../../../gossip-sdk/src/db/sqlite';
+import { Queries } from '../../../gossip-sdk/src/db/queries';
+import * as schema from '../../../gossip-sdk/src/db/schema';
 import { encodeUserId } from '../../../gossip-sdk/src/utils/userId';
 
 const require = createRequire(import.meta.url);
@@ -40,18 +36,24 @@ const TEST_PROFILE = {
   updatedAt: new Date(),
 };
 
+let conn: DatabaseConnection;
+let queries: Queries;
+
 describe('utils/validation.ts - Database tests', () => {
   beforeAll(async () => {
     const wasmBinary = waSqliteWasm.buffer.slice(
       waSqliteWasm.byteOffset,
       waSqliteWasm.byteOffset + waSqliteWasm.byteLength
     );
-    await initDb({ wasmBinary });
+    conn = await DatabaseConnection.create({
+      storage: { type: 'memory', wasmBinary },
+    });
+    queries = new Queries(conn);
   });
 
   afterAll(async () => {
     try {
-      await closeSqlite();
+      await conn.close();
     } catch {
       // SQLite might already be closed
     }
@@ -59,19 +61,22 @@ describe('utils/validation.ts - Database tests', () => {
 
   describe('validateUsernameAvailability()', () => {
     beforeEach(async () => {
-      await clearAllTables();
+      await conn.clearAllTables();
     });
 
     it('should accept username that does not exist', async () => {
-      const result = await validateUsernameAvailability('newuser');
+      const result = await validateUsernameAvailability('newuser', queries);
       expect(result.valid).toBe(true);
       expect(result.error).toBeUndefined();
     });
 
     it('should reject username that already exists', async () => {
-      await getSqliteDb().insert(schema.userProfile).values(TEST_PROFILE);
+      await conn.db.insert(schema.userProfile).values(TEST_PROFILE);
 
-      const result = await validateUsernameAvailability('existinguser');
+      const result = await validateUsernameAvailability(
+        'existinguser',
+        queries
+      );
       expect(result.valid).toBe(false);
       expect(result.error).toBe(
         'This username is already in use. Please choose another.'
@@ -79,11 +84,11 @@ describe('utils/validation.ts - Database tests', () => {
     });
 
     it('should reject username case-insensitively', async () => {
-      await getSqliteDb()
+      await conn.db
         .insert(schema.userProfile)
         .values({ ...TEST_PROFILE, username: 'testuser' });
 
-      const result = await validateUsernameAvailability('TestUser');
+      const result = await validateUsernameAvailability('TestUser', queries);
       expect(result.valid).toBe(false);
       expect(result.error).toBe(
         'This username is already in use. Please choose another.'
@@ -91,11 +96,14 @@ describe('utils/validation.ts - Database tests', () => {
     });
 
     it('should handle username with whitespace', async () => {
-      await getSqliteDb()
+      await conn.db
         .insert(schema.userProfile)
         .values({ ...TEST_PROFILE, username: 'testuser' });
 
-      const result = await validateUsernameAvailability('  testuser  ');
+      const result = await validateUsernameAvailability(
+        '  testuser  ',
+        queries
+      );
       expect(result.valid).toBe(false);
       expect(result.error).toBe(
         'This username is already in use. Please choose another.'
@@ -105,20 +113,22 @@ describe('utils/validation.ts - Database tests', () => {
 
   describe('validateUsernameFormatAndAvailability()', () => {
     beforeEach(async () => {
-      await clearAllTables();
+      await conn.clearAllTables();
     });
 
     it('should reject if format is invalid', async () => {
-      const result = await validateUsernameFormatAndAvailability('ab');
+      const result = await validateUsernameFormatAndAvailability('ab', queries);
       expect(result.valid).toBe(false);
       expect(result.error).toBe('Username must be at least 3 characters long');
     });
 
     it('should reject if format is valid but username exists', async () => {
-      await getSqliteDb().insert(schema.userProfile).values(TEST_PROFILE);
+      await conn.db.insert(schema.userProfile).values(TEST_PROFILE);
 
-      const result =
-        await validateUsernameFormatAndAvailability('existinguser');
+      const result = await validateUsernameFormatAndAvailability(
+        'existinguser',
+        queries
+      );
       expect(result.valid).toBe(false);
       expect(result.error).toBe(
         'This username is already in use. Please choose another.'
@@ -126,7 +136,10 @@ describe('utils/validation.ts - Database tests', () => {
     });
 
     it('should accept if format is valid and username is available', async () => {
-      const result = await validateUsernameFormatAndAvailability('newuser123');
+      const result = await validateUsernameFormatAndAvailability(
+        'newuser123',
+        queries
+      );
       expect(result.valid).toBe(true);
       expect(result.error).toBeUndefined();
     });

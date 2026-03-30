@@ -55,6 +55,7 @@ export enum AppRoute {
   contact = 'contact',
   discussion = 'discussion',
   discussions = 'discussions',
+  selfDiscussion = 'self-discussion',
 }
 
 export const ROUTES = {
@@ -73,15 +74,19 @@ export const ROUTES = {
   settingsSecurity: route(`/${AppRoute.settings}/security`),
   settingsNotifications: route(`/${AppRoute.settings}/notifications`),
   settingsAppearance: route(`/${AppRoute.settings}/appearance`),
+  settingsLanguage: route(`/${AppRoute.settings}/language`),
   settingsAbout: route(`/${AppRoute.settings}/about`),
   settingsDebug: route(`/${AppRoute.settings}/debug`),
   settingsAccountBackup: route(`/${AppRoute.settings}/account-backup`),
   settingsShareContact: route(`/${AppRoute.settings}/share-contact`),
   settingsWeb3: route(`/${AppRoute.settings}/web3`),
+  settingsPrivacy: route(`/${AppRoute.settings}/privacy`),
 
   // Actions
   newContact: route(`/${AppRoute.newContact}`),
   newDiscussion: route(`/${AppRoute.newDiscussion}`),
+
+  selfDiscussion: route(`/${AppRoute.selfDiscussion}`),
 
   // Dynamic routes
   contact: route(`/${AppRoute.contact}/:userId`),

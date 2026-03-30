@@ -1,0 +1,141 @@
+{
+  "title": "设置",
+  "profile": "个人资料",
+  "edit_username": "修改用户名",
+  "name_label": "名称：",
+  "account_name": "账户名称",
+  "user_id_label": "用户 ID：",
+  "copy_mns_domain": "复制 MNS 域名",
+  "menu": {
+    "account_backup": "账户备份",
+    "share_contact": "分享联系方式",
+    "notifications": "通知",
+    "appearance": "外观",
+    "language": "语言",
+    "web3": "Web3",
+    "about": "关于",
+    "debug": "调试",
+    "logout": "退出登录",
+    "security": "安全"
+  },
+  "delete_account": {
+    "button": "删除账户",
+    "title": "删除账户",
+    "confirm": "确定要删除此账户吗？",
+    "warning": "此操作无法撤销"
+  },
+  "edit_username_modal": {
+    "title": "修改用户名",
+    "placeholder": "输入用户名",
+    "username_label": "用户名",
+    "username_taken": "该用户名已被使用，请选择其他用户名。",
+    "username_check_failed": "无法验证用户名是否可用，请重试。",
+    "update_failed": "更新用户名失败，请重试。",
+    "checking": "正在检查可用性...",
+    "saving": "保存中...",
+    "test_notification": "测试通知"
+  },
+  "share_contact_qr": {
+    "copy_mns": "点击复制 MNS 域名",
+    "copy_user_id": "点击复制用户 ID",
+    "qr_alt": "您的联系方式二维码"
+  },
+  "appearance": {
+    "title": "外观"
+  },
+  "about": {
+    "title": "关于",
+    "version": "版本",
+    "build_id": "构建 ID"
+  },
+  "notifications": {
+    "title": "通知",
+    "not_supported": "此设备不支持通知功能。",
+    "toggle": "开关通知",
+    "blocked": "已屏蔽",
+    "enable": "启用",
+    "requesting": "请求中...",
+    "blocked_message": "通知已被屏蔽，请在浏览器设置中启用。"
+  },
+  "language": {
+    "title": "语言"
+  },
+  "backup": {
+    "title": "账户备份",
+    "method": "备份方式",
+    "mnemonic": "助记词",
+    "private_key": "私钥",
+    "enter_password": "请输入密码",
+    "password_placeholder": "请输入密码",
+    "show_backup": "显示备份",
+    "mnemonic_title": "24 位助记词",
+    "never_share": "切勿分享此信息。任何拥有此信息的人都可以访问您的账户。",
+    "private_key_warning": "<strong>警告：</strong>此 Massa 私钥无法用于恢复您的 Gossip 账户。仅在需要外部钱包兼容时使用。要恢复您的 Gossip 账户，必须使用 24 位助记词。",
+    "password_required": "需要输入密码",
+    "show_failed": "显示备份信息失败，请重试。"
+  },
+  "debug": {
+    "title": "调试",
+    "show_debug": "显示调试选项",
+    "show_console": "显示控制台按钮",
+    "disable_screenshot": "禁用截屏保护",
+    "reset_app": "重置应用",
+    "clear_messages": "清除消息和联系人",
+    "clear_cache": "清除缓存和数据库"
+  },
+  "security": {
+    "title": "安全",
+    "native_only": "安全设置仅在原生平台（Android 和 iOS）上可用。",
+    "auto_lock_title": "闲置锁定",
+    "auto_lock_description": "应用在后台运行一段时间后自动锁定。",
+    "auto_lock_current": "锁定时间",
+    "auto_lock_off": "关闭",
+    "auto_lock_1m": "1 分钟",
+    "auto_lock_5m": "5 分钟",
+    "auto_lock_15m": "15 分钟",
+    "auto_lock_30m": "30 分钟",
+    "auto_lock_1h": "1 小时"
+  },
+  "web3": {
+    "title": "Web3",
+    "enable_mns": "启用 MNS",
+    "toggle_mns": "开关 MNS 支持",
+    "mns_description": "MNS（Massa 域名系统）是一项去中心化的域名服务，可将易于阅读的域名（如 'alice.massa'）映射到任意数据，包括 Gossip ID。启用后，您可以使用 MNS 域名来识别和联系其他用户。",
+    "mns_manage": "在此创建和管理您的 MNS：",
+    "mns_link_label": "mns.massa（在新标签页中打开）",
+    "privacy_title": "隐私和信任注意事项",
+    "privacy_body": "MNS 域名将名称与您的 Gossip ID 关联，进而与 MNS 所有者的 Massa 地址关联。这会在您的身份和区块链地址之间建立公开的关联。",
+    "trust_body": "解析 MNS 域名需要信任 Massa RPC 的响应。RPC 端点可能会提供不正确或恶意的解析数据。"
+  },
+  "background_sync": {
+    "title": "后台同步",
+    "checking": "检查中...",
+    "optimized": "已优化",
+    "needs_attention": "需要注意",
+    "background_refresh": "后台应用刷新",
+    "enabled": "已启用",
+    "disabled": "已禁用",
+    "restricted": "受限",
+    "unknown": "未知",
+    "low_power": "低电量模式",
+    "on": "开",
+    "off": "关",
+    "open_settings": "打开设置",
+    "battery_optimization": "电池优化已禁用",
+    "yes": "是",
+    "no": "否",
+    "android_restriction": "Android 后台限制",
+    "not_restricted": "未受限",
+    "miui_note": "（MIUI 可能仍会限制）",
+    "disable_battery": "禁用电池优化",
+    "enable_autostart": "启用自启动（MIUI）",
+    "learn_more": "了解更多关于您设备的电池优化设置",
+    "debug_info": "调试信息",
+    "refresh_status": "刷新状态"
+  },
+  "pwa": {
+    "offline_ready": "应用已准备好离线使用",
+    "update_available": "有新内容可用，点击重新加载按钮进行更新。",
+    "reload": "重新加载"
+  }
+}

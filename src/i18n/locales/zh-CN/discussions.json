@@ -1,0 +1,161 @@
+{
+  "title": "Gossip",
+  "share_contact": "分享我的联系方式",
+  "share_to_discussion": "分享内容到会话",
+  "share_select": "选择一个会话来分享内容。",
+  "cancel_sharing": "取消分享",
+  "start_new": "发起新会话",
+  "filter": {
+    "all": "全部",
+    "unread": "未读",
+    "pending": "待处理"
+  },
+  "message_input": {
+    "replying_to": "回复",
+    "forwarding": "转发消息",
+    "editing": "编辑消息",
+    "placeholder": "输入消息",
+    "cancel_reply": "取消回复",
+    "cancel_forward": "取消转发",
+    "cancel_edit": "取消编辑",
+    "input_label": "消息输入",
+    "send": "发送消息"
+  },
+  "message": {
+    "sent": "已发送",
+    "delivered": "已送达",
+    "original_not_found": "未找到原始消息"
+  },
+  "list_item": {
+    "set_contact_name": "设置联系人名称",
+    "refuse_connection": "拒绝连接？",
+    "edit_name": "编辑名称",
+    "edit_name_title": "编辑会话名称"
+  },
+  "scroll_to_bottom": "滚动到最新消息",
+  "search": {
+    "placeholder": "搜索消息...",
+    "previous": "上一个匹配",
+    "next": "下一个匹配",
+    "close": "关闭搜索",
+    "no_results": "无结果",
+    "result_count": "{{current}}/{{total}}"
+  },
+  "selection": {
+    "clear": "清除选择",
+    "copy_messages": "复制所选消息",
+    "delete_messages": "删除所选消息"
+  },
+  "failed_to_send": "消息发送失败",
+  "failed_to_copy_selected": "复制所选消息失败",
+  "failed_to_delete_selected": "部分所选消息删除失败",
+  "unable_to_delete": "无法删除消息",
+  "failed_to_delete": "删除消息失败",
+  "unable_to_edit": "无法编辑消息",
+  "failed_to_edit": "编辑消息失败",
+  "copy_you": "你",
+  "test_messages_sent": "已发送 {{count}} 条测试消息！",
+  "test_messages_failed": "部分测试消息发送失败",
+  "settings": {
+    "title": "会话设置",
+    "loading": "正在加载会话…",
+    "name_section": "会话名称",
+    "edit_name": "编辑会话名称",
+    "reset_connection": "重置连接",
+    "reset_description": "如果你认为与对方的连接已断开，可以重置连接。部分消息可能会被重新发送，但聊天记录将会保留。",
+    "reconnected": "已重新连接！",
+    "participants": "参与者",
+    "no_participants": "未找到参与者",
+    "notifications": "通知",
+    "mute_notifications": "静音通知",
+    "unmute_notifications": "取消静音",
+    "muted": "已静音",
+    "auto_delete": "自动删除消息",
+    "auto_delete_description": "消息将在选定时间后自动删除。",
+    "auto_delete_current": "删除时间",
+    "auto_delete_off": "关闭",
+    "auto_delete_5m": "5分钟",
+    "auto_delete_1h": "1小时",
+    "auto_delete_8h": "8小时",
+    "auto_delete_1d": "1天",
+    "auto_delete_1w": "1周",
+    "auto_delete_1mo": "1个月"
+  },
+  "new_discussion": {
+    "title": "新会话",
+    "new_contact": "新联系人",
+    "new_group": "新群组（即将推出）",
+    "coming_soon": "即将推出",
+    "contacts": "联系人",
+    "search_contacts": "搜索联系人",
+    "loading_contacts": "正在加载联系人…",
+    "no_contacts": "暂无联系人",
+    "no_contacts_hint": "点击 <strong>\"新联系人\"</strong> 添加一个",
+    "no_search_results": "没有匹配的联系人",
+    "edit_contact": "编辑联系人"
+  },
+  "header": {
+    "contact_not_found": "未找到联系人",
+    "waiting_approval": "等待批准",
+    "discussion_settings": "会话设置",
+    "search_messages": "搜索消息",
+    "auto_delete_active": "{{duration}}后删除"
+  },
+  "list": {
+    "no_results": "未找到结果",
+    "user_id": "用户 ID：",
+    "accept": "接受",
+    "refuse": "拒绝",
+    "set_contact_name": "设置联系人名称",
+    "refuse_title": "拒绝连接？",
+    "refuse_body": "拒绝将关闭此会话请求。"
+  },
+  "empty": {
+    "no_discussions": "暂无会话",
+    "no_discussions_hint": "点击 <strong>+</strong> 按钮发起新会话",
+    "no_messages": "暂无消息",
+    "no_messages_hint": "发送你的第一条消息来开始对话"
+  },
+  "initializing": {
+    "title": "正在初始化安全会话",
+    "subtitle": "正在建立端到端加密..."
+  },
+  "loading_messages": "正在加载消息...",
+  "message_item": {
+    "double_tap_reply": "双击回复",
+    "sent_message": "已发送的消息",
+    "received_message": "收到的消息",
+    "original_not_found_title": "未找到原始消息",
+    "original_not_found_short": "（未找到原始消息）",
+    "original_message": "原始消息",
+    "forwarded_message": "转发的消息：",
+    "sending": "发送中",
+    "sent": "已发送",
+    "delivered": "已送达",
+    "jump_to_original": "点击跳转到原始消息",
+    "status": "状态：{{status}}",
+    "actions_menu": "消息操作",
+    "link_opens_new_tab": "{{content}}（在新标签页中打开）",
+    "deleted": "消息已删除",
+    "edited": "已编辑",
+    "reply": "回复",
+    "forward": "转发",
+    "share": "分享",
+    "copy": "复制",
+    "edit": "编辑",
+    "delete": "删除",
+    "react": "表情回应",
+    "add_reaction": "添加表情回应",
+    "more_emojis": "更多表情"
+  },
+  "session_issue": {
+    "message": "您已发送了许多尚未确认的消息。出于安全考虑，在收到回复之前不会再发送新消息。",
+    "info_label": "为什么需要等待回复？",
+    "info_message": "收到对方的消息可以更新加密密钥。如果攻击者获得了您当前的密钥，他们可以解密您最近发送的 {{count}} 条消息。"
+  },
+  "retention_separator": "自动删除已启用：{{duration}}",
+  "filter_label": "筛选会话",
+  "waiting_connection": "等待连接...",
+  "announcement": "通告",
+  "lock_account": "锁定账户"
+}

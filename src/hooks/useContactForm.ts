@@ -189,13 +189,25 @@ export function useContactForm() {
           // Fetch public key for the resolved gossip ID
           const publicKey = await getPublicKey(resolvedGossipId);
 
+          const existing = await gossip.contacts.get(resolvedGossipId);
+          if (existing) {
+            setUserId(prev => ({
+              ...prev,
+              error: 'This user is already in your contacts',
+              loading: false,
+            }));
+            return;
+          }
+
           setPublicKeys(publicKey);
           setUserId(prev => ({ ...prev, loading: false }));
           return;
         } catch (error) {
+          console.error('Failed to fetch public key:', error);
           setUserId(prev => ({
             ...prev,
-            error: error instanceof Error ? error.message : String(error),
+            error:
+              'Unable to load public key for this user ID. Please check it.',
             loading: false,
           }));
           return;
@@ -234,17 +246,29 @@ export function useContactForm() {
 
       try {
         const publicKey = await getPublicKey(trimmed);
+
+        const existing = await gossip.contacts.get(trimmed);
+        if (existing) {
+          setUserId(prev => ({
+            ...prev,
+            error: 'This user is already in your contacts',
+            loading: false,
+          }));
+          return;
+        }
+
         setPublicKeys(publicKey);
         setUserId(prev => ({ ...prev, loading: false }));
       } catch (error) {
+        console.error('Failed to fetch public key:', error);
         setUserId(prev => ({
           ...prev,
-          error: error instanceof Error ? error.message : String(error),
+          error: 'Unable to load public key for this user ID. Please check it.',
           loading: false,
         }));
       }
     },
-    [getPublicKey, userProfile?.userId, mnsEnabled]
+    [getPublicKey, gossip.contacts, userProfile?.userId, mnsEnabled]
   );
 
   const handleMessageChange = useCallback((value: string) => {
@@ -278,10 +302,7 @@ export function useContactForm() {
       }
 
       // check here if user already exists in contacts
-      const contact = await gossip.contacts.get(
-        userProfile.userId,
-        derivedUserId
-      );
+      const contact = await gossip.contacts.get(derivedUserId);
 
       if (contact) {
         toast.error('User already registred');
@@ -361,7 +382,7 @@ export function useContactForm() {
 
     try {
       // Duplicate checks
-      const contacts = await gossip.contacts.list(userProfile.userId);
+      const contacts = await gossip.contacts.list();
       const nameTaken = contacts.some(
         c => c.name.toLowerCase() === trimmedName.toLowerCase()
       );
@@ -374,10 +395,7 @@ export function useContactForm() {
         return;
       }
 
-      const existing = await gossip.contacts.get(
-        userProfile.userId,
-        effectiveUserId
-      );
+      const existing = await gossip.contacts.get(effectiveUserId);
       if (existing) {
         setUserId(prev => ({
           ...prev,
@@ -399,13 +417,13 @@ export function useContactForm() {
       };
 
       const result = await gossip.contacts.add(
-        userProfile.userId,
         effectiveUserId,
         trimmedName,
         publicKeys
       );
       if (!result.success && result.error) {
-        setGeneralError(result.error);
+        console.error('Failed to add contact:', result.error);
+        setGeneralError('Failed to add contact. Please try again.');
         return;
       }
 

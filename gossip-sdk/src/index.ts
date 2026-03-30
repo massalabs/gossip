@@ -20,18 +20,12 @@
  * @packageDocumentation
  */
 
-export * from './api';
-export * from './crypto';
-export * from './db';
-export * from './gossip';
-export * from './queries';
-export * from './utils';
-export * from './wasm';
-export {
-  initDb,
-  closeSqlite,
-  getSqliteDb,
-  clearAllTables,
-  clearConversationTables,
-  isSqliteOpen,
-} from './sqlite';
+export * from './api/index.js';
+export * from './crypto/index.js';
+export * from './gossip.js';
+export * from './utils/index.js';
+export * from './wasm/index.js';
+export * from './db/db.js';
+export * from './db/queries/index.js';
+export * from './db/sqlite.js';
+export { SELF_CONTACT_ID } from './services/selfMessage.js';

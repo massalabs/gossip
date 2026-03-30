@@ -14,6 +14,9 @@ interface DebugButtonPosition {
 }
 
 interface AppStoreState {
+  // Terms of Service acceptance
+  tosAccepted: boolean;
+  setTosAccepted: (value: boolean) => void;
   // Network config (read by accountStore)
   networkName: NetworkName;
   setNetworkName: (networkName: NetworkName) => void;
@@ -51,11 +54,22 @@ interface AppStoreState {
     userProfile: UserProfile | null,
     provider: Provider | null
   ) => Promise<void>;
+  // Default retention duration for new discussions (seconds), null = off
+  defaultRetentionDuration: number | null;
+  setDefaultRetentionDuration: (duration: number | null) => void;
+  // Auto-lock timeout (seconds), null = disabled
+  autoLockTimeout: number | null;
+  setAutoLockTimeout: (timeout: number | null) => void;
 }
 
 const useAppStoreBase = create<AppStoreState>()(
   persist(
     (set, get) => ({
+      // Terms of Service acceptance
+      tosAccepted: false,
+      setTosAccepted: (value: boolean) => {
+        set({ tosAccepted: value });
+      },
       // Network config
       networkName: NetworkName.Buildnet,
       setNetworkName: (networkName: NetworkName) => {
@@ -116,6 +130,16 @@ const useAppStoreBase = create<AppStoreState>()(
       setMnsDomains: (domains: string[]) => {
         set({ mnsDomains: domains });
       },
+      // Default retention duration for new discussions (1 month = 2592000s)
+      defaultRetentionDuration: 2592000,
+      setDefaultRetentionDuration: (duration: number | null) => {
+        set({ defaultRetentionDuration: duration });
+      },
+      // Auto-lock timeout (disabled by default)
+      autoLockTimeout: null,
+      setAutoLockTimeout: (timeout: number | null) => {
+        set({ autoLockTimeout: timeout });
+      },
       fetchMnsDomains: async (
         userProfile: UserProfile | null,
         provider: Provider | null
@@ -143,6 +167,7 @@ const useAppStoreBase = create<AppStoreState>()(
       name: STORAGE_KEYS.APP_STORE,
       storage: createJSONStorage(() => localStorage),
       partialize: state => ({
+        tosAccepted: state.tosAccepted,
         showDebugOption: state.showDebugOption,
         debugOverlayVisible: state.debugOverlayVisible,
         debugButtonPosition: state.debugButtonPosition,
@@ -151,6 +176,8 @@ const useAppStoreBase = create<AppStoreState>()(
         mnsEnabled: state.mnsEnabled,
         mnsDomains: state.mnsDomains,
         disableNativeScreenshot: state.disableNativeScreenshot,
+        defaultRetentionDuration: state.defaultRetentionDuration,
+        autoLockTimeout: state.autoLockTimeout,
       }),
     }
   )

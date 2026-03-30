@@ -132,9 +132,11 @@ impl Agraphon {
             sk_next: self_outgoing_announcement.sk_next.clone(),
             k_next: self_outgoing_announcement.k_next,
             seeker: Vec::new(),
+            peer_parent_height: 0,
         }));
 
         let latest_peer_msg = HistoryItemPeer {
+            height: 1,
             our_parent_height: 0,
             pk_next: peer_incoming_announcement.pk_next.clone(),
             k_next: peer_incoming_announcement.k_next,
@@ -277,6 +279,11 @@ impl Agraphon {
 
         // update last history item
         self.latest_peer_msg = HistoryItemPeer {
+            height: self
+                .latest_peer_msg
+                .height
+                .checked_add(1)
+                .expect("Peer message height overflow"),
             our_parent_height,
             pk_next,
             k_next: msg_root_kdf.k_next,
@@ -411,6 +418,7 @@ impl Agraphon {
             sk_next,
             k_next: msg_root_kdf.k_next,
             seeker: seeker.to_vec(),
+            peer_parent_height: p_peer.height,
         }));
 
         // assemble full message
@@ -444,7 +452,7 @@ impl Agraphon {
     /// ```no_run
     /// # use crypto_agraphon::Agraphon;
     /// # let session: Agraphon = todo!();
-    /// let lag = session.lag_length();
+    /// let lag = session.self_lag_length();
     /// if lag > 10 {
     ///     println!("Warning: {} unacknowledged messages", lag);
     ///     // Maybe pause sending or retry
@@ -463,7 +471,7 @@ impl Agraphon {
     /// Panics if the internal message history is empty. This should never happen in normal
     /// operation as the history is initialized during session creation.
     #[must_use]
-    pub fn lag_length(&self) -> u64 {
+    pub fn self_lag_length(&self) -> u64 {
         let our_latest_height = self
             .self_msg_history
             .back()
@@ -475,6 +483,43 @@ impl Agraphon {
         our_latest_height
             .checked_sub(peer_latest_parent_height)
             .expect("Self lag is negative")
+    }
+
+    /// Returns how many peer messages are still unacknowledged by our latest outgoing message.
+    ///
+    /// This value compares:
+    /// - the latest peer message height we have processed, and
+    /// - the peer message height acknowledged by our latest sent message.
+    ///
+    /// It grows when we receive peer messages without sending, and drops to `0`
+    /// each time we send a message (because each outgoing message acknowledges our
+    /// current latest peer message).
+    ///
+    /// # Attention
+    /// Before we send our first post-announcement message, this method returns `1`.
+    /// This is because the peer starts at height `1` (announcement) while our
+    /// bootstrap self history item acknowledges peer parent height `0` (static identity).
+    ///
+    /// # Returns
+    ///
+    /// The number of peer messages we have seen but not yet acknowledged back.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal message history is empty. This should never happen in normal
+    /// operation as the history is initialized during session creation.
+    #[must_use]
+    pub fn peer_lag_length(&self) -> u64 {
+        let our_latest_ack_peer_height = self
+            .self_msg_history
+            .back()
+            .expect("Self message history unexpectedly empty")
+            .peer_parent_height;
+
+        self.latest_peer_msg
+            .height
+            .checked_sub(our_latest_ack_peer_height)
+            .expect("Peer lag is negative")
     }
 }
 
@@ -672,12 +717,12 @@ mod tests {
     }
 
     #[test]
-    fn test_lag_length() {
+    fn test_self_lag_length() {
         let (mut alice_session, mut bob_session, alice_sk, alice_pk, bob_sk, bob_pk) =
             setup_sessions();
 
         // Initial lag should be 1 (Alice at message 1 after announcement, Bob hasn't acknowledged yet so still at 0)
-        let initial_lag = alice_session.lag_length();
+        let initial_lag = alice_session.self_lag_length();
         assert_eq!(initial_lag, 1);
 
         // Alice sends 3 messages
@@ -686,7 +731,7 @@ mod tests {
         let _r3 = alice_session.send_outgoing_message(b"seeker", b"msg3", &bob_pk);
 
         // Lag should now be 4 (Alice sent 3 more messages, now at height 4, Bob still at 0)
-        let lag_before = alice_session.lag_length();
+        let lag_before = alice_session.self_lag_length();
         assert_eq!(lag_before, 4);
 
         // Bob receives and responds to first message
@@ -701,8 +746,39 @@ mod tests {
             .expect("Failed to decrypt");
 
         // Alice's lag should decrease as Bob acknowledged her message
-        let lag_after = alice_session.lag_length();
+        let lag_after = alice_session.self_lag_length();
         assert!(lag_after < lag_before);
+    }
+
+    #[test]
+    fn test_peer_lag_length() {
+        let (mut alice_session, mut bob_session, alice_sk, alice_pk, bob_sk, bob_pk) =
+            setup_sessions();
+
+        // Initially each side has peer height 1 (announcement) and acknowledges peer parent 0.
+        assert_eq!(alice_session.peer_lag_length(), 1);
+
+        // Alice sends one message, Bob receives it, then Bob sends two without Alice replying.
+        let alice_to_bob = alice_session.send_outgoing_message(b"seeker", b"msg1", &bob_pk);
+        bob_session
+            .try_feed_incoming_message(&bob_sk, &alice_to_bob)
+            .expect("Bob failed to decrypt Alice's message");
+
+        let bob_to_alice_1 = bob_session.send_outgoing_message(b"seeker", b"reply1", &alice_pk);
+        let bob_to_alice_2 = bob_session.send_outgoing_message(b"seeker", b"reply2", &alice_pk);
+
+        // Alice receives two messages from Bob and has not acknowledged either yet.
+        alice_session
+            .try_feed_incoming_message(&alice_sk, &bob_to_alice_1)
+            .expect("Alice failed to decrypt Bob's first reply");
+        alice_session
+            .try_feed_incoming_message(&alice_sk, &bob_to_alice_2)
+            .expect("Alice failed to decrypt Bob's second reply");
+        assert_eq!(alice_session.peer_lag_length(), 2);
+
+        // After Alice sends, she acknowledges Bob's latest message, so peer lag resets.
+        let _alice_ack = alice_session.send_outgoing_message(b"seeker", b"ack", &bob_pk);
+        assert_eq!(alice_session.peer_lag_length(), 0);
     }
 
     #[test]

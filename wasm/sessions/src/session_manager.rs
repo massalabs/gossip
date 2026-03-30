@@ -31,6 +31,7 @@
 //!     max_session_inactivity_millis: 3_600_000,
 //!     keep_alive_interval_millis: 60_000,
 //!     max_session_lag_length: 100,
+//!     max_keep_alive_peer_lag_length: 8,
 //! };
 //! let mut manager = SessionManager::new(config);
 //!
@@ -155,6 +156,9 @@ pub struct SessionManagerConfig {
 
     /// The maximum lag length of a session before sending more messages is blocked
     pub max_session_lag_length: u64,
+
+    /// The peer lag threshold above which `refresh` requests a keep-alive immediately
+    pub max_keep_alive_peer_lag_length: u64,
 }
 
 #[derive(Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
@@ -306,7 +310,10 @@ impl SessionManager {
 
             // session keep-alive trigger
             if let Some(active_session) = &peer_info.active_session {
-                if active_session.last_outgoing_message_timestamp < keep_alive_timestamp {
+                if active_session.last_outgoing_message_timestamp < keep_alive_timestamp
+                    || active_session.session.peer_lag_length()
+                        >= self.config.max_keep_alive_peer_lag_length
+                {
                     keep_alive_needed.push(peer_id.clone());
                 }
             }
@@ -532,7 +539,7 @@ impl SessionManager {
 
         // grab session
         if let Some(session) = &peer_info.active_session {
-            if session.session.lag_length() >= self.config.max_session_lag_length {
+            if session.session.self_lag_length() >= self.config.max_session_lag_length {
                 return SessionStatus::Saturated;
             } else {
                 return SessionStatus::Active;
@@ -661,7 +668,7 @@ impl SessionManager {
         // get the session and send
         if let Some(peer_info) = self.peers.get_mut(peer_id) {
             if let Some(active_session) = &mut peer_info.active_session {
-                if active_session.session.lag_length() >= self.config.max_session_lag_length {
+                if active_session.session.self_lag_length() >= self.config.max_session_lag_length {
                     return None;
                 }
                 let send_result = active_session.session.send_outgoing_message(message);
@@ -694,6 +701,7 @@ mod tests {
             max_session_inactivity_millis: 3_600_000,
             keep_alive_interval_millis: 60_000,
             max_session_lag_length: 100,
+            max_keep_alive_peer_lag_length: 8,
         }
     }
 
@@ -1043,6 +1051,48 @@ mod tests {
 
         let keep_alive_peers = manager.refresh();
         assert_eq!(keep_alive_peers.len(), 0);
+    }
+
+    #[test]
+    fn test_refresh_triggers_keep_alive_on_high_peer_lag() {
+        let mut config = create_test_config();
+        // Keep this large so this test exercises lag-triggered keep-alive, not time-triggered.
+        config.keep_alive_interval_millis = 3_600_000;
+        let peer_lag_threshold = config.max_keep_alive_peer_lag_length;
+
+        let mut alice_manager = SessionManager::new(config);
+        let mut bob_manager = SessionManager::new(create_test_config());
+
+        let (alice_pk, alice_sk) = generate_test_keypair();
+        let (bob_pk, bob_sk) = generate_test_keypair();
+
+        // Establish sessions.
+        let alice_announcement =
+            alice_manager.establish_outgoing_session(&bob_pk, &alice_pk, &alice_sk, vec![]);
+        let bob_announcement =
+            bob_manager.establish_outgoing_session(&alice_pk, &bob_pk, &bob_sk, vec![]);
+        bob_manager.feed_incoming_announcement(&alice_announcement, &bob_pk, &bob_sk);
+        alice_manager.feed_incoming_announcement(&bob_announcement, &alice_pk, &alice_sk);
+
+        let alice_id = alice_pk.derive_id();
+        let bob_id = bob_pk.derive_id();
+
+        // Bob sends enough messages to push Alice's peer lag over the threshold.
+        for _ in 0..peer_lag_threshold {
+            let output = bob_manager
+                .send_message(&alice_id, &create_test_message(b"peer-burst"))
+                .expect("Bob should be able to send message");
+            let incoming = alice_manager.feed_incoming_message_board_read(
+                &output.seeker,
+                &output.data,
+                &alice_sk,
+            );
+            assert!(incoming.is_some(), "Alice should decrypt Bob's message");
+        }
+
+        let keep_alive_peers = alice_manager.refresh();
+        assert_eq!(keep_alive_peers.len(), 1);
+        assert_eq!(keep_alive_peers[0], bob_id);
     }
 
     #[test]

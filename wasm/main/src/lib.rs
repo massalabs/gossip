@@ -36,6 +36,7 @@ impl SessionConfig {
         max_session_inactivity_millis: f64,
         keep_alive_interval_millis: f64,
         max_session_lag_length: u64,
+        max_keep_alive_peer_lag_length: u64,
     ) -> Self {
         Self {
             inner: sessions::SessionManagerConfig {
@@ -47,6 +48,7 @@ impl SessionConfig {
                 max_session_inactivity_millis: max_session_inactivity_millis as u128,
                 keep_alive_interval_millis: keep_alive_interval_millis as u128,
                 max_session_lag_length,
+                max_keep_alive_peer_lag_length,
             },
         }
     }
@@ -59,6 +61,7 @@ impl SessionConfig {
     /// - Session inactivity: 1 week
     /// - Keep-alive interval: 1 day
     /// - Max lag: 10000 messages
+    /// - Max peer lag before keep-alive: 8 messages
     pub fn new_default() -> Self {
         Self {
             inner: sessions::SessionManagerConfig {
@@ -69,6 +72,7 @@ impl SessionConfig {
                 max_session_inactivity_millis: 604_800_000,        // 1 week
                 keep_alive_interval_millis: 86_400_000,            // 1 day
                 max_session_lag_length: 10000,
+                max_keep_alive_peer_lag_length: 8,
             },
         }
     }

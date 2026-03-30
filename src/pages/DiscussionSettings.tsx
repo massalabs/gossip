@@ -6,23 +6,35 @@ import React, {
   useState,
 } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { useDiscussionStore } from '../stores/discussionStore';
 import ContactAvatar from '../components/avatar/ContactAvatar';
 import ContactNameModal from '../components/ui/ContactNameModal';
 import Button from '../components/ui/Button';
 import PageHeader from '../components/ui/PageHeader';
 import PageLayout from '../components/ui/PageLayout';
-import { Check, Edit2, ChevronRight, RotateCw } from 'react-feather';
+import {
+  Check,
+  Edit2,
+  ChevronRight,
+  RotateCw,
+  Bell,
+  BellOff,
+} from 'react-feather';
 import { ROUTES } from '../constants/routes';
 import { useManualRenewDiscussion } from '../hooks/useManualRenew';
-import { updateDiscussionName, Contact } from '@massalabs/gossip-sdk';
+import type { Contact } from '@massalabs/gossip-sdk';
+import { useGossipSdk } from '../hooks/useGossipSdk';
 
 const DiscussionSettings: React.FC = () => {
+  const { t } = useTranslation('discussions');
   const { discussionId } = useParams();
   const navigate = useNavigate();
+  const gossip = useGossipSdk();
 
   const discussions = useDiscussionStore(s => s.discussions);
   const contacts = useDiscussionStore(s => s.contacts);
+  const patchDiscussion = useDiscussionStore(s => s.patchDiscussion);
   const manualRenewDiscussion = useManualRenewDiscussion();
 
   const discussion = useMemo(() => {
@@ -54,6 +66,7 @@ const DiscussionSettings: React.FC = () => {
   const [nameError, setNameError] = useState<string | null>(null);
   const [showSuccessCheck, setShowSuccessCheck] = useState(false);
   const [reconnectSuccess, setReconnectSuccess] = useState(false);
+  const [isRetentionModalOpen, setIsRetentionModalOpen] = useState(false);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
     null
   );
@@ -92,7 +105,7 @@ const DiscussionSettings: React.FC = () => {
     async (name?: string) => {
       if (!discussion?.id) return;
 
-      const result = await updateDiscussionName(discussion.id, name);
+      const result = await gossip.discussions.updateName(discussion.id, name);
       if (!result.success) {
         setNameError(result.message);
         return;
@@ -101,8 +114,53 @@ const DiscussionSettings: React.FC = () => {
       setIsNameModalOpen(false);
       setShowSuccessCheck(true);
     },
-    [discussion?.id]
+    [gossip, discussion?.id]
   );
+
+  const RETENTION_OPTIONS = useMemo(
+    () => [
+      { labelKey: 'settings.auto_delete_off', value: null as number | null },
+      { labelKey: 'settings.auto_delete_5m', value: 300 },
+      { labelKey: 'settings.auto_delete_1h', value: 3600 },
+      { labelKey: 'settings.auto_delete_8h', value: 28800 },
+      { labelKey: 'settings.auto_delete_1d', value: 86400 },
+      { labelKey: 'settings.auto_delete_1w', value: 604800 },
+      { labelKey: 'settings.auto_delete_1mo', value: 2592000 },
+    ],
+    []
+  );
+
+  const currentRetention = discussion?.messageRetentionDuration ?? null;
+
+  const retentionLabel = useMemo(() => {
+    const option = RETENTION_OPTIONS.find(o => o.value === currentRetention);
+    return option ? t(option.labelKey) : t('settings.auto_delete_off');
+  }, [currentRetention, t, RETENTION_OPTIONS]);
+
+  const handleSelectRetention = useCallback(
+    async (value: number | null) => {
+      if (!discussion?.id || !discussion?.contactUserId) return;
+      // Optimistically update the store so the label is instant here and in
+      // the discussion header when navigating back.
+      patchDiscussion(discussion.id, {
+        messageRetentionDuration: value,
+        retentionPolicySetAt: Date.now(),
+      });
+      setIsRetentionModalOpen(false);
+      await gossip.discussions.setRetentionPolicy(
+        discussion.contactUserId,
+        value
+      );
+    },
+    [gossip, discussion?.id, discussion?.contactUserId, patchDiscussion]
+  );
+
+  const handleToggleMute = useCallback(async () => {
+    if (!discussion?.id) return;
+    const newMuted = !discussion.mutedNotifications;
+    patchDiscussion(discussion.id, { mutedNotifications: newMuted });
+    await gossip.discussions.setMuted(discussion.id, newMuted);
+  }, [gossip, discussion?.id, discussion?.mutedNotifications, patchDiscussion]);
 
   const handleNavigateToContact = useCallback(
     (contact: Contact) => {
@@ -138,7 +196,9 @@ const DiscussionSettings: React.FC = () => {
       <div className="bg-background flex items-center justify-center h-full">
         <div className="text-center">
           <div className="w-8 h-8 border-2 border-border border-t-primary rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-sm text-muted-foreground">Loading discussion…</p>
+          <p className="text-sm text-muted-foreground">
+            {t('settings.loading')}
+          </p>
         </div>
       </div>
     );
@@ -147,7 +207,7 @@ const DiscussionSettings: React.FC = () => {
   return (
     <PageLayout
       header={
-        <PageHeader title="Discussion Settings" onBack={() => navigate(-1)} />
+        <PageHeader title={t('settings.title')} onBack={() => navigate(-1)} />
       }
       className="app-max-w mx-auto"
       contentClassName="pt-4 px-6 pb-6"
@@ -155,7 +215,7 @@ const DiscussionSettings: React.FC = () => {
       {/* Discussion Name Section */}
       <div className="mb-6">
         <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
-          Discussion Name
+          {t('settings.name_section')}
         </h2>
         <div className="bg-background border border-border rounded-xl p-4">
           <div className="flex items-center justify-between">
@@ -173,7 +233,7 @@ const DiscussionSettings: React.FC = () => {
                 variant="ghost"
                 size="custom"
                 className="p-2 hover:bg-muted rounded-lg transition-colors"
-                title="Edit discussion name"
+                title={t('settings.edit_name')}
               >
                 <Edit2 className="w-4 h-4 text-muted-foreground" />
               </Button>
@@ -185,13 +245,11 @@ const DiscussionSettings: React.FC = () => {
       {/* Reset Connection Section */}
       <div className="mb-6">
         <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
-          Reset Connection
+          {t('settings.reset_connection')}
         </h2>
         <div className="bg-background border border-border rounded-xl p-4">
           <p className="text-sm text-muted-foreground mb-3">
-            If you think you're disconnected from your peer, you can reset the
-            connection. Some messages may be resent but your history will be
-            preserved.
+            {t('settings.reset_description')}
           </p>
           <Button
             onClick={handleResetConnection}
@@ -203,22 +261,106 @@ const DiscussionSettings: React.FC = () => {
             ) : (
               <RotateCw className="w-4 h-4 mr-2" />
             )}
-            {reconnectSuccess ? 'Reconnected!' : 'Reset Connection'}
+            {reconnectSuccess
+              ? t('settings.reconnected')
+              : t('settings.reset_connection')}
           </Button>
         </div>
       </div>
 
+      {/* Mute Notifications Section */}
+      <div className="mb-6">
+        <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
+          {t('settings.notifications')}
+        </h2>
+        <div className="bg-background border border-border rounded-xl p-4">
+          <button
+            onClick={handleToggleMute}
+            className="w-full flex items-center justify-between text-sm font-medium text-foreground hover:bg-muted rounded-lg px-3 py-2 transition-colors"
+          >
+            <div className="flex items-center gap-3">
+              {discussion.mutedNotifications ? (
+                <BellOff className="w-4 h-4 text-muted-foreground" />
+              ) : (
+                <Bell className="w-4 h-4 text-muted-foreground" />
+              )}
+              <span>
+                {discussion.mutedNotifications
+                  ? t('settings.unmute_notifications')
+                  : t('settings.mute_notifications')}
+              </span>
+            </div>
+            {discussion.mutedNotifications && (
+              <span className="text-xs text-muted-foreground">
+                {t('settings.muted')}
+              </span>
+            )}
+          </button>
+        </div>
+      </div>
+
+      {/* Auto-delete Section */}
+      <div className="mb-6">
+        <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
+          {t('settings.auto_delete')}
+        </h2>
+        <div className="bg-background border border-border rounded-xl p-4">
+          <p className="text-sm text-muted-foreground mb-3">
+            {t('settings.auto_delete_description')}
+          </p>
+          <button
+            onClick={() => setIsRetentionModalOpen(true)}
+            className="w-full flex items-center justify-between text-sm font-medium text-foreground hover:bg-muted rounded-lg px-3 py-2 transition-colors"
+          >
+            <span>{t('settings.auto_delete_current')}</span>
+            <span className="text-primary">{retentionLabel}</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Retention picker modal */}
+      {isRetentionModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-black/50"
+          onClick={() => setIsRetentionModalOpen(false)}
+        >
+          <div
+            className="bg-background w-full max-w-md rounded-t-2xl p-6 pb-8"
+            onClick={e => e.stopPropagation()}
+          >
+            <h3 className="text-base font-semibold text-foreground mb-4">
+              {t('settings.auto_delete')}
+            </h3>
+            <div className="flex flex-col gap-1">
+              {RETENTION_OPTIONS.map(option => (
+                <button
+                  key={String(option.value)}
+                  onClick={() => handleSelectRetention(option.value)}
+                  className={`w-full text-left px-4 py-3 rounded-lg text-sm transition-colors ${
+                    currentRetention === option.value
+                      ? 'bg-primary/10 text-primary font-medium'
+                      : 'hover:bg-muted text-foreground'
+                  }`}
+                >
+                  {t(option.labelKey)}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Participants Section */}
       <div>
         <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
-          Participants
+          {t('settings.participants')}
         </h2>
         <div className="bg-background border border-border rounded-xl divide-y divide-border">
           {participants.map(contact => (
             <button
               key={contact.userId}
               onClick={() => handleNavigateToContact(contact)}
-              className="w-full flex items-center gap-3 p-4 hover:bg-muted/50 transition-colors first:rounded-t-xl last:rounded-b-xl"
+              className="hover-fill w-full flex items-center gap-3 p-4 first:rounded-t-xl last:rounded-b-xl"
             >
               <ContactAvatar contact={contact} size={10} />
               <div className="flex-1 min-w-0 text-left">
@@ -231,7 +373,7 @@ const DiscussionSettings: React.FC = () => {
           ))}
           {participants.length === 0 && (
             <div className="p-4 text-center text-sm text-muted-foreground">
-              No participants found
+              {t('settings.no_participants')}
             </div>
           )}
         </div>
@@ -240,9 +382,9 @@ const DiscussionSettings: React.FC = () => {
       <ContactNameModal
         isOpen={isNameModalOpen}
         onClose={() => setIsNameModalOpen(false)}
-        title="Edit discussion name"
+        title={t('settings.edit_name')}
         initialName={proposedName}
-        confirmLabel="Save"
+        confirmLabel={t('common:save')}
         allowEmpty
         error={nameError}
         onConfirm={async name => {

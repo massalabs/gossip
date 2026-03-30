@@ -14,4 +14,4 @@ export {
   type IMessageProtocol,
   type MessageProtocolResponse,
   type BulletinItem,
-} from './api/messageProtocol';
+} from './api/messageProtocol/index.js';

@@ -6,7 +6,9 @@ import { enableDebugLogger } from './utils/logger.ts';
 import { createSdk } from './sdk';
 import { useSdkStore } from './stores/sdkStore';
 import { protocolConfig } from './config/protocol';
+import { Capacitor } from '@capacitor/core';
 import waSqliteWasmUrl from 'wa-sqlite/dist/wa-sqlite.wasm?url';
+import waSqliteAsyncWasmUrl from 'wa-sqlite/dist/wa-sqlite-async.wasm?url';
 
 // Polyfill for Buffer
 import { Buffer } from 'buffer';
@@ -93,12 +95,15 @@ window.addEventListener('load', () => {
 enableDebugLogger();
 // }
 
+const isNative = Capacitor.isNativePlatform();
+
 Promise.all([
   createSdk({
     protocolBaseUrl: protocolConfig.baseUrl,
     config: { polling: { enabled: true } },
-    wasmUrl: waSqliteWasmUrl,
-    opfsPath: '/gossip-db',
+    storage: isNative
+      ? { type: 'opfs', path: '/gossip-db', wasmUrl: waSqliteWasmUrl }
+      : { type: 'idb', name: 'gossip-db', wasmUrl: waSqliteAsyncWasmUrl },
   }),
   initSafeArea(),
 ])
@@ -113,6 +118,11 @@ Promise.all([
   })
   .catch(error => {
     console.error('[Gossip] Failed to initialize:', error);
-    document.getElementById('root')!.textContent =
-      'Failed to start. Please restart the app.';
+    const message =
+      typeof error?.message === 'string' &&
+      (error.message.includes('createSyncAccessHandle') ||
+        error.message.includes('another open Access Handle'))
+        ? 'Another tab may have this app open. Please close other tabs and refresh.'
+        : 'Failed to start. Please restart the app.';
+    document.getElementById('root')!.textContent = message;
   });

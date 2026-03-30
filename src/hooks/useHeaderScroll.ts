@@ -2,28 +2,34 @@ import { useEffect, RefObject, useRef } from 'react';
 import { useUiStore } from '../stores/uiStore';
 
 interface UseHeaderScrollOptions {
+  /** Direct DOM node reference */
+  scrollContainer?: HTMLElement | null;
+  /** Ref to a scrollable container (alternative to scrollContainer) */
   scrollContainerRef?: RefObject<HTMLElement | null>;
+  /** DOM element ID (alternative to ref) */
   scrollContainerId?: string;
 }
 
 /**
- * Hook to detect scroll position of content and update header background state globally
- * Pass a ref to the scrollable content container
- * Uses requestAnimationFrame to throttle updates for better scroll performance
+ * Hook to detect scroll position of content and update header background state globally.
+ * Accepts a DOM node, a ref, or a DOM ID.
+ * Uses requestAnimationFrame to throttle updates for better scroll performance.
  */
 export const useHeaderScroll = (options?: UseHeaderScrollOptions) => {
   const setHeaderIsScrolled = useUiStore(s => s.setHeaderIsScrolled);
   const rafIdRef = useRef<number | null>(null);
   const lastScrollTopRef = useRef<number>(0);
 
-  useEffect(() => {
-    // Find the scrollable container
-    let scrollableContainer: HTMLElement | null = null;
+  // Resolve the scroll container from the various input types
+  const scrollContainer =
+    options?.scrollContainer ?? options?.scrollContainerRef?.current ?? null;
+  const scrollContainerId = options?.scrollContainerId;
 
-    if (options?.scrollContainerId) {
-      scrollableContainer = document.getElementById(options.scrollContainerId);
-    } else if (options?.scrollContainerRef?.current) {
-      scrollableContainer = options.scrollContainerRef.current;
+  useEffect(() => {
+    let scrollableContainer: HTMLElement | null = scrollContainer;
+
+    if (!scrollableContainer && scrollContainerId) {
+      scrollableContainer = document.getElementById(scrollContainerId);
     }
 
     if (!scrollableContainer) return;
@@ -62,9 +68,5 @@ export const useHeaderScroll = (options?: UseHeaderScrollOptions) => {
         cancelAnimationFrame(rafIdRef.current);
       }
     };
-  }, [
-    setHeaderIsScrolled,
-    options?.scrollContainerRef,
-    options?.scrollContainerId,
-  ]);
+  }, [setHeaderIsScrolled, scrollContainer, scrollContainerId]);
 };

@@ -2,44 +2,9 @@
 /* eslint-disable */
 export function start(): void;
 /**
- * Decrypts data using AES-256-SIV authenticated encryption.
- *
- * # Parameters
- *
- * - `key`: The encryption key (64 bytes, must match encryption key)
- * - `nonce`: The nonce (16 bytes, must match encryption nonce)
- * - `ciphertext`: The encrypted data with authentication tag
- * - `aad`: Additional authenticated data (must match encryption AAD)
- *
- * # Returns
- *
- * The decrypted plaintext, or `null` if authentication fails.
- *
- * # Security Notes
- *
- * - Returns `null` if:
- *   - The ciphertext has been tampered with
- *   - The wrong key or nonce is used
- *   - The AAD doesn't match
- * - Never ignore a decryption failure; it indicates tampering or corruption
- *
- * # Example
- *
- * ```javascript
- * const plaintext = aead_decrypt(key, nonce, ciphertext, aad);
- * if (plaintext) {
- *     console.log("Decrypted:", new TextDecoder().decode(plaintext));
- * } else {
- *     console.error("Decryption failed - data may be corrupted or tampered");
- * }
- * ```
+ * Generates user keys from a passphrase using password-based key derivation.
  */
-export function aead_decrypt(
-  key: EncryptionKey,
-  nonce: Nonce,
-  ciphertext: Uint8Array,
-  aad: Uint8Array
-): Uint8Array | undefined;
+export function generate_user_keys(passphrase: string): UserKeys;
 /**
  * Encrypts data using AES-256-SIV authenticated encryption.
  *
@@ -79,9 +44,44 @@ export function aead_encrypt(
   aad: Uint8Array
 ): Uint8Array;
 /**
- * Generates user keys from a passphrase using password-based key derivation.
+ * Decrypts data using AES-256-SIV authenticated encryption.
+ *
+ * # Parameters
+ *
+ * - `key`: The encryption key (64 bytes, must match encryption key)
+ * - `nonce`: The nonce (16 bytes, must match encryption nonce)
+ * - `ciphertext`: The encrypted data with authentication tag
+ * - `aad`: Additional authenticated data (must match encryption AAD)
+ *
+ * # Returns
+ *
+ * The decrypted plaintext, or `null` if authentication fails.
+ *
+ * # Security Notes
+ *
+ * - Returns `null` if:
+ *   - The ciphertext has been tampered with
+ *   - The wrong key or nonce is used
+ *   - The AAD doesn't match
+ * - Never ignore a decryption failure; it indicates tampering or corruption
+ *
+ * # Example
+ *
+ * ```javascript
+ * const plaintext = aead_decrypt(key, nonce, ciphertext, aad);
+ * if (plaintext) {
+ *     console.log("Decrypted:", new TextDecoder().decode(plaintext));
+ * } else {
+ *     console.error("Decryption failed - data may be corrupted or tampered");
+ * }
+ * ```
  */
-export function generate_user_keys(passphrase: string): UserKeys;
+export function aead_decrypt(
+  key: EncryptionKey,
+  nonce: Nonce,
+  ciphertext: Uint8Array,
+  aad: Uint8Array
+): Uint8Array | undefined;
 /**
  * Session status indicating the state of a peer session.
  */
@@ -124,17 +124,9 @@ export class EncryptionKey {
   free(): void;
   [Symbol.dispose](): void;
   /**
-   * Creates an encryption key from raw bytes (must be 64 bytes).
-   */
-  static from_bytes(bytes: Uint8Array): EncryptionKey;
-  /**
    * Generates a new random encryption key (64 bytes).
    */
   static generate(): EncryptionKey;
-  /**
-   * Gets the raw bytes of the encryption key.
-   */
-  to_bytes(): Uint8Array;
   /**
    * Generates a deterministic encryption key (64 bytes) from a seed and salt.
    *
@@ -145,6 +137,14 @@ export class EncryptionKey {
    * - `salt`: unique, random salt (minimum 8 bytes, recommended 16+ bytes)
    */
   static from_seed(seed: string, salt: Uint8Array): EncryptionKey;
+  /**
+   * Creates an encryption key from raw bytes (must be 64 bytes).
+   */
+  static from_bytes(bytes: Uint8Array): EncryptionKey;
+  /**
+   * Gets the raw bytes of the encryption key.
+   */
+  to_bytes(): Uint8Array;
 }
 /**
  * Nonce for AEAD operations (AES-256-SIV).
@@ -157,13 +157,13 @@ export class Nonce {
   free(): void;
   [Symbol.dispose](): void;
   /**
-   * Creates a nonce from raw bytes (must be 16 bytes).
-   */
-  static from_bytes(bytes: Uint8Array): Nonce;
-  /**
    * Generates a new random nonce (16 bytes).
    */
   static generate(): Nonce;
+  /**
+   * Creates a nonce from raw bytes (must be 16 bytes).
+   */
+  static from_bytes(bytes: Uint8Array): Nonce;
   /**
    * Gets the raw bytes of the nonce.
    */
@@ -177,21 +177,21 @@ export class ReceiveMessageOutput {
   free(): void;
   [Symbol.dispose](): void;
   /**
-   * Gets the list of newly acknowledged seekers.
-   */
-  readonly acknowledged_seekers: Array<any>;
-  /**
    * Gets the received message contents.
    */
   readonly message: Uint8Array;
   /**
-   * Gets the sender's user id (32 bytes).
-   */
-  readonly user_id: Uint8Array;
-  /**
    * Gets the message timestamp (milliseconds since Unix epoch).
    */
   readonly timestamp: number;
+  /**
+   * Gets the list of newly acknowledged seekers.
+   */
+  readonly acknowledged_seekers: Array<any>;
+  /**
+   * Gets the sender's user id (32 bytes).
+   */
+  readonly user_id: Uint8Array;
 }
 /**
  * Output from sending a message.
@@ -201,13 +201,13 @@ export class SendMessageOutput {
   free(): void;
   [Symbol.dispose](): void;
   /**
-   * Gets the encrypted message data.
-   */
-  readonly data: Uint8Array;
-  /**
    * Gets the seeker (identifier for message board lookup).
    */
   readonly seeker: Uint8Array;
+  /**
+   * Gets the encrypted message data.
+   */
+  readonly data: Uint8Array;
 }
 /**
  * Session manager configuration for controlling session behavior.
@@ -215,17 +215,6 @@ export class SendMessageOutput {
 export class SessionConfig {
   free(): void;
   [Symbol.dispose](): void;
-  /**
-   * Creates a default configuration with sensible defaults:
-   * - Announcement age: 1 week
-   * - Announcement future: 1 minute
-   * - Message age: 1 week
-   * - Message future: 1 minute
-   * - Session inactivity: 1 week
-   * - Keep-alive interval: 1 day
-   * - Max lag: 10000 messages
-   */
-  static new_default(): SessionConfig;
   /**
    * Creates a new session configuration with the given parameters.
    */
@@ -236,8 +225,21 @@ export class SessionConfig {
     max_incoming_message_future_millis: number,
     max_session_inactivity_millis: number,
     keep_alive_interval_millis: number,
-    max_session_lag_length: bigint
+    max_session_lag_length: bigint,
+    max_keep_alive_peer_lag_length: bigint
   );
+  /**
+   * Creates a default configuration with sensible defaults:
+   * - Announcement age: 1 week
+   * - Announcement future: 1 minute
+   * - Message age: 1 week
+   * - Message future: 1 minute
+   * - Session inactivity: 1 week
+   * - Keep-alive interval: 1 day
+   * - Max lag: 10000 messages
+   * - Max peer lag before keep-alive: 8 messages
+   */
+  static new_default(): SessionConfig;
 }
 /**
  * Session manager wrapper for WebAssembly.
@@ -246,20 +248,9 @@ export class SessionManagerWrapper {
   free(): void;
   [Symbol.dispose](): void;
   /**
-   * Discards a peer and all associated session state.
+   * Creates a new session manager with the given configuration.
    */
-  peer_discard(peer_id: Uint8Array): void;
-  /**
-   * Sends a message to a peer.
-   */
-  send_message(
-    peer_id: Uint8Array,
-    message_contents: Uint8Array
-  ): SendMessageOutput | undefined;
-  /**
-   * Serializes and encrypts the session manager into a blob.
-   */
-  to_encrypted_blob(key: EncryptionKey): Uint8Array;
+  constructor(config: SessionConfig);
   /**
    * Deserializes a session manager from an encrypted blob.
    */
@@ -268,9 +259,9 @@ export class SessionManagerWrapper {
     key: EncryptionKey
   ): SessionManagerWrapper;
   /**
-   * Gets the session status for a peer.
+   * Serializes and encrypts the session manager into a blob.
    */
-  peer_session_status(peer_id: Uint8Array): SessionStatus;
+  to_encrypted_blob(key: EncryptionKey): Uint8Array;
   /**
    * Establishes an outgoing session with a peer.
    *
@@ -345,6 +336,13 @@ export class SessionManagerWrapper {
    */
   get_message_board_read_keys(): Array<any>;
   /**
+   * Sends a message to a peer.
+   */
+  send_message(
+    peer_id: Uint8Array,
+    message_contents: Uint8Array
+  ): SendMessageOutput | undefined;
+  /**
    * Processes an incoming message from the message board.
    */
   feed_incoming_message_board_read(
@@ -353,17 +351,21 @@ export class SessionManagerWrapper {
     our_sk: UserSecretKeys
   ): ReceiveMessageOutput | undefined;
   /**
-   * Creates a new session manager with the given configuration.
+   * Gets the list of all peer IDs.
    */
-  constructor(config: SessionConfig);
+  peer_list(): Array<any>;
+  /**
+   * Gets the session status for a peer.
+   */
+  peer_session_status(peer_id: Uint8Array): SessionStatus;
+  /**
+   * Discards a peer and all associated session state.
+   */
+  peer_discard(peer_id: Uint8Array): void;
   /**
    * Refreshes sessions and returns peer IDs that need keep-alive messages.
    */
   refresh(): Array<any>;
-  /**
-   * Gets the list of all peer IDs.
-   */
-  peer_list(): Array<any>;
 }
 /**
  * User keypair containing both public and secret keys.
@@ -389,17 +391,21 @@ export class UserPublicKeys {
   free(): void;
   [Symbol.dispose](): void;
   /**
-   * Deserializes public keys from bytes.
+   * Derives a unique user ID from the public keys.
    */
-  static from_bytes(bytes: Uint8Array): UserPublicKeys;
+  derive_id(): Uint8Array;
   /**
    * Serializes the public keys to bytes.
    */
   to_bytes(): Uint8Array;
   /**
-   * Derives a unique user ID from the public keys.
+   * Deserializes public keys from bytes.
    */
-  derive_id(): Uint8Array;
+  static from_bytes(bytes: Uint8Array): UserPublicKeys;
+  /**
+   * Gets the DSA verification key bytes.
+   */
+  readonly dsa_verification_key: Uint8Array;
   /**
    * Gets the KEM public key bytes.
    */
@@ -408,10 +414,6 @@ export class UserPublicKeys {
    * Gets the Massa public key bytes.
    */
   readonly massa_public_key: Uint8Array;
-  /**
-   * Gets the DSA verification key bytes.
-   */
-  readonly dsa_verification_key: Uint8Array;
 }
 /**
  * User secret keys for signing and decryption.
@@ -421,21 +423,21 @@ export class UserSecretKeys {
   free(): void;
   [Symbol.dispose](): void;
   /**
-   * Deserializes secret keys from bytes.
-   */
-  static from_bytes(bytes: Uint8Array): UserSecretKeys;
-  /**
    * Serializes the secret keys to bytes for secure storage.
    */
   to_bytes(): Uint8Array;
   /**
-   * Gets the KEM secret key bytes.
+   * Deserializes secret keys from bytes.
    */
-  readonly kem_secret_key: Uint8Array;
+  static from_bytes(bytes: Uint8Array): UserSecretKeys;
   /**
    * Gets the DSA signing key bytes.
    */
   readonly dsa_signing_key: Uint8Array;
+  /**
+   * Gets the KEM secret key bytes.
+   */
+  readonly kem_secret_key: Uint8Array;
   /**
    * Gets only the Massa secret key bytes
    */
@@ -451,24 +453,65 @@ export type InitInput =
 
 export interface InitOutput {
   readonly memory: WebAssembly.Memory;
-  readonly __wbg_announcementresult_free: (a: number, b: number) => void;
-  readonly __wbg_encryptionkey_free: (a: number, b: number) => void;
-  readonly __wbg_nonce_free: (a: number, b: number) => void;
-  readonly __wbg_receivemessageoutput_free: (a: number, b: number) => void;
-  readonly __wbg_sendmessageoutput_free: (a: number, b: number) => void;
   readonly __wbg_sessionconfig_free: (a: number, b: number) => void;
-  readonly __wbg_sessionmanagerwrapper_free: (a: number, b: number) => void;
-  readonly __wbg_userkeys_free: (a: number, b: number) => void;
-  readonly __wbg_userpublickeys_free: (a: number, b: number) => void;
-  readonly __wbg_usersecretkeys_free: (a: number, b: number) => void;
-  readonly aead_decrypt: (
+  readonly sessionconfig_new: (
     a: number,
     b: number,
     c: number,
     d: number,
     e: number,
-    f: number
-  ) => [number, number];
+    f: number,
+    g: bigint,
+    h: bigint
+  ) => number;
+  readonly sessionconfig_new_default: () => number;
+  readonly __wbg_userpublickeys_free: (a: number, b: number) => void;
+  readonly userpublickeys_derive_id: (a: number) => [number, number];
+  readonly userpublickeys_dsa_verification_key: (a: number) => [number, number];
+  readonly userpublickeys_kem_public_key: (a: number) => [number, number];
+  readonly userpublickeys_massa_public_key: (a: number) => [number, number];
+  readonly userpublickeys_to_bytes: (
+    a: number
+  ) => [number, number, number, number];
+  readonly userpublickeys_from_bytes: (
+    a: number,
+    b: number
+  ) => [number, number, number];
+  readonly __wbg_usersecretkeys_free: (a: number, b: number) => void;
+  readonly usersecretkeys_to_bytes: (
+    a: number
+  ) => [number, number, number, number];
+  readonly usersecretkeys_from_bytes: (
+    a: number,
+    b: number
+  ) => [number, number, number];
+  readonly usersecretkeys_dsa_signing_key: (a: number) => [number, number];
+  readonly usersecretkeys_kem_secret_key: (a: number) => [number, number];
+  readonly usersecretkeys_massa_secret_key: (a: number) => [number, number];
+  readonly __wbg_userkeys_free: (a: number, b: number) => void;
+  readonly userkeys_public_keys: (a: number) => [number, number, number];
+  readonly userkeys_secret_keys: (a: number) => [number, number, number];
+  readonly generate_user_keys: (
+    a: number,
+    b: number
+  ) => [number, number, number];
+  readonly __wbg_encryptionkey_free: (a: number, b: number) => void;
+  readonly encryptionkey_generate: () => number;
+  readonly encryptionkey_from_seed: (
+    a: number,
+    b: number,
+    c: number,
+    d: number
+  ) => [number, number, number];
+  readonly encryptionkey_from_bytes: (
+    a: number,
+    b: number
+  ) => [number, number, number];
+  readonly encryptionkey_to_bytes: (a: number) => [number, number];
+  readonly __wbg_nonce_free: (a: number, b: number) => void;
+  readonly nonce_generate: () => number;
+  readonly nonce_from_bytes: (a: number, b: number) => [number, number, number];
+  readonly nonce_to_bytes: (a: number) => [number, number];
   readonly aead_encrypt: (
     a: number,
     b: number,
@@ -477,44 +520,37 @@ export interface InitOutput {
     e: number,
     f: number
   ) => [number, number];
-  readonly announcementresult_announcer_public_keys: (a: number) => number;
-  readonly announcementresult_timestamp: (a: number) => number;
-  readonly announcementresult_user_data: (a: number) => [number, number];
-  readonly encryptionkey_from_bytes: (
-    a: number,
-    b: number
-  ) => [number, number, number];
-  readonly encryptionkey_from_seed: (
-    a: number,
-    b: number,
-    c: number,
-    d: number
-  ) => [number, number, number];
-  readonly encryptionkey_generate: () => number;
-  readonly encryptionkey_to_bytes: (a: number) => [number, number];
-  readonly generate_user_keys: (
-    a: number,
-    b: number
-  ) => [number, number, number];
-  readonly nonce_from_bytes: (a: number, b: number) => [number, number, number];
-  readonly nonce_generate: () => number;
-  readonly nonce_to_bytes: (a: number) => [number, number];
-  readonly receivemessageoutput_acknowledged_seekers: (a: number) => any;
-  readonly receivemessageoutput_message: (a: number) => [number, number];
-  readonly receivemessageoutput_timestamp: (a: number) => number;
-  readonly receivemessageoutput_user_id: (a: number) => [number, number];
-  readonly sendmessageoutput_data: (a: number) => [number, number];
-  readonly sendmessageoutput_seeker: (a: number) => [number, number];
-  readonly sessionconfig_new: (
+  readonly aead_decrypt: (
     a: number,
     b: number,
     c: number,
     d: number,
     e: number,
-    f: number,
-    g: bigint
-  ) => number;
-  readonly sessionconfig_new_default: () => number;
+    f: number
+  ) => [number, number];
+  readonly __wbg_sendmessageoutput_free: (a: number, b: number) => void;
+  readonly sendmessageoutput_seeker: (a: number) => [number, number];
+  readonly sendmessageoutput_data: (a: number) => [number, number];
+  readonly __wbg_receivemessageoutput_free: (a: number, b: number) => void;
+  readonly __wbg_announcementresult_free: (a: number, b: number) => void;
+  readonly announcementresult_announcer_public_keys: (a: number) => number;
+  readonly announcementresult_timestamp: (a: number) => number;
+  readonly announcementresult_user_data: (a: number) => [number, number];
+  readonly receivemessageoutput_message: (a: number) => [number, number];
+  readonly receivemessageoutput_timestamp: (a: number) => number;
+  readonly receivemessageoutput_acknowledged_seekers: (a: number) => any;
+  readonly receivemessageoutput_user_id: (a: number) => [number, number];
+  readonly __wbg_sessionmanagerwrapper_free: (a: number, b: number) => void;
+  readonly sessionmanagerwrapper_new: (a: number) => number;
+  readonly sessionmanagerwrapper_from_encrypted_blob: (
+    a: number,
+    b: number,
+    c: number
+  ) => [number, number, number];
+  readonly sessionmanagerwrapper_to_encrypted_blob: (
+    a: number,
+    b: number
+  ) => [number, number, number, number];
   readonly sessionmanagerwrapper_establish_outgoing_session: (
     a: number,
     b: number,
@@ -530,6 +566,16 @@ export interface InitOutput {
     d: number,
     e: number
   ) => number;
+  readonly sessionmanagerwrapper_get_message_board_read_keys: (
+    a: number
+  ) => any;
+  readonly sessionmanagerwrapper_send_message: (
+    a: number,
+    b: number,
+    c: number,
+    d: number,
+    e: number
+  ) => [number, number, number];
   readonly sessionmanagerwrapper_feed_incoming_message_board_read: (
     a: number,
     b: number,
@@ -538,61 +584,18 @@ export interface InitOutput {
     e: number,
     f: number
   ) => number;
-  readonly sessionmanagerwrapper_from_encrypted_blob: (
-    a: number,
-    b: number,
-    c: number
-  ) => [number, number, number];
-  readonly sessionmanagerwrapper_get_message_board_read_keys: (
-    a: number
-  ) => any;
-  readonly sessionmanagerwrapper_new: (a: number) => number;
-  readonly sessionmanagerwrapper_peer_discard: (
-    a: number,
-    b: number,
-    c: number
-  ) => [number, number];
   readonly sessionmanagerwrapper_peer_list: (a: number) => any;
   readonly sessionmanagerwrapper_peer_session_status: (
     a: number,
     b: number,
     c: number
   ) => [number, number, number];
-  readonly sessionmanagerwrapper_refresh: (a: number) => any;
-  readonly sessionmanagerwrapper_send_message: (
+  readonly sessionmanagerwrapper_peer_discard: (
     a: number,
     b: number,
-    c: number,
-    d: number,
-    e: number
-  ) => [number, number, number];
-  readonly sessionmanagerwrapper_to_encrypted_blob: (
-    a: number,
-    b: number
-  ) => [number, number, number, number];
-  readonly userkeys_public_keys: (a: number) => [number, number, number];
-  readonly userkeys_secret_keys: (a: number) => [number, number, number];
-  readonly userpublickeys_derive_id: (a: number) => [number, number];
-  readonly userpublickeys_dsa_verification_key: (a: number) => [number, number];
-  readonly userpublickeys_from_bytes: (
-    a: number,
-    b: number
-  ) => [number, number, number];
-  readonly userpublickeys_kem_public_key: (a: number) => [number, number];
-  readonly userpublickeys_massa_public_key: (a: number) => [number, number];
-  readonly userpublickeys_to_bytes: (
-    a: number
-  ) => [number, number, number, number];
-  readonly usersecretkeys_dsa_signing_key: (a: number) => [number, number];
-  readonly usersecretkeys_from_bytes: (
-    a: number,
-    b: number
-  ) => [number, number, number];
-  readonly usersecretkeys_kem_secret_key: (a: number) => [number, number];
-  readonly usersecretkeys_massa_secret_key: (a: number) => [number, number];
-  readonly usersecretkeys_to_bytes: (
-    a: number
-  ) => [number, number, number, number];
+    c: number
+  ) => [number, number];
+  readonly sessionmanagerwrapper_refresh: (a: number) => any;
   readonly start: () => void;
   readonly __wbindgen_exn_store: (a: number) => void;
   readonly __externref_table_alloc: () => number;

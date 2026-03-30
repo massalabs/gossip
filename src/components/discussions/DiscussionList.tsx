@@ -1,8 +1,11 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Virtuoso } from 'react-virtuoso';
+import { useTranslation } from 'react-i18next';
+import { Virtualizer } from 'virtua';
+import toast from 'react-hot-toast';
 
 import { useDiscussionList } from '../../hooks/useDiscussionList';
+import { useGossipSdk } from '../../hooks/useGossipSdk';
 import {
   DiscussionFilter,
   useDiscussionStore,
@@ -65,7 +68,7 @@ const ContactItemRenderer: React.FC<ContactItemProps> = ({
   <button
     type="button"
     onClick={() => onSelect(item.contact.userId)}
-    className="w-full px-3 py-2 flex items-center gap-3 rounded-xl hover:bg-accent/50 transition-colors text-left"
+    className="hover-fill w-full px-3 py-2 flex items-center gap-3 rounded-xl text-left"
   >
     <ContactAvatar contact={item.contact} size={10} />
     <div className="flex-1 min-w-0">
@@ -91,7 +94,11 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
   scrollParent,
   filter = 'all',
 }) => {
+  const { t } = useTranslation('discussions');
   const navigate = useNavigate();
+  const gossip = useGossipSdk();
+  const scrollRef = useRef<HTMLElement | null>(null);
+  scrollRef.current = scrollParent;
 
   // Store selectors
   const discussions = useDiscussionStore(s => s.discussions);
@@ -142,31 +149,49 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
     [handleRefuseDiscussionRequest]
   );
 
-  // Virtuoso item renderer
-  const renderItem = useCallback(
-    (index: number) => {
-      const item = virtualItems[index];
-      if (!item) return null;
+  const handleEditName = useCallback(
+    async (discussion: Discussion, newName: string) => {
+      if (!discussion.id) return;
+      const result = await gossip.discussions.updateName(
+        discussion.id,
+        newName || undefined
+      );
+      if (result.success) {
+        toast.success('Name updated');
+      } else {
+        toast.error(result.message || 'Failed to update name');
+      }
+    },
+    [gossip]
+  );
 
+  const handleTogglePin = useCallback(
+    async (discussion: Discussion) => {
+      if (!discussion.id) return;
+      const result = await gossip.discussions.pin(
+        discussion.id,
+        !discussion.pinned
+      );
+      if (!result.success) {
+        toast.error(result.message || 'Failed to pin discussion');
+      }
+    },
+    [gossip]
+  );
+
+  // Item renderer
+  const renderItem = useCallback(
+    (item: (typeof virtualItems)[number]) => {
       switch (item.type) {
         case 'header':
-          return <HeaderItemRenderer key={item.key} item={item} />;
+          return <HeaderItemRenderer item={item} />;
 
         case 'contact':
-          return (
-            <ContactItemRenderer
-              key={item.contact.userId}
-              item={item}
-              onSelect={onSelect}
-            />
-          );
+          return <ContactItemRenderer item={item} onSelect={onSelect} />;
 
         case 'discussion':
           return (
-            <div
-              key={item.discussion.id}
-              className={item.isSelected ? 'bg-accent/10' : ''}
-            >
+            <div className={item.isSelected ? 'bg-accent/10' : ''}>
               <DiscussionListItem
                 discussion={item.discussion}
                 contact={item.contact}
@@ -174,6 +199,8 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
                 onSelect={d => onSelect(d.contactUserId)}
                 onAccept={handleAccept}
                 onRefuse={() => handleRefuse(item.discussion)}
+                onEditName={handleEditName}
+                onTogglePin={handleTogglePin}
               />
             </div>
           );
@@ -182,7 +209,7 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
           return null;
       }
     },
-    [virtualItems, onSelect, handleAccept, handleRefuse]
+    [onSelect, handleAccept, handleRefuse, handleEditName, handleTogglePin]
   );
 
   // Empty states
@@ -190,7 +217,9 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
     if (isSearching) {
       return (
         <div className="py-8 text-center">
-          <p className="text-sm text-muted-foreground">No results found</p>
+          <p className="text-sm text-muted-foreground">
+            {t('list.no_results')}
+          </p>
         </div>
       );
     }
@@ -199,15 +228,18 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
 
   // Main render
   return (
-    <Virtuoso
-      customScrollParent={scrollParent}
-      totalCount={virtualItems.length}
-      itemContent={renderItem}
-      increaseViewportBy={{ top: 200, bottom: 200 }}
-      components={{
-        Footer: () => <div className="h-20" />, // Add padding at bottom
-      }}
-    />
+    <Virtualizer scrollRef={scrollRef} bufferSize={200}>
+      {virtualItems.map(item => {
+        const key =
+          item.type === 'header'
+            ? item.key
+            : item.type === 'contact'
+              ? item.contact.userId
+              : item.discussion.id;
+        return <div key={key}>{renderItem(item)}</div>;
+      })}
+      <div className="h-20" aria-hidden="true" />
+    </Virtualizer>
   );
 };
 

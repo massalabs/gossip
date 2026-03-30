@@ -1,0 +1,30 @@
+diff --git a/node_modules/@capacitor/ios/Capacitor/Capacitor/WebViewDelegationHandler.swift b/node_modules/@capacitor/ios/Capacitor/Capacitor/WebViewDelegationHandler.swift
+index 2b4a256..5b5c4bb 100644
+--- a/node_modules/@capacitor/ios/Capacitor/Capacitor/WebViewDelegationHandler.swift
++++ b/node_modules/@capacitor/ios/Capacitor/Capacitor/WebViewDelegationHandler.swift
+@@ -162,8 +162,15 @@ open class WebViewDelegationHandler: NSObject, WKNavigationDelegate, WKUIDelegat
+     }
+ 
+     open func webView(_ webView: WKWebView, didReceive challenge: URLAuthenticationChallenge, completionHandler: @escaping @MainActor (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
++        // Accept self-signed certificates for dev server (patched by gossip-app)
++        if challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
++           let serverTrust = challenge.protectionSpace.serverTrust {
++            completionHandler(.useCredential, URLCredential(trust: serverTrust))
++            return
++        }
++
+         guard let bridge = bridge else {
+-            completionHandler(.rejectProtectionSpace, nil)
++            completionHandler(.performDefaultHandling, nil)
+             return
+         }
+ 
+@@ -177,7 +184,7 @@ open class WebViewDelegationHandler: NSObject, WKNavigationDelegate, WKUIDelegat
+             }
+         }
+ 
+-        completionHandler(.rejectProtectionSpace, nil)
++        completionHandler(.performDefaultHandling, nil)
+         return
+     }
+ 

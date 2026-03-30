@@ -8,15 +8,12 @@ import {
   MessageDirection,
   MessageType,
   DiscussionDirection,
-  DiscussionStatus,
 } from '../../src/db';
 import { encodeUserId } from '../../src/utils/userId';
 import { defaultSdkConfig, type SdkConfig } from '../../src/config/sdk';
 import { eq, and, gte, lte } from 'drizzle-orm';
-import { getSqliteDb, clearAllTables } from '../../src/sqlite';
-import * as schema from '../../src/schema';
-import { insertDiscussion } from '../../src/queries/discussions';
-import { insertMessage, getMessageById } from '../../src/queries/messages';
+import { getTestDb, clearAllTables, getTestQueries } from '../testDb';
+import * as schema from '../../src/db/schema';
 
 const DEDUP_OWNER_USER_ID = encodeUserId(new Uint8Array(32).fill(1));
 const DEDUP_CONTACT_USER_ID = encodeUserId(new Uint8Array(32).fill(2));
@@ -26,11 +23,10 @@ async function addDefaultDiscussion(
   ownerUserId: string = DEDUP_OWNER_USER_ID,
   contactUserId: string = DEDUP_CONTACT_USER_ID
 ) {
-  await insertDiscussion({
+  await getTestQueries().discussions.insert({
     ownerUserId,
     contactUserId,
     direction: DiscussionDirection.RECEIVED,
-    status: DiscussionStatus.ACTIVE,
     weAccepted: true,
     sendAnnouncement: null,
     unreadCount: 0,
@@ -43,12 +39,12 @@ async function addDefaultDiscussion(
 async function addMessage(
   data: typeof schema.messages.$inferInsert
 ): Promise<number> {
-  return insertMessage(data);
+  return getTestQueries().messages.insert(data);
 }
 
 /** Helper: get a message by id */
 async function getMessage(id: number) {
-  return getMessageById(id);
+  return getTestQueries().messages.getById(id);
 }
 
 /** Helper: find duplicate incoming message within a time window */
@@ -62,7 +58,7 @@ async function findDuplicateIncoming(
   const windowStart = new Date(timestamp.getTime() - windowMs);
   const windowEnd = new Date(timestamp.getTime() + windowMs);
 
-  return getSqliteDb()
+  return getTestDb()
     .select()
     .from(schema.messages)
     .where(

@@ -2,6 +2,7 @@ import { Component, ErrorInfo, ReactNode } from 'react';
 import { AlertTriangle } from 'react-feather';
 import { GroupChatGraphic } from '../graphics';
 import Button from './Button';
+import i18n from '../../i18n';
 
 interface Props {
   children: ReactNode;
@@ -39,10 +40,10 @@ class ErrorBoundary extends Component<Props, State> {
               </div>
             </div>
             <h1 className="text-2xl font-semibold text-foreground mb-3">
-              Something went wrong
+              {i18n.t('common:error_boundary.title')}
             </h1>
             <p className="text-muted-foreground mb-6">
-              {this.state.error?.message || 'An unexpected error occurred'}
+              {i18n.t('common:error_boundary.fallback')}
             </p>
             <Button
               onClick={() => window.location.reload()}
@@ -50,7 +51,7 @@ class ErrorBoundary extends Component<Props, State> {
               size="custom"
               className="h-12 px-6 rounded-full"
             >
-              Reload Page
+              {i18n.t('common:error_boundary.reload')}
             </Button>
           </div>
         </div>

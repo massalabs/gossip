@@ -4,13 +4,13 @@
  * Functions for managing discussion metadata.
  */
 
-import { type Discussion, rowToDiscussion } from '../db';
-import type { DiscussionRow } from '../queries';
-import { getDiscussionById, updateDiscussionById } from '../queries';
+import { type Discussion, rowToDiscussion } from '../db/index.js';
+import type { DiscussionRow } from '../db/index.js';
+import { Queries } from '../db/queries/index.js';
 
 /** Convert a Drizzle discussion row to a domain Discussion. */
 export function toDiscussion(row: DiscussionRow): Discussion {
-  return rowToDiscussion(row as Record<string, unknown>);
+  return rowToDiscussion(row);
 }
 
 /** Convert discussion rows to sorted Discussion[]. Most recent activity first. */
@@ -25,6 +25,26 @@ export function toSortedDiscussions(rows: DiscussionRow[]): Discussion[] {
     if (b.lastMessageTimestamp) return 1;
     return b.createdAt.getTime() - a.createdAt.getTime();
   });
+}
+
+export async function updateDiscussionPin(
+  discussionId: number,
+  pinned: boolean,
+  queries: Queries
+): Promise<{ success: boolean; message?: string }> {
+  try {
+    const discussion = await queries.discussions.getById(discussionId);
+    if (!discussion)
+      return { success: false, message: 'Discussion not found.' };
+    await queries.discussions.updateById(discussionId, { pinned });
+    return { success: true };
+  } catch (e) {
+    console.error('updateDiscussionPin failed', e);
+    return {
+      success: false,
+      message: 'Failed to update pin. Please try again.',
+    };
+  }
 }
 
 export type UpdateDiscussionNameResult =
@@ -46,13 +66,14 @@ export type UpdateDiscussionNameResult =
  */
 export async function updateDiscussionName(
   discussionId: number,
-  newName: string | undefined
+  newName: string | undefined,
+  queries: Queries
 ): Promise<UpdateDiscussionNameResult> {
   const trimmed = newName?.trim();
   const customName = trimmed && trimmed.length > 0 ? trimmed : null;
 
   try {
-    const discussion = await getDiscussionById(discussionId);
+    const discussion = await queries.discussions.getById(discussionId);
     if (!discussion) {
       return {
         success: false,
@@ -61,7 +82,7 @@ export async function updateDiscussionName(
       };
     }
 
-    await updateDiscussionById(discussionId, { customName });
+    await queries.discussions.updateById(discussionId, { customName });
 
     return { success: true, trimmedName: customName ?? undefined };
   } catch (e) {

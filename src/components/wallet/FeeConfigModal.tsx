@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Check, X } from 'react-feather';
 import Button from '../ui/Button';
 import type { FeeConfig } from './types';
@@ -17,6 +18,7 @@ const FeeConfigModal: React.FC<FeeConfigModalProps> = ({
   currentConfig,
 }) => {
   const [config, setConfig] = useState<FeeConfig>(currentConfig);
+  const { t } = useTranslation('wallet');
 
   const handlePresetChange = useCallback(
     (preset: 'low' | 'standard' | 'high') => {
@@ -95,18 +97,18 @@ const FeeConfigModal: React.FC<FeeConfigModalProps> = ({
   const presetFees = {
     low: {
       value: '0.01',
-      label: 'Low (0.01 MAS)',
-      description: 'Slower confirmation',
+      label: t('fees.low'),
+      description: t('fees.low_desc'),
     },
     standard: {
       value: '0.03',
-      label: 'Standard (0.03 MAS)',
-      description: 'Recommended',
+      label: t('fees.standard'),
+      description: t('fees.standard_desc'),
     },
     high: {
       value: '0.1',
-      label: 'High (0.1 MAS)',
-      description: 'Fast confirmation',
+      label: t('fees.high'),
+      description: t('fees.high_desc'),
     },
   };
 
@@ -125,7 +127,7 @@ const FeeConfigModal: React.FC<FeeConfigModalProps> = ({
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
           <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-            Advanced
+            {t('fees.title')}
           </h3>
           <button
             onClick={onClose}
@@ -140,9 +142,7 @@ const FeeConfigModal: React.FC<FeeConfigModalProps> = ({
           {/* Explanation */}
           <div className="mb-6">
             <p className="text-sm text-gray-600 dark:text-gray-400">
-              You pay gas fees to reward block validators and maximize your
-              chances to see your transaction validated. It is a tip for people
-              that support the blockchain network.
+              {t('fees.description')}
             </p>
           </div>
 
@@ -161,7 +161,7 @@ const FeeConfigModal: React.FC<FeeConfigModalProps> = ({
                   className="w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500"
                 />
                 <span className="ml-2 text-sm font-medium text-gray-900 dark:text-white">
-                  Preset
+                  {t('fees.preset')}
                 </span>
               </label>
 
@@ -211,7 +211,7 @@ const FeeConfigModal: React.FC<FeeConfigModalProps> = ({
                   className="w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500"
                 />
                 <span className="ml-2 text-sm font-medium text-gray-900 dark:text-white">
-                  Custom fees
+                  {t('fees.custom')}
                 </span>
               </label>
 
@@ -222,14 +222,14 @@ const FeeConfigModal: React.FC<FeeConfigModalProps> = ({
                     value={config.customFee || ''}
                     onChange={e => handleCustomFeeChange(e.target.value)}
                     onKeyDown={handleCustomFeeKeyDown}
-                    placeholder="Custom fees"
+                    placeholder={t('fees.custom_placeholder')}
                     step="0.001"
                     min="0"
                     className="w-full px-4 py-3 bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:text-white placeholder-gray-500 dark:placeholder-gray-400"
                     enterKeyHint="done"
                   />
                   <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                    Enter fee in MAS
+                    {t('fees.custom_hint')}
                   </div>
                 </div>
               )}
@@ -240,7 +240,7 @@ const FeeConfigModal: React.FC<FeeConfigModalProps> = ({
         {/* Action Buttons */}
         <div className="flex gap-3 p-6 border-t border-gray-200 dark:border-gray-700">
           <Button onClick={onClose} variant="secondary" fullWidth>
-            Cancel
+            {t('common:cancel')}
           </Button>
           <Button
             onClick={handleConfirm}
@@ -251,7 +251,7 @@ const FeeConfigModal: React.FC<FeeConfigModalProps> = ({
             variant="primary"
             fullWidth
           >
-            Confirm fees
+            {t('fees.confirm_fees')}
           </Button>
         </div>
       </div>

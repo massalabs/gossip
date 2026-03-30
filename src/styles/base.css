@@ -26,6 +26,14 @@
     --sab: 0px;
     --sal: 0px;
     --sar: 0px;
+    --keyboard-height: 0px;
+    --keyboard-offset: 0px;
+    /* Available height above the keyboard. Uses --keyboard-offset (not
+       --keyboard-height) so Android doesn't double-subtract — on Android the
+       OS already resized the viewport, so offset stays 0. */
+    --available-height: calc(
+      var(--viewport-height, 100dvh) - var(--keyboard-offset, 0px)
+    );
     --header-height: 3.5rem;
     --bottom-nav-height: 4rem;
     --header-padding: 1.5rem;
@@ -215,6 +223,14 @@
       /* Reserve space only on scrollbar side to prevent layout shift without creating both-side gutters */
       scrollbar-gutter: stable;
     }
+  }
+
+  /* Keyboard-aware layout via --available-height:
+     Both iOS and Android use adjustNothing/KeyboardResize.None — the OS does
+     not resize the WebView. --viewport-height is locked and --keyboard-offset
+     shrinks the layout when the keyboard opens. */
+  .keyboard-aware-height {
+    height: var(--available-height, 100dvh);
   }
 
   /* Ensure pointer cursor on all buttons */

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Copy, AlertTriangle } from 'react-feather';
 import { useAccountStore } from '../../stores/accountStore';
 import PageHeader from '../ui/PageHeader';
@@ -13,6 +14,7 @@ interface AccountBackupProps {
 }
 
 const AccountBackup: React.FC<AccountBackupProps> = ({ onBack }) => {
+  const { t } = useTranslation('settings');
   const { userProfile, showBackup } = useAccountStore();
   const [method, setMethod] = useState<'mnemonic' | 'privateKey'>('mnemonic');
   const [isLoading, setIsLoading] = useState(false);
@@ -34,7 +36,7 @@ const AccountBackup: React.FC<AccountBackupProps> = ({ onBack }) => {
       setPasswordError('');
 
       if (requiresPassword && !password.trim()) {
-        setPasswordError('Password is required');
+        setPasswordError(t('backup.password_required'));
         return;
       }
       const backupInfo = await showBackup(
@@ -43,8 +45,8 @@ const AccountBackup: React.FC<AccountBackupProps> = ({ onBack }) => {
       setBackupInfo(backupInfo);
       setPrivateKeyString(backupInfo.account.privateKey.toString());
     } catch (e) {
-      const message =
-        e instanceof Error ? e.message : 'Failed to show backup information';
+      console.error('Error showing backup:', e);
+      const message = t('backup.show_failed');
       setError(message);
       setPasswordError(message);
     } finally {
@@ -63,7 +65,7 @@ const AccountBackup: React.FC<AccountBackupProps> = ({ onBack }) => {
 
   return (
     <PageLayout
-      header={<PageHeader title="Account Backup" onBack={onBack} />}
+      header={<PageHeader title={t('backup.title')} onBack={onBack} />}
       className="app-max-w mx-auto"
       contentClassName="p-4 space-y-6"
     >
@@ -71,17 +73,17 @@ const AccountBackup: React.FC<AccountBackupProps> = ({ onBack }) => {
       {backupInfo && (
         <div className="mb-4">
           <p className="text-xl font-medium text-foreground mb-3">
-            Backup Method
+            {t('backup.method')}
           </p>
           <TabSwitcher
             options={[
               {
                 value: 'mnemonic',
-                label: 'Mnemonic',
+                label: t('backup.mnemonic'),
               },
               {
                 value: 'privateKey',
-                label: 'Private Key',
+                label: t('backup.private_key'),
               },
             ]}
             value={method}
@@ -98,13 +100,13 @@ const AccountBackup: React.FC<AccountBackupProps> = ({ onBack }) => {
             <>
               <div>
                 <label className="block text-xl font-medium text-foreground mb-3">
-                  Enter your password
+                  {t('backup.enter_password')}
                 </label>
                 <RoundedInput
                   type="password"
                   value={password}
                   onChange={e => setPassword(e.target.value)}
-                  placeholder="Enter your password"
+                  placeholder={t('backup.password_placeholder')}
                   error={!!passwordError}
                   disabled={isLoading}
                 />
@@ -123,7 +125,7 @@ const AccountBackup: React.FC<AccountBackupProps> = ({ onBack }) => {
                 fullWidth
                 className="h-11 text-sm font-medium"
               >
-                {!isLoading && 'Show Backup'}
+                {!isLoading && t('backup.show_backup')}
               </Button>
             </>
           ) : (
@@ -136,7 +138,7 @@ const AccountBackup: React.FC<AccountBackupProps> = ({ onBack }) => {
               fullWidth
               className="h-11 text-sm font-medium"
             >
-              {!isLoading && 'Show Backup'}
+              {!isLoading && t('backup.show_backup')}
             </Button>
           )}
         </div>
@@ -147,7 +149,7 @@ const AccountBackup: React.FC<AccountBackupProps> = ({ onBack }) => {
         <div className="bg-card rounded-lg p-6 space-y-4 border border-border">
           <div className="flex items-center justify-between">
             <h4 className="text-xl font-medium text-foreground">
-              24-Word Mnemonic
+              {t('backup.mnemonic_title')}
             </h4>
             <Button
               onClick={() => copyText(backupInfo.mnemonic)}
@@ -156,7 +158,7 @@ const AccountBackup: React.FC<AccountBackupProps> = ({ onBack }) => {
               className="text-sm font-medium text-muted-foreground hover:text-foreground flex items-center gap-2 p-0"
             >
               <Copy className="w-4 h-4" />
-              Copy
+              {t('common:copy')}
             </Button>
           </div>
           <div className="bg-muted rounded-lg p-4">
@@ -170,8 +172,7 @@ const AccountBackup: React.FC<AccountBackupProps> = ({ onBack }) => {
                 <AlertTriangle className="h-5 w-5 text-warning" />
               </div>
               <p className="text-sm text-foreground leading-relaxed font-medium">
-                Never share this information. Anyone with it can access your
-                account.
+                {t('backup.never_share')}
               </p>
             </div>
           </div>
@@ -182,7 +183,9 @@ const AccountBackup: React.FC<AccountBackupProps> = ({ onBack }) => {
       {method === 'privateKey' && privateKeyString && (
         <div className="bg-card rounded-lg p-6 space-y-4 border border-border">
           <div className="flex items-center justify-between">
-            <h4 className="text-xl font-medium text-foreground">Private Key</h4>
+            <h4 className="text-xl font-medium text-foreground">
+              {t('backup.private_key')}
+            </h4>
             <Button
               onClick={() => copyText(privateKeyString)}
               variant="ghost"
@@ -190,7 +193,7 @@ const AccountBackup: React.FC<AccountBackupProps> = ({ onBack }) => {
               className="text-sm font-medium text-muted-foreground hover:text-foreground flex items-center gap-2 p-0"
             >
               <Copy className="w-4 h-4" />
-              Copy
+              {t('common:copy')}
             </Button>
           </div>
           <div className="bg-muted rounded-lg p-4">
@@ -204,15 +207,14 @@ const AccountBackup: React.FC<AccountBackupProps> = ({ onBack }) => {
                 <AlertTriangle className="h-5 w-5 text-warning" />
               </div>
               <div className="space-y-2">
+                <p
+                  className="text-sm text-foreground leading-relaxed font-medium"
+                  dangerouslySetInnerHTML={{
+                    __html: t('backup.private_key_warning'),
+                  }}
+                />
                 <p className="text-sm text-foreground leading-relaxed font-medium">
-                  <strong>Warning:</strong> This Massa private key cannot be
-                  used to restore your Gossip account. Use this only for
-                  external wallet compatibility. To restore your Gossip account,
-                  you must use the 24-word mnemonic phrase.
-                </p>
-                <p className="text-sm text-foreground leading-relaxed font-medium">
-                  Never share this information. Anyone with it can access your
-                  account.
+                  {t('backup.never_share')}
                 </p>
               </div>
             </div>

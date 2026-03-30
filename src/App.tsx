@@ -1,3 +1,4 @@
+import './i18n';
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter, useMatch } from 'react-router-dom';
 import { useAccountStore } from './stores/accountStore';
@@ -20,11 +21,12 @@ import { Onboarding } from './pages/Onboarding.tsx';
 import { AppUrlListener } from './components/AppUrlListener';
 import { toastOptions } from './utils/toastOptions.ts';
 import LoadingScreen from './components/ui/LoadingScreen.tsx';
-import IOSKeyboardWrapper from './components/ui/IOSKeyboardWrapper';
+import KeyboardAwareWrapper from './components/ui/KeyboardAwareWrapper';
 import { ROUTES } from './constants/routes';
 import { useOnlineStore } from './stores/useOnlineStore.tsx';
 import { useTheme } from './hooks/useTheme.ts';
 import { useScreenshotProtection } from './hooks/useScreenshotProtection';
+import { useAutoLock } from './hooks/useAutoLock';
 
 const AppContent: React.FC = () => {
   const { isLoading, userProfile } = useAccountStore();
@@ -76,6 +78,7 @@ function App() {
   const { initTheme } = useTheme();
   const { initOnlineStore } = useOnlineStore();
   useScreenshotProtection();
+  useAutoLock();
 
   useEffect(() => {
     let cleanup: (() => void) | undefined;
@@ -97,15 +100,19 @@ function App() {
   return (
     <BrowserRouter>
       <ErrorBoundary>
-        <IOSKeyboardWrapper>
+        <KeyboardAwareWrapper>
           <AppUrlListener />
           <AppContent />
           <DebugConsole />
           {/* <div className="hidden">
             <PWABadge />
           </div> */}
-        </IOSKeyboardWrapper>
-        <Toaster position="top-center" toastOptions={toastOptions} />
+        </KeyboardAwareWrapper>
+        <Toaster
+          position="top-center"
+          containerStyle={{ top: 'var(--sat, 0px)' }}
+          toastOptions={toastOptions}
+        />
       </ErrorBoundary>
     </BrowserRouter>
   );

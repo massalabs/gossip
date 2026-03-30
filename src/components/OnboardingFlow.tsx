@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ArrowRight, Zap } from 'react-feather';
 import appLogo from '../assets/gossip_face.svg';
 import { PrivacyGraphic, LockGraphic, GroupChatGraphic } from './graphics';
@@ -13,25 +14,23 @@ const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
   onComplete,
   onImportMnemonic,
 }) => {
+  const { t } = useTranslation('onboarding');
   const [currentStep, setCurrentStep] = useState(0);
 
   const steps = [
     {
-      title: 'Welcome to Gossip!',
-      description:
-        'Your private messenger designed for secure, end-to-end encrypted conversations. Connect with confidence.',
+      title: t('welcome.title'),
+      description: t('welcome.description'),
       image: appLogo,
     },
     {
-      title: 'Privacy by Design',
-      description:
-        'All your messages are encrypted and stored locally on your device. Your conversations stay private, always.',
+      title: t('privacy.title'),
+      description: t('privacy.description'),
       image: appLogo,
     },
     {
-      title: "Let's Get Started!",
-      description:
-        'Create your account in seconds and start connecting with people securely.',
+      title: t('get_started.title'),
+      description: t('get_started.description'),
       image: appLogo,
     },
   ];
@@ -78,14 +77,7 @@ const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
         )}
         <div className="">
           <h1 className="text-3xl md:text-4xl font-bold text-foreground mb-4 leading-tight">
-            {currentStep === 0 ? (
-              <>
-                Welcome to{' '}
-                <span className="text-primary text-4xl">Gossip!</span>
-              </>
-            ) : (
-              steps[currentStep].title
-            )}
+            {steps[currentStep].title}
           </h1>
           <p className="text-base md:text-lg text-muted-foreground leading-relaxed app-max-w mx-auto px-2">
             {steps[currentStep].description}
@@ -105,7 +97,7 @@ const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
                 className="h-14 text-base font-semibold rounded-full gap-2"
               >
                 <Zap />
-                Create New Account
+                {t('create_account')}
               </Button>
               {onImportMnemonic && (
                 <Button
@@ -115,7 +107,7 @@ const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
                   fullWidth
                   className="h-14 text-base font-medium rounded-full"
                 >
-                  Import from Mnemonic
+                  {t('import_mnemonic')}
                 </Button>
               )}
             </div>
@@ -126,7 +118,7 @@ const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
             <div className="flex justify-between items-center">
               {currentStep > 0 ? (
                 <Button onClick={prevStep} variant="ghost" size="md">
-                  Back
+                  {t('back')}
                 </Button>
               ) : (
                 <div /> // Spacer to keep Next button aligned
@@ -138,7 +130,9 @@ const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
                 size="md"
                 className="px-8 gap-2"
               >
-                {currentStep === steps.length - 2 ? 'Get Started' : 'Next'}
+                {currentStep === steps.length - 2
+                  ? t('get_started_button')
+                  : t('next')}
                 <ArrowRight />
               </Button>
             </div>

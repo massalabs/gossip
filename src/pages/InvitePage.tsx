@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
 import { parseInvite } from '../utils/qrCodeParser';
 import { useAppStore } from '../stores/appStore';
@@ -17,6 +17,7 @@ const APP_SWITCH_DETECTION_DELAY = 300; // Time to detect if native app took ove
 
 export const InvitePage: React.FC = () => {
   const { userId } = useParams<{ userId: string }>();
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const setPendingDeepLinkInfo = useAppStore(s => s.setPendingDeepLinkInfo);
   const [isOpeningApp, setIsOpeningApp] = useState(false);
@@ -130,7 +131,8 @@ export const InvitePage: React.FC = () => {
 
     setIsOpeningApp(true);
     setAppOpened(false);
-    const invitePath = `/invite/${userId}`;
+    const query = searchParams.toString();
+    const invitePath = `/invite/${userId}${query ? `?${query}` : ''}`;
     const opened = await tryOpenNativeApp(invitePath);
 
     if (opened) {
@@ -146,7 +148,7 @@ export const InvitePage: React.FC = () => {
         'Could not open the app. You can continue in the web app instead.'
       );
     }
-  }, [userId, tryOpenNativeApp]);
+  }, [userId, searchParams, tryOpenNativeApp]);
 
   /**
    * Handle continuing in web app
@@ -155,13 +157,16 @@ export const InvitePage: React.FC = () => {
     if (!userId) return;
 
     try {
-      const inviteData = parseInvite(`/invite/${userId}`);
+      const query = searchParams.toString();
+      const inviteData = parseInvite(
+        `/invite/${userId}${query ? `?${query}` : ''}`
+      );
       await setPendingDeepLinkInfo(inviteData);
       navigate('/');
     } catch (err) {
       console.error('Failed to process invite:', err);
     }
-  }, [userId, setPendingDeepLinkInfo, navigate]);
+  }, [userId, searchParams, setPendingDeepLinkInfo, navigate]);
 
   // /**
   //  * Handle install from iOS App Store

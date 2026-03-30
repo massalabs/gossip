@@ -1,4 +1,11 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, {
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+  useMemo,
+} from 'react';
+import { useTranslation } from 'react-i18next';
 import { useAccountStore } from '../stores/accountStore';
 import { UserProfile } from '@massalabs/gossip-sdk';
 import { biometricService } from '../services/biometricService';
@@ -9,6 +16,7 @@ import RoundedInput from '../components/ui/RoundedInput';
 import { useNavigate } from 'react-router-dom';
 import { ROUTES } from '../constants/routes';
 import { PrivacyGraphic } from '../components/graphics';
+import { useDevAutoLogin } from '../hooks/useDevAutoLogin';
 
 interface LoginProps {
   onCreateNewAccount: () => void;
@@ -26,7 +34,9 @@ const Login: React.FC<LoginProps> = React.memo(
     persistentError = null,
     onErrorChange,
   }) => {
+    const { t } = useTranslation('auth');
     const loadAccount = useAccountStore(state => state.loadAccount);
+    const lockedByUser = useAccountStore(state => state.lockedByUser);
     const navigate = useNavigate();
     const [isLoading, setIsLoading] = useState(false);
     const [password, setPassword] = useState('');
@@ -76,11 +86,16 @@ const Login: React.FC<LoginProps> = React.memo(
         await loadAccount(undefined, currentAccount?.userId);
         onAccountSelected();
       } catch (error) {
-        onErrorChange?.(
-          error instanceof Error
-            ? error.message
-            : 'Biometric authentication failed'
-        );
+        console.error('Biometric authentication failed:', error);
+        const message = error instanceof Error ? error.message : '';
+        if (message === 'cancelled') {
+          // User (or system) dismissed the prompt intentionally — clear error, allow retry
+          onErrorChange?.(null);
+        } else if (message === 'biometric_locked') {
+          onErrorChange?.(t('login.biometric_locked'));
+        } else {
+          onErrorChange?.(t('login.biometric_failed'));
+        }
       } finally {
         setIsLoading(false);
       }
@@ -90,6 +105,7 @@ const Login: React.FC<LoginProps> = React.memo(
       onErrorChange,
       loadAccount,
       onAccountSelected,
+      t,
     ]);
 
     // Auto-trigger biometric auth when account is selected from account picker
@@ -113,10 +129,11 @@ const Login: React.FC<LoginProps> = React.memo(
 
     // Auto-trigger biometric auth on mount if account (from accountInfo) has biometric auth enabled
     // Only triggers for accountInfo, not selectedAccountInfo (which is handled by the effect above)
+    // Skip if user explicitly locked the app — they should manually unlock
     useEffect(() => {
-      // Skip if already attempted, no accountInfo, or user has manually selected a different account
       if (
         autoAuthAttempted.current ||
+        lockedByUser ||
         !accountInfo ||
         selectedAccountInfo ||
         !biometricMethodAvailable
@@ -133,9 +150,21 @@ const Login: React.FC<LoginProps> = React.memo(
     }, [
       accountInfo,
       selectedAccountInfo,
+      lockedByUser,
       handleBiometricAuth,
       biometricMethodAvailable,
     ]);
+
+    // Dev auto-login: skip password prompt in dev mode
+    const devAutoLoginCallbacks = useMemo(
+      () => ({
+        onSuccess: onAccountSelected,
+        onError: (msg: string) => onErrorChange?.(msg),
+        setLoading: setIsLoading,
+      }),
+      [onAccountSelected, onErrorChange]
+    );
+    useDevAutoLogin(currentAccount, devAutoLoginCallbacks);
 
     const handlePasswordAuth = async (
       e?: React.MouseEvent | React.KeyboardEvent
@@ -148,7 +177,7 @@ const Login: React.FC<LoginProps> = React.memo(
 
       try {
         if (!password.trim()) {
-          onErrorChange?.('Password is required');
+          onErrorChange?.(t('login.password_required'));
           setIsLoading(false);
           return;
         }
@@ -163,7 +192,7 @@ const Login: React.FC<LoginProps> = React.memo(
         }
       } catch (error) {
         console.error('Password authentication failed:', error);
-        const errorMessage = 'Invalid password. Please try again.';
+        const errorMessage = t('login.invalid_password');
         onErrorChange?.(errorMessage);
         setPassword('');
         if (window.location.pathname !== ROUTES.welcome()) {
@@ -239,17 +268,17 @@ const Login: React.FC<LoginProps> = React.memo(
               <h1 className="text-[28px] md:text-[32px] font-semibold tracking-tight text-gray-900 dark:text-white">
                 {displayUsername ? (
                   <>
-                    Welcome back,{' '}
+                    {t('login.welcome_back')}{' '}
                     <span className="text-blue-700 dark:text-blue-400 text-4xl">
                       {displayUsername}
                     </span>
                   </>
                 ) : (
-                  'Welcome to Gossip'
+                  t('login.welcome')
                 )}
               </h1>
               <p className="text-sm text-gray-600 dark:text-gray-400">
-                Sign in quickly and securely.
+                {t('login.sign_in')}
               </p>
             </div>
           </div>
@@ -268,11 +297,11 @@ const Login: React.FC<LoginProps> = React.memo(
                   fullWidth
                   className="h-[51px] rounded-full text-sm font-medium"
                 >
-                  {!isLoading && <span>Login with biometrics</span>}
+                  {!isLoading && <span>{t('login.biometric_auth')}</span>}
                 </Button>
                 {!biometricMethodAvailable && (
                   <p className="text-xs text-amber-700 dark:text-amber-400">
-                    Biometrics not detected. We will try anyway.
+                    {t('login.biometric_not_detected')}
                   </p>
                 )}
               </div>
@@ -296,7 +325,7 @@ const Login: React.FC<LoginProps> = React.memo(
                       handlePasswordAuth(e);
                     }
                   }}
-                  placeholder="Password"
+                  placeholder={t('login.password')}
                   error={!!persistentError}
                   disabled={isLoading}
                 />
@@ -309,7 +338,7 @@ const Login: React.FC<LoginProps> = React.memo(
                   fullWidth
                   className="h-[51px] rounded-full disabled:bg-primary/20"
                 >
-                  {!isLoading && <span>Login</span>}
+                  {!isLoading && <span>{t('login.login')}</span>}
                 </Button>
               </div>
             )}
@@ -330,7 +359,7 @@ const Login: React.FC<LoginProps> = React.memo(
                 fullWidth
                 className="h-[51px] rounded-full text-sm"
               >
-                Switch account
+                {t('login.switch_account')}
               </Button>
               <div className="grid grid-cols-2 gap-2">
                 <Button
@@ -339,7 +368,7 @@ const Login: React.FC<LoginProps> = React.memo(
                   size="custom"
                   className="h-[51px] rounded-full text-sm"
                 >
-                  Create new account
+                  {t('login.create_account')}
                 </Button>
                 <Button
                   onClick={() => setShowAccountImport(true)}
@@ -347,7 +376,7 @@ const Login: React.FC<LoginProps> = React.memo(
                   size="custom"
                   className="h-[51px] rounded-full text-sm"
                 >
-                  Import with Mnemonic
+                  {t('login.import_mnemonic')}
                 </Button>
               </div>
             </div>

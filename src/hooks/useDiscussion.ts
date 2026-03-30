@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useMemo } from 'react';
 import { Contact, SessionStatus } from '@massalabs/gossip-sdk';
 import type { Discussion } from '@massalabs/gossip-sdk';
 import { useDiscussionStore } from '../stores/discussionStore';
@@ -9,56 +9,46 @@ interface UseDiscussionProps {
 }
 
 export const useDiscussion = ({ contact }: UseDiscussionProps) => {
-  const gossip = useGossipSdk();
-  const [discussion, setDiscussion] = useState<Discussion | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const isMountedRef = useRef(true);
+  const sdk = useGossipSdk();
+  const discussions = useDiscussionStore(s => s.discussions);
+  const sessionsStatuses = useDiscussionStore(s => s.sessionsStatuses);
 
-  useEffect(() => {
-    return () => {
-      isMountedRef.current = false;
-    };
-  }, []);
+  const allDiscussions = useMemo<Discussion[]>(() => {
+    if (!contact.userId) return [];
+    return discussions
+      .filter(d => d.contactUserId === contact.userId)
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+  }, [contact.userId, discussions]);
 
-  const getDiscussionsForContact = useDiscussionStore(
-    s => s.getDiscussionsForContact
-  );
+  const discussion = useMemo<Discussion | null>(() => {
+    // Get the most recent discussion (active or pending)
+    return (
+      allDiscussions.find(d => {
+        const status: SessionStatus =
+          sessionsStatuses.get(d.contactUserId) ??
+          sdk.discussions.getStatus(d.contactUserId);
+        return [
+          SessionStatus.Active,
+          SessionStatus.SelfRequested,
+          SessionStatus.PeerRequested,
+        ].includes(status);
+      }) ?? null
+    );
+  }, [allDiscussions, sessionsStatuses, sdk.discussions]);
 
-  const loadDiscussion = useCallback(async () => {
-    if (!contact.userId || !isMountedRef.current) return;
-
-    try {
-      setIsLoading(true);
-      const discussions = getDiscussionsForContact(contact.userId);
-
-      // Get the most recent discussion (active or pending)
-      const latestDiscussion = discussions
-        .filter(d =>
-          [
-            SessionStatus.Active,
-            SessionStatus.SelfRequested,
-            SessionStatus.PeerRequested,
-          ].includes(gossip.discussions.getStatus(d.contactUserId))
-        )
-        .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
-
-      if (latestDiscussion) {
-        setDiscussion(latestDiscussion);
-      }
-    } catch (error) {
-      console.error('Failed to load discussion:', error);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [contact.userId, getDiscussionsForContact, gossip]);
-
-  useEffect(() => {
-    loadDiscussion();
-  }, [loadDiscussion]);
+  // The most recent discussion for this contact regardless of session status,
+  // used for navigation (e.g. settings) even when the session is not yet active.
+  const anyDiscussionId = allDiscussions[0]?.id ?? null;
+  const anyDiscussionRetentionDuration =
+    allDiscussions[0]?.messageRetentionDuration ?? null;
+  const anyDiscussionRetentionPolicySetAt =
+    allDiscussions[0]?.retentionPolicySetAt ?? null;
 
   return {
     discussion,
-    isLoading,
-    loadDiscussion,
+    anyDiscussionId,
+    anyDiscussionRetentionDuration,
+    anyDiscussionRetentionPolicySetAt,
+    isLoading: false,
   };
 };
