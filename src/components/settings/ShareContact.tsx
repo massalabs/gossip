@@ -7,7 +7,7 @@ import React, {
 } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { UserPublicKeys } from '@massalabs/gossip-sdk';
-import { Check, Edit2, FileText, Link2, Send } from 'react-feather';
+import { Check, Edit2, FileText, Image, Link2, Send } from 'react-feather';
 import toast from 'react-hot-toast';
 import { useTranslation } from 'react-i18next';
 import { useFileShareContact } from '../../hooks/useFileShareContact';
@@ -200,7 +200,7 @@ const ShareContact: React.FC<ShareContactProps> = ({
           </span>
         </Button>
 
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-3 gap-2">
           <Button
             variant="outline"
             size="custom"
@@ -213,6 +213,18 @@ const ShareContact: React.FC<ShareContactProps> = ({
           >
             <Send className="w-4 h-4" />
             <span className="text-sm font-normal">Share</span>
+          </Button>
+
+          <Button
+            variant="outline"
+            size="custom"
+            className="h-11 flex items-center justify-center gap-2 rounded-xl"
+            onClick={handleShareQR}
+            disabled={!qrDataUrl || isSharingQR}
+            loading={isSharingQR}
+          >
+            <Image className="w-4 h-4" />
+            <span className="text-sm font-normal">QR</span>
           </Button>
 
           <Button
