@@ -108,7 +108,11 @@ function App() {
             <PWABadge />
           </div> */}
         </KeyboardAwareWrapper>
-        <Toaster position="top-center" toastOptions={toastOptions} />
+        <Toaster
+          position="top-center"
+          containerStyle={{ top: 'var(--sat, 0px)' }}
+          toastOptions={toastOptions}
+        />
       </ErrorBoundary>
     </BrowserRouter>
   );
