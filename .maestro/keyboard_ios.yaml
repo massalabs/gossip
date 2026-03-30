@@ -34,10 +34,10 @@ appId: net.ben.gossip
 - takeScreenshot: keyboard_ios_03_typed
 
 # Scroll while keyboard open
-- scroll:
+- swipe:
     direction: UP
     duration: 500
-- scroll:
+- swipe:
     direction: DOWN
     duration: 500
 - assertVisible: "Maestro iOS keyboard test"

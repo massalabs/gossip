@@ -20,13 +20,13 @@ appId: net.massa.gossip
 
 # ===== 2. Discussion list — bottom safe area =====
 # Bottom nav should be above the home indicator
-- scroll:
+- swipe:
     direction: DOWN
     duration: 1000
 - takeScreenshot: safe_02_list_bottom
 
 # ===== 3. Open a discussion =====
-- scroll:
+- swipe:
     direction: UP
     duration: 500
 - tapOn:
@@ -37,7 +37,7 @@ appId: net.massa.gossip
 - takeScreenshot: safe_03_discussion_header
 
 # ===== 4. Scroll to bottom — message input =====
-- scroll:
+- swipe:
     direction: DOWN
     duration: 1000
 # Message input should be above home indicator
@@ -63,7 +63,7 @@ appId: net.massa.gossip
 - takeScreenshot: safe_06_settings_top
 
 # ===== 8. Scroll to bottom of settings =====
-- scroll:
+- swipe:
     direction: DOWN
     duration: 1500
 # Bottom content above home indicator

@@ -34,10 +34,10 @@ appId: net.massa.gossip
 - takeScreenshot: keyboard_03_text_typed
 
 # Scroll up while keyboard is open — messages should still be accessible
-- scroll:
+- swipe:
     direction: UP
     duration: 500
-- scroll:
+- swipe:
     direction: DOWN
     duration: 500
 
