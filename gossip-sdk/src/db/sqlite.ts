@@ -14,6 +14,7 @@
 
 import SQLiteESMFactory from 'wa-sqlite/dist/wa-sqlite.mjs';
 import * as SQLite from 'wa-sqlite';
+import { eq } from 'drizzle-orm';
 import { drizzle, type SqliteRemoteDatabase } from 'drizzle-orm/sqlite-proxy';
 import * as schema from './schema/index.js';
 import { runMigrations } from './migrate.js';
@@ -341,6 +342,34 @@ export class DatabaseConnection {
       await this.db.delete(schema.pendingAnnouncements);
       await this.db.delete(schema.activeSeekers);
       await this.db.delete(schema.announcementCursors);
+    });
+  }
+
+  /** Delete only the data belonging to a specific account. */
+  async clearAccountData(userId: string): Promise<void> {
+    await this.withTransaction(async () => {
+      // Tables with ownerUserId
+      await this.db
+        .delete(schema.messages)
+        .where(eq(schema.messages.ownerUserId, userId));
+      await this.db
+        .delete(schema.discussions)
+        .where(eq(schema.discussions.ownerUserId, userId));
+      await this.db
+        .delete(schema.contacts)
+        .where(eq(schema.contacts.ownerUserId, userId));
+      // Profile table keyed by userId
+      await this.db
+        .delete(schema.userProfile)
+        .where(eq(schema.userProfile.userId, userId));
+      // Announcement cursor keyed by userId
+      await this.db
+        .delete(schema.announcementCursors)
+        .where(eq(schema.announcementCursors.userId, userId));
+      // Session-specific tables (no user column — safe to clear for current session)
+      await this.db.delete(schema.pendingEncryptedMessages);
+      await this.db.delete(schema.pendingAnnouncements);
+      await this.db.delete(schema.activeSeekers);
     });
   }
 

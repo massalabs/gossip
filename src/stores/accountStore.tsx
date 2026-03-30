@@ -445,15 +445,28 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       try {
         set({ isLoading: true });
 
+        // Capture userId before closing the session (userId requires open session)
+        let accountUserId: string | undefined;
+        try {
+          accountUserId = getSdk().userId;
+        } catch {
+          // Session may already be closed
+        }
+
         // Cleanup session and in-memory stores
         await cleanupSession();
         useDiscussionStore.getState().cleanup();
         useMessageStore.getState().cleanup();
         useSelfMessageStore.getState().clearMessages();
 
-        // Clear all DB tables (conversations, contacts, profiles, seekers, etc.)
+        // Clear only this account's data (not other accounts)
         try {
-          await getSdk().clearAllTables();
+          if (accountUserId) {
+            await getSdk().clearAccountData(accountUserId);
+          } else {
+            // Fallback: no userId available, clear all tables
+            await getSdk().clearAllTables();
+          }
         } catch {
           // SQLite might not be initialized
         }

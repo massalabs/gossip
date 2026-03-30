@@ -475,6 +475,14 @@ class GossipSdk {
     await this._conn.clearAllTables();
   }
 
+  /** Delete only the data belonging to a specific account. */
+  async clearAccountData(userId: string): Promise<void> {
+    if (!this._conn) {
+      throw new Error('SDK not initialized. Call init() first.');
+    }
+    await this._conn.clearAccountData(userId);
+  }
+
   /** Clear only conversation-related tables (messages, discussions, contacts). */
   async clearConversationTables(): Promise<void> {
     if (!this._conn) {
