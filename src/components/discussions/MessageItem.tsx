@@ -306,20 +306,21 @@ const MessageItem: React.FC<MessageItemProps> = ({
       });
     }
     if (!isDeleted) {
+      const fwd = message.forwardOf?.originalContent;
+      const parts = [fwd, message.content].filter(Boolean);
+      const fullText = parts.join('\n\n') || '';
       items.push({
         label: t('message_item.share'),
         icon: <Share2 className="w-4 h-4" />,
         onClick: () => {
-          shareMessage(message.content).catch(() => {});
+          shareMessage(fullText).catch(() => {});
         },
       });
-    }
-    if (!isDeleted) {
       items.push({
         label: t('message_item.copy'),
         icon: <Copy className="w-4 h-4" />,
         onClick: () => {
-          navigator.clipboard.writeText(message.content).catch(() => {
+          navigator.clipboard.writeText(fullText).catch(() => {
             /* clipboard not available */
           });
         },
