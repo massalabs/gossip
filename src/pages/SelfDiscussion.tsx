@@ -137,6 +137,10 @@ const SelfDiscussion: React.FC = () => {
     contactName: t('selfDiscussion.title'),
     gossip,
     t,
+    onDeleteMessage: async (id: number) => {
+      await deleteMessage(id);
+      return true;
+    },
   });
 
   return (
