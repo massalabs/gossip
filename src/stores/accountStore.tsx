@@ -551,9 +551,6 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           session
         );
 
-        // Skip historical announcements AFTER profile is persisted
-        await getSdk().announcements.skipHistorical();
-
         useAppStore.getState().setIsInitialized(true);
         set({
           userProfile: profile,
