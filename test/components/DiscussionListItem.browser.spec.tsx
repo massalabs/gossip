@@ -1,5 +1,5 @@
 // Runs in BROWSER mode (real Chromium via Playwright)
-// Tests pin icon visibility on DiscussionListItem.
+// Tests pin icon and mute icon visibility on DiscussionListItem.
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import React from 'react';
@@ -201,5 +201,66 @@ describe('DiscussionListItem — pin icon', () => {
     );
 
     await expect.element(page.getByText('5')).toBeInTheDocument();
+  });
+});
+
+describe('DiscussionListItem — mute icon', () => {
+  let onSelect: ReturnType<typeof vi.fn>;
+  let onAccept: ReturnType<typeof vi.fn>;
+  let onRefuse: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    onSelect = vi.fn();
+    onAccept = vi.fn();
+    onRefuse = vi.fn();
+  });
+
+  it('shows mute icon when discussion.mutedNotifications is true', async () => {
+    const discussion = makeDiscussion({ mutedNotifications: true });
+    const contact = makeContact();
+
+    render(
+      <DiscussionListItem
+        discussion={discussion}
+        contact={contact}
+        lastMessage={undefined}
+        onSelect={onSelect}
+        onAccept={onAccept}
+        onRefuse={onRefuse}
+      />
+    );
+
+    const headingLocator = page.getByRole('heading', { name: 'Alice' });
+    await expect.element(headingLocator).toBeInTheDocument();
+
+    const heading = headingLocator.element() as HTMLElement;
+    // BellOff renders as an SVG; when muted there should be 1 svg (mute icon)
+    // When also pinned there would be 2, but here pinned=false so only mute icon
+    const svgs = heading.querySelectorAll('svg');
+    expect(svgs.length).toBe(1);
+  });
+
+  it('does not show mute icon when discussion.mutedNotifications is false', async () => {
+    const discussion = makeDiscussion({ mutedNotifications: false });
+    const contact = makeContact();
+
+    render(
+      <DiscussionListItem
+        discussion={discussion}
+        contact={contact}
+        lastMessage={undefined}
+        onSelect={onSelect}
+        onAccept={onAccept}
+        onRefuse={onRefuse}
+      />
+    );
+
+    const headingLocator = page.getByRole('heading', { name: 'Alice' });
+    await expect.element(headingLocator).toBeInTheDocument();
+
+    const heading = headingLocator.element() as HTMLElement;
+    // No icons should appear when neither pinned nor muted
+    const svgs = heading.querySelectorAll('svg');
+    expect(svgs.length).toBe(0);
   });
 });

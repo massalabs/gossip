@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Contact, SessionStatus, SELF_CONTACT_ID } from '@massalabs/gossip-sdk';
 import type { Discussion } from '@massalabs/gossip-sdk';
-import { Bookmark, Edit2 } from 'react-feather';
+import { BellOff, Bookmark, Edit2 } from 'react-feather';
 import ContactAvatar from '../avatar/ContactAvatar';
 import { BookOpen } from 'react-feather';
 import { formatRelativeTime } from '../../utils/timeUtils';
@@ -171,6 +171,9 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
                   : discussion.customName || contact.name}
                 {discussion.pinned && (
                   <Bookmark className="w-3 h-3 text-muted-foreground flex-shrink-0" />
+                )}
+                {discussion.mutedNotifications && (
+                  <BellOff className="w-3 h-3 text-muted-foreground flex-shrink-0" />
                 )}
               </h3>
               <div className="flex items-center gap-2">
