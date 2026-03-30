@@ -1,0 +1,110 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`i18n translation key completeness > all locales have the same set of namespace files 1`] = `[]`;
+
+exports[`i18n translation key completeness > namespace: auth > "en" has all keys for [auth] 1`] = `[]`;
+
+exports[`i18n translation key completeness > namespace: auth > "fr" has all keys for [auth] 1`] = `[]`;
+
+exports[`i18n translation key completeness > namespace: auth > "ru" has all keys for [auth] 1`] = `[]`;
+
+exports[`i18n translation key completeness > namespace: auth > "zh-CN" has all keys for [auth] 1`] = `[]`;
+
+exports[`i18n translation key completeness > namespace: common > "en" has all keys for [common] 1`] = `[]`;
+
+exports[`i18n translation key completeness > namespace: common > "fr" has all keys for [common] 1`] = `[]`;
+
+exports[`i18n translation key completeness > namespace: common > "ru" has all keys for [common] 1`] = `[]`;
+
+exports[`i18n translation key completeness > namespace: common > "zh-CN" has all keys for [common] 1`] = `[]`;
+
+exports[`i18n translation key completeness > namespace: contacts > "en" has all keys for [contacts] 1`] = `[]`;
+
+exports[`i18n translation key completeness > namespace: contacts > "fr" has all keys for [contacts] 1`] = `[]`;
+
+exports[`i18n translation key completeness > namespace: contacts > "ru" has all keys for [contacts] 1`] = `[]`;
+
+exports[`i18n translation key completeness > namespace: contacts > "zh-CN" has all keys for [contacts] 1`] = `[]`;
+
+exports[`i18n translation key completeness > namespace: discussions > "en" has all keys for [discussions] 1`] = `[]`;
+
+exports[`i18n translation key completeness > namespace: discussions > "fr" has all keys for [discussions] 1`] = `
+[
+  "list_item.pin_discussion",
+  "list_item.unpin_discussion",
+]
+`;
+
+exports[`i18n translation key completeness > namespace: discussions > "ru" has all keys for [discussions] 1`] = `
+[
+  "list_item.pin_discussion",
+  "list_item.unpin_discussion",
+  "selfDiscussion.emptyState",
+  "selfDiscussion.placeholder",
+  "selfDiscussion.title",
+]
+`;
+
+exports[`i18n translation key completeness > namespace: discussions > "zh-CN" has all keys for [discussions] 1`] = `
+[
+  "list_item.pin_discussion",
+  "list_item.unpin_discussion",
+  "selfDiscussion.emptyState",
+  "selfDiscussion.placeholder",
+  "selfDiscussion.title",
+]
+`;
+
+exports[`i18n translation key completeness > namespace: errors > "en" has all keys for [errors] 1`] = `[]`;
+
+exports[`i18n translation key completeness > namespace: errors > "fr" has all keys for [errors] 1`] = `[]`;
+
+exports[`i18n translation key completeness > namespace: errors > "ru" has all keys for [errors] 1`] = `[]`;
+
+exports[`i18n translation key completeness > namespace: errors > "zh-CN" has all keys for [errors] 1`] = `[]`;
+
+exports[`i18n translation key completeness > namespace: onboarding > "en" has all keys for [onboarding] 1`] = `[]`;
+
+exports[`i18n translation key completeness > namespace: onboarding > "fr" has all keys for [onboarding] 1`] = `[]`;
+
+exports[`i18n translation key completeness > namespace: onboarding > "ru" has all keys for [onboarding] 1`] = `[]`;
+
+exports[`i18n translation key completeness > namespace: onboarding > "zh-CN" has all keys for [onboarding] 1`] = `[]`;
+
+exports[`i18n translation key completeness > namespace: settings > "en" has all keys for [settings] 1`] = `[]`;
+
+exports[`i18n translation key completeness > namespace: settings > "fr" has all keys for [settings] 1`] = `[]`;
+
+exports[`i18n translation key completeness > namespace: settings > "ru" has all keys for [settings] 1`] = `
+[
+  "menu.privacy",
+  "privacy.default_retention_description",
+  "privacy.default_retention_title",
+  "privacy.title",
+]
+`;
+
+exports[`i18n translation key completeness > namespace: settings > "zh-CN" has all keys for [settings] 1`] = `
+[
+  "menu.privacy",
+  "privacy.default_retention_description",
+  "privacy.default_retention_title",
+  "privacy.title",
+]
+`;
+
+exports[`i18n translation key completeness > namespace: time > "en" has all keys for [time] 1`] = `[]`;
+
+exports[`i18n translation key completeness > namespace: time > "fr" has all keys for [time] 1`] = `[]`;
+
+exports[`i18n translation key completeness > namespace: time > "ru" has all keys for [time] 1`] = `[]`;
+
+exports[`i18n translation key completeness > namespace: time > "zh-CN" has all keys for [time] 1`] = `[]`;
+
+exports[`i18n translation key completeness > namespace: wallet > "en" has all keys for [wallet] 1`] = `[]`;
+
+exports[`i18n translation key completeness > namespace: wallet > "fr" has all keys for [wallet] 1`] = `[]`;
+
+exports[`i18n translation key completeness > namespace: wallet > "ru" has all keys for [wallet] 1`] = `[]`;
+
+exports[`i18n translation key completeness > namespace: wallet > "zh-CN" has all keys for [wallet] 1`] = `[]`;
