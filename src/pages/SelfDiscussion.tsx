@@ -10,6 +10,9 @@ import { useSelfMessageStore } from '../stores/selfMessageStore';
 import { getSdk } from '../stores/sdkStore';
 import { ROUTES } from '../constants/routes';
 import { useSwipeBack } from '../hooks/useSwipeBack';
+import { useDiscussionMessageSelection } from '../hooks/useDiscussionMessageSelection';
+import { useGossipSdk } from '../hooks/useGossipSdk';
+import SelectionHeader from '../components/discussions/SelectionHeader';
 
 const RETENTION_OPTIONS: {
   labelKey: string;
@@ -48,6 +51,7 @@ const SelfDiscussion: React.FC = () => {
   const reactions = useSelfMessageStore.use.reactions();
   const loadReactions = useSelfMessageStore.use.loadReactions();
 
+  const gossip = useGossipSdk();
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
   const swipeBack = useSwipeBack();
   const [editingMessage, setEditingMessage] = useState<Message | null>(null);
@@ -120,6 +124,21 @@ const SelfDiscussion: React.FC = () => {
     [messages]
   );
 
+  const {
+    selectedMessageIds,
+    isSelecting,
+    handleToggleSelect,
+    handleClearSelection,
+    handleCopySelected,
+    handleDeleteSelected,
+    canDeleteSelected,
+  } = useDiscussionMessageSelection({
+    messages: outgoingMessages,
+    contactName: t('selfDiscussion.title'),
+    gossip,
+    t,
+  });
+
   return (
     <div
       className="h-full app-max-w mx-auto bg-discussion-pattern flex flex-col relative overflow-hidden"
@@ -127,29 +146,39 @@ const SelfDiscussion: React.FC = () => {
       onTouchEnd={swipeBack.onTouchEnd}
     >
       {/* Header */}
-      <div className="px-header-padding pt-safe-t h-header-safe flex items-center gap-3 shrink-0 z-10 bg-card">
-        <BackButton />
-        <div className="flex-1 min-w-0">
-          <h1 className="text-xl font-semibold text-foreground">
-            {t('selfDiscussion.title')}
-          </h1>
-          {retentionHeaderLabel && (
-            <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-              <Clock className="w-3 h-3 shrink-0" />
-              {t('header.auto_delete_active', {
-                duration: retentionHeaderLabel,
-              })}
-            </span>
-          )}
+      {isSelecting ? (
+        <SelectionHeader
+          count={selectedMessageIds.size}
+          onClear={handleClearSelection}
+          onCopy={handleCopySelected}
+          onDelete={handleDeleteSelected}
+          canDelete={canDeleteSelected}
+        />
+      ) : (
+        <div className="px-header-padding pt-safe-t h-header-safe flex items-center gap-3 shrink-0 z-10 bg-card">
+          <BackButton />
+          <div className="flex-1 min-w-0">
+            <h1 className="text-xl font-semibold text-foreground">
+              {t('selfDiscussion.title')}
+            </h1>
+            {retentionHeaderLabel && (
+              <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                <Clock className="w-3 h-3 shrink-0" />
+                {t('header.auto_delete_active', {
+                  duration: retentionHeaderLabel,
+                })}
+              </span>
+            )}
+          </div>
+          <button
+            onClick={() => setIsRetentionModalOpen(true)}
+            className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-muted transition-colors shrink-0"
+            aria-label={t('settings.auto_delete')}
+          >
+            <Settings className="w-5 h-5 text-muted-foreground" />
+          </button>
         </div>
-        <button
-          onClick={() => setIsRetentionModalOpen(true)}
-          className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-muted transition-colors shrink-0"
-          aria-label={t('settings.auto_delete')}
-        >
-          <Settings className="w-5 h-5 text-muted-foreground" />
-        </button>
-      </div>
+      )}
 
       {/* Body */}
       <div className="flex-1 min-h-0 flex flex-col">
@@ -164,6 +193,9 @@ const SelfDiscussion: React.FC = () => {
             <MessageList
               messages={outgoingMessages}
               isLoading={isLoading}
+              isSelecting={isSelecting}
+              selectedMessageIds={selectedMessageIds}
+              onToggleSelect={handleToggleSelect}
               retentionInfo={
                 retentionDuration && retentionPolicySetAt
                   ? { setAt: retentionPolicySetAt, duration: retentionDuration }
@@ -198,6 +230,8 @@ const SelfDiscussion: React.FC = () => {
         </div>
 
         <MessageInput
+          disabled={isSelecting}
+          isSelecting={isSelecting}
           initialValue={
             editingMessage?.content ?? forwardedContent ?? undefined
           }
