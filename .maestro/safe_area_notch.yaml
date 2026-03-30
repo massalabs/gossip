@@ -1,0 +1,70 @@
+# Safe area / notch test
+# Verifies: content not hidden by status bar, notch, Dynamic Island, or home indicator.
+# This is primarily a screenshot-based test for visual verification.
+#
+# Run:   maestro test .maestro/safe_area_notch.yaml
+# Best on: iPhone 16 Pro (Dynamic Island) or Android with punch-hole camera
+# Pre-condition: User logged in with at least one discussion.
+
+appId: net.massa.gossip
+---
+
+- launchApp
+- waitForAnimationToEnd
+
+# ===== 1. Discussion list — top safe area =====
+# Header should be fully visible below notch/Dynamic Island
+- tapOn: "Discussions"
+- waitForAnimationToEnd
+- takeScreenshot: safe_01_list_top
+
+# ===== 2. Discussion list — bottom safe area =====
+# Bottom nav should be above the home indicator
+- scroll:
+    direction: DOWN
+    duration: 1000
+- takeScreenshot: safe_02_list_bottom
+
+# ===== 3. Open a discussion =====
+- scroll:
+    direction: UP
+    duration: 500
+- tapOn:
+    index: 0
+- waitForAnimationToEnd
+
+# Discussion header (contact name) should be below notch
+- takeScreenshot: safe_03_discussion_header
+
+# ===== 4. Scroll to bottom — message input =====
+- scroll:
+    direction: DOWN
+    duration: 1000
+# Message input should be above home indicator
+- takeScreenshot: safe_04_discussion_input
+
+# ===== 5. Open keyboard — input stays visible =====
+- tapOn:
+    text: "Type a message"
+- waitForAnimationToEnd
+- takeScreenshot: safe_05_keyboard_open
+
+# ===== 6. Dismiss keyboard =====
+- hideKeyboard
+- waitForAnimationToEnd
+
+# ===== 7. Go back to list, navigate to Settings =====
+- pressKey: back
+- waitForAnimationToEnd
+- tapOn: "Settings"
+- waitForAnimationToEnd
+
+# Settings header should be below notch
+- takeScreenshot: safe_06_settings_top
+
+# ===== 8. Scroll to bottom of settings =====
+- scroll:
+    direction: DOWN
+    duration: 1500
+# Bottom content above home indicator
+- takeScreenshot: safe_07_settings_bottom

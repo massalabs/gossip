@@ -1,0 +1,74 @@
+# QR scanner test
+# Verifies: scanner opens, camera permission handled, scan UI visible, cancel works.
+#
+# Run:   maestro test .maestro/qr_scanner.yaml
+# Device: Any device/emulator
+# Pre-condition: User logged in.
+#
+# Note: Maestro can't inject a QR image into the camera feed.
+# This tests the scanner UI lifecycle (open → cancel → return safely).
+# For actual scanning, place a physical QR code in front of the emulator webcam
+# or use Android emulator's virtual scene.
+
+appId: net.massa.gossip
+---
+
+- launchApp
+- waitForAnimationToEnd
+
+# ===== 1. Navigate to QR scanner =====
+
+# Go to Settings
+- tapOn: "Settings"
+- waitForAnimationToEnd
+- takeScreenshot: qr_01_settings
+
+# Tap Share Contact / QR code option
+- tapOn:
+    text: ".*Share.*Contact.*|.*QR.*"
+- waitForAnimationToEnd
+
+# Screenshot of QR share page (shows user's own QR code)
+- takeScreenshot: qr_02_my_qr_code
+
+# ===== 2. Switch to scan mode =====
+
+# Tap the scan toggle/button
+- tapOn:
+    text: ".*Scan.*"
+- waitForAnimationToEnd
+
+# Accept camera permission if prompted
+- tapOn:
+    text: ".*Allow.*|.*While Using.*"
+    optional: true
+- waitForAnimationToEnd
+
+# Scanner should be active
+- takeScreenshot: qr_03_scanner_active
+
+# ===== 3. Cancel scanner =====
+
+# Press back to cancel/close scanner
+- pressKey: back
+- waitForAnimationToEnd
+
+# Should return to QR share page without crash
+- takeScreenshot: qr_04_after_cancel
+
+# ===== 4. Reopen scanner to verify stability =====
+
+- tapOn:
+    text: ".*Scan.*"
+    optional: true
+- waitForAnimationToEnd
+- tapOn:
+    text: ".*Allow.*|.*While Using.*"
+    optional: true
+- waitForAnimationToEnd
+- takeScreenshot: qr_05_scanner_reopened
+
+# Close again
+- pressKey: back
+- waitForAnimationToEnd
+- takeScreenshot: qr_06_final_state
