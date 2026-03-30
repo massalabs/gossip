@@ -443,7 +443,12 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         set({ isLoading: true });
 
         // Capture userId before closing the session (userId requires open session)
-        const accountUserId = getSdk().userId;
+        let accountUserId: string | undefined;
+        try {
+          accountUserId = getSdk().userId;
+        } catch {
+          // Session may already be closed
+        }
 
         // Cleanup session and in-memory stores
         await cleanupSession();
@@ -453,7 +458,12 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
 
         // Clear only this account's data (not other accounts)
         try {
-          await getSdk().clearAccountData(accountUserId);
+          if (accountUserId) {
+            await getSdk().clearAccountData(accountUserId);
+          } else {
+            // Fallback: no userId available, clear all tables
+            await getSdk().clearAllTables();
+          }
         } catch {
           // SQLite might not be initialized
         }
@@ -550,9 +560,6 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           security,
           session
         );
-
-        // Skip historical announcements AFTER profile is persisted
-        await getSdk().announcements.skipHistorical();
 
         useAppStore.getState().setIsInitialized(true);
         set({
