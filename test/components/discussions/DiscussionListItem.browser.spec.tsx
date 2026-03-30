@@ -10,6 +10,23 @@ import {
   type Discussion,
 } from '@massalabs/gossip-sdk';
 
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({
+    t: (key: string) => {
+      const translations: Record<string, string> = {
+        'list_item.pin_discussion': 'Pin',
+        'list_item.unpin_discussion': 'Unpin',
+        'list_item.edit_name': 'Edit Name',
+        'list_item.edit_name_title': 'Edit discussion name',
+        'common:save': 'Save',
+      };
+      return translations[key] ?? key;
+    },
+    i18n: { language: 'en' },
+  }),
+  initReactI18next: { type: '3rdParty', init: () => {} },
+}));
+
 // Mock the discussion store
 const mockSessionsStatuses = new Map<string, SessionStatus>();
 
