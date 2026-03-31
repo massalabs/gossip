@@ -15,7 +15,7 @@
     "web3": "Web3",
     "about": "À propos",
     "debug": "Débogage",
-    "logout": "Déconnexion",
+    "lock_account": "Verrouiller le compte",
     "privacy": "Confidentialité",
     "security": "Sécurité"
   },

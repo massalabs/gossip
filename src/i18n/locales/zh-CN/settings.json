@@ -15,7 +15,7 @@
     "web3": "Web3",
     "about": "关于",
     "debug": "调试",
-    "logout": "退出登录",
+    "lock_account": "锁定账户",
     "privacy": "隐私",
     "security": "安全"
   },

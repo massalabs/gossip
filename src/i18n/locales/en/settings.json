@@ -15,7 +15,7 @@
     "web3": "Web3",
     "about": "About",
     "debug": "Debug",
-    "logout": "Logout",
+    "lock_account": "Lock account",
     "privacy": "Privacy",
     "security": "Security"
   },
