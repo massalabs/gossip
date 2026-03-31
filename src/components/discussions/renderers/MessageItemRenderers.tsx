@@ -123,7 +123,7 @@ interface MessageRendererProps {
     count: number;
     myReactionId?: number;
   }[];
-  contact?: Pick<Contact, 'name' | 'avatar'>;
+  contact?: Pick<Contact, 'name' | 'avatar' | 'userId'>;
   isHighlighted?: boolean;
   isSelecting?: boolean;
   isSelected?: boolean;

@@ -29,6 +29,7 @@ const ToSAcceptance: React.FC<ToSAcceptanceProps> = ({ onAccept }) => {
       {/* Scrollable ToS content */}
       <div
         ref={scrollRef}
+        data-testid="tos-scroll-container"
         onScroll={handleScroll}
         className="flex-1 overflow-y-auto rounded-xl border border-border bg-muted/30 p-4 text-sm text-muted-foreground whitespace-pre-wrap font-mono leading-relaxed"
       >

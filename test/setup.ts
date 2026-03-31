@@ -7,6 +7,9 @@
  * - Shared setup from setup.shared.ts
  */
 
+// Enable React act() environment for jsdom tests
+(globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
+
 // Import shared setup (service worker mocks, etc.)
 import './setup.shared';
 

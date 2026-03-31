@@ -360,7 +360,7 @@ describe('retentionPolicySetAt is stored when policy changes', () => {
     expect(row?.retentionPolicySetAt).toBeLessThanOrEqual(Date.now());
   });
 
-  it('setRetentionPolicy(null) clears retentionPolicySetAt to null', async () => {
+  it('setRetentionPolicy(null) keeps retentionPolicySetAt as a timestamp', async () => {
     await insertTestContactAndDiscussion(OWNER_USER_ID, CONTACT_USER_ID, 3600);
     const testQueries = getTestQueries();
     // Pre-set retentionPolicySetAt to simulate a previously enabled policy
@@ -391,7 +391,9 @@ describe('retentionPolicySetAt is stored when policy changes', () => {
       OWNER_USER_ID,
       CONTACT_USER_ID
     );
-    expect(row?.retentionPolicySetAt).toBeNull();
+    // retentionPolicySetAt stays as a timestamp so the default-policy
+    // useEffect in Discussion.tsx doesn't re-apply a default.
+    expect(row?.retentionPolicySetAt).toBeGreaterThan(0);
     expect(row?.messageRetentionDuration).toBeNull();
   });
 });

@@ -144,7 +144,7 @@ const DiscussionSettings: React.FC = () => {
       // the discussion header when navigating back.
       patchDiscussion(discussion.id, {
         messageRetentionDuration: value,
-        retentionPolicySetAt: value ? Date.now() : null,
+        retentionPolicySetAt: Date.now(),
       });
       setIsRetentionModalOpen(false);
       await gossip.discussions.setRetentionPolicy(

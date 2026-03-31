@@ -5,7 +5,7 @@ function findScrollContainer(
   containerRef: RefObject<HTMLElement | null>
 ): HTMLElement | null {
   const container = containerRef.current?.querySelector(
-    '[data-virtuoso-scroller]'
+    '.scroll-container'
   ) as HTMLElement;
 
   if (container) return container;

@@ -20,6 +20,7 @@ import { useKeyboardStore } from '../stores/keyboardStore';
 import DiscussionTopSection from '../components/discussions/DiscussionTopSection';
 import DiscussionDebugButton from '../components/discussions/DiscussionDebugButton';
 import MessageInput from '../components/discussions/MessageInput';
+import { useSwipeBack } from '../hooks/useSwipeBack';
 
 const TEST_MESSAGE_COUNT = 50;
 const TEST_MESSAGE_BATCH_DELAY_MS = 100;
@@ -57,6 +58,7 @@ const Discussion: React.FC = () => {
 
   const contact = userId ? contacts.find(c => c.userId === userId) : undefined;
   const onBack = () => navigate(-1);
+  const swipeBack = useSwipeBack();
 
   const safeContact = contact || {
     userId: '',
@@ -152,9 +154,18 @@ const Discussion: React.FC = () => {
   );
 
   const handleToggleSearch = useCallback(() => {
-    setIsSearchOpen(prev => !prev);
+    setIsSearchOpen(prev => {
+      if (prev) {
+        // Closing search — transfer focus to textarea so keyboard stays
+        const textarea = inputAreaRef.current?.querySelector('textarea');
+        textarea?.focus({ preventScroll: true });
+      }
+      return !prev;
+    });
   }, []);
   const handleCloseSearch = useCallback(() => {
+    const textarea = inputAreaRef.current?.querySelector('textarea');
+    textarea?.focus({ preventScroll: true });
     setIsSearchOpen(false);
     setSearchHighlightId(null);
   }, []);
@@ -298,9 +309,11 @@ const Discussion: React.FC = () => {
 
   return (
     <div
-      className="h-full app-max-w mx-auto bg-discussion-pattern flex flex-col relative select-none overflow-hidden"
+      className="h-full app-max-w mx-auto bg-card flex flex-col relative select-none overflow-hidden"
       style={{ WebkitTouchCallout: 'none' }}
-      onMouseDown={e => {
+      onTouchStart={swipeBack.onTouchStart}
+      onTouchEnd={swipeBack.onTouchEnd}
+      onPointerDown={e => {
         const tag = (e.target as HTMLElement).tagName;
         if (tag !== 'INPUT' && tag !== 'TEXTAREA') {
           e.preventDefault();
@@ -335,7 +348,7 @@ const Discussion: React.FC = () => {
       <div className="flex-1 min-h-0 flex flex-col">
         <div
           ref={messageListContainerRef}
-          className="flex-1 min-h-0 overflow-hidden pt-header-safe"
+          className="flex-1 min-h-0 overflow-hidden relative"
         >
           <MessageList
             ref={messageListRef}

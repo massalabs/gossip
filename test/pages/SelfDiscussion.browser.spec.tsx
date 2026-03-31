@@ -18,6 +18,16 @@ const mockGetSelfRetentionInfo = vi
   .fn()
   .mockResolvedValue({ duration: null, setAt: null });
 const mockSetSelfRetentionPolicy = vi.fn().mockResolvedValue(undefined);
+const mockSdk = {
+  isSessionOpen: true,
+  messages: {
+    get: mockGetMessage,
+  },
+  selfMessages: {
+    getRetentionInfo: mockGetSelfRetentionInfo,
+    setRetentionPolicy: mockSetSelfRetentionPolicy,
+  },
+};
 
 vi.mock('react-router-dom', () => ({
   useLocation: () => ({ state: mockLocationState }),
@@ -25,16 +35,12 @@ vi.mock('react-router-dom', () => ({
 }));
 
 vi.mock('../../src/stores/sdkStore', () => ({
-  getSdk: () => ({
-    isSessionOpen: true,
-    messages: {
-      get: mockGetMessage,
+  getSdk: () => mockSdk,
+  useSdkStore: {
+    use: {
+      sdk: () => mockSdk,
     },
-    selfMessages: {
-      getRetentionInfo: mockGetSelfRetentionInfo,
-      setRetentionPolicy: mockSetSelfRetentionPolicy,
-    },
-  }),
+  },
 }));
 
 vi.mock('../../src/stores/selfMessageStore', () => ({
@@ -68,6 +74,7 @@ vi.mock('react-i18next', () => ({
       options?.duration ? `${key}:${options.duration}` : key,
     i18n: { language: 'en' },
   }),
+  initReactI18next: { type: '3rdParty', init: () => {} },
 }));
 
 vi.mock('../../src/components/discussions/MessageInput', () => ({

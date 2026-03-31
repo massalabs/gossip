@@ -471,7 +471,7 @@ export class DiscussionService {
       contactUserId,
       {
         messageRetentionDuration: durationSeconds,
-        retentionPolicySetAt: durationSeconds ? Date.now() : null,
+        retentionPolicySetAt: Date.now(),
       }
     );
 

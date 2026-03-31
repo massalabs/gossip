@@ -5,6 +5,9 @@ import { Check, Copy } from 'react-feather';
 import { PrivacyGraphic } from '../graphics';
 import { formatUserId } from '@massalabs/gossip-sdk';
 
+/** Module-level cache so QR survives unmount/remount (slide transitions). */
+const qrCache = new Map<string, string>();
+
 interface ShareContactQRProps {
   deepLinkUrl: string;
   userId: string;
@@ -119,19 +122,25 @@ const ShareContactQR: React.FC<ShareContactQRProps> = ({
   }, []);
 
   useEffect(() => {
+    // Check cache first — avoids regeneration on slide back/forward
+    const cached = qrCache.get(deepLinkUrl);
+    if (cached) {
+      setQrDataUrl(cached);
+      onQRCodeGenerated?.(cached);
+      return;
+    }
+
     let isMounted = true;
 
     const generateQR = async () => {
-      // Always use a dark QR code on a light background (ignore theme)
-      const foregroundColor = '#1a1a1d'; // dark
-      const backgroundColor = '#ffffff'; // light
+      const foregroundColor = '#1a1a1d';
+      const backgroundColor = '#ffffff';
 
       const qrCodeStyling = new QRCodeStyling({
         width: 280,
         height: 280,
         data: deepLinkUrl,
         image: '/favicon/favicon.svg',
-
         dotsOptions: { type: 'extra-rounded', color: foregroundColor },
         cornersSquareOptions: {
           type: 'extra-rounded',
@@ -146,13 +155,13 @@ const ShareContactQR: React.FC<ShareContactQRProps> = ({
         },
       });
 
-      // Generate the SVG directly as a data URL for better quality
       const svg = await qrCodeStyling.getRawData('svg');
       if (svg && isMounted) {
         const reader = new FileReader();
         reader.onload = () => {
           if (isMounted) {
             const dataUrl = reader.result as string;
+            qrCache.set(deepLinkUrl, dataUrl);
             setQrDataUrl(dataUrl);
             onQRCodeGenerated?.(dataUrl);
           }

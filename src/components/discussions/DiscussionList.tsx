@@ -1,7 +1,7 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Virtuoso } from 'react-virtuoso';
+import { Virtualizer } from 'virtua';
 import toast from 'react-hot-toast';
 
 import { useDiscussionList } from '../../hooks/useDiscussionList';
@@ -97,6 +97,8 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
   const { t } = useTranslation('discussions');
   const navigate = useNavigate();
   const gossip = useGossipSdk();
+  const scrollRef = useRef<HTMLElement | null>(null);
+  scrollRef.current = scrollParent;
 
   // Store selectors
   const discussions = useDiscussionStore(s => s.discussions);
@@ -177,31 +179,19 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
     [gossip]
   );
 
-  // Virtuoso item renderer
+  // Item renderer
   const renderItem = useCallback(
-    (index: number) => {
-      const item = virtualItems[index];
-      if (!item) return null;
-
+    (item: (typeof virtualItems)[number]) => {
       switch (item.type) {
         case 'header':
-          return <HeaderItemRenderer key={item.key} item={item} />;
+          return <HeaderItemRenderer item={item} />;
 
         case 'contact':
-          return (
-            <ContactItemRenderer
-              key={item.contact.userId}
-              item={item}
-              onSelect={onSelect}
-            />
-          );
+          return <ContactItemRenderer item={item} onSelect={onSelect} />;
 
         case 'discussion':
           return (
-            <div
-              key={item.discussion.id}
-              className={item.isSelected ? 'bg-accent/10' : ''}
-            >
+            <div className={item.isSelected ? 'bg-accent/10' : ''}>
               <DiscussionListItem
                 discussion={item.discussion}
                 contact={item.contact}
@@ -219,14 +209,7 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
           return null;
       }
     },
-    [
-      virtualItems,
-      onSelect,
-      handleAccept,
-      handleRefuse,
-      handleEditName,
-      handleTogglePin,
-    ]
+    [onSelect, handleAccept, handleRefuse, handleEditName, handleTogglePin]
   );
 
   // Empty states
@@ -245,15 +228,18 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
 
   // Main render
   return (
-    <Virtuoso
-      customScrollParent={scrollParent}
-      totalCount={virtualItems.length}
-      itemContent={renderItem}
-      increaseViewportBy={{ top: 200, bottom: 200 }}
-      components={{
-        Footer: () => <div className="h-20" />, // Add padding at bottom
-      }}
-    />
+    <Virtualizer scrollRef={scrollRef} bufferSize={200}>
+      {virtualItems.map(item => {
+        const key =
+          item.type === 'header'
+            ? item.key
+            : item.type === 'contact'
+              ? item.contact.userId
+              : item.discussion.id;
+        return <div key={key}>{renderItem(item)}</div>;
+      })}
+      <div className="h-20" aria-hidden="true" />
+    </Virtualizer>
   );
 };
 

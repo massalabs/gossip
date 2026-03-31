@@ -15,6 +15,7 @@ import {
   Check as CheckIcon,
   AlertTriangle,
   Trash2,
+  Clock,
 } from 'react-feather';
 import { shareMessage } from '../../services/shareService';
 import { useLongPress } from '../../hooks/useLongPress';
@@ -34,22 +35,21 @@ import {
 import { useGossipSdk } from '../../hooks/useGossipSdk';
 import { parseLinks, openUrl } from '../../utils/linkUtils';
 import { useMarkMessageAsRead } from '../../hooks/useMarkMessageAsRead';
-import { useKeyboardStore } from '../../stores/keyboardStore';
 import { Capacitor } from '@capacitor/core';
 import ContactAvatar from '../avatar/ContactAvatar';
 import type { Contact } from '@massalabs/gossip-sdk';
 
 // Swipe gesture constants - base values for incoming messages
 const SWIPE_MAX_DISTANCE = 80;
-const SWIPE_RESISTANCE = 0.5;
-const SWIPE_THRESHOLD = 40;
+export const SWIPE_RESISTANCE = 0.5;
+export const SWIPE_THRESHOLD = 40;
 const SWIPE_INDICATOR_THRESHOLD = 8;
 const SWIPE_INDICATOR_MAX_WIDTH = 60;
 
 // Swipe gesture constants - more sensitive for outgoing (right-aligned) messages
 const SWIPE_MAX_DISTANCE_OUTGOING = 90;
-const SWIPE_RESISTANCE_OUTGOING = 0.65;
-const SWIPE_THRESHOLD_OUTGOING = 30;
+export const SWIPE_RESISTANCE_OUTGOING = 0.65;
+export const SWIPE_THRESHOLD_OUTGOING = 30;
 const SWIPE_INDICATOR_THRESHOLD_OUTGOING = 6;
 
 // Touch slop - prevents unintentional triggers when scrolling
@@ -76,7 +76,7 @@ interface MessageItemProps {
   isFirstInGroup?: boolean;
   isLastInGroup?: boolean;
   showAvatar?: boolean;
-  contact?: Pick<Contact, 'name' | 'avatar'>;
+  contact?: Pick<Contact, 'name' | 'avatar' | 'userId'>;
   isHighlighted?: boolean;
   isSelecting?: boolean;
   isSelected?: boolean;
@@ -110,6 +110,10 @@ const MessageItem: React.FC<MessageItemProps> = ({
   const isDeleted = message.type === MessageType.DELETED;
   const canReply = !!onReplyTo && !isDeleted;
   const canForward = !!onForward && !isDeleted;
+  const isSending =
+    isOutgoing &&
+    (message.status === MessageStatus.WAITING_SESSION ||
+      message.status === MessageStatus.READY);
   const isEdited =
     !!message.metadata &&
     (message.metadata as { edited?: boolean }).edited === true;
@@ -141,137 +145,24 @@ const MessageItem: React.FC<MessageItemProps> = ({
 
   // Context menu state
   const [isContextMenuOpen, setIsContextMenuOpen] = useState(false);
-  const [contextMenuTranslateX, setContextMenuTranslateX] = useState(0);
-  const [contextMenuTranslateY, setContextMenuTranslateY] = useState(0);
-  const [menuPosition, setMenuPosition] = useState<{
-    top: number;
-    left?: number;
-    right?: number;
-  } | null>(null);
-  const [bubbleRect, setBubbleRect] = useState<{
-    top: number;
-    left: number;
-    width: number;
-    height: number;
-    borderRadius?: string;
-  } | null>(null);
-  const [contextMenuPlacement, setContextMenuPlacement] = useState<
-    'above' | 'below'
-  >('below');
   const [isEmojiPickerOpen, setIsEmojiPickerOpen] = useState(false);
   const contextMenuOpenRef = useRef(false);
-  // Snapshot the keyboard height at touchstart — on iOS the keyboard may start
-  // dismissing during the 500ms long-press delay, zeroing the live value before
-  // openContextMenu fires.
-  const kbHeightSnapshotRef = useRef(0);
 
   const openContextMenu = useCallback(() => {
     if (!bubbleRef.current || contextMenuOpenRef.current || isDeleted) return;
-    const rect = bubbleRef.current.getBoundingClientRect();
-    const itemCount =
-      (canReply && !isDeleted ? 1 : 0) +
-        (canForward && !isDeleted ? 1 : 0) +
-        (!isDeleted ? 1 : 0) +
-        (!isDeleted ? 1 : 0) +
-        (onEdit && isOutgoing && !isDeleted && message.id != null ? 1 : 0) +
-        (onDelete && isOutgoing && !isDeleted && message.id != null ? 1 : 0) ||
-      1;
-    const rowH = 48;
-    const menuHeight = Math.max(itemCount * rowH, rowH);
-    const gap = 8;
-    const sab =
-      parseFloat(
-        getComputedStyle(document.documentElement).getPropertyValue('--sab')
-      ) || 0;
-    const pad = 16 + sab;
-    const kbAdjust =
-      Capacitor.getPlatform() === 'ios' ? kbHeightSnapshotRef.current : 0;
-    const vh = Math.min(
-      document.documentElement.clientHeight,
-      window.visualViewport?.height ?? Infinity,
-      window.innerHeight - kbAdjust
-    );
-    const viewportBottom = vh - pad;
-    const tall = rect.height > vh * 0.5;
-
-    const tx = isOutgoing ? -6 : 6;
-    let ty = -6;
-    let menuY: number;
-    let placement: 'above' | 'below' = 'below';
-
-    const placeBelow = rect.bottom + gap;
-    const placeAbove = rect.top - gap - menuHeight;
-    const fitsBelow = placeBelow + menuHeight <= viewportBottom;
-    const fitsAbove = placeAbove >= pad;
-
-    if (tall) {
-      menuY = placeBelow;
-      if (!fitsBelow) {
-        if (fitsAbove) {
-          menuY = placeAbove;
-          placement = 'above';
-        } else {
-          menuY = Math.max(pad, viewportBottom - menuHeight);
-        }
-      }
-    } else {
-      if (fitsBelow) {
-        menuY = placeBelow;
-      } else if (fitsAbove) {
-        menuY = placeAbove;
-        placement = 'above';
-      } else {
-        menuY = Math.max(pad, viewportBottom - menuHeight);
-        const overflow = placeBelow + menuHeight - viewportBottom;
-        ty -= Math.min(overflow, Math.max(0, rect.bottom - pad - 80));
-      }
-      if (rect.top + ty < pad) ty = pad - rect.top;
-    }
-
-    setContextMenuPlacement(placement);
-    setContextMenuTranslateX(tx);
-    setContextMenuTranslateY(ty);
-    setMenuPosition({
-      top: menuY,
-      ...(isOutgoing
-        ? { right: window.innerWidth - rect.right }
-        : { left: rect.left }),
-    });
-    // Read the actual computed border-radius so the spotlight hole matches exactly
-    const computed = getComputedStyle(bubbleRef.current);
-    setBubbleRect({
-      top: rect.top + ty,
-      left: rect.left + tx,
-      width: rect.width,
-      height: rect.height,
-      borderRadius: `${computed.borderTopLeftRadius} ${computed.borderTopRightRadius} ${computed.borderBottomRightRadius} ${computed.borderBottomLeftRadius}`,
-    });
     contextMenuOpenRef.current = true;
     setIsContextMenuOpen(true);
-  }, [
-    canReply,
-    canForward,
-    isOutgoing,
-    isDeleted,
-    onEdit,
-    onDelete,
-    message.id,
-  ]);
+  }, [isDeleted]);
 
   const closeContextMenu = useCallback(() => {
     contextMenuOpenRef.current = false;
     setIsContextMenuOpen(false);
-    setContextMenuTranslateX(0);
-    setContextMenuTranslateY(0);
-    setMenuPosition(null);
-    setBubbleRect(null);
-    setContextMenuPlacement('below');
   }, []);
 
   // Close context menu if the list scrolls (e.g. desktop mouse wheel)
   useEffect(() => {
     if (!isContextMenuOpen) return;
-    const scroller = bubbleRef.current?.closest('[data-virtuoso-scroller]');
+    const scroller = bubbleRef.current?.closest('.scroll-container');
     if (!scroller) return;
     const onScroll = () => closeContextMenu();
     scroller.addEventListener('scroll', onScroll, { passive: true });
@@ -415,20 +306,21 @@ const MessageItem: React.FC<MessageItemProps> = ({
       });
     }
     if (!isDeleted) {
+      const fwd = message.forwardOf?.originalContent;
+      const parts = [fwd, message.content].filter(Boolean);
+      const fullText = parts.join('\n\n') || '';
       items.push({
         label: t('message_item.share'),
         icon: <Share2 className="w-4 h-4" />,
         onClick: () => {
-          shareMessage(message.content).catch(() => {});
+          shareMessage(fullText).catch(() => {});
         },
       });
-    }
-    if (!isDeleted) {
       items.push({
         label: t('message_item.copy'),
         icon: <Copy className="w-4 h-4" />,
         onClick: () => {
-          navigator.clipboard.writeText(message.content).catch(() => {
+          navigator.clipboard.writeText(fullText).catch(() => {
             /* clipboard not available */
           });
         },
@@ -572,8 +464,6 @@ const MessageItem: React.FC<MessageItemProps> = ({
   const handleTouchStart = useCallback(
     (e: React.TouchEvent) => {
       if (isDeleted) return;
-      // Snapshot keyboard height before it can dismiss during long-press delay
-      kbHeightSnapshotRef.current = useKeyboardStore.getState().height;
       const touch = e.touches[0];
       longPressPosRef.current = { x: touch.clientX, y: touch.clientY };
       longPress.onTouchStart(e);
@@ -627,8 +517,8 @@ const MessageItem: React.FC<MessageItemProps> = ({
           ? SWIPE_MAX_DISTANCE_OUTGOING
           : SWIPE_MAX_DISTANCE;
         const rawSwipe = deltaX * resistance;
-        // Clamp to >= 0 (right-swipe only, no left-swipe)
-        const clampedSwipe = Math.max(0, Math.min(rawSwipe, maxDistance));
+        // Clamp to <= 0 (left-swipe only, no right-swipe)
+        const clampedSwipe = Math.min(0, Math.max(rawSwipe, -maxDistance));
         swipeOffsetRef.current = clampedSwipe;
         setSwipeOffset(clampedSwipe);
 
@@ -636,7 +526,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
         const threshold = isOutgoing
           ? SWIPE_THRESHOLD_OUTGOING
           : SWIPE_THRESHOLD;
-        if (clampedSwipe >= threshold && !hasTriggeredHaptic.current) {
+        if (-clampedSwipe >= threshold && !hasTriggeredHaptic.current) {
           hasTriggeredHaptic.current = true;
         }
       } else if (Math.abs(deltaX) > 5 || Math.abs(deltaY) > 5) {
@@ -678,9 +568,9 @@ const MessageItem: React.FC<MessageItemProps> = ({
       }
 
       const threshold = isOutgoing ? SWIPE_THRESHOLD_OUTGOING : SWIPE_THRESHOLD;
-      const isRightSwipeCompleted = swipeOffsetRef.current >= threshold;
+      const isLeftSwipeCompleted = -swipeOffsetRef.current >= threshold;
 
-      if (isRightSwipeCompleted && onReplyTo) {
+      if (isLeftSwipeCompleted && onReplyTo) {
         onReplyTo(message);
         swipeCompleted.current = true;
       }
@@ -897,50 +787,45 @@ const MessageItem: React.FC<MessageItemProps> = ({
       )}
       <div
         ref={combinedBubbleRef}
-        className={`relative max-w-[80%] sm:max-w-[70%] md:max-w-[65%] lg:max-w-[60%] px-3.5 py-3 font-normal text-[15px] leading-tight animate-bubble-in ${isTextSelectable ? 'select-text' : 'select-none'} ${borderRadiusClass} ${
+        className={`relative max-w-[80%] sm:max-w-[70%] md:max-w-[65%] lg:max-w-[60%] px-3.5 py-3 font-normal text-[15px] leading-tight ${isTextSelectable ? 'select-text' : 'select-none'} ${borderRadiusClass} ${
           isOutgoing
             ? 'ml-auto mr-3 bg-accent text-accent-foreground'
             : `${contact ? '' : 'ml-3'} mr-auto bg-surface-secondary text-card-foreground`
         } ${
           !isDeleted && canReply ? 'cursor-pointer focus:outline-none' : ''
-        } ${isContextMenuOpen ? 'shadow-lg' : ''} ${
+        } ${isContextMenuOpen ? 'ring-2 ring-accent shadow-lg brightness-105' : ''} ${
           isDeleted ? 'opacity-80' : ''
         }`}
         onClick={handleBubbleClick}
         onKeyDown={handleKeyDown}
-        tabIndex={isDeleted ? -1 : 0}
         role={isDeleted ? undefined : 'button'}
         aria-label={isDeleted ? undefined : t('message_item.double_tap_reply')}
         style={{
-          transform: isContextMenuOpen
-            ? `translate(${contextMenuTranslateX}px, ${contextMenuTranslateY}px)`
-            : swipeOffset !== 0
+          transform:
+            swipeOffset !== 0
               ? `translateX(${swipeOffset}px)`
               : 'translateX(0)',
-          filter: isContextMenuOpen ? 'brightness(0.95)' : undefined,
-          transition: isContextMenuOpen
-            ? 'transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s ease-out, border-radius 0.3s ease-out, filter 0.2s ease-out'
-            : isAnimatingBack
-              ? 'transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)'
-              : 'none',
+          transition: isAnimatingBack
+            ? 'transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), border-radius 0.3s ease-out'
+            : 'border-radius 0.3s ease-out',
         }}
       >
-        {/* Reply indicator (right swipe) */}
-        {swipeOffset > indicatorThreshold && canReply && (
+        {/* Reply indicator (left swipe) */}
+        {-swipeOffset > indicatorThreshold && canReply && (
           <div
-            className={`absolute left-0 top-0 bottom-0 flex items-center justify-center ${
+            className={`absolute right-0 top-0 bottom-0 flex items-center justify-center ${
               isOutgoing ? 'bg-accent/20' : 'bg-card/20'
-            } rounded-l-2xl`}
+            } rounded-r-2xl`}
             style={{
-              width: `${Math.min(swipeOffset, SWIPE_INDICATOR_MAX_WIDTH)}px`,
-              opacity: Math.min(swipeOffset / SWIPE_INDICATOR_MAX_WIDTH, 1),
+              width: `${Math.min(-swipeOffset, SWIPE_INDICATOR_MAX_WIDTH)}px`,
+              opacity: Math.min(-swipeOffset / SWIPE_INDICATOR_MAX_WIDTH, 1),
               transition: isAnimatingBack ? 'all 0.3s ease-out' : 'none',
             }}
             aria-hidden="true"
           >
             <CornerUpLeft
               className={`w-5 h-5 text-muted-foreground transition-transform ${
-                swipeOffset >=
+                -swipeOffset >=
                 (isOutgoing ? SWIPE_THRESHOLD_OUTGOING : SWIPE_THRESHOLD)
                   ? 'scale-110'
                   : 'scale-100'
@@ -1122,13 +1007,16 @@ const MessageItem: React.FC<MessageItemProps> = ({
           </div>
         )}
 
-        {/* Message Content */}
+        {/* Message Content + inline timestamp (WhatsApp style) */}
         {isDeleted ? (
-          <p className="whitespace-pre-wrap wrap-break-word pr-6 italic text-muted-foreground text-[13px]">
+          <p className="whitespace-pre-wrap wrap-break-word italic text-muted-foreground text-[13px]">
             {t('message_item.deleted')}
+            {showTimestamp && (
+              <span className="inline-block w-10" aria-hidden="true" />
+            )}
           </p>
         ) : (
-          <p className="whitespace-pre-wrap wrap-break-word pr-6">
+          <p className="whitespace-pre-wrap wrap-break-word">
             {parsedLinks.map((segment, index) => {
               if (segment.type === 'link') {
                 return (
@@ -1153,44 +1041,44 @@ const MessageItem: React.FC<MessageItemProps> = ({
               }
               return <span key={index}>{segment.content}</span>;
             })}
+            {/* Invisible spacer — reserves space for the absolute-positioned timestamp */}
+            {(showTimestamp || (!isDeleted && (isOutgoing || isEdited))) && (
+              <span
+                className={`inline-block ${isDeleted ? 'w-10' : isSending ? 'w-6' : isOutgoing ? 'w-16' : 'w-10'}`}
+                aria-hidden="true"
+              />
+            )}
           </p>
         )}
-        {/* Timestamp, Edited Label and Status — incoming "edited" must show even when
-            showTimestamp is false (grouped bubble); otherwise receivers never see it. */}
-        {(showTimestamp || isOutgoing || isEdited) && (
-          <div
-            className={`flex items-center justify-end gap-1.5 mt-1.5 pr-10 ${
+        {/* Timestamp + Status — absolute bottom-right of bubble */}
+        {(showTimestamp || (!isDeleted && (isOutgoing || isEdited))) && (
+          <span
+            className={`absolute bottom-[13px] right-2.5 flex items-center gap-1 ${
               isOutgoing ? 'text-accent-foreground/80' : 'text-muted-foreground'
             }`}
           >
-            {showTimestamp && (
+            {isEdited && !isSending && (
+              <span className="text-[10px] italic opacity-75">
+                {t('message_item.edited')}
+              </span>
+            )}
+            {showTimestamp && !isSending && (
               <span className="text-[11px] font-medium">
                 {formatTime(message.timestamp)}
               </span>
             )}
-            {isEdited && (
-              <span className="text-[10px] italic opacity-75 ml-1">
-                {t('message_item.edited')}
-              </span>
-            )}
-            {isOutgoing && (
-              <div
-                className="flex items-center gap-1"
+            {isOutgoing && !isDeleted && (
+              <span
+                className="inline-flex items-center"
                 aria-label={t('message_item.status', {
                   status: message.status,
                 })}
               >
-                {(message.status === MessageStatus.WAITING_SESSION ||
-                  message.status === MessageStatus.READY) && (
-                  <div className="flex items-center gap-1">
-                    <div
-                      className="w-2.5 h-2.5 border border-current border-t-transparent rounded-full animate-spin"
-                      aria-hidden="true"
-                    />
-                    <span className="text-[10px] font-medium">
-                      {t('message_item.sending')}
-                    </span>
-                  </div>
+                {isSending && (
+                  <Clock
+                    className="w-3 h-3"
+                    aria-label={t('message_item.sending')}
+                  />
                 )}
                 {message.status === MessageStatus.SENT && (
                   <CheckIcon
@@ -1200,21 +1088,22 @@ const MessageItem: React.FC<MessageItemProps> = ({
                 )}
                 {(message.status === MessageStatus.DELIVERED ||
                   message.status === MessageStatus.READ) && (
-                  <div
+                  <span
                     className="relative inline-flex items-center w-4 h-3.5"
                     aria-label={t('message_item.delivered')}
                   >
                     <CheckIcon className="w-3.5 h-3.5 absolute left-0" />
                     <CheckIcon className="w-3.5 h-3.5 absolute left-[5px] top-[1.5px]" />
-                  </div>
+                  </span>
                 )}
-              </div>
+              </span>
             )}
-          </div>
+          </span>
         )}
         {/* Reactions chips overlaid at the bottom of the bubble, like WhatsApp/Telegram */}
         {reactions.length > 0 && (
           <div
+            data-testid="reactions-bar"
             className={`absolute -bottom-2 ${
               isOutgoing ? 'right-3' : 'right-3'
             } flex flex-wrap gap-1`}
@@ -1264,10 +1153,6 @@ const MessageItem: React.FC<MessageItemProps> = ({
         isOpen={isContextMenuOpen}
         onClose={closeContextMenu}
         isOutgoing={isOutgoing}
-        position={menuPosition}
-        placement={contextMenuPlacement}
-        translateY={contextMenuTranslateY}
-        bubbleRect={bubbleRect}
         reactions={reactions}
         onSelectEmoji={emoji => {
           onReact?.(message, emoji);

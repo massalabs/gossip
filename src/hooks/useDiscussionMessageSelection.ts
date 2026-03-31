@@ -14,6 +14,8 @@ interface UseDiscussionMessageSelectionParams {
   contactName?: string;
   gossip: GossipSdk;
   t: TFunction;
+  /** Override the default delete function (e.g. for self messages) */
+  onDeleteMessage?: (messageId: number) => Promise<boolean>;
 }
 
 interface UseDiscussionMessageSelectionResult {
@@ -34,6 +36,7 @@ export const useDiscussionMessageSelection = ({
   contactName,
   gossip,
   t,
+  onDeleteMessage,
 }: UseDiscussionMessageSelectionParams): UseDiscussionMessageSelectionResult => {
   const [selectedMessageIds, setSelectedMessageIds] = useState<Set<number>>(
     new Set()
@@ -126,7 +129,9 @@ export const useDiscussionMessageSelection = ({
     for (const message of selectedMessages) {
       if (message.id == null) continue;
       try {
-        const deleted = await gossip.messages.deleteMessage(message.id);
+        const deleted = onDeleteMessage
+          ? await onDeleteMessage(message.id)
+          : await gossip.messages.deleteMessage(message.id);
         if (!deleted) {
           failedMessageIds.push(message.id);
           console.error('[multi-delete] deleteMessage returned false', {
@@ -157,7 +162,14 @@ export const useDiscussionMessageSelection = ({
     if (failedMessageIds.length > 0) {
       toast.error(t('failed_to_delete_selected'));
     }
-  }, [canDeleteSelected, selectedMessages, gossip, handleClearSelection, t]);
+  }, [
+    canDeleteSelected,
+    selectedMessages,
+    gossip,
+    onDeleteMessage,
+    handleClearSelection,
+    t,
+  ]);
 
   return {
     selectedMessageIds,

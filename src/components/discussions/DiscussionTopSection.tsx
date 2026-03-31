@@ -45,7 +45,7 @@ const DiscussionTopSection: React.FC<DiscussionTopSectionProps> = ({
   search,
 }) => {
   return (
-    <div className="fixed z-10 top-0 left-0 w-full">
+    <div className="shrink-0 z-10 w-full">
       {selection.isSelecting ? (
         <SelectionHeader
           count={selection.selectedCount}
@@ -69,12 +69,14 @@ const DiscussionTopSection: React.FC<DiscussionTopSectionProps> = ({
         outgoingSentCount={outgoingSentCount}
       />
       {search.isOpen && (
-        <MessageSearch
-          messages={search.messages}
-          onScrollToMessage={search.onScrollToMessage}
-          onHighlightChange={search.onHighlightChange}
-          onClose={search.onCloseSearch}
-        />
+        <div className="animate-slide-down-in overflow-hidden">
+          <MessageSearch
+            messages={search.messages}
+            onScrollToMessage={search.onScrollToMessage}
+            onHighlightChange={search.onHighlightChange}
+            onClose={search.onCloseSearch}
+          />
+        </div>
       )}
     </div>
   );

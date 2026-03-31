@@ -148,9 +148,6 @@ const MessageSearch: React.FC<MessageSearchProps> = ({
       <button
         onPointerDown={e => {
           e.preventDefault();
-          (document.querySelector('textarea') as HTMLElement)?.focus({
-            preventScroll: true,
-          });
           onClose();
         }}
         className="p-1.5 rounded-lg hover:bg-muted transition-colors"

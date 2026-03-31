@@ -1,22 +1,12 @@
-import React, {
-  useState,
-  useCallback,
-  useMemo,
-  useEffect,
-  useRef,
-} from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { UserPublicKeys } from '@massalabs/gossip-sdk';
-import { Check, Edit2, FileText, Link2, Send } from 'react-feather';
-import toast from 'react-hot-toast';
+import { Check, Edit2, FileText, Image, Link2, Send } from 'react-feather';
 import { useTranslation } from 'react-i18next';
 import { useFileShareContact } from '../../hooks/useFileShareContact';
+import { useLinkShare } from '../../hooks/useLinkShare';
+import { useQRShare } from '../../hooks/useQRShare';
 import { ROUTES } from '../../constants/routes';
-import {
-  canShareInvitationViaOtherApp,
-  shareInvitation,
-  shareQRCode,
-} from '../../services/shareService';
 import PageHeader from '../ui/PageHeader';
 import PageLayout from '../ui/PageLayout';
 import Button from '../ui/Button';
@@ -47,18 +37,11 @@ const ShareContact: React.FC<ShareContactProps> = ({
 }) => {
   const { t } = useTranslation('contacts');
   // Note: we keep a single QR/file-sharing view for now, no tab switcher.
-  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  const { qrDataUrl, setQrDataUrl, isSharingQR, handleShareQR } = useQRShare();
   const [isFilePanelOpen, setIsFilePanelOpen] = useState(false);
-  const [copiedLink, setCopiedLink] = useState(false);
-  const [isSharingLink, setIsSharingLink] = useState(false);
-  const [isSharingQR, setIsSharingQR] = useState(false);
-  const [includeUsername, setIncludeUsername] = useState(false);
+  const [includeUsername, setIncludeUsername] = useState(true);
   const [sharedUsername, setSharedUsername] = useState(userName);
   const [isUsernameModalOpen, setIsUsernameModalOpen] = useState(false);
-  const [canShareViaOtherApp, setCanShareViaOtherApp] = useState(false);
-  const copiedLinkTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
-    null
-  );
   const { shareFileContact, fileState } = useFileShareContact();
   const navigate = useNavigate();
   const deepLinkUrl = useMemo(
@@ -66,70 +49,19 @@ const ShareContact: React.FC<ShareContactProps> = ({
       generateDeepLinkUrl(userId, includeUsername ? sharedUsername : undefined),
     [userId, includeUsername, sharedUsername]
   );
+  const {
+    copiedLink,
+    isSharingLink,
+    canShareViaOtherApp,
+    handleCopyLink,
+    handleShareLink,
+  } = useLinkShare(deepLinkUrl);
   const isExportDisabled = !publicKey || fileState.isLoading;
 
   const handleShareFile = useCallback(() => {
     if (!publicKey || !userName) return;
     shareFileContact({ userPubKeys: publicKey.to_bytes(), userName });
   }, [shareFileContact, publicKey, userName]);
-
-  const handleCopyLink = useCallback(async () => {
-    try {
-      await navigator.clipboard.writeText(deepLinkUrl);
-      setCopiedLink(true);
-
-      if (copiedLinkTimeoutRef.current) {
-        clearTimeout(copiedLinkTimeoutRef.current);
-      }
-
-      copiedLinkTimeoutRef.current = setTimeout(() => {
-        setCopiedLink(false);
-        copiedLinkTimeoutRef.current = null;
-      }, 2000);
-    } catch (error) {
-      console.error('Failed to copy invitation link:', error);
-      toast.error('Failed to copy invitation link. Please try again.');
-    }
-  }, [deepLinkUrl]);
-
-  const handleShareLink = useCallback(async () => {
-    try {
-      setIsSharingLink(true);
-      await shareInvitation({ deepLinkUrl });
-    } catch (error) {
-      console.error('Failed to share invitation link:', error);
-      toast.error('Failed to share invitation link. Please try again.');
-    } finally {
-      setIsSharingLink(false);
-    }
-  }, [deepLinkUrl]);
-
-  const handleShareQR = useCallback(async () => {
-    if (!qrDataUrl) return;
-
-    try {
-      setIsSharingQR(true);
-      await shareQRCode({
-        qrDataUrl,
-        fileName: 'contact-qr-code.png',
-      });
-    } catch (error) {
-      console.error('Failed to share QR code:', error);
-      toast.error('Failed to share QR code. Please try again.');
-    } finally {
-      setIsSharingQR(false);
-    }
-  }, [qrDataUrl]);
-
-  useEffect(() => {
-    setCanShareViaOtherApp(canShareInvitationViaOtherApp());
-
-    return () => {
-      if (copiedLinkTimeoutRef.current) {
-        clearTimeout(copiedLinkTimeoutRef.current);
-      }
-    };
-  }, []);
 
   const content = (
     <div className="flex flex-col gap-4">
@@ -200,7 +132,7 @@ const ShareContact: React.FC<ShareContactProps> = ({
           </span>
         </Button>
 
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-3 gap-2">
           <Button
             variant="outline"
             size="custom"
@@ -213,6 +145,18 @@ const ShareContact: React.FC<ShareContactProps> = ({
           >
             <Send className="w-4 h-4" />
             <span className="text-sm font-normal">Share</span>
+          </Button>
+
+          <Button
+            variant="outline"
+            size="custom"
+            className="h-11 flex items-center justify-center gap-2 rounded-xl"
+            onClick={handleShareQR}
+            disabled={!qrDataUrl || isSharingQR}
+            loading={isSharingQR}
+          >
+            <Image className="w-4 h-4" />
+            <span className="text-sm font-normal">QR</span>
           </Button>
 
           <Button

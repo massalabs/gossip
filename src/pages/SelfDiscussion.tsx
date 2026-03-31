@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Clock, Settings } from 'react-feather';
@@ -9,6 +9,11 @@ import MessageInput from '../components/discussions/MessageInput';
 import { useSelfMessageStore } from '../stores/selfMessageStore';
 import { getSdk } from '../stores/sdkStore';
 import { ROUTES } from '../constants/routes';
+import { useSwipeBack } from '../hooks/useSwipeBack';
+import { useDiscussionMessageSelection } from '../hooks/useDiscussionMessageSelection';
+import { useGossipSdk } from '../hooks/useGossipSdk';
+import SelectionHeader from '../components/discussions/SelectionHeader';
+import { useRetentionPolicy } from '../hooks/useRetentionPolicy';
 
 const RETENTION_OPTIONS: {
   labelKey: string;
@@ -22,15 +27,6 @@ const RETENTION_OPTIONS: {
   { labelKey: 'settings.auto_delete_1w', value: 604800 },
   { labelKey: 'settings.auto_delete_1mo', value: 2592000 },
 ];
-
-const RETENTION_HEADER_LABELS: Record<number, string> = {
-  300: 'settings.auto_delete_5m',
-  3600: 'settings.auto_delete_1h',
-  28800: 'settings.auto_delete_8h',
-  86400: 'settings.auto_delete_1d',
-  604800: 'settings.auto_delete_1w',
-  2592000: 'settings.auto_delete_1mo',
-};
 
 const SelfDiscussion: React.FC = () => {
   const { t } = useTranslation('discussions');
@@ -47,16 +43,20 @@ const SelfDiscussion: React.FC = () => {
   const reactions = useSelfMessageStore.use.reactions();
   const loadReactions = useSelfMessageStore.use.loadReactions();
 
+  const gossip = useGossipSdk();
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
+  const swipeBack = useSwipeBack();
   const [editingMessage, setEditingMessage] = useState<Message | null>(null);
   const [forwardedContent, setForwardedContent] = useState<string | null>(null);
-  const [isRetentionModalOpen, setIsRetentionModalOpen] = useState(false);
-  const [retentionDuration, setRetentionDuration] = useState<number | null>(
-    null
-  );
-  const [retentionPolicySetAt, setRetentionPolicySetAt] = useState<
-    number | null
-  >(null);
+
+  const {
+    retentionDuration,
+    isRetentionModalOpen,
+    setIsRetentionModalOpen,
+    handleSelectRetention,
+    retentionHeaderLabel,
+    retentionInfo,
+  } = useRetentionPolicy(t);
 
   const forwardFromMessageId = (
     location.state as { forwardFromMessageId?: number } | undefined
@@ -85,30 +85,6 @@ const SelfDiscussion: React.FC = () => {
     void loadReactions();
   }, [loadMessages, loadReactions]);
 
-  useEffect(() => {
-    const sdk = getSdk();
-    if (!sdk.isSessionOpen) return;
-    void sdk.selfMessages.getRetentionInfo().then(info => {
-      setRetentionDuration(info.duration);
-      setRetentionPolicySetAt(info.setAt);
-    });
-  }, []);
-
-  const handleSelectRetention = useCallback(async (value: number | null) => {
-    const sdk = getSdk();
-    if (!sdk.isSessionOpen) return;
-    await sdk.selfMessages.setRetentionPolicy(value);
-    setRetentionDuration(value);
-    setRetentionPolicySetAt(value ? Date.now() : null);
-    setIsRetentionModalOpen(false);
-  }, []);
-
-  const retentionHeaderLabel = useMemo(() => {
-    if (!retentionDuration) return null;
-    const key = RETENTION_HEADER_LABELS[retentionDuration];
-    return key ? t(key) : null;
-  }, [retentionDuration, t]);
-
   const outgoingMessages = useMemo(
     () =>
       messages.map(m => ({
@@ -118,32 +94,65 @@ const SelfDiscussion: React.FC = () => {
     [messages]
   );
 
+  const {
+    selectedMessageIds,
+    isSelecting,
+    handleToggleSelect,
+    handleClearSelection,
+    handleCopySelected,
+    handleDeleteSelected,
+    canDeleteSelected,
+  } = useDiscussionMessageSelection({
+    messages: outgoingMessages,
+    contactName: t('selfDiscussion.title'),
+    gossip,
+    t,
+    onDeleteMessage: async (id: number) => {
+      await deleteMessage(id);
+      return true;
+    },
+  });
+
   return (
-    <div className="h-full app-max-w mx-auto bg-discussion-pattern flex flex-col relative overflow-hidden">
+    <div
+      className="h-full app-max-w mx-auto bg-discussion-pattern flex flex-col relative overflow-hidden"
+      onTouchStart={swipeBack.onTouchStart}
+      onTouchEnd={swipeBack.onTouchEnd}
+    >
       {/* Header */}
-      <div className="px-header-padding pt-safe-t h-header-safe flex items-center gap-3 shrink-0 z-10 bg-card">
-        <BackButton />
-        <div className="flex-1 min-w-0">
-          <h1 className="text-xl font-semibold text-foreground">
-            {t('selfDiscussion.title')}
-          </h1>
-          {retentionHeaderLabel && (
-            <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-              <Clock className="w-3 h-3 shrink-0" />
-              {t('header.auto_delete_active', {
-                duration: retentionHeaderLabel,
-              })}
-            </span>
-          )}
+      {isSelecting ? (
+        <SelectionHeader
+          count={selectedMessageIds.size}
+          onClear={handleClearSelection}
+          onCopy={handleCopySelected}
+          onDelete={handleDeleteSelected}
+          canDelete={canDeleteSelected}
+        />
+      ) : (
+        <div className="px-header-padding pt-safe-t h-header-safe flex items-center gap-3 shrink-0 z-10 bg-card">
+          <BackButton />
+          <div className="flex-1 min-w-0">
+            <h1 className="text-xl font-semibold text-foreground">
+              {t('selfDiscussion.title')}
+            </h1>
+            {retentionHeaderLabel && (
+              <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                <Clock className="w-3 h-3 shrink-0" />
+                {t('header.auto_delete_active', {
+                  duration: retentionHeaderLabel,
+                })}
+              </span>
+            )}
+          </div>
+          <button
+            onClick={() => setIsRetentionModalOpen(true)}
+            className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-muted transition-colors shrink-0"
+            aria-label={t('settings.auto_delete')}
+          >
+            <Settings className="w-5 h-5 text-muted-foreground" />
+          </button>
         </div>
-        <button
-          onClick={() => setIsRetentionModalOpen(true)}
-          className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-muted transition-colors shrink-0"
-          aria-label={t('settings.auto_delete')}
-        >
-          <Settings className="w-5 h-5 text-muted-foreground" />
-        </button>
-      </div>
+      )}
 
       {/* Body */}
       <div className="flex-1 min-h-0 flex flex-col">
@@ -158,11 +167,10 @@ const SelfDiscussion: React.FC = () => {
             <MessageList
               messages={outgoingMessages}
               isLoading={isLoading}
-              retentionInfo={
-                retentionDuration && retentionPolicySetAt
-                  ? { setAt: retentionPolicySetAt, duration: retentionDuration }
-                  : null
-              }
+              isSelecting={isSelecting}
+              selectedMessageIds={selectedMessageIds}
+              onToggleSelect={handleToggleSelect}
+              retentionInfo={retentionInfo}
               onEdit={message => {
                 setEditingMessage(message);
                 setReplyingTo(null);
@@ -192,6 +200,8 @@ const SelfDiscussion: React.FC = () => {
         </div>
 
         <MessageInput
+          disabled={isSelecting}
+          isSelecting={isSelecting}
           initialValue={
             editingMessage?.content ?? forwardedContent ?? undefined
           }

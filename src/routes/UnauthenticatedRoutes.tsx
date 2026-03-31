@@ -1,5 +1,5 @@
 import React, { useCallback } from 'react';
-import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
+import { Route, Navigate, useNavigate } from 'react-router-dom';
 import { useAccountStore } from '../stores/accountStore';
 import { useAppStore } from '../stores/appStore';
 import Login from '../pages/Login';
@@ -8,6 +8,7 @@ import { InvitePage } from '../pages/InvitePage';
 import { UserProfile } from '@massalabs/gossip-sdk';
 import { ROUTES } from '../constants/routes';
 import MainLayout from '../components/ui/MainLayout';
+import AnimatedRoutes from '../components/ui/AnimatedRoutes';
 
 interface UnauthenticatedRoutesProps {
   existingAccountInfo: UserProfile | null;
@@ -18,8 +19,8 @@ interface UnauthenticatedRoutesProps {
 /**
  * Routes accessible when user is not authenticated.
  *
+ * AnimatedRoutes provides cross-fade transitions between pages.
  * MainLayout automatically shows/hides bottom nav based on route.
- * Configure which routes show bottom nav in `src/constants/pageConfig.ts`
  */
 export const UnauthenticatedRoutes: React.FC<UnauthenticatedRoutesProps> = ({
   existingAccountInfo,
@@ -58,7 +59,7 @@ export const UnauthenticatedRoutes: React.FC<UnauthenticatedRoutesProps> = ({
 
   return (
     <MainLayout>
-      <Routes>
+      <AnimatedRoutes>
         <Route path={ROUTES.invite()} element={<InvitePage />} />
         <Route
           path={ROUTES.welcome()}
@@ -84,7 +85,7 @@ export const UnauthenticatedRoutes: React.FC<UnauthenticatedRoutesProps> = ({
         />
         <Route path="/" element={<Navigate to={ROUTES.welcome()} replace />} />
         <Route path="*" element={<Navigate to={ROUTES.welcome()} replace />} />
-      </Routes>
+      </AnimatedRoutes>
     </MainLayout>
   );
 };

@@ -15,7 +15,9 @@
     "web3": "Web3",
     "about": "关于",
     "debug": "调试",
-    "logout": "退出登录"
+    "logout": "退出登录",
+    "privacy": "隐私",
+    "security": "安全"
   },
   "delete_account": {
     "button": "删除账户",
@@ -85,6 +87,11 @@
   "security": {
     "title": "安全",
     "native_only": "安全设置仅在原生平台（Android 和 iOS）上可用。"
+  },
+  "privacy": {
+    "title": "隐私",
+    "default_retention_title": "默认消息自动删除",
+    "default_retention_description": "新会话将自动应用此保留策略。"
   },
   "web3": {
     "title": "Web3",
