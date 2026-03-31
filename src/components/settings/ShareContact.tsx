@@ -172,14 +172,12 @@ const ShareContact: React.FC<ShareContactProps> = ({
       </div>
 
       {/* Expiry hint */}
-      <p className="text-xs text-muted-foreground text-center leading-relaxed">
-        Invitations expire 2 weeks after your last connection.
-        <br />
-        File invitations don&apos;t expire.{' '}
+      <p className="text-xs text-muted-foreground text-center">
+        Invitations expire after 2 weeks. File invitations don&apos;t.{' '}
         <span className="relative inline-flex align-middle ml-0.5">
           <Popover
             position={PopoverPosition.TOP}
-            message="Each time you open the app, invitation validity is renewed if more than 24 hours have passed since the last renewal."
+            message="Invitations expire 2 weeks after your last connection. Each time you open the app, validity is renewed if more than 24 hours have passed. File invitations never expire."
           />
         </span>
       </p>

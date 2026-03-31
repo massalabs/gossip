@@ -3,7 +3,7 @@
   "loading": "Chargement du contact…",
   "edit_name": "Modifier le nom du contact",
   "share_contact": "Partager le contact",
-  "remove_contact": "Supprimer le contact",
+  "remove_contact": "Supprimer",
   "connection_pending": "Connexion en attente. Vous ne pouvez pas encore discuter.",
   "remove_modal": {
     "title": "Supprimer le contact ?",
