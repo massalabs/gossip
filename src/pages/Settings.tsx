@@ -360,7 +360,7 @@ const Settings = (): React.ReactElement => {
           >
             <Lock className="mr-4" />
             <span className="text-base font-semibold flex-1 text-left">
-              {t('menu.logout')}
+              {t('menu.lock_account')}
             </span>
           </Button>
           <Button
