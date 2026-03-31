@@ -29,6 +29,8 @@
   "list_item": {
     "set_contact_name": "Définir le nom du contact",
     "refuse_connection": "Refuser la connexion ?",
+    "pin_discussion": "Épingler",
+    "unpin_discussion": "Désépingler",
     "edit_name": "Modifier le nom",
     "edit_name_title": "Modifier le nom de la discussion"
   },

@@ -129,6 +129,11 @@ describe('Toaster safe-area top offset', () => {
     const styledParent = toastEl!.closest<HTMLElement>('div[style]');
     expect(styledParent).not.toBeNull();
 
+    const parentStyle = styledParent!.style;
+    expect(parentStyle.background).toBe('var(--card)');
+    expect(parentStyle.color).toBe('var(--foreground)');
+    expect(parentStyle.border).toBe('1px solid var(--border)');
+
     // Clean up custom properties
     document.documentElement.style.removeProperty('--card');
     document.documentElement.style.removeProperty('--foreground');

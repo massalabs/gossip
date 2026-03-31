@@ -79,17 +79,15 @@ describe('i18n translation key completeness', () => {
           const missing = [...unionKeys].filter(k => !localeKeys.has(k));
 
           if (missing.length > 0) {
-            // Log a clear warning with all missing keys
             console.warn(
               `\n  [${locale}/${namespace}] missing ${missing.length} key(s):\n` +
                 missing.map(k => `    - ${k}`).join('\n')
             );
           }
 
-          // Goal state: every locale returns [] (no missing keys).
-          // Non-empty snapshots track known gaps — add the translations,
-          // then run `vitest -u` to refresh the snapshot.
-          expect(missing).toMatchSnapshot();
+          // Hard fail: every locale must have every key.
+          // If a new key is added to one locale, add it to all.
+          expect(missing).toEqual([]);
         });
       }
     });
@@ -130,6 +128,6 @@ describe('i18n translation key completeness', () => {
       );
     }
 
-    expect(issues).toMatchSnapshot();
+    expect(issues).toEqual([]);
   });
 });
