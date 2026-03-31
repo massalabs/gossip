@@ -20,6 +20,7 @@ import { useGossipSdk } from '../hooks/useGossipSdk';
 import { SessionStatus, SELF_CONTACT_ID } from '@massalabs/gossip-sdk';
 import { useOnlineStore } from '../stores/useOnlineStore';
 import { useSwipeFilter } from '../hooks/useSwipeFilter';
+import { useStorageMode } from '../hooks/useStorageMode';
 
 const Discussions: React.FC = () => {
   const { t } = useTranslation('discussions');
@@ -40,6 +41,7 @@ const Discussions: React.FC = () => {
   const sessionsStatuses = useDiscussionStore(s => s.sessionsStatuses);
   const isOnline = useOnlineStore(s => s.isOnline);
   const swipeHandlers = useSwipeFilter(filter, setFilter);
+  const { secureStorageEnabled } = useStorageMode();
   // Callback ref: triggers re-render when scroll container is mounted
   const [scrollContainer, setScrollContainer] = useState<HTMLDivElement | null>(
     null
@@ -165,9 +167,17 @@ const Discussions: React.FC = () => {
       <div className="flex items-center gap-3">
         {isOnline && <UserProfileAvatar name={username} size={10} />}
         {isOnline ? (
-          <h1 className="text-xl font-semibold text-foreground">
-            {t('title')}
-          </h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-semibold text-foreground">
+              {t('title')}
+            </h1>
+            {secureStorageEnabled && (
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-accent/15 text-accent text-[10px] font-semibold uppercase tracking-wide">
+                <Lock className="w-3 h-3" />
+                Secure
+              </span>
+            )}
+          </div>
         ) : (
           <h1 className="text-xl font-semibold text-accent">
             {t('waiting_connection')}
