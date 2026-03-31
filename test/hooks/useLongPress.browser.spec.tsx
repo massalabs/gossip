@@ -135,6 +135,23 @@ describe('useLongPress', () => {
     expect(defaultPrevented).toBe(true);
   });
 
+  it('triggers again on a second right-click (mouse has no touchstart reset)', async () => {
+    const onLongPress = vi.fn();
+    render(<TestComponent onLongPress={onLongPress} />);
+
+    const target = page.getByTestId('target');
+    const el = target.element() as HTMLElement;
+
+    el.dispatchEvent(
+      new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
+    );
+    el.dispatchEvent(
+      new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
+    );
+
+    expect(onLongPress).toHaveBeenCalledTimes(2);
+  });
+
   it('does nothing when disabled', async () => {
     const onLongPress = vi.fn();
     render(<TestComponent onLongPress={onLongPress} delay={100} disabled />);

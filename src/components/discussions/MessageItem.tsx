@@ -284,9 +284,17 @@ const MessageItem: React.FC<MessageItemProps> = ({
         // Don't prevent default — let native selection handles appear
         return;
       }
+      e.preventDefault();
+      // Desktop / web: open the same actions menu as a bubble click (no touch long-press state).
+      // If a touch long-press just ran, skip — iOS can emit a synthetic contextmenu and we must
+      // not open the menu twice (same as longPress.onContextMenu duplicate guard).
+      if (!isAndroid && !isSelecting && !longPress.longPressTriggered.current) {
+        openContextMenu();
+        return;
+      }
       longPress.onContextMenu(e);
     },
-    [isAndroid, longPress, isDeleted]
+    [isAndroid, longPress, isDeleted, isSelecting, openContextMenu]
   );
   // Context menu items — depend on stable scalars, not the full message object
   const contextMenuItems = useMemo<MessageContextMenuItem[]>(() => {
