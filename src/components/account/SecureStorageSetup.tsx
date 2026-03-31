@@ -4,6 +4,7 @@ import { Shield, CheckCircle, Plus, Check } from 'react-feather';
 import PageHeader from '../ui/PageHeader';
 import PageLayout from '../ui/PageLayout';
 import Button from '../ui/Button';
+import BaseModal from '../ui/BaseModal';
 import HiddenAccountCreation from './HiddenAccountCreation';
 import { useAccountStore } from '../../stores/accountStore';
 import { getSdk } from '../../stores/sdkStore';
@@ -52,6 +53,7 @@ const SecureStorageSetup: React.FC<SecureStorageSetupProps> = ({
   const [addingAccount, setAddingAccount] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
+  const [showFinalizeConfirm, setShowFinalizeConfirm] = useState(false);
 
   const canAddMore = createdAccounts.length < MAX_SLOTS;
 
@@ -110,12 +112,10 @@ const SecureStorageSetup: React.FC<SecureStorageSetupProps> = ({
     }
   };
 
-  const handleSkip = async () => {
+  const handleSkip = () => {
     if (createdAccounts.length > 1) {
       // Hidden accounts exist — confirm before locking
-      const confirmed = window.confirm(t('secure_storage.confirm_lock'));
-      if (!confirmed) return;
-      await finalize();
+      setShowFinalizeConfirm(true);
     } else {
       // Only main account, no hidden — stay authenticated
       onComplete();
@@ -252,7 +252,7 @@ const SecureStorageSetup: React.FC<SecureStorageSetupProps> = ({
 
         {hasHiddenAccounts ? (
           <Button
-            onClick={finalize}
+            onClick={() => setShowFinalizeConfirm(true)}
             variant="primary"
             size="custom"
             fullWidth
@@ -281,6 +281,39 @@ const SecureStorageSetup: React.FC<SecureStorageSetupProps> = ({
           </Button>
         )}
       </div>
+
+      <BaseModal
+        isOpen={showFinalizeConfirm}
+        onClose={() => setShowFinalizeConfirm(false)}
+        title={t('secure_storage.confirm_lock_title')}
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-foreground">
+            {t('secure_storage.confirm_lock_body')}
+          </p>
+          <div className="flex gap-3">
+            <Button
+              onClick={async () => {
+                setShowFinalizeConfirm(false);
+                await finalize();
+              }}
+              variant="primary"
+              size="custom"
+              className="flex-1 h-11 rounded-lg font-semibold"
+            >
+              {t('secure_storage.confirm_lock_button')}
+            </Button>
+            <Button
+              onClick={() => setShowFinalizeConfirm(false)}
+              variant="secondary"
+              size="custom"
+              className="flex-1 h-11 rounded-lg font-semibold"
+            >
+              {t('common:cancel')}
+            </Button>
+          </div>
+        </div>
+      </BaseModal>
     </PageLayout>
   );
 };

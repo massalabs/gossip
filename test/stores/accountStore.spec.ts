@@ -221,11 +221,11 @@ describe('AccountStore skipHistorical behavior', () => {
     expect(skipHistoricalSpy).not.toHaveBeenCalled();
   });
 
-  it('initializeAccountWithBiometrics does NOT call skipHistorical()', async () => {
+  it('initializeAccountWithBiometrics calls skipHistorical()', async () => {
     await useAccountStore
       .getState()
       .initializeAccountWithBiometrics('testuser');
 
-    expect(skipHistoricalSpy).not.toHaveBeenCalled();
+    expect(skipHistoricalSpy).toHaveBeenCalledTimes(1);
   });
 });

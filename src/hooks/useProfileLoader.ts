@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { useAccountStore } from '../stores/accountStore';
 import { useAppStore } from '../stores/appStore';
 import { getSdk } from '../stores/sdkStore';
+import { useStorageMode } from './useStorageMode';
 
 const PROFILE_LOAD_DELAY_MS = 100;
 
@@ -10,20 +11,20 @@ const PROFILE_LOAD_DELAY_MS = 100;
  */
 export function useProfileLoader() {
   const { setLoading } = useAccountStore();
+  const { dbReady, needsUnlock } = useStorageMode();
 
   useEffect(() => {
     const loadProfile = async () => {
       try {
         setLoading(true);
 
-        const sdk = getSdk();
         // Once isInitialized is true (onboarding completed), never reset it to false.
         // Secure storage lock clears userProfile but onboarding is still done.
         const alreadyInitialized = useAppStore.getState().isInitialized;
 
         // Secure storage: DB isn't ready until allocate/unlock.
-        if (!sdk.dbReady) {
-          if (sdk.needsUnlock) {
+        if (!dbReady) {
+          if (needsUnlock) {
             // Encrypted data on device → user must unlock → Login, not onboarding.
             useAppStore.getState().setIsInitialized(true);
           } else if (!alreadyInitialized) {
@@ -38,6 +39,7 @@ export function useProfileLoader() {
           setTimeout(resolve, PROFILE_LOAD_DELAY_MS)
         );
 
+        const sdk = getSdk();
         const state = useAccountStore.getState();
         const existingProfile =
           state.userProfile || (await sdk.profiles.getMostRecent());
@@ -58,5 +60,5 @@ export function useProfileLoader() {
     };
     loadProfile();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [dbReady, needsUnlock]);
 }

@@ -486,12 +486,25 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           opts
         );
 
-        // Open SDK session
-        await getSdk().openSession({
+        const sessionOpts = {
           mnemonic,
           encryptionKey,
           onPersist: createOnPersist(userId),
-        });
+        };
+
+        // Open SDK session
+        if (getSdk().isSecureStorage) {
+          if (opts.useBiometrics) {
+            const { encodeToBase64 } = await import('@massalabs/gossip-sdk');
+            const biometricPassword = encodeToBase64(encryptionKey.to_bytes());
+            await getSdk().openSecureSession(0, biometricPassword, sessionOpts);
+          } else {
+            const password = opts.password!;
+            await getSdk().openSecureSession(0, password, sessionOpts);
+          }
+        } else {
+          await getSdk().openSession(sessionOpts);
+        }
 
         const session = getSdk().getEncryptedSession();
 

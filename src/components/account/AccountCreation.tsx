@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import AccountCreationFormView from './AccountCreationFormView';
-import { secureStorageEnabled } from '../../config/features';
+import { useStorageMode } from '../../hooks/useStorageMode';
 import type { SecureStorageSetupCredentials } from '../../stores/secureStorageSetupContext';
 import {
   useAccountCreationForm,
@@ -26,6 +26,7 @@ const AccountCreation: React.FC<AccountCreationProps> = ({
   onBack,
   onComplete,
 }) => {
+  const { secureStorageEnabled } = useStorageMode();
   const formOptions = useMemo(() => {
     if (secureStorageEnabled) {
       return {
@@ -45,7 +46,7 @@ const AccountCreation: React.FC<AccountCreationProps> = ({
         onComplete();
       },
     };
-  }, [onComplete]);
+  }, [onComplete, secureStorageEnabled]);
 
   const form = useAccountCreationForm(formOptions);
 
