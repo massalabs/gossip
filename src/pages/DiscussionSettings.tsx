@@ -210,17 +210,17 @@ const DiscussionSettings: React.FC = () => {
         <PageHeader title={t('settings.title')} onBack={() => navigate(-1)} />
       }
       className="app-max-w mx-auto"
-      contentClassName="pt-4 px-6 pb-6"
+      contentClassName="pt-3 px-4 pb-4 pb-safe-b"
     >
       {/* Discussion Name Section */}
-      <div className="mb-6">
-        <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
+      <div className="mb-4">
+        <h2 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">
           {t('settings.name_section')}
         </h2>
-        <div className="bg-background border border-border rounded-xl p-4">
+        <div className="bg-background border border-border rounded-xl p-3">
           <div className="flex items-center justify-between">
             <div className="flex-1 min-w-0">
-              <p className="text-base font-semibold text-foreground truncate">
+              <p className="text-sm font-semibold text-foreground truncate">
                 {displayName}
               </p>
             </div>
@@ -243,18 +243,19 @@ const DiscussionSettings: React.FC = () => {
       </div>
 
       {/* Reset Connection Section */}
-      <div className="mb-6">
-        <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
+      <div className="mb-4">
+        <h2 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">
           {t('settings.reset_connection')}
         </h2>
-        <div className="bg-background border border-border rounded-xl p-4">
-          <p className="text-sm text-muted-foreground mb-3">
+        <div className="bg-background border border-border rounded-xl p-3">
+          <p className="text-xs text-muted-foreground mb-2 leading-snug">
             {t('settings.reset_description')}
           </p>
           <Button
             onClick={handleResetConnection}
             variant="secondary"
-            className="w-full"
+            size="custom"
+            className="w-full h-10 text-sm"
           >
             {reconnectSuccess ? (
               <Check className="w-4 h-4 mr-2" />
@@ -269,14 +270,14 @@ const DiscussionSettings: React.FC = () => {
       </div>
 
       {/* Mute Notifications Section */}
-      <div className="mb-6">
-        <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
+      <div className="mb-4">
+        <h2 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">
           {t('settings.notifications')}
         </h2>
-        <div className="bg-background border border-border rounded-xl p-4">
+        <div className="bg-background border border-border rounded-xl p-2">
           <button
             onClick={handleToggleMute}
-            className="w-full flex items-center justify-between text-sm font-medium text-foreground hover:bg-muted rounded-lg px-3 py-2 transition-colors"
+            className="w-full flex items-center justify-between text-sm font-medium text-foreground hover:bg-muted rounded-lg px-2 py-2 transition-colors"
           >
             <div className="flex items-center gap-3">
               {discussion.mutedNotifications ? (
@@ -300,17 +301,17 @@ const DiscussionSettings: React.FC = () => {
       </div>
 
       {/* Auto-delete Section */}
-      <div className="mb-6">
-        <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
+      <div className="mb-4">
+        <h2 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">
           {t('settings.auto_delete')}
         </h2>
-        <div className="bg-background border border-border rounded-xl p-4">
-          <p className="text-sm text-muted-foreground mb-3">
+        <div className="bg-background border border-border rounded-xl p-3">
+          <p className="text-xs text-muted-foreground mb-2 leading-snug">
             {t('settings.auto_delete_description')}
           </p>
           <button
             onClick={() => setIsRetentionModalOpen(true)}
-            className="w-full flex items-center justify-between text-sm font-medium text-foreground hover:bg-muted rounded-lg px-3 py-2 transition-colors"
+            className="w-full flex items-center justify-between text-sm font-medium text-foreground hover:bg-muted rounded-lg px-2 py-2 transition-colors"
           >
             <span>{t('settings.auto_delete_current')}</span>
             <span className="text-primary">{retentionLabel}</span>
@@ -352,7 +353,7 @@ const DiscussionSettings: React.FC = () => {
 
       {/* Participants Section */}
       <div>
-        <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
+        <h2 className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">
           {t('settings.participants')}
         </h2>
         <div className="bg-background border border-border rounded-xl divide-y divide-border">
@@ -360,7 +361,7 @@ const DiscussionSettings: React.FC = () => {
             <button
               key={contact.userId}
               onClick={() => handleNavigateToContact(contact)}
-              className="hover-fill w-full flex items-center gap-3 p-4 first:rounded-t-xl last:rounded-b-xl"
+              className="hover-fill w-full flex items-center gap-2.5 p-3 first:rounded-t-xl last:rounded-b-xl"
             >
               <ContactAvatar contact={contact} size={10} />
               <div className="flex-1 min-w-0 text-left">
@@ -372,7 +373,7 @@ const DiscussionSettings: React.FC = () => {
             </button>
           ))}
           {participants.length === 0 && (
-            <div className="p-4 text-center text-sm text-muted-foreground">
+            <div className="p-3 text-center text-sm text-muted-foreground">
               {t('settings.no_participants')}
             </div>
           )}

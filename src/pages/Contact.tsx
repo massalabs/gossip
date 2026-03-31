@@ -144,14 +144,13 @@ const Contact: React.FC = () => {
       className="app-max-w mx-auto"
       contentClassName="pt-4 px-6 pb-6"
     >
-      <div className="flex items-center gap-4">
-        <ContactAvatar contact={contact} size={14} />
+      <div className="flex items-center gap-3">
+        <ContactAvatar contact={contact} size={12} />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <p className="text-base font-semibold text-foreground truncate">
               {displayName}
             </p>
-
             <button
               onClick={handleOpenEditName}
               disabled={!canEditName}
@@ -160,11 +159,9 @@ const Contact: React.FC = () => {
             >
               <Edit2 className="w-4 h-4 text-muted-foreground" />
             </button>
-            <div className="flex items-center gap-1">
-              {showSuccessCheck && (
-                <Check className="w-4 h-4 text-success transition-opacity duration-200" />
-              )}
-            </div>
+            {showSuccessCheck && (
+              <Check className="w-4 h-4 text-success transition-opacity duration-200" />
+            )}
           </div>
           <UserIdDisplay
             userId={contact.userId}
@@ -175,7 +172,6 @@ const Contact: React.FC = () => {
           />
         </div>
       </div>
-
       <div className="mt-6 grid grid-cols-1 gap-2">
         <Button
           onClick={() => {
@@ -230,7 +226,6 @@ const Contact: React.FC = () => {
           await handleSaveName(name);
         }}
       />
-
       <BaseModal
         isOpen={isDeleteModalOpen}
         onClose={() => {
