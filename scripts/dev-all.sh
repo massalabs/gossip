@@ -2,6 +2,9 @@
 #
 # Live reload on multiple Android and iOS devices simultaneously.
 #
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export GOSSIP_REPO_ROOT="$REPO_ROOT"
+#
 # Device lists can be set via env vars (comma-separated) or CLI args.
 # Env vars take precedence over CLI args.
 #
@@ -12,6 +15,9 @@
 # Usage (CLI fallback):
 #   scripts/dev-all.sh <android-device> [ios-device]
 #
+# Optional:
+#   DEV_ALL_QUIET=1  Less Vite noise (warn+); npm build:sdk stays verbose unless you use npm -s yourself.
+#
 # Examples:
 #   # Using env vars (recommended for multi-device):
 #   ANDROID_DEVICES="10.26.239.15:5555,10.26.239.20:5555" scripts/dev-all.sh
@@ -19,6 +25,9 @@
 #   # Using CLI args (single device each, backwards-compatible):
 #   scripts/dev-all.sh 10.26.239.15:5555 "iPhone de Ben"
 #   scripts/dev-all.sh 10.26.239.15:5555   # iOS opens Xcode
+
+# Fallback iOS deploy when Capacitor/native-run does not list Wi‑Fi devices
+. "$(dirname "${BASH_SOURCE[0]}")/ios-deploy-fallback.sh"
 
 # Read a var from .env safely (handles special chars like apostrophes)
 read_env() {
@@ -128,7 +137,9 @@ wait
 
 # Start Vite dev server in background, wait for it to be ready
 echo "[dev-all] Starting Vite dev server..."
-npx vite --host &
+VITE_ARGS=(--host)
+[ "${DEV_ALL_QUIET:-}" = 1 ] && VITE_ARGS+=(--logLevel warn)
+npx vite "${VITE_ARGS[@]}" &
 VITE_PID=$!
 
 # Wait for Vite to be ready
@@ -169,7 +180,11 @@ deploy_ios() {
   if [ ${#IOSES[@]} -gt 0 ]; then
     for device in "${IOSES[@]}"; do
       echo "[dev-all] Building + deploying to iOS: ${device}..."
-      npx cap run ios --target "$device" --no-sync || echo "[dev-all] WARNING: iOS deploy failed for ${device}"
+      if npx cap run ios --target "$device" --no-sync; then
+        :
+      else
+        deploy_ios_xcode_fallback "$device" || echo "[dev-all] WARNING: iOS deploy failed for ${device}"
+      fi
     done
   else
     echo "[dev-all] No iOS devices specified, opening Xcode..."
