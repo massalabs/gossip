@@ -259,6 +259,7 @@ async function showNewMessageNotification(messageCount) {
         id: notificationId,
         title,
         body,
+        smallIcon: 'ic_notification',
         autoCancel: true,
         schedule: {
           allowWhileIdle: true,
