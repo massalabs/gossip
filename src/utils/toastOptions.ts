@@ -1,4 +1,9 @@
+import React from 'react';
 import { DefaultToastOptions } from 'react-hot-toast';
+
+export const toasterContainerStyle: React.CSSProperties = {
+  top: 'var(--sat, 0px)',
+};
 
 export const toastOptions: DefaultToastOptions = {
   duration: 4000,

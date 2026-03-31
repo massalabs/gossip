@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
+import { DEFAULT_EMOJIS } from './constants';
 
 export interface MessageContextMenuItem {
   label: string;
@@ -55,8 +56,6 @@ const MessageContextMenu: React.FC<MessageContextMenuProps> = ({
   }, [isOpen, onClose]);
 
   if (!isOpen) return null;
-
-  const DEFAULT_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
 
   return createPortal(
     <div

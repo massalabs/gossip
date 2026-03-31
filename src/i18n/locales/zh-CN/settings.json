@@ -16,6 +16,7 @@
     "about": "关于",
     "debug": "调试",
     "logout": "退出登录",
+    "privacy": "隐私",
     "security": "安全"
   },
   "delete_account": {
@@ -95,6 +96,11 @@
     "auto_lock_15m": "15 分钟",
     "auto_lock_30m": "30 分钟",
     "auto_lock_1h": "1 小时"
+  },
+  "privacy": {
+    "title": "隐私",
+    "default_retention_title": "默认消息自动删除",
+    "default_retention_description": "新会话将自动应用此保留策略。"
   },
   "web3": {
     "title": "Web3",

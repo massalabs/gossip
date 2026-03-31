@@ -29,6 +29,8 @@
   "list_item": {
     "set_contact_name": "Задать имя контакта",
     "refuse_connection": "Отклонить запрос на связь?",
+    "pin_discussion": "Закрепить",
+    "unpin_discussion": "Открепить",
     "edit_name": "Изменить имя",
     "edit_name_title": "Изменить название чата"
   },
@@ -121,6 +123,11 @@
     "subtitle": "Устанавливаем сквозное шифрование..."
   },
   "loading_messages": "Загрузка сообщений...",
+  "selfDiscussion": {
+    "title": "Мои заметки",
+    "placeholder": "Написать заметку...",
+    "emptyState": "Ваши личные заметки появятся здесь"
+  },
   "message_item": {
     "double_tap_reply": "Двойное нажатие для ответа",
     "sent_message": "Отправленное сообщение",

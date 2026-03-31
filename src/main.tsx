@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import './index.css';
 import App from './App.tsx';
 import { enableDebugLogger } from './utils/logger.ts';
+import { showInitError } from './utils/initError.ts';
 import { createSdk } from './sdk';
 import { useSdkStore } from './stores/sdkStore';
 import { protocolConfig } from './config/protocol';
@@ -118,11 +119,5 @@ Promise.all([
   })
   .catch(error => {
     console.error('[Gossip] Failed to initialize:', error);
-    const message =
-      typeof error?.message === 'string' &&
-      (error.message.includes('createSyncAccessHandle') ||
-        error.message.includes('another open Access Handle'))
-        ? 'Another tab may have this app open. Please close other tabs and refresh.'
-        : 'Failed to start. Please restart the app.';
-    document.getElementById('root')!.textContent = message;
+    showInitError(error);
   });
