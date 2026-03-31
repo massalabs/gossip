@@ -25,6 +25,11 @@
 
 set -e
 
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export GOSSIP_REPO_ROOT="$REPO_ROOT"
+
+. "$(dirname "${BASH_SOURCE[0]}")/ios-deploy-fallback.sh"
+
 DEVICE="$1"
 
 if [ -z "$DEVICE" ]; then
@@ -72,7 +77,9 @@ npx cap sync ios
 # Deploy to device
 echo "[dev-ios] Deploying to device..."
 echo "[dev-ios] Target device: ${DEVICE}"
-npx cap run ios --target "$DEVICE"
+if ! npx cap run ios --target "$DEVICE"; then
+  deploy_ios_xcode_fallback "$DEVICE" || exit 1
+fi
 
 # Start Vite dev server (foreground — Ctrl+C to stop)
 echo ""
