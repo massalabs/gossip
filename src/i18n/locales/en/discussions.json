@@ -146,5 +146,6 @@
   },
   "filter_label": "Filter discussions",
   "waiting_connection": "Waiting for connection...",
-  "announcement": "Announcement"
+  "announcement": "Announcement",
+  "lock_account": "Lock Account"
 }
