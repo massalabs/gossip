@@ -463,10 +463,9 @@ describe('MultiSelectMessages', () => {
       await userEvent.click(page.getByTestId('toggle-1'));
       await userEvent.click(page.getByTestId('copy'));
 
-      // Give the async rejection time to propagate
-      await new Promise(r => setTimeout(r, 50));
-
-      expect(toast.error).toHaveBeenCalledWith('Failed to copy');
+      await vi.waitFor(() => {
+        expect(toast.error).toHaveBeenCalledWith('Failed to copy');
+      });
 
       // Selection should NOT be cleared on failure
       await expect
@@ -655,10 +654,9 @@ describe('MultiSelectMessages', () => {
       await userEvent.click(page.getByTestId('toggle-1'));
       await userEvent.click(page.getByTestId('delete'));
 
-      // Give async handler time to run
-      await new Promise(r => setTimeout(r, 50));
-
-      expect(mockDeleteMessage).not.toHaveBeenCalled();
+      await vi.waitFor(() => {
+        expect(mockDeleteMessage).not.toHaveBeenCalled();
+      });
       // Selection should remain (delete was a no-op)
       await expect
         .element(page.getByTestId('is-selecting'))

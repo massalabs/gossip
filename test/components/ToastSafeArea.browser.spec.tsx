@@ -47,10 +47,11 @@ describe('Toaster safe-area top offset', () => {
     toast('Safe area test');
 
     // Allow react-hot-toast to render
-    await new Promise(r => setTimeout(r, 100));
+    await vi.waitFor(() => {
+      expect(findToasterContainer()).not.toBeNull();
+    });
 
     const container = findToasterContainer();
-    expect(container).not.toBeNull();
     // The inline style should contain our CSS variable expression
     expect(container!.style.top).toBe('var(--sat, 0px)');
   });
@@ -68,10 +69,11 @@ describe('Toaster safe-area top offset', () => {
     );
 
     toast('Fallback test');
-    await new Promise(r => setTimeout(r, 100));
+    await vi.waitFor(() => {
+      expect(findToasterContainer()).not.toBeNull();
+    });
 
     const container = findToasterContainer();
-    expect(container).not.toBeNull();
     const computed = getComputedStyle(container!);
     // With no --sat defined the fallback 0px should apply
     expect(computed.top).toBe('0px');
@@ -90,10 +92,11 @@ describe('Toaster safe-area top offset', () => {
     );
 
     toast('Notch test');
-    await new Promise(r => setTimeout(r, 100));
+    await vi.waitFor(() => {
+      expect(findToasterContainer()).not.toBeNull();
+    });
 
     const container = findToasterContainer();
-    expect(container).not.toBeNull();
     const computed = getComputedStyle(container!);
     expect(computed.top).toBe('47px');
   });
@@ -113,11 +116,14 @@ describe('Toaster safe-area top offset', () => {
     );
 
     toast('Style test');
-    await new Promise(r => setTimeout(r, 300));
+    await vi.waitFor(() => {
+      expect(
+        document.querySelector<HTMLElement>('[role="status"]')
+      ).not.toBeNull();
+    });
 
     // Find the toast element (has role="status")
     const toastEl = document.querySelector<HTMLElement>('[role="status"]');
-    expect(toastEl).not.toBeNull();
 
     // The toast's parent div carries the inline styles from toastOptions
     const styledParent = toastEl!.closest<HTMLElement>('div[style]');

@@ -86,9 +86,9 @@ describe('i18n translation key completeness', () => {
             );
           }
 
-          // Snapshot the missing keys so regressions are caught.
-          // If new keys are added to one locale but not others, the snapshot
-          // will change and the test will fail until updated.
+          // Goal state: every locale returns [] (no missing keys).
+          // Non-empty snapshots track known gaps — add the translations,
+          // then run `vitest -u` to refresh the snapshot.
           expect(missing).toMatchSnapshot();
         });
       }

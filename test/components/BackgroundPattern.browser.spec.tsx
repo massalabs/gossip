@@ -17,7 +17,7 @@ beforeAll(() => {
   styleEl.textContent = `
     .bg-discussion-pattern {
       position: relative;
-      background-color: var(--card, #fff);
+      background-color: var(--card);
       isolation: isolate;
     }
     .bg-discussion-pattern::before {
@@ -25,7 +25,11 @@ beforeAll(() => {
       position: absolute;
       top: 0; left: 0; right: 0;
       min-height: 100vh;
+      min-height: 100dvh;
       z-index: -1;
+      /* Test uses url('bg-discussion-light.svg') / url('bg-discussion-dark.svg');
+         real source uses url('../assets/backgrounds/bg-discussion-light.svg') etc.
+         Paths differ because Vite resolves them at build time. */
       background-image: url('bg-discussion-light.svg');
       background-repeat: repeat;
       background-size: 120px 120px;

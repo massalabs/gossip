@@ -72,7 +72,9 @@ async function openContextMenu() {
     page.getByRole('button', { name: 'Double-tap to reply' })
   );
   // Wait for the 120ms touch-ready delay so menu items become clickable
-  await new Promise(resolve => setTimeout(resolve, 150));
+  await vi.waitFor(() => {
+    expect(page.getByRole('menuitem', { name: 'Copy' }).element()).toBeTruthy();
+  });
 }
 
 describe('Forwarded message share/copy', () => {

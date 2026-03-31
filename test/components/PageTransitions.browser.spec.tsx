@@ -186,8 +186,14 @@ function renderAtRoute(initialEntry: string) {
  * of 400ms, so we need to wait for slideReady to become true.
  */
 async function waitForSlideReady() {
-  // The READY_TIMEOUT_MS is 400ms in AnimatedRoutes; wait enough for it + React re-render
-  await new Promise(r => setTimeout(r, 500));
+  // Poll until the slide-enter animation class appears (set after READY_TIMEOUT_MS)
+  await vi.waitFor(
+    () => {
+      const el = document.querySelector('.animate-slide-enter-right');
+      expect(el).not.toBeNull();
+    },
+    { timeout: 1000 }
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -263,15 +269,13 @@ describe('PageTransitions', () => {
         page.getByTestId('page-discussion').getByTestId('nav-to-discussions')
       );
 
-      // Wait a tick for React to process the state update and render the exit div
-      await new Promise(r => setTimeout(r, 50));
-
       // The exit animation wrapper should appear with animate-slide-exit-right
       // Use ownerDocument from a rendered element to query the correct document
       const rootEl = page.getByTestId('page-discussions').element();
       const doc = rootEl.ownerDocument;
-      const exitDiv = doc.querySelector('.animate-slide-exit-right');
-      expect(exitDiv).not.toBeNull();
+      await vi.waitFor(() => {
+        expect(doc.querySelector('.animate-slide-exit-right')).not.toBeNull();
+      });
     });
 
     it('overlay starts offscreen with translateX(100%) before slide is ready', async () => {
@@ -280,9 +284,10 @@ describe('PageTransitions', () => {
       // Navigate to discussion — overlay is mounted but not yet "ready"
       await userEvent.click(page.getByTestId('nav-to-discussion'));
 
-      // The discussion stub should be in the DOM already (React renders synchronously
-      // in the same microtask). Wait a single frame for React to flush.
-      await new Promise(r => setTimeout(r, 10));
+      // Wait a single frame for React to flush and render the overlay.
+      await vi.waitFor(() => {
+        expect(page.getByTestId('page-discussion').element()).toBeTruthy();
+      });
 
       // Get the overlay element through the rendered page
       const discussionEl = page.getByTestId('page-discussion').element();
@@ -420,10 +425,7 @@ describe('PageTransitions', () => {
       // Navigate back
       await userEvent.click(page.getByTestId('nav-to-discussions'));
 
-      // Wait for exit animation to complete (500ms timeout in AnimatedRoutes)
-      await new Promise(r => setTimeout(r, 600));
-
-      // Should be back on discussions
+      // Should be back on discussions (wait for exit animation to complete)
       await expect
         .element(page.getByTestId('page-discussions'))
         .toBeInTheDocument();
@@ -442,9 +444,6 @@ describe('PageTransitions', () => {
         page.getByTestId('page-discussion').getByTestId('back-btn')
       );
 
-      // Wait for animations
-      await new Promise(r => setTimeout(r, 600));
-
       await expect
         .element(page.getByTestId('page-discussions'))
         .toBeInTheDocument();
@@ -458,11 +457,16 @@ describe('PageTransitions', () => {
       await waitForSlideReady();
       await userEvent.click(page.getByTestId('nav-to-discussions'));
 
-      // Wait for the exit animation to finish (500ms timeout + buffer)
-      await new Promise(r => setTimeout(r, 700));
+      // Wait for the exit animation div to be removed (500ms timeout + buffer)
+      const doc = page.getByTestId('page-discussions').element().ownerDocument;
+      await vi.waitFor(
+        () => {
+          expect(doc.querySelector('.animate-slide-exit-right')).toBeNull();
+        },
+        { timeout: 1000 }
+      );
 
       // Exit animation div should be gone
-      const doc = page.getByTestId('page-discussions').element().ownerDocument;
       const exitDiv = doc.querySelector('.animate-slide-exit-right');
       expect(exitDiv).toBeNull();
     });
