@@ -106,7 +106,9 @@ describe('MessageContextMenu', () => {
     );
 
     // Wait for the 120ms touch-ready delay so buttons become clickable
-    await new Promise(resolve => setTimeout(resolve, 150));
+    await vi.waitFor(() => {
+      expect(page.getByText('👍').element()).toBeTruthy();
+    });
 
     await userEvent.click(page.getByText('👍'));
 

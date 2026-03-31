@@ -78,7 +78,7 @@ describe('EmojiReactions', () => {
       // no button with emoji text content
       const el = listItem.element() as HTMLElement;
       const reactionButtons = el.querySelectorAll(
-        '.-bottom-2 button, [class*="-bottom-2"] button'
+        '[data-testid="reactions-bar"] button'
       );
       expect(reactionButtons.length).toBe(0);
     });

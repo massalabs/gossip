@@ -1103,6 +1103,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
         {/* Reactions chips overlaid at the bottom of the bubble, like WhatsApp/Telegram */}
         {reactions.length > 0 && (
           <div
+            data-testid="reactions-bar"
             className={`absolute -bottom-2 ${
               isOutgoing ? 'right-3' : 'right-3'
             } flex flex-wrap gap-1`}

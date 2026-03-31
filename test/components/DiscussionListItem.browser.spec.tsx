@@ -116,9 +116,8 @@ describe('DiscussionListItem — pin icon', () => {
     await expect.element(headingLocator).toBeInTheDocument();
 
     const heading = headingLocator.element() as HTMLElement;
-    // Bookmark is the only SVG in the heading when pinned=true, mutedNotifications=false
-    const pinSvg = heading.querySelector('svg');
-    expect(pinSvg).toBeTruthy();
+    const pinIcon = heading.querySelector('[data-testid="pin-icon"]');
+    expect(pinIcon).toBeTruthy();
   });
 
   it('does not show pin icon when discussion.pinned is false', async () => {
@@ -141,9 +140,8 @@ describe('DiscussionListItem — pin icon', () => {
 
     const heading = headingLocator.element() as HTMLElement;
 
-    // No SVGs should exist inside the heading when not pinned and not muted
-    const pinSvg = heading.querySelector('svg');
-    expect(pinSvg).toBeNull();
+    const pinIcon = heading.querySelector('[data-testid="pin-icon"]');
+    expect(pinIcon).toBeNull();
   });
 
   it('shows contact name in the heading', async () => {
