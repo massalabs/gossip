@@ -65,7 +65,7 @@ describe('useQRShare', () => {
     expect(ref.current!.qrDataUrl).toBeNull();
 
     await act(async () => {
-      await ref.current!.handleShareQR();
+      await ref.current!.handleShareQR('share');
     });
 
     expect(mockShareQRCode).not.toHaveBeenCalled();
@@ -80,7 +80,7 @@ describe('useQRShare', () => {
     });
 
     await act(async () => {
-      await ref.current!.handleShareQR();
+      await ref.current!.handleShareQR('share');
     });
 
     expect(mockShareQRCode).toHaveBeenCalledOnce();
@@ -107,7 +107,7 @@ describe('useQRShare', () => {
     let shareResolved = false;
     let shareCallPromise!: Promise<void>;
     act(() => {
-      shareCallPromise = ref.current!.handleShareQR();
+      shareCallPromise = ref.current!.handleShareQR('share');
       shareCallPromise.then(() => {
         shareResolved = true;
       });
@@ -116,6 +116,7 @@ describe('useQRShare', () => {
     // At this point shareQRCode has been called and is pending;
     // isSharingQR should be true
     expect(ref.current!.isSharingQR).toBe(true);
+    expect(ref.current!.qrShareSource).toBe('share');
 
     // Resolve and wait for cleanup
     await act(async () => {
@@ -136,7 +137,7 @@ describe('useQRShare', () => {
     });
 
     await act(async () => {
-      await ref.current!.handleShareQR();
+      await ref.current!.handleShareQR('qr');
     });
 
     expect(mockToastError).toHaveBeenCalledOnce();

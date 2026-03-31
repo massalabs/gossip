@@ -37,7 +37,8 @@ const ShareContact: React.FC<ShareContactProps> = ({
 }) => {
   const { t } = useTranslation('contacts');
   // Note: we keep a single QR/file-sharing view for now, no tab switcher.
-  const { qrDataUrl, setQrDataUrl, isSharingQR, handleShareQR } = useQRShare();
+  const { qrDataUrl, setQrDataUrl, isSharingQR, qrShareSource, handleShareQR } =
+    useQRShare();
   const [isFilePanelOpen, setIsFilePanelOpen] = useState(false);
   const [includeUsername, setIncludeUsername] = useState(true);
   const [sharedUsername, setSharedUsername] = useState(userName);
@@ -137,11 +138,17 @@ const ShareContact: React.FC<ShareContactProps> = ({
             variant="outline"
             size="custom"
             className="h-11 flex items-center justify-center gap-2 rounded-xl"
-            onClick={canShareViaOtherApp ? handleShareLink : handleShareQR}
+            onClick={
+              canShareViaOtherApp
+                ? handleShareLink
+                : () => void handleShareQR('share')
+            }
             disabled={
               canShareViaOtherApp ? isSharingLink : !qrDataUrl || isSharingQR
             }
-            loading={isSharingLink || isSharingQR}
+            loading={
+              canShareViaOtherApp ? isSharingLink : qrShareSource === 'share'
+            }
           >
             <Send className="w-4 h-4" />
             <span className="text-sm font-normal">Share</span>
@@ -151,9 +158,9 @@ const ShareContact: React.FC<ShareContactProps> = ({
             variant="outline"
             size="custom"
             className="h-11 flex items-center justify-center gap-2 rounded-xl"
-            onClick={handleShareQR}
+            onClick={() => void handleShareQR('qr')}
             disabled={!qrDataUrl || isSharingQR}
-            loading={isSharingQR}
+            loading={qrShareSource === 'qr'}
           >
             <Image className="w-4 h-4" />
             <span className="text-sm font-normal">QR</span>
