@@ -84,9 +84,13 @@ export function useLongPress({
     (e: React.MouseEvent) => {
       if (disabled) return;
       e.preventDefault();
+      // Skip duplicate when touch long-press already fired (timer + contextmenu on Android).
       if (longPressTriggered.current) return;
       longPressTriggered.current = true;
       onLongPress();
+      // Touch resets this in onTouchStart; mouse-only contextmenu never does — reset so the
+      // next right-click on the same element works (desktop).
+      longPressTriggered.current = false;
     },
     [disabled, onLongPress]
   );
