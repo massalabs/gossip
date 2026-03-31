@@ -7,13 +7,12 @@
 
 appId: net.massa.gossip
 ---
-
 - launchApp
 - waitForAnimationToEnd
 
 # Tap first discussion to open it
 - tapOn:
-    text: "Discussions"
+    text: 'Discussions'
 - waitForAnimationToEnd
 - takeScreenshot: keyboard_01_discussion_list
 
@@ -24,13 +23,13 @@ appId: net.massa.gossip
 
 # Tap the message input to open keyboard
 - tapOn:
-    text: "Type a message"
+    text: 'Type a message'
 - waitForAnimationToEnd
 - takeScreenshot: keyboard_02_keyboard_open
 
 # Type a message and verify it's visible
-- inputText: "Maestro keyboard test"
-- assertVisible: "Maestro keyboard test"
+- inputText: 'Maestro keyboard test'
+- assertVisible: 'Maestro keyboard test'
 - takeScreenshot: keyboard_03_text_typed
 
 # Scroll up while keyboard is open — messages should still be accessible
@@ -42,7 +41,7 @@ appId: net.massa.gossip
     duration: 500
 
 # Text should still be in the input
-- assertVisible: "Maestro keyboard test"
+- assertVisible: 'Maestro keyboard test'
 
 # Dismiss keyboard with back button
 - pressKey: back
@@ -51,11 +50,11 @@ appId: net.massa.gossip
 
 # Re-open keyboard
 - tapOn:
-    text: "Maestro keyboard test"
+    text: 'Maestro keyboard test'
 - waitForAnimationToEnd
 
 # Clear and type again
 - eraseText: 25
-- inputText: "Second test message"
-- assertVisible: "Second test message"
+- inputText: 'Second test message'
+- assertVisible: 'Second test message'
 - takeScreenshot: keyboard_05_second_input

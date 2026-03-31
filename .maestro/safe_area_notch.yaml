@@ -8,13 +8,12 @@
 
 appId: net.massa.gossip
 ---
-
 - launchApp
 - waitForAnimationToEnd
 
 # ===== 1. Discussion list — top safe area =====
 # Header should be fully visible below notch/Dynamic Island
-- tapOn: "Discussions"
+- tapOn: 'Discussions'
 - waitForAnimationToEnd
 - takeScreenshot: safe_01_list_top
 
@@ -45,7 +44,7 @@ appId: net.massa.gossip
 
 # ===== 5. Open keyboard — input stays visible =====
 - tapOn:
-    text: "Type a message"
+    text: 'Type a message'
 - waitForAnimationToEnd
 - takeScreenshot: safe_05_keyboard_open
 
@@ -56,7 +55,7 @@ appId: net.massa.gossip
 # ===== 7. Go back to list, navigate to Settings =====
 - pressKey: back
 - waitForAnimationToEnd
-- tapOn: "Settings"
+- tapOn: 'Settings'
 - waitForAnimationToEnd
 
 # Settings header should be below notch

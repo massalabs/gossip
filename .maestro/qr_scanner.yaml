@@ -12,20 +12,19 @@
 
 appId: net.massa.gossip
 ---
-
 - launchApp
 - waitForAnimationToEnd
 
 # ===== 1. Navigate to QR scanner =====
 
 # Go to Settings
-- tapOn: "Settings"
+- tapOn: 'Settings'
 - waitForAnimationToEnd
 - takeScreenshot: qr_01_settings
 
 # Tap Share Contact / QR code option
 - tapOn:
-    text: ".*Share.*Contact.*|.*QR.*"
+    text: '.*Share.*Contact.*|.*QR.*'
 - waitForAnimationToEnd
 
 # Screenshot of QR share page (shows user's own QR code)
@@ -35,12 +34,12 @@ appId: net.massa.gossip
 
 # Tap the scan toggle/button
 - tapOn:
-    text: ".*Scan.*"
+    text: '.*Scan.*'
 - waitForAnimationToEnd
 
 # Accept camera permission if prompted
 - tapOn:
-    text: ".*Allow.*|.*While Using.*"
+    text: '.*Allow.*|.*While Using.*'
     optional: true
 - waitForAnimationToEnd
 
@@ -59,11 +58,11 @@ appId: net.massa.gossip
 # ===== 4. Reopen scanner to verify stability =====
 
 - tapOn:
-    text: ".*Scan.*"
+    text: '.*Scan.*'
     optional: true
 - waitForAnimationToEnd
 - tapOn:
-    text: ".*Allow.*|.*While Using.*"
+    text: '.*Allow.*|.*While Using.*'
     optional: true
 - waitForAnimationToEnd
 - takeScreenshot: qr_05_scanner_reopened

@@ -7,13 +7,12 @@
 
 appId: net.ben.gossip
 ---
-
 - launchApp
 - waitForAnimationToEnd
 
 # Navigate to Discussions tab
 - tapOn:
-    text: "Discussions"
+    text: 'Discussions'
 - waitForAnimationToEnd
 - takeScreenshot: keyboard_ios_01_list
 
@@ -24,13 +23,13 @@ appId: net.ben.gossip
 
 # Tap message input
 - tapOn:
-    text: "Type a message"
+    text: 'Type a message'
 - waitForAnimationToEnd
 - takeScreenshot: keyboard_ios_02_keyboard_open
 
 # Type and verify
-- inputText: "Maestro iOS keyboard test"
-- assertVisible: "Maestro iOS keyboard test"
+- inputText: 'Maestro iOS keyboard test'
+- assertVisible: 'Maestro iOS keyboard test'
 - takeScreenshot: keyboard_ios_03_typed
 
 # Scroll while keyboard open
@@ -40,7 +39,7 @@ appId: net.ben.gossip
 - swipe:
     direction: DOWN
     duration: 500
-- assertVisible: "Maestro iOS keyboard test"
+- assertVisible: 'Maestro iOS keyboard test'
 
 # Dismiss keyboard
 - hideKeyboard
@@ -49,8 +48,8 @@ appId: net.ben.gossip
 
 # Re-open and type again
 - tapOn:
-    text: "Maestro iOS keyboard test"
+    text: 'Maestro iOS keyboard test'
 - eraseText: 30
-- inputText: "Second iOS test"
-- assertVisible: "Second iOS test"
+- inputText: 'Second iOS test'
+- assertVisible: 'Second iOS test'
 - takeScreenshot: keyboard_ios_05_second

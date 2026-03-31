@@ -10,7 +10,6 @@
 
 appId: net.massa.gossip
 ---
-
 # ===== PART 1: Biometric login success =====
 
 - launchApp
@@ -18,13 +17,13 @@ appId: net.massa.gossip
 - takeScreenshot: bio_01_login_screen
 
 # Verify biometric button is visible
-- assertVisible: "Login with biometrics"
+- assertVisible: 'Login with biometrics'
 
 # Tap biometric login
-- tapOn: "Login with biometrics"
+- tapOn: 'Login with biometrics'
 
 # Simulate successful biometric
-- setBiometric: "face"
+- setBiometric: 'face'
 - waitForAnimationToEnd
 
 # Should be past login — verify discussions or main screen is visible
@@ -39,11 +38,11 @@ appId: net.massa.gossip
 
 # Tap biometric again
 - tapOn:
-    text: "Login with biometrics"
+    text: 'Login with biometrics'
     optional: true
 
 # Simulate failure
-- setBiometric: "no match"
+- setBiometric: 'no match'
 - waitForAnimationToEnd
 
 # App should show error or stay on login
@@ -54,7 +53,7 @@ appId: net.massa.gossip
 # After biometric failure, password field should be accessible
 # The login screen shows Password input when usePassword or as fallback
 - assertVisible:
-    text: "Password"
+    text: 'Password'
     optional: true
 
 - takeScreenshot: bio_04_password_fallback
