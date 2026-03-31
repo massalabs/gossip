@@ -16,6 +16,7 @@
     "about": "О приложении",
     "debug": "Отладка",
     "logout": "Выйти",
+    "privacy": "Конфиденциальность",
     "security": "Безопасность"
   },
   "delete_account": {
@@ -95,6 +96,11 @@
     "auto_lock_15m": "15 минут",
     "auto_lock_30m": "30 минут",
     "auto_lock_1h": "1 час"
+  },
+  "privacy": {
+    "title": "Конфиденциальность",
+    "default_retention_title": "Автоудаление сообщений по умолчанию",
+    "default_retention_description": "К новым чатам будет автоматически применяться эта политика хранения."
   },
   "web3": {
     "title": "Web3",

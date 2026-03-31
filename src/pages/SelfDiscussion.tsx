@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Clock, Settings } from 'react-feather';
@@ -13,6 +13,7 @@ import { useSwipeBack } from '../hooks/useSwipeBack';
 import { useDiscussionMessageSelection } from '../hooks/useDiscussionMessageSelection';
 import { useGossipSdk } from '../hooks/useGossipSdk';
 import SelectionHeader from '../components/discussions/SelectionHeader';
+import { useRetentionPolicy } from '../hooks/useRetentionPolicy';
 
 const RETENTION_OPTIONS: {
   labelKey: string;
@@ -26,15 +27,6 @@ const RETENTION_OPTIONS: {
   { labelKey: 'settings.auto_delete_1w', value: 604800 },
   { labelKey: 'settings.auto_delete_1mo', value: 2592000 },
 ];
-
-const RETENTION_HEADER_LABELS: Record<number, string> = {
-  300: 'settings.auto_delete_5m',
-  3600: 'settings.auto_delete_1h',
-  28800: 'settings.auto_delete_8h',
-  86400: 'settings.auto_delete_1d',
-  604800: 'settings.auto_delete_1w',
-  2592000: 'settings.auto_delete_1mo',
-};
 
 const SelfDiscussion: React.FC = () => {
   const { t } = useTranslation('discussions');
@@ -56,13 +48,15 @@ const SelfDiscussion: React.FC = () => {
   const swipeBack = useSwipeBack();
   const [editingMessage, setEditingMessage] = useState<Message | null>(null);
   const [forwardedContent, setForwardedContent] = useState<string | null>(null);
-  const [isRetentionModalOpen, setIsRetentionModalOpen] = useState(false);
-  const [retentionDuration, setRetentionDuration] = useState<number | null>(
-    null
-  );
-  const [retentionPolicySetAt, setRetentionPolicySetAt] = useState<
-    number | null
-  >(null);
+
+  const {
+    retentionDuration,
+    isRetentionModalOpen,
+    setIsRetentionModalOpen,
+    handleSelectRetention,
+    retentionHeaderLabel,
+    retentionInfo,
+  } = useRetentionPolicy(t);
 
   const forwardFromMessageId = (
     location.state as { forwardFromMessageId?: number } | undefined
@@ -90,30 +84,6 @@ const SelfDiscussion: React.FC = () => {
     void loadMessages();
     void loadReactions();
   }, [loadMessages, loadReactions]);
-
-  useEffect(() => {
-    const sdk = getSdk();
-    if (!sdk.isSessionOpen) return;
-    void sdk.selfMessages.getRetentionInfo().then(info => {
-      setRetentionDuration(info.duration);
-      setRetentionPolicySetAt(info.setAt);
-    });
-  }, []);
-
-  const handleSelectRetention = useCallback(async (value: number | null) => {
-    const sdk = getSdk();
-    if (!sdk.isSessionOpen) return;
-    await sdk.selfMessages.setRetentionPolicy(value);
-    setRetentionDuration(value);
-    setRetentionPolicySetAt(value ? Date.now() : null);
-    setIsRetentionModalOpen(false);
-  }, []);
-
-  const retentionHeaderLabel = useMemo(() => {
-    if (!retentionDuration) return null;
-    const key = RETENTION_HEADER_LABELS[retentionDuration];
-    return key ? t(key) : null;
-  }, [retentionDuration, t]);
 
   const outgoingMessages = useMemo(
     () =>
@@ -200,11 +170,7 @@ const SelfDiscussion: React.FC = () => {
               isSelecting={isSelecting}
               selectedMessageIds={selectedMessageIds}
               onToggleSelect={handleToggleSelect}
-              retentionInfo={
-                retentionDuration && retentionPolicySetAt
-                  ? { setAt: retentionPolicySetAt, duration: retentionDuration }
-                  : null
-              }
+              retentionInfo={retentionInfo}
               onEdit={message => {
                 setEditingMessage(message);
                 setReplyingTo(null);

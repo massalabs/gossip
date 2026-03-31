@@ -19,7 +19,7 @@ import { AuthenticatedRoutes } from './routes/AuthenticatedRoutes';
 import { UnauthenticatedRoutes } from './routes/UnauthenticatedRoutes';
 import { Onboarding } from './pages/Onboarding.tsx';
 import { AppUrlListener } from './components/AppUrlListener';
-import { toastOptions } from './utils/toastOptions.ts';
+import { toastOptions, toasterContainerStyle } from './utils/toastOptions.ts';
 import LoadingScreen from './components/ui/LoadingScreen.tsx';
 import KeyboardAwareWrapper from './components/ui/KeyboardAwareWrapper';
 import { ROUTES } from './constants/routes';
@@ -110,7 +110,7 @@ function App() {
         </KeyboardAwareWrapper>
         <Toaster
           position="top-center"
-          containerStyle={{ top: 'var(--sat, 0px)' }}
+          containerStyle={toasterContainerStyle}
           toastOptions={toastOptions}
         />
       </ErrorBoundary>

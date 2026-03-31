@@ -36,4 +36,24 @@ describe('shouldLock', () => {
     expect(shouldLock(bg, 3_599_000, 3600)).toBe(false);
     expect(shouldLock(bg, 3_600_000, 3600)).toBe(true);
   });
+
+  it('locks when auto-lock is 60s and 61s have elapsed', () => {
+    const bg = 5000;
+    const now = bg + 61_000;
+    expect(shouldLock(bg, now, 60)).toBe(true);
+  });
+
+  it('with timeout 0, any non-negative elapsed time triggers lock', () => {
+    // timeout 0 means "lock immediately on any resume"
+    expect(shouldLock(100, 100, 0)).toBe(true); // 0s elapsed >= 0
+    expect(shouldLock(100, 101, 0)).toBe(true); // 1ms elapsed >= 0
+    expect(shouldLock(100, 200_000, 0)).toBe(true); // large elapsed >= 0
+  });
+
+  it('returns false for null background regardless of timeout', () => {
+    // Covers the "disabled" path: if no background timestamp was set, never lock
+    expect(shouldLock(null, 999_999, 0)).toBe(false);
+    expect(shouldLock(null, 999_999, 60)).toBe(false);
+    expect(shouldLock(null, 999_999, 3600)).toBe(false);
+  });
 });
