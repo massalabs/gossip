@@ -42,7 +42,12 @@ vi.mock('../../src/hooks/useMarkMessageAsRead', () => ({
   useMarkMessageAsRead: () => React.createRef(),
 }));
 
-import MessageItem from '../../src/components/discussions/MessageItem';
+import MessageItem, {
+  SWIPE_RESISTANCE,
+  SWIPE_THRESHOLD,
+  SWIPE_RESISTANCE_OUTGOING,
+  SWIPE_THRESHOLD_OUTGOING,
+} from '../../src/components/discussions/MessageItem';
 
 // ---------- Helpers ----------
 
@@ -141,8 +146,11 @@ describe('SwipeReply — swipe-left to reply', () => {
     await expect.element(listItem).toBeInTheDocument();
 
     const el = listItem.element() as HTMLElement;
-    // Swipe left by -200px (effective = -200 * 0.5 = -100, exceeds threshold 40)
-    simulateSwipe(el, -200);
+    // Raw delta chosen so effective distance = delta * SWIPE_RESISTANCE exceeds SWIPE_THRESHOLD
+    const aboveThresholdDelta = Math.ceil(
+      (SWIPE_THRESHOLD / SWIPE_RESISTANCE) * 2
+    );
+    simulateSwipe(el, -aboveThresholdDelta);
 
     expect(onReplyTo).toHaveBeenCalledOnce();
     expect(onReplyTo).toHaveBeenCalledWith(expect.objectContaining({ id: 42 }));
@@ -156,8 +164,11 @@ describe('SwipeReply — swipe-left to reply', () => {
     await expect.element(listItem).toBeInTheDocument();
 
     const el = listItem.element() as HTMLElement;
-    // Outgoing: resistance=0.65, threshold=30, so -200*0.65 = -130 (clamped to -90 by max), exceeds 30
-    simulateSwipe(el, -200);
+    // Raw delta chosen so effective distance = delta * SWIPE_RESISTANCE_OUTGOING exceeds SWIPE_THRESHOLD_OUTGOING
+    const aboveThresholdDeltaOutgoing = Math.ceil(
+      (SWIPE_THRESHOLD_OUTGOING / SWIPE_RESISTANCE_OUTGOING) * 2
+    );
+    simulateSwipe(el, -aboveThresholdDeltaOutgoing);
 
     expect(onReplyTo).toHaveBeenCalledOnce();
   });
@@ -170,8 +181,11 @@ describe('SwipeReply — swipe-left to reply', () => {
     await expect.element(listItem).toBeInTheDocument();
 
     const el = listItem.element() as HTMLElement;
-    // Swipe left only -30px (effective = -30 * 0.5 = -15, below threshold 40)
-    simulateSwipe(el, -30);
+    // Raw delta chosen so effective distance = delta * SWIPE_RESISTANCE < SWIPE_THRESHOLD
+    const belowThresholdDelta = Math.floor(
+      (SWIPE_THRESHOLD / SWIPE_RESISTANCE) * 0.5
+    );
+    simulateSwipe(el, -belowThresholdDelta);
 
     expect(onReplyTo).not.toHaveBeenCalled();
   });

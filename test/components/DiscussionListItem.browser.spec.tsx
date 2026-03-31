@@ -110,13 +110,14 @@ describe('DiscussionListItem — pin icon', () => {
       />
     );
 
-    // The Bookmark icon from react-feather renders an <svg> with class "w-3 h-3"
-    // inside the <h3> heading. Use getByRole('heading') to uniquely target it.
+    // The Bookmark icon renders as an <svg> inside the <h3> heading.
+    // Use getByRole('heading') to uniquely target it.
     const headingLocator = page.getByRole('heading', { name: 'Alice' });
     await expect.element(headingLocator).toBeInTheDocument();
 
     const heading = headingLocator.element() as HTMLElement;
-    const pinSvg = heading.querySelector('svg.w-3.h-3');
+    // Bookmark is the only SVG in the heading when pinned=true, mutedNotifications=false
+    const pinSvg = heading.querySelector('svg');
     expect(pinSvg).toBeTruthy();
   });
 
@@ -140,8 +141,8 @@ describe('DiscussionListItem — pin icon', () => {
 
     const heading = headingLocator.element() as HTMLElement;
 
-    // No pin SVG should exist inside the heading when not pinned
-    const pinSvg = heading.querySelector('svg.w-3.h-3');
+    // No SVGs should exist inside the heading when not pinned and not muted
+    const pinSvg = heading.querySelector('svg');
     expect(pinSvg).toBeNull();
   });
 

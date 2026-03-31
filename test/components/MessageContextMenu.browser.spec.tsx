@@ -16,8 +16,7 @@ vi.mock('react-i18next', () => ({
 import MessageContextMenu, {
   type MessageContextMenuItem,
 } from '../../src/components/ui/MessageContextMenu';
-
-const DEFAULT_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
+import { DEFAULT_EMOJIS } from '../../src/components/ui/constants';
 
 function makeItems(onClick?: () => void): MessageContextMenuItem[] {
   return [

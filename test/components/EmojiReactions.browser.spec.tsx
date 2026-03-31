@@ -156,7 +156,7 @@ describe('EmojiReactions', () => {
       expect(myReaction).toBeTruthy();
       expect(otherReaction).toBeTruthy();
 
-      // Own reaction should have the accent border class
+      // className check: no aria/data attribute distinguishes own reactions
       expect(myReaction!.className).toContain('border-accent');
       // Other reaction should have the default border class
       expect(otherReaction!.className).toContain('border-border');

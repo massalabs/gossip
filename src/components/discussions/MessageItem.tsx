@@ -41,15 +41,15 @@ import type { Contact } from '@massalabs/gossip-sdk';
 
 // Swipe gesture constants - base values for incoming messages
 const SWIPE_MAX_DISTANCE = 80;
-const SWIPE_RESISTANCE = 0.5;
-const SWIPE_THRESHOLD = 40;
+export const SWIPE_RESISTANCE = 0.5;
+export const SWIPE_THRESHOLD = 40;
 const SWIPE_INDICATOR_THRESHOLD = 8;
 const SWIPE_INDICATOR_MAX_WIDTH = 60;
 
 // Swipe gesture constants - more sensitive for outgoing (right-aligned) messages
 const SWIPE_MAX_DISTANCE_OUTGOING = 90;
-const SWIPE_RESISTANCE_OUTGOING = 0.65;
-const SWIPE_THRESHOLD_OUTGOING = 30;
+export const SWIPE_RESISTANCE_OUTGOING = 0.65;
+export const SWIPE_THRESHOLD_OUTGOING = 30;
 const SWIPE_INDICATOR_THRESHOLD_OUTGOING = 6;
 
 // Touch slop - prevents unintentional triggers when scrolling

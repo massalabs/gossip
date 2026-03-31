@@ -6,7 +6,10 @@ import { describe, it, expect, afterEach } from 'vitest';
 import React from 'react';
 import { render, cleanup } from 'vitest-browser-react';
 import toast, { Toaster } from 'react-hot-toast';
-import { toastOptions } from '../../src/utils/toastOptions';
+import {
+  toastOptions,
+  toasterContainerStyle,
+} from '../../src/utils/toastOptions';
 
 /** Helper: find the react-hot-toast container div (has role="region" or generated class). */
 function findToasterContainer(): HTMLElement | null {
@@ -38,7 +41,7 @@ describe('Toaster safe-area top offset', () => {
     render(
       <Toaster
         position="top-center"
-        containerStyle={{ top: 'var(--sat, 0px)' }}
+        containerStyle={toasterContainerStyle}
         toastOptions={toastOptions}
       />
     );
@@ -63,7 +66,7 @@ describe('Toaster safe-area top offset', () => {
     render(
       <Toaster
         position="top-center"
-        containerStyle={{ top: 'var(--sat, 0px)' }}
+        containerStyle={toasterContainerStyle}
         toastOptions={toastOptions}
       />
     );
@@ -86,7 +89,7 @@ describe('Toaster safe-area top offset', () => {
     render(
       <Toaster
         position="top-center"
-        containerStyle={{ top: 'var(--sat, 0px)' }}
+        containerStyle={toasterContainerStyle}
         toastOptions={toastOptions}
       />
     );
@@ -110,7 +113,7 @@ describe('Toaster safe-area top offset', () => {
     render(
       <Toaster
         position="top-center"
-        containerStyle={{ top: 'var(--sat, 0px)' }}
+        containerStyle={toasterContainerStyle}
         toastOptions={toastOptions}
       />
     );

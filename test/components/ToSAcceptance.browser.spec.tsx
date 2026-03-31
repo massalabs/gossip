@@ -30,6 +30,9 @@ function renderToS(onAccept: () => void) {
 
 /** Simulate scrolling the ToS div to the bottom */
 function scrollToBottom() {
+  // Class selector: the scrollable div has no testid or semantic role;
+  // overflow-y-auto is the only Tailwind class that uniquely identifies it
+  // in this component's DOM structure.
   const scrollDiv = document.querySelector(
     '.overflow-y-auto'
   ) as HTMLDivElement;
