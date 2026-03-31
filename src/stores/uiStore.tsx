@@ -2,7 +2,10 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { createSelectors } from './utils/createSelectors';
 import { STORAGE_KEYS } from '../utils/localStorage';
-import { resolveTheme } from '../utils/themeUtils';
+import {
+  applyResolvedThemeToDocument,
+  resolveTheme,
+} from '../utils/themeUtils';
 import i18n, { type SupportedLanguage } from '../i18n';
 
 export type Theme = 'light' | 'dark' | 'system';
@@ -40,7 +43,9 @@ const useUiStoreBase = create<UiStoreState>()(
       theme: 'system',
       resolvedTheme: resolveTheme('system'),
       setTheme: (theme: Theme) => {
-        set({ theme });
+        const resolved = resolveTheme(theme);
+        set({ theme, resolvedTheme: resolved });
+        applyResolvedThemeToDocument(resolved);
       },
       setResolvedTheme: (resolvedTheme: 'light' | 'dark') => {
         set({ resolvedTheme });
@@ -85,10 +90,24 @@ const useUiStoreBase = create<UiStoreState>()(
         showBottomNav: state.showBottomNav,
         language: state.language,
       }),
-      onRehydrateStorage: () => state => {
-        if (state?.language && state.language !== i18n.language) {
+      merge: (persistedState, currentState) => {
+        if (!persistedState || typeof persistedState !== 'object') {
+          return currentState;
+        }
+        const p = persistedState as Partial<UiStoreState>;
+        const theme = (p.theme ?? currentState.theme) as Theme;
+        return {
+          ...currentState,
+          ...p,
+          resolvedTheme: resolveTheme(theme),
+        };
+      },
+      onRehydrateStorage: () => (state, error) => {
+        if (error || !state) return;
+        if (state.language && state.language !== i18n.language) {
           i18n.changeLanguage(state.language);
         }
+        applyResolvedThemeToDocument(resolveTheme(state.theme));
       },
     }
   )
