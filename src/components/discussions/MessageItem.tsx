@@ -1,12 +1,13 @@
 import React, { useRef, useMemo, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Check as CheckIcon } from 'react-feather';
 import MessageContextMenu, {
   type ReactionGroup as ContextMenuReactionGroup,
 } from '../ui/MessageContextMenu';
 import EmojiPickerModal from '../ui/EmojiPickerModal';
 import ReactionBar from './ReactionBar';
 import MessageBubble from './MessageBubble';
+import SelectionCheckbox from './SelectionCheckbox';
+import MessageAvatar from './MessageAvatar';
 import {
   Message,
   MessageStatus,
@@ -15,7 +16,6 @@ import {
 } from '@massalabs/gossip-sdk';
 import { useMarkMessageAsRead } from '../../hooks/useMarkMessageAsRead';
 import { Capacitor } from '@capacitor/core';
-import ContactAvatar from '../avatar/ContactAvatar';
 import type { Contact } from '@massalabs/gossip-sdk';
 
 import { useSwipeToReply } from './hooks/useSwipeToReply';
@@ -265,13 +265,9 @@ const MessageItem: React.FC<MessageItemProps> = ({
           : undefined
       }
     >
-      {/* Selection checkbox */}
-      <div
-        className={`absolute left-1 top-0 bottom-0 flex items-center justify-center transition-opacity duration-200 ease-out ${
-          isSelecting && !isDeleted
-            ? 'opacity-100'
-            : 'opacity-0 pointer-events-none'
-        }`}
+      <SelectionCheckbox
+        isVisible={isSelecting && !isDeleted}
+        isSelected={isSelected}
         onClick={e => {
           e.stopPropagation();
           if (
@@ -283,33 +279,10 @@ const MessageItem: React.FC<MessageItemProps> = ({
           }
           if (!isDeleted && message.id != null) onToggleSelect?.(message.id);
         }}
-        data-testid="select-checkbox"
-      >
-        <div
-          className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors duration-150 ${
-            isSelected
-              ? 'bg-accent border-accent'
-              : 'border-muted-foreground/40 bg-transparent'
-          }`}
-        >
-          {isSelected && (
-            <CheckIcon
-              className="w-3 h-3 text-accent-foreground"
-              strokeWidth={3}
-            />
-          )}
-        </div>
-      </div>
+      />
 
-      {/* Incoming avatar */}
       {!isOutgoing && contact && (
-        <div className="w-8 shrink-0 ml-1">
-          {showAvatar ? (
-            <ContactAvatar contact={contact} size={8} />
-          ) : (
-            <div className="w-8 h-8" />
-          )}
-        </div>
+        <MessageAvatar contact={contact} showAvatar={showAvatar} />
       )}
 
       <MessageBubble
