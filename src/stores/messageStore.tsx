@@ -5,454 +5,27 @@ import {
   MessageStatus,
   MessageType,
   decodeUserId,
-  SdkEventType,
 } from '@massalabs/gossip-sdk';
 import { createSelectors } from './utils/createSelectors';
 import { useAccountStore } from './accountStore';
 import { getSdk } from './sdkStore';
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
+import type { MessageStoreState } from './messageStore.types';
+export type { ReactionGroup } from './messageStore.types';
 
-export interface ReactionGroup {
-  emoji: string;
-  count: number;
-  myReactionId?: number;
-  myReactionMessageId?: Uint8Array;
-}
-
-interface MessageStoreState {
-  messagesByContact: Map<string, Message[]>;
-  reactionsByContact: Map<string, Message[]>;
-  reactionGroupsCache: Map<string, ReactionGroup[]>;
-  currentContactUserId: string | null;
-  cleanupFn: (() => void) | null;
-  isInitializing: boolean;
-
-  init: () => Promise<void>;
-  setCurrentContact: (contactUserId: string | null) => void;
-  sendMessage: (
-    contactUserId: string,
-    content: string,
-    replyToId?: number,
-    forwardFromMessageId?: number
-  ) => Promise<void>;
-  getMessagesForContact: (contactUserId: string) => Message[];
-  getReactionsForMessage: (messageId: Uint8Array) => ReactionGroup[];
-  deleteMessage: (contactUserId: string, messageId: number) => Promise<void>;
-  editMessage: (
-    contactUserId: string,
-    messageId: number,
-    newContent: string
-  ) => Promise<void>;
-  reactToMessage: (
-    contactUserId: string,
-    emoji: string,
-    messageDbId: number
-  ) => Promise<void>;
-  removeReaction: (
-    reactionDbId: number | undefined,
-    reactionMessageId?: Uint8Array
-  ) => Promise<void>;
-  clearMessages: (contactUserId: string) => void;
-  cleanup: () => void;
-}
-
-// ---------------------------------------------------------------------------
-// Helpers — Uint8Array comparison
-// ---------------------------------------------------------------------------
-
-const messageIdEquals = (
-  a: Uint8Array | undefined,
-  b: Uint8Array | undefined
-): boolean => {
-  if (!a || !b || a.length !== b.length) return false;
-  return a.every((byte, i) => byte === b[i]);
-};
-
-const messageIdKey = (id: Uint8Array): string => id.join(',');
-
-const EMPTY_MESSAGES: Message[] = [];
-const EMPTY_REACTIONS: ReactionGroup[] = [];
-
-// ---------------------------------------------------------------------------
-// Helpers — immutable Map updates
-// ---------------------------------------------------------------------------
-
-/** Update one contact's messages, keeping stable refs for others. */
-function patchContact(
-  map: Map<string, Message[]>,
-  contactId: string,
-  updater: (msgs: Message[]) => Message[] | null
-): Map<string, Message[]> | null {
-  const updated = updater(map.get(contactId) || []);
-  if (updated === null) return null;
-  const next = new Map(map);
-  next.set(contactId, updated);
-  return next;
-}
-
-/** Find a message across all contacts and patch it (early return). */
-function findAndPatch(
-  map: Map<string, Message[]>,
-  predicate: (m: Message) => boolean,
-  patch: (m: Message) => Message
-): Map<string, Message[]> | null {
-  for (const [contact, msgs] of map) {
-    const idx = msgs.findIndex(predicate);
-    if (idx >= 0) {
-      const next = new Map(map);
-      const updated = [...msgs];
-      updated[idx] = patch(msgs[idx]);
-      next.set(contact, updated);
-      return next;
-    }
-  }
-  return null;
-}
-
-/** Upsert a message into a contact's list: update by messageId/id, or append. */
-function upsertMessage(msgs: Message[], message: Message): Message[] {
-  if (message.messageId) {
-    const idx = msgs.findIndex(m =>
-      messageIdEquals(m.messageId, message.messageId)
-    );
-    if (idx >= 0) {
-      const updated = [...msgs];
-      updated[idx] = {
-        ...msgs[idx],
-        ...message,
-        id: msgs[idx].id || message.id,
-      };
-      return updated;
-    }
-  }
-  if (message.id) {
-    const idx = msgs.findIndex(m => m.id === message.id);
-    if (idx >= 0) {
-      const updated = [...msgs];
-      updated[idx] = { ...msgs[idx], ...message };
-      return updated;
-    }
-  }
-  return [...msgs, message];
-}
-
-// ---------------------------------------------------------------------------
-// Helpers — reaction groups cache
-// ---------------------------------------------------------------------------
-
-function computeReactionGroups(
-  reactions: Message[],
-  messages: Message[]
-): Map<string, ReactionGroup[]> {
-  const msgIdSet = new Set<string>();
-  for (const m of messages) {
-    if (m.messageId) msgIdSet.add(messageIdKey(m.messageId));
-  }
-
-  const latestByTarget = new Map<
-    string,
-    { incoming?: Message; outgoing?: Message }
-  >();
-  for (const r of reactions) {
-    const targetId = r.reactionOf?.originalMsgId;
-    if (!targetId) continue;
-    const key = messageIdKey(targetId);
-    if (!msgIdSet.has(key)) continue;
-
-    const entry = latestByTarget.get(key) ?? {};
-    if (r.direction === MessageDirection.OUTGOING) {
-      if (!entry.outgoing || r.timestamp > entry.outgoing.timestamp)
-        entry.outgoing = r;
-    } else {
-      if (!entry.incoming || r.timestamp > entry.incoming.timestamp)
-        entry.incoming = r;
-    }
-    latestByTarget.set(key, entry);
-  }
-
-  const result = new Map<string, ReactionGroup[]>();
-  for (const [key, { incoming, outgoing }] of latestByTarget) {
-    const groups = new Map<string, ReactionGroup>();
-    for (const r of [incoming, outgoing]) {
-      if (!r) continue;
-      const isMine = r.direction === MessageDirection.OUTGOING;
-      const existing = groups.get(r.content) ?? { emoji: r.content, count: 0 };
-      groups.set(r.content, {
-        ...existing,
-        count: existing.count + 1,
-        myReactionId: isMine && r.id != null ? r.id : existing.myReactionId,
-        myReactionMessageId:
-          isMine && r.messageId ? r.messageId : existing.myReactionMessageId,
-      });
-    }
-    result.set(key, Array.from(groups.values()));
-  }
-  return result;
-}
-
-function patchReactionCache(
-  cache: Map<string, ReactionGroup[]>,
-  contactId: string,
-  messagesByContact: Map<string, Message[]>,
-  reactionsByContact: Map<string, Message[]>
-): Map<string, ReactionGroup[]> {
-  const messages = messagesByContact.get(contactId) || [];
-  const reactions = reactionsByContact.get(contactId) || [];
-  const next = new Map(cache);
-  for (const m of messages) {
-    if (m.messageId) next.delete(messageIdKey(m.messageId));
-  }
-  for (const [key, value] of computeReactionGroups(reactions, messages)) {
-    next.set(key, value);
-  }
-  return next;
-}
-
-function recomputeFullCache(
-  messagesByContact: Map<string, Message[]>,
-  reactionsByContact: Map<string, Message[]>
-): Map<string, ReactionGroup[]> {
-  const cache = new Map<string, ReactionGroup[]>();
-  for (const [contact, reactions] of reactionsByContact) {
-    const messages = messagesByContact.get(contact) || [];
-    for (const [key, value] of computeReactionGroups(reactions, messages)) {
-      cache.set(key, value);
-    }
-  }
-  return cache;
-}
-
-// ---------------------------------------------------------------------------
-// Helpers — optimistic mutation with rollback
-// ---------------------------------------------------------------------------
-
-type SetFn = (
-  fn: (state: MessageStoreState) => Partial<MessageStoreState>
-) => void;
-
-/** Apply optimistic mutation, run SDK call, rollback on failure. */
-async function optimisticMutation(
-  set: SetFn,
-  apply: () => void,
-  persist: () => Promise<boolean>,
-  rollback: () => void
-) {
-  apply();
-  try {
-    const ok = await persist();
-    if (!ok) rollback();
-  } catch {
-    rollback();
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Helpers — reaction state updates (shared by onOptimistic + onReceived)
-// ---------------------------------------------------------------------------
-
-function addReactionToState(
-  set: SetFn,
-  contact: string,
-  message: Message,
-  deduplicate: boolean
-) {
-  set(state => {
-    const existing = state.reactionsByContact.get(contact) || [];
-    if (
-      deduplicate &&
-      message.messageId &&
-      existing.some(m => messageIdEquals(m.messageId, message.messageId))
-    ) {
-      return state;
-    }
-    const rxnMap = new Map(state.reactionsByContact);
-    rxnMap.set(contact, [...existing, message]);
-    return {
-      reactionsByContact: rxnMap,
-      reactionGroupsCache: patchReactionCache(
-        state.reactionGroupsCache,
-        contact,
-        state.messagesByContact,
-        rxnMap
-      ),
-    };
-  });
-}
-
-function removeReactionFromState(
-  set: SetFn,
-  contact: string,
-  predicate: (r: Message) => boolean
-): boolean {
-  let found = false;
-  set(state => {
-    const existing = state.reactionsByContact.get(contact) || [];
-    if (!existing.some(predicate)) return state;
-    found = true;
-    const rxnMap = new Map(state.reactionsByContact);
-    rxnMap.set(
-      contact,
-      existing.filter(r => !predicate(r))
-    );
-    return {
-      reactionsByContact: rxnMap,
-      reactionGroupsCache: patchReactionCache(
-        state.reactionGroupsCache,
-        contact,
-        state.messagesByContact,
-        rxnMap
-      ),
-    };
-  });
-  return found;
-}
-
-// ---------------------------------------------------------------------------
-// Event handlers
-// ---------------------------------------------------------------------------
-
-type GetFn = () => MessageStoreState;
-
-function createEventHandlers(
-  sdk: ReturnType<typeof getSdk>,
-  set: SetFn,
-  get: GetFn
-) {
-  const onOptimistic = (message: Message) => {
-    if (message.type === MessageType.REACTION) {
-      addReactionToState(set, message.contactUserId, message, false);
-      return;
-    }
-    set(state => {
-      const map = patchContact(
-        state.messagesByContact,
-        message.contactUserId,
-        msgs => [...msgs, message]
-      );
-      return map ? { messagesByContact: map } : state;
-    });
-  };
-
-  const onReceived = (message: Message) => {
-    if (message.type === MessageType.REACTION) {
-      addReactionToState(set, message.contactUserId, message, true);
-      return;
-    }
-
-    // Reaction deletion: remove from reactionsByContact if messageId matches
-    if (message.type === MessageType.DELETED && message.messageId) {
-      const removed = removeReactionFromState(set, message.contactUserId, r =>
-        messageIdEquals(r.messageId, message.messageId)
-      );
-      if (removed) return;
-    }
-
-    // Regular message: upsert
-    set(state => {
-      const map = patchContact(
-        state.messagesByContact,
-        message.contactUserId,
-        msgs => upsertMessage(msgs, message)
-      );
-      return map ? { messagesByContact: map } : state;
-    });
-  };
-
-  const onSent = (message: Message) => {
-    set(state => {
-      const map = patchContact(
-        state.messagesByContact,
-        message.contactUserId,
-        msgs => {
-          let changed = false;
-          const updated = msgs.map(m => {
-            if (messageIdEquals(m.messageId, message.messageId)) {
-              changed = true;
-              return { ...m, id: message.id ?? m.id, status: message.status };
-            }
-            return m;
-          });
-          return changed ? updated : null;
-        }
-      );
-      return map ? { messagesByContact: map } : state;
-    });
-  };
-
-  const onWriteFailed = (
-    failedMessageId: Uint8Array | undefined,
-    entityType: string
-  ) => {
-    if (entityType !== 'message') return;
-    set(state => {
-      const map = findAndPatch(
-        state.messagesByContact,
-        m => messageIdEquals(m.messageId, failedMessageId),
-        m => ({ ...m, status: MessageStatus.FAILED })
-      );
-      return map ? { messagesByContact: map } : state;
-    });
-  };
-
-  const onRead = (messageDbId: number) => {
-    set(state => {
-      const map = findAndPatch(
-        state.messagesByContact,
-        m => m.id === messageDbId,
-        m => ({ ...m, status: MessageStatus.READ })
-      );
-      return map ? { messagesByContact: map } : state;
-    });
-  };
-
-  const onSessionEvent = async () => {
-    const currentContact = get().currentContactUserId;
-    if (!currentContact || !sdk.isSessionOpen) return;
-    try {
-      const messages = await sdk.messages.getVisibleMessages(currentContact);
-      const reactions = await sdk.messages.getReactions(currentContact);
-      set(state => {
-        const msgMap = new Map(state.messagesByContact);
-        const rxnMap = new Map(state.reactionsByContact);
-        msgMap.set(currentContact, messages);
-        if (reactions.length > 0) rxnMap.set(currentContact, reactions);
-        else rxnMap.delete(currentContact);
-        return {
-          messagesByContact: msgMap,
-          reactionsByContact: rxnMap,
-          reactionGroupsCache: recomputeFullCache(msgMap, rxnMap),
-        };
-      });
-    } catch (error) {
-      console.error('Session event refetch error:', error);
-    }
-  };
-
-  sdk.on(SdkEventType.MESSAGE_OPTIMISTIC, onOptimistic);
-  sdk.on(SdkEventType.MESSAGE_RECEIVED, onReceived);
-  sdk.on(SdkEventType.MESSAGE_SENT, onSent);
-  sdk.on(SdkEventType.MESSAGE_READ, onRead);
-  sdk.on(SdkEventType.WRITE_FAILED, onWriteFailed);
-  sdk.on(SdkEventType.SESSION_CREATED, onSessionEvent);
-  sdk.on(SdkEventType.SESSION_ACCEPTED, onSessionEvent);
-
-  return () => {
-    try {
-      sdk.off(SdkEventType.MESSAGE_OPTIMISTIC, onOptimistic);
-      sdk.off(SdkEventType.MESSAGE_RECEIVED, onReceived);
-      sdk.off(SdkEventType.MESSAGE_SENT, onSent);
-      sdk.off(SdkEventType.MESSAGE_READ, onRead);
-      sdk.off(SdkEventType.WRITE_FAILED, onWriteFailed);
-      sdk.off(SdkEventType.SESSION_CREATED, onSessionEvent);
-      sdk.off(SdkEventType.SESSION_ACCEPTED, onSessionEvent);
-    } catch {
-      // SDK might not be available during cleanup
-    }
-  };
-}
+import {
+  messageIdEquals,
+  messageIdKey,
+  patchContact,
+  EMPTY_MESSAGES,
+  EMPTY_REACTIONS,
+  recomputeFullCache,
+  optimisticMutation,
+  rollbackInsert,
+  rollbackReplace,
+  removeReactionFromState,
+} from './messageStore.helpers';
+import { createEventHandlers } from './messageStore.events';
 
 // ---------------------------------------------------------------------------
 // Store
@@ -642,7 +215,6 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
     ).find(m => m.id === messageDbId);
     if (!target?.messageId) return;
 
-    // Check for existing outgoing reaction on this message
     const existing = (
       get().reactionsByContact.get(contactUserId) || EMPTY_MESSAGES
     ).find(
@@ -653,16 +225,13 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
     );
 
     if (existing) {
-      // Same emoji → toggle off
       if (existing.content === emoji) {
         get().removeReaction(existing.id, existing.messageId);
         return;
       }
-      // Different emoji → swap (both fire-and-forget for instant swap)
       get().removeReaction(existing.id, existing.messageId);
     }
 
-    // Add new reaction via sendOptimistic pipeline
     getSdk().messages.sendOptimistic({
       ownerUserId: useAccountStore.getState().userProfile?.userId ?? '',
       contactUserId,
@@ -681,7 +250,6 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
         ? messageIdEquals(r.messageId, reactionMessageId)
         : r.id === reactionDbId;
 
-    // Optimistic: find contact and remove reaction from state
     let matchedContact: string | null = null;
     for (const [contact] of get().reactionsByContact) {
       if (removeReactionFromState(set, contact, match)) {
@@ -690,7 +258,6 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
       }
     }
 
-    // Persist: resolve dbId and send delete control message
     const sdk = getSdk();
     let dbId = reactionDbId;
     if (!dbId && reactionMessageId && matchedContact) {
@@ -735,34 +302,5 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
     });
   },
 }));
-
-// ---------------------------------------------------------------------------
-// Helpers — rollback (need store type, defined after store)
-// ---------------------------------------------------------------------------
-
-function rollbackInsert(set: SetFn, contactUserId: string, message: Message) {
-  set(state => {
-    const map = patchContact(state.messagesByContact, contactUserId, msgs =>
-      [...msgs, message].sort(
-        (a, b) => a.timestamp.getTime() - b.timestamp.getTime()
-      )
-    );
-    return map ? { messagesByContact: map } : state;
-  });
-}
-
-function rollbackReplace(
-  set: SetFn,
-  contactUserId: string,
-  messageId: number,
-  original: Message
-) {
-  set(state => {
-    const map = patchContact(state.messagesByContact, contactUserId, msgs =>
-      msgs.map(m => (m.id === messageId ? original : m))
-    );
-    return map ? { messagesByContact: map } : state;
-  });
-}
 
 export const useMessageStore = createSelectors(useMessageStoreBase);
