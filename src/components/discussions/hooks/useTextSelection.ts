@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { Capacitor } from '@capacitor/core';
 
 interface UseTextSelectionOptions {
-  bubbleRef: React.RefObject<HTMLDivElement>;
+  bubbleRef: React.RefObject<HTMLDivElement | null>;
   contextMenuOpenRef: React.MutableRefObject<boolean>;
 }
 

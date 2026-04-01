@@ -13,7 +13,7 @@ interface UseContextMenuOptions {
   isOutgoing: boolean;
   isDeleted: boolean;
   isSelecting: boolean;
-  bubbleRef: React.RefObject<HTMLDivElement>;
+  bubbleRef: React.RefObject<HTMLDivElement | null>;
   contextMenuOpenRef: React.MutableRefObject<boolean>;
   longPress: ReturnType<typeof useLongPress>;
   onReplyTo?: (message: Message) => void;

@@ -324,6 +324,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
           contextMenu.closeContextMenu();
         }}
       />
+
       <EmojiPickerModal
         isOpen={contextMenu.isEmojiPickerOpen}
         onClose={() => contextMenu.setIsEmojiPickerOpen(false)}
