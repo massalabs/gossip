@@ -667,8 +667,10 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
         ? messageIdEquals(r.messageId, reactionMessageId)
         : r.id === reactionDbId;
 
+    let matchedContact: string | null = null;
     for (const [contact, rxns] of get().reactionsByContact) {
       if (rxns.some(match)) {
+        matchedContact = contact;
         set(state => {
           const existing = state.reactionsByContact.get(contact) || [];
           const rxnMap = new Map(state.reactionsByContact);
@@ -690,9 +692,22 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
       }
     }
 
-    // Persist: delete from DB (need dbId for SDK call)
-    if (reactionDbId) {
-      await getSdk().messages.deleteMessage(reactionDbId);
+    // Persist: delete from DB + send control message to peer
+    const sdk = getSdk();
+    let dbId = reactionDbId;
+    if (!dbId && reactionMessageId && matchedContact) {
+      const ownerUserId = useAccountStore.getState().userProfile?.userId;
+      if (ownerUserId) {
+        const found = await sdk.messages.findMessageByMsgId(
+          reactionMessageId,
+          ownerUserId,
+          matchedContact
+        );
+        dbId = found?.id;
+      }
+    }
+    if (dbId) {
+      await sdk.messages.deleteMessage(dbId);
     }
   },
 
