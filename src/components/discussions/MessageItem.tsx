@@ -1,36 +1,29 @@
 import React, { useRef, useMemo, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { CornerUpLeft, ChevronDown, Check as CheckIcon } from 'react-feather';
+import { Check as CheckIcon } from 'react-feather';
 import MessageContextMenu, {
   type ReactionGroup as ContextMenuReactionGroup,
 } from '../ui/MessageContextMenu';
 import EmojiPickerModal from '../ui/EmojiPickerModal';
 import ReactionBar from './ReactionBar';
-import CitedMessage from './CitedMessage';
-import MessageStatusIndicator from './MessageStatus';
+import MessageBubble from './MessageBubble';
 import {
   Message,
   MessageStatus,
   MessageDirection,
   MessageType,
 } from '@massalabs/gossip-sdk';
-import { parseLinks, openUrl } from '../../utils/linkUtils';
 import { useMarkMessageAsRead } from '../../hooks/useMarkMessageAsRead';
 import { Capacitor } from '@capacitor/core';
 import ContactAvatar from '../avatar/ContactAvatar';
 import type { Contact } from '@massalabs/gossip-sdk';
 
-import {
-  useSwipeToReply,
-  SWIPE_THRESHOLD,
-  SWIPE_THRESHOLD_OUTGOING,
-} from './hooks/useSwipeToReply';
+import { useSwipeToReply } from './hooks/useSwipeToReply';
 import { useContextMenu } from './hooks/useContextMenu';
 import { useTextSelection } from './hooks/useTextSelection';
 import { useOriginalMessage } from './hooks/useOriginalMessage';
 import { useLongPress } from '../../hooks/useLongPress';
 
-const SWIPE_INDICATOR_MAX_WIDTH = 60;
 const POST_GESTURE_SUPPRESS_MS = 700;
 
 // ---------------------------------------------------------------------------
@@ -67,43 +60,6 @@ interface MessageItemProps {
 // ---------------------------------------------------------------------------
 // Shared link renderer (reply/forward/content all use same pattern)
 // ---------------------------------------------------------------------------
-
-function LinkText({
-  segments,
-  onLinkClick,
-  linkAriaLabel,
-}: {
-  segments: ReturnType<typeof parseLinks>;
-  onLinkClick: (e: React.MouseEvent<HTMLAnchorElement>) => void;
-  linkAriaLabel: (content: string) => string;
-}) {
-  return (
-    <>
-      {segments.map((segment, index) => {
-        if (segment.type === 'link') {
-          return (
-            <a
-              key={index}
-              href={segment.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={onLinkClick}
-              aria-label={linkAriaLabel(segment.content)}
-              className="underline hover:opacity-80 transition-opacity break-all cursor-pointer"
-              style={{
-                textDecorationColor: 'currentColor',
-                textDecorationThickness: '1px',
-              }}
-            >
-              {segment.content}
-            </a>
-          );
-        }
-        return <span key={index}>{segment.content}</span>;
-      })}
-    </>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Component
@@ -221,27 +177,6 @@ const MessageItem: React.FC<MessageItemProps> = ({
   });
 
   const original = useOriginalMessage({ message, onScrollToMessage });
-
-  // Parsed links for content
-  const parsedLinks = useMemo(
-    () => parseLinks(message.content),
-    [message.content]
-  );
-
-  const handleLinkClick = useCallback(
-    (e: React.MouseEvent<HTMLAnchorElement>) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const url = e.currentTarget.href;
-      if (url) openUrl(url);
-    },
-    []
-  );
-
-  const linkAriaLabel = useCallback(
-    (content: string) => t('message_item.link_opens_new_tab', { content }),
-    [t]
-  );
 
   // Bubble click
   const handleBubbleClick = useCallback(
@@ -377,130 +312,29 @@ const MessageItem: React.FC<MessageItemProps> = ({
         </div>
       )}
 
-      {/* Bubble */}
-      <div
-        ref={combinedBubbleRef}
-        className={`relative max-w-[80%] sm:max-w-[70%] md:max-w-[65%] lg:max-w-[60%] ${reactions.length > 1 ? 'min-w-[8rem]' : ''} px-3.5 py-3 font-normal text-[15px] leading-tight ${textSelection.isTextSelectable ? 'select-text' : 'select-none'} ${borderRadiusClass} ${
-          isOutgoing
-            ? 'ml-auto mr-3 bg-accent text-accent-foreground'
-            : `${contact ? '' : 'ml-3'} mr-auto bg-surface-secondary text-card-foreground`
-        } ${!isDeleted && canReply ? 'cursor-pointer focus:outline-none' : ''} ${
-          contextMenu.isContextMenuOpen
-            ? 'ring-2 ring-accent shadow-lg brightness-105'
-            : ''
-        } ${isDeleted ? 'opacity-80' : ''}`}
+      <MessageBubble
+        message={message}
+        bubbleRef={combinedBubbleRef}
+        isOutgoing={isOutgoing}
+        isDeleted={isDeleted}
+        isEdited={isEdited}
+        isSending={isSending}
+        showTimestamp={showTimestamp}
+        isTextSelectable={textSelection.isTextSelectable}
+        isContextMenuOpen={contextMenu.isContextMenuOpen}
+        canReply={canReply}
+        hasContact={!!contact}
+        hasMultipleReactions={reactions.length > 1}
+        borderRadiusClass={borderRadiusClass}
+        swipeOffset={swipe.swipeOffset}
+        isAnimatingBack={swipe.isAnimatingBack}
+        indicatorThreshold={swipe.indicatorThreshold}
+        original={original}
         onClick={handleBubbleClick}
         onKeyDown={handleKeyDown}
-        role={isDeleted ? undefined : 'button'}
-        aria-label={isDeleted ? undefined : t('message_item.double_tap_reply')}
-        style={{
-          transform:
-            swipe.swipeOffset !== 0
-              ? `translateX(${swipe.swipeOffset}px)`
-              : 'translateX(0)',
-          transition: swipe.isAnimatingBack
-            ? 'transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), border-radius 0.3s ease-out'
-            : 'border-radius 0.3s ease-out',
-        }}
-      >
-        {/* Swipe reply indicator */}
-        {-swipe.swipeOffset > swipe.indicatorThreshold && canReply && (
-          <div
-            className={`absolute right-0 top-0 bottom-0 flex items-center justify-center ${isOutgoing ? 'bg-accent/20' : 'bg-card/20'} rounded-r-2xl`}
-            style={{
-              width: `${Math.min(-swipe.swipeOffset, SWIPE_INDICATOR_MAX_WIDTH)}px`,
-              opacity: Math.min(
-                -swipe.swipeOffset / SWIPE_INDICATOR_MAX_WIDTH,
-                1
-              ),
-              transition: swipe.isAnimatingBack ? 'all 0.3s ease-out' : 'none',
-            }}
-            aria-hidden="true"
-          >
-            <CornerUpLeft
-              className={`w-5 h-5 text-muted-foreground transition-transform ${
-                -swipe.swipeOffset >=
-                (isOutgoing ? SWIPE_THRESHOLD_OUTGOING : SWIPE_THRESHOLD)
-                  ? 'scale-110'
-                  : 'scale-100'
-              }`}
-              aria-hidden="true"
-            />
-          </div>
-        )}
-
-        {/* Reply context */}
-        {message.replyTo && (
-          <CitedMessage
-            isOutgoing={isOutgoing}
-            original={original}
-            variant="reply"
-            onLinkClick={handleLinkClick}
-            linkAriaLabel={linkAriaLabel}
-          />
-        )}
-
-        {/* Forward context */}
-        {message.forwardOf && (
-          <CitedMessage
-            isOutgoing={isOutgoing}
-            original={original}
-            variant="forward"
-            fallbackContent={message.forwardOf.originalContent}
-            onLinkClick={handleLinkClick}
-            linkAriaLabel={linkAriaLabel}
-          />
-        )}
-
-        {/* Content */}
-        {isDeleted ? (
-          <p className="whitespace-pre-wrap wrap-break-word italic text-muted-foreground text-[13px]">
-            {t('message_item.deleted')}
-            {showTimestamp && (
-              <span className="inline-block w-10" aria-hidden="true" />
-            )}
-          </p>
-        ) : (
-          <p className="whitespace-pre-wrap wrap-break-word">
-            <LinkText
-              segments={parsedLinks}
-              onLinkClick={handleLinkClick}
-              linkAriaLabel={linkAriaLabel}
-            />
-            {(showTimestamp || (!isDeleted && (isOutgoing || isEdited))) && (
-              <span
-                className={`inline-block ${isOutgoing ? 'w-16' : 'w-10'}`}
-                aria-hidden="true"
-              />
-            )}
-          </p>
-        )}
-
-        <MessageStatusIndicator
-          status={message.status}
-          timestamp={message.timestamp}
-          isOutgoing={isOutgoing}
-          isDeleted={isDeleted}
-          isEdited={isEdited}
-          isSending={isSending}
-          showTimestamp={showTimestamp}
-        />
-
-        {/* Desktop context menu arrow */}
-        {!isSelecting && !isDeleted && (
-          <button
-            type="button"
-            onClick={e => {
-              e.stopPropagation();
-              contextMenu.openContextMenu();
-            }}
-            className="absolute top-1.5 right-2 p-0.5 opacity-0 group-hover:opacity-100 transition-opacity hidden md:flex items-center justify-center"
-            aria-label={t('message_item.actions_menu')}
-          >
-            <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
-          </button>
-        )}
-      </div>
+        openContextMenu={contextMenu.openContextMenu}
+        isSelecting={isSelecting}
+      />
 
       <ReactionBar
         reactions={reactions}
