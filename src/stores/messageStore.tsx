@@ -162,11 +162,7 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
       },
       { optimistic: true }
     );
-    if (!(result as { success: boolean; error?: string }).success)
-      console.error(
-        'Failed to send message:',
-        (result as { error?: string }).error
-      );
+    if (!result.success) console.error('Failed to send message:', result.error);
   },
 
   getMessagesForContact: contactUserId =>
