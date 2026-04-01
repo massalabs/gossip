@@ -1,5 +1,4 @@
 import React, { useCallback, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Virtualizer } from 'virtua';
 import toast from 'react-hot-toast';
@@ -10,7 +9,6 @@ import {
   DiscussionFilter,
   useDiscussionStore,
 } from '../../stores/discussionStore';
-import { ROUTES } from '../../constants/routes';
 
 import EmptyDiscussions from './EmptyDiscussions';
 import DiscussionListItem from './DiscussionListItem';
@@ -95,7 +93,6 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
   filter = 'all',
 }) => {
   const { t } = useTranslation('discussions');
-  const navigate = useNavigate();
   const gossip = useGossipSdk();
   const scrollRef = useRef<HTMLElement | null>(null);
   scrollRef.current = scrollParent;
@@ -137,9 +134,8 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
   const handleAccept = useCallback(
     async (discussion: Discussion, newName?: string) => {
       await handleAcceptDiscussionRequest(discussion, newName);
-      navigate(ROUTES.discussion({ userId: discussion.contactUserId }));
     },
-    [handleAcceptDiscussionRequest, navigate]
+    [handleAcceptDiscussionRequest]
   );
 
   const handleRefuse = useCallback(

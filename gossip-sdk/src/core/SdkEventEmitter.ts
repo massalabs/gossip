@@ -29,7 +29,9 @@ export enum SdkEventType {
 }
 
 export interface SdkEventHandlers {
-  [SdkEventType.MESSAGE_RECEIVED]: (message: Message) => void;
+  [SdkEventType.MESSAGE_RECEIVED]: (
+    message: Omit<Message, 'id'> & { id?: number }
+  ) => void;
   [SdkEventType.MESSAGE_SENT]: (message: Message) => void;
   [SdkEventType.MESSAGE_READ]: (messageId: number) => void;
   [SdkEventType.MESSAGE_FAILED]: (message: Message, error: Error) => void;

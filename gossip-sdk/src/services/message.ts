@@ -260,8 +260,7 @@ export class MessageService {
   private emitMessageReceived(
     message: Omit<Message, 'id'> & { id?: number }
   ): void {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    this.eventEmitter.emit(SdkEventType.MESSAGE_RECEIVED, message as any);
+    this.eventEmitter.emit(SdkEventType.MESSAGE_RECEIVED, message);
   }
 
   constructor(
