@@ -594,11 +594,59 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
       console.warn('Cannot react to message without messageId');
       return;
     }
-    await getSdk().messages.sendReaction(
+
+    // Optimistic: add reaction to state immediately
+    const optimisticReaction: Message = {
+      ownerUserId: useAccountStore.getState().userProfile?.userId ?? '',
       contactUserId,
-      emoji,
-      target.messageId
-    );
+      content: emoji,
+      type: MessageType.REACTION,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.WAITING_SESSION,
+      timestamp: new Date(),
+      reactionOf: { originalMsgId: target.messageId },
+    };
+    set(state => {
+      const existing = state.reactionsByContact.get(contactUserId) || [];
+      const rxnMap = new Map(state.reactionsByContact);
+      rxnMap.set(contactUserId, [...existing, optimisticReaction]);
+      return {
+        reactionsByContact: rxnMap,
+        reactionGroupsCache: patchReactionCache(
+          state.reactionGroupsCache,
+          contactUserId,
+          state.messagesByContact,
+          rxnMap
+        ),
+      };
+    });
+
+    try {
+      await getSdk().messages.sendReaction(
+        contactUserId,
+        emoji,
+        target.messageId
+      );
+    } catch {
+      // Rollback: remove optimistic reaction
+      set(state => {
+        const existing = state.reactionsByContact.get(contactUserId) || [];
+        const rxnMap = new Map(state.reactionsByContact);
+        rxnMap.set(
+          contactUserId,
+          existing.filter(r => r !== optimisticReaction)
+        );
+        return {
+          reactionsByContact: rxnMap,
+          reactionGroupsCache: patchReactionCache(
+            state.reactionGroupsCache,
+            contactUserId,
+            state.messagesByContact,
+            rxnMap
+          ),
+        };
+      });
+    }
   },
 
   removeReaction: async reactionDbId => {
