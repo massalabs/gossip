@@ -10,6 +10,7 @@ import {
   setApiBaseUrlForBackgroundSync,
   syncBackgroundSyncPresetToRunner,
 } from '../utils/preferences';
+import { logSyncDiagnostics } from '../utils/syncDiagnostics';
 import { protocolConfig } from '../config/protocol';
 import { Capacitor } from '@capacitor/core';
 import { networkObserverService } from './networkObserver';
@@ -146,6 +147,9 @@ async function initializeBackgroundSync(): Promise<void> {
     // The background runner can't access import.meta.env, so we persist it via Preferences
     await setApiBaseUrlForBackgroundSync(protocolConfig.baseUrl);
     await syncBackgroundSyncPresetToRunner();
+    logSyncDiagnostics('Background sync preferences initialized', {
+      baseUrl: protocolConfig.baseUrl,
+    });
 
     // Request notification permission
     await notificationService.requestPermission();
