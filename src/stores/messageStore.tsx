@@ -164,6 +164,8 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
         set({ messagesByContact: msgMap, reactionsByContact: rxnMap });
       } catch (error) {
         console.error('Messages initial load error:', error);
+        set({ isInitializing: false });
+        return;
       }
     }
 
@@ -255,18 +257,6 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
       });
     };
 
-    const onWriteConfirmed = (dbId: number, entityType: string) => {
-      if (entityType !== 'message') return;
-      set(state => {
-        const map = findAndPatch(
-          state.messagesByContact,
-          m => !m.id && m.direction === MessageDirection.OUTGOING,
-          m => ({ ...m, id: dbId })
-        );
-        return map ? { messagesByContact: map } : state;
-      });
-    };
-
     const onWriteFailed = (
       failedMessageId: Uint8Array | undefined,
       entityType: string
@@ -316,7 +306,6 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
     sdk.on(SdkEventType.MESSAGE_RECEIVED, onReceived);
     sdk.on(SdkEventType.MESSAGE_SENT, onSent);
     sdk.on(SdkEventType.MESSAGE_READ, onRead);
-    sdk.on(SdkEventType.WRITE_CONFIRMED, onWriteConfirmed);
     sdk.on(SdkEventType.WRITE_FAILED, onWriteFailed);
     sdk.on(SdkEventType.SESSION_CREATED, onSessionEvent);
     sdk.on(SdkEventType.SESSION_ACCEPTED, onSessionEvent);
@@ -327,7 +316,6 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
         sdk.off(SdkEventType.MESSAGE_RECEIVED, onReceived);
         sdk.off(SdkEventType.MESSAGE_SENT, onSent);
         sdk.off(SdkEventType.MESSAGE_READ, onRead);
-        sdk.off(SdkEventType.WRITE_CONFIRMED, onWriteConfirmed);
         sdk.off(SdkEventType.WRITE_FAILED, onWriteFailed);
         sdk.off(SdkEventType.SESSION_CREATED, onSessionEvent);
         sdk.off(SdkEventType.SESSION_ACCEPTED, onSessionEvent);

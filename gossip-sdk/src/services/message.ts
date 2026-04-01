@@ -746,7 +746,12 @@ export class MessageService {
 
       storedIds.push(id);
 
-      this.eventEmitter.emit(SdkEventType.WRITE_CONFIRMED, id, 'message');
+      this.eventEmitter.emit(
+        SdkEventType.WRITE_CONFIRMED,
+        id,
+        'message',
+        message.messageId
+      );
     }
 
     return storedIds;
@@ -1413,7 +1418,8 @@ export class MessageService {
           this.eventEmitter.emit(
             SdkEventType.WRITE_CONFIRMED,
             result.message.id!,
-            'message'
+            'message',
+            randomMessageId
           );
         } else {
           this.eventEmitter.emit(

@@ -49,7 +49,8 @@ export interface SdkEventHandlers {
   [SdkEventType.DISCUSSION_UPDATED]: (contactUserId: string) => void;
   [SdkEventType.WRITE_CONFIRMED]: (
     id: number,
-    entityType: 'message' | 'discussion' | 'contact'
+    entityType: 'message' | 'discussion' | 'contact',
+    messageId?: Uint8Array
   ) => void;
   [SdkEventType.WRITE_FAILED]: (
     messageId: Uint8Array | undefined,

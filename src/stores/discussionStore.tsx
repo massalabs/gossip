@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import {
   Contact,
+  MessageType,
   SessionStatus,
   SdkEventType,
   SELF_CONTACT_ID,
@@ -168,6 +169,12 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
 
     // Optimistic: update lastMessages immediately on outgoing/incoming messages
     const onMessageEvent = (message: Message) => {
+      if (
+        message.type === MessageType.REACTION ||
+        message.type === MessageType.KEEP_ALIVE ||
+        message.type === MessageType.RETENTION_POLICY
+      )
+        return;
       set(state => {
         const lastMessages = new Map(state.lastMessages);
         lastMessages.set(message.contactUserId, {
