@@ -366,9 +366,7 @@ const Discussion: React.FC = () => {
                 console.error('Failed to send reaction', err);
               });
             }}
-            getReactionsForMessage={messageId =>
-              getReactionsForMessage(contact.userId, messageId)
-            }
+            getReactionsForMessage={getReactionsForMessage}
             onToggleReaction={(message, emoji, myReactionId) => {
               if (myReactionId) {
                 removeReaction(myReactionId).catch(err => {

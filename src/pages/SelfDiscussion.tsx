@@ -180,9 +180,15 @@ const SelfDiscussion: React.FC = () => {
                   void deleteMessage(message.id);
                 }
               }}
-              getReactionsForMessage={messageId =>
-                reactions.get(messageId) ?? []
-              }
+              getReactionsForMessage={msgId => {
+                const msg = messages.find(
+                  m =>
+                    m.messageId &&
+                    msgId.length === m.messageId.length &&
+                    msgId.every((b, i) => b === m.messageId![i])
+                );
+                return msg?.id != null ? (reactions.get(msg.id) ?? []) : [];
+              }}
               onReact={(message, emoji) => {
                 if (message.id != null) {
                   void sendReaction(emoji, message.id);

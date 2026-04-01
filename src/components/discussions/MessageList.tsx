@@ -73,7 +73,7 @@ interface MessageListProps {
     emoji: string,
     myReactionId?: number
   ) => void;
-  getReactionsForMessage?: (messageDbId: number) => {
+  getReactionsForMessage?: (messageId: Uint8Array) => {
     emoji: string;
     count: number;
     myReactionId?: number;
@@ -372,8 +372,8 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
                 onReact={onReact}
                 onToggleReaction={onToggleReaction}
                 reactions={
-                  item.message.id != null && getReactionsForMessage
-                    ? getReactionsForMessage(item.message.id)
+                  item.message.messageId && getReactionsForMessage
+                    ? getReactionsForMessage(item.message.messageId)
                     : []
                 }
                 contact={contact}

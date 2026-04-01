@@ -24,10 +24,13 @@ const messageIdEquals = (
   return a.every((byte, i) => byte === b[i]);
 };
 
-const EMPTY_MESSAGES: Message[] = [];
+/** Convert Uint8Array to string key for Map lookups */
+const messageIdKey = (id: Uint8Array): string => id.join(',');
 
-/** Update one contact's messages in a Map, keeping stable refs for others.
- *  Returns new Map or null if updater returned null (no change). */
+const EMPTY_MESSAGES: Message[] = [];
+const EMPTY_REACTIONS: ReactionGroup[] = [];
+
+/** Update one contact's messages in a Map, keeping stable refs for others. */
 function patchContact(
   map: Map<string, Message[]>,
   contactId: string,
@@ -40,7 +43,7 @@ function patchContact(
   return next;
 }
 
-/** Find a message across all contacts and patch it. Early-returns on first match. */
+/** Find a message across all contacts and patch it. */
 function findAndPatch(
   map: Map<string, Message[]>,
   predicate: (m: Message) => boolean,
@@ -59,6 +62,66 @@ function findAndPatch(
   return null;
 }
 
+/** Compute reaction groups for a contact from raw reaction messages + messages list.
+ *  Returns a Map keyed by messageIdKey → ReactionGroup[] with stable refs. */
+function computeReactionGroups(
+  reactions: Message[],
+  messages: Message[]
+): Map<string, ReactionGroup[]> {
+  // Index messages by messageIdKey for fast lookup
+  const msgIdSet = new Set<string>();
+  for (const m of messages) {
+    if (m.messageId) msgIdSet.add(messageIdKey(m.messageId));
+  }
+
+  // Group reactions by target messageIdKey, keeping only latest per direction
+  const latestByTarget = new Map<
+    string,
+    { incoming?: Message; outgoing?: Message }
+  >();
+
+  for (const r of reactions) {
+    const targetId = r.reactionOf?.originalMsgId;
+    if (!targetId) continue;
+    const key = messageIdKey(targetId);
+    if (!msgIdSet.has(key)) continue;
+
+    const entry = latestByTarget.get(key) ?? {};
+    if (r.direction === MessageDirection.OUTGOING) {
+      if (!entry.outgoing || r.timestamp > entry.outgoing.timestamp)
+        entry.outgoing = r;
+    } else {
+      if (!entry.incoming || r.timestamp > entry.incoming.timestamp)
+        entry.incoming = r;
+    }
+    latestByTarget.set(key, entry);
+  }
+
+  // Build ReactionGroup[] for each target
+  const result = new Map<string, ReactionGroup[]>();
+  for (const [key, { incoming, outgoing }] of latestByTarget) {
+    const groups = new Map<string, ReactionGroup>();
+    for (const r of [incoming, outgoing]) {
+      if (!r) continue;
+      const existing = groups.get(r.content) ?? {
+        emoji: r.content,
+        count: 0,
+      };
+      groups.set(r.content, {
+        ...existing,
+        count: existing.count + 1,
+        myReactionId:
+          r.direction === MessageDirection.OUTGOING && r.id != null
+            ? r.id
+            : existing.myReactionId,
+      });
+    }
+    result.set(key, Array.from(groups.values()));
+  }
+
+  return result;
+}
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -72,6 +135,8 @@ export interface ReactionGroup {
 interface MessageStoreState {
   messagesByContact: Map<string, Message[]>;
   reactionsByContact: Map<string, Message[]>;
+  /** Pre-computed reaction groups keyed by messageIdKey */
+  reactionGroupsCache: Map<string, ReactionGroup[]>;
   currentContactUserId: string | null;
   isLoading: boolean;
   isSending: boolean;
@@ -87,10 +152,7 @@ interface MessageStoreState {
     forwardFromMessageId?: number
   ) => Promise<void>;
   getMessagesForContact: (contactUserId: string) => Message[];
-  getReactionsForMessage: (
-    contactUserId: string,
-    messageDbId: number
-  ) => ReactionGroup[];
+  getReactionsForMessage: (messageId: Uint8Array) => ReactionGroup[];
   deleteMessage: (contactUserId: string, messageId: number) => Promise<void>;
   editMessage: (
     contactUserId: string,
@@ -114,6 +176,7 @@ interface MessageStoreState {
 const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
   messagesByContact: new Map(),
   reactionsByContact: new Map(),
+  reactionGroupsCache: new Map(),
   currentContactUserId: null,
   isLoading: false,
   isSending: false,
@@ -136,7 +199,12 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
           const rxnMap = new Map(state.reactionsByContact);
           if (messages.length > 0) msgMap.set(contactUserId, messages);
           if (reactions.length > 0) rxnMap.set(contactUserId, reactions);
-          return { messagesByContact: msgMap, reactionsByContact: rxnMap };
+          const cache = recomputeCache(msgMap, rxnMap);
+          return {
+            messagesByContact: msgMap,
+            reactionsByContact: rxnMap,
+            reactionGroupsCache: cache,
+          };
         });
       });
     }
@@ -161,7 +229,12 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
           if (msgs.length > 0) msgMap.set(d.contactUserId, msgs);
           if (rxns.length > 0) rxnMap.set(d.contactUserId, rxns);
         }
-        set({ messagesByContact: msgMap, reactionsByContact: rxnMap });
+        const cache = recomputeCache(msgMap, rxnMap);
+        set({
+          messagesByContact: msgMap,
+          reactionsByContact: rxnMap,
+          reactionGroupsCache: cache,
+        });
       } catch (error) {
         console.error('Messages initial load error:', error);
         set({ isInitializing: false });
@@ -186,17 +259,18 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
     const onReceived = (message: Message) => {
       if (message.type === MessageType.REACTION) {
         set(state => {
-          const existing =
-            state.reactionsByContact.get(message.contactUserId) || [];
+          const contact = message.contactUserId;
+          const existing = state.reactionsByContact.get(contact) || [];
           if (
             message.messageId &&
             existing.some(m => messageIdEquals(m.messageId, message.messageId))
           ) {
             return state;
           }
-          const map = new Map(state.reactionsByContact);
-          map.set(message.contactUserId, [...existing, message]);
-          return { reactionsByContact: map };
+          const rxnMap = new Map(state.reactionsByContact);
+          rxnMap.set(contact, [...existing, message]);
+          const cache = recomputeCache(state.messagesByContact, rxnMap);
+          return { reactionsByContact: rxnMap, reactionGroupsCache: cache };
         });
         return;
       }
@@ -206,7 +280,6 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
           state.messagesByContact,
           message.contactUserId,
           msgs => {
-            // Update existing message (edit/delete from peer)
             if (message.messageId) {
               const idx = msgs.findIndex(m =>
                 messageIdEquals(m.messageId, message.messageId)
@@ -295,7 +368,12 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
           msgMap.set(currentContact, messages);
           if (reactions.length > 0) rxnMap.set(currentContact, reactions);
           else rxnMap.delete(currentContact);
-          return { messagesByContact: msgMap, reactionsByContact: rxnMap };
+          const cache = recomputeCache(msgMap, rxnMap);
+          return {
+            messagesByContact: msgMap,
+            reactionsByContact: rxnMap,
+            reactionGroupsCache: cache,
+          };
         });
       } catch (error) {
         console.error('Session event refetch error:', error);
@@ -398,11 +476,16 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
     return get().messagesByContact.get(contactUserId) || EMPTY_MESSAGES;
   },
 
+  getReactionsForMessage: (msgId: Uint8Array) => {
+    return (
+      get().reactionGroupsCache.get(messageIdKey(msgId)) || EMPTY_REACTIONS
+    );
+  },
+
   deleteMessage: async (contactUserId, messageId) => {
     const msgs = get().messagesByContact.get(contactUserId) || EMPTY_MESSAGES;
     const removed = msgs.find(m => m.id === messageId);
 
-    // Optimistic remove
     set(state => {
       const map = patchContact(state.messagesByContact, contactUserId, ms =>
         ms.filter(m => m.id !== messageId)
@@ -422,7 +505,6 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
     const msgs = get().messagesByContact.get(contactUserId) || EMPTY_MESSAGES;
     const original = msgs.find(m => m.id === messageId);
 
-    // Optimistic update
     set(state => {
       const map = patchContact(state.messagesByContact, contactUserId, ms =>
         ms.map(m =>
@@ -490,52 +572,17 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
     }
   },
 
-  getReactionsForMessage: (contactUserId, messageDbId) => {
-    const reactions =
-      get().reactionsByContact.get(contactUserId) || EMPTY_MESSAGES;
-    const msgs = get().messagesByContact.get(contactUserId) || EMPTY_MESSAGES;
-    const target = msgs.find(m => m.id === messageDbId);
-    if (!target?.messageId) return [];
-
-    let latestIncoming: Message | undefined;
-    let latestOutgoing: Message | undefined;
-
-    for (const r of reactions) {
-      if (!messageIdEquals(r.reactionOf?.originalMsgId, target.messageId))
-        continue;
-      if (r.direction === MessageDirection.OUTGOING) {
-        if (!latestOutgoing || r.timestamp > latestOutgoing.timestamp)
-          latestOutgoing = r;
-      } else {
-        if (!latestIncoming || r.timestamp > latestIncoming.timestamp)
-          latestIncoming = r;
-      }
-    }
-
-    const groups = new Map<string, ReactionGroup>();
-    for (const r of [latestIncoming, latestOutgoing].filter(
-      Boolean
-    ) as Message[]) {
-      const existing = groups.get(r.content) ?? { emoji: r.content, count: 0 };
-      groups.set(r.content, {
-        ...existing,
-        count: existing.count + 1,
-        myReactionId:
-          r.direction === MessageDirection.OUTGOING && r.id != null
-            ? r.id
-            : existing.myReactionId,
-      });
-    }
-
-    return Array.from(groups.values());
-  },
-
   clearMessages: contactUserId => {
     const msgMap = new Map(get().messagesByContact);
     const rxnMap = new Map(get().reactionsByContact);
     msgMap.delete(contactUserId);
     rxnMap.delete(contactUserId);
-    set({ messagesByContact: msgMap, reactionsByContact: rxnMap });
+    const cache = recomputeCache(msgMap, rxnMap);
+    set({
+      messagesByContact: msgMap,
+      reactionsByContact: rxnMap,
+      reactionGroupsCache: cache,
+    });
   },
 
   cleanup: () => {
@@ -544,6 +591,7 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
       cleanupFn: null,
       messagesByContact: new Map(),
       reactionsByContact: new Map(),
+      reactionGroupsCache: new Map(),
       currentContactUserId: null,
       isLoading: false,
       isSending: false,
@@ -553,8 +601,24 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
 }));
 
 // ---------------------------------------------------------------------------
-// Rollback helpers (shared by delete / edit)
+// Helpers (outside store to avoid circular refs with set)
 // ---------------------------------------------------------------------------
+
+/** Recompute all reaction groups from raw data. */
+function recomputeCache(
+  messagesByContact: Map<string, Message[]>,
+  reactionsByContact: Map<string, Message[]>
+): Map<string, ReactionGroup[]> {
+  const cache = new Map<string, ReactionGroup[]>();
+  for (const [contact, reactions] of reactionsByContact) {
+    const messages = messagesByContact.get(contact) || [];
+    const groups = computeReactionGroups(reactions, messages);
+    for (const [key, value] of groups) {
+      cache.set(key, value);
+    }
+  }
+  return cache;
+}
 
 type SetFn = (
   fn: (state: MessageStoreState) => Partial<MessageStoreState>

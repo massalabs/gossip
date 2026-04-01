@@ -182,25 +182,18 @@ export const MessageRenderer: React.FC<MessageRendererProps> = React.memo(
   (prev, next) => {
     const pm = prev.message;
     const nm = next.message;
-    if (
-      pm.id !== nm.id ||
-      pm.content !== nm.content ||
-      pm.status !== nm.status ||
-      pm.type !== nm.type ||
-      prev.showTimestamp !== next.showTimestamp ||
-      prev.isHighlighted !== next.isHighlighted ||
-      prev.isSelecting !== next.isSelecting ||
-      prev.isSelected !== next.isSelected ||
-      prev.groupInfo.isFirstInGroup !== next.groupInfo.isFirstInGroup ||
-      prev.groupInfo.isLastInGroup !== next.groupInfo.isLastInGroup ||
-      prev.reactions.length !== next.reactions.length
-    )
-      return false;
-    return prev.reactions.every(
-      (r, i) =>
-        r.emoji === next.reactions[i]?.emoji &&
-        r.count === next.reactions[i]?.count &&
-        r.myReactionId === next.reactions[i]?.myReactionId
+    return (
+      pm.id === nm.id &&
+      pm.content === nm.content &&
+      pm.status === nm.status &&
+      pm.type === nm.type &&
+      prev.showTimestamp === next.showTimestamp &&
+      prev.isHighlighted === next.isHighlighted &&
+      prev.isSelecting === next.isSelecting &&
+      prev.isSelected === next.isSelected &&
+      prev.groupInfo.isFirstInGroup === next.groupInfo.isFirstInGroup &&
+      prev.groupInfo.isLastInGroup === next.groupInfo.isLastInGroup &&
+      prev.reactions === next.reactions
     );
   }
 );
