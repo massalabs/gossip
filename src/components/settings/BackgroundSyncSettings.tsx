@@ -29,6 +29,12 @@ import {
   backgroundRefreshService,
   type IOSBackgroundSyncStatus,
 } from '../../services/backgroundRefreshiOS';
+import TabSwitcher from '../ui/TabSwitcher';
+import {
+  type BackgroundSyncPreset,
+  getBackgroundSyncPreset,
+  setBackgroundSyncPreset,
+} from '../../utils/preferences';
 
 interface BackgroundSyncSettingsProps {
   showDebugInfo?: boolean;
@@ -53,6 +59,7 @@ const BackgroundSyncSettings: React.FC<BackgroundSyncSettingsProps> = ({
 
   // Common state
   const [isLoading, setIsLoading] = useState(true);
+  const [syncPreset, setSyncPreset] = useState<BackgroundSyncPreset>('max');
 
   // Platform detection
   const platform = Capacitor.getPlatform();
@@ -94,6 +101,30 @@ const BackgroundSyncSettings: React.FC<BackgroundSyncSettingsProps> = ({
 
     void loadStatus();
   }, [isNative, isAndroidNative, isIOSNative]);
+
+  useEffect(() => {
+    if (!isNative) return;
+    void (async () => {
+      try {
+        const p = await getBackgroundSyncPreset();
+        setSyncPreset(p);
+      } catch {
+        // keep default
+      }
+    })();
+  }, [isNative]);
+
+  const handleSyncPresetChange = useCallback(
+    async (preset: BackgroundSyncPreset) => {
+      try {
+        await setBackgroundSyncPreset(preset);
+        setSyncPreset(preset);
+      } catch (error) {
+        console.error('Failed to save background sync preset:', error);
+      }
+    },
+    []
+  );
 
   // Refresh status
   const handleRefresh = useCallback(async () => {
@@ -248,6 +279,28 @@ const BackgroundSyncSettings: React.FC<BackgroundSyncSettingsProps> = ({
 
       {/* Content */}
       <div className="px-4 py-3 space-y-3">
+        <div className="space-y-2 pb-3 border-b border-border">
+          <p className="text-xs font-medium text-muted-foreground">
+            {t('background_sync.preset_title')}
+          </p>
+          <TabSwitcher
+            options={[
+              { value: 'max', label: t('background_sync.preset_max') },
+              {
+                value: 'balanced',
+                label: t('background_sync.preset_balanced'),
+              },
+            ]}
+            value={syncPreset}
+            onChange={handleSyncPresetChange}
+          />
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            {syncPreset === 'balanced'
+              ? t('background_sync.preset_balanced_description')
+              : t('background_sync.preset_max_description')}
+          </p>
+        </div>
+
         {/* ==================== iOS SECTION ==================== */}
         {isIOSNative && iosStatus && (
           <>

@@ -116,6 +116,11 @@
   "background_sync": {
     "privacy_model_title": "Confidentialité et réception en arrière-plan",
     "privacy_model_body": "Gossip n'utilise pas de notifications push serveur. L'application se synchronise en arrière-plan lorsque le système l'autorise. La réception n'est pas en temps réel : elle dépend de l'appareil, des réglages batterie et du fait que l'app ait été arrêtée de force. Sous iOS, l'exécution en arrière-plan est surtout limitée.",
+    "preset_title": "Espacement des synchronisations",
+    "preset_max": "Réactivité max",
+    "preset_max_description": "Autoriser des tentatives de synchro espacées d’au plus une minute lorsque le système exécute la tâche en arrière-plan. Plus de vérifications ; peut un peu plus solliciter la batterie si l’OS réveille souvent l’app.",
+    "preset_balanced": "Équilibré",
+    "preset_balanced_description": "Éviter les synchros redondantes si la dernière date de moins de cinq minutes. Moins de doublons lorsque l’OS déclenche la tâche plusieurs fois.",
     "title": "Synchronisation en arrière-plan",
     "checking": "Vérification...",
     "optimized": "Optimisé",

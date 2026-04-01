@@ -116,6 +116,11 @@
   "background_sync": {
     "privacy_model_title": "隐私与后台送达",
     "privacy_model_body": "Gossip 不使用服务器推送通知。应用仅在系统允许时在后台同步。送达并非实时：取决于设备、电池设置以及是否强制停止应用。在 iOS 上，后台运行尤其受限。",
+    "preset_title": "后台拉取间隔策略",
+    "preset_max": "最高响应",
+    "preset_max_description": "系统执行后台任务时，同步尝试最短间隔约一分钟。更频繁检查新消息；若系统常唤醒应用可能更耗电。",
+    "preset_balanced": "均衡",
+    "preset_balanced_description": "若距上次同步不足五分钟则跳过重复同步。在系统多次触发任务时减少重复检查。",
     "title": "后台同步",
     "checking": "检查中...",
     "optimized": "已优化",

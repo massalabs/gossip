@@ -116,6 +116,11 @@
   "background_sync": {
     "privacy_model_title": "Privacy and background delivery",
     "privacy_model_body": "Gossip does not use server push notifications. The app syncs in the background when the system allows it. Delivery is not real-time: it depends on your device, battery settings, and whether the app was force-stopped. On iOS, background execution is especially limited.",
+    "preset_title": "Background fetch spacing",
+    "preset_max": "Max responsiveness",
+    "preset_max_description": "Allow sync attempts at most one minute apart when the system runs the background task. More checks for new messages; may use more battery if the OS wakes the app often.",
+    "preset_balanced": "Balanced",
+    "preset_balanced_description": "Skip redundant syncs if the last one was less than five minutes ago. Fewer duplicate checks when the OS triggers the task multiple times.",
     "title": "Background Sync",
     "checking": "Checking...",
     "optimized": "Optimized",
