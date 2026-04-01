@@ -683,14 +683,14 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
     if (existing) {
       // Same emoji → toggle off (just remove)
       if (existing.content === emoji) {
-        await get().removeReaction(existing.id, existing.messageId);
+        get().removeReaction(existing.id, existing.messageId);
         return;
       }
-      // Different emoji → remove old, then add new
-      await get().removeReaction(existing.id, existing.messageId);
+      // Different emoji → remove old + add new (both optimistic, no await)
+      get().removeReaction(existing.id, existing.messageId);
     }
 
-    await get().sendReaction(contactUserId, emoji, messageDbId);
+    get().sendReaction(contactUserId, emoji, messageDbId);
   },
 
   removeReaction: async (reactionDbId, reactionMessageId?) => {
