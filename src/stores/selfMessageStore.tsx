@@ -1,7 +1,13 @@
 import { create } from 'zustand';
-import { Message } from '@massalabs/gossip-sdk';
+import {
+  Message,
+  MessageDirection,
+  MessageStatus,
+  MessageType,
+} from '@massalabs/gossip-sdk';
 import { createSelectors } from './utils/createSelectors';
 import { getSdk } from './sdkStore';
+import { useAccountStore } from './accountStore';
 import { ReactionGroup } from './messageStore';
 
 interface SelfMessageStore {
@@ -74,17 +80,37 @@ const useSelfMessageStoreBase = create<SelfMessageStore>((set, get) => ({
 
     const sdk = getSdk();
     if (!sdk.isSessionOpen) return;
+    const userProfile = useAccountStore.getState().userProfile;
+    if (!userProfile?.userId) return;
 
     set({ isSending: true });
+
+    // Optimistic: add to state before SDK call
+    const optimistic: Message = {
+      id: undefined as unknown as number,
+      ownerUserId: userProfile.userId,
+      contactUserId: '__self__',
+      content: trimmed,
+      type: MessageType.TEXT,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.SENT,
+      timestamp: new Date(),
+    };
+    set(state => ({ messages: [...state.messages, optimistic] }));
+    set({ isSending: false });
+
     try {
       const message = await sdk.selfMessages.send(trimmed);
+      // Replace optimistic with persisted (has real id)
       set(state => ({
-        messages: [...state.messages, message],
+        messages: state.messages.map(m => (m === optimistic ? message : m)),
       }));
     } catch (error) {
       console.error('Failed to send self message', error);
-    } finally {
-      set({ isSending: false });
+      // Remove optimistic message
+      set(state => ({
+        messages: state.messages.filter(m => m !== optimistic),
+      }));
     }
   },
 
@@ -119,13 +145,24 @@ const useSelfMessageStoreBase = create<SelfMessageStore>((set, get) => ({
     const sdk = getSdk();
     if (!sdk.isSessionOpen) return;
 
+    // Optimistic: remove from state
+    const removed = get().messages.find(m => m.id === id);
+    set(state => ({
+      messages: state.messages.filter(m => m.id !== id),
+    }));
+
     try {
       await sdk.selfMessages.deleteMessage(id);
-      set(state => ({
-        messages: state.messages.filter(m => m.id !== id),
-      }));
     } catch (error) {
       console.error('Failed to delete self message', error);
+      // Rollback
+      if (removed) {
+        set(state => ({
+          messages: [...state.messages, removed].sort(
+            (a, b) => a.timestamp.getTime() - b.timestamp.getTime()
+          ),
+        }));
+      }
     }
   },
 

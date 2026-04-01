@@ -39,7 +39,7 @@ import { SdkConfig, defaultSdkConfig } from '../config/sdk.js';
 import { SdkEventEmitter, SdkEventType } from '../core/SdkEventEmitter.js';
 import type { RefreshService } from './refresh.js';
 import { Queries } from '../db/queries/index.js';
-import { QueueManager } from '../utils/queue.js';
+import { QueueManager, PromiseQueue } from '../utils/queue.js';
 
 /** Options for the simplified sendText method */
 export interface SendTextOptions {
@@ -255,6 +255,15 @@ export class MessageService {
   private processingContacts = new Set<string>();
   private isFetchingMessages = false;
   private queries: Queries;
+  private persistQueue = new PromiseQueue();
+
+  /** Emit MESSAGE_RECEIVED with a Message that may not have a DB id yet */
+  private emitMessageReceived(
+    message: Omit<Message, 'id'> & { id?: number }
+  ): void {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    this.eventEmitter.emit(SdkEventType.MESSAGE_RECEIVED, message as any);
+  }
 
   constructor(
     messageProtocol: IMessageProtocol,
@@ -532,6 +541,13 @@ export class MessageService {
           continue;
         }
 
+        // Emit before DB write so UI updates instantly
+        this.emitMessageReceived({
+          ...target,
+          content: '[Message deleted]',
+          type: MessageType.DELETED,
+        });
+
         await this.queries.messages.updateById(target.id, {
           content: '[Message deleted]',
           type: MessageType.DELETED,
@@ -560,6 +576,13 @@ export class MessageService {
           ...(target.metadata ?? {}),
           edited: true,
         };
+
+        // Emit before DB write so UI updates instantly
+        this.emitMessageReceived({
+          ...target,
+          content: message.content,
+          metadata: mergedMetadata,
+        });
 
         await this.queries.messages.updateById(target.id, {
           content: message.content,
@@ -610,6 +633,19 @@ export class MessageService {
           });
           continue;
         }
+
+        // Emit before DB write so UI updates instantly
+        this.emitMessageReceived({
+          messageId: message.messageId,
+          ownerUserId,
+          contactUserId: discussion.contactUserId,
+          content: message.content,
+          type: MessageType.REACTION,
+          direction: MessageDirection.INCOMING,
+          status: MessageStatus.DELIVERED,
+          timestamp: message.sentAt,
+          reactionOf: message.reactionOf,
+        });
 
         const id = await this.queries.messages.insert({
           messageId: message.messageId,
@@ -669,6 +705,20 @@ export class MessageService {
         }
       }
 
+      // Emit optimistic event BEFORE DB write — UI shows message instantly
+      this.emitMessageReceived({
+        messageId: message.messageId,
+        ownerUserId,
+        contactUserId: discussion.contactUserId,
+        content: message.content,
+        type: message.type,
+        direction: MessageDirection.INCOMING,
+        status: MessageStatus.DELIVERED,
+        timestamp: message.sentAt,
+        replyTo: message.replyTo,
+        forwardOf: message.forwardOf,
+      });
+
       const id = await this.queries.messages.insert({
         messageId: message.messageId,
         ownerUserId,
@@ -696,14 +746,7 @@ export class MessageService {
 
       storedIds.push(id);
 
-      // Emit event for new message
-      const row = await this.queries.messages.getById(id);
-      if (row) {
-        this.eventEmitter.emit(
-          SdkEventType.MESSAGE_RECEIVED,
-          rowToMessage(row)
-        );
-      }
+      this.eventEmitter.emit(SdkEventType.WRITE_CONFIRMED, id, 'message');
     }
 
     return storedIds;
@@ -817,12 +860,15 @@ export class MessageService {
     }
 
     // Generate a random messageId for deduplication (not for keep-alive or retention policy)
-    const randomMessageId =
-      message.type !== MessageType.KEEP_ALIVE &&
-      message.type !== MessageType.RETENTION_POLICY
-        ? crypto.getRandomValues(new Uint8Array(MESSAGE_ID_SIZE))
-        : undefined;
-    message.messageId = randomMessageId;
+    // Skip if already provided (e.g., from sendOptimistic)
+    if (!message.messageId) {
+      const randomMessageId =
+        message.type !== MessageType.KEEP_ALIVE &&
+        message.type !== MessageType.RETENTION_POLICY
+          ? crypto.getRandomValues(new Uint8Array(MESSAGE_ID_SIZE))
+          : undefined;
+      message.messageId = randomMessageId;
+    }
 
     // Add message as WAITING_SESSION
     let messageId: number;
@@ -1318,6 +1364,77 @@ export class MessageService {
       );
     }
     return this.sendMessage(message);
+  }
+
+  /**
+   * Optimistic send: validates, generates messageId, emits MESSAGE_OPTIMISTIC
+   * immediately, then queues DB write + encryption + network send.
+   * Returns synchronously with the optimistic message (no DB id yet).
+   */
+  sendOptimistic(message: Omit<Message, 'id'>): SendMessageResult {
+    const log = logger.forMethod('sendOptimistic');
+
+    const peerId = decodeUserId(message.contactUserId);
+    if (peerId.length !== 32) {
+      return {
+        success: false,
+        error: 'Invalid contact userId (must be 32 bytes)',
+      };
+    }
+
+    // Generate messageId synchronously (no DB needed)
+    const randomMessageId =
+      message.type !== MessageType.KEEP_ALIVE &&
+      message.type !== MessageType.RETENTION_POLICY
+        ? crypto.getRandomValues(new Uint8Array(MESSAGE_ID_SIZE))
+        : undefined;
+
+    const optimisticMessage: Message = {
+      ...message,
+      id: undefined as unknown as number,
+      messageId: randomMessageId,
+      status: MessageStatus.WAITING_SESSION,
+    };
+
+    // Emit immediately — store adds to state before DB write
+    this.eventEmitter.emit(SdkEventType.MESSAGE_OPTIMISTIC, optimisticMessage);
+
+    log.info('optimistic send', { messageType: message.type });
+
+    // Queue DB write + send pipeline
+    this.persistQueue.enqueue(async () => {
+      try {
+        const result = await this.sendMessage({
+          ...message,
+          messageId: randomMessageId,
+        });
+
+        if (result.success && result.message) {
+          this.eventEmitter.emit(
+            SdkEventType.WRITE_CONFIRMED,
+            result.message.id!,
+            'message'
+          );
+        } else {
+          this.eventEmitter.emit(
+            SdkEventType.WRITE_FAILED,
+            randomMessageId,
+            'message',
+            new Error(result.error ?? 'Unknown error')
+          );
+        }
+      } catch (error) {
+        log.error('optimistic send failed during persist', { error });
+        this.eventEmitter.emit(
+          SdkEventType.WRITE_FAILED,
+          randomMessageId,
+          'message',
+          error instanceof Error ? error : new Error(String(error))
+        );
+      }
+    });
+
+    return { success: true, message: optimisticMessage };
   }
 
   /**

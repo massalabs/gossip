@@ -235,7 +235,7 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
             ? item.key
             : item.type === 'contact'
               ? item.contact.userId
-              : item.discussion.id;
+              : item.discussion.contactUserId;
         return <div key={key}>{renderItem(item)}</div>;
       })}
       <div className="h-20" aria-hidden="true" />

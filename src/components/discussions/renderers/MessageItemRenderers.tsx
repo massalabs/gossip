@@ -130,58 +130,71 @@ interface MessageRendererProps {
   onToggleSelect?: (messageId: number) => void;
 }
 
-export const MessageRenderer: React.FC<MessageRendererProps> = ({
-  message,
-  showTimestamp,
-  groupInfo,
-  onReplyTo,
-  onForward,
-  onDelete,
-  onEdit,
-  onScrollToMessage,
-  onReact,
-  onToggleReaction,
-  getReactionsForMessage,
-  contact,
-  isHighlighted,
-  isSelecting,
-  isSelected,
-  onToggleSelect,
-}) => {
-  const isIncoming = message.direction === MessageDirection.INCOMING;
-  const reactions =
-    message.id != null && getReactionsForMessage
-      ? getReactionsForMessage(message.id)
-      : [];
+export const MessageRenderer: React.FC<MessageRendererProps> = React.memo(
+  ({
+    message,
+    showTimestamp,
+    groupInfo,
+    onReplyTo,
+    onForward,
+    onDelete,
+    onEdit,
+    onScrollToMessage,
+    onReact,
+    onToggleReaction,
+    getReactionsForMessage,
+    contact,
+    isHighlighted,
+    isSelecting,
+    isSelected,
+    onToggleSelect,
+  }) => {
+    const isIncoming = message.direction === MessageDirection.INCOMING;
+    const reactions =
+      message.id != null && getReactionsForMessage
+        ? getReactionsForMessage(message.id)
+        : [];
 
-  return (
-    <div
-      className={`px-4 md:px-6 lg:px-8 transition-colors duration-150 ${isSelecting && isSelected ? 'bg-accent/10' : ''}`}
-    >
-      <MessageItem
-        id={`message-${message.id}`}
-        message={message}
-        onReplyTo={onReplyTo}
-        onForward={onForward}
-        onDelete={onDelete}
-        onEdit={onEdit}
-        onScrollToMessage={onScrollToMessage}
-        onReact={onReact}
-        onToggleReaction={onToggleReaction}
-        reactions={reactions}
-        showTimestamp={showTimestamp}
-        isFirstInGroup={groupInfo.isFirstInGroup}
-        isLastInGroup={groupInfo.isLastInGroup}
-        showAvatar={isIncoming && groupInfo.isLastInGroup}
-        contact={isIncoming ? contact : undefined}
-        isHighlighted={isHighlighted}
-        isSelecting={isSelecting}
-        isSelected={isSelected}
-        onToggleSelect={onToggleSelect}
-      />
-    </div>
-  );
-};
+    return (
+      <div
+        className={`px-4 md:px-6 lg:px-8 transition-colors duration-150 ${isSelecting && isSelected ? 'bg-accent/10' : ''}`}
+      >
+        <MessageItem
+          id={`message-${message.id}`}
+          message={message}
+          onReplyTo={onReplyTo}
+          onForward={onForward}
+          onDelete={onDelete}
+          onEdit={onEdit}
+          onScrollToMessage={onScrollToMessage}
+          onReact={onReact}
+          onToggleReaction={onToggleReaction}
+          reactions={reactions}
+          showTimestamp={showTimestamp}
+          isFirstInGroup={groupInfo.isFirstInGroup}
+          isLastInGroup={groupInfo.isLastInGroup}
+          showAvatar={isIncoming && groupInfo.isLastInGroup}
+          contact={isIncoming ? contact : undefined}
+          isHighlighted={isHighlighted}
+          isSelecting={isSelecting}
+          isSelected={isSelected}
+          onToggleSelect={onToggleSelect}
+        />
+      </div>
+    );
+  },
+  (prev, next) =>
+    prev.message.id === next.message.id &&
+    prev.message.content === next.message.content &&
+    prev.message.status === next.message.status &&
+    prev.message.type === next.message.type &&
+    prev.showTimestamp === next.showTimestamp &&
+    prev.isHighlighted === next.isHighlighted &&
+    prev.isSelecting === next.isSelecting &&
+    prev.isSelected === next.isSelected &&
+    prev.groupInfo.isFirstInGroup === next.groupInfo.isFirstInGroup &&
+    prev.groupInfo.isLastInGroup === next.groupInfo.isLastInGroup
+);
 
 // =============================================================================
 // Retention Separator Renderer

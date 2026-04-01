@@ -37,9 +37,11 @@ import {
 const MESSAGES_ABOVE_UNREAD = 3;
 const AT_BOTTOM_THRESHOLD = 50;
 
-/** Stable key for a message — used for both React keys and animation tracking. */
+/** Stable key for a message — uses messageId (generated before DB write) so
+ *  the key never changes when the DB id is assigned later. */
 function getMessageKey(m: Message): string {
-  if (m.id != null) return `msg-${m.id}`;
+  if (m.messageId) return `msg-${m.messageId.join(',')}`;
+  if (m.id != null) return `msg-db-${m.id}`;
   return `msg-temp-${m.timestamp.getTime()}-${m.direction}-${m.content.slice(0, 16)}`;
 }
 

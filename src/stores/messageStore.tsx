@@ -11,28 +11,74 @@ import { createSelectors } from './utils/createSelectors';
 import { useAccountStore } from './accountStore';
 import { getSdk } from './sdkStore';
 
-const POLL_INTERVAL_MS = 3000;
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/** Compare two Uint8Array messageIds for equality */
+const messageIdEquals = (
+  a: Uint8Array | undefined,
+  b: Uint8Array | undefined
+): boolean => {
+  if (!a || !b || a.length !== b.length) return false;
+  return a.every((byte, i) => byte === b[i]);
+};
+
+const EMPTY_MESSAGES: Message[] = [];
+
+/** Update one contact's messages in a Map, keeping stable refs for others.
+ *  Returns new Map or null if updater returned null (no change). */
+function patchContact(
+  map: Map<string, Message[]>,
+  contactId: string,
+  updater: (msgs: Message[]) => Message[] | null
+): Map<string, Message[]> | null {
+  const updated = updater(map.get(contactId) || []);
+  if (updated === null) return null;
+  const next = new Map(map);
+  next.set(contactId, updated);
+  return next;
+}
+
+/** Find a message across all contacts and patch it. Early-returns on first match. */
+function findAndPatch(
+  map: Map<string, Message[]>,
+  predicate: (m: Message) => boolean,
+  patch: (m: Message) => Message
+): Map<string, Message[]> | null {
+  for (const [contact, msgs] of map) {
+    const idx = msgs.findIndex(predicate);
+    if (idx >= 0) {
+      const next = new Map(map);
+      const updated = [...msgs];
+      updated[idx] = patch(msgs[idx]);
+      next.set(contact, updated);
+      return next;
+    }
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+export interface ReactionGroup {
+  emoji: string;
+  count: number;
+  myReactionId?: number;
+}
 
 interface MessageStoreState {
-  // Messages keyed by contactUserId (Map for efficient lookups)
   messagesByContact: Map<string, Message[]>;
-  // Reactions keyed by contactUserId (all non-deleted REACTION messages)
   reactionsByContact: Map<string, Message[]>;
-  // Current contact being viewed
   currentContactUserId: string | null;
-  // Loading state (only one discussion can be viewed at a time)
   isLoading: boolean;
-  // Sending state (global, since you can only send to one contact at a time)
   isSending: boolean;
-  // Polling timer and event handler
-  pollTimer: ReturnType<typeof setInterval> | null;
-  eventHandler: (() => void) | null;
-  cancelDebounce: (() => void) | null;
-
-  init: () => Promise<void>;
+  cleanupFn: (() => void) | null;
   isInitializing: boolean;
 
-  // Actions
+  init: () => Promise<void>;
   setCurrentContact: (contactUserId: string | null) => void;
   sendMessage: (
     contactUserId: string,
@@ -45,6 +91,12 @@ interface MessageStoreState {
     contactUserId: string,
     messageDbId: number
   ) => ReactionGroup[];
+  deleteMessage: (contactUserId: string, messageId: number) => Promise<void>;
+  editMessage: (
+    contactUserId: string,
+    messageId: number,
+    newContent: string
+  ) => Promise<void>;
   sendReaction: (
     contactUserId: string,
     emoji: string,
@@ -55,183 +107,243 @@ interface MessageStoreState {
   cleanup: () => void;
 }
 
-export interface ReactionGroup {
-  emoji: string;
-  count: number;
-  myReactionId?: number;
-}
-
-// Empty array constant to avoid creating new arrays on each call
-const EMPTY_MESSAGES: Message[] = [];
-
-// Helper to check if messages actually changed
-const messagesChanged = (
-  existing: Message[],
-  newMessages: Message[]
-): boolean => {
-  return (
-    newMessages.length > existing.length || // New messages at the end
-    existing.some((existingMsg, index) => {
-      const newMsg = newMessages[index];
-      if (!newMsg) return true; // New message added
-      const editedA = !!(existingMsg.metadata as { edited?: boolean })?.edited;
-      const editedB = !!(newMsg.metadata as { edited?: boolean })?.edited;
-      return (
-        existingMsg.id !== newMsg.id ||
-        existingMsg.content !== newMsg.content ||
-        existingMsg.status !== newMsg.status ||
-        editedA !== editedB
-      );
-    })
-  );
-};
+// ---------------------------------------------------------------------------
+// Store
+// ---------------------------------------------------------------------------
 
 const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
-  // Initial state
   messagesByContact: new Map(),
   reactionsByContact: new Map(),
   currentContactUserId: null,
   isLoading: false,
   isSending: false,
-  pollTimer: null,
-  eventHandler: null,
-  cancelDebounce: null,
+  cleanupFn: null,
   isInitializing: false,
 
-  // Set current contact (for viewing messages)
   setCurrentContact: (contactUserId: string | null) => {
-    const current = get().currentContactUserId;
-    // Only update if contact actually changed
-    if (current === contactUserId) return;
-
+    if (get().currentContactUserId === contactUserId) return;
     set({ currentContactUserId: contactUserId });
+
+    if (contactUserId && !get().messagesByContact.has(contactUserId)) {
+      const sdk = getSdk();
+      if (!sdk.isSessionOpen) return;
+      Promise.all([
+        sdk.messages.getVisibleMessages(contactUserId),
+        sdk.messages.getReactions(contactUserId),
+      ]).then(([messages, reactions]) => {
+        set(state => {
+          const msgMap = new Map(state.messagesByContact);
+          const rxnMap = new Map(state.reactionsByContact);
+          if (messages.length > 0) msgMap.set(contactUserId, messages);
+          if (reactions.length > 0) rxnMap.set(contactUserId, reactions);
+          return { messagesByContact: msgMap, reactionsByContact: rxnMap };
+        });
+      });
+    }
   },
 
-  // Initialize the store with polling + event-driven refetch
   init: async () => {
     const { userProfile } = useAccountStore.getState();
     const ownerUserId = userProfile?.userId;
-
-    if (!ownerUserId || get().pollTimer || get().isInitializing) return;
+    if (!ownerUserId || get().cleanupFn || get().isInitializing) return;
 
     set({ isInitializing: true });
 
-    let isFetching = false;
-    const fetchAllMessages = async () => {
-      if (isFetching) return;
-      isFetching = true;
+    const sdk = getSdk();
+    if (sdk.isSessionOpen) {
       try {
-        const sdk = getSdk();
-        if (!sdk.isSessionOpen) return;
-
-        // Get all contacts from the discussion store to know which contacts have messages
         const discussions = await sdk.discussions.list();
-        const contactUserIds = discussions.map(d => d.contactUserId);
-
-        // Fetch messages for all contacts
-        const newMessagesMap = new Map<string, Message[]>();
-        const newReactionsMap = new Map<string, Message[]>();
-        for (const contactUserId of contactUserIds) {
-          const messages = await sdk.messages.getVisibleMessages(contactUserId);
-          const reactions = await sdk.messages.getReactions(contactUserId);
-          if (messages.length > 0) {
-            newMessagesMap.set(contactUserId, messages);
-          }
-          if (reactions.length > 0) {
-            newReactionsMap.set(contactUserId, reactions);
-          }
+        const msgMap = new Map<string, Message[]>();
+        const rxnMap = new Map<string, Message[]>();
+        for (const d of discussions) {
+          const msgs = await sdk.messages.getVisibleMessages(d.contactUserId);
+          const rxns = await sdk.messages.getReactions(d.contactUserId);
+          if (msgs.length > 0) msgMap.set(d.contactUserId, msgs);
+          if (rxns.length > 0) rxnMap.set(d.contactUserId, rxns);
         }
+        set({ messagesByContact: msgMap, reactionsByContact: rxnMap });
+      } catch (error) {
+        console.error('Messages initial load error:', error);
+      }
+    }
 
-        // Check for changes before updating to avoid unnecessary sets
-        let hasChanges = false;
-        const currentMessagesMap = get().messagesByContact;
-        const currentReactionsMap = get().reactionsByContact;
+    // ── Event handlers ──
 
-        newMessagesMap.forEach((msgs, contactId) => {
-          if (!hasChanges) {
-            const existing = currentMessagesMap.get(contactId) || [];
-            if (messagesChanged(existing, msgs)) {
-              hasChanges = true;
-            }
+    const onOptimistic = (message: Message) => {
+      if (message.type === MessageType.REACTION) return;
+      set(state => {
+        const map = patchContact(
+          state.messagesByContact,
+          message.contactUserId,
+          msgs => [...msgs, message]
+        );
+        return map ? { messagesByContact: map } : state;
+      });
+    };
+
+    const onReceived = (message: Message) => {
+      if (message.type === MessageType.REACTION) {
+        set(state => {
+          const existing =
+            state.reactionsByContact.get(message.contactUserId) || [];
+          if (
+            message.messageId &&
+            existing.some(m => messageIdEquals(m.messageId, message.messageId))
+          ) {
+            return state;
           }
+          const map = new Map(state.reactionsByContact);
+          map.set(message.contactUserId, [...existing, message]);
+          return { reactionsByContact: map };
         });
+        return;
+      }
 
-        // Also check reactions changes
-        if (!hasChanges) {
-          newReactionsMap.forEach((rxns, contactId) => {
-            if (!hasChanges) {
-              const existing = currentReactionsMap.get(contactId) || [];
-              if (messagesChanged(existing, rxns)) {
-                hasChanges = true;
+      set(state => {
+        const map = patchContact(
+          state.messagesByContact,
+          message.contactUserId,
+          msgs => {
+            // Update existing message (edit/delete from peer)
+            if (message.messageId) {
+              const idx = msgs.findIndex(m =>
+                messageIdEquals(m.messageId, message.messageId)
+              );
+              if (idx >= 0) {
+                const updated = [...msgs];
+                updated[idx] = {
+                  ...msgs[idx],
+                  ...message,
+                  id: msgs[idx].id || message.id,
+                };
+                return updated;
               }
             }
-          });
-        }
+            if (message.id) {
+              const idx = msgs.findIndex(m => m.id === message.id);
+              if (idx >= 0) {
+                const updated = [...msgs];
+                updated[idx] = { ...msgs[idx], ...message };
+                return updated;
+              }
+            }
+            return [...msgs, message];
+          }
+        );
+        return map ? { messagesByContact: map } : state;
+      });
+    };
 
-        // Also check for removed contacts / reactions
-        if (!hasChanges) {
-          currentMessagesMap.forEach((_, contactId) => {
-            if (!newMessagesMap.has(contactId)) hasChanges = true;
-          });
-        }
-        if (!hasChanges) {
-          currentReactionsMap.forEach((_, contactId) => {
-            if (!newReactionsMap.has(contactId)) hasChanges = true;
-          });
-        }
+    const onSent = (message: Message) => {
+      set(state => {
+        const map = patchContact(
+          state.messagesByContact,
+          message.contactUserId,
+          msgs => {
+            let changed = false;
+            const updated = msgs.map(m => {
+              if (messageIdEquals(m.messageId, message.messageId)) {
+                changed = true;
+                return { ...m, id: message.id ?? m.id, status: message.status };
+              }
+              return m;
+            });
+            return changed ? updated : null;
+          }
+        );
+        return map ? { messagesByContact: map } : state;
+      });
+    };
 
-        if (hasChanges) {
-          set({
-            messagesByContact: newMessagesMap,
-            reactionsByContact: newReactionsMap,
-          });
-        }
+    const onWriteConfirmed = (dbId: number, entityType: string) => {
+      if (entityType !== 'message') return;
+      set(state => {
+        const map = findAndPatch(
+          state.messagesByContact,
+          m => !m.id && m.direction === MessageDirection.OUTGOING,
+          m => ({ ...m, id: dbId })
+        );
+        return map ? { messagesByContact: map } : state;
+      });
+    };
+
+    const onWriteFailed = (
+      failedMessageId: Uint8Array | undefined,
+      entityType: string
+    ) => {
+      if (entityType !== 'message') return;
+      set(state => {
+        const map = findAndPatch(
+          state.messagesByContact,
+          m => messageIdEquals(m.messageId, failedMessageId),
+          m => ({ ...m, status: MessageStatus.FAILED })
+        );
+        return map ? { messagesByContact: map } : state;
+      });
+    };
+
+    const onRead = (messageDbId: number) => {
+      set(state => {
+        const map = findAndPatch(
+          state.messagesByContact,
+          m => m.id === messageDbId,
+          m => ({ ...m, status: MessageStatus.READ })
+        );
+        return map ? { messagesByContact: map } : state;
+      });
+    };
+
+    const onSessionEvent = async () => {
+      const currentContact = get().currentContactUserId;
+      if (!currentContact || !sdk.isSessionOpen) return;
+      try {
+        const messages = await sdk.messages.getVisibleMessages(currentContact);
+        const reactions = await sdk.messages.getReactions(currentContact);
+        set(state => {
+          const msgMap = new Map(state.messagesByContact);
+          const rxnMap = new Map(state.reactionsByContact);
+          msgMap.set(currentContact, messages);
+          if (reactions.length > 0) rxnMap.set(currentContact, reactions);
+          else rxnMap.delete(currentContact);
+          return { messagesByContact: msgMap, reactionsByContact: rxnMap };
+        });
       } catch (error) {
-        console.error('Messages fetch error:', error);
-      } finally {
-        isFetching = false;
+        console.error('Session event refetch error:', error);
       }
     };
 
-    // Immediate fetch
-    await fetchAllMessages();
+    sdk.on(SdkEventType.MESSAGE_OPTIMISTIC, onOptimistic);
+    sdk.on(SdkEventType.MESSAGE_RECEIVED, onReceived);
+    sdk.on(SdkEventType.MESSAGE_SENT, onSent);
+    sdk.on(SdkEventType.MESSAGE_READ, onRead);
+    sdk.on(SdkEventType.WRITE_CONFIRMED, onWriteConfirmed);
+    sdk.on(SdkEventType.WRITE_FAILED, onWriteFailed);
+    sdk.on(SdkEventType.SESSION_CREATED, onSessionEvent);
+    sdk.on(SdkEventType.SESSION_ACCEPTED, onSessionEvent);
 
-    // Polling interval
-    const timer = setInterval(fetchAllMessages, POLL_INTERVAL_MS);
-
-    // Event-driven immediate refetch (debounced to collapse rapid events)
-    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-    const onEvent = () => {
-      if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(fetchAllMessages, 100);
-    };
-    const cancelDebounce = () => {
-      if (debounceTimer) {
-        clearTimeout(debounceTimer);
-        debounceTimer = null;
+    const cleanupFn = () => {
+      try {
+        sdk.off(SdkEventType.MESSAGE_OPTIMISTIC, onOptimistic);
+        sdk.off(SdkEventType.MESSAGE_RECEIVED, onReceived);
+        sdk.off(SdkEventType.MESSAGE_SENT, onSent);
+        sdk.off(SdkEventType.MESSAGE_READ, onRead);
+        sdk.off(SdkEventType.WRITE_CONFIRMED, onWriteConfirmed);
+        sdk.off(SdkEventType.WRITE_FAILED, onWriteFailed);
+        sdk.off(SdkEventType.SESSION_CREATED, onSessionEvent);
+        sdk.off(SdkEventType.SESSION_ACCEPTED, onSessionEvent);
+      } catch {
+        // SDK might not be available during cleanup
       }
     };
-    const sdk = getSdk();
-    sdk.on(SdkEventType.MESSAGE_RECEIVED, onEvent);
-    sdk.on(SdkEventType.MESSAGE_SENT, onEvent);
-    sdk.on(SdkEventType.MESSAGE_READ, onEvent);
-    sdk.on(SdkEventType.SESSION_CREATED, onEvent);
-    sdk.on(SdkEventType.SESSION_ACCEPTED, onEvent);
 
-    set({
-      pollTimer: timer,
-      eventHandler: onEvent,
-      cancelDebounce,
-      isInitializing: false,
-    });
+    set({ cleanupFn, isInitializing: false });
   },
 
-  // Send a message
   sendMessage: async (
-    contactUserId: string,
-    content: string,
-    replyToId?: number,
-    forwardFromMessageId?: number
+    contactUserId,
+    content,
+    replyToId?,
+    forwardFromMessageId?
   ) => {
     const { userProfile } = useAccountStore.getState();
     const isForward = !!forwardFromMessageId;
@@ -243,63 +355,37 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
       return;
 
     set({ isSending: true });
-
     try {
-      const discussion = await getSdk().discussions.get(contactUserId);
-
-      if (!discussion) {
-        throw new Error('Discussion not found');
-      }
-
-      // Create message with sending status
-      let replyTo: Message['replyTo'] = undefined;
-      let forwardOf: Message['forwardOf'] = undefined;
+      let replyTo: Message['replyTo'];
+      let forwardOf: Message['forwardOf'];
 
       if (replyToId) {
-        // Look up the original message to get its seeker
-        const originalMessage = await getSdk().messages.get(replyToId);
-        if (!originalMessage) {
-          throw new Error('Original message not found');
-        }
-        if (!originalMessage.messageId) {
+        const orig = await getSdk().messages.get(replyToId);
+        if (!orig) throw new Error('Original message not found');
+        if (!orig.messageId)
           throw new Error('Cannot reply to a message that has no messageId');
-        }
-        replyTo = {
-          originalMsgId: originalMessage.messageId,
-        };
+        replyTo = { originalMsgId: orig.messageId };
       }
 
       if (forwardFromMessageId) {
-        const originalMessage =
-          await getSdk().messages.get(forwardFromMessageId);
-        if (!originalMessage) {
+        const orig = await getSdk().messages.get(forwardFromMessageId);
+        if (!orig) {
           console.warn(
             'Forward target message not found, sending as regular message'
           );
-        } else if (!originalMessage.messageId) {
+        } else if (!orig.messageId) {
           throw new Error('Cannot forward a message that has no messageId');
-        } else if (originalMessage.contactUserId === contactUserId) {
-          // Forwarding within the same discussion → treat as a reply
-          replyTo = {
-            originalMsgId: originalMessage.messageId!,
-          };
+        } else if (orig.contactUserId === contactUserId) {
+          replyTo = { originalMsgId: orig.messageId! };
         } else {
-          // Forwarding to a different discussion → use forward metadata
-          let originalContactId: Uint8Array;
-          try {
-            originalContactId = decodeUserId(originalMessage.contactUserId);
-          } catch {
-            throw new Error('Invalid original contact userId');
-          }
-
           forwardOf = {
-            originalContent: originalMessage.content,
-            originalContactId,
+            originalContent: orig.content,
+            originalContactId: decodeUserId(orig.contactUserId),
           };
         }
       }
 
-      const message: Omit<Message, 'id'> = {
+      const result = getSdk().messages.sendOptimistic({
         ownerUserId: userProfile.userId,
         contactUserId,
         content,
@@ -309,19 +395,9 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
         timestamp: new Date(),
         replyTo,
         forwardOf,
-      };
-
-      // Send via service
-      const result = await getSdk().messages.send(message);
-      if (!result.success) {
-        if (result.message) {
-          console.warn(
-            `Message has been added to pending queue waiting to be resent. Cause: ${result.error}`
-          );
-        } else {
-          console.error('Failed to send message, got error:', result.error);
-        }
-      }
+      });
+      if (!result.success)
+        console.error('Failed to send message:', result.error);
     } catch (error) {
       console.error('Failed to send message:', error);
       throw error;
@@ -330,161 +406,154 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
     }
   },
 
-  // Get messages for a contact
-  getMessagesForContact: (contactUserId: string) => {
+  getMessagesForContact: contactUserId => {
     return get().messagesByContact.get(contactUserId) || EMPTY_MESSAGES;
   },
 
-  sendReaction: async (
-    contactUserId: string,
-    emoji: string,
-    messageDbId: number
-  ) => {
-    const messages =
-      get().messagesByContact.get(contactUserId) || EMPTY_MESSAGES;
-    const target = messages.find(m => m.id === messageDbId);
-    if (!target || !target.messageId) {
+  deleteMessage: async (contactUserId, messageId) => {
+    const msgs = get().messagesByContact.get(contactUserId) || EMPTY_MESSAGES;
+    const removed = msgs.find(m => m.id === messageId);
+
+    // Optimistic remove
+    set(state => {
+      const map = patchContact(state.messagesByContact, contactUserId, ms =>
+        ms.filter(m => m.id !== messageId)
+      );
+      return map ? { messagesByContact: map } : state;
+    });
+
+    try {
+      const ok = await getSdk().messages.deleteMessage(messageId);
+      if (!ok && removed) rollbackInsert(set, contactUserId, removed);
+    } catch {
+      if (removed) rollbackInsert(set, contactUserId, removed);
+    }
+  },
+
+  editMessage: async (contactUserId, messageId, newContent) => {
+    const msgs = get().messagesByContact.get(contactUserId) || EMPTY_MESSAGES;
+    const original = msgs.find(m => m.id === messageId);
+
+    // Optimistic update
+    set(state => {
+      const map = patchContact(state.messagesByContact, contactUserId, ms =>
+        ms.map(m =>
+          m.id === messageId
+            ? {
+                ...m,
+                content: newContent,
+                metadata: { ...(m.metadata as object), edited: true },
+              }
+            : m
+        )
+      );
+      return map ? { messagesByContact: map } : state;
+    });
+
+    try {
+      const ok = await getSdk().messages.editMessage(messageId, newContent);
+      if (!ok && original)
+        rollbackReplace(set, contactUserId, messageId, original);
+    } catch {
+      if (original) rollbackReplace(set, contactUserId, messageId, original);
+    }
+  },
+
+  sendReaction: async (contactUserId, emoji, messageDbId) => {
+    const msgs = get().messagesByContact.get(contactUserId) || EMPTY_MESSAGES;
+    const target = msgs.find(m => m.id === messageDbId);
+    if (!target?.messageId) {
       console.warn('Cannot react to message without messageId');
       return;
     }
-    const sdk = getSdk();
-    await sdk.messages.sendReaction(contactUserId, emoji, target.messageId);
+    await getSdk().messages.sendReaction(
+      contactUserId,
+      emoji,
+      target.messageId
+    );
   },
 
-  removeReaction: async (reactionDbId: number) => {
+  removeReaction: async reactionDbId => {
     const sdk = getSdk();
-    // Look up the reaction to know which original message it targets
     const reaction = await sdk.messages.get(reactionDbId);
     if (
-      !reaction ||
-      reaction.type !== MessageType.REACTION ||
-      !reaction.reactionOf?.originalMsgId
+      !reaction?.reactionOf?.originalMsgId ||
+      reaction.type !== MessageType.REACTION
     ) {
-      // Fallback: just delete this row
       await sdk.messages.deleteMessage(reactionDbId);
       return;
     }
 
-    const originalMsgId = reaction.reactionOf.originalMsgId;
     const allReactions = await sdk.messages.getReactions(
       reaction.contactUserId
     );
-
-    // Delete all of *our* reactions for this original message so nothing is
-    // left after the user taps to remove their reaction, regardless of how
-    // many times they've reacted before.
     const targets = allReactions.filter(
       r =>
         r.direction === MessageDirection.OUTGOING &&
-        r.reactionOf?.originalMsgId &&
-        r.reactionOf.originalMsgId.length === originalMsgId.length &&
-        r.reactionOf.originalMsgId.every((b, i) => b === originalMsgId[i]) &&
+        messageIdEquals(
+          r.reactionOf?.originalMsgId,
+          reaction.reactionOf!.originalMsgId
+        ) &&
         r.id != null
     );
 
-    if (targets.length === 0) {
-      await sdk.messages.deleteMessage(reactionDbId);
-      return;
-    }
-
-    for (const r of targets) {
+    for (const r of targets.length > 0 ? targets : [reaction]) {
       await sdk.messages.deleteMessage(r.id!);
     }
   },
 
-  // Get aggregated reactions for a specific message in a contact
-  getReactionsForMessage: (contactUserId: string, messageDbId: number) => {
+  getReactionsForMessage: (contactUserId, messageDbId) => {
     const reactions =
       get().reactionsByContact.get(contactUserId) || EMPTY_MESSAGES;
-    const messages =
-      get().messagesByContact.get(contactUserId) || EMPTY_MESSAGES;
-    const target = messages.find(m => m.id === messageDbId);
-    if (!target || !target.messageId) return [];
+    const msgs = get().messagesByContact.get(contactUserId) || EMPTY_MESSAGES;
+    const target = msgs.find(m => m.id === messageDbId);
+    if (!target?.messageId) return [];
 
-    // With a single peer per discussion and ordered delivery, there can be at
-    // most one meaningful reaction per user. Pick the *latest* reaction for
-    // each direction (INCOMING / OUTGOING), then aggregate by emoji.
     let latestIncoming: Message | undefined;
     let latestOutgoing: Message | undefined;
 
-    for (const reaction of reactions) {
-      if (!reaction.reactionOf?.originalMsgId) continue;
-      if (
-        reaction.reactionOf.originalMsgId.length === target.messageId.length &&
-        reaction.reactionOf.originalMsgId.every(
-          (b, i) => b === target.messageId![i]
-        )
-      ) {
-        if (reaction.direction === MessageDirection.OUTGOING) {
-          if (
-            !latestOutgoing ||
-            reaction.timestamp > latestOutgoing.timestamp
-          ) {
-            latestOutgoing = reaction;
-          }
-        } else if (reaction.direction === MessageDirection.INCOMING) {
-          if (
-            !latestIncoming ||
-            reaction.timestamp > latestIncoming.timestamp
-          ) {
-            latestIncoming = reaction;
-          }
-        }
+    for (const r of reactions) {
+      if (!messageIdEquals(r.reactionOf?.originalMsgId, target.messageId))
+        continue;
+      if (r.direction === MessageDirection.OUTGOING) {
+        if (!latestOutgoing || r.timestamp > latestOutgoing.timestamp)
+          latestOutgoing = r;
+      } else {
+        if (!latestIncoming || r.timestamp > latestIncoming.timestamp)
+          latestIncoming = r;
       }
     }
 
-    const effective: Message[] = [];
-    if (latestIncoming) effective.push(latestIncoming);
-    if (latestOutgoing) effective.push(latestOutgoing);
-
     const groups = new Map<string, ReactionGroup>();
-    for (const r of effective) {
-      const key = r.content;
-      const existing = groups.get(key) ?? { emoji: key, count: 0 };
-      const isMine = r.direction === MessageDirection.OUTGOING && r.id != null;
-      groups.set(key, {
-        emoji: key,
+    for (const r of [latestIncoming, latestOutgoing].filter(
+      Boolean
+    ) as Message[]) {
+      const existing = groups.get(r.content) ?? { emoji: r.content, count: 0 };
+      groups.set(r.content, {
+        ...existing,
         count: existing.count + 1,
-        myReactionId: isMine ? r.id : existing.myReactionId,
+        myReactionId:
+          r.direction === MessageDirection.OUTGOING && r.id != null
+            ? r.id
+            : existing.myReactionId,
       });
     }
 
     return Array.from(groups.values());
   },
 
-  // Clear messages for a contact
-  clearMessages: (contactUserId: string) => {
-    const newMessagesMap = new Map(get().messagesByContact);
-    const newReactionsMap = new Map(get().reactionsByContact);
-    newMessagesMap.delete(contactUserId);
-    newReactionsMap.delete(contactUserId);
-    set({
-      messagesByContact: newMessagesMap,
-      reactionsByContact: newReactionsMap,
-    });
+  clearMessages: contactUserId => {
+    const msgMap = new Map(get().messagesByContact);
+    const rxnMap = new Map(get().reactionsByContact);
+    msgMap.delete(contactUserId);
+    rxnMap.delete(contactUserId);
+    set({ messagesByContact: msgMap, reactionsByContact: rxnMap });
   },
 
   cleanup: () => {
-    const timer = get().pollTimer;
-    if (timer) clearInterval(timer);
-    get().cancelDebounce?.();
-    const handler = get().eventHandler;
-    if (handler) {
-      try {
-        const sdk = getSdk();
-        sdk.off(SdkEventType.MESSAGE_RECEIVED, handler);
-        sdk.off(SdkEventType.MESSAGE_SENT, handler);
-        sdk.off(SdkEventType.MESSAGE_READ, handler);
-        sdk.off(SdkEventType.SESSION_CREATED, handler);
-        sdk.off(SdkEventType.SESSION_ACCEPTED, handler);
-      } catch {
-        // SDK might not be available during cleanup
-      }
-    }
+    get().cleanupFn?.();
     set({
-      pollTimer: null,
-      eventHandler: null,
-      cancelDebounce: null,
+      cleanupFn: null,
       messagesByContact: new Map(),
       reactionsByContact: new Map(),
       currentContactUserId: null,
@@ -493,5 +562,38 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
     });
   },
 }));
+
+// ---------------------------------------------------------------------------
+// Rollback helpers (shared by delete / edit)
+// ---------------------------------------------------------------------------
+
+type SetFn = (
+  fn: (state: MessageStoreState) => Partial<MessageStoreState>
+) => void;
+
+function rollbackInsert(set: SetFn, contactUserId: string, message: Message) {
+  set(state => {
+    const map = patchContact(state.messagesByContact, contactUserId, msgs =>
+      [...msgs, message].sort(
+        (a, b) => a.timestamp.getTime() - b.timestamp.getTime()
+      )
+    );
+    return map ? { messagesByContact: map } : state;
+  });
+}
+
+function rollbackReplace(
+  set: SetFn,
+  contactUserId: string,
+  messageId: number,
+  original: Message
+) {
+  set(state => {
+    const map = patchContact(state.messagesByContact, contactUserId, msgs =>
+      msgs.map(m => (m.id === messageId ? original : m))
+    );
+    return map ? { messagesByContact: map } : state;
+  });
+}
 
 export const useMessageStore = createSelectors(useMessageStoreBase);

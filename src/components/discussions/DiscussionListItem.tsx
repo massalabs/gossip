@@ -136,7 +136,7 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
 
   return (
     <div
-      key={discussion.id}
+      key={discussion.contactUserId}
       className="w-full px-2 py-0.5 text-left bg-background/20 border border-border rounded-xl mb-1 hover:bg-accent/10"
     >
       <div

@@ -5,14 +5,12 @@ import {
   SdkEventType,
   SELF_CONTACT_ID,
 } from '@massalabs/gossip-sdk';
-import type { Discussion } from '@massalabs/gossip-sdk';
+import type { Discussion, Message } from '@massalabs/gossip-sdk';
 import { getSdk } from './sdkStore';
 import { createSelectors } from './utils/createSelectors';
 import { useAccountStore } from './accountStore';
 
 export type DiscussionFilter = 'all' | 'unread' | 'pending';
-
-const POLL_INTERVAL_MS = 3000;
 
 interface DiscussionStoreState {
   discussions: Discussion[];
@@ -20,12 +18,7 @@ interface DiscussionStoreState {
   contacts: Contact[];
   lastMessages: Map<string, { content: string; timestamp: Date }>;
   openNameModals: Set<number>;
-  pollTimer: ReturnType<typeof setInterval> | null;
-  eventHandler: (() => void) | null;
-  sessionStatusHandler:
-    | ((contactUserId: string, status: SessionStatus) => void)
-    | null;
-  cancelDebounce: (() => void) | null;
+  cleanupFn: (() => void) | null;
   isInitializing: boolean;
   filter: DiscussionFilter;
 
@@ -45,17 +38,14 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
   contacts: [],
   lastMessages: new Map(),
   openNameModals: new Set<number>(),
-  pollTimer: null,
-  eventHandler: null,
-  sessionStatusHandler: null,
-  cancelDebounce: null,
+  cleanupFn: null,
   isInitializing: false,
   filter: 'all',
 
   init: () => {
     const ownerUserId = useAccountStore.getState().userProfile?.userId;
 
-    if (!ownerUserId || get().pollTimer || get().isInitializing) return;
+    if (!ownerUserId || get().cleanupFn || get().isInitializing) return;
 
     set({ isInitializing: true });
 
@@ -82,16 +72,14 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
               sdk.discussions.getStatus(d.contactUserId)
             );
           }
-          set({ sessionsStatuses: statusMap }); // Update sessionsStatuses map reference
+          set({ sessionsStatuses: statusMap });
         }
 
-        // Sort discussions: new requests (PENDING) first, then active discussions
-        // Within each group, sort by most recent activity
+        // Sort discussions
         const getActivityTime = (discussion: Discussion): number => {
           if (discussion.lastMessageTimestamp) {
             return discussion.lastMessageTimestamp.getTime();
           }
-
           const status = get().sessionsStatuses.get(discussion.contactUserId);
           if (
             status &&
@@ -102,7 +90,6 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
           ) {
             return discussion.updatedAt.getTime();
           }
-
           return discussion.createdAt.getTime();
         };
 
@@ -121,7 +108,6 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
           discussion.pinned ? 0 : 1;
 
         const sortedDiscussions = discussionsList.sort((a, b) => {
-          // Pinned first
           const pinnedDiff = getPinnedPriority(a) - getPinnedPriority(b);
           if (pinnedDiff !== 0) return pinnedDiff;
 
@@ -170,33 +156,48 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
       }
     };
 
-    // Immediate fetch
+    // Initial fetch
     fetchData();
 
-    // Polling interval
-    const timer = setInterval(fetchData, POLL_INTERVAL_MS);
-
-    // Event-driven immediate refetch (debounced to collapse rapid events)
+    // Event-driven refetch (debounced to collapse rapid events)
     let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-    const onEvent = () => {
+    const debouncedFetch = () => {
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(fetchData, 100);
     };
-    // Cancel pending debounce (called from cleanup)
-    const cancelDebounce = () => {
-      if (debounceTimer) {
-        clearTimeout(debounceTimer);
-        debounceTimer = null;
-      }
+
+    // Optimistic: update lastMessages immediately on outgoing/incoming messages
+    const onMessageEvent = (message: Message) => {
+      set(state => {
+        const lastMessages = new Map(state.lastMessages);
+        lastMessages.set(message.contactUserId, {
+          content: message.content,
+          timestamp: message.timestamp,
+        });
+        // Re-sort: move the affected discussion to top (after pinned)
+        const discussions = [...state.discussions].sort((a, b) => {
+          if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+          const timeA =
+            lastMessages.get(a.contactUserId)?.timestamp.getTime() ?? 0;
+          const timeB =
+            lastMessages.get(b.contactUserId)?.timestamp.getTime() ?? 0;
+          return timeB - timeA;
+        });
+        return { lastMessages, discussions };
+      });
+      // Also trigger a full refetch to sync DB state (discussion metadata)
+      debouncedFetch();
     };
+
     const sdk = getSdk();
-    sdk.on(SdkEventType.MESSAGE_RECEIVED, onEvent);
-    sdk.on(SdkEventType.MESSAGE_READ, onEvent);
-    sdk.on(SdkEventType.SESSION_CREATED, onEvent);
-    sdk.on(SdkEventType.SESSION_ACCEPTED, onEvent);
-    sdk.on(SdkEventType.SESSION_RENEWED, onEvent);
-    sdk.on(SdkEventType.SESSION_REQUESTED, onEvent);
-    sdk.on(SdkEventType.DISCUSSION_UPDATED, onEvent);
+    sdk.on(SdkEventType.MESSAGE_OPTIMISTIC, onMessageEvent);
+    sdk.on(SdkEventType.MESSAGE_RECEIVED, onMessageEvent);
+    sdk.on(SdkEventType.MESSAGE_READ, debouncedFetch);
+    sdk.on(SdkEventType.SESSION_CREATED, debouncedFetch);
+    sdk.on(SdkEventType.SESSION_ACCEPTED, debouncedFetch);
+    sdk.on(SdkEventType.SESSION_RENEWED, debouncedFetch);
+    sdk.on(SdkEventType.SESSION_REQUESTED, debouncedFetch);
+    sdk.on(SdkEventType.DISCUSSION_UPDATED, debouncedFetch);
 
     const onSessionStatusChanged = (
       contactUserId: string,
@@ -208,16 +209,26 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
         return { sessionsStatuses: next };
       });
     };
-
     sdk.on(SdkEventType.SESSION_STATUS_CHANGED, onSessionStatusChanged);
 
-    set({
-      pollTimer: timer,
-      eventHandler: onEvent,
-      sessionStatusHandler: onSessionStatusChanged,
-      cancelDebounce,
-      isInitializing: false,
-    });
+    const cleanupFn = () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      try {
+        sdk.off(SdkEventType.MESSAGE_OPTIMISTIC, onMessageEvent);
+        sdk.off(SdkEventType.MESSAGE_RECEIVED, onMessageEvent);
+        sdk.off(SdkEventType.MESSAGE_READ, debouncedFetch);
+        sdk.off(SdkEventType.SESSION_CREATED, debouncedFetch);
+        sdk.off(SdkEventType.SESSION_ACCEPTED, debouncedFetch);
+        sdk.off(SdkEventType.SESSION_RENEWED, debouncedFetch);
+        sdk.off(SdkEventType.SESSION_REQUESTED, debouncedFetch);
+        sdk.off(SdkEventType.DISCUSSION_UPDATED, debouncedFetch);
+        sdk.off(SdkEventType.SESSION_STATUS_CHANGED, onSessionStatusChanged);
+      } catch {
+        // SDK might not be available during cleanup
+      }
+    };
+
+    set({ cleanupFn, isInitializing: false });
   },
 
   getDiscussionsForContact: (contactUserId: string) => {
@@ -231,7 +242,6 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
   getDiscussionsByStatus: (status: SessionStatus[]) => {
     const ownerUserId = useAccountStore.getState().userProfile?.userId;
     if (!ownerUserId) return [];
-    // Return empty array if session is not open (cannot get status)
     if (!getSdk().isSessionOpen) return [];
     return get().discussions.filter(discussion => {
       return status.includes(
@@ -241,36 +251,10 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
   },
 
   cleanup: () => {
-    const timer = get().pollTimer;
-    if (timer) clearInterval(timer);
-    get().cancelDebounce?.();
-    const handler = get().eventHandler;
-    const statusHandler = get().sessionStatusHandler;
-    if (handler || statusHandler) {
-      try {
-        const sdk = getSdk();
-        if (handler) {
-          sdk.off(SdkEventType.MESSAGE_RECEIVED, handler);
-          sdk.off(SdkEventType.MESSAGE_READ, handler);
-          sdk.off(SdkEventType.SESSION_CREATED, handler);
-          sdk.off(SdkEventType.SESSION_ACCEPTED, handler);
-          sdk.off(SdkEventType.SESSION_RENEWED, handler);
-          sdk.off(SdkEventType.SESSION_REQUESTED, handler);
-          sdk.off(SdkEventType.DISCUSSION_UPDATED, handler);
-        }
-        if (statusHandler) {
-          sdk.off(SdkEventType.SESSION_STATUS_CHANGED, statusHandler);
-        }
-      } catch {
-        // SDK might not be available during cleanup
-      }
-    }
+    get().cleanupFn?.();
     set({
       sessionsStatuses: new Map<string, SessionStatus>(),
-      pollTimer: null,
-      eventHandler: null,
-      sessionStatusHandler: null,
-      cancelDebounce: null,
+      cleanupFn: null,
       discussions: [],
       contacts: [],
       lastMessages: new Map(),

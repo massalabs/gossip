@@ -1052,7 +1052,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
             {/* Invisible spacer — reserves space for the absolute-positioned timestamp */}
             {(showTimestamp || (!isDeleted && (isOutgoing || isEdited))) && (
               <span
-                className={`inline-block ${isDeleted ? 'w-10' : isSending ? 'w-6' : isOutgoing ? 'w-16' : 'w-10'}`}
+                className={`inline-block ${isDeleted ? 'w-10' : isOutgoing ? 'w-16' : 'w-10'}`}
                 aria-hidden="true"
               />
             )}
@@ -1077,7 +1077,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
             )}
             {isOutgoing && !isDeleted && (
               <span
-                className="inline-flex items-center"
+                className="inline-flex items-center w-4 h-3.5 transition-opacity duration-200"
                 aria-label={t('message_item.status', {
                   status: message.status,
                 })}

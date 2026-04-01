@@ -23,7 +23,6 @@ interface UseDiscussionActionsParams {
 export function useDiscussionActions({
   contact,
   isSelecting,
-  gossip,
   t,
   forwardFromMessageId,
   setReplyingTo,
@@ -33,6 +32,8 @@ export function useDiscussionActions({
 }: UseDiscussionActionsParams) {
   const navigate = useNavigate();
   const sendMessage = useMessageStore(s => s.sendMessage);
+  const deleteMessage = useMessageStore(s => s.deleteMessage);
+  const editMessage = useMessageStore(s => s.editMessage);
   const setPendingSharedContent = useAppStore(s => s.setPendingSharedContent);
   const setPendingForwardMessageId = useAppStore(
     s => s.setPendingForwardMessageId
@@ -101,20 +102,18 @@ export function useDiscussionActions({
     [setEditingMessage, setReplyingTo, setInputPrefill]
   );
 
+  // Optimistic delete via store
   const handleDeleteMessage = useCallback(
     async (message: Message) => {
-      if (!message.id) return;
+      if (!message.id || !contact?.userId) return;
       try {
-        const deleted = await gossip.messages.deleteMessage(message.id);
-        if (!deleted) {
-          toast.error(t('unable_to_delete'));
-        }
+        await deleteMessage(contact.userId, message.id);
       } catch (error) {
         toast.error(t('failed_to_delete'));
         console.error('Failed to delete message:', error);
       }
     },
-    [gossip, t]
+    [contact?.userId, deleteMessage, t]
   );
 
   const handleCancelReply = useCallback(() => {
@@ -126,14 +125,12 @@ export function useDiscussionActions({
     setInputPrefill(undefined);
   }, [setEditingMessage, setInputPrefill]);
 
+  // Optimistic edit via store
   const handleConfirmEdit = useCallback(
     async (newContent: string, message: Message) => {
-      if (!message.id) return;
+      if (!message.id || !contact?.userId) return;
       try {
-        const ok = await gossip.messages.editMessage(message.id, newContent);
-        if (!ok) {
-          toast.error(t('unable_to_edit'));
-        }
+        await editMessage(contact.userId, message.id, newContent);
       } catch (error) {
         toast.error(t('failed_to_edit'));
         console.error('Failed to edit message:', error);
@@ -142,7 +139,7 @@ export function useDiscussionActions({
         setInputPrefill(undefined);
       }
     },
-    [gossip, t, setEditingMessage, setInputPrefill]
+    [contact?.userId, editMessage, t, setEditingMessage, setInputPrefill]
   );
 
   const handleInputFocus = useCallback(() => {
