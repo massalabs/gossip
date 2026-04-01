@@ -100,10 +100,10 @@ const Discussion: React.FC = () => {
   const messages = useMessageStore(s =>
     contact ? s.getMessagesForContact(contact.userId) : []
   );
-  const getReactionsForMessage = useMessageStore(s => s.getReactionsForMessage);
-  const sendReaction = useMessageStore(s => s.sendReaction);
+  const reactionGroups = useMessageStore(s => s.reactionGroupsCache);
+  const reactToMessage = useMessageStore(s => s.reactToMessage);
   const removeReaction = useMessageStore(s => s.removeReaction);
-  const isLoading = useMessageStore(s => s.isLoading);
+  const isLoading = useMessageStore(s => s.isInitializing);
   const sendMessage = useMessageStore(s => s.sendMessage);
 
   const prevContactUserIdRef = useRef<string | null>(null);
@@ -138,7 +138,6 @@ const Discussion: React.FC = () => {
   } = useDiscussionActions({
     contact: contact ?? undefined,
     isSelecting,
-    gossip,
     t,
     forwardFromMessageId,
     setReplyingTo,
@@ -362,20 +361,23 @@ const Discussion: React.FC = () => {
             onEdit={handleEditMessage}
             onReact={(message, emoji) => {
               if (!message.id) return;
-              sendReaction(contact.userId, emoji, message.id).catch(err => {
+              reactToMessage(contact.userId, emoji, message.id).catch(err => {
                 console.error('Failed to send reaction', err);
               });
             }}
-            getReactionsForMessage={messageId =>
-              getReactionsForMessage(contact.userId, messageId)
-            }
-            onToggleReaction={(message, emoji, myReactionId) => {
-              if (myReactionId) {
-                removeReaction(myReactionId).catch(err => {
+            reactionGroups={reactionGroups}
+            onToggleReaction={(
+              message,
+              emoji,
+              myReactionId,
+              myReactionMessageId
+            ) => {
+              if (myReactionId || myReactionMessageId) {
+                removeReaction(myReactionId, myReactionMessageId).catch(err => {
                   console.error('Failed to remove reaction', err);
                 });
               } else if (message.id) {
-                sendReaction(contact.userId, emoji, message.id).catch(err => {
+                reactToMessage(contact.userId, emoji, message.id).catch(err => {
                   console.error('Failed to send reaction', err);
                 });
               }

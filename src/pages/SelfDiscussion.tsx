@@ -44,6 +44,20 @@ const SelfDiscussion: React.FC = () => {
   const loadReactions = useSelfMessageStore.use.loadReactions();
 
   const gossip = useGossipSdk();
+
+  const selfReactionGroups = useMemo(() => {
+    const map = new Map<
+      string,
+      { emoji: string; count: number; myReactionId?: number }[]
+    >();
+    for (const msg of messages) {
+      if (msg.messageId && msg.id != null) {
+        const groups = reactions.get(msg.id);
+        if (groups) map.set(msg.messageId.join(','), groups);
+      }
+    }
+    return map;
+  }, [messages, reactions]);
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
   const swipeBack = useSwipeBack();
   const [editingMessage, setEditingMessage] = useState<Message | null>(null);
@@ -180,9 +194,7 @@ const SelfDiscussion: React.FC = () => {
                   void deleteMessage(message.id);
                 }
               }}
-              getReactionsForMessage={messageId =>
-                reactions.get(messageId) ?? []
-              }
+              reactionGroups={selfReactionGroups}
               onReact={(message, emoji) => {
                 if (message.id != null) {
                   void sendReaction(emoji, message.id);

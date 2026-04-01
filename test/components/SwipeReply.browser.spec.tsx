@@ -42,12 +42,13 @@ vi.mock('../../src/hooks/useMarkMessageAsRead', () => ({
   useMarkMessageAsRead: () => React.createRef(),
 }));
 
-import MessageItem, {
+import MessageItem from '../../src/components/discussions/MessageItem';
+import {
   SWIPE_RESISTANCE,
   SWIPE_THRESHOLD,
   SWIPE_RESISTANCE_OUTGOING,
   SWIPE_THRESHOLD_OUTGOING,
-} from '../../src/components/discussions/MessageItem';
+} from '../../src/components/discussions/hooks/useSwipeToReply';
 
 // ---------- Helpers ----------
 
