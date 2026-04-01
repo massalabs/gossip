@@ -293,6 +293,35 @@ function createEventHandlers(
       return;
     }
 
+    // Handle reaction deletion — remove from reactionsByContact
+    if (message.type === MessageType.DELETED && message.messageId) {
+      let handled = false;
+      set(state => {
+        const contact = message.contactUserId;
+        const existing = state.reactionsByContact.get(contact) || [];
+        const idx = existing.findIndex(r =>
+          messageIdEquals(r.messageId, message.messageId)
+        );
+        if (idx < 0) return state;
+        handled = true;
+        const rxnMap = new Map(state.reactionsByContact);
+        rxnMap.set(
+          contact,
+          existing.filter((_, i) => i !== idx)
+        );
+        return {
+          reactionsByContact: rxnMap,
+          reactionGroupsCache: patchReactionCache(
+            state.reactionGroupsCache,
+            contact,
+            state.messagesByContact,
+            rxnMap
+          ),
+        };
+      });
+      if (handled) return;
+    }
+
     set(state => {
       const map = patchContact(
         state.messagesByContact,
@@ -662,32 +691,7 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
       });
     }
 
-    const sdk = getSdk();
-    const reaction = await sdk.messages.get(reactionDbId);
-    if (
-      !reaction?.reactionOf?.originalMsgId ||
-      reaction.type !== MessageType.REACTION
-    ) {
-      await sdk.messages.deleteMessage(reactionDbId);
-      return;
-    }
-
-    const allReactions = await sdk.messages.getReactions(
-      reaction.contactUserId
-    );
-    const targets = allReactions.filter(
-      r =>
-        r.direction === MessageDirection.OUTGOING &&
-        messageIdEquals(
-          r.reactionOf?.originalMsgId,
-          reaction.reactionOf!.originalMsgId
-        ) &&
-        r.id != null
-    );
-
-    for (const r of targets.length > 0 ? targets : [reaction]) {
-      await sdk.messages.deleteMessage(r.id!);
-    }
+    await getSdk().messages.deleteMessage(reactionDbId);
   },
 
   clearMessages: contactUserId => {

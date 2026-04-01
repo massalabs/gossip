@@ -540,19 +540,26 @@ export class MessageService {
           continue;
         }
 
-        // Emit before DB write so UI updates instantly
-        this.emitMessageReceived({
-          ...target,
-          content: '[Message deleted]',
-          type: MessageType.DELETED,
-        });
+        if (target.type === MessageType.REACTION) {
+          // Reaction delete: hard-delete the row, not "[Message deleted]"
+          await this.queries.messages.deleteById(target.id);
+          this.emitMessageReceived({
+            ...target,
+            type: MessageType.DELETED,
+          });
+        } else {
+          // Regular message delete: mark as deleted
+          this.emitMessageReceived({
+            ...target,
+            content: '[Message deleted]',
+            type: MessageType.DELETED,
+          });
+          await this.queries.messages.updateById(target.id, {
+            content: '[Message deleted]',
+            type: MessageType.DELETED,
+          });
+        }
 
-        await this.queries.messages.updateById(target.id, {
-          content: '[Message deleted]',
-          type: MessageType.DELETED,
-        });
-
-        // Do not insert a new message row for delete control messages
         continue;
       }
 
