@@ -1,16 +1,10 @@
-import React, {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  useMemo,
-} from 'react';
+import React, { useCallback, useRef, useState, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import DiscussionListPanel from '../components/discussions/DiscussionList';
 import DiscussionFilterButtons from '../components/discussions/DiscussionFilterButtons';
 import { useAccountStore } from '../stores/accountStore';
 import { useAppStore } from '../stores/appStore';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { Plus, X, Settings, Lock } from 'react-feather';
 import Button from '../components/ui/Button';
 import SearchBar from '../components/ui/SearchBar';
@@ -53,16 +47,15 @@ const Discussions: React.FC = () => {
 
   // Prevent double navigation (two discussions opening on top of each other)
   const isNavigatingRef = useRef(false);
-  const location = useLocation();
-  useEffect(() => {
-    // Reset when we return to this page (location changes on back navigation)
-    isNavigatingRef.current = false;
-  }, [location.key]);
 
   const handleSelectDiscussion = useCallback(
     (contactUserId: string) => {
       if (isNavigatingRef.current) return;
       isNavigatingRef.current = true;
+      // Reset after animation completes so user can navigate again on return
+      setTimeout(() => {
+        isNavigatingRef.current = false;
+      }, 600);
 
       if (contactUserId === SELF_CONTACT_ID) {
         if (pendingForwardMessageId != null) {
