@@ -7,6 +7,7 @@ import React, {
   useState,
 } from 'react';
 import { MessageDirection, Message } from '@massalabs/gossip-sdk';
+import MessageItem from './MessageItem';
 import type { Discussion, Contact } from '@massalabs/gossip-sdk';
 import { VList, type VListHandle } from 'virtua';
 
@@ -25,7 +26,6 @@ import { findFirstUnreadMessage } from '../../utils/messages';
 import {
   AnnouncementRenderer,
   DateRenderer,
-  MessageRenderer,
   RetentionSeparatorRenderer,
   SpacerRenderer,
 } from './renderers/MessageItemRenderers';
@@ -370,35 +370,45 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
                 retentionDuration={item.retentionDuration}
               />
             );
-          case 'message':
+          case 'message': {
+            const isIncoming =
+              item.message.direction === MessageDirection.INCOMING;
             return (
-              <MessageRenderer
-                message={item.message}
-                showTimestamp={item.showTimestamp}
-                groupInfo={item.groupInfo}
-                onReplyTo={onReplyTo}
-                onForward={onForward}
-                onDelete={onDelete}
-                onEdit={onEdit}
-                onScrollToMessage={onScrollToMessage}
-                onReact={onReact}
-                onToggleReaction={onToggleReaction}
-                reactions={
-                  item.message.messageId && reactionGroups
-                    ? (reactionGroups.get(item.message.messageId.join(',')) ??
-                      EMPTY_REACTIONS)
-                    : EMPTY_REACTIONS
-                }
-                contact={contact}
-                isHighlighted={item.message.id === highlightedMessageId}
-                isSelecting={isSelecting}
-                isSelected={
-                  item.message.id != null &&
-                  selectedMessageIds?.has(item.message.id)
-                }
-                onToggleSelect={onToggleSelect}
-              />
+              <div
+                className={`px-4 md:px-6 lg:px-8 transition-colors duration-150 ${isSelecting && item.message.id != null && selectedMessageIds?.has(item.message.id) ? 'bg-accent/10' : ''}`}
+              >
+                <MessageItem
+                  id={`message-${item.message.id}`}
+                  message={item.message}
+                  onReplyTo={onReplyTo}
+                  onForward={onForward}
+                  onDelete={onDelete}
+                  onEdit={onEdit}
+                  onScrollToMessage={onScrollToMessage}
+                  onReact={onReact}
+                  onToggleReaction={onToggleReaction}
+                  reactions={
+                    item.message.messageId && reactionGroups
+                      ? (reactionGroups.get(item.message.messageId.join(',')) ??
+                        EMPTY_REACTIONS)
+                      : EMPTY_REACTIONS
+                  }
+                  showTimestamp={item.showTimestamp}
+                  isFirstInGroup={item.groupInfo.isFirstInGroup}
+                  isLastInGroup={item.groupInfo.isLastInGroup}
+                  showAvatar={isIncoming && item.groupInfo.isLastInGroup}
+                  contact={isIncoming ? contact : undefined}
+                  isHighlighted={item.message.id === highlightedMessageId}
+                  isSelecting={isSelecting}
+                  isSelected={
+                    item.message.id != null &&
+                    selectedMessageIds?.has(item.message.id)
+                  }
+                  onToggleSelect={onToggleSelect}
+                />
+              </div>
             );
+          }
           default:
             return null;
         }
