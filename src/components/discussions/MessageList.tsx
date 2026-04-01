@@ -398,7 +398,10 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
                   isLastInGroup={item.groupInfo.isLastInGroup}
                   showAvatar={isIncoming && item.groupInfo.isLastInGroup}
                   contact={isIncoming ? contact : undefined}
-                  isHighlighted={item.message.id === highlightedMessageId}
+                  isHighlighted={
+                    highlightedMessageId != null &&
+                    item.message.id === highlightedMessageId
+                  }
                   isSelecting={isSelecting}
                   isSelected={
                     item.message.id != null &&
