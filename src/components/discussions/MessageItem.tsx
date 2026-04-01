@@ -1,18 +1,13 @@
 import React, { useRef, useMemo, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import {
-  CornerUpLeft,
-  ChevronDown,
-  Check as CheckIcon,
-  AlertTriangle,
-  Clock,
-} from 'react-feather';
+import { CornerUpLeft, ChevronDown, Check as CheckIcon } from 'react-feather';
 import MessageContextMenu, {
   type ReactionGroup as ContextMenuReactionGroup,
 } from '../ui/MessageContextMenu';
 import EmojiPickerModal from '../ui/EmojiPickerModal';
 import ReactionBar from './ReactionBar';
-import { formatTime } from '../../utils/timeUtils';
+import CitedMessage from './CitedMessage';
+import MessageStatusIndicator from './MessageStatus';
 import {
   Message,
   MessageStatus,
@@ -436,106 +431,36 @@ const MessageItem: React.FC<MessageItemProps> = ({
 
         {/* Reply context */}
         {message.replyTo && (
-          <div
-            className={`mb-2 pb-2 border-l-2 pl-2 ${isOutgoing ? 'border-accent-foreground/30' : 'border-card-foreground/30'} ${original.originalNotFound ? 'border-destructive/50' : ''} ${
-              message.replyTo.originalMsgId && onScrollToMessage
-                ? 'cursor-pointer hover:bg-black/5 dark:hover:bg-white/5 rounded-r transition-colors active:scale-[0.98]'
-                : ''
-            }`}
-            {...(message.replyTo.originalMsgId && onScrollToMessage
-              ? {
-                  onClick: original.handleReplyContextClick,
-                  onKeyDown: original.handleReplyContextKeyDown,
-                  tabIndex: 0,
-                  role: 'button',
-                  'aria-label': t('message_item.jump_to_original'),
-                }
-              : {})}
-          >
-            {original.originalNotFound && (
-              <div className="flex items-center gap-1 mb-2">
-                <span
-                  className="inline-flex items-center gap-1"
-                  title={t('message_item.original_not_found_title')}
-                >
-                  <AlertTriangle
-                    className="w-3.5 h-3.5 text-destructive shrink-0"
-                    aria-hidden="true"
-                  />
-                  <span className="text-xs text-destructive md:hidden">
-                    {t('message_item.original_not_found_short')}
-                  </span>
-                </span>
-              </div>
-            )}
-            <p
-              className={`text-xs truncate ${isOutgoing ? 'text-accent-foreground/80' : 'text-muted-foreground/80'} ${original.originalNotFound ? 'italic opacity-70' : ''}`}
-            >
-              {original.isLoadingOriginal ? (
-                t('common:loading')
-              ) : original.parsedReplyLinks.length > 0 ? (
-                <LinkText
-                  segments={original.parsedReplyLinks}
-                  onLinkClick={handleLinkClick}
-                  linkAriaLabel={linkAriaLabel}
-                />
-              ) : (
-                original.originalMessage?.content ||
-                t('message_item.original_message')
-              )}
-            </p>
-          </div>
+          <CitedMessage
+            isOutgoing={isOutgoing}
+            isNotFound={original.originalNotFound}
+            isLoading={original.isLoadingOriginal}
+            content={original.originalMessage?.content}
+            parsedLinks={original.parsedReplyLinks}
+            canNavigate={!!message.replyTo.originalMsgId && !!onScrollToMessage}
+            onClick={original.handleReplyContextClick}
+            onKeyDown={original.handleReplyContextKeyDown}
+            onLinkClick={handleLinkClick}
+            linkAriaLabel={linkAriaLabel}
+          />
         )}
 
         {/* Forward context */}
         {message.forwardOf && (
-          <div
-            className={`mb-2 pb-2 border-l-2 pl-2 ${isOutgoing ? 'border-accent-foreground/30' : 'border-card-foreground/30'} ${
-              original.canNavigateToForwarded
-                ? 'cursor-pointer hover:bg-black/5 dark:hover:bg-white/5 rounded-r transition-colors active:scale-[0.98]'
-                : ''
-            }`}
-            {...(original.canNavigateToForwarded
-              ? {
-                  onClick: original.handleReplyContextClick,
-                  onKeyDown: original.handleReplyContextKeyDown,
-                  tabIndex: 0,
-                  role: 'button',
-                  'aria-label': t('message_item.jump_to_original'),
-                }
-              : {})}
-          >
-            {original.isLoadingOriginal ? (
-              <p
-                className={`text-xs ${isOutgoing ? 'text-accent-foreground/80' : 'text-muted-foreground/80'}`}
-              >
-                {t('common:loading')}
-              </p>
-            ) : (
-              <>
-                <p
-                  className={`text-[11px] font-medium mb-0.5 ${isOutgoing ? 'text-accent-foreground/80' : 'text-muted-foreground/80'}`}
-                >
-                  {t('message_item.forwarded_message')}
-                </p>
-                <p
-                  className={`text-xs truncate ${isOutgoing ? 'text-accent-foreground/80' : 'text-muted-foreground/80'}`}
-                >
-                  {original.parsedForwardLinks.length > 0 ? (
-                    <LinkText
-                      segments={original.parsedForwardLinks}
-                      onLinkClick={handleLinkClick}
-                      linkAriaLabel={linkAriaLabel}
-                    />
-                  ) : (
-                    original.originalMessage?.content ||
-                    message.forwardOf.originalContent ||
-                    t('message_item.original_message')
-                  )}
-                </p>
-              </>
-            )}
-          </div>
+          <CitedMessage
+            isOutgoing={isOutgoing}
+            isNotFound={false}
+            isLoading={original.isLoadingOriginal}
+            content={original.originalMessage?.content}
+            parsedLinks={original.parsedForwardLinks}
+            canNavigate={original.canNavigateToForwarded}
+            label={t('message_item.forwarded_message')}
+            fallbackContent={message.forwardOf.originalContent}
+            onClick={original.handleReplyContextClick}
+            onKeyDown={original.handleReplyContextKeyDown}
+            onLinkClick={handleLinkClick}
+            linkAriaLabel={linkAriaLabel}
+          />
         )}
 
         {/* Content */}
@@ -562,54 +487,15 @@ const MessageItem: React.FC<MessageItemProps> = ({
           </p>
         )}
 
-        {/* Timestamp + Status */}
-        {(showTimestamp || (!isDeleted && (isOutgoing || isEdited))) && (
-          <span
-            className={`absolute bottom-[13px] right-2.5 flex items-center gap-1 ${isOutgoing ? 'text-accent-foreground/80' : 'text-muted-foreground'}`}
-          >
-            {isEdited && !isSending && (
-              <span className="text-[10px] italic opacity-75">
-                {t('message_item.edited')}
-              </span>
-            )}
-            {showTimestamp && !isSending && (
-              <span className="text-[11px] font-medium">
-                {formatTime(message.timestamp)}
-              </span>
-            )}
-            {isOutgoing && !isDeleted && (
-              <span
-                className="inline-flex items-center w-4 h-3.5 transition-opacity duration-200"
-                aria-label={t('message_item.status', {
-                  status: message.status,
-                })}
-              >
-                {isSending && (
-                  <Clock
-                    className="w-3 h-3"
-                    aria-label={t('message_item.sending')}
-                  />
-                )}
-                {message.status === MessageStatus.SENT && (
-                  <CheckIcon
-                    className="w-3.5 h-3.5"
-                    aria-label={t('message_item.sent')}
-                  />
-                )}
-                {(message.status === MessageStatus.DELIVERED ||
-                  message.status === MessageStatus.READ) && (
-                  <span
-                    className="relative inline-flex items-center w-4 h-3.5"
-                    aria-label={t('message_item.delivered')}
-                  >
-                    <CheckIcon className="w-3.5 h-3.5 absolute left-0" />
-                    <CheckIcon className="w-3.5 h-3.5 absolute left-[5px] top-[1.5px]" />
-                  </span>
-                )}
-              </span>
-            )}
-          </span>
-        )}
+        <MessageStatusIndicator
+          status={message.status}
+          timestamp={message.timestamp}
+          isOutgoing={isOutgoing}
+          isDeleted={isDeleted}
+          isEdited={isEdited}
+          isSending={isSending}
+          showTimestamp={showTimestamp}
+        />
 
         {/* Desktop context menu arrow */}
         {!isSelecting && !isDeleted && (
