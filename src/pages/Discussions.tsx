@@ -1,10 +1,16 @@
-import React, { useCallback, useState, useMemo } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useMemo,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 import DiscussionListPanel from '../components/discussions/DiscussionList';
 import DiscussionFilterButtons from '../components/discussions/DiscussionFilterButtons';
 import { useAccountStore } from '../stores/accountStore';
 import { useAppStore } from '../stores/appStore';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Plus, X, Settings, Lock } from 'react-feather';
 import Button from '../components/ui/Button';
 import SearchBar from '../components/ui/SearchBar';
@@ -45,8 +51,19 @@ const Discussions: React.FC = () => {
     null
   );
 
+  // Prevent double navigation (two discussions opening on top of each other)
+  const isNavigatingRef = useRef(false);
+  const location = useLocation();
+  useEffect(() => {
+    // Reset when we return to this page (location changes on back navigation)
+    isNavigatingRef.current = false;
+  }, [location.key]);
+
   const handleSelectDiscussion = useCallback(
     (contactUserId: string) => {
+      if (isNavigatingRef.current) return;
+      isNavigatingRef.current = true;
+
       if (contactUserId === SELF_CONTACT_ID) {
         if (pendingForwardMessageId != null) {
           navigate(ROUTES.selfDiscussion(), {
@@ -60,22 +77,16 @@ const Discussions: React.FC = () => {
         }
         return;
       }
-      // If there's pending shared content, pass it as prefilled message
       if (pendingSharedContent) {
         const state =
           pendingForwardMessageId != null
-            ? {
-                forwardFromMessageId: pendingForwardMessageId,
-              }
-            : {
-                prefilledMessage: pendingSharedContent,
-              };
+            ? { forwardFromMessageId: pendingForwardMessageId }
+            : { prefilledMessage: pendingSharedContent };
 
         navigate(ROUTES.discussion({ userId: contactUserId }), {
           state,
           replace: false,
         });
-        // Clear pending shared content after navigation
         setPendingSharedContent(null);
         setPendingForwardMessageId(null);
       } else {
