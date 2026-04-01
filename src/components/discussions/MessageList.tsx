@@ -71,11 +71,17 @@ interface MessageListProps {
   onToggleReaction?: (
     message: Message,
     emoji: string,
-    myReactionId?: number
+    myReactionId?: number,
+    myReactionMessageId?: Uint8Array
   ) => void;
   reactionGroups?: Map<
     string,
-    { emoji: string; count: number; myReactionId?: number }[]
+    {
+      emoji: string;
+      count: number;
+      myReactionId?: number;
+      myReactionMessageId?: Uint8Array;
+    }[]
   >;
 }
 

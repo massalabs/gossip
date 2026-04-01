@@ -68,7 +68,8 @@ interface MessageItemProps {
   onToggleReaction?: (
     message: Message,
     emoji: string,
-    myReactionId?: number
+    myReactionId?: number,
+    myReactionMessageId?: Uint8Array
   ) => void;
   reactions?: ContextMenuReactionGroup[];
   id?: string;
@@ -1125,11 +1126,12 @@ const MessageItem: React.FC<MessageItemProps> = ({
                   onToggleReaction?.(
                     message,
                     reaction.emoji,
-                    reaction.myReactionId
+                    reaction.myReactionId,
+                    reaction.myReactionMessageId
                   );
                 }}
                 className={`flex items-center gap-0.5 text-sm min-w-[2rem] min-h-[1.75rem] px-2 py-1 rounded-full border shadow-sm bg-card/95 backdrop-blur active:scale-95 transition-transform ${
-                  reaction.myReactionId
+                  reaction.myReactionId || reaction.myReactionMessageId
                     ? 'border-accent text-foreground'
                     : 'border-border text-foreground'
                 }`}
@@ -1138,11 +1140,6 @@ const MessageItem: React.FC<MessageItemProps> = ({
                 {reaction.count > 1 && (
                   <span className="text-[10px] text-muted-foreground">
                     {reaction.count}
-                  </span>
-                )}
-                {!reaction.myReactionId && contact?.name && (
-                  <span className="text-[9px] text-muted-foreground max-w-[3rem] truncate">
-                    {contact.name.charAt(0)}
                   </span>
                 )}
               </button>

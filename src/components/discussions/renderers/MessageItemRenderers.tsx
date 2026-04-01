@@ -116,12 +116,14 @@ interface MessageRendererProps {
   onToggleReaction?: (
     message: Message,
     emoji: string,
-    myReactionId?: number
+    myReactionId?: number,
+    myReactionMessageId?: Uint8Array
   ) => void;
   reactions: {
     emoji: string;
     count: number;
     myReactionId?: number;
+    myReactionMessageId?: Uint8Array;
   }[];
   contact?: Pick<Contact, 'name' | 'avatar' | 'userId'>;
   isHighlighted?: boolean;

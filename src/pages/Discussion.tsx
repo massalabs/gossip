@@ -367,9 +367,14 @@ const Discussion: React.FC = () => {
               });
             }}
             reactionGroups={reactionGroups}
-            onToggleReaction={(message, emoji, myReactionId) => {
-              if (myReactionId) {
-                removeReaction(myReactionId).catch(err => {
+            onToggleReaction={(
+              message,
+              emoji,
+              myReactionId,
+              myReactionMessageId
+            ) => {
+              if (myReactionId || myReactionMessageId) {
+                removeReaction(myReactionId, myReactionMessageId).catch(err => {
                   console.error('Failed to remove reaction', err);
                 });
               } else if (message.id) {

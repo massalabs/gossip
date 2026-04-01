@@ -19,6 +19,7 @@ export interface ReactionGroup {
   emoji: string;
   count: number;
   myReactionId?: number;
+  myReactionMessageId?: Uint8Array;
 }
 
 interface MessageStoreState {
@@ -50,7 +51,10 @@ interface MessageStoreState {
     emoji: string,
     messageDbId: number
   ) => Promise<void>;
-  removeReaction: (reactionDbId: number) => Promise<void>;
+  removeReaction: (
+    reactionDbId: number | undefined,
+    reactionMessageId?: Uint8Array
+  ) => Promise<void>;
   clearMessages: (contactUserId: string) => void;
   cleanup: () => void;
 }
@@ -144,14 +148,14 @@ function computeReactionGroups(
     const groups = new Map<string, ReactionGroup>();
     for (const r of [incoming, outgoing]) {
       if (!r) continue;
+      const isMine = r.direction === MessageDirection.OUTGOING;
       const existing = groups.get(r.content) ?? { emoji: r.content, count: 0 };
       groups.set(r.content, {
         ...existing,
         count: existing.count + 1,
-        myReactionId:
-          r.direction === MessageDirection.OUTGOING && r.id != null
-            ? r.id
-            : existing.myReactionId,
+        myReactionId: isMine && r.id != null ? r.id : existing.myReactionId,
+        myReactionMessageId:
+          isMine && r.messageId ? r.messageId : existing.myReactionMessageId,
       });
     }
     result.set(key, Array.from(groups.values()));
@@ -656,42 +660,40 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
       console.error('Failed to send reaction:', result.error);
   },
 
-  removeReaction: async reactionDbId => {
-    // Optimistic: remove outgoing reactions for this target from state
-    const contactUserId = (() => {
-      for (const [contact, rxns] of get().reactionsByContact) {
-        if (rxns.some(r => r.id === reactionDbId)) return contact;
-      }
-      return null;
-    })();
+  removeReaction: async (reactionDbId, reactionMessageId?) => {
+    // Optimistic: find and remove the reaction from state
+    const match = (r: Message) =>
+      reactionMessageId
+        ? messageIdEquals(r.messageId, reactionMessageId)
+        : r.id === reactionDbId;
 
-    if (contactUserId) {
-      set(state => {
-        const existing = state.reactionsByContact.get(contactUserId) || [];
-        const rxnMap = new Map(state.reactionsByContact);
-        rxnMap.set(
-          contactUserId,
-          existing.filter(
-            r =>
-              !(
-                r.id === reactionDbId ||
-                (r.direction === MessageDirection.OUTGOING && !r.id)
-              )
-          )
-        );
-        return {
-          reactionsByContact: rxnMap,
-          reactionGroupsCache: patchReactionCache(
-            state.reactionGroupsCache,
-            contactUserId,
-            state.messagesByContact,
-            rxnMap
-          ),
-        };
-      });
+    for (const [contact, rxns] of get().reactionsByContact) {
+      if (rxns.some(match)) {
+        set(state => {
+          const existing = state.reactionsByContact.get(contact) || [];
+          const rxnMap = new Map(state.reactionsByContact);
+          rxnMap.set(
+            contact,
+            existing.filter(r => !match(r))
+          );
+          return {
+            reactionsByContact: rxnMap,
+            reactionGroupsCache: patchReactionCache(
+              state.reactionGroupsCache,
+              contact,
+              state.messagesByContact,
+              rxnMap
+            ),
+          };
+        });
+        break;
+      }
     }
 
-    await getSdk().messages.deleteMessage(reactionDbId);
+    // Persist: delete from DB (need dbId for SDK call)
+    if (reactionDbId) {
+      await getSdk().messages.deleteMessage(reactionDbId);
+    }
   },
 
   clearMessages: contactUserId => {
