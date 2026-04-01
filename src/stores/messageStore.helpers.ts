@@ -165,27 +165,12 @@ export function recomputeFullCache(
 }
 
 // ---------------------------------------------------------------------------
-// Optimistic mutation with rollback
+// Rollback helpers
 // ---------------------------------------------------------------------------
 
 export type SetFn = (
   fn: (state: MessageStoreState) => Partial<MessageStoreState>
 ) => void;
-
-export async function optimisticMutation(
-  set: SetFn,
-  apply: () => void,
-  persist: () => Promise<boolean>,
-  rollback: () => void
-) {
-  apply();
-  try {
-    const ok = await persist();
-    if (!ok) rollback();
-  } catch {
-    rollback();
-  }
-}
 
 export function rollbackInsert(
   set: SetFn,

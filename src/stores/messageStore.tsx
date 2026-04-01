@@ -20,7 +20,6 @@ import {
   EMPTY_MESSAGES,
   EMPTY_REACTIONS,
   recomputeFullCache,
-  optimisticMutation,
   rollbackInsert,
   rollbackReplace,
   removeReactionFromState,
@@ -164,49 +163,50 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
     get().reactionGroupsCache.get(messageIdKey(msgId)) || EMPTY_REACTIONS,
 
   deleteMessage: async (contactUserId, messageId) => {
-    const removed = (
-      get().messagesByContact.get(contactUserId) || EMPTY_MESSAGES
-    ).find(m => m.id === messageId);
+    const msgs = get().messagesByContact.get(contactUserId) || EMPTY_MESSAGES;
+    const removed = msgs.find(m => m.id === messageId);
 
-    await optimisticMutation(
-      set,
-      () =>
-        set(state => {
-          const map = patchContact(state.messagesByContact, contactUserId, ms =>
-            ms.filter(m => m.id !== messageId)
-          );
-          return map ? { messagesByContact: map } : state;
-        }),
-      () => getSdk().messages.deleteMessage(messageId),
-      () => removed && rollbackInsert(set, contactUserId, removed)
-    );
+    set(state => {
+      const map = patchContact(state.messagesByContact, contactUserId, ms =>
+        ms.filter(m => m.id !== messageId)
+      );
+      return map ? { messagesByContact: map } : state;
+    });
+
+    try {
+      const ok = await getSdk().messages.deleteMessage(messageId);
+      if (!ok && removed) rollbackInsert(set, contactUserId, removed);
+    } catch {
+      if (removed) rollbackInsert(set, contactUserId, removed);
+    }
   },
 
   editMessage: async (contactUserId, messageId, newContent) => {
-    const original = (
-      get().messagesByContact.get(contactUserId) || EMPTY_MESSAGES
-    ).find(m => m.id === messageId);
+    const msgs = get().messagesByContact.get(contactUserId) || EMPTY_MESSAGES;
+    const original = msgs.find(m => m.id === messageId);
 
-    await optimisticMutation(
-      set,
-      () =>
-        set(state => {
-          const map = patchContact(state.messagesByContact, contactUserId, ms =>
-            ms.map(m =>
-              m.id === messageId
-                ? {
-                    ...m,
-                    content: newContent,
-                    metadata: { ...(m.metadata as object), edited: true },
-                  }
-                : m
-            )
-          );
-          return map ? { messagesByContact: map } : state;
-        }),
-      () => getSdk().messages.editMessage(messageId, newContent),
-      () => original && rollbackReplace(set, contactUserId, messageId, original)
-    );
+    set(state => {
+      const map = patchContact(state.messagesByContact, contactUserId, ms =>
+        ms.map(m =>
+          m.id === messageId
+            ? {
+                ...m,
+                content: newContent,
+                metadata: { ...(m.metadata as object), edited: true },
+              }
+            : m
+        )
+      );
+      return map ? { messagesByContact: map } : state;
+    });
+
+    try {
+      const ok = await getSdk().messages.editMessage(messageId, newContent);
+      if (!ok && original)
+        rollbackReplace(set, contactUserId, messageId, original);
+    } catch {
+      if (original) rollbackReplace(set, contactUserId, messageId, original);
+    }
   },
 
   reactToMessage: async (contactUserId, emoji, messageDbId) => {
