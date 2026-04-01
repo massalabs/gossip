@@ -100,7 +100,7 @@ const Discussion: React.FC = () => {
   const messages = useMessageStore(s =>
     contact ? s.getMessagesForContact(contact.userId) : []
   );
-  const getReactionsForMessage = useMessageStore(s => s.getReactionsForMessage);
+  const reactionGroups = useMessageStore(s => s.reactionGroupsCache);
   const sendReaction = useMessageStore(s => s.sendReaction);
   const removeReaction = useMessageStore(s => s.removeReaction);
   const isLoading = useMessageStore(s => s.isInitializing);
@@ -366,7 +366,7 @@ const Discussion: React.FC = () => {
                 console.error('Failed to send reaction', err);
               });
             }}
-            getReactionsForMessage={getReactionsForMessage}
+            reactionGroups={reactionGroups}
             onToggleReaction={(message, emoji, myReactionId) => {
               if (myReactionId) {
                 removeReaction(myReactionId).catch(err => {

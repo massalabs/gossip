@@ -73,11 +73,10 @@ interface MessageListProps {
     emoji: string,
     myReactionId?: number
   ) => void;
-  getReactionsForMessage?: (messageId: Uint8Array) => {
-    emoji: string;
-    count: number;
-    myReactionId?: number;
-  }[];
+  reactionGroups?: Map<
+    string,
+    { emoji: string; count: number; myReactionId?: number }[]
+  >;
 }
 
 export interface MessageListHandle {
@@ -127,7 +126,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
       onToggleSelect,
       onReact,
       onToggleReaction,
-      getReactionsForMessage,
+      reactionGroups,
     },
     ref
   ) => {
@@ -372,8 +371,9 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
                 onReact={onReact}
                 onToggleReaction={onToggleReaction}
                 reactions={
-                  item.message.messageId && getReactionsForMessage
-                    ? getReactionsForMessage(item.message.messageId)
+                  item.message.messageId && reactionGroups
+                    ? (reactionGroups.get(item.message.messageId.join(',')) ??
+                      [])
                     : []
                 }
                 contact={contact}
@@ -398,7 +398,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
         onScrollToMessage,
         onReact,
         onToggleReaction,
-        getReactionsForMessage,
+        reactionGroups,
         contact,
         highlightedMessageId,
         isSelecting,
