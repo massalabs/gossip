@@ -37,6 +37,13 @@ import {
 const MESSAGES_ABOVE_UNREAD = 3;
 const AT_BOTTOM_THRESHOLD = 50;
 
+const EMPTY_REACTIONS: {
+  emoji: string;
+  count: number;
+  myReactionId?: number;
+  myReactionMessageId?: Uint8Array;
+}[] = [];
+
 /** Stable key for a message — uses messageId (generated before DB write) so
  *  the key never changes when the DB id is assigned later. */
 function getMessageKey(m: Message): string {
@@ -379,8 +386,8 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
                 reactions={
                   item.message.messageId && reactionGroups
                     ? (reactionGroups.get(item.message.messageId.join(',')) ??
-                      [])
-                    : []
+                      EMPTY_REACTIONS)
+                    : EMPTY_REACTIONS
                 }
                 contact={contact}
                 isHighlighted={item.message.id === highlightedMessageId}

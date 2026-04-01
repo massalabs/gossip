@@ -110,11 +110,12 @@ const MessageItem: React.FC<MessageItemProps> = ({
   );
   const suppressClickRef = useRef(false);
   const suppressClicksUntilRef = useRef(0);
+  const contextMenuOpenRef = useRef(false);
 
   // Extracted hooks
   const textSelection = useTextSelection({
     bubbleRef,
-    contextMenuOpenRef: { current: false }, // will be set below
+    contextMenuOpenRef,
   });
 
   const isAndroid = Capacitor.getPlatform() === 'android';
@@ -153,6 +154,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
     isDeleted,
     isSelecting,
     bubbleRef,
+    contextMenuOpenRef,
     longPress,
     onReplyTo,
     onForward,

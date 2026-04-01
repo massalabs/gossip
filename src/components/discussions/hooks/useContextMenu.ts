@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { CornerUpLeft, Share, Share2, Copy, Trash2 } from 'react-feather';
 import { createElement } from 'react';
@@ -14,6 +14,7 @@ interface UseContextMenuOptions {
   isDeleted: boolean;
   isSelecting: boolean;
   bubbleRef: React.RefObject<HTMLDivElement>;
+  contextMenuOpenRef: React.MutableRefObject<boolean>;
   longPress: ReturnType<typeof useLongPress>;
   onReplyTo?: (message: Message) => void;
   onForward?: (message: Message) => void;
@@ -27,6 +28,7 @@ export function useContextMenu({
   isDeleted,
   isSelecting,
   bubbleRef,
+  contextMenuOpenRef,
   longPress,
   onReplyTo,
   onForward,
@@ -37,18 +39,17 @@ export function useContextMenu({
 
   const [isContextMenuOpen, setIsContextMenuOpen] = useState(false);
   const [isEmojiPickerOpen, setIsEmojiPickerOpen] = useState(false);
-  const contextMenuOpenRef = useRef(false);
 
   const openContextMenu = useCallback(() => {
     if (!bubbleRef.current || contextMenuOpenRef.current || isDeleted) return;
     contextMenuOpenRef.current = true;
     setIsContextMenuOpen(true);
-  }, [isDeleted, bubbleRef]);
+  }, [isDeleted, bubbleRef, contextMenuOpenRef]);
 
   const closeContextMenu = useCallback(() => {
     contextMenuOpenRef.current = false;
     setIsContextMenuOpen(false);
-  }, []);
+  }, [contextMenuOpenRef]);
 
   // Close context menu if the list scrolls (e.g. desktop mouse wheel)
   useEffect(() => {
