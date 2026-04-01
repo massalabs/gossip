@@ -12,117 +12,6 @@ import { useAccountStore } from './accountStore';
 import { getSdk } from './sdkStore';
 
 // ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/** Compare two Uint8Array messageIds for equality */
-const messageIdEquals = (
-  a: Uint8Array | undefined,
-  b: Uint8Array | undefined
-): boolean => {
-  if (!a || !b || a.length !== b.length) return false;
-  return a.every((byte, i) => byte === b[i]);
-};
-
-/** Convert Uint8Array to string key for Map lookups */
-const messageIdKey = (id: Uint8Array): string => id.join(',');
-
-const EMPTY_MESSAGES: Message[] = [];
-const EMPTY_REACTIONS: ReactionGroup[] = [];
-
-/** Update one contact's messages in a Map, keeping stable refs for others. */
-function patchContact(
-  map: Map<string, Message[]>,
-  contactId: string,
-  updater: (msgs: Message[]) => Message[] | null
-): Map<string, Message[]> | null {
-  const updated = updater(map.get(contactId) || []);
-  if (updated === null) return null;
-  const next = new Map(map);
-  next.set(contactId, updated);
-  return next;
-}
-
-/** Find a message across all contacts and patch it. */
-function findAndPatch(
-  map: Map<string, Message[]>,
-  predicate: (m: Message) => boolean,
-  patch: (m: Message) => Message
-): Map<string, Message[]> | null {
-  for (const [contact, msgs] of map) {
-    const idx = msgs.findIndex(predicate);
-    if (idx >= 0) {
-      const next = new Map(map);
-      const updated = [...msgs];
-      updated[idx] = patch(msgs[idx]);
-      next.set(contact, updated);
-      return next;
-    }
-  }
-  return null;
-}
-
-/** Compute reaction groups for a contact from raw reaction messages + messages list.
- *  Returns a Map keyed by messageIdKey → ReactionGroup[] with stable refs. */
-function computeReactionGroups(
-  reactions: Message[],
-  messages: Message[]
-): Map<string, ReactionGroup[]> {
-  // Index messages by messageIdKey for fast lookup
-  const msgIdSet = new Set<string>();
-  for (const m of messages) {
-    if (m.messageId) msgIdSet.add(messageIdKey(m.messageId));
-  }
-
-  // Group reactions by target messageIdKey, keeping only latest per direction
-  const latestByTarget = new Map<
-    string,
-    { incoming?: Message; outgoing?: Message }
-  >();
-
-  for (const r of reactions) {
-    const targetId = r.reactionOf?.originalMsgId;
-    if (!targetId) continue;
-    const key = messageIdKey(targetId);
-    if (!msgIdSet.has(key)) continue;
-
-    const entry = latestByTarget.get(key) ?? {};
-    if (r.direction === MessageDirection.OUTGOING) {
-      if (!entry.outgoing || r.timestamp > entry.outgoing.timestamp)
-        entry.outgoing = r;
-    } else {
-      if (!entry.incoming || r.timestamp > entry.incoming.timestamp)
-        entry.incoming = r;
-    }
-    latestByTarget.set(key, entry);
-  }
-
-  // Build ReactionGroup[] for each target
-  const result = new Map<string, ReactionGroup[]>();
-  for (const [key, { incoming, outgoing }] of latestByTarget) {
-    const groups = new Map<string, ReactionGroup>();
-    for (const r of [incoming, outgoing]) {
-      if (!r) continue;
-      const existing = groups.get(r.content) ?? {
-        emoji: r.content,
-        count: 0,
-      };
-      groups.set(r.content, {
-        ...existing,
-        count: existing.count + 1,
-        myReactionId:
-          r.direction === MessageDirection.OUTGOING && r.id != null
-            ? r.id
-            : existing.myReactionId,
-      });
-    }
-    result.set(key, Array.from(groups.values()));
-  }
-
-  return result;
-}
-
-// ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
@@ -135,11 +24,8 @@ export interface ReactionGroup {
 interface MessageStoreState {
   messagesByContact: Map<string, Message[]>;
   reactionsByContact: Map<string, Message[]>;
-  /** Pre-computed reaction groups keyed by messageIdKey */
   reactionGroupsCache: Map<string, ReactionGroup[]>;
   currentContactUserId: string | null;
-  isLoading: boolean;
-  isSending: boolean;
   cleanupFn: (() => void) | null;
   isInitializing: boolean;
 
@@ -170,6 +56,358 @@ interface MessageStoreState {
 }
 
 // ---------------------------------------------------------------------------
+// Helpers — immutable Map updates
+// ---------------------------------------------------------------------------
+
+const messageIdEquals = (
+  a: Uint8Array | undefined,
+  b: Uint8Array | undefined
+): boolean => {
+  if (!a || !b || a.length !== b.length) return false;
+  return a.every((byte, i) => byte === b[i]);
+};
+
+const messageIdKey = (id: Uint8Array): string => id.join(',');
+
+const EMPTY_MESSAGES: Message[] = [];
+const EMPTY_REACTIONS: ReactionGroup[] = [];
+
+/** Update one contact's messages, keeping stable refs for others. */
+function patchContact(
+  map: Map<string, Message[]>,
+  contactId: string,
+  updater: (msgs: Message[]) => Message[] | null
+): Map<string, Message[]> | null {
+  const updated = updater(map.get(contactId) || []);
+  if (updated === null) return null;
+  const next = new Map(map);
+  next.set(contactId, updated);
+  return next;
+}
+
+/** Find a message across all contacts and patch it (early return). */
+function findAndPatch(
+  map: Map<string, Message[]>,
+  predicate: (m: Message) => boolean,
+  patch: (m: Message) => Message
+): Map<string, Message[]> | null {
+  for (const [contact, msgs] of map) {
+    const idx = msgs.findIndex(predicate);
+    if (idx >= 0) {
+      const next = new Map(map);
+      const updated = [...msgs];
+      updated[idx] = patch(msgs[idx]);
+      next.set(contact, updated);
+      return next;
+    }
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Helpers — reaction groups cache
+// ---------------------------------------------------------------------------
+
+/** Compute grouped reactions for one contact. */
+function computeReactionGroups(
+  reactions: Message[],
+  messages: Message[]
+): Map<string, ReactionGroup[]> {
+  const msgIdSet = new Set<string>();
+  for (const m of messages) {
+    if (m.messageId) msgIdSet.add(messageIdKey(m.messageId));
+  }
+
+  const latestByTarget = new Map<
+    string,
+    { incoming?: Message; outgoing?: Message }
+  >();
+  for (const r of reactions) {
+    const targetId = r.reactionOf?.originalMsgId;
+    if (!targetId) continue;
+    const key = messageIdKey(targetId);
+    if (!msgIdSet.has(key)) continue;
+
+    const entry = latestByTarget.get(key) ?? {};
+    if (r.direction === MessageDirection.OUTGOING) {
+      if (!entry.outgoing || r.timestamp > entry.outgoing.timestamp)
+        entry.outgoing = r;
+    } else {
+      if (!entry.incoming || r.timestamp > entry.incoming.timestamp)
+        entry.incoming = r;
+    }
+    latestByTarget.set(key, entry);
+  }
+
+  const result = new Map<string, ReactionGroup[]>();
+  for (const [key, { incoming, outgoing }] of latestByTarget) {
+    const groups = new Map<string, ReactionGroup>();
+    for (const r of [incoming, outgoing]) {
+      if (!r) continue;
+      const existing = groups.get(r.content) ?? { emoji: r.content, count: 0 };
+      groups.set(r.content, {
+        ...existing,
+        count: existing.count + 1,
+        myReactionId:
+          r.direction === MessageDirection.OUTGOING && r.id != null
+            ? r.id
+            : existing.myReactionId,
+      });
+    }
+    result.set(key, Array.from(groups.values()));
+  }
+  return result;
+}
+
+/** Incremental cache update for a single contact. */
+function patchReactionCache(
+  cache: Map<string, ReactionGroup[]>,
+  contactId: string,
+  messagesByContact: Map<string, Message[]>,
+  reactionsByContact: Map<string, Message[]>
+): Map<string, ReactionGroup[]> {
+  const messages = messagesByContact.get(contactId) || [];
+  const reactions = reactionsByContact.get(contactId) || [];
+
+  const next = new Map(cache);
+  for (const m of messages) {
+    if (m.messageId) next.delete(messageIdKey(m.messageId));
+  }
+  for (const [key, value] of computeReactionGroups(reactions, messages)) {
+    next.set(key, value);
+  }
+  return next;
+}
+
+/** Full cache recompute (init / session refetch). */
+function recomputeFullCache(
+  messagesByContact: Map<string, Message[]>,
+  reactionsByContact: Map<string, Message[]>
+): Map<string, ReactionGroup[]> {
+  const cache = new Map<string, ReactionGroup[]>();
+  for (const [contact, reactions] of reactionsByContact) {
+    const messages = messagesByContact.get(contact) || [];
+    for (const [key, value] of computeReactionGroups(reactions, messages)) {
+      cache.set(key, value);
+    }
+  }
+  return cache;
+}
+
+// ---------------------------------------------------------------------------
+// Helpers — rollback
+// ---------------------------------------------------------------------------
+
+type SetFn = (
+  fn: (state: MessageStoreState) => Partial<MessageStoreState>
+) => void;
+
+function rollbackInsert(set: SetFn, contactUserId: string, message: Message) {
+  set(state => {
+    const map = patchContact(state.messagesByContact, contactUserId, msgs =>
+      [...msgs, message].sort(
+        (a, b) => a.timestamp.getTime() - b.timestamp.getTime()
+      )
+    );
+    return map ? { messagesByContact: map } : state;
+  });
+}
+
+function rollbackReplace(
+  set: SetFn,
+  contactUserId: string,
+  messageId: number,
+  original: Message
+) {
+  set(state => {
+    const map = patchContact(state.messagesByContact, contactUserId, msgs =>
+      msgs.map(m => (m.id === messageId ? original : m))
+    );
+    return map ? { messagesByContact: map } : state;
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Event handlers (extracted from init for readability)
+// ---------------------------------------------------------------------------
+
+type GetFn = () => MessageStoreState;
+
+function createEventHandlers(
+  sdk: ReturnType<typeof getSdk>,
+  set: SetFn,
+  get: GetFn
+) {
+  const onOptimistic = (message: Message) => {
+    if (message.type === MessageType.REACTION) return;
+    set(state => {
+      const map = patchContact(
+        state.messagesByContact,
+        message.contactUserId,
+        msgs => [...msgs, message]
+      );
+      return map ? { messagesByContact: map } : state;
+    });
+  };
+
+  const onReceived = (message: Message) => {
+    if (message.type === MessageType.REACTION) {
+      set(state => {
+        const contact = message.contactUserId;
+        const existing = state.reactionsByContact.get(contact) || [];
+        if (
+          message.messageId &&
+          existing.some(m => messageIdEquals(m.messageId, message.messageId))
+        ) {
+          return state;
+        }
+        const rxnMap = new Map(state.reactionsByContact);
+        rxnMap.set(contact, [...existing, message]);
+        return {
+          reactionsByContact: rxnMap,
+          reactionGroupsCache: patchReactionCache(
+            state.reactionGroupsCache,
+            contact,
+            state.messagesByContact,
+            rxnMap
+          ),
+        };
+      });
+      return;
+    }
+
+    set(state => {
+      const map = patchContact(
+        state.messagesByContact,
+        message.contactUserId,
+        msgs => {
+          if (message.messageId) {
+            const idx = msgs.findIndex(m =>
+              messageIdEquals(m.messageId, message.messageId)
+            );
+            if (idx >= 0) {
+              const updated = [...msgs];
+              updated[idx] = {
+                ...msgs[idx],
+                ...message,
+                id: msgs[idx].id || message.id,
+              };
+              return updated;
+            }
+          }
+          if (message.id) {
+            const idx = msgs.findIndex(m => m.id === message.id);
+            if (idx >= 0) {
+              const updated = [...msgs];
+              updated[idx] = { ...msgs[idx], ...message };
+              return updated;
+            }
+          }
+          return [...msgs, message];
+        }
+      );
+      return map ? { messagesByContact: map } : state;
+    });
+  };
+
+  const onSent = (message: Message) => {
+    set(state => {
+      const map = patchContact(
+        state.messagesByContact,
+        message.contactUserId,
+        msgs => {
+          let changed = false;
+          const updated = msgs.map(m => {
+            if (messageIdEquals(m.messageId, message.messageId)) {
+              changed = true;
+              return { ...m, id: message.id ?? m.id, status: message.status };
+            }
+            return m;
+          });
+          return changed ? updated : null;
+        }
+      );
+      return map ? { messagesByContact: map } : state;
+    });
+  };
+
+  const onWriteFailed = (
+    failedMessageId: Uint8Array | undefined,
+    entityType: string
+  ) => {
+    if (entityType !== 'message') return;
+    set(state => {
+      const map = findAndPatch(
+        state.messagesByContact,
+        m => messageIdEquals(m.messageId, failedMessageId),
+        m => ({ ...m, status: MessageStatus.FAILED })
+      );
+      return map ? { messagesByContact: map } : state;
+    });
+  };
+
+  const onRead = (messageDbId: number) => {
+    set(state => {
+      const map = findAndPatch(
+        state.messagesByContact,
+        m => m.id === messageDbId,
+        m => ({ ...m, status: MessageStatus.READ })
+      );
+      return map ? { messagesByContact: map } : state;
+    });
+  };
+
+  const onSessionEvent = async () => {
+    const currentContact = get().currentContactUserId;
+    if (!currentContact || !sdk.isSessionOpen) return;
+    try {
+      const messages = await sdk.messages.getVisibleMessages(currentContact);
+      const reactions = await sdk.messages.getReactions(currentContact);
+      set(state => {
+        const msgMap = new Map(state.messagesByContact);
+        const rxnMap = new Map(state.reactionsByContact);
+        msgMap.set(currentContact, messages);
+        if (reactions.length > 0) rxnMap.set(currentContact, reactions);
+        else rxnMap.delete(currentContact);
+        return {
+          messagesByContact: msgMap,
+          reactionsByContact: rxnMap,
+          reactionGroupsCache: recomputeFullCache(msgMap, rxnMap),
+        };
+      });
+    } catch (error) {
+      console.error('Session event refetch error:', error);
+    }
+  };
+
+  // Subscribe all
+  const subscriptions: [string, (...args: unknown[]) => void][] = [
+    [SdkEventType.MESSAGE_OPTIMISTIC, onOptimistic],
+    [SdkEventType.MESSAGE_RECEIVED, onReceived],
+    [SdkEventType.MESSAGE_SENT, onSent],
+    [SdkEventType.MESSAGE_READ, onRead],
+    [SdkEventType.WRITE_FAILED, onWriteFailed],
+    [SdkEventType.SESSION_CREATED, onSessionEvent],
+    [SdkEventType.SESSION_ACCEPTED, onSessionEvent],
+  ];
+  for (const [event, handler] of subscriptions) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    sdk.on(event as any, handler as any);
+  }
+
+  return () => {
+    try {
+      for (const [event, handler] of subscriptions) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        sdk.off(event as any, handler as any);
+      }
+    } catch {
+      // SDK might not be available during cleanup
+    }
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Store
 // ---------------------------------------------------------------------------
 
@@ -178,8 +416,6 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
   reactionsByContact: new Map(),
   reactionGroupsCache: new Map(),
   currentContactUserId: null,
-  isLoading: false,
-  isSending: false,
   cleanupFn: null,
   isInitializing: false,
 
@@ -199,11 +435,10 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
           const rxnMap = new Map(state.reactionsByContact);
           if (messages.length > 0) msgMap.set(contactUserId, messages);
           if (reactions.length > 0) rxnMap.set(contactUserId, reactions);
-          const cache = recomputeCache(msgMap, rxnMap);
           return {
             messagesByContact: msgMap,
             reactionsByContact: rxnMap,
-            reactionGroupsCache: cache,
+            reactionGroupsCache: recomputeFullCache(msgMap, rxnMap),
           };
         });
       });
@@ -212,8 +447,7 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
 
   init: async () => {
     const { userProfile } = useAccountStore.getState();
-    const ownerUserId = userProfile?.userId;
-    if (!ownerUserId || get().cleanupFn || get().isInitializing) return;
+    if (!userProfile?.userId || get().cleanupFn || get().isInitializing) return;
 
     set({ isInitializing: true });
 
@@ -229,11 +463,10 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
           if (msgs.length > 0) msgMap.set(d.contactUserId, msgs);
           if (rxns.length > 0) rxnMap.set(d.contactUserId, rxns);
         }
-        const cache = recomputeCache(msgMap, rxnMap);
         set({
           messagesByContact: msgMap,
           reactionsByContact: rxnMap,
-          reactionGroupsCache: cache,
+          reactionGroupsCache: recomputeFullCache(msgMap, rxnMap),
         });
       } catch (error) {
         console.error('Messages initial load error:', error);
@@ -242,167 +475,10 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
       }
     }
 
-    // ── Event handlers ──
-
-    const onOptimistic = (message: Message) => {
-      if (message.type === MessageType.REACTION) return;
-      set(state => {
-        const map = patchContact(
-          state.messagesByContact,
-          message.contactUserId,
-          msgs => [...msgs, message]
-        );
-        return map ? { messagesByContact: map } : state;
-      });
-    };
-
-    const onReceived = (message: Message) => {
-      if (message.type === MessageType.REACTION) {
-        set(state => {
-          const contact = message.contactUserId;
-          const existing = state.reactionsByContact.get(contact) || [];
-          if (
-            message.messageId &&
-            existing.some(m => messageIdEquals(m.messageId, message.messageId))
-          ) {
-            return state;
-          }
-          const rxnMap = new Map(state.reactionsByContact);
-          rxnMap.set(contact, [...existing, message]);
-          const cache = recomputeCache(state.messagesByContact, rxnMap);
-          return { reactionsByContact: rxnMap, reactionGroupsCache: cache };
-        });
-        return;
-      }
-
-      set(state => {
-        const map = patchContact(
-          state.messagesByContact,
-          message.contactUserId,
-          msgs => {
-            if (message.messageId) {
-              const idx = msgs.findIndex(m =>
-                messageIdEquals(m.messageId, message.messageId)
-              );
-              if (idx >= 0) {
-                const updated = [...msgs];
-                updated[idx] = {
-                  ...msgs[idx],
-                  ...message,
-                  id: msgs[idx].id || message.id,
-                };
-                return updated;
-              }
-            }
-            if (message.id) {
-              const idx = msgs.findIndex(m => m.id === message.id);
-              if (idx >= 0) {
-                const updated = [...msgs];
-                updated[idx] = { ...msgs[idx], ...message };
-                return updated;
-              }
-            }
-            return [...msgs, message];
-          }
-        );
-        return map ? { messagesByContact: map } : state;
-      });
-    };
-
-    const onSent = (message: Message) => {
-      set(state => {
-        const map = patchContact(
-          state.messagesByContact,
-          message.contactUserId,
-          msgs => {
-            let changed = false;
-            const updated = msgs.map(m => {
-              if (messageIdEquals(m.messageId, message.messageId)) {
-                changed = true;
-                return { ...m, id: message.id ?? m.id, status: message.status };
-              }
-              return m;
-            });
-            return changed ? updated : null;
-          }
-        );
-        return map ? { messagesByContact: map } : state;
-      });
-    };
-
-    const onWriteFailed = (
-      failedMessageId: Uint8Array | undefined,
-      entityType: string
-    ) => {
-      if (entityType !== 'message') return;
-      set(state => {
-        const map = findAndPatch(
-          state.messagesByContact,
-          m => messageIdEquals(m.messageId, failedMessageId),
-          m => ({ ...m, status: MessageStatus.FAILED })
-        );
-        return map ? { messagesByContact: map } : state;
-      });
-    };
-
-    const onRead = (messageDbId: number) => {
-      set(state => {
-        const map = findAndPatch(
-          state.messagesByContact,
-          m => m.id === messageDbId,
-          m => ({ ...m, status: MessageStatus.READ })
-        );
-        return map ? { messagesByContact: map } : state;
-      });
-    };
-
-    const onSessionEvent = async () => {
-      const currentContact = get().currentContactUserId;
-      if (!currentContact || !sdk.isSessionOpen) return;
-      try {
-        const messages = await sdk.messages.getVisibleMessages(currentContact);
-        const reactions = await sdk.messages.getReactions(currentContact);
-        set(state => {
-          const msgMap = new Map(state.messagesByContact);
-          const rxnMap = new Map(state.reactionsByContact);
-          msgMap.set(currentContact, messages);
-          if (reactions.length > 0) rxnMap.set(currentContact, reactions);
-          else rxnMap.delete(currentContact);
-          const cache = recomputeCache(msgMap, rxnMap);
-          return {
-            messagesByContact: msgMap,
-            reactionsByContact: rxnMap,
-            reactionGroupsCache: cache,
-          };
-        });
-      } catch (error) {
-        console.error('Session event refetch error:', error);
-      }
-    };
-
-    sdk.on(SdkEventType.MESSAGE_OPTIMISTIC, onOptimistic);
-    sdk.on(SdkEventType.MESSAGE_RECEIVED, onReceived);
-    sdk.on(SdkEventType.MESSAGE_SENT, onSent);
-    sdk.on(SdkEventType.MESSAGE_READ, onRead);
-    sdk.on(SdkEventType.WRITE_FAILED, onWriteFailed);
-    sdk.on(SdkEventType.SESSION_CREATED, onSessionEvent);
-    sdk.on(SdkEventType.SESSION_ACCEPTED, onSessionEvent);
-
-    const cleanupFn = () => {
-      try {
-        sdk.off(SdkEventType.MESSAGE_OPTIMISTIC, onOptimistic);
-        sdk.off(SdkEventType.MESSAGE_RECEIVED, onReceived);
-        sdk.off(SdkEventType.MESSAGE_SENT, onSent);
-        sdk.off(SdkEventType.MESSAGE_READ, onRead);
-        sdk.off(SdkEventType.WRITE_FAILED, onWriteFailed);
-        sdk.off(SdkEventType.SESSION_CREATED, onSessionEvent);
-        sdk.off(SdkEventType.SESSION_ACCEPTED, onSessionEvent);
-      } catch {
-        // SDK might not be available during cleanup
-      }
-    };
-
-    set({ cleanupFn, isInitializing: false });
+    set({
+      cleanupFn: createEventHandlers(sdk, set, get),
+      isInitializing: false,
+    });
   },
 
   sendMessage: async (
@@ -420,67 +496,52 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
     )
       return;
 
-    set({ isSending: true });
-    try {
-      let replyTo: Message['replyTo'];
-      let forwardOf: Message['forwardOf'];
+    let replyTo: Message['replyTo'];
+    let forwardOf: Message['forwardOf'];
 
-      if (replyToId) {
-        const orig = await getSdk().messages.get(replyToId);
-        if (!orig) throw new Error('Original message not found');
-        if (!orig.messageId)
-          throw new Error('Cannot reply to a message that has no messageId');
-        replyTo = { originalMsgId: orig.messageId };
-      }
-
-      if (forwardFromMessageId) {
-        const orig = await getSdk().messages.get(forwardFromMessageId);
-        if (!orig) {
-          console.warn(
-            'Forward target message not found, sending as regular message'
-          );
-        } else if (!orig.messageId) {
-          throw new Error('Cannot forward a message that has no messageId');
-        } else if (orig.contactUserId === contactUserId) {
-          replyTo = { originalMsgId: orig.messageId! };
-        } else {
-          forwardOf = {
-            originalContent: orig.content,
-            originalContactId: decodeUserId(orig.contactUserId),
-          };
-        }
-      }
-
-      const result = getSdk().messages.sendOptimistic({
-        ownerUserId: userProfile.userId,
-        contactUserId,
-        content,
-        type: MessageType.TEXT,
-        direction: MessageDirection.OUTGOING,
-        status: MessageStatus.WAITING_SESSION,
-        timestamp: new Date(),
-        replyTo,
-        forwardOf,
-      });
-      if (!result.success)
-        console.error('Failed to send message:', result.error);
-    } catch (error) {
-      console.error('Failed to send message:', error);
-      throw error;
-    } finally {
-      set({ isSending: false });
+    if (replyToId) {
+      const orig = await getSdk().messages.get(replyToId);
+      if (!orig) throw new Error('Original message not found');
+      if (!orig.messageId)
+        throw new Error('Cannot reply to a message that has no messageId');
+      replyTo = { originalMsgId: orig.messageId };
     }
+
+    if (forwardFromMessageId) {
+      const orig = await getSdk().messages.get(forwardFromMessageId);
+      if (!orig) {
+        console.warn('Forward target not found, sending as regular message');
+      } else if (!orig.messageId) {
+        throw new Error('Cannot forward a message that has no messageId');
+      } else if (orig.contactUserId === contactUserId) {
+        replyTo = { originalMsgId: orig.messageId! };
+      } else {
+        forwardOf = {
+          originalContent: orig.content,
+          originalContactId: decodeUserId(orig.contactUserId),
+        };
+      }
+    }
+
+    const result = getSdk().messages.sendOptimistic({
+      ownerUserId: userProfile.userId,
+      contactUserId,
+      content,
+      type: MessageType.TEXT,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.WAITING_SESSION,
+      timestamp: new Date(),
+      replyTo,
+      forwardOf,
+    });
+    if (!result.success) console.error('Failed to send message:', result.error);
   },
 
-  getMessagesForContact: contactUserId => {
-    return get().messagesByContact.get(contactUserId) || EMPTY_MESSAGES;
-  },
+  getMessagesForContact: contactUserId =>
+    get().messagesByContact.get(contactUserId) || EMPTY_MESSAGES,
 
-  getReactionsForMessage: (msgId: Uint8Array) => {
-    return (
-      get().reactionGroupsCache.get(messageIdKey(msgId)) || EMPTY_REACTIONS
-    );
-  },
+  getReactionsForMessage: (msgId: Uint8Array) =>
+    get().reactionGroupsCache.get(messageIdKey(msgId)) || EMPTY_REACTIONS,
 
   deleteMessage: async (contactUserId, messageId) => {
     const msgs = get().messagesByContact.get(contactUserId) || EMPTY_MESSAGES;
@@ -573,15 +634,16 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
   },
 
   clearMessages: contactUserId => {
-    const msgMap = new Map(get().messagesByContact);
-    const rxnMap = new Map(get().reactionsByContact);
-    msgMap.delete(contactUserId);
-    rxnMap.delete(contactUserId);
-    const cache = recomputeCache(msgMap, rxnMap);
-    set({
-      messagesByContact: msgMap,
-      reactionsByContact: rxnMap,
-      reactionGroupsCache: cache,
+    set(state => {
+      const msgMap = new Map(state.messagesByContact);
+      const rxnMap = new Map(state.reactionsByContact);
+      msgMap.delete(contactUserId);
+      rxnMap.delete(contactUserId);
+      return {
+        messagesByContact: msgMap,
+        reactionsByContact: rxnMap,
+        reactionGroupsCache: recomputeFullCache(msgMap, rxnMap),
+      };
     });
   },
 
@@ -593,60 +655,9 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
       reactionsByContact: new Map(),
       reactionGroupsCache: new Map(),
       currentContactUserId: null,
-      isLoading: false,
-      isSending: false,
       isInitializing: false,
     });
   },
 }));
-
-// ---------------------------------------------------------------------------
-// Helpers (outside store to avoid circular refs with set)
-// ---------------------------------------------------------------------------
-
-/** Recompute all reaction groups from raw data. */
-function recomputeCache(
-  messagesByContact: Map<string, Message[]>,
-  reactionsByContact: Map<string, Message[]>
-): Map<string, ReactionGroup[]> {
-  const cache = new Map<string, ReactionGroup[]>();
-  for (const [contact, reactions] of reactionsByContact) {
-    const messages = messagesByContact.get(contact) || [];
-    const groups = computeReactionGroups(reactions, messages);
-    for (const [key, value] of groups) {
-      cache.set(key, value);
-    }
-  }
-  return cache;
-}
-
-type SetFn = (
-  fn: (state: MessageStoreState) => Partial<MessageStoreState>
-) => void;
-
-function rollbackInsert(set: SetFn, contactUserId: string, message: Message) {
-  set(state => {
-    const map = patchContact(state.messagesByContact, contactUserId, msgs =>
-      [...msgs, message].sort(
-        (a, b) => a.timestamp.getTime() - b.timestamp.getTime()
-      )
-    );
-    return map ? { messagesByContact: map } : state;
-  });
-}
-
-function rollbackReplace(
-  set: SetFn,
-  contactUserId: string,
-  messageId: number,
-  original: Message
-) {
-  set(state => {
-    const map = patchContact(state.messagesByContact, contactUserId, msgs =>
-      msgs.map(m => (m.id === messageId ? original : m))
-    );
-    return map ? { messagesByContact: map } : state;
-  });
-}
 
 export const useMessageStore = createSelectors(useMessageStoreBase);
