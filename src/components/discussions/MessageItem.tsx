@@ -1128,14 +1128,23 @@ const MessageItem: React.FC<MessageItemProps> = ({
                     reaction.myReactionId
                   );
                 }}
-                className={`text-[11px] px-1.5 py-0.5 rounded-full border shadow-sm bg-card/95 backdrop-blur ${
+                className={`flex items-center gap-0.5 text-sm min-w-[2rem] min-h-[1.75rem] px-2 py-1 rounded-full border shadow-sm bg-card/95 backdrop-blur active:scale-95 transition-transform ${
                   reaction.myReactionId
                     ? 'border-accent text-foreground'
                     : 'border-border text-foreground'
                 }`}
               >
-                {reaction.emoji}
-                {reaction.count > 1 ? ` ${reaction.count}` : ''}
+                <span>{reaction.emoji}</span>
+                {reaction.count > 1 && (
+                  <span className="text-[10px] text-muted-foreground">
+                    {reaction.count}
+                  </span>
+                )}
+                {!reaction.myReactionId && contact?.name && (
+                  <span className="text-[9px] text-muted-foreground max-w-[3rem] truncate">
+                    {contact.name.charAt(0)}
+                  </span>
+                )}
               </button>
             ))}
           </div>
