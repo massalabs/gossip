@@ -4,7 +4,6 @@ import MessageContextMenu, {
   type ReactionGroup as ContextMenuReactionGroup,
 } from '../ui/MessageContextMenu';
 import EmojiPickerModal from '../ui/EmojiPickerModal';
-import ReactionBar from './ReactionBar';
 import MessageBubble from './MessageBubble';
 import SelectionCheckbox from './SelectionCheckbox';
 import MessageAvatar from './MessageAvatar';
@@ -303,18 +302,12 @@ const MessageItem: React.FC<MessageItemProps> = ({
         isAnimatingBack={swipe.isAnimatingBack}
         indicatorThreshold={swipe.indicatorThreshold}
         original={original}
+        reactions={reactions}
+        onToggleReaction={onToggleReaction}
         onClick={handleBubbleClick}
         onKeyDown={handleKeyDown}
         openContextMenu={contextMenu.openContextMenu}
         isSelecting={isSelecting}
-      />
-
-      <ReactionBar
-        reactions={reactions}
-        message={message}
-        isOutgoing={isOutgoing}
-        hasAvatar={!!contact}
-        onToggleReaction={onToggleReaction}
       />
 
       <MessageContextMenu

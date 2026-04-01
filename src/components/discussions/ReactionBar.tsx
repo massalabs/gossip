@@ -6,7 +6,6 @@ interface ReactionBarProps {
   reactions: ReactionGroup[];
   message: Message;
   isOutgoing: boolean;
-  hasAvatar: boolean;
   onToggleReaction?: (
     message: Message,
     emoji: string,
@@ -16,16 +15,14 @@ interface ReactionBarProps {
 }
 
 const ReactionBar: React.FC<ReactionBarProps> = React.memo(
-  ({ reactions, message, isOutgoing, hasAvatar, onToggleReaction }) => {
+  ({ reactions, message, isOutgoing, onToggleReaction }) => {
     if (reactions.length === 0) return null;
 
     return (
       <div
         data-testid="reactions-bar"
-        className={`flex gap-1 -mt-2 ${
-          isOutgoing
-            ? 'mr-3 justify-end'
-            : `${hasAvatar ? 'ml-8' : 'ml-3'} justify-start`
+        className={`flex gap-1 -mt-1 ${
+          isOutgoing ? 'justify-end' : 'justify-start'
         }`}
       >
         {reactions.map(reaction => {
