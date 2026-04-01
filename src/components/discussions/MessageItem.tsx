@@ -433,13 +433,8 @@ const MessageItem: React.FC<MessageItemProps> = ({
         {message.replyTo && (
           <CitedMessage
             isOutgoing={isOutgoing}
-            isNotFound={original.originalNotFound}
-            isLoading={original.isLoadingOriginal}
-            content={original.originalMessage?.content}
-            parsedLinks={original.parsedReplyLinks}
-            canNavigate={!!message.replyTo.originalMsgId && !!onScrollToMessage}
-            onClick={original.handleReplyContextClick}
-            onKeyDown={original.handleReplyContextKeyDown}
+            original={original}
+            variant="reply"
             onLinkClick={handleLinkClick}
             linkAriaLabel={linkAriaLabel}
           />
@@ -449,15 +444,9 @@ const MessageItem: React.FC<MessageItemProps> = ({
         {message.forwardOf && (
           <CitedMessage
             isOutgoing={isOutgoing}
-            isNotFound={false}
-            isLoading={original.isLoadingOriginal}
-            content={original.originalMessage?.content}
-            parsedLinks={original.parsedForwardLinks}
-            canNavigate={original.canNavigateToForwarded}
-            label={t('message_item.forwarded_message')}
+            original={original}
+            variant="forward"
             fallbackContent={message.forwardOf.originalContent}
-            onClick={original.handleReplyContextClick}
-            onKeyDown={original.handleReplyContextKeyDown}
             onLinkClick={handleLinkClick}
             linkAriaLabel={linkAriaLabel}
           />

@@ -1,34 +1,33 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { AlertTriangle } from 'react-feather';
-import { parseLinks } from '../../utils/linkUtils';
+import type { parseLinks } from '../../utils/linkUtils';
+
+export interface CitedMessageOriginal {
+  originalMessage: { content: string } | null;
+  isLoadingOriginal: boolean;
+  originalNotFound: boolean;
+  parsedReplyLinks: ReturnType<typeof parseLinks>;
+  parsedForwardLinks: ReturnType<typeof parseLinks>;
+  canNavigateToForwarded: boolean;
+  handleReplyContextClick: (e: React.MouseEvent) => void;
+  handleReplyContextKeyDown: (e: React.KeyboardEvent) => void;
+}
 
 interface CitedMessageProps {
   isOutgoing: boolean;
-  isNotFound: boolean;
-  isLoading: boolean;
-  content: string | undefined;
-  parsedLinks: ReturnType<typeof parseLinks>;
-  canNavigate: boolean;
-  label?: string;
+  original: CitedMessageOriginal;
+  variant: 'reply' | 'forward';
   fallbackContent?: string;
-  onClick?: (e: React.MouseEvent) => void;
-  onKeyDown?: (e: React.KeyboardEvent) => void;
   onLinkClick: (e: React.MouseEvent<HTMLAnchorElement>) => void;
   linkAriaLabel: (content: string) => string;
 }
 
 const CitedMessage: React.FC<CitedMessageProps> = ({
   isOutgoing,
-  isNotFound,
-  isLoading,
-  content,
-  parsedLinks,
-  canNavigate,
-  label,
+  original,
+  variant,
   fallbackContent,
-  onClick,
-  onKeyDown,
   onLinkClick,
   linkAriaLabel,
 }) => {
@@ -37,26 +36,35 @@ const CitedMessage: React.FC<CitedMessageProps> = ({
     ? 'text-accent-foreground/80'
     : 'text-muted-foreground/80';
 
+  const isReply = variant === 'reply';
+  const parsedLinks = isReply
+    ? original.parsedReplyLinks
+    : original.parsedForwardLinks;
+  const canNavigate = isReply
+    ? !!original.handleReplyContextClick
+    : original.canNavigateToForwarded;
+  const showNotFound = isReply && original.originalNotFound;
+
   return (
     <div
       className={`mb-2 pb-2 border-l-2 pl-2 ${
         isOutgoing ? 'border-accent-foreground/30' : 'border-card-foreground/30'
-      } ${isNotFound ? 'border-destructive/50' : ''} ${
+      } ${showNotFound ? 'border-destructive/50' : ''} ${
         canNavigate
           ? 'cursor-pointer hover:bg-black/5 dark:hover:bg-white/5 rounded-r transition-colors active:scale-[0.98]'
           : ''
       }`}
       {...(canNavigate
         ? {
-            onClick,
-            onKeyDown,
+            onClick: original.handleReplyContextClick,
+            onKeyDown: original.handleReplyContextKeyDown,
             tabIndex: 0,
             role: 'button' as const,
             'aria-label': t('message_item.jump_to_original'),
           }
         : {})}
     >
-      {isNotFound && (
+      {showNotFound && (
         <div className="flex items-center gap-1 mb-2">
           <span
             className="inline-flex items-center gap-1"
@@ -72,13 +80,15 @@ const CitedMessage: React.FC<CitedMessageProps> = ({
           </span>
         </div>
       )}
-      {label && (
-        <p className={`text-[11px] font-medium mb-0.5 ${textColor}`}>{label}</p>
+      {!isReply && (
+        <p className={`text-[11px] font-medium mb-0.5 ${textColor}`}>
+          {t('message_item.forwarded_message')}
+        </p>
       )}
       <p
-        className={`text-xs truncate ${textColor} ${isNotFound ? 'italic opacity-70' : ''}`}
+        className={`text-xs truncate ${textColor} ${showNotFound ? 'italic opacity-70' : ''}`}
       >
-        {isLoading
+        {original.isLoadingOriginal
           ? t('common:loading')
           : parsedLinks.length > 0
             ? parsedLinks.map((segment, index) =>
@@ -102,7 +112,9 @@ const CitedMessage: React.FC<CitedMessageProps> = ({
                   <span key={index}>{segment.content}</span>
                 )
               )
-            : content || fallbackContent || t('message_item.original_message')}
+            : original.originalMessage?.content ||
+              fallbackContent ||
+              t('message_item.original_message')}
       </p>
     </div>
   );
