@@ -10,7 +10,7 @@ import {
   MessageStatus,
   type Message,
 } from '@massalabs/gossip-sdk';
-import type { ReactionGroup } from '../../src/components/ui/MessageContextMenu';
+import type { ReactionGroup } from '../../src/stores/messageStore';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -110,7 +110,7 @@ describe('EmojiReactions', () => {
       const heartBtn = buttons.find(btn => btn.textContent?.includes('❤️'));
       expect(heartBtn).toBeTruthy();
       // Count > 1 should display the number after the emoji
-      expect(heartBtn!.textContent).toBe('❤️ 5');
+      expect(heartBtn!.textContent).toBe('❤️5');
     });
 
     it('renders multiple reaction badges', async () => {
@@ -130,13 +130,13 @@ describe('EmojiReactions', () => {
       const heart = buttons.find(b => b.textContent?.includes('❤️'));
 
       expect(thumbsUp).toBeTruthy();
-      expect(thumbsUp!.textContent).toBe('👍 3');
+      expect(thumbsUp!.textContent).toBe('👍3');
 
       expect(laugh).toBeTruthy();
       expect(laugh!.textContent).toBe('😂');
 
       expect(heart).toBeTruthy();
-      expect(heart!.textContent).toBe('❤️ 2');
+      expect(heart!.textContent).toBe('❤️2');
     });
 
     it('highlights own reaction with accent border', async () => {
@@ -201,7 +201,12 @@ describe('EmojiReactions', () => {
       await userEvent.click(thumbsUpBtn!);
 
       expect(onToggleReaction).toHaveBeenCalledOnce();
-      expect(onToggleReaction).toHaveBeenCalledWith(msg, '👍', undefined);
+      expect(onToggleReaction).toHaveBeenCalledWith(
+        msg,
+        '👍',
+        undefined,
+        undefined
+      );
     });
 
     it('passes myReactionId when toggling own reaction', async () => {
@@ -227,7 +232,7 @@ describe('EmojiReactions', () => {
       await userEvent.click(heartBtn!);
 
       expect(onToggleReaction).toHaveBeenCalledOnce();
-      expect(onToggleReaction).toHaveBeenCalledWith(msg, '❤️', 99);
+      expect(onToggleReaction).toHaveBeenCalledWith(msg, '❤️', 99, undefined);
     });
 
     it('does not open context menu when clicking a reaction badge', async () => {
