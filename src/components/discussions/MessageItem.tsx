@@ -24,6 +24,7 @@ import MessageContextMenu, {
   type ReactionGroup as ContextMenuReactionGroup,
 } from '../ui/MessageContextMenu';
 import EmojiPickerModal from '../ui/EmojiPickerModal';
+import ReactionBar from './ReactionBar';
 import { formatTime } from '../../utils/timeUtils';
 import {
   Message,
@@ -681,9 +682,15 @@ const MessageItem: React.FC<MessageItemProps> = ({
   // Last message in group gets more margin to separate from next group.
   // When reactions are present (overlaid at the bottom of the bubble),
   // add extra space so they don't overlap the next message row.
-  const baseSpacingClass = isLastInGroup ? 'mb-1' : 'mb-0.5';
+  const baseSpacingClass = isLastInGroup
+    ? 'mb-1 -bottom-6'
+    : 'mb-0.5 -bottom-7';
   const spacingClass =
-    reactions.length > 0 ? (isLastInGroup ? 'mb-4' : 'mb-3') : baseSpacingClass;
+    reactions.length > 0
+      ? isLastInGroup
+        ? 'mb-4 -bottom-6'
+        : 'mb-3 -bottom-6'
+      : baseSpacingClass;
 
   // Memoize border radius calculation
   const borderRadiusClass = useMemo(() => {
@@ -796,7 +803,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
       )}
       <div
         ref={combinedBubbleRef}
-        className={`relative max-w-[80%] sm:max-w-[70%] md:max-w-[65%] lg:max-w-[60%] px-3.5 py-3 font-normal text-[15px] leading-tight ${isTextSelectable ? 'select-text' : 'select-none'} ${borderRadiusClass} ${
+        className={`relative max-w-[80%] sm:max-w-[70%] md:max-w-[65%] lg:max-w-[60%] ${reactions.length > 1 ? 'min-w-[8rem]' : ''} px-3.5 py-3 font-normal text-[15px] leading-tight ${isTextSelectable ? 'select-text' : 'select-none'} ${borderRadiusClass} ${
           isOutgoing
             ? 'ml-auto mr-3 bg-accent text-accent-foreground'
             : `${contact ? '' : 'ml-3'} mr-auto bg-surface-secondary text-card-foreground`
@@ -1109,43 +1116,6 @@ const MessageItem: React.FC<MessageItemProps> = ({
             )}
           </span>
         )}
-        {/* Reactions chips overlaid at the bottom of the bubble, like WhatsApp/Telegram */}
-        {reactions.length > 0 && (
-          <div
-            data-testid="reactions-bar"
-            className={`absolute -bottom-2 ${
-              isOutgoing ? 'right-3' : 'right-3'
-            } flex flex-wrap gap-1`}
-          >
-            {reactions.map(reaction => (
-              <button
-                key={reaction.emoji}
-                type="button"
-                onClick={e => {
-                  e.stopPropagation();
-                  onToggleReaction?.(
-                    message,
-                    reaction.emoji,
-                    reaction.myReactionId,
-                    reaction.myReactionMessageId
-                  );
-                }}
-                className={`flex items-center gap-0.5 text-sm min-w-[2rem] min-h-[1.75rem] px-2 py-1 rounded-full border shadow-sm bg-card/95 backdrop-blur active:scale-95 transition-transform ${
-                  reaction.myReactionId || reaction.myReactionMessageId
-                    ? 'border-accent text-foreground'
-                    : 'border-border text-foreground'
-                }`}
-              >
-                <span>{reaction.emoji}</span>
-                {reaction.count > 1 && (
-                  <span className="text-[10px] text-muted-foreground">
-                    {reaction.count}
-                  </span>
-                )}
-              </button>
-            ))}
-          </div>
-        )}
         {/* Hover arrow for desktop context menu */}
         {!isSelecting && !isDeleted && (
           <button
@@ -1161,6 +1131,13 @@ const MessageItem: React.FC<MessageItemProps> = ({
           </button>
         )}
       </div>
+      <ReactionBar
+        reactions={reactions}
+        message={message}
+        isOutgoing={isOutgoing}
+        hasAvatar={!!contact}
+        onToggleReaction={onToggleReaction}
+      />
 
       <MessageContextMenu
         items={contextMenuItems}
