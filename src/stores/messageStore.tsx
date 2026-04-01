@@ -381,26 +381,23 @@ function createEventHandlers(
   };
 
   // Subscribe all
-  const subscriptions: [string, (...args: unknown[]) => void][] = [
-    [SdkEventType.MESSAGE_OPTIMISTIC, onOptimistic],
-    [SdkEventType.MESSAGE_RECEIVED, onReceived],
-    [SdkEventType.MESSAGE_SENT, onSent],
-    [SdkEventType.MESSAGE_READ, onRead],
-    [SdkEventType.WRITE_FAILED, onWriteFailed],
-    [SdkEventType.SESSION_CREATED, onSessionEvent],
-    [SdkEventType.SESSION_ACCEPTED, onSessionEvent],
-  ];
-  for (const [event, handler] of subscriptions) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    sdk.on(event as any, handler as any);
-  }
+  sdk.on(SdkEventType.MESSAGE_OPTIMISTIC, onOptimistic);
+  sdk.on(SdkEventType.MESSAGE_RECEIVED, onReceived);
+  sdk.on(SdkEventType.MESSAGE_SENT, onSent);
+  sdk.on(SdkEventType.MESSAGE_READ, onRead);
+  sdk.on(SdkEventType.WRITE_FAILED, onWriteFailed);
+  sdk.on(SdkEventType.SESSION_CREATED, onSessionEvent);
+  sdk.on(SdkEventType.SESSION_ACCEPTED, onSessionEvent);
 
   return () => {
     try {
-      for (const [event, handler] of subscriptions) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        sdk.off(event as any, handler as any);
-      }
+      sdk.off(SdkEventType.MESSAGE_OPTIMISTIC, onOptimistic);
+      sdk.off(SdkEventType.MESSAGE_RECEIVED, onReceived);
+      sdk.off(SdkEventType.MESSAGE_SENT, onSent);
+      sdk.off(SdkEventType.MESSAGE_READ, onRead);
+      sdk.off(SdkEventType.WRITE_FAILED, onWriteFailed);
+      sdk.off(SdkEventType.SESSION_CREATED, onSessionEvent);
+      sdk.off(SdkEventType.SESSION_ACCEPTED, onSessionEvent);
     } catch {
       // SDK might not be available during cleanup
     }

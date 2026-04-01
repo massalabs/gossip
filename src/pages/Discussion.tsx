@@ -103,7 +103,7 @@ const Discussion: React.FC = () => {
   const getReactionsForMessage = useMessageStore(s => s.getReactionsForMessage);
   const sendReaction = useMessageStore(s => s.sendReaction);
   const removeReaction = useMessageStore(s => s.removeReaction);
-  const isLoading = useMessageStore(s => s.isLoading);
+  const isLoading = useMessageStore(s => s.isInitializing);
   const sendMessage = useMessageStore(s => s.sendMessage);
 
   const prevContactUserIdRef = useRef<string | null>(null);
