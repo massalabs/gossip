@@ -20,6 +20,7 @@ import {
   Zap,
 } from 'react-feather';
 import Button from '../ui/Button';
+import Toggle from '../ui/Toggle';
 import {
   batteryOptimizationService,
   type BackgroundSyncStatus,
@@ -35,6 +36,7 @@ import {
   getBackgroundSyncPreset,
   setBackgroundSyncPreset,
 } from '../../utils/preferences';
+import { ForegroundSync } from '../../services/foregroundSync';
 
 interface BackgroundSyncSettingsProps {
   showDebugInfo?: boolean;
@@ -60,6 +62,8 @@ const BackgroundSyncSettings: React.FC<BackgroundSyncSettingsProps> = ({
   // Common state
   const [isLoading, setIsLoading] = useState(true);
   const [syncPreset, setSyncPreset] = useState<BackgroundSyncPreset>('max');
+  const [foregroundHighReliability, setForegroundHighReliability] =
+    useState(false);
 
   // Platform detection
   const platform = Capacitor.getPlatform();
@@ -114,6 +118,20 @@ const BackgroundSyncSettings: React.FC<BackgroundSyncSettingsProps> = ({
     })();
   }, [isNative]);
 
+  useEffect(() => {
+    if (!isAndroidNative) {
+      return;
+    }
+    void (async () => {
+      try {
+        const { enabled } = await ForegroundSync.isEnabled();
+        setForegroundHighReliability(enabled);
+      } catch {
+        // Native plugin missing or error
+      }
+    })();
+  }, [isAndroidNative]);
+
   const handleSyncPresetChange = useCallback(
     async (preset: BackgroundSyncPreset) => {
       try {
@@ -121,6 +139,22 @@ const BackgroundSyncSettings: React.FC<BackgroundSyncSettingsProps> = ({
         setSyncPreset(preset);
       } catch (error) {
         console.error('Failed to save background sync preset:', error);
+      }
+    },
+    []
+  );
+
+  const handleForegroundReliabilityChange = useCallback(
+    async (enabled: boolean) => {
+      try {
+        if (enabled) {
+          await ForegroundSync.start();
+        } else {
+          await ForegroundSync.stop();
+        }
+        setForegroundHighReliability(enabled);
+      } catch (error) {
+        console.error('Failed to toggle foreground sync:', error);
       }
     },
     []
@@ -300,6 +334,27 @@ const BackgroundSyncSettings: React.FC<BackgroundSyncSettingsProps> = ({
               : t('background_sync.preset_max_description')}
           </p>
         </div>
+
+        {isAndroidNative && (
+          <div className="space-y-2 pb-3 border-b border-border">
+            <p className="text-xs font-medium text-muted-foreground">
+              {t('background_sync.foreground_title')}
+            </p>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              {t('background_sync.foreground_description')}
+            </p>
+            <div className="flex items-center justify-between gap-3 py-1">
+              <span className="text-sm text-foreground flex-1">
+                {t('background_sync.foreground_toggle')}
+              </span>
+              <Toggle
+                checked={foregroundHighReliability}
+                onChange={handleForegroundReliabilityChange}
+                ariaLabel={t('background_sync.foreground_toggle')}
+              />
+            </div>
+          </div>
+        )}
 
         {/* ==================== iOS SECTION ==================== */}
         {isIOSNative && iosStatus && (
@@ -481,6 +536,18 @@ const BackgroundSyncSettings: React.FC<BackgroundSyncSettingsProps> = ({
             <p className="text-xs text-muted-foreground font-mono">
               Platform: {platform}
             </p>
+            <p className="text-xs text-muted-foreground font-mono">
+              {t('background_sync.debug_sync_preset', {
+                preset: syncPreset,
+              })}
+            </p>
+            {isAndroidNative && (
+              <p className="text-xs text-muted-foreground font-mono">
+                {t('background_sync.debug_foreground_sync', {
+                  value: foregroundHighReliability ? 'on' : 'off',
+                })}
+              </p>
+            )}
 
             {/* Android debug info */}
             {isAndroidNative && androidStatus && (

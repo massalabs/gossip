@@ -76,8 +76,13 @@ public class BootReceiver extends BroadcastReceiver {
         try {
             // Schedule a delayed sync to run after the system has stabilized
             BackgroundSyncWorker.scheduleDelayedSync(context, BOOT_SYNC_DELAY_MINUTES);
-            
+
             Log.d(TAG, "Background sync scheduled for " + BOOT_SYNC_DELAY_MINUTES + " minutes after boot");
+
+            if (GossipForegroundSyncService.isEnabled(context)) {
+                GossipForegroundSyncService.start(context);
+                Log.d(TAG, "High-reliability foreground sync restarted after boot");
+            }
         } catch (Exception e) {
             Log.e(TAG, "Failed to schedule background sync after boot", e);
         }

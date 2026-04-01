@@ -39,6 +39,10 @@ public class AppUpdateReceiver extends BroadcastReceiver {
             if (!scheduled) {
                 Log.w(TAG, "Background sync could not be scheduled after update (lock may be held)");
             }
+            if (GossipForegroundSyncService.isEnabled(context)) {
+                GossipForegroundSyncService.start(context);
+                Log.d(TAG, "High-reliability foreground sync restarted after update");
+            }
         } catch (Exception e) {
             Log.e(TAG, "Failed to schedule background sync after update", e);
         }
