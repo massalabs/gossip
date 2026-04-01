@@ -704,8 +704,7 @@ export class MessageService {
         }
       }
 
-      // Emit optimistic event BEFORE DB write — UI shows message instantly
-      this.emitMessageReceived({
+      const incomingMsg: Omit<Message, 'id'> = {
         messageId: message.messageId,
         ownerUserId,
         contactUserId: discussion.contactUserId,
@@ -716,7 +715,10 @@ export class MessageService {
         timestamp: message.sentAt,
         replyTo: message.replyTo,
         forwardOf: message.forwardOf,
-      });
+      };
+
+      // Emit before DB write — UI shows message instantly
+      this.emitMessageReceived(incomingMsg);
 
       const id = await this.queries.messages.insert({
         messageId: message.messageId,
@@ -745,20 +747,8 @@ export class MessageService {
 
       storedIds.push(id);
 
-      // Re-emit with DB id so the store can patch the optimistic message
-      this.emitMessageReceived({
-        messageId: message.messageId,
-        ownerUserId,
-        contactUserId: discussion.contactUserId,
-        content: message.content,
-        type: message.type,
-        direction: MessageDirection.INCOMING,
-        status: MessageStatus.DELIVERED,
-        timestamp: message.sentAt,
-        replyTo: message.replyTo,
-        forwardOf: message.forwardOf,
-        id,
-      });
+      // Re-emit with DB id so the store patches the optimistic message
+      this.emitMessageReceived({ ...incomingMsg, id });
     }
 
     return storedIds;
