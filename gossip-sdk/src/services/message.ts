@@ -39,7 +39,7 @@ import { SdkConfig, defaultSdkConfig } from '../config/sdk.js';
 import { SdkEventEmitter, SdkEventType } from '../core/SdkEventEmitter.js';
 import type { RefreshService } from './refresh.js';
 import { Queries } from '../db/queries/index.js';
-import { QueueManager, PromiseQueue } from '../utils/queue.js';
+import { QueueManager } from '../utils/queue.js';
 
 /** Options for the simplified sendText method */
 export interface SendTextOptions {
@@ -255,7 +255,6 @@ export class MessageService {
   private processingContacts = new Set<string>();
   private isFetchingMessages = false;
   private queries: Queries;
-  private persistQueue = new PromiseQueue();
 
   /** Emit MESSAGE_RECEIVED with a Message that may not have a DB id yet */
   private emitMessageReceived(
@@ -1413,14 +1412,9 @@ export class MessageService {
 
     log.info('optimistic send', { messageType: message.type });
 
-    // Queue DB write + send pipeline
-    this.persistQueue.enqueue(async () => {
-      try {
-        const result = await this.sendMessage({
-          ...message,
-          messageId: randomMessageId,
-        });
-
+    // Fire and forget — send() uses queueManager for per-contact serialization
+    this.send({ ...message, messageId: randomMessageId })
+      .then(result => {
         if (!result.success) {
           this.eventEmitter.emit(
             SdkEventType.WRITE_FAILED,
@@ -1429,7 +1423,8 @@ export class MessageService {
             new Error(result.error ?? 'Unknown error')
           );
         }
-      } catch (error) {
+      })
+      .catch(error => {
         log.error('optimistic send failed during persist', { error });
         this.eventEmitter.emit(
           SdkEventType.WRITE_FAILED,
@@ -1437,8 +1432,7 @@ export class MessageService {
           'message',
           error instanceof Error ? error : new Error(String(error))
         );
-      }
-    });
+      });
 
     return { success: true, message: optimisticMessage };
   }
