@@ -239,7 +239,24 @@ function createEventHandlers(
   get: GetFn
 ) {
   const onOptimistic = (message: Message) => {
-    if (message.type === MessageType.REACTION) return;
+    if (message.type === MessageType.REACTION) {
+      set(state => {
+        const contact = message.contactUserId;
+        const existing = state.reactionsByContact.get(contact) || [];
+        const rxnMap = new Map(state.reactionsByContact);
+        rxnMap.set(contact, [...existing, message]);
+        return {
+          reactionsByContact: rxnMap,
+          reactionGroupsCache: patchReactionCache(
+            state.reactionGroupsCache,
+            contact,
+            state.messagesByContact,
+            rxnMap
+          ),
+        };
+      });
+      return;
+    }
     set(state => {
       const map = patchContact(
         state.messagesByContact,
@@ -595,8 +612,8 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
       return;
     }
 
-    // Optimistic: add reaction to state immediately
-    const optimisticReaction: Message = {
+    // Same pipeline as regular messages — onOptimistic routes REACTION to reactionsByContact
+    const result = getSdk().messages.sendOptimistic({
       ownerUserId: useAccountStore.getState().userProfile?.userId ?? '',
       contactUserId,
       content: emoji,
@@ -605,48 +622,9 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
       status: MessageStatus.WAITING_SESSION,
       timestamp: new Date(),
       reactionOf: { originalMsgId: target.messageId },
-    };
-    set(state => {
-      const existing = state.reactionsByContact.get(contactUserId) || [];
-      const rxnMap = new Map(state.reactionsByContact);
-      rxnMap.set(contactUserId, [...existing, optimisticReaction]);
-      return {
-        reactionsByContact: rxnMap,
-        reactionGroupsCache: patchReactionCache(
-          state.reactionGroupsCache,
-          contactUserId,
-          state.messagesByContact,
-          rxnMap
-        ),
-      };
     });
-
-    try {
-      await getSdk().messages.sendReaction(
-        contactUserId,
-        emoji,
-        target.messageId
-      );
-    } catch {
-      // Rollback: remove optimistic reaction
-      set(state => {
-        const existing = state.reactionsByContact.get(contactUserId) || [];
-        const rxnMap = new Map(state.reactionsByContact);
-        rxnMap.set(
-          contactUserId,
-          existing.filter(r => r !== optimisticReaction)
-        );
-        return {
-          reactionsByContact: rxnMap,
-          reactionGroupsCache: patchReactionCache(
-            state.reactionGroupsCache,
-            contactUserId,
-            state.messagesByContact,
-            rxnMap
-          ),
-        };
-      });
-    }
+    if (!result.success)
+      console.error('Failed to send reaction:', result.error);
   },
 
   removeReaction: async reactionDbId => {
