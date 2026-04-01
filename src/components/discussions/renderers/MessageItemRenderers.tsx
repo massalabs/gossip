@@ -1,14 +1,7 @@
 import React, { useMemo, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Clock } from 'react-feather';
-import {
-  Message,
-  MessageDirection,
-  DiscussionDirection,
-} from '@massalabs/gossip-sdk';
-import type { Contact } from '@massalabs/gossip-sdk';
-import { MessageGroupInfo } from '../../../utils/messageGrouping';
-import MessageItem from '../MessageItem';
+import { DiscussionDirection } from '@massalabs/gossip-sdk';
 import DateSeparator from '../DateSeparator';
 import { parseLinks, openUrl } from '../../../utils/linkUtils';
 
@@ -98,90 +91,6 @@ export const DateRenderer: React.FC<DateRendererProps> = ({ date }) => (
     <DateSeparator date={date} />
   </div>
 );
-
-// =============================================================================
-// Message Renderer
-// =============================================================================
-
-interface MessageRendererProps {
-  message: Message;
-  showTimestamp: boolean;
-  groupInfo: MessageGroupInfo;
-  onReplyTo?: (message: Message) => void;
-  onForward?: (message: Message) => void;
-  onDelete?: (message: Message) => void;
-  onEdit?: (message: Message) => void;
-  onScrollToMessage?: (messageId: number) => void;
-  onReact?: (message: Message, emoji: string) => void;
-  onToggleReaction?: (
-    message: Message,
-    emoji: string,
-    myReactionId?: number
-  ) => void;
-  getReactionsForMessage?: (messageDbId: number) => {
-    emoji: string;
-    count: number;
-    myReactionId?: number;
-  }[];
-  contact?: Pick<Contact, 'name' | 'avatar' | 'userId'>;
-  isHighlighted?: boolean;
-  isSelecting?: boolean;
-  isSelected?: boolean;
-  onToggleSelect?: (messageId: number) => void;
-}
-
-export const MessageRenderer: React.FC<MessageRendererProps> = ({
-  message,
-  showTimestamp,
-  groupInfo,
-  onReplyTo,
-  onForward,
-  onDelete,
-  onEdit,
-  onScrollToMessage,
-  onReact,
-  onToggleReaction,
-  getReactionsForMessage,
-  contact,
-  isHighlighted,
-  isSelecting,
-  isSelected,
-  onToggleSelect,
-}) => {
-  const isIncoming = message.direction === MessageDirection.INCOMING;
-  const reactions =
-    message.id != null && getReactionsForMessage
-      ? getReactionsForMessage(message.id)
-      : [];
-
-  return (
-    <div
-      className={`px-4 md:px-6 lg:px-8 transition-colors duration-150 ${isSelecting && isSelected ? 'bg-accent/10' : ''}`}
-    >
-      <MessageItem
-        id={`message-${message.id}`}
-        message={message}
-        onReplyTo={onReplyTo}
-        onForward={onForward}
-        onDelete={onDelete}
-        onEdit={onEdit}
-        onScrollToMessage={onScrollToMessage}
-        onReact={onReact}
-        onToggleReaction={onToggleReaction}
-        reactions={reactions}
-        showTimestamp={showTimestamp}
-        isFirstInGroup={groupInfo.isFirstInGroup}
-        isLastInGroup={groupInfo.isLastInGroup}
-        showAvatar={isIncoming && groupInfo.isLastInGroup}
-        contact={isIncoming ? contact : undefined}
-        isHighlighted={isHighlighted}
-        isSelecting={isSelecting}
-        isSelected={isSelected}
-        onToggleSelect={onToggleSelect}
-      />
-    </div>
-  );
-};
 
 // =============================================================================
 // Retention Separator Renderer
