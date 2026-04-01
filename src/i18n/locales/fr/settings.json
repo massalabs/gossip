@@ -114,6 +114,8 @@
     "trust_body": "La résolution des domaines MNS nécessite de faire confiance à la réponse du RPC Massa. Le point d'accès RPC pourrait potentiellement fournir des données de résolution incorrectes ou malveillantes."
   },
   "background_sync": {
+    "privacy_model_title": "Confidentialité et réception en arrière-plan",
+    "privacy_model_body": "Gossip n'utilise pas de notifications push serveur. L'application se synchronise en arrière-plan lorsque le système l'autorise. La réception n'est pas en temps réel : elle dépend de l'appareil, des réglages batterie et du fait que l'app ait été arrêtée de force. Sous iOS, l'exécution en arrière-plan est surtout limitée.",
     "title": "Synchronisation en arrière-plan",
     "checking": "Vérification...",
     "optimized": "Optimisé",

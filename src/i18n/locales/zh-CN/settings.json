@@ -114,6 +114,8 @@
     "trust_body": "解析 MNS 域名需要信任 Massa RPC 的响应。RPC 端点可能会提供不正确或恶意的解析数据。"
   },
   "background_sync": {
+    "privacy_model_title": "隐私与后台送达",
+    "privacy_model_body": "Gossip 不使用服务器推送通知。应用仅在系统允许时在后台同步。送达并非实时：取决于设备、电池设置以及是否强制停止应用。在 iOS 上，后台运行尤其受限。",
     "title": "后台同步",
     "checking": "检查中...",
     "optimized": "已优化",

@@ -114,6 +114,8 @@
     "trust_body": "Resolving MNS domains requires trusting the Massa RPC response. The RPC endpoint could potentially provide incorrect or malicious resolution data."
   },
   "background_sync": {
+    "privacy_model_title": "Privacy and background delivery",
+    "privacy_model_body": "Gossip does not use server push notifications. The app syncs in the background when the system allows it. Delivery is not real-time: it depends on your device, battery settings, and whether the app was force-stopped. On iOS, background execution is especially limited.",
     "title": "Background Sync",
     "checking": "Checking...",
     "optimized": "Optimized",

@@ -7,6 +7,7 @@ import PageHeader from '../../components/ui/PageHeader';
 import Button from '../../components/ui/Button';
 import Toggle from '../../components/ui/Toggle';
 import BackgroundSyncSettings from '../../components/settings/BackgroundSyncSettings';
+import BackgroundSyncPrivacyNotice from '../../components/settings/BackgroundSyncPrivacyNotice';
 import {
   notificationService,
   type NotificationPreferences,
@@ -70,6 +71,8 @@ const NotificationsSettings: React.FC = () => {
       className="app-max-w mx-auto"
       contentClassName="px-6 py-6"
     >
+      <BackgroundSyncPrivacyNotice />
+
       <div className="bg-card border border-border rounded-xl overflow-hidden">
         <div className="h-[54px] flex items-center px-4 justify-start w-full border-b border-border">
           <Bell className="text-foreground mr-4" />
