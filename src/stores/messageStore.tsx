@@ -48,19 +48,25 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
       Promise.all([
         sdk.messages.getVisibleMessages(contactUserId),
         sdk.messages.getReactions(contactUserId),
-      ]).then(([messages, reactions]) => {
-        set(state => {
-          const msgMap = new Map(state.messagesByContact);
-          const rxnMap = new Map(state.reactionsByContact);
-          if (messages.length > 0) msgMap.set(contactUserId, messages);
-          if (reactions.length > 0) rxnMap.set(contactUserId, reactions);
-          return {
-            messagesByContact: msgMap,
-            reactionsByContact: rxnMap,
-            reactionGroupsCache: recomputeFullCache(msgMap, rxnMap),
-          };
+      ])
+        .then(([messages, reactions]) => {
+          // Guard against stale closure
+          if (get().currentContactUserId !== contactUserId) return;
+          set(state => {
+            const msgMap = new Map(state.messagesByContact);
+            const rxnMap = new Map(state.reactionsByContact);
+            if (messages.length > 0) msgMap.set(contactUserId, messages);
+            if (reactions.length > 0) rxnMap.set(contactUserId, reactions);
+            return {
+              messagesByContact: msgMap,
+              reactionsByContact: rxnMap,
+              reactionGroupsCache: recomputeFullCache(msgMap, rxnMap),
+            };
+          });
+        })
+        .catch(error => {
+          console.error('Failed to load messages for contact:', error);
         });
-      });
     }
   },
 

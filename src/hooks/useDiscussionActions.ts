@@ -2,7 +2,6 @@ import { useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { Message } from '@massalabs/gossip-sdk';
-import type { GossipSdk } from '@massalabs/gossip-sdk';
 import { ROUTES } from '../constants/routes';
 import { useAppStore } from '../stores/appStore';
 import { useMessageStore } from '../stores/messageStore';
@@ -11,7 +10,6 @@ import type { TFunction } from 'i18next';
 interface UseDiscussionActionsParams {
   contact: { userId: string } | undefined;
   isSelecting: boolean;
-  gossip: GossipSdk;
   t: TFunction;
   forwardFromMessageId: number | undefined;
   setReplyingTo: (msg: Message | null) => void;

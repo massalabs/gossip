@@ -7,17 +7,18 @@ interface MessageAvatarProps {
   showAvatar: boolean;
 }
 
-const MessageAvatar: React.FC<MessageAvatarProps> = ({
-  contact,
-  showAvatar,
-}) => (
-  <div className="w-8 shrink-0 ml-1">
-    {showAvatar ? (
-      <ContactAvatar contact={contact} size={8} />
-    ) : (
-      <div className="w-8 h-8" />
-    )}
-  </div>
+const MessageAvatar: React.FC<MessageAvatarProps> = React.memo(
+  ({ contact, showAvatar }) => (
+    <div className="w-8 shrink-0 ml-1">
+      {showAvatar ? (
+        <ContactAvatar contact={contact} size={8} />
+      ) : (
+        <div className="w-8 h-8" />
+      )}
+    </div>
+  )
 );
+
+MessageAvatar.displayName = 'MessageAvatar';
 
 export default MessageAvatar;

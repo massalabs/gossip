@@ -87,7 +87,6 @@ const useSelfMessageStoreBase = create<SelfMessageStore>((set, get) => ({
 
     // Optimistic: add to state before SDK call
     const optimistic: Message = {
-      id: undefined as unknown as number,
       ownerUserId: userProfile.userId,
       contactUserId: '__self__',
       content: trimmed,

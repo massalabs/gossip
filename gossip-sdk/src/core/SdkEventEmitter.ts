@@ -23,7 +23,6 @@ export enum SdkEventType {
   SEEKERS_UPDATED = 'seekersUpdated',
   SESSION_STATUS_CHANGED = 'sessionStatusChanged',
   DISCUSSION_UPDATED = 'discussionUpdated',
-  WRITE_CONFIRMED = 'writeConfirmed',
   WRITE_FAILED = 'writeFailed',
   MESSAGE_OPTIMISTIC = 'messageOptimistic',
   ERROR = 'error',
@@ -47,11 +46,6 @@ export interface SdkEventHandlers {
     status: SessionStatus
   ) => void;
   [SdkEventType.DISCUSSION_UPDATED]: (contactUserId: string) => void;
-  [SdkEventType.WRITE_CONFIRMED]: (
-    id: number,
-    entityType: 'message' | 'discussion' | 'contact',
-    messageId?: Uint8Array
-  ) => void;
   [SdkEventType.WRITE_FAILED]: (
     messageId: Uint8Array | undefined,
     entityType: 'message' | 'discussion' | 'contact',
@@ -101,9 +95,6 @@ export class SdkEventEmitter {
     >(),
     [SdkEventType.DISCUSSION_UPDATED]: new Set<
       SdkEventHandlers[SdkEventType.DISCUSSION_UPDATED]
-    >(),
-    [SdkEventType.WRITE_CONFIRMED]: new Set<
-      SdkEventHandlers[SdkEventType.WRITE_CONFIRMED]
     >(),
     [SdkEventType.WRITE_FAILED]: new Set<
       SdkEventHandlers[SdkEventType.WRITE_FAILED]

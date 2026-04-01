@@ -138,7 +138,6 @@ const Discussion: React.FC = () => {
   } = useDiscussionActions({
     contact: contact ?? undefined,
     isSelecting,
-    gossip,
     t,
     forwardFromMessageId,
     setReplyingTo,
