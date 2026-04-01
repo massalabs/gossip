@@ -51,6 +51,11 @@ interface MessageStoreState {
     emoji: string,
     messageDbId: number
   ) => Promise<void>;
+  reactToMessage: (
+    contactUserId: string,
+    emoji: string,
+    messageDbId: number
+  ) => Promise<void>;
   removeReaction: (
     reactionDbId: number | undefined,
     reactionMessageId?: Uint8Array
@@ -658,6 +663,34 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
     });
     if (!result.success)
       console.error('Failed to send reaction:', result.error);
+  },
+
+  reactToMessage: async (contactUserId, emoji, messageDbId) => {
+    const msgs = get().messagesByContact.get(contactUserId) || EMPTY_MESSAGES;
+    const target = msgs.find(m => m.id === messageDbId);
+    if (!target?.messageId) return;
+
+    // Check if user already has a reaction on this message
+    const reactions =
+      get().reactionsByContact.get(contactUserId) || EMPTY_MESSAGES;
+    const existing = reactions.find(
+      r =>
+        r.direction === MessageDirection.OUTGOING &&
+        r.reactionOf?.originalMsgId &&
+        messageIdEquals(r.reactionOf.originalMsgId, target.messageId)
+    );
+
+    if (existing) {
+      // Same emoji → toggle off (just remove)
+      if (existing.content === emoji) {
+        await get().removeReaction(existing.id, existing.messageId);
+        return;
+      }
+      // Different emoji → remove old, then add new
+      await get().removeReaction(existing.id, existing.messageId);
+    }
+
+    await get().sendReaction(contactUserId, emoji, messageDbId);
   },
 
   removeReaction: async (reactionDbId, reactionMessageId?) => {
