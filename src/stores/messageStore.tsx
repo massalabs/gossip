@@ -628,6 +628,40 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
   },
 
   removeReaction: async reactionDbId => {
+    // Optimistic: remove outgoing reactions for this target from state
+    const contactUserId = (() => {
+      for (const [contact, rxns] of get().reactionsByContact) {
+        if (rxns.some(r => r.id === reactionDbId)) return contact;
+      }
+      return null;
+    })();
+
+    if (contactUserId) {
+      set(state => {
+        const existing = state.reactionsByContact.get(contactUserId) || [];
+        const rxnMap = new Map(state.reactionsByContact);
+        rxnMap.set(
+          contactUserId,
+          existing.filter(
+            r =>
+              !(
+                r.id === reactionDbId ||
+                (r.direction === MessageDirection.OUTGOING && !r.id)
+              )
+          )
+        );
+        return {
+          reactionsByContact: rxnMap,
+          reactionGroupsCache: patchReactionCache(
+            state.reactionGroupsCache,
+            contactUserId,
+            state.messagesByContact,
+            rxnMap
+          ),
+        };
+      });
+    }
+
     const sdk = getSdk();
     const reaction = await sdk.messages.get(reactionDbId);
     if (
