@@ -869,7 +869,7 @@ export class MessageService {
     }
 
     // Generate a random messageId for deduplication (not for keep-alive or retention policy)
-    // Skip if already provided (e.g., from sendOptimistic)
+    // Skip if already provided (e.g., from optimistic send)
     if (!message.messageId) {
       const randomMessageId =
         message.type !== MessageType.KEEP_ALIVE &&
@@ -1365,73 +1365,77 @@ export class MessageService {
     return rows.map(rowToMessage);
   }
 
-  /** Send a message, queued via QueueManager if available */
-  async send(message: Omit<Message, 'id'>): Promise<SendMessageResult> {
+  /**
+   * Send a message.
+   * When `optimistic: true`, generates messageId, emits MESSAGE_OPTIMISTIC
+   * immediately, and fires DB write in background (returns synchronously).
+   * Otherwise, awaits the full DB write + queue pipeline.
+   */
+  send(
+    message: Omit<Message, 'id'>,
+    options?: { optimistic?: boolean }
+  ): SendMessageResult | Promise<SendMessageResult> {
+    if (options?.optimistic) {
+      const log = logger.forMethod('send:optimistic');
+
+      const peerId = decodeUserId(message.contactUserId);
+      if (peerId.length !== 32) {
+        return {
+          success: false,
+          error: 'Invalid contact userId (must be 32 bytes)',
+        };
+      }
+
+      const randomMessageId =
+        message.type !== MessageType.KEEP_ALIVE &&
+        message.type !== MessageType.RETENTION_POLICY
+          ? crypto.getRandomValues(new Uint8Array(MESSAGE_ID_SIZE))
+          : undefined;
+
+      const optimisticMessage: Message = {
+        ...message,
+        messageId: randomMessageId,
+        status: MessageStatus.WAITING_SESSION,
+      };
+
+      this.eventEmitter.emit(
+        SdkEventType.MESSAGE_OPTIMISTIC,
+        optimisticMessage
+      );
+      log.info('optimistic send', { messageType: message.type });
+
+      // Fire and forget — persist in background
+      this.send({ ...message, messageId: randomMessageId })
+        .then(result => {
+          if (!(result as SendMessageResult).success) {
+            this.eventEmitter.emit(
+              SdkEventType.WRITE_FAILED,
+              randomMessageId,
+              'message',
+              new Error((result as SendMessageResult).error ?? 'Unknown error')
+            );
+          }
+        })
+        .catch(error => {
+          log.error('optimistic send failed during persist', { error });
+          this.eventEmitter.emit(
+            SdkEventType.WRITE_FAILED,
+            randomMessageId,
+            'message',
+            error instanceof Error ? error : new Error(String(error))
+          );
+        });
+
+      return { success: true, message: optimisticMessage };
+    }
+
+    // Non-optimistic: await the full pipeline
     if (this.queueManager) {
       return this.queueManager.enqueue(message.contactUserId, () =>
         this.sendMessage(message)
       );
     }
     return this.sendMessage(message);
-  }
-
-  /**
-   * Optimistic send: validates, generates messageId, emits MESSAGE_OPTIMISTIC
-   * immediately, then queues DB write + encryption + network send.
-   * Returns synchronously with the optimistic message (no DB id yet).
-   */
-  sendOptimistic(message: Omit<Message, 'id'>): SendMessageResult {
-    const log = logger.forMethod('sendOptimistic');
-
-    const peerId = decodeUserId(message.contactUserId);
-    if (peerId.length !== 32) {
-      return {
-        success: false,
-        error: 'Invalid contact userId (must be 32 bytes)',
-      };
-    }
-
-    // Generate messageId synchronously (no DB needed)
-    const randomMessageId =
-      message.type !== MessageType.KEEP_ALIVE &&
-      message.type !== MessageType.RETENTION_POLICY
-        ? crypto.getRandomValues(new Uint8Array(MESSAGE_ID_SIZE))
-        : undefined;
-
-    const optimisticMessage: Message = {
-      ...message,
-      messageId: randomMessageId,
-      status: MessageStatus.WAITING_SESSION,
-    };
-
-    // Emit immediately — store adds to state before DB write
-    this.eventEmitter.emit(SdkEventType.MESSAGE_OPTIMISTIC, optimisticMessage);
-
-    log.info('optimistic send', { messageType: message.type });
-
-    // Fire and forget — send() uses queueManager for per-contact serialization
-    this.send({ ...message, messageId: randomMessageId })
-      .then(result => {
-        if (!result.success) {
-          this.eventEmitter.emit(
-            SdkEventType.WRITE_FAILED,
-            randomMessageId,
-            'message',
-            new Error(result.error ?? 'Unknown error')
-          );
-        }
-      })
-      .catch(error => {
-        log.error('optimistic send failed during persist', { error });
-        this.eventEmitter.emit(
-          SdkEventType.WRITE_FAILED,
-          randomMessageId,
-          'message',
-          error instanceof Error ? error : new Error(String(error))
-        );
-      });
-
-    return { success: true, message: optimisticMessage };
   }
 
   /**

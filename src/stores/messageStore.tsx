@@ -148,18 +148,25 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
       }
     }
 
-    const result = getSdk().messages.sendOptimistic({
-      ownerUserId: userProfile.userId,
-      contactUserId,
-      content,
-      type: MessageType.TEXT,
-      direction: MessageDirection.OUTGOING,
-      status: MessageStatus.WAITING_SESSION,
-      timestamp: new Date(),
-      replyTo,
-      forwardOf,
-    });
-    if (!result.success) console.error('Failed to send message:', result.error);
+    const result = getSdk().messages.send(
+      {
+        ownerUserId: userProfile.userId,
+        contactUserId,
+        content,
+        type: MessageType.TEXT,
+        direction: MessageDirection.OUTGOING,
+        status: MessageStatus.WAITING_SESSION,
+        timestamp: new Date(),
+        replyTo,
+        forwardOf,
+      },
+      { optimistic: true }
+    );
+    if (!(result as { success: boolean; error?: string }).success)
+      console.error(
+        'Failed to send message:',
+        (result as { error?: string }).error
+      );
   },
 
   getMessagesForContact: contactUserId =>
@@ -238,16 +245,19 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
       get().removeReaction(existing.id, existing.messageId);
     }
 
-    getSdk().messages.sendOptimistic({
-      ownerUserId: useAccountStore.getState().userProfile?.userId ?? '',
-      contactUserId,
-      content: emoji,
-      type: MessageType.REACTION,
-      direction: MessageDirection.OUTGOING,
-      status: MessageStatus.WAITING_SESSION,
-      timestamp: new Date(),
-      reactionOf: { originalMsgId: target.messageId },
-    });
+    getSdk().messages.send(
+      {
+        ownerUserId: useAccountStore.getState().userProfile?.userId ?? '',
+        contactUserId,
+        content: emoji,
+        type: MessageType.REACTION,
+        direction: MessageDirection.OUTGOING,
+        status: MessageStatus.WAITING_SESSION,
+        timestamp: new Date(),
+        reactionOf: { originalMsgId: target.messageId },
+      },
+      { optimistic: true }
+    );
   },
 
   removeReaction: async (reactionDbId, reactionMessageId?) => {
