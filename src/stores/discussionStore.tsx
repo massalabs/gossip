@@ -262,6 +262,7 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
     set({
       sessionsStatuses: new Map<string, SessionStatus>(),
       cleanupFn: null,
+      isInitializing: false,
       discussions: [],
       contacts: [],
       lastMessages: new Map(),

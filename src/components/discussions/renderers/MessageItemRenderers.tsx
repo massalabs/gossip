@@ -118,7 +118,7 @@ interface MessageRendererProps {
     emoji: string,
     myReactionId?: number
   ) => void;
-  getReactionsForMessage?: (messageDbId: number) => {
+  reactions: {
     emoji: string;
     count: number;
     myReactionId?: number;
@@ -142,7 +142,7 @@ export const MessageRenderer: React.FC<MessageRendererProps> = React.memo(
     onScrollToMessage,
     onReact,
     onToggleReaction,
-    getReactionsForMessage,
+    reactions,
     contact,
     isHighlighted,
     isSelecting,
@@ -150,10 +150,6 @@ export const MessageRenderer: React.FC<MessageRendererProps> = React.memo(
     onToggleSelect,
   }) => {
     const isIncoming = message.direction === MessageDirection.INCOMING;
-    const reactions =
-      message.id != null && getReactionsForMessage
-        ? getReactionsForMessage(message.id)
-        : [];
 
     return (
       <div
@@ -193,7 +189,14 @@ export const MessageRenderer: React.FC<MessageRendererProps> = React.memo(
     prev.isSelecting === next.isSelecting &&
     prev.isSelected === next.isSelected &&
     prev.groupInfo.isFirstInGroup === next.groupInfo.isFirstInGroup &&
-    prev.groupInfo.isLastInGroup === next.groupInfo.isLastInGroup
+    prev.groupInfo.isLastInGroup === next.groupInfo.isLastInGroup &&
+    prev.reactions.length === next.reactions.length &&
+    prev.reactions.every(
+      (r, i) =>
+        r.emoji === next.reactions[i]?.emoji &&
+        r.count === next.reactions[i]?.count &&
+        r.myReactionId === next.reactions[i]?.myReactionId
+    )
 );
 
 // =============================================================================

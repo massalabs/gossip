@@ -547,6 +547,7 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
       currentContactUserId: null,
       isLoading: false,
       isSending: false,
+      isInitializing: false,
     });
   },
 }));

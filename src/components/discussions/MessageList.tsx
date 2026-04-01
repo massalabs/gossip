@@ -371,7 +371,11 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
                 onScrollToMessage={onScrollToMessage}
                 onReact={onReact}
                 onToggleReaction={onToggleReaction}
-                getReactionsForMessage={getReactionsForMessage}
+                reactions={
+                  item.message.id != null && getReactionsForMessage
+                    ? getReactionsForMessage(item.message.id)
+                    : []
+                }
                 contact={contact}
                 isHighlighted={item.message.id === highlightedMessageId}
                 isSelecting={isSelecting}

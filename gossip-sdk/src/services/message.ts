@@ -746,12 +746,20 @@ export class MessageService {
 
       storedIds.push(id);
 
-      this.eventEmitter.emit(
-        SdkEventType.WRITE_CONFIRMED,
+      // Re-emit with DB id so the store can patch the optimistic message
+      this.emitMessageReceived({
+        messageId: message.messageId,
+        ownerUserId,
+        contactUserId: discussion.contactUserId,
+        content: message.content,
+        type: message.type,
+        direction: MessageDirection.INCOMING,
+        status: MessageStatus.DELIVERED,
+        timestamp: message.sentAt,
+        replyTo: message.replyTo,
+        forwardOf: message.forwardOf,
         id,
-        'message',
-        message.messageId
-      );
+      });
     }
 
     return storedIds;
@@ -1396,7 +1404,6 @@ export class MessageService {
 
     const optimisticMessage: Message = {
       ...message,
-      id: undefined as unknown as number,
       messageId: randomMessageId,
       status: MessageStatus.WAITING_SESSION,
     };
@@ -1414,14 +1421,7 @@ export class MessageService {
           messageId: randomMessageId,
         });
 
-        if (result.success && result.message) {
-          this.eventEmitter.emit(
-            SdkEventType.WRITE_CONFIRMED,
-            result.message.id!,
-            'message',
-            randomMessageId
-          );
-        } else {
+        if (!result.success) {
           this.eventEmitter.emit(
             SdkEventType.WRITE_FAILED,
             randomMessageId,
