@@ -39,10 +39,15 @@ vi.mock('../../src/hooks/useFileShareContact', () => ({
   }),
 }));
 
-vi.mock('../../src/utils/inviteUrl', () => ({
-  generateDeepLinkUrl: (userId: string, name?: string) =>
-    `https://gossip.test/invite/${userId}${name ? `?name=${name}` : ''}`,
-}));
+vi.mock('../../src/utils/inviteUrl', async importOriginal => {
+  const actual =
+    await importOriginal<typeof import('../../src/utils/inviteUrl')>();
+  return {
+    ...actual,
+    generateDeepLinkUrl: (userId: string, name?: string) =>
+      `https://gossip.test/invite/${userId}${name ? `?name=${name}` : ''}`,
+  };
+});
 
 // Mock ShareContactQR to control qrDataUrl via onQRCodeGenerated callback
 let capturedOnQRCodeGenerated: ((url: string) => void) | undefined;
