@@ -23,21 +23,26 @@ import { toastOptions, toasterContainerStyle } from './utils/toastOptions.ts';
 import LoadingScreen from './components/ui/LoadingScreen.tsx';
 import KeyboardAwareWrapper from './components/ui/KeyboardAwareWrapper';
 import { ROUTES } from './constants/routes';
-import { useOnlineStore } from './stores/useOnlineStore.tsx';
-import { useTheme } from './hooks/useTheme.ts';
-import { useScreenshotProtection } from './hooks/useScreenshotProtection';
-import { useAutoLock } from './hooks/useAutoLock';
+import { useAppInit } from './hooks/useAppInit';
 
 const AppContent: React.FC = () => {
-  const { isLoading, userProfile } = useAccountStore();
-  const { isInitialized } = useAppStore();
-  const [showImport, setShowImport] = useState(false);
-  const [loginError, setLoginError] = useState<string | null>(null);
   useProfileLoader();
   useStoreInit(); // Initialize all stores when user profile is available
+
+  const { isLoading, userProfile } = useAccountStore();
+  const isInitialized = useAppStore(s => s.isInitialized);
   const existingAccountInfo = useAccountInfo();
 
+  const [loginError, setLoginError] = useState<string | null>(null);
+
   const inviteMatch = useMatch(ROUTES.invite());
+  const isOnboarding = !isInitialized && !inviteMatch;
+  const isAuthenticated = !!userProfile;
+  // Pending = initial profile load only. Guards against flashing Login/Onboarding
+  // before useProfileLoader determines the correct state.
+  // !isInitialized: once isInitialized is set (by useProfileLoader or secure storage setup),
+  // isPending is permanently false — login attempts (loadAccount) won't unmount Login.
+  const isPending = !isInitialized && isLoading && !userProfile;
 
   // Setup service worker: register, listen for messages, start sync scheduler, and initialize background sync
   useEffect(() => {
@@ -46,22 +51,18 @@ const AppContent: React.FC = () => {
     });
   }, []); // Only run once on mount
 
-  if (isLoading && !isInitialized && !userProfile) {
+  // Onboarding owns the full account-creation flow (including secure storage setup).
+  // Must be checked before isPending: initializeAccount sets isLoading=true mid-flow,
+  // and showing LoadingScreen would unmount Onboarding and lose its state.
+  if (isOnboarding) {
+    return <Onboarding />;
+  }
+
+  if (isPending) {
     return <LoadingScreen />;
   }
 
-  // For invite links, we bypass onboarding so the user lands on the invite page.
-  //
-  // Design note: If a user manually navigates to an invite URL before initialization completes,
-  // the onboarding flow is skipped and the invite page is shown directly. This is to handle the
-  // case where a user has the phone app and doesn't necessarily need to create an account on web or pwa.
-  if (!isInitialized && !inviteMatch) {
-    return (
-      <Onboarding showImport={showImport} onShowImportChange={setShowImport} />
-    );
-  }
-
-  if (userProfile) {
+  if (isAuthenticated) {
     return <AuthenticatedRoutes />;
   }
 
@@ -75,27 +76,7 @@ const AppContent: React.FC = () => {
 };
 
 function App() {
-  const { initTheme } = useTheme();
-  const { initOnlineStore } = useOnlineStore();
-  useScreenshotProtection();
-  useAutoLock();
-
-  useEffect(() => {
-    let cleanup: (() => void) | undefined;
-
-    const initialize = async () => {
-      const cleanupFn = await initTheme();
-      cleanup = cleanupFn;
-      await initOnlineStore();
-    };
-
-    void initialize();
-
-    return () => {
-      cleanup?.();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  useAppInit();
 
   return (
     <BrowserRouter>
@@ -104,9 +85,6 @@ function App() {
           <AppUrlListener />
           <AppContent />
           <DebugConsole />
-          {/* <div className="hidden">
-            <PWABadge />
-          </div> */}
         </KeyboardAwareWrapper>
         <Toaster
           position="top-center"

@@ -1,0 +1,15 @@
+{
+  "name": "secureStorage",
+  "type": "module",
+  "version": "0.1.0",
+  "files": [
+    "secureStorage_bg.wasm",
+    "secureStorage.js",
+    "secureStorage.d.ts"
+  ],
+  "main": "secureStorage.js",
+  "types": "secureStorage.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

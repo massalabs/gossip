@@ -6,6 +6,10 @@ import {
 } from '@massalabs/gossip-sdk';
 import { biometricService } from '../../services/biometricService';
 import { UserProfile } from '@massalabs/gossip-sdk';
+import {
+  BIOMETRIC_SALT,
+  BIOMETRIC_STORAGE_KEY,
+} from '../../constants/biometric';
 
 export interface AuthResult {
   mnemonic: string;
@@ -13,7 +17,8 @@ export interface AuthResult {
 }
 export async function auth(
   profile: UserProfile,
-  password?: string
+  password?: string,
+  encryptionKey?: EncryptionKey
 ): Promise<AuthResult> {
   const salt = profile.security.encKeySalt;
   if (!salt || salt.length < 8) {
@@ -22,42 +27,42 @@ export async function auth(
     );
   }
 
-  let encryptionKey: EncryptionKey;
-
-  const authMethod = profile.security.authMethod;
-  if (!authMethod) {
-    throw new Error('Account authentication method is not set');
-  }
-
-  if (authMethod === 'password') {
-    if (!password) {
-      throw new Error('Password is required for password authentication');
+  if (!encryptionKey) {
+    const authMethod = profile.security.authMethod;
+    if (!authMethod) {
+      throw new Error('Account authentication method is not set');
     }
-    encryptionKey = await deriveKey(password, salt);
-  } else {
-    // For biometric authentication (capacitor or webauthn)
-    const userIdOrCredentialId =
-      authMethod === 'capacitor'
-        ? profile.userId // For Capacitor: userId to retrieve encryption key from secure storage
-        : profile.security.webauthn?.credentialId; // For WebAuthn: credential ID for PRF
 
-    const syncFromiCloud = profile.security.iCloudSync ?? false;
+    if (authMethod === 'password') {
+      if (!password) {
+        throw new Error('Password is required for password authentication');
+      }
+      encryptionKey = await deriveKey(password, salt);
+    } else {
+      // For biometric authentication (capacitor or webauthn)
+      const userIdOrCredentialId =
+        authMethod === 'capacitor'
+          ? BIOMETRIC_STORAGE_KEY // Fixed key — matches what biometricService.storeEncryptionKey uses
+          : profile.security.webauthn?.credentialId;
 
-    const authResult = await biometricService.authenticate(
-      authMethod,
-      userIdOrCredentialId,
-      salt,
-      syncFromiCloud
-    );
+      const syncFromiCloud = profile.security.iCloudSync ?? false;
 
-    if (
-      !authResult.success ||
-      !authResult.data ||
-      !authResult.data.encryptionKey
-    ) {
-      throw new Error(authResult.error || 'Biometric authentication failed');
+      const authResult = await biometricService.authenticate(
+        authMethod,
+        userIdOrCredentialId,
+        BIOMETRIC_SALT,
+        syncFromiCloud
+      );
+
+      if (
+        !authResult.success ||
+        !authResult.data ||
+        !authResult.data.encryptionKey
+      ) {
+        throw new Error(authResult.error || 'Biometric authentication failed');
+      }
+      encryptionKey = authResult.data.encryptionKey;
     }
-    encryptionKey = authResult.data.encryptionKey;
   }
 
   try {

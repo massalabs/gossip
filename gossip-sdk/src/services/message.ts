@@ -391,51 +391,63 @@ export class MessageService {
   private async addMessageAndUpdateDiscussion(
     message: Omit<Message, 'id'>
   ): Promise<number> {
-    const messageId = await this.queries.messages.insert({
-      messageId: message.messageId,
-      ownerUserId: message.ownerUserId,
-      contactUserId: message.contactUserId,
-      content: message.content,
-      serializedContent: message.serializedContent,
-      type: message.type,
-      direction: message.direction,
-      status: message.status,
-      timestamp: message.timestamp,
-      metadata: serializeMetadata(message.metadata),
-      seeker: message.seeker,
-      replyTo: serializeReplyTo(message.replyTo),
-      forwardOf: serializeForwardOf(message.forwardOf),
-      deleteOf: serializeDeleteOf(message.deleteOf),
-      editOf: serializeEditOf(message.editOf),
-      reactionOf: serializeReactionOf(message.reactionOf),
-      encryptedMessage: message.encryptedMessage,
-      whenToSend: message.whenToSend,
-    });
+    const t0 = performance.now();
+    const mark = (label: string) =>
+      console.log(
+        `[PerfTrace:addMsg] ${label}: ${(performance.now() - t0) | 0}ms`
+      );
 
-    const discussion = await this.queries.discussions.getByOwnerAndContact(
-      message.ownerUserId,
-      message.contactUserId
-    );
-
-    if (
-      discussion &&
-      message.type !== MessageType.KEEP_ALIVE &&
-      message.type !== MessageType.REACTION &&
-      message.type !== MessageType.RETENTION_POLICY
-    ) {
-      await this.queries.discussions.updateById(discussion.id, {
-        lastMessageId: messageId,
-        lastMessageContent: message.content,
-        lastMessageTimestamp: message.timestamp,
-        updatedAt: new Date(),
+    return this.queries.conn.withTransaction(async () => {
+      const messageId = await this.queries.messages.insert({
+        messageId: message.messageId,
+        ownerUserId: message.ownerUserId,
+        contactUserId: message.contactUserId,
+        content: message.content,
+        serializedContent: message.serializedContent,
+        type: message.type,
+        direction: message.direction,
+        status: message.status,
+        timestamp: message.timestamp,
+        metadata: serializeMetadata(message.metadata),
+        seeker: message.seeker,
+        replyTo: serializeReplyTo(message.replyTo),
+        forwardOf: serializeForwardOf(message.forwardOf),
+        deleteOf: serializeDeleteOf(message.deleteOf),
+        editOf: serializeEditOf(message.editOf),
+        reactionOf: serializeReactionOf(message.reactionOf),
+        encryptedMessage: message.encryptedMessage,
+        whenToSend: message.whenToSend,
       });
+      mark('INSERT message');
 
-      if (message.direction === MessageDirection.INCOMING) {
-        await this.queries.discussions.incrementUnreadCount(discussion.id);
+      const discussion = await this.queries.discussions.getByOwnerAndContact(
+        message.ownerUserId,
+        message.contactUserId
+      );
+      mark('SELECT discussion');
+
+      if (
+        discussion &&
+        message.type !== MessageType.KEEP_ALIVE &&
+        message.type !== MessageType.REACTION &&
+        message.type !== MessageType.RETENTION_POLICY
+      ) {
+        await this.queries.discussions.updateById(discussion.id, {
+          lastMessageId: messageId,
+          lastMessageContent: message.content,
+          lastMessageTimestamp: message.timestamp,
+          updatedAt: new Date(),
+        });
+        mark('UPDATE discussion');
+
+        if (message.direction === MessageDirection.INCOMING) {
+          await this.queries.discussions.incrementUnreadCount(discussion.id);
+          mark('UPDATE unreadCount');
+        }
       }
-    }
 
-    return messageId;
+      return messageId;
+    });
   }
 
   private async decryptMessages(encrypted: EncryptedMessage[]): Promise<{
@@ -846,6 +858,11 @@ export class MessageService {
 
   async sendMessage(message: Message): Promise<SendMessageResult> {
     const log = logger.forMethod('sendMessage');
+    const t0 = performance.now();
+    const mark = (label: string) =>
+      console.log(
+        `[PerfTrace:sendMessage] ${label}: ${(performance.now() - t0) | 0}ms`
+      );
     log.info('queueing message', {
       messageType: message.type,
     });
@@ -866,6 +883,7 @@ export class MessageService {
     if (!discussion) {
       return { success: false, error: 'Discussion not found' };
     }
+    mark('discussion lookup');
 
     // Generate a random messageId for deduplication (not for keep-alive or retention policy)
     // Skip if already provided (e.g., from optimistic send)
@@ -891,6 +909,7 @@ export class MessageService {
         error: 'Failed to add message to database, got error: ' + error,
       };
     }
+    mark('addMessageAndUpdateDiscussion');
 
     const queuedMessage = {
       ...message,
@@ -903,6 +922,7 @@ export class MessageService {
     If the stateUpdate function is already running, it will be skipped.
     */
     await this.refreshService?.stateUpdate();
+    mark('stateUpdate — TOTAL');
 
     return {
       success: true,
@@ -1113,6 +1133,11 @@ export class MessageService {
       }
 
       // retrieve all messages in send queue that need to be updated for this contact
+      const tQueue = performance.now();
+      const qMark = (label: string) =>
+        console.log(
+          `[PerfTrace:processQueue] ${label}: ${(performance.now() - tQueue) | 0}ms`
+        );
       const pendingMessages = (
         await this.queries.messages.getSendQueue(ownerUserId, contactUserId)
       ).map(rowToMessage);
@@ -1131,11 +1156,17 @@ export class MessageService {
       if (pendingMessages.length === 0) {
         return { success: true, data: 0 };
       }
+      qMark(`getSendQueue (${pendingMessages.length} msgs)`);
 
       let sentCount = 0;
 
       for (const msg of pendingMessages) {
         if (!msg.id) continue;
+        const tMsg = performance.now();
+        const mMark = (label: string) =>
+          console.log(
+            `[PerfTrace:processQueue:msg#${msg.id}] ${label}: ${(performance.now() - tMsg) | 0}ms`
+          );
 
         let currentStatus = msg.status;
         let encryptedMessage = msg.encryptedMessage;
@@ -1159,12 +1190,14 @@ export class MessageService {
             }
             serializedContent = serializeResult.data;
           }
+          mMark('serialize');
 
           /* Encrypt message*/
           const sendOutput = await this.session.sendMessage(
             peerId,
             serializedContent
           );
+          mMark('session.sendMessage (encrypt+persist)');
           if (!sendOutput) {
             log.info(
               'session manager returned null for queued message; will retry later',
@@ -1187,6 +1220,7 @@ export class MessageService {
             whenToSend,
             serializedContent,
           });
+          mMark('updateById READY');
           currentStatus = MessageStatus.READY;
           log.debug('message updated to READY', {
             messageId: msg.id,
@@ -1240,23 +1274,27 @@ export class MessageService {
               seeker,
               ciphertext: encryptedMessage,
             });
+            mMark('network send');
 
             // update the db — check latest state to avoid race conditions
-            const latestRow = await this.queries.messages.getById(msg.id);
-
-            let sent = false;
-            if (
-              latestRow && // ensure the discussion has not been deleted
-              latestRow.status === MessageStatus.READY // ensure the discussion has not been reset with all pending messages reset to WAITING_SESSION
-            ) {
-              await this.queries.messages.updateById(msg.id, {
-                status: MessageStatus.SENT,
-                encryptedMessage: null,
-                serializedContent: null,
-                whenToSend: null,
-              });
-              sent = true;
-            }
+            const msgId = msg.id!;
+            const sent = await this.queries.conn.withTransaction(async () => {
+              const latestRow = await this.queries.messages.getById(msgId);
+              if (
+                latestRow && // ensure the discussion has not been deleted
+                latestRow.status === MessageStatus.READY // ensure the discussion has not been reset with all pending messages reset to WAITING_SESSION
+              ) {
+                await this.queries.messages.updateById(msgId, {
+                  status: MessageStatus.SENT,
+                  encryptedMessage: null,
+                  serializedContent: null,
+                  whenToSend: null,
+                });
+                mMark('updateById SENT — msg done');
+                return true;
+              }
+              return false;
+            });
 
             if (sent) {
               sentCount++;

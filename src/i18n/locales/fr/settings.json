@@ -99,8 +99,8 @@
   },
   "privacy": {
     "title": "Confidentialité",
-    "default_retention_title": "Suppression automatique par défaut",
-    "default_retention_description": "Les nouvelles discussions auront automatiquement cette politique de rétention appliquée."
+    "default_retention_title": "Suppression automatique des messages par défaut",
+    "default_retention_description": "Les nouvelles conversations appliqueront automatiquement cette politique de rétention."
   },
   "web3": {
     "title": "Web3",

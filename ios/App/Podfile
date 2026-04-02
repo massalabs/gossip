@@ -35,4 +35,15 @@ end
 
 post_install do |installer|
   assertDeploymentTarget(installer)
+
+  # Append -all_load to the Gossip app xcconfig files so the linker
+  # includes all Rust FFI symbols from SecureStorage.xcframework.
+  # This survives `pod install` because we append to the generated files.
+  Dir.glob("Pods/Target Support Files/Pods-Gossip/Pods-Gossip.*.xcconfig").each do |path|
+    content = File.read(path)
+    unless content.include?('-all_load')
+      content.sub!(/^OTHER_LDFLAGS = /, "OTHER_LDFLAGS = -all_load ")
+      File.write(path, content)
+    end
+  end
 end

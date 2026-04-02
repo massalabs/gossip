@@ -29,7 +29,8 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(BatteryOptimizationPlugin.class);
         registerPlugin(NetworkObserverPlugin.class);
         registerPlugin(BackgroundRunnerStoragePlugin.class);
-        
+        registerPlugin(SecureStoragePlugin.class);
+
         super.onCreate(savedInstanceState);
 
         // Samsung (OneUI) ignores adjustNothing and always resizes the WebView.

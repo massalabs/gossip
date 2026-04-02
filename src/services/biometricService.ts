@@ -151,6 +151,31 @@ export class BiometricService {
     }
   }
 
+  /**
+   * Check if a biometric credential already exists (runtime probe, no persisted flag).
+   * - Capacitor: tries to read the key from Secure Enclave (survives localStorage clear)
+   * - Web: checks WEBAUTHN_CREDENTIAL_ID_KEY in localStorage
+   */
+  public async hasExistingCredential(storageKey: string): Promise<boolean> {
+    if (this.capacitorAvailable) {
+      try {
+        const key = this.getEncryptionKeyStorageKey(storageKey);
+        const value = await SecureStorage.get(key);
+        return !!value;
+      } catch {
+        return false;
+      }
+    }
+
+    if (this.isWebAuthnSupported) {
+      const { WEBAUTHN_CREDENTIAL_ID_KEY } =
+        await import('../constants/biometric');
+      return localStorage.getItem(WEBAUTHN_CREDENTIAL_ID_KEY) !== null;
+    }
+
+    return false;
+  }
+
   private checkCapacitorAvailability(): boolean {
     try {
       return (
@@ -242,7 +267,8 @@ export class BiometricService {
     username: string,
     userId: Uint8Array,
     salt: Uint8Array,
-    syncToiCloud = false
+    syncToiCloud = false,
+    storageKey?: string
   ): Promise<BiometricCreationResult> {
     // For native platforms, create biometric credentials without WebAuthn browser APIs
     if (this.capacitorAvailable) {
@@ -256,9 +282,14 @@ export class BiometricService {
         // Generate a new encryption key
         const encryptionKey = await generateEncryptionKey();
 
-        // Store the encryption key securely
-        const userIdStr = encodeUserId(userId);
-        await this.storeEncryptionKey(userIdStr, encryptionKey, syncToiCloud);
+        // Store the encryption key under a fixed storage key (not userId).
+        // Using userId would leak identity info and break plausible deniability.
+        // The constant BIOMETRIC_STORAGE_KEY is used at both store and retrieve time.
+        await this.storeEncryptionKey(
+          storageKey ?? encodeUserId(userId),
+          encryptionKey,
+          syncToiCloud
+        );
 
         return {
           success: true,
@@ -361,18 +392,14 @@ export class BiometricService {
       console.error('Biometric authentication failed:', error);
 
       // Handle Capacitor biometric errors
-      if (error instanceof BiometryError) {
-        if (
-          error.code === BiometryErrorType.userCancel ||
-          error.code === BiometryErrorType.systemCancel ||
-          error.code === BiometryErrorType.appCancel ||
-          error.code === BiometryErrorType.userFallback
-        ) {
-          return { success: false, error: 'cancelled' };
-        }
-        if (error.code === BiometryErrorType.biometryLockout) {
-          return { success: false, error: 'biometric_locked' };
-        }
+      if (
+        error instanceof BiometryError &&
+        error.code === BiometryErrorType.userCancel
+      ) {
+        return {
+          success: false,
+          error: 'Authentication was cancelled',
+        };
       }
 
       // Handle WebAuthn DOMException errors
@@ -381,7 +408,10 @@ export class BiometricService {
         (error.name === 'NotAllowedError' ||
           error.message.includes('not allowed'))
       ) {
-        return { success: false, error: 'cancelled' };
+        return {
+          success: false,
+          error: 'Authentication was cancelled or timed out',
+        };
       }
 
       return {

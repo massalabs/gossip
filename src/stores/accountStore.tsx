@@ -15,6 +15,11 @@ import { getSdk } from './sdkStore';
 import { isWebAuthnSupported } from '../crypto/webauthn';
 import { biometricService } from '../services/biometricService';
 import {
+  BIOMETRIC_STORAGE_KEY,
+  BIOMETRIC_SALT,
+  WEBAUTHN_CREDENTIAL_ID_KEY,
+} from '../constants/biometric';
+import {
   Provider,
   Account,
   PrivateKey,
@@ -107,13 +112,15 @@ async function buildSecurityFromBiometrics(
     throw new Error('Mnemonic is required for account creation');
   }
 
-  const salt = (await generateNonce()).to_bytes();
-  // Use the unified biometric service to create credentials
+  const mnemonicSalt = (await generateNonce()).to_bytes();
+  // Use fixed BIOMETRIC_SALT for WebAuthn PRF — must match login.
+  // The random mnemonicSalt is only for mnemonic encryption (stored in security.encKeySalt).
   const credentialResult = await biometricService.createCredential(
     `Gossip:${username}`,
     userIdBytes,
-    salt,
-    iCloudSync
+    BIOMETRIC_SALT,
+    iCloudSync,
+    BIOMETRIC_STORAGE_KEY
   );
 
   if (!credentialResult.success || !credentialResult.data) {
@@ -124,7 +131,16 @@ async function buildSecurityFromBiometrics(
 
   const { credentialId, encryptionKey, authMethod } = credentialResult.data;
 
-  const { encryptedData } = await encrypt(mnemonic, encryptionKey, salt);
+  // Persist credential ID outside secure storage so Login can use it before unlock
+  if (credentialId) {
+    localStorage.setItem(WEBAUTHN_CREDENTIAL_ID_KEY, credentialId);
+  }
+
+  const { encryptedData } = await encrypt(
+    mnemonic,
+    encryptionKey,
+    mnemonicSalt
+  );
 
   const mnemonicBackup: UserProfile['security']['mnemonicBackup'] = {
     encryptedMnemonic: encryptedData,
@@ -140,7 +156,7 @@ async function buildSecurityFromBiometrics(
         }
       : undefined,
     iCloudSync,
-    encKeySalt: salt,
+    encKeySalt: mnemonicSalt,
     mnemonicBackup,
   };
 
@@ -158,10 +174,24 @@ interface AccountState {
   provider: Provider | null;
   initializeAccountWithBiometrics: (
     username: string,
-    iCloudSync?: boolean
+    iCloudSync?: boolean,
+    opts?: { setInitialized?: boolean }
   ) => Promise<void>;
-  initializeAccount: (username: string, password: string) => Promise<void>;
-  loadAccount: (password?: string, userId?: string) => Promise<void>;
+  initializeAccount: (
+    username: string,
+    password: string,
+    opts?: { setInitialized?: boolean }
+  ) => Promise<void>;
+  createHiddenAccount: (
+    slot: number,
+    username: string,
+    password: string
+  ) => Promise<void>;
+  loadAccount: (
+    password?: string,
+    userId?: string,
+    biometricKey?: EncryptionKey
+  ) => Promise<void>;
   restoreAccountFromMnemonic: (
     username: string,
     mnemonic: string,
@@ -207,6 +237,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       userProfile: null,
       encryptionKey: null,
       isLoading: false,
+      lockedByUser: true,
     };
   };
 
@@ -226,14 +257,58 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       });
   };
 
-  // Helper to persist session blob to DB
+  // Helper to persist session blob to DB.
+  // Leading-edge coalescing: the FIRST call flushes immediately (no delay),
+  // rapid subsequent calls within the window share that same flush.
+  // This avoids the 200ms wait on single sends while still batching bursts.
+  const PERSIST_COALESCE_MS = 150;
   const createOnPersist = (_userId: string) => {
-    return async (blob: Uint8Array, _key: EncryptionKey) => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let latestBlob: Uint8Array | null = null;
+    let pendingResolves: (() => void)[] = [];
+    let flushInProgress = false;
+
+    const flush = async () => {
+      timer = null;
+      if (flushInProgress) return; // another flush will pick up latestBlob
+      flushInProgress = true;
+
+      const blob = latestBlob;
+      const resolves = pendingResolves;
+      latestBlob = null;
+      pendingResolves = [];
+
       const current = get().userProfile;
-      if (!current) return;
+      if (!current || !blob) {
+        resolves.forEach(r => r());
+        flushInProgress = false;
+        return;
+      }
       const updated = { ...current, session: blob, updatedAt: new Date() };
       await getSdk().profiles.save(updated);
       set({ userProfile: updated });
+      resolves.forEach(r => r());
+      flushInProgress = false;
+
+      // If new blobs arrived during flush, schedule another
+      if (latestBlob) {
+        timer = setTimeout(flush, PERSIST_COALESCE_MS);
+      }
+    };
+
+    return async (blob: Uint8Array, _key: EncryptionKey) => {
+      latestBlob = blob;
+      return new Promise<void>(resolve => {
+        pendingResolves.push(resolve);
+        if (!timer && !flushInProgress) {
+          // Leading edge: flush immediately on first call
+          void flush();
+        } else if (!timer) {
+          // Flush in progress: schedule coalesced follow-up
+          timer = setTimeout(flush, PERSIST_COALESCE_MS);
+        }
+        // else: timer already scheduled, blob will be picked up
+      });
     };
   };
 
@@ -242,19 +317,24 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
     userProfile: null,
     encryptionKey: null,
     isLoading: true,
-    lockedByUser: false,
+    lockedByUser: true,
     webauthnSupported: isWebAuthnSupported(),
     platformAuthenticatorAvailable: false,
     account: null,
     provider: null,
     // Actions
-    initializeAccount: async (username: string, password: string) => {
+    initializeAccount: async (
+      username: string,
+      password: string,
+      opts?: { setInitialized?: boolean }
+    ) => {
       try {
         set({ isLoading: true });
 
         // Ensure any existing session is closed before creating new account
         await cleanupSession();
 
+        const sdk = getSdk();
         const mnemonic = generateMnemonic(256);
 
         // Generate keys for Massa wallet (SDK generates its own internally)
@@ -276,12 +356,17 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           }
         );
 
-        // Open SDK session
-        await getSdk().openSession({
+        const sessionOpts = {
           mnemonic,
           encryptionKey,
           onPersist: createOnPersist(userId),
-        });
+        };
+
+        if (sdk.isSecureStorage) {
+          await sdk.openSecureSession(0, password, sessionOpts);
+        } else {
+          await sdk.openSession(sessionOpts);
+        }
 
         const session = getSdk().getEncryptedSession();
 
@@ -295,7 +380,9 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         // Skip historical announcements AFTER profile is persisted
         await getSdk().announcements.skipHistorical();
 
-        useAppStore.getState().setIsInitialized(true);
+        if (opts?.setInitialized !== false) {
+          useAppStore.getState().setIsInitialized(true);
+        }
         set({
           userProfile: profile,
           encryptionKey,
@@ -310,6 +397,60 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         set({ isLoading: false });
         throw error;
       }
+    },
+
+    createHiddenAccount: async (
+      slot: number,
+      username: string,
+      password: string
+    ) => {
+      const sdk = getSdk();
+
+      if (sdk.isSessionOpen) {
+        await sdk.closeSession();
+      }
+
+      // Drain pending DB queries from async subscribers before switching slots.
+      // No dedicated awaitDbIdle() exists; profiles.getCount() is a cheap read
+      // that serialises behind the dbLock, guaranteeing all prior writes have
+      // settled before we switch secure storage slots.
+      try {
+        await sdk.profiles.getCount();
+      } catch {
+        // Ignore — the goal is to serialise against dbLock, not use the result.
+      }
+
+      const mnemonic = generateMnemonic(256);
+      const keys = await generateUserKeys(mnemonic);
+      const userIdBytes = keys.public_keys().derive_id();
+      const userId = encodeUserId(userIdBytes);
+
+      const { encryptionKey, security } = await provisionAccount(
+        username,
+        mnemonic,
+        userIdBytes,
+        { useBiometrics: false, password }
+      );
+
+      // No-op onPersist is safe: this session is ephemeral — we only open it to
+      // write the profile, then closeSession() handles the final persist.
+      // No markDirty()/persistIfNeeded() calls occur between open and close.
+      await sdk.openSecureSession(
+        slot,
+        password,
+        {
+          mnemonic,
+          encryptionKey,
+          onPersist: async () => {},
+        },
+        true
+      );
+      const session = sdk.getEncryptedSession();
+
+      await sdk.profiles.createOrUpdate(username, userId, security, session);
+      await sdk.announcements.skipHistorical();
+
+      await sdk.closeSession();
     },
 
     restoreAccountFromMnemonic: async (
@@ -345,12 +486,25 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           opts
         );
 
-        // Open SDK session
-        await getSdk().openSession({
+        const sessionOpts = {
           mnemonic,
           encryptionKey,
           onPersist: createOnPersist(userId),
-        });
+        };
+
+        // Open SDK session
+        if (getSdk().isSecureStorage) {
+          if (opts.useBiometrics) {
+            const { encodeToBase64 } = await import('@massalabs/gossip-sdk');
+            const biometricPassword = encodeToBase64(encryptionKey.to_bytes());
+            await getSdk().openSecureSession(0, biometricPassword, sessionOpts);
+          } else {
+            const password = opts.password!;
+            await getSdk().openSecureSession(0, password, sessionOpts);
+          }
+        } else {
+          await getSdk().openSession(sessionOpts);
+        }
 
         const session = getSdk().getEncryptedSession();
 
@@ -378,14 +532,37 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       }
     },
 
-    loadAccount: async (password?: string, userId?: string) => {
+    loadAccount: async (
+      password?: string,
+      userId?: string,
+      biometricKey?: EncryptionKey
+    ) => {
       try {
         set({ isLoading: true });
+
+        const sdk = getSdk();
+
+        // Unlock encrypted storage first — DB may be deferred until after unlock
+        if (sdk.needsUnlock) {
+          let unlockPassword: string | undefined;
+          if (biometricKey) {
+            const { encodeToBase64 } = await import('@massalabs/gossip-sdk');
+            unlockPassword = encodeToBase64(biometricKey.to_bytes());
+          } else if (password) {
+            unlockPassword = password;
+          }
+          if (unlockPassword) {
+            const unlocked = await sdk.secureStorageUnlock(unlockPassword);
+            if (!unlocked) {
+              throw new Error('Failed to unlock encrypted storage');
+            }
+          }
+        }
 
         // If userId is provided, load that specific account, otherwise use active or first
         let profile: UserProfile | null;
         if (userId) {
-          profile = await getSdk().profiles.get(userId);
+          profile = await sdk.profiles.get(userId);
         } else {
           profile = await getActiveOrFirstProfile();
         }
@@ -394,7 +571,11 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           throw new Error('No user profile found');
         }
 
-        const { mnemonic, encryptionKey } = await auth(profile, password);
+        const { mnemonic, encryptionKey } = await auth(
+          profile,
+          password,
+          biometricKey
+        );
 
         // Generate keys for Massa wallet
         const keys = await generateUserKeys(mnemonic);
@@ -424,7 +605,6 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           account,
           encryptionKey,
           isLoading: false,
-          lockedByUser: false,
         });
 
         // Fetch MNS domains if MNS is enabled
@@ -468,6 +648,14 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           // SQLite might not be initialized
         }
 
+        // Remove biometric key from Secure Enclave so a fresh account
+        // can re-enroll biometrics instead of being forced to password.
+        try {
+          await biometricService.removeEncryptionKey(BIOMETRIC_STORAGE_KEY);
+        } catch {
+          // Non-critical — key may not exist
+        }
+
         set(clearAccountState());
         const nbAccounts = await getSdk().profiles.getCount();
         useAppStore.getState().setIsInitialized(nbAccounts > 0);
@@ -487,6 +675,9 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         useDiscussionStore.getState().cleanup();
         useMessageStore.getState().cleanup();
         useSelfMessageStore.getState().clearMessages();
+        if (getSdk().isSecureStorage) {
+          await getSdk().secureStorageLock();
+        }
         // Clear in-memory state but keep data in database
         // Keep isInitialized true so user goes to login screen
         // lockedByUser: true (default) skips biometric auto-login on the login screen
@@ -509,7 +700,8 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
     // Biometric-based account initialization
     initializeAccountWithBiometrics: async (
       username: string,
-      iCloudSync = false
+      iCloudSync = false,
+      opts?: { setInitialized?: boolean }
     ) => {
       try {
         set({ isLoading: true });
@@ -545,12 +737,19 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           }
         );
 
-        // Open SDK session
-        await getSdk().openSession({
+        const sessionOpts = {
           mnemonic,
           encryptionKey,
           onPersist: createOnPersist(userId),
-        });
+        };
+
+        if (getSdk().isSecureStorage) {
+          const { encodeToBase64 } = await import('@massalabs/gossip-sdk');
+          const biometricPassword = encodeToBase64(encryptionKey.to_bytes());
+          await getSdk().openSecureSession(0, biometricPassword, sessionOpts);
+        } else {
+          await getSdk().openSession(sessionOpts);
+        }
 
         const session = getSdk().getEncryptedSession();
 
@@ -561,7 +760,12 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           session
         );
 
-        useAppStore.getState().setIsInitialized(true);
+        // Skip historical announcements AFTER profile is persisted
+        await getSdk().announcements.skipHistorical();
+
+        if (opts?.setInitialized !== false) {
+          useAppStore.getState().setIsInitialized(true);
+        }
         set({
           userProfile: profile,
           encryptionKey,

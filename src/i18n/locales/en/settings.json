@@ -100,7 +100,7 @@
   "privacy": {
     "title": "Privacy",
     "default_retention_title": "Default message auto-delete",
-    "default_retention_description": "New discussions will automatically have this retention policy applied."
+    "default_retention_description": "New conversations will automatically use this retention policy."
   },
   "web3": {
     "title": "Web3",

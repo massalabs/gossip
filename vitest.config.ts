@@ -53,6 +53,7 @@ export default defineConfig({
 
       // Project 2: jsdom for unit tests (DOM simulation - faster)
       {
+        extends: true,
         test: {
           name: 'jsdom',
           environment: 'jsdom',
@@ -66,6 +67,7 @@ export default defineConfig({
 
       // Project 3: Node environment for pure logic tests (no DOM)
       {
+        extends: true,
         test: {
           name: 'node',
           environment: 'node',
@@ -78,6 +80,7 @@ export default defineConfig({
 
       // Project 4: Default jsdom for tests without suffix (catch-all)
       {
+        extends: true,
         test: {
           name: 'unit',
           environment: 'jsdom',

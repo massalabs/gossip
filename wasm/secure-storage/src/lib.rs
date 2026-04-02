@@ -3,7 +3,7 @@
 //! Spec: <https://github.com/massalabs/gossip/discussions/380>
 
 mod block;
-mod constants;
+pub mod constants;
 mod domain;
 mod error;
 mod kdf;
@@ -15,6 +15,13 @@ pub mod storage;
 mod types;
 mod unlock;
 mod write;
+
+#[cfg(all(target_arch = "wasm32", feature = "wasm"))]
+pub(crate) mod vfs;
+#[cfg(all(target_arch = "wasm32", feature = "wasm"))]
+pub(crate) mod db;
+#[cfg(all(target_arch = "wasm32", feature = "wasm"))]
+mod wasm_api;
 
 pub use block::{create_cover_block, decrypt_block, encrypt_block, rerandomize_block};
 pub use constants::{

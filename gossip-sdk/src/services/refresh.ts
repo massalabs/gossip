@@ -124,6 +124,8 @@ export class RefreshService {
     }
 
     this.isUpdating = true;
+    // Defer session persists: batch all state changes into 1 persist at the end.
+    this.session.beginDeferPersist();
     try {
       if (!ownerUserId) {
         log.error('ownerUserId is empty, skipping update_state');
@@ -262,6 +264,8 @@ export class RefreshService {
     } catch (error) {
       log.error('error in update_state', { error });
     } finally {
+      // Flush deferred session persist (1 persist for the entire stateUpdate).
+      await this.session.flushPersist();
       this.isUpdating = false;
     }
   }

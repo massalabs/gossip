@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useCallback } from 'react';
 import { Route, Navigate, useNavigate } from 'react-router-dom';
 import { useAccountStore } from '../stores/accountStore';
 import { useAppStore } from '../stores/appStore';
@@ -38,10 +38,10 @@ export const UnauthenticatedRoutes: React.FC<UnauthenticatedRoutesProps> = ({
     navigate(ROUTES.setup());
   };
 
-  const handleNewAccountComplete = () => {
-    useAppStore.getState().setIsInitialized(true);
-    navigate(ROUTES.default(), { replace: true });
-  };
+  const handleNewAccountComplete = useCallback(
+    () => navigate(ROUTES.welcome(), { replace: true }),
+    [navigate]
+  );
 
   const handleNewAccountBack = async () => {
     try {

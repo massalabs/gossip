@@ -6,12 +6,15 @@ import tailwindcss from '@tailwindcss/vite';
 import { ViteImageOptimizer } from 'vite-plugin-image-optimizer';
 import { nodePolyfills } from 'vite-plugin-node-polyfills';
 import mkcert from 'vite-plugin-mkcert';
+// @ts-expect-error — no type declarations for this plugin
+import crossOriginIsolation from 'vite-plugin-cross-origin-isolation';
 
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [
     react(),
     tailwindcss(),
+    crossOriginIsolation(), // ← COOP/COEP for SharedArrayBuffer (rayon WASM threads)
     mkcert(), // ← Enables HTTPS locally
     nodePolyfills({
       // Whether to polyfill `node:` protocol imports.

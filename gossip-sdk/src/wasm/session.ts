@@ -22,6 +22,8 @@ import { encodeUserId } from '../utils/userId.js';
 export class SessionModule {
   private sessionManager: SessionManagerWrapper | null = null;
   private onPersist?: () => Promise<void>; // Async callback for persistence
+  private _deferPersist = false;
+  private _dirty = false;
   public ourPk: UserPublicKeys;
   public ourSk: UserSecretKeys;
   public userId: Uint8Array;
@@ -51,22 +53,45 @@ export class SessionModule {
 
   /**
    * Helper to trigger persistence after state changes.
-   * Returns a promise that resolves when persistence is complete.
-   * IMPORTANT: Callers should await this before sending data to network
-   * to prevent state loss on app crash.
+   * In defer mode, marks dirty instead of persisting (batched later via flushPersist).
    */
   private async persistIfNeeded(): Promise<void> {
-    if (this.onPersist) {
-      await this.onPersist!();
+    if (!this.onPersist) return;
+    if (this._deferPersist) {
+      this._dirty = true;
+      return;
+    }
+    await this.onPersist();
+  }
+
+  /**
+   * Enter defer mode: persistIfNeeded() will only set a dirty flag.
+   * Call flushPersist() at the end to persist once.
+   */
+  beginDeferPersist(): void {
+    this._deferPersist = true;
+    this._dirty = false;
+  }
+
+  /**
+   * Exit defer mode and persist if any state change happened.
+   */
+  async flushPersist(): Promise<void> {
+    this._deferPersist = false;
+    if (this._dirty && this.onPersist) {
+      this._dirty = false;
+      await this.onPersist();
     }
   }
 
   /**
-   * Trigger persistence explicitly and wait for completion.
-   * Use this when you need to ensure state is saved before proceeding.
+   * Trigger persistence explicitly (bypasses defer mode).
    */
   async persist(): Promise<void> {
-    await this.persistIfNeeded();
+    if (this.onPersist) {
+      this._dirty = false;
+      await this.onPersist();
+    }
   }
 
   /**
@@ -206,10 +231,15 @@ export class SessionModule {
       throw new Error('Session manager is not initialized');
     }
 
+    const t0 = performance.now();
     const result = this.sessionManager.send_message(peerId, message);
-    // CRITICAL: Persist session state BEFORE returning
-    // This ensures state is saved before the encrypted message goes on the network
-    await this.persistIfNeeded();
+    const tEncrypt = performance.now();
+    // CRITICAL: Always persist here — bypass defer mode.
+    // Session state must be saved before the encrypted message goes on the network.
+    await this.persist();
+    console.log(
+      `[PerfTrace:session] encrypt: ${(tEncrypt - t0) | 0}ms, persist: ${(performance.now() - tEncrypt) | 0}ms`
+    );
     return result;
   }
 

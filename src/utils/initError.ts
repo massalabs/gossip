@@ -1,29 +1,46 @@
-/**
- * Classify an SDK initialization error and return a user-facing message.
- *
- * When wa-sqlite (OPFS) fails because another tab already holds the
- * SyncAccessHandle, the browser throws with a message containing
- * "createSyncAccessHandle" or "another open Access Handle".
- * We surface a friendlier multi-tab hint in that case.
- */
-export function getInitErrorMessage(error: unknown): string {
-  if (
-    typeof (error as { message?: unknown })?.message === 'string' &&
-    ((error as Error).message.includes('createSyncAccessHandle') ||
-      (error as Error).message.includes('another open Access Handle'))
-  ) {
-    return 'Another tab may have this app open. Please close other tabs and refresh.';
-  }
-  return 'Failed to start. Please restart the app.';
+export interface InitError {
+  title: string;
+  detail: string;
+  actionLabel: string;
+  showClear: boolean;
 }
 
-/**
- * Render an init error message into the root element.
- * Called from main.tsx when the SDK fails to start.
- */
-export function showInitError(error: unknown): void {
-  const root = document.getElementById('root');
-  if (root) {
-    root.textContent = getInitErrorMessage(error);
+export function parseInitError(error: unknown): InitError {
+  const msg =
+    error instanceof Error && typeof error.message === 'string'
+      ? error.message
+      : '';
+
+  if (
+    msg.includes('createSyncAccessHandle') ||
+    msg.includes('another open Access Handle')
+  ) {
+    return {
+      title: 'App already open',
+      detail:
+        'Another tab may have this app open. Please close other tabs and refresh.',
+      actionLabel: 'Reload Page',
+      showClear: false,
+    };
   }
+
+  if (
+    msg.includes('less than the existing version') ||
+    msg.includes('VersionError')
+  ) {
+    return {
+      title: 'Database version conflict',
+      detail:
+        'The local database is from a newer version and cannot be opened. Clear app data to start fresh.',
+      actionLabel: 'Clear data & reload',
+      showClear: true,
+    };
+  }
+
+  return {
+    title: 'Something went wrong',
+    detail: 'An unexpected error occurred. Please restart the app.',
+    actionLabel: 'Reload Page',
+    showClear: false,
+  };
 }

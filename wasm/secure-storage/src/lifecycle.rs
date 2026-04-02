@@ -25,7 +25,13 @@ use crate::write::{encrypt_session_data_block, ensure_block_count, repair_blocks
 /// any password while remaining structurally indistinguishable from
 /// an allocated slot's `sk_ct`. Empty blockstreams (length 0) are
 /// created for each slot.
-pub fn provision_storage<S: BlockStorage + KeypairStorage>(storage: &mut S) -> Result<()> {
+/// Returns `true` if this was a fresh provision, `false` if already provisioned.
+pub fn provision_storage<S: BlockStorage + KeypairStorage>(storage: &mut S) -> Result<bool> {
+    // Idempotent: if slot 0 already has a keypair, skip entirely.
+    if storage.read_keypair(SessionIndex::new(0).unwrap()).is_ok() {
+        return Ok(false);
+    }
+
     for i in 0..SESSION_COUNT as u8 {
         let slot = SessionIndex::new(i).unwrap();
         let (pk, _sk) = pq_keygen();
@@ -46,7 +52,7 @@ pub fn provision_storage<S: BlockStorage + KeypairStorage>(storage: &mut S) -> R
         storage.init_blockstream(slot)?;
     }
 
-    Ok(())
+    Ok(true)
 }
 
 /// Allocate a session in a specific slot with the given password.

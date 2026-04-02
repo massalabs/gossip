@@ -208,7 +208,11 @@ class GossipSdk {
 
     console.log('[GossipSdk] Initializing SQLite');
     this._conn = await DatabaseConnection.create({ storage: options.storage });
-    this._queries = new Queries(this._conn);
+
+    // Defer queries/profile creation for secure storage (DB not ready until unlock).
+    if (this._conn.isOpen) {
+      this._queries = new Queries(this._conn);
+    }
 
     console.log('[GossipSdk] SQLite initialized');
     // Create message protocol
@@ -216,7 +220,7 @@ class GossipSdk {
 
     // Create services that don't need a session
     this._auth = new AuthService(createAuthProtocol());
-    this._profile = new ProfileService(this._queries);
+    this._profile = this._queries ? new ProfileService(this._queries) : null;
 
     this.state = {
       status: SdkStatus.INITIALIZED,
@@ -315,8 +319,6 @@ class GossipSdk {
       config,
       queries
     );
-
-    this._discussion.setMessageService(this._message);
 
     this._refresh = new RefreshService(
       this._message,
@@ -501,6 +503,81 @@ class GossipSdk {
       throw new Error('No encryption key found. Call openSession() first.');
     }
     return state.session.toEncryptedBlob(state.encryptionKey);
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // Secure Storage
+  // ─────────────────────────────────────────────────────────────────
+
+  get isSecureStorage(): boolean {
+    return this._conn?.isSecureStorage ?? false;
+  }
+
+  private requireConn(): DatabaseConnection {
+    if (!this._conn) {
+      throw new Error('SDK not initialized. Call init() first.');
+    }
+    return this._conn;
+  }
+
+  async secureStorageProvision(): Promise<void> {
+    await this.requireConn().secureStorageProvision();
+  }
+
+  async secureStorageAllocate(
+    slot: number,
+    password: string,
+    forceInit = false
+  ): Promise<void> {
+    const conn = this.requireConn();
+    await conn.secureStorageAllocate(slot, password, forceInit);
+    if (!this._queries) {
+      this._queries = new Queries(conn);
+      this._profile = new ProfileService(this._queries);
+    }
+  }
+
+  async secureStorageUnlock(password: string): Promise<boolean> {
+    const conn = this.requireConn();
+    const unlocked = await conn.secureStorageUnlock(password);
+    if (unlocked && !this._queries) {
+      this._queries = new Queries(conn);
+      this._profile = new ProfileService(this._queries);
+    }
+    return unlocked;
+  }
+
+  async secureStorageLock(): Promise<void> {
+    await this.requireConn().secureStorageLock();
+    this._queries = null;
+    this._profile = null;
+  }
+
+  /** True when the database is ready for queries (migrations run, Drizzle created). */
+  get dbReady(): boolean {
+    return this._queries !== null;
+  }
+
+  /** Whether the database needs an unlock before queries can run. */
+  get needsUnlock(): boolean {
+    return this._conn?.needsUnlock ?? false;
+  }
+
+  /** Force-flush deferred VFS writes + storage persistence. */
+  async flush(): Promise<void> {
+    if (this._conn?.isSecureStorage) {
+      await this._conn.secureStorageFlush();
+    }
+  }
+
+  async openSecureSession(
+    slot: number,
+    password: string,
+    options: OpenSessionOptions,
+    forceInit = false
+  ): Promise<void> {
+    await this.secureStorageAllocate(slot, password, forceInit);
+    await this.openSession(options);
   }
 
   // ─────────────────────────────────────────────────────────────────

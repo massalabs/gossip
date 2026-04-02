@@ -168,18 +168,21 @@ export class DiscussionService {
       }
 
       if (payload?.message) {
-        await this.queries.messages.insert({
-          ownerUserId: userId,
-          contactUserId: contact.userId,
-          content: payload.message,
-          type: MessageType.ANNOUNCEMENT,
-          direction: MessageDirection.OUTGOING,
-          status: MessageStatus.READ,
-          timestamp: new Date(),
-        });
-        // Store the announcement message on the discussion so the UI can display it
-        await this.queries.discussions.updateById(discussionId, {
-          announcementMessage: payload.message,
+        const message = payload.message;
+        await this.queries.conn.withTransaction(async () => {
+          await this.queries.messages.insert({
+            ownerUserId: userId,
+            contactUserId: contact.userId,
+            content: message,
+            type: MessageType.ANNOUNCEMENT,
+            direction: MessageDirection.OUTGOING,
+            status: MessageStatus.READ,
+            timestamp: new Date(),
+          });
+          // Store the announcement message on the discussion so the UI can display it
+          await this.queries.discussions.updateById(discussionId, {
+            announcementMessage: message,
+          });
         });
       }
 
@@ -304,19 +307,21 @@ export class DiscussionService {
     const now = new Date();
 
     try {
-      // add the new announcement to the discussion
-      await this.queries.discussions.updateById(discussion.id!, {
-        weAccepted: true,
-        sendAnnouncement: serializeSendAnnouncement({
-          announcement_bytes: sessionResult.data,
-          when_to_send: now,
-        }),
-        initiationAnnouncement: sessionResult.data,
-        updatedAt: now,
-      });
+      await this.queries.conn.withTransaction(async () => {
+        // add the new announcement to the discussion
+        await this.queries.discussions.updateById(discussion.id!, {
+          weAccepted: true,
+          sendAnnouncement: serializeSendAnnouncement({
+            announcement_bytes: sessionResult.data,
+            when_to_send: now,
+          }),
+          initiationAnnouncement: sessionResult.data,
+          updatedAt: now,
+        });
 
-      // reset all messages in send queue to WAITING_SESSION for this contact
-      await this.queries.messages.resetSendQueue(ownerUserId, contactUserId);
+        // reset all messages in send queue to WAITING_SESSION for this contact
+        await this.queries.messages.resetSendQueue(ownerUserId, contactUserId);
+      });
     } catch (error) {
       return {
         success: false,

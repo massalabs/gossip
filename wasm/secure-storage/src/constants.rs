@@ -1,5 +1,5 @@
 /// Number of independent session slots.
-pub const SESSION_COUNT: usize = 5;
+pub const SESSION_COUNT: usize = 3;
 
 /// AEAD authentication tag size in bytes.
 pub const AEAD_TAG_SIZE: usize = 16;
