@@ -41,13 +41,11 @@ export function setupSdkEventHandlers(gossip: GossipSdk): void {
   // Show notification for new discussion requests when app is in background
   gossip.on(
     SdkEventType.SESSION_REQUESTED,
-    async (discussion: Discussion, contact: Contact) => {
+    async (_discussion: Discussion, contact: Contact) => {
       const foreground = await isAppInForeground();
       if (!foreground) {
         try {
-          await notificationService.showNewDiscussionNotification(
-            discussion.lastAnnouncementMessage
-          );
+          await notificationService.showNewDiscussionNotification();
           console.log('[SDK Event] New discussion request notification shown', {
             contactUserId: contact.userId,
           });
