@@ -116,8 +116,6 @@ const NotificationsSettings: React.FC = () => {
               className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0 border-t border-border"
               onClick={async () => {
                 await notificationService.showDiscussionNotification(
-                  'Test User',
-                  'Test Message',
                   'test-user-id'
                 );
               }}

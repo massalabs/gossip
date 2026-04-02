@@ -154,11 +154,7 @@ describe('setupSdkEventHandlers — mute notifications', () => {
     await new Promise(r => setTimeout(r, 20));
 
     expect(mockShowDiscussionNotification).toHaveBeenCalledOnce();
-    expect(mockShowDiscussionNotification).toHaveBeenCalledWith(
-      'Alice',
-      incomingMessage.content,
-      'contact-1'
-    );
+    expect(mockShowDiscussionNotification).toHaveBeenCalledWith('contact-1');
   });
 
   it('suppresses the notification when mutedNotifications = true', async () => {
