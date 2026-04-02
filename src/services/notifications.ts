@@ -421,16 +421,14 @@ export class NotificationService {
    * Show a notification for a new discussion
    * @param announcementMessage - Optional message about the new discussion
    */
-  async showNewDiscussionNotification(
-    announcementMessage?: string
-  ): Promise<void> {
+  async showNewDiscussionNotification(): Promise<void> {
     if (!this.canShowNotification()) {
       return;
     }
 
     try {
       const title = 'New contact request';
-      const body = announcementMessage || 'User wants to start a conversation';
+      const body = 'User wants to start a conversation';
 
       await this.sendNotification(
         title,
