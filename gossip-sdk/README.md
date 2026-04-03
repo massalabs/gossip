@@ -230,7 +230,7 @@ sdk.on(SdkEventType.MESSAGE_RECEIVED, message => { ... });
 sdk.on(SdkEventType.MESSAGE_SENT, message => { ... });
 
 // Discussion events
-sdk.on(SdkEventType.SESSION_REQUESTED, (discussion, contact) => { ... });
+sdk.on(SdkEventType.SESSION_REQUESTED, (contact) => { ... });
 
 // Error handling
 sdk.on(SdkEventType.ERROR, (error, context) => {
