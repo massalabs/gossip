@@ -65,13 +65,14 @@ function initKeyboardTracking() {
       const h = window.innerHeight;
       const state = useKeyboardStore.getState();
       if (state.isVisible) {
-        // Samsung: OS resized the WebView — update available height directly
-        setCssVar('--available-height', `${h}px`);
+        // Samsung: OS resized the WebView while keyboard is open.
+        // --keyboard-offset is already 0 (osShrink == keyboardHeight),
+        // so update --viewport-height to match the shrunk viewport.
+        setCssVar('--viewport-height', `${h}px`);
       } else {
-        // Keyboard closed — update the baseline viewport height
+        // Keyboard closed — update the baseline viewport height.
         useKeyboardStore.setState({ viewportHeight: h });
         setCssVar('--viewport-height', `${h}px`);
-        setCssVar('--available-height', `${h}px`);
       }
     });
 
