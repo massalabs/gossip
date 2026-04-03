@@ -17,6 +17,10 @@ import {
   createCredential,
 } from '../services/biometricService';
 import {
+  getBiometricSalt,
+  WEBAUTHN_CREDENTIAL_ID_KEY,
+} from '../constants/biometric';
+import {
   Provider,
   Account,
   JsonRpcProvider,
@@ -116,11 +120,15 @@ async function buildSecurityFromBiometrics(
     throw new Error('Mnemonic is required for account creation');
   }
 
-  const salt = (await generateNonce()).to_bytes();
+  // WebAuthn PRF needs the fixed biometric salt; Capacitor ignores it.
+  // Mnemonic encryption uses a separate random salt.
+  const prfSalt = await getBiometricSalt();
+  const encSalt = (await generateNonce()).to_bytes();
+
   const credentialResult = await createCredential(
     `Gossip:${username}`,
     userIdBytes,
-    salt,
+    prfSalt,
     iCloudSync
   );
 
@@ -132,7 +140,12 @@ async function buildSecurityFromBiometrics(
 
   const { credentialId, encryptionKey, authMethod } = credentialResult.data;
 
-  const { encryptedData } = await encrypt(mnemonic, encryptionKey, salt);
+  // Persist WebAuthn credential ID for login discovery
+  if (credentialId) {
+    localStorage.setItem(WEBAUTHN_CREDENTIAL_ID_KEY, credentialId);
+  }
+
+  const { encryptedData } = await encrypt(mnemonic, encryptionKey, encSalt);
 
   const mnemonicBackup: UserProfile['security']['mnemonicBackup'] = {
     encryptedMnemonic: encryptedData,
@@ -148,7 +161,7 @@ async function buildSecurityFromBiometrics(
         }
       : undefined,
     iCloudSync,
-    encKeySalt: salt,
+    encKeySalt: encSalt,
     mnemonicBackup,
   };
 

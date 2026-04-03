@@ -32,6 +32,7 @@ const SecureAccountForm: React.FC<SecureAccountFormProps> = ({
   const [usernameError, setUsernameError] = useState<string | null>(null);
   const [passwordError, setPasswordError] = useState<string | null>(null);
   const [showPasswords, setShowPasswords] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleUsernameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
@@ -50,7 +51,8 @@ const SecureAccountForm: React.FC<SecureAccountFormProps> = ({
   };
 
   const passwordsMatch = password === confirmPassword;
-  const canSubmit = isUsernameValid && isPasswordValid && passwordsMatch;
+  const canSubmit =
+    isUsernameValid && isPasswordValid && passwordsMatch && !isSubmitting;
 
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -64,6 +66,7 @@ const SecureAccountForm: React.FC<SecureAccountFormProps> = ({
     }
 
     if (!canSubmit) return;
+    setIsSubmitting(true);
     onSubmit({ username, password });
   };
 
@@ -147,13 +150,18 @@ const SecureAccountForm: React.FC<SecureAccountFormProps> = ({
           <Button
             type="submit"
             disabled={!canSubmit}
+            loading={isSubmitting}
             variant="primary"
             size="custom"
             fullWidth
             className="h-11 rounded-full text-sm font-medium flex items-center justify-center gap-2"
           >
-            <Zap className="w-5 h-5" />
-            <span>{t('secure_setup.create_account')}</span>
+            {!isSubmitting && (
+              <>
+                <Zap className="w-5 h-5" />
+                <span>{t('secure_setup.create_account')}</span>
+              </>
+            )}
           </Button>
         </form>
       </div>
