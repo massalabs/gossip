@@ -7,6 +7,7 @@ import PageHeader from '../../components/ui/PageHeader';
 import Button from '../../components/ui/Button';
 import Toggle from '../../components/ui/Toggle';
 import BackgroundSyncSettings from '../../components/settings/BackgroundSyncSettings';
+import BackgroundSyncPrivacyNotice from '../../components/settings/BackgroundSyncPrivacyNotice';
 import {
   notificationService,
   type NotificationPreferences,
@@ -128,11 +129,19 @@ const NotificationsSettings: React.FC = () => {
           )}
       </div>
 
-      {/* Background Sync Settings (Battery Optimization) - Only on native platforms */}
-      {Capacitor.isNativePlatform() && (
-        <div className="mt-6">
-          <BackgroundSyncSettings showDebugInfo={showDebugOption} />
-        </div>
+      {notificationPrefs.permission.granted && notificationPrefs.enabled && (
+        <>
+          {/* Background Sync Settings (Battery Optimization) - Only on native platforms */}
+          {Capacitor.isNativePlatform() && (
+            <div className="mt-6">
+              <BackgroundSyncSettings showDebugInfo={showDebugOption} />
+            </div>
+          )}
+
+          <div className="mt-6">
+            <BackgroundSyncPrivacyNotice />
+          </div>
+        </>
       )}
     </PageLayout>
   );
