@@ -38,6 +38,17 @@ export function parseInvite(input: string): ParsedInvite {
 }
 
 /**
+ * Like {@link parseInvite} but returns null instead of throwing.
+ */
+export function tryParseInvite(input: string): ParsedInvite | null {
+  try {
+    return parseInvite(input);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Extract a query parameter value from any URL-like string.
  */
 function extractQueryParam(input: string, param: string): string | null {
@@ -58,8 +69,9 @@ export function extractInvitePath(input: string): string | null {
   const trimmed = input.trim();
   if (!trimmed) return null;
 
+  // Strip query/fragment so the path matches INVITE_REGEX (same as URL.pathname)
   if (trimmed.startsWith(`/${AppRoute.invite}`)) {
-    return trimmed;
+    return trimmed.split(/[?#]/)[0];
   }
 
   // Handle gossip:// protocol

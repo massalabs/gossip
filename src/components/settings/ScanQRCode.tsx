@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { parseInvite } from '../../utils/qrCodeParser';
+import { parseInvite } from '../../utils/invite';
 import toast from 'react-hot-toast';
 import { Capacitor } from '@capacitor/core';
 import { PrivacyScreen } from '@capacitor-community/privacy-screen';

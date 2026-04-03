@@ -1,7 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { DEWEB_DEV_INVITE_DOMAIN } from '../../src/constants/links';
 import { AppRoute } from '../../src/constants/routes';
-import { generateDeepLinkUrl } from '../../src/utils/inviteUrl';
+import {
+  buildInvitePath,
+  generateDeepLinkUrl,
+  toGossipInviteHref,
+} from '../../src/utils/invite';
 import { defineWindowLocation, setWindowOrigin } from '../helpers/window';
 
 describe('inviteUrl - generateDeepLinkUrl', () => {
@@ -123,5 +127,44 @@ describe('inviteUrl - generateDeepLinkUrl', () => {
         `${base}/${AppRoute.invite}/user123?name=${encodeURIComponent('Héloïse 🎉')}`
       );
     });
+  });
+});
+
+describe('inviteUrl - buildInvitePath', () => {
+  it('builds path without query', () => {
+    expect(buildInvitePath('gossip1abc')).toBe(
+      `/${AppRoute.invite}/gossip1abc`
+    );
+  });
+
+  it('appends query from URLSearchParams', () => {
+    const sp = new URLSearchParams({ name: 'Alice' });
+    expect(buildInvitePath('user123', sp)).toBe(
+      `/${AppRoute.invite}/user123?name=Alice`
+    );
+  });
+
+  it('appends query string', () => {
+    expect(buildInvitePath('user123', 'name=Bob')).toBe(
+      `/${AppRoute.invite}/user123?name=Bob`
+    );
+  });
+
+  it('throws when userId is empty', () => {
+    expect(() => buildInvitePath('')).toThrowError('userId is required');
+  });
+});
+
+describe('inviteUrl - toGossipInviteHref', () => {
+  it('converts invite path to gossip:// URL', () => {
+    expect(toGossipInviteHref(`/${AppRoute.invite}/gossip1abc`)).toBe(
+      `gossip://${AppRoute.invite}/gossip1abc`
+    );
+  });
+
+  it('throws when path does not start with /', () => {
+    expect(() => toGossipInviteHref('invite/foo')).toThrowError(
+      'invitePath must start with /'
+    );
   });
 });

@@ -13,7 +13,7 @@ import Button from '../ui/Button';
 import BaseModal from '../ui/BaseModal';
 import ContactNameModal from '../ui/ContactNameModal';
 import Toggle from '../ui/Toggle';
-import { generateDeepLinkUrl } from '../../utils/inviteUrl';
+import { generateDeepLinkUrl } from '../../utils/invite';
 import ShareContactQR from './ShareContactQR';
 import Popover from '../ui/Popover';
 import { PopoverPosition } from '../utils';
