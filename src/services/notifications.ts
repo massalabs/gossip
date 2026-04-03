@@ -418,8 +418,8 @@ export class NotificationService {
   }
 
   /**
-   * Show a notification for a new discussion
-   * @param announcementMessage - Optional message about the new discussion
+   * Show a notification for a new discussion (contact request).
+   * Content is intentionally generic for privacy — no message preview.
    */
   async showNewDiscussionNotification(): Promise<void> {
     if (!this.canShowNotification()) {

@@ -30,7 +30,6 @@ import {
   backgroundRefreshService,
   type IOSBackgroundSyncStatus,
 } from '../../services/backgroundRefreshiOS';
-import TabSwitcher from '../ui/TabSwitcher';
 import {
   type BackgroundSyncPreset,
   getBackgroundSyncPreset,
@@ -132,17 +131,15 @@ const BackgroundSyncSettings: React.FC<BackgroundSyncSettingsProps> = ({
     })();
   }, [isAndroidNative]);
 
-  const handleSyncPresetChange = useCallback(
-    async (preset: BackgroundSyncPreset) => {
-      try {
-        await setBackgroundSyncPreset(preset);
-        setSyncPreset(preset);
-      } catch (error) {
-        console.error('Failed to save background sync preset:', error);
-      }
-    },
-    []
-  );
+  const handleSyncPresetChange = useCallback(async (maxReactivity: boolean) => {
+    const preset: BackgroundSyncPreset = maxReactivity ? 'max' : 'balanced';
+    try {
+      await setBackgroundSyncPreset(preset);
+      setSyncPreset(preset);
+    } catch (error) {
+      console.error('Failed to save background sync preset:', error);
+    }
+  }, []);
 
   const handleForegroundReliabilityChange = useCallback(
     async (enabled: boolean) => {
@@ -313,36 +310,28 @@ const BackgroundSyncSettings: React.FC<BackgroundSyncSettingsProps> = ({
 
       {/* Content */}
       <div className="px-4 py-3 space-y-3">
-        <div className="space-y-2 pb-3 border-b border-border">
-          <p className="text-xs font-medium text-muted-foreground">
-            {t('background_sync.preset_title')}
-          </p>
-          <TabSwitcher
-            options={[
-              { value: 'max', label: t('background_sync.preset_max') },
-              {
-                value: 'balanced',
-                label: t('background_sync.preset_balanced'),
-              },
-            ]}
-            value={syncPreset}
-            onChange={handleSyncPresetChange}
-          />
-          <p className="text-xs text-muted-foreground leading-relaxed">
-            {syncPreset === 'balanced'
-              ? t('background_sync.preset_balanced_description')
-              : t('background_sync.preset_max_description')}
-          </p>
-        </div>
+        {isAndroidNative && (
+          <div className="space-y-2 pb-3 border-b border-border">
+            <div className="flex items-center justify-between gap-3 py-1">
+              <span className="text-sm text-foreground flex-1">
+                {t('background_sync.preset_max')}
+              </span>
+              <Toggle
+                checked={syncPreset === 'max'}
+                onChange={handleSyncPresetChange}
+                ariaLabel={t('background_sync.preset_max')}
+              />
+            </div>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              {syncPreset === 'max'
+                ? t('background_sync.preset_max_description')
+                : t('background_sync.preset_balanced_description')}
+            </p>
+          </div>
+        )}
 
         {isAndroidNative && (
           <div className="space-y-2 pb-3 border-b border-border">
-            <p className="text-xs font-medium text-muted-foreground">
-              {t('background_sync.foreground_title')}
-            </p>
-            <p className="text-xs text-muted-foreground leading-relaxed">
-              {t('background_sync.foreground_description')}
-            </p>
             <div className="flex items-center justify-between gap-3 py-1">
               <span className="text-sm text-foreground flex-1">
                 {t('background_sync.foreground_toggle')}
@@ -353,6 +342,9 @@ const BackgroundSyncSettings: React.FC<BackgroundSyncSettingsProps> = ({
                 ariaLabel={t('background_sync.foreground_toggle')}
               />
             </div>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              {t('background_sync.foreground_description')}
+            </p>
           </div>
         )}
 
@@ -412,6 +404,11 @@ const BackgroundSyncSettings: React.FC<BackgroundSyncSettingsProps> = ({
               </div>
             </div>
 
+            {/* iOS limitation notice */}
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              {t('background_sync.ios_limitation')}
+            </p>
+
             {/* iOS Action buttons */}
             {iosHasIssues && iosStatus.userCanEnableBackgroundRefresh && (
               <div className="space-y-2 pt-1">
@@ -431,30 +428,31 @@ const BackgroundSyncSettings: React.FC<BackgroundSyncSettingsProps> = ({
         {/* ==================== ANDROID SECTION ==================== */}
         {isAndroidNative && (
           <>
-            {/* Android Device-specific warning */}
-            {deviceInfo?.isProblematic && deviceInfo.warningMessage && (
-              <div className="bg-warning/10 border border-warning/20 rounded-lg p-3">
-                <p className="text-sm text-foreground leading-relaxed">
-                  {deviceInfo.warningMessage}
-                </p>
-                {deviceInfo.helpUrl && (
-                  <Button
-                    variant="link"
-                    onClick={handleOpenHelp}
-                    className="mt-2 flex items-center gap-1.5 text-sm text-accent p-0 h-auto"
-                    ariaLabel={t('background_sync.learn_more')}
-                  >
-                    <ExternalLink className="w-4 h-4" aria-hidden="true" />
-                    {t('background_sync.learn_more')}
-                  </Button>
-                )}
-              </div>
-            )}
+            {/* Android Device-specific warning — only when there are issues */}
+            {androidHasIssues &&
+              deviceInfo?.isProblematic &&
+              deviceInfo.warningMessage && (
+                <div className="bg-warning/10 border border-warning/20 rounded-lg p-3">
+                  <p className="text-sm text-foreground leading-relaxed">
+                    {deviceInfo.warningMessage}
+                  </p>
+                  {deviceInfo.helpUrl && (
+                    <Button
+                      variant="link"
+                      onClick={handleOpenHelp}
+                      className="mt-2 flex items-center gap-1.5 text-sm text-accent p-0 h-auto"
+                      ariaLabel={t('background_sync.learn_more')}
+                    >
+                      <ExternalLink className="w-4 h-4" aria-hidden="true" />
+                      {t('background_sync.learn_more')}
+                    </Button>
+                  )}
+                </div>
+              )}
 
-            {/* Android Status indicators */}
+            {/* Android Status indicators — always visible */}
             {androidStatus && (
               <div className="space-y-2">
-                {/* Battery optimization status */}
                 <div className="flex items-center justify-between py-1">
                   <span className="text-sm text-muted-foreground">
                     {t('background_sync.battery_optimization')}
@@ -470,7 +468,6 @@ const BackgroundSyncSettings: React.FC<BackgroundSyncSettingsProps> = ({
                   )}
                 </div>
 
-                {/* Background restriction status */}
                 <div className="flex items-center justify-between py-1">
                   <span className="text-sm text-muted-foreground">
                     {t('background_sync.android_restriction')}
@@ -495,10 +492,9 @@ const BackgroundSyncSettings: React.FC<BackgroundSyncSettingsProps> = ({
               </div>
             )}
 
-            {/* Android Action buttons */}
-            {(androidHasIssues || isXiaomi) && (
+            {/* Android Action buttons — only when there are issues */}
+            {androidHasIssues && (
               <div className="space-y-2 pt-1">
-                {/* Battery optimization button */}
                 {!androidStatus?.isIgnoringBatteryOptimization && (
                   <Button
                     variant="primary"
@@ -509,8 +505,16 @@ const BackgroundSyncSettings: React.FC<BackgroundSyncSettingsProps> = ({
                     {t('background_sync.disable_battery')}
                   </Button>
                 )}
-
-                {/* Xiaomi-specific AutoStart button */}
+                {androidStatus?.isBackgroundRestricted && (
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    className="w-full"
+                    onClick={handleOpenBatterySettings}
+                  >
+                    {t('background_sync.open_settings')}
+                  </Button>
+                )}
                 {isXiaomi && (
                   <Button
                     variant="outline"
@@ -523,6 +527,21 @@ const BackgroundSyncSettings: React.FC<BackgroundSyncSettingsProps> = ({
                   </Button>
                 )}
               </div>
+            )}
+
+            {/* Battery settings — visible when no issues, so user can re-enable optimization */}
+            {androidStatus && !androidHasIssues && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full"
+                onClick={async () => {
+                  await batteryOptimizationService.openAppSettings();
+                }}
+                ariaLabel={t('background_sync.battery_settings')}
+              >
+                {t('background_sync.battery_settings')}
+              </Button>
             )}
           </>
         )}

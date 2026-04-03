@@ -71,8 +71,6 @@ const NotificationsSettings: React.FC = () => {
       className="app-max-w mx-auto"
       contentClassName="px-6 py-6"
     >
-      <BackgroundSyncPrivacyNotice />
-
       <div className="bg-card border border-border rounded-xl overflow-hidden">
         <div className="h-[54px] flex items-center px-4 justify-start w-full border-b border-border">
           <Bell className="text-foreground mr-4" />
@@ -133,11 +131,19 @@ const NotificationsSettings: React.FC = () => {
           )}
       </div>
 
-      {/* Background Sync Settings (Battery Optimization) - Only on native platforms */}
-      {Capacitor.isNativePlatform() && (
-        <div className="mt-6">
-          <BackgroundSyncSettings showDebugInfo={showDebugOption} />
-        </div>
+      {notificationPrefs.permission.granted && notificationPrefs.enabled && (
+        <>
+          {/* Background Sync Settings (Battery Optimization) - Only on native platforms */}
+          {Capacitor.isNativePlatform() && (
+            <div className="mt-6">
+              <BackgroundSyncSettings showDebugInfo={showDebugOption} />
+            </div>
+          )}
+
+          <div className="mt-6">
+            <BackgroundSyncPrivacyNotice />
+          </div>
+        </>
       )}
     </PageLayout>
   );

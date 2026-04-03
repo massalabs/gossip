@@ -43,4 +43,15 @@ public class ForegroundSyncPlugin extends Plugin {
             call.reject("Failed to read foreground sync state", e);
         }
     }
+
+    @PluginMethod
+    public void setSyncPreset(PluginCall call) {
+        try {
+            String preset = call.getString("preset", "balanced");
+            GossipForegroundSyncService.setSyncPreset(getContext(), preset);
+            call.resolve();
+        } catch (Exception e) {
+            call.reject("Failed to set sync preset", e);
+        }
+    }
 }

@@ -9,6 +9,7 @@ export interface ForegroundSyncPlugin {
   start(): Promise<void>;
   stop(): Promise<void>;
   isEnabled(): Promise<{ enabled: boolean }>;
+  setSyncPreset(options: { preset: string }): Promise<void>;
 }
 
 export const ForegroundSync = registerPlugin<ForegroundSyncPlugin>(
@@ -22,6 +23,9 @@ export const ForegroundSync = registerPlugin<ForegroundSyncPlugin>(
         /* no-op */
       },
       isEnabled: async () => ({ enabled: false }),
+      setSyncPreset: async () => {
+        /* no-op */
+      },
     }),
   }
 );

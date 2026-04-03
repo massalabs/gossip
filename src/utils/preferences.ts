@@ -10,6 +10,7 @@ import { Preferences } from '@capacitor/preferences';
 import { encodeToBase64 } from '@massalabs/gossip-sdk';
 import { isAppInForeground } from './appState';
 import { backgroundRunnerStorageService } from '../services/backgroundRunnerStorage';
+import { ForegroundSync } from '../services/foregroundSync';
 
 // Preferences keys
 const ACTIVE_SEEKERS_KEY = 'gossip-active-seekers';
@@ -157,6 +158,7 @@ export async function setBackgroundSyncPreset(
   });
   if (Capacitor.isNativePlatform()) {
     await setBackgroundRunnerStorage(BACKGROUND_SYNC_PRESET_KV_KEY, preset);
+    await ForegroundSync.setSyncPreset({ preset });
   }
 }
 
