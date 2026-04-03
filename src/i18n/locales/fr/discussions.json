@@ -55,7 +55,7 @@
   "failed_to_delete": "Échec de la suppression du message",
   "unable_to_edit": "Impossible de modifier le message",
   "failed_to_edit": "Échec de la modification du message",
-  "copy_you": "Vous",
+  "copy_you": "Toi",
   "test_messages_sent": "{{count}} messages de test envoyés !",
   "test_messages_failed": "Échec de l'envoi de certains messages de test",
   "settings": {
@@ -64,7 +64,7 @@
     "name_section": "Nom de la discussion",
     "edit_name": "Modifier le nom de la discussion",
     "reset_connection": "Réinitialiser la connexion",
-    "reset_description": "Si vous pensez être déconnecté de votre correspondant, vous pouvez réinitialiser la connexion. Certains messages pourront être renvoyés, mais votre historique sera conservé.",
+    "reset_description": "Si tu penses être déconnecté de ton correspondant, tu peux réinitialiser la connexion. Certains messages pourront être renvoyés, mais ton historique sera conservé.",
     "reconnected": "Reconnecté !",
     "participants": "Participants",
     "no_participants": "Aucun participant trouvé",
@@ -93,7 +93,7 @@
     "loading_contacts": "Chargement des contacts…",
     "no_contacts": "Aucun contact pour le moment",
     "no_contacts_hint": "Appuyez sur <strong>\"Nouveau contact\"</strong> pour en ajouter un",
-    "no_search_results": "Aucun contact ne correspond à votre recherche",
+    "no_search_results": "Aucun contact ne correspond à ta recherche",
     "edit_contact": "Modifier le contact"
   },
   "header": {
@@ -116,7 +116,7 @@
     "no_discussions": "Aucune discussion pour le moment",
     "no_discussions_hint": "Démarrez une discussion en appuyant sur le bouton <strong>+</strong>",
     "no_messages": "Aucun message pour le moment",
-    "no_messages_hint": "Lancez la conversation en envoyant votre premier message"
+    "no_messages_hint": "Lance la conversation en envoyant ton premier message"
   },
   "initializing": {
     "title": "Initialisation de la discussion sécurisée",
@@ -126,7 +126,7 @@
   "selfDiscussion": {
     "title": "Mes notes",
     "placeholder": "Écrivez une note...",
-    "emptyState": "Vos notes privées apparaîtront ici"
+    "emptyState": "Tes notes privées apparaîtront ici"
   },
   "message_item": {
     "double_tap_reply": "Appuyez deux fois pour répondre",
@@ -156,7 +156,7 @@
     "more_emojis": "Plus d’emojis"
   },
   "session_issue": {
-    "message": "Vous avez envoyé de nombreux messages qui n'ont pas encore été confirmés. Par sécurité, aucun autre message ne sera envoyé tant qu'une réponse ne sera pas reçue.",
+    "message": "Tu as envoyé de nombreux messages qui n'ont pas encore été confirmés. Par sécurité, aucun autre message ne sera envoyé tant qu'une réponse ne sera pas reçue.",
     "info_label": "Pourquoi attendre une réponse ?",
     "info_message": "La réception d'un message du correspondant permet de renouveler la clé de chiffrement. Si un attaquant obtient votre clé actuelle, il pourrait déchiffrer vos {{count}} derniers messages envoyés."
   },

@@ -38,28 +38,41 @@ function initKeyboardTracking() {
   );
 
   if (Capacitor.isNativePlatform()) {
-    // Both iOS (KeyboardResize.None) and Android (adjustNothing in manifest)
-    // prevent the OS from resizing the WebView. We lock --viewport-height
-    // and use --keyboard-offset to shrink the layout ourselves.
-    // This ensures consistent behavior across all OEMs (Samsung, Xiaomi, etc.).
-    window.addEventListener('resize', () => {
-      if (useKeyboardStore.getState().height === 0) {
-        const h = window.innerHeight;
-        useKeyboardStore.setState({ viewportHeight: h });
-        setCssVar('--viewport-height', `${h}px`);
-      }
-    });
+    // We manage keyboard offset manually via --keyboard-offset.
+    // On some Android devices, the OS also resizes the WebView despite adjustNothing.
+    // We detect this and only apply the offset the OS didn't already handle.
 
     Keyboard.addListener('keyboardWillShow', (info: KeyboardInfo) => {
       updateState(true, info.keyboardHeight);
       setCssVar('--keyboard-height', `${info.keyboardHeight}px`);
-      setCssVar('--keyboard-offset', `${info.keyboardHeight}px`);
+
+      // Wait a frame so the OS resize (if any) is applied before measuring
+      requestAnimationFrame(() => {
+        const { viewportHeight } = useKeyboardStore.getState();
+        const osShrink = viewportHeight - window.innerHeight;
+        const offset = Math.max(0, info.keyboardHeight - osShrink);
+        setCssVar('--keyboard-offset', `${offset}px`);
+      });
     });
 
     Keyboard.addListener('keyboardWillHide', () => {
       updateState(false, 0);
       setCssVar('--keyboard-height', '0px');
       setCssVar('--keyboard-offset', '0px');
+    });
+
+    window.addEventListener('resize', () => {
+      const h = window.innerHeight;
+      const state = useKeyboardStore.getState();
+      if (state.isVisible) {
+        // Samsung: OS resized the WebView — update available height directly
+        setCssVar('--available-height', `${h}px`);
+      } else {
+        // Keyboard closed — update the baseline viewport height
+        useKeyboardStore.setState({ viewportHeight: h });
+        setCssVar('--viewport-height', `${h}px`);
+        setCssVar('--available-height', `${h}px`);
+      }
     });
 
     return;

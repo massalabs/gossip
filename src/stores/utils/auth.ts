@@ -4,7 +4,7 @@ import {
   decrypt,
   deriveKey,
 } from '@massalabs/gossip-sdk';
-import { biometricService } from '../../services/biometricService';
+import { authenticate } from '../../services/biometricService';
 import { UserProfile } from '@massalabs/gossip-sdk';
 
 export interface AuthResult {
@@ -13,7 +13,8 @@ export interface AuthResult {
 }
 export async function auth(
   profile: UserProfile,
-  password?: string
+  password?: string,
+  providedEncryptionKey?: EncryptionKey
 ): Promise<AuthResult> {
   const salt = profile.security.encKeySalt;
   if (!salt || salt.length < 8) {
@@ -24,26 +25,26 @@ export async function auth(
 
   let encryptionKey: EncryptionKey;
 
-  const authMethod = profile.security.authMethod;
-  if (!authMethod) {
-    throw new Error('Account authentication method is not set');
-  }
-
-  if (authMethod === 'password') {
-    if (!password) {
-      throw new Error('Password is required for password authentication');
-    }
+  if (providedEncryptionKey) {
+    // Key already derived (e.g., from SecureLogin biometric flow)
+    encryptionKey = providedEncryptionKey;
+  } else if (password) {
     encryptionKey = await deriveKey(password, salt);
   } else {
-    // For biometric authentication (capacitor or webauthn)
+    // Biometric authentication (capacitor or webauthn)
+    const authMethod = profile.security.authMethod;
+    if (!authMethod || authMethod === 'password') {
+      throw new Error('Password is required for password authentication');
+    }
+
     const userIdOrCredentialId =
       authMethod === 'capacitor'
-        ? profile.userId // For Capacitor: userId to retrieve encryption key from secure storage
-        : profile.security.webauthn?.credentialId; // For WebAuthn: credential ID for PRF
+        ? profile.userId
+        : profile.security.webauthn?.credentialId;
 
     const syncFromiCloud = profile.security.iCloudSync ?? false;
 
-    const authResult = await biometricService.authenticate(
+    const authResult = await authenticate(
       authMethod,
       userIdOrCredentialId,
       salt,

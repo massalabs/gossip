@@ -272,12 +272,8 @@
 
   .bg-discussion-pattern::before {
     content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    min-height: 100vh;
-    min-height: 100dvh;
+    position: fixed;
+    inset: 0;
     z-index: -1;
     background-image: url('../assets/backgrounds/bg-discussion-light.svg');
     background-repeat: repeat;
