@@ -71,18 +71,13 @@ export function setupSdkEventHandlers(gossip: GossipSdk): void {
     if (foreground) return;
 
     try {
-      const { contacts, discussions } = useDiscussionStore.getState();
-      const contact = contacts.find(c => c.userId === message.contactUserId);
+      const { discussions } = useDiscussionStore.getState();
       const discussion = discussions.find(
         d => d.contactUserId === message.contactUserId
       );
       if (discussion?.mutedNotifications) return;
 
-      const contactName = contact?.name || 'Someone';
-
       await notificationService.showDiscussionNotification(
-        contactName,
-        message.content,
         message.contactUserId
       );
     } catch (error) {

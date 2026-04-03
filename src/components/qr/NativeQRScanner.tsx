@@ -3,6 +3,10 @@ import {
   CapacitorBarcodeScanner,
   CapacitorBarcodeScannerTypeHint,
 } from '@capacitor/barcode-scanner';
+import {
+  formatQrScanErrorForLog,
+  normalizeNativeQrError,
+} from '../../utils/qrScanErrors';
 import { QRScannerProps } from './types';
 
 const NativeQRScanner: React.FC<QRScannerProps> = ({
@@ -28,12 +32,16 @@ const NativeQRScanner: React.FC<QRScannerProps> = ({
         // TODO: Improve Scan Result handling
         onScan(result.ScanResult);
       } catch (err: unknown) {
-        console.error('NativeQRScanner error', err);
-        const error = err instanceof Error ? err.message : String(err);
-        if (error.includes('the process was cancelled')) {
+        const normalized = normalizeNativeQrError(err);
+        const line = formatQrScanErrorForLog(normalized);
+        if (normalized.isCancelled) {
+          // Expected when the user leaves the scanner or the OS ends the session (e.g. custom ROMs).
+          // Use debug level so logcat / dev-console are not noisy; full detail is still in the debug overlay.
+          console.debug(line, normalized);
           onClose();
         } else {
-          onError(error);
+          console.warn(line, err);
+          onError(normalized.message);
         }
       }
     };

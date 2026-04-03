@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { parseInvite } from '../../utils/qrCodeParser';
+import { parseInvite } from '../../utils/invite';
 import toast from 'react-hot-toast';
 import { Capacitor } from '@capacitor/core';
 import { PrivacyScreen } from '@capacitor-community/privacy-screen';
 import WebQRScanner from '../qr/WebQRScanner';
 import NativeQRScanner from '../qr/NativeQRScanner';
+import { isQrScanCancelledMessage } from '../../utils/qrScanErrors';
 
 interface ScanQRCodeProps {
   onBack: () => void;
@@ -59,8 +60,8 @@ const ScanQRCode: React.FC<ScanQRCodeProps> = ({ onBack, onScanSuccess }) => {
   };
 
   const handleError = (err: string) => {
-    if (!err.includes('process was cancelled')) {
-      console.error('QR scan failed:', err);
+    if (!isQrScanCancelledMessage(err)) {
+      console.warn('[QRScan]', err);
       toast.error(t('qr_scan_failed'));
     }
     onBack();

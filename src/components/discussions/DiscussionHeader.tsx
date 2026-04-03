@@ -100,61 +100,79 @@ const DiscussionHeader: React.FC<DiscussionHeaderProps> = ({
     }
   };
 
+  const showMetaBlock =
+    !isOnline || (isOnline && isPendingOutgoing) || !!retentionLabel;
+
+  const hasStatusChips = (isOnline && isPendingOutgoing) || !!retentionLabel;
+
   return (
-    <HeaderBar>
-      <div className="flex items-center w-full gap-3">
+    <HeaderBar className="min-h-header-safe h-auto! items-start! py-2.5 pb-3">
+      <div className="flex items-center w-full gap-2 sm:gap-3">
         {onBack && (
           <Button
             onClick={onBack}
             variant="circular"
             size="custom"
             ariaLabel={t('common:back')}
-            className="w-8 h-8 flex items-center justify-center"
+            className="w-8 h-8 flex items-center justify-center shrink-0"
           >
             <ChevronLeft className="w-5 h-5 text-muted-foreground" />
           </Button>
         )}
         <button
+          type="button"
           onClick={handleHeaderClick}
-          className="flex items-center flex-1 min-w-0 gap-3 group hover:opacity-80 transition-opacity active:opacity-70"
+          className="flex items-start flex-1 min-w-0 gap-2.5 sm:gap-3 group text-left hover:opacity-80 transition-opacity active:opacity-70"
           title={t('header.discussion_settings')}
         >
-          <div className="relative">
+          <div className="relative shrink-0 mt-0.5">
             <ContactAvatar contact={contact} size={12} />
             {contact?.isOnline && (
-              <span className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-success border-2 border-card rounded-full shadow-sm"></span>
+              <span className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-success border-2 border-card rounded-full shadow-sm" />
             )}
           </div>
-          <div className="flex-1 min-w-0 text-left">
-            <h1 className="text-xl font-semibold text-foreground truncate leading-tight">
+          <div className="flex-1 min-w-0 flex flex-col gap-1.5">
+            <h1 className="text-lg font-semibold text-foreground leading-snug line-clamp-2 wrap-break-word">
               {displayName}
             </h1>
-            {!isOnline && (
-              <p className="text-xs font-light text-accent truncate">
-                {t('waiting_connection')}
-              </p>
-            )}
-            {isOnline && isPendingOutgoing && (
-              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-accent text-accent-foreground border border-border">
-                {t('header.waiting_approval')}
-              </span>
-            )}
-            {retentionLabel && (
-              <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-                <Clock className="w-3 h-3 shrink-0" />
-                {t('header.auto_delete_active', { duration: retentionLabel })}
-              </span>
+            {showMetaBlock && (
+              <div className="flex flex-col gap-1.5 min-w-0">
+                {!isOnline && (
+                  <p className="text-xs text-accent leading-relaxed">
+                    {t('waiting_connection')}
+                  </p>
+                )}
+                {hasStatusChips && (
+                  <div className="flex flex-nowrap items-center gap-2 min-w-0 w-full">
+                    {isOnline && isPendingOutgoing && (
+                      <span className="inline-flex items-center shrink-0 px-2 py-1 rounded-full text-xs font-medium bg-muted text-foreground border border-border">
+                        {t('header.waiting_approval')}
+                      </span>
+                    )}
+                    {retentionLabel && (
+                      <span className="inline-flex items-center gap-1.5 min-w-0 flex-1 text-xs text-muted-foreground overflow-hidden">
+                        <Clock className="w-3.5 h-3.5 shrink-0" />
+                        <span className="leading-snug truncate">
+                          {t('header.auto_delete_active', {
+                            duration: retentionLabel,
+                          })}
+                        </span>
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
             )}
           </div>
         </button>
         {onSearchToggle && (
-          <span onPointerDown={e => e.preventDefault()}>
+          <span className="shrink-0" onPointerDown={e => e.preventDefault()}>
             <Button
               onClick={onSearchToggle}
               variant="circular"
               size="custom"
               ariaLabel={t('header.search_messages')}
-              className="w-8 h-8 flex items-center justify-center shrink-0"
+              className="w-8 h-8 flex items-center justify-center"
             >
               <Search className="w-5 h-5 text-muted-foreground" />
             </Button>

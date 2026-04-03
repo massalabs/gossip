@@ -23,11 +23,15 @@ export enum SdkEventType {
   SEEKERS_UPDATED = 'seekersUpdated',
   SESSION_STATUS_CHANGED = 'sessionStatusChanged',
   DISCUSSION_UPDATED = 'discussionUpdated',
+  WRITE_FAILED = 'writeFailed',
+  MESSAGE_OPTIMISTIC = 'messageOptimistic',
   ERROR = 'error',
 }
 
 export interface SdkEventHandlers {
-  [SdkEventType.MESSAGE_RECEIVED]: (message: Message) => void;
+  [SdkEventType.MESSAGE_RECEIVED]: (
+    message: Omit<Message, 'id'> & { id?: number }
+  ) => void;
   [SdkEventType.MESSAGE_SENT]: (message: Message) => void;
   [SdkEventType.MESSAGE_READ]: (messageId: number) => void;
   [SdkEventType.MESSAGE_FAILED]: (message: Message, error: Error) => void;
@@ -44,6 +48,12 @@ export interface SdkEventHandlers {
     status: SessionStatus
   ) => void;
   [SdkEventType.DISCUSSION_UPDATED]: (contactUserId: string) => void;
+  [SdkEventType.WRITE_FAILED]: (
+    messageId: Uint8Array | undefined,
+    entityType: 'message' | 'discussion' | 'contact',
+    error: Error
+  ) => void;
+  [SdkEventType.MESSAGE_OPTIMISTIC]: (message: Message) => void;
   [SdkEventType.ERROR]: (error: Error, context: string) => void;
 }
 
@@ -87,6 +97,12 @@ export class SdkEventEmitter {
     >(),
     [SdkEventType.DISCUSSION_UPDATED]: new Set<
       SdkEventHandlers[SdkEventType.DISCUSSION_UPDATED]
+    >(),
+    [SdkEventType.WRITE_FAILED]: new Set<
+      SdkEventHandlers[SdkEventType.WRITE_FAILED]
+    >(),
+    [SdkEventType.MESSAGE_OPTIMISTIC]: new Set<
+      SdkEventHandlers[SdkEventType.MESSAGE_OPTIMISTIC]
     >(),
     [SdkEventType.ERROR]: new Set<SdkEventHandlers[SdkEventType.ERROR]>(),
   };

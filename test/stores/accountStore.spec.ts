@@ -30,7 +30,7 @@ const getSdkMock = vi.fn(makeSdkMock);
 
 // Mock getSdk to avoid real SDK initialization
 vi.mock('../../src/stores/sdkStore', () => ({
-  getSdk: (...args: unknown[]) => getSdkMock(...args),
+  getSdk: () => getSdkMock(),
 }));
 
 // Simple spies for store cleanup functions – shared instances so we can assert call counts
@@ -112,20 +112,18 @@ vi.mock('../../src/crypto/webauthn', () => ({
 }));
 
 vi.mock('../../src/services/biometricService', () => ({
-  biometricService: {
-    checkAvailability: vi.fn(async () => ({
-      available: true,
-      biometryType: 'none',
-    })),
-    createCredential: vi.fn(async () => ({
-      success: true,
-      data: {
-        credentialId: 'mock-cred-id',
-        encryptionKey: { type: 'mock-key' },
-        authMethod: 'webauthn',
-      },
-    })),
-  },
+  checkBiometricAvailability: vi.fn(async () => ({
+    available: true,
+    biometryType: 'none',
+  })),
+  createCredential: vi.fn(async () => ({
+    success: true,
+    data: {
+      credentialId: 'mock-cred-id',
+      encryptionKey: { type: 'mock-key' },
+      authMethod: 'webauthn',
+    },
+  })),
 }));
 
 vi.mock('../../src/stores/appStore', () => ({

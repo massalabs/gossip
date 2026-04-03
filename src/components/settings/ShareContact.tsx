@@ -13,7 +13,7 @@ import Button from '../ui/Button';
 import BaseModal from '../ui/BaseModal';
 import ContactNameModal from '../ui/ContactNameModal';
 import Toggle from '../ui/Toggle';
-import { generateDeepLinkUrl } from '../../utils/inviteUrl';
+import { generateDeepLinkUrl } from '../../utils/invite';
 import ShareContactQR from './ShareContactQR';
 import Popover from '../ui/Popover';
 import { PopoverPosition } from '../utils';
@@ -178,8 +178,8 @@ const ShareContact: React.FC<ShareContactProps> = ({
         </div>
       </div>
 
-      {/* Expiry hint */}
-      <p className="text-xs text-muted-foreground text-center">
+      {/* Expiry hint: must be div — Popover contains block nodes */}
+      <div className="text-xs text-muted-foreground text-center">
         Invitations expire after 2 weeks. File invitations don&apos;t.{' '}
         <span className="relative inline-flex align-middle ml-0.5">
           <Popover
@@ -187,7 +187,7 @@ const ShareContact: React.FC<ShareContactProps> = ({
             message="Invitations expire 2 weeks after your last connection. Each time you open the app, validity is renewed if more than 24 hours have passed. File invitations never expire."
           />
         </span>
-      </p>
+      </div>
 
       <BaseModal
         isOpen={isFilePanelOpen}

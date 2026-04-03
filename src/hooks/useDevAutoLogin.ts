@@ -29,7 +29,11 @@ export function useDevAutoLogin(
     attempted.current = true;
     callbacks.setLoading(true);
 
-    loadAccount(devPassword, account.userId)
+    loadAccount({
+      type: 'password',
+      password: devPassword,
+      userId: account.userId,
+    })
       .then(() => {
         if (useAccountStore.getState().userProfile) {
           callbacks.onSuccess();
@@ -37,7 +41,7 @@ export function useDevAutoLogin(
       })
       .catch(err => {
         console.error('[dev-auto-login] failed:', err);
-        callbacks.onError('Dev auto-login failed. Check VITE_DEV_PASSWORD.');
+        callbacks.onError('Dev auto-login failed');
       })
       .finally(() => callbacks.setLoading(false));
   }, [account, lockedByUser, loadAccount, callbacks]);

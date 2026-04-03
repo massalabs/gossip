@@ -1,4 +1,4 @@
-import React, { useCallback, useState, useMemo } from 'react';
+import React, { useCallback, useRef, useState, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import DiscussionListPanel from '../components/discussions/DiscussionList';
 import DiscussionFilterButtons from '../components/discussions/DiscussionFilterButtons';
@@ -45,8 +45,18 @@ const Discussions: React.FC = () => {
     null
   );
 
+  // Prevent double navigation (two discussions opening on top of each other)
+  const isNavigatingRef = useRef(false);
+
   const handleSelectDiscussion = useCallback(
     (contactUserId: string) => {
+      if (isNavigatingRef.current) return;
+      isNavigatingRef.current = true;
+      // Reset after animation completes so user can navigate again on return
+      setTimeout(() => {
+        isNavigatingRef.current = false;
+      }, 600);
+
       if (contactUserId === SELF_CONTACT_ID) {
         if (pendingForwardMessageId != null) {
           navigate(ROUTES.selfDiscussion(), {
@@ -60,22 +70,16 @@ const Discussions: React.FC = () => {
         }
         return;
       }
-      // If there's pending shared content, pass it as prefilled message
       if (pendingSharedContent) {
         const state =
           pendingForwardMessageId != null
-            ? {
-                forwardFromMessageId: pendingForwardMessageId,
-              }
-            : {
-                prefilledMessage: pendingSharedContent,
-              };
+            ? { forwardFromMessageId: pendingForwardMessageId }
+            : { prefilledMessage: pendingSharedContent };
 
         navigate(ROUTES.discussion({ userId: contactUserId }), {
           state,
           replace: false,
         });
-        // Clear pending shared content after navigation
         setPendingSharedContent(null);
         setPendingForwardMessageId(null);
       } else {

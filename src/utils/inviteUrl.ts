@@ -51,3 +51,38 @@ export function generateDeepLinkUrl(userId: string, name?: string): string {
   }
   return url;
 }
+
+/**
+ * Builds the in-app invite path used on the web (React Router) and for
+ * {@link parseInvite}. Includes optional query string (e.g. `?name=`).
+ *
+ * Example: `/invite/gossip1abc?name=Alice`
+ */
+export function buildInvitePath(
+  userId: string,
+  query?: URLSearchParams | string
+): string {
+  if (!userId?.trim()) {
+    throw new Error('userId is required');
+  }
+
+  const q =
+    query === undefined
+      ? ''
+      : typeof query === 'string'
+        ? query
+        : query.toString();
+  const suffix = q ? `?${q}` : '';
+
+  return `/${AppRoute.invite}/${userId.trim()}${suffix}`;
+}
+
+/**
+ * Converts a web invite path (`/invite/...`) to the native custom-scheme URL.
+ */
+export function toGossipInviteHref(invitePath: string): string {
+  if (!invitePath.startsWith('/')) {
+    throw new Error('invitePath must start with /');
+  }
+  return `gossip://${invitePath.slice(1)}`;
+}
