@@ -88,7 +88,9 @@ const PageLayout: React.FC<PageLayoutProps> = ({
       : 'none';
 
   return (
-    <div className={`h-full flex flex-col bg-background ${className}`.trim()}>
+    <div
+      className={`h-full min-h-0 flex flex-col bg-background ${className}`.trim()}
+    >
       {/* Header with safe area */}
       {header && (
         <div

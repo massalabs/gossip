@@ -17,7 +17,7 @@ export function PrivacyGraphic({
         <div
           className={`rounded-full blur-3xl ${
             loading ? 'animate-pulse-loading' : 'animate-pulse-slow'
-          } bg-black/10 dark:bg-white/5`}
+          } bg-black/5 dark:bg-white/2`}
           style={{
             width: `${size}px`,
             height: `${size}px`,

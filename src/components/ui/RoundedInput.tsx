@@ -6,6 +6,8 @@ interface RoundedInputProps {
   value: string;
   onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void;
+  onFocus?: (e: React.FocusEvent<HTMLInputElement>) => void;
+  onBlur?: (e: React.FocusEvent<HTMLInputElement>) => void;
   placeholder?: string;
   error?: boolean;
   disabled?: boolean;
@@ -24,6 +26,8 @@ const RoundedInput: React.FC<RoundedInputProps> = ({
   value,
   onChange,
   onKeyDown,
+  onFocus,
+  onBlur,
   placeholder,
   error = false,
   disabled = false,
@@ -58,6 +62,8 @@ const RoundedInput: React.FC<RoundedInputProps> = ({
         value={value}
         onChange={onChange}
         onKeyDown={onKeyDown}
+        onFocus={onFocus}
+        onBlur={onBlur}
         placeholder={placeholder}
         maxLength={maxLength}
         disabled={disabled}

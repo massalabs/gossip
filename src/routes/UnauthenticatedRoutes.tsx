@@ -35,7 +35,7 @@ export const UnauthenticatedRoutes: React.FC<UnauthenticatedRoutesProps> = ({
 
   const handleCreateNewAccount = () => {
     onLoginErrorChange(null);
-    navigate(ROUTES.setup());
+    navigate(ROUTES.setup(), { replace: true });
   };
 
   const handleNewAccountComplete = () => {
