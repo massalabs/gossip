@@ -37,34 +37,45 @@ function initKeyboardTracking() {
   );
 
   if (Capacitor.isNativePlatform()) {
-    // Infallible strategy: always write --available-height directly.
-    // - keyboardWillShow: set available = viewportHeight - keyboardHeight
-    // - resize (if OS also shrinks WebView): overwrite with window.innerHeight
-    // Whoever fires last wins — both compute the same correct value.
+    // Use Capacitor Keyboard events for isVisible/height state,
+    // but rely on visualViewport for the actual available height.
+    // This is infallible: visualViewport.height always reflects the
+    // visible area regardless of what the OS does (adjustNothing,
+    // adjustResize, Samsung quirks, etc).
 
     Keyboard.addListener('keyboardWillShow', (info: KeyboardInfo) => {
       updateState(true, info.keyboardHeight);
       setCssVar('--keyboard-height', `${info.keyboardHeight}px`);
-      const { viewportHeight } = useKeyboardStore.getState();
-      setCssVar(
-        '--available-height',
-        `${viewportHeight - info.keyboardHeight}px`
-      );
     });
 
     Keyboard.addListener('keyboardWillHide', () => {
       updateState(false, 0);
       setCssVar('--keyboard-height', '0px');
-      const { viewportHeight } = useKeyboardStore.getState();
-      setCssVar('--available-height', `${viewportHeight}px`);
     });
 
+    // visualViewport is the single source of truth for available height.
+    // Works on all Android OEMs regardless of adjustNothing/adjustResize.
+    const vv = window.visualViewport;
+    if (vv) {
+      const syncHeight = () => {
+        const h = vv.height;
+        setCssVar('--available-height', `${h}px`);
+        if (!useKeyboardStore.getState().isVisible) {
+          useKeyboardStore.setState({ viewportHeight: h });
+        }
+      };
+      vv.addEventListener('resize', syncHeight);
+    }
+
+    // Fallback: also listen to window resize for devices where
+    // visualViewport doesn't fire (rare, but defensive).
     window.addEventListener('resize', () => {
-      const h = window.innerHeight;
-      // Always trust the actual viewport height
-      setCssVar('--available-height', `${h}px`);
-      if (!useKeyboardStore.getState().isVisible) {
-        useKeyboardStore.setState({ viewportHeight: h });
+      if (!window.visualViewport) {
+        const h = window.innerHeight;
+        setCssVar('--available-height', `${h}px`);
+        if (!useKeyboardStore.getState().isVisible) {
+          useKeyboardStore.setState({ viewportHeight: h });
+        }
       }
     });
 
