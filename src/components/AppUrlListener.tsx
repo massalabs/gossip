@@ -3,7 +3,7 @@ import { Capacitor } from '@capacitor/core';
 import { App, URLOpenListenerEvent } from '@capacitor/app';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import { useNavigate } from 'react-router-dom';
-import { extractInvitePath, parseInvite } from '../utils/qrCodeParser';
+import { extractInvitePath, tryParseInvite } from '../utils/invite';
 import { useAppStore } from '../stores/appStore';
 import { ROUTES } from '../constants/routes';
 
@@ -44,7 +44,11 @@ export const AppUrlListener: React.FC = () => {
         const invitePath = extractInvitePath(url);
         if (!invitePath) return;
 
-        const parsed = parseInvite(url);
+        const parsed = tryParseInvite(url);
+        if (!parsed) {
+          console.error('Failed to parse invite from app URL:', url);
+          return;
+        }
         await setPendingDeepLinkInfo(parsed);
 
         // Reset browser history URL so React Router can control navigation

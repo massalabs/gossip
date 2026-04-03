@@ -3,7 +3,7 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import { NetworkName, Provider } from '@massalabs/massa-web3';
 import { createSelectors } from './utils/createSelectors';
 import { STORAGE_KEYS } from '../utils/localStorage';
-import { ParsedInvite } from '../utils/qrCodeParser';
+import { ParsedInvite } from '../utils/invite';
 import { mnsService } from '../services/mns';
 import { UserProfile } from '@massalabs/gossip-sdk';
 

@@ -41,6 +41,11 @@ describe('qrCodeParser - extractInvitePath', () => {
     expect(extractInvitePath(url)).toBe(`/${AppRoute.invite}/gossip1abc`);
   });
 
+  it('strips query from bare invite path (consistent with pathname)', () => {
+    const bare = `/${AppRoute.invite}/gossip1abc?name=value`;
+    expect(extractInvitePath(bare)).toBe(`/${AppRoute.invite}/gossip1abc`);
+  });
+
   it('returns null for non-invite paths', () => {
     expect(extractInvitePath('/not-invite/xyz')).toBeNull();
     expect(extractInvitePath('https://example.com/other/xyz')).toBeNull();
@@ -101,6 +106,17 @@ describe('qrCodeParser - parseInvite', () => {
 
     expect(validateUserIdFormatSpy).toHaveBeenCalledWith(userId);
     expect(result).toEqual({ userId });
+  });
+
+  it('parses bare path with ?name= (InvitePage / Continue in web)', () => {
+    validateUserIdFormatSpy.mockReturnValue({ valid: true });
+    const userId = 'gossip1validuser';
+
+    const result = parseInvite(
+      `/${AppRoute.invite}/${encodeURIComponent(userId)}?name=Alice`
+    );
+
+    expect(result).toEqual({ userId, name: 'Alice' });
   });
 
   it('handles URL-encoded userId correctly', () => {
