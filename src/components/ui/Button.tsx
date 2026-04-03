@@ -4,6 +4,7 @@ interface ButtonProps {
   children: React.ReactNode;
   onClick?: (e: React.MouseEvent<HTMLButtonElement>) => void;
   onMouseDown?: (e: React.MouseEvent<HTMLButtonElement>) => void;
+  onPointerDown?: (e: React.PointerEvent<HTMLButtonElement>) => void;
   disabled?: boolean;
   loading?: boolean;
   variant?:
@@ -29,6 +30,7 @@ const Button: React.FC<ButtonProps> = ({
   children,
   onClick,
   onMouseDown,
+  onPointerDown,
   onKeyDown,
   disabled = false,
   loading = false,
@@ -99,6 +101,7 @@ const Button: React.FC<ButtonProps> = ({
       type={type}
       onClick={onClick}
       onMouseDown={onMouseDown}
+      onPointerDown={onPointerDown}
       onKeyDown={onKeyDown}
       disabled={disabled || loading}
       className={combinedClasses}

@@ -6,18 +6,23 @@ import {
   deriveKey,
   generateMnemonic,
   validateMnemonic,
-  generateUserKeys,
   EncryptionKey,
   generateNonce,
   validateUsernameFormat,
 } from '@massalabs/gossip-sdk';
 import { getSdk } from './sdkStore';
 import { isWebAuthnSupported } from '../crypto/webauthn';
-import { biometricService } from '../services/biometricService';
+import {
+  checkBiometricAvailability,
+  createCredential,
+} from '../services/biometricService';
+import {
+  getBiometricSalt,
+  WEBAUTHN_CREDENTIAL_ID_KEY,
+} from '../constants/biometric';
 import {
   Provider,
   Account,
-  PrivateKey,
   JsonRpcProvider,
   PublicApiUrl,
   NetworkName,
@@ -30,6 +35,15 @@ import { auth } from './utils/auth';
 import { useDiscussionStore } from './discussionStore';
 import { useMessageStore } from './messageStore';
 import { useSelfMessageStore } from './selfMessageStore';
+import {
+  deriveAccountFromMnemonic,
+  fetchMnsDomainsIfEnabled,
+} from './utils/accountHelpers';
+
+export type LoginMethod =
+  | { type: 'password'; password: string; userId?: string }
+  | { type: 'biometric'; userId?: string }
+  | { type: 'encryptionKey'; encryptionKey: EncryptionKey };
 
 type accountProvisionResult = {
   encryptionKey: EncryptionKey;
@@ -102,17 +116,19 @@ async function buildSecurityFromBiometrics(
   security: UserProfile['security'];
   encryptionKey: EncryptionKey;
 }> {
-  // Encrypt mnemonic with derived key using biometric credentials
   if (!mnemonic) {
     throw new Error('Mnemonic is required for account creation');
   }
 
-  const salt = (await generateNonce()).to_bytes();
-  // Use the unified biometric service to create credentials
-  const credentialResult = await biometricService.createCredential(
+  // WebAuthn PRF needs the fixed biometric salt; Capacitor ignores it.
+  // Mnemonic encryption uses a separate random salt.
+  const prfSalt = await getBiometricSalt();
+  const encSalt = (await generateNonce()).to_bytes();
+
+  const credentialResult = await createCredential(
     `Gossip:${username}`,
     userIdBytes,
-    salt,
+    prfSalt,
     iCloudSync
   );
 
@@ -124,7 +140,12 @@ async function buildSecurityFromBiometrics(
 
   const { credentialId, encryptionKey, authMethod } = credentialResult.data;
 
-  const { encryptedData } = await encrypt(mnemonic, encryptionKey, salt);
+  // Persist WebAuthn credential ID for login discovery
+  if (credentialId) {
+    localStorage.setItem(WEBAUTHN_CREDENTIAL_ID_KEY, credentialId);
+  }
+
+  const { encryptedData } = await encrypt(mnemonic, encryptionKey, encSalt);
 
   const mnemonicBackup: UserProfile['security']['mnemonicBackup'] = {
     encryptedMnemonic: encryptedData,
@@ -140,7 +161,7 @@ async function buildSecurityFromBiometrics(
         }
       : undefined,
     iCloudSync,
-    encKeySalt: salt,
+    encKeySalt: encSalt,
     mnemonicBackup,
   };
 
@@ -161,7 +182,7 @@ interface AccountState {
     iCloudSync?: boolean
   ) => Promise<void>;
   initializeAccount: (username: string, password: string) => Promise<void>;
-  loadAccount: (password?: string, userId?: string) => Promise<void>;
+  loadAccount: (method: LoginMethod) => Promise<void>;
   restoreAccountFromMnemonic: (
     username: string,
     mnemonic: string,
@@ -210,22 +231,6 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
     };
   };
 
-  // Helper function to fetch MNS domains if MNS is enabled
-  const fetchMnsDomainsIfEnabled = (profile: UserProfile) => {
-    const { mnsEnabled } = useAppStore.getState();
-    if (!mnsEnabled) return;
-
-    const state = get();
-    if (!state.provider) return;
-
-    useAppStore
-      .getState()
-      .fetchMnsDomains(profile, state.provider)
-      .catch(error => {
-        console.error('Error fetching MNS domains:', error);
-      });
-  };
-
   // Helper to persist session blob to DB
   const createOnPersist = (_userId: string) => {
     return async (blob: Uint8Array, _key: EncryptionKey) => {
@@ -235,6 +240,68 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       await getSdk().profiles.save(updated);
       set({ userProfile: updated });
     };
+  };
+
+  // Shared scaffold for account creation / restoration
+  interface SetupAccountParams {
+    username: string;
+    mnemonic: string;
+    provisionOpts: {
+      useBiometrics: boolean;
+      password?: string;
+      iCloudSync?: boolean;
+    };
+    extraState?: Partial<AccountState>;
+    skipHistorical?: boolean;
+  }
+
+  const setupAccount = async ({
+    username,
+    mnemonic,
+    provisionOpts,
+    extraState = {},
+    skipHistorical = false,
+  }: SetupAccountParams): Promise<void> => {
+    await cleanupSession();
+
+    const { account, userIdBytes } = await deriveAccountFromMnemonic(mnemonic);
+    const userId = encodeUserId(userIdBytes);
+
+    const { encryptionKey, security } = await provisionAccount(
+      username,
+      mnemonic,
+      userIdBytes,
+      provisionOpts
+    );
+
+    await getSdk().openSession({
+      mnemonic,
+      encryptionKey,
+      onPersist: createOnPersist(userId),
+    });
+
+    const session = getSdk().getEncryptedSession();
+
+    const profile = await getSdk().profiles.createOrUpdate(
+      username,
+      encodeUserId(userIdBytes),
+      security,
+      session
+    );
+
+    if (skipHistorical) {
+      await getSdk().announcements.skipHistorical();
+    }
+
+    set({
+      userProfile: profile,
+      encryptionKey,
+      account,
+      isLoading: false,
+      ...extraState,
+    });
+
+    fetchMnsDomainsIfEnabled(profile, get().provider);
   };
 
   return {
@@ -247,64 +314,18 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
     platformAuthenticatorAvailable: false,
     account: null,
     provider: null,
+
     // Actions
     initializeAccount: async (username: string, password: string) => {
       try {
         set({ isLoading: true });
-
-        // Ensure any existing session is closed before creating new account
-        await cleanupSession();
-
         const mnemonic = generateMnemonic(256);
-
-        // Generate keys for Massa wallet (SDK generates its own internally)
-        const keys = await generateUserKeys(mnemonic);
-        const account = await Account.fromPrivateKey(
-          PrivateKey.fromBytes(keys.secret_keys().massa_secret_key)
-        );
-
-        const userIdBytes = keys.public_keys().derive_id();
-        const userId = encodeUserId(userIdBytes);
-
-        const { encryptionKey, security } = await provisionAccount(
+        await setupAccount({
           username,
           mnemonic,
-          userIdBytes,
-          {
-            useBiometrics: false,
-            password,
-          }
-        );
-
-        // Open SDK session
-        await getSdk().openSession({
-          mnemonic,
-          encryptionKey,
-          onPersist: createOnPersist(userId),
+          provisionOpts: { useBiometrics: false, password },
+          skipHistorical: true,
         });
-
-        const session = getSdk().getEncryptedSession();
-
-        const profile = await getSdk().profiles.createOrUpdate(
-          username,
-          encodeUserId(userIdBytes),
-          security,
-          session
-        );
-
-        // Skip historical announcements AFTER profile is persisted
-        await getSdk().announcements.skipHistorical();
-
-        useAppStore.getState().setIsInitialized(true);
-        set({
-          userProfile: profile,
-          encryptionKey,
-          account,
-          isLoading: false,
-        });
-
-        // Fetch MNS domains if MNS is enabled
-        fetchMnsDomainsIfEnabled(profile);
       } catch (error) {
         console.error('Error creating user profile:', error);
         set({ isLoading: false });
@@ -319,58 +340,14 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
     ) => {
       try {
         set({ isLoading: true });
-
-        // Ensure any existing session is closed before restoring account
-        await cleanupSession();
-
-        // Validate mnemonic
         if (!validateMnemonic(mnemonic)) {
           throw new Error('Invalid mnemonic phrase');
         }
-
-        // Generate keys for Massa wallet
-        const keys = await generateUserKeys(mnemonic);
-        const account = await Account.fromPrivateKey(
-          PrivateKey.fromBytes(keys.secret_keys().massa_secret_key)
-        );
-
-        const userIdBytes = keys.public_keys().derive_id();
-        const userId = encodeUserId(userIdBytes);
-
-        // Provision the account
-        const { encryptionKey, security } = await provisionAccount(
+        await setupAccount({
           username,
           mnemonic,
-          userIdBytes,
-          opts
-        );
-
-        // Open SDK session
-        await getSdk().openSession({
-          mnemonic,
-          encryptionKey,
-          onPersist: createOnPersist(userId),
+          provisionOpts: opts,
         });
-
-        const session = getSdk().getEncryptedSession();
-
-        const profile = await getSdk().profiles.createOrUpdate(
-          username,
-          encodeUserId(userIdBytes),
-          security,
-          session
-        );
-
-        useAppStore.getState().setIsInitialized(true);
-        set({
-          account,
-          userProfile: profile,
-          encryptionKey,
-          isLoading: false,
-        });
-
-        // Fetch MNS domains if MNS is enabled
-        fetchMnsDomainsIfEnabled(profile);
       } catch (error) {
         console.error('Error restoring account from mnemonic:', error);
         set({ isLoading: false });
@@ -378,11 +355,12 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       }
     },
 
-    loadAccount: async (password?: string, userId?: string) => {
+    loadAccount: async (method: LoginMethod) => {
       try {
         set({ isLoading: true });
 
-        // If userId is provided, load that specific account, otherwise use active or first
+        const userId =
+          method.type !== 'encryptionKey' ? method.userId : undefined;
         let profile: UserProfile | null;
         if (userId) {
           profile = await getSdk().profiles.get(userId);
@@ -394,15 +372,32 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           throw new Error('No user profile found');
         }
 
-        const { mnemonic, encryptionKey } = await auth(profile, password);
+        let mnemonic: string;
+        let encryptionKey: EncryptionKey;
 
-        // Generate keys for Massa wallet
-        const keys = await generateUserKeys(mnemonic);
-        const account = await Account.fromPrivateKey(
-          PrivateKey.fromBytes(keys.secret_keys().massa_secret_key)
-        );
+        switch (method.type) {
+          case 'password': {
+            const result = await auth(profile, method.password);
+            mnemonic = result.mnemonic;
+            encryptionKey = result.encryptionKey;
+            break;
+          }
+          case 'biometric': {
+            const result = await auth(profile);
+            mnemonic = result.mnemonic;
+            encryptionKey = result.encryptionKey;
+            break;
+          }
+          case 'encryptionKey': {
+            const result = await auth(profile, undefined, method.encryptionKey);
+            mnemonic = result.mnemonic;
+            encryptionKey = result.encryptionKey;
+            break;
+          }
+        }
 
-        // Open SDK session with existing encrypted session state
+        const { account } = await deriveAccountFromMnemonic(mnemonic);
+
         await getSdk().openSession({
           mnemonic,
           encryptedSession: profile.session,
@@ -410,7 +405,6 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           onPersist: createOnPersist(profile.userId),
         });
 
-        // Update lastSeen timestamp for the logged-in user
         const lastSeen = new Date();
         const updatedProfile = {
           ...profile,
@@ -427,10 +421,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           lockedByUser: false,
         });
 
-        // Fetch MNS domains if MNS is enabled
-        fetchMnsDomainsIfEnabled(updatedProfile);
-
-        // TODO: Add session refresh via SDK if needed
+        fetchMnsDomainsIfEnabled(updatedProfile, get().provider);
       } catch (error) {
         console.error('Error loading account:', error);
         set({ isLoading: false });
@@ -442,7 +433,6 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       try {
         set({ isLoading: true });
 
-        // Capture userId before closing the session (userId requires open session)
         let accountUserId: string | undefined;
         try {
           accountUserId = getSdk().userId;
@@ -450,18 +440,15 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           // Session may already be closed
         }
 
-        // Cleanup session and in-memory stores
         await cleanupSession();
         useDiscussionStore.getState().cleanup();
         useMessageStore.getState().cleanup();
         useSelfMessageStore.getState().clearMessages();
 
-        // Clear only this account's data (not other accounts)
         try {
           if (accountUserId) {
             await getSdk().clearAccountData(accountUserId);
           } else {
-            // Fallback: no userId available, clear all tables
             await getSdk().clearAllTables();
           }
         } catch {
@@ -482,15 +469,11 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       try {
         set({ isLoading: true });
 
-        // Cleanup session and in-memory stores
         await cleanupSession();
         useDiscussionStore.getState().cleanup();
         useMessageStore.getState().cleanup();
         useSelfMessageStore.getState().clearMessages();
-        // Clear in-memory state but keep data in database
-        // Keep isInitialized true so user goes to login screen
-        // lockedByUser: true (default) skips biometric auto-login on the login screen
-        // lockedByUser: false (auto-lock) allows biometric auto-login on return
+
         set({
           ...clearAccountState(),
           lockedByUser: options?.lockedByUser ?? true,
@@ -506,7 +489,6 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       set({ isLoading: loading });
     },
 
-    // Biometric-based account initialization
     initializeAccountWithBiometrics: async (
       username: string,
       iCloudSync = false
@@ -514,64 +496,22 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       try {
         set({ isLoading: true });
 
-        // Ensure any existing session is closed before creating new account
-        await cleanupSession();
-
-        // Check biometric support using unified service
-        const availability = await biometricService.checkAvailability();
+        const availability = await checkBiometricAvailability();
         if (!availability.available) {
           throw new Error(
             'Biometric authentication is not available on this device'
           );
         }
 
-        // Generate a BIP39 mnemonic
         const mnemonic = generateMnemonic(256);
-
-        // Generate keys for Massa wallet
-        const keys = await generateUserKeys(mnemonic);
-        const account = await Account.fromPrivateKey(
-          PrivateKey.fromBytes(keys.secret_keys().massa_secret_key)
-        );
-        const userIdBytes = keys.public_keys().derive_id();
-        const userId = encodeUserId(userIdBytes);
-        const { encryptionKey, security } = await provisionAccount(
+        await setupAccount({
           username,
           mnemonic,
-          userIdBytes,
-          {
-            useBiometrics: true,
-            iCloudSync,
-          }
-        );
-
-        // Open SDK session
-        await getSdk().openSession({
-          mnemonic,
-          encryptionKey,
-          onPersist: createOnPersist(userId),
+          provisionOpts: { useBiometrics: true, iCloudSync },
+          extraState: {
+            platformAuthenticatorAvailable: availability.available,
+          },
         });
-
-        const session = getSdk().getEncryptedSession();
-
-        const profile = await getSdk().profiles.createOrUpdate(
-          username,
-          encodeUserId(userIdBytes),
-          security,
-          session
-        );
-
-        useAppStore.getState().setIsInitialized(true);
-        set({
-          userProfile: profile,
-          encryptionKey,
-          account,
-          isLoading: false,
-          platformAuthenticatorAvailable: availability.available,
-        });
-
-        // Fetch MNS domains if MNS is enabled
-        fetchMnsDomainsIfEnabled(profile);
       } catch (error) {
         console.error('Error creating user profile with biometrics:', error);
         set({ isLoading: false });
@@ -593,17 +533,9 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         }
 
         const { mnemonic } = await auth(profile, password);
+        const { account } = await deriveAccountFromMnemonic(mnemonic);
 
-        // Derive Massa account from mnemonic (SDK doesn't expose secret keys)
-        const keys = await generateUserKeys(mnemonic);
-        const account = await Account.fromPrivateKey(
-          PrivateKey.fromBytes(keys.secret_keys().massa_secret_key)
-        );
-
-        return {
-          mnemonic,
-          account,
-        };
+        return { mnemonic, account };
       } catch (error) {
         console.error('Error showing mnemonic backup:', error);
         throw error;
@@ -651,7 +583,6 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       }
     },
 
-    // Account detection methods
     hasExistingAccount: async () => {
       try {
         const count = await getSdk().profiles.getCount();
@@ -688,18 +619,16 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         console.warn(
           'No session, user profile, or encryption key to persist, skipping persistence'
         );
-        return; // Nothing to persist
+        return;
       }
 
       try {
-        // Serialize the session via SDK
         const sessionBlob = getSdk().getEncryptedSession();
         if (!sessionBlob) {
           console.warn('Failed to get encrypted session');
           return;
         }
 
-        // Update the profile with the new session blob
         const updatedProfile = {
           ...userProfile,
           session: sessionBlob,
@@ -710,7 +639,6 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         set({ userProfile: updatedProfile });
       } catch (error) {
         console.error('Error persisting session:', error);
-        // Don't throw - persistence failures shouldn't break the app
       }
     },
 
@@ -725,7 +653,6 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
 
         const trimmedUsername = newUsername.trim();
 
-        // Validate username format (consistency with account creation)
         const formatResult = validateUsernameFormat(trimmedUsername);
         if (!formatResult.valid) {
           throw new Error(formatResult.error || 'Invalid username format');
@@ -765,11 +692,9 @@ useAccountStoreBase.subscribe(async (state, prevState) => {
 
 // Subscribe to account changes to initialize provider
 useAccountStoreBase.subscribe(async (state, prevState) => {
-  // Compare account addresses to detect actual account changes
   const currentAddress = state.account?.address?.toString();
   const prevAddress = prevState.account?.address?.toString();
 
-  // Only proceed if account address actually changed
   if (currentAddress === prevAddress) return;
 
   try {
@@ -796,30 +721,11 @@ useAccountStoreBase.subscribe(async (state, prevState) => {
 
 // Subscribe to provider changes to fetch MNS domains when provider becomes available
 useAccountStoreBase.subscribe(async (state, prevState) => {
-  // Only proceed if provider actually changed (became available)
   if (state.provider === prevState.provider) return;
 
-  // Fetch MNS domains if provider is available and user profile exists
   if (state.provider && state.userProfile) {
     fetchMnsDomainsIfEnabled(state.userProfile, state.provider);
   }
 });
-
-// Helper function to fetch MNS domains if MNS is enabled
-// Used in subscriptions where we have explicit provider
-function fetchMnsDomainsIfEnabled(
-  profile: UserProfile,
-  provider: Provider
-): void {
-  const { mnsEnabled } = useAppStore.getState();
-  if (!mnsEnabled) return;
-
-  useAppStore
-    .getState()
-    .fetchMnsDomains(profile, provider)
-    .catch(error => {
-      console.error('Error fetching MNS domains:', error);
-    });
-}
 
 export const useAccountStore = createSelectors(useAccountStoreBase);

@@ -27,9 +27,8 @@ function updateState(isVisible: boolean, height: number) {
 function initKeyboardTracking() {
   const vp = window.innerHeight;
   useKeyboardStore.setState({ viewportHeight: vp });
-  setCssVar('--viewport-height', `${vp}px`);
+  setCssVar('--available-height', `${vp}px`);
   setCssVar('--keyboard-height', '0px');
-  setCssVar('--keyboard-offset', '0px');
 
   const platform = Capacitor.getPlatform();
   setCssVar(
@@ -38,29 +37,65 @@ function initKeyboardTracking() {
   );
 
   if (Capacitor.isNativePlatform()) {
-    // Both iOS (KeyboardResize.None) and Android (adjustNothing in manifest)
-    // prevent the OS from resizing the WebView. We lock --viewport-height
-    // and use --keyboard-offset to shrink the layout ourselves.
-    // This ensures consistent behavior across all OEMs (Samsung, Xiaomi, etc.).
-    window.addEventListener('resize', () => {
-      if (useKeyboardStore.getState().height === 0) {
-        const h = window.innerHeight;
-        useKeyboardStore.setState({ viewportHeight: h });
-        setCssVar('--viewport-height', `${h}px`);
+    if (platform === 'ios') {
+      // iOS with KeyboardResize.None: the WebView stays full-size and
+      // visualViewport doesn't change. We must compute available height
+      // from the Capacitor keyboard events directly.
+
+      Keyboard.addListener('keyboardWillShow', (info: KeyboardInfo) => {
+        updateState(true, info.keyboardHeight);
+        setCssVar('--keyboard-height', `${info.keyboardHeight}px`);
+        const { viewportHeight } = useKeyboardStore.getState();
+        setCssVar(
+          '--available-height',
+          `${viewportHeight - info.keyboardHeight}px`
+        );
+      });
+
+      Keyboard.addListener('keyboardWillHide', () => {
+        updateState(false, 0);
+        setCssVar('--keyboard-height', '0px');
+        const { viewportHeight } = useKeyboardStore.getState();
+        setCssVar('--available-height', `${viewportHeight}px`);
+      });
+    } else {
+      // Android: use visualViewport as single source of truth.
+      // Works regardless of OEM behavior (Samsung adjustResize,
+      // Xiaomi adjustNothing, etc).
+
+      Keyboard.addListener('keyboardWillShow', (info: KeyboardInfo) => {
+        updateState(true, info.keyboardHeight);
+        setCssVar('--keyboard-height', `${info.keyboardHeight}px`);
+      });
+
+      Keyboard.addListener('keyboardWillHide', () => {
+        updateState(false, 0);
+        setCssVar('--keyboard-height', '0px');
+      });
+
+      const vv = window.visualViewport;
+      if (vv) {
+        const syncHeight = () => {
+          const h = vv.height;
+          setCssVar('--available-height', `${h}px`);
+          if (!useKeyboardStore.getState().isVisible) {
+            useKeyboardStore.setState({ viewportHeight: h });
+          }
+        };
+        vv.addEventListener('resize', syncHeight);
       }
-    });
 
-    Keyboard.addListener('keyboardWillShow', (info: KeyboardInfo) => {
-      updateState(true, info.keyboardHeight);
-      setCssVar('--keyboard-height', `${info.keyboardHeight}px`);
-      setCssVar('--keyboard-offset', `${info.keyboardHeight}px`);
-    });
-
-    Keyboard.addListener('keyboardWillHide', () => {
-      updateState(false, 0);
-      setCssVar('--keyboard-height', '0px');
-      setCssVar('--keyboard-offset', '0px');
-    });
+      // Fallback for devices without visualViewport
+      window.addEventListener('resize', () => {
+        if (!window.visualViewport) {
+          const h = window.innerHeight;
+          setCssVar('--available-height', `${h}px`);
+          if (!useKeyboardStore.getState().isVisible) {
+            useKeyboardStore.setState({ viewportHeight: h });
+          }
+        }
+      });
+    }
 
     return;
   }

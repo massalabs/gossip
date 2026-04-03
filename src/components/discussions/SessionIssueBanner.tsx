@@ -23,7 +23,7 @@ const SessionIssueBanner: React.FC<SessionIssueBannerProps> = ({
   if (!isSessionSaturated) return null;
 
   return (
-    <div className="w-full rounded-md border border-border bg-muted px-2 py-1.5 text-xs text-muted-foreground flex items-start gap-2">
+    <div className="w-full rounded-lg border border-border bg-muted px-3 py-2 text-xs text-muted-foreground leading-relaxed flex items-start gap-2">
       <span className="flex-1">{t('session_issue.message')}</span>
       <Popover
         ariaLabel={t('session_issue.info_label')}
