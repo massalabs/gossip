@@ -10,7 +10,8 @@ members = [
     "crypto-agraphon",
     "auth",
     "sessions",
-    "main"
+    "main",
+    "secure-storage"
 ]
 
 [workspace.package]
