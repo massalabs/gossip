@@ -268,7 +268,7 @@ const SelfDiscussion: React.FC = () => {
       }
       overlay={retentionModal}
     >
-      <div className="h-full">
+      <div className="h-full bg-discussion-pattern">
         {!isLoading && outgoingMessages.length === 0 ? (
           <div className="h-full flex items-center justify-center px-8">
             <p className="text-center text-sm text-muted-foreground">

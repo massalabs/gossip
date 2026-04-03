@@ -436,7 +436,9 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
     if (isLoading) {
       return (
         <SignalReadyOnMount signalReady={signalReady}>
-          <LoadingState />
+          <div className="h-full bg-discussion-pattern">
+            <LoadingState />
+          </div>
         </SignalReadyOnMount>
       );
     }
@@ -444,7 +446,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
     if (messages.length === 0 && !discussion?.lastAnnouncementMessage) {
       return (
         <SignalReadyOnMount signalReady={signalReady}>
-          <div className="px-4 md:px-6 lg:px-8 py-6">
+          <div className="h-full bg-discussion-pattern px-4 md:px-6 lg:px-8 py-6">
             <EmptyState />
           </div>
         </SignalReadyOnMount>
