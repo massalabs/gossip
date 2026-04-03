@@ -91,6 +91,11 @@
             </intent-filter>
         </receiver>
 
+        <service
+            android:name=".GossipForegroundSyncService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
     </application>
 
     <!-- Permissions -->
@@ -108,5 +113,8 @@
     
     <!-- Network state monitoring permission -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
 </manifest>
