@@ -38,12 +38,10 @@ const NativeQRScanner: React.FC<QRScannerProps> = ({
           // Expected when the user leaves the scanner or the OS ends the session (e.g. custom ROMs).
           // Use debug level so logcat / dev-console are not noisy; full detail is still in the debug overlay.
           console.debug(line, normalized);
+          onClose();
         } else {
           console.warn(line, err);
           onError(normalized.message);
-        }
-        if (normalized.isCancelled) {
-          onClose();
         }
       }
     };
