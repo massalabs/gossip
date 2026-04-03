@@ -37,47 +37,65 @@ function initKeyboardTracking() {
   );
 
   if (Capacitor.isNativePlatform()) {
-    // Use Capacitor Keyboard events for isVisible/height state,
-    // but rely on visualViewport for the actual available height.
-    // This is infallible: visualViewport.height always reflects the
-    // visible area regardless of what the OS does (adjustNothing,
-    // adjustResize, Samsung quirks, etc).
+    if (platform === 'ios') {
+      // iOS with KeyboardResize.None: the WebView stays full-size and
+      // visualViewport doesn't change. We must compute available height
+      // from the Capacitor keyboard events directly.
 
-    Keyboard.addListener('keyboardWillShow', (info: KeyboardInfo) => {
-      updateState(true, info.keyboardHeight);
-      setCssVar('--keyboard-height', `${info.keyboardHeight}px`);
-    });
+      Keyboard.addListener('keyboardWillShow', (info: KeyboardInfo) => {
+        updateState(true, info.keyboardHeight);
+        setCssVar('--keyboard-height', `${info.keyboardHeight}px`);
+        const { viewportHeight } = useKeyboardStore.getState();
+        setCssVar(
+          '--available-height',
+          `${viewportHeight - info.keyboardHeight}px`
+        );
+      });
 
-    Keyboard.addListener('keyboardWillHide', () => {
-      updateState(false, 0);
-      setCssVar('--keyboard-height', '0px');
-    });
+      Keyboard.addListener('keyboardWillHide', () => {
+        updateState(false, 0);
+        setCssVar('--keyboard-height', '0px');
+        const { viewportHeight } = useKeyboardStore.getState();
+        setCssVar('--available-height', `${viewportHeight}px`);
+      });
+    } else {
+      // Android: use visualViewport as single source of truth.
+      // Works regardless of OEM behavior (Samsung adjustResize,
+      // Xiaomi adjustNothing, etc).
 
-    // visualViewport is the single source of truth for available height.
-    // Works on all Android OEMs regardless of adjustNothing/adjustResize.
-    const vv = window.visualViewport;
-    if (vv) {
-      const syncHeight = () => {
-        const h = vv.height;
-        setCssVar('--available-height', `${h}px`);
-        if (!useKeyboardStore.getState().isVisible) {
-          useKeyboardStore.setState({ viewportHeight: h });
-        }
-      };
-      vv.addEventListener('resize', syncHeight);
-    }
+      Keyboard.addListener('keyboardWillShow', (info: KeyboardInfo) => {
+        updateState(true, info.keyboardHeight);
+        setCssVar('--keyboard-height', `${info.keyboardHeight}px`);
+      });
 
-    // Fallback: also listen to window resize for devices where
-    // visualViewport doesn't fire (rare, but defensive).
-    window.addEventListener('resize', () => {
-      if (!window.visualViewport) {
-        const h = window.innerHeight;
-        setCssVar('--available-height', `${h}px`);
-        if (!useKeyboardStore.getState().isVisible) {
-          useKeyboardStore.setState({ viewportHeight: h });
-        }
+      Keyboard.addListener('keyboardWillHide', () => {
+        updateState(false, 0);
+        setCssVar('--keyboard-height', '0px');
+      });
+
+      const vv = window.visualViewport;
+      if (vv) {
+        const syncHeight = () => {
+          const h = vv.height;
+          setCssVar('--available-height', `${h}px`);
+          if (!useKeyboardStore.getState().isVisible) {
+            useKeyboardStore.setState({ viewportHeight: h });
+          }
+        };
+        vv.addEventListener('resize', syncHeight);
       }
-    });
+
+      // Fallback for devices without visualViewport
+      window.addEventListener('resize', () => {
+        if (!window.visualViewport) {
+          const h = window.innerHeight;
+          setCssVar('--available-height', `${h}px`);
+          if (!useKeyboardStore.getState().isVisible) {
+            useKeyboardStore.setState({ viewportHeight: h });
+          }
+        }
+      });
+    }
 
     return;
   }
