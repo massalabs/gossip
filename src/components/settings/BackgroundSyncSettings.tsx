@@ -14,7 +14,6 @@ import { App } from '@capacitor/app';
 import {
   Battery,
   ExternalLink,
-  Shield,
   AlertTriangle,
   RefreshCcw,
   Zap,
@@ -265,12 +264,6 @@ const BackgroundSyncSettings: React.FC<BackgroundSyncSettingsProps> = ({
 
   const hasIssues = androidHasIssues || iosHasIssues;
 
-  const isReliable = isAndroidNative
-    ? androidStatus?.isBackgroundSyncReliable
-    : isIOSNative
-      ? iosStatus?.isBackgroundSyncReliable
-      : true;
-
   // Get iOS warning message
   const iosWarningMessage = iosStatus
     ? backgroundRefreshService.getStatusMessage(iosStatus)
@@ -288,13 +281,6 @@ const BackgroundSyncSettings: React.FC<BackgroundSyncSettingsProps> = ({
           <span className="text-xs text-muted-foreground">
             {t('background_sync.checking')}
           </span>
-        ) : isReliable ? (
-          <div className="flex items-center gap-1.5">
-            <Shield className="w-4 h-4 text-success" aria-hidden="true" />
-            <span className="text-xs text-success">
-              {t('background_sync.optimized')}
-            </span>
-          </div>
         ) : hasIssues ? (
           <div className="flex items-center gap-1.5">
             <AlertTriangle
