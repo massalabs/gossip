@@ -12,6 +12,7 @@ import android.content.SharedPreferences;
 import android.os.Build;
 import android.os.IBinder;
 import android.os.SystemClock;
+import android.util.Log;
 
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
@@ -25,6 +26,8 @@ import androidx.core.app.NotificationCompat;
  */
 public class GossipForegroundSyncService extends Service {
 
+    private static final String TAG = "GossipForegroundSync";
+
     public static final String PREFS_NAME = "GossipForegroundSyncPrefs";
     public static final String KEY_ENABLED = "foreground_sync_enabled";
     /** SharedPreferences key matching BACKGROUND_SYNC_PRESET_KV_KEY on the JS side. */
@@ -37,6 +40,13 @@ public class GossipForegroundSyncService extends Service {
 
     private static final long TICK_MS_MAX = 1 * 60 * 1000L;       // 1 min — preset "max"
     private static final long TICK_MS_BALANCED = 5 * 60 * 1000L;   // 5 min — preset "balanced" (default)
+    /**
+     * Floor used when SCHEDULE_EXACT_ALARM is not granted and we fall back to
+     * setAndAllowWhileIdle. Doze throttles inexact allow-while-idle alarms to a
+     * 9–15 min minimum, so scheduling a 1-min next-fire is misleading and just
+     * burns binder calls. Use 15 min to align with Doze's worst case.
+     */
+    private static final long TICK_MS_DEGRADED_FLOOR = 15 * 60 * 1000L;
 
     @Override
     public void onCreate() {
@@ -103,14 +113,64 @@ public class GossipForegroundSyncService extends Service {
         return PendingIntent.getService(this, ALARM_REQUEST_CODE, intent, flags);
     }
 
+    /**
+     * Whether the app can schedule exact alarms.
+     *
+     * Pre-API 31, the SCHEDULE_EXACT_ALARM permission did not exist and exact alarms
+     * are always allowed. From API 31+, the permission is required and must be checked
+     * via AlarmManager.canScheduleExactAlarms() at runtime since the user (or system)
+     * can revoke it at any time. The early Build.VERSION.SDK_INT return is recognized
+     * by Android lint's SDK version checker, so canScheduleExactAlarms() (which is
+     * @RequiresApi(31)) is only reached on API 31+.
+     */
+    private static boolean canUseExactAlarms(AlarmManager am) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+            return true;
+        }
+        return am.canScheduleExactAlarms();
+    }
+
+    /**
+     * Schedule the next sync tick via AlarmManager.
+     *
+     * On Android 12+ (API 31+), exact alarms require the SCHEDULE_EXACT_ALARM permission,
+     * which is NOT pre-granted on Android 13+ fresh installs and may be revoked at any time
+     * by the user or the system. Calling setExactAndAllowWhileIdle without it throws
+     * SecurityException, which would crash the foreground service.
+     *
+     * Strategy (minSdk is 26, so we always have setExactAndAllowWhileIdle available):
+     *  - API 31+ with permission: setExactAndAllowWhileIdle (1-min "max" preset works)
+     *  - API 31+ without permission: fallback to setAndAllowWhileIdle (degraded — Doze
+     *    will throttle to ~9-15 min minimum, but the app keeps working without crashing)
+     *  - API 26-30: setExactAndAllowWhileIdle (no permission required on these versions)
+     *
+     * The whole call is wrapped in try/catch as a final safety net against any unexpected
+     * SecurityException from OEM-specific battery savers (Xiaomi, Huawei, etc.).
+     */
     private void scheduleNextTick() {
         AlarmManager am = (AlarmManager) getSystemService(ALARM_SERVICE);
         if (am == null) return;
-        long triggerAt = SystemClock.elapsedRealtime() + getTickMs();
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            am.setExactAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerAt, tickPendingIntent());
-        } else {
-            am.setExact(AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerAt, tickPendingIntent());
+        boolean exact = canUseExactAlarms(am);
+        // In degraded mode, Doze clamps inexact alarms to 9-15 min anyway, so
+        // honour that floor in our own next-fire calculation rather than asking
+        // for 1 min and being silently throttled. Keeps tick metrics honest.
+        long tickMs = exact ? getTickMs() : Math.max(getTickMs(), TICK_MS_DEGRADED_FLOOR);
+        long triggerAt = SystemClock.elapsedRealtime() + tickMs;
+        PendingIntent pi = tickPendingIntent();
+        try {
+            if (exact) {
+                am.setExactAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerAt, pi);
+            } else {
+                Log.w(TAG, "SCHEDULE_EXACT_ALARM not granted, using inexact alarm (Doze-throttled)");
+                am.setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerAt, pi);
+            }
+        } catch (SecurityException e) {
+            Log.w(TAG, "SCHEDULE_EXACT_ALARM not granted, using inexact alarm (Doze-throttled)", e);
+            try {
+                am.setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerAt, pi);
+            } catch (Exception ignored) {
+                Log.e(TAG, "Failed to schedule any alarm — sync tick disabled until next service start");
+            }
         }
     }
 

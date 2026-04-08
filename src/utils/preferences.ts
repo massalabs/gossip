@@ -158,12 +158,17 @@ export async function setBackgroundSyncPreset(
   });
   if (Capacitor.isNativePlatform()) {
     await setBackgroundRunnerStorage(BACKGROUND_SYNC_PRESET_KV_KEY, preset);
-    await ForegroundSync.setSyncPreset({ preset });
+    try {
+      await ForegroundSync.setSyncPreset({ preset });
+    } catch {
+      // Native plugin missing or platform without ForegroundSync — ignore.
+    }
   }
 }
 
 /**
- * Copy the current preset into Background Runner storage so the headless script can read it.
+ * Copy the current preset into Background Runner storage AND the native foreground
+ * service SharedPreferences so both stay in sync with the JS-side Preferences value.
  * Call after startup and whenever the app may have updated Preferences without going through setBackgroundSyncPreset.
  */
 export async function syncBackgroundSyncPresetToRunner(): Promise<void> {
@@ -172,4 +177,11 @@ export async function syncBackgroundSyncPresetToRunner(): Promise<void> {
   }
   const preset = await getBackgroundSyncPreset();
   await setBackgroundRunnerStorage(BACKGROUND_SYNC_PRESET_KV_KEY, preset);
+  // Also push to the Android foreground service SharedPrefs so the native tick
+  // interval matches the JS-side preset (no-op on iOS via the web stub).
+  try {
+    await ForegroundSync.setSyncPreset({ preset });
+  } catch {
+    // Native plugin missing or platform without ForegroundSync — ignore.
+  }
 }
