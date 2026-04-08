@@ -9,6 +9,7 @@ import {
 import {
   isWebAuthnSupported,
   isPlatformAuthenticatorAvailable,
+  isWebAuthnPrfSupported,
   createWebAuthnCredential,
   authenticateWithWebAuthn,
 } from '../crypto/webauthn';
@@ -133,14 +134,24 @@ export async function checkBiometricAvailability(): Promise<BiometricAvailabilit
 
   if (isWebAuthnSupported()) {
     try {
-      const available = await isPlatformAuthenticatorAvailable();
-      if (available) {
+      const [platformAvailable, prfSupported] = await Promise.all([
+        isPlatformAuthenticatorAvailable(),
+        isWebAuthnPrfSupported(),
+      ]);
+      if (platformAvailable && prfSupported) {
         return {
           available: true,
           biometryType: 'fingerprint',
           method: 'webauthn',
         };
       }
+      console.info(
+        '[biometric][availability] WebAuthn unavailable after preflight',
+        {
+          platformAvailable,
+          prfSupported,
+        }
+      );
     } catch (error) {
       console.warn('WebAuthn not available:', error);
     }
