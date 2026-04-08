@@ -2,9 +2,11 @@
  * Profile Service
  *
  * Manages user profiles (get, save, delete, validate, etc.).
- * Only requires Queries — no session needed, so it can be created at init() time.
+ * Only requires Queries and IMessageProtocol — no session needed,
+ * so it can be created at init() time.
  */
 
+import { Logger } from '../utils/logs.js';
 import { type UserProfile } from '../db/index.js';
 import {
   Queries,
@@ -15,12 +17,17 @@ import {
   validateUsernameFormatAndAvailability,
   type ValidationResult,
 } from '../utils/validation.js';
+import { IMessageProtocol } from '../api/messageProtocol/index.js';
 
 export class ProfileService {
   private queries: Queries;
+  private messageProtocol: IMessageProtocol;
 
-  constructor(queries: Queries) {
+  private logger = new Logger('ProfileService');
+
+  constructor(queries: Queries, messageProtocol: IMessageProtocol) {
     this.queries = queries;
+    this.messageProtocol = messageProtocol;
   }
 
   async get(userId: string): Promise<UserProfile | null> {
@@ -71,7 +78,8 @@ export class ProfileService {
     username: string,
     userId: string,
     security: UserProfile['security'],
-    session: Uint8Array
+    session: Uint8Array,
+    skipHistoricalAnnouncements: boolean = false
   ): Promise<UserProfile> {
     const existing = await this.queries.userProfiles.getById(userId);
     if (existing) {
@@ -107,6 +115,42 @@ export class ProfileService {
       updatedAt: new Date(),
     };
     await this.queries.userProfiles.upsert(userProfileToRow(newProfile));
+
+    if (skipHistoricalAnnouncements) {
+      await this.skipHistoricalAnnouncements(userId);
+    }
+
     return newProfile;
+  }
+
+  /**
+   * Persist the bulletin polling cursor for the provided user.
+   * Stored in a dedicated announcementCursors table (not userProfile).
+   */
+  private async _upsertLastBulletinCounter(
+    nextCounter: string,
+    userId: string
+  ): Promise<void> {
+    await this.queries.announcementCursors.upsert(userId, nextCounter);
+  }
+
+  /**
+   * Fetch the latest bulletin counter from the API and persist it so that
+   * historical announcements (undecryptable by a new account) are skipped.
+   * No-op if a counter already exists.
+   */
+  async skipHistoricalAnnouncements(userId: string): Promise<void> {
+    const log = this.logger.forMethod('skipHistoricalAnnouncements');
+    const existing = await this.queries.announcementCursors.get(userId);
+    if (existing !== undefined) return;
+
+    try {
+      const counter = await this.messageProtocol.fetchBulletinCounter();
+      await this._upsertLastBulletinCounter(counter, userId);
+      log.info('set initial bulletin counter for new account', { counter });
+    } catch (err) {
+      // Non-critical — on failure the first fetch starts from the beginning.
+      log.warn('failed to initialize bulletin counter', { err });
+    }
   }
 }

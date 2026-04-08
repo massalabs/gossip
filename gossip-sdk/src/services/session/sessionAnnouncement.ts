@@ -10,10 +10,8 @@ import {
   MessageType,
   Session,
 } from '../../db/index.js';
-import { toDiscussion } from '../../utils/discussions.js';
-import { decodeUserId, encodeUserId } from '../../utils/userId.js';
+import { encodeUserId } from '../../utils/userId.js';
 import { IMessageProtocol } from '../../api/messageProtocol/index.js';
-import { SessionStatus } from '../../wasm/bindings.js';
 import { SessionModule, sessionStatusToString } from '../../wasm/session.js';
 import { Logger } from '../../utils/logs.js';
 import { BulletinItem } from '../../api/messageProtocol/types.js';
@@ -86,10 +84,11 @@ export class SessionAnnouncementService {
     for (const session of sessions) {
       if (!session.id) continue;
 
-      // sendAnnouncement is deserialized by toDiscussion() before reaching here
-      if (session.announcement_bytes === null || session.when_to_send === null) continue;
+      // If there is no announcement to send, skip
+      if (session.announcement_bytes === null || session.when_to_send === null)
+        continue;
 
-
+      // If the announcement is not yet time to send, skip
       if (session.when_to_send.getTime() > now) {
         log.debug('skipping announcement, not yet time to send', {
           sessionId: session.id,
@@ -100,7 +99,7 @@ export class SessionAnnouncementService {
         continue;
       }
 
-      // Send the announcement and handle updates after transaction
+      // Send the announcement
       const result = await this.sendAnnouncement(session.announcement_bytes);
 
       // update session state after sending
@@ -115,10 +114,11 @@ export class SessionAnnouncementService {
           updatedAt: new Date(),
         });
       } else {
+        // If sending the announcement throught the network failed, retry later
         await this.queries.sessions.updateById(session.id, {
-          announcement_bytes: session.announcement_bytes,
+          announcement_bytes: session.announcement_bytes, // keep the encrypted announcement bytes for later retry
           when_to_send: new Date(
-            Date.now() + this.config.announcements.retryDelayMs
+            Date.now() + this.config.announcements.retryDelayMs // retry later
           ),
           updatedAt: new Date(),
           /* If send announcement failed, There are chances that the session will be killed again the next state_update call.
@@ -132,6 +132,7 @@ export class SessionAnnouncementService {
   async fetchAndProcessAnnouncements(): Promise<AnnouncementReceptionResult> {
     const log = logger.forMethod('fetchAndProcessAnnouncements');
 
+    // If this function is already running, skip
     if (this.isProcessingAnnouncements) {
       log.info('fetch already in progress, skipping');
       return { success: true, newAnnouncementsCount: 0 };
@@ -143,6 +144,8 @@ export class SessionAnnouncementService {
 
     this.isProcessingAnnouncements = true;
     try {
+      /* First attempt to process pending announcements from DB if any. 
+      These announcements were fetched by webservice and stored in the database when the app was not up, to be processed later when the app is back up.*/
       const pending = await this.queries.pendingAnnouncements.getAll();
       const successfullyProcessedPendingIds: number[] = [];
 
@@ -213,7 +216,7 @@ export class SessionAnnouncementService {
         };
       }
 
-      // No pending - fetch from API
+      /* No pending announcements un DB - fetch from API */
       const cursor = await this.queries.announcementCursors.get(
         this.session.userIdEncoded
       );
@@ -286,28 +289,6 @@ export class SessionAnnouncementService {
     );
   }
 
-  /**
-   * Fetch the latest bulletin counter from the API and persist it so that
-   * historical announcements (undecryptable by a new account) are skipped.
-   * No-op if a counter already exists.
-   */
-  async skipHistoricalAnnouncements(): Promise<void> {
-    const log = logger.forMethod('skipHistoricalAnnouncements');
-    const existing = await this.queries.announcementCursors.get(
-      this.session.userIdEncoded
-    );
-    if (existing !== undefined) return;
-
-    try {
-      const counter = await this.messageProtocol.fetchBulletinCounter();
-      await this._upsertLastBulletinCounter(counter);
-      log.info('set initial bulletin counter for new account', { counter });
-    } catch (err) {
-      // Non-critical — on failure the first fetch starts from the beginning.
-      log.warn('failed to initialize bulletin counter', { err });
-    }
-  }
-
   // ─────────────────────────────────────────────────────────────────
   // Consumer-facing aliases
   // ─────────────────────────────────────────────────────────────────
@@ -315,11 +296,6 @@ export class SessionAnnouncementService {
   /** Fetch and process announcements from the protocol (alias) */
   async fetch(): Promise<AnnouncementReceptionResult> {
     return this.fetchAndProcessAnnouncements();
-  }
-
-  /** Skip historical announcements for a new account (alias) */
-  async skipHistorical(): Promise<void> {
-    return this.skipHistoricalAnnouncements();
   }
 
   private async _fetchAnnouncements(
@@ -364,13 +340,17 @@ export class SessionAnnouncementService {
     announcementData: Uint8Array
   ): Promise<{
     success: boolean;
-    discussionId?: number;
     contactUserId?: string;
     error?: string;
   }> {
     const log = logger.forMethod('_processIncomingAnnouncement');
 
-    // feed incoming announcement to session manager to decrypt and get the announcement result (we are the recipient of the announcement)
+    /* feed incoming announcement to session manager to decrypt and get the announcement result
+     If the result is not null, it means the announcement is intended for us. 
+     After this line, the announcement is stored in session manager:
+      - If no outgoing announcement sent to this contact, a new peerRequested session is now setup
+      - If we already have an outgoing announcement sent to this contact, the session is now active.
+     If the result is null, it means the announcement is not intended for us. It's not an error*/
     const result =
       await this.session.feedIncomingAnnouncement(announcementData);
 
@@ -427,9 +407,30 @@ export class SessionAnnouncementService {
       throw new Error('Could not find or create contact');
     }
 
-    const { discussionId } = await this._handleReceivedDiscussion(
-      this.session.userIdEncoded,
+    const existingSession =
+      await this.queries.sessions.getByContact(contactUserId);
+    if (!existingSession) {
+      const now = new Date();
+      await this.queries.sessions.insert({
+        contactUserId,
+        announcement_bytes: null,
+        when_to_send: null,
+        createdAt: now,
+        updatedAt: now,
+      });
+    } else {
+      // reset pending outgoing messages to WAITING_SESSION for this contact
+      // Only reset READY and SENT — DELIVERED messages should not be resent.
+      await this.queries.messages.resetSendQueue(
+        this.session.userIdEncoded,
+        contactUserId
+      );
+    }
+
+    this.eventEmitter.emit(
+      SdkEventType.ANNOUNCEMENT_RECEIVED,
       contactUserId,
+      contact.name,
       message
     );
 
@@ -467,85 +468,7 @@ export class SessionAnnouncementService {
 
     return {
       success: true,
-      discussionId,
       contactUserId,
     };
-  }
-
-  private async _handleReceivedDiscussion(
-    ownerUserId: string,
-    contactUserId: string,
-    message?: string
-  ): Promise<{ discussionId: number }> {
-    const log = logger.forMethod('handleReceivedDiscussion');
-
-    const existing = await this.queries.discussions.getByOwnerAndContact(
-      ownerUserId,
-      contactUserId
-    );
-
-    if (existing) {
-      const updateData: Record<string, unknown> = { updatedAt: new Date() };
-      if (message) updateData.announcementMessage = message;
-
-      log.info('updating existing discussion', {
-        discussionId: existing.id,
-        contactUserId,
-      });
-
-      await this.queries.discussions.updateById(existing.id, updateData);
-
-      // reset pending outgoing messages to WAITING_SESSION for this contact
-      // Only reset READY and SENT — DELIVERED messages should not be resent.
-      await this.queries.messages.resetSendQueue(
-        this.session.userIdEncoded,
-        contactUserId
-      );
-
-      const newDiscussion = await this.queries.discussions.getById(existing.id);
-      const contactRow = await this.queries.contacts.getByOwnerAndUser(
-        ownerUserId,
-        contactUserId
-      );
-      if (
-        newDiscussion &&
-        contactRow &&
-        this.session.peerSessionStatus(decodeUserId(contactUserId)) ===
-          SessionStatus.PeerRequested
-      ) {
-        this.eventEmitter.emit(
-          SdkEventType.SESSION_REQUESTED,
-          toDiscussion(newDiscussion),
-          contactRow
-        );
-      }
-      return { discussionId: existing.id };
-    }
-
-    log.info('creating new discussion', { contactUserId });
-    const discussionId = await this.queries.discussions.insert({
-      ownerUserId,
-      contactUserId,
-      direction: DiscussionDirection.RECEIVED,
-      announcementMessage: message,
-      unreadCount: 0,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
-
-    const discussion = await this.queries.discussions.getById(discussionId);
-    const contactRow = await this.queries.contacts.getByOwnerAndUser(
-      ownerUserId,
-      contactUserId
-    );
-    if (discussion && contactRow) {
-      this.eventEmitter.emit(
-        SdkEventType.SESSION_REQUESTED,
-        toDiscussion(discussion),
-        contactRow
-      );
-    }
-
-    return { discussionId };
   }
 }

@@ -8,7 +8,7 @@
  * End-to-end flow over the live API (https://api.usegossip.com):
  *   1. Alice opens session (publishes public keys)
  *   2. Bob opens session (publishes public keys)
- *   3. Alice starts a discussion with Bob (simplified API)
+ *   3. Alice adds Bob as contact, then creates DM
  *   4. Bob polls for announcement → accepts
  *   5. Alice polls for acceptance → session active
  *   6. Alice sends a message → Bob polls until received
@@ -133,11 +133,9 @@ async function main() {
   const alice = await openSdk(ALICE_MNEMONIC, ALICE_STORAGE);
   // ── Step 2: Bob opens session ───────────────────────────────────
   const bob = await openSdk(BOB_MNEMONIC, BOB_STORAGE);
-  // ── Step 3: Alice starts discussion with Bob ─────────────────────
-  const startResult = await alice.discussions.startByUserId(bob.userId, 'Bob', {
-    username: 'Alice',
-    message: ALICE_MESSAGE,
-  });
+  // ── Step 3: Alice adds Bob as contact then creates DM ────────────
+  await alice.contacts.add(bob.userId, 'Bob', bob.publicKeys);
+  const startResult = await alice.dms.create(bob.userId, ALICE_MESSAGE);
 
   if (!startResult.success)
     throw new Error(`Start discussion failed: ${startResult.error}`);

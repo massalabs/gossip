@@ -11,15 +11,15 @@ import {
   MessageStatus,
   MessageType,
   MESSAGE_ID_SIZE,
-} from '../db/index.js';
-import { type MessageRow } from '../db/index.js';
-import { decodeUserId, encodeUserId } from '../utils/userId.js';
+} from '../../db/index.js';
+import { type MessageRow } from '../../db/index.js';
+import { decodeUserId, encodeUserId } from '../../utils/userId.js';
 import {
   IMessageProtocol,
   EncryptedMessage,
-} from '../api/messageProtocol/index.js';
-import { SessionStatus } from '../wasm/bindings.js';
-import { SessionModule } from '../wasm/index.js';
+} from '../../api/messageProtocol/index.js';
+import { SessionStatus } from '../../wasm/bindings.js';
+import { SessionModule } from '../../wasm/index.js';
 import {
   serializeRegularMessage,
   serializeReplyMessage,
@@ -31,140 +31,27 @@ import {
   serializeReactionMessage,
   serializeRetentionPolicyMessage,
   deserializeMessage,
-} from '../utils/messageSerialization.js';
-import { encodeToBase64, decodeFromBase64 } from '../utils/base64.js';
-import { Result } from '../utils/type.js';
-import { sessionStatusToString } from '../wasm/session.js';
-import { Logger } from '../utils/logs.js';
-import { SdkConfig, defaultSdkConfig } from '../config/sdk.js';
-import { SdkEventEmitter, SdkEventType } from '../core/SdkEventEmitter.js';
-import type { RefreshService } from './refresh.js';
-import { Queries } from '../db/queries/index.js';
-import { QueueManager } from '../utils/queue.js';
+} from '../../utils/messageSerialization.js';
+import { encodeToBase64 } from '../../utils/base64.js';
+import { Result } from '../../utils/type.js';
+import { sessionStatusToString } from '../../wasm/session.js';
+import { Logger } from '../../utils/logs.js';
+import { SdkConfig, defaultSdkConfig } from '../../config/sdk.js';
+import { SdkEventEmitter, SdkEventType } from '../../core/SdkEventEmitter.js';
+import { Queries } from '../../db/queries/index.js';
+import { QueueManager } from '../../utils/queue.js';
+import { RefreshService } from '../refresh.js';
 
 /** Options for the simplified sendText method */
 export interface SendTextOptions {
   /** Reply to an existing message */
-  replyTo?: { originalMsgId: Uint8Array };
+  replyToMsgId?: Uint8Array;
   /** Arbitrary metadata to attach */
   metadata?: Record<string, unknown>;
 }
 
 // ---------------------------------------------------------------------------
-// JSON serialization helpers for message fields stored as text in SQLite
-// ---------------------------------------------------------------------------
-
-/** Serialize replyTo to JSON string for SQLite storage.
- *  Uint8Array fields are base64-encoded. */
-function serializeReplyTo(
-  replyTo: { originalMsgId: Uint8Array } | undefined
-): string | null {
-  if (!replyTo) return null;
-  return JSON.stringify({
-    originalMsgId: encodeToBase64(replyTo.originalMsgId),
-  });
-}
-
-/** Deserialize replyTo from JSON string. */
-function deserializeReplyTo(
-  json: string | null
-): { originalMsgId: Uint8Array } | undefined {
-  if (!json) return undefined;
-  const parsed = JSON.parse(json);
-  return {
-    originalMsgId: decodeFromBase64(parsed.originalMsgId),
-  };
-}
-
-/** Serialize forwardOf to JSON string for SQLite storage. */
-function serializeForwardOf(
-  forwardOf:
-    | { originalContent?: string; originalContactId?: Uint8Array }
-    | undefined
-): string | null {
-  if (!forwardOf) return null;
-  return JSON.stringify({
-    originalContent: forwardOf.originalContent,
-    originalContactId: forwardOf.originalContactId
-      ? encodeToBase64(forwardOf.originalContactId)
-      : undefined,
-  });
-}
-
-/** Deserialize forwardOf from JSON string. */
-function deserializeForwardOf(
-  json: string | null
-): { originalContent?: string; originalContactId?: Uint8Array } | undefined {
-  if (!json) return undefined;
-  const parsed = JSON.parse(json);
-  return {
-    originalContent: parsed.originalContent ?? undefined,
-    originalContactId: parsed.originalContactId
-      ? decodeFromBase64(parsed.originalContactId)
-      : undefined,
-  };
-}
-
-/** Serialize deleteOf to JSON string for SQLite storage. */
-function serializeDeleteOf(
-  deleteOf: { originalMsgId: Uint8Array } | undefined
-): string | null {
-  if (!deleteOf) return null;
-  return JSON.stringify({
-    originalMsgId: encodeToBase64(deleteOf.originalMsgId),
-  });
-}
-
-/** Deserialize deleteOf from JSON string. */
-function deserializeDeleteOf(
-  json: string | null
-): { originalMsgId: Uint8Array } | undefined {
-  if (!json) return undefined;
-  const parsed = JSON.parse(json);
-  return {
-    originalMsgId: decodeFromBase64(parsed.originalMsgId),
-  };
-}
-
-function serializeEditOf(
-  editOf: { originalMsgId: Uint8Array } | undefined
-): string | null {
-  if (!editOf) return null;
-  return JSON.stringify({
-    originalMsgId: encodeToBase64(editOf.originalMsgId),
-  });
-}
-
-function deserializeEditOf(
-  json: string | null
-): { originalMsgId: Uint8Array } | undefined {
-  if (!json) return undefined;
-  const parsed = JSON.parse(json);
-  return {
-    originalMsgId: decodeFromBase64(parsed.originalMsgId),
-  };
-}
-
-function serializeReactionOf(
-  reactionOf: { originalMsgId: Uint8Array } | undefined
-): string | null {
-  if (!reactionOf) return null;
-  return JSON.stringify({
-    originalMsgId: encodeToBase64(reactionOf.originalMsgId),
-  });
-}
-
-function deserializeReactionOf(
-  json: string | null
-): { originalMsgId: Uint8Array } | undefined {
-  if (!json) return undefined;
-  const parsed = JSON.parse(json);
-  return {
-    originalMsgId: decodeFromBase64(parsed.originalMsgId),
-  };
-}
-
-/** Serialize metadata to JSON string. */
+// Serialize metadata to JSON string.
 function serializeMetadata(
   metadata: Record<string, unknown> | undefined
 ): string | null {
@@ -172,7 +59,7 @@ function serializeMetadata(
   return JSON.stringify(metadata);
 }
 
-/** Deserialize metadata from JSON string. */
+// Deserialize metadata from JSON string.
 function deserializeMetadata(
   json: string | null
 ): Record<string, unknown> | undefined {
@@ -195,11 +82,12 @@ export function rowToMessage(row: MessageRow): Message {
     timestamp: row.timestamp,
     metadata: deserializeMetadata(row.metadata),
     seeker: row.seeker ?? undefined,
-    replyTo: deserializeReplyTo(row.replyTo),
-    forwardOf: deserializeForwardOf(row.forwardOf),
-    deleteOf: deserializeDeleteOf(row.deleteOf ?? null),
-    editOf: deserializeEditOf(row.editOf ?? null),
-    reactionOf: deserializeReactionOf(row.reactionOf ?? null),
+    replyToMsgId: row.replyToMsgId ?? undefined,
+    forwardOfContent: row.forwardOfContent ?? undefined,
+    forwardOfContactId: row.forwardOfContactId ?? undefined,
+    deleteOfMsgId: row.deleteOfMsgId ?? undefined,
+    editOfMsgId: row.editOfMsgId ?? undefined,
+    reactionOfMsgId: row.reactionOfMsgId ?? undefined,
     encryptedMessage: row.encryptedMessage ?? undefined,
     whenToSend: row.whenToSend ?? undefined,
   };
@@ -223,22 +111,12 @@ interface Decrypted {
   senderId: string;
   seeker: Uint8Array;
   messageId: Uint8Array; // 12-byte random ID
-  replyTo?: {
-    originalMsgId: Uint8Array;
-  };
-  forwardOf?: {
-    originalContent: string;
-    originalContactId?: Uint8Array;
-  };
-  deleteOf?: {
-    originalMsgId: Uint8Array;
-  };
-  editOf?: {
-    originalMsgId: Uint8Array;
-  };
-  reactionOf?: {
-    originalMsgId: Uint8Array;
-  };
+  replyToMsgId?: Uint8Array;
+  forwardOfContent?: string;
+  forwardOfContactId?: Uint8Array;
+  deleteOfMsgId?: Uint8Array;
+  editOfMsgId?: Uint8Array;
+  reactionOfMsgId?: Uint8Array;
   encryptedMessage: Uint8Array;
   type: MessageType;
 }
@@ -246,16 +124,16 @@ interface Decrypted {
 const sleep = (ms: number) => new Promise(res => setTimeout(res, ms));
 
 const logger = new Logger('MessageService');
-export class MessageService {
+export class SessionMessageService {
   private messageProtocol: IMessageProtocol;
   private session: SessionModule;
   private eventEmitter: SdkEventEmitter;
   private config: SdkConfig;
-  private refreshService?: RefreshService;
   private queueManager?: QueueManager;
   private processingContacts = new Set<string>();
   private isFetchingMessages = false;
   private queries: Queries;
+  private refreshService?: RefreshService;
 
   constructor(
     messageProtocol: IMessageProtocol,
@@ -379,60 +257,6 @@ export class MessageService {
     }
   }
 
-  /**
-   * Add a message to SQLite and update the corresponding discussion.
-   */
-  private async addMessageAndUpdateDiscussion(
-    message: Omit<Message, 'id'>
-  ): Promise<number> {
-    const messageId = await this.queries.messages.insert({
-      messageId: message.messageId,
-      ownerUserId: message.ownerUserId,
-      contactUserId: message.contactUserId,
-      content: message.content,
-      serializedContent: message.serializedContent,
-      type: message.type,
-      direction: message.direction,
-      status: message.status,
-      timestamp: message.timestamp,
-      metadata: serializeMetadata(message.metadata),
-      seeker: message.seeker,
-      replyTo: serializeReplyTo(message.replyTo),
-      forwardOf: serializeForwardOf(message.forwardOf),
-      deleteOf: serializeDeleteOf(message.deleteOf),
-      editOf: serializeEditOf(message.editOf),
-      reactionOf: serializeReactionOf(message.reactionOf),
-      encryptedMessage: message.encryptedMessage,
-      whenToSend: message.whenToSend,
-    });
-
-    const discussion = await this.queries.discussions.getByOwnerAndContact(
-      message.ownerUserId,
-      message.contactUserId
-    );
-
-    if (
-      discussion &&
-      message.type !== MessageType.KEEP_ALIVE &&
-      message.type !== MessageType.DM_SYN &&
-      message.type !== MessageType.REACTION &&
-      message.type !== MessageType.RETENTION_POLICY
-    ) {
-      await this.queries.discussions.updateById(discussion.id, {
-        lastMessageId: messageId,
-        lastMessageContent: message.content,
-        lastMessageTimestamp: message.timestamp,
-        updatedAt: new Date(),
-      });
-
-      if (message.direction === MessageDirection.INCOMING) {
-        await this.queries.discussions.incrementUnreadCount(discussion.id);
-      }
-    }
-
-    return messageId;
-  }
-
   private async decryptMessages(encrypted: EncryptedMessage[]): Promise<{
     decrypted: Decrypted[];
     acknowledgedSeekers: Set<string>;
@@ -461,9 +285,6 @@ export class MessageService {
           if (deserialized.type === MessageType.KEEP_ALIVE) {
             continue;
           }
-          if (deserialized.type === MessageType.DM_SYN) {
-            continue;
-          }
 
           // Delete control messages are handled at storage time; keep them in decrypted array
 
@@ -484,11 +305,12 @@ export class MessageService {
             messageId: deserialized.messageId ?? new Uint8Array(),
             encryptedMessage: msg.ciphertext,
             type: deserialized.type,
-            replyTo: deserialized.replyTo,
-            forwardOf: deserialized.forwardOf,
-            deleteOf: deserialized.deleteOf,
-            editOf: deserialized.editOf,
-            reactionOf: deserialized.reactionOf,
+            replyToMsgId: deserialized.replyTo?.originalMsgId,
+            forwardOfContent: deserialized.forwardOf?.originalContent,
+            forwardOfContactId: deserialized.forwardOf?.originalContactId,
+            deleteOfMsgId: deserialized.deleteOf?.originalMsgId,
+            editOfMsgId: deserialized.editOf?.originalMsgId,
+            reactionOfMsgId: deserialized.reactionOf?.originalMsgId,
           });
         } catch (deserializationError) {
           log.error('deserialization failed', {
@@ -520,19 +342,16 @@ export class MessageService {
 
     for (const message of decrypted) {
       // Handle delete control messages by updating the referenced message in-place
-      if (
-        message.type === MessageType.DELETED &&
-        message.deleteOf?.originalMsgId
-      ) {
+      if (message.type === MessageType.DELETED && message.deleteOfMsgId) {
         const target = await this.findMessageByMsgId(
-          message.deleteOf.originalMsgId,
+          message.deleteOfMsgId,
           ownerUserId,
           message.senderId
         );
 
         if (!target || !target.id) {
           log.warn('delete target not found', {
-            originalMsgId: encodeToBase64(message.deleteOf.originalMsgId),
+            originalMsgId: encodeToBase64(message.deleteOfMsgId),
           });
           continue;
         }
@@ -547,16 +366,16 @@ export class MessageService {
       }
 
       // Handle edit control messages by updating the referenced message in-place
-      if (message.editOf?.originalMsgId) {
+      if (message.editOfMsgId) {
         const target = await this.findMessageByMsgId(
-          message.editOf.originalMsgId,
+          message.editOfMsgId,
           ownerUserId,
           message.senderId
         );
 
         if (!target || !target.id) {
           log.warn('edit target not found', {
-            originalMsgId: encodeToBase64(message.editOf.originalMsgId),
+            originalMsgId: encodeToBase64(message.editOfMsgId),
           });
           continue;
         }
@@ -599,10 +418,7 @@ export class MessageService {
       }
 
       // Handle reaction messages by inserting a separate row
-      if (
-        message.type === MessageType.REACTION &&
-        message.reactionOf?.originalMsgId
-      ) {
+      if (message.type === MessageType.REACTION && message.reactionOfMsgId) {
         const discussion = await this.queries.discussions.getByOwnerAndContact(
           ownerUserId,
           message.senderId
@@ -626,7 +442,7 @@ export class MessageService {
           status: MessageStatus.DELIVERED,
           timestamp: message.sentAt,
           metadata: serializeMetadata({}),
-          reactionOf: serializeReactionOf(message.reactionOf),
+          reactionOfMsgId: message.reactionOfMsgId,
         });
 
         storedIds.push(id);
@@ -661,15 +477,15 @@ export class MessageService {
         continue;
       }
 
-      if (message.replyTo?.originalMsgId) {
+      if (message.replyToMsgId) {
         const original = await this.findMessageByMsgId(
-          message.replyTo.originalMsgId,
+          message.replyToMsgId,
           ownerUserId,
           message.senderId
         );
         if (!original) {
           log.warn('reply target not found', {
-            originalMsgId: encodeToBase64(message.replyTo.originalMsgId),
+            originalMsgId: encodeToBase64(message.replyToMsgId),
           });
         }
       }
@@ -684,8 +500,9 @@ export class MessageService {
         status: MessageStatus.DELIVERED,
         timestamp: message.sentAt,
         metadata: serializeMetadata({}),
-        replyTo: serializeReplyTo(message.replyTo),
-        forwardOf: serializeForwardOf(message.forwardOf),
+        replyToMsgId: message.replyToMsgId,
+        forwardOfContent: message.forwardOfContent,
+        forwardOfContactId: message.forwardOfContactId,
       });
 
       // Update discussion in SQLite
@@ -752,17 +569,6 @@ export class MessageService {
     return row ? rowToMessage(row) : undefined;
   }
 
-  async findMessageBySeeker(
-    seeker: Uint8Array,
-    ownerUserId: string
-  ): Promise<Message | undefined> {
-    const row = await this.queries.messages.getByOwnerAndSeeker(
-      ownerUserId,
-      seeker
-    );
-    return row ? rowToMessage(row) : undefined;
-  }
-
   private async acknowledgeMessages(
     seekers: Set<string>,
     userId: string
@@ -812,13 +618,11 @@ export class MessageService {
       };
     }
 
-    // Look up discussion
-    const discussion = await this.queries.discussions.getByOwnerAndContact(
-      message.ownerUserId,
+    const sessionRow = await this.queries.sessions.getByContact(
       message.contactUserId
     );
-    if (!discussion) {
-      return { success: false, error: 'Discussion not found' };
+    if (!sessionRow) {
+      return { success: false, error: 'Session not found' };
     }
 
     // Generate a random messageId for deduplication (not for keep-alive or retention policy)
@@ -833,9 +637,26 @@ export class MessageService {
     // Add message as WAITING_SESSION
     let messageId: number;
     try {
-      messageId = await this.addMessageAndUpdateDiscussion({
-        ...message,
+      messageId = await this.queries.messages.insert({
+        messageId: message.messageId,
+        ownerUserId: message.ownerUserId,
+        contactUserId: message.contactUserId,
+        content: message.content,
+        serializedContent: message.serializedContent,
+        type: message.type,
+        direction: message.direction,
         status: MessageStatus.WAITING_SESSION,
+        timestamp: message.timestamp,
+        metadata: serializeMetadata(message.metadata),
+        seeker: message.seeker,
+        replyToMsgId: message.replyToMsgId,
+        forwardOfContent: message.forwardOfContent,
+        forwardOfContactId: message.forwardOfContactId,
+        deleteOfMsgId: message.deleteOfMsgId,
+        editOfMsgId: message.editOfMsgId,
+        reactionOfMsgId: message.reactionOfMsgId,
+        encryptedMessage: message.encryptedMessage,
+        whenToSend: message.whenToSend,
       });
     } catch (error) {
       return {
@@ -849,6 +670,8 @@ export class MessageService {
       id: messageId,
       status: MessageStatus.WAITING_SESSION,
     };
+
+    this.eventEmitter.emit(SdkEventType.MSG_SEND_QUEUE, queuedMessage);
 
     /*
     Trigger a state update to send the new message.
@@ -879,9 +702,9 @@ export class MessageService {
       };
     }
 
-    if (message.replyTo) {
+    if (message.replyToMsgId) {
       const originalMessage = await this.findMessageByMsgId(
-        message.replyTo.originalMsgId,
+        message.replyToMsgId,
         message.ownerUserId,
         message.contactUserId
       );
@@ -897,7 +720,7 @@ export class MessageService {
         success: true,
         data: serializeReplyMessage(
           message.content,
-          message.replyTo.originalMsgId,
+          message.replyToMsgId,
           message.messageId!
         ),
       };
@@ -919,9 +742,9 @@ export class MessageService {
           isNaN(durationSeconds) || durationSeconds < 0 ? 0 : durationSeconds
         ),
       };
-    } else if (message.type === MessageType.DELETED && message.deleteOf) {
+    } else if (message.type === MessageType.DELETED && message.deleteOfMsgId) {
       // Serialize a delete control message targeting an existing messageId
-      const originalMsgId = message.deleteOf.originalMsgId;
+      const originalMsgId = message.deleteOfMsgId;
       if (!originalMsgId || originalMsgId.length !== MESSAGE_ID_SIZE) {
         return {
           success: false,
@@ -932,8 +755,8 @@ export class MessageService {
         success: true,
         data: serializeDeleteMessage(originalMsgId, message.messageId!),
       };
-    } else if (message.editOf) {
-      const originalMsgId = message.editOf.originalMsgId;
+    } else if (message.editOfMsgId) {
+      const originalMsgId = message.editOfMsgId;
       if (!originalMsgId || originalMsgId.length !== MESSAGE_ID_SIZE) {
         return {
           success: false,
@@ -949,15 +772,15 @@ export class MessageService {
           message.messageId!
         ),
       };
-    } else if (message.forwardOf) {
+    } else if (message.forwardOfContent || message.forwardOfContactId) {
       try {
         return {
           success: true,
           data: serializeForwardMessage(
-            message.forwardOf.originalContent ?? '',
+            message.forwardOfContent ?? '',
             message.content,
             message.messageId!,
-            message.forwardOf.originalContactId
+            message.forwardOfContactId
           ),
         };
       } catch (error) {
@@ -967,8 +790,11 @@ export class MessageService {
           error: 'Failed to serialize forward message',
         };
       }
-    } else if (message.type === MessageType.REACTION && message.reactionOf) {
-      const originalMsgId = message.reactionOf.originalMsgId;
+    } else if (
+      message.type === MessageType.REACTION &&
+      message.reactionOfMsgId
+    ) {
+      const originalMsgId = message.reactionOfMsgId;
       if (!originalMsgId || originalMsgId.length !== MESSAGE_ID_SIZE) {
         return {
           success: false,
@@ -1248,23 +1074,9 @@ export class MessageService {
     return rows.length;
   }
 
-  /**
-   * Get count of messages waiting for session with a specific contact.
-   */
-  async getWaitingMessageCount(contactUserId: string): Promise<number> {
-    const ownerUserId = this.session.userIdEncoded;
-    return this.queries.messages.getWaitingCount(ownerUserId, contactUserId);
-  }
-
   // ─────────────────────────────────────────────────────────────────
   // Consumer-facing convenience methods
   // ─────────────────────────────────────────────────────────────────
-
-  /** Get a message by its database ID */
-  async get(id: number): Promise<Message | undefined> {
-    const row = await this.queries.messages.getById(id);
-    return row ? rowToMessage(row) : undefined;
-  }
 
   /** Get all messages for a contact (using session owner).
    *  NOTE: This returns raw rows without UI-level filtering.
@@ -1322,17 +1134,12 @@ export class MessageService {
       direction: MessageDirection.OUTGOING,
       status: MessageStatus.WAITING_SESSION,
       timestamp: new Date(),
-      ...(options?.replyTo && { replyTo: options.replyTo }),
+      ...(options?.replyToMsgId && { replyToMsgId: options.replyToMsgId }),
       ...(options?.metadata && { metadata: options.metadata }),
     };
     const result = await this.send(message);
     await this.refreshService?.stateUpdate();
     return result;
-  }
-
-  /** Fetch and decrypt messages from the protocol (alias) */
-  async fetch(): Promise<MessageResult> {
-    return this.fetchMessages();
   }
 
   /**
@@ -1372,9 +1179,7 @@ export class MessageService {
       direction: MessageDirection.OUTGOING,
       status: MessageStatus.WAITING_SESSION,
       timestamp: new Date(),
-      deleteOf: {
-        originalMsgId: row.messageId,
-      },
+      deleteOfMsgId: row.messageId,
     };
 
     const result = await this.send(controlMessage);
@@ -1399,7 +1204,7 @@ export class MessageService {
       direction: MessageDirection.OUTGOING,
       status: MessageStatus.WAITING_SESSION,
       timestamp: new Date(),
-      reactionOf: { originalMsgId },
+      reactionOfMsgId: originalMsgId,
     };
     const result = await this.send(message);
     await this.refreshService?.stateUpdate();
@@ -1450,9 +1255,7 @@ export class MessageService {
       direction: MessageDirection.OUTGOING,
       status: MessageStatus.WAITING_SESSION,
       timestamp: new Date(),
-      editOf: {
-        originalMsgId: row.messageId,
-      },
+      editOfMsgId: row.messageId,
       metadata: {
         control: 'edit',
       },

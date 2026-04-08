@@ -1,18 +1,19 @@
-import { UserPublicKeys } from '../../wasm/bindings.js';
+import { SessionStatus, UserPublicKeys } from '../../wasm/bindings.js';
 import { SessionModule } from '../../wasm/session.js';
 import { Logger } from '../../utils/logs.js';
 import { Result } from '../../utils/type.js';
 import { EstablishSessionError } from '../announcement.js';
 import { Queries } from '../../db/queries/index.js';
 import { SdkEventType } from '../../core/SdkEventEmitter.js';
+import type { Message } from '../../db/index.js';
+import type { SendMessageResult } from './sessionMessage.js';
 import { SessionAnnouncementService } from './sessionAnnouncement.js';
 import { SessionMessageService } from './sessionMessage.js';
 import { SdkEventEmitter } from '../../core/SdkEventEmitter.js';
 import type { IMessageProtocol } from '../../api/messageProtocol/index.js';
 import type { SdkConfig } from '../../config/sdk.js';
 import { SessionRefreshService } from './sessionRefresh.js';
-
-
+import { decodeUserId } from 'src/utils/userId.js';
 
 interface PeriodicTimers {
   messages: ReturnType<typeof setInterval> | null;
@@ -43,43 +44,38 @@ export class SessionsService {
     messageProtocol: IMessageProtocol,
     eventEmitter: SdkEventEmitter,
     config: SdkConfig,
-    queries: Queries,
+    queries: Queries
   ) {
     this.session = session;
     this.eventEmitter = eventEmitter;
     this.config = config;
     this.queries = queries;
-    this.announcementService =
-      new SessionAnnouncementService(
-        messageProtocol,
-        session,
-        eventEmitter,
-        config,
-        queries
-      );
-    this.messageService =
-      new SessionMessageService(
-        messageProtocol,
-        session,
-        eventEmitter,
-        config,
-        queries
-      );
-    this.refreshService =
-      new SessionRefreshService(
-        async (contactUserId: string): Promise<Result<Uint8Array, Error>> => {
-          return await this.createSessionForContact(
-            contactUserId,
-            new Uint8Array(0)
-          );
-        },
-        session,
-        this.messageService,
-        this.announcementService,
-        eventEmitter,
-        queries,
-        config
-      );
+    this.announcementService = new SessionAnnouncementService(
+      messageProtocol,
+      session,
+      eventEmitter,
+      config,
+      queries
+    );
+    this.messageService = new SessionMessageService(
+      messageProtocol,
+      session,
+      eventEmitter,
+      config,
+      queries
+    );
+    this.refreshService = new SessionRefreshService(
+      // resetSession callback
+      async (contactUserId: string): Promise<Result<Uint8Array, Error>> => {
+        return await this.createOrRenew(contactUserId, new Uint8Array(0));
+      },
+      session,
+      this.messageService,
+      this.announcementService,
+      eventEmitter,
+      queries,
+      config
+    );
   }
 
   startPeriodicTask(): void {
@@ -142,11 +138,16 @@ export class SessionsService {
     this.eventEmitter.emit(SdkEventType.ERROR, err, source);
   }
 
+  /** Get the session status with a contact */
+  getStatus(contactUserId: string): SessionStatus {
+    return this.session.peerSessionStatus(decodeUserId(contactUserId));
+  }
+
   /**
-   * Create or recreate an outgoing encrypted session with a peer and queue the
+   * Create or renew an outgoing encrypted session with a peer and queue the
    * announcement on the session row.
    */
-  async createSessionForContact(
+  async createOrRenew(
     contactUserId: string,
     userData: Uint8Array
   ): Promise<Result<Uint8Array, Error>> {
@@ -177,27 +178,27 @@ export class SessionsService {
 
     const now = new Date();
 
-    let sessionId: number
+    let sessionId: number;
     // If the session does not exist in db, create it. Otherwise, update it.
-    const existingSession = await this.queries.sessions.getByContact(contactUserId);
+    const existingSession =
+      await this.queries.sessions.getByContact(contactUserId);
     try {
-        if (!existingSession) {
-            sessionId = await this.queries.sessions.insert({
-                contactUserId: contactUserId,
-                announcement_bytes: announcement,
-                when_to_send: now,
-                createdAt: now,
-                updatedAt: now,
-            });
-        } else {
-            sessionId = existingSession.id!;
-            await this.queries.sessions.updateById(existingSession.id!, {
-                announcement_bytes: announcement,
-                when_to_send: now,
-                updatedAt: now,
-            });
-        }
-
+      if (!existingSession) {
+        sessionId = await this.queries.sessions.insert({
+          contactUserId: contactUserId,
+          announcement_bytes: announcement,
+          when_to_send: now,
+          createdAt: now,
+          updatedAt: now,
+        });
+      } else {
+        sessionId = existingSession.id!;
+        await this.queries.sessions.updateById(existingSession.id!, {
+          announcement_bytes: announcement,
+          when_to_send: now,
+          updatedAt: now,
+        });
+      }
     } catch (error) {
       return {
         success: false,
@@ -219,11 +220,16 @@ export class SessionsService {
     if (!updatedSession) {
       return {
         success: false,
-        error: new Error((existingSession ? 'Updated' : 'Created') + 'Session ('+ contactUserId + ') not found'),
+        error: new Error(
+          (existingSession ? 'Updated' : 'Created') +
+            'Session (' +
+            contactUserId +
+            ') not found'
+        ),
       };
     }
 
-
+    // emit event based on the session creation or renewal
     if (existingSession) {
       this.eventEmitter.emit(
         SdkEventType.SESSION_RENEWED,
@@ -234,14 +240,6 @@ export class SessionsService {
         SdkEventType.SESSION_CREATED,
         updatedSession as unknown as never
       );
-    }
-
-    const sessionRow = await this.queries.sessions.getById(sessionId);
-    if (!sessionRow) {
-      return {
-        success: false,
-        error: new Error('Created or updated Session'+ sessionId + 'not found'),
-      };
     }
 
     try {
@@ -255,6 +253,8 @@ export class SessionsService {
 
     return { success: true, data: announcement };
   }
+
+  async sendMessage(message: Message): Promise<SendMessageResult> {
+    return this.messageService.sendMessage(message);
+  }
 }
-
-

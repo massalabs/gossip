@@ -289,11 +289,9 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           username,
           encodeUserId(userIdBytes),
           security,
-          session
+          session,
+          true
         );
-
-        // Skip historical announcements AFTER profile is persisted
-        await getSdk().announcements.skipHistorical();
 
         useAppStore.getState().setIsInitialized(true);
         set({
@@ -358,11 +356,9 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           username,
           encodeUserId(userIdBytes),
           security,
-          session
+          session,
+          true
         );
-
-        // Skip historical announcements AFTER profile is persisted
-        await getSdk().announcements.skipHistorical();
 
         useAppStore.getState().setIsInitialized(true);
         set({
@@ -544,11 +540,9 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           username,
           encodeUserId(userIdBytes),
           security,
-          session
+          session,
+          true
         );
-
-        // Skip historical announcements AFTER profile is persisted
-        await getSdk().announcements.skipHistorical();
 
         useAppStore.getState().setIsInitialized(true);
         set({

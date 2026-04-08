@@ -51,9 +51,7 @@ export class DMQueries {
   }
 
   async deleteById(id: number): Promise<void> {
-    await this.conn.db
-      .delete(schema.dms)
-      .where(eq(schema.dms.id, id));
+    await this.conn.db.delete(schema.dms).where(eq(schema.dms.id, id));
   }
 
   async deleteByContact(contactUserId: string): Promise<void> {
@@ -77,11 +75,6 @@ export class DMQueries {
       .set({
         unreadCount: sql`MAX(${schema.dms.unreadCount} - 1, 0)`,
       })
-      .where(
-        and(
-          eq(schema.dms.id, dmId),
-          gt(schema.dms.unreadCount, 0)
-        )
-      );
+      .where(and(eq(schema.dms.id, dmId), gt(schema.dms.unreadCount, 0)));
   }
 }

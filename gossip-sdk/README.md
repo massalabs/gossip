@@ -7,7 +7,7 @@ A platform-agnostic SDK for the Gossip messenger app. Enables automation, chatbo
 The Gossip SDK provides a clean, typed interface for:
 
 - **Contact Management** - Add, update, and delete contacts
-- **Discussion Management** - Initialize and manage encrypted discussions
+- **DM Management** - Create and manage 1-to-1 encrypted discussions
 - **Message Operations** - Send and receive encrypted messages
 - **Announcement Handling** - Process protocol announcements
 - **Session Management** - Automatic session renewal and persistence
@@ -51,10 +51,8 @@ await sdk.openSession({
 
 // 3. Use the SDK
 const contacts = await sdk.contacts.list();
-await sdk.discussions.startByUserId(contactUserId, 'Alice', {
-  username: 'Alice',
-  message: 'Hello!',
-});
+await sdk.contacts.add(contactUserId, 'Alice', publicKeys);
+await sdk.dms.create(contactUserId, 'Hello!');
 await sdk.messages.sendText(contactUserId, 'Hi Alice!');
 
 // 4. Listen to events
@@ -160,29 +158,30 @@ const visibleMessages = await sdk.messages.getVisibleMessages(contactId);
 await sdk.messages.markAsRead(messageId);
 ```
 
-### Discussions
+### Sessions
 
 ```typescript
-// Start a new discussion
-const result = await sdk.discussions.startByUserId(contactUserId, 'Alice', {
-  username: 'Alice',
-  message: 'Hi!',
-});
-
-// Accept an incoming discussion request
-await sdk.discussions.accept(discussion);
-
-// Renew a broken session
-await sdk.discussions.renew(contactUserId);
-
 // Get session status for a contact
-const status = sdk.discussions.getStatus(contactUserId);
+const status = sdk.sessions.getStatus(contactUserId);
 
-// List all discussions
-const discussions = await sdk.discussions.list();
+// renew a sessions
+sdk.sessions.createOrRenew(contactUserId);
+```
 
-// Get a specific discussion
-const discussion = await sdk.discussions.get(contactUserId);
+### DMs
+
+```typescript
+// Create a DM with an existing contact
+const result = await sdk.dms.create(contactUserId, 'Hi!');
+
+// Accept an incoming DM request
+await sdk.dms.accept(contactUserId);
+
+// List all DMs
+const dms = await sdk.dms.list();
+
+// Get a specific DM
+const dm = await sdk.dms.get(contactUserId);
 ```
 
 ### Contacts

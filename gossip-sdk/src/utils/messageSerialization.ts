@@ -16,6 +16,7 @@ export const MESSAGE_TYPE_DELETE = ProtoMessageType.MESSAGE_TYPE_DELETE;
 export const MESSAGE_TYPE_EDIT = ProtoMessageType.MESSAGE_TYPE_EDIT;
 export const MESSAGE_TYPE_RETENTION_POLICY =
   ProtoMessageType.MESSAGE_TYPE_RETENTION_POLICY;
+export const MESSAGE_TYPE_DM_SYN = ProtoMessageType.MESSAGE_TYPE_DM_SYN;
 
 export interface DeserializedMessage {
   content: string;
@@ -46,6 +47,17 @@ export interface DeserializedMessage {
 export function serializeKeepAliveMessage(): Uint8Array {
   return ProtoMessage.encode({
     messageType: ProtoMessageType.MESSAGE_TYPE_KEEP_ALIVE,
+    content: '',
+  });
+}
+
+/**
+ * Serialize a DM_SYN control message.
+ * Payload follows keep-alive pattern (empty content).
+ */
+export function serializeDMSynMessage(): Uint8Array {
+  return ProtoMessage.encode({
+    messageType: ProtoMessageType.MESSAGE_TYPE_DM_SYN,
     content: '',
   });
 }
@@ -252,6 +264,13 @@ export function deserializeMessage(buffer: Uint8Array): DeserializedMessage {
     return {
       content: decoded.content ?? '0',
       type: MessageType.RETENTION_POLICY,
+    };
+  }
+
+  if (protoType === ProtoMessageType.MESSAGE_TYPE_DM_SYN) {
+    return {
+      content: '',
+      type: MessageType.DM_SYN,
     };
   }
 

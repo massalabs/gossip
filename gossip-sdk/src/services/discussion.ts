@@ -357,9 +357,7 @@ export class DiscussionService {
   }
 
   /**
-   * Start a discussion by userId (simplified).
-   * Fetches public keys, adds the contact if needed, starts the discussion,
-   * and triggers state update.
+   * @deprecated Prefer: create/fetch contact first, then call `sdk.dms.create(contactUserId, message?)`.
    */
   async startByUserId(
     contactUserId: string,

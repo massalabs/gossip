@@ -39,22 +39,12 @@ export interface Message {
   timestamp: Date;
   metadata?: Record<string, unknown>;
   seeker?: Uint8Array; // Seeker for this message (stored when sending or receiving)
-  replyTo?: {
-    originalMsgId: Uint8Array; // Message ID of the original message (required for replies)
-  };
-  forwardOf?: {
-    originalContent?: string;
-    originalContactId?: Uint8Array;
-  };
-  deleteOf?: {
-    originalMsgId: Uint8Array;
-  };
-  editOf?: {
-    originalMsgId: Uint8Array;
-  };
-  reactionOf?: {
-    originalMsgId: Uint8Array;
-  };
+  replyToMsgId?: Uint8Array; // Message ID of the original message (required for replies)
+  forwardOfContent?: string; // Content of the original message (required for forwards)
+  forwardOfContactId?: Uint8Array; // Contact ID of the original message (required for forwards)
+  deleteOfMsgId?: Uint8Array; // Message ID of the original message (required for deletes)
+  editOfMsgId?: Uint8Array; // Message ID of the original message (required for edits)
+  reactionOfMsgId?: Uint8Array; // Message ID of the original message (required for reactions)
 }
 
 export interface UserProfile {
@@ -124,6 +114,7 @@ export enum MessageType {
   DELETED = 'deleted',
   REACTION = 'reaction',
   RETENTION_POLICY = 'retention_policy',
+  DM_SYN = 'dm_syn',
 }
 
 export interface ReadyAnnouncement {
@@ -167,7 +158,6 @@ export interface Session {
   announcement_bytes: Uint8Array | null;
   when_to_send: Date | null;
 
-
   // Session recovery state (persisted to throttle resets)
   killedNextRetryAt?: Date | null;
   saturatedRetryAt?: Date | null;
@@ -181,9 +171,8 @@ export interface DM {
   contactUserId: string; // Reference to Contact.userId - unique per contact
 
   // Protocol/Encryption fields
-  /*weAccepted: Whether the user has expressed the will to communicate with the peer
-  i.e. the user has initiated a new discussion or it accepted the discussion initiated by the peer. */
-  weAccepted: boolean;
+  /*accepted: Whether the DM was accepted by both users */
+  accepted: boolean;
   direction: DiscussionDirection; // Whether this user initiated or received the discussion
   announcementMessage: string | null; // Optional message from incoming announcement (user_data)
   lastSyncTimestamp: Date | null; // Last time messages were synced from protocol

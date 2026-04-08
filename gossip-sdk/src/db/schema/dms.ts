@@ -11,7 +11,7 @@ export const dms = sqliteTable(
   {
     id: integer('id').primaryKey({ autoIncrement: true }),
     contactUserId: text('contactUserId').notNull(),
-    weAccepted: integer('weAccepted', { mode: 'boolean' })
+    accepted: integer('weAccepted', { mode: 'boolean' })
       .notNull()
       .default(false),
     direction: text('direction').$type<DiscussionDirection>().notNull(),

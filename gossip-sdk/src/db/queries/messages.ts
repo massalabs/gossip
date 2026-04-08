@@ -239,7 +239,8 @@ export class MessageQueries {
     ownerUserId: string,
     contactUserId: string
   ): Promise<MessageRow[]> {
-    if (!this.preparedGetSendQueue) { // prepare the query only once. performance benefit for large queries.
+    if (!this.preparedGetSendQueue) {
+      // prepare the query only once. performance benefit for large queries.
       this.preparedGetSendQueue = this.conn.db
         .select()
         .from(schema.messages)
@@ -255,7 +256,7 @@ export class MessageQueries {
           )
         )
         .orderBy(asc(schema.messages.timestamp), asc(schema.messages.id))
-        .prepare()
+        .prepare();
     }
     return await this.preparedGetSendQueue!.all({ ownerUserId, contactUserId });
   }

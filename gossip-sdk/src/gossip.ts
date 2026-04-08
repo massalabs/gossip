@@ -19,10 +19,11 @@
  *
  * // Service API — ownerUserId handled internally via session
  * await gossipSdk.contacts.add(userId, 'Bob');              // fetches keys automatically
- * await gossipSdk.discussions.startByUserId(userId, 'Bob'); // add + start + send
+ * await gossipSdk.contacts.add(userId, 'Bob');
+ * await gossipSdk.dms.create(userId, 'Hello Bob!');
  * await gossipSdk.messages.sendText(contactId, 'Hello!');   // build + send + flush
  * const contacts = await gossipSdk.contacts.list();         // ownerUserId inferred
- * const discussions = await gossipSdk.discussions.list();   // ownerUserId inferred
+ * const dms = await gossipSdk.dms.list();                   // ownerUserId inferred
  *
  * // Events
  * gossipSdk.on(SdkEventType.MESSAGE_RECEIVED, (msg) => { ... });
@@ -63,6 +64,7 @@ import { ProfileService } from './services/profile.js';
 import { ContactService } from './services/contact.js';
 import { SelfMessageService } from './services/selfMessage.js';
 import { SessionsService } from './services/session/session.js';
+import { DMService } from './services/discussions/DM.js';
 import {
   validateUserIdFormat,
   validateUsernameFormat,
@@ -70,7 +72,7 @@ import {
 } from './utils/validation.js';
 import { QueueManager } from './utils/queue.js';
 import { encodeUserId, decodeUserId } from './utils/userId.js';
-import { type StorageConfig, MessageStatus } from './db/index.js';
+import { type StorageConfig } from './db/index.js';
 import { DatabaseConnection } from './db/sqlite.js';
 import { Queries } from './db/queries/index.js';
 import {
@@ -180,6 +182,7 @@ class GossipSdk {
   private _contact: ContactService | null = null;
   private _selfMessage: SelfMessageService | null = null;
   private _sessions: SessionsService | null = null;
+  private _dm: DMService | null = null;
 
   // ─────────────────────────────────────────────────────────────────
   // Lifecycle
@@ -218,7 +221,7 @@ class GossipSdk {
 
     // Create services that don't need a session
     this._auth = new AuthService(createAuthProtocol());
-    this._profile = new ProfileService(this._queries);
+    this._profile = new ProfileService(this._queries, messageProtocol);
 
     this.state = {
       status: SdkStatus.INITIALIZED,
@@ -345,6 +348,13 @@ class GossipSdk {
     );
     await this._selfMessage.ensureDiscussionExists();
 
+    this._dm = new DMService(
+      queries,
+      this.eventEmitter,
+      session.userIdEncoded,
+      this._sessions!
+    );
+
     // Publish gossip ID (public key) on messageProtocol so the user is discoverable.
     // Non-blocking: login must succeed even when the API is unreachable.
     this._auth!.publishPublicKey(
@@ -362,10 +372,6 @@ class GossipSdk {
     this._discussion.setRefreshService(this._refresh);
     this._message.setRefreshService(this._refresh);
     this._announcement.setRefreshService(this._refresh);
-
-    // Reset any messages stuck in SENDING status to WAITING_SESSION
-    // This handles app crash/close during message send
-    await this.resetStuckSendingMessages(session.userIdEncoded);
 
     // Update SDK state to reflect the newly opened session.
     this.state = {
@@ -413,6 +419,8 @@ class GossipSdk {
     this._contact = null;
     this._selfMessage = null;
     this._sessions = null;
+    this._dm?.cleanup();
+    this._dm = null;
 
     // Clear message queues
     this.messageQueues.clear();
@@ -580,6 +588,15 @@ class GossipSdk {
     return this._sessions;
   }
 
+  /** DM service */
+  get dms(): DMService {
+    this.requireSession();
+    if (!this._dm) {
+      throw new Error('DM service not initialized');
+    }
+    return this._dm;
+  }
+
   /**
    * Update state for all discussions:
    * - Cleanup orphaned peers
@@ -705,45 +722,6 @@ class GossipSdk {
         error instanceof Error ? error : new Error(String(error)),
         'session_persist'
       );
-    }
-  }
-
-  /**
-   * Reset messages stuck in SENDING status to WAITING_SESSION.
-   *
-   * Per spec: SENDING is a transient state that should never be persisted.
-   * If the app crashes/closes during a send, the message would be stuck forever.
-   *
-   * By resetting to WAITING_SESSION:
-   * - Message will be re-encrypted with current session keys
-   * - Message will be automatically sent when session is active
-   * - No manual user intervention required
-   *
-   * We also clear encryptedMessage and seeker since they may be stale.
-   */
-  private async resetStuckSendingMessages(ownerUserId: string): Promise<void> {
-    try {
-      const q = this._queries!;
-      const stuck = await q.messages.getByStatus(
-        ownerUserId,
-        MessageStatus.SENDING
-      );
-
-      for (const m of stuck) {
-        await q.messages.updateById(m.id, {
-          status: MessageStatus.WAITING_SESSION,
-          encryptedMessage: null,
-          seeker: null,
-        });
-      }
-
-      if (stuck.length > 0) {
-        console.log(
-          `[GossipSdk] Reset ${stuck.length} stuck SENDING message(s) to WAITING_SESSION for auto-retry`
-        );
-      }
-    } catch (error) {
-      console.error('[GossipSdk] Failed to reset stuck messages:', error);
     }
   }
 }

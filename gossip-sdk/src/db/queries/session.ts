@@ -33,10 +33,7 @@ export class SessionQueries {
     return this.conn.getLastInsertRowId();
   }
 
-  async updateById(
-    id: number,
-    data: Partial<SessionInsert>
-  ): Promise<void> {
+  async updateById(id: number, data: Partial<SessionInsert>): Promise<void> {
     await this.conn.db
       .update(schema.sessions)
       .set(data)

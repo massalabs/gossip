@@ -3,7 +3,13 @@
  *
  */
 
-import { type Session, type Queries, MessageType, MessageDirection, MessageStatus } from '../../db/index.js';
+import {
+  type Session,
+  type Queries,
+  MessageType,
+  MessageDirection,
+  MessageStatus,
+} from '../../db/index.js';
 import type { SessionModule } from '../../wasm/session.js';
 import { SessionStatus } from '../../wasm/bindings.js';
 import { decodeUserId, encodeUserId } from '../../utils/userId.js';
@@ -17,14 +23,15 @@ import { Result } from '../../utils/type.js';
 
 const logger = new Logger('SessionRefreshService');
 
-
 export class SessionRefreshService {
   private sessionMessageService: SessionMessageService;
   private sessionAnnouncementService: SessionAnnouncementService;
   private session: SessionModule;
   private isUpdating = false;
   private eventEmitter: SdkEventEmitter;
-  private resetSession: (contactUserId: string) => Promise<Result<Uint8Array, Error>>;
+  private resetSession: (
+    contactUserId: string
+  ) => Promise<Result<Uint8Array, Error>>;
   private queries: Queries;
   private config: SdkConfig;
   private sessionStatusMap: Map<string, SessionStatus> = new Map();
@@ -125,17 +132,16 @@ export class SessionRefreshService {
       }
 
       // Step 2: send announcements
-      const sessionsAfterRefresh =
-        await this.queries.sessions.getAll();
-      const livePendingSessions = sessionsAfterRefresh.filter(
-        session => {
-          return [
-            SessionStatus.Active,
-            SessionStatus.SelfRequested,
-            SessionStatus.Saturated,
-          ].includes(this.session.peerSessionStatus(decodeUserId(session.contactUserId)));
-        }
-      );
+      const sessionsAfterRefresh = await this.queries.sessions.getAll();
+      const livePendingSessions = sessionsAfterRefresh.filter(session => {
+        return [
+          SessionStatus.Active,
+          SessionStatus.SelfRequested,
+          SessionStatus.Saturated,
+        ].includes(
+          this.session.peerSessionStatus(decodeUserId(session.contactUserId))
+        );
+      });
 
       await this.sessionAnnouncementService.processOutgoingAnnouncements(
         livePendingSessions
@@ -145,14 +151,11 @@ export class SessionRefreshService {
       // NOTE: only flush queued messages once the session is fully Active or saturated.
       // SelfRequested means the handshake is still establishing and
       // session.sendMessage() can return null.
-      const liveEstablishedSessions = livePendingSessions.filter(
-        session =>
-          // saturated sessions can't send messages on session manager but it's still possible to send on network msg that have already been encrypted if any
-          [SessionStatus.Active, SessionStatus.Saturated].includes(
-            this.session.peerSessionStatus(
-              decodeUserId(session.contactUserId)
-            )
-          )
+      const liveEstablishedSessions = livePendingSessions.filter(session =>
+        // saturated sessions can't send messages on session manager but it's still possible to send on network msg that have already been encrypted if any
+        [SessionStatus.Active, SessionStatus.Saturated].includes(
+          this.session.peerSessionStatus(decodeUserId(session.contactUserId))
+        )
       );
       const keepAliveSet = new Set(keepAlivePeerIds);
       for (const session of liveEstablishedSessions) {
@@ -164,9 +167,10 @@ export class SessionRefreshService {
           ) === SessionStatus.Active
         ) {
           // Send keep alive message only if no messages are pending
-          const pendingCount = await this.sessionMessageService.getPendingSendCount(
-            session.contactUserId
-          );
+          const pendingCount =
+            await this.sessionMessageService.getPendingSendCount(
+              session.contactUserId
+            );
           if (pendingCount === 0) {
             const result = await this.sessionMessageService.sendMessage({
               contactUserId: session.contactUserId,
@@ -188,9 +192,10 @@ export class SessionRefreshService {
         }
 
         // process msg in send queue for contact
-        const result = await this.sessionMessageService.processSendQueueForContact(
-          session.contactUserId
-        );
+        const result =
+          await this.sessionMessageService.processSendQueueForContact(
+            session.contactUserId
+          );
         if (!result.success) {
           log.error('failed to process send queue for contact', {
             contactUserId: session.contactUserId,
@@ -283,7 +288,9 @@ export class SessionRefreshService {
     }
 
     if (
-      [SessionStatus.SelfRequested, SessionStatus.PeerRequested].includes(status)
+      [SessionStatus.SelfRequested, SessionStatus.PeerRequested].includes(
+        status
+      )
     ) {
       return;
     }
@@ -305,9 +312,7 @@ export class SessionRefreshService {
         return;
       }
 
-      const res = await this.resetSession(
-        sessionRow.contactUserId,
-      );
+      const res = await this.resetSession(sessionRow.contactUserId);
       if (!res.success) {
         log.error('failed to create session for contact', {
           contactUserId: sessionRow.contactUserId,
@@ -348,9 +353,7 @@ export class SessionRefreshService {
         return;
       }
 
-      const res = await this.resetSession(
-        sessionRow.contactUserId,
-      );
+      const res = await this.resetSession(sessionRow.contactUserId);
       if (!res.success) {
         log.error('failed to create session for contact', {
           contactUserId: sessionRow.contactUserId,
