@@ -15,6 +15,7 @@ import RoundedInput from '../ui/RoundedInput';
 import ICloudSyncModal from '../ui/ICloudSyncModal';
 import { checkBiometricAvailability } from '../../services/biometricService';
 import { scrollFieldIntoView } from '../../utils/scrollFieldIntoView';
+import { WEBAUTHN_PRF_UNSUPPORTED_ERROR_CODE } from '../../crypto/webauthn';
 
 export interface AccountCreationResult {
   username: string;
@@ -166,7 +167,19 @@ const AccountCreationForm: React.FC<AccountCreationFormProps> = ({
       });
     } catch (err) {
       console.error('Error creating account:', err);
-      setError(t('create.failed'));
+      const message = err instanceof Error ? err.message : '';
+      const isPrfProviderError =
+        message.includes(WEBAUTHN_PRF_UNSUPPORTED_ERROR_CODE) ||
+        message.includes(
+          'passkey provider does not support required biometric key derivation'
+        ) ||
+        message.includes('PRF extension not supported by this authenticator');
+
+      setError(
+        isPrfProviderError
+          ? t('create.biometric_prf_unsupported')
+          : t('create.failed')
+      );
       setIsCreating(false);
     }
   };
