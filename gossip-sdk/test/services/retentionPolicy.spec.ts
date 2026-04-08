@@ -677,6 +677,95 @@ describe('MessageQueries.deleteExpiredByOwner', () => {
     expect(await testQueries.messages.getById(expiredId)).toBeUndefined();
     expect(await testQueries.messages.getById(safeId)).toBeDefined();
   });
+
+  it('does not delete messages created before retention policy activation', async () => {
+    const testQueries = getTestQueries();
+    const retentionSeconds = 3600; // 1 hour
+
+    await insertTestContactAndDiscussion(
+      OWNER_USER_ID,
+      CONTACT_USER_ID,
+      retentionSeconds
+    );
+
+    const policySetAt = Date.now() - 30 * 60 * 1000; // 30 minutes ago
+    await testQueries.discussions.updateByOwnerAndContact(
+      OWNER_USER_ID,
+      CONTACT_USER_ID,
+      { retentionPolicySetAt: policySetAt }
+    );
+
+    const oldBeforePolicyId = await testQueries.messages.insert({
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: 'Older than retention but sent before policy activation',
+      type: MessageType.TEXT,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.DELIVERED,
+      timestamp: new Date(Date.now() - 2 * retentionSeconds * 1000), // 2 hours ago
+    });
+
+    const discussionRows =
+      await testQueries.discussions.getByOwner(OWNER_USER_ID);
+    await testQueries.messages.deleteExpiredByOwner(
+      OWNER_USER_ID,
+      discussionRows
+    );
+
+    expect(await testQueries.messages.getById(oldBeforePolicyId)).toBeDefined();
+  });
+
+  it('deletes edited and reaction messages when they exceed retention after policy activation', async () => {
+    const testQueries = getTestQueries();
+    const retentionSeconds = 3600; // 1 hour
+
+    await insertTestContactAndDiscussion(
+      OWNER_USER_ID,
+      CONTACT_USER_ID,
+      retentionSeconds
+    );
+
+    const policySetAt = Date.now() - 3 * 3600 * 1000; // 3 hours ago
+    await testQueries.discussions.updateByOwnerAndContact(
+      OWNER_USER_ID,
+      CONTACT_USER_ID,
+      { retentionPolicySetAt: policySetAt }
+    );
+
+    const expiredTimestamp = new Date(Date.now() - 2 * retentionSeconds * 1000); // 2 hours ago
+
+    const editedId = await testQueries.messages.insert({
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: 'Edited message content',
+      type: MessageType.TEXT,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.DELIVERED,
+      timestamp: expiredTimestamp,
+      metadata: JSON.stringify({ edited: true }),
+    });
+
+    const reactionId = await testQueries.messages.insert({
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: '👍',
+      type: MessageType.REACTION,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.DELIVERED,
+      timestamp: expiredTimestamp,
+      metadata: JSON.stringify({ originalMessageId: editedId }),
+    });
+
+    const discussionRows =
+      await testQueries.discussions.getByOwner(OWNER_USER_ID);
+    await testQueries.messages.deleteExpiredByOwner(
+      OWNER_USER_ID,
+      discussionRows
+    );
+
+    expect(await testQueries.messages.getById(editedId)).toBeUndefined();
+    expect(await testQueries.messages.getById(reactionId)).toBeUndefined();
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
