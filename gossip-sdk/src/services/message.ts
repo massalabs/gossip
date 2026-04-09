@@ -889,7 +889,24 @@ export class MessageService {
       message.messageId = randomMessageId;
     }
 
-    // Add message as WAITING_SESSION
+    // Fast path: if the peer's session is already Active we can encrypt
+    // and ship the message in parallel with the local INSERT instead of
+    // waiting for `addMessageAndUpdateDiscussion` to commit before
+    // `processSendQueueForContact` even starts. The user-perceived
+    // latency drops from `INSERT + encrypt + POST` (sequential) to
+    // `max(INSERT, encrypt + POST)` — ~440 ms saved on prod where the
+    // network round-trip dominates.
+    const sessionStatus = this.session.peerSessionStatus(peerId);
+    if (sessionStatus === SessionStatus.Active) {
+      const fastPathResult = await this.sendMessageFastPath(message, peerId);
+      if (fastPathResult) {
+        return fastPathResult;
+      }
+      // Fast path bailed (encrypt returned null, etc.) — fall back to
+      // the slow path below.
+    }
+
+    // Slow path: INSERT first, let stateUpdate handle the encrypt + send.
     let messageId: number;
     try {
       messageId = await this.addMessageAndUpdateDiscussion({
@@ -918,6 +935,187 @@ export class MessageService {
     return {
       success: true,
       message: queuedMessage,
+    };
+  }
+
+  /**
+   * Happy-path send: peer session is Active, so we can encrypt locally,
+   * fire the network POST, and INSERT the row in parallel. The three
+   * pieces are independent up until the final `UPDATE → SENT`, which
+   * needs both the row id (from INSERT) and a successful network ack.
+   *
+   *   ┌── INSERT (~440 ms) ───────────────┐
+   *   │                                   ├── UPDATE → SENT (background)
+   *   └── encrypt (~150 ms) → POST (~620 ms)
+   *                                       │
+   *                                       └── emit MESSAGE_SENT
+   *
+   * Returns `null` if the fast path can't run (encrypt declined, network
+   * threw, etc.) so the caller can fall back to the slow path.
+   */
+  private async sendMessageFastPath(
+    message: Message,
+    peerId: Uint8Array
+  ): Promise<SendMessageResult | null> {
+    const log = logger.forMethod('sendMessageFastPath');
+
+    // 1. Serialize synchronously — needed before encrypt.
+    const serializeResult = await this.serializeMessage(message);
+    if (!serializeResult.success) {
+      log.error('failed to serialize message for fast path', {
+        error: serializeResult.error,
+      });
+      return null;
+    }
+    const serializedContent = serializeResult.data;
+
+    // 2. Kick off the local INSERT and the encrypt in parallel.
+    //    encrypt is fast (~150 ms with rayon) and doesn't depend on
+    //    the row id; INSERT is slow (~440 ms) and only the row id is
+    //    later needed for the SENT update.
+    const insertPromise = this.addMessageAndUpdateDiscussion({
+      ...message,
+      status: MessageStatus.WAITING_SESSION,
+    }).catch(error => {
+      log.error('addMessageAndUpdateDiscussion failed in fast path', {
+        error,
+      });
+      return null as number | null;
+    });
+
+    const sendOutput = await this.session.sendMessage(
+      peerId,
+      serializedContent
+    );
+    if (!sendOutput) {
+      // Session became inactive between status check and encrypt.
+      // Wait for the INSERT to land then bail out so the slow path
+      // can take over.
+      const messageId = await insertPromise;
+      if (messageId === null) {
+        return {
+          success: false,
+          error: 'Failed to add message to database',
+        };
+      }
+      log.info(
+        'encrypt returned null in fast path, falling back to slow path',
+        {
+          messageId,
+        }
+      );
+      void this.refreshService?.stateUpdate();
+      return {
+        success: true,
+        message: {
+          ...message,
+          id: messageId,
+          status: MessageStatus.WAITING_SESSION,
+        },
+      };
+    }
+
+    // 3. Encrypt succeeded. Network POST runs in parallel with the
+    //    still-in-flight INSERT.
+    const networkPromise = this.messageProtocol
+      .sendMessage({
+        seeker: sendOutput.seeker,
+        ciphertext: sendOutput.data,
+      })
+      .then(() => true)
+      .catch(error => {
+        log.error('network send failed in fast path', { error });
+        return false;
+      });
+
+    const [messageId, networkOk] = await Promise.all([
+      insertPromise,
+      networkPromise,
+    ]);
+
+    if (messageId === null) {
+      return {
+        success: false,
+        error: 'Failed to add message to database',
+      };
+    }
+
+    if (!networkOk) {
+      // Network failed: persist READY so the next retry doesn't
+      // re-encrypt, and let stateUpdate pick it up.
+      await this.queries.messages.updateById(messageId, {
+        status: MessageStatus.READY,
+        encryptedMessage: sendOutput.data,
+        seeker: sendOutput.seeker,
+        whenToSend: new Date(Date.now() + this.config.messages.retryDelayMs),
+        serializedContent,
+      });
+      void this.refreshService?.stateUpdate();
+      return {
+        success: true,
+        message: {
+          ...message,
+          id: messageId,
+          status: MessageStatus.READY,
+        },
+      };
+    }
+
+    // 4. Both succeeded. Race-check + fire-and-forget UPDATE → SENT.
+    const latestRow = await this.queries.messages.getById(messageId);
+    if (!latestRow || latestRow.status !== MessageStatus.WAITING_SESSION) {
+      log.debug(
+        'message gone or status changed during fast-path send, skipping SENT update',
+        { messageId, currentStatus: latestRow?.status }
+      );
+      return {
+        success: true,
+        message: {
+          ...message,
+          id: messageId,
+          status: MessageStatus.SENT,
+        },
+      };
+    }
+
+    this.inFlightSentUpdates.add(messageId);
+    void this.queries.messages
+      .updateById(messageId, {
+        status: MessageStatus.SENT,
+        encryptedMessage: null,
+        serializedContent: null,
+        whenToSend: null,
+      })
+      .catch(error => {
+        log.error('background UPDATE → SENT failed in fast path', {
+          messageId,
+          error,
+        });
+      })
+      .finally(() => {
+        this.inFlightSentUpdates.delete(messageId);
+      });
+
+    try {
+      this.eventEmitter.emit(SdkEventType.MESSAGE_SENT, {
+        ...message,
+        id: messageId,
+        status: MessageStatus.SENT,
+      });
+    } catch (error) {
+      log.error('failed to emit message sent event from fast path', {
+        messageId,
+        error,
+      });
+    }
+
+    return {
+      success: true,
+      message: {
+        ...message,
+        id: messageId,
+        status: MessageStatus.SENT,
+      },
     };
   }
 
