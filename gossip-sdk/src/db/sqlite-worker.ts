@@ -73,7 +73,12 @@ async function handleMessage(e: MessageEvent): Promise<void> {
       case 'init': {
         const { dbPath, wasmUrl, initSql, useOPFS } = e.data;
         const moduleArg: Record<string, unknown> = {};
-        if (wasmUrl) moduleArg.locateFile = () => wasmUrl;
+        // Pre-fetch WASM as ArrayBuffer so Safari doesn't choke on
+        // chunked Transfer-Encoding during instantiateStreaming.
+        if (wasmUrl) {
+          const resp = await fetch(wasmUrl);
+          moduleArg.wasmBinary = await resp.arrayBuffer();
+        }
 
         // Load the right WASM build + VFS.
         // NOTE: import() paths must be string literals — Vite can't resolve variables.
