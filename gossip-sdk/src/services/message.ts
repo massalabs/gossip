@@ -255,6 +255,15 @@ export class MessageService {
   private processingContacts = new Set<string>();
   private isFetchingMessages = false;
   private queries: Queries;
+  /**
+   * Message ids whose final `UPDATE → SENT` is still in flight (the row
+   * was already delivered on the network and we emitted MESSAGE_SENT,
+   * but the SQL write to clear `encryptedMessage` and flip the status
+   * column hasn't committed yet). Filtered out of the next
+   * `processSendQueueForContact` pass to prevent re-encrypting + re-sending
+   * a message we've already shipped.
+   */
+  private inFlightSentUpdates = new Set<number>();
 
   /** Emit MESSAGE_RECEIVED with a Message that may not have a DB id yet */
   private emitMessageReceived(
@@ -1138,13 +1147,23 @@ export class MessageService {
 
       for (const msg of pendingMessages) {
         if (!msg.id) continue;
+        if (this.inFlightSentUpdates.has(msg.id)) {
+          // The previous pass already shipped this message and emitted
+          // MESSAGE_SENT; the background UPDATE → SENT just hasn't
+          // committed yet. Skip until it does.
+          continue;
+        }
 
-        let currentStatus = msg.status;
+        const currentStatus = msg.status;
         let encryptedMessage = msg.encryptedMessage;
         let seeker = msg.seeker;
-        let whenToSend = msg.whenToSend;
+        const whenToSend = msg.whenToSend;
 
-        // If the sessions is saturated it can't send messages on session manager
+        // Happy path: WAITING_SESSION + Active session.
+        // Encrypt → network → SENT directly, skipping the intermediate
+        // READY SQL write. The READY block below still handles retries
+        // (delayed sends, post-failure retries), where the encrypted
+        // bytes need to survive a restart.
         if (
           currentStatus === MessageStatus.WAITING_SESSION &&
           sessionStatus === SessionStatus.Active
@@ -1180,23 +1199,93 @@ export class MessageService {
 
           encryptedMessage = sendOutput.data;
           seeker = sendOutput.seeker;
-          whenToSend = new Date();
 
-          await this.queries.messages.updateById(msg.id, {
-            status: MessageStatus.READY,
-            encryptedMessage,
-            seeker,
-            whenToSend,
-            serializedContent,
-          });
-          currentStatus = MessageStatus.READY;
-          log.debug('message updated to READY', {
+          // Try the network synchronously. On success, skip READY entirely
+          // and write SENT in the background. On failure, fall back to
+          // persisting READY so the next retry doesn't have to re-encrypt.
+          try {
+            await this.messageProtocol.sendMessage({
+              seeker,
+              ciphertext: encryptedMessage,
+            });
+          } catch (error) {
+            log.error('network send failed for fresh message', {
+              messageId: msg.id,
+              error,
+            });
+            await this.queries.messages.updateById(msg.id, {
+              status: MessageStatus.READY,
+              encryptedMessage,
+              seeker,
+              whenToSend: new Date(
+                Date.now() + this.config.messages.retryDelayMs
+              ),
+              serializedContent,
+            });
+            continue;
+          }
+
+          // Network success. Race-check: most resets only touch
+          // READY/SENT rows so they leave us alone, but the discussion
+          // could have been deleted while we were on the wire — bail
+          // out if the row is gone or has moved to a non-WAITING state.
+          const latestRow = await this.queries.messages.getById(msg.id);
+          if (
+            !latestRow ||
+            latestRow.status !== MessageStatus.WAITING_SESSION
+          ) {
+            log.debug(
+              'message gone or status changed during network send, skipping SENT update',
+              {
+                messageId: msg.id,
+                currentStatus: latestRow?.status,
+              }
+            );
+            continue;
+          }
+
+          // Fire-and-forget UPDATE → SENT. The UI gets its checkmark
+          // from the synchronous emit below; the SQL write happens in
+          // the background.
+          const sentMsgId = msg.id;
+          this.inFlightSentUpdates.add(sentMsgId);
+          void this.queries.messages
+            .updateById(sentMsgId, {
+              status: MessageStatus.SENT,
+              encryptedMessage: null,
+              serializedContent: null,
+              whenToSend: null,
+            })
+            .catch(error => {
+              log.error('background UPDATE → SENT failed', {
+                messageId: sentMsgId,
+                error,
+              });
+            })
+            .finally(() => {
+              this.inFlightSentUpdates.delete(sentMsgId);
+            });
+
+          sentCount++;
+          log.debug('message sent (skipped READY)', {
             messageId: msg.id,
-            status: currentStatus,
+            status: MessageStatus.SENT,
             content: msg.content,
             type: msg.type,
             direction: msg.direction,
           });
+          try {
+            this.eventEmitter.emit(SdkEventType.MESSAGE_SENT, {
+              ...msg,
+              status: MessageStatus.SENT,
+            });
+          } catch (error) {
+            log.error('failed to emit message sent event', {
+              messageId: msg.id,
+              error,
+            });
+          }
+          continue;
         }
 
         if (currentStatus === MessageStatus.READY) {
