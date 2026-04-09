@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { CornerUpLeft, Share, Share2, Copy, Trash2 } from 'react-feather';
+import { CornerUpLeft, Share, Share2, Copy, Trash2, Edit } from 'react-feather';
 import { createElement } from 'react';
 import { shareMessage } from '../../../services/shareService';
 import type { useLongPress } from '../../../hooks/useLongPress';
@@ -127,7 +127,7 @@ export function useContextMenu({
     if (onEdit && isOutgoing && !isDeleted && message.id != null) {
       items.push({
         label: t('message_item.edit'),
-        icon: createElement(CornerUpLeft, { className: 'w-4 h-4' }),
+        icon: createElement(Edit, { className: 'w-4 h-4' }),
         onClick: () => onEdit(message),
       });
     }
