@@ -8,6 +8,9 @@
  */
 
 import { init } from './bindings.js';
+import gossipWasmUrl from '../assets/generated/wasm/gossip_wasm_bg.wasm?url';
+
+const WASM_PATH = '../assets/generated/wasm/gossip_wasm_bg.wasm';
 
 const WASM_PATH = '../assets/generated/wasm/gossip_wasm_bg.wasm';
 
@@ -63,10 +66,9 @@ export async function initializeWasm(): Promise<void> {
         const wasmBytes = fs.readFileSync(wasmPath);
         await init(wasmBytes);
       } else {
-        // Browser: pre-fetch as ArrayBuffer so Safari doesn't choke on
+        // Pre-fetch as ArrayBuffer so Safari doesn't choke on
         // chunked Transfer-Encoding during instantiateStreaming.
-        const wasmUrl = new URL(WASM_PATH, import.meta.url);
-        const resp = await fetch(wasmUrl);
+        const resp = await fetch(gossipWasmUrl);
         const wasmBytes = await resp.arrayBuffer();
         await init(wasmBytes);
       }

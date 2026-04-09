@@ -73,11 +73,24 @@ async function handleMessage(e: MessageEvent): Promise<void> {
       case 'init': {
         const { dbPath, wasmUrl, initSql, useOPFS } = e.data;
         const moduleArg: Record<string, unknown> = {};
-        // Pre-fetch WASM as ArrayBuffer so Safari doesn't choke on
-        // chunked Transfer-Encoding during instantiateStreaming.
+        // Pre-fetch WASM as ArrayBuffer and override instantiateWasm
+        // so Emscripten never calls instantiateStreaming (Safari chokes
+        // on chunked Transfer-Encoding).
         if (wasmUrl) {
           const resp = await fetch(wasmUrl);
-          moduleArg.wasmBinary = await resp.arrayBuffer();
+          const bytes = await resp.arrayBuffer();
+          moduleArg.instantiateWasm = (
+            imports: WebAssembly.Imports,
+            successCallback: (
+              instance: WebAssembly.Instance,
+              module: WebAssembly.Module
+            ) => void
+          ) => {
+            WebAssembly.instantiate(bytes, imports).then(result => {
+              successCallback(result.instance, result.module);
+            });
+            return {};
+          };
         }
 
         // Load the right WASM build + VFS.
