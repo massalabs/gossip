@@ -391,51 +391,53 @@ export class MessageService {
   private async addMessageAndUpdateDiscussion(
     message: Omit<Message, 'id'>
   ): Promise<number> {
-    const messageId = await this.queries.messages.insert({
-      messageId: message.messageId,
-      ownerUserId: message.ownerUserId,
-      contactUserId: message.contactUserId,
-      content: message.content,
-      serializedContent: message.serializedContent,
-      type: message.type,
-      direction: message.direction,
-      status: message.status,
-      timestamp: message.timestamp,
-      metadata: serializeMetadata(message.metadata),
-      seeker: message.seeker,
-      replyTo: serializeReplyTo(message.replyTo),
-      forwardOf: serializeForwardOf(message.forwardOf),
-      deleteOf: serializeDeleteOf(message.deleteOf),
-      editOf: serializeEditOf(message.editOf),
-      reactionOf: serializeReactionOf(message.reactionOf),
-      encryptedMessage: message.encryptedMessage,
-      whenToSend: message.whenToSend,
-    });
-
-    const discussion = await this.queries.discussions.getByOwnerAndContact(
-      message.ownerUserId,
-      message.contactUserId
-    );
-
-    if (
-      discussion &&
-      message.type !== MessageType.KEEP_ALIVE &&
-      message.type !== MessageType.REACTION &&
-      message.type !== MessageType.RETENTION_POLICY
-    ) {
-      await this.queries.discussions.updateById(discussion.id, {
-        lastMessageId: messageId,
-        lastMessageContent: message.content,
-        lastMessageTimestamp: message.timestamp,
-        updatedAt: new Date(),
+    return this.queries.conn.withTransaction(async () => {
+      const messageId = await this.queries.messages.insert({
+        messageId: message.messageId,
+        ownerUserId: message.ownerUserId,
+        contactUserId: message.contactUserId,
+        content: message.content,
+        serializedContent: message.serializedContent,
+        type: message.type,
+        direction: message.direction,
+        status: message.status,
+        timestamp: message.timestamp,
+        metadata: serializeMetadata(message.metadata),
+        seeker: message.seeker,
+        replyTo: serializeReplyTo(message.replyTo),
+        forwardOf: serializeForwardOf(message.forwardOf),
+        deleteOf: serializeDeleteOf(message.deleteOf),
+        editOf: serializeEditOf(message.editOf),
+        reactionOf: serializeReactionOf(message.reactionOf),
+        encryptedMessage: message.encryptedMessage,
+        whenToSend: message.whenToSend,
       });
 
-      if (message.direction === MessageDirection.INCOMING) {
-        await this.queries.discussions.incrementUnreadCount(discussion.id);
-      }
-    }
+      const discussion = await this.queries.discussions.getByOwnerAndContact(
+        message.ownerUserId,
+        message.contactUserId
+      );
 
-    return messageId;
+      if (
+        discussion &&
+        message.type !== MessageType.KEEP_ALIVE &&
+        message.type !== MessageType.REACTION &&
+        message.type !== MessageType.RETENTION_POLICY
+      ) {
+        await this.queries.discussions.updateById(discussion.id, {
+          lastMessageId: messageId,
+          lastMessageContent: message.content,
+          lastMessageTimestamp: message.timestamp,
+          updatedAt: new Date(),
+        });
+
+        if (message.direction === MessageDirection.INCOMING) {
+          await this.queries.discussions.incrementUnreadCount(discussion.id);
+        }
+      }
+
+      return messageId;
+    });
   }
 
   private async decryptMessages(encrypted: EncryptedMessage[]): Promise<{
