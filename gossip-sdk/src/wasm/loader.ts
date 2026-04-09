@@ -12,8 +12,6 @@ import gossipWasmUrl from '../assets/generated/wasm/gossip_wasm_bg.wasm?url';
 
 const WASM_PATH = '../assets/generated/wasm/gossip_wasm_bg.wasm';
 
-const WASM_PATH = '../assets/generated/wasm/gossip_wasm_bg.wasm';
-
 /**
  * WASM Initialization State
  */
