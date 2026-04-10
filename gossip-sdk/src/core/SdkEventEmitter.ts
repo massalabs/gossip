@@ -1,17 +1,10 @@
 /**
- * SDK Event Emitter
- *
- * Type-safe event emitter backed by mitt. The SdkEvents type map is the
- * single source of truth for all event names and their payload shapes.
+ * SDK Event Emitter — type-safe event bus backed by mitt.
  */
 
 import mitt from 'mitt';
 import type { Message, Discussion, Contact } from '../db';
 import type { SessionStatus } from '../wasm/bindings';
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Event Types
-// ─────────────────────────────────────────────────────────────────────────────
 
 export enum SdkEventType {
   MESSAGE_RECEIVED = 'messageReceived',
@@ -33,10 +26,6 @@ export enum SdkEventType {
   MESSAGE_EDIT_FAILED = 'messageEditFailed',
   ERROR = 'error',
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Event Payload Map
-// ─────────────────────────────────────────────────────────────────────────────
 
 export type SdkEvents = {
   [SdkEventType.MESSAGE_RECEIVED]: Omit<Message, 'id'> & { id?: number };
@@ -85,18 +74,6 @@ export type SdkEvents = {
   };
   [SdkEventType.ERROR]: { error: Error; context: string };
 };
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Backward-compat: re-export SdkEventHandlers derived from SdkEvents
-// ─────────────────────────────────────────────────────────────────────────────
-
-export type SdkEventHandlers = {
-  [K in keyof SdkEvents]: (payload: SdkEvents[K]) => void;
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Event Emitter Class (mitt-backed)
-// ─────────────────────────────────────────────────────────────────────────────
 
 export class SdkEventEmitter {
   private bus = mitt<SdkEvents>();

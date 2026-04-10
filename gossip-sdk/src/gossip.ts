@@ -80,17 +80,13 @@ import {
 import {
   SdkEventEmitter,
   SdkEventType,
-  type SdkEventHandlers,
+  type SdkEvents,
 } from './core/SdkEventEmitter.js';
 import { SdkPolling } from './core/SdkPolling.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
-
-// Note: SdkEventType, SdkEvents, SdkEventHandlers are re-exported from
-// index.ts via core/SdkEventEmitter.js to avoid enum identity issues
-// with vite module resolution.
 
 export enum SdkStatus {
   UNINITIALIZED = 'uninitialized',
@@ -652,14 +648,20 @@ class GossipSdk {
   /**
    * Register an event handler
    */
-  on<K extends SdkEventType>(event: K, handler: SdkEventHandlers[K]): void {
+  on<K extends SdkEventType>(
+    event: K,
+    handler: (payload: SdkEvents[K]) => void
+  ): void {
     this.eventEmitter.on(event, handler);
   }
 
   /**
    * Remove an event handler
    */
-  off<K extends SdkEventType>(event: K, handler: SdkEventHandlers[K]): void {
+  off<K extends SdkEventType>(
+    event: K,
+    handler: (payload: SdkEvents[K]) => void
+  ): void {
     this.eventEmitter.off(event, handler);
   }
 
