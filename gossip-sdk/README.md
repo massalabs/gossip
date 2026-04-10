@@ -293,9 +293,6 @@ const utils = sdk.utils;
 const result = utils.validateUserId(userId);
 if (!result.valid) console.error(result.error);
 
-// Validate username format
-const result = utils.validateUsername(username);
-
 // Encode/decode user IDs
 const encoded = utils.encodeUserId(rawBytes);
 const decoded = utils.decodeUserId(encodedString);

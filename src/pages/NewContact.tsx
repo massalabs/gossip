@@ -34,6 +34,7 @@ const NewContact: React.FC = () => {
     mnsState,
     shareUsername,
     customUsername,
+    customUsernameError,
     isSubmitting,
     canSubmit,
     hasUnsavedChanges,
@@ -321,8 +322,12 @@ const NewContact: React.FC = () => {
               placeholder={t('new_contact.share_username_placeholder')}
               className="w-full bg-muted/50 text-foreground placeholder-muted-foreground focus:outline-none rounded-lg px-3 py-2 text-sm"
               aria-label={t('new_contact.share_username_aria')}
-              maxLength={50}
             />
+            {customUsernameError && (
+              <p className="mt-1.5 text-sm text-destructive" role="alert">
+                {customUsernameError}
+              </p>
+            )}
           </div>
         )}
       </div>

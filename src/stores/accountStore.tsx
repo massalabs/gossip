@@ -8,8 +8,8 @@ import {
   validateMnemonic,
   EncryptionKey,
   generateNonce,
-  validateUsernameFormat,
 } from '@massalabs/gossip-sdk';
+import { validateUsernameFormat } from '../utils/validation';
 import { getSdk } from './sdkStore';
 import { isWebAuthnSupported } from '../crypto/webauthn';
 import {

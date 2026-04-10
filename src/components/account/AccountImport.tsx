@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Lock, Shield } from 'react-feather';
 import { useAccountStore } from '../../stores/accountStore';
 import { validateMnemonic, validatePassword } from '@massalabs/gossip-sdk';
+import { validateUsernameFormat } from '../../utils/validation';
 import Button from '../ui/Button';
 import PageHeader from '../ui/PageHeader';
 import PageLayout from '../ui/PageLayout';
@@ -56,8 +57,9 @@ const AccountImport: React.FC<AccountImportProps> = ({
         return;
       }
 
-      if (username.length < 3) {
-        setError(t('create.username_min_length'));
+      const usernameResult = validateUsernameFormat(username);
+      if (!usernameResult.valid) {
+        setError(usernameResult.error);
         return;
       }
 

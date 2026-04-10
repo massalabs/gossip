@@ -1,0 +1,8 @@
+{
+  "username": {
+    "required": "Un nom d'utilisateur est requis",
+    "no_spaces": "Le nom d'utilisateur ne peut pas contenir d'espaces",
+    "min_length": "Le nom d'utilisateur doit contenir au moins {{min}} caractères",
+    "max_length": "Le nom d'utilisateur doit contenir au plus {{max}} caractères"
+  }
+}

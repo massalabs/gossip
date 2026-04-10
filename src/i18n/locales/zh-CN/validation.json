@@ -1,0 +1,8 @@
+{
+  "username": {
+    "required": "用户名不能为空",
+    "no_spaces": "用户名不能包含空格",
+    "min_length": "用户名至少需要 {{min}} 个字符",
+    "max_length": "用户名最多 {{max}} 个字符"
+  }
+}

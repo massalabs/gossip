@@ -5,11 +5,11 @@ import { useAccountStore } from '../stores/accountStore';
 import { useAppStore } from '../stores/appStore';
 import {
   validateUserIdFormat,
-  validateUsernameFormat,
   encodeUserId,
   UserPublicKeys,
   AnnouncementPayload,
 } from '@massalabs/gossip-sdk';
+import { validateUsernameFormat } from '../utils/validation';
 import { useGossipSdk } from './useGossipSdk';
 import { useFileShareContact } from './useFileShareContact';
 import { mnsService, isMnsDomain } from '../services/mns';
@@ -57,6 +57,9 @@ export function useContactForm() {
   const [customUsername, setCustomUsername] = useState(
     userProfile?.username || ''
   );
+  const [customUsernameError, setCustomUsernameError] = useState<
+    string | undefined
+  >(undefined);
 
   // Sync customUsername with profile username when it becomes available
   useEffect(() => {
@@ -101,6 +104,7 @@ export function useContactForm() {
     name.value.trim().length > 0 &&
     !userId.error &&
     userId.value.trim().length > 0 &&
+    (!shareUsername || !customUsernameError) &&
     publicKeys !== null &&
     !isSubmitting &&
     !userId.loading;
@@ -359,6 +363,16 @@ export function useContactForm() {
       }));
     }
 
+    if (shareUsername) {
+      const customUsernameResult = validateUsernameFormat(
+        customUsername.trim()
+      );
+      if (!customUsernameResult.valid) {
+        setCustomUsernameError(customUsernameResult.error);
+        return;
+      }
+    }
+
     // Prevent adding own user ID as a contact, even if previous checks passed
     if (userProfile?.userId && effectiveUserId === userProfile.userId) {
       setUserId(prev => ({
@@ -470,6 +484,7 @@ export function useContactForm() {
     mnsState,
     shareUsername,
     customUsername,
+    customUsernameError,
 
     generalError,
     isSubmitting,
