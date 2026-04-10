@@ -1,4 +1,4 @@
-import { eq, and, or, sql, inArray, asc, ne, lt, gte, like } from 'drizzle-orm';
+import { eq, and, or, sql, inArray, asc, ne, lt, gte } from 'drizzle-orm';
 import type { DiscussionRow } from './discussions.js';
 import * as schema from '../schema/index.js';
 import type { DatabaseConnection } from '../sqlite.js';
@@ -188,20 +188,18 @@ export class MessageQueries {
     ownerUserId: string,
     contactUserId: string,
     messageIdBase64: string
-  ): Promise<void> {
-    await this.conn.db
+  ): Promise<number> {
+    const deleted = await this.conn.db
       .delete(schema.messages)
       .where(
         and(
           eq(schema.messages.ownerUserId, ownerUserId),
           eq(schema.messages.contactUserId, contactUserId),
           eq(schema.messages.type, MessageType.REACTION),
-          like(
-            schema.messages.reactionOf,
-            `%"originalMsgId":"${messageIdBase64}"%`
-          )
+          sql`json_extract(${schema.messages.reactionOf}, '$.originalMsgId') = ${messageIdBase64}`
         )
       );
+    return deleted.changes ?? 0;
   }
 
   async deleteDeliveredKeepAlive(ownerUserId: string): Promise<void> {

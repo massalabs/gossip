@@ -175,20 +175,45 @@ export function createEventHandlers(
   const onDeletedOptimistic = ({
     contactUserId,
     messageDbId,
+    originalMsgId,
   }: {
     contactUserId: string;
     messageDbId: number;
     originalMsgId: Uint8Array;
   }) => {
     set(state => {
-      const map = patchContact(state.messagesByContact, contactUserId, ms =>
+      const msgMap = patchContact(state.messagesByContact, contactUserId, ms =>
         ms.map(m =>
           m.id === messageDbId
             ? { ...m, type: MessageType.DELETED, content: '[Message deleted]' }
             : m
         )
       );
-      return map ? { messagesByContact: map } : state;
+      if (!msgMap) return state;
+
+      // Remove cached reactions that reference the deleted message
+      const reactions = state.reactionsByContact.get(contactUserId);
+      if (!reactions || reactions.length === 0) {
+        return { messagesByContact: msgMap };
+      }
+      const filtered = reactions.filter(
+        r =>
+          !r.reactionOf?.originalMsgId ||
+          !messageIdEquals(r.reactionOf.originalMsgId, originalMsgId)
+      );
+      const rxnMap = new Map(state.reactionsByContact);
+      if (filtered.length > 0) rxnMap.set(contactUserId, filtered);
+      else rxnMap.delete(contactUserId);
+      return {
+        messagesByContact: msgMap,
+        reactionsByContact: rxnMap,
+        reactionGroupsCache: patchReactionCache(
+          state.reactionGroupsCache,
+          contactUserId,
+          msgMap,
+          rxnMap
+        ),
+      };
     });
   };
 
