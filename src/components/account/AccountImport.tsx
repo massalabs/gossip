@@ -3,7 +3,10 @@ import { useTranslation } from 'react-i18next';
 import { Lock, Shield } from 'react-feather';
 import { useAccountStore } from '../../stores/accountStore';
 import { validateMnemonic, validatePassword } from '@massalabs/gossip-sdk';
-import { validateUsernameFormat } from '../../utils/validation';
+import {
+  validateUsernameFormat,
+  USERNAME_MAX_LENGTH,
+} from '../../utils/validation';
 import Button from '../ui/Button';
 import PageHeader from '../ui/PageHeader';
 import PageLayout from '../ui/PageLayout';
@@ -169,6 +172,7 @@ const AccountImport: React.FC<AccountImportProps> = ({
           value={username}
           onChange={e => setUsername(e.target.value)}
           placeholder={t('import.enter_username')}
+          maxLength={USERNAME_MAX_LENGTH}
           disabled={isImporting}
         />
       </div>
