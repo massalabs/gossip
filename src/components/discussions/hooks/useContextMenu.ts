@@ -62,6 +62,7 @@ export function useContextMenu({
   }, [isContextMenuOpen, closeContextMenu, bubbleRef]);
 
   const isAndroid = Capacitor.getPlatform() === 'android';
+  const isWeb = !Capacitor.isNativePlatform();
 
   const handleContextMenu = useCallback(
     (e: React.MouseEvent) => {
@@ -74,16 +75,20 @@ export function useContextMenu({
         return;
       }
       e.preventDefault();
-      // Desktop / web: open the same actions menu as a bubble click (no touch long-press state).
-      // If a touch long-press just ran, skip — iOS can emit a synthetic contextmenu and we must
-      // not open the menu twice (same as longPress.onContextMenu duplicate guard).
+      // Web/desktop: right-click always opens context menu, regardless of selection state.
+      // On mobile (non-Android), skip if a touch long-press just ran — iOS can emit a
+      // synthetic contextmenu and we must not open the menu twice.
+      if (isWeb && !longPress.longPressTriggered.current) {
+        openContextMenu();
+        return;
+      }
       if (!isAndroid && !isSelecting && !longPress.longPressTriggered.current) {
         openContextMenu();
         return;
       }
       longPress.onContextMenu(e);
     },
-    [isAndroid, longPress, isDeleted, isSelecting, openContextMenu]
+    [isAndroid, isWeb, longPress, isDeleted, isSelecting, openContextMenu]
   );
 
   // Context menu items — depend on stable scalars, not the full message object
