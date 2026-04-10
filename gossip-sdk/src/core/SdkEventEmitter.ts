@@ -27,13 +27,11 @@ export enum SdkEventType {
   DISCUSSION_UPDATED = 'discussionUpdated',
   WRITE_FAILED = 'writeFailed',
   MESSAGE_OPTIMISTIC = 'messageOptimistic',
-  ERROR = 'error',
-
-  // Semantic optimistic events
   MESSAGE_DELETED_OPTIMISTIC = 'messageDeletedOptimistic',
   MESSAGE_EDITED_OPTIMISTIC = 'messageEditedOptimistic',
   MESSAGE_DELETE_FAILED = 'messageDeleteFailed',
   MESSAGE_EDIT_FAILED = 'messageEditFailed',
+  ERROR = 'error',
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -64,9 +62,6 @@ export type SdkEvents = {
     error: Error;
   };
   [SdkEventType.MESSAGE_OPTIMISTIC]: Message;
-  [SdkEventType.ERROR]: { error: Error; context: string };
-
-  // Semantic optimistic events
   [SdkEventType.MESSAGE_DELETED_OPTIMISTIC]: {
     contactUserId: string;
     messageDbId: number;
@@ -88,6 +83,7 @@ export type SdkEvents = {
     messageDbId: number;
     original: Message;
   };
+  [SdkEventType.ERROR]: { error: Error; context: string };
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
