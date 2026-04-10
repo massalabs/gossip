@@ -30,10 +30,6 @@ export const aead_encrypt: (
 export const announcementresult_announcer_public_keys: (a: number) => number;
 export const announcementresult_timestamp: (a: number) => number;
 export const announcementresult_user_data: (a: number) => [number, number];
-export const derive_evm_address: (
-  a: number,
-  b: number
-) => [number, number, number, number];
 export const encryptionkey_from_bytes: (
   a: number,
   b: number
@@ -128,6 +124,7 @@ export const sessionmanagerwrapper_to_encrypted_blob: (
   a: number,
   b: number
 ) => [number, number, number, number];
+export const userkeys_evm_address: (a: number) => [number, number];
 export const userkeys_public_keys: (a: number) => [number, number, number];
 export const userkeys_secret_keys: (a: number) => [number, number, number];
 export const userpublickeys_derive_id: (a: number) => [number, number];

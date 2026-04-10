@@ -39,19 +39,6 @@ export function aead_encrypt(
   aad: Uint8Array
 ): Uint8Array;
 /**
- * Generates user keys from a passphrase using password-based key derivation.
- */
-export function generate_user_keys(passphrase: string): UserKeys;
-/**
- * Derives an EVM address from a BIP39 mnemonic phrase.
- *
- * Uses BIP44 derivation path `m/44'/60'/0'/0/0` and returns an EIP-55
- * checksummed hex string (0x…). Fails if the input is not a valid
- * BIP39 mnemonic — callers that may pass arbitrary passphrases should
- * not use this function.
- */
-export function derive_evm_address(mnemonic: string): string;
-/**
  * Decrypts data using AES-256-SIV authenticated encryption.
  *
  * # Parameters
@@ -91,6 +78,14 @@ export function aead_decrypt(
   aad: Uint8Array
 ): Uint8Array | undefined;
 export function start(): void;
+/**
+ * Generates user keys from a passphrase (typically a BIP39 mnemonic).
+ *
+ * Derives gossip keys (DSA, KEM, Massa) and, when the passphrase is a
+ * valid BIP39 mnemonic, the EVM address — all in a single WASM call so
+ * the mnemonic crosses the JS boundary only once.
+ */
+export function generate_user_keys(passphrase: string): UserKeys;
 /**
  * Session status indicating the state of a peer session.
  */
@@ -384,6 +379,10 @@ export class UserKeys {
   free(): void;
   [Symbol.dispose](): void;
   /**
+   * EIP-55 checksummed EVM address (0x…) derived from the mnemonic.
+   */
+  evm_address(): string;
+  /**
    * Gets the public keys.
    */
   public_keys(): UserPublicKeys;
@@ -491,10 +490,6 @@ export interface InitOutput {
   readonly announcementresult_announcer_public_keys: (a: number) => number;
   readonly announcementresult_timestamp: (a: number) => number;
   readonly announcementresult_user_data: (a: number) => [number, number];
-  readonly derive_evm_address: (
-    a: number,
-    b: number
-  ) => [number, number, number, number];
   readonly encryptionkey_from_bytes: (
     a: number,
     b: number
@@ -586,6 +581,7 @@ export interface InitOutput {
     a: number,
     b: number
   ) => [number, number, number, number];
+  readonly userkeys_evm_address: (a: number) => [number, number];
   readonly userkeys_public_keys: (a: number) => [number, number, number];
   readonly userkeys_secret_keys: (a: number) => [number, number, number];
   readonly userpublickeys_derive_id: (a: number) => [number, number];

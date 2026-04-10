@@ -169,6 +169,7 @@ impl UserSecretKeys {
 pub struct UserKeys {
     public_keys_bytes: Vec<u8>,
     secret_keys_bytes: Vec<u8>,
+    evm_address: String,
 }
 
 #[wasm_bindgen]
@@ -182,31 +183,32 @@ impl UserKeys {
     pub fn secret_keys(&self) -> Result<UserSecretKeys, JsValue> {
         UserSecretKeys::from_bytes(&self.secret_keys_bytes)
     }
+
+    /// EIP-55 checksummed EVM address (0x…) derived from the mnemonic.
+    pub fn evm_address(&self) -> String {
+        self.evm_address.clone()
+    }
 }
 
-/// Generates user keys from a passphrase using password-based key derivation.
+/// Generates user keys from a passphrase (typically a BIP39 mnemonic).
+///
+/// Derives gossip keys (DSA, KEM, Massa) and, when the passphrase is a
+/// valid BIP39 mnemonic, the EVM address — all in a single WASM call so
+/// the mnemonic crosses the JS boundary only once.
 #[wasm_bindgen]
 pub fn generate_user_keys(passphrase: &str) -> Result<UserKeys, JsValue> {
     let root_secret = auth::StaticRootSecret::from_passphrase(passphrase.as_bytes());
 
     let (public_keys, secret_keys) = auth::derive_keys_from_static_root_secret(&root_secret);
 
+    let evm_address = auth::derive_evm_address(passphrase).unwrap_or_default();
+
     Ok(UserKeys {
         public_keys_bytes: public_keys.to_bytes(),
         secret_keys_bytes: bincode::serde::encode_to_vec(&secret_keys, bincode::config::standard())
             .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))?,
+        evm_address,
     })
-}
-
-/// Derives an EVM address from a BIP39 mnemonic phrase.
-///
-/// Uses BIP44 derivation path `m/44'/60'/0'/0/0` and returns an EIP-55
-/// checksummed hex string (0x…). Fails if the input is not a valid
-/// BIP39 mnemonic — callers that may pass arbitrary passphrases should
-/// not use this function.
-#[wasm_bindgen]
-pub fn derive_evm_address(mnemonic: &str) -> Result<String, JsValue> {
-    auth::derive_evm_address(mnemonic).map_err(|e| JsValue::from_str(&e))
 }
 
 /// Encryption key for AEAD operations (AES-256-SIV).

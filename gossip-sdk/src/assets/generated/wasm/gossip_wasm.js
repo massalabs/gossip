@@ -210,61 +210,6 @@ export function aead_encrypt(key, nonce, plaintext, aad) {
 }
 
 /**
- * Generates user keys from a passphrase using password-based key derivation.
- * @param {string} passphrase
- * @returns {UserKeys}
- */
-export function generate_user_keys(passphrase) {
-  const ptr0 = passStringToWasm0(
-    passphrase,
-    wasm.__wbindgen_malloc,
-    wasm.__wbindgen_realloc
-  );
-  const len0 = WASM_VECTOR_LEN;
-  const ret = wasm.generate_user_keys(ptr0, len0);
-  if (ret[2]) {
-    throw takeFromExternrefTable0(ret[1]);
-  }
-  return UserKeys.__wrap(ret[0]);
-}
-
-/**
- * Derives an EVM address from a BIP39 mnemonic phrase.
- *
- * Uses BIP44 derivation path `m/44'/60'/0'/0/0` and returns an EIP-55
- * checksummed hex string (0x…). Fails if the input is not a valid
- * BIP39 mnemonic — callers that may pass arbitrary passphrases should
- * not use this function.
- * @param {string} mnemonic
- * @returns {string}
- */
-export function derive_evm_address(mnemonic) {
-  let deferred3_0;
-  let deferred3_1;
-  try {
-    const ptr0 = passStringToWasm0(
-      mnemonic,
-      wasm.__wbindgen_malloc,
-      wasm.__wbindgen_realloc
-    );
-    const len0 = WASM_VECTOR_LEN;
-    const ret = wasm.derive_evm_address(ptr0, len0);
-    var ptr2 = ret[0];
-    var len2 = ret[1];
-    if (ret[3]) {
-      ptr2 = 0;
-      len2 = 0;
-      throw takeFromExternrefTable0(ret[2]);
-    }
-    deferred3_0 = ptr2;
-    deferred3_1 = len2;
-    return getStringFromWasm0(ptr2, len2);
-  } finally {
-    wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
-  }
-}
-
-/**
  * Decrypts data using AES-256-SIV authenticated encryption.
  *
  * # Parameters
@@ -327,6 +272,29 @@ export function aead_decrypt(key, nonce, ciphertext, aad) {
 
 export function start() {
   wasm.start();
+}
+
+/**
+ * Generates user keys from a passphrase (typically a BIP39 mnemonic).
+ *
+ * Derives gossip keys (DSA, KEM, Massa) and, when the passphrase is a
+ * valid BIP39 mnemonic, the EVM address — all in a single WASM call so
+ * the mnemonic crosses the JS boundary only once.
+ * @param {string} passphrase
+ * @returns {UserKeys}
+ */
+export function generate_user_keys(passphrase) {
+  const ptr0 = passStringToWasm0(
+    passphrase,
+    wasm.__wbindgen_malloc,
+    wasm.__wbindgen_realloc
+  );
+  const len0 = WASM_VECTOR_LEN;
+  const ret = wasm.generate_user_keys(ptr0, len0);
+  if (ret[2]) {
+    throw takeFromExternrefTable0(ret[1]);
+  }
+  return UserKeys.__wrap(ret[0]);
 }
 
 /**
@@ -1092,6 +1060,22 @@ export class UserKeys {
   free() {
     const ptr = this.__destroy_into_raw();
     wasm.__wbg_userkeys_free(ptr, 0);
+  }
+  /**
+   * EIP-55 checksummed EVM address (0x…) derived from the mnemonic.
+   * @returns {string}
+   */
+  evm_address() {
+    let deferred1_0;
+    let deferred1_1;
+    try {
+      const ret = wasm.userkeys_evm_address(this.__wbg_ptr);
+      deferred1_0 = ret[0];
+      deferred1_1 = ret[1];
+      return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+      wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+    }
   }
   /**
    * Gets the public keys.
