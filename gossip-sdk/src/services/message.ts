@@ -1757,6 +1757,10 @@ export class MessageService {
    * Delete a message by its database ID (outgoing or incoming in 1-to-1).
    * Marks the local message as deleted and enqueues a delete control message
    * so the peer can mark their copy as deleted as well.
+   *
+   * Both sides can delete any message for plausible deniability.
+   * Currently only 1-to-1 discussions exist; if groups are added,
+   * restrict incoming deletion to 1-to-1 only.
    */
   async deleteMessage(id: number): Promise<boolean> {
     const row = await this.queries.messages.getById(id);
