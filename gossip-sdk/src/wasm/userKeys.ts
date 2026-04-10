@@ -8,6 +8,7 @@
 import { ensureWasmInitialized } from './loader.js';
 import {
   generate_user_keys as _generate_user_keys,
+  derive_evm_address as _derive_evm_address,
   UserKeys,
 } from './bindings.js';
 
@@ -28,4 +29,15 @@ export async function generateUserKeys(passphrase: string): Promise<UserKeys> {
   const keys = _generate_user_keys(passphrase);
 
   return keys;
+}
+
+/**
+ * Derive an EVM address from a BIP39 mnemonic phrase.
+ *
+ * Uses BIP44 path `m/44'/60'/0'/0/0` and returns an EIP-55 checksummed
+ * hex string (0x…). Throws if the input is not a valid BIP39 mnemonic.
+ */
+export async function deriveEvmAddress(mnemonic: string): Promise<string> {
+  await ensureWasmInitialized();
+  return _derive_evm_address(mnemonic);
 }

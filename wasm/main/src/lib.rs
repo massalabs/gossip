@@ -198,6 +198,17 @@ pub fn generate_user_keys(passphrase: &str) -> Result<UserKeys, JsValue> {
     })
 }
 
+/// Derives an EVM address from a BIP39 mnemonic phrase.
+///
+/// Uses BIP44 derivation path `m/44'/60'/0'/0/0` and returns an EIP-55
+/// checksummed hex string (0x…). Fails if the input is not a valid
+/// BIP39 mnemonic — callers that may pass arbitrary passphrases should
+/// not use this function.
+#[wasm_bindgen]
+pub fn derive_evm_address(mnemonic: &str) -> Result<String, JsValue> {
+    auth::derive_evm_address(mnemonic).map_err(|e| JsValue::from_str(&e))
+}
+
 /// Encryption key for AEAD operations (AES-256-SIV).
 ///
 /// AES-256-SIV uses a 64-byte (512-bit) key: two 256-bit keys for encryption and MAC.

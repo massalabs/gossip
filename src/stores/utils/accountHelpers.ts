@@ -1,16 +1,21 @@
-import { generateUserKeys, UserProfile } from '@massalabs/gossip-sdk';
+import {
+  deriveEvmAddress,
+  generateUserKeys,
+  UserProfile,
+} from '@massalabs/gossip-sdk';
 import { Account, PrivateKey, Provider } from '@massalabs/massa-web3';
 import { useAppStore } from '../appStore';
 
 export async function deriveAccountFromMnemonic(
   mnemonic: string
-): Promise<{ account: Account; userIdBytes: Uint8Array }> {
+): Promise<{ account: Account; userIdBytes: Uint8Array; evmAddress: string }> {
   const keys = await generateUserKeys(mnemonic);
   const account = await Account.fromPrivateKey(
     PrivateKey.fromBytes(keys.secret_keys().massa_secret_key)
   );
   const userIdBytes = keys.public_keys().derive_id();
-  return { account, userIdBytes };
+  const evmAddress = await deriveEvmAddress(mnemonic);
+  return { account, userIdBytes, evmAddress };
 }
 
 export function fetchMnsDomainsIfEnabled(

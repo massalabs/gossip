@@ -10,7 +10,7 @@ import { useAccountStore } from '../stores/accountStore';
 import { useWalletStore } from '../stores/walletStore';
 import SendModal from '../components/wallet/SendModal';
 import ReceiveModal from '../components/wallet/ReceiveModal';
-import { formatMassaAddress } from '../utils/addressUtils';
+import { formatMassaAddress, formatEvmAddress } from '../utils/addressUtils';
 import { formatAmount } from '../utils/parseAmount';
 import Button from '../components/ui/Button';
 import CopyClipboard from '../components/ui/CopyClipboard';
@@ -18,7 +18,7 @@ import toast from 'react-hot-toast';
 // no-op
 
 const Wallet: React.FC = () => {
-  const { account } = useAccountStore();
+  const { account, evmAddress } = useAccountStore();
   const tokens = useWalletStore.use.tokens();
   const isLoading = useWalletStore.use.isLoading();
   const refreshBalances = useWalletStore.use.refreshBalances();
@@ -44,6 +44,7 @@ const Wallet: React.FC = () => {
 
   const fullAddress = account?.address?.toString() ?? '';
   const displayAddress = formatMassaAddress(fullAddress);
+  const displayEvmAddress = evmAddress ? formatEvmAddress(evmAddress) : '';
 
   return (
     <div className="bg-background">
@@ -67,16 +68,31 @@ const Wallet: React.FC = () => {
           </Button>
         </div>
 
-        {/* Address */}
+        {/* Massa Address */}
         {fullAddress && (
           <div className="px-6 -mt-2">
             <div className="flex items-center justify-between text-xs text-gray-600 dark:text-gray-300">
-              <span className="uppercase tracking-wide">{t('address')}</span>
+              <span className="uppercase tracking-wide">Massa</span>
               <div className="flex items-center gap-2">
                 <span className="px-2 py-1 rounded-md bg-gray-100 dark:bg-gray-800">
                   {displayAddress}
                 </span>
                 <CopyClipboard text={fullAddress} title={t('copy_address')} />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* EVM Address */}
+        {evmAddress && (
+          <div className="px-6 mt-1">
+            <div className="flex items-center justify-between text-xs text-gray-600 dark:text-gray-300">
+              <span className="uppercase tracking-wide">EVM</span>
+              <div className="flex items-center gap-2">
+                <span className="px-2 py-1 rounded-md bg-gray-100 dark:bg-gray-800">
+                  {displayEvmAddress}
+                </span>
+                <CopyClipboard text={evmAddress} title={t('copy_address')} />
               </div>
             </div>
           </div>
