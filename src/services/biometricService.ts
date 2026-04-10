@@ -102,17 +102,19 @@ async function retrieveEncryptionKey(
 }
 
 export async function hasExistingCredential(
-  storageKey: string
+  nativeStorageKey: string
 ): Promise<boolean> {
   if (isCapacitorAvailable()) {
     try {
-      const value = await SecureStorage.get(storageKey);
+      const value = await SecureStorage.get(nativeStorageKey);
       return value != null && value !== '';
     } catch {
       return false;
     }
   }
 
+  // On web, credentials are WebAuthn passkeys; the credential ID is stored
+  // in localStorage under a fixed key (not the native storage key).
   if (isWebAuthnSupported()) {
     return localStorage.getItem(WEBAUTHN_CREDENTIAL_ID_KEY) !== null;
   }
