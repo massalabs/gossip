@@ -761,4 +761,4 @@ interface PollingAPI {
 /** A convenience singleton for apps that only need one SDK instance. */
 export const gossipSdk = new GossipSdk();
 
-export { GossipSdk };
+export { GossipSdk, SdkEventType };
