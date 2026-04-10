@@ -7,9 +7,14 @@ import { showInitError } from './utils/initError.ts';
 import { createSdk } from './sdk';
 import { useSdkStore } from './stores/sdkStore';
 import { protocolConfig } from './config/protocol';
+import {
+  SECURE_STORAGE_ENABLED,
+  DEV_HARDCODED_PASSWORD,
+} from './config/features';
 import { Capacitor } from '@capacitor/core';
 import waSqliteWasmUrl from 'wa-sqlite/dist/wa-sqlite.wasm?url';
 import waSqliteAsyncWasmUrl from 'wa-sqlite/dist/wa-sqlite-async.wasm?url';
+import secureStorageWasmUrl from '@massalabs/gossip-sdk/assets/generated/wasm-secureStorage/secureStorage_bg.wasm?url';
 
 // Polyfill for Buffer
 import { Buffer } from 'buffer';
@@ -98,17 +103,42 @@ enableDebugLogger();
 
 const isNative = Capacitor.isNativePlatform();
 
-Promise.all([
-  createSdk({
+async function bootstrap() {
+  const sdk = await createSdk({
     protocolBaseUrl: protocolConfig.baseUrl,
     config: { polling: { enabled: true } },
-    storage: isNative
-      ? { type: 'opfs', path: '/gossip-db', wasmUrl: waSqliteWasmUrl }
-      : { type: 'idb', name: 'gossip-db', wasmUrl: waSqliteAsyncWasmUrl },
-  }),
-  initSafeArea(),
-])
-  .then(([sdk]) => {
+    storage: SECURE_STORAGE_ENABLED
+      ? {
+          type: 'secureStorage',
+          domain: 'gossip',
+          secureStorageWasmUrl,
+        }
+      : isNative
+        ? { type: 'opfs', path: '/gossip-db', wasmUrl: waSqliteWasmUrl }
+        : { type: 'idb', name: 'gossip-db', wasmUrl: waSqliteAsyncWasmUrl },
+  });
+
+  if (SECURE_STORAGE_ENABLED) {
+    if (sdk.needsUnlock) {
+      const ok = await sdk.secureStorageUnlock(DEV_HARDCODED_PASSWORD);
+      if (!ok) {
+        // Unlock failed — likely stale data from a previous build with
+        // a different storage format. Re-provision and allocate fresh.
+        console.warn('[Gossip] Unlock failed, re-provisioning secure storage');
+        await sdk.secureStorageProvision();
+        await sdk.secureStorageAllocate(0, DEV_HARDCODED_PASSWORD);
+      }
+    } else {
+      await sdk.secureStorageAllocate(0, DEV_HARDCODED_PASSWORD);
+    }
+  }
+
+  await initSafeArea();
+  return sdk;
+}
+
+bootstrap()
+  .then(sdk => {
     useSdkStore.getState().setSdk(sdk);
 
     createRoot(document.getElementById('root')!).render(

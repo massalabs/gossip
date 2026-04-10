@@ -982,9 +982,9 @@ export class MessageService {
     const serializedContent = serializeResult.data;
 
     // 2. Kick off the local INSERT and the encrypt in parallel.
-    //    encrypt is fast (~150 ms with rayon) and doesn't depend on
-    //    the row id; INSERT is slow (~440 ms) and only the row id is
-    //    later needed for the SENT update.
+    //    encrypt is fast (~1 ms for ratchet sends) and doesn't depend
+    //    on the row id; INSERT is slow (~440 ms) and only the row id
+    //    is later needed for the SENT update.
     const insertPromise = this.addMessageAndUpdateDiscussion({
       ...message,
       status: MessageStatus.WAITING_SESSION,

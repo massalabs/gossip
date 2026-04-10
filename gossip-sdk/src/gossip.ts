@@ -69,7 +69,7 @@ import {
 import { QueueManager } from './utils/queue.js';
 import { encodeUserId, decodeUserId } from './utils/userId.js';
 import { type StorageConfig, MessageStatus } from './db/index.js';
-import { DatabaseConnection } from './db/sqlite.js';
+import { DatabaseConnection, SESSION_BLOB_NAMESPACE } from './db/sqlite.js';
 import { Queries } from './db/queries/index.js';
 import {
   type UserPublicKeys,
@@ -174,6 +174,28 @@ class GossipSdk {
   private _contact: ContactService | null = null;
   private _selfMessage: SelfMessageService | null = null;
 
+  // ─── Session persist debouncer ──────────────────────────────────
+  //
+  // The SessionModule WASM calls our persist callback before every network
+  // send. Each persist writes the (growing) session blob to userProfile via
+  // the encrypted SQLite VFS, which costs 400-500 ms per call. Awaiting it
+  // synchronously inside sendMessage adds ~1.4 s of latency per message.
+  //
+  // Instead, we coalesce: the callback returns immediately, marks the
+  // state dirty, and schedules a flush 500 ms later. The latest blob
+  // overrides any previous queued blob (debouncing), so a burst of N
+  // sendMessage calls produces at most one persist per 500 ms window.
+  //
+  // `closeSession()` calls `flushSessionPersistSync()` to drain the
+  // pending state synchronously before destroying the session, so we
+  // never lose data on a graceful shutdown. On a crash, we lose at most
+  // 500 ms of session state — recoverable via re-fetching announcements.
+  private static readonly PERSIST_DEBOUNCE_MS = 500;
+  private _persistDirty = false;
+  private _persistInFlight = false;
+  private _persistTimer: ReturnType<typeof setTimeout> | null = null;
+  private _persistInFlightPromise: Promise<void> | null = null;
+
   // ─────────────────────────────────────────────────────────────────
   // Lifecycle
   // ─────────────────────────────────────────────────────────────────
@@ -203,7 +225,11 @@ class GossipSdk {
 
     console.log('[GossipSdk] Initializing SQLite');
     this._conn = await DatabaseConnection.create({ storage: options.storage });
-    this._queries = new Queries(this._conn);
+
+    // Defer queries/profile when the database needs an unlock first.
+    if (this._conn.isOpen) {
+      this._queries = new Queries(this._conn);
+    }
 
     console.log('[GossipSdk] SQLite initialized');
     // Create message protocol
@@ -211,7 +237,7 @@ class GossipSdk {
 
     // Create services that don't need a session
     this._auth = new AuthService(createAuthProtocol());
-    this._profile = new ProfileService(this._queries);
+    this._profile = this._queries ? new ProfileService(this._queries) : null;
 
     this.state = {
       status: SdkStatus.INITIALIZED,
@@ -267,12 +293,18 @@ class GossipSdk {
     // Generate keys from mnemonic
     const userKeys = await generateUserKeys(options.mnemonic);
 
-    // Create session with persistence callback
-    // IMPORTANT: This callback is awaited by the session module before network sends
+    // Create session with persistence callback.
+    //
+    // The callback is awaited by the session module before each network
+    // send. We coalesce persists into a 500 ms-debounced background flush
+    // so the await resolves instantly: `handleSessionPersist` only marks
+    // the state dirty and schedules the actual write. See the
+    // `_persistDirty`/`flushPersist` machinery below and `closeSession`
+    // for the synchronous drain.
     const session = new SessionModule(
       userKeys,
       async () => {
-        await this.handleSessionPersist();
+        this.handleSessionPersist();
       },
       options.sessionConfig
     );
@@ -386,6 +418,11 @@ class GossipSdk {
     // Stop polling first
     this.pollingManager.stop();
 
+    // Drain any pending session persist before tearing down state.
+    // The debounced background flush may have queued writes that haven't
+    // run yet; this guarantees durability on graceful shutdown.
+    await this.flushSessionPersistSync();
+
     // Cleanup session
     this.state.session.cleanup();
 
@@ -498,6 +535,129 @@ class GossipSdk {
       throw new Error('No encryption key found. Call openSession() first.');
     }
     return state.session.toEncryptedBlob(state.encryptionKey);
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // Secure storage
+  // ─────────────────────────────────────────────────────────────────
+
+  get isSecureStorage(): boolean {
+    return this._conn?.isSecureStorage ?? false;
+  }
+
+  /** True when migrations have run and Drizzle is ready to query. */
+  get dbReady(): boolean {
+    return this._queries !== null;
+  }
+
+  get needsUnlock(): boolean {
+    return this._conn?.needsUnlock ?? false;
+  }
+
+  private requireConn(): DatabaseConnection {
+    if (!this._conn) {
+      throw new Error('SDK not initialized. Call init() first.');
+    }
+    return this._conn;
+  }
+
+  async secureStorageProvision(): Promise<void> {
+    await this.requireConn().secureStorageProvision();
+  }
+
+  async secureStorageAllocate(slot: number, password: string): Promise<void> {
+    const conn = this.requireConn();
+    await conn.secureStorageAllocate(slot, password);
+    if (!this._queries) {
+      this._queries = new Queries(conn);
+      this._profile = new ProfileService(this._queries);
+    }
+  }
+
+  async secureStorageUnlock(password: string): Promise<boolean> {
+    const conn = this.requireConn();
+    const ok = await conn.secureStorageUnlock(password);
+    if (ok && !this._queries) {
+      this._queries = new Queries(conn);
+      this._profile = new ProfileService(this._queries);
+    }
+    return ok;
+  }
+
+  async secureStorageLock(): Promise<void> {
+    await this.requireConn().secureStorageLock();
+    this._queries = null;
+    this._profile = null;
+  }
+
+  /** Force-flush dirty encrypted blocks to the backing store. */
+  async flush(): Promise<void> {
+    if (this._conn?.isSecureStorage) {
+      await this._conn.secureStorageFlush();
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // Session blob persistence (secure-storage namespace fast path)
+  // ─────────────────────────────────────────────────────────────────
+  //
+  // On the secureStorage backend, the session blob lives in its own
+  // block-level namespace (SESSION_BLOB_NAMESPACE = 1) instead of being
+  // stored as a column in the userProfile SQL row. This bypasses
+  // SQLite/Drizzle/page-management on every persist and lets the blob
+  // grow without inflating the SQL row size.
+  //
+  // On the wa-sqlite path these methods return null/undefined and
+  // callers must continue to use `userProfile.session` round-tripping.
+
+  /**
+   * True when the SDK should route session blob persistence through
+   * the secure-storage namespace API instead of the SQL profile row.
+   */
+  get usesSessionBlobNamespace(): boolean {
+    return this._conn?.isSecureStorage ?? false;
+  }
+
+  /**
+   * Persist the encrypted session blob into the secure-storage session
+   * blob namespace. No-op on the wa-sqlite backend (caller is expected
+   * to fall back to `profiles.save` with `session` set).
+   *
+   * The full blob replaces any previous content (write at offset 0 +
+   * truncate the namespace if the new blob is shorter).
+   */
+  async persistSessionBlob(blob: Uint8Array): Promise<void> {
+    const conn = this._conn;
+    if (!conn?.isSecureStorage) return;
+    const previousLen = await conn.secureStorageNamespaceDataLength(
+      SESSION_BLOB_NAMESPACE
+    );
+    if (blob.length < previousLen) {
+      // Shrink first so stale tail bytes don't survive in the namespace.
+      await conn.secureStorageClearNamespace(SESSION_BLOB_NAMESPACE);
+    }
+    await conn.secureStorageWriteNamespaceData(SESSION_BLOB_NAMESPACE, 0, blob);
+  }
+
+  /**
+   * Read the encrypted session blob from the secure-storage namespace.
+   * Returns `null` on the wa-sqlite backend or when the namespace is empty.
+   */
+  async readSessionBlob(): Promise<Uint8Array | null> {
+    const conn = this._conn;
+    if (!conn?.isSecureStorage) return null;
+    const len = await conn.secureStorageNamespaceDataLength(
+      SESSION_BLOB_NAMESPACE
+    );
+    if (len === 0) return null;
+    return conn.secureStorageReadNamespaceData(SESSION_BLOB_NAMESPACE, 0, len);
+  }
+
+  /** Truncate the session blob namespace (e.g. on account reset). */
+  async clearSessionBlob(): Promise<void> {
+    const conn = this._conn;
+    if (!conn?.isSecureStorage) return;
+    await conn.secureStorageClearNamespace(SESSION_BLOB_NAMESPACE);
   }
 
   // ─────────────────────────────────────────────────────────────────
@@ -677,23 +837,116 @@ class GossipSdk {
     return this.state;
   }
 
-  private async handleSessionPersist(): Promise<void> {
+  /**
+   * Mark the session state dirty and schedule a debounced background
+   * flush. Returns synchronously — the caller (`SessionModule` callback)
+   * does NOT wait for the actual persist to complete.
+   *
+   * Behaviour:
+   *   * If a flush is already in flight, just mark dirty; the in-flight
+   *     handler will reschedule itself when it completes.
+   *   * If a timer is already pending, do nothing — the next tick will
+   *     pick up the latest state.
+   *   * Otherwise, arm a timer for `PERSIST_DEBOUNCE_MS` and return.
+   */
+  private handleSessionPersist(): void {
     if (this.state.status !== SdkStatus.SESSION_OPEN) return;
 
-    const { onPersist, encryptionKey, session } = this.state;
-    if (!onPersist || !encryptionKey) return;
+    // A/B test escape hatch: skip the entire pipeline if the debug flag
+    // is set in the dev console. WARNING: if the app crashes/reloads
+    // while this is on, the session state is lost.
+    if (
+      typeof globalThis !== 'undefined' &&
+      (globalThis as { __DISABLE_SESSION_PERSIST?: boolean })
+        .__DISABLE_SESSION_PERSIST
+    ) {
+      console.log('[SessionPersist] SKIPPED (debug flag)');
+      return;
+    }
 
-    try {
-      const blob = session.toEncryptedBlob(encryptionKey);
-      console.log(
-        `[SessionPersist] Saving session blob (${blob.length} bytes)`
-      );
-      await onPersist(blob, encryptionKey);
-    } catch (error) {
-      this.eventEmitter.emit(SdkEventType.ERROR, {
-        error: error instanceof Error ? error : new Error(String(error)),
-        context: 'session_persist',
-      });
+    this._persistDirty = true;
+
+    if (this._persistInFlight) return;
+    if (this._persistTimer !== null) return;
+
+    this._persistTimer = setTimeout(() => {
+      this._persistTimer = null;
+      void this.flushPersist();
+    }, GossipSdk.PERSIST_DEBOUNCE_MS);
+  }
+
+  /**
+   * Run a single persist cycle: snapshot the latest blob, write it
+   * through `onPersist`, and reschedule another flush if more changes
+   * arrived during the write.
+   */
+  private async flushPersist(): Promise<void> {
+    if (this.state.status !== SdkStatus.SESSION_OPEN) return;
+    if (!this._persistDirty) return;
+
+    this._persistInFlight = true;
+    this._persistDirty = false;
+
+    const promise = (async () => {
+      if (this.state.status !== SdkStatus.SESSION_OPEN) return;
+      const { onPersist, encryptionKey, session } = this.state;
+      if (!onPersist || !encryptionKey) return;
+
+      try {
+        const t0 = performance.now();
+        const blob = session.toEncryptedBlob(encryptionKey);
+        const tBlob = performance.now();
+        await onPersist(blob, encryptionKey);
+        const tDone = performance.now();
+        console.log(
+          `[SessionPersist] ${blob.length}B blob=${(tBlob - t0).toFixed(0)}ms write=${(tDone - tBlob).toFixed(0)}ms total=${(tDone - t0).toFixed(0)}ms (deferred)`
+        );
+      } catch (error) {
+        // Re-mark dirty so the next tick retries.
+        this._persistDirty = true;
+        this.eventEmitter.emit(
+          SdkEventType.ERROR,
+          error instanceof Error ? error : new Error(String(error)),
+          'session_persist'
+        );
+      }
+    })();
+
+    this._persistInFlightPromise = promise;
+    await promise;
+    this._persistInFlightPromise = null;
+    this._persistInFlight = false;
+
+    // If state changed during the flush, schedule another tick.
+    if (
+      this._persistDirty &&
+      this._persistTimer === null &&
+      this.state.status === SdkStatus.SESSION_OPEN
+    ) {
+      this._persistTimer = setTimeout(() => {
+        this._persistTimer = null;
+        void this.flushPersist();
+      }, GossipSdk.PERSIST_DEBOUNCE_MS);
+    }
+  }
+
+  /**
+   * Drain any pending persist synchronously. Called by `closeSession`
+   * before destroying session state to guarantee durability on graceful
+   * shutdown. Cancels any pending timer, awaits the in-flight write
+   * (if any), and runs one final synchronous flush if state is still
+   * dirty.
+   */
+  private async flushSessionPersistSync(): Promise<void> {
+    if (this._persistTimer !== null) {
+      clearTimeout(this._persistTimer);
+      this._persistTimer = null;
+    }
+    if (this._persistInFlightPromise) {
+      await this._persistInFlightPromise;
+    }
+    if (this._persistDirty) {
+      await this.flushPersist();
     }
   }
 

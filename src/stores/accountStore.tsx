@@ -240,13 +240,29 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
     };
   };
 
-  // Helper to persist session blob to DB
+  // Helper to persist session blob.
+  //
+  // On the secureStorage backend, the blob is written directly into a
+  // dedicated namespace stream (bypassing SQLite/Drizzle/page-management),
+  // and the in-memory `userProfile.session` is updated to the new blob.
+  // The SQL `userProfile` row is NOT touched on the hot path: it now stores
+  // the session column only as a fallback for the wa-sqlite backend, where
+  // we still call `profiles.save` to persist via SQL UPDATE.
   const createOnPersist = (_userId: string) => {
     return async (blob: Uint8Array, _key: EncryptionKey) => {
+      const sdk = getSdk();
       const current = get().userProfile;
       if (!current) return;
       const updated = { ...current, session: blob, updatedAt: new Date() };
-      await getSdk().profiles.save(updated);
+
+      if (sdk.usesSessionBlobNamespace) {
+        // Fast path: write the blob to the secure-storage namespace.
+        await sdk.persistSessionBlob(blob);
+      } else {
+        // Legacy path: round-trip through the SQL profile row.
+        await sdk.profiles.save(updated);
+      }
+
       set({ userProfile: updated });
     };
   };
@@ -411,9 +427,16 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         const { account, evmAddress } =
           await deriveAccountFromMnemonic(mnemonic);
 
-        await getSdk().openSession({
+        // Prefer the secure-storage namespace blob when available; fall
+        // back to the SQL profile column on the wa-sqlite backend.
+        const sdk = getSdk();
+        const encryptedSession = sdk.usesSessionBlobNamespace
+          ? ((await sdk.readSessionBlob()) ?? profile.session)
+          : profile.session;
+
+        await sdk.openSession({
           mnemonic,
-          encryptedSession: profile.session,
+          encryptedSession,
           encryptionKey,
           onPersist: createOnPersist(profile.userId),
         });
