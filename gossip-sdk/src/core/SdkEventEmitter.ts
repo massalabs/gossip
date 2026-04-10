@@ -5,38 +5,9 @@
  * single source of truth for all event names and their payload shapes.
  */
 
+import mitt from 'mitt';
 import type { Message, Discussion, Contact } from '../db';
 import type { SessionStatus } from '../wasm/bindings';
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type Mitt = { on: any; off: any; emit: any; all: Map<string, Set<any>> };
-function createMitt(): Mitt {
-  const all = new Map<string, Set<(...args: unknown[]) => void>>();
-  return {
-    all,
-    on(type: string, handler: (...args: unknown[]) => void) {
-      const handlers = all.get(type);
-      if (handlers) handlers.add(handler);
-      else all.set(type, new Set([handler]));
-    },
-    off(type: string, handler: (...args: unknown[]) => void) {
-      const handlers = all.get(type);
-      if (handlers) handlers.delete(handler);
-    },
-    emit(type: string, payload: unknown) {
-      const handlers = all.get(type);
-      if (handlers) {
-        for (const handler of handlers) {
-          try {
-            handler(payload);
-          } catch (e) {
-            console.error(`[SdkEventEmitter] Error in ${type} handler:`, e);
-          }
-        }
-      }
-    },
-  };
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Event Types
@@ -132,7 +103,7 @@ export type SdkEventHandlers = {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export class SdkEventEmitter {
-  private bus = createMitt();
+  private bus = mitt<SdkEvents>();
 
   on<K extends keyof SdkEvents>(
     event: K,
