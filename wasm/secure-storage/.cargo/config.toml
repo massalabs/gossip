@@ -1,0 +1,15 @@
+# WASM threads (atomics + SharedArrayBuffer) for wasm-bindgen-rayon.
+# 4 MiB stack for pq-rerand polynomial operations.
+[target.wasm32-unknown-unknown]
+rustflags = [
+    "-C", "target-feature=+atomics,+bulk-memory",
+    "-C", "link-args=-z stack-size=4194304 --shared-memory --import-memory --max-memory=4294967296 --export=__wasm_init_tls --export=__tls_size --export=__tls_align --export=__tls_base",
+]
+
+[env]
+# ABI-compat flags for C deps (sqlite-wasm-rs). SQLite stays single-threaded.
+CFLAGS_wasm32_unknown_unknown = "-matomics -mbulk-memory"
+
+# Rebuild std with atomics (requires nightly).
+[unstable]
+build-std = ["std", "panic_abort"]

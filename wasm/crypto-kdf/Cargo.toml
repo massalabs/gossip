@@ -9,3 +9,4 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 hkdf = "0.12"
 sha2 = "0.10"
+zeroize = "1"

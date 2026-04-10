@@ -27,7 +27,7 @@ pub fn encrypt_block(
     let mut nonce_bytes = [0u8; crypto_aead::NONCE_SIZE];
     rand::rngs::OsRng.fill_bytes(&mut nonce_bytes);
     let nonce = crypto_aead::Nonce::from(nonce_bytes);
-    let key = crypto_aead::Key::from(*aead_key);
+    let key = crypto_aead::Key::from_ref(aead_key);
 
     let aead_ct = crypto_aead::encrypt(&key, &nonce, plaintext, aad.as_bytes());
 
@@ -55,7 +55,7 @@ pub fn decrypt_block(
             .map_err(|_| SecureStorageError::CorruptedBlock)?,
     );
     let aead_ct = &msg[crypto_aead::NONCE_SIZE..];
-    let key = crypto_aead::Key::from(*aead_key);
+    let key = crypto_aead::Key::from_ref(aead_key);
 
     let plaintext_vec = Zeroizing::new(
         crypto_aead::decrypt(&key, &nonce, aead_ct, aad.as_bytes())
@@ -81,7 +81,7 @@ pub fn create_cover_block(pq_pk: &PqPublicKey, aad_root: &str) -> Vec<u8> {
 
     let mut tmp_key_bytes = Zeroizing::new([0u8; crypto_aead::KEY_SIZE]);
     rng.fill_bytes(tmp_key_bytes.as_mut());
-    let tmp_key = crypto_aead::Key::from(*tmp_key_bytes);
+    let tmp_key = crypto_aead::Key::from_ref(&tmp_key_bytes);
 
     let mut nonce_bytes = [0u8; crypto_aead::NONCE_SIZE];
     rng.fill_bytes(&mut nonce_bytes);
