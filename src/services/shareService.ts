@@ -186,7 +186,7 @@ export async function shareInvitation(
     try {
       await navigator.share({
         title: shareTitle,
-        text: shareText,
+        text: 'Join me on Gossip!',
         url: deepLinkUrl,
       });
       return;
