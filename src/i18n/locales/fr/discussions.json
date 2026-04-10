@@ -19,7 +19,8 @@
     "cancel_forward": "Annuler le transfert",
     "cancel_edit": "Annuler la modification",
     "input_label": "Saisie du message",
-    "send": "Envoyer le message"
+    "send": "Envoyer le message",
+    "emoji": "Emoji"
   },
   "message": {
     "sent": "Envoyé",

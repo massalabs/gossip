@@ -19,7 +19,8 @@
     "cancel_forward": "Cancel forward",
     "cancel_edit": "Cancel edit",
     "input_label": "Message input",
-    "send": "Send message"
+    "send": "Send message",
+    "emoji": "Emoji"
   },
   "message": {
     "sent": "Sent",
