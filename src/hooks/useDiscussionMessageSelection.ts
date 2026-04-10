@@ -54,11 +54,7 @@ export const useDiscussionMessageSelection = ({
   );
 
   const canDeleteSelected = useMemo(
-    () =>
-      selectedMessages.length > 0 &&
-      selectedMessages.every(
-        message => message.direction === MessageDirection.OUTGOING
-      ),
+    () => selectedMessages.length > 0,
     [selectedMessages]
   );
 
