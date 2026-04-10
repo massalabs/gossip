@@ -12,6 +12,7 @@ import enOnboarding from './locales/en/onboarding.json';
 import enErrors from './locales/en/errors.json';
 import enTime from './locales/en/time.json';
 import enContacts from './locales/en/contacts.json';
+import enValidation from './locales/en/validation.json';
 
 // FR
 import frCommon from './locales/fr/common.json';
@@ -23,6 +24,7 @@ import frOnboarding from './locales/fr/onboarding.json';
 import frErrors from './locales/fr/errors.json';
 import frTime from './locales/fr/time.json';
 import frContacts from './locales/fr/contacts.json';
+import frValidation from './locales/fr/validation.json';
 
 // ZH-CN
 import zhCommon from './locales/zh-CN/common.json';
@@ -34,6 +36,7 @@ import zhOnboarding from './locales/zh-CN/onboarding.json';
 import zhErrors from './locales/zh-CN/errors.json';
 import zhTime from './locales/zh-CN/time.json';
 import zhContacts from './locales/zh-CN/contacts.json';
+import zhValidation from './locales/zh-CN/validation.json';
 
 // RU
 import ruCommon from './locales/ru/common.json';
@@ -45,6 +48,7 @@ import ruOnboarding from './locales/ru/onboarding.json';
 import ruErrors from './locales/ru/errors.json';
 import ruTime from './locales/ru/time.json';
 import ruContacts from './locales/ru/contacts.json';
+import ruValidation from './locales/ru/validation.json';
 
 export const SUPPORTED_LANGUAGES = ['en', 'fr', 'zh-CN', 'ru'] as const;
 export type SupportedLanguage = (typeof SUPPORTED_LANGUAGES)[number];
@@ -67,6 +71,7 @@ const resources = {
     errors: enErrors,
     time: enTime,
     contacts: enContacts,
+    validation: enValidation,
   },
   fr: {
     common: frCommon,
@@ -78,6 +83,7 @@ const resources = {
     errors: frErrors,
     time: frTime,
     contacts: frContacts,
+    validation: frValidation,
   },
   'zh-CN': {
     common: zhCommon,
@@ -89,6 +95,7 @@ const resources = {
     errors: zhErrors,
     time: zhTime,
     contacts: zhContacts,
+    validation: zhValidation,
   },
   ru: {
     common: ruCommon,
@@ -100,6 +107,7 @@ const resources = {
     errors: ruErrors,
     time: ruTime,
     contacts: ruContacts,
+    validation: ruValidation,
   },
 };
 
@@ -120,6 +128,7 @@ i18n
       'errors',
       'time',
       'contacts',
+      'validation',
     ],
 
     interpolation: {

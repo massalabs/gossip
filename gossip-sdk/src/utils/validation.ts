@@ -5,7 +5,6 @@
  */
 
 import { isValidUserId } from './userId.js';
-import { Queries } from '../db/queries/index.js';
 
 export type ValidationResult =
   | { valid: true; error?: never }
@@ -33,87 +32,11 @@ export function validatePassword(value: string): ValidationResult {
 }
 
 /**
- * Validate a username format (without checking availability)
- *
- * @param value - The username to validate
- * @returns Validation result
- */
-export function validateUsernameFormat(value: string): ValidationResult {
-  const trimmed = value.trim();
-
-  if (!trimmed) {
-    return { valid: false, error: 'Username is required' };
-  }
-
-  // Disallow any whitespace inside the username (single token only)
-  if (/\s/.test(trimmed)) {
-    return {
-      valid: false,
-      error: 'Username cannot contain spaces',
-    };
-  }
-
-  if (trimmed.length < 3) {
-    return {
-      valid: false,
-      error: 'Username must be at least 3 characters long',
-    };
-  }
-
-  return { valid: true };
-}
-
-/**
  * Validate a username is available (not already in use)
  *
- * @param value - The username to check
- * @returns Validation result
- */
-export async function validateUsernameAvailability(
-  value: string,
-  queries: Queries
-): Promise<ValidationResult> {
-  try {
-    const existingProfile =
-      await queries.userProfiles.getByUsernameLower(value);
 
-    if (existingProfile) {
-      return {
-        valid: false,
-        error: 'This username is already in use. Please choose another.',
-      };
-    }
 
-    return { valid: true };
-  } catch (error) {
-    return {
-      valid: false,
-      error:
-        error instanceof Error
-          ? error.message
-          : 'Unable to verify username availability. Please try again.',
-    };
-  }
-}
 
-/**
- * Validate a username format and availability
- *
- * @param value - The username to validate
- * @param db - Database instance
- * @returns Validation result
- */
-export async function validateUsernameFormatAndAvailability(
-  value: string,
-  queries: Queries
-): Promise<ValidationResult> {
-  const result = validateUsernameFormat(value);
-  if (!result.valid) {
-    return result;
-  }
-
-  return await validateUsernameAvailability(value, queries);
-}
 
 /**
  * Validate a user ID format (Bech32 gossip1... format)

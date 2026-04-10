@@ -64,7 +64,6 @@ import { ContactService } from './services/contact.js';
 import { SelfMessageService } from './services/selfMessage.js';
 import {
   validateUserIdFormat,
-  validateUsernameFormat,
   type ValidationResult,
 } from './utils/validation.js';
 import { QueueManager } from './utils/queue.js';
@@ -585,7 +584,6 @@ class GossipSdk {
   get utils(): SdkUtils {
     return {
       validateUserId: validateUserIdFormat,
-      validateUsername: validateUsernameFormat,
       encodeUserId,
       decodeUserId,
     };
@@ -742,8 +740,6 @@ class GossipSdk {
 interface SdkUtils {
   /** Validate a user ID format */
   validateUserId(userId: string): ValidationResult;
-  /** Validate a username format */
-  validateUsername(username: string): ValidationResult;
   /** Encode raw bytes to user ID string */
   encodeUserId(rawId: Uint8Array): string;
   /** Decode user ID string to raw bytes */

@@ -1,11 +1,8 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Zap } from 'react-feather';
-import {
-  validatePassword,
-  validateUsernameFormat,
-} from '@massalabs/gossip-sdk';
-import { useGossipSdk } from '../../hooks/useGossipSdk';
+import { validatePassword } from '@massalabs/gossip-sdk';
+import { validateUsernameFormat } from '../../utils/validation';
 import PageHeader from '../ui/PageHeader';
 import PageLayout from '../ui/PageLayout';
 import Button from '../ui/Button';
@@ -22,7 +19,6 @@ const SecureAccountForm: React.FC<SecureAccountFormProps> = ({
   onBack,
 }) => {
   const { t } = useTranslation('auth');
-  const gossip = useGossipSdk();
 
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -58,7 +54,8 @@ const SecureAccountForm: React.FC<SecureAccountFormProps> = ({
     e.preventDefault();
     e.stopPropagation();
 
-    const usernameResult = await gossip.profiles.validateUsername(username);
+    const usernameResult = validateUsernameFormat(username);
+
     if (!usernameResult.valid) {
       setIsUsernameValid(false);
       setUsernameError(usernameResult.error);
@@ -93,7 +90,6 @@ const SecureAccountForm: React.FC<SecureAccountFormProps> = ({
               onChange={handleUsernameChange}
               placeholder={t('create.enter_username')}
               error={!!usernameError}
-              maxLength={20}
             />
             <p
               className={`text-xs mt-1 h-4 ${usernameError ? 'text-red-500 dark:text-red-400' : 'invisible'}`}
