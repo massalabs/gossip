@@ -206,10 +206,13 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
     sdk.on(SdkEventType.SESSION_REQUESTED, debouncedFetch);
     sdk.on(SdkEventType.DISCUSSION_UPDATED, debouncedFetch);
 
-    const onSessionStatusChanged = (
-      contactUserId: string,
-      status: SessionStatus
-    ) => {
+    const onSessionStatusChanged = ({
+      contactUserId,
+      status,
+    }: {
+      contactUserId: string;
+      status: SessionStatus;
+    }) => {
       set(state => {
         const next = new Map(state.sessionsStatuses);
         next.set(contactUserId, status);
@@ -217,6 +220,8 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
       });
     };
     sdk.on(SdkEventType.SESSION_STATUS_CHANGED, onSessionStatusChanged);
+    sdk.on(SdkEventType.MESSAGE_DELETED_OPTIMISTIC, debouncedFetch);
+    sdk.on(SdkEventType.MESSAGE_EDITED_OPTIMISTIC, debouncedFetch);
 
     const cleanupFn = () => {
       if (debounceTimer) clearTimeout(debounceTimer);
@@ -229,6 +234,8 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
         sdk.off(SdkEventType.SESSION_RENEWED, debouncedFetch);
         sdk.off(SdkEventType.SESSION_REQUESTED, debouncedFetch);
         sdk.off(SdkEventType.DISCUSSION_UPDATED, debouncedFetch);
+        sdk.off(SdkEventType.MESSAGE_DELETED_OPTIMISTIC, debouncedFetch);
+        sdk.off(SdkEventType.MESSAGE_EDITED_OPTIMISTIC, debouncedFetch);
         sdk.off(SdkEventType.SESSION_STATUS_CHANGED, onSessionStatusChanged);
       } catch {
         // SDK might not be available during cleanup

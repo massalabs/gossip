@@ -1,15 +1,10 @@
 /**
- * SDK Event Emitter
- *
- * Type-safe event emitter for SDK events.
+ * SDK Event Emitter — type-safe event bus backed by mitt.
  */
 
+import mitt from 'mitt';
 import type { Message, Discussion, Contact } from '../db';
 import type { SessionStatus } from '../wasm/bindings';
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Event Types
-// ─────────────────────────────────────────────────────────────────────────────
 
 export enum SdkEventType {
   MESSAGE_RECEIVED = 'messageReceived',
@@ -25,137 +20,95 @@ export enum SdkEventType {
   DISCUSSION_UPDATED = 'discussionUpdated',
   WRITE_FAILED = 'writeFailed',
   MESSAGE_OPTIMISTIC = 'messageOptimistic',
+  MESSAGE_DELETED_OPTIMISTIC = 'messageDeletedOptimistic',
+  MESSAGE_EDITED_OPTIMISTIC = 'messageEditedOptimistic',
+  MESSAGE_DELETE_FAILED = 'messageDeleteFailed',
+  MESSAGE_EDIT_FAILED = 'messageEditFailed',
   ERROR = 'error',
 }
 
-export interface SdkEventHandlers {
-  [SdkEventType.MESSAGE_RECEIVED]: (
-    message: Omit<Message, 'id'> & { id?: number }
-  ) => void;
-  [SdkEventType.MESSAGE_SENT]: (message: Message) => void;
-  [SdkEventType.MESSAGE_READ]: (messageId: number) => void;
-  [SdkEventType.MESSAGE_FAILED]: (message: Message, error: Error) => void;
-  [SdkEventType.SESSION_REQUESTED]: (
-    discussion: Discussion,
-    contact: Contact
-  ) => void;
-  [SdkEventType.SESSION_CREATED]: (discussion: Discussion) => void;
-  [SdkEventType.SESSION_RENEWED]: (discussion: Discussion) => void;
-  [SdkEventType.SESSION_ACCEPTED]: (contactUserId: string) => void;
-  [SdkEventType.SEEKERS_UPDATED]: (seekers: Uint8Array[]) => void;
-  [SdkEventType.SESSION_STATUS_CHANGED]: (
-    contactUserId: string,
-    status: SessionStatus
-  ) => void;
-  [SdkEventType.DISCUSSION_UPDATED]: (contactUserId: string) => void;
-  [SdkEventType.WRITE_FAILED]: (
-    messageId: Uint8Array | undefined,
-    entityType: 'message' | 'discussion' | 'contact',
-    error: Error
-  ) => void;
-  [SdkEventType.MESSAGE_OPTIMISTIC]: (message: Message) => void;
-  [SdkEventType.ERROR]: (error: Error, context: string) => void;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Event Emitter Class
-// ─────────────────────────────────────────────────────────────────────────────
+export type SdkEvents = {
+  [SdkEventType.MESSAGE_RECEIVED]: Omit<Message, 'id'> & { id?: number };
+  [SdkEventType.MESSAGE_SENT]: Message;
+  [SdkEventType.MESSAGE_READ]: number;
+  [SdkEventType.MESSAGE_FAILED]: { message: Message; error: Error };
+  [SdkEventType.SESSION_REQUESTED]: {
+    discussion: Discussion;
+    contact: Contact;
+  };
+  [SdkEventType.SESSION_CREATED]: Discussion;
+  [SdkEventType.SESSION_RENEWED]: Discussion;
+  [SdkEventType.SESSION_ACCEPTED]: string;
+  [SdkEventType.SEEKERS_UPDATED]: Uint8Array[];
+  [SdkEventType.SESSION_STATUS_CHANGED]: {
+    contactUserId: string;
+    status: SessionStatus;
+  };
+  [SdkEventType.DISCUSSION_UPDATED]: string;
+  [SdkEventType.WRITE_FAILED]: {
+    messageId: Uint8Array | undefined;
+    entityType: 'message' | 'discussion' | 'contact';
+    error: Error;
+  };
+  [SdkEventType.MESSAGE_OPTIMISTIC]: Message;
+  [SdkEventType.MESSAGE_DELETED_OPTIMISTIC]: {
+    contactUserId: string;
+    messageDbId: number;
+    originalMsgId: Uint8Array;
+  };
+  [SdkEventType.MESSAGE_EDITED_OPTIMISTIC]: {
+    contactUserId: string;
+    messageDbId: number;
+    newContent: string;
+    metadata: Record<string, unknown>;
+  };
+  [SdkEventType.MESSAGE_DELETE_FAILED]: {
+    contactUserId: string;
+    messageDbId: number;
+    original: Message;
+  };
+  [SdkEventType.MESSAGE_EDIT_FAILED]: {
+    contactUserId: string;
+    messageDbId: number;
+    original: Message;
+  };
+  [SdkEventType.ERROR]: { error: Error; context: string };
+};
 
 export class SdkEventEmitter {
-  private handlers: {
-    [K in SdkEventType]: Set<SdkEventHandlers[K]>;
-  } = {
-    [SdkEventType.MESSAGE_RECEIVED]: new Set<
-      SdkEventHandlers[SdkEventType.MESSAGE_RECEIVED]
-    >(),
-    [SdkEventType.MESSAGE_SENT]: new Set<
-      SdkEventHandlers[SdkEventType.MESSAGE_SENT]
-    >(),
-    [SdkEventType.MESSAGE_READ]: new Set<
-      SdkEventHandlers[SdkEventType.MESSAGE_READ]
-    >(),
-    [SdkEventType.MESSAGE_FAILED]: new Set<
-      SdkEventHandlers[SdkEventType.MESSAGE_FAILED]
-    >(),
-    [SdkEventType.SESSION_REQUESTED]: new Set<
-      SdkEventHandlers[SdkEventType.SESSION_REQUESTED]
-    >(),
-    [SdkEventType.SESSION_CREATED]: new Set<
-      SdkEventHandlers[SdkEventType.SESSION_CREATED]
-    >(),
-    [SdkEventType.SESSION_RENEWED]: new Set<
-      SdkEventHandlers[SdkEventType.SESSION_RENEWED]
-    >(),
-    [SdkEventType.SESSION_ACCEPTED]: new Set<
-      SdkEventHandlers[SdkEventType.SESSION_ACCEPTED]
-    >(),
-    [SdkEventType.SEEKERS_UPDATED]: new Set<
-      SdkEventHandlers[SdkEventType.SEEKERS_UPDATED]
-    >(),
-    [SdkEventType.SESSION_STATUS_CHANGED]: new Set<
-      SdkEventHandlers[SdkEventType.SESSION_STATUS_CHANGED]
-    >(),
-    [SdkEventType.DISCUSSION_UPDATED]: new Set<
-      SdkEventHandlers[SdkEventType.DISCUSSION_UPDATED]
-    >(),
-    [SdkEventType.WRITE_FAILED]: new Set<
-      SdkEventHandlers[SdkEventType.WRITE_FAILED]
-    >(),
-    [SdkEventType.MESSAGE_OPTIMISTIC]: new Set<
-      SdkEventHandlers[SdkEventType.MESSAGE_OPTIMISTIC]
-    >(),
-    [SdkEventType.ERROR]: new Set<SdkEventHandlers[SdkEventType.ERROR]>(),
-  };
+  private bus = mitt<SdkEvents>();
 
-  /**
-   * Register an event handler
-   */
-  on<K extends keyof SdkEventHandlers>(
+  on<K extends keyof SdkEvents>(
     event: K,
-    handler: SdkEventHandlers[K]
+    handler: (payload: SdkEvents[K]) => void
   ): void {
-    (this.handlers[event as SdkEventType] as Set<SdkEventHandlers[K]>).add(
-      handler
-    );
+    this.bus.on(event, handler);
   }
 
-  /**
-   * Remove an event handler
-   */
-  off<K extends keyof SdkEventHandlers>(
+  off<K extends keyof SdkEvents>(
     event: K,
-    handler: SdkEventHandlers[K]
+    handler: (payload: SdkEvents[K]) => void
   ): void {
-    (this.handlers[event as SdkEventType] as Set<SdkEventHandlers[K]>).delete(
-      handler
-    );
+    this.bus.off(event, handler);
   }
 
-  /**
-   * Emit an event to all registered handlers
-   */
-  emit<K extends keyof SdkEventHandlers>(
-    event: K,
-    ...args: Parameters<SdkEventHandlers[K]>
-  ): void {
-    const handlers = this.handlers[event as SdkEventType] as Set<
-      SdkEventHandlers[K]
-    >;
-    handlers.forEach(handler => {
-      try {
-        (handler as (...args: Parameters<SdkEventHandlers[K]>) => void)(
-          ...args
-        );
-      } catch (error) {
-        console.error(`[SdkEventEmitter] Error in ${event} handler:`, error);
+  emit<K extends keyof SdkEvents>(event: K, payload: SdkEvents[K]): void {
+    const handlers = this.bus.all.get(event);
+    if (handlers) {
+      for (const handler of handlers) {
+        try {
+          (handler as (p: SdkEvents[K]) => void)(payload);
+        } catch (error) {
+          console.error(
+            `[SdkEventEmitter] Error in ${String(event)} handler:`,
+            error
+          );
+        }
       }
-    });
+    }
   }
 
-  /**
-   * Remove all handlers for all events
-   */
   clear(): void {
-    Object.values(this.handlers).forEach(set => set.clear());
+    this.bus.all.clear();
   }
 }

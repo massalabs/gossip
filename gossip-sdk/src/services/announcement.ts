@@ -566,11 +566,10 @@ export class AnnouncementService {
         this.session.peerSessionStatus(decodeUserId(contactUserId)) ===
           SessionStatus.PeerRequested
       ) {
-        this.eventEmitter.emit(
-          SdkEventType.SESSION_REQUESTED,
-          toDiscussion(newDiscussion),
-          contactRow
-        );
+        this.eventEmitter.emit(SdkEventType.SESSION_REQUESTED, {
+          discussion: toDiscussion(newDiscussion),
+          contact: contactRow,
+        });
       }
       return { discussionId: existing.id };
     }
@@ -592,11 +591,10 @@ export class AnnouncementService {
       contactUserId
     );
     if (discussion && contactRow) {
-      this.eventEmitter.emit(
-        SdkEventType.SESSION_REQUESTED,
-        toDiscussion(discussion),
-        contactRow
-      );
+      this.eventEmitter.emit(SdkEventType.SESSION_REQUESTED, {
+        discussion: toDiscussion(discussion),
+        contact: contactRow,
+      });
     }
 
     return { discussionId };
