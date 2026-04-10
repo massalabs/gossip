@@ -1708,45 +1708,30 @@ describe('Messaging Flow', () => {
 
       await aliceSdk.messages.fetch();
 
-      // First stateUpdate: mock returns undefined, keep-alive stays WAITING_SESSION
+      // stateUpdate: mock returns undefined on first sendMessage call (fast
+      // path bails), but processSendQueueForContact retries within the same
+      // stateUpdate — the second call uses the real session, so the
+      // keep-alive ends up SENT after a single stateUpdate.
       await aliceServices._refresh.stateUpdate();
 
-      let aliceMessages = await aliceSdk.queries.messages.getByOwnerAndContact(
-        aliceSdk.userId,
-        bobSdk.userId
-      );
+      const aliceMessages =
+        await aliceSdk.queries.messages.getByOwnerAndContact(
+          aliceSdk.userId,
+          bobSdk.userId
+        );
 
-      const keepAlives = aliceMessages.filter(
-        m =>
-          m.type === MessageType.KEEP_ALIVE &&
-          m.direction === MessageDirection.OUTGOING
-      );
-      const ka =
-        keepAlives.find(m => m.status === MessageStatus.WAITING_SESSION) ??
-        keepAlives[keepAlives.length - 1];
-      expect(ka).toBeDefined();
       expect(sendSpy).toHaveBeenCalled();
-      expect(ka?.status).toBe(MessageStatus.WAITING_SESSION);
 
-      // Second stateUpdate: resend with real sendMessage
-      await aliceServices._refresh.stateUpdate();
-
-      aliceMessages = await aliceSdk.queries.messages.getByOwnerAndContact(
-        aliceSdk.userId,
-        bobSdk.userId
-      );
-
-      const kaAfter = aliceMessages.find(
+      const ka = aliceMessages.find(
         m =>
           m.type === MessageType.KEEP_ALIVE &&
           m.direction === MessageDirection.OUTGOING
       );
-      if (kaAfter) {
-        expect(kaAfter.status).toBe(MessageStatus.SENT);
-        expect(kaAfter.encryptedMessage).toBeNull();
-        expect(kaAfter.seeker).toBeDefined();
-        expect(kaAfter.whenToSend).toBeNull();
-      }
+      expect(ka).toBeDefined();
+      expect(ka?.status).toBe(MessageStatus.SENT);
+      expect(ka?.encryptedMessage).toBeNull();
+      expect(ka?.seeker).toBeDefined();
+      expect(ka?.whenToSend).toBeNull();
 
       sendSpy.mockRestore();
     });
