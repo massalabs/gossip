@@ -567,6 +567,11 @@ export class MessageService {
             content: '[Message deleted]',
             type: MessageType.DELETED,
           });
+          await this.queries.messages.deleteReactionsForMessage(
+            ownerUserId,
+            target.contactUserId,
+            encodeToBase64(message.deleteOf.originalMsgId)
+          );
         }
 
         continue;
@@ -1779,6 +1784,11 @@ export class MessageService {
         content: '[Message deleted]',
         type: MessageType.DELETED,
       });
+      await this.queries.messages.deleteReactionsForMessage(
+        ownerUserId,
+        row.contactUserId,
+        encodeToBase64(row.messageId)
+      );
 
       const controlMessage: Omit<Message, 'id'> = {
         ownerUserId,
