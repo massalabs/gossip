@@ -398,11 +398,6 @@ class GossipSdk {
     // Free the encryption key WASM object to zero its memory before dropping
     this.state.encryptionKey?.free();
 
-    // Lock the encrypted VFS and drop query/profile handles
-    if (this._conn?.isSecureStorage) {
-      await this.secureStorageLock();
-    }
-
     // Clear services
     this._announcement = null;
     this._discussion = null;
