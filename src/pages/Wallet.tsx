@@ -10,7 +10,7 @@ import { useAccountStore } from '../stores/accountStore';
 import { useWalletStore } from '../stores/walletStore';
 import SendModal from '../components/wallet/SendModal';
 import ReceiveModal from '../components/wallet/ReceiveModal';
-import { formatMassaAddress } from '../utils/addressUtils';
+import { formatMassaAddress, shortenAddress } from '../utils/addressUtils';
 import { formatAmount } from '../utils/parseAmount';
 import Button from '../components/ui/Button';
 import CopyClipboard from '../components/ui/CopyClipboard';
@@ -44,7 +44,7 @@ const Wallet: React.FC = () => {
 
   const fullAddress = account?.address?.toString() ?? '';
   const displayAddress = formatMassaAddress(fullAddress);
-  const displayEvmAddress = evmAddress ? formatMassaAddress(evmAddress) : '';
+  const displayEvmAddress = evmAddress ? shortenAddress(evmAddress, 6, 4) : '';
 
   return (
     <div className="bg-background">

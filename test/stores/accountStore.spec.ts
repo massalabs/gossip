@@ -79,7 +79,7 @@ vi.mock('@massalabs/gossip-sdk', async () => {
       public_keys: () => ({
         derive_id: () => new Uint8Array(32),
       }),
-      evm_address: () => '0x0000000000000000000000000000000000000000',
+      evm_address: () => '0x9858EfFD232B4033E47d90003D41EC34EcaEda94',
     })),
     encodeUserId: vi.fn(() => 'mock-user-id'),
     generateNonce: vi.fn(async () => ({

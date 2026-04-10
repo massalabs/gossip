@@ -185,6 +185,7 @@ impl UserKeys {
     }
 
     /// EIP-55 checksummed EVM address (0x…) derived from the mnemonic.
+    /// Returns "" when the passphrase is not a valid BIP39 mnemonic.
     pub fn evm_address(&self) -> String {
         self.evm_address.clone()
     }

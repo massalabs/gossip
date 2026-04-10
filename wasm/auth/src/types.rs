@@ -297,7 +297,7 @@ pub fn derive_evm_address(mnemonic_phrase: &str) -> Result<String, String> {
         .derive_path("m/44'/60'/0'/0/0")
         .map_err(|e| format!("BIP44 derivation failed: {e}"))?;
 
-    // Uncompressed public key (65 bytes: 0x04 || x || y), hash sans le prefix
+    // Uncompressed public key (65 bytes: 0x04 || x || y), hash without the prefix
     let pubkey = child.verify_key();
     let verifying_key: &k256::ecdsa::VerifyingKey = pubkey.as_ref();
     let uncompressed = verifying_key.to_encoded_point(false);
