@@ -163,16 +163,15 @@ export async function shareInvitation(
     throw new Error('deepLinkUrl is required');
   }
 
-  const shareText = 'Join me on Gossip!';
   const shareTitle = 'Join me on Gossip';
 
   // Use native Capacitor Share plugin on native platforms
   if (Capacitor.isNativePlatform()) {
     try {
+      // Embed URL in text so apps like Telegram that ignore the separate url field still receive the link
       await Share.share({
         title: shareTitle,
-        text: shareText,
-        url: deepLinkUrl,
+        text: `Join me on Gossip!\n${deepLinkUrl}`,
         dialogTitle: shareTitle,
       });
       return;
