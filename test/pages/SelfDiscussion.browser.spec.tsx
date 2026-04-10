@@ -119,21 +119,11 @@ describe('SelfDiscussion forward to self notes', () => {
     mockSetSelfRetentionPolicy.mockResolvedValue(undefined);
   });
 
-  it('prefills the input with forwarded message content', async () => {
+  it('auto-sends forwarded message content', async () => {
     render(<SelfDiscussion />);
     await act(async () => {});
 
     expect(mockGetMessage).toHaveBeenCalledWith(42);
-    expect(latestInitialValue).toBe('Forwarded note content');
-  });
-
-  it('sends the forwarded content as a self note when sending', async () => {
-    render(<SelfDiscussion />);
-    await act(async () => {});
-
-    expect(latestOnSend).toBeTruthy();
-    await latestOnSend?.('Forwarded note content');
-
     expect(mockSendSelfMessage).toHaveBeenCalledWith('Forwarded note content');
   });
 
