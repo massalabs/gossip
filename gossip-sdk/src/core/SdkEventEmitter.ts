@@ -120,7 +120,19 @@ export class SdkEventEmitter {
   }
 
   emit<K extends keyof SdkEvents>(event: K, payload: SdkEvents[K]): void {
-    this.bus.emit(event, payload);
+    const handlers = this.bus.all.get(event);
+    if (handlers) {
+      for (const handler of handlers) {
+        try {
+          (handler as (p: SdkEvents[K]) => void)(payload);
+        } catch (error) {
+          console.error(
+            `[SdkEventEmitter] Error in ${String(event)} handler:`,
+            error
+          );
+        }
+      }
+    }
   }
 
   clear(): void {
