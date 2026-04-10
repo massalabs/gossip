@@ -11,6 +11,7 @@ import ToS from '../../components/ToS';
 import { APP_VERSION, APP_BUILD_ID } from '../../config/version';
 import { useAppStore } from '../../stores/appStore';
 import { ROUTES } from '../../constants/routes';
+import { resolveDeweb } from '@massalabs/massa-web3';
 
 const AboutSettings: React.FC = () => {
   const { t } = useTranslation('settings');
@@ -22,8 +23,12 @@ const AboutSettings: React.FC = () => {
     navigate(ROUTES.settings());
   };
 
-  const handleOpenGossipWebsite = () => {
-    window.open('https://usegossip.massa.network/', '_blank');
+  const handleOpenGossipWebsite = async () => {
+    let url = await resolveDeweb('usegossip.massa');
+    if (url.includes('deweb_redirect?deweb_url=usegossip.massa')) {
+      url = 'https://usegossip.massa.network/';
+    }
+    window.open(url, '_blank');
   };
 
   return (
