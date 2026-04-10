@@ -15,6 +15,9 @@
 		504EC3121FED79650016851F /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 504EC3101FED79650016851F /* LaunchScreen.storyboard */; };
 		50B271D11FEDC1A000F3C39B /* public in Resources */ = {isa = PBXBuildFile; fileRef = 50B271D01FEDC1A000F3C39B /* public */; };
 		A084ECDBA7D38E1E42DFC39D /* Pods_Gossip.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AF277DCFFFF123FFC6DF26C7 /* Pods_Gossip.framework */; };
+		D0F41CE62F73E80A003FC4E1 /* SecureStorage.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = D0F41CE52F73E80A003FC4E1 /* SecureStorage.xcframework */; };
+		D0F41CEC2F73ED03003FC4E1 /* SecureStoragePlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0F41CEA2F73ED03003FC4E1 /* SecureStoragePlugin.swift */; };
+		D0F41CFE2F73FD8B003FC4E1 /* secureStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0F41CE72F73ED03003FC4E1 /* secureStorage.swift */; };
 		FA11BB012F00A00000000001 /* SSLBypassPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA11BB002F00A00000000001 /* SSLBypassPlugin.swift */; };
 		FAA8F08A2EE6DD3800CE65AE /* BackgroundRunnerStoragePlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAA8F0892EE6DD3800CE65AE /* BackgroundRunnerStoragePlugin.swift */; };
 		FAA8F0912EE6E27F00CE65AE /* BackgroundRefreshPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAA8F0902EE6E27F00CE65AE /* BackgroundRefreshPlugin.swift */; };
@@ -59,6 +62,11 @@
 		50B271D01FEDC1A000F3C39B /* public */ = {isa = PBXFileReference; lastKnownFileType = folder; path = public; sourceTree = "<group>"; };
 		AF277DCFFFF123FFC6DF26C7 /* Pods_Gossip.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_Gossip.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		AF51FD2D460BCFE21FA515B2 /* Pods-Gossip.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Gossip.release.xcconfig"; path = "Pods/Target Support Files/Pods-Gossip/Pods-Gossip.release.xcconfig"; sourceTree = "<group>"; };
+		D0F41CE52F73E80A003FC4E1 /* SecureStorage.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = SecureStorage.xcframework; sourceTree = "<group>"; };
+		D0F41CE72F73ED03003FC4E1 /* secureStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = secureStorage.swift; sourceTree = "<group>"; };
+		D0F41CE82F73ED03003FC4E1 /* secureStorageFFI.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = secureStorageFFI.h; sourceTree = "<group>"; };
+		D0F41CE92F73ED03003FC4E1 /* secureStorageFFI.modulemap */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.module-map"; path = secureStorageFFI.modulemap; sourceTree = "<group>"; };
+		D0F41CEA2F73ED03003FC4E1 /* SecureStoragePlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecureStoragePlugin.swift; sourceTree = "<group>"; };
 		FA11BB002F00A00000000001 /* SSLBypassPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSLBypassPlugin.swift; sourceTree = "<group>"; };
 		FAA8F0892EE6DD3800CE65AE /* BackgroundRunnerStoragePlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundRunnerStoragePlugin.swift; sourceTree = "<group>"; };
 		FAA8F0902EE6E27F00CE65AE /* BackgroundRefreshPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundRefreshPlugin.swift; sourceTree = "<group>"; };
@@ -95,6 +103,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				D0F41CE62F73E80A003FC4E1 /* SecureStorage.xcframework in Frameworks */,
 				A084ECDBA7D38E1E42DFC39D /* Pods_Gossip.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -120,6 +129,7 @@
 		504EC2FB1FED79650016851F = {
 			isa = PBXGroup;
 			children = (
+				D0F41CE52F73E80A003FC4E1 /* SecureStorage.xcframework */,
 				FAB0FFE82EF01C8600832215 /* Gossip.entitlements */,
 				504EC3061FED79650016851F /* App */,
 				FAB0FFD92EF01BB300832215 /* GossipShareExtension */,
@@ -165,9 +175,21 @@
 			name = Pods;
 			sourceTree = "<group>";
 		};
+		D0F41CEB2F73ED03003FC4E1 /* secureStorage */ = {
+			isa = PBXGroup;
+			children = (
+				D0F41CE72F73ED03003FC4E1 /* secureStorage.swift */,
+				D0F41CE82F73ED03003FC4E1 /* secureStorageFFI.h */,
+				D0F41CE92F73ED03003FC4E1 /* secureStorageFFI.modulemap */,
+				D0F41CEA2F73ED03003FC4E1 /* SecureStoragePlugin.swift */,
+			);
+			path = secureStorage;
+			sourceTree = "<group>";
+		};
 		FAA8F0862EE6DCD100CE65AE /* plugins */ = {
 			isa = PBXGroup;
 			children = (
+				D0F41CEB2F73ED03003FC4E1 /* secureStorage */,
 				FAA8F09E2EE6F17300CE65AE /* networkObserver */,
 				FAA8F08F2EE6E25E00CE65AE /* backgroundRefresh */,
 				FAA8F0872EE6DCFE00CE65AE /* backgroundStorage */,
@@ -352,9 +374,11 @@
 			files = (
 				FAA8F08A2EE6DD3800CE65AE /* BackgroundRunnerStoragePlugin.swift in Sources */,
 				FAA8F0912EE6E27F00CE65AE /* BackgroundRefreshPlugin.swift in Sources */,
+				D0F41CFE2F73FD8B003FC4E1 /* secureStorage.swift in Sources */,
 				FAA8F0A02EE6F1C000CE65AE /* NetworkObserverPlugin.swift in Sources */,
 				FAA8F09D2EE6EA6400CE65AE /* MyViewController.swift in Sources */,
 				FA11BB012F00A00000000001 /* SSLBypassPlugin.swift in Sources */,
+				D0F41CEC2F73ED03003FC4E1 /* SecureStoragePlugin.swift in Sources */,
 				504EC3081FED79650016851F /* AppDelegate.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -521,6 +545,28 @@
 				CODE_SIGN_ENTITLEMENTS = Gossip.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 2;
+				HEADER_SEARCH_PATHS = (
+					"$(inherited)",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/AparajitaCapacitorBiometricAuth/AparajitaCapacitorBiometricAuth.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/AparajitaCapacitorSecureStorage/AparajitaCapacitorSecureStorage.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/Capacitor/Capacitor.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/CapacitorApp/CapacitorApp.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/CapacitorBackgroundRunner/CapacitorBackgroundRunner.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/CapacitorBarcodeScanner/CapacitorBarcodeScanner.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/CapacitorCommunityPrivacyScreen/CapacitorCommunityPrivacyScreen.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/CapacitorCordova/Cordova.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/CapacitorDevice/CapacitorDevice.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/CapacitorFilesystem/CapacitorFilesystem.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/CapacitorKeyboard/CapacitorKeyboard.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/CapacitorLocalNotifications/CapacitorLocalNotifications.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/CapacitorNetwork/CapacitorNetwork.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/CapacitorPluginSafeArea/CapacitorPluginSafeArea.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/CapacitorPreferences/CapacitorPreferences.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/CapacitorShare/CapacitorShare.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/CapacitorStatusBar/CapacitorStatusBar.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/KeychainSwift/KeychainSwift.framework/Headers\"",
+					"\"$(SRCROOT)/App/plugins/secureStorage\"",
+				);
 				INFOPLIST_FILE = App/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -532,6 +578,8 @@
 				PRODUCT_BUNDLE_IDENTIFIER = net.massa.gossip;
 				PRODUCT_NAME = Gossip;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_INCLUDE_PATHS = "$(SRCROOT)/App/plugins/secureStorage";
+				"SWIFT_OBJC_BRIDGING_HEADER[arch=*]" = "App/App-Bridging-Header.h";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -547,6 +595,28 @@
 				CODE_SIGN_ENTITLEMENTS = Gossip.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 2;
+				HEADER_SEARCH_PATHS = (
+					"$(inherited)",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/AparajitaCapacitorBiometricAuth/AparajitaCapacitorBiometricAuth.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/AparajitaCapacitorSecureStorage/AparajitaCapacitorSecureStorage.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/Capacitor/Capacitor.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/CapacitorApp/CapacitorApp.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/CapacitorBackgroundRunner/CapacitorBackgroundRunner.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/CapacitorBarcodeScanner/CapacitorBarcodeScanner.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/CapacitorCommunityPrivacyScreen/CapacitorCommunityPrivacyScreen.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/CapacitorCordova/Cordova.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/CapacitorDevice/CapacitorDevice.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/CapacitorFilesystem/CapacitorFilesystem.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/CapacitorKeyboard/CapacitorKeyboard.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/CapacitorLocalNotifications/CapacitorLocalNotifications.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/CapacitorNetwork/CapacitorNetwork.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/CapacitorPluginSafeArea/CapacitorPluginSafeArea.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/CapacitorPreferences/CapacitorPreferences.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/CapacitorShare/CapacitorShare.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/CapacitorStatusBar/CapacitorStatusBar.framework/Headers\"",
+					"\"${PODS_CONFIGURATION_BUILD_DIR}/KeychainSwift/KeychainSwift.framework/Headers\"",
+					"\"$(SRCROOT)/App/plugins/secureStorage\"",
+				);
 				INFOPLIST_FILE = App/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -557,6 +627,8 @@
 				PRODUCT_BUNDLE_IDENTIFIER = net.massa.gossip;
 				PRODUCT_NAME = Gossip;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "";
+				SWIFT_INCLUDE_PATHS = "$(SRCROOT)/App/plugins/secureStorage";
+				"SWIFT_OBJC_BRIDGING_HEADER[arch=*]" = "App/App-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
