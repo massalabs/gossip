@@ -322,8 +322,6 @@ const MessageItem: React.FC<MessageItemProps> = ({
         onToggleReaction={onToggleReaction}
         onClick={handleBubbleClick}
         onKeyDown={handleKeyDown}
-        openContextMenu={contextMenu.openContextMenu}
-        isSelecting={isSelecting}
       />
 
       <MessageContextMenu

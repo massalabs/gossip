@@ -153,13 +153,6 @@ describe('MessageItem', () => {
       writeText.mockRestore();
     });
 
-    it('shows hover arrow on desktop', async () => {
-      render(<MessageItem message={makeMessage()} onReplyTo={vi.fn()} />);
-
-      const btn = page.getByRole('button', { name: 'Message actions' });
-      await expect.element(btn).toBeInTheDocument();
-    });
-
     it('does not expose actions for deleted messages', async () => {
       render(
         <MessageItem
@@ -171,9 +164,6 @@ describe('MessageItem', () => {
 
       await expect
         .element(page.getByRole('button', { name: 'Double-tap to reply' }))
-        .not.toBeInTheDocument();
-      await expect
-        .element(page.getByRole('button', { name: 'Message actions' }))
         .not.toBeInTheDocument();
       await expect.element(page.getByRole('menu')).not.toBeInTheDocument();
     });
@@ -562,22 +552,6 @@ describe('MessageItem', () => {
 
       await userEvent.click(page.getByRole('listitem'));
       expect(onToggleSelect).toHaveBeenCalledWith(0);
-    });
-
-    it('hides desktop message actions button while selecting', async () => {
-      render(
-        <MessageItem
-          message={makeMessage()}
-          isSelecting={true}
-          isSelected={false}
-          onToggleSelect={vi.fn()}
-          onReplyTo={vi.fn()}
-        />
-      );
-
-      await expect
-        .element(page.getByRole('button', { name: 'Message actions' }))
-        .not.toBeInTheDocument();
     });
   });
 });
