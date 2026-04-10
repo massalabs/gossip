@@ -286,6 +286,7 @@ pub fn derive_keys_from_static_root_secret(
 pub fn derive_evm_address(mnemonic_phrase: &str) -> Result<String, String> {
     let mnemonic = <Mnemonic<English>>::new_from_phrase(mnemonic_phrase)
         .map_err(|e| format!("Invalid mnemonic: {e}"))?;
+    // Empty BIP39 passphrase — standard behavior (MetaMask, ethers.js, etc.)
     let seed = mnemonic
         .to_seed(None)
         .map_err(|e| format!("Seed derivation failed: {e}"))?;
@@ -482,6 +483,7 @@ mod tests {
     #[test]
     fn test_derive_evm_address_invalid_mnemonic() {
         assert!(derive_evm_address("not a valid mnemonic").is_err());
+        assert!(derive_evm_address("").is_err());
     }
 
     #[test]

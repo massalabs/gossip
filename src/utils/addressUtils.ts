@@ -41,16 +41,6 @@ export function formatMassaAddress(address: string): string {
   return shortenAddress(address, 8, 6);
 }
 
-/**
- * Formats an EVM address for display
- * @param address - The full EVM address (0x…)
- * @returns Shortened address string (e.g., "0x1234...abcd")
- */
-export function formatEvmAddress(address: string): string {
-  if (!address) return '';
-  return shortenAddress(address, 8, 6);
-}
-
 export function isValidAddress(address: string): boolean {
   try {
     Address.fromString(address.trim());

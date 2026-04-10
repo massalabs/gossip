@@ -2,6 +2,8 @@
   "title": "WALLET",
   "refresh": "Refresh balance and prices",
   "address": "Address",
+  "massa_address": "Massa",
+  "evm_address": "EVM",
   "copy_address": "Copy address",
   "swap_coming_soon": "Swap functionality will be implemented soon!",
   "send_label": "send",

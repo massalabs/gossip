@@ -10,7 +10,7 @@ import { useAccountStore } from '../stores/accountStore';
 import { useWalletStore } from '../stores/walletStore';
 import SendModal from '../components/wallet/SendModal';
 import ReceiveModal from '../components/wallet/ReceiveModal';
-import { formatMassaAddress, formatEvmAddress } from '../utils/addressUtils';
+import { formatMassaAddress } from '../utils/addressUtils';
 import { formatAmount } from '../utils/parseAmount';
 import Button from '../components/ui/Button';
 import CopyClipboard from '../components/ui/CopyClipboard';
@@ -44,7 +44,7 @@ const Wallet: React.FC = () => {
 
   const fullAddress = account?.address?.toString() ?? '';
   const displayAddress = formatMassaAddress(fullAddress);
-  const displayEvmAddress = evmAddress ? formatEvmAddress(evmAddress) : '';
+  const displayEvmAddress = evmAddress ? formatMassaAddress(evmAddress) : '';
 
   return (
     <div className="bg-background">
@@ -72,7 +72,9 @@ const Wallet: React.FC = () => {
         {fullAddress && (
           <div className="px-6 -mt-2">
             <div className="flex items-center justify-between text-xs text-gray-600 dark:text-gray-300">
-              <span className="uppercase tracking-wide">Massa</span>
+              <span className="uppercase tracking-wide">
+                {t('massa_address')}
+              </span>
               <div className="flex items-center gap-2">
                 <span className="px-2 py-1 rounded-md bg-gray-100 dark:bg-gray-800">
                   {displayAddress}
@@ -87,7 +89,9 @@ const Wallet: React.FC = () => {
         {evmAddress && (
           <div className="px-6 mt-1">
             <div className="flex items-center justify-between text-xs text-gray-600 dark:text-gray-300">
-              <span className="uppercase tracking-wide">EVM</span>
+              <span className="uppercase tracking-wide">
+                {t('evm_address')}
+              </span>
               <div className="flex items-center gap-2">
                 <span className="px-2 py-1 rounded-md bg-gray-100 dark:bg-gray-800">
                   {displayEvmAddress}
