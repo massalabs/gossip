@@ -87,9 +87,12 @@ vi.mock('@massalabs/gossip-sdk', async () => {
     })),
     deriveKey: vi.fn(async () => ({ type: 'mock-key' })),
     encrypt: vi.fn(async () => ({ encryptedData: new Uint8Array(0) })),
-    validateUsernameFormat: vi.fn(() => ({ valid: true })),
   };
 });
+
+vi.mock('../../src/utils/validation', () => ({
+  validateUsernameFormat: vi.fn(() => ({ valid: true })),
+}));
 
 vi.mock('@massalabs/massa-web3', async () => {
   const actual = await vi.importActual<typeof import('@massalabs/massa-web3')>(

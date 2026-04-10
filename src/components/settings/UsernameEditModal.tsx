@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import BaseModal from '../ui/BaseModal';
 import Button from '../ui/Button';
 import { useKeyDown } from '../../hooks/useKeyDown';
-import { validateUsernameFormat } from '@massalabs/gossip-sdk';
+import { validateUsernameFormat } from '../../utils/validation';
 import { useGossipSdk } from '../../hooks/useGossipSdk';
 
 interface UsernameEditModalProps {

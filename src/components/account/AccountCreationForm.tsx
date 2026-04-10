@@ -2,11 +2,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Capacitor } from '@capacitor/core';
 import { Lock, Shield, Zap } from 'react-feather';
-import {
-  validatePassword,
-  validateUsernameFormat,
-} from '@massalabs/gossip-sdk';
-import { useGossipSdk } from '../../hooks/useGossipSdk';
+import { validatePassword } from '@massalabs/gossip-sdk';
+import { validateUsernameFormat } from '../../utils/validation';
 import PageHeader from '../ui/PageHeader';
 import PageLayout from '../ui/PageLayout';
 import TabSwitcher from '../ui/TabSwitcher';
@@ -80,7 +77,6 @@ const AccountCreationForm: React.FC<AccountCreationFormProps> = ({
 }) => {
   const { t } = useTranslation('auth');
 
-  const gossip = useGossipSdk();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -190,7 +186,7 @@ const AccountCreationForm: React.FC<AccountCreationFormProps> = ({
     e.preventDefault();
     e.stopPropagation();
 
-    const usernameResult = await gossip.profiles.validateUsername(username);
+    const usernameResult = validateUsernameFormat(username);
     if (!usernameResult.valid) {
       setIsUsernameValid(false);
       setUsernameError(usernameResult.error);
@@ -248,7 +244,6 @@ const AccountCreationForm: React.FC<AccountCreationFormProps> = ({
               onChange={handleUsernameChange}
               placeholder={t('create.enter_username')}
               error={!!usernameError}
-              maxLength={20}
               disabled={isCreating}
             />
           </FormFieldRow>

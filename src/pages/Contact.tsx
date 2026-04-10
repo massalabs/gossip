@@ -13,6 +13,7 @@ import UserIdDisplay from '../components/ui/UserIdDisplay';
 import BaseModal from '../components/ui/BaseModal';
 import { Check, Edit2, Trash2 } from 'react-feather';
 import { UserPublicKeys, SessionStatus } from '@massalabs/gossip-sdk';
+import { validateUsernameFormat } from '../utils/validation';
 import { ROUTES } from '../constants/routes';
 import { useGossipSdk } from '../hooks/useGossipSdk';
 
@@ -71,6 +72,11 @@ const Contact: React.FC = () => {
   const handleSaveName = useCallback(
     async (name: string) => {
       if (!contact) return;
+      const formatResult = validateUsernameFormat(name);
+      if (!formatResult.valid) {
+        setNameError(formatResult.error);
+        return;
+      }
       const result = await gossip.contacts.updateName(contact.userId, name);
       if (!result.success) {
         console.error('Failed to update contact name:', result.message);

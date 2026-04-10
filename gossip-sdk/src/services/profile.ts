@@ -11,10 +11,6 @@ import {
   rowToUserProfile,
   userProfileToRow,
 } from '../db/queries/index.js';
-import {
-  validateUsernameFormatAndAvailability,
-  type ValidationResult,
-} from '../utils/validation.js';
 
 export class ProfileService {
   private queries: Queries;
@@ -48,10 +44,6 @@ export class ProfileService {
 
   delete(userId: string): Promise<void> {
     return this.queries.userProfiles.delete(userId);
-  }
-
-  validateUsername(username: string): Promise<ValidationResult> {
-    return validateUsernameFormatAndAvailability(username, this.queries);
   }
 
   async isUsernameTaken(
