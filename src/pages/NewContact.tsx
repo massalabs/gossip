@@ -251,7 +251,7 @@ const NewContact: React.FC = () => {
             aria-label={t('new_contact.scan_qr')}
           >
             <QrCodeIcon className="w-5 h-5" />
-            <span className="text-base font-medium">
+            <span className="text-sm font-medium">
               {t('new_contact.scan_qr')}
             </span>
           </button>
@@ -263,7 +263,7 @@ const NewContact: React.FC = () => {
             aria-label={t('new_contact.import_file')}
           >
             <Upload className="w-5 h-5" />
-            <span className="text-base font-medium">
+            <span className="text-sm font-medium">
               {t('new_contact.import_file')}
             </span>
           </button>
