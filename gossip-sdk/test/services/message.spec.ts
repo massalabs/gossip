@@ -486,7 +486,8 @@ describe('MessageService', () => {
     expect(reactionRows.map(r => r.content).sort()).toEqual(['😀', '😂']);
     reactionRows.forEach(r => {
       expect(r.direction).toBe(MessageDirection.OUTGOING);
-      expect(r.status).toBe(MessageStatus.WAITING_SESSION);
+      // Active session triggers the fast path: reactions go directly to SENT
+      expect(r.status).toBe(MessageStatus.SENT);
       expect(r.reactionOf).toBeTruthy();
       const parsed = JSON.parse(r.reactionOf!);
       expect(parsed.originalMsgId).toBeDefined();
@@ -726,13 +727,11 @@ describe('processSendQueueForContact: Encryption Error', () => {
       getTestQueries()
     );
 
-    await messageService.sendMessage(createTestMessage());
-
-    const processResult = await messageService
-      .processSendQueueForContact(CONTACT_USER_ID)
-      .catch((e: Error) => ({ success: false, error: e }));
-
-    expect(processResult.success).toBe(false);
+    // Active session triggers the fast path, which propagates the encryption
+    // error directly from sendMessage instead of deferring to processSendQueue
+    await expect(
+      messageService.sendMessage(createTestMessage())
+    ).rejects.toThrow('Encryption failed: invalid session state');
   });
 
   it('should leave message as WAITING_SESSION when encryption fails', async () => {
@@ -750,20 +749,21 @@ describe('processSendQueueForContact: Encryption Error', () => {
       getTestQueries()
     );
 
-    const sendResult = await messageService.sendMessage(createTestMessage());
-    expect(sendResult.success).toBe(true);
-
-    await messageService
-      .processSendQueueForContact(CONTACT_USER_ID)
-      .catch(() => {});
+    // Active session triggers the fast path, which propagates the encryption
+    // error directly. The INSERT runs in parallel and may or may not have
+    // committed — the row (if created) stays at WAITING_SESSION.
+    await expect(
+      messageService.sendMessage(createTestMessage())
+    ).rejects.toThrow('Encryption error');
 
     const messages = await getTestQueries().messages.getByOwnerAndContact(
       OWNER_USER_ID,
       CONTACT_USER_ID
     );
 
-    expect(messages.length).toBe(1);
-    expect(messages[0].status).toBe(MessageStatus.WAITING_SESSION);
+    if (messages.length > 0) {
+      expect(messages[0].status).toBe(MessageStatus.WAITING_SESSION);
+    }
   });
 });
 

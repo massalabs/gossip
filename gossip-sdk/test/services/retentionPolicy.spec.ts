@@ -181,12 +181,15 @@ describe('DiscussionService.setRetentionPolicy', () => {
 
     await discussionService.setRetentionPolicy(CONTACT_USER_ID, 604800);
 
-    // The control message should be in the send queue
-    const queue = await testQueries.messages.getSendQueue(
+    // Active session triggers the fast path — the control message is sent
+    // immediately (status SENT) rather than staying in the send queue.
+    const allMessages = await testQueries.messages.getByOwnerAndContact(
       OWNER_USER_ID,
       CONTACT_USER_ID
     );
-    const controlMsg = queue.find(m => m.type === MessageType.RETENTION_POLICY);
+    const controlMsg = allMessages.find(
+      m => m.type === MessageType.RETENTION_POLICY
+    );
     expect(controlMsg).toBeDefined();
     expect(controlMsg?.content).toBe('604800');
     expect(controlMsg?.direction).toBe(MessageDirection.OUTGOING);
@@ -215,11 +218,13 @@ describe('DiscussionService.setRetentionPolicy', () => {
 
     await discussionService.setRetentionPolicy(CONTACT_USER_ID, null);
 
-    const queue = await testQueries.messages.getSendQueue(
+    const allMessages = await testQueries.messages.getByOwnerAndContact(
       OWNER_USER_ID,
       CONTACT_USER_ID
     );
-    const controlMsg = queue.find(m => m.type === MessageType.RETENTION_POLICY);
+    const controlMsg = allMessages.find(
+      m => m.type === MessageType.RETENTION_POLICY
+    );
     expect(controlMsg?.content).toBe('0');
   });
 });

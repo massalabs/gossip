@@ -263,7 +263,6 @@ export class MessageService {
    * `processSendQueueForContact` pass to prevent re-encrypting + re-sending
    * a message we've already shipped.
    */
-  private inFlightSentUpdates = new Set<number>();
 
   /** Emit MESSAGE_RECEIVED with a Message that may not have a DB id yet */
   private emitMessageReceived(
@@ -1078,23 +1077,13 @@ export class MessageService {
       };
     }
 
-    this.inFlightSentUpdates.add(messageId);
-    void this.queries.messages
-      .updateById(messageId, {
-        status: MessageStatus.SENT,
-        encryptedMessage: null,
-        serializedContent: null,
-        whenToSend: null,
-      })
-      .catch(error => {
-        log.error('background UPDATE → SENT failed in fast path', {
-          messageId,
-          error,
-        });
-      })
-      .finally(() => {
-        this.inFlightSentUpdates.delete(messageId);
-      });
+    await this.queries.messages.updateById(messageId, {
+      status: MessageStatus.SENT,
+      seeker: sendOutput.seeker,
+      encryptedMessage: null,
+      serializedContent: null,
+      whenToSend: null,
+    });
 
     try {
       this.eventEmitter.emit(SdkEventType.MESSAGE_SENT, {
@@ -1345,12 +1334,6 @@ export class MessageService {
 
       for (const msg of pendingMessages) {
         if (!msg.id) continue;
-        if (this.inFlightSentUpdates.has(msg.id)) {
-          // The previous pass already shipped this message and emitted
-          // MESSAGE_SENT; the background UPDATE → SENT just hasn't
-          // committed yet. Skip until it does.
-          continue;
-        }
 
         const currentStatus = msg.status;
         let encryptedMessage = msg.encryptedMessage;
@@ -1442,27 +1425,13 @@ export class MessageService {
             continue;
           }
 
-          // Fire-and-forget UPDATE → SENT. The UI gets its checkmark
-          // from the synchronous emit below; the SQL write happens in
-          // the background.
-          const sentMsgId = msg.id;
-          this.inFlightSentUpdates.add(sentMsgId);
-          void this.queries.messages
-            .updateById(sentMsgId, {
-              status: MessageStatus.SENT,
-              encryptedMessage: null,
-              serializedContent: null,
-              whenToSend: null,
-            })
-            .catch(error => {
-              log.error('background UPDATE → SENT failed', {
-                messageId: sentMsgId,
-                error,
-              });
-            })
-            .finally(() => {
-              this.inFlightSentUpdates.delete(sentMsgId);
-            });
+          await this.queries.messages.updateById(msg.id, {
+            status: MessageStatus.SENT,
+            seeker,
+            encryptedMessage: null,
+            serializedContent: null,
+            whenToSend: null,
+          });
 
           sentCount++;
           log.debug('message sent (skipped READY)', {
