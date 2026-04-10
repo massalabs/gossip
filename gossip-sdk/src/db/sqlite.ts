@@ -212,11 +212,19 @@ export class DatabaseConnection {
         this.state.useWorker = true;
 
         try {
+          // Pre-fetch WASM in the main thread to avoid Safari's
+          // chunked Transfer-Encoding bug in Worker fetch().
+          let wasmBinary: ArrayBuffer | undefined;
+          if (storage.wasmUrl) {
+            const resp = await fetch(storage.wasmUrl);
+            wasmBinary = await resp.arrayBuffer();
+          }
+
           await this.postToWorker({
             type: 'init',
             dbPath,
             useOPFS,
-            wasmUrl: storage.wasmUrl,
+            wasmBinary,
             initSql: PRAGMAS,
           });
         } catch (err) {

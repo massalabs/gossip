@@ -10,7 +10,6 @@ import {
   MessageDirection,
   type Discussion,
   type Contact,
-  type Message,
   GossipSdk,
   MessageType,
 } from '@massalabs/gossip-sdk';
@@ -41,7 +40,7 @@ export function setupSdkEventHandlers(gossip: GossipSdk): void {
   // Show notification for new discussion requests when app is in background
   gossip.on(
     SdkEventType.SESSION_REQUESTED,
-    async (_discussion: Discussion, contact: Contact) => {
+    async ({ contact }: { discussion: Discussion; contact: Contact }) => {
       const foreground = await isAppInForeground();
       if (!foreground) {
         try {
@@ -57,7 +56,7 @@ export function setupSdkEventHandlers(gossip: GossipSdk): void {
   );
 
   // Show notification for incoming messages when app is in background
-  gossip.on(SdkEventType.MESSAGE_RECEIVED, async (message: Message) => {
+  gossip.on(SdkEventType.MESSAGE_RECEIVED, async message => {
     // Only notify for incoming messages
     if (message.direction !== MessageDirection.INCOMING) return;
 
@@ -86,7 +85,10 @@ export function setupSdkEventHandlers(gossip: GossipSdk): void {
   });
 
   // Log errors for debugging
-  gossip.on(SdkEventType.ERROR, (error: Error, context: string) => {
-    console.error(`[SDK Error:${context}]`, error);
-  });
+  gossip.on(
+    SdkEventType.ERROR,
+    ({ error, context }: { error: Error; context: string }) => {
+      console.error(`[SDK Error:${context}]`, error);
+    }
+  );
 }

@@ -1,6 +1,8 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { Message, encodeUserId } from '@massalabs/gossip-sdk';
 import { useGossipSdk } from '../../../hooks/useGossipSdk';
+import { useMessageStore } from '../../../stores/messageStore';
+import { messageIdEquals } from '../../../stores/messageStore.helpers';
 import { parseLinks } from '../../../utils/linkUtils';
 
 interface UseOriginalMessageOptions {
@@ -13,22 +15,38 @@ export function useOriginalMessage({
   onScrollToMessage,
 }: UseOriginalMessageOptions) {
   const sdk = useGossipSdk();
-  const [originalMessage, setOriginalMessage] = useState<Message | null>(null);
+  const [dbOriginal, setDbOriginal] = useState<Message | null>(null);
   const [isLoadingOriginal, setIsLoadingOriginal] = useState(false);
   const [originalNotFound, setOriginalNotFound] = useState(false);
 
-  // Load original message if this is a reply or forward
-  useEffect(() => {
-    const citedMsgId = message.replyTo?.originalMsgId;
-    const citedContactId = message.forwardOf?.originalContactId;
-    let originalContactUserId = message.contactUserId;
+  const citedMsgId = message.replyTo?.originalMsgId;
+  const citedContactId = message.forwardOf?.originalContactId;
 
-    if (citedContactId && citedContactId.length === 32) {
-      try {
-        originalContactUserId = encodeUserId(citedContactId);
-      } catch (error) {
-        console.warn('Failed to encode cited contact ID', error);
-      }
+  let originalContactUserId = message.contactUserId;
+  if (citedContactId && citedContactId.length === 32) {
+    try {
+      originalContactUserId = encodeUserId(citedContactId);
+    } catch {
+      // keep default
+    }
+  }
+
+  // Reactive lookup in the store — picks up optimistic updates (e.g. delete)
+  const storeMessages = useMessageStore(state =>
+    state.messagesByContact.get(originalContactUserId)
+  );
+  const storeMatch = useMemo(() => {
+    if (!citedMsgId || !storeMessages) return undefined;
+    return storeMessages.find(m => messageIdEquals(m.messageId, citedMsgId));
+  }, [citedMsgId, storeMessages]);
+
+  // Fall back to DB for messages not in the store (e.g. older messages not loaded)
+  useEffect(() => {
+    if (storeMatch) {
+      setDbOriginal(null);
+      setOriginalNotFound(false);
+      setIsLoadingOriginal(false);
+      return;
     }
 
     if (citedMsgId && sdk.isSessionOpen) {
@@ -44,15 +62,15 @@ export function useOriginalMessage({
           );
 
           if (msg) {
-            setOriginalMessage(msg);
+            setDbOriginal(msg);
             setOriginalNotFound(false);
           } else {
-            setOriginalMessage(null);
+            setDbOriginal(null);
             setOriginalNotFound(true);
           }
         } catch (e) {
           console.error('Error finding message by seeker:', e);
-          setOriginalMessage(null);
+          setDbOriginal(null);
           setOriginalNotFound(true);
         } finally {
           setIsLoadingOriginal(false);
@@ -61,21 +79,26 @@ export function useOriginalMessage({
 
       findMessage();
     } else if (message.replyTo || message.forwardOf) {
-      setOriginalMessage(null);
+      setDbOriginal(null);
       setOriginalNotFound(true);
       setIsLoadingOriginal(false);
     } else {
-      setOriginalMessage(null);
+      setDbOriginal(null);
       setOriginalNotFound(false);
       setIsLoadingOriginal(false);
     }
   }, [
+    citedMsgId,
+    storeMatch,
     message.replyTo,
     message.forwardOf,
     message.ownerUserId,
-    message.contactUserId,
+    originalContactUserId,
     sdk,
   ]);
+
+  // Store match wins over DB result (more up-to-date)
+  const originalMessage = storeMatch ?? dbOriginal;
 
   const handleReplyContextClick = useCallback(
     (e: React.MouseEvent) => {

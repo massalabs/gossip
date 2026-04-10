@@ -96,11 +96,10 @@ export class RefreshService {
 
       if (previous !== status) {
         this.sessionStatusMap.set(discussion.contactUserId, status);
-        this.eventEmitter.emit(
-          SdkEventType.SESSION_STATUS_CHANGED,
-          discussion.contactUserId,
-          status
-        );
+        this.eventEmitter.emit(SdkEventType.SESSION_STATUS_CHANGED, {
+          contactUserId: discussion.contactUserId,
+          status,
+        });
       }
     }
   }
@@ -237,11 +236,10 @@ export class RefreshService {
               timestamp: new Date(),
             });
             if (!result.success) {
-              this.eventEmitter.emit(
-                SdkEventType.ERROR,
-                new Error(result.error || 'Unknown error'),
-                'keep_alive_message'
-              );
+              this.eventEmitter.emit(SdkEventType.ERROR, {
+                error: new Error(result.error || 'Unknown error'),
+                context: 'keep_alive_message',
+              });
             }
           }
         }
