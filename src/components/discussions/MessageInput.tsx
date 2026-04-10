@@ -199,6 +199,8 @@ const MessageInput: React.FC<MessageInputProps> = ({
           {isWeb && (
             <button
               type="button"
+              // onPointerDown + preventDefault keeps focus on the textarea
+              // so the emoji is inserted at the correct cursor position
               onPointerDown={e => {
                 e.preventDefault();
                 e.stopPropagation();
@@ -257,6 +259,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
           isOpen={isEmojiPickerOpen}
           onClose={() => setIsEmojiPickerOpen(false)}
           onSelectEmoji={handleEmojiSelect}
+          height={400}
         />
       )}
     </div>

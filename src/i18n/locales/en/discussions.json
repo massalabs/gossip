@@ -20,7 +20,8 @@
     "cancel_edit": "Cancel edit",
     "input_label": "Message input",
     "send": "Send message",
-    "emoji": "Emoji"
+    "emoji": "Emoji",
+    "emoji_search": "Search emoji…"
   },
   "message": {
     "sent": "Sent",
