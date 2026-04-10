@@ -141,6 +141,12 @@ impl From<[u8; KEY_SIZE]> for Key {
 }
 
 impl Key {
+    /// Create a key by copying from a reference, avoiding an intermediate
+    /// stack copy that `Key::from(*zeroizing_wrapper)` would produce.
+    pub fn from_ref(bytes: &[u8; KEY_SIZE]) -> Self {
+        Self(*bytes)
+    }
+
     /// Get the raw bytes of the key
     ///
     /// # Examples

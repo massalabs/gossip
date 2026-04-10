@@ -22,15 +22,26 @@ pub fn session_scope(domain: &str, version: u32, index: SessionIndex) -> String 
     format!("{domain}:secureStorage:session:v{version}:i{}", index.as_u8())
 }
 
-/// Block scope: `{session_scope}:b{block_index}`
+/// Block scope: `{session_scope}:n{namespace}:b{block_index}`
+///
+/// Each (session, namespace, block_index) triple gets a unique scope, used as
+/// the AAD root for AEAD encryption. Different namespaces within the same
+/// session never collide because the namespace byte is part of the scope.
 ///
 /// Writes into `buf` (cleared first) to avoid allocations in per-block loops.
-pub fn block_scope(buf: &mut String, domain: &str, version: u32, index: SessionIndex, block: u64) {
+pub fn block_scope(
+    buf: &mut String,
+    domain: &str,
+    version: u32,
+    index: SessionIndex,
+    namespace: u8,
+    block: u64,
+) {
     buf.clear();
     // String::write_fmt is infallible
     let _ = write!(
         buf,
-        "{domain}:secureStorage:session:v{version}:i{}:b{block}",
+        "{domain}:secureStorage:session:v{version}:i{}:n{namespace}:b{block}",
         index.as_u8()
     );
 }
@@ -44,7 +55,7 @@ pub fn password_kdf_salt(domain: &str) -> String {
 /// Salt for root KDF: `{domain}:kdf:salt`
 #[must_use]
 pub fn root_kdf_salt(domain: &str) -> String {
-    format!("{domain}:kdf:salt")
+    format!("{domain}:secureStorage:kdf:salt")
 }
 
 /// AAD for secret key wrapping: `{session_scope}:pq_sk_wrap`
@@ -64,12 +75,13 @@ pub fn block_kdf_salt(
     domain: &str,
     version: u32,
     index: SessionIndex,
+    namespace: u8,
     block: u64,
 ) {
     buf.clear();
     let _ = write!(
         buf,
-        "{domain}:secureStorage:session:v{version}:i{}:b{block}:kdf:salt",
+        "{domain}:secureStorage:session:v{version}:i{}:n{namespace}:b{block}:kdf:salt",
         index.as_u8()
     );
 }
@@ -82,12 +94,13 @@ pub fn block_aead_key_label(
     domain: &str,
     version: u32,
     index: SessionIndex,
+    namespace: u8,
     block: u64,
 ) {
     buf.clear();
     let _ = write!(
         buf,
-        "{domain}:secureStorage:session:v{version}:i{}:b{block}:kdf:block_aead_key",
+        "{domain}:secureStorage:session:v{version}:i{}:n{namespace}:b{block}:kdf:block_aead_key",
         index.as_u8()
     );
 }
@@ -100,12 +113,13 @@ pub fn block_aead_aad(
     domain: &str,
     version: u32,
     index: SessionIndex,
+    namespace: u8,
     block: u64,
 ) {
     buf.clear();
     let _ = write!(
         buf,
-        "{domain}:secureStorage:session:v{version}:i{}:b{block}:block_aead",
+        "{domain}:secureStorage:session:v{version}:i{}:n{namespace}:b{block}:block_aead",
         index.as_u8()
     );
 }
@@ -144,8 +158,18 @@ mod tests {
     fn test_block_scope_format() {
         let idx = SessionIndex::new(0).unwrap();
         let mut buf = String::new();
-        block_scope(&mut buf, "app:ns", 0, idx, 42);
-        assert_eq!(buf, "app:ns:secureStorage:session:v0:i0:b42");
+        block_scope(&mut buf, "app:ns", 0, idx, 0, 42);
+        assert_eq!(buf, "app:ns:secureStorage:session:v0:i0:n0:b42");
+    }
+
+    #[test]
+    fn test_block_scope_namespace_changes_output() {
+        let idx = SessionIndex::new(0).unwrap();
+        let mut buf0 = String::new();
+        let mut buf1 = String::new();
+        block_scope(&mut buf0, "app", 0, idx, 0, 42);
+        block_scope(&mut buf1, "app", 0, idx, 1, 42);
+        assert_ne!(buf0, buf1);
     }
 
     #[test]
@@ -158,7 +182,7 @@ mod tests {
 
     #[test]
     fn test_root_kdf_salt() {
-        assert_eq!(root_kdf_salt("app:ns"), "app:ns:kdf:salt");
+        assert_eq!(root_kdf_salt("app:ns"), "app:ns:secureStorage:kdf:salt");
     }
 
     #[test]
@@ -174,18 +198,18 @@ mod tests {
     fn test_block_kdf_salt() {
         let idx = SessionIndex::new(0).unwrap();
         let mut buf = String::new();
-        block_kdf_salt(&mut buf, "app:ns", 0, idx, 5);
-        assert_eq!(buf, "app:ns:secureStorage:session:v0:i0:b5:kdf:salt");
+        block_kdf_salt(&mut buf, "app:ns", 0, idx, 0, 5);
+        assert_eq!(buf, "app:ns:secureStorage:session:v0:i0:n0:b5:kdf:salt");
     }
 
     #[test]
     fn test_block_aead_key_label() {
         let idx = SessionIndex::new(0).unwrap();
         let mut buf = String::new();
-        block_aead_key_label(&mut buf, "app:ns", 0, idx, 5);
+        block_aead_key_label(&mut buf, "app:ns", 0, idx, 0, 5);
         assert_eq!(
             buf,
-            "app:ns:secureStorage:session:v0:i0:b5:kdf:block_aead_key"
+            "app:ns:secureStorage:session:v0:i0:n0:b5:kdf:block_aead_key"
         );
     }
 
@@ -193,8 +217,8 @@ mod tests {
     fn test_block_aead_aad() {
         let idx = SessionIndex::new(0).unwrap();
         let mut buf = String::new();
-        block_aead_aad(&mut buf, "app:ns", 0, idx, 5);
-        assert_eq!(buf, "app:ns:secureStorage:session:v0:i0:b5:block_aead");
+        block_aead_aad(&mut buf, "app:ns", 0, idx, 0, 5);
+        assert_eq!(buf, "app:ns:secureStorage:session:v0:i0:n0:b5:block_aead");
     }
 
     #[test]
@@ -219,11 +243,11 @@ mod tests {
         let domain = "test";
         let mut buf = String::new();
 
-        block_kdf_salt(&mut buf, domain, 0, idx, 0);
+        block_kdf_salt(&mut buf, domain, 0, idx, 0, 0);
         let bks = buf.clone();
-        block_aead_key_label(&mut buf, domain, 0, idx, 0);
+        block_aead_key_label(&mut buf, domain, 0, idx, 0, 0);
         let bakl = buf.clone();
-        block_aead_aad(&mut buf, domain, 0, idx, 0);
+        block_aead_aad(&mut buf, domain, 0, idx, 0, 0);
         let baa = buf.clone();
 
         let labels = vec![
@@ -254,8 +278,19 @@ mod tests {
         let mut buf0 = String::new();
         let mut buf1 = String::new();
 
-        block_aead_aad(&mut buf0, "d", 0, s0, 0);
-        block_aead_aad(&mut buf1, "d", 0, s1, 0);
+        block_aead_aad(&mut buf0, "d", 0, s0, 0, 0);
+        block_aead_aad(&mut buf1, "d", 0, s1, 0, 0);
+        assert_ne!(buf0, buf1);
+    }
+
+    #[test]
+    fn test_different_namespaces_different_labels() {
+        let idx = SessionIndex::new(0).unwrap();
+        let mut buf0 = String::new();
+        let mut buf1 = String::new();
+
+        block_aead_aad(&mut buf0, "d", 0, idx, 0, 5);
+        block_aead_aad(&mut buf1, "d", 0, idx, 1, 5);
         assert_ne!(buf0, buf1);
     }
 
@@ -265,8 +300,8 @@ mod tests {
         let mut buf0 = String::new();
         let mut buf1 = String::new();
 
-        block_aead_aad(&mut buf0, "d", 0, idx, 0);
-        block_aead_aad(&mut buf1, "d", 0, idx, 1);
+        block_aead_aad(&mut buf0, "d", 0, idx, 0, 0);
+        block_aead_aad(&mut buf1, "d", 0, idx, 0, 1);
         assert_ne!(buf0, buf1);
     }
 
@@ -276,8 +311,8 @@ mod tests {
         let mut buf0 = String::new();
         let mut buf1 = String::new();
 
-        block_aead_aad(&mut buf0, "d", 0, idx, 0);
-        block_aead_aad(&mut buf1, "d", 1, idx, 0);
+        block_aead_aad(&mut buf0, "d", 0, idx, 0, 0);
+        block_aead_aad(&mut buf1, "d", 1, idx, 0, 0);
         assert_ne!(buf0, buf1);
     }
 
@@ -286,10 +321,10 @@ mod tests {
         let idx = SessionIndex::new(0).unwrap();
         let mut buf = String::new();
 
-        block_aead_aad(&mut buf, "d", 0, idx, 0);
+        block_aead_aad(&mut buf, "d", 0, idx, 0, 0);
         let first = buf.clone();
 
-        block_aead_aad(&mut buf, "d", 0, idx, 1);
+        block_aead_aad(&mut buf, "d", 0, idx, 0, 1);
         assert_ne!(first, buf, "buffer should be overwritten on reuse");
     }
 }

@@ -1,5 +1,8 @@
 /// Number of independent session slots.
-pub const SESSION_COUNT: usize = 5;
+pub const SESSION_COUNT: usize = 3;
+
+/// Default namespace for the primary block data stream.
+pub const DEFAULT_NAMESPACE: u8 = 0;
 
 /// AEAD authentication tag size in bytes.
 pub const AEAD_TAG_SIZE: usize = 16;
