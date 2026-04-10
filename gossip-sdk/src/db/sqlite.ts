@@ -117,13 +117,20 @@ export class DatabaseConnection {
 
   // ─── Raw SQL execution ─────────────────────────────────────────
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private postToWorker(msg: Record<string, unknown>): Promise<any> {
-    return new Promise((resolve, reject) => {
-      const id = ++this.state.msgId;
-      this.state.pending.set(id, { resolve, reject });
-      this.state.worker!.postMessage({ ...msg, id });
-    });
+  private postToWorker(
+    msg: Record<string, unknown>,
+    transfer: Transferable[] = []
+  ) {
+    return new Promise<{ rows: unknown[][]; lastInsertRowId: number }>(
+      (resolve, reject) => {
+        const id = ++this.state.msgId;
+        this.state.pending.set(id, {
+          resolve: resolve as (v: unknown) => void,
+          reject,
+        });
+        this.state.worker!.postMessage({ ...msg, id }, transfer);
+      }
+    );
   }
 
   private handleWorkerMessage = (e: MessageEvent) => {
@@ -220,13 +227,10 @@ export class DatabaseConnection {
             wasmBinary = await resp.arrayBuffer();
           }
 
-          await this.postToWorker({
-            type: 'init',
-            dbPath,
-            useOPFS,
-            wasmBinary,
-            initSql: PRAGMAS,
-          });
+          await this.postToWorker(
+            { type: 'init', dbPath, useOPFS, wasmBinary, initSql: PRAGMAS },
+            wasmBinary ? [wasmBinary] : []
+          );
         } catch (err) {
           if (this.state.worker) {
             this.state.worker.terminate();

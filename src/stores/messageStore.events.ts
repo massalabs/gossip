@@ -133,7 +133,7 @@ export function createEventHandlers(
       );
       if (map) return { messagesByContact: map };
 
-      // Fall back to reactions — an optimistic reaction write can fail too
+      // Fall back to reactions — remove silently on failure
       for (const [contact, reactions] of state.reactionsByContact) {
         const idx = reactions.findIndex(r =>
           messageIdEquals(r.messageId, failedMessageId)
