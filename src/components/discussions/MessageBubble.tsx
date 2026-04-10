@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { CornerUpLeft } from 'react-feather';
+import { CornerUpLeft, ChevronDown } from 'react-feather';
 import { Message } from '@massalabs/gossip-sdk';
 import { parseLinks, openUrl } from '../../utils/linkUtils';
 import CitedMessage, { type CitedMessageOriginal } from './CitedMessage';
@@ -89,6 +89,8 @@ interface MessageBubbleProps {
   // Handlers
   onClick: (e: React.MouseEvent) => void;
   onKeyDown: (e: React.KeyboardEvent) => void;
+  openContextMenu: () => void;
+  isSelecting: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -118,6 +120,8 @@ const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
     onToggleReaction,
     onClick,
     onKeyDown,
+    openContextMenu,
+    isSelecting,
   }) => {
     const { t } = useTranslation('discussions');
 
@@ -253,6 +257,21 @@ const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
             isSending={isSending}
             showTimestamp={showTimestamp}
           />
+
+          {/* Desktop context menu arrow */}
+          {!isSelecting && !isDeleted && (
+            <button
+              type="button"
+              onClick={e => {
+                e.stopPropagation();
+                openContextMenu();
+              }}
+              className="absolute top-1.5 right-2 p-0.5 opacity-0 group-hover:opacity-100 transition-opacity hidden md:flex items-center justify-center"
+              aria-label={t('message_item.actions_menu')}
+            >
+              <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
+            </button>
+          )}
         </div>
         <ReactionBar
           reactions={reactions}
