@@ -81,7 +81,9 @@ async function storeEncryptionKey(
   encryptionKey: EncryptionKey,
   syncToiCloud = false
 ): Promise<void> {
-  const keyBase64 = encodeToBase64(encryptionKey.to_bytes());
+  const keyBytes = encryptionKey.to_bytes();
+  const keyBase64 = encodeToBase64(keyBytes);
+  keyBytes.fill(0);
   await SecureStorage.set(storageKey(userId), keyBase64, syncToiCloud);
 }
 
@@ -93,16 +95,31 @@ async function retrieveEncryptionKey(
   if (!keyBase64 || typeof keyBase64 !== 'string') {
     throw new Error('Encryption key not found in secure storage');
   }
-  return encryptionKeyFromBytes(decodeFromBase64(keyBase64));
+  const keyBytes = decodeFromBase64(keyBase64);
+  const key = await encryptionKeyFromBytes(keyBytes);
+  keyBytes.fill(0);
+  return key;
 }
 
-export async function hasExistingCredential(key: string): Promise<boolean> {
-  try {
-    const value = await SecureStorage.get(key);
-    return value != null && value !== '';
-  } catch {
-    return false;
+export async function hasExistingCredential(
+  nativeStorageKey: string
+): Promise<boolean> {
+  if (isCapacitorAvailable()) {
+    try {
+      const value = await SecureStorage.get(nativeStorageKey);
+      return value != null && value !== '';
+    } catch {
+      return false;
+    }
   }
+
+  // On web, credentials are WebAuthn passkeys; the credential ID is stored
+  // in localStorage under a fixed key (not the native storage key).
+  if (isWebAuthnSupported()) {
+    return localStorage.getItem(WEBAUTHN_CREDENTIAL_ID_KEY) !== null;
+  }
+
+  return false;
 }
 
 export async function removeEncryptionKey(
