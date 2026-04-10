@@ -486,7 +486,8 @@ describe('MessageService', () => {
     expect(reactionRows.map(r => r.content).sort()).toEqual(['😀', '😂']);
     reactionRows.forEach(r => {
       expect(r.direction).toBe(MessageDirection.OUTGOING);
-      expect(r.status).toBe(MessageStatus.WAITING_SESSION);
+      // Active session triggers the fast path: reactions go directly to SENT
+      expect(r.status).toBe(MessageStatus.SENT);
       expect(r.reactionOf).toBeTruthy();
       const parsed = JSON.parse(r.reactionOf!);
       expect(parsed.originalMsgId).toBeDefined();
@@ -711,7 +712,7 @@ describe('processSendQueueForContact: Encryption Error', () => {
     await insertTestContactAndDiscussion();
   });
 
-  it('should propagate error when encryption fails', async () => {
+  it('should fall back to slow path when encryption fails', async () => {
     (mockSession.sendMessage as ReturnType<typeof vi.fn>).mockImplementation(
       () => {
         throw new Error('Encryption failed: invalid session state');
@@ -726,13 +727,11 @@ describe('processSendQueueForContact: Encryption Error', () => {
       getTestQueries()
     );
 
-    await messageService.sendMessage(createTestMessage());
-
-    const processResult = await messageService
-      .processSendQueueForContact(CONTACT_USER_ID)
-      .catch((e: Error) => ({ success: false, error: e }));
-
-    expect(processResult.success).toBe(false);
+    // Fast path catches the encrypt error and bails gracefully —
+    // the message is inserted via the slow path as WAITING_SESSION.
+    const result = await messageService.sendMessage(createTestMessage());
+    expect(result.success).toBe(true);
+    expect(result.message?.status).toBe(MessageStatus.WAITING_SESSION);
   });
 
   it('should leave message as WAITING_SESSION when encryption fails', async () => {
@@ -750,12 +749,10 @@ describe('processSendQueueForContact: Encryption Error', () => {
       getTestQueries()
     );
 
-    const sendResult = await messageService.sendMessage(createTestMessage());
-    expect(sendResult.success).toBe(true);
-
-    await messageService
-      .processSendQueueForContact(CONTACT_USER_ID)
-      .catch(() => {});
+    // Fast path catches the encrypt error and bails — slow path inserts
+    // the message as WAITING_SESSION for retry on the next stateUpdate.
+    const result = await messageService.sendMessage(createTestMessage());
+    expect(result.success).toBe(true);
 
     const messages = await getTestQueries().messages.getByOwnerAndContact(
       OWNER_USER_ID,
