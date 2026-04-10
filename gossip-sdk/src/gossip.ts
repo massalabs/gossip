@@ -390,6 +390,9 @@ class GossipSdk {
     // Cleanup session
     this.state.session.cleanup();
 
+    // Free the encryption key WASM object to zero its memory before dropping
+    this.state.encryptionKey?.free();
+
     // Clear services
     this._announcement = null;
     this._discussion = null;

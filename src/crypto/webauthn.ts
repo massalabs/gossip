@@ -194,7 +194,9 @@ export async function createWebAuthnCredential(
       throw new Error(WEBAUTHN_PRF_UNSUPPORTED_ERROR_CODE);
     }
 
-    const seed = encodeToBase64(new Uint8Array(prfOutput));
+    const prfBytes = new Uint8Array(prfOutput);
+    const seed = encodeToBase64(prfBytes);
+    prfBytes.fill(0);
     const encryptionKey = await generateEncryptionKeyFromSeed(seed, salt);
     const credentialId = encodeToBase64Url(new Uint8Array(credential.rawId));
 
@@ -282,7 +284,9 @@ export async function authenticateWithWebAuthn(
       throw new Error(WEBAUTHN_PRF_UNSUPPORTED_ERROR_CODE);
     }
 
-    const seed = encodeToBase64(new Uint8Array(prfOutput));
+    const prfBytes = new Uint8Array(prfOutput);
+    const seed = encodeToBase64(prfBytes);
+    prfBytes.fill(0);
     const encryptionKey = await generateEncryptionKeyFromSeed(seed, salt);
 
     return {

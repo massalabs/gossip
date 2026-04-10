@@ -224,6 +224,13 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
 
   // Helper function to clear account state
   const clearAccountState = () => {
+    // Free the WASM EncryptionKey to zero its memory before dropping.
+    // Guard against double-free: closeSession() may have already freed it,
+    // leaving __wbg_ptr === 0 which would pass a null pointer to WASM.
+    const key = get().encryptionKey;
+    if (key && (key as unknown as { __wbg_ptr: number }).__wbg_ptr !== 0) {
+      key.free();
+    }
     return {
       account: null,
       evmAddress: null,

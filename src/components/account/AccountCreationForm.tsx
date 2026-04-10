@@ -165,6 +165,8 @@ const AccountCreationForm: React.FC<AccountCreationFormProps> = ({
         password: usePassword ? password : undefined,
         iCloudSync,
       });
+      setPassword('');
+      setConfirmPassword('');
     } catch (err) {
       console.error('Error creating account:', err);
       const message = err instanceof Error ? err.message : '';
