@@ -83,10 +83,12 @@ export function useDiscussionActions({
   const handleForwardMessage = useCallback(
     (message: Message) => {
       if (!message.id) return;
-      // Reuse the share flow: set pending content + forward id, then navigate to discussions
+      // Set pending forward state, then go to discussions list for recipient selection.
+      // replace: true avoids pushing a duplicate /discussions entry so back navigation
+      // after forwarding returns cleanly to the discussions list.
       setPendingSharedContent(message.content);
       setPendingForwardMessageId(message.id);
-      navigate(ROUTES.discussions());
+      navigate(ROUTES.discussions(), { replace: true });
     },
     [navigate, setPendingForwardMessageId, setPendingSharedContent]
   );
