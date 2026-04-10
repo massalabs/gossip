@@ -1,16 +1,12 @@
 /**
- * Stub for the native secure-storage Capacitor plugin.
+ * Capacitor plugin interface for native secure storage.
  *
- * The real implementation arrives in the native-foundation branch.
- * This stub satisfies the type-only import and the dynamic import()
- * in sqlite.ts (which is wrapped in a try/catch).
- *
- * We avoid a `Proxy`-on-`get` trap here: `typeof x === 'object'` and
- * other feature-detection patterns read hidden properties that would
- * otherwise throw. Exposing a plain object with methods that throw
- * keeps feature-detection safe while still surfacing a clear error if
- * any method is actually invoked.
+ * On iOS/Android, the Rust secure-storage library is compiled natively
+ * (not as WASM). This plugin bridges TypeScript to the native code via
+ * Capacitor's plugin system, replacing the WASM web worker path.
  */
+
+import { registerPlugin } from '@capacitor/core';
 
 export interface SecureStorageNativePlugin {
   initSecureStorage(options: { path: string; domain: string }): Promise<void>;
@@ -51,23 +47,6 @@ export interface SecureStorageNativePlugin {
   clearNamespace?(options: { namespace: number }): Promise<void>;
 }
 
-function unavailable(): never {
-  throw new Error(
-    'SecureStorageNative plugin is not available on web/JSDOM. ' +
-      'Route through the WASM worker (secure-storage-worker.ts) or ' +
-      'check `Capacitor.isNativePlatform()` before calling into native.'
-  );
-}
-
-export const SecureStorageNative: SecureStorageNativePlugin = {
-  initSecureStorage: unavailable,
-  provisionStorage: unavailable,
-  allocateSession: unavailable,
-  unlockSession: unavailable,
-  lockSession: unavailable,
-  isUnlocked: unavailable,
-  coverTrafficTick: unavailable,
-  execSql: unavailable,
-  flush: unavailable,
-  close: unavailable,
-};
+export const SecureStorageNative = registerPlugin<SecureStorageNativePlugin>(
+  'SecureStorageNative'
+);

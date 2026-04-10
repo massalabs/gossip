@@ -22,6 +22,12 @@ mod sqlite_handle;
 #[cfg(all(target_arch = "wasm32", feature = "wasm"))]
 mod wasm_api;
 
+#[cfg(feature = "native")]
+mod native_api;
+
+#[cfg(feature = "native")]
+uniffi::setup_scaffolding!();
+
 pub use block::{create_cover_block, decrypt_block, encrypt_block, rerandomize_block};
 pub use constants::{
     AEAD_TAG_SIZE, BLOCK_SIZE, DEFAULT_NAMESPACE, LENGTH_HDR_SIZE, PLAINTEXT_SIZE,
