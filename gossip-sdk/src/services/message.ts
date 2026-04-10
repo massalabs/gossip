@@ -256,13 +256,13 @@ export class MessageService {
   private isFetchingMessages = false;
   private queries: Queries;
   /**
-   * Message ids whose final `UPDATE → SENT` is still in flight (the row
-   * was already delivered on the network and we emitted MESSAGE_SENT,
-   * but the SQL write to clear `encryptedMessage` and flip the status
-   * column hasn't committed yet). Filtered out of the next
-   * `processSendQueueForContact` pass to prevent re-encrypting + re-sending
-   * a message we've already shipped.
+   * Message ids currently being sent via `sendMessageFastPath`. The row is
+   * WAITING_SESSION in the DB while the fast path runs INSERT + encrypt +
+   * POST in parallel. Without this guard, a concurrent `stateUpdate` could
+   * pick up the same WAITING_SESSION row via `processSendQueueForContact`
+   * and send a duplicate.
    */
+  private inFlightFastPath = new Set<number>();
 
   /** Emit MESSAGE_RECEIVED with a Message that may not have a DB id yet */
   private emitMessageReceived(
@@ -975,17 +975,27 @@ export class MessageService {
     const insertPromise = this.addMessageAndUpdateDiscussion({
       ...message,
       status: MessageStatus.WAITING_SESSION,
-    }).catch(error => {
-      log.error('addMessageAndUpdateDiscussion failed in fast path', {
+    })
+      .then(id => {
+        this.inFlightFastPath.add(id);
+        return id;
+      })
+      .catch(error => {
+        log.error('addMessageAndUpdateDiscussion failed in fast path', {
+          error,
+        });
+        return null as number | null;
+      });
+
+    let sendOutput: Awaited<ReturnType<SessionModule['sendMessage']>>;
+    try {
+      sendOutput = await this.session.sendMessage(peerId, serializedContent);
+    } catch (error) {
+      log.error('session.sendMessage threw in fast path, falling back', {
         error,
       });
-      return null as number | null;
-    });
-
-    const sendOutput = await this.session.sendMessage(
-      peerId,
-      serializedContent
-    );
+      sendOutput = undefined;
+    }
     if (!sendOutput) {
       // Session became inactive between status check and encrypt.
       // Wait for the INSERT to land then bail out so the slow path
@@ -999,10 +1009,9 @@ export class MessageService {
       }
       log.info(
         'encrypt returned null in fast path, falling back to slow path',
-        {
-          messageId,
-        }
+        { messageId }
       );
+      this.inFlightFastPath.delete(messageId);
       void this.refreshService?.stateUpdate();
       return {
         success: true,
@@ -1042,6 +1051,7 @@ export class MessageService {
     if (!networkOk) {
       // Network failed: persist READY so the next retry doesn't
       // re-encrypt, and let stateUpdate pick it up.
+      this.inFlightFastPath.delete(messageId);
       await this.queries.messages.updateById(messageId, {
         status: MessageStatus.READY,
         encryptedMessage: sendOutput.data,
@@ -1060,13 +1070,14 @@ export class MessageService {
       };
     }
 
-    // 4. Both succeeded. Race-check + fire-and-forget UPDATE → SENT.
+    // 4. Both succeeded. Race-check then UPDATE → SENT.
     const latestRow = await this.queries.messages.getById(messageId);
     if (!latestRow || latestRow.status !== MessageStatus.WAITING_SESSION) {
       log.debug(
         'message gone or status changed during fast-path send, skipping SENT update',
         { messageId, currentStatus: latestRow?.status }
       );
+      this.inFlightFastPath.delete(messageId);
       return {
         success: true,
         message: {
@@ -1085,17 +1096,22 @@ export class MessageService {
       whenToSend: null,
     });
 
-    try {
-      this.eventEmitter.emit(SdkEventType.MESSAGE_SENT, {
-        ...message,
-        id: messageId,
-        status: MessageStatus.SENT,
-      });
-    } catch (error) {
-      log.error('failed to emit message sent event from fast path', {
-        messageId,
-        error,
-      });
+    this.inFlightFastPath.delete(messageId);
+
+    const isControlMessage = !!(message.deleteOf || message.editOf);
+    if (!isControlMessage) {
+      try {
+        this.eventEmitter.emit(SdkEventType.MESSAGE_SENT, {
+          ...message,
+          id: messageId,
+          status: MessageStatus.SENT,
+        });
+      } catch (error) {
+        log.error('failed to emit message sent event from fast path', {
+          messageId,
+          error,
+        });
+      }
     }
 
     return {
@@ -1334,6 +1350,7 @@ export class MessageService {
 
       for (const msg of pendingMessages) {
         if (!msg.id) continue;
+        if (this.inFlightFastPath.has(msg.id)) continue;
 
         const currentStatus = msg.status;
         let encryptedMessage = msg.encryptedMessage;
@@ -1441,16 +1458,19 @@ export class MessageService {
             type: msg.type,
             direction: msg.direction,
           });
-          try {
-            this.eventEmitter.emit(SdkEventType.MESSAGE_SENT, {
-              ...msg,
-              status: MessageStatus.SENT,
-            });
-          } catch (error) {
-            log.error('failed to emit message sent event', {
-              messageId: msg.id,
-              error,
-            });
+          const isControlMessage = !!(msg.deleteOf || msg.editOf);
+          if (!isControlMessage) {
+            try {
+              this.eventEmitter.emit(SdkEventType.MESSAGE_SENT, {
+                ...msg,
+                status: MessageStatus.SENT,
+              });
+            } catch (error) {
+              log.error('failed to emit message sent event', {
+                messageId: msg.id,
+                error,
+              });
+            }
           }
           continue;
         }
