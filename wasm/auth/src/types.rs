@@ -4,7 +4,11 @@
 //! in a hierarchical key derivation scheme. All user keys are derived from a single
 //! root secret, ensuring deterministic key generation.
 
+use alloy_primitives::Address;
+use coins_bip32::prelude::*;
+use coins_bip39::{English, Mnemonic};
 use serde::{Deserialize, Serialize};
+use sha3::{Digest, Keccak256};
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 /// Size of the user ID in bytes.
@@ -268,6 +272,44 @@ pub fn derive_keys_from_static_root_secret(
     )
 }
 
+/// Derives an EVM address from a BIP39 mnemonic phrase.
+///
+/// Uses `coins-bip39`/`coins-bip32` (same crates as alloy/ethers-rs internally)
+/// with the standard BIP44 derivation path `m/44'/60'/0'/0/0`.
+/// Keccak-256 of the uncompressed public key yields the 20-byte address; EIP-55
+/// checksum encoding is done via [`alloy_primitives::Address::to_checksum`].
+/// Returns an EIP-55 checksummed hex string (0x…).
+///
+/// # Errors
+///
+/// Returns an error string if the mnemonic is invalid or key derivation fails.
+pub fn derive_evm_address(mnemonic_phrase: &str) -> Result<String, String> {
+    let mnemonic = <Mnemonic<English>>::new_from_phrase(mnemonic_phrase)
+        .map_err(|e| format!("Invalid mnemonic: {e}"))?;
+    // Empty BIP39 passphrase — standard behavior (MetaMask, ethers.js, etc.)
+    let seed = mnemonic
+        .to_seed(None)
+        .map_err(|e| format!("Seed derivation failed: {e}"))?;
+
+    let root = XPriv::root_from_seed(&seed, None)
+        .map_err(|e| format!("BIP32 root key failed: {e}"))?;
+    let child = root
+        .derive_path("m/44'/60'/0'/0/0")
+        .map_err(|e| format!("BIP44 derivation failed: {e}"))?;
+
+    // Uncompressed public key (65 bytes: 0x04 || x || y), hash without the prefix
+    let pubkey = child.verify_key();
+    let verifying_key: &k256::ecdsa::VerifyingKey = pubkey.as_ref();
+    let uncompressed = verifying_key.to_encoded_point(false);
+    let hash = Keccak256::digest(&uncompressed.as_bytes()[1..]);
+    let addr_bytes: &[u8; 20] = hash[12..]
+        .try_into()
+        .map_err(|_| "Keccak output too short for address".to_string())?;
+
+    let address = Address::from(*addr_bytes);
+    Ok(address.to_checksum(None))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -401,6 +443,47 @@ mod tests {
         // Verify keys are not all zeros (they have been properly generated)
         assert_ne!(pub_keys.dsa_verification_key.as_bytes(), &[0u8; 1952]);
         assert_ne!(pub_keys.kem_public_key.as_bytes(), &[0u8; 1184]);
+    }
+
+    #[test]
+    fn test_derive_evm_address_vectors() {
+        // All vectors verified against ethers.js v6 HDNodeWallet.fromPhrase()
+        let vectors: &[(&str, &str)] = &[
+            // 12-word mnemonics
+            (
+                "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+                "0x9858EfFD232B4033E47d90003D41EC34EcaEda94",
+            ),
+            (
+                "zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo wrong",
+                "0xfc2077CA7F403cBECA41B1B0F62D91B5EA631B5E",
+            ),
+            (
+                "letter advice cage absurd amount doctor acoustic avoid letter advice cage above",
+                "0x3061750d3dF69ef7B8d4407CB7f3F879Fd9d2398",
+            ),
+            // 15-word mnemonic
+            (
+                "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon address",
+                "0x54bE88525B024a20229Fe7f6F62DC0884e4aAA0a",
+            ),
+            // 24-word mnemonic
+            (
+                "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art",
+                "0xF278cF59F82eDcf871d630F28EcC8056f25C1cdb",
+            ),
+        ];
+
+        for (mnemonic, expected) in vectors {
+            let addr = derive_evm_address(mnemonic).unwrap();
+            assert_eq!(&addr, expected, "mismatch for mnemonic: {mnemonic}");
+        }
+    }
+
+    #[test]
+    fn test_derive_evm_address_invalid_mnemonic() {
+        assert!(derive_evm_address("not a valid mnemonic").is_err());
+        assert!(derive_evm_address("").is_err());
     }
 
     #[test]

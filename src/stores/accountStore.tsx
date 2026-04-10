@@ -176,6 +176,7 @@ interface AccountState {
   webauthnSupported: boolean;
   platformAuthenticatorAvailable: boolean;
   account: Account | null;
+  evmAddress: string | null;
   provider: Provider | null;
   initializeAccountWithBiometrics: (
     username: string,
@@ -225,6 +226,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
   const clearAccountState = () => {
     return {
       account: null,
+      evmAddress: null,
       userProfile: null,
       encryptionKey: null,
       isLoading: false,
@@ -264,7 +266,8 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
   }: SetupAccountParams): Promise<void> => {
     await cleanupSession();
 
-    const { account, userIdBytes } = await deriveAccountFromMnemonic(mnemonic);
+    const { account, userIdBytes, evmAddress } =
+      await deriveAccountFromMnemonic(mnemonic);
     const userId = encodeUserId(userIdBytes);
 
     const { encryptionKey, security } = await provisionAccount(
@@ -297,6 +300,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       userProfile: profile,
       encryptionKey,
       account,
+      evmAddress,
       isLoading: false,
       ...extraState,
     });
@@ -313,6 +317,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
     webauthnSupported: isWebAuthnSupported(),
     platformAuthenticatorAvailable: false,
     account: null,
+    evmAddress: null,
     provider: null,
 
     // Actions
@@ -396,7 +401,8 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           }
         }
 
-        const { account } = await deriveAccountFromMnemonic(mnemonic);
+        const { account, evmAddress } =
+          await deriveAccountFromMnemonic(mnemonic);
 
         await getSdk().openSession({
           mnemonic,
@@ -416,6 +422,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         set({
           userProfile: updatedProfile,
           account,
+          evmAddress,
           encryptionKey,
           isLoading: false,
           lockedByUser: false,

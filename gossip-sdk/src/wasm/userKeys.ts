@@ -15,17 +15,12 @@ import {
 export { UserKeys };
 
 /**
- * Generate user keys from a passphrase using password-based key derivation
- * This ensures WASM is initialized before calling
+ * Generate user keys from a BIP39 mnemonic.
  *
- * @param passphrase - The user's passphrase
- * @param secondaryKey - A 32-byte secondary public key
- * @returns UserKeys object containing public and secret keys
+ * Derives gossip keys (DSA, KEM, Massa) and the EVM address in a single
+ * WASM call. The EVM address is available via `keys.evm_address()`.
  */
 export async function generateUserKeys(passphrase: string): Promise<UserKeys> {
   await ensureWasmInitialized();
-  // The actual WASM function is synchronous, so we can call it directly
-  const keys = _generate_user_keys(passphrase);
-
-  return keys;
+  return _generate_user_keys(passphrase);
 }

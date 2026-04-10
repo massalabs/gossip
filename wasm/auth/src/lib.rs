@@ -27,5 +27,5 @@ mod types;
 pub use auth_blob::AuthBlob;
 pub use types::{
     STATIC_ROOT_SECRET_SIZE, StaticRootSecret, USER_ID_SIZE, UserId, UserPublicKeys,
-    UserSecretKeys, derive_keys_from_static_root_secret,
+    UserSecretKeys, derive_evm_address, derive_keys_from_static_root_secret,
 };
