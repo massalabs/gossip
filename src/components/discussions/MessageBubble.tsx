@@ -237,7 +237,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
               />
               {(showTimestamp || (!isDeleted && (isOutgoing || isEdited))) && (
                 <span
-                  className={`inline-block ${isOutgoing ? 'w-16' : 'w-10'}`}
+                  className={`inline-block ${isOutgoing && isEdited ? 'w-24' : isOutgoing ? 'w-16' : isEdited ? 'w-20' : 'w-10'}`}
                   aria-hidden="true"
                 />
               )}
