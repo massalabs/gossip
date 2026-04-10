@@ -135,8 +135,7 @@ describe('RefreshService', () => {
       expect(getByOwnerSpy).toHaveBeenCalledWith(REFRESH_OWNER_USER_ID);
       expect(emitSpy).toHaveBeenCalledWith(
         SdkEventType.SESSION_STATUS_CHANGED,
-        REFRESH_CONTACT_USER_ID,
-        SessionStatus.Active
+        { contactUserId: REFRESH_CONTACT_USER_ID, status: SessionStatus.Active }
       );
     });
 
@@ -149,8 +148,7 @@ describe('RefreshService', () => {
       expect(emitSpy).toHaveBeenCalledTimes(1);
       expect(emitSpy).toHaveBeenCalledWith(
         SdkEventType.SESSION_STATUS_CHANGED,
-        REFRESH_CONTACT_USER_ID,
-        SessionStatus.Active
+        { contactUserId: REFRESH_CONTACT_USER_ID, status: SessionStatus.Active }
       );
     });
 
@@ -169,14 +167,12 @@ describe('RefreshService', () => {
       expect(emitSpy).toHaveBeenNthCalledWith(
         1,
         SdkEventType.SESSION_STATUS_CHANGED,
-        REFRESH_CONTACT_USER_ID,
-        SessionStatus.Active
+        { contactUserId: REFRESH_CONTACT_USER_ID, status: SessionStatus.Active }
       );
       expect(emitSpy).toHaveBeenNthCalledWith(
         2,
         SdkEventType.SESSION_STATUS_CHANGED,
-        REFRESH_CONTACT_USER_ID,
-        SessionStatus.Killed
+        { contactUserId: REFRESH_CONTACT_USER_ID, status: SessionStatus.Killed }
       );
     });
   });

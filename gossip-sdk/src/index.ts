@@ -20,6 +20,7 @@
  * @packageDocumentation
  */
 
+export * from './core/SdkEventEmitter.js';
 export * from './api/index.js';
 export * from './crypto/index.js';
 export * from './gossip.js';

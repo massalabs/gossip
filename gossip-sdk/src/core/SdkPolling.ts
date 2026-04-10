@@ -72,7 +72,10 @@ export class SdkPolling {
         await this.callbacks?.fetchMessages();
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
-        this.eventEmitter?.emit(SdkEventType.ERROR, err, 'message_polling');
+        this.eventEmitter?.emit(SdkEventType.ERROR, {
+          error: err,
+          context: 'message_polling',
+        });
       }
     }, config.polling.messagesIntervalMs);
 
@@ -82,11 +85,10 @@ export class SdkPolling {
         await this.callbacks?.fetchAnnouncements();
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
-        this.eventEmitter?.emit(
-          SdkEventType.ERROR,
-          err,
-          'announcement_polling'
-        );
+        this.eventEmitter?.emit(SdkEventType.ERROR, {
+          error: err,
+          context: 'announcement_polling',
+        });
       }
     }, config.polling.announcementsIntervalMs);
 
@@ -96,7 +98,10 @@ export class SdkPolling {
         await this.callbacks?.handleSessionRefresh();
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
-        this.eventEmitter?.emit(SdkEventType.ERROR, err, 'session_update');
+        this.eventEmitter?.emit(SdkEventType.ERROR, {
+          error: err,
+          context: 'session_update',
+        });
       }
     }, config.polling.sessionRefreshIntervalMs);
 
@@ -106,11 +111,10 @@ export class SdkPolling {
         await this.callbacks?.refreshSessionsStatusEvent();
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
-        this.eventEmitter?.emit(
-          SdkEventType.ERROR,
-          err,
-          'session_status_polling'
-        );
+        this.eventEmitter?.emit(SdkEventType.ERROR, {
+          error: err,
+          context: 'session_status_polling',
+        });
       }
     }, SESSION_STATUS_POLL_INTERVAL_MS);
   }

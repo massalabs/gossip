@@ -80,17 +80,13 @@ import {
 import {
   SdkEventEmitter,
   SdkEventType,
-  type SdkEventHandlers,
+  type SdkEvents,
 } from './core/SdkEventEmitter.js';
 import { SdkPolling } from './core/SdkPolling.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
-
-export type { SdkEventHandlers };
-
-export { SdkEventType };
 
 export enum SdkStatus {
   UNINITIALIZED = 'uninitialized',
@@ -342,11 +338,10 @@ class GossipSdk {
       session.userIdEncoded,
       queries
     ).catch(err => {
-      this.eventEmitter.emit(
-        SdkEventType.ERROR,
-        err instanceof Error ? err : new Error(String(err)),
-        'publishPublicKey'
-      );
+      this.eventEmitter.emit(SdkEventType.ERROR, {
+        error: err instanceof Error ? err : new Error(String(err)),
+        context: 'publishPublicKey',
+      });
     });
     // Now set refreshService on services (circular dependency resolved via setter)
     this._discussion.setRefreshService(this._refresh);
@@ -653,14 +648,20 @@ class GossipSdk {
   /**
    * Register an event handler
    */
-  on<K extends SdkEventType>(event: K, handler: SdkEventHandlers[K]): void {
+  on<K extends SdkEventType>(
+    event: K,
+    handler: (payload: SdkEvents[K]) => void
+  ): void {
     this.eventEmitter.on(event, handler);
   }
 
   /**
    * Remove an event handler
    */
-  off<K extends SdkEventType>(event: K, handler: SdkEventHandlers[K]): void {
+  off<K extends SdkEventType>(
+    event: K,
+    handler: (payload: SdkEvents[K]) => void
+  ): void {
     this.eventEmitter.off(event, handler);
   }
 
@@ -688,11 +689,10 @@ class GossipSdk {
       );
       await onPersist(blob, encryptionKey);
     } catch (error) {
-      this.eventEmitter.emit(
-        SdkEventType.ERROR,
-        error instanceof Error ? error : new Error(String(error)),
-        'session_persist'
-      );
+      this.eventEmitter.emit(SdkEventType.ERROR, {
+        error: error instanceof Error ? error : new Error(String(error)),
+        context: 'session_persist',
+      });
     }
   }
 
@@ -763,4 +763,4 @@ interface PollingAPI {
 /** A convenience singleton for apps that only need one SDK instance. */
 export const gossipSdk = new GossipSdk();
 
-export { GossipSdk };
+export { GossipSdk, SdkEventType };
