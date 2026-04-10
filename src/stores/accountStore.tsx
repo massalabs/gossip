@@ -224,6 +224,8 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
 
   // Helper function to clear account state
   const clearAccountState = () => {
+    // Free the WASM EncryptionKey to zero its memory before dropping
+    get().encryptionKey?.free();
     return {
       account: null,
       evmAddress: null,

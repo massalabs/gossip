@@ -81,7 +81,9 @@ async function storeEncryptionKey(
   encryptionKey: EncryptionKey,
   syncToiCloud = false
 ): Promise<void> {
-  const keyBase64 = encodeToBase64(encryptionKey.to_bytes());
+  const keyBytes = encryptionKey.to_bytes();
+  const keyBase64 = encodeToBase64(keyBytes);
+  keyBytes.fill(0);
   await SecureStorage.set(storageKey(userId), keyBase64, syncToiCloud);
 }
 
@@ -93,16 +95,29 @@ async function retrieveEncryptionKey(
   if (!keyBase64 || typeof keyBase64 !== 'string') {
     throw new Error('Encryption key not found in secure storage');
   }
-  return encryptionKeyFromBytes(decodeFromBase64(keyBase64));
+  const keyBytes = decodeFromBase64(keyBase64);
+  const key = await encryptionKeyFromBytes(keyBytes);
+  keyBytes.fill(0);
+  return key;
 }
 
-export async function hasExistingCredential(key: string): Promise<boolean> {
-  try {
-    const value = await SecureStorage.get(key);
-    return value != null && value !== '';
-  } catch {
-    return false;
+export async function hasExistingCredential(
+  storageKey: string
+): Promise<boolean> {
+  if (isCapacitorAvailable()) {
+    try {
+      const value = await SecureStorage.get(storageKey);
+      return value != null && value !== '';
+    } catch {
+      return false;
+    }
   }
+
+  if (isWebAuthnSupported()) {
+    return localStorage.getItem(WEBAUTHN_CREDENTIAL_ID_KEY) !== null;
+  }
+
+  return false;
 }
 
 export async function removeEncryptionKey(
@@ -177,7 +192,9 @@ export async function createCredential(
       const userIdStr = encodeUserId(userId);
       await storeEncryptionKey(userIdStr, encryptionKey, syncToiCloud);
       // Also store under the fixed biometric key for SecureLogin discovery
-      const keyBase64 = encodeToBase64(encryptionKey.to_bytes());
+      const keyBytes = encryptionKey.to_bytes();
+      const keyBase64 = encodeToBase64(keyBytes);
+      keyBytes.fill(0);
       await SecureStorage.set(BIOMETRIC_STORAGE_KEY, keyBase64, syncToiCloud);
 
       return {
@@ -295,9 +312,9 @@ export async function authenticateSecureLogin(
       if (!keyBase64 || typeof keyBase64 !== 'string') {
         throw new Error('Encryption key not found in secure storage');
       }
-      const encryptionKey = await encryptionKeyFromBytes(
-        decodeFromBase64(keyBase64)
-      );
+      const keyBytes = decodeFromBase64(keyBase64);
+      const encryptionKey = await encryptionKeyFromBytes(keyBytes);
+      keyBytes.fill(0);
       return { success: true, data: { encryptionKey } };
     }
     const credentialId =
