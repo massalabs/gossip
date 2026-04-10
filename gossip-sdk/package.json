@@ -40,6 +40,7 @@
   ],
   "license": "MIT",
   "devDependencies": {
+    "@types/varint": "^6.0.3",
     "drizzle-kit": "^0.31.1",
     "rimraf": "^6.1.2",
     "typescript": "^5.9.3",
@@ -51,6 +52,7 @@
     "@scure/bip39": "^2.0.1",
     "drizzle-orm": "^0.45.2",
     "mitt": "^3.0.1",
+    "varint": "^6.0.0",
     "wa-sqlite": "^1.0.0"
   }
 }
