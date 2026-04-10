@@ -139,7 +139,8 @@ const MessageInput: React.FC<MessageInputProps> = ({
     (emoji: string) => {
       const textarea = textareaRef.current;
       const cursor = textarea?.selectionStart ?? newMessage.length;
-      const updated = newMessage.slice(0, cursor) + emoji + newMessage.slice(cursor);
+      const updated =
+        newMessage.slice(0, cursor) + emoji + newMessage.slice(cursor);
       setNewMessage(updated);
       requestAnimationFrame(() => {
         autoResizeTextarea();
