@@ -203,7 +203,14 @@ const MessageItem: React.FC<MessageItemProps> = ({
       }
       contextMenu.openContextMenu();
     },
-    [contextMenu, textSelection, isSelecting, isDeleted, message.id, onToggleSelect]
+    [
+      contextMenu,
+      textSelection,
+      isSelecting,
+      isDeleted,
+      message.id,
+      onToggleSelect,
+    ]
   );
 
   const handleKeyDown = useCallback(
