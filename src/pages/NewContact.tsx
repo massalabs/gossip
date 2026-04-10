@@ -11,10 +11,12 @@ import { useAccountStore } from '../stores/accountStore';
 import { useAppStore } from '../stores/appStore';
 import { Upload, CheckCircle, Info } from 'react-feather';
 import { formatUserId } from '@massalabs/gossip-sdk';
+import { USERNAME_MAX_LENGTH } from '../utils/validation';
 import QrCodeIcon from '../components/ui/customIcons/QrCodeIcon';
 import PageLayout from '../components/ui/PageLayout';
 import PageHeader from '../components/ui/PageHeader';
 import ConnectionBanner from '../components/ui/ConnectionBanner';
+import Toggle from '../components/ui/Toggle';
 
 const NewContact: React.FC = () => {
   const { t } = useTranslation('contacts');
@@ -23,6 +25,7 @@ const NewContact: React.FC = () => {
   const { state } = useLocation();
   const [isDiscardModalOpen, setIsDiscardModalOpen] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
+  const [showMessage, setShowMessage] = useState(false);
   const { userProfile } = useAccountStore();
   const mnsEnabled = useAppStore(s => s.mnsEnabled);
 
@@ -181,7 +184,7 @@ const NewContact: React.FC = () => {
                   ? 'contact-user-id-error'
                   : mnsState.resolvedGossipId
                     ? 'contact-user-id-mns-resolved'
-                    : 'contact-user-id-helper'
+                    : undefined
               }
             />
             {userId.loading && (
@@ -219,17 +222,6 @@ const NewContact: React.FC = () => {
               })}
             </div>
           )}
-          {/* Default helper text */}
-          {!userId.error && !userId.loading && !mnsState.resolvedGossipId && (
-            <p
-              id="contact-user-id-helper"
-              className="mt-1.5 text-xs text-muted-foreground"
-            >
-              {mnsEnabled
-                ? t('new_contact.address_mns_helper')
-                : t('new_contact.address_helper')}
-            </p>
-          )}
           {userId.error && (
             <p
               id="contact-user-id-error"
@@ -240,81 +232,51 @@ const NewContact: React.FC = () => {
             </p>
           )}
         </div>
-      </div>
 
-      {/* Scan QR Code and File Options — hidden when a valid gossip ID is entered */}
-      {!(userId.value.trim() && !userId.error) && (
-        <div className="flex gap-3 mb-6">
-          <button
-            onClick={() => setShowScanner(true)}
-            className="flex-1 flex items-center justify-center gap-2 text-primary hover:text-primary/80 transition-colors py-3"
-            aria-label={t('new_contact.scan_qr')}
-          >
-            <QrCodeIcon className="w-5 h-5" />
-            <span className="text-base font-medium">
-              {t('new_contact.scan_qr')}
-            </span>
-          </button>
+        {/* Scan QR / Import — alternative ways to fill the address */}
+        {!(userId.value.trim() && !userId.error) && (
+          <>
+            <button
+              onClick={() => setShowScanner(true)}
+              className="w-full flex items-center gap-3 px-4 py-3 border-t border-border text-primary hover:bg-muted/50 active:bg-muted transition-colors"
+              aria-label={t('new_contact.scan_qr')}
+            >
+              <QrCodeIcon className="w-5 h-5 shrink-0" />
+              <span className="text-sm font-medium">
+                {t('new_contact.scan_qr')}
+              </span>
+            </button>
 
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={fileState.isLoading}
-            className="flex-1 flex items-center justify-center gap-2 text-muted-foreground hover:text-foreground transition-colors py-3 disabled:opacity-50 disabled:cursor-not-allowed"
-            aria-label={t('new_contact.import_file')}
-          >
-            <Upload className="w-5 h-5" />
-            <span className="text-base font-medium">
-              {t('new_contact.import_file')}
-            </span>
-          </button>
-        </div>
-      )}
-
-      {/* Message Field */}
-      <div className="bg-card rounded-xl border border-border p-4 mb-6">
-        <label
-          htmlFor="contact-message"
-          className="block text-sm font-medium text-foreground mb-2"
-        >
-          {t('new_contact.announcement_label')}
-        </label>
-        <textarea
-          id="contact-message"
-          value={message.value}
-          onChange={e => handleMessageChange(e.target.value)}
-          placeholder={getDefaultMessage()}
-          rows={3}
-          maxLength={500}
-          className="w-full bg-transparent text-foreground placeholder-muted-foreground focus:outline-none resize-none"
-          aria-label={t('new_contact.announcement_aria')}
-        />
-        {message.value && (
-          <div className="flex items-center justify-end mt-2">
-            <span className="text-xs text-muted-foreground">
-              {message.value.length}/500
-            </span>
-          </div>
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={fileState.isLoading}
+              className="w-full flex items-center gap-3 px-4 py-3 border-t border-border text-muted-foreground hover:bg-muted/50 active:bg-muted transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              aria-label={t('new_contact.import_file')}
+            >
+              <Upload className="w-5 h-5 shrink-0" />
+              <span className="text-sm font-medium">
+                {t('new_contact.import_file')}
+              </span>
+            </button>
+          </>
         )}
       </div>
 
-      {/* Share Username Section */}
-      <div className="bg-card rounded-xl border border-border p-4 mb-6">
-        <label className="flex items-center gap-3 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={shareUsername}
-            onChange={e => handleShareUsernameChange(e.target.checked)}
-            className="w-5 h-5 rounded border-border text-primary focus:ring-primary"
-          />
-          <span className="text-sm font-medium text-foreground">
+      {/* Request details — share username + message */}
+      <div className="bg-card rounded-xl border border-border overflow-hidden mb-6">
+        {/* Share username */}
+        <div className="flex items-center justify-between gap-3 px-4 py-3">
+          <span className="text-sm text-foreground">
             {t('new_contact.share_username')}
           </span>
-        </label>
-        <p className="text-xs text-muted-foreground mt-1 ml-8">
-          {t('new_contact.share_username_hint')}
-        </p>
+          <Toggle
+            checked={shareUsername}
+            onChange={handleShareUsernameChange}
+            ariaLabel={t('new_contact.share_username')}
+          />
+        </div>
         {shareUsername && (
-          <div className="mt-3">
+          <div className="px-4 pb-3">
             <input
               type="text"
               value={customUsername}
@@ -322,6 +284,7 @@ const NewContact: React.FC = () => {
               placeholder={t('new_contact.share_username_placeholder')}
               className="w-full bg-muted/50 text-foreground placeholder-muted-foreground focus:outline-none rounded-lg px-3 py-2 text-sm"
               aria-label={t('new_contact.share_username_aria')}
+              maxLength={USERNAME_MAX_LENGTH}
             />
             {customUsernameError && (
               <p className="mt-1.5 text-sm text-destructive" role="alert">
@@ -330,23 +293,53 @@ const NewContact: React.FC = () => {
             )}
           </div>
         )}
-      </div>
 
-      <div className="bg-muted/30 border border-border rounded-xl p-4 mb-6">
-        <div className="flex items-start gap-2">
-          <Info className="w-4 h-4 text-muted-foreground mt-0.5 shrink-0" />
-          <div className="flex-1">
-            <p className="text-xs font-medium text-foreground mb-1">
-              {t('privacy_notice.title')}
-            </p>
-            <p className="text-xs text-muted-foreground leading-relaxed">
-              <Trans
-                i18nKey="privacy_notice.body"
-                ns="contacts"
-                components={{ strong: <strong /> }}
-              />
-            </p>
+        {/* Custom message */}
+        <div className="border-t border-border">
+          <div className="flex items-center justify-between gap-3 px-4 py-3">
+            <span className="text-sm text-foreground">
+              {t('new_contact.announcement_label')}
+            </span>
+            <Toggle
+              checked={message.value.length > 0 || showMessage}
+              onChange={v => {
+                setShowMessage(v);
+                if (!v) handleMessageChange('');
+              }}
+              ariaLabel={t('new_contact.announcement_label')}
+            />
           </div>
+          {(showMessage || message.value.length > 0) && (
+            <div className="px-4 pb-3">
+              <textarea
+                id="contact-message"
+                value={message.value}
+                onChange={e => handleMessageChange(e.target.value)}
+                placeholder={getDefaultMessage()}
+                rows={3}
+                maxLength={500}
+                className="w-full bg-muted/50 text-foreground placeholder-muted-foreground focus:outline-none resize-none text-sm rounded-lg px-3 py-2"
+                aria-label={t('new_contact.announcement_aria')}
+              />
+              {message.value && (
+                <div className="flex items-center justify-end mt-1">
+                  <span className="text-xs text-muted-foreground">
+                    {message.value.length}/500
+                  </span>
+                </div>
+              )}
+              <div className="flex items-start gap-2 mt-2 bg-muted/30 rounded-lg p-2.5">
+                <Info className="w-3.5 h-3.5 text-muted-foreground mt-0.5 shrink-0" />
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  <Trans
+                    i18nKey="privacy_notice.body"
+                    ns="contacts"
+                    components={{ strong: <strong /> }}
+                  />
+                </p>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
