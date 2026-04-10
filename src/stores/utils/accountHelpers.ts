@@ -4,13 +4,14 @@ import { useAppStore } from '../appStore';
 
 export async function deriveAccountFromMnemonic(
   mnemonic: string
-): Promise<{ account: Account; userIdBytes: Uint8Array }> {
+): Promise<{ account: Account; userIdBytes: Uint8Array; evmAddress: string }> {
   const keys = await generateUserKeys(mnemonic);
   const account = await Account.fromPrivateKey(
     PrivateKey.fromBytes(keys.secret_keys().massa_secret_key)
   );
   const userIdBytes = keys.public_keys().derive_id();
-  return { account, userIdBytes };
+  const evmAddress = keys.evm_address();
+  return { account, userIdBytes, evmAddress };
 }
 
 export function fetchMnsDomainsIfEnabled(

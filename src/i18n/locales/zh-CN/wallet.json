@@ -2,6 +2,8 @@
   "title": "钱包",
   "refresh": "刷新余额和价格",
   "address": "地址",
+  "massa_address": "Massa",
+  "evm_address": "EVM",
   "copy_address": "复制地址",
   "swap_coming_soon": "兑换功能即将上线！",
   "send_label": "发送",

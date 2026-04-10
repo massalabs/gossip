@@ -2,6 +2,8 @@
   "title": "КОШЕЛЁК",
   "refresh": "Обновить баланс и курсы",
   "address": "Адрес",
+  "massa_address": "Massa",
+  "evm_address": "EVM",
   "copy_address": "Копировать адрес",
   "swap_coming_soon": "Функция обмена будет доступна в ближайшее время!",
   "send_label": "отправить",
