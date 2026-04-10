@@ -228,9 +228,15 @@ const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
           {isDeleted ? (
             <p className="whitespace-pre-wrap wrap-break-word italic text-muted-foreground text-[13px]">
               {t('message_item.deleted')}
-              {showTimestamp && (
-                <span className="inline-block w-10" aria-hidden="true" />
-              )}
+              <MessageStatusIndicator
+                status={message.status}
+                timestamp={message.timestamp}
+                isOutgoing={isOutgoing}
+                isDeleted={isDeleted}
+                isEdited={isEdited}
+                isSending={isSending}
+                showTimestamp={showTimestamp}
+              />
             </p>
           ) : (
             <p className="whitespace-pre-wrap wrap-break-word">
@@ -239,24 +245,17 @@ const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
                 onLinkClick={handleLinkClick}
                 linkAriaLabel={linkAriaLabel}
               />
-              {(showTimestamp || (!isDeleted && (isOutgoing || isEdited))) && (
-                <span
-                  className={`inline-block ${isOutgoing && isEdited ? 'w-24' : isOutgoing ? 'w-16' : isEdited ? 'w-20' : 'w-10'}`}
-                  aria-hidden="true"
-                />
-              )}
+              <MessageStatusIndicator
+                status={message.status}
+                timestamp={message.timestamp}
+                isOutgoing={isOutgoing}
+                isDeleted={isDeleted}
+                isEdited={isEdited}
+                isSending={isSending}
+                showTimestamp={showTimestamp}
+              />
             </p>
           )}
-
-          <MessageStatusIndicator
-            status={message.status}
-            timestamp={message.timestamp}
-            isOutgoing={isOutgoing}
-            isDeleted={isDeleted}
-            isEdited={isEdited}
-            isSending={isSending}
-            showTimestamp={showTimestamp}
-          />
 
           {/* Desktop context menu arrow */}
           {!isSelecting && !isDeleted && (

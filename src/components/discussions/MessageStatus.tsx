@@ -31,7 +31,7 @@ const MessageStatusIndicator: React.FC<MessageStatusProps> = React.memo(
 
     return (
       <span
-        className={`absolute bottom-[13px] right-2.5 flex items-center gap-1 ${
+        className={`inline-flex items-center gap-1 ml-1.5 align-bottom translate-y-[1px] ${
           isOutgoing ? 'text-accent-foreground/80' : 'text-muted-foreground'
         }`}
       >
