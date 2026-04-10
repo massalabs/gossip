@@ -2,7 +2,10 @@ import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Zap } from 'react-feather';
 import { validatePassword } from '@massalabs/gossip-sdk';
-import { validateUsernameFormat } from '../../utils/validation';
+import {
+  validateUsernameFormat,
+  USERNAME_MAX_LENGTH,
+} from '../../utils/validation';
 import PageHeader from '../ui/PageHeader';
 import PageLayout from '../ui/PageLayout';
 import Button from '../ui/Button';
@@ -90,6 +93,7 @@ const SecureAccountForm: React.FC<SecureAccountFormProps> = ({
               onChange={handleUsernameChange}
               placeholder={t('create.enter_username')}
               error={!!usernameError}
+              maxLength={USERNAME_MAX_LENGTH}
             />
             <p
               className={`text-xs mt-1 h-4 ${usernameError ? 'text-red-500 dark:text-red-400' : 'invisible'}`}
