@@ -70,7 +70,6 @@ const SelfDiscussion: React.FC = () => {
 
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
   const [editingMessage, setEditingMessage] = useState<Message | null>(null);
-  const [forwardedContent, setForwardedContent] = useState<string | null>(null);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const messageListRef = useRef<MessageListHandle>(null);
   const atBottomRef = useRef(true);
@@ -113,7 +112,7 @@ const SelfDiscussion: React.FC = () => {
     const load = async () => {
       const msg = await getSdk().messages.get(forwardFromMessageId);
       if (!cancelled && msg?.content) {
-        setForwardedContent(msg.content);
+        await sendMessage(msg.content);
       }
       if (!cancelled) {
         navigate(ROUTES.selfDiscussion(), { replace: true, state: {} });
@@ -123,7 +122,7 @@ const SelfDiscussion: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [forwardFromMessageId, navigate]);
+  }, [forwardFromMessageId, navigate, sendMessage]);
 
   useEffect(() => {
     void loadMessages();
@@ -245,13 +244,10 @@ const SelfDiscussion: React.FC = () => {
         <MessageInput
           disabled={isSelecting}
           isSelecting={isSelecting}
-          initialValue={
-            editingMessage?.content ?? forwardedContent ?? undefined
-          }
+          initialValue={editingMessage?.content}
           onSend={content => {
             void sendMessage(content);
             setReplyingTo(null);
-            setForwardedContent(null);
           }}
           replyingTo={replyingTo}
           onCancelReply={() => setReplyingTo(null)}
