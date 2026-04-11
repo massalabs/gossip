@@ -188,8 +188,8 @@ export class MessageQueries {
     ownerUserId: string,
     contactUserId: string,
     messageIdBase64: string
-  ): Promise<number> {
-    const deleted = await this.conn.db
+  ): Promise<void> {
+    await this.conn.db
       .delete(schema.messages)
       .where(
         and(
@@ -199,7 +199,6 @@ export class MessageQueries {
           sql`json_extract(${schema.messages.reactionOf}, '$.originalMsgId') = ${messageIdBase64}`
         )
       );
-    return deleted.changes ?? 0;
   }
 
   async deleteDeliveredKeepAlive(ownerUserId: string): Promise<void> {
