@@ -3,6 +3,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import React from 'react';
+import { act } from 'react';
 import { render } from 'vitest-browser-react';
 import { page, userEvent } from 'vitest/browser';
 import {
@@ -66,12 +67,16 @@ function makeMessage(overrides?: Partial<Message>): Message {
   } as Message;
 }
 
-/** Open the context menu by clicking the message bubble. */
+/** Open the context menu by right-clicking the message bubble. */
 async function openContextMenu() {
-  await userEvent.click(
-    page.getByRole('button', { name: 'Double-tap to reply' })
-  );
-  // Wait for the 120ms touch-ready delay so menu items become clickable
+  const bubble = page
+    .getByRole('button', { name: 'Double-tap to reply' })
+    .element() as HTMLElement;
+  await act(async () => {
+    bubble.dispatchEvent(
+      new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
+    );
+  });
   await vi.waitFor(() => {
     expect(page.getByRole('menuitem', { name: 'Copy' }).element()).toBeTruthy();
   });

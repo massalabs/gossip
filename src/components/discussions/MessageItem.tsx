@@ -24,6 +24,7 @@ import { useOriginalMessage } from './hooks/useOriginalMessage';
 import { useLongPress } from '../../hooks/useLongPress';
 
 const POST_GESTURE_SUPPRESS_MS = 700;
+const isWeb = !Capacitor.isNativePlatform();
 
 // ---------------------------------------------------------------------------
 // Types
@@ -179,7 +180,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
 
   const original = useOriginalMessage({ message, onScrollToMessage });
 
-  // Bubble click
+  // Bubble click: on web, left-click toggles selection; on mobile, opens context menu
   const handleBubbleClick = useCallback(
     (e: React.MouseEvent) => {
       if (isDeleted) return;
@@ -189,6 +190,12 @@ const MessageItem: React.FC<MessageItemProps> = ({
         suppressClickRef.current = false;
         return;
       }
+      if (isWeb) {
+        // Stop propagation so the outer row onClick does not double-toggle
+        e.stopPropagation();
+        if (message.id != null) onToggleSelect?.(message.id);
+        return;
+      }
       if (isSelecting) return;
       if (textSelection.isTextSelectable) {
         textSelection.clearTextSelection();
@@ -196,7 +203,14 @@ const MessageItem: React.FC<MessageItemProps> = ({
       }
       contextMenu.openContextMenu();
     },
-    [contextMenu, textSelection, isSelecting, isDeleted]
+    [
+      contextMenu,
+      textSelection,
+      isSelecting,
+      isDeleted,
+      message.id,
+      onToggleSelect,
+    ]
   );
 
   const handleKeyDown = useCallback(
@@ -237,7 +251,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
   return (
     <div
       id={id}
-      className={`flex items-end gap-1 ${isOutgoing ? 'justify-end' : 'justify-start'} group relative ${spacingClass} ${isHighlighted ? 'search-highlight' : ''} ${isSelecting ? 'cursor-pointer pl-8' : 'pl-0'} transition-[padding-left] duration-200 ease-out`}
+      className={`flex items-end gap-1 ${isOutgoing ? 'justify-end' : 'justify-start'} group relative ${spacingClass} ${isHighlighted ? 'search-highlight' : ''} ${isSelecting || isWeb ? 'cursor-pointer' : ''} ${isSelecting ? 'pl-8' : 'pl-0'} transition-[padding-left] duration-200 ease-out`}
       onTouchStart={swipe.handleTouchStart}
       onTouchMove={swipe.handleTouchMove}
       onTouchEnd={swipe.handleTouchEnd}
@@ -251,7 +265,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
           : t('message_item.received_message')
       }
       onClick={
-        isSelecting
+        isSelecting || isWeb
           ? () => {
               if (
                 !suppressClickRef.current &&
@@ -308,8 +322,6 @@ const MessageItem: React.FC<MessageItemProps> = ({
         onToggleReaction={onToggleReaction}
         onClick={handleBubbleClick}
         onKeyDown={handleKeyDown}
-        openContextMenu={contextMenu.openContextMenu}
-        isSelecting={isSelecting}
       />
 
       <MessageContextMenu
