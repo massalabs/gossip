@@ -63,7 +63,7 @@ describe('MessageItem', () => {
   });
 
   describe('context menu', () => {
-    it('opens context menu on click', async () => {
+    it('opens context menu on right-click', async () => {
       const onReplyTo = vi.fn();
       const onForward = vi.fn();
       render(
@@ -74,10 +74,15 @@ describe('MessageItem', () => {
         />
       );
 
-      // Click the bubble to open context menu
-      await userEvent.click(
-        page.getByRole('button', { name: 'Double-tap to reply' })
-      );
+      // Right-click the bubble to open context menu
+      const bubble = page
+        .getByRole('button', { name: 'Double-tap to reply' })
+        .element() as HTMLElement;
+      await act(async () => {
+        bubble.dispatchEvent(
+          new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
+        );
+      });
 
       const menu = page.getByRole('menu');
       await expect.element(menu).toBeInTheDocument();
@@ -97,9 +102,14 @@ describe('MessageItem', () => {
       const onReplyTo = vi.fn();
       render(<MessageItem message={makeMessage()} onReplyTo={onReplyTo} />);
 
-      await userEvent.click(
-        page.getByRole('button', { name: 'Double-tap to reply' })
-      );
+      const bubble = page
+        .getByRole('button', { name: 'Double-tap to reply' })
+        .element() as HTMLElement;
+      await act(async () => {
+        bubble.dispatchEvent(
+          new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
+        );
+      });
 
       await userEvent.click(page.getByRole('menuitem', { name: 'Reply' }));
       expect(onReplyTo).toHaveBeenCalledOnce();
@@ -109,9 +119,14 @@ describe('MessageItem', () => {
       const onForward = vi.fn();
       render(<MessageItem message={makeMessage()} onForward={onForward} />);
 
-      await userEvent.click(
-        page.getByRole('button', { name: 'Double-tap to reply' })
-      );
+      const bubble = page
+        .getByRole('button', { name: 'Double-tap to reply' })
+        .element() as HTMLElement;
+      await act(async () => {
+        bubble.dispatchEvent(
+          new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
+        );
+      });
 
       await userEvent.click(page.getByRole('menuitem', { name: 'Forward' }));
       expect(onForward).toHaveBeenCalledOnce();
@@ -124,20 +139,18 @@ describe('MessageItem', () => {
 
       render(<MessageItem message={makeMessage({ content: 'Copy me' })} />);
 
-      await userEvent.click(
-        page.getByRole('button', { name: 'Double-tap to reply' })
-      );
+      const bubble = page
+        .getByRole('button', { name: 'Double-tap to reply' })
+        .element() as HTMLElement;
+      await act(async () => {
+        bubble.dispatchEvent(
+          new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
+        );
+      });
 
       await userEvent.click(page.getByRole('menuitem', { name: 'Copy' }));
       expect(writeText).toHaveBeenCalledWith('Copy me');
       writeText.mockRestore();
-    });
-
-    it('shows hover arrow on desktop', async () => {
-      render(<MessageItem message={makeMessage()} onReplyTo={vi.fn()} />);
-
-      const btn = page.getByRole('button', { name: 'Message actions' });
-      await expect.element(btn).toBeInTheDocument();
     });
 
     it('does not expose actions for deleted messages', async () => {
@@ -151,9 +164,6 @@ describe('MessageItem', () => {
 
       await expect
         .element(page.getByRole('button', { name: 'Double-tap to reply' }))
-        .not.toBeInTheDocument();
-      await expect
-        .element(page.getByRole('button', { name: 'Message actions' }))
         .not.toBeInTheDocument();
       await expect.element(page.getByRole('menu')).not.toBeInTheDocument();
     });
@@ -542,22 +552,6 @@ describe('MessageItem', () => {
 
       await userEvent.click(page.getByRole('listitem'));
       expect(onToggleSelect).toHaveBeenCalledWith(0);
-    });
-
-    it('hides desktop message actions button while selecting', async () => {
-      render(
-        <MessageItem
-          message={makeMessage()}
-          isSelecting={true}
-          isSelected={false}
-          onToggleSelect={vi.fn()}
-          onReplyTo={vi.fn()}
-        />
-      );
-
-      await expect
-        .element(page.getByRole('button', { name: 'Message actions' }))
-        .not.toBeInTheDocument();
     });
   });
 });
