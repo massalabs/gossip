@@ -261,3 +261,41 @@ export function removeReactionFromState(
   });
   return found;
 }
+
+/**
+ * Remove all reactions that reference a deleted message from state and cache.
+ * Returns the updated reactionsByContact map and reactionGroupsCache,
+ * or null if nothing changed.
+ */
+export function clearReactionsForDeletedMessage(
+  state: MessageStoreState,
+  contactUserId: string,
+  originalMsgId: Uint8Array,
+  messagesByContact: Map<string, Message[]>
+): Pick<
+  MessageStoreState,
+  'reactionsByContact' | 'reactionGroupsCache'
+> | null {
+  const reactions = state.reactionsByContact.get(contactUserId);
+  if (!reactions || reactions.length === 0) return null;
+
+  const filtered = reactions.filter(
+    r =>
+      !r.reactionOf?.originalMsgId ||
+      !messageIdEquals(r.reactionOf.originalMsgId, originalMsgId)
+  );
+  if (filtered.length === reactions.length) return null;
+
+  const rxnMap = new Map(state.reactionsByContact);
+  if (filtered.length > 0) rxnMap.set(contactUserId, filtered);
+  else rxnMap.delete(contactUserId);
+  return {
+    reactionsByContact: rxnMap,
+    reactionGroupsCache: patchReactionCache(
+      state.reactionGroupsCache,
+      contactUserId,
+      messagesByContact,
+      rxnMap
+    ),
+  };
+}

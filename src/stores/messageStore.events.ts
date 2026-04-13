@@ -14,6 +14,7 @@ import {
   upsertMessage,
   addReactionToState,
   removeReactionFromState,
+  clearReactionsForDeletedMessage,
   patchReactionCache,
   recomputeFullCache,
   rollbackReplace,
@@ -49,6 +50,7 @@ export function createEventHandlers(
     }
 
     if (message.type === MessageType.DELETED && message.messageId) {
+      // If this delete targets a reaction row, remove it from state
       const removed = removeReactionFromState(set, message.contactUserId, r =>
         messageIdEquals(r.messageId, message.messageId)
       );
@@ -56,12 +58,27 @@ export function createEventHandlers(
     }
 
     set(state => {
-      const map = patchContact(
+      const msgMap = patchContact(
         state.messagesByContact,
         message.contactUserId,
         msgs => upsertMessage(msgs, message)
       );
-      return map ? { messagesByContact: map } : state;
+      if (!msgMap) return state;
+
+      // When a message is deleted, also clear reactions referencing it
+      if (message.type === MessageType.DELETED && message.messageId) {
+        const rxnUpdate = clearReactionsForDeletedMessage(
+          state,
+          message.contactUserId,
+          message.messageId,
+          msgMap
+        );
+        return rxnUpdate
+          ? { messagesByContact: msgMap, ...rxnUpdate }
+          : { messagesByContact: msgMap };
+      }
+
+      return { messagesByContact: msgMap };
     });
   };
 
@@ -191,33 +208,19 @@ export function createEventHandlers(
       );
       if (!msgMap) return state;
 
-      // Remove cached reactions that reference the deleted message
-      const reactions = state.reactionsByContact.get(contactUserId);
-      if (!reactions || reactions.length === 0) {
-        return { messagesByContact: msgMap };
-      }
-      const filtered = reactions.filter(
-        r =>
-          !r.reactionOf?.originalMsgId ||
-          !messageIdEquals(r.reactionOf.originalMsgId, originalMsgId)
+      const rxnUpdate = clearReactionsForDeletedMessage(
+        state,
+        contactUserId,
+        originalMsgId,
+        msgMap
       );
-      const rxnMap = new Map(state.reactionsByContact);
-      if (filtered.length > 0) rxnMap.set(contactUserId, filtered);
-      else rxnMap.delete(contactUserId);
-      return {
-        messagesByContact: msgMap,
-        reactionsByContact: rxnMap,
-        reactionGroupsCache: patchReactionCache(
-          state.reactionGroupsCache,
-          contactUserId,
-          msgMap,
-          rxnMap
-        ),
-      };
+      return rxnUpdate
+        ? { messagesByContact: msgMap, ...rxnUpdate }
+        : { messagesByContact: msgMap };
     });
   };
 
-  const onDeleteFailed = ({
+  const onOptimisticFailed = ({
     contactUserId,
     messageDbId,
     original,
@@ -248,18 +251,6 @@ export function createEventHandlers(
       );
       return map ? { messagesByContact: map } : state;
     });
-  };
-
-  const onEditFailed = ({
-    contactUserId,
-    messageDbId,
-    original,
-  }: {
-    contactUserId: string;
-    messageDbId: number;
-    original: Message;
-  }) => {
-    rollbackReplace(set, contactUserId, messageDbId, original);
   };
 
   // ── Session event: merge DB data with pending optimistic ────────
@@ -334,8 +325,8 @@ export function createEventHandlers(
   sdk.on(SdkEventType.SESSION_ACCEPTED, onSessionEvent);
   sdk.on(SdkEventType.MESSAGE_DELETED_OPTIMISTIC, onDeletedOptimistic);
   sdk.on(SdkEventType.MESSAGE_EDITED_OPTIMISTIC, onEditedOptimistic);
-  sdk.on(SdkEventType.MESSAGE_DELETE_FAILED, onDeleteFailed);
-  sdk.on(SdkEventType.MESSAGE_EDIT_FAILED, onEditFailed);
+  sdk.on(SdkEventType.MESSAGE_DELETE_FAILED, onOptimisticFailed);
+  sdk.on(SdkEventType.MESSAGE_EDIT_FAILED, onOptimisticFailed);
 
   return () => {
     try {
@@ -348,8 +339,8 @@ export function createEventHandlers(
       sdk.off(SdkEventType.SESSION_ACCEPTED, onSessionEvent);
       sdk.off(SdkEventType.MESSAGE_DELETED_OPTIMISTIC, onDeletedOptimistic);
       sdk.off(SdkEventType.MESSAGE_EDITED_OPTIMISTIC, onEditedOptimistic);
-      sdk.off(SdkEventType.MESSAGE_DELETE_FAILED, onDeleteFailed);
-      sdk.off(SdkEventType.MESSAGE_EDIT_FAILED, onEditFailed);
+      sdk.off(SdkEventType.MESSAGE_DELETE_FAILED, onOptimisticFailed);
+      sdk.off(SdkEventType.MESSAGE_EDIT_FAILED, onOptimisticFailed);
     } catch {
       // SDK might not be available during cleanup
     }
