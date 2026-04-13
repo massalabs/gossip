@@ -1754,14 +1754,15 @@ export class MessageService {
   }
 
   /**
-   * Delete an outgoing message by its database ID.
+   * Delete a message by its database ID (outgoing or incoming in 1-to-1).
    * Marks the local message as deleted and enqueues a delete control message
    * so the peer can mark their copy as deleted as well.
+   *
+   * Both sides can delete any message for plausible deniability.
    */
   async deleteMessage(id: number): Promise<boolean> {
     const row = await this.queries.messages.getById(id);
     if (!row) return false;
-    if (row.direction !== MessageDirection.OUTGOING) return false;
     if (!row.messageId)
       throw new Error('Cannot delete a message that has no messageId');
 

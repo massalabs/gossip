@@ -326,7 +326,7 @@ describe('MessageService', () => {
     ).toHaveLength(0);
   });
 
-  it('deleteMessage returns false for incoming messages and does not modify the row', async () => {
+  it('deleteMessage marks an incoming message as deleted and enqueues a control message', async () => {
     const testQueries = getTestQueries();
     await insertTestContactAndDiscussion();
 
@@ -349,19 +349,19 @@ describe('MessageService', () => {
       testQueries
     );
 
-    expect(await service.deleteMessage(msgId)).toBe(false);
+    expect(await service.deleteMessage(msgId)).toBe(true);
 
     const row = await testQueries.messages.getById(msgId);
-    expect(row?.content).toBe('From peer');
-    expect(row?.type).toBe(MessageType.TEXT);
-    expect(row?.direction).toBe(MessageDirection.INCOMING);
+    expect(row?.content).toBe('[Message deleted]');
+    expect(row?.type).toBe(MessageType.DELETED);
     const rows = await testQueries.messages.getByOwnerAndContact(
       OWNER_USER_ID,
       CONTACT_USER_ID
     );
+    // A delete control message should have been enqueued
     expect(
       rows.filter(r => r.type === MessageType.DELETED && r.content === '')
-    ).toHaveLength(0);
+    ).toHaveLength(1);
   });
 
   it('deleteMessage on a reaction only deletes the reaction row and keeps original message visible', async () => {

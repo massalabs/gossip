@@ -29,10 +29,15 @@ const DiscussionLayout: React.FC<DiscussionLayoutProps> = ({
       onTouchStart={swipeBack.onTouchStart}
       onTouchEnd={swipeBack.onTouchEnd}
       onPointerDown={e => {
-        const tag = (e.target as HTMLElement).tagName;
-        if (tag !== 'INPUT' && tag !== 'TEXTAREA') {
-          e.preventDefault();
+        const el = e.target as HTMLElement;
+        if (
+          el.tagName === 'INPUT' ||
+          el.tagName === 'TEXTAREA' ||
+          el.closest('button')
+        ) {
+          return;
         }
+        e.preventDefault();
       }}
     >
       <div className="shrink-0">{header}</div>

@@ -514,7 +514,7 @@ describe('MultiSelectMessages', () => {
         .toHaveTextContent('true');
     });
 
-    it('canDelete is false when any selected message is incoming', async () => {
+    it('canDelete is true when any selected message is incoming', async () => {
       const messages = [
         makeMessage({
           id: 1,
@@ -534,10 +534,10 @@ describe('MultiSelectMessages', () => {
 
       await expect
         .element(page.getByTestId('can-delete'))
-        .toHaveTextContent('false');
+        .toHaveTextContent('true');
     });
 
-    it('canDelete is false when only incoming messages are selected', async () => {
+    it('canDelete is true when only incoming messages are selected', async () => {
       const messages = [
         makeMessage({
           id: 1,
@@ -550,7 +550,7 @@ describe('MultiSelectMessages', () => {
 
       await expect
         .element(page.getByTestId('can-delete'))
-        .toHaveTextContent('false');
+        .toHaveTextContent('true');
     });
 
     it('canDelete updates dynamically when selection changes', async () => {
@@ -574,17 +574,18 @@ describe('MultiSelectMessages', () => {
         .element(page.getByTestId('can-delete'))
         .toHaveTextContent('true');
 
-      // Add incoming -> can no longer delete
-      await userEvent.click(page.getByTestId('toggle-2'));
-      await expect
-        .element(page.getByTestId('can-delete'))
-        .toHaveTextContent('false');
-
-      // Remove incoming -> can delete again
+      // Add incoming -> can still delete (both directions allowed in 1-to-1)
       await userEvent.click(page.getByTestId('toggle-2'));
       await expect
         .element(page.getByTestId('can-delete'))
         .toHaveTextContent('true');
+
+      // Remove both -> can no longer delete (nothing selected)
+      await userEvent.click(page.getByTestId('toggle-1'));
+      await userEvent.click(page.getByTestId('toggle-2'));
+      await expect
+        .element(page.getByTestId('can-delete'))
+        .toHaveTextContent('false');
     });
 
     it('delete calls gossip.messages.deleteMessage for each selected message', async () => {
@@ -641,7 +642,7 @@ describe('MultiSelectMessages', () => {
         .toHaveTextContent('0');
     });
 
-    it('delete does nothing when canDelete is false', async () => {
+    it('delete does nothing when canDelete is false (nothing selected)', async () => {
       const messages = [
         makeMessage({
           id: 1,
@@ -651,16 +652,12 @@ describe('MultiSelectMessages', () => {
       ];
       render(<SelectionHarness messages={messages} contactName="Alice" />);
 
-      await userEvent.click(page.getByTestId('toggle-1'));
+      // Do not select anything — canDelete should be false
       await userEvent.click(page.getByTestId('delete'));
 
       await vi.waitFor(() => {
         expect(mockDeleteMessage).not.toHaveBeenCalled();
       });
-      // Selection should remain (delete was a no-op)
-      await expect
-        .element(page.getByTestId('is-selecting'))
-        .toHaveTextContent('true');
     });
 
     it('shows toast error on partial delete failure', async () => {
