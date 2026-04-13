@@ -24,6 +24,7 @@ export enum SdkEventType {
   MESSAGE_EDITED_OPTIMISTIC = 'messageEditedOptimistic',
   MESSAGE_DELETE_FAILED = 'messageDeleteFailed',
   MESSAGE_EDIT_FAILED = 'messageEditFailed',
+  MESSAGE_ACKNOWLEDGED = 'messageAcknowledged',
   ERROR = 'error',
 }
 
@@ -71,6 +72,10 @@ export type SdkEvents = {
     contactUserId: string;
     messageDbId: number;
     original: Message;
+  };
+  [SdkEventType.MESSAGE_ACKNOWLEDGED]: {
+    contactUserId: string;
+    messageDbId: number;
   };
   [SdkEventType.ERROR]: { error: Error; context: string };
 };

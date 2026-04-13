@@ -842,6 +842,10 @@ export class MessageService {
         seeker: null,
         whenToSend: null,
       });
+      this.eventEmitter.emit(SdkEventType.MESSAGE_ACKNOWLEDGED, {
+        contactUserId: m.contactUserId,
+        messageDbId: m.id,
+      });
     }
 
     // After marking as DELIVERED, clean up DELIVERED keep-alive messages
