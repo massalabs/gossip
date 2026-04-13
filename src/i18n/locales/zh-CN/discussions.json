@@ -19,7 +19,9 @@
     "cancel_forward": "取消转发",
     "cancel_edit": "取消编辑",
     "input_label": "消息输入",
-    "send": "发送消息"
+    "send": "发送消息",
+    "emoji": "表情",
+    "emoji_search": "搜索表情…"
   },
   "message": {
     "sent": "已发送",
