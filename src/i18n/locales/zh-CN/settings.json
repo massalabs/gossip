@@ -17,8 +17,7 @@
     "debug": "调试",
     "lock_account": "锁定",
     "privacy": "隐私",
-    "security": "安全",
-    "feedback": "发送反馈"
+    "security": "安全"
   },
   "delete_account": {
     "button": "删除账户",
@@ -48,9 +47,7 @@
   "about": {
     "title": "关于",
     "version": "版本",
-    "build_id": "构建 ID",
-    "about_gossip": "关于 Gossip",
-    "terms_conditions": "条款与条件"
+    "build_id": "构建 ID"
   },
   "notifications": {
     "title": "通知",

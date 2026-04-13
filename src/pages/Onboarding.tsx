@@ -6,6 +6,7 @@ import AccountImport from '../components/account/AccountImport';
 import AccountCreation from '../components/account/AccountCreation';
 import ToSAcceptance from '../components/ToSAcceptance';
 import { getDevAccounts } from '../hooks/useDevAutoLogin';
+import { secureStorageEnabled } from '../config/secureStorage';
 
 /**
  * Routes for onboarding flow (when no account exists)
@@ -21,7 +22,10 @@ export const Onboarding: React.FC<{
   showImport: boolean;
   onShowImportChange: (show: boolean) => void;
 }> = ({ showImport, onShowImportChange }) => {
-  const [showAccountCreation, setShowAccountCreation] = useState(false);
+  // When secure storage is enabled, skip the slideshow and go straight
+  // to the account creation form (which is SecureAccountCreation).
+  const [showAccountCreation, setShowAccountCreation] =
+    useState(secureStorageEnabled);
   const [skipDevPicker, setSkipDevPicker] = useState(false);
   const tosAccepted = useAppStore.use.tosAccepted();
   const setTosAccepted = useAppStore.use.setTosAccepted();
