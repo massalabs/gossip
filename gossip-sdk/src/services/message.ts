@@ -563,15 +563,19 @@ export class MessageService {
             content: '[Message deleted]',
             type: MessageType.DELETED,
           });
-          await this.queries.messages.updateById(target.id, {
-            content: '[Message deleted]',
-            type: MessageType.DELETED,
+          const targetId = target.id;
+          const deleteOriginalMsgId = message.deleteOf.originalMsgId;
+          await this.queries.conn.withTransaction(async () => {
+            await this.queries.messages.updateById(targetId, {
+              content: '[Message deleted]',
+              type: MessageType.DELETED,
+            });
+            await this.queries.messages.deleteReactionsForMessage(
+              ownerUserId,
+              target.contactUserId,
+              encodeToBase64(deleteOriginalMsgId)
+            );
           });
-          await this.queries.messages.deleteReactionsForMessage(
-            ownerUserId,
-            target.contactUserId,
-            encodeToBase64(message.deleteOf.originalMsgId)
-          );
         }
 
         continue;
@@ -1780,15 +1784,18 @@ export class MessageService {
     }
 
     try {
-      await this.queries.messages.updateById(id, {
-        content: '[Message deleted]',
-        type: MessageType.DELETED,
+      const messageId = row.messageId;
+      await this.queries.conn.withTransaction(async () => {
+        await this.queries.messages.updateById(id, {
+          content: '[Message deleted]',
+          type: MessageType.DELETED,
+        });
+        await this.queries.messages.deleteReactionsForMessage(
+          ownerUserId,
+          row.contactUserId,
+          encodeToBase64(messageId)
+        );
       });
-      await this.queries.messages.deleteReactionsForMessage(
-        ownerUserId,
-        row.contactUserId,
-        encodeToBase64(row.messageId)
-      );
 
       const controlMessage: Omit<Message, 'id'> = {
         ownerUserId,
