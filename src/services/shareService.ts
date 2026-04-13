@@ -169,10 +169,10 @@ export async function shareInvitation(
   // Use native Capacitor Share plugin on native platforms
   if (Capacitor.isNativePlatform()) {
     try {
+      // Embed URL in text so apps like Telegram that ignore the separate url field still receive the link
       await Share.share({
         title: shareTitle,
-        text: shareText,
-        url: deepLinkUrl,
+        text: `${shareText}\n${deepLinkUrl}`,
         dialogTitle: shareTitle,
       });
       return;
@@ -187,7 +187,7 @@ export async function shareInvitation(
     try {
       await navigator.share({
         title: shareTitle,
-        text: shareText,
+        text: 'Join me on Gossip!',
         url: deepLinkUrl,
       });
       return;
