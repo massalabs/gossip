@@ -399,3 +399,98 @@ describe('onSessionEvent merge', () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// E) Acknowledge (SENT → DELIVERED) via SDK events
+// ---------------------------------------------------------------------------
+
+describe('acknowledge via SDK events', () => {
+  it('MESSAGE_ACKNOWLEDGED updates message status from SENT to DELIVERED', () => {
+    const message = makeMessage({ status: MessageStatus.SENT });
+    useMessageStore.setState({
+      ...useMessageStore.getState(),
+      messagesByContact: new Map([[contactUserId, [message]]]),
+    });
+
+    // Simulate SDK emitting the acknowledge event
+    emit(SdkEventType.MESSAGE_ACKNOWLEDGED, {
+      contactUserId,
+      messageDbId: message.id!,
+    });
+
+    const msgs = getMessages();
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0].status).toBe(MessageStatus.DELIVERED);
+  });
+
+  it('MESSAGE_ACKNOWLEDGED is a no-op for messages not in state', () => {
+    const message = makeMessage({ status: MessageStatus.SENT });
+    useMessageStore.setState({
+      ...useMessageStore.getState(),
+      messagesByContact: new Map([[contactUserId, [message]]]),
+    });
+
+    // Emit for a different message id
+    emit(SdkEventType.MESSAGE_ACKNOWLEDGED, {
+      contactUserId,
+      messageDbId: 999,
+    });
+
+    const msgs = getMessages();
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0].status).toBe(MessageStatus.SENT);
+  });
+
+  it('MESSAGE_ACKNOWLEDGED does not affect already DELIVERED messages', () => {
+    const message = makeMessage({ status: MessageStatus.DELIVERED });
+    useMessageStore.setState({
+      ...useMessageStore.getState(),
+      messagesByContact: new Map([[contactUserId, [message]]]),
+    });
+
+    emit(SdkEventType.MESSAGE_ACKNOWLEDGED, {
+      contactUserId,
+      messageDbId: message.id!,
+    });
+
+    const msgs = getMessages();
+    expect(msgs[0].status).toBe(MessageStatus.DELIVERED);
+  });
+
+  it('acknowledges multiple messages in sequence', () => {
+    const msg1 = makeMessage({
+      id: 1,
+      messageId: new Uint8Array(12).fill(1),
+      status: MessageStatus.SENT,
+    });
+    const msg2 = makeMessage({
+      id: 2,
+      messageId: new Uint8Array(12).fill(2),
+      status: MessageStatus.SENT,
+    });
+    const msg3 = makeMessage({
+      id: 3,
+      messageId: new Uint8Array(12).fill(3),
+      status: MessageStatus.SENT,
+    });
+
+    useMessageStore.setState({
+      ...useMessageStore.getState(),
+      messagesByContact: new Map([[contactUserId, [msg1, msg2, msg3]]]),
+    });
+
+    emit(SdkEventType.MESSAGE_ACKNOWLEDGED, {
+      contactUserId,
+      messageDbId: 1,
+    });
+    emit(SdkEventType.MESSAGE_ACKNOWLEDGED, {
+      contactUserId,
+      messageDbId: 3,
+    });
+
+    const msgs = getMessages();
+    expect(msgs[0].status).toBe(MessageStatus.DELIVERED);
+    expect(msgs[1].status).toBe(MessageStatus.SENT); // msg2 not acknowledged
+    expect(msgs[2].status).toBe(MessageStatus.DELIVERED);
+  });
+});
