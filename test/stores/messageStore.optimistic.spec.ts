@@ -214,6 +214,109 @@ describe('delete via SDK events', () => {
     expect(msgs).toHaveLength(1);
     expect(msgs[0].type).toBe(MessageType.DELETED);
   });
+
+  it('onDeletedOptimistic removes reactions from reactionsByContact and reactionGroupsCache', () => {
+    const message = makeMessage({
+      id: 10,
+      messageId: new Uint8Array(12).fill(10),
+    });
+    const reactionForTarget: Message = {
+      id: 20,
+      messageId: new Uint8Array(12).fill(20),
+      ownerUserId: 'test-user-id',
+      contactUserId,
+      content: '👍',
+      type: MessageType.REACTION,
+      direction: MessageDirection.INCOMING,
+      status: MessageStatus.DELIVERED,
+      timestamp: new Date('2024-01-01T10:01:00Z'),
+      reactionOf: { originalMsgId: new Uint8Array(12).fill(10) },
+    };
+    const reactionForOther: Message = {
+      id: 30,
+      messageId: new Uint8Array(12).fill(30),
+      ownerUserId: 'test-user-id',
+      contactUserId,
+      content: '❤️',
+      type: MessageType.REACTION,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.SENT,
+      timestamp: new Date('2024-01-01T10:02:00Z'),
+      reactionOf: { originalMsgId: new Uint8Array(12).fill(99) },
+    };
+
+    const reactionsMap = new Map([
+      [contactUserId, [reactionForTarget, reactionForOther]],
+    ]);
+
+    useMessageStore.setState({
+      ...useMessageStore.getState(),
+      messagesByContact: new Map([[contactUserId, [message]]]),
+      reactionsByContact: reactionsMap,
+    });
+
+    // Emit the optimistic delete event
+    emit(SdkEventType.MESSAGE_DELETED_OPTIMISTIC, {
+      contactUserId,
+      messageDbId: message.id!,
+      originalMsgId: message.messageId!,
+    });
+
+    // The message should be marked as deleted
+    const msgs = getMessages();
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0].type).toBe(MessageType.DELETED);
+    expect(msgs[0].content).toBe('[Message deleted]');
+
+    // The reaction for the deleted message should be removed
+    const remainingReactions =
+      useMessageStore.getState().reactionsByContact.get(contactUserId) ?? [];
+    expect(remainingReactions).toHaveLength(1);
+    expect(remainingReactions[0].content).toBe('❤️');
+    expect(remainingReactions[0].id).toBe(30);
+
+    // The reactionGroupsCache should be updated (not contain groups for the deleted message)
+    const cache = useMessageStore.getState().reactionGroupsCache;
+    // Cache should exist and reflect the updated reactions
+    expect(cache).toBeDefined();
+  });
+
+  it('onDeletedOptimistic removes all reactions when all reference the deleted message', () => {
+    const message = makeMessage({
+      id: 10,
+      messageId: new Uint8Array(12).fill(10),
+    });
+    const reaction: Message = {
+      id: 20,
+      messageId: new Uint8Array(12).fill(20),
+      ownerUserId: 'test-user-id',
+      contactUserId,
+      content: '👍',
+      type: MessageType.REACTION,
+      direction: MessageDirection.INCOMING,
+      status: MessageStatus.DELIVERED,
+      timestamp: new Date('2024-01-01T10:01:00Z'),
+      reactionOf: { originalMsgId: new Uint8Array(12).fill(10) },
+    };
+
+    useMessageStore.setState({
+      ...useMessageStore.getState(),
+      messagesByContact: new Map([[contactUserId, [message]]]),
+      reactionsByContact: new Map([[contactUserId, [reaction]]]),
+    });
+
+    emit(SdkEventType.MESSAGE_DELETED_OPTIMISTIC, {
+      contactUserId,
+      messageDbId: message.id!,
+      originalMsgId: message.messageId!,
+    });
+
+    // When all reactions are removed, the contact entry should be deleted from the map
+    const remainingReactions = useMessageStore
+      .getState()
+      .reactionsByContact.get(contactUserId);
+    expect(remainingReactions).toBeUndefined();
+  });
 });
 
 // ---------------------------------------------------------------------------

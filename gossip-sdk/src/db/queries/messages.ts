@@ -184,6 +184,23 @@ export class MessageQueries {
       .where(eq(schema.messages.id, id));
   }
 
+  async deleteReactionsForMessage(
+    ownerUserId: string,
+    contactUserId: string,
+    messageIdBase64: string
+  ): Promise<void> {
+    await this.conn.db
+      .delete(schema.messages)
+      .where(
+        and(
+          eq(schema.messages.ownerUserId, ownerUserId),
+          eq(schema.messages.contactUserId, contactUserId),
+          eq(schema.messages.type, MessageType.REACTION),
+          sql`json_extract(${schema.messages.reactionOf}, '$.originalMsgId') = ${messageIdBase64}`
+        )
+      );
+  }
+
   async deleteDeliveredKeepAlive(ownerUserId: string): Promise<void> {
     await this.conn.db
       .delete(schema.messages)

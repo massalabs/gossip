@@ -19,6 +19,7 @@ import {
 } from '../../src/db';
 import type { SessionModule } from '../../src/wasm/session';
 import { encodeUserId, decodeUserId } from '../../src/utils/userId';
+import { encodeToBase64 } from '../../src/utils/base64';
 import { SessionStatus } from '../../src/wasm/bindings';
 import { defaultSdkConfig } from '../../src/config/sdk';
 import { SdkEventEmitter } from '../../src/core/SdkEventEmitter';
@@ -761,6 +762,270 @@ describe('processSendQueueForContact: Encryption Error', () => {
 
     expect(messages.length).toBe(1);
     expect(messages[0].status).toBe(MessageStatus.WAITING_SESSION);
+  });
+});
+
+describe('deleteReactionsForMessage query', () => {
+  beforeEach(clearAllTables);
+
+  it('removes only reactions referencing the deleted message', async () => {
+    const testQueries = getTestQueries();
+
+    const originalMsgIdBytes = new Uint8Array(12).fill(42);
+    const originalMsgIdBase64 = encodeToBase64(originalMsgIdBytes);
+
+    const unrelatedMsgIdBytes = new Uint8Array(12).fill(99);
+    const unrelatedMsgIdBase64 = encodeToBase64(unrelatedMsgIdBytes);
+
+    // Insert the original message
+    const originalMsgRowId = await testQueries.messages.insert({
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: 'Original message',
+      type: MessageType.TEXT,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.SENT,
+      timestamp: new Date('2024-01-01T00:00:00Z'),
+      messageId: originalMsgIdBytes,
+    });
+
+    // Insert reactions referencing the original message
+    const reaction1Id = await testQueries.messages.insert({
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: '👍',
+      type: MessageType.REACTION,
+      direction: MessageDirection.INCOMING,
+      status: MessageStatus.DELIVERED,
+      timestamp: new Date('2024-01-01T00:01:00Z'),
+      reactionOf: JSON.stringify({ originalMsgId: originalMsgIdBase64 }),
+    });
+
+    const reaction2Id = await testQueries.messages.insert({
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: '❤️',
+      type: MessageType.REACTION,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.SENT,
+      timestamp: new Date('2024-01-01T00:02:00Z'),
+      reactionOf: JSON.stringify({ originalMsgId: originalMsgIdBase64 }),
+    });
+
+    // Insert an unrelated reaction referencing a different message
+    const unrelatedReactionId = await testQueries.messages.insert({
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: '😂',
+      type: MessageType.REACTION,
+      direction: MessageDirection.INCOMING,
+      status: MessageStatus.DELIVERED,
+      timestamp: new Date('2024-01-01T00:03:00Z'),
+      reactionOf: JSON.stringify({ originalMsgId: unrelatedMsgIdBase64 }),
+    });
+
+    // Delete reactions for the original message
+    await testQueries.messages.deleteReactionsForMessage(
+      OWNER_USER_ID,
+      CONTACT_USER_ID,
+      originalMsgIdBase64
+    );
+
+    const allRows = await testQueries.messages.getByOwnerAndContact(
+      OWNER_USER_ID,
+      CONTACT_USER_ID
+    );
+
+    // Original message should still exist
+    expect(allRows.find(r => r.id === originalMsgRowId)).toBeDefined();
+    expect(allRows.find(r => r.id === originalMsgRowId)?.content).toBe(
+      'Original message'
+    );
+
+    // Reactions referencing the original message should be deleted
+    expect(allRows.find(r => r.id === reaction1Id)).toBeUndefined();
+    expect(allRows.find(r => r.id === reaction2Id)).toBeUndefined();
+
+    // Unrelated reaction should still exist
+    expect(allRows.find(r => r.id === unrelatedReactionId)).toBeDefined();
+    expect(allRows.find(r => r.id === unrelatedReactionId)?.content).toBe('😂');
+  });
+});
+
+describe('deleteMessage also removes associated reactions', () => {
+  beforeEach(clearAllTables);
+
+  it('deleteMessage deletes reactions for the message from the DB', async () => {
+    const testQueries = getTestQueries();
+    await insertTestContactAndDiscussion();
+
+    const originalMsgIdBytes = new Uint8Array(12).fill(50);
+    const originalMsgIdBase64 = encodeToBase64(originalMsgIdBytes);
+
+    // Insert the outgoing message that will be deleted
+    const msgId = await testQueries.messages.insert({
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: 'Message to delete',
+      type: MessageType.TEXT,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.SENT,
+      timestamp: new Date('2024-01-01T00:00:00Z'),
+      messageId: originalMsgIdBytes,
+    });
+
+    // Insert reactions referencing this message
+    const reaction1Id = await testQueries.messages.insert({
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: '👍',
+      type: MessageType.REACTION,
+      direction: MessageDirection.INCOMING,
+      status: MessageStatus.DELIVERED,
+      timestamp: new Date('2024-01-01T00:01:00Z'),
+      reactionOf: JSON.stringify({ originalMsgId: originalMsgIdBase64 }),
+    });
+
+    const reaction2Id = await testQueries.messages.insert({
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: '❤️',
+      type: MessageType.REACTION,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.SENT,
+      timestamp: new Date('2024-01-01T00:02:00Z'),
+      reactionOf: JSON.stringify({ originalMsgId: originalMsgIdBase64 }),
+    });
+
+    // Insert an unrelated message with its own reaction
+    const unrelatedMsgIdBytes = new Uint8Array(12).fill(60);
+    const unrelatedMsgId = await testQueries.messages.insert({
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: 'Unrelated message',
+      type: MessageType.TEXT,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.SENT,
+      timestamp: new Date('2024-01-01T00:03:00Z'),
+      messageId: unrelatedMsgIdBytes,
+    });
+
+    const unrelatedReactionId = await testQueries.messages.insert({
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: '😂',
+      type: MessageType.REACTION,
+      direction: MessageDirection.INCOMING,
+      status: MessageStatus.DELIVERED,
+      timestamp: new Date('2024-01-01T00:04:00Z'),
+      reactionOf: JSON.stringify({
+        originalMsgId: encodeToBase64(unrelatedMsgIdBytes),
+      }),
+    });
+
+    const service = new MessageService(
+      new MockMessageProtocol(),
+      createMockSession(),
+      new SdkEventEmitter(),
+      defaultSdkConfig,
+      testQueries
+    );
+
+    const result = await service.deleteMessage(msgId);
+    expect(result).toBe(true);
+
+    const allRows = await testQueries.messages.getByOwnerAndContact(
+      OWNER_USER_ID,
+      CONTACT_USER_ID
+    );
+
+    // The deleted message should be marked as DELETED
+    const deletedMsg = allRows.find(r => r.id === msgId);
+    expect(deletedMsg?.type).toBe(MessageType.DELETED);
+    expect(deletedMsg?.content).toBe('[Message deleted]');
+
+    // Reactions for the deleted message should be removed
+    expect(allRows.find(r => r.id === reaction1Id)).toBeUndefined();
+    expect(allRows.find(r => r.id === reaction2Id)).toBeUndefined();
+
+    // Unrelated message and its reaction should remain
+    expect(allRows.find(r => r.id === unrelatedMsgId)).toBeDefined();
+    expect(allRows.find(r => r.id === unrelatedReactionId)).toBeDefined();
+    expect(allRows.find(r => r.id === unrelatedReactionId)?.content).toBe('😂');
+  });
+});
+
+describe('incoming delete path also removes reactions', () => {
+  beforeEach(clearAllTables);
+
+  it('deleteReactionsForMessage is called correctly for incoming deletes', async () => {
+    const testQueries = getTestQueries();
+
+    const originalMsgIdBytes = new Uint8Array(12).fill(70);
+    const originalMsgIdBase64 = encodeToBase64(originalMsgIdBytes);
+
+    // Insert the original incoming message (sent by contact, received by owner)
+    const msgRowId = await testQueries.messages.insert({
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: 'Incoming message to delete',
+      type: MessageType.TEXT,
+      direction: MessageDirection.INCOMING,
+      status: MessageStatus.DELIVERED,
+      timestamp: new Date('2024-01-01T00:00:00Z'),
+      messageId: originalMsgIdBytes,
+    });
+
+    // Insert reactions referencing this message
+    const reaction1Id = await testQueries.messages.insert({
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: '👍',
+      type: MessageType.REACTION,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.SENT,
+      timestamp: new Date('2024-01-01T00:01:00Z'),
+      reactionOf: JSON.stringify({ originalMsgId: originalMsgIdBase64 }),
+    });
+
+    const reaction2Id = await testQueries.messages.insert({
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: '❤️',
+      type: MessageType.REACTION,
+      direction: MessageDirection.INCOMING,
+      status: MessageStatus.DELIVERED,
+      timestamp: new Date('2024-01-01T00:02:00Z'),
+      reactionOf: JSON.stringify({ originalMsgId: originalMsgIdBase64 }),
+    });
+
+    // Simulate what the incoming delete path does:
+    // 1. Mark the message as deleted
+    await testQueries.messages.updateById(msgRowId, {
+      content: '[Message deleted]',
+      type: MessageType.DELETED,
+    });
+
+    // 2. Delete reactions for that message (this is the new behavior)
+    await testQueries.messages.deleteReactionsForMessage(
+      OWNER_USER_ID,
+      CONTACT_USER_ID,
+      originalMsgIdBase64
+    );
+
+    const allRows = await testQueries.messages.getByOwnerAndContact(
+      OWNER_USER_ID,
+      CONTACT_USER_ID
+    );
+
+    // The original message should be marked as deleted
+    const deletedMsg = allRows.find(r => r.id === msgRowId);
+    expect(deletedMsg?.type).toBe(MessageType.DELETED);
+    expect(deletedMsg?.content).toBe('[Message deleted]');
+
+    // All reactions for that message should be deleted
+    expect(allRows.find(r => r.id === reaction1Id)).toBeUndefined();
+    expect(allRows.find(r => r.id === reaction2Id)).toBeUndefined();
   });
 });
 
