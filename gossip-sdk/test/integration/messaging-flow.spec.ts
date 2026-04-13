@@ -362,8 +362,8 @@ describe('Messaging Flow', () => {
       const aliceRows = await aliceSdk.messages.getMessages(bobSdk.userId);
       const firstOutgoing = aliceRows.find(m => m.content === 'First');
       expect(firstOutgoing?.id).toBeDefined();
-      // Receiver cannot delete incoming copy (outgoing-only API)
-      expect(await bobSdk.messages.deleteMessage(firstId)).toBe(false);
+      // Receiver can delete incoming messages in 1-to-1
+      expect(await bobSdk.messages.deleteMessage(firstId)).toBe(true);
       expect(await aliceSdk.messages.deleteMessage(firstOutgoing!.id!)).toBe(
         true
       );

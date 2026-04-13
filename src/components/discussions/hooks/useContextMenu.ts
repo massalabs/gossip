@@ -136,7 +136,7 @@ export function useContextMenu({
         onClick: () => onEdit(message),
       });
     }
-    if (onDelete && isOutgoing && !isDeleted && message.id != null) {
+    if (onDelete && !isDeleted && message.id != null) {
       items.push({
         label: t('message_item.delete'),
         icon: createElement(Trash2, { className: 'w-4 h-4' }),

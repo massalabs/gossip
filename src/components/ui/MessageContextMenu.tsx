@@ -61,6 +61,7 @@ const MessageContextMenu: React.FC<MessageContextMenuProps> = ({
     <div
       className="fixed left-0 right-0 top-0 z-1000 flex items-center justify-center"
       style={{ height: 'var(--available-height, 100dvh)' }}
+      onClick={e => e.stopPropagation()}
     >
       {/* Backdrop — dims screen */}
       <div
