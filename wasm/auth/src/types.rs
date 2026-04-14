@@ -111,13 +111,28 @@ impl UserPublicKeys {
         UserId(hash.into())
     }
 
+    /// Address version — matches `UserAddressV0::VERSION` in massa-models.
+    const ADDRESS_VERSION: u64 = 0;
+
     /// Derives the Massa address (AU…) from the stored public key.
+    ///
+    /// Replicates the logic from `massa-models` `Address::from_public_key`:
+    /// `"AU" + bs58check(varint(version) + blake3(public_key_bytes))`
     #[must_use]
     pub fn massa_address(&self) -> String {
         let hash = massa_hash::Hash::compute_from(&self.massa_public_key.to_bytes());
-        // Version 0 varint prefix is a single 0x00 byte
-        let mut payload = Vec::with_capacity(1 + 32);
-        payload.push(0x00);
+        let mut payload = Vec::with_capacity(10 + 32);
+        // Encode version as unsigned LEB128 varint (same as unsigned-varint crate)
+        let mut version = Self::ADDRESS_VERSION;
+        loop {
+            let byte = (version & 0x7F) as u8;
+            version >>= 7;
+            if version == 0 {
+                payload.push(byte);
+                break;
+            }
+            payload.push(byte | 0x80);
+        }
         payload.extend_from_slice(hash.to_bytes());
         format!("AU{}", bs58::encode(payload).with_check().into_string())
     }
@@ -468,20 +483,15 @@ mod tests {
     }
 
     #[test]
-    fn test_massa_address_matches_models() {
-        // Verify our address derivation matches massa_models::Address::from_public_key
-        let root_secret = StaticRootSecret::from_passphrase(b"cross check");
+    fn test_massa_address_matches_web3() {
+        // Cross-checked: massa-web3 (TS) produces the same address for this passphrase
+        let root_secret = StaticRootSecret::from_passphrase(b"cross chain test 123");
         let (pub_keys, _) = derive_keys_from_static_root_secret(&root_secret);
 
-        let our_addr = pub_keys.massa_address();
-
-        // Recompute using massa_hash directly
-        let hash = massa_hash::Hash::compute_from(&pub_keys.massa_public_key.to_bytes());
-        let mut payload = vec![0x00];
-        payload.extend_from_slice(hash.to_bytes());
-        let expected = format!("AU{}", bs58::encode(payload).with_check().into_string());
-
-        assert_eq!(our_addr, expected);
+        assert_eq!(
+            pub_keys.massa_address(),
+            "AU1CKrPb3a1Aj3JJkeTuHJoMswGVDSdgg1ynK7QMMMKHVYjinBfq"
+        );
     }
 
     #[test]
