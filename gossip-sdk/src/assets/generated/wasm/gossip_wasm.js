@@ -147,6 +147,10 @@ function takeFromExternrefTable0(idx) {
   return value;
 }
 
+export function start() {
+  wasm.start();
+}
+
 function _assertClass(instance, klass) {
   if (!(instance instanceof klass)) {
     throw new Error(`expected instance of ${klass.name}`);
@@ -210,6 +214,28 @@ export function aead_encrypt(key, nonce, plaintext, aad) {
 }
 
 /**
+ * Generates user keys from a passphrase.
+ *
+ * Derives all gossip keys (DSA, KEM, Massa, EVM) in a single WASM call so
+ * the passphrase crosses the JS boundary only once.
+ * @param {string} passphrase
+ * @returns {UserKeys}
+ */
+export function generate_user_keys(passphrase) {
+  const ptr0 = passStringToWasm0(
+    passphrase,
+    wasm.__wbindgen_malloc,
+    wasm.__wbindgen_realloc
+  );
+  const len0 = WASM_VECTOR_LEN;
+  const ret = wasm.generate_user_keys(ptr0, len0);
+  if (ret[2]) {
+    throw takeFromExternrefTable0(ret[1]);
+  }
+  return UserKeys.__wrap(ret[0]);
+}
+
+/**
  * Decrypts data using AES-256-SIV authenticated encryption.
  *
  * # Parameters
@@ -268,33 +294,6 @@ export function aead_decrypt(key, nonce, ciphertext, aad) {
     wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
   }
   return v3;
-}
-
-export function start() {
-  wasm.start();
-}
-
-/**
- * Generates user keys from a passphrase (typically a BIP39 mnemonic).
- *
- * Derives gossip keys (DSA, KEM, Massa) and, when the passphrase is a
- * valid BIP39 mnemonic, the EVM address — all in a single WASM call so
- * the mnemonic crosses the JS boundary only once.
- * @param {string} passphrase
- * @returns {UserKeys}
- */
-export function generate_user_keys(passphrase) {
-  const ptr0 = passStringToWasm0(
-    passphrase,
-    wasm.__wbindgen_malloc,
-    wasm.__wbindgen_realloc
-  );
-  const len0 = WASM_VECTOR_LEN;
-  const ret = wasm.generate_user_keys(ptr0, len0);
-  if (ret[2]) {
-    throw takeFromExternrefTable0(ret[1]);
-  }
-  return UserKeys.__wrap(ret[0]);
 }
 
 /**
@@ -1062,7 +1061,7 @@ export class UserKeys {
     wasm.__wbg_userkeys_free(ptr, 0);
   }
   /**
-   * EIP-55 checksummed EVM address (0x…) derived from the mnemonic.
+   * EIP-55 checksummed EVM address (0x…) derived from the EVM public key.
    * @returns {string}
    */
   evm_address() {
@@ -1070,22 +1069,6 @@ export class UserKeys {
     let deferred1_1;
     try {
       const ret = wasm.userkeys_evm_address(this.__wbg_ptr);
-      deferred1_0 = ret[0];
-      deferred1_1 = ret[1];
-      return getStringFromWasm0(ret[0], ret[1]);
-    } finally {
-      wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
-    }
-  }
-  /**
-   * Massa address (AU…) derived from the Massa public key.
-   * @returns {string}
-   */
-  massa_address() {
-    let deferred1_0;
-    let deferred1_1;
-    try {
-      const ret = wasm.userkeys_massa_address(this.__wbg_ptr);
       deferred1_0 = ret[0];
       deferred1_1 = ret[1];
       return getStringFromWasm0(ret[0], ret[1]);
@@ -1114,6 +1097,22 @@ export class UserKeys {
       throw takeFromExternrefTable0(ret[1]);
     }
     return UserSecretKeys.__wrap(ret[0]);
+  }
+  /**
+   * Massa address (AU…) derived from the Massa public key.
+   * @returns {string}
+   */
+  massa_address() {
+    let deferred1_0;
+    let deferred1_1;
+    try {
+      const ret = wasm.userkeys_massa_address(this.__wbg_ptr);
+      deferred1_0 = ret[0];
+      deferred1_1 = ret[1];
+      return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+      wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+    }
   }
 }
 if (Symbol.dispose)
@@ -1161,6 +1160,16 @@ export class UserPublicKeys {
       throw takeFromExternrefTable0(ret[1]);
     }
     return UserPublicKeys.__wrap(ret[0]);
+  }
+  /**
+   * Gets the EVM public key bytes (compressed, secp256k1).
+   * @returns {Uint8Array}
+   */
+  get evm_public_key() {
+    const ret = wasm.userpublickeys_evm_public_key(this.__wbg_ptr);
+    var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v1;
   }
   /**
    * Gets the KEM public key bytes.
@@ -1261,6 +1270,16 @@ export class UserSecretKeys {
       throw takeFromExternrefTable0(ret[1]);
     }
     return UserSecretKeys.__wrap(ret[0]);
+  }
+  /**
+   * Gets the EVM secret key bytes (raw 32-byte scalar).
+   * @returns {Uint8Array}
+   */
+  get evm_secret_key() {
+    const ret = wasm.usersecretkeys_evm_secret_key(this.__wbg_ptr);
+    var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v1;
   }
   /**
    * Gets the KEM secret key bytes.

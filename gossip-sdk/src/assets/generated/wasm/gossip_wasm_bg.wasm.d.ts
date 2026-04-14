@@ -132,6 +132,7 @@ export const userpublickeys_derive_id: (a: number) => [number, number];
 export const userpublickeys_dsa_verification_key: (
   a: number
 ) => [number, number];
+export const userpublickeys_evm_public_key: (a: number) => [number, number];
 export const userpublickeys_from_bytes: (
   a: number,
   b: number
@@ -142,6 +143,7 @@ export const userpublickeys_to_bytes: (
   a: number
 ) => [number, number, number, number];
 export const usersecretkeys_dsa_signing_key: (a: number) => [number, number];
+export const usersecretkeys_evm_secret_key: (a: number) => [number, number];
 export const usersecretkeys_from_bytes: (
   a: number,
   b: number

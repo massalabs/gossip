@@ -1,5 +1,6 @@
 /* tslint:disable */
 /* eslint-disable */
+export function start(): void;
 /**
  * Encrypts data using AES-256-SIV authenticated encryption.
  *
@@ -39,6 +40,13 @@ export function aead_encrypt(
   aad: Uint8Array
 ): Uint8Array;
 /**
+ * Generates user keys from a passphrase.
+ *
+ * Derives all gossip keys (DSA, KEM, Massa, EVM) in a single WASM call so
+ * the passphrase crosses the JS boundary only once.
+ */
+export function generate_user_keys(passphrase: string): UserKeys;
+/**
  * Decrypts data using AES-256-SIV authenticated encryption.
  *
  * # Parameters
@@ -77,15 +85,6 @@ export function aead_decrypt(
   ciphertext: Uint8Array,
   aad: Uint8Array
 ): Uint8Array | undefined;
-export function start(): void;
-/**
- * Generates user keys from a passphrase (typically a BIP39 mnemonic).
- *
- * Derives gossip keys (DSA, KEM, Massa) and, when the passphrase is a
- * valid BIP39 mnemonic, the EVM address — all in a single WASM call so
- * the mnemonic crosses the JS boundary only once.
- */
-export function generate_user_keys(passphrase: string): UserKeys;
 /**
  * Session status indicating the state of a peer session.
  */
@@ -383,10 +382,6 @@ export class UserKeys {
    */
   evm_address(): string;
   /**
-   * Massa address (AU…) derived from the Massa public key.
-   */
-  massa_address(): string;
-  /**
    * Gets the public keys.
    */
   public_keys(): UserPublicKeys;
@@ -394,6 +389,10 @@ export class UserKeys {
    * Gets the secret keys.
    */
   secret_keys(): UserSecretKeys;
+  /**
+   * Massa address (AU…) derived from the Massa public key.
+   */
+  massa_address(): string;
 }
 /**
  * User public keys for authentication and encryption.
@@ -414,6 +413,10 @@ export class UserPublicKeys {
    * Derives a unique user ID from the public keys.
    */
   derive_id(): Uint8Array;
+  /**
+   * Gets the EVM public key bytes (compressed, secp256k1).
+   */
+  readonly evm_public_key: Uint8Array;
   /**
    * Gets the KEM public key bytes.
    */
@@ -442,6 +445,10 @@ export class UserSecretKeys {
    * Serializes the secret keys to bytes for secure storage.
    */
   to_bytes(): Uint8Array;
+  /**
+   * Gets the EVM secret key bytes (raw 32-byte scalar).
+   */
+  readonly evm_secret_key: Uint8Array;
   /**
    * Gets the KEM secret key bytes.
    */
@@ -591,6 +598,7 @@ export interface InitOutput {
   readonly userkeys_secret_keys: (a: number) => [number, number, number];
   readonly userpublickeys_derive_id: (a: number) => [number, number];
   readonly userpublickeys_dsa_verification_key: (a: number) => [number, number];
+  readonly userpublickeys_evm_public_key: (a: number) => [number, number];
   readonly userpublickeys_from_bytes: (
     a: number,
     b: number
@@ -601,6 +609,7 @@ export interface InitOutput {
     a: number
   ) => [number, number, number, number];
   readonly usersecretkeys_dsa_signing_key: (a: number) => [number, number];
+  readonly usersecretkeys_evm_secret_key: (a: number) => [number, number];
   readonly usersecretkeys_from_bytes: (
     a: number,
     b: number
