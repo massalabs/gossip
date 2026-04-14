@@ -182,6 +182,7 @@ pub struct UserKeys {
     public_keys_bytes: Vec<u8>,
     secret_keys_bytes: Vec<u8>,
     evm_address: String,
+    massa_address: String,
 }
 
 #[wasm_bindgen]
@@ -200,6 +201,11 @@ impl UserKeys {
     pub fn evm_address(&self) -> String {
         self.evm_address.clone()
     }
+
+    /// Massa address (AU…) derived from the Massa public key.
+    pub fn massa_address(&self) -> String {
+        self.massa_address.clone()
+    }
 }
 
 /// Generates user keys from a passphrase.
@@ -212,12 +218,14 @@ pub fn generate_user_keys(passphrase: &str) -> Result<UserKeys, JsValue> {
     let (public_keys, secret_keys) = auth::derive_keys_from_static_root_secret(&root_secret);
 
     let evm_address = public_keys.evm_address();
+    let massa_address = public_keys.massa_address();
 
     Ok(UserKeys {
         public_keys_bytes: public_keys.to_bytes(),
         secret_keys_bytes: bincode::serde::encode_to_vec(&secret_keys, bincode::config::standard())
             .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))?,
         evm_address,
+        massa_address,
     })
 }
 

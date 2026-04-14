@@ -295,6 +295,7 @@ dependencies = [
  "alloy-primitives",
  "bincode",
  "blake3",
+ "bs58",
  "crypto-aead",
  "crypto-dsa",
  "crypto-kdf",

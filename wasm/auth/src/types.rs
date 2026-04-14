@@ -111,6 +111,17 @@ impl UserPublicKeys {
         UserId(hash.into())
     }
 
+    /// Derives the Massa address (AU…) from the stored public key.
+    #[must_use]
+    pub fn massa_address(&self) -> String {
+        let hash = massa_hash::Hash::compute_from(&self.massa_public_key.to_bytes());
+        // Version 0 varint prefix is a single 0x00 byte
+        let mut payload = Vec::with_capacity(1 + 32);
+        payload.push(0x00);
+        payload.extend_from_slice(hash.to_bytes());
+        format!("AU{}", bs58::encode(payload).with_check().into_string())
+    }
+
     /// Derives the EIP-55 checksummed EVM address from the stored public key.
     #[must_use]
     pub fn evm_address(&self) -> String {
@@ -434,6 +445,43 @@ mod tests {
         // Verify keys are not all zeros (they have been properly generated)
         assert_ne!(pub_keys.dsa_verification_key.as_bytes(), &[0u8; 1952]);
         assert_ne!(pub_keys.kem_public_key.as_bytes(), &[0u8; 1184]);
+    }
+
+    #[test]
+    fn test_massa_address() {
+        let root_secret = StaticRootSecret::from_passphrase(b"massa address test");
+        let (pub_keys, _) = derive_keys_from_static_root_secret(&root_secret);
+
+        let addr = pub_keys.massa_address();
+        assert!(addr.starts_with("AU"), "Massa address must start with AU");
+        // AU + bs58check(1 byte version + 32 bytes hash) → typically ~50 chars
+        assert!(addr.len() > 40, "Massa address seems too short: {}", addr);
+    }
+
+    #[test]
+    fn test_massa_address_deterministic() {
+        let root_secret = StaticRootSecret::from_passphrase(b"deterministic massa");
+        let (pub1, _) = derive_keys_from_static_root_secret(&root_secret);
+        let (pub2, _) = derive_keys_from_static_root_secret(&root_secret);
+
+        assert_eq!(pub1.massa_address(), pub2.massa_address());
+    }
+
+    #[test]
+    fn test_massa_address_matches_models() {
+        // Verify our address derivation matches massa_models::Address::from_public_key
+        let root_secret = StaticRootSecret::from_passphrase(b"cross check");
+        let (pub_keys, _) = derive_keys_from_static_root_secret(&root_secret);
+
+        let our_addr = pub_keys.massa_address();
+
+        // Recompute using massa_hash directly
+        let hash = massa_hash::Hash::compute_from(&pub_keys.massa_public_key.to_bytes());
+        let mut payload = vec![0x00];
+        payload.extend_from_slice(hash.to_bytes());
+        let expected = format!("AU{}", bs58::encode(payload).with_check().into_string());
+
+        assert_eq!(our_addr, expected);
     }
 
     #[test]

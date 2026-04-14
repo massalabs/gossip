@@ -19,6 +19,7 @@ massa_signature = { git = "https://github.com/massalabs/massa.git", package = "m
 massa_hash = { git = "https://github.com/massalabs/massa.git", package = "massa_hash" }
 bincode = { version = "2.0", features = ["serde"] }
 blake3 = "1.5"
+bs58 = { version = "0.5", features = ["check"] }
 k256 = "0.13"
 sha3 = "0.10"
 alloy-primitives = { version = "1", default-features = false, features = ["std"] }

@@ -379,9 +379,13 @@ export class UserKeys {
   free(): void;
   [Symbol.dispose](): void;
   /**
-   * EIP-55 checksummed EVM address (0x…) derived from the mnemonic.
+   * EIP-55 checksummed EVM address (0x…) derived from the EVM public key.
    */
   evm_address(): string;
+  /**
+   * Massa address (AU…) derived from the Massa public key.
+   */
+  massa_address(): string;
   /**
    * Gets the public keys.
    */
@@ -582,6 +586,7 @@ export interface InitOutput {
     b: number
   ) => [number, number, number, number];
   readonly userkeys_evm_address: (a: number) => [number, number];
+  readonly userkeys_massa_address: (a: number) => [number, number];
   readonly userkeys_public_keys: (a: number) => [number, number, number];
   readonly userkeys_secret_keys: (a: number) => [number, number, number];
   readonly userpublickeys_derive_id: (a: number) => [number, number];
