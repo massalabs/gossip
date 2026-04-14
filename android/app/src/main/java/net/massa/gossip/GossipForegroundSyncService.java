@@ -199,6 +199,7 @@ public class GossipForegroundSyncService extends Service {
                 .setContentIntent(contentIntent)
                 .setOngoing(true)
                 .setPriority(NotificationCompat.PRIORITY_LOW)
+                .setOnlyAlertOnce(true)
                 .build();
     }
 
