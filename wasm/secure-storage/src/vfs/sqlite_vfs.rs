@@ -236,8 +236,10 @@ impl VfsCtx {
 /// `xRead`, which it guarantees to be a writable buffer of at least `iAmt`
 /// bytes valid until the call returns.
 fn read_buffer<'a>(ptr: *mut core::ffi::c_void, len: c_int) -> &'a mut [u8] {
+    debug_assert!(len >= 0, "SQLite passed negative iAmt to xRead");
+    let len = len.max(0) as usize;
     // SAFETY: documented above.
-    unsafe { core::slice::from_raw_parts_mut(ptr.cast::<u8>(), len as usize) }
+    unsafe { core::slice::from_raw_parts_mut(ptr.cast::<u8>(), len) }
 }
 
 /// Write a 64-bit size through a SQLite-supplied output pointer.
@@ -245,8 +247,8 @@ fn read_buffer<'a>(ptr: *mut core::ffi::c_void, len: c_int) -> &'a mut [u8] {
 /// Soundness: only ever called with the `pSize` pointer SQLite passes to
 /// `xFileSize`, which it guarantees to be a writable `sqlite3_int64*`.
 fn write_size(out: *mut sqlite3_int64, value: usize) {
-    // SAFETY: documented above.
-    unsafe { *out = value as sqlite3_int64 }
+    // SAFETY: documented above. On WASM32, usize fits in i64.
+    unsafe { *out = sqlite3_int64::try_from(value).unwrap_or(sqlite3_int64::MAX) }
 }
 
 /// Resolve `pAppData` to our `&'static AppState` for the safe store callbacks.

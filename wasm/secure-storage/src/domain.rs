@@ -38,12 +38,13 @@ pub fn block_scope(
     block: u64,
 ) {
     buf.clear();
-    // String::write_fmt is infallible
-    let _ = write!(
+    // String::write_fmt is infallible — unwrap is safe.
+    write!(
         buf,
         "{domain}:secureStorage:session:v{version}:i{}:n{namespace}:b{block}",
         index.as_u8()
-    );
+    )
+    .unwrap();
 }
 
 /// Salt for password KDF: `{root}:password_kdf`
@@ -79,11 +80,13 @@ pub fn block_kdf_salt(
     block: u64,
 ) {
     buf.clear();
-    let _ = write!(
+    // String::write_fmt is infallible — unwrap is safe.
+    write!(
         buf,
         "{domain}:secureStorage:session:v{version}:i{}:n{namespace}:b{block}:kdf:salt",
         index.as_u8()
-    );
+    )
+    .unwrap();
 }
 
 /// Label for per-block AEAD key derivation: `{block_scope}:kdf:block_aead_key`
@@ -98,11 +101,13 @@ pub fn block_aead_key_label(
     block: u64,
 ) {
     buf.clear();
-    let _ = write!(
+    // String::write_fmt is infallible — unwrap is safe.
+    write!(
         buf,
         "{domain}:secureStorage:session:v{version}:i{}:n{namespace}:b{block}:kdf:block_aead_key",
         index.as_u8()
-    );
+    )
+    .unwrap();
 }
 
 /// AAD for block AEAD encryption: `{block_scope}:block_aead`
@@ -117,11 +122,13 @@ pub fn block_aead_aad(
     block: u64,
 ) {
     buf.clear();
-    let _ = write!(
+    // String::write_fmt is infallible — unwrap is safe.
+    write!(
         buf,
         "{domain}:secureStorage:session:v{version}:i{}:n{namespace}:b{block}:block_aead",
         index.as_u8()
-    );
+    )
+    .unwrap();
 }
 
 /// Label for sk_wrap_key derivation: `{root}:kdf:sk_wrap_key`
