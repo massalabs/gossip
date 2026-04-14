@@ -109,6 +109,12 @@ impl UserPublicKeys {
         self.inner.massa_public_key.to_bytes()
     }
 
+    /// Gets the EVM public key bytes (compressed, secp256k1).
+    #[wasm_bindgen(getter)]
+    pub fn evm_public_key(&self) -> Vec<u8> {
+        self.inner.evm_public_key.clone()
+    }
+
     /// Serializes the public keys to bytes.
     pub fn to_bytes(&self) -> Result<Vec<u8>, JsValue> {
         Ok(self.inner.to_bytes())
@@ -162,6 +168,12 @@ impl UserSecretKeys {
     pub fn massa_secret_key(&self) -> Vec<u8> {
         self.inner.massa_keypair.to_bytes().to_vec()
     }
+
+    /// Gets the EVM secret key bytes (raw 32-byte scalar).
+    #[wasm_bindgen(getter)]
+    pub fn evm_secret_key(&self) -> Vec<u8> {
+        self.inner.evm_secret_key.to_vec()
+    }
 }
 
 /// User keypair containing both public and secret keys.
@@ -170,6 +182,7 @@ pub struct UserKeys {
     public_keys_bytes: Vec<u8>,
     secret_keys_bytes: Vec<u8>,
     evm_address: String,
+    massa_address: String,
 }
 
 #[wasm_bindgen]
@@ -184,31 +197,35 @@ impl UserKeys {
         UserSecretKeys::from_bytes(&self.secret_keys_bytes)
     }
 
-    /// EIP-55 checksummed EVM address (0x…) derived from the mnemonic.
-    /// Returns "" when the passphrase is not a valid BIP39 mnemonic.
+    /// EIP-55 checksummed EVM address (0x…) derived from the EVM public key.
     pub fn evm_address(&self) -> String {
         self.evm_address.clone()
     }
+
+    /// Massa address (AU…) derived from the Massa public key.
+    pub fn massa_address(&self) -> String {
+        self.massa_address.clone()
+    }
 }
 
-/// Generates user keys from a passphrase (typically a BIP39 mnemonic).
+/// Generates user keys from a passphrase.
 ///
-/// Derives gossip keys (DSA, KEM, Massa) and, when the passphrase is a
-/// valid BIP39 mnemonic, the EVM address — all in a single WASM call so
-/// the mnemonic crosses the JS boundary only once.
+/// Derives all gossip keys (DSA, KEM, Massa, EVM) in a single WASM call so
+/// the passphrase crosses the JS boundary only once.
 #[wasm_bindgen]
 pub fn generate_user_keys(passphrase: &str) -> Result<UserKeys, JsValue> {
     let root_secret = auth::StaticRootSecret::from_passphrase(passphrase.as_bytes());
-
     let (public_keys, secret_keys) = auth::derive_keys_from_static_root_secret(&root_secret);
 
-    let evm_address = auth::derive_evm_address(passphrase).unwrap_or_default();
+    let evm_address = public_keys.evm_address();
+    let massa_address = public_keys.massa_address();
 
     Ok(UserKeys {
         public_keys_bytes: public_keys.to_bytes(),
         secret_keys_bytes: bincode::serde::encode_to_vec(&secret_keys, bincode::config::standard())
             .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))?,
         evm_address,
+        massa_address,
     })
 }
 

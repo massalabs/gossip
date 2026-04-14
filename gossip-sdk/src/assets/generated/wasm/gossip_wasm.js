@@ -1078,6 +1078,22 @@ export class UserKeys {
     }
   }
   /**
+   * Massa address (AU…) derived from the Massa public key.
+   * @returns {string}
+   */
+  massa_address() {
+    let deferred1_0;
+    let deferred1_1;
+    try {
+      const ret = wasm.userkeys_massa_address(this.__wbg_ptr);
+      deferred1_0 = ret[0];
+      deferred1_1 = ret[1];
+      return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+      wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+    }
+  }
+  /**
    * Gets the public keys.
    * @returns {UserPublicKeys}
    */

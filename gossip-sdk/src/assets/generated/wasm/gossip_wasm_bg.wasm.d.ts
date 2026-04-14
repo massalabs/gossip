@@ -125,6 +125,7 @@ export const sessionmanagerwrapper_to_encrypted_blob: (
   b: number
 ) => [number, number, number, number];
 export const userkeys_evm_address: (a: number) => [number, number];
+export const userkeys_massa_address: (a: number) => [number, number];
 export const userkeys_public_keys: (a: number) => [number, number, number];
 export const userkeys_secret_keys: (a: number) => [number, number, number];
 export const userpublickeys_derive_id: (a: number) => [number, number];
