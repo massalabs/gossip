@@ -8,7 +8,8 @@ build/
 # Generated files
 *.min.js
 *.min.css
-src/assets/generated
+src/assets/generated/
+**/assets/generated/**
 
 # Android assets
 android/app/src/main/assets
