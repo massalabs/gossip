@@ -57,6 +57,16 @@ fn map_err(e: SecureStorageError) -> JsValue {
     JsValue::from_str(&e.to_string())
 }
 
+/// Safe f64→u64 conversion for JS `number` offsets.
+/// Returns `None` for NaN, negative, infinity, or values beyond u64 range.
+fn safe_f64_to_u64(v: f64) -> Option<u64> {
+    if v.is_finite() && v >= 0.0 && v <= u64::MAX as f64 {
+        Some(v as u64)
+    } else {
+        None
+    }
+}
+
 fn not_initialized() -> JsValue {
     JsValue::from_str("secure storage not initialized")
 }
@@ -221,6 +231,8 @@ fn ensure_namespace_state_loaded(
 
 #[wasm_bindgen(js_name = writeNamespaceData)]
 pub fn write_namespace_data(namespace: u8, offset: f64, data: &[u8]) -> Result<(), JsValue> {
+    let offset = safe_f64_to_u64(offset)
+        .ok_or_else(|| JsValue::from_str("invalid offset"))?;
     with_app_state(|app| {
         let mut state = app.state.borrow_mut();
         ensure_namespace_state_loaded(&mut state, namespace)?;
@@ -234,13 +246,15 @@ pub fn write_namespace_data(namespace: u8, offset: f64, data: &[u8]) -> Result<(
             .as_ref()
             .ok_or_else(|| JsValue::from_str("session not unlocked"))?;
         let ns_state = namespace_states.entry(namespace).or_default();
-        crate::write_session_data(backend, domain, namespace, session, ns_state, offset as u64, data)
+        crate::write_session_data(backend, domain, namespace, session, ns_state, offset, data)
             .map_err(map_err)
     })
 }
 
 #[wasm_bindgen(js_name = readNamespaceData)]
 pub fn read_namespace_data(namespace: u8, offset: f64, len: usize) -> Result<Vec<u8>, JsValue> {
+    let offset = safe_f64_to_u64(offset)
+        .ok_or_else(|| JsValue::from_str("invalid offset"))?;
     with_app_state(|app| {
         let mut state = app.state.borrow_mut();
         ensure_namespace_state_loaded(&mut state, namespace)?;
@@ -259,7 +273,7 @@ pub fn read_namespace_data(namespace: u8, offset: f64, len: usize) -> Result<Vec
             namespace,
             session,
             &ns_state,
-            offset as u64,
+            offset,
             len,
         )
         .map_err(map_err)?;
@@ -469,6 +483,8 @@ fn run_statement(db: &SafeDb, sql: &str, params: &Array) -> Result<ExecResult, J
         };
     }
 
+    // Safe: SQLite rowids are sequential and won't exceed 2^53 in practice.
+    // Beyond that, f64 loses precision — acceptable for our use case.
     let last_insert_rowid = db.last_insert_rowid() as f64;
 
     // stmt drops here → sqlite3_finalize.

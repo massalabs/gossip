@@ -83,22 +83,18 @@ async fn has_any_data(db: &IdbDatabase) -> std::result::Result<bool, JsValue> {
     Ok(n > 0)
 }
 
-/// Apply puts and deletes in a single atomic readwrite transaction.
-async fn batch_update(
+/// Apply puts in a single atomic readwrite transaction.
+async fn batch_put(
     db: &IdbDatabase,
     puts: &[(String, Uint8Array)],
-    deletes: &[String],
 ) -> std::result::Result<(), JsValue> {
-    if puts.is_empty() && deletes.is_empty() {
+    if puts.is_empty() {
         return Ok(());
     }
     let tx = db.transaction_on_one_with_mode(STORE_NAME, IdbTransactionMode::Readwrite)?;
     let store = tx.object_store(STORE_NAME)?;
     for (k, v) in puts {
         store.put_key_val(&JsValue::from_str(k), v)?;
-    }
-    for k in deletes {
-        store.delete(&JsValue::from_str(k))?;
     }
     Ok(tx.await.into_result()?)
 }
@@ -142,7 +138,7 @@ impl IdbBlockStorage {
     /// transaction.
     ///
     /// Uses the drain/restore pattern: phase 1 atomically drains the
-    /// dirty/tombstone sets into a snapshot (state becomes clean).
+    /// dirty sets into a snapshot (state becomes clean).
     /// Phase 2 commits the snapshot to IDB. On success, the snapshot
     /// is dropped. On failure, [`IdbStorageState::restore_pending`]
     /// puts the entries back so the next flush retries.
@@ -152,7 +148,7 @@ impl IdbBlockStorage {
     /// no race, no data loss, even when overwriting the same block.
     pub async fn persist_dirty(&self) -> std::result::Result<(), JsValue> {
         // Phase 1: drain (sync, under borrow_mut). Atomically empties
-        // the dirty/tombstone sets and captures their contents.
+        // the dirty sets and captures their contents.
         let snapshot = {
             let mut state = self.state.borrow_mut();
             let snap = state.drain_pending();
@@ -180,22 +176,10 @@ impl IdbBlockStorage {
             let key = IdbKey::Keypair { session: *session }.encode();
             puts.push((key, Uint8Array::from(data.as_slice())));
         }
-        let deletes: Vec<String> = snapshot
-            .deletes
-            .iter()
-            .map(|(session, namespace, idx)| {
-                IdbKey::Block {
-                    session: *session,
-                    namespace: *namespace,
-                    idx: *idx,
-                }
-                .encode()
-            })
-            .collect();
 
         // Phase 2: atomic commit to IDB. On failure, restore the
         // snapshot so the next flush will retry.
-        if let Err(e) = batch_update(&self.db, &puts, &deletes).await {
+        if let Err(e) = batch_put(&self.db, &puts).await {
             self.state.borrow_mut().restore_pending(snapshot);
             return Err(e);
         }

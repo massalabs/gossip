@@ -81,7 +81,8 @@ pub fn derive_block_aead_key(
 mod tests {
     use super::*;
 
-    const ROOT_KEY: [u8; 32] = [0xAA; 32];
+    /// Deterministic test-only root key — NOT for production use.
+    const TEST_ROOT_KEY: [u8; 32] = [0xAA; 32];
 
     fn idx(i: u8) -> SessionIndex {
         SessionIndex::new(i).unwrap()
@@ -102,57 +103,57 @@ mod tests {
 
     #[test]
     fn deterministic() {
-        let k1 = derive("d", 0, 0, 0, &ROOT_KEY, 0);
-        let k2 = derive("d", 0, 0, 0, &ROOT_KEY, 0);
+        let k1 = derive("d", 0, 0, 0, &TEST_ROOT_KEY, 0);
+        let k2 = derive("d", 0, 0, 0, &TEST_ROOT_KEY, 0);
         assert_eq!(k1, k2);
     }
 
     #[test]
     fn different_blocks() {
-        let k0 = derive("d", 0, 0, 0, &ROOT_KEY, 0);
-        let k1 = derive("d", 0, 0, 0, &ROOT_KEY, 1);
+        let k0 = derive("d", 0, 0, 0, &TEST_ROOT_KEY, 0);
+        let k1 = derive("d", 0, 0, 0, &TEST_ROOT_KEY, 1);
         assert_ne!(k0, k1);
     }
 
     #[test]
     fn different_sessions() {
-        let k0 = derive("d", 0, 0, 0, &ROOT_KEY, 0);
-        let k1 = derive("d", 0, 1, 0, &ROOT_KEY, 0);
+        let k0 = derive("d", 0, 0, 0, &TEST_ROOT_KEY, 0);
+        let k1 = derive("d", 0, 1, 0, &TEST_ROOT_KEY, 0);
         assert_ne!(k0, k1);
     }
 
     #[test]
     fn different_namespaces() {
-        let k0 = derive("d", 0, 0, 0, &ROOT_KEY, 0);
-        let k1 = derive("d", 0, 0, 1, &ROOT_KEY, 0);
+        let k0 = derive("d", 0, 0, 0, &TEST_ROOT_KEY, 0);
+        let k1 = derive("d", 0, 0, 1, &TEST_ROOT_KEY, 0);
         assert_ne!(k0, k1);
     }
 
     #[test]
     fn different_versions() {
-        let k0 = derive("d", 0, 0, 0, &ROOT_KEY, 0);
-        let k1 = derive("d", 1, 0, 0, &ROOT_KEY, 0);
+        let k0 = derive("d", 0, 0, 0, &TEST_ROOT_KEY, 0);
+        let k1 = derive("d", 1, 0, 0, &TEST_ROOT_KEY, 0);
         assert_ne!(k0, k1);
     }
 
     #[test]
     fn different_root_keys() {
         let other_root = [0xBB; 32];
-        let k0 = derive("d", 0, 0, 0, &ROOT_KEY, 0);
+        let k0 = derive("d", 0, 0, 0, &TEST_ROOT_KEY, 0);
         let k1 = derive("d", 0, 0, 0, &other_root, 0);
         assert_ne!(k0, k1);
     }
 
     #[test]
     fn different_domains() {
-        let k0 = derive("d", 0, 0, 0, &ROOT_KEY, 0);
-        let k1 = derive("other-domain", 0, 0, 0, &ROOT_KEY, 0);
+        let k0 = derive("d", 0, 0, 0, &TEST_ROOT_KEY, 0);
+        let k1 = derive("other-domain", 0, 0, 0, &TEST_ROOT_KEY, 0);
         assert_ne!(k0, k1);
     }
 
     #[test]
     fn returns_block_scope() {
-        let (_key, scope) = derive_block_aead_key("app", 0, idx(2), 0, &ROOT_KEY, 5);
+        let (_key, scope) = derive_block_aead_key("app", 0, idx(2), 0, &TEST_ROOT_KEY, 5);
         assert_eq!(scope, "app:secureStorage:session:v0:i2:n0:b5");
     }
 }

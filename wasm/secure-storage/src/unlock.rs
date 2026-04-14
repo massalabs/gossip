@@ -109,7 +109,8 @@ pub fn unlock_session<S: BlockStorage + KeypairStorage>(
             &nonce,
             &kf.sk_ct,
             sk_wrap_aad.as_bytes(),
-        );
+        )
+        .map(Zeroizing::new);
 
         // Always parse pk/sk regardless of AEAD result to equalize timing.
         let sk_parse = decrypt_result
