@@ -756,9 +756,12 @@ export class DatabaseConnection {
     data: Uint8Array
   ): Promise<void> {
     if (this.state.useNativePlugin) {
-      throw new Error(
-        'secureStorage namespace data API not implemented on native plugin'
-      );
+      await this.requireNativePlugin().writeNamespaceData({
+        namespace,
+        offset,
+        data: Array.from(data),
+      });
+      return;
     }
     const proxy = this.requireSecureProxy();
     // Same pattern as `execRawDirect`: mark just the Uint8Array buffer
@@ -777,9 +780,12 @@ export class DatabaseConnection {
     len: number
   ): Promise<Uint8Array> {
     if (this.state.useNativePlugin) {
-      throw new Error(
-        'secureStorage namespace data API not implemented on native plugin'
-      );
+      const { data } = await this.requireNativePlugin().readNamespaceData({
+        namespace,
+        offset,
+        len,
+      });
+      return Uint8Array.from(data);
     }
     return this.requireSecureProxy().readNamespaceData(namespace, offset, len);
   }
@@ -787,9 +793,10 @@ export class DatabaseConnection {
   /** Total bytes currently stored in a namespace stream (0 if empty). */
   async secureStorageNamespaceDataLength(namespace: number): Promise<number> {
     if (this.state.useNativePlugin) {
-      throw new Error(
-        'secureStorage namespace data API not implemented on native plugin'
-      );
+      const { length } = await this.requireNativePlugin().namespaceDataLength({
+        namespace,
+      });
+      return length;
     }
     return this.requireSecureProxy().namespaceDataLength(namespace);
   }
@@ -797,9 +804,8 @@ export class DatabaseConnection {
   /** Truncate a namespace stream to length 0. */
   async secureStorageClearNamespace(namespace: number): Promise<void> {
     if (this.state.useNativePlugin) {
-      throw new Error(
-        'secureStorage namespace data API not implemented on native plugin'
-      );
+      await this.requireNativePlugin().clearNamespace({ namespace });
+      return;
     }
     await this.requireSecureProxy().clearNamespace(namespace);
   }
