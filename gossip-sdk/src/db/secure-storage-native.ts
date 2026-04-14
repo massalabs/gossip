@@ -26,25 +26,24 @@ export interface SecureStorageNativePlugin {
   }>;
   flush(): Promise<void>;
   close(): Promise<void>;
-  // @todo native-foundation: namespace data RPCs not yet wired through
-  // the Capacitor plugin. The web worker exposes them via Comlink (see
-  // `secure-storage-worker.ts`); native must mirror the surface or the
-  // session-blob namespace path is unusable on iOS/Android. sqlite.ts
-  // throws "not implemented on native plugin" inline until they exist.
-  writeNamespaceData?(options: {
+
+  // Namespace data API - parity with the WASM worker. Enables the SDK
+  // to persist the session blob on the native path without going
+  // through the SQL VFS.
+  writeNamespaceData(options: {
     namespace: number;
     offset: number;
     data: number[];
   }): Promise<void>;
-  readNamespaceData?(options: {
+  readNamespaceData(options: {
     namespace: number;
     offset: number;
-    length: number;
+    len: number;
   }): Promise<{ data: number[] }>;
-  namespaceDataLength?(options: {
+  namespaceDataLength(options: {
     namespace: number;
   }): Promise<{ length: number }>;
-  clearNamespace?(options: { namespace: number }): Promise<void>;
+  clearNamespace(options: { namespace: number }): Promise<void>;
 }
 
 export const SecureStorageNative = registerPlugin<SecureStorageNativePlugin>(

@@ -7,7 +7,10 @@
 //! The SQL execution path uses a global `rusqlite::Connection` stored
 //! behind the same `Mutex` as the VFS state.
 
+use std::path::Path;
 use std::sync::{Mutex, OnceLock};
+
+use zeroize::Zeroizing;
 
 use crate::error::SecureStorageError;
 use crate::vfs::native_vfs;
@@ -72,8 +75,40 @@ impl From<rusqlite::Error> for SecureStorageException {
 
 // ── Lifecycle exports ───────────────────────────────────────────────
 
+/// Validate a storage path received from the plugin layer.
+///
+/// Rejects:
+/// * interior NUL bytes (UniFFI allows them in `String`, but we pass the
+///   path to filesystem APIs that don't tolerate them),
+/// * non-absolute paths (the plugin should pass an absolute path rooted
+///   in the platform's sandboxed storage directory),
+/// * path components containing `..` (defence-in-depth against a
+///   compromised plugin callsite traversing out of the sandbox).
+fn validate_storage_path(path: &str) -> std::result::Result<(), SecureStorageException> {
+    if path.bytes().any(|b| b == 0) {
+        return Err(SecureStorageException::Error {
+            msg: "path contains interior NUL".into(),
+        });
+    }
+    let p = Path::new(path);
+    if !p.is_absolute() {
+        return Err(SecureStorageException::Error {
+            msg: "path must be absolute".into(),
+        });
+    }
+    for comp in p.components() {
+        if matches!(comp, std::path::Component::ParentDir) {
+            return Err(SecureStorageException::Error {
+                msg: "path must not contain '..'".into(),
+            });
+        }
+    }
+    Ok(())
+}
+
 #[uniffi::export]
 pub fn init_secure_storage(path: String, domain: String) -> Result<(), SecureStorageException> {
+    validate_storage_path(&path)?;
     native_vfs::init_native(&path, &domain)?;
     native_vfs::register()?;
     Ok(())
@@ -87,6 +122,9 @@ pub fn provision_storage_native() -> Result<(), SecureStorageException> {
 
 #[uniffi::export]
 pub fn allocate_session_native(slot: u8, password: Vec<u8>) -> Result<(), SecureStorageException> {
+    // Wrap at the boundary so the password buffer is zeroized when the
+    // function returns, whether or not `allocate` succeeds.
+    let password = Zeroizing::new(password);
     native_vfs::allocate(slot, &password)?;
     // Auto-open the database after allocation.
     let conn = native_vfs::open_db()?;
@@ -97,6 +135,7 @@ pub fn allocate_session_native(slot: u8, password: Vec<u8>) -> Result<(), Secure
 
 #[uniffi::export]
 pub fn unlock_session_native(password: Vec<u8>) -> Result<bool, SecureStorageException> {
+    let password = Zeroizing::new(password);
     let ok = native_vfs::unlock(&password)?;
     if ok {
         let conn = native_vfs::open_db()?;
@@ -179,8 +218,13 @@ pub fn exec_sql_native(
                 rusqlite::types::ValueRef::Null => SqlValue::Null,
                 rusqlite::types::ValueRef::Integer(v) => SqlValue::Integer { value: v },
                 rusqlite::types::ValueRef::Real(v) => SqlValue::Real { value: v },
-                rusqlite::types::ValueRef::Text(v) => SqlValue::Text {
-                    value: String::from_utf8_lossy(v).into_owned(),
+                // A TEXT column may contain non-UTF-8 bytes if the caller
+                // wrote a raw BLOB into it. `from_utf8_lossy` would
+                // silently replace with U+FFFD; fall back to the Blob
+                // variant so callers can detect and handle the raw bytes.
+                rusqlite::types::ValueRef::Text(v) => match std::str::from_utf8(v) {
+                    Ok(s) => SqlValue::Text { value: s.to_string() },
+                    Err(_) => SqlValue::Blob { value: v.to_vec() },
                 },
                 rusqlite::types::ValueRef::Blob(v) => SqlValue::Blob {
                     value: v.to_vec(),
@@ -211,6 +255,9 @@ pub fn write_namespace_data_native(
     offset: u64,
     data: Vec<u8>,
 ) -> Result<(), SecureStorageException> {
+    // Session blobs and other namespace payloads may contain key
+    // material; zeroize on return.
+    let data = Zeroizing::new(data);
     Ok(native_vfs::write_namespace_data(namespace, offset, &data)?)
 }
 
@@ -226,6 +273,11 @@ pub fn read_namespace_data_native(
 #[uniffi::export]
 pub fn namespace_data_length_native(namespace: u8) -> Result<u64, SecureStorageException> {
     Ok(native_vfs::namespace_data_length(namespace)?)
+}
+
+#[uniffi::export]
+pub fn clear_namespace_native(namespace: u8) -> Result<(), SecureStorageException> {
+    Ok(native_vfs::clear_namespace(namespace)?)
 }
 
 // Note: `uniffi::setup_scaffolding!()` is in lib.rs (crate root),

@@ -5,21 +5,32 @@
 //! `read_session_data`, with writes buffered in RAM and flushed at
 //! COMMIT (`x_sync`).
 //!
-//! Uses a global `Mutex` instead of `thread_local!` for thread safety.
+//! Process safety: redb takes an exclusive OS-level file lock on
+//! `storage.redb` at `Database::create`, so a second process opening
+//! the same path fails at `init_native` rather than reaching SQLite.
+//! Combined with rusqlite's `locking_mode=EXCLUSIVE` + `journal_mode=OFF`,
+//! the no-op `xLock`/`xUnlock`/`xCheckReservedLock` callbacks below are
+//! safe: concurrent access is already prevented one layer down.
+//!
+//! Thread safety: a single global `Mutex<Option<VfsState>>` guards the
+//! VFS state and is acquired by every FFI callback. Every callback body
+//! is wrapped in `catch_unwind` so a Rust panic or poisoned mutex turns
+//! into `SQLITE_IOERR` instead of unwinding into SQLite's C code.
 
 use std::collections::HashMap;
 use std::ffi::{CStr, CString};
 use std::mem::size_of;
 use std::os::raw::{c_char, c_int, c_void};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::Path;
-use std::sync::{Mutex, Once, OnceLock};
+use std::sync::{Mutex, MutexGuard, Once, OnceLock};
 
 use rusqlite::ffi::{
     sqlite3_file, sqlite3_io_methods, sqlite3_vfs, sqlite3_vfs_find, sqlite3_vfs_register,
     SQLITE_IOERR, SQLITE_IOERR_SHORT_READ, SQLITE_NOTFOUND, SQLITE_OK, SQLITE_OPEN_MAIN_DB,
 };
 
-use crate::constants::SQL_NAMESPACE;
+use crate::DEFAULT_NAMESPACE;
 use crate::error::{Result, SecureStorageError};
 use crate::types::SessionIndex;
 use crate::unlock::{NamespaceState, UnlockedSession, load_namespace_state};
@@ -47,13 +58,13 @@ struct VfsState {
 impl VfsState {
     fn sql_ns_state(&self) -> NamespaceState {
         self.namespace_states
-            .get(&SQL_NAMESPACE)
+            .get(&DEFAULT_NAMESPACE)
             .copied()
             .unwrap_or_default()
     }
 
     fn sql_ns_state_mut(&mut self) -> &mut NamespaceState {
-        self.namespace_states.entry(SQL_NAMESPACE).or_default()
+        self.namespace_states.entry(DEFAULT_NAMESPACE).or_default()
     }
 }
 
@@ -125,27 +136,56 @@ pub fn init_native(path: &str, domain: &str) -> Result<()> {
 }
 
 static REGISTER_VFS: Once = Once::new();
+static REGISTER_RESULT: OnceLock<std::result::Result<(), String>> = OnceLock::new();
 
 /// Register the encrypted VFS with SQLite (non-default). Idempotent.
+///
+/// Failures here propagate back to the caller via `SecureStorageError::Storage`
+/// rather than panicking — panicking across the UniFFI boundary on mobile
+/// is undefined behaviour because Rust unwinding cannot traverse
+/// Swift/Kotlin frames.
 pub fn register() -> Result<()> {
-    REGISTER_VFS.call_once(|| unsafe {
-        let default = sqlite3_vfs_find(std::ptr::null());
-        assert!(!default.is_null(), "default VFS not found");
+    REGISTER_VFS.call_once(|| {
+        let outcome = unsafe {
+            let default = sqlite3_vfs_find(std::ptr::null());
+            if default.is_null() {
+                Err("default VFS not found".to_string())
+            } else {
+                let mut vfs = *default;
+                match CString::new(VFS_NAME) {
+                    Ok(name) => {
+                        // Intentionally leaked: the VFS lives for the
+                        // lifetime of the process, so the `zName` pointer
+                        // must remain valid forever.
+                        vfs.zName = name.into_raw();
+                        vfs.szOsFile = size_of::<EncFile>() as c_int;
+                        vfs.xOpen = Some(x_open);
+                        vfs.xDelete = Some(x_delete);
+                        vfs.xAccess = Some(x_access);
+                        vfs.xFullPathname = Some(x_full_pathname);
 
-        let mut vfs = *default;
-        let name = CString::new(VFS_NAME).unwrap();
-        vfs.zName = name.into_raw();
-        vfs.szOsFile = size_of::<EncFile>() as c_int;
-        vfs.xOpen = Some(x_open);
-        vfs.xDelete = Some(x_delete);
-        vfs.xAccess = Some(x_access);
-        vfs.xFullPathname = Some(x_full_pathname);
-
-        let ptr = Box::into_raw(Box::new(vfs));
-        let rc = sqlite3_vfs_register(ptr, 0);
-        assert_eq!(rc, SQLITE_OK as c_int, "encrypted VFS registration failed");
+                        let ptr = Box::into_raw(Box::new(vfs));
+                        let rc = sqlite3_vfs_register(ptr, 0);
+                        if rc == SQLITE_OK as c_int {
+                            Ok(())
+                        } else {
+                            Err(format!("sqlite3_vfs_register failed: rc={rc}"))
+                        }
+                    }
+                    Err(_) => Err("VFS_NAME must be NUL-free".to_string()),
+                }
+            }
+        };
+        let _ = REGISTER_RESULT.set(outcome);
     });
-    Ok(())
+    match REGISTER_RESULT.get() {
+        Some(Ok(())) => Ok(()),
+        Some(Err(msg)) => Err(SecureStorageError::Storage(msg.clone())),
+        // Should not happen — `call_once` always sets REGISTER_RESULT.
+        None => Err(SecureStorageError::Storage(
+            "VFS registration state missing".into(),
+        )),
+    }
 }
 
 /// Provision all session slots.
@@ -170,7 +210,7 @@ pub fn allocate(slot: u8, password: &[u8]) -> Result<()> {
     st.pending_writes.clear();
     st.namespace_states.clear();
     st.namespace_states
-        .insert(SQL_NAMESPACE, NamespaceState::empty());
+        .insert(DEFAULT_NAMESPACE, NamespaceState::empty());
     st.pending_file_size = 0;
     st.session = Some(session);
     Ok(())
@@ -186,11 +226,11 @@ pub fn unlock(password: &[u8]) -> Result<bool> {
     match crate::unlock_session(&st.backend, &st.domain, password) {
         Ok(session) => {
             let sql_state =
-                load_namespace_state(&st.backend, &st.domain, &session, SQL_NAMESPACE)?;
+                load_namespace_state(&st.backend, &st.domain, &session, DEFAULT_NAMESPACE)?;
             st.pending_writes.clear();
             st.pending_file_size = sql_state.total_data_length;
             st.namespace_states.clear();
-            st.namespace_states.insert(SQL_NAMESPACE, sql_state);
+            st.namespace_states.insert(DEFAULT_NAMESPACE, sql_state);
             st.session = Some(session);
             Ok(true)
         }
@@ -228,7 +268,7 @@ pub fn cover_tick() -> Result<()> {
     let st = guard
         .as_mut()
         .ok_or_else(|| SecureStorageError::Storage("not initialized".into()))?;
-    crate::cover_traffic_tick(&mut st.backend, &st.domain, SQL_NAMESPACE)
+    crate::cover_traffic_tick(&mut st.backend, &st.domain, DEFAULT_NAMESPACE)
 }
 
 /// Flush pending plaintext writes + encrypted blocks + rerand pool to
@@ -295,11 +335,11 @@ fn flush_pending_writes(st: &mut VfsState) -> Result<()> {
             .session
             .as_ref()
             .ok_or_else(|| SecureStorageError::Storage("no session".into()))?;
-        let ns_state = st.namespace_states.entry(SQL_NAMESPACE).or_default();
+        let ns_state = st.namespace_states.entry(DEFAULT_NAMESPACE).or_default();
         flush_writes(
             &mut st.backend,
             &st.domain,
-            SQL_NAMESPACE,
+            DEFAULT_NAMESPACE,
             session,
             ns_state,
             &writes,
@@ -353,6 +393,27 @@ pub fn read_namespace_data(namespace: u8, offset: u64, len: usize) -> Result<Vec
     Ok(data.to_vec())
 }
 
+/// Truncate a non-SQL namespace back to empty. Re-initialises the
+/// underlying block stream so a subsequent `write_session_data` starts
+/// from offset 0 with no residual bytes.
+pub fn clear_namespace(namespace: u8) -> Result<()> {
+    let mutex = state_mutex();
+    let mut guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
+    let st = guard
+        .as_mut()
+        .ok_or_else(|| SecureStorageError::Storage("not initialized".into()))?;
+    let session = st
+        .session
+        .as_ref()
+        .ok_or_else(|| SecureStorageError::Storage("no session".into()))?;
+    use crate::storage::BlockStorage;
+    st.backend.init_blockstream(session.session_index, namespace)?;
+    // Reset in-memory tracking for this namespace.
+    st.namespace_states
+        .insert(namespace, NamespaceState::empty());
+    st.backend.commit()
+}
+
 /// Total bytes in a namespace.
 pub fn namespace_data_length(namespace: u8) -> Result<u64> {
     let mutex = state_mutex();
@@ -372,6 +433,54 @@ pub fn namespace_data_length(namespace: u8) -> Result<u64> {
 }
 
 // ── VFS callbacks ────────────────────────────────────────────────────
+//
+// Every callback body runs inside `catch_unwind`. A Rust panic reaching
+// the FFI frontier is UB under C ABI; we convert it (and any poisoned
+// mutex) into `SQLITE_IOERR` so SQLite can surface the failure cleanly.
+
+/// Run `f` under `catch_unwind`; a panic maps to `SQLITE_IOERR`.
+fn vfs_call<F: FnOnce() -> c_int>(f: F) -> c_int {
+    match catch_unwind(AssertUnwindSafe(f)) {
+        Ok(rc) => rc,
+        Err(_) => SQLITE_IOERR as c_int,
+    }
+}
+
+/// Acquire the VFS state mutex without poisoning semantics: a previously
+/// panicking holder (caught by `vfs_call`) should not lock us out — we
+/// recover by taking the inner value. Returns `None` if not initialised.
+fn lock_state() -> std::result::Result<MutexGuard<'static, Option<VfsState>>, ()> {
+    match state_mutex().lock() {
+        Ok(g) => Ok(g),
+        Err(poisoned) => Ok(poisoned.into_inner()),
+    }
+}
+
+fn lock_aux() -> std::result::Result<MutexGuard<'static, Vec<Vec<u8>>>, ()> {
+    match aux().lock() {
+        Ok(g) => Ok(g),
+        Err(poisoned) => Ok(poisoned.into_inner()),
+    }
+}
+
+/// Checked `usize` conversion for SQLite's `c_int` sizes. Negative or
+/// outrageously-large values are rejected so we never allocate or index
+/// with a wrapped value.
+fn checked_usize_from_c_int(v: c_int) -> Option<usize> {
+    if v < 0 {
+        return None;
+    }
+    Some(v as usize)
+}
+
+/// Checked conversion from SQLite's signed `i64` offset to `u64`.
+fn checked_u64_from_i64(v: i64) -> Option<u64> {
+    if v < 0 {
+        None
+    } else {
+        Some(v as u64)
+    }
+}
 
 unsafe extern "C" fn x_open(
     _vfs: *mut sqlite3_vfs,
@@ -380,7 +489,7 @@ unsafe extern "C" fn x_open(
     flags: c_int,
     out_flags: *mut c_int,
 ) -> c_int {
-    unsafe {
+    vfs_call(|| unsafe {
         let f = &mut *(file as *mut EncFile);
         f.base.pMethods = io_methods();
 
@@ -389,11 +498,13 @@ unsafe extern "C" fn x_open(
             f.aux_id = 0;
         } else {
             f.kind = KIND_AUX;
-            f.aux_id = {
-                let mut a = aux().lock().unwrap();
-                let id = a.len() as u32;
-                a.push(Vec::new());
-                id
+            f.aux_id = match lock_aux() {
+                Ok(mut a) => {
+                    let id = a.len() as u32;
+                    a.push(Vec::new());
+                    id
+                }
+                Err(_) => return SQLITE_IOERR as c_int,
             };
         }
 
@@ -401,20 +512,21 @@ unsafe extern "C" fn x_open(
             *out_flags = flags;
         }
         SQLITE_OK as c_int
-    }
+    })
 }
 
 unsafe extern "C" fn x_close(file: *mut sqlite3_file) -> c_int {
-    unsafe {
+    vfs_call(|| unsafe {
         let f = &*(file as *const EncFile);
         if f.kind == KIND_AUX {
-            let mut a = aux().lock().unwrap();
-            if let Some(v) = a.get_mut(f.aux_id as usize) {
-                *v = Vec::new();
+            if let Ok(mut a) = lock_aux() {
+                if let Some(v) = a.get_mut(f.aux_id as usize) {
+                    *v = Vec::new();
+                }
             }
         }
-    }
-    SQLITE_OK as c_int
+        SQLITE_OK as c_int
+    })
 }
 
 unsafe extern "C" fn x_read(
@@ -423,32 +535,48 @@ unsafe extern "C" fn x_read(
     amt: c_int,
     offset: i64,
 ) -> c_int {
-    unsafe {
+    vfs_call(|| unsafe {
         let f = &*(file as *const EncFile);
-        let n = amt as usize;
-        let off = offset as u64;
+        let n = match checked_usize_from_c_int(amt) {
+            Some(n) => n,
+            None => return SQLITE_IOERR as c_int,
+        };
+        let off = match checked_u64_from_i64(offset) {
+            Some(o) => o,
+            None => return SQLITE_IOERR as c_int,
+        };
         let dst = std::slice::from_raw_parts_mut(buf as *mut u8, n);
 
         if f.kind == KIND_MAIN {
-            let guard = state_mutex().lock().unwrap();
+            let guard = match lock_state() {
+                Ok(g) => g,
+                Err(_) => return SQLITE_IOERR as c_int,
+            };
             let st = match guard.as_ref() {
                 Some(st) => st,
                 None => {
                     dst.fill(0);
-                    return SQLITE_IOERR_SHORT_READ as c_int;
+                    return SQLITE_IOERR as c_int;
                 }
             };
             let session = match st.session.as_ref() {
                 Some(s) => s,
                 None => {
                     dst.fill(0);
-                    return SQLITE_IOERR_SHORT_READ as c_int;
+                    // No valid DB without a session — reject firmly so
+                    // SQLite cannot mis-parse the zero-filled buffer as
+                    // an empty-but-valid database header.
+                    return SQLITE_IOERR as c_int;
                 }
             };
             let ns_state = st.sql_ns_state();
             let logical_size = st.pending_file_size.max(ns_state.total_data_length);
 
-            if off + n as u64 > logical_size {
+            let read_end = match off.checked_add(n as u64) {
+                Some(v) => v,
+                None => return SQLITE_IOERR as c_int,
+            };
+            if read_end > logical_size {
                 let avail = logical_size.saturating_sub(off) as usize;
                 if avail > 0 {
                     let persisted = ns_state.total_data_length.saturating_sub(off) as usize;
@@ -457,7 +585,7 @@ unsafe extern "C" fn x_read(
                         if let Ok(data) = crate::read_session_data(
                             &st.backend,
                             &st.domain,
-                            SQL_NAMESPACE,
+                            DEFAULT_NAMESPACE,
                             session,
                             &ns_state,
                             off,
@@ -477,7 +605,7 @@ unsafe extern "C" fn x_read(
                 match crate::read_session_data(
                     &st.backend,
                     &st.domain,
-                    SQL_NAMESPACE,
+                    DEFAULT_NAMESPACE,
                     session,
                     &ns_state,
                     off,
@@ -491,7 +619,7 @@ unsafe extern "C" fn x_read(
                     if let Ok(data) = crate::read_session_data(
                         &st.backend,
                         &st.domain,
-                        SQL_NAMESPACE,
+                        DEFAULT_NAMESPACE,
                         session,
                         &ns_state,
                         off,
@@ -505,11 +633,24 @@ unsafe extern "C" fn x_read(
             apply_pending_overlay(&st.pending_writes, off, dst);
             SQLITE_OK as c_int
         } else {
-            let a = aux().lock().unwrap();
-            let fd = &a[f.aux_id as usize];
-            let o = offset as usize;
-            if o + n <= fd.len() {
-                dst.copy_from_slice(&fd[o..o + n]);
+            let a = match lock_aux() {
+                Ok(a) => a,
+                Err(_) => return SQLITE_IOERR as c_int,
+            };
+            let fd = match a.get(f.aux_id as usize) {
+                Some(fd) => fd,
+                None => return SQLITE_IOERR as c_int,
+            };
+            let o = match usize::try_from(offset) {
+                Ok(o) => o,
+                Err(_) => return SQLITE_IOERR as c_int,
+            };
+            let end = match o.checked_add(n) {
+                Some(v) => v,
+                None => return SQLITE_IOERR as c_int,
+            };
+            if end <= fd.len() {
+                dst.copy_from_slice(&fd[o..end]);
                 SQLITE_OK as c_int
             } else if o < fd.len() {
                 let avail = fd.len() - o;
@@ -521,8 +662,13 @@ unsafe extern "C" fn x_read(
                 SQLITE_IOERR_SHORT_READ as c_int
             }
         }
-    }
+    })
 }
+
+/// Hard cap on the size of an in-memory auxiliary (journal / temp) file.
+/// Exceeding this returns `SQLITE_FULL`, preventing a runaway query from
+/// OOM-ing a mobile process.
+const AUX_FILE_MAX_BYTES: usize = 64 * 1024 * 1024;
 
 unsafe extern "C" fn x_write(
     file: *mut sqlite3_file,
@@ -530,13 +676,27 @@ unsafe extern "C" fn x_write(
     amt: c_int,
     offset: i64,
 ) -> c_int {
-    unsafe {
+    vfs_call(|| unsafe {
         let f = &*(file as *const EncFile);
-        let n = amt as usize;
+        let n = match checked_usize_from_c_int(amt) {
+            Some(n) => n,
+            None => return SQLITE_IOERR as c_int,
+        };
         let src = std::slice::from_raw_parts(buf as *const u8, n);
 
         if f.kind == KIND_MAIN {
-            let mut guard = state_mutex().lock().unwrap();
+            let write_off = match checked_u64_from_i64(offset) {
+                Some(o) => o,
+                None => return SQLITE_IOERR as c_int,
+            };
+            let write_end = match write_off.checked_add(n as u64) {
+                Some(v) => v,
+                None => return SQLITE_IOERR as c_int,
+            };
+            let mut guard = match lock_state() {
+                Ok(g) => g,
+                Err(_) => return SQLITE_IOERR as c_int,
+            };
             let st = match guard.as_mut() {
                 Some(st) => st,
                 None => return SQLITE_IOERR as c_int,
@@ -544,8 +704,6 @@ unsafe extern "C" fn x_write(
             if st.session.is_none() {
                 return SQLITE_IOERR as c_int;
             }
-            let write_off = offset as u64;
-            let write_end = write_off + n as u64;
             if write_end > st.pending_file_size {
                 st.pending_file_size = write_end;
             }
@@ -555,60 +713,98 @@ unsafe extern "C" fn x_write(
             });
             SQLITE_OK as c_int
         } else {
-            let mut a = aux().lock().unwrap();
-            let fd = &mut a[f.aux_id as usize];
-            let o = offset as usize;
-            if o + n > fd.len() {
-                fd.resize(o + n, 0);
+            let mut a = match lock_aux() {
+                Ok(a) => a,
+                Err(_) => return SQLITE_IOERR as c_int,
+            };
+            let fd = match a.get_mut(f.aux_id as usize) {
+                Some(fd) => fd,
+                None => return SQLITE_IOERR as c_int,
+            };
+            let o = match usize::try_from(offset) {
+                Ok(o) => o,
+                Err(_) => return SQLITE_IOERR as c_int,
+            };
+            let end = match o.checked_add(n) {
+                Some(v) => v,
+                None => return SQLITE_IOERR as c_int,
+            };
+            if end > AUX_FILE_MAX_BYTES {
+                return rusqlite::ffi::SQLITE_FULL as c_int;
             }
-            fd[o..o + n].copy_from_slice(src);
+            if end > fd.len() {
+                fd.resize(end, 0);
+            }
+            fd[o..end].copy_from_slice(src);
             SQLITE_OK as c_int
         }
-    }
+    })
 }
 
 unsafe extern "C" fn x_truncate(file: *mut sqlite3_file, size: i64) -> c_int {
-    let f = unsafe { &*(file as *const EncFile) };
-    if f.kind == KIND_MAIN {
-        let mut guard = state_mutex().lock().unwrap();
-        if let Some(st) = guard.as_mut() {
-            st.pending_file_size = size as u64;
-            st.sql_ns_state_mut().total_data_length = size as u64;
+    vfs_call(|| unsafe {
+        let f = &*(file as *const EncFile);
+        let size = match checked_u64_from_i64(size) {
+            Some(s) => s,
+            None => return SQLITE_IOERR as c_int,
+        };
+        if f.kind == KIND_MAIN {
+            if let Ok(mut guard) = lock_state() {
+                if let Some(st) = guard.as_mut() {
+                    st.pending_file_size = size;
+                    st.sql_ns_state_mut().total_data_length = size;
+                }
+            }
+        } else if let Ok(mut a) = lock_aux() {
+            if let Some(fd) = a.get_mut(f.aux_id as usize) {
+                let new_len = usize::try_from(size).unwrap_or(usize::MAX);
+                fd.truncate(new_len);
+            }
         }
-    } else {
-        let mut a = aux().lock().unwrap();
-        a[f.aux_id as usize].truncate(size as usize);
-    }
-    SQLITE_OK as c_int
+        SQLITE_OK as c_int
+    })
 }
 
 unsafe extern "C" fn x_sync(_file: *mut sqlite3_file, _flags: c_int) -> c_int {
-    let mut guard = state_mutex().lock().unwrap();
-    let st = match guard.as_mut() {
-        Some(st) => st,
-        None => return SQLITE_OK as c_int,
-    };
-    if flush_pending_writes(st).is_err() {
-        return SQLITE_IOERR as c_int;
-    }
-    SQLITE_OK as c_int
+    vfs_call(|| {
+        let mut guard = match lock_state() {
+            Ok(g) => g,
+            Err(_) => return SQLITE_IOERR as c_int,
+        };
+        let st = match guard.as_mut() {
+            Some(st) => st,
+            None => return SQLITE_OK as c_int,
+        };
+        if flush_pending_writes(st).is_err() {
+            return SQLITE_IOERR as c_int;
+        }
+        SQLITE_OK as c_int
+    })
 }
 
 unsafe extern "C" fn x_file_size(file: *mut sqlite3_file, size: *mut i64) -> c_int {
-    unsafe {
+    vfs_call(|| unsafe {
         let f = &*(file as *const EncFile);
         if f.kind == KIND_MAIN {
-            let guard = state_mutex().lock().unwrap();
-            *size = guard.as_ref().map_or(0, |st| {
+            let guard = match lock_state() {
+                Ok(g) => g,
+                Err(_) => return SQLITE_IOERR as c_int,
+            };
+            let logical = guard.as_ref().map_or(0u64, |st| {
                 let persisted = st.sql_ns_state().total_data_length;
-                persisted.max(st.pending_file_size) as i64
+                persisted.max(st.pending_file_size)
             });
+            *size = i64::try_from(logical).unwrap_or(i64::MAX);
         } else {
-            let a = aux().lock().unwrap();
-            *size = a[f.aux_id as usize].len() as i64;
+            let a = match lock_aux() {
+                Ok(a) => a,
+                Err(_) => return SQLITE_IOERR as c_int,
+            };
+            let len = a.get(f.aux_id as usize).map(|fd| fd.len()).unwrap_or(0);
+            *size = i64::try_from(len).unwrap_or(i64::MAX);
         }
         SQLITE_OK as c_int
-    }
+    })
 }
 
 unsafe extern "C" fn x_delete(
@@ -625,10 +821,10 @@ unsafe extern "C" fn x_access(
     _flags: c_int,
     result: *mut c_int,
 ) -> c_int {
-    unsafe {
+    vfs_call(|| unsafe {
         *result = 0;
         SQLITE_OK as c_int
-    }
+    })
 }
 
 unsafe extern "C" fn x_full_pathname(
@@ -637,16 +833,24 @@ unsafe extern "C" fn x_full_pathname(
     n_out: c_int,
     z_out: *mut c_char,
 ) -> c_int {
-    unsafe {
+    vfs_call(|| unsafe {
         if !z_name.is_null() {
             let bytes = CStr::from_ptr(z_name).to_bytes_with_nul();
-            let len = bytes.len().min(n_out as usize);
+            let cap = match checked_usize_from_c_int(n_out) {
+                Some(c) => c,
+                None => return SQLITE_IOERR as c_int,
+            };
+            let len = bytes.len().min(cap);
             std::ptr::copy_nonoverlapping(bytes.as_ptr(), z_out as *mut u8, len);
         }
         SQLITE_OK as c_int
-    }
+    })
 }
 
+// xLock/xUnlock/xCheckReservedLock are safe no-ops: `locking_mode=EXCLUSIVE`
+// keeps the single process as the sole locker, and redb's OS-level file
+// lock on `storage.redb` prevents a second process from ever reaching
+// this code path. See module-level doc for the full argument.
 unsafe extern "C" fn x_lock(_f: *mut sqlite3_file, _l: c_int) -> c_int {
     SQLITE_OK as c_int
 }
@@ -654,8 +858,10 @@ unsafe extern "C" fn x_unlock(_f: *mut sqlite3_file, _l: c_int) -> c_int {
     SQLITE_OK as c_int
 }
 unsafe extern "C" fn x_check_reserved_lock(_f: *mut sqlite3_file, r: *mut c_int) -> c_int {
-    unsafe { *r = 0 };
-    SQLITE_OK as c_int
+    vfs_call(|| {
+        unsafe { *r = 0 };
+        SQLITE_OK as c_int
+    })
 }
 unsafe extern "C" fn x_file_control(_f: *mut sqlite3_file, _o: c_int, _a: *mut c_void) -> c_int {
     SQLITE_NOTFOUND as c_int
@@ -720,6 +926,36 @@ mod tests {
             assert_eq!(vals, vec!["hello", "world"]);
             drop(conn);
         });
+    }
+
+    /// Regression for H7 / clear_namespace: writing, reading, and
+    /// clearing a non-SQL namespace through the native API must produce
+    /// a zero-length result and the blob must not be readable back.
+    #[test]
+    fn test_native_vfs_namespace_clear_roundtrip() {
+        run_with_stack(|| {
+            let _guard = test_mutex().lock().unwrap();
+            let (_dir, conn) = setup_native_vfs();
+
+            let payload = vec![0x42u8; 4096];
+            write_namespace_data(1, 0, &payload).unwrap();
+            assert_eq!(namespace_data_length(1).unwrap(), 4096);
+            let got = read_namespace_data(1, 0, 4096).unwrap();
+            assert_eq!(got, payload);
+
+            clear_namespace(1).unwrap();
+            assert_eq!(namespace_data_length(1).unwrap(), 0);
+            drop(conn);
+        });
+    }
+
+    /// Regression for C3: a negative offset or negative amount at the
+    /// VFS callback boundary must be rejected instead of wrapping and
+    /// reading/writing at a random address.
+    #[test]
+    fn test_checked_conversions_reject_negative() {
+        assert!(checked_u64_from_i64(-1).is_none());
+        assert!(checked_usize_from_c_int(-1).is_none());
     }
 
     #[test]

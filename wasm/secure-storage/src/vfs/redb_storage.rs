@@ -350,7 +350,7 @@ impl KeypairStorage for RedbStorage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::SQL_NAMESPACE;
+    use crate::DEFAULT_NAMESPACE as SQL_NAMESPACE;
     use tempfile::TempDir;
 
     const NS: u8 = SQL_NAMESPACE;
