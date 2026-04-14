@@ -5,8 +5,6 @@
 //! root secret, ensuring deterministic key generation.
 
 use alloy_primitives::Address;
-use coins_bip32::prelude::*;
-use coins_bip39::{English, Mnemonic};
 use serde::{Deserialize, Serialize};
 use sha3::{Digest, Keccak256};
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
@@ -46,10 +44,11 @@ impl AsRef<[u8]> for UserId {
 
 /// A collection of all public keys associated with a user.
 ///
-/// This structure contains three different types of public keys:
+/// This structure contains four types of public keys:
 /// - DSA verification key for digital signatures
 /// - KEM public key for key encapsulation
 /// - Massa blockchain public key
+/// - EVM public key (compressed SEC1, 33 bytes)
 #[derive(Clone, Zeroize, ZeroizeOnDrop, Serialize, Deserialize)]
 pub struct UserPublicKeys {
     /// Digital Signature Algorithm verification key.
@@ -59,6 +58,8 @@ pub struct UserPublicKeys {
     /// Massa blockchain public key.
     #[zeroize(skip)] // TODO: add zeroization to massa pubkeys
     pub massa_public_key: massa_signature::PublicKey,
+    /// EVM public key (compressed, secp256k1).
+    pub evm_public_key: Vec<u8>,
 }
 
 impl UserPublicKeys {
@@ -108,6 +109,17 @@ impl UserPublicKeys {
         let serialized = Zeroizing::new(self.to_bytes());
         let hash = blake3::hash(&serialized);
         UserId(hash.into())
+    }
+
+    /// Derives the EIP-55 checksummed EVM address from the stored public key.
+    #[must_use]
+    pub fn evm_address(&self) -> String {
+        let verifying_key = k256::ecdsa::VerifyingKey::from_sec1_bytes(&self.evm_public_key)
+            .expect("Invalid EVM public key stored in UserPublicKeys");
+        let uncompressed = verifying_key.to_encoded_point(false);
+        let hash = Keccak256::digest(&uncompressed.as_bytes()[1..]);
+        let addr_bytes: [u8; 20] = hash[12..].try_into().expect("Keccak output is 32 bytes");
+        Address::from(addr_bytes).to_checksum(None)
     }
 }
 
@@ -187,6 +199,8 @@ pub struct UserSecretKeys {
     /// Massa blockchain keypair.
     #[zeroize(skip)] // TODO: add zeroization to massa keypair
     pub massa_keypair: massa_signature::KeyPair,
+    /// EVM secret key (raw 32-byte scalar).
+    pub evm_secret_key: [u8; 32],
 }
 
 /// Derives all user keys from a static root secret.
@@ -196,6 +210,7 @@ pub struct UserSecretKeys {
 /// - DSA signing/verification keypair
 /// - KEM secret/public keypair
 /// - Massa blockchain keypair
+/// - EVM keypair (secp256k1)
 ///
 /// The derivation is deterministic, meaning the same inputs will always produce
 /// the same output keys. This allows users to recover their keys from their
@@ -250,6 +265,10 @@ pub fn derive_keys_from_static_root_secret(
         &mut massa_keypair_bytes[1..],
     );
 
+    // Derive EVM secret key (32-byte secp256k1 scalar)
+    let mut evm_secret_key = [0u8; 32];
+    expander.expand(b"auth.keypairs.kdf.evm_secret_key", &mut evm_secret_key);
+
     // Generate keypairs from derived randomness
     let (dsa_signing_key, dsa_verification_key) = crypto_dsa::generate_key_pair(dsa_randomness);
     let (kem_secret_key, kem_public_key) = crypto_kem::generate_key_pair(kem_randomness);
@@ -258,56 +277,28 @@ pub fn derive_keys_from_static_root_secret(
         .expect("Invalid massa keypair bytes");
     let massa_public_key = massa_keypair.get_public_key();
 
+    let evm_signing_key = k256::ecdsa::SigningKey::from_bytes(&evm_secret_key.into())
+        .expect("Invalid EVM key material from KDF");
+    let evm_public_key = evm_signing_key
+        .verifying_key()
+        .to_encoded_point(true)
+        .as_bytes()
+        .to_vec();
+
     (
         UserPublicKeys {
             dsa_verification_key,
             kem_public_key,
             massa_public_key,
+            evm_public_key,
         },
         UserSecretKeys {
             dsa_signing_key,
             kem_secret_key,
             massa_keypair,
+            evm_secret_key,
         },
     )
-}
-
-/// Derives an EVM address from a BIP39 mnemonic phrase.
-///
-/// Uses `coins-bip39`/`coins-bip32` (same crates as alloy/ethers-rs internally)
-/// with the standard BIP44 derivation path `m/44'/60'/0'/0/0`.
-/// Keccak-256 of the uncompressed public key yields the 20-byte address; EIP-55
-/// checksum encoding is done via [`alloy_primitives::Address::to_checksum`].
-/// Returns an EIP-55 checksummed hex string (0x…).
-///
-/// # Errors
-///
-/// Returns an error string if the mnemonic is invalid or key derivation fails.
-pub fn derive_evm_address(mnemonic_phrase: &str) -> Result<String, String> {
-    let mnemonic = <Mnemonic<English>>::new_from_phrase(mnemonic_phrase)
-        .map_err(|e| format!("Invalid mnemonic: {e}"))?;
-    // Empty BIP39 passphrase — standard behavior (MetaMask, ethers.js, etc.)
-    let seed = mnemonic
-        .to_seed(None)
-        .map_err(|e| format!("Seed derivation failed: {e}"))?;
-
-    let root = XPriv::root_from_seed(&seed, None)
-        .map_err(|e| format!("BIP32 root key failed: {e}"))?;
-    let child = root
-        .derive_path("m/44'/60'/0'/0/0")
-        .map_err(|e| format!("BIP44 derivation failed: {e}"))?;
-
-    // Uncompressed public key (65 bytes: 0x04 || x || y), hash without the prefix
-    let pubkey = child.verify_key();
-    let verifying_key: &k256::ecdsa::VerifyingKey = pubkey.as_ref();
-    let uncompressed = verifying_key.to_encoded_point(false);
-    let hash = Keccak256::digest(&uncompressed.as_bytes()[1..]);
-    let addr_bytes: &[u8; 20] = hash[12..]
-        .try_into()
-        .map_err(|_| "Keccak output too short for address".to_string())?;
-
-    let address = Address::from(*addr_bytes);
-    Ok(address.to_checksum(None))
 }
 
 #[cfg(test)]
@@ -446,50 +437,47 @@ mod tests {
     }
 
     #[test]
-    fn test_derive_evm_address_vectors() {
-        // All vectors verified against ethers.js v6 HDNodeWallet.fromPhrase()
-        let vectors: &[(&str, &str)] = &[
-            // 12-word mnemonics
-            (
-                "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
-                "0x9858EfFD232B4033E47d90003D41EC34EcaEda94",
-            ),
-            (
-                "zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo wrong",
-                "0xfc2077CA7F403cBECA41B1B0F62D91B5EA631B5E",
-            ),
-            (
-                "letter advice cage absurd amount doctor acoustic avoid letter advice cage above",
-                "0x3061750d3dF69ef7B8d4407CB7f3F879Fd9d2398",
-            ),
-            // 15-word mnemonic
-            (
-                "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon address",
-                "0x54bE88525B024a20229Fe7f6F62DC0884e4aAA0a",
-            ),
-            // 24-word mnemonic
-            (
-                "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art",
-                "0xF278cF59F82eDcf871d630F28EcC8056f25C1cdb",
-            ),
-        ];
+    fn test_evm_keypair_populated() {
+        let root_secret = StaticRootSecret::from_passphrase(b"evm test");
+        let (pub_keys, sec_keys) = derive_keys_from_static_root_secret(&root_secret);
 
-        for (mnemonic, expected) in vectors {
-            let addr = derive_evm_address(mnemonic).unwrap();
-            assert_eq!(&addr, expected, "mismatch for mnemonic: {mnemonic}");
-        }
+        // Verify EVM keypair is non-zero
+        assert_ne!(pub_keys.evm_public_key, vec![0u8; 33]);
+        assert_ne!(sec_keys.evm_secret_key, [0u8; 32]);
+
+        // Verify the public key is a valid SEC1 compressed point
+        k256::ecdsa::VerifyingKey::from_sec1_bytes(&pub_keys.evm_public_key)
+            .expect("EVM public key should be a valid SEC1 point");
+
+        // Verify evm_address() returns a valid EIP-55 address
+        let addr = pub_keys.evm_address();
+        assert!(addr.starts_with("0x"));
+        assert_eq!(addr.len(), 42);
     }
 
     #[test]
-    fn test_derive_evm_address_invalid_mnemonic() {
-        assert!(derive_evm_address("not a valid mnemonic").is_err());
-        assert!(derive_evm_address("").is_err());
+    fn test_evm_keypair_deterministic() {
+        let root_secret = StaticRootSecret::from_passphrase(b"deterministic evm");
+        let (pub1, sec1) = derive_keys_from_static_root_secret(&root_secret);
+        let (pub2, sec2) = derive_keys_from_static_root_secret(&root_secret);
+
+        assert_eq!(pub1.evm_public_key, pub2.evm_public_key);
+        assert_eq!(sec1.evm_secret_key, sec2.evm_secret_key);
+    }
+
+    #[test]
+    fn test_evm_keypair_any_passphrase() {
+        // EVM keys are now derived via HKDF, so any passphrase works
+        let root_secret = StaticRootSecret::from_passphrase(b"not a mnemonic at all");
+        let (pub_keys, sec_keys) = derive_keys_from_static_root_secret(&root_secret);
+
+        assert_ne!(pub_keys.evm_public_key, vec![0u8; 33]);
+        assert_ne!(sec_keys.evm_secret_key, [0u8; 32]);
     }
 
     #[test]
     fn test_user_public_keys_serialization() {
-        let passphrase = b"serialization test";
-        let root_secret = StaticRootSecret::from_passphrase(passphrase);
+        let root_secret = StaticRootSecret::from_passphrase(b"serialization test");
         let (pub_keys, _) = derive_keys_from_static_root_secret(&root_secret);
 
         // Test to_bytes and from_bytes
@@ -510,5 +498,6 @@ mod tests {
             pub_keys.massa_public_key.to_bytes(),
             deserialized.massa_public_key.to_bytes()
         );
+        assert_eq!(pub_keys.evm_public_key, deserialized.evm_public_key);
     }
 }
