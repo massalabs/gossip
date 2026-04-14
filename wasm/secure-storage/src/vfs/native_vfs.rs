@@ -958,6 +958,132 @@ mod tests {
         assert!(checked_usize_from_c_int(-1).is_none());
     }
 
+    /// Large end-to-end Rust integration test approximating the full
+    /// mobile onboarding + login flow that Swift/Kotlin drive from the
+    /// Capacitor plugins. Exercises every entry point in `native_api`
+    /// order and asserts cross-reopen durability, wrong-password
+    /// rejection, and namespace-data isolation — the closest we can get
+    /// to an end-to-end native run without a device/simulator.
+    #[test]
+    fn test_native_full_mobile_flow() {
+        run_with_stack(|| {
+            let _guard = test_mutex().lock().unwrap();
+            reset_state();
+            ensure_registered();
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().to_str().unwrap().to_string();
+
+            // ── Phase 1: onboarding (provision + allocate + initial data) ──
+            {
+                init_native(&path, "gossip").unwrap();
+                provision().unwrap();
+                allocate(0, b"correct-horse-battery-staple").unwrap();
+                assert!(is_unlocked().unwrap());
+
+                let conn = open_db().unwrap();
+                conn.execute_batch(
+                    "CREATE TABLE messages (id INTEGER PRIMARY KEY, body TEXT);
+                     CREATE TABLE contacts (id INTEGER PRIMARY KEY, name TEXT);
+                     INSERT INTO messages (body) VALUES ('hi'), ('world'), ('!');
+                     INSERT INTO contacts (name) VALUES ('alice'), ('bob');",
+                )
+                .unwrap();
+
+                // Session blob (namespace 1) — the non-SQL persistence path.
+                let blob_v1 = vec![0x11u8; 32 * 1024];
+                write_namespace_data(1, 0, &blob_v1).unwrap();
+                assert_eq!(namespace_data_length(1).unwrap(), 32 * 1024);
+
+                // Cover-traffic tick mid-session (matches the 1b scheduler
+                // and PR 2 cover_traffic_tick_native entry point).
+                cover_tick().unwrap();
+
+                drop(conn);
+                flush().unwrap();
+                lock();
+                assert!(!is_unlocked().unwrap());
+            }
+
+            // ── Phase 2: app relaunch — fresh process, wrong password ──
+            {
+                reset_state();
+                init_native(&path, "gossip").unwrap();
+                assert!(!is_unlocked().unwrap());
+                // Wrong password must fail without destroying state.
+                assert!(!unlock(b"wrong-password").unwrap());
+                assert!(!is_unlocked().unwrap());
+            }
+
+            // ── Phase 3: app relaunch — correct password, read back ──
+            {
+                reset_state();
+                init_native(&path, "gossip").unwrap();
+                assert!(unlock(b"correct-horse-battery-staple").unwrap());
+                assert!(is_unlocked().unwrap());
+
+                let conn = open_db().unwrap();
+                let msgs: Vec<String> = conn
+                    .prepare("SELECT body FROM messages ORDER BY id")
+                    .unwrap()
+                    .query_map([], |r| r.get::<_, String>(0))
+                    .unwrap()
+                    .map(|r| r.unwrap())
+                    .collect();
+                assert_eq!(msgs, vec!["hi", "world", "!"]);
+
+                // Session blob roundtrip after reopen.
+                let got = read_namespace_data(1, 0, 32 * 1024).unwrap();
+                assert_eq!(got, vec![0x11u8; 32 * 1024]);
+
+                // Simulate the SDK's PD-M2 fix: always clear then rewrite.
+                clear_namespace(1).unwrap();
+                assert_eq!(namespace_data_length(1).unwrap(), 0);
+                let blob_v2 = vec![0x22u8; 48 * 1024];
+                write_namespace_data(1, 0, &blob_v2).unwrap();
+                assert_eq!(namespace_data_length(1).unwrap(), 48 * 1024);
+
+                // More SQL work to interleave with the namespace writes.
+                conn.execute("INSERT INTO messages (body) VALUES ('after-reopen')", [])
+                    .unwrap();
+
+                drop(conn);
+                flush().unwrap();
+                lock();
+            }
+
+            // ── Phase 4: final relaunch — everything must still be there ──
+            {
+                reset_state();
+                init_native(&path, "gossip").unwrap();
+                assert!(unlock(b"correct-horse-battery-staple").unwrap());
+                let conn = open_db().unwrap();
+                let msgs: Vec<String> = conn
+                    .prepare("SELECT body FROM messages ORDER BY id")
+                    .unwrap()
+                    .query_map([], |r| r.get::<_, String>(0))
+                    .unwrap()
+                    .map(|r| r.unwrap())
+                    .collect();
+                assert_eq!(msgs, vec!["hi", "world", "!", "after-reopen"]);
+
+                let contacts: Vec<String> = conn
+                    .prepare("SELECT name FROM contacts ORDER BY id")
+                    .unwrap()
+                    .query_map([], |r| r.get::<_, String>(0))
+                    .unwrap()
+                    .map(|r| r.unwrap())
+                    .collect();
+                assert_eq!(contacts, vec!["alice", "bob"]);
+
+                // Namespace 1 still holds the rewritten blob, not v1.
+                let got = read_namespace_data(1, 0, 48 * 1024).unwrap();
+                assert_eq!(got, vec![0x22u8; 48 * 1024]);
+
+                drop(conn);
+            }
+        });
+    }
+
     #[test]
     fn test_native_vfs_persistence() {
         run_with_stack(|| {
