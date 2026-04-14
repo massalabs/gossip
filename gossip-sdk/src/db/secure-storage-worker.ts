@@ -55,6 +55,16 @@ export const SESSION_BLOB_NAMESPACE = 1;
  */
 const RAYON_THREADS = Math.min(3, navigator.hardwareConcurrency || 3);
 
+/** Minimum delay between cover traffic ticks (ms). */
+const COVER_TRAFFIC_MIN_INTERVAL_MS = 10_000;
+/** Maximum delay between cover traffic ticks (ms). */
+const COVER_TRAFFIC_MAX_INTERVAL_MS = 30_000;
+/** Namespaces that cover traffic must rerandomize each tick. */
+const COVER_TRAFFIC_NAMESPACES = [
+  SQL_NAMESPACE,
+  SESSION_BLOB_NAMESPACE,
+] as const;
+
 export interface InitResult {
   needsUnlock: boolean;
   backend: 'idb';
@@ -65,7 +75,36 @@ export interface ExecResult {
   lastInsertRowId: number;
 }
 
+function randomCoverInterval(): number {
+  return (
+    COVER_TRAFFIC_MIN_INTERVAL_MS +
+    Math.random() *
+      (COVER_TRAFFIC_MAX_INTERVAL_MS - COVER_TRAFFIC_MIN_INTERVAL_MS)
+  );
+}
+
 class SecureStorageWorkerApi {
+  private coverTimerId: ReturnType<typeof setTimeout> | null = null;
+
+  private startCoverTraffic(): void {
+    this.stopCoverTraffic();
+    const tick = async () => {
+      for (const ns of COVER_TRAFFIC_NAMESPACES) {
+        coverTrafficTick(ns);
+      }
+      await flushEncrypted();
+      this.coverTimerId = setTimeout(tick, randomCoverInterval());
+    };
+    this.coverTimerId = setTimeout(tick, randomCoverInterval());
+  }
+
+  private stopCoverTraffic(): void {
+    if (this.coverTimerId !== null) {
+      clearTimeout(this.coverTimerId);
+      this.coverTimerId = null;
+    }
+  }
+
   async init(
     domain: string,
     secureStorageWasmUrl?: string
@@ -89,6 +128,7 @@ class SecureStorageWorkerApi {
     if (!needsUnlock) {
       provisionStorage();
     }
+    this.startCoverTraffic();
     return { needsUnlock, backend: 'idb' };
   }
 
@@ -177,6 +217,7 @@ class SecureStorageWorkerApi {
   }
 
   async close(): Promise<void> {
+    this.stopCoverTraffic();
     closeDatabase();
     await flushEncrypted();
   }
