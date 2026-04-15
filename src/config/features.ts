@@ -22,8 +22,13 @@ export const DEV_HARDCODED_PASSWORD = import.meta.env.DEV
 
 /**
  * Maximum number of accounts that can be created during secure storage
- * setup. Includes the main account (1 main + 4 additional = 5 default).
+ * setup. Includes the main account (1 main + 2 additional = 3 total).
+ *
+ * Hard-capped at 3 to match `SESSION_COUNT = 3` in the Rust crate
+ * (`wasm/secure-storage/src/constants.rs`). Bumping the JS side without
+ * also bumping the Rust constant produces a runtime "no slot available"
+ * error — see `SPEC_DEVIATIONS.md` for the SESSION_COUNT rationale.
  */
 export const MAX_SECURE_ACCOUNTS = Number(
-  import.meta.env.VITE_SECURE_STORAGE_MAX_ACCOUNTS ?? 5
+  import.meta.env.VITE_SECURE_STORAGE_MAX_ACCOUNTS ?? 3
 );
