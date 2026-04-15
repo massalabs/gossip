@@ -138,7 +138,9 @@ pub fn read_session_data<S: BlockStorage>(
     let ps = PLAINTEXT_SIZE as u64;
     let hdr = LENGTH_HDR_SIZE as u64;
 
-    let start_pos = hdr.checked_add(offset).ok_or(SecureStorageError::Overflow)?;
+    let start_pos = hdr
+        .checked_add(offset)
+        .ok_or(SecureStorageError::Overflow)?;
     let end_pos_excl = hdr.checked_add(end).ok_or(SecureStorageError::Overflow)?;
 
     let first_block = start_pos / ps;
@@ -270,7 +272,9 @@ mod tests {
             .append_block(session.session_index, DEFAULT_NAMESPACE, ct_arr)
             .unwrap();
 
-        assert!(decrypt_session_data_block(&storage, DOMAIN, DEFAULT_NAMESPACE, &session, 0).is_err());
+        assert!(
+            decrypt_session_data_block(&storage, DOMAIN, DEFAULT_NAMESPACE, &session, 0).is_err()
+        );
     }
 
     fn write_session_data_for_test(
@@ -312,9 +316,16 @@ mod tests {
         let data = vec![0xAB; 100];
         write_session_data_for_test(&mut storage, &session, &mut ns_state, &data);
 
-        let result =
-            read_session_data(&storage, DOMAIN, DEFAULT_NAMESPACE, &session, &ns_state, 0, 100)
-                .unwrap();
+        let result = read_session_data(
+            &storage,
+            DOMAIN,
+            DEFAULT_NAMESPACE,
+            &session,
+            &ns_state,
+            0,
+            100,
+        )
+        .unwrap();
         assert_eq!(*result, data);
     }
 
@@ -350,9 +361,16 @@ mod tests {
         let data = vec![0xCD; 200];
         write_session_data_for_test(&mut storage, &session, &mut ns_state, &data);
 
-        let result =
-            read_session_data(&storage, DOMAIN, DEFAULT_NAMESPACE, &session, &ns_state, 50, 100)
-                .unwrap();
+        let result = read_session_data(
+            &storage,
+            DOMAIN,
+            DEFAULT_NAMESPACE,
+            &session,
+            &ns_state,
+            50,
+            100,
+        )
+        .unwrap();
         assert_eq!(*result, vec![0xCD; 100]);
     }
 
@@ -366,8 +384,16 @@ mod tests {
         write_session_data_for_test(&mut storage, &session, &mut ns_state, &data);
 
         assert!(
-            read_session_data(&storage, DOMAIN, DEFAULT_NAMESPACE, &session, &ns_state, 50, 100)
-                .is_err()
+            read_session_data(
+                &storage,
+                DOMAIN,
+                DEFAULT_NAMESPACE,
+                &session,
+                &ns_state,
+                50,
+                100
+            )
+            .is_err()
         );
     }
 
@@ -380,8 +406,16 @@ mod tests {
         let data = vec![0; 100];
         write_session_data_for_test(&mut storage, &session, &mut ns_state, &data);
 
-        let result =
-            read_session_data(&storage, DOMAIN, DEFAULT_NAMESPACE, &session, &ns_state, 0, 0).unwrap();
+        let result = read_session_data(
+            &storage,
+            DOMAIN,
+            DEFAULT_NAMESPACE,
+            &session,
+            &ns_state,
+            0,
+            0,
+        )
+        .unwrap();
         assert!(result.is_empty());
     }
 

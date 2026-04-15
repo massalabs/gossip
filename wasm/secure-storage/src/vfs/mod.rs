@@ -1,7 +1,7 @@
 //! Storage backend modules for secure-storage.
 
-pub(crate) mod pending;
 pub(crate) mod file_core;
+pub(crate) mod pending;
 
 pub(crate) mod idb_state;
 

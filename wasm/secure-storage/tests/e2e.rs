@@ -4,10 +4,10 @@ use secureStorage::BLOCK_SIZE;
 use secureStorage::SecureStorageError;
 use secureStorage::storage::{BlockStorage, KeypairStorage, MemoryStorage};
 use secureStorage::{
-    NamespaceState, PLAINTEXT_SIZE, SESSION_COUNT, DEFAULT_NAMESPACE, SessionIndex, allocate_session,
-    cover_traffic_tick, get_global_block_count, load_namespace_state, provision_storage,
-    decrypt_session_data_block, read_session_data, shrink_session_data, unlock_session,
-    write_session_data,
+    DEFAULT_NAMESPACE, NamespaceState, PLAINTEXT_SIZE, SESSION_COUNT, SessionIndex,
+    allocate_session, cover_traffic_tick, decrypt_session_data_block, get_global_block_count,
+    load_namespace_state, provision_storage, read_session_data, shrink_session_data,
+    unlock_session, write_session_data,
 };
 
 const DOMAIN: &str = "e2e-test";
@@ -45,8 +45,7 @@ fn e2e_provision_allocate_write_read() {
         )
         .unwrap();
 
-        let result =
-            read_session_data(&storage, DOMAIN, NS, &session, &ns_state, 0, 11).unwrap();
+        let result = read_session_data(&storage, DOMAIN, NS, &session, &ns_state, 0, 11).unwrap();
         assert_eq!(&*result, b"hello world");
     });
 }
@@ -196,8 +195,16 @@ fn e2e_corruption_heals_on_write() {
         let session = allocate_session(&mut storage, DOMAIN, slot, b"pw").unwrap();
         let mut ns_state = NamespaceState::empty();
 
-        write_session_data(&mut storage, DOMAIN, NS, &session, &mut ns_state, 0, b"hello")
-            .unwrap();
+        write_session_data(
+            &mut storage,
+            DOMAIN,
+            NS,
+            &session,
+            &mut ns_state,
+            0,
+            b"hello",
+        )
+        .unwrap();
 
         // Corrupt a block of another session (session 1, block 0)
         let s1 = SessionIndex::new(1).unwrap();
@@ -205,8 +212,16 @@ fn e2e_corruption_heals_on_write() {
         storage.write_block(s1, NS, 0, &corrupted).unwrap();
 
         // Write at the same block index — should heal the corrupted block via cover
-        write_session_data(&mut storage, DOMAIN, NS, &session, &mut ns_state, 0, b"world")
-            .unwrap();
+        write_session_data(
+            &mut storage,
+            DOMAIN,
+            NS,
+            &session,
+            &mut ns_state,
+            0,
+            b"world",
+        )
+        .unwrap();
 
         // Our data should still be readable
         let result = read_session_data(&storage, DOMAIN, NS, &session, &ns_state, 0, 5).unwrap();
@@ -284,8 +299,16 @@ fn e2e_append_and_overwrite_pattern() {
         let mut ns_state = NamespaceState::empty();
 
         // Append pattern
-        write_session_data(&mut storage, DOMAIN, NS, &session, &mut ns_state, 0, b"Hello")
-            .unwrap();
+        write_session_data(
+            &mut storage,
+            DOMAIN,
+            NS,
+            &session,
+            &mut ns_state,
+            0,
+            b"Hello",
+        )
+        .unwrap();
         write_session_data(&mut storage, DOMAIN, NS, &session, &mut ns_state, 5, b", ").unwrap();
         write_session_data(
             &mut storage,
@@ -298,8 +321,7 @@ fn e2e_append_and_overwrite_pattern() {
         )
         .unwrap();
 
-        let result =
-            read_session_data(&storage, DOMAIN, NS, &session, &ns_state, 0, 13).unwrap();
+        let result = read_session_data(&storage, DOMAIN, NS, &session, &ns_state, 0, 13).unwrap();
         assert_eq!(&*result, b"Hello, World!");
 
         // Partial overwrite
@@ -314,8 +336,7 @@ fn e2e_append_and_overwrite_pattern() {
         )
         .unwrap();
 
-        let result =
-            read_session_data(&storage, DOMAIN, NS, &session, &ns_state, 0, 13).unwrap();
+        let result = read_session_data(&storage, DOMAIN, NS, &session, &ns_state, 0, 13).unwrap();
         assert_eq!(&*result, b"Hello, Rust!!");
     });
 }
@@ -350,8 +371,7 @@ fn e2e_unlock_after_cover_traffic() {
         // Re-unlock from scratch
         let session = unlock_session(&storage, DOMAIN, b"secret").unwrap();
         let ns_state = load_namespace_state(&storage, DOMAIN, &session, NS).unwrap();
-        let result =
-            read_session_data(&storage, DOMAIN, NS, &session, &ns_state, 0, 10).unwrap();
+        let result = read_session_data(&storage, DOMAIN, NS, &session, &ns_state, 0, 10).unwrap();
         assert_eq!(&*result, b"persistent");
     });
 }
@@ -372,8 +392,7 @@ fn e2e_shrink_then_read() {
 
         shrink_session_data(&mut storage, DOMAIN, NS, &session, &mut ns_state, 100).unwrap();
 
-        let result =
-            read_session_data(&storage, DOMAIN, NS, &session, &ns_state, 0, 100).unwrap();
+        let result = read_session_data(&storage, DOMAIN, NS, &session, &ns_state, 0, 100).unwrap();
         assert_eq!(&*result, &data[..100]);
 
         // Re-unlock and verify
@@ -381,8 +400,7 @@ fn e2e_shrink_then_read() {
         let session = unlock_session(&storage, DOMAIN, b"pw").unwrap();
         let ns_state = load_namespace_state(&storage, DOMAIN, &session, NS).unwrap();
         assert_eq!(ns_state.total_data_length, 100);
-        let result =
-            read_session_data(&storage, DOMAIN, NS, &session, &ns_state, 0, 100).unwrap();
+        let result = read_session_data(&storage, DOMAIN, NS, &session, &ns_state, 0, 100).unwrap();
         assert_eq!(&*result, &data[..100]);
     });
 }
@@ -398,8 +416,16 @@ fn e2e_shrink_to_zero_then_rewrite() {
         let session = allocate_session(&mut storage, DOMAIN, slot, b"pw").unwrap();
         let mut ns_state = NamespaceState::empty();
 
-        write_session_data(&mut storage, DOMAIN, NS, &session, &mut ns_state, 0, b"first")
-            .unwrap();
+        write_session_data(
+            &mut storage,
+            DOMAIN,
+            NS,
+            &session,
+            &mut ns_state,
+            0,
+            b"first",
+        )
+        .unwrap();
         shrink_session_data(&mut storage, DOMAIN, NS, &session, &mut ns_state, 0).unwrap();
         assert_eq!(ns_state.total_data_length, 0);
 
@@ -442,8 +468,7 @@ fn e2e_shrink_cover_traffic_relock() {
         let session = unlock_session(&storage, DOMAIN, b"pw").unwrap();
         let ns_state = load_namespace_state(&storage, DOMAIN, &session, NS).unwrap();
         assert_eq!(ns_state.total_data_length, 150);
-        let result =
-            read_session_data(&storage, DOMAIN, NS, &session, &ns_state, 0, 150).unwrap();
+        let result = read_session_data(&storage, DOMAIN, NS, &session, &ns_state, 0, 150).unwrap();
         assert_eq!(&*result, &data[..150]);
     });
 }
@@ -530,8 +555,16 @@ fn e2e_cover_traffic_snapshot_resistance() {
         let slot = SessionIndex::new(0).unwrap();
         let session = allocate_session(&mut storage, DOMAIN, slot, b"pw").unwrap();
         let mut ns_state = NamespaceState::empty();
-        write_session_data(&mut storage, DOMAIN, NS, &session, &mut ns_state, 0, b"data")
-            .unwrap();
+        write_session_data(
+            &mut storage,
+            DOMAIN,
+            NS,
+            &session,
+            &mut ns_state,
+            0,
+            b"data",
+        )
+        .unwrap();
 
         // Snapshot before cover traffic
         let mut before = Vec::new();
@@ -684,11 +717,18 @@ fn e2e_shrink_then_grow_past_original() {
 
         // Grow past original 200 bytes
         let big_data: Vec<u8> = (0..500).map(|i| (i % 256) as u8).collect();
-        write_session_data(&mut storage, DOMAIN, NS, &session, &mut ns_state, 0, &big_data)
-            .unwrap();
+        write_session_data(
+            &mut storage,
+            DOMAIN,
+            NS,
+            &session,
+            &mut ns_state,
+            0,
+            &big_data,
+        )
+        .unwrap();
 
-        let result =
-            read_session_data(&storage, DOMAIN, NS, &session, &ns_state, 0, 500).unwrap();
+        let result = read_session_data(&storage, DOMAIN, NS, &session, &ns_state, 0, 500).unwrap();
         assert_eq!(&*result, &big_data);
     });
 }
@@ -774,8 +814,7 @@ fn e2e_multi_namespace_independent() {
         let mut ns0 = NamespaceState::empty();
         let mut ns1 = NamespaceState::empty();
 
-        write_session_data(&mut storage, DOMAIN, 0, &session, &mut ns0, 0, b"sql data")
-            .unwrap();
+        write_session_data(&mut storage, DOMAIN, 0, &session, &mut ns0, 0, b"sql data").unwrap();
         write_session_data(
             &mut storage,
             DOMAIN,
@@ -880,10 +919,7 @@ fn e2e_cross_session_decrypt_fails() {
         // This must fail — different session keys derive different AEAD
         // keys and different AAD, so the AEAD tag check will reject.
         let _cross_decrypt = decrypt_session_data_block(
-            &storage,
-            DOMAIN,
-            NS,
-            &session_b, // wrong session!
+            &storage, DOMAIN, NS, &session_b, // wrong session!
             0,          // block 0 of session B's slot — which has cover data, not A's data
         );
 
@@ -984,8 +1020,7 @@ fn e2e_tampered_ciphertext_detected() {
         .unwrap();
 
         // Sanity: decrypt works before tampering.
-        let plaintext =
-            decrypt_session_data_block(&storage, DOMAIN, NS, &session, 0);
+        let plaintext = decrypt_session_data_block(&storage, DOMAIN, NS, &session, 0);
         assert!(plaintext.is_ok(), "decrypt should succeed before tampering");
 
         // Read the raw ciphertext, flip one bit, write it back.
@@ -996,8 +1031,7 @@ fn e2e_tampered_ciphertext_detected() {
         storage.write_block(slot, NS, 0, &ct).unwrap();
 
         // Decryption must now fail due to AEAD tag mismatch.
-        let result =
-            decrypt_session_data_block(&storage, DOMAIN, NS, &session, 0);
+        let result = decrypt_session_data_block(&storage, DOMAIN, NS, &session, 0);
         assert!(
             matches!(result, Err(SecureStorageError::CorruptedBlock)),
             "tampered ciphertext must be rejected by AEAD verification"
@@ -1018,15 +1052,30 @@ fn e2e_read_past_end_returns_error() {
         let session = allocate_session(&mut storage, DOMAIN, slot, b"pw").unwrap();
         let mut ns_state = NamespaceState::empty();
 
-        write_session_data(&mut storage, DOMAIN, NS, &session, &mut ns_state, 0, b"short").unwrap();
+        write_session_data(
+            &mut storage,
+            DOMAIN,
+            NS,
+            &session,
+            &mut ns_state,
+            0,
+            b"short",
+        )
+        .unwrap();
 
         // Reading beyond total_data_length must fail.
         let result = read_session_data(&storage, DOMAIN, NS, &session, &ns_state, 0, 100);
-        assert!(matches!(result, Err(SecureStorageError::OutOfBounds)), "read past end should fail with OutOfBounds");
+        assert!(
+            matches!(result, Err(SecureStorageError::OutOfBounds)),
+            "read past end should fail with OutOfBounds"
+        );
 
         // Reading at exactly the end with length > 0 must fail.
         let result = read_session_data(&storage, DOMAIN, NS, &session, &ns_state, 5, 1);
-        assert!(matches!(result, Err(SecureStorageError::OutOfBounds)), "read at boundary should fail with OutOfBounds");
+        assert!(
+            matches!(result, Err(SecureStorageError::OutOfBounds)),
+            "read at boundary should fail with OutOfBounds"
+        );
     });
 }
 
@@ -1042,7 +1091,16 @@ fn e2e_write_empty_is_noop() {
         let mut ns_state = NamespaceState::empty();
 
         // Write real data first.
-        write_session_data(&mut storage, DOMAIN, NS, &session, &mut ns_state, 0, b"hello").unwrap();
+        write_session_data(
+            &mut storage,
+            DOMAIN,
+            NS,
+            &session,
+            &mut ns_state,
+            0,
+            b"hello",
+        )
+        .unwrap();
         assert_eq!(ns_state.total_data_length, 5);
 
         // Write empty data — should not change anything.
@@ -1070,27 +1128,55 @@ fn e2e_block_boundary_exact() {
 
         // Exactly fills block 0 data area — should NOT need block 1.
         let data_exact: Vec<u8> = (0..max_single_block).map(|i| (i % 256) as u8).collect();
-        write_session_data(&mut storage, DOMAIN, NS, &session, &mut ns_state, 0, &data_exact)
-            .unwrap();
+        write_session_data(
+            &mut storage,
+            DOMAIN,
+            NS,
+            &session,
+            &mut ns_state,
+            0,
+            &data_exact,
+        )
+        .unwrap();
 
         let block_count = storage.block_count(slot, NS).unwrap();
         assert_eq!(block_count, 1, "exact fit should need only 1 block");
 
         let result = read_session_data(
-            &storage, DOMAIN, NS, &session, &ns_state, 0, max_single_block,
+            &storage,
+            DOMAIN,
+            NS,
+            &session,
+            &ns_state,
+            0,
+            max_single_block,
         )
         .unwrap();
         assert_eq!(&*result, &data_exact);
 
         // One more byte — must spill to block 1.
         let data_spill: Vec<u8> = (0..max_single_block + 1).map(|i| (i % 256) as u8).collect();
-        write_session_data(&mut storage, DOMAIN, NS, &session, &mut ns_state, 0, &data_spill)
-            .unwrap();
+        write_session_data(
+            &mut storage,
+            DOMAIN,
+            NS,
+            &session,
+            &mut ns_state,
+            0,
+            &data_spill,
+        )
+        .unwrap();
 
         // block_count is per-session and includes cover blocks from other sessions,
         // but after the write, the target session should have at least 2 blocks.
         let result = read_session_data(
-            &storage, DOMAIN, NS, &session, &ns_state, 0, max_single_block + 1,
+            &storage,
+            DOMAIN,
+            NS,
+            &session,
+            &ns_state,
+            0,
+            max_single_block + 1,
         )
         .unwrap();
         assert_eq!(&*result, &data_spill);
@@ -1108,8 +1194,16 @@ fn e2e_shrink_noop_when_not_smaller() {
         let session = allocate_session(&mut storage, DOMAIN, slot, b"pw").unwrap();
         let mut ns_state = NamespaceState::empty();
 
-        write_session_data(&mut storage, DOMAIN, NS, &session, &mut ns_state, 0, b"12345")
-            .unwrap();
+        write_session_data(
+            &mut storage,
+            DOMAIN,
+            NS,
+            &session,
+            &mut ns_state,
+            0,
+            b"12345",
+        )
+        .unwrap();
 
         // Shrink to same size — no-op.
         shrink_session_data(&mut storage, DOMAIN, NS, &session, &mut ns_state, 5).unwrap();
@@ -1170,8 +1264,16 @@ fn e2e_double_provision_destroys_sessions() {
         let slot = SessionIndex::new(0).unwrap();
         let session = allocate_session(&mut storage, DOMAIN, slot, b"pw").unwrap();
         let mut ns_state = NamespaceState::empty();
-        write_session_data(&mut storage, DOMAIN, NS, &session, &mut ns_state, 0, b"important data")
-            .unwrap();
+        write_session_data(
+            &mut storage,
+            DOMAIN,
+            NS,
+            &session,
+            &mut ns_state,
+            0,
+            b"important data",
+        )
+        .unwrap();
         drop(session);
 
         // Verify data is accessible before re-provision.
@@ -1207,9 +1309,15 @@ fn e2e_repair_blockstream_lengths_pads_misaligned() {
         write_session_data(&mut storage, DOMAIN, NS, &session, &mut ns_state, 0, &big).unwrap();
 
         // All sessions should have the same block count.
-        let count0 = storage.block_count(SessionIndex::new(0).unwrap(), NS).unwrap();
-        let count1 = storage.block_count(SessionIndex::new(1).unwrap(), NS).unwrap();
-        let count2 = storage.block_count(SessionIndex::new(2).unwrap(), NS).unwrap();
+        let count0 = storage
+            .block_count(SessionIndex::new(0).unwrap(), NS)
+            .unwrap();
+        let count1 = storage
+            .block_count(SessionIndex::new(1).unwrap(), NS)
+            .unwrap();
+        let count2 = storage
+            .block_count(SessionIndex::new(2).unwrap(), NS)
+            .unwrap();
         assert_eq!(count0, count1);
         assert_eq!(count1, count2);
         assert!(count0 >= 3); // at least 3 blocks for 2*PLAINTEXT_SIZE data
@@ -1220,9 +1328,15 @@ fn e2e_repair_blockstream_lengths_pads_misaligned() {
         cover_traffic_tick(&mut storage, DOMAIN, NS).unwrap();
 
         // Block counts still aligned after cover traffic.
-        let c0 = storage.block_count(SessionIndex::new(0).unwrap(), NS).unwrap();
-        let c1 = storage.block_count(SessionIndex::new(1).unwrap(), NS).unwrap();
-        let c2 = storage.block_count(SessionIndex::new(2).unwrap(), NS).unwrap();
+        let c0 = storage
+            .block_count(SessionIndex::new(0).unwrap(), NS)
+            .unwrap();
+        let c1 = storage
+            .block_count(SessionIndex::new(1).unwrap(), NS)
+            .unwrap();
+        let c2 = storage
+            .block_count(SessionIndex::new(2).unwrap(), NS)
+            .unwrap();
         assert_eq!(c0, c1);
         assert_eq!(c1, c2);
     });

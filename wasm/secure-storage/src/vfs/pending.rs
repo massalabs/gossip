@@ -57,8 +57,8 @@ pub(crate) fn flush_writes<S: BlockStorage + KeypairStorage>(
             let mut buf = vec![0u8; span];
 
             if ns_state.total_data_length > group_off {
-                let readable =
-                    (ns_state.total_data_length.saturating_sub(group_off)).min(span as u64) as usize;
+                let readable = (ns_state.total_data_length.saturating_sub(group_off))
+                    .min(span as u64) as usize;
                 let existing = crate::read_session_data(
                     backend, domain, namespace, session, ns_state, group_off, readable,
                 )?;
@@ -70,7 +70,10 @@ pub(crate) fn flush_writes<S: BlockStorage + KeypairStorage>(
                 if pw.offset < group_end && pw_end > group_off {
                     let src_start = group_off.saturating_sub(pw.offset) as usize;
                     let dst_start = pw.offset.saturating_sub(group_off) as usize;
-                    let copy_len = pw_end.min(group_end).saturating_sub(pw.offset.max(group_off)) as usize;
+                    let copy_len = pw_end
+                        .min(group_end)
+                        .saturating_sub(pw.offset.max(group_off))
+                        as usize;
                     buf[dst_start..dst_start + copy_len]
                         .copy_from_slice(&pw.data[src_start..src_start + copy_len]);
                 }
@@ -98,10 +101,7 @@ fn group_by_contiguous_blocks(writes: &[PendingWrite]) -> Vec<(u64, u64)> {
         .map(|pw| {
             let first = (pw.offset / block_size) * block_size;
             let last_byte = pw.offset.saturating_add(pw.data.len() as u64);
-            let end = last_byte
-                .saturating_add(block_size - 1)
-                / block_size
-                * block_size;
+            let end = last_byte.saturating_add(block_size - 1) / block_size * block_size;
             (first, end)
         })
         .collect();
@@ -132,8 +132,7 @@ pub(crate) fn apply_pending_overlay(pending: &[PendingWrite], read_off: u64, dst
             let src_start = read_off.saturating_sub(pw.offset) as usize;
             let dst_start = pw.offset.saturating_sub(read_off) as usize;
             let len = (pw_end.min(read_end).saturating_sub(pw.offset.max(read_off))) as usize;
-            dst[dst_start..dst_start + len]
-                .copy_from_slice(&pw.data[src_start..src_start + len]);
+            dst[dst_start..dst_start + len].copy_from_slice(&pw.data[src_start..src_start + len]);
         }
     }
 }
@@ -145,7 +144,7 @@ mod tests {
     use crate::constants::PLAINTEXT_SIZE;
     use crate::storage::MemoryStorage;
     use crate::types::SessionIndex;
-    use crate::unlock::{load_namespace_state, NamespaceState};
+    use crate::unlock::{NamespaceState, load_namespace_state};
     use crate::{allocate_session, provision_storage, read_session_data};
 
     const DOMAIN: &str = "pending-tests";
@@ -288,7 +287,16 @@ mod tests {
         crate::run_with_stack(|| {
             let (mut storage, session, mut ns_state) = fresh_session();
             let writes = vec![pw(0, b"hello")];
-            flush_writes(&mut storage, DOMAIN, NS, &session, &mut ns_state, &writes, 5).unwrap();
+            flush_writes(
+                &mut storage,
+                DOMAIN,
+                NS,
+                &session,
+                &mut ns_state,
+                &writes,
+                5,
+            )
+            .unwrap();
 
             let read = read_session_data(&storage, DOMAIN, NS, &session, &ns_state, 0, 5).unwrap();
             assert_eq!(&*read, b"hello");
@@ -311,8 +319,7 @@ mod tests {
             )
             .unwrap();
 
-            let read =
-                read_session_data(&storage, DOMAIN, NS, &session, &ns_state, 0, 11).unwrap();
+            let read = read_session_data(&storage, DOMAIN, NS, &session, &ns_state, 0, 11).unwrap();
             assert_eq!(&*read, b"hello world");
         });
     }
@@ -333,8 +340,7 @@ mod tests {
             )
             .unwrap();
 
-            let read =
-                read_session_data(&storage, DOMAIN, NS, &session, &ns_state, 0, 8).unwrap();
+            let read = read_session_data(&storage, DOMAIN, NS, &session, &ns_state, 0, 8).unwrap();
             assert_eq!(&*read, b"AABBAAAA");
         });
     }

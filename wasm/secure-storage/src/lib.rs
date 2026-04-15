@@ -1,7 +1,3 @@
-//! SecureStorage v2 on-device encrypted storage.
-//!
-//! Spec: <https://github.com/massalabs/gossip/discussions/380>
-
 mod block;
 mod constants;
 mod domain;
@@ -27,14 +23,14 @@ mod wasm_api;
 
 pub use block::{create_cover_block, decrypt_block, encrypt_block, rerandomize_block};
 pub use constants::{
-    AEAD_TAG_SIZE, BLOCK_SIZE, LENGTH_HDR_SIZE, PLAINTEXT_SIZE, ROOT_BLOCK_KEY_SIZE, SESSION_COUNT,
-    DEFAULT_NAMESPACE,
+    AEAD_TAG_SIZE, BLOCK_SIZE, DEFAULT_NAMESPACE, LENGTH_HDR_SIZE, PLAINTEXT_SIZE,
+    ROOT_BLOCK_KEY_SIZE, SESSION_COUNT,
 };
 pub use domain::{
     block_aead_aad, block_aead_key_label, block_kdf_salt, block_scope, password_kdf_salt, root,
     root_aead_key_label, root_kdf_salt, session_scope, sk_wrap_aad, sk_wrap_key_label,
 };
-pub use error::{SecureStorageError, Result};
+pub use error::{Result, SecureStorageError};
 pub use kdf::{SessionKeys, derive_block_aead_key, derive_session_keys};
 pub use keypair::{KeypairFile, read_session_keypair, read_session_version_and_pk};
 pub use lifecycle::{allocate_session, cover_traffic_tick, provision_storage};

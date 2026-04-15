@@ -6,7 +6,7 @@ use zeroize::Zeroizing;
 
 use crate::BLOCK_SIZE;
 use crate::block::{create_cover_block, rerandomize_block};
-use crate::constants::{LENGTH_HDR_SIZE, PLAINTEXT_SIZE, SESSION_COUNT, DEFAULT_NAMESPACE};
+use crate::constants::{DEFAULT_NAMESPACE, LENGTH_HDR_SIZE, PLAINTEXT_SIZE, SESSION_COUNT};
 use crate::domain;
 use crate::error::{Result, SecureStorageError};
 use crate::kdf::derive_session_keys;
@@ -44,7 +44,7 @@ pub fn provision_storage<S: BlockStorage + KeypairStorage>(storage: &mut S) -> R
 
         let kf = KeypairFile::build_wrapped(0, pk.to_bytes(), &dummy_wrap_key, &dummy_sk, b"");
         storage.write_keypair(slot, &kf.serialize())?;
-        storage.init_blockstream(slot, DEFAULT_NAMESPACE)?;
+        storage.reset_blockstream(slot, DEFAULT_NAMESPACE)?;
     }
 
     Ok(())

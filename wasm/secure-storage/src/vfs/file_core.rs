@@ -136,7 +136,14 @@ impl EncryptedFileCore {
         });
 
         if new_size < ns_state.total_data_length {
-            crate::shrink_session_data(backend, domain, DEFAULT_NAMESPACE, session, ns_state, new_size)?;
+            crate::shrink_session_data(
+                backend,
+                domain,
+                DEFAULT_NAMESPACE,
+                session,
+                ns_state,
+                new_size,
+            )?;
         }
 
         self.pending_size = new_size;
@@ -155,7 +162,7 @@ mod tests {
     use super::*;
     use crate::storage::MemoryStorage;
     use crate::types::SessionIndex;
-    use crate::unlock::{load_namespace_state, NamespaceState};
+    use crate::unlock::{NamespaceState, load_namespace_state};
     use crate::{allocate_session, provision_storage};
 
     const DOMAIN: &str = "file-core-tests";
@@ -215,7 +222,8 @@ mod tests {
             let mut file = EncryptedFileCore::new();
 
             file.write(0, b"hello");
-            file.sync(&mut storage, DOMAIN, &session, &mut ns_state).unwrap();
+            file.sync(&mut storage, DOMAIN, &session, &mut ns_state)
+                .unwrap();
 
             assert_eq!(file.size(&ns_state), 5);
             let mut buf = vec![0u8; 5];
@@ -234,7 +242,8 @@ mod tests {
             let mut file = EncryptedFileCore::new();
 
             file.write(0, b"AAAA");
-            file.sync(&mut storage, DOMAIN, &session, &mut ns_state).unwrap();
+            file.sync(&mut storage, DOMAIN, &session, &mut ns_state)
+                .unwrap();
 
             file.write(4, b"BBBB"); // not synced
 
@@ -254,7 +263,8 @@ mod tests {
             let mut file = EncryptedFileCore::new();
 
             file.write(0, b"data");
-            file.sync(&mut storage, DOMAIN, &session, &mut ns_state).unwrap();
+            file.sync(&mut storage, DOMAIN, &session, &mut ns_state)
+                .unwrap();
 
             let mut buf = vec![0xFFu8; 10];
             let ok = file
@@ -287,7 +297,8 @@ mod tests {
             let (mut storage, session, mut ns_state) = fresh_session();
             let mut file = EncryptedFileCore::new();
             file.write(0, b"data");
-            file.sync(&mut storage, DOMAIN, &session, &mut ns_state).unwrap();
+            file.sync(&mut storage, DOMAIN, &session, &mut ns_state)
+                .unwrap();
 
             assert!(file.pending.is_empty());
             assert_eq!(file.pending_size, 0);
@@ -301,7 +312,8 @@ mod tests {
             let (mut storage, session, mut ns_state) = fresh_session();
             let mut file = EncryptedFileCore::new();
             let total_before = ns_state.total_data_length;
-            file.sync(&mut storage, DOMAIN, &session, &mut ns_state).unwrap();
+            file.sync(&mut storage, DOMAIN, &session, &mut ns_state)
+                .unwrap();
             assert_eq!(ns_state.total_data_length, total_before);
         });
     }
@@ -313,7 +325,8 @@ mod tests {
             let mut file = EncryptedFileCore::new();
 
             file.write(0, b"hello world");
-            file.sync(&mut storage, DOMAIN, &session, &mut ns_state).unwrap();
+            file.sync(&mut storage, DOMAIN, &session, &mut ns_state)
+                .unwrap();
             assert_eq!(file.size(&ns_state), 11);
 
             file.truncate(&mut storage, DOMAIN, &session, &mut ns_state, 5)
@@ -370,7 +383,8 @@ mod tests {
             let mut file = EncryptedFileCore::new();
 
             file.write(0, b"data");
-            file.sync(&mut storage, DOMAIN, &session, &mut ns_state).unwrap();
+            file.sync(&mut storage, DOMAIN, &session, &mut ns_state)
+                .unwrap();
 
             file.truncate(&mut storage, DOMAIN, &session, &mut ns_state, 100)
                 .unwrap();
@@ -392,7 +406,8 @@ mod tests {
             let mut file = EncryptedFileCore::new();
 
             file.write(0, b"AAAAA");
-            file.sync(&mut storage, DOMAIN, &session, &mut ns_state).unwrap();
+            file.sync(&mut storage, DOMAIN, &session, &mut ns_state)
+                .unwrap();
             assert_eq!(file.size(&ns_state), 5);
 
             file.write(10, b"BB"); // pending grows logical size to 12
@@ -407,7 +422,8 @@ mod tests {
             let mut file = EncryptedFileCore::new();
 
             file.write(0, b"persisted");
-            file.sync(&mut storage, DOMAIN, &session, &mut ns_state).unwrap();
+            file.sync(&mut storage, DOMAIN, &session, &mut ns_state)
+                .unwrap();
 
             file.write(20, b"discarded");
             file.discard_pending();

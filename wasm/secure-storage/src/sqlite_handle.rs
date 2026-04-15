@@ -8,18 +8,18 @@
 
 #![cfg(all(target_arch = "wasm32", feature = "wasm"))]
 
-use std::ffi::{c_char, c_int, CStr, CString};
+use std::ffi::{CStr, CString, c_char, c_int};
 use std::marker::PhantomData;
 use std::ptr;
 
 use sqlite_wasm_rs::{
-    sqlite3, sqlite3_bind_blob, sqlite3_bind_double, sqlite3_bind_int64, sqlite3_bind_null,
-    sqlite3_bind_text, sqlite3_close, sqlite3_column_blob, sqlite3_column_bytes,
-    sqlite3_column_count, sqlite3_column_double, sqlite3_column_int64, sqlite3_column_text,
-    sqlite3_column_type, sqlite3_errmsg, sqlite3_exec, sqlite3_finalize, sqlite3_last_insert_rowid,
-    sqlite3_open_v2, sqlite3_prepare_v2, sqlite3_step, sqlite3_stmt, SQLITE_BLOB, SQLITE_FLOAT,
-    SQLITE_INTEGER, SQLITE_NULL, SQLITE_OK, SQLITE_OPEN_CREATE, SQLITE_OPEN_READWRITE, SQLITE_TEXT,
-    SQLITE_TRANSIENT,
+    SQLITE_BLOB, SQLITE_FLOAT, SQLITE_INTEGER, SQLITE_NULL, SQLITE_OK, SQLITE_OPEN_CREATE,
+    SQLITE_OPEN_READWRITE, SQLITE_TEXT, SQLITE_TRANSIENT, sqlite3, sqlite3_bind_blob,
+    sqlite3_bind_double, sqlite3_bind_int64, sqlite3_bind_null, sqlite3_bind_text, sqlite3_close,
+    sqlite3_column_blob, sqlite3_column_bytes, sqlite3_column_count, sqlite3_column_double,
+    sqlite3_column_int64, sqlite3_column_text, sqlite3_column_type, sqlite3_errmsg, sqlite3_exec,
+    sqlite3_finalize, sqlite3_last_insert_rowid, sqlite3_open_v2, sqlite3_prepare_v2, sqlite3_step,
+    sqlite3_stmt,
 };
 
 // ── Errors ─────────────────────────────────────────────────────────

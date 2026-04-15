@@ -33,6 +33,7 @@ pub enum SecureStorageError {
     #[error("io error")]
     Io(#[from] std::io::Error),
 
+    // TODO: Check if this can be removed
     #[error("lock poisoned")]
     LockPoisoned,
 

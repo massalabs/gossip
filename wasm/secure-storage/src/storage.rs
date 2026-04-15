@@ -51,7 +51,7 @@ pub trait BlockStorage {
     /// Reset a session/namespace blockstream to empty (length 0).
     ///
     /// If the blockstream already exists, all existing blocks are removed.
-    fn init_blockstream(&mut self, session: SessionIndex, namespace: u8) -> Result<()>;
+    fn reset_blockstream(&mut self, session: SessionIndex, namespace: u8) -> Result<()>;
 }
 
 /// Keypair file storage for session keypair files.
@@ -87,7 +87,9 @@ impl MemoryStorage {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            keypairs: (0..SESSION_COUNT).map(|_| Zeroizing::new(Vec::new())).collect(),
+            keypairs: (0..SESSION_COUNT)
+                .map(|_| Zeroizing::new(Vec::new()))
+                .collect(),
             blockstreams: (0..SESSION_COUNT).map(|_| HashMap::new()).collect(),
         }
     }
@@ -154,8 +156,8 @@ impl BlockStorage for MemoryStorage {
         Ok(())
     }
 
-    fn init_blockstream(&mut self, session: SessionIndex, namespace: u8) -> Result<()> {
-        // Clear any existing blocks (matches IdbStorageState::init_blockstream).
+    fn reset_blockstream(&mut self, session: SessionIndex, namespace: u8) -> Result<()> {
+        // Clear any existing blocks (matches IdbStorageState::reset_blockstream).
         self.blockstreams[session.as_usize()].insert(namespace, Vec::new());
         Ok(())
     }
@@ -198,10 +200,9 @@ mod fs_backend {
         }
 
         fn blocks_path(&self, session: SessionIndex, namespace: u8) -> PathBuf {
-            self.base.join("sessions").join(format!(
-                "session_{}_n_{namespace}.blocks",
-                session.as_u8()
-            ))
+            self.base
+                .join("sessions")
+                .join(format!("session_{}_n_{namespace}.blocks", session.as_u8()))
         }
 
         fn keypair_path(&self, session: SessionIndex) -> PathBuf {
@@ -291,7 +292,7 @@ mod fs_backend {
             Ok(())
         }
 
-        fn init_blockstream(&mut self, session: SessionIndex, namespace: u8) -> Result<()> {
+        fn reset_blockstream(&mut self, session: SessionIndex, namespace: u8) -> Result<()> {
             let path = self.blocks_path(session, namespace);
             // Create or truncate to zero length, matching the trait contract
             // ("reset to empty"). The old code used create_new + AlreadyExists
@@ -428,11 +429,11 @@ mod tests {
     }
 
     #[test]
-    fn test_memory_init_blockstream_creates_empty() {
+    fn test_memory_reset_blockstream_creates_empty() {
         let mut store = MemoryStorage::new();
         let s0 = SessionIndex::new(0).unwrap();
 
-        store.init_blockstream(s0, 7).unwrap();
+        store.reset_blockstream(s0, 7).unwrap();
         assert_eq!(store.block_count(s0, 7).unwrap(), 0);
     }
 

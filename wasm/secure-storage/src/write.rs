@@ -75,7 +75,12 @@ pub fn encrypt_session_data_block<S: BlockStorage + KeypairStorage>(
             } else {
                 storage.read_block(idx, namespace, block_index).ok()
             };
-            Ok(BlockPrep { index: idx, pk, aad_root: aad, existing })
+            Ok(BlockPrep {
+                index: idx,
+                pk,
+                aad_root: aad,
+                existing,
+            })
         })
         .collect::<Result<_>>()?;
 
@@ -144,7 +149,14 @@ pub fn repair_blockstream_lengths<S: BlockStorage + KeypairStorage>(
             let (version, pk_bytes) = read_session_version_and_pk(storage, session)?;
             let pk = PqPublicKey::from_bytes(&pk_bytes)?;
 
-            domain::block_scope(&mut cur_aad_root, domain, version, session, namespace, count);
+            domain::block_scope(
+                &mut cur_aad_root,
+                domain,
+                version,
+                session,
+                namespace,
+                count,
+            );
             let cover = create_cover_block(&pk, &cur_aad_root);
             let ct_arr: &[u8; BLOCK_SIZE] = cover
                 .as_slice()
@@ -302,7 +314,9 @@ pub fn write_session_data<S: BlockStorage + KeypairStorage>(
     )?;
 
     // Map logical data offset to virtual plaintext stream position
-    let start_pos = hdr.checked_add(offset).ok_or(SecureStorageError::Overflow)?;
+    let start_pos = hdr
+        .checked_add(offset)
+        .ok_or(SecureStorageError::Overflow)?;
     let end_pos_excl = start_pos
         .checked_add(data_len)
         .ok_or(SecureStorageError::Overflow)?;
@@ -563,8 +577,7 @@ mod tests {
             encrypt_session_data_block(&mut storage, DOMAIN, NS, &session, 0, &pt).unwrap();
 
             let decrypted =
-                crate::read::decrypt_session_data_block(&storage, DOMAIN, NS, &session, 0)
-                    .unwrap();
+                crate::read::decrypt_session_data_block(&storage, DOMAIN, NS, &session, 0).unwrap();
             assert_eq!(*decrypted, pt);
         });
     }
@@ -693,8 +706,7 @@ mod tests {
             let (session, mut ns_state, _) = provision_all_sessions(&mut storage);
 
             let data = b"hello, secureStorage!";
-            write_session_data(&mut storage, DOMAIN, NS, &session, &mut ns_state, 0, data)
-                .unwrap();
+            write_session_data(&mut storage, DOMAIN, NS, &session, &mut ns_state, 0, data).unwrap();
 
             let result =
                 read_session_data(&storage, DOMAIN, NS, &session, &ns_state, 0, data.len())
@@ -741,13 +753,29 @@ mod tests {
 
             // Write initial data
             let initial = vec![0xAA; 100];
-            write_session_data(&mut storage, DOMAIN, NS, &session, &mut ns_state, 0, &initial)
-                .unwrap();
+            write_session_data(
+                &mut storage,
+                DOMAIN,
+                NS,
+                &session,
+                &mut ns_state,
+                0,
+                &initial,
+            )
+            .unwrap();
 
             // Overwrite bytes 25..75
             let patch = vec![0xBB; 50];
-            write_session_data(&mut storage, DOMAIN, NS, &session, &mut ns_state, 25, &patch)
-                .unwrap();
+            write_session_data(
+                &mut storage,
+                DOMAIN,
+                NS,
+                &session,
+                &mut ns_state,
+                25,
+                &patch,
+            )
+            .unwrap();
 
             let result =
                 read_session_data(&storage, DOMAIN, NS, &session, &ns_state, 0, 100).unwrap();
@@ -788,10 +816,26 @@ mod tests {
             let mut storage = MemoryStorage::new();
             let (session, mut ns_state, _) = provision_all_sessions(&mut storage);
 
-            write_session_data(&mut storage, DOMAIN, NS, &session, &mut ns_state, 0, b"hello")
-                .unwrap();
-            write_session_data(&mut storage, DOMAIN, NS, &session, &mut ns_state, 5, b" world")
-                .unwrap();
+            write_session_data(
+                &mut storage,
+                DOMAIN,
+                NS,
+                &session,
+                &mut ns_state,
+                0,
+                b"hello",
+            )
+            .unwrap();
+            write_session_data(
+                &mut storage,
+                DOMAIN,
+                NS,
+                &session,
+                &mut ns_state,
+                5,
+                b" world",
+            )
+            .unwrap();
 
             let result =
                 read_session_data(&storage, DOMAIN, NS, &session, &ns_state, 0, 11).unwrap();
@@ -826,8 +870,16 @@ mod tests {
             let (session, mut ns_state, _) = provision_all_sessions(&mut storage);
 
             // 1 byte of data: last byte at virtual pos LENGTH_HDR_SIZE + 0 -> block 0
-            write_session_data(&mut storage, DOMAIN, NS, &session, &mut ns_state, 0, &[0x42])
-                .unwrap();
+            write_session_data(
+                &mut storage,
+                DOMAIN,
+                NS,
+                &session,
+                &mut ns_state,
+                0,
+                &[0x42],
+            )
+            .unwrap();
             assert_eq!(ns_state.total_data_length, 1);
             assert_eq!(get_global_block_count(&storage, NS).unwrap(), 1);
 
@@ -895,8 +947,7 @@ mod tests {
             assert_eq!(get_global_block_count(&storage, NS).unwrap(), 2);
 
             let result =
-                read_session_data(&storage, DOMAIN, NS, &session, &ns_state, 0, exact_two)
-                    .unwrap();
+                read_session_data(&storage, DOMAIN, NS, &session, &ns_state, 0, exact_two).unwrap();
             assert_eq!(&*result, &data);
         });
     }
@@ -1157,8 +1208,7 @@ mod tests {
                 .unwrap();
 
             // Read the full plaintext of block 0 before shrink
-            let pt_before =
-                decrypt_session_data_block(&storage, DOMAIN, NS, &session, 0).unwrap();
+            let pt_before = decrypt_session_data_block(&storage, DOMAIN, NS, &session, 0).unwrap();
 
             // Shrink to half the data
             let half = (PLAINTEXT_SIZE - LENGTH_HDR_SIZE) / 2;
@@ -1173,8 +1223,7 @@ mod tests {
             .unwrap();
 
             // Read the full plaintext of block 0 after shrink
-            let pt_after =
-                decrypt_session_data_block(&storage, DOMAIN, NS, &session, 0).unwrap();
+            let pt_after = decrypt_session_data_block(&storage, DOMAIN, NS, &session, 0).unwrap();
 
             // The data portion should match
             assert_eq!(

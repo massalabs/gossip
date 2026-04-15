@@ -8,7 +8,7 @@ use rand::RngCore;
 use zeroize::Zeroizing;
 
 use crate::constants::{AEAD_TAG_SIZE, BLOCK_SIZE, PLAINTEXT_SIZE};
-use crate::error::{SecureStorageError, Result};
+use crate::error::{Result, SecureStorageError};
 use crate::pq::{PQ_MSG_SIZE, PqPublicKey, PqSecretKey, pq_decrypt, pq_encrypt, pq_rerand};
 
 const BLOCK_AEAD_SUFFIX: &str = ":block_aead";
@@ -126,7 +126,7 @@ mod tests {
         key
     }
 
-    const AAD_ROOT: &str = "test:secureStorage:session:v0:i0:b0";
+    const AAD_ROOT: &str = "test:secure_storage:session:v0:i0:b0";
 
     // --- encrypt / decrypt ---
 

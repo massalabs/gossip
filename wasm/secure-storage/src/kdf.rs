@@ -1,4 +1,4 @@
-//! Key derivation for secureStorage.
+//! Key derivation for secure_storage.
 
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
@@ -154,6 +154,6 @@ mod tests {
     #[test]
     fn returns_block_scope() {
         let (_key, scope) = derive_block_aead_key("app", 0, idx(2), 0, &TEST_ROOT_KEY, 5);
-        assert_eq!(scope, "app:secureStorage:session:v0:i2:n0:b5");
+        assert_eq!(scope, "app:secure_storage:session:v0:i2:n0:b5");
     }
 }

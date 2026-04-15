@@ -19,21 +19,21 @@ use std::marker::PhantomData;
 use std::time::Duration;
 
 use sqlite_wasm_rs::utils::ffi::{
-    sqlite3_file, sqlite3_int64, sqlite3_vfs, SQLITE_IOERR, SQLITE_IOERR_SHORT_READ, SQLITE_OK,
-    SQLITE_OPEN_MAIN_DB,
+    SQLITE_IOERR, SQLITE_IOERR_SHORT_READ, SQLITE_OK, SQLITE_OPEN_MAIN_DB, sqlite3_file,
+    sqlite3_int64, sqlite3_vfs,
 };
 use sqlite_wasm_rs::utils::{
     MemChunksFile, OsCallback, SQLiteIoMethods, SQLiteVfs, SQLiteVfsFile, VfsAppData, VfsError,
     VfsFile, VfsResult, VfsStore,
 };
 
+use crate::BLOCK_SIZE;
 use crate::DEFAULT_NAMESPACE;
 use crate::storage::{BlockStorage, KeypairStorage, MemoryStorage};
 use crate::types::SessionIndex;
 use crate::unlock::{NamespaceState, UnlockedSession};
 use crate::vfs::file_core::EncryptedFileCore;
 use crate::vfs::idb_storage::IdbBlockStorage;
-use crate::BLOCK_SIZE;
 
 // ── Backend ────────────────────────────────────────────────────────
 
@@ -91,14 +91,14 @@ impl BlockStorage for Backend {
             Backend::Idb(s) => s.fsync(session, namespace),
         }
     }
-    fn init_blockstream(
+    fn reset_blockstream(
         &mut self,
         session: SessionIndex,
         namespace: u8,
     ) -> crate::error::Result<()> {
         match self {
-            Backend::Memory(s) => s.init_blockstream(session, namespace),
-            Backend::Idb(s) => s.init_blockstream(session, namespace),
+            Backend::Memory(s) => s.reset_blockstream(session, namespace),
+            Backend::Idb(s) => s.reset_blockstream(session, namespace),
         }
     }
 }
@@ -215,8 +215,7 @@ impl VfsCtx {
         // SAFETY: documented above. Single-threaded WASM rules out tearing.
         unsafe {
             let vfs_file = SQLiteVfsFile::from_file(p_file);
-            let wrapped =
-                <EncryptedStore as VfsStore<SqlFile, AppState>>::app_data(vfs_file.vfs);
+            let wrapped = <EncryptedStore as VfsStore<SqlFile, AppState>>::app_data(vfs_file.vfs);
             VfsCtx {
                 wrapped,
                 app_data: &**wrapped,
@@ -260,8 +259,7 @@ fn write_size(out: *mut sqlite3_int64, value: usize) {
 fn store_app_data(vfs: *mut sqlite3_vfs) -> &'static AppState {
     // SAFETY: documented above.
     unsafe {
-        let wrapped =
-            <EncryptedStore as VfsStore<SqlFile, AppState>>::app_data(vfs);
+        let wrapped = <EncryptedStore as VfsStore<SqlFile, AppState>>::app_data(vfs);
         &**wrapped
     }
 }
@@ -483,7 +481,14 @@ fn read_main_or_temp(
                 .copied()
                 .unwrap_or_default();
             let full = core
-                .read(&state.backend, &state.domain, session, &ns_state, offset, buf)
+                .read(
+                    &state.backend,
+                    &state.domain,
+                    session,
+                    &ns_state,
+                    offset,
+                    buf,
+                )
                 .map_err(|e| VfsError::new(SQLITE_IOERR, e.to_string()))?;
             Ok(if full {
                 SQLITE_OK

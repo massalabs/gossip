@@ -104,13 +104,9 @@ pub fn unlock_session<S: BlockStorage + KeypairStorage>(
         let sk_wrap_aad = domain::sk_wrap_aad(domain, kf.version, session);
         let nonce = crypto_aead::Nonce::from(kf.sk_nonce);
 
-        let decrypt_result = crypto_aead::decrypt(
-            &sk_wrap_aead_key,
-            &nonce,
-            &kf.sk_ct,
-            sk_wrap_aad.as_bytes(),
-        )
-        .map(Zeroizing::new);
+        let decrypt_result =
+            crypto_aead::decrypt(&sk_wrap_aead_key, &nonce, &kf.sk_ct, sk_wrap_aad.as_bytes())
+                .map(Zeroizing::new);
 
         // Always parse pk/sk regardless of AEAD result to equalize timing.
         let sk_parse = decrypt_result
@@ -202,7 +198,9 @@ mod tests {
 
         let ct = encrypt_block(pq_pk, &aead_key, &aad_root, &plaintext);
         let ct_arr: &[u8; crate::BLOCK_SIZE] = ct.as_slice().try_into().unwrap();
-        storage.append_block(session, DEFAULT_NAMESPACE, ct_arr).unwrap();
+        storage
+            .append_block(session, DEFAULT_NAMESPACE, ct_arr)
+            .unwrap();
     }
 
     #[test]

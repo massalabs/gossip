@@ -22,22 +22,24 @@ use crate::storage::{BlockStorage, KeypairStorage};
 use crate::types::SessionIndex;
 use crate::vfs::idb_state::{IdbKey, IdbStorageState};
 
-const DB_NAME: &str = "secureStorage";
+const DB_NAME: &str = "secure_storage";
 const STORE_NAME: &str = "blocks";
 const DB_VERSION: u32 = 1;
 
 // ── Low-level IDB helpers ───────────────────────────────────────────
 
-/// Open (or create) the secureStorage IndexedDB database.
+/// Open (or create) the secure_storage IndexedDB database.
 async fn open_db() -> std::result::Result<IdbDatabase, JsValue> {
     let mut req = IdbDatabase::open_u32(DB_NAME, DB_VERSION)?;
-    req.set_on_upgrade_needed(Some(|evt: &IdbVersionChangeEvent| -> std::result::Result<(), JsValue> {
-        let db = evt.db();
-        if !db.object_store_names().any(|n| n == STORE_NAME) {
-            db.create_object_store(STORE_NAME)?;
-        }
-        Ok(())
-    }));
+    req.set_on_upgrade_needed(Some(
+        |evt: &IdbVersionChangeEvent| -> std::result::Result<(), JsValue> {
+            let db = evt.db();
+            if !db.object_store_names().any(|n| n == STORE_NAME) {
+                db.create_object_store(STORE_NAME)?;
+            }
+            Ok(())
+        },
+    ));
     Ok(req.into_future().await?)
 }
 
@@ -101,7 +103,7 @@ async fn batch_put(
 
 // ── Storage type ────────────────────────────────────────────────────
 
-/// IndexedDB-backed block storage for secureStorage.
+/// IndexedDB-backed block storage for secure_storage.
 ///
 /// All in-memory state lives in [`IdbStorageState`] behind a single
 /// `RefCell` (single-threaded WASM, no `Mutex` needed).
@@ -237,10 +239,10 @@ impl BlockStorage for IdbBlockStorage {
         Ok(())
     }
 
-    fn init_blockstream(&mut self, session: SessionIndex, namespace: u8) -> Result<()> {
+    fn reset_blockstream(&mut self, session: SessionIndex, namespace: u8) -> Result<()> {
         self.state
             .get_mut()
-            .init_blockstream(session.as_u8(), namespace);
+            .reset_blockstream(session.as_u8(), namespace);
         Ok(())
     }
 }

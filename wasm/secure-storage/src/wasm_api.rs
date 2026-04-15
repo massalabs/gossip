@@ -21,8 +21,8 @@ use std::cell::RefCell;
 use std::ffi::CStr;
 
 use js_sys::{Array, Uint8Array};
-use sqlite_wasm_rs::utils::{register_vfs, registered_vfs, VfsAppData};
 use sqlite_wasm_rs::WasmOsCallback;
+use sqlite_wasm_rs::utils::{VfsAppData, register_vfs, registered_vfs};
 use wasm_bindgen::prelude::*;
 
 // Re-export wasm-bindgen-rayon's `initThreadPool` so it survives DCE and
@@ -33,14 +33,12 @@ pub use wasm_bindgen_rayon::init_thread_pool;
 
 use crate::DEFAULT_NAMESPACE;
 use crate::error::SecureStorageError;
-use crate::sqlite_handle::{SafeDb, SafeStmt, SqlValue, DONE, OK, ROW};
+use crate::sqlite_handle::{DONE, OK, ROW, SafeDb, SafeStmt, SqlValue};
 use crate::storage::MemoryStorage;
 use crate::types::SessionIndex;
 use crate::unlock::{NamespaceState, load_namespace_state};
 use crate::vfs::idb_storage::IdbBlockStorage;
-use crate::vfs::sqlite_vfs::{
-    AppState, Backend, EncryptedIoMethods, EncryptedVfs, VFS_NAME,
-};
+use crate::vfs::sqlite_vfs::{AppState, Backend, EncryptedIoMethods, EncryptedVfs, VFS_NAME};
 
 // ── Global state ───────────────────────────────────────────────────
 
@@ -141,8 +139,8 @@ pub fn allocate_session(slot: u8, password: &[u8]) -> Result<(), JsValue> {
         let mut state = app.state.borrow_mut();
         let idx = SessionIndex::new(slot).map_err(map_err)?;
         let domain = state.domain.clone();
-        let session = crate::allocate_session(&mut state.backend, &domain, idx, password)
-            .map_err(map_err)?;
+        let session =
+            crate::allocate_session(&mut state.backend, &domain, idx, password).map_err(map_err)?;
         state.session = Some(session);
         // allocate_session writes block 0 with length=0 in the default namespace.
         state.namespace_states.clear();
@@ -223,16 +221,15 @@ fn ensure_namespace_state_loaded(
         .as_ref()
         .ok_or_else(|| JsValue::from_str("session not unlocked"))?;
     let domain = state.domain.clone();
-    let ns_state = load_namespace_state(&state.backend, &domain, session, namespace)
-        .map_err(map_err)?;
+    let ns_state =
+        load_namespace_state(&state.backend, &domain, session, namespace).map_err(map_err)?;
     state.namespace_states.insert(namespace, ns_state);
     Ok(())
 }
 
 #[wasm_bindgen(js_name = writeNamespaceData)]
 pub fn write_namespace_data(namespace: u8, offset: f64, data: &[u8]) -> Result<(), JsValue> {
-    let offset = safe_f64_to_u64(offset)
-        .ok_or_else(|| JsValue::from_str("invalid offset"))?;
+    let offset = safe_f64_to_u64(offset).ok_or_else(|| JsValue::from_str("invalid offset"))?;
     with_app_state(|app| {
         let mut state = app.state.borrow_mut();
         ensure_namespace_state_loaded(&mut state, namespace)?;
@@ -253,8 +250,7 @@ pub fn write_namespace_data(namespace: u8, offset: f64, data: &[u8]) -> Result<(
 
 #[wasm_bindgen(js_name = readNamespaceData)]
 pub fn read_namespace_data(namespace: u8, offset: f64, len: usize) -> Result<Vec<u8>, JsValue> {
-    let offset = safe_f64_to_u64(offset)
-        .ok_or_else(|| JsValue::from_str("invalid offset"))?;
+    let offset = safe_f64_to_u64(offset).ok_or_else(|| JsValue::from_str("invalid offset"))?;
     with_app_state(|app| {
         let mut state = app.state.borrow_mut();
         ensure_namespace_state_loaded(&mut state, namespace)?;

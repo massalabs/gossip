@@ -29,8 +29,14 @@ use crate::error::{Result, SecureStorageError};
 /// build IDB key strings ad-hoc anywhere else in the codebase.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum IdbKey {
-    Block { session: u8, namespace: u8, idx: u64 },
-    Keypair { session: u8 },
+    Block {
+        session: u8,
+        namespace: u8,
+        idx: u64,
+    },
+    Keypair {
+        session: u8,
+    },
 }
 
 impl IdbKey {
@@ -167,8 +173,7 @@ impl IdbStorageState {
     /// True if there is nothing to flush to IDB.
     #[cfg(test)]
     pub fn is_clean(&self) -> bool {
-        self.dirty_blocks.is_empty()
-            && self.dirty_keypairs.is_empty()
+        self.dirty_blocks.is_empty() && self.dirty_keypairs.is_empty()
     }
 
     // ── Block ops ──────────────────────────────────────────────
@@ -179,11 +184,13 @@ impl IdbStorageState {
         namespace: u8,
         block: u64,
     ) -> Result<Box<[u8; BLOCK_SIZE]>> {
-        let stream = self.blocks[session as usize].get(&namespace).ok_or_else(|| {
-            SecureStorageError::Storage(format!(
-                "block not found: session={session}, namespace={namespace}, block={block}"
-            ))
-        })?;
+        let stream = self.blocks[session as usize]
+            .get(&namespace)
+            .ok_or_else(|| {
+                SecureStorageError::Storage(format!(
+                    "block not found: session={session}, namespace={namespace}, block={block}"
+                ))
+            })?;
         match stream.get(block as usize).and_then(|opt| opt.as_ref()) {
             Some(data) => Ok(data.clone()),
             None => Err(SecureStorageError::Storage(format!(
@@ -193,9 +200,7 @@ impl IdbStorageState {
     }
 
     pub fn write_block(&mut self, session: u8, namespace: u8, block: u64, data: &[u8; BLOCK_SIZE]) {
-        let stream = self.blocks[session as usize]
-            .entry(namespace)
-            .or_default();
+        let stream = self.blocks[session as usize].entry(namespace).or_default();
         let i = block as usize;
         if i >= stream.len() {
             stream.resize_with(i + 1, || None);
@@ -205,9 +210,7 @@ impl IdbStorageState {
     }
 
     pub fn append_block(&mut self, session: u8, namespace: u8, data: &[u8; BLOCK_SIZE]) {
-        let stream = self.blocks[session as usize]
-            .entry(namespace)
-            .or_default();
+        let stream = self.blocks[session as usize].entry(namespace).or_default();
         let block = stream.len() as u64;
         stream.push(Some(Box::new(*data)));
         self.dirty_blocks.insert((session, namespace, block));
@@ -228,7 +231,7 @@ impl IdbStorageState {
     /// This method tombstones every existing block of the namespace so
     /// the next flush physically deletes them from IndexedDB. Other
     /// namespaces of the same session are untouched.
-    pub fn init_blockstream(&mut self, session: u8, namespace: u8) {
+    pub fn reset_blockstream(&mut self, session: u8, namespace: u8) {
         let session_streams = &mut self.blocks[session as usize];
         // Remove old blocks from cache and dirty set. No tombstones needed:
         // the global block count never decreases (spec §14), so every old
@@ -241,7 +244,7 @@ impl IdbStorageState {
             }
         }
         // Re-insert an empty vector so the namespace exists with length 0
-        // (matches MemoryStorage::init_blockstream semantics).
+        // (matches MemoryStorage::reset_blockstream semantics).
         session_streams.insert(namespace, Vec::new());
     }
 
@@ -298,7 +301,11 @@ impl IdbStorageState {
 
         let keypair_puts: Vec<(u8, Zeroizing<Vec<u8>>)> = dirty_keypairs
             .iter()
-            .filter_map(|&s| self.keypairs[s as usize].as_ref().map(|d| (s, Zeroizing::new(d.to_vec()))))
+            .filter_map(|&s| {
+                self.keypairs[s as usize]
+                    .as_ref()
+                    .map(|d| (s, Zeroizing::new(d.to_vec())))
+            })
             .collect();
 
         DirtySnapshot {
@@ -311,7 +318,7 @@ impl IdbStorageState {
     ///
     /// Re-marks each entry as dirty so it will be retried at the next
     /// drain. Entries whose cache slot has been wiped since the drain
-    /// (e.g., by [`Self::init_blockstream`]) are silently skipped —
+    /// (e.g., by [`Self::reset_blockstream`]) are silently skipped —
     /// there is nothing to retry.
     pub fn restore_pending(&mut self, snap: DirtySnapshot) {
         for ((s, n, b), _data) in snap.block_puts {
@@ -412,7 +419,10 @@ mod tests {
 
     #[test]
     fn key_parse_keypair() {
-        assert_eq!(IdbKey::parse("s:0:kp"), Some(IdbKey::Keypair { session: 0 }));
+        assert_eq!(
+            IdbKey::parse("s:0:kp"),
+            Some(IdbKey::Keypair { session: 0 })
+        );
     }
 
     #[test]
@@ -584,13 +594,13 @@ mod tests {
     }
 
     #[test]
-    fn init_blockstream_only_wipes_target_namespace() {
+    fn reset_blockstream_only_wipes_target_namespace() {
         let mut s = IdbStorageState::new();
         s.write_block(0, 0, 0, &block(0xAA));
         s.write_block(0, 1, 0, &block(0xBB));
         let _ = s.drain_pending();
 
-        s.init_blockstream(0, 0);
+        s.reset_blockstream(0, 0);
 
         assert!(s.read_block(0, 0, 0).is_err());
         assert!(s.read_block(0, 1, 0).is_ok());
@@ -705,7 +715,7 @@ mod tests {
         assert_eq!(snap.block_puts.len(), 3);
 
         // Wipe session 0 namespace NS between drain and restore
-        s.init_blockstream(0, NS);
+        s.reset_blockstream(0, NS);
 
         // Restore the failed snapshot
         s.restore_pending(snap);
@@ -730,21 +740,21 @@ mod tests {
         assert!(s.dirty_keypairs.is_empty());
     }
 
-    // ── init_blockstream without tombstones ──
+    // ── reset_blockstream without tombstones ──
     //
     // Since the global block count never decreases (spec §14), old IDB
     // entries are always overwritten by repair_blockstream_lengths or
     // encrypt_session_data_block before the next flush. No deletes needed.
 
     #[test]
-    fn init_blockstream_clears_ram_and_dirty() {
+    fn reset_blockstream_clears_ram_and_dirty() {
         let mut s = IdbStorageState::new();
         s.write_block(0, NS, 0, &block(1));
         s.write_block(0, NS, 1, &block(2));
         s.write_block(0, NS, 2, &block(3));
         assert_eq!(s.block_count(0, NS), 3);
 
-        s.init_blockstream(0, NS);
+        s.reset_blockstream(0, NS);
 
         // Blocks gone from RAM.
         assert!(s.read_block(0, NS, 0).is_err());
@@ -757,12 +767,12 @@ mod tests {
     }
 
     #[test]
-    fn init_blockstream_then_write_is_dirty() {
+    fn reset_blockstream_then_write_is_dirty() {
         let mut s = IdbStorageState::new();
         s.write_block(0, NS, 0, &block(1));
         let _ = s.drain_pending();
 
-        s.init_blockstream(0, NS);
+        s.reset_blockstream(0, NS);
         s.write_block(0, NS, 0, &block(42));
 
         let snap = s.drain_pending();
@@ -771,24 +781,24 @@ mod tests {
     }
 
     #[test]
-    fn init_blockstream_clears_dirty_for_wiped_blocks() {
+    fn reset_blockstream_clears_dirty_for_wiped_blocks() {
         let mut s = IdbStorageState::new();
         s.write_block(0, NS, 0, &block(1));
         // Don't drain — block is still dirty
-        s.init_blockstream(0, NS);
+        s.reset_blockstream(0, NS);
 
         // The dirty marker for (0,NS,0) must be gone.
         assert!(s.is_clean());
     }
 
     #[test]
-    fn init_blockstream_does_not_affect_other_sessions() {
+    fn reset_blockstream_does_not_affect_other_sessions() {
         let mut s = IdbStorageState::new();
         s.write_block(0, NS, 0, &block(1));
         s.write_block(1, NS, 0, &block(2));
         let _ = s.drain_pending();
 
-        s.init_blockstream(0, NS);
+        s.reset_blockstream(0, NS);
 
         // Session 1 untouched.
         assert!(s.read_block(1, NS, 0).is_ok());
