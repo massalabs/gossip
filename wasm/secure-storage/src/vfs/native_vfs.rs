@@ -469,7 +469,7 @@ pub fn clear_namespace(namespace: u8) -> Result<()> {
         .as_ref()
         .ok_or_else(|| SecureStorageError::Storage("no session".into()))?;
     use crate::storage::BlockStorage;
-    st.backend.init_blockstream(session.session_index, namespace)?;
+    st.backend.reset_blockstream(session.session_index, namespace)?;
     // Reset in-memory tracking for this namespace.
     st.namespace_states
         .insert(namespace, NamespaceState::empty());

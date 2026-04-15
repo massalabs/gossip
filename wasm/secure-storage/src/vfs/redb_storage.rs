@@ -247,7 +247,7 @@ impl BlockStorage for RedbStorage {
         Ok(())
     }
 
-    fn init_blockstream(&mut self, session: SessionIndex, namespace: u8) -> Result<()> {
+    fn reset_blockstream(&mut self, session: SessionIndex, namespace: u8) -> Result<()> {
         let si = session.as_usize();
         let su8 = session.as_u8();
 
@@ -510,14 +510,14 @@ mod tests {
     }
 
     #[test]
-    fn test_init_blockstream_clears_namespace() {
+    fn test_reset_blockstream_clears_namespace() {
         let (mut s, _dir) = make_storage();
         let si = SessionIndex::new(0).unwrap();
         s.append_block(si, NS, &make_block(0xAA)).unwrap();
         s.append_block(si, 1, &make_block(0xBB)).unwrap();
         s.commit().unwrap();
 
-        s.init_blockstream(si, NS).unwrap();
+        s.reset_blockstream(si, NS).unwrap();
         assert_eq!(s.block_count(si, NS).unwrap(), 0);
         // Other namespace untouched.
         assert_eq!(s.block_count(si, 1).unwrap(), 1);
