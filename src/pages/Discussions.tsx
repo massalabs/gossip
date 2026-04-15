@@ -63,25 +63,24 @@ const Discussions: React.FC = () => {
             state: { forwardFromMessageId: pendingForwardMessageId },
             replace: false,
           });
-          setPendingSharedContent(null);
           setPendingForwardMessageId(null);
         } else {
           navigate(ROUTES.selfDiscussion());
         }
         return;
       }
-      if (pendingSharedContent) {
-        const state =
-          pendingForwardMessageId != null
-            ? { forwardFromMessageId: pendingForwardMessageId }
-            : { prefilledMessage: pendingSharedContent };
-
+      if (pendingForwardMessageId != null) {
         navigate(ROUTES.discussion({ userId: contactUserId }), {
-          state,
+          state: { forwardFromMessageId: pendingForwardMessageId },
+          replace: false,
+        });
+        setPendingForwardMessageId(null);
+      } else if (pendingSharedContent) {
+        navigate(ROUTES.discussion({ userId: contactUserId }), {
+          state: { prefilledMessage: pendingSharedContent },
           replace: false,
         });
         setPendingSharedContent(null);
-        setPendingForwardMessageId(null);
       } else {
         navigate(ROUTES.discussion({ userId: contactUserId }));
       }
@@ -199,8 +198,8 @@ const Discussions: React.FC = () => {
       contentClassName="pt-2 px-2 pb-4 flex flex-col"
       onScrollContainerRef={setScrollContainer}
     >
-      {/* Show banner when there's pending shared content */}
-      {pendingSharedContent && (
+      {/* Show banner when there's pending shared content or a pending forward */}
+      {(pendingSharedContent || pendingForwardMessageId != null) && (
         <div className="mx-2 mb-4 p-4 bg-accent/50 border border-border rounded-lg">
           <div className="flex items-start justify-between gap-3">
             <div className="flex-1 min-w-0">

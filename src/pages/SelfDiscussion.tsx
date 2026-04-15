@@ -6,7 +6,7 @@ import React, {
   useState,
 } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
 import { Clock, Settings } from 'react-feather';
 import { MessageDirection, Message } from '@massalabs/gossip-sdk';
 import BackButton from '../components/ui/BackButton';
@@ -17,7 +17,6 @@ import MessageInput from '../components/discussions/MessageInput';
 import DiscussionLayout from '../components/discussions/DiscussionLayout';
 import { useSelfMessageStore } from '../stores/selfMessageStore';
 import { getSdk } from '../stores/sdkStore';
-import { ROUTES } from '../constants/routes';
 import { useDiscussionMessageSelection } from '../hooks/useDiscussionMessageSelection';
 import { useGossipSdk } from '../hooks/useGossipSdk';
 import SelectionHeader from '../components/discussions/SelectionHeader';
@@ -40,7 +39,6 @@ const RETENTION_OPTIONS: {
 const SelfDiscussion: React.FC = () => {
   const { t } = useTranslation('discussions');
   const location = useLocation();
-  const navigate = useNavigate();
   const messages = useSelfMessageStore.use.messages();
   const isLoading = useSelfMessageStore.use.isLoading();
   const loadMessages = useSelfMessageStore.use.loadMessages();
@@ -106,23 +104,19 @@ const SelfDiscussion: React.FC = () => {
     location.state as { forwardFromMessageId?: number } | undefined
   )?.forwardFromMessageId;
 
+  const forwardHandledRef = useRef<number | null>(null);
   useEffect(() => {
     if (forwardFromMessageId == null) return;
-    let cancelled = false;
-    const load = async () => {
+    if (forwardHandledRef.current === forwardFromMessageId) return;
+    forwardHandledRef.current = forwardFromMessageId;
+
+    void (async () => {
       const msg = await getSdk().messages.get(forwardFromMessageId);
-      if (!cancelled && msg?.content) {
+      if (msg?.content) {
         await sendMessage(msg.content);
       }
-      if (!cancelled) {
-        navigate(ROUTES.selfDiscussion(), { replace: true, state: {} });
-      }
-    };
-    void load();
-    return () => {
-      cancelled = true;
-    };
-  }, [forwardFromMessageId, navigate, sendMessage]);
+    })();
+  }, [forwardFromMessageId, sendMessage]);
 
   useEffect(() => {
     void loadMessages();

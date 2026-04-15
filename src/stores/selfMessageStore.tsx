@@ -1,13 +1,7 @@
 import { create } from 'zustand';
-import {
-  Message,
-  MessageDirection,
-  MessageStatus,
-  MessageType,
-} from '@massalabs/gossip-sdk';
+import { Message } from '@massalabs/gossip-sdk';
 import { createSelectors } from './utils/createSelectors';
 import { getSdk } from './sdkStore';
-import { useAccountStore } from './accountStore';
 import { ReactionGroup } from './messageStore';
 
 interface SelfMessageStore {
@@ -80,36 +74,17 @@ const useSelfMessageStoreBase = create<SelfMessageStore>((set, get) => ({
 
     const sdk = getSdk();
     if (!sdk.isSessionOpen) return;
-    const userProfile = useAccountStore.getState().userProfile;
-    if (!userProfile?.userId) return;
 
     set({ isSending: true });
-
-    // Optimistic: add to state before SDK call
-    const optimistic: Message = {
-      ownerUserId: userProfile.userId,
-      contactUserId: '__self__',
-      content: trimmed,
-      type: MessageType.TEXT,
-      direction: MessageDirection.OUTGOING,
-      status: MessageStatus.SENT,
-      timestamp: new Date(),
-    };
-    set(state => ({ messages: [...state.messages, optimistic] }));
-    set({ isSending: false });
-
     try {
-      const message = await sdk.selfMessages.send(trimmed);
-      // Replace optimistic with persisted (has real id)
+      const persisted = await sdk.selfMessages.send(trimmed);
       set(state => ({
-        messages: state.messages.map(m => (m === optimistic ? message : m)),
+        isSending: false,
+        messages: [...state.messages, persisted],
       }));
     } catch (error) {
       console.error('Failed to send self message', error);
-      // Remove optimistic message
-      set(state => ({
-        messages: state.messages.filter(m => m !== optimistic),
-      }));
+      set({ isSending: false });
     }
   },
 

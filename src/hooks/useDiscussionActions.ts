@@ -32,7 +32,6 @@ export function useDiscussionActions({
   const sendMessage = useMessageStore(s => s.sendMessage);
   const deleteMessage = useMessageStore(s => s.deleteMessage);
   const editMessage = useMessageStore(s => s.editMessage);
-  const setPendingSharedContent = useAppStore(s => s.setPendingSharedContent);
   const setPendingForwardMessageId = useAppStore(
     s => s.setPendingForwardMessageId
   );
@@ -86,11 +85,10 @@ export function useDiscussionActions({
       // Set pending forward state, then go to discussions list for recipient selection.
       // replace: true avoids pushing a duplicate /discussions entry so back navigation
       // after forwarding returns cleanly to the discussions list.
-      setPendingSharedContent(message.content);
       setPendingForwardMessageId(message.id);
       navigate(ROUTES.discussions(), { replace: true });
     },
-    [navigate, setPendingForwardMessageId, setPendingSharedContent]
+    [navigate, setPendingForwardMessageId]
   );
 
   const handleEditMessage = useCallback(
