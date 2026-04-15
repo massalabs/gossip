@@ -37,7 +37,7 @@ use crate::error::{Result, SecureStorageError};
 use crate::types::SessionIndex;
 use crate::unlock::{NamespaceState, UnlockedSession, load_namespace_state};
 
-use super::pending::{PendingWrite, apply_pending_overlay, flush_writes};
+use super::file_core::EncryptedFileCore;
 use super::redb_storage::RedbStorage;
 
 /// VFS name used for registration with SQLite.
@@ -59,11 +59,13 @@ struct VfsState {
     domain: String,
     session: Option<UnlockedSession>,
     namespace_states: HashMap<u8, NamespaceState>,
-    /// Plaintext write buffer for the SQL namespace. Writes accumulate
-    /// during a transaction and are flushed at `x_sync`.
-    pending_writes: Vec<PendingWrite>,
-    /// Tracks the logical file size including pending writes.
-    pending_file_size: u64,
+    /// Per-file read/write/sync state for the SQLite main DB.
+    ///
+    /// Shared with the web VFS via [`EncryptedFileCore`] — this is the
+    /// single source of truth for pending-write handling, overlay
+    /// reads, and shrink semantics. Native callbacks are thin FFI
+    /// trampolines that delegate here.
+    main_file: EncryptedFileCore,
 }
 
 impl VfsState {
@@ -72,10 +74,6 @@ impl VfsState {
             .get(&DEFAULT_NAMESPACE)
             .copied()
             .unwrap_or_default()
-    }
-
-    fn sql_ns_state_mut(&mut self) -> &mut NamespaceState {
-        self.namespace_states.entry(DEFAULT_NAMESPACE).or_default()
     }
 }
 
@@ -140,8 +138,7 @@ pub fn init_native(path: &str, domain: &str) -> Result<()> {
         domain: domain.to_string(),
         session: None,
         namespace_states: HashMap::new(),
-        pending_writes: Vec::new(),
-        pending_file_size: 0,
+        main_file: EncryptedFileCore::new(),
     });
     drop(guard);
     // Start the cover-traffic background thread once the backend is
@@ -222,11 +219,15 @@ pub fn allocate(slot: u8, password: &[u8]) -> Result<()> {
         .ok_or_else(|| SecureStorageError::Storage("not initialized".into()))?;
     let idx = SessionIndex::new(slot)?;
     let session = crate::allocate_session(&mut st.backend, &st.domain, idx, password)?;
-    st.pending_writes.clear();
+    // Drop any pending writes from the previous session by replacing the
+    // file core with a fresh one. Equivalent to the web path's
+    // `app.files.clear()` inside `close_database_and_clear_files` (the
+    // SQLite handle is closed by the caller before entering this function,
+    // so we only need to wipe the in-memory pending buffer here).
+    st.main_file = EncryptedFileCore::new();
     st.namespace_states.clear();
     st.namespace_states
         .insert(DEFAULT_NAMESPACE, NamespaceState::empty());
-    st.pending_file_size = 0;
     st.session = Some(session);
     Ok(())
 }
@@ -242,8 +243,8 @@ pub fn unlock(password: &[u8]) -> Result<bool> {
         Ok(session) => {
             let sql_state =
                 load_namespace_state(&st.backend, &st.domain, &session, DEFAULT_NAMESPACE)?;
-            st.pending_writes.clear();
-            st.pending_file_size = sql_state.total_data_length;
+            // Same reset-on-switch pattern as `allocate` above.
+            st.main_file = EncryptedFileCore::new();
             st.namespace_states.clear();
             st.namespace_states.insert(DEFAULT_NAMESPACE, sql_state);
             st.session = Some(session);
@@ -260,8 +261,8 @@ pub fn lock() {
         if let Some(st) = guard.as_mut() {
             st.session = None;
             st.namespace_states.clear();
-            st.pending_writes.clear();
-            st.pending_file_size = 0;
+            // Same reset-on-switch pattern as `allocate` / `unlock` above.
+            st.main_file = EncryptedFileCore::new();
         }
     }
 }
@@ -398,36 +399,21 @@ pub(crate) fn reset_state() {
     }
 }
 
-/// Drain all pending writes through the encryption layer and commit.
+/// Drain pending writes via `EncryptedFileCore::sync` and commit redb.
 fn flush_pending_writes(st: &mut VfsState) -> Result<()> {
-    if st.pending_writes.is_empty() {
-        return Ok(());
-    }
-    let writes = std::mem::take(&mut st.pending_writes);
-    let file_size = st.pending_file_size;
-
-    let result = (|| -> Result<()> {
-        let session = st
-            .session
-            .as_ref()
-            .ok_or_else(|| SecureStorageError::Storage("no session".into()))?;
-        let ns_state = st.namespace_states.entry(DEFAULT_NAMESPACE).or_default();
-        flush_writes(
-            &mut st.backend,
-            &st.domain,
-            DEFAULT_NAMESPACE,
-            session,
-            ns_state,
-            &writes,
-            file_size,
-        )?;
-        st.backend.commit()
-    })();
-
-    if result.is_err() {
-        st.pending_writes = writes;
-    }
-    result
+    let VfsState {
+        backend,
+        domain,
+        session,
+        namespace_states,
+        main_file,
+    } = st;
+    let session = session
+        .as_ref()
+        .ok_or_else(|| SecureStorageError::Storage("no session".into()))?;
+    let ns_state = namespace_states.entry(DEFAULT_NAMESPACE).or_default();
+    main_file.sync(backend, domain, session, ns_state)?;
+    backend.commit()
 }
 
 // ── Namespace data (session blob, etc.) ─────────────────────────────
@@ -624,6 +610,11 @@ unsafe extern "C" fn x_read(
         let dst = std::slice::from_raw_parts_mut(buf as *mut u8, n);
 
         if f.kind == KIND_MAIN {
+            // Pre-validate the end offset so the shared `read()`
+            // implementation never sees an overflow.
+            if off.checked_add(n as u64).is_none() {
+                return SQLITE_IOERR as c_int;
+            }
             let guard = match lock_state() {
                 Ok(g) => g,
                 Err(_) => return SQLITE_IOERR as c_int,
@@ -646,68 +637,17 @@ unsafe extern "C" fn x_read(
                 }
             };
             let ns_state = st.sql_ns_state();
-            let logical_size = st.pending_file_size.max(ns_state.total_data_length);
-
-            let read_end = match off.checked_add(n as u64) {
-                Some(v) => v,
-                None => return SQLITE_IOERR as c_int,
-            };
-            if read_end > logical_size {
-                let avail = logical_size.saturating_sub(off) as usize;
-                if avail > 0 {
-                    let persisted = ns_state.total_data_length.saturating_sub(off) as usize;
-                    let from_storage = avail.min(persisted);
-                    if from_storage > 0 {
-                        if let Ok(data) = crate::read_session_data(
-                            &st.backend,
-                            &st.domain,
-                            DEFAULT_NAMESPACE,
-                            session,
-                            &ns_state,
-                            off,
-                            from_storage,
-                        ) {
-                            dst[..from_storage].copy_from_slice(&data);
-                        }
-                    }
+            match st
+                .main_file
+                .read(&st.backend, &st.domain, session, &ns_state, off, dst)
+            {
+                Ok(true) => SQLITE_OK as c_int,
+                Ok(false) => SQLITE_IOERR_SHORT_READ as c_int,
+                Err(_) => {
+                    dst.fill(0);
+                    SQLITE_IOERR as c_int
                 }
-                dst[avail..].fill(0);
-                apply_pending_overlay(&st.pending_writes, off, dst);
-                return SQLITE_IOERR_SHORT_READ as c_int;
             }
-
-            let persisted_avail = ns_state.total_data_length.saturating_sub(off) as usize;
-            if persisted_avail >= n {
-                match crate::read_session_data(
-                    &st.backend,
-                    &st.domain,
-                    DEFAULT_NAMESPACE,
-                    session,
-                    &ns_state,
-                    off,
-                    n,
-                ) {
-                    Ok(data) => dst.copy_from_slice(&data),
-                    Err(_) => dst.fill(0),
-                }
-            } else {
-                if persisted_avail > 0 {
-                    if let Ok(data) = crate::read_session_data(
-                        &st.backend,
-                        &st.domain,
-                        DEFAULT_NAMESPACE,
-                        session,
-                        &ns_state,
-                        off,
-                        persisted_avail,
-                    ) {
-                        dst[..persisted_avail].copy_from_slice(&data);
-                    }
-                }
-                dst[persisted_avail..].fill(0);
-            }
-            apply_pending_overlay(&st.pending_writes, off, dst);
-            SQLITE_OK as c_int
         } else {
             let a = match lock_aux() {
                 Ok(a) => a,
@@ -765,10 +705,9 @@ unsafe extern "C" fn x_write(
                 Some(o) => o,
                 None => return SQLITE_IOERR as c_int,
             };
-            let write_end = match write_off.checked_add(n as u64) {
-                Some(v) => v,
-                None => return SQLITE_IOERR as c_int,
-            };
+            if write_off.checked_add(n as u64).is_none() {
+                return SQLITE_IOERR as c_int;
+            }
             let mut guard = match lock_state() {
                 Ok(g) => g,
                 Err(_) => return SQLITE_IOERR as c_int,
@@ -780,13 +719,7 @@ unsafe extern "C" fn x_write(
             if st.session.is_none() {
                 return SQLITE_IOERR as c_int;
             }
-            if write_end > st.pending_file_size {
-                st.pending_file_size = write_end;
-            }
-            st.pending_writes.push(PendingWrite {
-                offset: write_off,
-                data: src.to_vec(),
-            });
+            st.main_file.write(write_off, src);
             SQLITE_OK as c_int
         } else {
             let mut a = match lock_aux() {
@@ -833,67 +766,28 @@ unsafe extern "C" fn x_truncate(file: *mut sqlite3_file, size: i64) -> c_int {
                 Some(st) => st,
                 None => return SQLITE_IOERR as c_int,
             };
-
-            // Drop or trim pending writes that sit past `new_size`.
-            // Without this we'd replay stale bytes after a shrink.
-            st.pending_writes.retain_mut(|pw| {
-                if pw.offset >= new_size {
-                    false
-                } else if pw.offset.saturating_add(pw.data.len() as u64) > new_size {
-                    let keep = (new_size - pw.offset) as usize;
-                    pw.data.truncate(keep);
-                    true
-                } else {
-                    true
-                }
-            });
-
-            // Shrink: hand off to the crate-level `shrink_session_data`
-            // so freed blocks become cover blocks (spec §"snapshot
-            // resistance") instead of staying as frozen orphans on
-            // disk. This matches the web path — see
-            // `vfs/file_core.rs::truncate` — and closes PD-H1 on
-            // native. Field-level borrows (backend / domain / session /
-            // namespace_states) are intentionally taken separately so
-            // the borrow checker sees disjoint accesses.
-            let current_total = st
-                .namespace_states
-                .get(&DEFAULT_NAMESPACE)
-                .copied()
-                .unwrap_or_default()
-                .total_data_length;
-            if new_size < current_total {
-                let VfsState {
-                    backend,
-                    domain,
-                    session,
-                    namespace_states,
-                    ..
-                } = st;
-                let session = match session.as_ref() {
-                    Some(s) => s,
-                    None => return SQLITE_IOERR as c_int,
-                };
-                let ns_state = namespace_states.entry(DEFAULT_NAMESPACE).or_default();
-                if crate::shrink_session_data(
-                    backend,
-                    domain,
-                    DEFAULT_NAMESPACE,
-                    session,
-                    ns_state,
-                    new_size,
-                )
+            // Delegate to the shared `EncryptedFileCore::truncate`
+            // (same code path as the web VFS) — it trims pending
+            // writes and calls `shrink_session_data` on shrink so
+            // freed blocks become covers (PD-H1).
+            let VfsState {
+                backend,
+                domain,
+                session,
+                namespace_states,
+                main_file,
+            } = st;
+            let session = match session.as_ref() {
+                Some(s) => s,
+                None => return SQLITE_IOERR as c_int,
+            };
+            let ns_state = namespace_states.entry(DEFAULT_NAMESPACE).or_default();
+            if main_file
+                .truncate(backend, domain, session, ns_state, new_size)
                 .is_err()
-                {
-                    return SQLITE_IOERR as c_int;
-                }
-            } else {
-                st.namespace_states
-                    .entry(DEFAULT_NAMESPACE)
-                    .or_default()
-                    .total_data_length = new_size;
+            {
+                return SQLITE_IOERR as c_int;
             }
-            st.pending_file_size = new_size;
         } else if let Ok(mut a) = lock_aux() {
             if let Some(fd) = a.get_mut(f.aux_id as usize) {
                 let new_len = usize::try_from(new_size).unwrap_or(usize::MAX);
@@ -929,10 +823,9 @@ unsafe extern "C" fn x_file_size(file: *mut sqlite3_file, size: *mut i64) -> c_i
                 Ok(g) => g,
                 Err(_) => return SQLITE_IOERR as c_int,
             };
-            let logical = guard.as_ref().map_or(0u64, |st| {
-                let persisted = st.sql_ns_state().total_data_length;
-                persisted.max(st.pending_file_size)
-            });
+            let logical = guard
+                .as_ref()
+                .map_or(0u64, |st| st.main_file.size(&st.sql_ns_state()));
             *size = i64::try_from(logical).unwrap_or(i64::MAX);
         } else {
             let a = match lock_aux() {
