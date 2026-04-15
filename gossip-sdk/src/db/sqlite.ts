@@ -22,6 +22,11 @@ import { execStatements } from './exec-utils.js';
 
 export type GossipDatabase = SqliteRemoteDatabase<typeof schema>;
 
+/** Callback `tx` from `GossipDatabase.transaction()` — pass through query helpers for the same API as `db`. */
+export type GossipSqliteTx = Parameters<
+  Parameters<GossipDatabase['transaction']>[0]
+>[0];
+
 /** Selects the SQLite storage backend. */
 export type StorageConfig =
   | { type: 'opfs'; path: string; wasmUrl?: string }

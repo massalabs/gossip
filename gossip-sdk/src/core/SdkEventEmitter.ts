@@ -11,6 +11,8 @@ export enum SdkEventType {
   MESSAGE_SENT = 'messageSent',
   MESSAGE_READ = 'messageRead',
   MESSAGE_FAILED = 'messageFailed',
+  MESSAGE_DELETED = 'messageDeleted',
+  MESSAGE_UPDATED = 'messageUpdated',
   SESSION_REQUESTED = 'sessionRequested',
   SESSION_CREATED = 'sessionCreated',
   SESSION_RENEWED = 'sessionRenewed',
@@ -27,6 +29,8 @@ export type SdkEvents = {
   [SdkEventType.MESSAGE_SENT]: Message;
   [SdkEventType.MESSAGE_READ]: number;
   [SdkEventType.MESSAGE_FAILED]: { message: Message; error: Error };
+  [SdkEventType.MESSAGE_DELETED]: { messages: Message[] };
+  [SdkEventType.MESSAGE_UPDATED]: { messages: Message[] };
   [SdkEventType.SESSION_REQUESTED]: {
     discussion: Discussion;
     contact: Contact;
@@ -39,7 +43,7 @@ export type SdkEvents = {
     contactUserId: string;
     status: SessionStatus;
   };
-  [SdkEventType.DISCUSSION_UPDATED]: string;
+  [SdkEventType.DISCUSSION_UPDATED]: number;
   [SdkEventType.MESSAGE_ACKNOWLEDGED]: {
     contactUserId: string;
     messageDbId: number;

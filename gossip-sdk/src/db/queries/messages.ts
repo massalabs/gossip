@@ -1,7 +1,7 @@
 import { eq, and, or, sql, inArray, asc, ne, lt, gte } from 'drizzle-orm';
 import type { DiscussionRow } from './discussions.js';
 import * as schema from '../schema/index.js';
-import type { DatabaseConnection } from '../sqlite.js';
+import type { DatabaseConnection, GossipSqliteTx } from '../sqlite.js';
 import { MessageDirection, MessageStatus, MessageType } from '../../db/db.js';
 
 export type MessageRow = typeof schema.messages.$inferSelect;
@@ -147,8 +147,8 @@ export class MessageQueries {
       .get();
   }
 
-  async insert(values: MessageInsert): Promise<number> {
-    await this.conn.db.insert(schema.messages).values(values);
+  async insert(values: MessageInsert, tx?: GossipSqliteTx): Promise<number> {
+    await (tx ?? this.conn.db).insert(schema.messages).values(values);
     return this.conn.getLastInsertRowId();
   }
 
@@ -157,8 +157,12 @@ export class MessageQueries {
     await this.conn.db.insert(schema.messages).values(values);
   }
 
-  async updateById(id: number, data: Partial<MessageInsert>): Promise<void> {
-    await this.conn.db
+  async updateById(
+    id: number,
+    data: Partial<MessageInsert>,
+    tx?: GossipSqliteTx
+  ): Promise<void> {
+    await (tx ?? this.conn.db)
       .update(schema.messages)
       .set(data)
       .where(eq(schema.messages.id, id));

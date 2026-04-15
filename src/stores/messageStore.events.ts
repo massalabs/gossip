@@ -210,6 +210,8 @@ export function createEventHandlers(
   sdk.on(SdkEventType.MESSAGE_SENT, onSent);
   sdk.on(SdkEventType.MESSAGE_READ, onRead);
   sdk.on(SdkEventType.MESSAGE_ACKNOWLEDGED, onAcknowledged);
+  sdk.on(SdkEventType.MESSAGE_DELETED, onDeleted);
+  sdk.on(SdkEventType.MESSAGE_UPDATED, onUpdated);
   sdk.on(SdkEventType.SESSION_CREATED, onSessionEvent);
   sdk.on(SdkEventType.SESSION_ACCEPTED, onSessionEvent);
 
@@ -219,6 +221,8 @@ export function createEventHandlers(
       sdk.off(SdkEventType.MESSAGE_SENT, onSent);
       sdk.off(SdkEventType.MESSAGE_READ, onRead);
       sdk.off(SdkEventType.MESSAGE_ACKNOWLEDGED, onAcknowledged);
+      sdk.off(SdkEventType.MESSAGE_DELETED, onDeleted);
+      sdk.off(SdkEventType.MESSAGE_UPDATED, onUpdated);
       sdk.off(SdkEventType.SESSION_CREATED, onSessionEvent);
       sdk.off(SdkEventType.SESSION_ACCEPTED, onSessionEvent);
     } catch {

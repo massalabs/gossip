@@ -1,6 +1,8 @@
 import { eq, and, gt, sql } from 'drizzle-orm';
 import * as schema from '../schema/index.js';
-import type { DatabaseConnection } from '../sqlite.js';
+import type { DatabaseConnection, GossipSqliteTx } from '../sqlite.js';
+import type { MessageRow } from './messages.js';
+import { MessageType } from '../db.js';
 
 export type DiscussionRow = typeof schema.discussions.$inferSelect;
 export type DiscussionInsert = typeof schema.discussions.$inferInsert;
@@ -10,9 +12,10 @@ export class DiscussionQueries {
 
   async getByOwnerAndContact(
     ownerUserId: string,
-    contactUserId: string
+    contactUserId: string,
+    tx?: GossipSqliteTx
   ): Promise<DiscussionRow | undefined> {
-    return this.conn.db
+    return (tx ?? this.conn.db)
       .select()
       .from(schema.discussions)
       .where(
@@ -40,13 +43,35 @@ export class DiscussionQueries {
       .get();
   }
 
+  async getLastTextMessage(
+    contactUserId: string,
+    tx?: GossipSqliteTx
+  ): Promise<MessageRow | undefined> {
+    return (tx ?? this.conn.db)
+      .select()
+      .from(schema.messages)
+      .where(
+        and(
+          eq(schema.messages.contactUserId, contactUserId),
+          eq(schema.messages.type, MessageType.TEXT)
+        )
+      )
+      .orderBy(sql`${schema.messages.timestamp} DESC`)
+      .limit(1)
+      .get();
+  }
+
   async insert(values: DiscussionInsert): Promise<number> {
     await this.conn.db.insert(schema.discussions).values(values);
     return this.conn.getLastInsertRowId();
   }
 
-  async updateById(id: number, data: Partial<DiscussionInsert>): Promise<void> {
-    await this.conn.db
+  async updateById(
+    id: number,
+    data: Partial<DiscussionInsert>,
+    tx?: GossipSqliteTx
+  ): Promise<void> {
+    await (tx ?? this.conn.db)
       .update(schema.discussions)
       .set(data)
       .where(eq(schema.discussions.id, id));
@@ -88,8 +113,11 @@ export class DiscussionQueries {
       );
   }
 
-  async incrementUnreadCount(discussionId: number): Promise<void> {
-    await this.conn.db
+  async incrementUnreadCount(
+    discussionId: number,
+    tx?: GossipSqliteTx
+  ): Promise<void> {
+    await (tx ?? this.conn.db)
       .update(schema.discussions)
       .set({
         unreadCount: sql`${schema.discussions.unreadCount} + 1`,

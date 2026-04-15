@@ -508,32 +508,6 @@ describe('MessageService', () => {
     );
   });
 
-  it('finds message by seeker', async () => {
-    const seeker = new Uint8Array(32).fill(5);
-    await getTestQueries().messages.insert({
-      ownerUserId: OWNER_USER_ID,
-      contactUserId: CONTACT_USER_ID,
-      content: 'Hello',
-      type: MessageType.TEXT,
-      direction: MessageDirection.OUTGOING,
-      status: MessageStatus.SENT,
-      timestamp: new Date(),
-      seeker,
-    });
-
-    const service = new MessageService(
-      new MockMessageProtocol(),
-      createMockSession(),
-      new SdkEventEmitter(),
-      defaultSdkConfig,
-      getTestQueries()
-    );
-    const message = await service.findMessageBySeeker(seeker, OWNER_USER_ID);
-
-    expect(message).toBeDefined();
-    expect(message?.content).toBe('Hello');
-  });
-
   it('getReactions returns only reaction rows for a contact', async () => {
     const testQueries = getTestQueries();
     await insertTestContactAndDiscussion();
@@ -582,21 +556,6 @@ describe('MessageService', () => {
     const ids = reactions.map(r => r.id);
     expect(ids).toEqual([reaction1Id, reaction2Id]);
     expect(reactions.every(r => r.type === MessageType.REACTION)).toBe(true);
-  });
-
-  it('returns undefined for missing seeker', async () => {
-    const seeker = new Uint8Array(32).fill(9);
-
-    const service = new MessageService(
-      new MockMessageProtocol(),
-      createMockSession(),
-      new SdkEventEmitter(),
-      defaultSdkConfig,
-      getTestQueries()
-    );
-    const message = await service.findMessageBySeeker(seeker, OWNER_USER_ID);
-
-    expect(message).toBeUndefined();
   });
 
   describe('sendMessage', () => {

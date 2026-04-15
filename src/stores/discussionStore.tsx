@@ -1,12 +1,11 @@
 import { create } from 'zustand';
 import {
   Contact,
-  MessageType,
   SessionStatus,
   SdkEventType,
   SELF_CONTACT_ID,
 } from '@massalabs/gossip-sdk';
-import type { Discussion, Message } from '@massalabs/gossip-sdk';
+import type { Discussion } from '@massalabs/gossip-sdk';
 import { getSdk } from './sdkStore';
 import { createSelectors } from './utils/createSelectors';
 import { useAccountStore } from './accountStore';
@@ -165,35 +164,6 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
     const debouncedFetch = () => {
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(fetchData, 100);
-    };
-
-    // Optimistic: update lastMessages immediately on outgoing/incoming messages
-    const onMessageEvent = (message: Message) => {
-      if (
-        message.type === MessageType.REACTION ||
-        message.type === MessageType.KEEP_ALIVE ||
-        message.type === MessageType.RETENTION_POLICY
-      )
-        return;
-      set(state => {
-        const lastMessages = new Map(state.lastMessages);
-        lastMessages.set(message.contactUserId, {
-          content: message.content,
-          timestamp: message.timestamp,
-        });
-        // Re-sort: move the affected discussion to top (after pinned)
-        const discussions = [...state.discussions].sort((a, b) => {
-          if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
-          const timeA =
-            lastMessages.get(a.contactUserId)?.timestamp.getTime() ?? 0;
-          const timeB =
-            lastMessages.get(b.contactUserId)?.timestamp.getTime() ?? 0;
-          return timeB - timeA;
-        });
-        return { lastMessages, discussions };
-      });
-      // Also trigger a full refetch to sync DB state (discussion metadata)
-      debouncedFetch();
     };
 
     const sdk = getSdk();

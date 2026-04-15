@@ -354,7 +354,10 @@ export class DiscussionService {
     const result = await this.initialize(contact, payload);
     if (result.success) {
       await this.refreshService?.stateUpdate();
-      this.eventEmitter.emit(SdkEventType.DISCUSSION_UPDATED, contact.userId);
+      this.eventEmitter.emit(
+        SdkEventType.DISCUSSION_UPDATED,
+        result.data.discussionId
+      );
     }
     return result;
   }

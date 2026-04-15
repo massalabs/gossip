@@ -11,6 +11,8 @@ import {
   MessageStatus,
   MessageType,
   MESSAGE_ID_SIZE,
+  Discussion,
+  rowToDiscussion,
 } from '../db/index.js';
 import { type MessageRow } from '../db/index.js';
 import { decodeUserId, encodeUserId } from '../utils/userId.js';
@@ -31,6 +33,7 @@ import {
   serializeRetentionPolicyMessage,
   deserializeMessage,
 } from '../utils/messageSerialization.js';
+import * as schema from '../db/schema/index.js';
 import { encodeToBase64, decodeFromBase64 } from '../utils/base64.js';
 import { Result } from '../utils/type.js';
 import { sessionStatusToString } from '../wasm/session.js';
@@ -40,6 +43,9 @@ import { SdkEventEmitter, SdkEventType } from '../core/SdkEventEmitter.js';
 import type { RefreshService } from './refresh.js';
 import { Queries } from '../db/queries/index.js';
 import { QueueManager } from '../utils/queue.js';
+import { and, eq, sql } from 'drizzle-orm';
+import { GossipSqliteTx } from '../db/sqlite.js';
+import { POST_MESSAGE_TYPES } from '../utils/message.js';
 
 /** Options for the simplified sendText method */
 export interface SendTextOptions {
@@ -399,49 +405,57 @@ export class MessageService {
   private async addMessageAndUpdateDiscussion(
     message: Omit<Message, 'id'>
   ): Promise<number> {
-    return this.queries.conn.withTransaction(async () => {
-      const messageId = await this.queries.messages.insert({
-        messageId: message.messageId,
-        ownerUserId: message.ownerUserId,
-        contactUserId: message.contactUserId,
-        content: message.content,
-        serializedContent: message.serializedContent,
-        type: message.type,
-        direction: message.direction,
-        status: message.status,
-        timestamp: message.timestamp,
-        metadata: serializeMetadata(message.metadata),
-        seeker: message.seeker,
-        replyTo: serializeReplyTo(message.replyTo),
-        forwardOf: serializeForwardOf(message.forwardOf),
-        deleteOf: serializeDeleteOf(message.deleteOf),
-        editOf: serializeEditOf(message.editOf),
-        reactionOf: serializeReactionOf(message.reactionOf),
-        encryptedMessage: message.encryptedMessage,
-        whenToSend: message.whenToSend,
-      });
+    return this.queries.conn.db.transaction(async tx => {
+      const messageId = await this.queries.messages.insert(
+        {
+          messageId: message.messageId,
+          ownerUserId: message.ownerUserId,
+          contactUserId: message.contactUserId,
+          content: message.content,
+          serializedContent: message.serializedContent,
+          type: message.type,
+          direction: message.direction,
+          status: message.status,
+          timestamp: message.timestamp,
+          metadata: serializeMetadata(message.metadata),
+          seeker: message.seeker,
+          replyTo: serializeReplyTo(message.replyTo),
+          forwardOf: serializeForwardOf(message.forwardOf),
+          deleteOf: serializeDeleteOf(message.deleteOf),
+          editOf: serializeEditOf(message.editOf),
+          reactionOf: serializeReactionOf(message.reactionOf),
+          encryptedMessage: message.encryptedMessage,
+          whenToSend: message.whenToSend,
+        },
+        tx
+      );
 
       const discussion = await this.queries.discussions.getByOwnerAndContact(
         message.ownerUserId,
-        message.contactUserId
+        message.contactUserId,
+        tx
       );
 
-      if (
-        discussion &&
-        message.type !== MessageType.KEEP_ALIVE &&
-        message.type !== MessageType.REACTION &&
-        message.type !== MessageType.RETENTION_POLICY
-      ) {
-        await this.queries.discussions.updateById(discussion.id, {
-          lastMessageId: messageId,
-          lastMessageContent: message.content,
-          lastMessageTimestamp: message.timestamp,
-          updatedAt: new Date(),
-        });
+      if (discussion && POST_MESSAGE_TYPES.includes(message.type)) {
+        await this.queries.discussions.updateById(
+          discussion.id,
+          {
+            lastMessageId: messageId,
+            lastMessageContent: message.content,
+            lastMessageTimestamp: message.timestamp,
+            updatedAt: new Date(),
+          },
+          tx
+        );
 
         if (message.direction === MessageDirection.INCOMING) {
-          await this.queries.discussions.incrementUnreadCount(discussion.id);
+          await this.queries.discussions.incrementUnreadCount(
+            discussion.id,
+            tx
+          );
         }
+
+        this.eventEmitter.emit(SdkEventType.DISCUSSION_UPDATED, discussion.id);
       }
 
       return messageId;
@@ -552,36 +566,19 @@ export class MessageService {
         if (target.type === MessageType.REACTION) {
           // Reaction delete: hard-delete the row, not "[Message deleted]"
           await this.queries.messages.deleteById(target.id);
-          this.emitMessageReceived({
-            ...target,
-            type: MessageType.DELETED,
-          });
         } else {
-          // Regular message delete: mark as deleted
-          this.emitMessageReceived({
-            ...target,
-            content: '[Message deleted]',
-            type: MessageType.DELETED,
-          });
-          const targetId = target.id;
-          const deleteOriginalMsgId = message.deleteOf.originalMsgId;
-          await this.queries.conn.withTransaction(async () => {
-            await this.queries.messages.updateById(targetId, {
-              content: '[Message deleted]',
-              type: MessageType.DELETED,
-            });
-            await this.queries.messages.deleteReactionsForMessage(
-              ownerUserId,
-              target.contactUserId,
-              encodeToBase64(deleteOriginalMsgId)
+          const resDb = await this.PerformDeleteMessage(target);
+          if (!resDb.success) {
+            throw new Error(
+              resDb.error?.message ?? 'Failed to delete message from db'
             );
-          });
+          }
         }
 
         continue;
       }
 
-      // Handle edit control messages by updating the referenced message in-place
+      // Handle EDIT control messages by updating the referenced message in-place
       if (message.editOf?.originalMsgId) {
         const target = await this.findMessageByMsgId(
           message.editOf.originalMsgId,
@@ -608,10 +605,14 @@ export class MessageService {
           metadata: mergedMetadata,
         });
 
-        await this.queries.messages.updateById(target.id, {
-          content: message.content,
-          metadata: serializeMetadata(mergedMetadata),
-        });
+        const res = await this.performEditMessage(
+          message.content,
+          target,
+          mergedMetadata
+        );
+        if (!res.success) {
+          throw new Error(res.error?.message ?? 'Failed to edit message in db');
+        }
 
         // Do not insert a new message row for edit control messages
         continue;
@@ -632,10 +633,20 @@ export class MessageService {
             retentionPolicySetAt: duration ? Date.now() : null,
           }
         );
-        this.eventEmitter.emit(
-          SdkEventType.DISCUSSION_UPDATED,
+        const discussion = await this.queries.discussions.getByOwnerAndContact(
+          ownerUserId,
           message.senderId
         );
+        if (!discussion) {
+          this.eventEmitter.emit(SdkEventType.ERROR, {
+            error: new Error(
+              'could no retrieve discussion after updating retention policy'
+            ),
+            context: 'storeDecryptedMessages',
+          });
+          continue;
+        }
+        this.eventEmitter.emit(SdkEventType.DISCUSSION_UPDATED, discussion.id);
         // Do not insert a new message row for retention policy control messages
         continue;
       }
@@ -813,17 +824,6 @@ export class MessageService {
       ownerUserId,
       contactUserId,
       messageId
-    );
-    return row ? rowToMessage(row) : undefined;
-  }
-
-  async findMessageBySeeker(
-    seeker: Uint8Array,
-    ownerUserId: string
-  ): Promise<Message | undefined> {
-    const row = await this.queries.messages.getByOwnerAndSeeker(
-      ownerUserId,
-      seeker
     );
     return row ? rowToMessage(row) : undefined;
   }
@@ -1262,33 +1262,6 @@ export class MessageService {
     }
   }
 
-  async resendMessages(messages: Map<string, Message[]>) {
-    const log = logger.forMethod('resendMessages');
-
-    let totalProcessed = 0;
-
-    for (const [contactId, retryMessages] of messages.entries()) {
-      totalProcessed += retryMessages.length;
-
-      for (const msg of retryMessages) {
-        if (!msg.id) continue;
-        await this.queries.messages.updateById(msg.id, {
-          status: MessageStatus.WAITING_SESSION,
-          encryptedMessage: null,
-          seeker: null,
-          whenToSend: null,
-        });
-      }
-
-      await this.processSendQueueForContact(contactId);
-    }
-
-    log.info('resend completed', {
-      contacts: messages.size,
-      messagesProcessed: totalProcessed,
-    });
-  }
-
   /**
    * Process the send queue for a single contact.
    * Handles WAITING_SESSION -> READY encryption and READY -> SENT delivery.
@@ -1614,14 +1587,6 @@ export class MessageService {
     return rows.length;
   }
 
-  /**
-   * Get count of messages waiting for session with a specific contact.
-   */
-  async getWaitingMessageCount(contactUserId: string): Promise<number> {
-    const ownerUserId = this.session.userIdEncoded;
-    return this.queries.messages.getWaitingCount(ownerUserId, contactUserId);
-  }
-
   // ─────────────────────────────────────────────────────────────────
   // Consumer-facing convenience methods
   // ─────────────────────────────────────────────────────────────────
@@ -1701,6 +1666,132 @@ export class MessageService {
     return this.fetchMessages();
   }
 
+  private async PerformDeleteMessage(
+    message: Message,
+    tx?: GossipSqliteTx
+  ): Promise<Result<(() => void) | null, Error>> {
+    if (!message.id) {
+      return { success: false, error: new Error('Message ID is required') };
+    }
+    const db = tx ?? this.queries.conn.db;
+
+    let deletedMessages: Message[] = [];
+    let updatedMessages: Message[] = [];
+    let updatedDiscussion: Discussion | undefined;
+
+    try {
+      // Run all operations inside an explicit transaction for atomicity
+      await db.transaction(async trx => {
+        const discussion = await trx
+          .select()
+          .from(schema.discussions)
+          .where(
+            and(
+              eq(schema.discussions.ownerUserId, message.ownerUserId),
+              eq(schema.discussions.contactUserId, message.contactUserId)
+            )
+          )
+          .get();
+        if (!discussion) {
+          throw new Error('Discussion not found');
+        }
+
+        // delete the message : MessageType.DELETED '[Message deleted]' in  db
+        await this.queries.messages.updateById(
+          message.id!, // message.id is guaranteed to be not null because we checked it above
+          {
+            content: '[Message deleted]',
+            type: MessageType.DELETED,
+          },
+          trx
+        );
+
+        if (message.type === MessageType.TEXT) {
+          // If the message to delete is the last text message in the discussion, update the discussion to the previous last text message
+          if (discussion.lastMessageId === message.id) {
+            const lastMessage =
+              await this.queries.discussions.getLastTextMessage(
+                message.contactUserId,
+                trx
+              );
+            await this.queries.discussions.updateById(
+              discussion.id,
+              {
+                lastMessageId: lastMessage?.id ?? null,
+                lastMessageContent: lastMessage?.content ?? null,
+                lastMessageTimestamp: lastMessage?.timestamp ?? null,
+                updatedAt: new Date(),
+              },
+              trx
+            );
+            updatedDiscussion = rowToDiscussion(discussion);
+          }
+
+          // Delete all REACTION messages for this contact referencing this message
+          const deletedReactionMessages = await trx
+            .delete(schema.messages)
+            .where(
+              and(
+                eq(schema.messages.contactUserId, message.contactUserId),
+                eq(schema.messages.type, MessageType.REACTION),
+                sql`json_extract(${schema.messages.reactionOf}, '$.originalMsgId') = ${encodeToBase64(message.messageId!)}`
+              )
+            )
+            .returning();
+          deletedMessages = deletedReactionMessages.map(rowToMessage);
+
+          // Also update all messages REPLYING to this message by setting their replyTo to null
+          const updatedMessagesDb = await trx
+            .update(schema.messages)
+            .set({ replyTo: null })
+            .where(
+              and(
+                eq(schema.messages.contactUserId, message.contactUserId),
+                sql`json_extract(${schema.messages.replyTo}, '$.originalMsgId') = ${encodeToBase64(message.messageId!)}`
+              )
+            )
+            .returning();
+          updatedMessages = updatedMessagesDb.map(row =>
+            rowToMessage(row as MessageRow)
+          );
+        }
+      });
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error : new Error(String(error)),
+      };
+    }
+
+    // function to be called after the db transaction is committed.
+    // Send events only when we are sure corresponding operation are saved in db
+    const postDbCommit = () => {
+      this.eventEmitter.emit(SdkEventType.MESSAGE_DELETED, {
+        messages: [message, ...deletedMessages],
+      });
+      if (updatedMessages.length > 0) {
+        this.eventEmitter.emit(SdkEventType.MESSAGE_UPDATED, {
+          messages: updatedMessages,
+        });
+      }
+      if (updatedDiscussion && updatedDiscussion.id) {
+        this.eventEmitter.emit(
+          SdkEventType.DISCUSSION_UPDATED,
+          updatedDiscussion.id
+        );
+      }
+    };
+
+    if (!tx) {
+      // if we are not in a db transaction, we can just emit the event and return
+      postDbCommit();
+      return { success: true, data: null };
+    } else {
+      // if we are in a db transaction, we need to return a function that will be called after the transaction is committed
+      return { success: true, data: postDbCommit };
+    }
+  }
+
   /**
    * Delete a message by its database ID (outgoing or incoming in 1-to-1).
    * Marks the local message as deleted and enqueues a delete control message
@@ -1716,36 +1807,63 @@ export class MessageService {
 
     const ownerUserId = this.session.userIdEncoded;
 
-    const messageId = row.messageId;
-    await this.queries.conn.withTransaction(async () => {
-      await this.queries.messages.updateById(id, {
-        content: '[Message deleted]',
-        type: MessageType.DELETED,
+    // Emit optimistic event so UI updates immediately (skip for reactions —
+    // the store handles reaction removal separately).
+    if (row.type !== MessageType.REACTION) {
+      this.eventEmitter.emit(SdkEventType.MESSAGE_DELETED_OPTIMISTIC, {
+        contactUserId: row.contactUserId,
+        messageDbId: id,
+        originalMsgId: row.messageId,
       });
-      await this.queries.messages.deleteReactionsForMessage(
-        ownerUserId,
-        row.contactUserId,
-        encodeToBase64(messageId)
-      );
-    });
+    }
 
-    const controlMessage: Omit<Message, 'id'> = {
-      ownerUserId,
-      contactUserId: row.contactUserId,
-      content: '',
-      type: MessageType.DELETED,
-      direction: MessageDirection.OUTGOING,
-      status: MessageStatus.WAITING_SESSION,
-      timestamp: new Date(),
-      deleteOf: { originalMsgId: row.messageId },
-    };
+    try {
+      const callbackAfterDbCommit: (() => void) | null =
+        await this.queries.conn.db.transaction(async tx => {
+          const res = await this.PerformDeleteMessage(rowToMessage(row), tx);
+          if (!res.success) {
+            tx.rollback(); // if deleting the message from the db fails, rollback the transaction
+            throw new Error(
+              res.error?.message ?? 'Failed to delete message from db'
+            );
+          }
 
-    const result = await this.send(controlMessage);
-    if (!result.success)
-      throw new Error(result.error ?? 'Failed to enqueue delete message');
+          // Send the delete control message to the peer
+          const controlMessage: Omit<Message, 'id'> = {
+            ownerUserId,
+            contactUserId: row.contactUserId,
+            content: '',
+            type: MessageType.DELETED,
+            direction: MessageDirection.OUTGOING,
+            status: MessageStatus.WAITING_SESSION,
+            timestamp: new Date(),
+            deleteOf: { originalMsgId: row.messageId! }, // row.messageId was previously verified to be not null
+          };
 
-    await this.refreshService?.stateUpdate();
-    return true;
+          const result = await this.send(controlMessage);
+          if (!result.success) {
+            tx.rollback(); // if sending the delete control message fails, rollback the transaction
+            throw new Error(result.error ?? 'Failed to enqueue delete message');
+          }
+          return res.data;
+        });
+
+      if (callbackAfterDbCommit) {
+        callbackAfterDbCommit();
+      }
+
+      return true;
+    } catch (error) {
+      // Rollback: emit failure so store can restore original
+      if (row.type !== MessageType.REACTION) {
+        this.eventEmitter.emit(SdkEventType.MESSAGE_DELETE_FAILED, {
+          contactUserId: row.contactUserId,
+          messageDbId: id,
+          original,
+        });
+      }
+      throw error;
+    }
   }
 
   async sendReaction(
@@ -1766,6 +1884,69 @@ export class MessageService {
     const result = await this.send(message);
     await this.refreshService?.stateUpdate();
     return result;
+  }
+
+  private async performEditMessage(
+    newContent: string,
+    originalMsg: Message,
+    metadata: Record<string, unknown>,
+    tx?: GossipSqliteTx
+  ): Promise<Result<(() => void) | null, Error>> {
+    if (!originalMsg.id) {
+      return { success: false, error: new Error('Message ID is required') };
+    }
+    const db = tx ?? this.queries.conn.db;
+    let discussionUpdatedId: number | undefined;
+    try {
+      await db
+        .update(schema.messages)
+        .set({ content: newContent, metadata: serializeMetadata(metadata) })
+        .where(eq(schema.messages.id, originalMsg.id))
+        .returning();
+
+      const discussion = await this.queries.discussions.getByOwnerAndContact(
+        originalMsg.ownerUserId,
+        originalMsg.contactUserId,
+        tx
+      );
+      if (!discussion) {
+        return { success: false, error: new Error('Discussion not found') };
+      }
+      if (discussion.lastMessageId === originalMsg.id) {
+        await this.queries.discussions.updateById(
+          discussion.id,
+          {
+            lastMessageContent: newContent,
+            updatedAt: new Date(),
+          },
+          tx
+        );
+        discussionUpdatedId = discussion.id;
+      }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error : new Error(String(error)),
+      };
+    }
+
+    const postDbCommit = () => {
+      if (discussionUpdatedId) {
+        this.eventEmitter.emit(
+          SdkEventType.DISCUSSION_UPDATED,
+          discussionUpdatedId
+        );
+      }
+    };
+
+    if (!tx) {
+      // if we are not in a db transaction, we can just emit the event and return
+      postDbCommit();
+      return { success: true, data: null };
+    } else {
+      // if we are in a db transaction, we need to return a function that will be called after the transaction is committed
+      return { success: true, data: postDbCommit };
+    }
   }
 
   /**
@@ -1790,24 +1971,54 @@ export class MessageService {
       metadata: serializeMetadata(mergedMetadata),
     });
 
-    const controlMessage: Omit<Message, 'id'> = {
-      ownerUserId,
-      contactUserId: row.contactUserId,
-      content: newContent,
-      type: MessageType.TEXT,
-      direction: MessageDirection.OUTGOING,
-      status: MessageStatus.WAITING_SESSION,
-      timestamp: new Date(),
-      editOf: { originalMsgId: row.messageId },
-      metadata: { control: 'edit' },
-    };
+    try {
+      const callbackAfterDbCommit: (() => void) | null =
+        await this.queries.conn.db.transaction(async tx => {
+          const res = await this.performEditMessage(
+            newContent,
+            original,
+            mergedMetadata,
+            tx
+          );
+          if (!res.success) {
+            tx.rollback();
+            throw new Error(
+              res.error?.message ?? 'Failed to edit message in db'
+            );
+          }
 
-    const result = await this.send(controlMessage);
-    if (!result.success)
-      throw new Error(result.error ?? 'Failed to enqueue edit message');
+          const controlMessage: Omit<Message, 'id'> = {
+            ownerUserId,
+            contactUserId: row.contactUserId,
+            content: newContent,
+            type: MessageType.TEXT,
+            direction: MessageDirection.OUTGOING,
+            status: MessageStatus.WAITING_SESSION,
+            timestamp: new Date(),
+            editOf: { originalMsgId: row.messageId! }, // row.messageId was previously verified to be not null
+            metadata: { control: 'edit' },
+          };
 
-    await this.refreshService?.stateUpdate();
-    return true;
+          const result = await this.send(controlMessage);
+          if (!result.success) {
+            tx.rollback();
+            throw new Error(result.error ?? 'Failed to enqueue edit message');
+          }
+          return res.data;
+        });
+
+      if (callbackAfterDbCommit) {
+        callbackAfterDbCommit();
+      }
+      return true;
+    } catch (error) {
+      this.eventEmitter.emit(SdkEventType.MESSAGE_EDIT_FAILED, {
+        contactUserId: row.contactUserId,
+        messageDbId: id,
+        original,
+      });
+      throw error;
+    }
   }
 
   /**
@@ -1854,6 +2065,10 @@ export class MessageService {
     }
 
     this.eventEmitter.emit(SdkEventType.MESSAGE_READ, id);
+    this.eventEmitter.emit(
+      SdkEventType.DISCUSSION_UPDATED,
+      discussion?.id ?? 0
+    );
 
     return true;
   }
