@@ -88,6 +88,7 @@ public class GossipForegroundSyncService extends Service {
                             getString(R.string.foreground_sync_channel_name),
                             NotificationManager.IMPORTANCE_LOW);
             channel.setDescription(getString(R.string.foreground_sync_channel_desc));
+            channel.setShowBadge(false);
             NotificationManager nm = getSystemService(NotificationManager.class);
             if (nm != null) {
                 nm.createNotificationChannel(channel);
@@ -200,6 +201,8 @@ public class GossipForegroundSyncService extends Service {
                 .setOngoing(true)
                 .setPriority(NotificationCompat.PRIORITY_LOW)
                 .setOnlyAlertOnce(true)
+                .setNumber(0)
+                .setBadgeIconType(NotificationCompat.BADGE_ICON_NONE)
                 .build();
     }
 
