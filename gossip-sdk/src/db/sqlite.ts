@@ -671,11 +671,20 @@ export class DatabaseConnection {
     }
   }
 
-  async secureStorageCoverTick(namespace?: number): Promise<void> {
+  /**
+   * Trigger one round of cover traffic on every tracked namespace.
+   *
+   * Both backends (web worker and native plugin) iterate over the full
+   * `COVER_TRAFFIC_NAMESPACES` set internally, so the TS wrapper takes
+   * no arguments — any asymmetry here was a PD footgun (PR 2 review).
+   * Prefer letting the platform-side scheduler run this autonomously;
+   * manual invocation is only useful for tests.
+   */
+  async secureStorageCoverTick(): Promise<void> {
     if (this.state.useNativePlugin) {
       await this.requireNativePlugin().coverTrafficTick();
     } else {
-      await this.requireSecureProxy().cover(namespace);
+      await this.requireSecureProxy().cover();
     }
   }
 
