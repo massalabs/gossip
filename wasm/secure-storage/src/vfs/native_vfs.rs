@@ -820,20 +820,83 @@ unsafe extern "C" fn x_write(
 unsafe extern "C" fn x_truncate(file: *mut sqlite3_file, size: i64) -> c_int {
     vfs_call(|| unsafe {
         let f = &*(file as *const EncFile);
-        let size = match checked_u64_from_i64(size) {
+        let new_size = match checked_u64_from_i64(size) {
             Some(s) => s,
             None => return SQLITE_IOERR as c_int,
         };
         if f.kind == KIND_MAIN {
-            if let Ok(mut guard) = lock_state() {
-                if let Some(st) = guard.as_mut() {
-                    st.pending_file_size = size;
-                    st.sql_ns_state_mut().total_data_length = size;
+            let mut guard = match lock_state() {
+                Ok(g) => g,
+                Err(_) => return SQLITE_IOERR as c_int,
+            };
+            let st = match guard.as_mut() {
+                Some(st) => st,
+                None => return SQLITE_IOERR as c_int,
+            };
+
+            // Drop or trim pending writes that sit past `new_size`.
+            // Without this we'd replay stale bytes after a shrink.
+            st.pending_writes.retain_mut(|pw| {
+                if pw.offset >= new_size {
+                    false
+                } else if pw.offset.saturating_add(pw.data.len() as u64) > new_size {
+                    let keep = (new_size - pw.offset) as usize;
+                    pw.data.truncate(keep);
+                    true
+                } else {
+                    true
                 }
+            });
+
+            // Shrink: hand off to the crate-level `shrink_session_data`
+            // so freed blocks become cover blocks (spec §"snapshot
+            // resistance") instead of staying as frozen orphans on
+            // disk. This matches the web path — see
+            // `vfs/file_core.rs::truncate` — and closes PD-H1 on
+            // native. Field-level borrows (backend / domain / session /
+            // namespace_states) are intentionally taken separately so
+            // the borrow checker sees disjoint accesses.
+            let current_total = st
+                .namespace_states
+                .get(&DEFAULT_NAMESPACE)
+                .copied()
+                .unwrap_or_default()
+                .total_data_length;
+            if new_size < current_total {
+                let VfsState {
+                    backend,
+                    domain,
+                    session,
+                    namespace_states,
+                    ..
+                } = st;
+                let session = match session.as_ref() {
+                    Some(s) => s,
+                    None => return SQLITE_IOERR as c_int,
+                };
+                let ns_state = namespace_states.entry(DEFAULT_NAMESPACE).or_default();
+                if crate::shrink_session_data(
+                    backend,
+                    domain,
+                    DEFAULT_NAMESPACE,
+                    session,
+                    ns_state,
+                    new_size,
+                )
+                .is_err()
+                {
+                    return SQLITE_IOERR as c_int;
+                }
+            } else {
+                st.namespace_states
+                    .entry(DEFAULT_NAMESPACE)
+                    .or_default()
+                    .total_data_length = new_size;
             }
+            st.pending_file_size = new_size;
         } else if let Ok(mut a) = lock_aux() {
             if let Some(fd) = a.get_mut(f.aux_id as usize) {
-                let new_len = usize::try_from(size).unwrap_or(usize::MAX);
+                let new_len = usize::try_from(new_size).unwrap_or(usize::MAX);
                 fd.truncate(new_len);
             }
         }
@@ -1021,6 +1084,78 @@ mod tests {
 
             clear_namespace(1).unwrap();
             assert_eq!(namespace_data_length(1).unwrap(), 0);
+            drop(conn);
+        });
+    }
+
+    /// Regression for PD-H1: after SQLite truncates the main DB,
+    /// `shrink_session_data` must run so freed blocks are
+    /// re-randomised rather than frozen on disk. We verify the
+    /// reported file size shrinks *and* the physical `block_count`
+    /// stays at its high-water-mark (freed blocks kept as covers) so a
+    /// snapshot attacker cannot diff the dead region.
+    #[test]
+    fn test_native_vfs_truncate_freed_blocks_become_cover() {
+        run_with_stack(|| {
+            let _guard = test_mutex().lock().unwrap();
+            let (_dir, conn) = setup_native_vfs();
+
+            // Grow the DB to ~64 pages so we have plenty of blocks on
+            // disk before shrinking.
+            conn.execute_batch(
+                "CREATE TABLE t (id INTEGER PRIMARY KEY, blob BLOB);",
+            )
+            .unwrap();
+            for i in 0..64 {
+                conn.execute(
+                    "INSERT INTO t (id, blob) VALUES (?, ?)",
+                    rusqlite::params![i, vec![0xABu8; 4096]],
+                )
+                .unwrap();
+            }
+            flush().unwrap();
+
+            // Snapshot block count before shrink.
+            let pre_count = {
+                use crate::storage::BlockStorage;
+                let guard = state_mutex().lock().unwrap();
+                let st = guard.as_ref().unwrap();
+                st.backend
+                    .block_count(
+                        st.session.as_ref().unwrap().session_index,
+                        DEFAULT_NAMESPACE,
+                    )
+                    .unwrap()
+            };
+            assert!(pre_count > 4, "expected >4 blocks, got {pre_count}");
+
+            // DROP + VACUUM shrinks the file.
+            conn.execute_batch("DELETE FROM t; VACUUM;").unwrap();
+            flush().unwrap();
+
+            // After truncate, the logical file size should drop but the
+            // physical block count must NOT decrease — freed blocks
+            // become covers (PD invariant).
+            let (logical_size, post_count) = {
+                use crate::storage::BlockStorage;
+                let guard = state_mutex().lock().unwrap();
+                let st = guard.as_ref().unwrap();
+                let count = st
+                    .backend
+                    .block_count(
+                        st.session.as_ref().unwrap().session_index,
+                        DEFAULT_NAMESPACE,
+                    )
+                    .unwrap();
+                (st.sql_ns_state().total_data_length, count)
+            };
+            assert!(
+                logical_size < (pre_count as u64) * (crate::BLOCK_SIZE as u64)
+            );
+            assert_eq!(
+                post_count, pre_count,
+                "truncate must NOT shrink the physical block count (PD-H1 spec)"
+            );
             drop(conn);
         });
     }
