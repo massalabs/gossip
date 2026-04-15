@@ -4,10 +4,21 @@ apply plugin: 'org.jetbrains.kotlin.android'
 android {
     namespace = "net.massa.gossip"
     compileSdk = rootProject.ext.compileSdkVersion
+    // Pin the NDK version so the `.so` produced by
+    // scripts/build-native-android.sh is reproducible across dev/CI.
+    // Keep in sync with the ANDROID_NDK_VERSION constant in that script.
+    ndkVersion "26.3.11579264"
     defaultConfig {
         applicationId "net.massa.gossip"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
+        ndk {
+            // 64-bit-only: Play Store has required 64-bit companions
+            // since 2019 and all supported devices ship 64-bit. If 32-bit
+            // markets become a target, also add `armeabi-v7a` + `x86`
+            // here AND to scripts/build-native-android.sh.
+            abiFilters "arm64-v8a", "x86_64"
+        }
         // Use an auto-generated numeric versionCode so each build is unique without manual bumping.
         // We must stay within the 32-bit signed int limit required by Google Play (max 2147483647).
         //
@@ -51,6 +62,16 @@ android {
         buildConfig = true
     }
 
+    // AGP 8.13 requires JDK 17; align Kotlin with the same target so
+    // the Kotlin compiler doesn't fall back to the 2.x default (1.8).
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions {
+        jvmTarget = JavaVersion.VERSION_17.toString()
+    }
+
     buildTypes {
         release {
             if (System.getenv('ANDROID_KEYSTORE_FILE')) {
@@ -80,12 +101,53 @@ dependencies {
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
     implementation project(':capacitor-cordova-android-plugins')
-    // UniFFI-generated Kotlin bindings require JNA + Kotlin stdlib
-    implementation 'org.jetbrains.kotlin:kotlin-stdlib:2.1.0'
+    // UniFFI-generated Kotlin bindings need JNA at runtime.
+    // kotlin-stdlib is provided transitively by the Kotlin Android
+    // plugin — pinning it explicitly can conflict with Capacitor's
+    // own Kotlin version.
     implementation 'net.java.dev.jna:jna:5.14.0@aar'
 }
 
 apply from: 'capacitor.build.gradle'
+
+// ── secure-storage Rust build ────────────────────────────────────────
+//
+// Keeps `android/app/src/main/jniLibs/*/libsecureStorage.so` and the
+// UniFFI-generated Kotlin bindings out of git (see .gitignore): this
+// task regenerates them on demand before every Android build. cargo's
+// own caching keeps the no-op path fast (seconds when the Rust source
+// hasn't changed).
+//
+// Run manually with:    ./gradlew :app:buildRustSecureStorage
+// Or indirectly via:    ./gradlew :app:preBuild  (any assemble task)
+tasks.register('buildRustSecureStorage', Exec) {
+    group = 'secure-storage'
+    description = 'Cross-compile the secureStorage Rust crate into jniLibs + regenerate UniFFI Kotlin bindings.'
+    def rootDir = project.rootProject.projectDir.parentFile
+    workingDir rootDir
+    def profileFlag = gradle.startParameter.taskNames.any { it.toLowerCase().contains('release') }
+        ? '--release'
+        : '--debug'
+    commandLine 'bash', 'scripts/build-native-android.sh', profileFlag
+
+    // Declare outputs so Gradle skips the task on no-op builds.
+    outputs.files(
+        fileTree("${project.projectDir}/src/main/jniLibs") {
+            include '*/libsecureStorage.so'
+        },
+        fileTree("${project.projectDir}/src/main/java/uniffi") {
+            include '**/*.kt'
+        }
+    )
+    // Always re-run when the Rust source changes, even partially.
+    inputs.dir "${rootDir}/wasm/secure-storage/src"
+    inputs.file "${rootDir}/wasm/Cargo.toml"
+    inputs.file "${rootDir}/wasm/secure-storage/Cargo.toml"
+}
+
+afterEvaluate {
+    tasks.named('preBuild').configure { dependsOn 'buildRustSecureStorage' }
+}
 
 try {
     def servicesJSON = file('google-services.json')
