@@ -175,6 +175,47 @@ describe('RefreshService', () => {
         { contactUserId: REFRESH_CONTACT_USER_ID, status: SessionStatus.Killed }
       );
     });
+
+    it('flushes send queue when session transitions from SelfRequested to Active', async () => {
+      // Start with SelfRequested — messages queued during this phase should
+      // auto-flush the moment the peer accepts and the session goes Active.
+      vi.mocked(mockSession.peerSessionStatus).mockReturnValue(
+        SessionStatus.SelfRequested
+      );
+      await refreshService.refreshSessionsStatusEvent();
+      expect(
+        mockMessageService.processSendQueueForContact
+      ).not.toHaveBeenCalled();
+
+      // Peer accepts: session flips to Active.
+      vi.mocked(mockSession.peerSessionStatus).mockReturnValue(
+        SessionStatus.Active
+      );
+      await refreshService.refreshSessionsStatusEvent();
+
+      expect(
+        mockMessageService.processSendQueueForContact
+      ).toHaveBeenCalledWith(REFRESH_CONTACT_USER_ID);
+    });
+
+    it('does not flush send queue when transitioning from Active to another state', async () => {
+      // Initial Active — first call just records status.
+      vi.mocked(mockSession.peerSessionStatus).mockReturnValue(
+        SessionStatus.Active
+      );
+      await refreshService.refreshSessionsStatusEvent();
+      vi.mocked(mockMessageService.processSendQueueForContact).mockClear();
+
+      // Flip to Killed — must not trigger a flush from the status-change path.
+      vi.mocked(mockSession.peerSessionStatus).mockReturnValue(
+        SessionStatus.Killed
+      );
+      await refreshService.refreshSessionsStatusEvent();
+
+      expect(
+        mockMessageService.processSendQueueForContact
+      ).not.toHaveBeenCalled();
+    });
   });
 
   describe('stateUpdate', () => {
