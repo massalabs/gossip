@@ -17,7 +17,8 @@
     "debug": "Débogage",
     "lock_account": "Verrouiller",
     "privacy": "Confidentialité",
-    "security": "Sécurité"
+    "security": "Sécurité",
+    "feedback": "Envoyer des commentaires"
   },
   "delete_account": {
     "button": "Supprimer le compte",
@@ -47,7 +48,9 @@
   "about": {
     "title": "À propos",
     "version": "Version",
-    "build_id": "ID de build"
+    "build_id": "ID de build",
+    "about_gossip": "À propos de Gossip",
+    "terms_conditions": "Conditions générales"
   },
   "notifications": {
     "title": "Notifications",

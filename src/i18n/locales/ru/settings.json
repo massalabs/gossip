@@ -17,7 +17,8 @@
     "debug": "Отладка",
     "lock_account": "Заблокировать",
     "privacy": "Конфиденциальность",
-    "security": "Безопасность"
+    "security": "Безопасность",
+    "feedback": "Отправить отзыв"
   },
   "delete_account": {
     "button": "Удалить аккаунт",
@@ -47,7 +48,9 @@
   "about": {
     "title": "О приложении",
     "version": "Версия",
-    "build_id": "ID сборки"
+    "build_id": "ID сборки",
+    "about_gossip": "О Gossip",
+    "terms_conditions": "Условия использования"
   },
   "notifications": {
     "title": "Уведомления",

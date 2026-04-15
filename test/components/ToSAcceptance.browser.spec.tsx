@@ -20,7 +20,7 @@ vi.mock('../../TERMS_OF_SERVICE.md?raw', () => ({
 import ToSAcceptance from '../../src/components/ToSAcceptance';
 
 /** Render inside a fixed-height container so the ToS content overflows */
-function renderToS(onAccept: () => void) {
+function renderToS(onAccept: () => unknown) {
   return render(
     <div style={{ height: '400px', display: 'flex', flexDirection: 'column' }}>
       <ToSAcceptance onAccept={onAccept} />
@@ -38,10 +38,13 @@ function scrollToBottom() {
 }
 
 describe('ToSAcceptance', () => {
-  let onAccept: ReturnType<typeof vi.fn>;
+  let onAcceptCalls: number;
+  const onAccept = () => {
+    onAcceptCalls += 1;
+  };
 
   beforeEach(() => {
-    onAccept = vi.fn();
+    onAcceptCalls = 0;
   });
 
   it('button is disabled before scrolling and checking', async () => {
@@ -83,7 +86,7 @@ describe('ToSAcceptance', () => {
     await expect.element(button).toBeEnabled();
     await userEvent.click(button);
 
-    expect(onAccept).toHaveBeenCalledOnce();
+    expect(onAcceptCalls).toBe(1);
   });
 
   it('unchecking checkbox disables button again', async () => {

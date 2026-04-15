@@ -19,3 +19,11 @@ export const SECURE_STORAGE_ENABLED =
 export const DEV_HARDCODED_PASSWORD = import.meta.env.DEV
   ? 'changeme-dev-only'
   : '';
+
+/**
+ * Maximum number of accounts that can be created during secure storage
+ * setup. Includes the main account (1 main + 4 additional = 5 default).
+ */
+export const MAX_SECURE_ACCOUNTS = Number(
+  import.meta.env.VITE_SECURE_STORAGE_MAX_ACCOUNTS ?? 5
+);

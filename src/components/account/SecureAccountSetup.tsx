@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Shield, CheckCircle, Plus, Check } from 'react-feather';
 import { useAccountStore } from '../../stores/accountStore';
-import { maxSecureAccounts } from '../../config/secureStorage';
+import { MAX_SECURE_ACCOUNTS } from '../../config/features';
 import PageHeader from '../ui/PageHeader';
 import PageLayout from '../ui/Layout/PageLayout';
 import Button from '../ui/Button';
@@ -33,7 +33,7 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
   const [isFinalizing, setIsFinalizing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const canAddMore = createdAccounts.length < maxSecureAccounts;
+  const canAddMore = createdAccounts.length < MAX_SECURE_ACCOUNTS;
 
   const handleAddAccount = async (creds: {
     username: string;

@@ -24,6 +24,7 @@ import {
   Type,
   Shield,
   Clock,
+  MessageSquare,
 } from 'react-feather';
 import { useNavigate } from 'react-router-dom';
 
@@ -324,6 +325,24 @@ const Settings = (): React.ReactElement => {
               {t('menu.about')}
             </span>
           </Button>
+          <Button
+            variant="outline"
+            size="custom"
+            className={`w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0 border-b border-border`}
+            onClick={() =>
+              window.open(
+                'https://cryptpad.fr/form/#/2/form/view/ZzlOcdHn5aACC2omt+QoCLoDohBgdZtWSIXjxmguPDs/embed/',
+                '_blank'
+              )
+            }
+          >
+            <MessageSquare className="mr-4" />
+
+            <span className="text-base font-semibold flex-1 text-left">
+              {t('menu.feedback')}
+            </span>
+          </Button>
+
           {showDebugOption && (
             <Button
               variant="outline"

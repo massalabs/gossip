@@ -17,7 +17,8 @@
     "debug": "Debug",
     "lock_account": "Lock",
     "privacy": "Privacy",
-    "security": "Security"
+    "security": "Security",
+    "feedback": "Send Feedback"
   },
   "delete_account": {
     "button": "Delete Account",
@@ -47,7 +48,9 @@
   "about": {
     "title": "About",
     "version": "Version",
-    "build_id": "Build ID"
+    "build_id": "Build ID",
+    "about_gossip": "About Gossip",
+    "terms_conditions": "Terms & Conditions"
   },
   "notifications": {
     "title": "Notifications",

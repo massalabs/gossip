@@ -1,8 +1,8 @@
-import { secureStorageEnabled } from '../../config/secureStorage';
+import { SECURE_STORAGE_ENABLED } from '../../config/features';
 import SecureAccountCreation from './SecureAccountCreation';
 import ClassicAccountCreation from './ClassicAccountCreation';
 
-const AccountCreation = secureStorageEnabled
+const AccountCreation = SECURE_STORAGE_ENABLED
   ? SecureAccountCreation
   : ClassicAccountCreation;
 

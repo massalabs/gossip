@@ -6,7 +6,7 @@ import AccountImport from '../components/account/AccountImport';
 import AccountCreation from '../components/account/AccountCreation';
 import ToSAcceptance from '../components/ToSAcceptance';
 import { getDevAccounts } from '../hooks/useDevAutoLogin';
-import { secureStorageEnabled } from '../config/secureStorage';
+import { SECURE_STORAGE_ENABLED } from '../config/features';
 
 /**
  * Routes for onboarding flow (when no account exists)
@@ -23,9 +23,12 @@ export const Onboarding: React.FC<{
   onShowImportChange: (show: boolean) => void;
 }> = ({ showImport, onShowImportChange }) => {
   // When secure storage is enabled, skip the slideshow and go straight
-  // to the account creation form (which is SecureAccountCreation).
-  const [showAccountCreation, setShowAccountCreation] =
-    useState(secureStorageEnabled);
+  // to the account creation form (`AccountCreation` resolves to
+  // `SecureAccountCreation` under the same flag — see
+  // `components/account/AccountCreation.tsx`).
+  const [showAccountCreation, setShowAccountCreation] = useState(
+    SECURE_STORAGE_ENABLED
+  );
   const [skipDevPicker, setSkipDevPicker] = useState(false);
   const tosAccepted = useAppStore.use.tosAccepted();
   const setTosAccepted = useAppStore.use.setTosAccepted();
@@ -76,8 +79,12 @@ export const Onboarding: React.FC<{
             if (hasAny) {
               // If accounts exist, go to login flow
               useAppStore.getState().setIsInitialized(true);
-            } else {
-              // Otherwise go back to onboarding
+            } else if (!SECURE_STORAGE_ENABLED) {
+              // Otherwise go back to onboarding slideshow — but only
+              // in the legacy path. Under secure storage the slideshow
+              // was skipped on purpose; dropping back to it here would
+              // contradict that decision, so we stay on the creation
+              // form.
               setShowAccountCreation(false);
             }
           })();
