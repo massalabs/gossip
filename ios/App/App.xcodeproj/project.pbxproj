@@ -229,6 +229,7 @@
 			buildConfigurationList = 504EC3161FED79650016851F /* Build configuration list for PBXNativeTarget "Gossip" */;
 			buildPhases = (
 				6634F4EFEBD30273BCE97C65 /* [CP] Check Pods Manifest.lock */,
+				D0F41D102F74000000000001 /* Build secure-storage (Rust) */,
 				504EC3001FED79650016851F /* Sources */,
 				504EC3011FED79650016851F /* Frameworks */,
 				504EC3021FED79650016851F /* Resources */,
@@ -363,6 +364,26 @@
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
 			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-Gossip/Pods-Gossip-frameworks.sh\"\n";
+			showEnvVarsInLog = 0;
+		};
+		D0F41D102F74000000000001 /* Build secure-storage (Rust) */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Build secure-storage (Rust)";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/bash;
+			shellScript = "set -euo pipefail\n# Rebuild the secureStorage Rust crate + XCFramework + UniFFI\n# Swift bindings before compiling the iOS app. The .a files and\n# generated Swift bindings are gitignored (see .gitignore + PR 3\n# review H2) — this phase is what makes a fresh clone buildable.\n# cargo's own caching keeps the no-op case fast.\ncd \"${SRCROOT}/../..\"\nif [ \"${CONFIGURATION}\" = \"Release\" ]; then\n    PROFILE=--release\nelse\n    PROFILE=--debug\nfi\nbash scripts/build-native-ios.sh \"$PROFILE\"\n";
 			showEnvVarsInLog = 0;
 		};
 /* End PBXShellScriptBuildPhase section */
@@ -578,8 +599,11 @@
 				PRODUCT_BUNDLE_IDENTIFIER = net.massa.gossip;
 				PRODUCT_NAME = Gossip;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SRCROOT)",
+				);
 				SWIFT_INCLUDE_PATHS = "$(SRCROOT)/App/plugins/secureStorage";
-				"SWIFT_OBJC_BRIDGING_HEADER[arch=*]" = "App/App-Bridging-Header.h";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -627,8 +651,11 @@
 				PRODUCT_BUNDLE_IDENTIFIER = net.massa.gossip;
 				PRODUCT_NAME = Gossip;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "";
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SRCROOT)",
+				);
 				SWIFT_INCLUDE_PATHS = "$(SRCROOT)/App/plugins/secureStorage";
-				"SWIFT_OBJC_BRIDGING_HEADER[arch=*]" = "App/App-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};

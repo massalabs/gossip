@@ -54,6 +54,16 @@ ios/App/fastlane/test_output/
 ios/App/Gemfile.lock
 ios/App/plugins/App/public/assets
 
+# secure-storage native artifacts — rebuilt from Rust on demand via the
+# "Build secure-storage (Rust)" Xcode pre-build phase (see
+# scripts/build-native-ios.sh). Keeping these out of git prevents
+# ~34 MB of static libs from accumulating in history on every rebuild
+# and guarantees the binary always matches the committed Rust source.
+ios/App/SecureStorage.xcframework/**/*.a
+ios/App/App/plugins/secureStorage/secureStorage.swift
+ios/App/App/plugins/secureStorage/secureStorageFFI.h
+ios/App/App/plugins/secureStorage/secureStorageFFI.modulemap
+
 # Android build artifacts
 android/.gradle/
 android/app/build/
