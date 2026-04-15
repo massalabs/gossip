@@ -393,6 +393,34 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       try {
         set({ isLoading: true });
 
+        // Secure-storage mode: unlock the slot FIRST. Profile queries
+        // fail (DB locked) until we provide the secret, so we can't
+        // fetch the profile before this. Password path uses the
+        // user-typed password; encryptionKey path uses the biometric-
+        // derived key bytes, which were computed outside of the DB
+        // (WebAuthn PRF / Capacitor Keychain) so no profile lookup is
+        // needed to get them. The legacy 'biometric' branch is used
+        // only by ClassicLogin (non-secure-storage), which can still
+        // read the profile without unlocking.
+        const sdk = getSdk();
+        if (sdk.needsUnlock) {
+          const secret =
+            method.type === 'password'
+              ? method.password
+              : method.type === 'encryptionKey'
+                ? encodeToBase64(method.encryptionKey.to_bytes())
+                : null;
+          if (!secret) {
+            throw new Error(
+              'Secure storage requires password or encryption-key login'
+            );
+          }
+          const ok = await sdk.secureStorageUnlock(secret);
+          if (!ok) {
+            throw new Error('Secure storage unlock failed');
+          }
+        }
+
         const userId =
           method.type !== 'encryptionKey' ? method.userId : undefined;
         let profile: UserProfile | null;

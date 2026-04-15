@@ -21,6 +21,19 @@ export function useProfileLoader() {
           setTimeout(resolve, PROFILE_LOAD_DELAY_MS)
         );
 
+        // Secure-storage: if the backend is still locked at boot,
+        // queries will throw. Skip the profile lookup in that case —
+        // the presence of `needsUnlock=true` already tells us there is
+        // existing data, so route the user to SecureLogin by flipping
+        // `isInitialized=true`. The actual profile hydration happens
+        // in accountStore.loadAccount once the user enters their
+        // password.
+        const sdk = getSdk();
+        if (sdk.isSecureStorage && sdk.needsUnlock) {
+          useAppStore.getState().setIsInitialized(true);
+          return;
+        }
+
         const state = useAccountStore.getState();
         const existingProfile =
           state.userProfile || (await getSdk().profiles.getMostRecent());
