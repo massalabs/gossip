@@ -23,7 +23,9 @@ use std::mem::size_of;
 use std::os::raw::{c_char, c_int, c_void};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::Path;
-use std::sync::{Mutex, MutexGuard, Once, OnceLock};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard, Once, OnceLock};
+use std::time::Duration;
 
 use rusqlite::ffi::{
     sqlite3_file, sqlite3_io_methods, sqlite3_vfs, sqlite3_vfs_find, sqlite3_vfs_register,
@@ -40,6 +42,15 @@ use super::redb_storage::RedbStorage;
 
 /// VFS name used for registration with SQLite.
 pub const VFS_NAME: &str = "secure-storage-enc-native";
+
+/// Application-level namespace for the SDK-owned session blob stream.
+/// Must stay in sync with `SESSION_BLOB_NAMESPACE` in
+/// `gossip-sdk/src/db/secure-storage-namespaces.ts`.
+const SESSION_BLOB_NAMESPACE: u8 = 1;
+
+/// Namespaces the cover-traffic scheduler rerandomises on every tick.
+/// Mirrors `COVER_TRAFFIC_NAMESPACES` on the web side.
+const COVER_TRAFFIC_NAMESPACES: &[u8] = &[DEFAULT_NAMESPACE, SESSION_BLOB_NAMESPACE];
 
 // ── State ────────────────────────────────────────────────────────────
 
@@ -132,6 +143,10 @@ pub fn init_native(path: &str, domain: &str) -> Result<()> {
         pending_writes: Vec::new(),
         pending_file_size: 0,
     });
+    drop(guard);
+    // Start the cover-traffic background thread once the backend is
+    // reachable. The scheduler outlives lock/unlock cycles on purpose.
+    ensure_cover_scheduler();
     Ok(())
 }
 
@@ -261,14 +276,75 @@ pub fn is_unlocked() -> Result<bool> {
     Ok(st.session.is_some())
 }
 
-/// Run one round of cover traffic for the SQL namespace.
+// ── Cover-traffic scheduler ─────────────────────────────────────────
+//
+// Mirrors the web worker's `startCoverTraffic` (see
+// `gossip-sdk/src/db/secure-storage-worker.ts`). Without this, the
+// native build would only run cover traffic when the TS SDK explicitly
+// polls it — and on iOS/Android the WebView may be suspended (background
+// fetch, notification extension) while the Rust layer is still alive,
+// so relying on the JS side would create PD gaps between snapshots.
+//
+// Tick cadence: uniform random in [COVER_MIN, COVER_MAX], same bounds
+// the web worker uses. Each tick iterates every cover-traffic
+// namespace and flushes redb once at the end.
+
+const COVER_TRAFFIC_MIN_INTERVAL_MS: u64 = 10_000;
+const COVER_TRAFFIC_MAX_INTERVAL_MS: u64 = 30_000;
+
+static SCHEDULER: OnceLock<Arc<AtomicBool>> = OnceLock::new();
+
+fn random_cover_interval_ms() -> u64 {
+    use rand::Rng;
+    rand::rngs::OsRng.gen_range(COVER_TRAFFIC_MIN_INTERVAL_MS..=COVER_TRAFFIC_MAX_INTERVAL_MS)
+}
+
+/// Spawn the cover-traffic background thread if it isn't already
+/// running. Idempotent — subsequent calls are no-ops. The thread lives
+/// for the process; stopping it on lock would itself leak activity
+/// (scheduler silence = "user just locked"), so we keep it running.
+fn ensure_cover_scheduler() {
+    SCHEDULER.get_or_init(|| {
+        let running = Arc::new(AtomicBool::new(true));
+        let running_for_thread = running.clone();
+        let spawn_result = std::thread::Builder::new()
+            .name("secure-storage-cover".into())
+            .spawn(move || {
+                while running_for_thread.load(Ordering::Relaxed) {
+                    std::thread::sleep(Duration::from_millis(random_cover_interval_ms()));
+                    if !running_for_thread.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    // Best-effort: errors while the state is missing
+                    // (e.g. between `init_native` and the first
+                    // `provision`) are ignored and we simply keep
+                    // ticking at the next interval.
+                    let _ = cover_tick();
+                    let _ = flush();
+                }
+            });
+        // Panic at spawn is deliberately not rethrown across the FFI
+        // boundary — a missing cover thread is a PD degradation, not a
+        // correctness failure, and the caller's init must still succeed.
+        debug_assert!(spawn_result.is_ok(), "cover scheduler spawn failed");
+        running
+    });
+}
+
+/// Run one round of cover traffic across every namespace the scheduler
+/// tracks. Iterating the whole set on each tick keeps the snapshot
+/// invariant — "all sessions change at all block indices" — symmetric
+/// between the web worker and the native backend.
 pub fn cover_tick() -> Result<()> {
     let mutex = state_mutex();
     let mut guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
     let st = guard
         .as_mut()
         .ok_or_else(|| SecureStorageError::Storage("not initialized".into()))?;
-    crate::cover_traffic_tick(&mut st.backend, &st.domain, DEFAULT_NAMESPACE)
+    for &ns in COVER_TRAFFIC_NAMESPACES {
+        crate::cover_traffic_tick(&mut st.backend, &st.domain, ns)?;
+    }
+    Ok(())
 }
 
 /// Flush pending plaintext writes + encrypted blocks + rerand pool to
