@@ -100,6 +100,27 @@ export class RefreshService {
           contactUserId: discussion.contactUserId,
           status,
         });
+
+        // When a session we initiated finally gets accepted (SelfRequested → Active),
+        // proactively flush any messages the user queued during the waiting-approval
+        // phase instead of waiting for the next periodic stateUpdate tick.
+        if (
+          previous === SessionStatus.SelfRequested &&
+          status === SessionStatus.Active
+        ) {
+          const flushResult =
+            await this.messageService.processSendQueueForContact(
+              discussion.contactUserId
+            );
+          if (!flushResult.success) {
+            logger
+              .forMethod('refreshSessionsStatusEvent')
+              .error('failed to flush send queue on SelfRequested→Active', {
+                contactUserId: discussion.contactUserId,
+                error: flushResult.error,
+              });
+          }
+        }
       }
     }
   }
