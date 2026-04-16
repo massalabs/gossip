@@ -20,7 +20,7 @@ export interface MessageStoreState {
   sendMessage: (
     contactUserId: string,
     content: string,
-    replyToId?: number,
+    replyToMessageId?: number,
     forwardFromMessageId?: number
   ) => Promise<void>;
   getMessagesForContact: (contactUserId: string) => Message[];
@@ -36,10 +36,7 @@ export interface MessageStoreState {
     emoji: string,
     messageDbId: number
   ) => Promise<void>;
-  removeReaction: (
-    reactionDbId: number | undefined,
-    reactionMessageId?: Uint8Array
-  ) => Promise<void>;
+  removeReaction: (reactionDbId: number) => Promise<void>;
   clearMessages: (contactUserId: string) => void;
   cleanup: () => void;
 }

@@ -29,6 +29,10 @@ import {
   RetentionSeparatorRenderer,
   SpacerRenderer,
 } from './renderers/MessageItemRenderers';
+import {
+  messageIdEquals,
+  messageIdKey,
+} from '../../stores/messageStore.helpers';
 
 // =============================================================================
 // Constants
@@ -66,14 +70,14 @@ interface MessageListProps {
   onForward?: (message: Message) => void;
   onDelete?: (message: Message) => void;
   onEdit?: (message: Message) => void;
-  onScrollToMessage?: (messageId: number) => void;
+  onScrollToMessage?: (id: number) => void;
   onAtBottomChange?: (atBottom: boolean) => void;
   onScrollToBottom?: () => void;
   showScrollToBottom?: boolean;
   highlightedMessageId?: number | null;
   isSelecting?: boolean;
   selectedMessageIds?: Set<number>;
-  onToggleSelect?: (messageId: number) => void;
+  onToggleSelect?: (id: number) => void;
   onReact?: (message: Message, emoji: string) => void;
   onToggleReaction?: (
     message: Message,
@@ -170,7 +174,11 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
       if (firstUnreadMessage) {
         const idx = virtualItems.findIndex(
           item =>
-            item.type === 'message' && item.message.id === firstUnreadMessage.id
+            item.type === 'message' &&
+            messageIdEquals(
+              item.message.messageId,
+              firstUnreadMessage.messageId
+            )
         );
         if (idx >= 0) return Math.max(0, idx - MESSAGES_ABOVE_UNREAD);
       }
@@ -373,12 +381,18 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
           case 'message': {
             const isIncoming =
               item.message.direction === MessageDirection.INCOMING;
+            const msgDbId = item.message.id;
+            const msgIdKey = item.message.messageId
+              ? messageIdKey(item.message.messageId)
+              : null;
+            const isSelected =
+              msgDbId != null && (selectedMessageIds?.has(msgDbId) ?? false);
             return (
               <div
-                className={`px-4 md:px-6 lg:px-8 transition-colors duration-150 ${isSelecting && item.message.id != null && selectedMessageIds?.has(item.message.id) ? 'bg-accent/10' : ''}`}
+                className={`px-4 md:px-6 lg:px-8 transition-colors duration-150 ${isSelecting && isSelected ? 'bg-accent/10' : ''}`}
               >
                 <MessageItem
-                  id={`message-${item.message.id}`}
+                  id={msgDbId != null ? `message-${msgDbId}` : undefined}
                   message={item.message}
                   onReplyTo={onReplyTo}
                   onForward={onForward}
@@ -388,9 +402,8 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
                   onReact={onReact}
                   onToggleReaction={onToggleReaction}
                   reactions={
-                    item.message.messageId && reactionGroups
-                      ? (reactionGroups.get(item.message.messageId.join(',')) ??
-                        EMPTY_REACTIONS)
+                    msgIdKey && reactionGroups
+                      ? (reactionGroups.get(msgIdKey) ?? EMPTY_REACTIONS)
                       : EMPTY_REACTIONS
                   }
                   showTimestamp={item.showTimestamp}
@@ -400,13 +413,10 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
                   contact={isIncoming ? contact : undefined}
                   isHighlighted={
                     highlightedMessageId != null &&
-                    item.message.id === highlightedMessageId
+                    msgDbId === highlightedMessageId
                   }
                   isSelecting={isSelecting}
-                  isSelected={
-                    item.message.id != null &&
-                    selectedMessageIds?.has(item.message.id)
-                  }
+                  isSelected={isSelected}
                   onToggleSelect={onToggleSelect}
                 />
               </div>

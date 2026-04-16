@@ -5,8 +5,8 @@ import { Message } from '@massalabs/gossip-sdk';
 
 interface MessageSearchProps {
   messages: Message[];
-  onScrollToMessage: (messageId: number) => void;
-  onHighlightChange: (messageId: number | null) => void;
+  onScrollToMessage: (id: number) => void;
+  onHighlightChange: (id: number | null) => void;
   onClose: () => void;
 }
 
@@ -57,8 +57,8 @@ const MessageSearch: React.FC<MessageSearchProps> = ({
     }
 
     const lowerQuery = debouncedQuery.toLowerCase();
-    const found = messages.filter(m =>
-      m.content.toLowerCase().includes(lowerQuery)
+    const found = messages.filter(
+      m => m.id != null && m.content.toLowerCase().includes(lowerQuery)
     );
     setMatches(found);
 

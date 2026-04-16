@@ -1,8 +1,9 @@
 /**
- * MessageService optimistic event tests (TDD — RED phase)
+ * MessageService delete/edit + control-message tests
  *
- * Tests that deleteMessage/editMessage emit semantic optimistic events,
- * and that processSendQueueForContact skips MESSAGE_SENT for control messages.
+ * Tests that deleteMessage/editMessage update the DB and enqueue control
+ * messages, and that processSendQueueForContact skips MESSAGE_SENT for
+ * control messages.
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
@@ -72,17 +73,18 @@ async function insertTestContactAndDiscussion() {
   });
 }
 
-describe('MessageService optimistic events', () => {
+describe('MessageService delete/edit and control messages', () => {
   beforeEach(clearAllTables);
 
   // -------------------------------------------------------------------------
   // deleteMessage
   // -------------------------------------------------------------------------
 
-  it('deleteMessage emits MESSAGE_DELETED_OPTIMISTIC before DB write', async () => {
+  it('deleteMessage updates the DB row to DELETED type and sends a control message', async () => {
     const testQueries = getTestQueries();
     await insertTestContactAndDiscussion();
 
+    const msgIdBytes = new Uint8Array(12).fill(5);
     const msgId = await testQueries.messages.insert({
       ownerUserId: OWNER_USER_ID,
       contactUserId: CONTACT_USER_ID,
@@ -91,15 +93,10 @@ describe('MessageService optimistic events', () => {
       direction: MessageDirection.OUTGOING,
       status: MessageStatus.SENT,
       timestamp: new Date(),
-      messageId: new Uint8Array(12).fill(5),
+      messageId: msgIdBytes,
     });
 
     const eventEmitter = new SdkEventEmitter();
-    const emitted: unknown[] = [];
-    eventEmitter.on(SdkEventType.MESSAGE_DELETED_OPTIMISTIC, payload => {
-      emitted.push(payload);
-    });
-
     const service = new MessageService(
       new MockMessageProtocol(),
       createMockSession(),
@@ -111,26 +108,28 @@ describe('MessageService optimistic events', () => {
     const result = await service.deleteMessage(msgId);
     expect(result).toBe(true);
 
-    // Event was emitted
-    expect(emitted).toHaveLength(1);
-    const event = emitted[0] as {
-      contactUserId: string;
-      messageDbId: number;
-      originalMsgId: Uint8Array;
-    };
-    expect(event.contactUserId).toBe(CONTACT_USER_ID);
-    expect(event.messageDbId).toBe(msgId);
-
-    // DB was updated
+    // DB row was updated to DELETED
     const row = await testQueries.messages.getById(msgId);
     expect(row?.type).toBe(MessageType.DELETED);
     expect(row?.content).toBe('[Message deleted]');
+
+    // A control message was enqueued in the DB
+    const allMessages = await testQueries.messages.getByOwnerAndContact(
+      OWNER_USER_ID,
+      CONTACT_USER_ID
+    );
+    const controlMsg = allMessages.find(
+      m => m.id !== msgId && m.type === MessageType.DELETED
+    );
+    expect(controlMsg).toBeDefined();
+    expect(controlMsg?.direction).toBe(MessageDirection.OUTGOING);
   });
 
-  it('deleteMessage emits MESSAGE_DELETE_FAILED on DB error', async () => {
+  it('deleteMessage throws on DB error without emitting events', async () => {
     const testQueries = getTestQueries();
     await insertTestContactAndDiscussion();
 
+    const msgIdBytes = new Uint8Array(12).fill(6);
     const msgId = await testQueries.messages.insert({
       ownerUserId: OWNER_USER_ID,
       contactUserId: CONTACT_USER_ID,
@@ -139,21 +138,11 @@ describe('MessageService optimistic events', () => {
       direction: MessageDirection.OUTGOING,
       status: MessageStatus.SENT,
       timestamp: new Date(),
-      messageId: new Uint8Array(12).fill(6),
+      messageId: msgIdBytes,
     });
 
     const eventEmitter = new SdkEventEmitter();
-    const optimisticEvents: unknown[] = [];
-    const failedEvents: unknown[] = [];
 
-    eventEmitter.on(SdkEventType.MESSAGE_DELETED_OPTIMISTIC, payload => {
-      optimisticEvents.push(payload);
-    });
-    eventEmitter.on(SdkEventType.MESSAGE_DELETE_FAILED, payload => {
-      failedEvents.push(payload);
-    });
-
-    // Create service with a spy on updateById to force an error
     const service = new MessageService(
       new MockMessageProtocol(),
       createMockSession(),
@@ -163,55 +152,32 @@ describe('MessageService optimistic events', () => {
     );
 
     // Sabotage the DB update to simulate failure
-    const originalUpdateById = testQueries.messages.updateById.bind(
-      testQueries.messages
-    );
-    let callCount = 0;
-    vi.spyOn(testQueries.messages, 'updateById').mockImplementation(
-      async (...args) => {
-        callCount++;
-        if (callCount === 1) throw new Error('DB write failed');
-        return originalUpdateById(...args);
-      }
+    vi.spyOn(testQueries.messages, 'updateById').mockRejectedValueOnce(
+      new Error('DB write failed')
     );
 
-    await expect(service.deleteMessage(msgId)).rejects.toThrow();
-
-    // Optimistic event was emitted
-    expect(optimisticEvents).toHaveLength(1);
-
-    // Failure event was emitted with original message
-    expect(failedEvents).toHaveLength(1);
-    const failEvent = failedEvents[0] as {
-      contactUserId: string;
-      messageDbId: number;
-      original: { content: string; type: string };
-    };
-    expect(failEvent.original.content).toBe('Will fail');
-    expect(failEvent.original.type).toBe(MessageType.TEXT);
+    await expect(service.deleteMessage(msgId)).rejects.toThrow(
+      'DB write failed'
+    );
   });
 
-  it('deleteMessage does NOT emit MESSAGE_DELETED_OPTIMISTIC for REACTION rows', async () => {
+  it('deleteMessage on a REACTION row still works', async () => {
     const testQueries = getTestQueries();
     await insertTestContactAndDiscussion();
 
+    const msgIdBytes = new Uint8Array(12).fill(8);
     const msgId = await testQueries.messages.insert({
       ownerUserId: OWNER_USER_ID,
       contactUserId: CONTACT_USER_ID,
-      content: '👍',
+      content: '\u{1F44D}',
       type: MessageType.REACTION,
       direction: MessageDirection.OUTGOING,
       status: MessageStatus.SENT,
       timestamp: new Date(),
-      messageId: new Uint8Array(12).fill(8),
+      messageId: msgIdBytes,
     });
 
     const eventEmitter = new SdkEventEmitter();
-    const emitted: unknown[] = [];
-    eventEmitter.on(SdkEventType.MESSAGE_DELETED_OPTIMISTIC, payload => {
-      emitted.push(payload);
-    });
-
     const service = new MessageService(
       new MockMessageProtocol(),
       createMockSession(),
@@ -220,20 +186,23 @@ describe('MessageService optimistic events', () => {
       testQueries
     );
 
-    await service.deleteMessage(msgId);
+    const result = await service.deleteMessage(msgId);
+    expect(result).toBe(true);
 
-    // No optimistic event for reactions
-    expect(emitted).toHaveLength(0);
+    // DB row was updated to DELETED
+    const row = await testQueries.messages.getById(msgId);
+    expect(row?.type).toBe(MessageType.DELETED);
   });
 
   // -------------------------------------------------------------------------
   // editMessage
   // -------------------------------------------------------------------------
 
-  it('editMessage emits MESSAGE_EDITED_OPTIMISTIC before DB write', async () => {
+  it('editMessage updates DB content and sends a control message', async () => {
     const testQueries = getTestQueries();
     await insertTestContactAndDiscussion();
 
+    const msgIdBytes = new Uint8Array(12).fill(10);
     const msgId = await testQueries.messages.insert({
       ownerUserId: OWNER_USER_ID,
       contactUserId: CONTACT_USER_ID,
@@ -242,15 +211,10 @@ describe('MessageService optimistic events', () => {
       direction: MessageDirection.OUTGOING,
       status: MessageStatus.SENT,
       timestamp: new Date(),
-      messageId: new Uint8Array(12).fill(10),
+      messageId: msgIdBytes,
     });
 
     const eventEmitter = new SdkEventEmitter();
-    const emitted: unknown[] = [];
-    eventEmitter.on(SdkEventType.MESSAGE_EDITED_OPTIMISTIC, payload => {
-      emitted.push(payload);
-    });
-
     const service = new MessageService(
       new MockMessageProtocol(),
       createMockSession(),
@@ -262,22 +226,21 @@ describe('MessageService optimistic events', () => {
     const result = await service.editMessage(msgId, 'Edited');
     expect(result).toBe(true);
 
-    // Event was emitted
-    expect(emitted).toHaveLength(1);
-    const event = emitted[0] as {
-      contactUserId: string;
-      messageDbId: number;
-      newContent: string;
-      metadata: Record<string, unknown>;
-    };
-    expect(event.contactUserId).toBe(CONTACT_USER_ID);
-    expect(event.messageDbId).toBe(msgId);
-    expect(event.newContent).toBe('Edited');
-    expect(event.metadata.edited).toBe(true);
-
-    // DB was updated
+    // DB was updated with new content
     const row = await testQueries.messages.getById(msgId);
     expect(row?.content).toBe('Edited');
+
+    // A control message (edit) was enqueued
+    const allMessages = await testQueries.messages.getByOwnerAndContact(
+      OWNER_USER_ID,
+      CONTACT_USER_ID
+    );
+    const controlMsg = allMessages.find(
+      m => m.id !== msgId && m.editOf != null
+    );
+    expect(controlMsg).toBeDefined();
+    expect(controlMsg?.content).toBe('Edited');
+    expect(controlMsg?.direction).toBe(MessageDirection.OUTGOING);
   });
 
   // -------------------------------------------------------------------------

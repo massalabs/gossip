@@ -33,7 +33,7 @@ const isWeb = !Capacitor.isNativePlatform();
 interface MessageItemProps {
   message: Message;
   onReplyTo?: (message: Message) => void;
-  onScrollToMessage?: (messageId: number) => void;
+  onScrollToMessage?: (id: number) => void;
   onForward?: (message: Message) => void;
   onDelete?: (message: Message) => void;
   onEdit?: (message: Message) => void;
@@ -54,7 +54,7 @@ interface MessageItemProps {
   isHighlighted?: boolean;
   isSelecting?: boolean;
   isSelected?: boolean;
-  onToggleSelect?: (messageId: number) => void;
+  onToggleSelect?: (id: number) => void;
 }
 
 // ---------------------------------------------------------------------------

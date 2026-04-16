@@ -12,7 +12,7 @@ import { useInitialValue } from '../../hooks/useInitialValue';
 const isWeb = !Capacitor.isNativePlatform();
 
 interface MessageInputProps {
-  onSend: (message: string, replyToId?: number) => void;
+  onSend: (message: string, replyToMessageId?: Uint8Array) => void;
   disabled?: boolean;
   replyingTo?: Message | null;
   onCancelReply?: () => void;
@@ -88,7 +88,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
 
   const isForwarding = !!forwardPreview;
   const sendButtonDisabled = disabled || (!newMessage.trim() && !isForwarding);
-  const replyToId = replyingTo?.id;
+  const replyToMessageId = replyingTo?.messageId;
 
   const handleSendMessage = useCallback(
     (e: React.MouseEvent | React.KeyboardEvent) => {
@@ -101,7 +101,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
       if (editingMessage && onConfirmEdit) {
         onConfirmEdit(cleanedMessage, editingMessage);
       } else {
-        onSend(cleanedMessage, replyToId);
+        onSend(cleanedMessage, replyToMessageId);
       }
 
       resetTextarea();
@@ -113,7 +113,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
     [
       newMessage,
       onSend,
-      replyToId,
+      replyToMessageId,
       resetTextarea,
       sendButtonDisabled,
       isForwarding,

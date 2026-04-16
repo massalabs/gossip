@@ -63,11 +63,12 @@ export function useMarkMessageAsRead(message: Message) {
             if (
               shouldMarkAsRead &&
               message.status === MessageStatus.DELIVERED &&
-              !hasBeenMarkedAsReadRef.current
+              !hasBeenMarkedAsReadRef.current &&
+              message.id != null
             ) {
               // Mark this specific message as read
               hasBeenMarkedAsReadRef.current = await gossip.messages.markAsRead(
-                message.id!
+                message.id
               );
             }
           } catch (error) {

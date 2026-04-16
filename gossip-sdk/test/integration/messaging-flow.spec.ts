@@ -298,7 +298,7 @@ describe('Messaging Flow', () => {
       const aliceMessages = await aliceSdk.messages.getMessages(bobSdk.userId);
       expect(aliceMessages.length).toBe(1);
       const aliceMsg = aliceMessages[0];
-      expect(aliceMsg.id).toBeDefined();
+      expect(aliceMsg.messageId).toBeDefined();
       const deleteResult = await aliceSdk.messages.deleteMessage(aliceMsg.id!);
       expect(deleteResult).toBe(true);
 
@@ -353,7 +353,8 @@ describe('Messaging Flow', () => {
         aliceSdk.userId
       );
       expect(bobBefore.length).toBe(2);
-      const firstId = bobBefore[0].id!;
+      const firstMsgId = bobBefore[0].messageId!;
+      const firstDbId = bobBefore[0].id!;
       const secondId = bobBefore[1].id!;
       const firstTimestamp = bobBefore[0].timestamp.getTime();
       expect(bobBefore[0].content).toBe('First');
@@ -361,9 +362,9 @@ describe('Messaging Flow', () => {
 
       const aliceRows = await aliceSdk.messages.getMessages(bobSdk.userId);
       const firstOutgoing = aliceRows.find(m => m.content === 'First');
-      expect(firstOutgoing?.id).toBeDefined();
+      expect(firstOutgoing?.messageId).toBeDefined();
       // Receiver can delete incoming messages in 1-to-1
-      expect(await bobSdk.messages.deleteMessage(firstId)).toBe(true);
+      expect(await bobSdk.messages.deleteMessage(firstDbId)).toBe(true);
       expect(await aliceSdk.messages.deleteMessage(firstOutgoing!.id!)).toBe(
         true
       );
@@ -373,7 +374,13 @@ describe('Messaging Flow', () => {
         aliceSdk.userId
       );
       expect(bobAfter.length).toBe(2);
-      const firstAfter = bobAfter.find(m => m.id === firstId);
+      const firstAfter = bobAfter.find(
+        m =>
+          m.messageId != null &&
+          firstMsgId != null &&
+          m.messageId.length === firstMsgId.length &&
+          m.messageId.every((b, i) => b === firstMsgId[i])
+      );
       const secondAfter = bobAfter.find(m => m.id === secondId);
       expect(firstAfter).toBeDefined();
       expect(secondAfter).toBeDefined();
@@ -453,7 +460,7 @@ describe('Messaging Flow', () => {
 
       const aliceRows = await aliceSdk.messages.getMessages(bobSdk.userId);
       const firstOutgoing = aliceRows.find(m => m.content === 'First');
-      expect(firstOutgoing?.id).toBeDefined();
+      expect(firstOutgoing?.messageId).toBeDefined();
       expect(
         await aliceSdk.messages.editMessage(firstOutgoing!.id!, 'First edited')
       ).toBe(true);

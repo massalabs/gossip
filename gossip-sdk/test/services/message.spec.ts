@@ -237,6 +237,7 @@ describe('MessageService', () => {
     await insertTestContactAndDiscussion();
 
     // Insert an outgoing text message with a messageId
+    const msgIdBytes = new Uint8Array(12).fill(7);
     const msgId = await testQueries.messages.insert({
       ownerUserId: OWNER_USER_ID,
       contactUserId: CONTACT_USER_ID,
@@ -245,7 +246,7 @@ describe('MessageService', () => {
       direction: MessageDirection.OUTGOING,
       status: MessageStatus.SENT,
       timestamp: new Date('2024-01-01T00:00:00Z'),
-      messageId: new Uint8Array(12).fill(7),
+      messageId: msgIdBytes,
     });
 
     const service = new MessageService(
@@ -293,6 +294,7 @@ describe('MessageService', () => {
     const testQueries = getTestQueries();
     await insertTestContactAndDiscussion();
 
+    const msgIdBytes = new Uint8Array(12).fill(9);
     const msgId = await testQueries.messages.insert({
       ownerUserId: OWNER_USER_ID,
       contactUserId: CONTACT_USER_ID,
@@ -301,7 +303,7 @@ describe('MessageService', () => {
       direction: MessageDirection.INCOMING,
       status: MessageStatus.DELIVERED,
       timestamp: new Date('2024-06-01T12:00:00Z'),
-      messageId: new Uint8Array(12).fill(9),
+      messageId: msgIdBytes,
     });
 
     const service = new MessageService(
@@ -331,6 +333,7 @@ describe('MessageService', () => {
     const testQueries = getTestQueries();
     await insertTestContactAndDiscussion();
 
+    const msgIdBytes = new Uint8Array(12).fill(8);
     const msgId = await testQueries.messages.insert({
       ownerUserId: OWNER_USER_ID,
       contactUserId: CONTACT_USER_ID,
@@ -339,7 +342,7 @@ describe('MessageService', () => {
       direction: MessageDirection.INCOMING,
       status: MessageStatus.DELIVERED,
       timestamp: new Date('2024-06-01T12:00:00Z'),
-      messageId: new Uint8Array(12).fill(8),
+      messageId: msgIdBytes,
     });
 
     const service = new MessageService(
@@ -383,6 +386,7 @@ describe('MessageService', () => {
     });
 
     // Outgoing reaction row
+    const reactionMsgIdBytes = new Uint8Array(12).fill(12);
     const reactionRowId = await testQueries.messages.insert({
       ownerUserId: OWNER_USER_ID,
       contactUserId: CONTACT_USER_ID,
@@ -391,7 +395,7 @@ describe('MessageService', () => {
       direction: MessageDirection.OUTGOING,
       status: MessageStatus.SENT,
       timestamp: new Date('2024-07-01T10:01:00Z'),
-      messageId: new Uint8Array(12).fill(12),
+      messageId: reactionMsgIdBytes,
       reactionOf: JSON.stringify({
         originalMsgId: Buffer.from(originalMsgIdBytes).toString('base64'),
       }),
@@ -863,7 +867,7 @@ describe('deleteMessage also removes associated reactions', () => {
     const originalMsgIdBase64 = encodeToBase64(originalMsgIdBytes);
 
     // Insert the outgoing message that will be deleted
-    const msgId = await testQueries.messages.insert({
+    const msgDbId = await testQueries.messages.insert({
       ownerUserId: OWNER_USER_ID,
       contactUserId: CONTACT_USER_ID,
       content: 'Message to delete',
@@ -931,7 +935,7 @@ describe('deleteMessage also removes associated reactions', () => {
       testQueries
     );
 
-    const result = await service.deleteMessage(msgId);
+    const result = await service.deleteMessage(msgDbId);
     expect(result).toBe(true);
 
     const allRows = await testQueries.messages.getByOwnerAndContact(
@@ -940,7 +944,7 @@ describe('deleteMessage also removes associated reactions', () => {
     );
 
     // The deleted message should be marked as DELETED
-    const deletedMsg = allRows.find(r => r.id === msgId);
+    const deletedMsg = allRows.find(r => r.id === msgDbId);
     expect(deletedMsg?.type).toBe(MessageType.DELETED);
     expect(deletedMsg?.content).toBe('[Message deleted]');
 

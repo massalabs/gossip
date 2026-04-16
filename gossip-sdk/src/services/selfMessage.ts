@@ -10,6 +10,7 @@ import {
   MessageDirection,
   MessageStatus,
   MessageType,
+  MESSAGE_ID_SIZE,
 } from '../db/db.js';
 import { discussions } from '../db/schema/index.js';
 import { encodeToBase64, decodeFromBase64 } from '../utils/base64.js';
@@ -93,6 +94,7 @@ export class SelfMessageService {
   async send(content: string): Promise<Message> {
     const encryptedContent = await this.encryptContent(content);
     const now = new Date();
+    const messageId = crypto.getRandomValues(new Uint8Array(MESSAGE_ID_SIZE));
 
     const id = await this.queries.messages.insert({
       ownerUserId: this.ownerUserId,
@@ -102,6 +104,7 @@ export class SelfMessageService {
       direction: MessageDirection.OUTGOING,
       status: MessageStatus.SENT,
       timestamp: now,
+      messageId,
     });
 
     const discussion = await this.queries.discussions.getByOwnerAndContact(
@@ -120,6 +123,7 @@ export class SelfMessageService {
 
     return {
       id,
+      messageId,
       ownerUserId: this.ownerUserId,
       contactUserId: SELF_CONTACT_ID,
       content,
@@ -143,6 +147,7 @@ export class SelfMessageService {
         const plaintext = await this.decryptContent(row.content);
         result.push({
           id: row.id,
+          messageId: row.messageId ?? undefined,
           ownerUserId: row.ownerUserId,
           contactUserId: row.contactUserId,
           content: plaintext,
@@ -168,42 +173,65 @@ export class SelfMessageService {
       ? JSON.parse(row.metadata as string)
       : {};
 
-    await this.queries.messages.updateById(id, {
+    await this.queries.messages.updateById(row.id, {
       content: encryptedContent,
       metadata: JSON.stringify({ ...existingMetadata, edited: true }),
     });
   }
 
   async deleteMessage(id: number): Promise<void> {
+    const row = await this.queries.messages.getById(id);
+    if (!row) return;
+
     // Delete any reactions that reference this message via metadata.originalMessageId
-    const reactions = await this.queries.messages.getReactionsByOwnerAndContact(
-      this.ownerUserId,
-      SELF_CONTACT_ID
-    );
+    if (row.messageId) {
+      const messageIdBase64 = encodeToBase64(row.messageId);
+      const reactions =
+        await this.queries.messages.getReactionsByOwnerAndContact(
+          this.ownerUserId,
+          SELF_CONTACT_ID
+        );
 
-    const toDelete = reactions.filter(row => {
-      if (!row.metadata) return false;
-      try {
-        const meta = JSON.parse(row.metadata as string);
-        return meta?.originalMessageId === id;
-      } catch {
-        return false;
+      const toDelete = reactions.filter(r => {
+        if (!r.metadata) return false;
+        try {
+          const meta = JSON.parse(r.metadata as string);
+          return meta?.originalMessageId === messageIdBase64;
+        } catch {
+          return false;
+        }
+      });
+
+      for (const reaction of toDelete) {
+        await this.queries.messages.deleteById(reaction.id);
       }
-    });
-
-    for (const reaction of toDelete) {
-      await this.queries.messages.deleteById(reaction.id);
     }
 
-    await this.queries.messages.deleteById(id);
+    await this.queries.messages.deleteById(row.id);
   }
 
   async sendReaction(
     emoji: string,
     originalMessageDbId: number
-  ): Promise<{ id: number; emoji: string; originalMessageId: number }> {
+  ): Promise<{
+    id: number;
+    messageId: Uint8Array;
+    emoji: string;
+    originalMessageId: Uint8Array;
+  }> {
+    const originalRow =
+      await this.queries.messages.getById(originalMessageDbId);
+    if (!originalRow || !originalRow.messageId) {
+      throw new Error(
+        'Original message not found or has no messageId for reaction'
+      );
+    }
+    const originalMessageId = originalRow.messageId;
+
     const encryptedEmoji = await this.encryptContent(emoji);
     const now = new Date();
+    const messageId = crypto.getRandomValues(new Uint8Array(MESSAGE_ID_SIZE));
+    const originalMessageIdBase64 = encodeToBase64(originalMessageId);
 
     const id = await this.queries.messages.insert({
       ownerUserId: this.ownerUserId,
@@ -213,14 +241,19 @@ export class SelfMessageService {
       direction: MessageDirection.OUTGOING,
       status: MessageStatus.SENT,
       timestamp: now,
-      metadata: JSON.stringify({ originalMessageId: originalMessageDbId }),
+      messageId,
+      metadata: JSON.stringify({
+        originalMessageId: originalMessageIdBase64,
+      }),
     });
 
-    return { id, emoji, originalMessageId: originalMessageDbId };
+    return { id, messageId, emoji, originalMessageId };
   }
 
   async removeReaction(reactionId: number): Promise<void> {
-    await this.queries.messages.deleteById(reactionId);
+    const row = await this.queries.messages.getById(reactionId);
+    if (!row) return;
+    await this.queries.messages.deleteById(row.id);
   }
 
   async getRetentionInfo(): Promise<{
@@ -251,24 +284,39 @@ export class SelfMessageService {
   }
 
   async getReactions(): Promise<
-    { id: number; emoji: string; originalMessageId: number }[]
+    {
+      id: number;
+      messageId: Uint8Array;
+      emoji: string;
+      originalMessageId: Uint8Array;
+    }[]
   > {
     const rows = await this.queries.messages.getReactionsByOwnerAndContact(
       this.ownerUserId,
       SELF_CONTACT_ID
     );
 
-    const result: { id: number; emoji: string; originalMessageId: number }[] =
-      [];
+    const result: {
+      id: number;
+      messageId: Uint8Array;
+      emoji: string;
+      originalMessageId: Uint8Array;
+    }[] = [];
 
     for (const row of rows) {
+      if (!row.messageId) continue;
       try {
         const emoji = await this.decryptContent(row.content);
         const meta = row.metadata ? JSON.parse(row.metadata as string) : null;
-        const originalMessageId = meta?.originalMessageId;
-        if (typeof originalMessageId === 'number') {
-          result.push({ id: row.id, emoji, originalMessageId });
-        }
+        const originalMessageIdRaw = meta?.originalMessageId;
+        if (typeof originalMessageIdRaw !== 'string') continue;
+        const originalMessageId = decodeFromBase64(originalMessageIdRaw);
+        result.push({
+          id: row.id,
+          messageId: row.messageId,
+          emoji,
+          originalMessageId,
+        });
       } catch {
         // Skip reactions that cannot be decrypted
       }

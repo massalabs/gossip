@@ -43,9 +43,13 @@ vi.mock('../../../src/hooks/useMarkMessageAsRead', () => ({
 import MessageItem from '../../../src/components/discussions/MessageItem';
 
 function makeMessage(overrides?: Partial<Message>): Message {
+  const id = overrides?.id ?? 1;
   return {
-    id: 1,
-    msgId: 1,
+    id,
+    messageId:
+      overrides?.messageId === undefined
+        ? new Uint8Array(12).fill(id === 0 ? 99 : id)
+        : overrides?.messageId,
     contactUserId: 'contact-1',
     ownerUserId: 'owner-1',
     content: 'Hello world',
@@ -55,6 +59,10 @@ function makeMessage(overrides?: Partial<Message>): Message {
     unread: false,
     ...overrides,
   } as Message;
+}
+
+function midFor(id: number): number {
+  return id;
 }
 
 describe('MessageItem', () => {
@@ -512,7 +520,7 @@ describe('MessageItem', () => {
         page.getByRole('button', { name: 'Double-tap to reply' })
       );
 
-      expect(onToggleSelect).toHaveBeenCalledWith(1);
+      expect(onToggleSelect).toHaveBeenCalledWith(midFor(1));
       await expect.element(page.getByRole('menu')).not.toBeInTheDocument();
     });
 
@@ -528,14 +536,14 @@ describe('MessageItem', () => {
       );
 
       await userEvent.click(page.getByRole('listitem'));
-      expect(onToggleSelect).toHaveBeenCalledWith(1);
+      expect(onToggleSelect).toHaveBeenCalledWith(midFor(1));
     });
 
-    it('does not call onToggleSelect when message.id is missing', async () => {
+    it('does not call onToggleSelect when message.messageId is missing', async () => {
       const onToggleSelect = vi.fn();
       render(
         <MessageItem
-          message={makeMessage({ id: undefined })}
+          message={makeMessage({ id: undefined, messageId: undefined })}
           isSelecting={true}
           isSelected={false}
           onToggleSelect={onToggleSelect}
@@ -561,7 +569,7 @@ describe('MessageItem', () => {
       );
 
       await userEvent.click(page.getByRole('listitem'));
-      expect(onToggleSelect).toHaveBeenCalledWith(0);
+      expect(onToggleSelect).toHaveBeenCalledWith(midFor(0));
     });
 
     it('hides desktop message actions button while selecting', async () => {

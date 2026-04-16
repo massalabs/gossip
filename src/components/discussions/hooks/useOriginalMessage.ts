@@ -7,7 +7,7 @@ import { parseLinks } from '../../../utils/linkUtils';
 
 interface UseOriginalMessageOptions {
   message: Message;
-  onScrollToMessage?: (messageId: number) => void;
+  onScrollToMessage?: (id: number) => void;
 }
 
 export function useOriginalMessage({
@@ -103,7 +103,7 @@ export function useOriginalMessage({
   const handleReplyContextClick = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
-      if (originalMessage?.id && onScrollToMessage) {
+      if (originalMessage?.id != null && onScrollToMessage) {
         onScrollToMessage(originalMessage.id);
       }
     },
@@ -114,7 +114,7 @@ export function useOriginalMessage({
     (e: React.KeyboardEvent) => {
       if (
         (e.key === 'Enter' || e.key === ' ') &&
-        originalMessage?.id &&
+        originalMessage?.id != null &&
         onScrollToMessage
       ) {
         e.preventDefault();
@@ -141,7 +141,7 @@ export function useOriginalMessage({
   );
 
   const canNavigateToForwarded =
-    !!originalMessage?.id && typeof onScrollToMessage === 'function';
+    originalMessage?.id != null && typeof onScrollToMessage === 'function';
 
   return {
     originalMessage,

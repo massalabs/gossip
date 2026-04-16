@@ -11,6 +11,7 @@ const mockDeleteMessage = vi.fn().mockResolvedValue(undefined);
 let mockMessages = [
   {
     id: 1,
+    messageId: new Uint8Array(12).fill(1),
     content: 'Self note one',
     direction: MessageDirection.OUTGOING,
     status: MessageStatus.SENT,
@@ -105,11 +106,7 @@ vi.mock('../../src/components/discussions/SelectionHeader', () => ({
 }));
 
 vi.mock('../../src/components/discussions/MessageList', () => ({
-  default: ({
-    onToggleSelect,
-  }: {
-    onToggleSelect?: (messageId: number) => void;
-  }) => (
+  default: ({ onToggleSelect }: { onToggleSelect?: (id: number) => void }) => (
     <button
       type="button"
       onClick={() => onToggleSelect?.(1)}
@@ -149,6 +146,7 @@ describe('SelfDiscussion message selection', () => {
     mockMessages = [
       {
         id: 1,
+        messageId: new Uint8Array(12).fill(1),
         content: 'Self note one',
         direction: MessageDirection.OUTGOING,
         status: MessageStatus.SENT,
@@ -261,7 +259,7 @@ describe('SelfDiscussion message selection', () => {
       page.getByRole('button', { name: 'delete selected' })
     );
 
-    // deleteMessage should have been called with the message id
+    // deleteMessage should have been called with the message's id
     expect(mockDeleteMessage).toHaveBeenCalledWith(1);
 
     // Selection should be cleared after deletion

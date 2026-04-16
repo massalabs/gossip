@@ -18,8 +18,8 @@ interface DiscussionTopSectionSearchProps {
   isOpen: boolean;
   messages: Message[];
   onToggleSearch: () => void;
-  onScrollToMessage: (messageId: number) => void;
-  onHighlightChange: (messageId: number | null) => void;
+  onScrollToMessage: (id: number) => void;
+  onHighlightChange: (id: number | null) => void;
   onCloseSearch: () => void;
 }
 

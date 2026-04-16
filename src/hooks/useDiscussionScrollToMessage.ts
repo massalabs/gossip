@@ -16,11 +16,11 @@ interface UseDiscussionScrollToMessageParams {
 }
 
 const getVirtualIndexForMessage = (
-  messageId: number,
+  id: number,
   messages: Message[],
   discussion?: Discussion
 ): number => {
-  const messageIndex = messages.findIndex(msg => msg.id === messageId);
+  const messageIndex = messages.findIndex(msg => msg.id === id);
   if (messageIndex === -1) {
     return -1;
   }
@@ -79,29 +79,29 @@ export const useDiscussionScrollToMessage = ({
   }, []);
 
   const handleScrollToMessage = useCallback(
-    (messageId: number) => {
+    (id: number) => {
       (async () => {
-        const target = await gossip.messages.get(messageId);
+        const target = await gossip.messages.get(id);
         if (!target) {
-          console.warn(`Message with id ${messageId} not found in database`);
+          console.warn(`Message not found in database`);
           return;
         }
 
         if (target.contactUserId !== contactUserId) {
           navigate(ROUTES.discussion({ userId: target.contactUserId }), {
-            state: { scrollToMessageId: messageId },
+            state: { scrollToMessageId: id },
           });
           return;
         }
 
         const virtualIndex = getVirtualIndexForMessage(
-          messageId,
+          id,
           messages,
           discussion
         );
         if (virtualIndex === -1) {
           console.warn(
-            `Message ${messageId} not found in current messages array. It may not be loaded yet.`
+            `Message not found in current messages array. It may not be loaded yet.`
           );
           return;
         }
@@ -109,8 +109,9 @@ export const useDiscussionScrollToMessage = ({
         messageListRef.current?.scrollToIndex(virtualIndex);
 
         if (!isSearchOpenRef.current) {
+          const domId = `message-${id}`;
           setTimeout(() => {
-            const element = document.getElementById(`message-${messageId}`);
+            const element = document.getElementById(domId);
             if (element) {
               element.classList.add('highlight-message');
 
@@ -119,7 +120,7 @@ export const useDiscussionScrollToMessage = ({
               }
 
               highlightTimeoutRef.current = setTimeout(() => {
-                const el = document.getElementById(`message-${messageId}`);
+                const el = document.getElementById(domId);
                 if (el) {
                   el.classList.remove('highlight-message');
                 }

@@ -197,7 +197,7 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
     };
 
     const sdk = getSdk();
-    sdk.on(SdkEventType.MESSAGE_OPTIMISTIC, onMessageEvent);
+    sdk.on(SdkEventType.MESSAGE_SENT, onMessageEvent);
     sdk.on(SdkEventType.MESSAGE_RECEIVED, onMessageEvent);
     sdk.on(SdkEventType.MESSAGE_READ, debouncedFetch);
     sdk.on(SdkEventType.SESSION_CREATED, debouncedFetch);
@@ -220,13 +220,11 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
       });
     };
     sdk.on(SdkEventType.SESSION_STATUS_CHANGED, onSessionStatusChanged);
-    sdk.on(SdkEventType.MESSAGE_DELETED_OPTIMISTIC, debouncedFetch);
-    sdk.on(SdkEventType.MESSAGE_EDITED_OPTIMISTIC, debouncedFetch);
 
     const cleanupFn = () => {
       if (debounceTimer) clearTimeout(debounceTimer);
       try {
-        sdk.off(SdkEventType.MESSAGE_OPTIMISTIC, onMessageEvent);
+        sdk.off(SdkEventType.MESSAGE_SENT, onMessageEvent);
         sdk.off(SdkEventType.MESSAGE_RECEIVED, onMessageEvent);
         sdk.off(SdkEventType.MESSAGE_READ, debouncedFetch);
         sdk.off(SdkEventType.SESSION_CREATED, debouncedFetch);
@@ -234,8 +232,6 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
         sdk.off(SdkEventType.SESSION_RENEWED, debouncedFetch);
         sdk.off(SdkEventType.SESSION_REQUESTED, debouncedFetch);
         sdk.off(SdkEventType.DISCUSSION_UPDATED, debouncedFetch);
-        sdk.off(SdkEventType.MESSAGE_DELETED_OPTIMISTIC, debouncedFetch);
-        sdk.off(SdkEventType.MESSAGE_EDITED_OPTIMISTIC, debouncedFetch);
         sdk.off(SdkEventType.SESSION_STATUS_CHANGED, onSessionStatusChanged);
       } catch {
         // SDK might not be available during cleanup

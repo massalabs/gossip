@@ -27,9 +27,10 @@ import { useDiscussionMessageSelection } from '../../src/hooks/useDiscussionMess
 // ---------- Helpers ----------
 
 function makeMessage(overrides?: Partial<Message>): Message {
+  const id = overrides?.id ?? 1;
   return {
-    id: 1,
-    msgId: 1,
+    id,
+    messageId: new Uint8Array(12).fill(id),
     contactUserId: 'contact-1',
     ownerUserId: 'owner-1',
     content: 'Hello',
@@ -39,6 +40,10 @@ function makeMessage(overrides?: Partial<Message>): Message {
     unread: false,
     ...overrides,
   } as Message;
+}
+
+function keyOf(id: number): number {
+  return id;
 }
 
 const mockDeleteMessage = vi.fn().mockResolvedValue(true);
@@ -163,7 +168,7 @@ describe('MultiSelectMessages', () => {
         .toHaveTextContent('1');
       await expect
         .element(page.getByTestId('selected-ids'))
-        .toHaveTextContent('[1]');
+        .toHaveTextContent(JSON.stringify([keyOf(1)]));
     });
 
     it('selects multiple messages', async () => {
@@ -182,7 +187,7 @@ describe('MultiSelectMessages', () => {
         .toHaveTextContent('2');
       await expect
         .element(page.getByTestId('selected-ids'))
-        .toHaveTextContent('[1,3]');
+        .toHaveTextContent(JSON.stringify([keyOf(1), keyOf(3)].sort()));
     });
 
     it('deselects a message by toggling it again', async () => {
@@ -204,7 +209,7 @@ describe('MultiSelectMessages', () => {
         .toHaveTextContent('1');
       await expect
         .element(page.getByTestId('selected-ids'))
-        .toHaveTextContent('[2]');
+        .toHaveTextContent(JSON.stringify([keyOf(2)]));
     });
 
     it('deselecting all messages exits selection mode', async () => {

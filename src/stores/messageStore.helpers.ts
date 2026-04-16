@@ -190,12 +190,12 @@ export function rollbackInsert(
 export function rollbackReplace(
   set: SetFn,
   contactUserId: string,
-  messageId: number,
+  id: number,
   original: Message
 ) {
   set(state => {
     const map = patchContact(state.messagesByContact, contactUserId, msgs =>
-      msgs.map(m => (m.id === messageId ? original : m))
+      msgs.map(m => (m.id === id ? original : m))
     );
     return map ? { messagesByContact: map } : state;
   });

@@ -26,9 +26,10 @@ import { useDiscussionMessageSelection } from '../../src/hooks/useDiscussionMess
 // ---------- Helpers ----------
 
 function makeMessage(overrides?: Partial<Message>): Message {
+  const id = overrides?.id ?? 1;
   return {
-    id: 1,
-    msgId: 1,
+    id,
+    messageId: new Uint8Array(12).fill(id),
     contactUserId: 'contact-1',
     ownerUserId: 'owner-1',
     content: 'Hello',
@@ -67,7 +68,7 @@ function SelectionHarness({
   onDeleteMessage,
 }: {
   messages: Message[];
-  onDeleteMessage?: (messageId: number) => Promise<boolean>;
+  onDeleteMessage?: (id: number) => Promise<boolean>;
 }) {
   const {
     selectedMessageIds,

@@ -4,6 +4,7 @@ import {
   MessageDirection,
   MessageStatus,
   MessageType,
+  MESSAGE_ID_SIZE,
   decodeUserId,
 } from '@massalabs/gossip-sdk';
 import { createSelectors } from './utils/createSelectors';
@@ -16,6 +17,10 @@ export type { ReactionGroup } from './messageStore.types';
 import {
   messageIdEquals,
   messageIdKey,
+  patchContact,
+  clearReactionsForDeletedMessage,
+  rollbackReplace,
+  addReactionToState,
   EMPTY_MESSAGES,
   EMPTY_REACTIONS,
   recomputeFullCache,
@@ -106,7 +111,7 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
   sendMessage: async (
     contactUserId,
     content,
-    replyToId?,
+    replyToMessageId?,
     forwardFromMessageId?
   ) => {
     const { userProfile } = useAccountStore.getState();
@@ -121,8 +126,8 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
     let replyTo: Message['replyTo'];
     let forwardOf: Message['forwardOf'];
 
-    if (replyToId) {
-      const orig = await getSdk().messages.get(replyToId);
+    if (replyToMessageId) {
+      const orig = await getSdk().messages.get(replyToMessageId);
       if (!orig) throw new Error('Original message not found');
       if (!orig.messageId)
         throw new Error('Cannot reply to a message that has no messageId');
@@ -145,21 +150,75 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
       }
     }
 
-    const result = getSdk().messages.send(
-      {
-        ownerUserId: userProfile.userId,
-        contactUserId,
-        content,
-        type: MessageType.TEXT,
-        direction: MessageDirection.OUTGOING,
-        status: MessageStatus.WAITING_SESSION,
-        timestamp: new Date(),
-        replyTo,
-        forwardOf,
-      },
-      { optimistic: true }
-    );
-    if (!result.success) console.error('Failed to send message:', result.error);
+    const messageId = crypto.getRandomValues(new Uint8Array(MESSAGE_ID_SIZE));
+    const message: Omit<Message, 'id'> = {
+      ownerUserId: userProfile.userId,
+      contactUserId,
+      content,
+      type: MessageType.TEXT,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.WAITING_SESSION,
+      timestamp: new Date(),
+      messageId,
+      replyTo,
+      forwardOf,
+    };
+
+    // Optimistic: add to store immediately
+    set(state => {
+      const map = patchContact(state.messagesByContact, contactUserId, msgs => [
+        ...msgs,
+        message as Message,
+      ]);
+      return map ? { messagesByContact: map } : state;
+    });
+
+    try {
+      const result = await getSdk().messages.send(message);
+      if (result.success && result.message?.id != null) {
+        // Patch optimistic message with real DB id
+        set(state => {
+          const map = patchContact(
+            state.messagesByContact,
+            contactUserId,
+            msgs =>
+              msgs.map(m =>
+                messageIdEquals(m.messageId, messageId)
+                  ? { ...m, id: result.message!.id }
+                  : m
+              )
+          );
+          return map ? { messagesByContact: map } : state;
+        });
+      } else if (!result.success) {
+        console.error('Failed to send message:', result.error);
+        set(state => {
+          const map = patchContact(
+            state.messagesByContact,
+            contactUserId,
+            msgs =>
+              msgs.map(m =>
+                messageIdEquals(m.messageId, messageId)
+                  ? { ...m, status: MessageStatus.FAILED }
+                  : m
+              )
+          );
+          return map ? { messagesByContact: map } : state;
+        });
+      }
+    } catch (error) {
+      console.error('Failed to send message:', error);
+      set(state => {
+        const map = patchContact(state.messagesByContact, contactUserId, msgs =>
+          msgs.map(m =>
+            messageIdEquals(m.messageId, messageId)
+              ? { ...m, status: MessageStatus.FAILED }
+              : m
+          )
+        );
+        return map ? { messagesByContact: map } : state;
+      });
+    }
   },
 
   getMessagesForContact: contactUserId =>
@@ -168,12 +227,77 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
   getReactionsForMessage: (msgId: Uint8Array) =>
     get().reactionGroupsCache.get(messageIdKey(msgId)) || EMPTY_REACTIONS,
 
-  deleteMessage: async (_contactUserId, messageId) => {
-    await getSdk().messages.deleteMessage(messageId);
+  deleteMessage: async (contactUserId, id) => {
+    // Save original for rollback
+    const msgs = get().messagesByContact.get(contactUserId) || [];
+    const original = msgs.find(m => m.id === id);
+
+    // Optimistic: mark as deleted in store
+    set(state => {
+      const msgMap = patchContact(state.messagesByContact, contactUserId, ms =>
+        ms.map(m =>
+          m.id === id
+            ? { ...m, type: MessageType.DELETED, content: '[Message deleted]' }
+            : m
+        )
+      );
+      if (!msgMap) return state;
+      const originalMsgId = original?.messageId;
+      if (originalMsgId) {
+        const rxnUpdate = clearReactionsForDeletedMessage(
+          state,
+          contactUserId,
+          originalMsgId,
+          msgMap
+        );
+        if (rxnUpdate) {
+          return { messagesByContact: msgMap, ...rxnUpdate };
+        }
+      }
+      return { messagesByContact: msgMap };
+    });
+
+    try {
+      await getSdk().messages.deleteMessage(id);
+    } catch (error) {
+      // Rollback on failure
+      if (original) {
+        rollbackReplace(set, contactUserId, id, original);
+      }
+      throw error;
+    }
   },
 
-  editMessage: async (_contactUserId, messageId, newContent) => {
-    await getSdk().messages.editMessage(messageId, newContent);
+  editMessage: async (contactUserId, id, newContent) => {
+    // Save original for rollback
+    const msgs = get().messagesByContact.get(contactUserId) || [];
+    const original = msgs.find(m => m.id === id);
+
+    // Optimistic: update content in store
+    set(state => {
+      const map = patchContact(state.messagesByContact, contactUserId, ms =>
+        ms.map(m =>
+          m.id === id
+            ? {
+                ...m,
+                content: newContent,
+                metadata: { ...m.metadata, edited: true },
+              }
+            : m
+        )
+      );
+      return map ? { messagesByContact: map } : state;
+    });
+
+    try {
+      await getSdk().messages.editMessage(id, newContent);
+    } catch (error) {
+      // Rollback on failure
+      if (original) {
+        rollbackReplace(set, contactUserId, id, original);
+      }
+      throw error;
+    }
   },
 
   reactToMessage: async (contactUserId, emoji, messageDbId) => {
@@ -199,51 +323,46 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
       get().removeReaction(existing.id, existing.messageId);
     }
 
-    getSdk().messages.send(
-      {
-        ownerUserId: useAccountStore.getState().userProfile?.userId ?? '',
-        contactUserId,
-        content: emoji,
-        type: MessageType.REACTION,
-        direction: MessageDirection.OUTGOING,
-        status: MessageStatus.WAITING_SESSION,
-        timestamp: new Date(),
-        reactionOf: { originalMsgId: target.messageId },
-      },
-      { optimistic: true }
+    const reactionMsgId = crypto.getRandomValues(
+      new Uint8Array(MESSAGE_ID_SIZE)
     );
+    const reaction: Message = {
+      ownerUserId: useAccountStore.getState().userProfile?.userId ?? '',
+      contactUserId,
+      content: emoji,
+      type: MessageType.REACTION,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.WAITING_SESSION,
+      timestamp: new Date(),
+      messageId: reactionMsgId,
+      reactionOf: { originalMsgId: target.messageId },
+    };
+
+    // Optimistic: add reaction to store
+    addReactionToState(set, contactUserId, reaction, false);
+
+    // Persist in background
+    getSdk()
+      .messages.send(reaction)
+      .catch(() => {
+        removeReactionFromState(set, contactUserId, r =>
+          messageIdEquals(r.messageId, reactionMsgId)
+        );
+      });
   },
 
-  removeReaction: async (reactionDbId, reactionMessageId?) => {
-    const match = (r: Message) =>
-      reactionMessageId
-        ? messageIdEquals(r.messageId, reactionMessageId)
-        : r.id === reactionDbId;
+  removeReaction: async reactionDbId => {
+    const match = (r: Message) => r.id === reactionDbId;
 
-    let matchedContact: string | null = null;
-    for (const [contact] of get().reactionsByContact) {
-      if (removeReactionFromState(set, contact, match)) {
-        matchedContact = contact;
+    for (const [contact, reactions] of get().reactionsByContact) {
+      const found = reactions.find(match);
+      if (found) {
+        removeReactionFromState(set, contact, match);
         break;
       }
     }
 
-    const sdk = getSdk();
-    let dbId = reactionDbId;
-    if (!dbId && reactionMessageId && matchedContact) {
-      const ownerUserId = useAccountStore.getState().userProfile?.userId;
-      if (ownerUserId) {
-        const found = await sdk.messages.findMessageByMsgId(
-          reactionMessageId,
-          ownerUserId,
-          matchedContact
-        );
-        dbId = found?.id;
-      }
-    }
-    if (dbId) {
-      await sdk.messages.deleteMessage(dbId);
-    }
+    await getSdk().messages.deleteMessage(reactionDbId);
   },
 
   clearMessages: contactUserId => {

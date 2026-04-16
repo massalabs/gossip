@@ -15,7 +15,7 @@ interface UseDiscussionMessageSelectionParams {
   gossip: GossipSdk;
   t: TFunction;
   /** Override the default delete function (e.g. for self messages) */
-  onDeleteMessage?: (messageId: number) => Promise<boolean>;
+  onDeleteMessage?: (id: number) => Promise<boolean>;
 }
 
 interface UseDiscussionMessageSelectionResult {
@@ -24,7 +24,7 @@ interface UseDiscussionMessageSelectionResult {
   selectedMessages: Message[];
   canDeleteSelected: boolean;
   outgoingSentCount: number;
-  handleToggleSelect: (messageId: number) => void;
+  handleToggleSelect: (id: number) => void;
   handleClearSelection: () => void;
   handleCopySelected: () => Promise<void>;
   handleDeleteSelected: () => Promise<void>;
@@ -45,11 +45,7 @@ export const useDiscussionMessageSelection = ({
   const isSelecting = selectedMessageIds.size > 0;
 
   const selectedMessages = useMemo(
-    () =>
-      messages.filter(
-        // Keep this as != null (not truthy) so message id 0 remains valid.
-        m => m.id != null && selectedMessageIds.has(m.id)
-      ),
+    () => messages.filter(m => m.id != null && selectedMessageIds.has(m.id)),
     [messages, selectedMessageIds]
   );
 
@@ -68,13 +64,13 @@ export const useDiscussionMessageSelection = ({
     [messages]
   );
 
-  const handleToggleSelect = useCallback((messageId: number) => {
+  const handleToggleSelect = useCallback((id: number) => {
     setSelectedMessageIds(prev => {
       const next = new Set(prev);
-      if (next.has(messageId)) {
-        next.delete(messageId);
+      if (next.has(id)) {
+        next.delete(id);
       } else {
-        next.add(messageId);
+        next.add(id);
       }
       return next;
     });
@@ -86,7 +82,6 @@ export const useDiscussionMessageSelection = ({
 
   const handleCopySelected = useCallback(async () => {
     const selected = messages
-      // Keep this as != null (not truthy) so message id 0 remains valid.
       .filter(m => m.id != null && selectedMessageIds.has(m.id))
       .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
 
@@ -120,8 +115,8 @@ export const useDiscussionMessageSelection = ({
   const handleDeleteSelected = useCallback(async () => {
     if (!canDeleteSelected || selectedMessages.length === 0) return;
 
-    const failedMessageIds: number[] = [];
-    const deletedMessageIds: number[] = [];
+    const failedIds: number[] = [];
+    const deletedIds: number[] = [];
     for (const message of selectedMessages) {
       if (message.id == null) continue;
       try {
@@ -129,33 +124,33 @@ export const useDiscussionMessageSelection = ({
           ? await onDeleteMessage(message.id)
           : await gossip.messages.deleteMessage(message.id);
         if (!deleted) {
-          failedMessageIds.push(message.id);
+          failedIds.push(message.id);
           console.error('[multi-delete] deleteMessage returned false', {
-            messageId: message.id,
+            id: message.id,
           });
         } else {
-          deletedMessageIds.push(message.id);
+          deletedIds.push(message.id);
         }
       } catch (error) {
-        failedMessageIds.push(message.id);
+        failedIds.push(message.id);
         console.error('[multi-delete] deleteMessage threw', {
-          messageId: message.id,
+          id: message.id,
           error,
         });
       }
     }
 
-    if (failedMessageIds.length > 0) {
+    if (failedIds.length > 0) {
       console.error('[multi-delete] partial failure summary', {
         selectedCount: selectedMessages.length,
-        deletedCount: deletedMessageIds.length,
-        failedCount: failedMessageIds.length,
-        failedMessageIds,
+        deletedCount: deletedIds.length,
+        failedCount: failedIds.length,
+        failedIds,
       });
     }
 
     handleClearSelection();
-    if (failedMessageIds.length > 0) {
+    if (failedIds.length > 0) {
       toast.error(t('failed_to_delete_selected'));
     }
   }, [

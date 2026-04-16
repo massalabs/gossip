@@ -362,7 +362,7 @@ const Discussion: React.FC = () => {
           onDelete={handleDeleteMessage}
           onEdit={handleEditMessage}
           onReact={(message, emoji) => {
-            if (!message.id) return;
+            if (message.id == null) return;
             reactToMessage(contact.userId, emoji, message.id).catch(err => {
               console.error('Failed to send reaction', err);
             });
@@ -378,7 +378,7 @@ const Discussion: React.FC = () => {
               removeReaction(myReactionId, myReactionMessageId).catch(err => {
                 console.error('Failed to remove reaction', err);
               });
-            } else if (message.id) {
+            } else if (message.id != null) {
               reactToMessage(contact.userId, emoji, message.id).catch(err => {
                 console.error('Failed to send reaction', err);
               });

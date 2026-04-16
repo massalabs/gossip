@@ -147,7 +147,7 @@ export function useVirtualItems(
         items.push({
           type: 'date',
           date: message.timestamp,
-          key: `date-${message.id}`,
+          key: `date-${message.messageId ? message.messageId.join(',') : (message.id ?? message.timestamp.getTime())}`,
         });
       }
 

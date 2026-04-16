@@ -14,7 +14,7 @@ let latestOnSend: ((text: string) => void | Promise<void>) | null = null;
 let mockMessages = [
   {
     id: 1,
-    msgId: 1,
+    messageId: new Uint8Array(12).fill(1),
     contactUserId: 'contact-1',
     ownerUserId: 'owner-1',
     content: 'Hello',
@@ -137,7 +137,7 @@ vi.mock('../../src/components/discussions/MessageList', () => ({
     {
       onToggleSelect,
     }: {
-      onToggleSelect?: (messageId: number) => void;
+      onToggleSelect?: (id: number) => void;
     },
     _ref
   ) {
@@ -188,7 +188,7 @@ describe('Discussion multi-select input behavior', () => {
     mockMessages = [
       {
         id: 1,
-        msgId: 1,
+        messageId: new Uint8Array(12).fill(1),
         contactUserId: 'contact-1',
         ownerUserId: 'owner-1',
         content: 'Hello',
@@ -238,7 +238,7 @@ describe('Discussion multi-select input behavior', () => {
     mockMessages = [
       {
         id: 1,
-        msgId: 1,
+        messageId: new Uint8Array(12).fill(1),
         contactUserId: 'contact-1',
         ownerUserId: 'owner-1',
         content: 'Hello',

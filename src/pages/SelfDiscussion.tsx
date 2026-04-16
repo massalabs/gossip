@@ -57,12 +57,18 @@ const SelfDiscussion: React.FC = () => {
   const selfReactionGroups = useMemo(() => {
     const map = new Map<
       string,
-      { emoji: string; count: number; myReactionId?: number }[]
+      {
+        emoji: string;
+        count: number;
+        myReactionId?: number;
+        myReactionMessageId?: Uint8Array;
+      }[]
     >();
     for (const msg of messages) {
-      if (msg.messageId && msg.id != null) {
-        const groups = reactions.get(msg.id);
-        if (groups) map.set(msg.messageId.join(','), groups);
+      if (msg.messageId) {
+        const key = msg.messageId.join(',');
+        const groups = reactions.get(key);
+        if (groups) map.set(key, groups);
       }
     }
     return map;
@@ -298,9 +304,14 @@ const SelfDiscussion: React.FC = () => {
                 void sendReaction(emoji, message.id);
               }
             }}
-            onToggleReaction={(message, emoji, myReactionId) => {
-              if (myReactionId) {
-                void removeReaction(myReactionId);
+            onToggleReaction={(
+              message,
+              emoji,
+              _myReactionId,
+              myReactionMessageId
+            ) => {
+              if (myReactionMessageId) {
+                void removeReaction(undefined, myReactionMessageId);
               } else if (message.id != null) {
                 void sendReaction(emoji, message.id);
               }

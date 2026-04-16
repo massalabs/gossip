@@ -8,12 +8,11 @@ import {
   MessageDirection,
   MessageStatus,
   MessageType,
-  SdkEventType,
 } from '@massalabs/gossip-sdk';
 import { recomputeFullCache } from '../../src/stores/messageStore.helpers';
 
 // ---------------------------------------------------------------------------
-// Mock SDK with event emitter so optimistic sends flow through the store
+// Mock SDK with event emitter
 // ---------------------------------------------------------------------------
 
 type EventHandler = (...args: unknown[]) => void;
@@ -25,25 +24,7 @@ const mockSdk = {
     getVisibleMessages: vi.fn(async () => [] as Message[]),
     getReactions: vi.fn(async () => [] as Message[]),
     get: vi.fn(async () => undefined as unknown as Message | undefined),
-    send: vi.fn(
-      (message: Omit<Message, 'id'>, options?: { optimistic?: boolean }) => {
-        if (options?.optimistic) {
-          const optimisticMessage: Message = {
-            ...message,
-            messageId:
-              message.messageId ?? crypto.getRandomValues(new Uint8Array(12)),
-            status: MessageStatus.WAITING_SESSION,
-          };
-          // Emit MESSAGE_OPTIMISTIC like the real SDK does
-          const handlers = listeners.get(SdkEventType.MESSAGE_OPTIMISTIC);
-          if (handlers) {
-            for (const handler of handlers) handler(optimisticMessage);
-          }
-          return { success: true };
-        }
-        return Promise.resolve({ success: true });
-      }
-    ),
+    send: vi.fn(async () => ({ success: true as const })),
     findMessageByMsgId: vi.fn(async () => undefined as Message | undefined),
     deleteMessage: vi.fn(async () => true),
     editMessage: vi.fn(async () => true),
@@ -107,7 +88,7 @@ describe('MessageStore reactions', () => {
     useMessageStore.getState().cleanup();
   });
 
-  it('reactToMessage sends a reaction via sdk.messages.send with optimistic flag', async () => {
+  it('reactToMessage sends a reaction via sdk.messages.send', async () => {
     const messageWithId: Message = {
       id: 1,
       messageId: new Uint8Array(12).fill(1),
@@ -137,8 +118,7 @@ describe('MessageStore reactions', () => {
         type: MessageType.REACTION,
         direction: MessageDirection.OUTGOING,
         reactionOf: { originalMsgId: messageWithId.messageId },
-      }),
-      { optimistic: true }
+      })
     );
 
     // No deleteMessage call should be made; the latest reaction wins by ordering.
@@ -341,10 +321,8 @@ describe('MessageStore reactions', () => {
 
     mockSdk.messages.deleteMessage.mockClear();
 
-    // removeReaction takes (reactionDbId, reactionMessageId?)
-    await useMessageStore
-      .getState()
-      .removeReaction(reaction.id!, reaction.messageId);
+    // removeReaction takes (reactionDbId)
+    await useMessageStore.getState().removeReaction(reaction.id!);
 
     // The outgoing reaction should be deleted
     expect(mockSdk.messages.deleteMessage).toHaveBeenCalledTimes(1);

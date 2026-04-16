@@ -134,7 +134,8 @@ describe('SelfMessageService', () => {
     );
     expect(rows.map(r => r.id)).toContain(sent.id);
 
-    // Attach a reaction linked via metadata.originalMessageId
+    // Attach a reaction linked via metadata.originalMessageId (base64 messageId)
+    const { encodeToBase64 } = await import('../../src/utils/base64');
     const reactionId = await queries.messages.insert({
       ownerUserId,
       contactUserId: SELF_CONTACT_ID,
@@ -143,7 +144,9 @@ describe('SelfMessageService', () => {
       direction: MessageDirection.OUTGOING,
       status: MessageStatus.SENT,
       timestamp: new Date(),
-      metadata: JSON.stringify({ originalMessageId: sent.id }),
+      metadata: JSON.stringify({
+        originalMessageId: encodeToBase64(sent.messageId!),
+      }),
     });
 
     await service.deleteMessage(sent.id!);

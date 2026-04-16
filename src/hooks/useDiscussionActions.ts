@@ -38,14 +38,14 @@ export function useDiscussionActions({
   );
 
   const handleSendMessage = useCallback(
-    async (text: string, replyToId?: number) => {
+    async (text: string, replyToMessageId?: number) => {
       if (isSelecting) return;
       if (!contact?.userId) return;
       try {
         await sendMessage(
           contact.userId,
           text,
-          replyToId,
+          replyToMessageId,
           forwardFromMessageId
         );
         setReplyingTo(null);
@@ -82,7 +82,7 @@ export function useDiscussionActions({
 
   const handleForwardMessage = useCallback(
     (message: Message) => {
-      if (!message.id) return;
+      if (message.id == null) return;
       // Set pending forward state, then go to discussions list for recipient selection.
       // replace: true avoids pushing a duplicate /discussions entry so back navigation
       // after forwarding returns cleanly to the discussions list.
@@ -105,7 +105,7 @@ export function useDiscussionActions({
   // Optimistic delete via store
   const handleDeleteMessage = useCallback(
     async (message: Message) => {
-      if (!message.id || !contact?.userId) return;
+      if (message.id == null || !contact?.userId) return;
       try {
         await deleteMessage(contact.userId, message.id);
       } catch (error) {
@@ -128,7 +128,7 @@ export function useDiscussionActions({
   // Optimistic edit via store
   const handleConfirmEdit = useCallback(
     async (newContent: string, message: Message) => {
-      if (!message.id || !contact?.userId) return;
+      if (message.id == null || !contact?.userId) return;
       try {
         await editMessage(contact.userId, message.id, newContent);
       } catch (error) {

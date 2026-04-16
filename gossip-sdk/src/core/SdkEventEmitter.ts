@@ -18,12 +18,6 @@ export enum SdkEventType {
   SEEKERS_UPDATED = 'seekersUpdated',
   SESSION_STATUS_CHANGED = 'sessionStatusChanged',
   DISCUSSION_UPDATED = 'discussionUpdated',
-  WRITE_FAILED = 'writeFailed',
-  MESSAGE_OPTIMISTIC = 'messageOptimistic',
-  MESSAGE_DELETED_OPTIMISTIC = 'messageDeletedOptimistic',
-  MESSAGE_EDITED_OPTIMISTIC = 'messageEditedOptimistic',
-  MESSAGE_DELETE_FAILED = 'messageDeleteFailed',
-  MESSAGE_EDIT_FAILED = 'messageEditFailed',
   MESSAGE_ACKNOWLEDGED = 'messageAcknowledged',
   ERROR = 'error',
 }
@@ -46,33 +40,6 @@ export type SdkEvents = {
     status: SessionStatus;
   };
   [SdkEventType.DISCUSSION_UPDATED]: string;
-  [SdkEventType.WRITE_FAILED]: {
-    messageId: Uint8Array | undefined;
-    entityType: 'message' | 'discussion' | 'contact';
-    error: Error;
-  };
-  [SdkEventType.MESSAGE_OPTIMISTIC]: Message;
-  [SdkEventType.MESSAGE_DELETED_OPTIMISTIC]: {
-    contactUserId: string;
-    messageDbId: number;
-    originalMsgId: Uint8Array;
-  };
-  [SdkEventType.MESSAGE_EDITED_OPTIMISTIC]: {
-    contactUserId: string;
-    messageDbId: number;
-    newContent: string;
-    metadata: Record<string, unknown>;
-  };
-  [SdkEventType.MESSAGE_DELETE_FAILED]: {
-    contactUserId: string;
-    messageDbId: number;
-    original: Message;
-  };
-  [SdkEventType.MESSAGE_EDIT_FAILED]: {
-    contactUserId: string;
-    messageDbId: number;
-    original: Message;
-  };
   [SdkEventType.MESSAGE_ACKNOWLEDGED]: {
     contactUserId: string;
     messageDbId: number;

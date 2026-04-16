@@ -9,10 +9,12 @@ import { createSelectors } from './utils/createSelectors';
 import { getSdk } from './sdkStore';
 import { useAccountStore } from './accountStore';
 import { ReactionGroup } from './messageStore';
+import { messageIdKey } from './messageStore.helpers';
 
 interface SelfMessageStore {
   messages: Message[];
-  reactions: Map<number, ReactionGroup[]>;
+  /** Reactions keyed by target message's messageIdKey */
+  reactions: Map<string, ReactionGroup[]>;
   isLoading: boolean;
   isSending: boolean;
   loadMessages: () => Promise<void>;
@@ -20,9 +22,9 @@ interface SelfMessageStore {
   sendMessage: (content: string) => Promise<void>;
   editMessage: (id: number, newContent: string) => Promise<void>;
   deleteMessage: (id: number) => Promise<void>;
-  sendReaction: (emoji: string, messageDbId: number) => Promise<void>;
+  sendReaction: (emoji: string, targetMessageDbId: number) => Promise<void>;
   removeReaction: (reactionId: number) => Promise<void>;
-  getReactionsForMessage: (messageDbId: number) => ReactionGroup[];
+  getReactionsForMessage: (targetMessageId: Uint8Array) => ReactionGroup[];
   clearMessages: () => void;
 }
 
@@ -53,20 +55,32 @@ const useSelfMessageStoreBase = create<SelfMessageStore>((set, get) => ({
 
     try {
       const raw = await sdk.selfMessages.getReactions();
-      const map = new Map<number, ReactionGroup[]>();
-      for (const { id, emoji, originalMessageId } of raw) {
-        const existing: ReactionGroup[] = map.get(originalMessageId) ?? [];
+      const map = new Map<string, ReactionGroup[]>();
+      for (const {
+        id,
+        messageId: reactionMessageId,
+        emoji,
+        originalMessageId,
+      } of raw) {
+        const key = messageIdKey(originalMessageId);
+        const existing: ReactionGroup[] = map.get(key) ?? [];
         const groupIndex = existing.findIndex(g => g.emoji === emoji);
         if (groupIndex >= 0) {
           existing[groupIndex] = {
             ...existing[groupIndex],
             count: existing[groupIndex].count + 1,
             myReactionId: id,
+            myReactionMessageId: reactionMessageId,
           };
         } else {
-          existing.push({ emoji, count: 1, myReactionId: id });
+          existing.push({
+            emoji,
+            count: 1,
+            myReactionId: id,
+            myReactionMessageId: reactionMessageId,
+          });
         }
-        map.set(originalMessageId, existing);
+        map.set(key, existing);
       }
       set({ reactions: map });
     } catch (error) {
@@ -165,15 +179,19 @@ const useSelfMessageStoreBase = create<SelfMessageStore>((set, get) => ({
     }
   },
 
-  sendReaction: async (emoji: string, messageDbId: number) => {
+  sendReaction: async (emoji: string, targetMessageDbId: number) => {
     const sdk = getSdk();
     if (!sdk.isSessionOpen) return;
+
+    const target = get().messages.find(m => m.id === targetMessageDbId);
+    if (!target?.messageId) return;
+    const key = messageIdKey(target.messageId);
 
     // Optimistic update with a temporary negative ID
     const tempId = -Date.now();
     set(state => {
       const map = new Map(state.reactions);
-      const existing: ReactionGroup[] = map.get(messageDbId) ?? [];
+      const existing: ReactionGroup[] = map.get(key) ?? [];
       const groupIndex = existing.findIndex(g => g.emoji === emoji);
       if (groupIndex >= 0) {
         const updated = [...existing];
@@ -182,28 +200,32 @@ const useSelfMessageStoreBase = create<SelfMessageStore>((set, get) => ({
           count: updated[groupIndex].count + 1,
           myReactionId: tempId,
         };
-        map.set(messageDbId, updated);
+        map.set(key, updated);
       } else {
-        map.set(messageDbId, [
-          ...existing,
-          { emoji, count: 1, myReactionId: tempId },
-        ]);
+        map.set(key, [...existing, { emoji, count: 1, myReactionId: tempId }]);
       }
       return { reactions: map };
     });
 
     try {
-      const reaction = await sdk.selfMessages.sendReaction(emoji, messageDbId);
-      // Replace temp ID with real DB ID
+      const reaction = await sdk.selfMessages.sendReaction(
+        emoji,
+        targetMessageDbId
+      );
+      // Replace temp ID with real DB/messageId
       set(state => {
         const map = new Map(state.reactions);
-        const groups = map.get(messageDbId);
+        const groups = map.get(key);
         if (groups) {
           map.set(
-            messageDbId,
+            key,
             groups.map(g =>
               g.myReactionId === tempId
-                ? { ...g, myReactionId: reaction.id }
+                ? {
+                    ...g,
+                    myReactionId: reaction.id,
+                    myReactionMessageId: reaction.messageId,
+                  }
                 : g
             )
           );
@@ -215,7 +237,7 @@ const useSelfMessageStoreBase = create<SelfMessageStore>((set, get) => ({
       // Revert optimistic update
       set(state => {
         const map = new Map(state.reactions);
-        const groups = map.get(messageDbId);
+        const groups = map.get(key);
         if (groups) {
           const updated = groups
             .map(g =>
@@ -224,8 +246,8 @@ const useSelfMessageStoreBase = create<SelfMessageStore>((set, get) => ({
                 : g
             )
             .filter(g => g.count > 0);
-          if (updated.length === 0) map.delete(messageDbId);
-          else map.set(messageDbId, updated);
+          if (updated.length === 0) map.delete(key);
+          else map.set(key, updated);
         }
         return { reactions: map };
       });
@@ -237,22 +259,24 @@ const useSelfMessageStoreBase = create<SelfMessageStore>((set, get) => ({
     if (!sdk.isSessionOpen) return;
 
     // Optimistic update — find and save the group for potential revert
-    let revertInfo: { msgId: number; group: ReactionGroup } | null = null;
+    type RevertInfo = { key: string; group: ReactionGroup };
+    const revertInfoHolder: { value: RevertInfo | null } = { value: null };
     set(state => {
       const map = new Map(state.reactions);
-      map.forEach((groups, msgId) => {
+      map.forEach((groups, key) => {
         const groupIndex = groups.findIndex(g => g.myReactionId === reactionId);
         if (groupIndex >= 0) {
-          revertInfo = { msgId, group: groups[groupIndex] };
+          revertInfoHolder.value = { key, group: groups[groupIndex] };
+          const target = groups[groupIndex];
           const updated = groups
             .map(g =>
-              g.myReactionId === reactionId
+              g === target
                 ? { ...g, count: g.count - 1, myReactionId: undefined }
                 : g
             )
             .filter(g => g.count > 0);
-          if (updated.length === 0) map.delete(msgId);
-          else map.set(msgId, updated);
+          if (updated.length === 0) map.delete(key);
+          else map.set(key, updated);
         }
       });
       return { reactions: map };
@@ -263,20 +287,20 @@ const useSelfMessageStoreBase = create<SelfMessageStore>((set, get) => ({
     } catch (error) {
       console.error('Failed to remove self reaction', error);
       // Revert optimistic update
-      if (revertInfo) {
-        const { msgId, group } = revertInfo;
+      if (revertInfoHolder.value) {
+        const { key, group } = revertInfoHolder.value;
         set(state => {
           const map = new Map(state.reactions);
-          const existing: ReactionGroup[] = map.get(msgId) ?? [];
-          map.set(msgId, [...existing, group]);
+          const existing: ReactionGroup[] = map.get(key) ?? [];
+          map.set(key, [...existing, group]);
           return { reactions: map };
         });
       }
     }
   },
 
-  getReactionsForMessage: (messageDbId: number): ReactionGroup[] => {
-    return get().reactions.get(messageDbId) ?? [];
+  getReactionsForMessage: (targetMessageId: Uint8Array): ReactionGroup[] => {
+    return get().reactions.get(messageIdKey(targetMessageId)) ?? [];
   },
 
   clearMessages: () => {

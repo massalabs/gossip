@@ -5,8 +5,9 @@ import React from 'react';
 import { render } from 'vitest-browser-react';
 import { act } from 'react';
 
+const FORWARD_MSG_ID = 42;
 let mockLocationState: { forwardFromMessageId?: number } = {
-  forwardFromMessageId: 42,
+  forwardFromMessageId: FORWARD_MSG_ID,
 };
 
 const mockNavigate = vi.fn();
@@ -86,9 +87,10 @@ import SelfDiscussion from '../../src/pages/SelfDiscussion';
 describe('SelfDiscussion forward to self notes', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockLocationState = { forwardFromMessageId: 42 };
+    mockLocationState = { forwardFromMessageId: FORWARD_MSG_ID };
     mockGetMessage.mockResolvedValue({
       id: 42,
+      messageId: FORWARD_MSG_ID,
       content: 'Forwarded note content',
     });
     mockSendSelfMessage.mockResolvedValue(undefined);
@@ -100,7 +102,7 @@ describe('SelfDiscussion forward to self notes', () => {
     render(<SelfDiscussion />);
     await act(async () => {});
 
-    expect(mockGetMessage).toHaveBeenCalledWith(42);
+    expect(mockGetMessage).toHaveBeenCalledWith(FORWARD_MSG_ID);
     expect(mockSendSelfMessage).toHaveBeenCalledWith('Forwarded note content');
   });
 
