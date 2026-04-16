@@ -5,7 +5,7 @@ import React from 'react';
 import { render } from 'vitest-browser-react';
 import { page } from 'vitest/browser';
 import { MemoryRouter } from 'react-router-dom';
-import MainLayout from '../../../src/components/ui/MainLayout';
+import MainLayout from '../../../src/components/ui/Layout/MainLayout';
 
 // Mock Capacitor (used by keyboardStore)
 vi.mock('@capacitor/core', () => ({
