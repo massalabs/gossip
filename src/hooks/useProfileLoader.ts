@@ -21,16 +21,15 @@ export function useProfileLoader() {
           setTimeout(resolve, PROFILE_LOAD_DELAY_MS)
         );
 
-        // Secure-storage: if the backend is still locked at boot,
-        // queries will throw. Skip the profile lookup in that case —
-        // the presence of `needsUnlock=true` already tells us there is
-        // existing data, so route the user to SecureLogin by flipping
-        // `isInitialized=true`. The actual profile hydration happens
-        // in accountStore.loadAccount once the user enters their
-        // password.
+        // Secure-storage: the SDK has no open session at boot, so any
+        // profile query would throw "SDK not initialized". We decide
+        // the initial route purely from `needsUnlock`:
+        //   - true  → existing data, go to SecureLogin.
+        //   - false → fresh install, go to onboarding (create account).
+        // Profile hydration happens later, after login/signup.
         const sdk = getSdk();
-        if (sdk.isSecureStorage && sdk.needsUnlock) {
-          useAppStore.getState().setIsInitialized(true);
+        if (sdk.isSecureStorage) {
+          useAppStore.getState().setIsInitialized(sdk.needsUnlock);
           return;
         }
 

@@ -213,12 +213,42 @@ interface AccountState {
   updateUsername: (newUsername: string) => Promise<void>;
 }
 
+// Tracks which secure-storage slots have been allocated during the
+// current onboarding session. Kept in module scope (not zustand) since
+// it's pure RAM and must never hit disk — leaking the allocated slot
+// indices would break plausible deniability. Cleared on logout.
+//
+// Range matches the Rust crate's `SESSION_COUNT = 3`; each onboarding
+// allocates up to 3 accounts (main + 2 decoys), each to a distinct
+// randomly-picked free slot.
+const SECURE_SLOT_COUNT = 3;
+const onboardingAllocatedSlots = new Set<number>();
+
+function pickFreeSlot(): number {
+  const free: number[] = [];
+  for (let i = 0; i < SECURE_SLOT_COUNT; i++) {
+    if (!onboardingAllocatedSlots.has(i)) free.push(i);
+  }
+  if (free.length === 0) {
+    throw new Error('No free secure-storage slot');
+  }
+  const rand = crypto.getRandomValues(new Uint8Array(1))[0];
+  return free[rand % free.length];
+}
+
 const useAccountStoreBase = create<AccountState>((set, get) => {
   // Helper function to cleanup session
   const cleanupSession = async () => {
     const sdk = getSdk();
     if (sdk.isSessionOpen) {
       await sdk.closeSession();
+    }
+    // Lock secure-storage too, otherwise `needsUnlock` stays false and
+    // the next login would skip the unlock step and read whichever
+    // slot was current when the session closed — leaking the wrong
+    // account's data to the caller.
+    if (sdk.isSecureStorage && !sdk.needsUnlock) {
+      await sdk.secureStorageLock();
     }
   };
 
@@ -300,10 +330,40 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       provisionOpts
     );
 
-    await getSdk().openSession({
+    // Secure-storage mode: create the slot with the user's credential
+    // before any DB access. Queries created by openSession need the
+    // backend unlocked. In the password path we use the password
+    // directly; in the biometric path we use the biometric-derived
+    // encryption key bytes (base64'd) - deterministic, so a later
+    // unlock with the same biometric yields the same secret.
+    const sdk = getSdk();
+    if (sdk.isSecureStorage) {
+      const secret = provisionOpts.useBiometrics
+        ? encodeToBase64(encryptionKey.to_bytes())
+        : (provisionOpts.password ?? '');
+      if (!secret) {
+        throw new Error('Secure storage requires a password or biometric key');
+      }
+      // Pick a random free slot among the 3 available. `unlock`
+      // probes every slot, so we don't need to persist the choice -
+      // but within an onboarding session we must not collide with a
+      // previously-allocated slot (that would silently overwrite the
+      // earlier account). The in-memory `onboardingAllocatedSlots`
+      // set guards against that.
+      const slot = pickFreeSlot();
+      await sdk.secureStorageCreate(slot, secret);
+      onboardingAllocatedSlots.add(slot);
+    }
+
+    await sdk.openSession({
       mnemonic,
       encryptionKey,
       onPersist: createOnPersist(userId),
+      // Don't poll during onboarding — we may open the session just to
+      // write the profile and then close it again to create another
+      // account in a different slot. Polling is re-enabled on the real
+      // login (loadAccount), which defaults to `autoStartPolling: true`.
+      autoStartPolling: false,
     });
 
     const sdk = getSdk();
@@ -573,6 +633,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         useDiscussionStore.getState().cleanup();
         useMessageStore.getState().cleanup();
         useSelfMessageStore.getState().clearMessages();
+        onboardingAllocatedSlots.clear();
 
         set({
           ...clearAccountState(),

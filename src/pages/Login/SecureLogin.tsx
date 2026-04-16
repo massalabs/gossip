@@ -14,7 +14,6 @@ import { useLoginForm } from './useLoginForm';
 import AccountImport from '../../components/account/AccountImport';
 import { PasswordForm } from './PasswordForm';
 import { ErrorDisplay } from './ErrorDisplay';
-import { LoginActions } from './LoginActions';
 import { LoginLayout } from './LoginLayout';
 import { useKeyboardStore } from '../../stores/keyboardStore';
 
@@ -174,10 +173,15 @@ export const SecureLogin: React.FC<LoginProps> = React.memo(
             keyboardOpen ? 'max-h-0 opacity-0' : 'max-h-40 opacity-100'
           }`}
         >
-          <LoginActions
-            onCreateNewAccount={onCreateNewAccount}
-            onImport={() => setShowAccountImport(true)}
-          />
+          <Button
+            onClick={() => setShowAccountImport(true)}
+            variant="outline"
+            size="custom"
+            fullWidth
+            className="h-[51px] rounded-full text-sm"
+          >
+            {t('login.import_mnemonic')}
+          </Button>
         </div>
       </LoginLayout>
     );
