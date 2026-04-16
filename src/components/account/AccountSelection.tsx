@@ -6,7 +6,7 @@ import { UserProfile } from '@massalabs/gossip-sdk';
 import { formatDate } from '../../utils/timeUtils';
 import Button from '../ui/Button';
 import PageHeader from '../ui/PageHeader';
-import PageLayout from '../ui/PageLayout';
+import PageLayout from '../ui/Layout/PageLayout';
 
 interface AccountSelectionProps {
   onBack: () => void;

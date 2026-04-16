@@ -54,21 +54,19 @@ describe('ToSAcceptance', () => {
     await expect.element(button).toBeDisabled();
   });
 
-  it('checkbox is disabled before scrolling to bottom', async () => {
+  it('checkbox is hidden before scrolling to bottom', async () => {
     await renderToS(onAccept);
 
     const checkbox = page.getByRole('checkbox');
-    await expect.element(checkbox).toBeDisabled();
+    await expect.element(checkbox).not.toBeInTheDocument();
   });
 
-  it('checkbox enables after scrolling to bottom', async () => {
+  it('checkbox appears after scrolling to bottom', async () => {
     await renderToS(onAccept);
-
-    const checkbox = page.getByRole('checkbox');
-    await expect.element(checkbox).toBeDisabled();
 
     scrollToBottom();
 
+    const checkbox = page.getByRole('checkbox');
     await expect.element(checkbox).toBeEnabled();
   });
 

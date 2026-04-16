@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import PageLayout from '../../components/ui/PageLayout';
+import PageLayout from '../../components/ui/Layout/PageLayout';
 import PageHeader from '../../components/ui/PageHeader';
 import Toggle from '../../components/ui/Toggle';
 import { useAppStore } from '../../stores/appStore';

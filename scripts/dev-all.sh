@@ -65,9 +65,7 @@ for d in "${IOSES[@]}"; do [ -n "$d" ] && CLEAN_IOSES+=("$d"); done
 IOSES=("${CLEAN_IOSES[@]}")
 
 if [ ${#ANDROIDS[@]} -eq 0 ] && [ ${#IOSES[@]} -eq 0 ]; then
-  echo "Usage: $0 <android-device> [ios-device]" >&2
-  echo "" >&2
-  echo "Or set env vars (comma-separated for multiple devices):" >&2
+  echo "[dev-all] No devices configured. Set ANDROID_DEVICES and/or IOS_DEVICES env vars." >&2
   echo "  ANDROID_DEVICES=\"device1,device2\"" >&2
   echo "  IOS_DEVICES=\"device1,device2\"" >&2
   exit 1
@@ -177,29 +175,30 @@ deploy_android() {
 }
 
 deploy_ios() {
-  if [ ${#IOSES[@]} -gt 0 ]; then
-    for device in "${IOSES[@]}"; do
-      echo "[dev-all] Building + deploying to iOS: ${device}..."
-      if npx cap run ios --target "$device" --no-sync; then
-        :
-      else
-        deploy_ios_xcode_fallback "$device" || echo "[dev-all] WARNING: iOS deploy failed for ${device}"
-      fi
-    done
-  else
-    echo "[dev-all] No iOS devices specified, opening Xcode..."
-    npx cap open ios
-  fi
+  for device in "${IOSES[@]}"; do
+    echo "[dev-all] Building + deploying to iOS: ${device}..."
+    if npx cap run ios --target "$device" --no-sync; then
+      :
+    else
+      deploy_ios_xcode_fallback "$device" || echo "[dev-all] WARNING: iOS deploy failed for ${device}"
+    fi
+  done
 }
 
-# Run Android and iOS deploys in parallel (sequential within each platform)
-deploy_android &
-ANDROID_PID=$!
-deploy_ios &
-IOS_PID=$!
+# Run deploys only for platforms that have devices
+ANDROID_PID=""
+IOS_PID=""
+if [ ${#ANDROIDS[@]} -gt 0 ]; then
+  deploy_android &
+  ANDROID_PID=$!
+fi
+if [ ${#IOSES[@]} -gt 0 ]; then
+  deploy_ios &
+  IOS_PID=$!
+fi
 
-wait $ANDROID_PID || true
-wait $IOS_PID || true
+[ -n "$ANDROID_PID" ] && wait $ANDROID_PID || true
+[ -n "$IOS_PID" ] && wait $IOS_PID || true
 
 # Vite is already running — bring it to foreground
 TOTAL=$(( ${#ANDROIDS[@]} + ${#IOSES[@]} ))

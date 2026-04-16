@@ -10,7 +10,7 @@ import Button from '../components/ui/Button';
 import SearchBar from '../components/ui/SearchBar';
 import { useSearch } from '../hooks/useSearch';
 import { PrivacyGraphic } from '../components/graphics';
-import PageLayout from '../components/ui/PageLayout';
+import PageLayout from '../components/ui/Layout/PageLayout';
 import UserProfileAvatar from '../components/avatar/UserProfileAvatar';
 import QrCodeIcon from '../components/ui/customIcons/QrCodeIcon';
 import ThreeDotMenu, { MenuItem } from '../components/ui/ThreeDotMenu';

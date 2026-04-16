@@ -13,7 +13,7 @@ import { Upload, CheckCircle, Info } from 'react-feather';
 import { formatUserId } from '@massalabs/gossip-sdk';
 import { USERNAME_MAX_LENGTH } from '../utils/validation';
 import QrCodeIcon from '../components/ui/customIcons/QrCodeIcon';
-import PageLayout from '../components/ui/PageLayout';
+import PageLayout from '../components/ui/Layout/PageLayout';
 import PageHeader from '../components/ui/PageHeader';
 import ConnectionBanner from '../components/ui/ConnectionBanner';
 import Toggle from '../components/ui/Toggle';

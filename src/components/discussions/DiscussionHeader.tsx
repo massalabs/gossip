@@ -37,41 +37,15 @@ const DiscussionHeader: React.FC<DiscussionHeaderProps> = ({
   const navigate = useNavigate();
   const isOnline = useOnlineStore(s => s.isOnline);
 
-  // Header with title (for list view with custom title)
-  if (title && !contact) {
-    return (
-      <HeaderBar>
-        <div className="flex items-center w-full">
-          <h1 className="text-xl font-semibold text-foreground">{title}</h1>
-        </div>
-      </HeaderBar>
-    );
-  }
+  const isFullHeader = !!contact;
 
-  // Guard against undefined/null contact when contact is expected
-  if (!contact) {
-    return (
-      <HeaderBar>
-        <div className="flex items-center w-full">
-          <BackButton />
-          <div className="flex-1">
-            <p className="text-muted-foreground">
-              {t('header.contact_not_found')}
-            </p>
-          </div>
-        </div>
-      </HeaderBar>
-    );
-  }
-
-  // Display name: customName takes priority over contact name
-  const displayName = discussion?.customName || contact.name || 'Unknown';
+  const displayName = contact
+    ? discussion?.customName || contact.name || 'Unknown'
+    : '';
 
   const sessionStatus = discussion
     ? sessionsStatuses.get(discussion.contactUserId)
     : undefined;
-
-  // Check if discussion is pending outgoing (waiting for approval)
   const isPendingOutgoing = sessionStatus === SessionStatus.SelfRequested;
 
   const RETENTION_LABELS: Record<number, string> = {
@@ -101,12 +75,38 @@ const DiscussionHeader: React.FC<DiscussionHeaderProps> = ({
   };
 
   const showMetaBlock =
-    !isOnline || (isOnline && isPendingOutgoing) || !!retentionLabel;
-
+    isFullHeader &&
+    (!isOnline || (isOnline && isPendingOutgoing) || !!retentionLabel);
   const hasStatusChips = (isOnline && isPendingOutgoing) || !!retentionLabel;
 
-  return (
-    <HeaderBar className="min-h-header-safe h-auto! items-start! py-2.5 pb-3">
+  const headerBarClassName = isFullHeader
+    ? 'min-h-header h-auto! items-start! py-2.5 pb-3'
+    : '';
+
+  let content: React.ReactNode;
+
+  if (!contact && title) {
+    // Title-only header (list view)
+    content = (
+      <div className="flex items-center w-full">
+        <h1 className="text-xl font-semibold text-foreground">{title}</h1>
+      </div>
+    );
+  } else if (!contact) {
+    // Guard: contact not found
+    content = (
+      <div className="flex items-center w-full">
+        <BackButton />
+        <div className="flex-1">
+          <p className="text-muted-foreground">
+            {t('header.contact_not_found')}
+          </p>
+        </div>
+      </div>
+    );
+  } else {
+    // Full discussion header
+    content = (
       <div className="flex items-center w-full gap-2 sm:gap-3">
         {onBack && (
           <Button
@@ -127,7 +127,7 @@ const DiscussionHeader: React.FC<DiscussionHeaderProps> = ({
         >
           <div className="relative shrink-0 mt-0.5">
             <ContactAvatar contact={contact} size={12} />
-            {contact?.isOnline && (
+            {contact.isOnline && (
               <span className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-success border-2 border-card rounded-full shadow-sm" />
             )}
           </div>
@@ -179,8 +179,10 @@ const DiscussionHeader: React.FC<DiscussionHeaderProps> = ({
           </span>
         )}
       </div>
-    </HeaderBar>
-  );
+    );
+  }
+
+  return <HeaderBar className={headerBarClassName}>{content}</HeaderBar>;
 };
 
 export default DiscussionHeader;
