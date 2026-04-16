@@ -62,14 +62,18 @@ android {
         buildConfig = true
     }
 
-    // AGP 8.13 requires JDK 17; align Kotlin with the same target so
-    // the Kotlin compiler doesn't fall back to the 2.x default (1.8).
+    // Both Java and Kotlin compile to JVM 21 bytecode. Matches the
+    // default JDK shipped with recent Android Studio (2024+) and
+    // modern macOS installs, so devs don't need to install a second
+    // JDK just for this project. Capacitor plugins' 17-bytecode .aars
+    // are forward-compatible with 21. Bump both (and the host JDK
+    // min) together if you ever raise the target.
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_17
-        targetCompatibility JavaVersion.VERSION_17
+        sourceCompatibility JavaVersion.VERSION_21
+        targetCompatibility JavaVersion.VERSION_21
     }
     kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_17.toString()
+        jvmTarget = JavaVersion.VERSION_21.toString()
     }
 
     buildTypes {
@@ -125,9 +129,16 @@ tasks.register('buildRustSecureStorage', Exec) {
     description = 'Cross-compile the secureStorage Rust crate into jniLibs + regenerate UniFFI Kotlin bindings.'
     def rootDir = project.rootProject.projectDir.parentFile
     workingDir rootDir
-    def profileFlag = gradle.startParameter.taskNames.any { it.toLowerCase().contains('release') }
-        ? '--release'
-        : '--debug'
+    // Always build Rust in --release, even under Gradle's "debug"
+    // variant. The PQ crypto (ML-KEM rerand) is ~10-50× slower in a
+    // debug Rust build — session allocate / cover-traffic tick become
+    // seconds-long. Line-tables are kept via Cargo.toml's profile
+    // settings so crash frames still symbolicate.
+    //
+    // Override with `SECURE_STORAGE_RUST_PROFILE=debug ./gradlew …` if
+    // you need stepping debug into the Rust code.
+    def rustProfileEnv = System.getenv('SECURE_STORAGE_RUST_PROFILE') ?: 'release'
+    def profileFlag = rustProfileEnv == 'debug' ? '--debug' : '--release'
     commandLine 'bash', 'scripts/build-native-android.sh', profileFlag
 
     // Declare outputs so Gradle skips the task on no-op builds.
@@ -143,6 +154,11 @@ tasks.register('buildRustSecureStorage', Exec) {
     inputs.dir "${rootDir}/wasm/secure-storage/src"
     inputs.file "${rootDir}/wasm/Cargo.toml"
     inputs.file "${rootDir}/wasm/secure-storage/Cargo.toml"
+    // Track the profile flag as an input so switching between release
+    // and debug invalidates the cached .so. Without this, Gradle sees
+    // no source change and happily reuses a stale debug .so under a
+    // release build (the symptom: "native is suddenly slow again").
+    inputs.property 'rustProfile', rustProfileEnv
 }
 
 afterEvaluate {

@@ -12,12 +12,15 @@ set -Eeuo pipefail
 usage() {
     cat <<'EOF'
 Usage: build-native-android.sh [--release|--debug] [-h|--help]
-  --release  Optimised build (stripped by AGP at packaging time)
-  --debug    Unoptimised build with symbols (default)
+  --release  Optimised build (stripped by AGP at packaging time, default)
+  --debug    Unoptimised build with symbols
 EOF
 }
 
-PROFILE="${1:---debug}"
+# Default to --release. Debug Rust is ~10-50× slower on PQ crypto;
+# forgetting the flag here used to poison the Gradle cache with a
+# debug .so that silently persists across subsequent builds.
+PROFILE="${1:---release}"
 case "$PROFILE" in
     --release) CARGO_FLAGS="--release"; TARGET_DIR="release" ;;
     --debug)   CARGO_FLAGS="";          TARGET_DIR="debug" ;;
