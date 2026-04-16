@@ -11,8 +11,6 @@ import {
   MessageStatus,
   MessageType,
   MESSAGE_ID_SIZE,
-  Discussion,
-  rowToDiscussion,
 } from '../db/index.js';
 import { type MessageRow } from '../db/index.js';
 import { decodeUserId, encodeUserId } from '../utils/userId.js';
@@ -403,9 +401,11 @@ export class MessageService {
    * Add a message to SQLite and update the corresponding discussion.
    */
   private async addMessageAndUpdateDiscussion(
-    message: Omit<Message, 'id'>
+    message: Omit<Message, 'id'>,
+    parentTx?: GossipSqliteTx
   ): Promise<number> {
-    return this.queries.conn.db.transaction(async tx => {
+    const db = parentTx ?? this.queries.conn.db;
+    const result = await db.transaction(async tx => {
       const messageId = await this.queries.messages.insert(
         {
           messageId: message.messageId,
@@ -455,11 +455,20 @@ export class MessageService {
           );
         }
 
-        this.eventEmitter.emit(SdkEventType.DISCUSSION_UPDATED, discussion.id);
+        return { messageId, updatedDiscussionId: discussion?.id };
       }
 
-      return messageId;
+      return { messageId, updatedDiscussionId: null };
     });
+
+    if (result.updatedDiscussionId) {
+      this.eventEmitter.emit(
+        SdkEventType.DISCUSSION_UPDATED,
+        result.updatedDiscussionId
+      );
+    }
+
+    return result.messageId;
   }
 
   private async decryptMessages(encrypted: EncryptedMessage[]): Promise<{
@@ -867,7 +876,10 @@ export class MessageService {
     }
   }
 
-  async sendMessage(message: Message): Promise<SendMessageResult> {
+  async sendMessage(
+    message: Message,
+    parentTx?: GossipSqliteTx
+  ): Promise<SendMessageResult> {
     const log = logger.forMethod('sendMessage');
     log.info('queueing message', {
       messageType: message.type,
@@ -884,7 +896,8 @@ export class MessageService {
     // Look up discussion
     const discussion = await this.queries.discussions.getByOwnerAndContact(
       message.ownerUserId,
-      message.contactUserId
+      message.contactUserId,
+      parentTx
     );
     if (!discussion) {
       return { success: false, error: 'Discussion not found' };
@@ -901,30 +914,15 @@ export class MessageService {
       message.messageId = randomMessageId;
     }
 
-    // Fast path: if the peer's session is already Active we can encrypt
-    // and ship the message in parallel with the local INSERT instead of
-    // waiting for `addMessageAndUpdateDiscussion` to commit before
-    // `processSendQueueForContact` even starts. The user-perceived
-    // latency drops from `INSERT + encrypt + POST` (sequential) to
-    // `max(INSERT, encrypt + POST)` — ~440 ms saved on prod where the
-    // network round-trip dominates.
-    const sessionStatus = this.session.peerSessionStatus(peerId);
-    if (sessionStatus === SessionStatus.Active) {
-      const fastPathResult = await this.sendMessageFastPath(message, peerId);
-      if (fastPathResult) {
-        return fastPathResult;
-      }
-      // Fast path bailed (encrypt returned null, etc.) — fall back to
-      // the slow path below.
-    }
-
-    // Slow path: INSERT first, let stateUpdate handle the encrypt + send.
-    let messageId: number;
+    let messageIdDb: number;
     try {
-      messageId = await this.addMessageAndUpdateDiscussion({
-        ...message,
-        status: MessageStatus.WAITING_SESSION,
-      });
+      messageIdDb = await this.addMessageAndUpdateDiscussion(
+        {
+          ...message,
+          status: MessageStatus.WAITING_SESSION,
+        },
+        parentTx
+      );
     } catch (error) {
       return {
         success: false,
@@ -934,7 +932,7 @@ export class MessageService {
 
     const queuedMessage = {
       ...message,
-      id: messageId,
+      id: messageIdDb,
       status: MessageStatus.WAITING_SESSION,
     };
 
@@ -947,193 +945,6 @@ export class MessageService {
     return {
       success: true,
       message: queuedMessage,
-    };
-  }
-
-  /**
-   * Happy-path send: peer session is Active, so we can encrypt locally,
-   * fire the network POST, and INSERT the row in parallel. The three
-   * pieces are independent up until the final `UPDATE → SENT`, which
-   * needs both the row id (from INSERT) and a successful network ack.
-   *
-   *   ┌── INSERT (~440 ms) ───────────────┐
-   *   │                                   ├── UPDATE → SENT (background)
-   *   └── encrypt (~150 ms) → POST (~620 ms)
-   *                                       │
-   *                                       └── emit MESSAGE_SENT
-   *
-   * Returns `null` if the fast path can't run (encrypt declined, network
-   * threw, etc.) so the caller can fall back to the slow path.
-   */
-  private async sendMessageFastPath(
-    message: Message,
-    peerId: Uint8Array
-  ): Promise<SendMessageResult | null> {
-    const log = logger.forMethod('sendMessageFastPath');
-
-    // 1. Serialize synchronously — needed before encrypt.
-    const serializeResult = await this.serializeMessage(message);
-    if (!serializeResult.success) {
-      log.error('failed to serialize message for fast path', {
-        error: serializeResult.error,
-      });
-      return null;
-    }
-    const serializedContent = serializeResult.data;
-
-    // 2. Kick off the local INSERT and the encrypt in parallel.
-    //    encrypt is fast (~150 ms with rayon) and doesn't depend on
-    //    the row id; INSERT is slow (~440 ms) and only the row id is
-    //    later needed for the SENT update.
-    const insertPromise = this.addMessageAndUpdateDiscussion({
-      ...message,
-      status: MessageStatus.WAITING_SESSION,
-    })
-      .then(id => {
-        this.inFlightFastPath.add(id);
-        return id;
-      })
-      .catch(error => {
-        log.error('addMessageAndUpdateDiscussion failed in fast path', {
-          error,
-        });
-        return null as number | null;
-      });
-
-    let sendOutput: Awaited<ReturnType<SessionModule['sendMessage']>>;
-    try {
-      sendOutput = await this.session.sendMessage(peerId, serializedContent);
-    } catch (error) {
-      log.error('session.sendMessage threw in fast path, falling back', {
-        error,
-      });
-      sendOutput = undefined;
-    }
-    if (!sendOutput) {
-      // Session became inactive between status check and encrypt.
-      // Wait for the INSERT to land then bail out so the slow path
-      // can take over.
-      const messageId = await insertPromise;
-      if (messageId === null) {
-        return {
-          success: false,
-          error: 'Failed to add message to database',
-        };
-      }
-      log.info(
-        'encrypt returned null in fast path, falling back to slow path',
-        { messageId }
-      );
-      this.inFlightFastPath.delete(messageId);
-      void this.refreshService?.stateUpdate();
-      return {
-        success: true,
-        message: {
-          ...message,
-          id: messageId,
-          status: MessageStatus.WAITING_SESSION,
-        },
-      };
-    }
-
-    // 3. Encrypt succeeded. Network POST runs in parallel with the
-    //    still-in-flight INSERT.
-    const networkPromise = this.messageProtocol
-      .sendMessage({
-        seeker: sendOutput.seeker,
-        ciphertext: sendOutput.data,
-      })
-      .then(() => true)
-      .catch(error => {
-        log.error('network send failed in fast path', { error });
-        return false;
-      });
-
-    const [messageId, networkOk] = await Promise.all([
-      insertPromise,
-      networkPromise,
-    ]);
-
-    if (messageId === null) {
-      return {
-        success: false,
-        error: 'Failed to add message to database',
-      };
-    }
-
-    if (!networkOk) {
-      // Network failed: persist READY so the next retry doesn't
-      // re-encrypt, and let stateUpdate pick it up.
-      this.inFlightFastPath.delete(messageId);
-      await this.queries.messages.updateById(messageId, {
-        status: MessageStatus.READY,
-        encryptedMessage: sendOutput.data,
-        seeker: sendOutput.seeker,
-        whenToSend: new Date(Date.now() + this.config.messages.retryDelayMs),
-        serializedContent,
-      });
-      void this.refreshService?.stateUpdate();
-      return {
-        success: true,
-        message: {
-          ...message,
-          id: messageId,
-          status: MessageStatus.READY,
-        },
-      };
-    }
-
-    // 4. Both succeeded. Race-check then UPDATE → SENT.
-    const latestRow = await this.queries.messages.getById(messageId);
-    if (!latestRow || latestRow.status !== MessageStatus.WAITING_SESSION) {
-      log.debug(
-        'message gone or status changed during fast-path send, skipping SENT update',
-        { messageId, currentStatus: latestRow?.status }
-      );
-      this.inFlightFastPath.delete(messageId);
-      return {
-        success: true,
-        message: {
-          ...message,
-          id: messageId,
-          status: MessageStatus.SENT,
-        },
-      };
-    }
-
-    await this.queries.messages.updateById(messageId, {
-      status: MessageStatus.SENT,
-      seeker: sendOutput.seeker,
-      encryptedMessage: null,
-      serializedContent: null,
-      whenToSend: null,
-    });
-
-    this.inFlightFastPath.delete(messageId);
-
-    const isControlMessage = !!(message.deleteOf || message.editOf);
-    if (!isControlMessage) {
-      try {
-        this.eventEmitter.emit(SdkEventType.MESSAGE_SENT, {
-          ...message,
-          id: messageId,
-          status: MessageStatus.SENT,
-        });
-      } catch (error) {
-        log.error('failed to emit message sent event from fast path', {
-          messageId,
-          error,
-        });
-      }
-    }
-
-    return {
-      success: true,
-      message: {
-        ...message,
-        id: messageId,
-        status: MessageStatus.SENT,
-      },
     };
   }
 
@@ -1677,7 +1488,7 @@ export class MessageService {
 
     let deletedMessages: Message[] = [];
     let updatedMessages: Message[] = [];
-    let updatedDiscussion: Discussion | undefined;
+    let discussionId: number | undefined;
 
     try {
       // Run all operations inside an explicit transaction for atomicity
@@ -1724,7 +1535,20 @@ export class MessageService {
               },
               trx
             );
-            updatedDiscussion = rowToDiscussion(discussion);
+            discussionId = discussion.id;
+          }
+
+          // If deleted message is not read yet, decrement the discussion unread count
+          if (
+            message.status !== MessageStatus.READ &&
+            message.direction === MessageDirection.INCOMING
+          ) {
+            await this.queries.discussions.decrementUnreadCount(
+              discussion.id,
+              trx
+            );
+
+            discussionId = discussion.id;
           }
 
           // Delete all REACTION messages for this contact referencing this message
@@ -1774,11 +1598,8 @@ export class MessageService {
           messages: updatedMessages,
         });
       }
-      if (updatedDiscussion && updatedDiscussion.id) {
-        this.eventEmitter.emit(
-          SdkEventType.DISCUSSION_UPDATED,
-          updatedDiscussion.id
-        );
+      if (discussionId) {
+        this.eventEmitter.emit(SdkEventType.DISCUSSION_UPDATED, discussionId);
       }
     };
 
@@ -1840,7 +1661,7 @@ export class MessageService {
             deleteOf: { originalMsgId: row.messageId! }, // row.messageId was previously verified to be not null
           };
 
-          const result = await this.send(controlMessage);
+          const result = await this.sendMessage(controlMessage, tx);
           if (!result.success) {
             tx.rollback(); // if sending the delete control message fails, rollback the transaction
             throw new Error(result.error ?? 'Failed to enqueue delete message');
@@ -1999,7 +1820,7 @@ export class MessageService {
             metadata: { control: 'edit' },
           };
 
-          const result = await this.send(controlMessage);
+          const result = await this.sendMessage(controlMessage, tx);
           if (!result.success) {
             tx.rollback();
             throw new Error(result.error ?? 'Failed to enqueue edit message');

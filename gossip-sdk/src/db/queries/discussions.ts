@@ -125,8 +125,11 @@ export class DiscussionQueries {
       .where(eq(schema.discussions.id, discussionId));
   }
 
-  async decrementUnreadCount(discussionId: number): Promise<void> {
-    await this.conn.db
+  async decrementUnreadCount(
+    discussionId: number,
+    tx?: GossipSqliteTx
+  ): Promise<void> {
+    await (tx ?? this.conn.db)
       .update(schema.discussions)
       .set({
         unreadCount: sql`MAX(${schema.discussions.unreadCount} - 1, 0)`,
