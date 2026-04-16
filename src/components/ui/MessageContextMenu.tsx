@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { DEFAULT_EMOJIS } from './constants';
@@ -36,24 +36,32 @@ const MessageContextMenu: React.FC<MessageContextMenuProps> = ({
 }) => {
   const { t } = useTranslation('discussions');
   const [touchReady, setTouchReady] = useState(false);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     if (isOpen) {
+      previousFocusRef.current = document.activeElement as HTMLElement | null;
       const timer = setTimeout(() => setTouchReady(true), 120);
       return () => clearTimeout(timer);
     }
     setTouchReady(false);
   }, [isOpen]);
 
+  const restoreAndClose = useCallback(() => {
+    previousFocusRef.current?.focus();
+    previousFocusRef.current = null;
+    onClose();
+  }, [onClose]);
+
   // Dismiss on Escape
   useEffect(() => {
     if (!isOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') restoreAndClose();
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
+  }, [isOpen, restoreAndClose]);
 
   if (!isOpen) return null;
 
@@ -61,13 +69,14 @@ const MessageContextMenu: React.FC<MessageContextMenuProps> = ({
     <div
       className="fixed left-0 right-0 top-0 z-1000 flex items-center justify-center"
       style={{ height: 'var(--available-height, 100dvh)' }}
+      onMouseDown={e => e.preventDefault()}
       onClick={e => e.stopPropagation()}
     >
       {/* Backdrop — dims screen */}
       <div
         className={`absolute inset-0 bg-black/20 dark:bg-black/40 animate-backdrop-fade-in ${touchReady ? '' : 'pointer-events-none'}`}
         style={{ height: '100%' }}
-        onClick={onClose}
+        onClick={restoreAndClose}
         data-testid="context-menu-backdrop"
       />
 
@@ -84,15 +93,15 @@ const MessageContextMenu: React.FC<MessageContextMenuProps> = ({
               const isMine = !!match?.myReactionId;
               const count = match?.count ?? 0;
               return (
-                <button
+                <div
                   key={emoji}
-                  type="button"
+                  role="button"
                   onClick={e => {
                     e.stopPropagation();
                     onSelectEmoji?.(emoji);
-                    onClose();
+                    restoreAndClose();
                   }}
-                  className={`w-9 h-9 flex items-center justify-center text-lg rounded-full transition-colors ${
+                  className={`w-9 h-9 flex items-center justify-center text-lg rounded-full transition-colors cursor-pointer ${
                     isMine
                       ? 'bg-accent/20 ring-1 ring-accent'
                       : 'hover:bg-muted'
@@ -102,21 +111,21 @@ const MessageContextMenu: React.FC<MessageContextMenuProps> = ({
                   {count > 1 && (
                     <span className="text-[10px] ml-0.5">{count}</span>
                   )}
-                </button>
+                </div>
               );
             })}
             {onOpenEmojiPicker && (
-              <button
-                type="button"
+              <div
+                role="button"
                 onClick={e => {
                   e.stopPropagation();
                   onOpenEmojiPicker();
                 }}
-                className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-muted border border-border text-foreground text-lg leading-none"
+                className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-muted border border-border text-foreground text-lg leading-none cursor-pointer"
                 aria-label={t('message_item.more_emojis')}
               >
                 +
-              </button>
+              </div>
             )}
           </div>
         )}
@@ -128,15 +137,14 @@ const MessageContextMenu: React.FC<MessageContextMenuProps> = ({
           className={`min-w-[180px] bg-card border border-border rounded-lg shadow-xl overflow-hidden ${touchReady ? 'pointer-events-auto' : ''}`}
         >
           {items.map((item, index) => (
-            <button
+            <div
               key={item.label}
               role="menuitem"
-              type="button"
               onClick={() => {
                 item.onClick();
-                onClose();
+                restoreAndClose();
               }}
-              className={`hover-fill w-full flex items-center justify-between gap-3 px-4 py-3 text-sm font-medium text-left ${
+              className={`hover-fill w-full flex items-center justify-between gap-3 px-4 py-3 text-sm font-medium text-left cursor-pointer ${
                 item.danger ? 'text-destructive' : 'text-foreground'
               } ${index < items.length - 1 ? 'border-b border-border' : ''}`}
             >
@@ -146,7 +154,7 @@ const MessageContextMenu: React.FC<MessageContextMenuProps> = ({
                   {item.icon}
                 </span>
               )}
-            </button>
+            </div>
           ))}
         </div>
       </div>

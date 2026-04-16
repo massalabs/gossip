@@ -9,7 +9,7 @@ import { useGossipSdk } from '../hooks/useGossipSdk';
 import ContactAvatar from '../components/avatar/ContactAvatar';
 import UserIdDisplay from '../components/ui/UserIdDisplay';
 import PageHeader from '../components/ui/PageHeader';
-import PageLayout from '../components/ui/PageLayout';
+import PageLayout from '../components/ui/Layout/PageLayout';
 import { ROUTES } from '../constants/routes';
 import SearchBar from '../components/ui/SearchBar';
 import ConnectionBanner from '../components/ui/ConnectionBanner';

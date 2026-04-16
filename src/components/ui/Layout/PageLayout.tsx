@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useUiStore } from '../../stores/uiStore';
-import { useHeaderScroll } from '../../hooks/useHeaderScroll';
+import { useUiStore } from '../../../stores/uiStore';
+import { useHeaderScroll } from '../../../hooks/useHeaderScroll';
+import HeaderBar from '../HeaderBar';
 
 interface PageLayoutProps {
   /** Header content - can be a simple title string or custom JSX */
@@ -52,7 +53,6 @@ const PageLayout: React.FC<PageLayoutProps> = ({
   scrollAwareHeader = true,
   onScrollContainerRef,
 }) => {
-  const headerIsScrolled = useUiStore(s => s.headerIsScrolled);
   const setHeaderVisible = useUiStore(s => s.setHeaderVisible);
   const [scrollContainer, setScrollContainer] = useState<HTMLDivElement | null>(
     null
@@ -80,29 +80,12 @@ const PageLayout: React.FC<PageLayoutProps> = ({
     scrollAwareHeader && header ? { scrollContainer } : undefined
   );
 
-  const bgClass =
-    scrollAwareHeader && headerIsScrolled ? 'bg-muted' : 'bg-card';
-  const shadowStyle =
-    scrollAwareHeader && headerIsScrolled
-      ? '0 2px 4px -1px rgba(0, 0, 0, 0.06), 0 4px 6px -1px rgba(0, 0, 0, 0.1)'
-      : 'none';
-
   return (
     <div
       className={`h-full min-h-0 flex flex-col bg-background ${className}`.trim()}
     >
-      {/* Header with safe area */}
       {header && (
-        <div
-          className={`px-header-padding pt-safe-t h-header-safe flex items-center shrink-0 relative z-10 ${bgClass}`}
-          style={{
-            boxShadow: shadowStyle,
-            transition:
-              'background-color 200ms cubic-bezier(0.4, 0, 0.2, 1), box-shadow 200ms cubic-bezier(0.4, 0, 0.2, 1)',
-          }}
-        >
-          {header}
-        </div>
+        <HeaderBar scrollAware={scrollAwareHeader}>{header}</HeaderBar>
       )}
 
       {/* Scrollable content */}

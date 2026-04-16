@@ -7,7 +7,7 @@ import {
   USERNAME_MAX_LENGTH,
 } from '../../utils/validation';
 import PageHeader from '../ui/PageHeader';
-import PageLayout from '../ui/PageLayout';
+import PageLayout from '../ui/Layout/PageLayout';
 import Button from '../ui/Button';
 import RoundedInput from '../ui/RoundedInput';
 import { scrollFieldIntoView } from '../../utils/scrollFieldIntoView';

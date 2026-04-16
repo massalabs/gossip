@@ -13,32 +13,31 @@ const ToSAcceptance: React.FC<ToSAcceptanceProps> = ({ onAccept }) => {
   const [checked, setChecked] = useState(false);
 
   return (
-    <div className="h-full min-h-0 flex flex-col p-4 md:p-8 py-10 w-full mx-auto max-w-2xl">
+    <div className="h-full min-h-0 flex flex-col md:p-8 p-safe-b  w-full mx-auto max-w-2xl px-4">
       <ToS onHasScrolledBottom={() => setHasScrolledToBottom(true)} />
 
       {/* Acceptance controls */}
       <div className="shrink-0 pt-4 space-y-4">
-        {!hasScrolledToBottom && (
+        {!hasScrolledToBottom ? (
           <p className="text-xs text-muted-foreground text-center">
             {t('tos.scroll_hint', 'Please scroll to the bottom to continue.')}
           </p>
+        ) : (
+          <label className="flex items-start gap-3 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              className="accent-primary mt-0.5 h-4 w-4 shrink-0"
+              checked={checked}
+              onChange={e => setChecked(e.target.checked)}
+            />
+            <span className="text-sm text-foreground leading-snug">
+              {t(
+                'tos.checkbox_label',
+                'I have read and agree to the Terms of Service.'
+              )}
+            </span>
+          </label>
         )}
-
-        <label className="flex items-start gap-3 cursor-pointer select-none">
-          <input
-            type="checkbox"
-            className="mt-1 accent-primary"
-            checked={checked}
-            disabled={!hasScrolledToBottom}
-            onChange={e => setChecked(e.target.checked)}
-          />
-          <span className="text-sm text-foreground">
-            {t(
-              'tos.checkbox_label',
-              'I have read and agree to the Terms of Service.'
-            )}
-          </span>
-        </label>
 
         <Button
           onClick={onAccept}

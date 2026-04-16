@@ -1,3 +1,5 @@
+import { p } from '@vite-pwa/assets-generator/dist/shared/assets-generator.5e51fd40.js';
+
 /** @type {import('tailwindcss').Config} */
 export default {
   content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
@@ -116,6 +118,12 @@ export default {
         'safe-r': 'var(--sar)',
       },
 
+      padding: {
+        'safe-t': 'var(--sat)',
+        'safe-b': 'var(--sab)',
+        'safe-l': 'var(--sal)',
+        'safe-r': 'var(--sar)',
+      },
       // Pour min-height, height
       height: {
         'safe-t': 'var(--sat)',

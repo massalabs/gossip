@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Copy, AlertTriangle } from 'react-feather';
 import { useAccountStore } from '../../stores/accountStore';
 import PageHeader from '../ui/PageHeader';
-import PageLayout from '../ui/PageLayout';
+import PageLayout from '../ui/Layout/PageLayout';
 import TabSwitcher from '../ui/TabSwitcher';
 import Button from '../ui/Button';
 import RoundedInput from '../ui/RoundedInput';

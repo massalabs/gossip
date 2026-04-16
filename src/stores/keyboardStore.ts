@@ -27,7 +27,6 @@ function updateState(isVisible: boolean, height: number) {
 function initKeyboardTracking() {
   const vp = window.innerHeight;
   useKeyboardStore.setState({ viewportHeight: vp });
-  setCssVar('--available-height', `${vp}px`);
   setCssVar('--keyboard-height', '0px');
 
   const platform = Capacitor.getPlatform();
@@ -35,6 +34,14 @@ function initKeyboardTracking() {
     '--keyboard-transition-duration',
     platform === 'android' ? '0.35s' : '0.25s'
   );
+
+  // Only set --available-height to a pixel value on native platforms where
+  // keyboard events drive the available height. On web, the CSS default
+  // of 100dvh (in :root) is correct and avoids stale pixel values that can
+  // mismatch the actual viewport on Safari desktop.
+  if (Capacitor.isNativePlatform()) {
+    setCssVar('--available-height', `${vp}px`);
+  }
 
   if (Capacitor.isNativePlatform()) {
     if (platform === 'ios') {

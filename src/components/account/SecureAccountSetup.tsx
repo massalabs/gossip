@@ -4,7 +4,7 @@ import { Shield, CheckCircle, Plus, Check } from 'react-feather';
 import { useAccountStore } from '../../stores/accountStore';
 import { maxSecureAccounts } from '../../config/secureStorage';
 import PageHeader from '../ui/PageHeader';
-import PageLayout from '../ui/PageLayout';
+import PageLayout from '../ui/Layout/PageLayout';
 import Button from '../ui/Button';
 import { PrivacyGraphic } from '../graphics';
 import SecureAccountForm from './SecureAccountForm';

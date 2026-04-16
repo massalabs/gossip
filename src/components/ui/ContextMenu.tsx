@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 
 export interface ContextMenuItem {
@@ -19,81 +19,85 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
   isOpen,
   onClose,
 }) => {
-  const [mounted, setMounted] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const dragStartY = useRef<number | null>(null);
+  const focusedIndex = useRef(-1);
 
-  // Save and restore focus
+  // Save focused element when opening, reset index when closing
   useEffect(() => {
     if (isOpen) {
       previousFocusRef.current = document.activeElement as HTMLElement | null;
-      const id = requestAnimationFrame(() => setMounted(true));
-      return () => cancelAnimationFrame(id);
-    }
-    setMounted(false);
-  }, [isOpen]);
-
-  // Focus first item on mount
-  useEffect(() => {
-    if (mounted) {
-      requestAnimationFrame(() => {
-        menuRef.current
-          ?.querySelector<HTMLButtonElement>('[role="menuitem"]')
-          ?.focus();
-      });
-    }
-  }, [mounted]);
-
-  // Restore focus on close
-  useEffect(() => {
-    if (!isOpen && previousFocusRef.current) {
-      previousFocusRef.current.focus();
-      previousFocusRef.current = null;
+      focusedIndex.current = -1;
     }
   }, [isOpen]);
 
-  // Keyboard: Escape + arrow navigation
+  const restoreAndClose = useCallback(() => {
+    previousFocusRef.current?.focus();
+    previousFocusRef.current = null;
+    onClose();
+  }, [onClose]);
+
+  const getMenuItems = useCallback(
+    () =>
+      menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [],
+    []
+  );
+
+  const highlightItem = useCallback(
+    (index: number) => {
+      const menuItems = getMenuItems();
+      // Remove previous highlight
+      menuItems.forEach(el => el.removeAttribute('data-focused'));
+      if (index >= 0 && index < menuItems.length) {
+        menuItems[index].setAttribute('data-focused', 'true');
+        focusedIndex.current = index;
+      }
+    },
+    [getMenuItems]
+  );
+
+  // Keyboard: Escape + arrow navigation + Enter/Space
   useEffect(() => {
     if (!isOpen) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        onClose();
+        restoreAndClose();
         return;
       }
 
+      const menuItems = getMenuItems();
+      if (!menuItems.length) return;
+
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         e.preventDefault();
-        const menuItems =
-          menuRef.current?.querySelectorAll<HTMLButtonElement>(
-            '[role="menuitem"]'
-          );
-        if (!menuItems?.length) return;
-
-        const currentIndex = Array.from(menuItems).findIndex(
-          el => el === document.activeElement
-        );
         let nextIndex: number;
-        if (e.key === 'ArrowDown') {
+        if (focusedIndex.current === -1) {
+          nextIndex = e.key === 'ArrowDown' ? 0 : menuItems.length - 1;
+        } else if (e.key === 'ArrowDown') {
           nextIndex =
-            currentIndex < menuItems.length - 1 ? currentIndex + 1 : 0;
+            focusedIndex.current < menuItems.length - 1
+              ? focusedIndex.current + 1
+              : 0;
         } else {
           nextIndex =
-            currentIndex > 0 ? currentIndex - 1 : menuItems.length - 1;
+            focusedIndex.current > 0
+              ? focusedIndex.current - 1
+              : menuItems.length - 1;
         }
-        menuItems[nextIndex].focus();
+        highlightItem(nextIndex);
+      }
+
+      if ((e.key === 'Enter' || e.key === ' ') && focusedIndex.current >= 0) {
+        e.preventDefault();
+        (menuItems[focusedIndex.current] as HTMLElement).click();
       }
     };
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
-
-  // Swipe-down to dismiss
-  const handleTouchStart = useCallback((e: React.TouchEvent) => {
-    dragStartY.current = e.touches[0].clientY;
-  }, []);
+  }, [isOpen, restoreAndClose, getMenuItems, highlightItem]);
 
   const handleTouchEnd = useCallback(
     (e: React.TouchEvent) => {
@@ -101,20 +105,23 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
       const delta = e.changedTouches[0].clientY - dragStartY.current;
       dragStartY.current = null;
       if (delta > 50) {
-        onClose();
+        restoreAndClose();
       }
     },
-    [onClose]
+    [restoreAndClose]
   );
 
   if (!isOpen) return null;
 
   return createPortal(
-    <div className="fixed inset-0 z-1000 flex flex-col items-center justify-end">
+    <div
+      className="fixed inset-0 z-1000 flex flex-col items-center justify-end"
+      onMouseDown={e => e.preventDefault()}
+    >
       {/* Backdrop */}
       <div
         className="absolute inset-0 bg-black/50 dark:bg-black/60 animate-backdrop-fade-in"
-        onClick={onClose}
+        onClick={restoreAndClose}
         data-testid="context-menu-backdrop"
       />
 
@@ -124,7 +131,10 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
         role="menu"
         aria-label="Context menu"
         className="relative w-full md:max-w-2xl lg:max-w-3xl bg-card rounded-t-2xl shadow-2xl pb-safe-b animate-sheet-slide-up"
-        onTouchStart={handleTouchStart}
+        onTouchStart={e => {
+          e.stopPropagation();
+          dragStartY.current = e.touches[0].clientY;
+        }}
         onTouchEnd={handleTouchEnd}
       >
         {/* Drag handle */}
@@ -132,17 +142,16 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
           <div className="w-10 h-1 rounded-full bg-muted-foreground/30" />
         </div>
 
-        {/* Menu items */}
+        {/* Menu items — plain div so tapping doesn't steal focus / dismiss keyboard on iOS */}
         {items.map((item, index) => (
-          <button
+          <div
             key={item.label}
             role="menuitem"
-            type="button"
             onClick={() => {
               item.onClick();
-              onClose();
+              restoreAndClose();
             }}
-            className={`hover-fill w-full flex items-center justify-between gap-3 py-3.5 px-6 text-sm font-medium text-left ${
+            className={`hover-fill w-full flex items-center justify-between gap-3 py-3.5 px-6 text-sm font-medium text-left cursor-pointer data-[focused]:bg-accent ${
               item.danger ? 'text-destructive' : 'text-foreground'
             } ${index < items.length - 1 ? 'border-b border-border' : ''}`}
           >
@@ -152,7 +161,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
                 {item.icon}
               </span>
             )}
-          </button>
+          </div>
         ))}
       </div>
     </div>,

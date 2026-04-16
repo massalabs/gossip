@@ -9,7 +9,7 @@ import {
 } from '../../utils/validation';
 import Button from '../ui/Button';
 import PageHeader from '../ui/PageHeader';
-import PageLayout from '../ui/PageLayout';
+import PageLayout from '../ui/Layout/PageLayout';
 import RoundedInput from '../ui/RoundedInput';
 import TabSwitcher from '../ui/TabSwitcher';
 

@@ -9,7 +9,7 @@ import { InvitePage } from '../pages/InvitePage';
 import { usePendingDeepLink } from '../hooks/usePendingDeepLink';
 import { usePendingSharedContent } from '../hooks/usePendingSharedContent';
 import { ROUTES } from '../constants/routes';
-import MainLayout from '../components/ui/MainLayout';
+import MainLayout from '../components/ui/Layout/MainLayout';
 import AnimatedRoutes from '../components/ui/AnimatedRoutes';
 
 // Lazy-loaded pages (not needed on initial render)

@@ -1,5 +1,6 @@
 import React from 'react';
-import { useSwipeBack } from '../../hooks/useSwipeBack';
+import { useSwipeBack } from '../../../hooks/useSwipeBack';
+import { useKeyboardStore } from '../../../stores/keyboardStore';
 
 interface DiscussionLayoutProps {
   header: React.ReactNode;
@@ -21,6 +22,7 @@ const DiscussionLayout: React.FC<DiscussionLayoutProps> = ({
   className = 'bg-card',
 }) => {
   const swipeBack = useSwipeBack();
+  const keyboardOpen = useKeyboardStore(s => s.isVisible);
 
   return (
     <div
@@ -42,7 +44,7 @@ const DiscussionLayout: React.FC<DiscussionLayoutProps> = ({
     >
       <div className="shrink-0">{header}</div>
 
-      <div className="flex-1 min-h-0 flex flex-col">
+      <div className={`flex-1 min-h-0 flex flex-col`}>
         <div className="flex-1 min-h-0 overflow-hidden relative">
           {children}
         </div>
@@ -51,6 +53,10 @@ const DiscussionLayout: React.FC<DiscussionLayoutProps> = ({
       </div>
 
       {overlay}
+
+      <div
+        className={`${keyboardOpen ? '' : 'h-[env(safe-area-inset-bottom)]'} shrink-0`}
+      ></div>
     </div>
   );
 };
