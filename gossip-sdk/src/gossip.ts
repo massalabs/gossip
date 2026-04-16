@@ -120,6 +120,15 @@ export interface OpenSessionOptions {
   ) => Promise<void>;
   /** Custom session configuration (optional, uses defaults if not provided) */
   sessionConfig?: SessionConfig;
+  /**
+   * Auto-start the polling loop (messages / announcements / session
+   * refresh) after the session is open. Defaults to `true` for
+   * backwards compatibility. Pass `false` during multi-step flows
+   * like secure-storage onboarding, where the app opens several
+   * sessions in sequence and must not poll until the user is fully
+   * authenticated.
+   */
+  autoStartPolling?: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -455,8 +464,12 @@ class GossipSdk {
     this._message.setQueueManager(this.messageQueues);
     this._discussion.setAuthService(this._auth!);
 
-    // Auto-start polling if enabled in config
-    if (config.polling.enabled) {
+    // Auto-start polling if enabled in config AND the caller didn't opt
+    // out via `autoStartPolling: false`. The opt-out is used by the app
+    // during multi-account onboarding, where we open each account's
+    // session just long enough to write its profile — polling during
+    // that window would race with session switches.
+    if (config.polling.enabled && options.autoStartPolling !== false) {
       this.startPolling();
     }
   }

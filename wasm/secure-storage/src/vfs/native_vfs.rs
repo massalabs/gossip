@@ -28,8 +28,8 @@ use std::sync::{Arc, Mutex, MutexGuard, Once, OnceLock};
 use std::time::Duration;
 
 use rusqlite::ffi::{
-    sqlite3_file, sqlite3_io_methods, sqlite3_vfs, sqlite3_vfs_find, sqlite3_vfs_register,
     SQLITE_IOERR, SQLITE_IOERR_SHORT_READ, SQLITE_NOTFOUND, SQLITE_OK, SQLITE_OPEN_MAIN_DB,
+    sqlite3_file, sqlite3_io_methods, sqlite3_vfs, sqlite3_vfs_find, sqlite3_vfs_register,
 };
 
 use crate::DEFAULT_NAMESPACE;
@@ -200,6 +200,17 @@ pub fn register() -> Result<()> {
     }
 }
 
+/// Return true if the backing redb database already has keypair data.
+/// Used by the plugin layer to gate `provision` at boot.
+pub fn has_data() -> Result<bool> {
+    let mutex = state_mutex();
+    let guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
+    let st = guard
+        .as_ref()
+        .ok_or_else(|| SecureStorageError::Storage("not initialized".into()))?;
+    st.backend.has_data()
+}
+
 /// Provision all session slots.
 pub fn provision() -> Result<()> {
     let mutex = state_mutex();
@@ -217,6 +228,14 @@ pub fn allocate(slot: u8, password: &[u8]) -> Result<()> {
     let st = guard
         .as_mut()
         .ok_or_else(|| SecureStorageError::Storage("not initialized".into()))?;
+    // Flush pending writes to the CURRENT session before switching.
+    // Otherwise the `main_file` reset below would drop data that was
+    // buffered but not yet synced to redb — e.g. during multi-account
+    // onboarding, the profile INSERT for account 1 might still sit in
+    // RAM when we allocate account 2.
+    if st.session.is_some() {
+        flush_pending_writes(st)?;
+    }
     let idx = SessionIndex::new(slot)?;
     let session = crate::allocate_session(&mut st.backend, &st.domain, idx, password)?;
     // Drop any pending writes from the previous session by replacing the
@@ -256,9 +275,17 @@ pub fn unlock(password: &[u8]) -> Result<bool> {
 }
 
 /// Zeroize session keys. SQLite must be closed before calling this.
+///
+/// Best-effort flushes pending writes first — if the caller forgot to
+/// flush before locking, we don't silently drop buffered data. Flush
+/// errors are ignored because locking must not fail (it's often the
+/// last thing an app calls during shutdown).
 pub fn lock() {
     if let Ok(mut guard) = state_mutex().lock() {
         if let Some(st) = guard.as_mut() {
+            if st.session.is_some() {
+                let _ = flush_pending_writes(st);
+            }
             st.session = None;
             st.namespace_states.clear();
             // Same reset-on-switch pattern as `allocate` / `unlock` above.
@@ -429,8 +456,25 @@ pub fn write_namespace_data(namespace: u8, offset: u64, data: &[u8]) -> Result<(
         .session
         .as_ref()
         .ok_or_else(|| SecureStorageError::Storage("no session".into()))?;
-    let ns_state = st.namespace_states.entry(namespace).or_default();
-    crate::write_session_data(&mut st.backend, &st.domain, namespace, session, ns_state, offset, data)?;
+    // Lazy-load the namespace state before writing. Without this, the
+    // default (length=0) state clobbers whatever was there from a
+    // previous session, leaving orphan blocks that break subsequent
+    // reads with CorruptedBlock. Mirrors the web path's
+    // `ensure_namespace_state_loaded` call.
+    if !st.namespace_states.contains_key(&namespace) {
+        let ns = load_namespace_state(&st.backend, &st.domain, session, namespace)?;
+        st.namespace_states.insert(namespace, ns);
+    }
+    let ns_state = st.namespace_states.get_mut(&namespace).unwrap();
+    crate::write_session_data(
+        &mut st.backend,
+        &st.domain,
+        namespace,
+        session,
+        ns_state,
+        offset,
+        data,
+    )?;
     st.backend.commit()
 }
 
@@ -451,7 +495,15 @@ pub fn read_namespace_data(namespace: u8, offset: u64, len: usize) -> Result<Vec
         st.namespace_states.insert(namespace, ns);
     }
     let ns_state = st.namespace_states.get(&namespace).unwrap();
-    let data = crate::read_session_data(&st.backend, &st.domain, namespace, session, ns_state, offset, len)?;
+    let data = crate::read_session_data(
+        &st.backend,
+        &st.domain,
+        namespace,
+        session,
+        ns_state,
+        offset,
+        len,
+    )?;
     Ok(data.to_vec())
 }
 
@@ -469,7 +521,8 @@ pub fn clear_namespace(namespace: u8) -> Result<()> {
         .as_ref()
         .ok_or_else(|| SecureStorageError::Storage("no session".into()))?;
     use crate::storage::BlockStorage;
-    st.backend.reset_blockstream(session.session_index, namespace)?;
+    st.backend
+        .reset_blockstream(session.session_index, namespace)?;
     // Reset in-memory tracking for this namespace.
     st.namespace_states
         .insert(namespace, NamespaceState::empty());
@@ -491,7 +544,11 @@ pub fn namespace_data_length(namespace: u8) -> Result<u64> {
         let ns = load_namespace_state(&st.backend, &st.domain, session, namespace)?;
         st.namespace_states.insert(namespace, ns);
     }
-    Ok(st.namespace_states.get(&namespace).map(|s| s.total_data_length).unwrap_or(0))
+    Ok(st
+        .namespace_states
+        .get(&namespace)
+        .map(|s| s.total_data_length)
+        .unwrap_or(0))
 }
 
 // ── VFS callbacks ────────────────────────────────────────────────────
@@ -537,11 +594,7 @@ fn checked_usize_from_c_int(v: c_int) -> Option<usize> {
 
 /// Checked conversion from SQLite's signed `i64` offset to `u64`.
 fn checked_u64_from_i64(v: i64) -> Option<u64> {
-    if v < 0 {
-        None
-    } else {
-        Some(v as u64)
-    }
+    if v < 0 { None } else { Some(v as u64) }
 }
 
 unsafe extern "C" fn x_open(
@@ -995,10 +1048,8 @@ mod tests {
 
             // Grow the DB to ~64 pages so we have plenty of blocks on
             // disk before shrinking.
-            conn.execute_batch(
-                "CREATE TABLE t (id INTEGER PRIMARY KEY, blob BLOB);",
-            )
-            .unwrap();
+            conn.execute_batch("CREATE TABLE t (id INTEGER PRIMARY KEY, blob BLOB);")
+                .unwrap();
             for i in 0..64 {
                 conn.execute(
                     "INSERT INTO t (id, blob) VALUES (?, ?)",
@@ -1042,9 +1093,7 @@ mod tests {
                     .unwrap();
                 (st.sql_ns_state().total_data_length, count)
             };
-            assert!(
-                logical_size < (pre_count as u64) * (crate::BLOCK_SIZE as u64)
-            );
+            assert!(logical_size < (pre_count as u64) * (crate::BLOCK_SIZE as u64));
             assert_eq!(
                 post_count, pre_count,
                 "truncate must NOT shrink the physical block count (PD-H1 spec)"
