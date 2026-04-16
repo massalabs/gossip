@@ -24,6 +24,10 @@ import SelectionHeader from '../components/discussions/SelectionHeader';
 import { useRetentionPolicy } from '../hooks/useRetentionPolicy';
 import { useKeyboardStore } from '../stores/keyboardStore';
 
+// Module-level guard so a given forward id is processed once across remounts
+// (StrictMode, route animation, back/forward nav).
+const handledForwardIds = new Set<number>();
+
 const RETENTION_OPTIONS: {
   labelKey: string;
   value: number | null;
@@ -108,20 +112,18 @@ const SelfDiscussion: React.FC = () => {
 
   useEffect(() => {
     if (forwardFromMessageId == null) return;
-    let cancelled = false;
-    const load = async () => {
-      const msg = await getSdk().messages.get(forwardFromMessageId);
-      if (!cancelled && msg?.content) {
+    if (handledForwardIds.has(forwardFromMessageId)) return;
+    handledForwardIds.add(forwardFromMessageId);
+
+    const idToForward = forwardFromMessageId;
+    navigate(ROUTES.selfDiscussion(), { replace: true, state: {} });
+
+    void (async () => {
+      const msg = await getSdk().messages.get(idToForward);
+      if (msg?.content) {
         await sendMessage(msg.content);
       }
-      if (!cancelled) {
-        navigate(ROUTES.selfDiscussion(), { replace: true, state: {} });
-      }
-    };
-    void load();
-    return () => {
-      cancelled = true;
-    };
+    })();
   }, [forwardFromMessageId, navigate, sendMessage]);
 
   useEffect(() => {

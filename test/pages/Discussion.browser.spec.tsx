@@ -66,6 +66,8 @@ vi.mock('../../src/stores/discussionStore', () => ({
           createdAt: new Date(),
         },
       ],
+      sessionsStatuses: new Map(),
+      patchDiscussion: vi.fn(),
     }),
 }));
 

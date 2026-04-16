@@ -28,21 +28,16 @@ const mockSdk = {
     getVisibleMessages: vi.fn(async () => [] as Message[]),
     getReactions: vi.fn(async () => [] as Message[]),
     get: vi.fn(async () => undefined as Message | undefined),
-    send: vi.fn(
-      (message: Omit<Message, 'id'>, options?: { optimistic?: boolean }) => {
-        if (options?.optimistic) {
-          const optimisticMessage: Message = {
-            ...message,
-            messageId:
-              message.messageId ?? crypto.getRandomValues(new Uint8Array(12)),
-            status: MessageStatus.WAITING_SESSION,
-          };
-          emit(SdkEventType.MESSAGE_OPTIMISTIC, optimisticMessage);
-          return { success: true };
-        }
-        return Promise.resolve({ success: true });
-      }
-    ),
+    send: vi.fn(async (message: Omit<Message, 'id'>) => ({
+      success: true,
+      message: {
+        ...message,
+        id: Math.floor(Math.random() * 10000),
+        messageId:
+          message.messageId ?? crypto.getRandomValues(new Uint8Array(12)),
+        status: MessageStatus.WAITING_SESSION,
+      },
+    })),
     findMessageByMsgId: vi.fn(async () => undefined as Message | undefined),
     deleteMessage: vi.fn(async (_id: number) => {
       // Real SDK will emit MESSAGE_DELETED_OPTIMISTIC — simulated per test
@@ -135,23 +130,20 @@ afterEach(() => {
 });
 
 // ---------------------------------------------------------------------------
-// A) Delete via SDK events
+// A) Delete via store optimistic handling
 // ---------------------------------------------------------------------------
 
-describe('delete via SDK events', () => {
-  it('onDeletedOptimistic marks message as DELETED in state', () => {
+describe('delete via store', () => {
+  it('deleteMessage optimistically marks message as DELETED', async () => {
     const message = makeMessage();
     useMessageStore.setState({
       ...useMessageStore.getState(),
       messagesByContact: new Map([[contactUserId, [message]]]),
     });
 
-    // Simulate SDK emitting the optimistic delete event
-    emit(SdkEventType.MESSAGE_DELETED_OPTIMISTIC, {
-      contactUserId,
-      messageDbId: message.id!,
-      originalMsgId: message.messageId!,
-    });
+    await useMessageStore.getState().deleteMessage(contactUserId, message.id!);
+
+    expect(mockSdk.messages.deleteMessage).toHaveBeenCalledWith(message.id);
 
     const msgs = getMessages();
     expect(msgs).toHaveLength(1);
@@ -159,247 +151,69 @@ describe('delete via SDK events', () => {
     expect(msgs[0].content).toBe('[Message deleted]');
   });
 
-  it('onDeleteFailed restores original message after optimistic delete', () => {
+  it('deleteMessage rolls back on SDK failure', async () => {
     const message = makeMessage({ content: 'Original content' });
     useMessageStore.setState({
       ...useMessageStore.getState(),
       messagesByContact: new Map([[contactUserId, [message]]]),
     });
 
-    // Optimistic delete
-    emit(SdkEventType.MESSAGE_DELETED_OPTIMISTIC, {
-      contactUserId,
-      messageDbId: message.id!,
-      originalMsgId: message.messageId!,
-    });
-    expect(getMessages()[0].type).toBe(MessageType.DELETED);
+    mockSdk.messages.deleteMessage.mockRejectedValueOnce(
+      new Error('SDK error')
+    );
 
-    // Failure → rollback
-    emit(SdkEventType.MESSAGE_DELETE_FAILED, {
-      contactUserId,
-      messageDbId: message.id!,
-      original: message,
-    });
+    await useMessageStore.getState().deleteMessage(contactUserId, message.id!);
 
     const msgs = getMessages();
     expect(msgs).toHaveLength(1);
     expect(msgs[0].type).toBe(MessageType.TEXT);
     expect(msgs[0].content).toBe('Original content');
   });
-
-  it('deleteMessage delegates to SDK without local state mutation', async () => {
-    const message = makeMessage();
-    useMessageStore.setState({
-      ...useMessageStore.getState(),
-      messagesByContact: new Map([[contactUserId, [message]]]),
-    });
-
-    // Mock SDK deleteMessage to emit the optimistic event (simulating real SDK behavior)
-    mockSdk.messages.deleteMessage.mockImplementation(async (id: number) => {
-      emit(SdkEventType.MESSAGE_DELETED_OPTIMISTIC, {
-        contactUserId,
-        messageDbId: id,
-        originalMsgId: message.messageId!,
-      });
-      return true;
-    });
-
-    await useMessageStore.getState().deleteMessage(contactUserId, message.id!);
-
-    // SDK was called
-    expect(mockSdk.messages.deleteMessage).toHaveBeenCalledWith(message.id);
-
-    // State was updated via the event, not by local mutation
-    const msgs = getMessages();
-    expect(msgs).toHaveLength(1);
-    expect(msgs[0].type).toBe(MessageType.DELETED);
-  });
-
-  it('onDeletedOptimistic removes reactions from reactionsByContact and reactionGroupsCache', () => {
-    const message = makeMessage({
-      id: 10,
-      messageId: new Uint8Array(12).fill(10),
-    });
-    const reactionForTarget: Message = {
-      id: 20,
-      messageId: new Uint8Array(12).fill(20),
-      ownerUserId: 'test-user-id',
-      contactUserId,
-      content: '👍',
-      type: MessageType.REACTION,
-      direction: MessageDirection.INCOMING,
-      status: MessageStatus.DELIVERED,
-      timestamp: new Date('2024-01-01T10:01:00Z'),
-      reactionOf: { originalMsgId: new Uint8Array(12).fill(10) },
-    };
-    const reactionForOther: Message = {
-      id: 30,
-      messageId: new Uint8Array(12).fill(30),
-      ownerUserId: 'test-user-id',
-      contactUserId,
-      content: '❤️',
-      type: MessageType.REACTION,
-      direction: MessageDirection.OUTGOING,
-      status: MessageStatus.SENT,
-      timestamp: new Date('2024-01-01T10:02:00Z'),
-      reactionOf: { originalMsgId: new Uint8Array(12).fill(99) },
-    };
-
-    const reactionsMap = new Map([
-      [contactUserId, [reactionForTarget, reactionForOther]],
-    ]);
-
-    useMessageStore.setState({
-      ...useMessageStore.getState(),
-      messagesByContact: new Map([[contactUserId, [message]]]),
-      reactionsByContact: reactionsMap,
-    });
-
-    // Emit the optimistic delete event
-    emit(SdkEventType.MESSAGE_DELETED_OPTIMISTIC, {
-      contactUserId,
-      messageDbId: message.id!,
-      originalMsgId: message.messageId!,
-    });
-
-    // The message should be marked as deleted
-    const msgs = getMessages();
-    expect(msgs).toHaveLength(1);
-    expect(msgs[0].type).toBe(MessageType.DELETED);
-    expect(msgs[0].content).toBe('[Message deleted]');
-
-    // The reaction for the deleted message should be removed
-    const remainingReactions =
-      useMessageStore.getState().reactionsByContact.get(contactUserId) ?? [];
-    expect(remainingReactions).toHaveLength(1);
-    expect(remainingReactions[0].content).toBe('❤️');
-    expect(remainingReactions[0].id).toBe(30);
-
-    // The reactionGroupsCache should be updated (not contain groups for the deleted message)
-    const cache = useMessageStore.getState().reactionGroupsCache;
-    // Cache should exist and reflect the updated reactions
-    expect(cache).toBeDefined();
-  });
-
-  it('onDeletedOptimistic removes all reactions when all reference the deleted message', () => {
-    const message = makeMessage({
-      id: 10,
-      messageId: new Uint8Array(12).fill(10),
-    });
-    const reaction: Message = {
-      id: 20,
-      messageId: new Uint8Array(12).fill(20),
-      ownerUserId: 'test-user-id',
-      contactUserId,
-      content: '👍',
-      type: MessageType.REACTION,
-      direction: MessageDirection.INCOMING,
-      status: MessageStatus.DELIVERED,
-      timestamp: new Date('2024-01-01T10:01:00Z'),
-      reactionOf: { originalMsgId: new Uint8Array(12).fill(10) },
-    };
-
-    useMessageStore.setState({
-      ...useMessageStore.getState(),
-      messagesByContact: new Map([[contactUserId, [message]]]),
-      reactionsByContact: new Map([[contactUserId, [reaction]]]),
-    });
-
-    emit(SdkEventType.MESSAGE_DELETED_OPTIMISTIC, {
-      contactUserId,
-      messageDbId: message.id!,
-      originalMsgId: message.messageId!,
-    });
-
-    // When all reactions are removed, the contact entry should be deleted from the map
-    const remainingReactions = useMessageStore
-      .getState()
-      .reactionsByContact.get(contactUserId);
-    expect(remainingReactions).toBeUndefined();
-  });
 });
 
 // ---------------------------------------------------------------------------
-// B) Edit via SDK events
+// B) Edit via store optimistic handling
 // ---------------------------------------------------------------------------
 
-describe('edit via SDK events', () => {
-  it('onEditedOptimistic patches content and metadata in state', () => {
+describe('edit via store', () => {
+  it('editMessage optimistically patches content and metadata', async () => {
     const message = makeMessage();
     useMessageStore.setState({
       ...useMessageStore.getState(),
       messagesByContact: new Map([[contactUserId, [message]]]),
     });
 
-    emit(SdkEventType.MESSAGE_EDITED_OPTIMISTIC, {
-      contactUserId,
-      messageDbId: message.id!,
-      newContent: 'Edited content',
-      metadata: { edited: true },
-    });
+    await useMessageStore
+      .getState()
+      .editMessage(contactUserId, message.id!, 'Edited content');
+
+    expect(mockSdk.messages.editMessage).toHaveBeenCalledWith(
+      message.id,
+      'Edited content'
+    );
 
     const msgs = getMessages();
     expect(msgs).toHaveLength(1);
     expect(msgs[0].content).toBe('Edited content');
-    expect(msgs[0].metadata).toEqual({ edited: true });
+    expect(msgs[0].metadata).toEqual(expect.objectContaining({ edited: true }));
   });
 
-  it('onEditFailed restores original message after optimistic edit', () => {
+  it('editMessage rolls back on SDK failure', async () => {
     const message = makeMessage({ content: 'Original' });
     useMessageStore.setState({
       ...useMessageStore.getState(),
       messagesByContact: new Map([[contactUserId, [message]]]),
     });
 
-    emit(SdkEventType.MESSAGE_EDITED_OPTIMISTIC, {
-      contactUserId,
-      messageDbId: message.id!,
-      newContent: 'Edited',
-      metadata: { edited: true },
-    });
-    expect(getMessages()[0].content).toBe('Edited');
-
-    emit(SdkEventType.MESSAGE_EDIT_FAILED, {
-      contactUserId,
-      messageDbId: message.id!,
-      original: message,
-    });
-
-    const msgs = getMessages();
-    expect(msgs[0].content).toBe('Original');
-    expect(msgs[0].type).toBe(MessageType.TEXT);
-  });
-
-  it('editMessage delegates to SDK without local state mutation', async () => {
-    const message = makeMessage();
-    useMessageStore.setState({
-      ...useMessageStore.getState(),
-      messagesByContact: new Map([[contactUserId, [message]]]),
-    });
-
-    mockSdk.messages.editMessage.mockImplementation(
-      async (id: number, newContent: string) => {
-        emit(SdkEventType.MESSAGE_EDITED_OPTIMISTIC, {
-          contactUserId,
-          messageDbId: id,
-          newContent,
-          metadata: { edited: true },
-        });
-        return true;
-      }
-    );
+    mockSdk.messages.editMessage.mockRejectedValueOnce(new Error('SDK error'));
 
     await useMessageStore
       .getState()
       .editMessage(contactUserId, message.id!, 'New content');
 
-    expect(mockSdk.messages.editMessage).toHaveBeenCalledWith(
-      message.id,
-      'New content'
-    );
-
     const msgs = getMessages();
-    expect(msgs[0].content).toBe('New content');
+    expect(msgs[0].content).toBe('Original');
+    expect(msgs[0].type).toBe(MessageType.TEXT);
   });
 });
 

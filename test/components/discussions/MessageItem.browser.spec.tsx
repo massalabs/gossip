@@ -24,6 +24,8 @@ vi.mock('react-i18next', () => ({
         'message_item.copy': 'Copy',
         'message_item.delete': 'Delete',
         'message_item.share': 'Share',
+        'message_item.edit': 'Edit',
+        'message_item.more_emojis': 'More emojis',
       };
       return translations[key] ?? key;
     },
@@ -176,6 +178,285 @@ describe('MessageItem', () => {
         .element(page.getByRole('button', { name: 'Message actions' }))
         .not.toBeInTheDocument();
       await expect.element(page.getByRole('menu')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('waiting-approval discussion (no onReplyTo / onEdit)', () => {
+    // Discussion.tsx passes undefined for onReplyTo / onEdit when the session
+    // is in SelfRequested (waiting approval). These tests lock the mechanism:
+    // without those handlers, the actions must be absent and swipe-to-reply
+    // must not fire. Forward / Share / Copy / Delete remain available.
+    async function openContextMenu() {
+      const bubble = page
+        .getByRole('button', { name: 'Double-tap to reply' })
+        .element() as HTMLElement;
+      await act(async () => {
+        bubble.dispatchEvent(
+          new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
+        );
+      });
+    }
+
+    it('hides Reply when onReplyTo is not provided', async () => {
+      render(
+        <MessageItem
+          message={makeMessage()}
+          onForward={vi.fn()}
+          onDelete={vi.fn()}
+        />
+      );
+
+      await openContextMenu();
+      await expect
+        .element(page.getByRole('menuitem', { name: 'Reply' }))
+        .not.toBeInTheDocument();
+      await expect
+        .element(page.getByRole('menuitem', { name: 'Forward' }))
+        .toBeInTheDocument();
+    });
+
+    it('hides Edit for outgoing message when onEdit is not provided', async () => {
+      render(
+        <MessageItem
+          message={makeMessage({ direction: MessageDirection.OUTGOING })}
+          onForward={vi.fn()}
+          onDelete={vi.fn()}
+        />
+      );
+
+      await openContextMenu();
+      await expect
+        .element(page.getByRole('menuitem', { name: 'Edit' }))
+        .not.toBeInTheDocument();
+      await expect
+        .element(page.getByRole('menuitem', { name: 'Delete' }))
+        .toBeInTheDocument();
+    });
+
+    it('does not trigger swipe-to-reply when onReplyTo is not provided', async () => {
+      const onForward = vi.fn();
+      render(<MessageItem message={makeMessage()} onForward={onForward} />);
+
+      const el = page.getByRole('listitem').element() as HTMLElement;
+      await act(async () => {
+        el.dispatchEvent(
+          new TouchEvent('touchstart', {
+            bubbles: true,
+            touches: [
+              new Touch({
+                identifier: 0,
+                target: el,
+                clientX: 200,
+                clientY: 100,
+              }),
+            ],
+          })
+        );
+        el.dispatchEvent(
+          new TouchEvent('touchmove', {
+            bubbles: true,
+            touches: [
+              new Touch({
+                identifier: 0,
+                target: el,
+                clientX: 80,
+                clientY: 100,
+              }),
+            ],
+          })
+        );
+        el.dispatchEvent(
+          new TouchEvent('touchend', {
+            bubbles: true,
+            changedTouches: [
+              new Touch({
+                identifier: 0,
+                target: el,
+                clientX: 80,
+                clientY: 100,
+              }),
+            ],
+          })
+        );
+      });
+      // onReplyTo isn't provided at all, and we assert the forward handler
+      // wasn't triggered either (left-swipe used to forward in older revs).
+      expect(onForward).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('optimistic message (no id)', () => {
+    async function openContextMenu() {
+      const bubble = page
+        .getByRole('button', { name: 'Double-tap to reply' })
+        .element() as HTMLElement;
+      await act(async () => {
+        bubble.dispatchEvent(
+          new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
+        );
+      });
+    }
+
+    it('hides Reply/Forward/Delete in context menu when id is missing', async () => {
+      render(
+        <MessageItem
+          message={makeMessage({ id: undefined })}
+          onReplyTo={vi.fn()}
+          onForward={vi.fn()}
+          onDelete={vi.fn()}
+        />
+      );
+
+      await openContextMenu();
+      await expect.element(page.getByRole('menu')).toBeInTheDocument();
+
+      await expect
+        .element(page.getByRole('menuitem', { name: 'Reply' }))
+        .not.toBeInTheDocument();
+      await expect
+        .element(page.getByRole('menuitem', { name: 'Forward' }))
+        .not.toBeInTheDocument();
+      await expect
+        .element(page.getByRole('menuitem', { name: 'Delete' }))
+        .not.toBeInTheDocument();
+    });
+
+    it('treats id=0 as unconfirmed (DB auto-increment starts at 1)', async () => {
+      // Regression lock: messageStore used to push `id: 0` as a placeholder
+      // for optimistic peer messages; hasConfirmedId must reject it so the
+      // id-dependent actions stay hidden until the real DB id arrives.
+      render(
+        <MessageItem
+          message={makeMessage({
+            id: 0,
+            direction: MessageDirection.OUTGOING,
+          })}
+          onReplyTo={vi.fn()}
+          onForward={vi.fn()}
+          onEdit={vi.fn()}
+          onDelete={vi.fn()}
+          onReact={vi.fn()}
+        />
+      );
+
+      await openContextMenu();
+      await expect
+        .element(page.getByRole('menuitem', { name: 'Reply' }))
+        .not.toBeInTheDocument();
+      await expect
+        .element(page.getByRole('menuitem', { name: 'Forward' }))
+        .not.toBeInTheDocument();
+      await expect
+        .element(page.getByRole('menuitem', { name: 'Edit' }))
+        .not.toBeInTheDocument();
+      await expect
+        .element(page.getByRole('menuitem', { name: 'Delete' }))
+        .not.toBeInTheDocument();
+      await expect
+        .element(page.getByRole('button', { name: 'More emojis' }))
+        .not.toBeInTheDocument();
+    });
+
+    it('hides Edit in context menu for outgoing optimistic message', async () => {
+      render(
+        <MessageItem
+          message={makeMessage({
+            id: undefined,
+            direction: MessageDirection.OUTGOING,
+          })}
+          onEdit={vi.fn()}
+          onDelete={vi.fn()}
+        />
+      );
+
+      await openContextMenu();
+      await expect
+        .element(page.getByRole('menuitem', { name: 'Edit' }))
+        .not.toBeInTheDocument();
+    });
+
+    it('still exposes Copy/Share (content-based actions)', async () => {
+      render(
+        <MessageItem
+          message={makeMessage({ id: undefined, content: 'optimistic' })}
+        />
+      );
+
+      await openContextMenu();
+      await expect
+        .element(page.getByRole('menuitem', { name: 'Copy' }))
+        .toBeInTheDocument();
+    });
+
+    it('hides the reaction emoji row when id is missing', async () => {
+      render(
+        <MessageItem
+          message={makeMessage({ id: undefined })}
+          onReact={vi.fn()}
+        />
+      );
+
+      await openContextMenu();
+      // The "+" more-emojis button only renders when onOpenEmojiPicker is
+      // provided, which MessageItem skips when the message has no id.
+      await expect
+        .element(page.getByRole('button', { name: 'More emojis' }))
+        .not.toBeInTheDocument();
+    });
+
+    it('does not trigger swipe-to-reply when id is missing', async () => {
+      const onReplyTo = vi.fn();
+      render(
+        <MessageItem
+          message={makeMessage({ id: undefined })}
+          onReplyTo={onReplyTo}
+        />
+      );
+
+      const el = page.getByRole('listitem').element() as HTMLElement;
+      await act(async () => {
+        el.dispatchEvent(
+          new TouchEvent('touchstart', {
+            bubbles: true,
+            touches: [
+              new Touch({
+                identifier: 0,
+                target: el,
+                clientX: 200,
+                clientY: 100,
+              }),
+            ],
+          })
+        );
+        el.dispatchEvent(
+          new TouchEvent('touchmove', {
+            bubbles: true,
+            touches: [
+              new Touch({
+                identifier: 0,
+                target: el,
+                clientX: 80,
+                clientY: 100,
+              }),
+            ],
+          })
+        );
+        el.dispatchEvent(
+          new TouchEvent('touchend', {
+            bubbles: true,
+            changedTouches: [
+              new Touch({
+                identifier: 0,
+                target: el,
+                clientX: 80,
+                clientY: 100,
+              }),
+            ],
+          })
+        );
+      });
+
+      expect(onReplyTo).not.toHaveBeenCalled();
     });
   });
 

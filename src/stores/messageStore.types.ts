@@ -16,7 +16,7 @@ export interface MessageStoreState {
   isInitializing: boolean;
 
   init: () => Promise<void>;
-  setCurrentContact: (contactUserId: string | null) => void;
+  setCurrentContact: (contactUserId: string | null) => Promise<void>;
   sendMessage: (
     contactUserId: string,
     content: string,

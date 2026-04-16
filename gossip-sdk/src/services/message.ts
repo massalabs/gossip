@@ -1662,74 +1662,13 @@ export class MessageService {
   }
 
   /** Send a message and await the full DB write + queue pipeline. */
-  send(message: Omit<Message, 'id'>): Promise<SendMessageResult>;
-  /**
-   * Optimistic send: generates messageId, emits MESSAGE_OPTIMISTIC immediately,
-   * and persists in the background. Returns synchronously.
-   */
-  send(
-    message: Omit<Message, 'id'>,
-    options: { optimistic: true }
-  ): SendMessageResult;
-  send(
-    message: Omit<Message, 'id'>,
-    options?: { optimistic?: boolean }
-  ): SendMessageResult | Promise<SendMessageResult> {
-    if (!options?.optimistic) {
-      if (this.queueManager) {
-        return this.queueManager.enqueue(message.contactUserId, () =>
-          this.sendMessage(message)
-        );
-      }
-      return this.sendMessage(message);
+  async send(message: Omit<Message, 'id'>): Promise<SendMessageResult> {
+    if (this.queueManager) {
+      return this.queueManager.enqueue(message.contactUserId, () =>
+        this.sendMessage(message)
+      );
     }
-
-    const log = logger.forMethod('send:optimistic');
-    const peerId = decodeUserId(message.contactUserId);
-    if (peerId.length !== 32) {
-      return {
-        success: false,
-        error: 'Invalid contact userId (must be 32 bytes)',
-      };
-    }
-
-    const messageId =
-      message.type !== MessageType.KEEP_ALIVE &&
-      message.type !== MessageType.RETENTION_POLICY
-        ? crypto.getRandomValues(new Uint8Array(MESSAGE_ID_SIZE))
-        : undefined;
-
-    const optimisticMessage: Message = {
-      ...message,
-      messageId,
-      status: MessageStatus.WAITING_SESSION,
-    };
-
-    this.eventEmitter.emit(SdkEventType.MESSAGE_OPTIMISTIC, optimisticMessage);
-    log.info('optimistic send', { messageType: message.type });
-
-    // Persist in background (non-optimistic path)
-    this.send({ ...message, messageId }).then(
-      result => {
-        if (!result.success) {
-          this.eventEmitter.emit(SdkEventType.WRITE_FAILED, {
-            messageId,
-            entityType: 'message',
-            error: new Error(result.error ?? 'Unknown error'),
-          });
-        }
-      },
-      error => {
-        log.error('optimistic send failed', { error });
-        this.eventEmitter.emit(SdkEventType.WRITE_FAILED, {
-          messageId,
-          entityType: 'message',
-          error: error instanceof Error ? error : new Error(String(error)),
-        });
-      }
-    );
-
-    return { success: true, message: optimisticMessage };
+    return this.sendMessage(message);
   }
 
   /**
@@ -1775,65 +1714,38 @@ export class MessageService {
     if (!row.messageId)
       throw new Error('Cannot delete a message that has no messageId');
 
-    const original = rowToMessage(row);
     const ownerUserId = this.session.userIdEncoded;
 
-    // Emit optimistic event so UI updates immediately (skip for reactions —
-    // the store handles reaction removal separately).
-    if (row.type !== MessageType.REACTION) {
-      this.eventEmitter.emit(SdkEventType.MESSAGE_DELETED_OPTIMISTIC, {
-        contactUserId: row.contactUserId,
-        messageDbId: id,
-        originalMsgId: row.messageId,
-      });
-    }
-
-    try {
-      const messageId = row.messageId;
-      await this.queries.conn.withTransaction(async () => {
-        await this.queries.messages.updateById(id, {
-          content: '[Message deleted]',
-          type: MessageType.DELETED,
-        });
-        await this.queries.messages.deleteReactionsForMessage(
-          ownerUserId,
-          row.contactUserId,
-          encodeToBase64(messageId)
-        );
-      });
-
-      const controlMessage: Omit<Message, 'id'> = {
-        ownerUserId,
-        contactUserId: row.contactUserId,
-        content: '',
+    const messageId = row.messageId;
+    await this.queries.conn.withTransaction(async () => {
+      await this.queries.messages.updateById(id, {
+        content: '[Message deleted]',
         type: MessageType.DELETED,
-        direction: MessageDirection.OUTGOING,
-        status: MessageStatus.WAITING_SESSION,
-        timestamp: new Date(),
-        deleteOf: { originalMsgId: row.messageId },
-      };
+      });
+      await this.queries.messages.deleteReactionsForMessage(
+        ownerUserId,
+        row.contactUserId,
+        encodeToBase64(messageId)
+      );
+    });
 
-      const result = await this.send(controlMessage);
-      if (!result.success)
-        throw new Error(result.error ?? 'Failed to enqueue delete message');
+    const controlMessage: Omit<Message, 'id'> = {
+      ownerUserId,
+      contactUserId: row.contactUserId,
+      content: '',
+      type: MessageType.DELETED,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.WAITING_SESSION,
+      timestamp: new Date(),
+      deleteOf: { originalMsgId: row.messageId },
+    };
 
-      await this.refreshService?.stateUpdate();
-      return true;
-    } catch (error) {
-      // Rollback: emit failure so store can restore original
-      if (row.type !== MessageType.REACTION) {
-        this.eventEmitter.emit(SdkEventType.MESSAGE_DELETE_FAILED, {
-          contactUserId: row.contactUserId,
-          messageDbId: id,
-          original,
-        });
-      }
-      // Best-effort DB rollback
-      await this.queries.messages
-        .updateById(id, { content: original.content, type: original.type })
-        .catch(() => {});
-      throw error;
-    }
+    const result = await this.send(controlMessage);
+    if (!result.success)
+      throw new Error(result.error ?? 'Failed to enqueue delete message');
+
+    await this.refreshService?.stateUpdate();
+    return true;
   }
 
   async sendReaction(
@@ -1868,58 +1780,34 @@ export class MessageService {
     if (!row.messageId || row.messageId.length !== MESSAGE_ID_SIZE)
       throw new Error('Cannot edit a message that has no valid messageId');
 
-    const original = rowToMessage(row);
     const ownerUserId = this.session.userIdEncoded;
 
     const existingMetadata = deserializeMetadata(row.metadata) ?? {};
     const mergedMetadata = { ...existingMetadata, edited: true };
 
-    // Emit optimistic event so UI updates immediately
-    this.eventEmitter.emit(SdkEventType.MESSAGE_EDITED_OPTIMISTIC, {
-      contactUserId: row.contactUserId,
-      messageDbId: id,
-      newContent,
-      metadata: mergedMetadata,
+    await this.queries.messages.updateById(id, {
+      content: newContent,
+      metadata: serializeMetadata(mergedMetadata),
     });
 
-    try {
-      await this.queries.messages.updateById(id, {
-        content: newContent,
-        metadata: serializeMetadata(mergedMetadata),
-      });
+    const controlMessage: Omit<Message, 'id'> = {
+      ownerUserId,
+      contactUserId: row.contactUserId,
+      content: newContent,
+      type: MessageType.TEXT,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.WAITING_SESSION,
+      timestamp: new Date(),
+      editOf: { originalMsgId: row.messageId },
+      metadata: { control: 'edit' },
+    };
 
-      const controlMessage: Omit<Message, 'id'> = {
-        ownerUserId,
-        contactUserId: row.contactUserId,
-        content: newContent,
-        type: MessageType.TEXT,
-        direction: MessageDirection.OUTGOING,
-        status: MessageStatus.WAITING_SESSION,
-        timestamp: new Date(),
-        editOf: { originalMsgId: row.messageId },
-        metadata: { control: 'edit' },
-      };
+    const result = await this.send(controlMessage);
+    if (!result.success)
+      throw new Error(result.error ?? 'Failed to enqueue edit message');
 
-      const result = await this.send(controlMessage);
-      if (!result.success)
-        throw new Error(result.error ?? 'Failed to enqueue edit message');
-
-      await this.refreshService?.stateUpdate();
-      return true;
-    } catch (error) {
-      this.eventEmitter.emit(SdkEventType.MESSAGE_EDIT_FAILED, {
-        contactUserId: row.contactUserId,
-        messageDbId: id,
-        original,
-      });
-      await this.queries.messages
-        .updateById(id, {
-          content: original.content,
-          metadata: row.metadata ?? undefined,
-        })
-        .catch(() => {});
-      throw error;
-    }
+    await this.refreshService?.stateUpdate();
+    return true;
   }
 
   /**
