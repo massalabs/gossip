@@ -14,7 +14,7 @@ import MessageList, {
   MessageListHandle,
 } from '../components/discussions/MessageList';
 import MessageInput from '../components/discussions/MessageInput';
-import DiscussionLayout from '../components/discussions/DiscussionLayout';
+import DiscussionLayout from '../components/ui/Layout/DiscussionLayout';
 import { useSelfMessageStore } from '../stores/selfMessageStore';
 import { getSdk } from '../stores/sdkStore';
 import { ROUTES } from '../constants/routes';

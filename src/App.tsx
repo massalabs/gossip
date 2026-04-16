@@ -27,6 +27,7 @@ import { useOnlineStore } from './stores/useOnlineStore.tsx';
 import { useTheme } from './hooks/useTheme.ts';
 import { useScreenshotProtection } from './hooks/useScreenshotProtection';
 import { useAutoLock } from './hooks/useAutoLock';
+import PageLayout from './components/ui/Layout/PageLayout.tsx';
 
 const AppContent: React.FC = () => {
   const { isLoading, userProfile } = useAccountStore();
@@ -57,7 +58,12 @@ const AppContent: React.FC = () => {
   // case where a user has the phone app and doesn't necessarily need to create an account on web or pwa.
   if (!isInitialized && !inviteMatch) {
     return (
-      <Onboarding showImport={showImport} onShowImportChange={setShowImport} />
+      <PageLayout>
+        <Onboarding
+          showImport={showImport}
+          onShowImportChange={setShowImport}
+        />
+      </PageLayout>
     );
   }
 

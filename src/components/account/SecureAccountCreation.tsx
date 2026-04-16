@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAccountStore } from '../../stores/accountStore';
 import PageHeader from '../ui/PageHeader';
-import PageLayout from '../ui/PageLayout';
+import PageLayout from '../ui/Layout/PageLayout';
 import { PrivacyGraphic } from '../graphics';
 import AccountCreationForm, {
   AccountCreationResult,

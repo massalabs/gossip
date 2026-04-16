@@ -20,7 +20,7 @@ import { useKeyboardStore } from '../stores/keyboardStore';
 import DiscussionTopSection from '../components/discussions/DiscussionTopSection';
 import DiscussionDebugButton from '../components/discussions/DiscussionDebugButton';
 import MessageInput from '../components/discussions/MessageInput';
-import DiscussionLayout from '../components/discussions/DiscussionLayout';
+import DiscussionLayout from '../components/ui/Layout/DiscussionLayout';
 
 const TEST_MESSAGE_COUNT = 50;
 const TEST_MESSAGE_BATCH_DELAY_MS = 100;

@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
-import PageLayout from '../../components/ui/PageLayout';
+import PageLayout from '../../components/ui/Layout/PageLayout';
 import PageHeader from '../../components/ui/PageHeader';
 import BackgroundSyncSettings from '../../components/settings/BackgroundSyncSettings';
 import { useAppStore } from '../../stores/appStore';

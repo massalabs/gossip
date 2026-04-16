@@ -1,9 +1,9 @@
 import React from 'react';
 import { useLocation } from 'react-router-dom';
-import { useKeyboardStore } from '../../stores/keyboardStore';
-import { useUiStore } from '../../stores/uiStore';
-import { shouldShowBottomNav } from '../../constants/pageConfig';
-import BottomNavigation from './BottomNavigation';
+import { useKeyboardStore } from '../../../stores/keyboardStore';
+import { useUiStore } from '../../../stores/uiStore';
+import { shouldShowBottomNav } from '../../../constants/pageConfig';
+import BottomNavigation from '../BottomNavigation';
 
 interface MainLayoutProps {
   children: React.ReactNode;
@@ -34,13 +34,9 @@ const MainLayout: React.FC<MainLayoutProps> = ({
     !isKeyboardVisible &&
     shouldShowBottomNav(location.pathname);
 
-  const safeAreaClass = isKeyboardVisible || showNav ? '' : 'pb-safe-b';
-
   return (
     <div className="relative h-full flex flex-col">
-      <main
-        className={`flex-1 min-h-0 app-max-w ${safeAreaClass} ${contentClassName}`.trim()}
-      >
+      <main className={`flex-1 min-h-0 app-max-w ${contentClassName}`.trim()}>
         {children}
       </main>
       {showNav && <BottomNavigation />}

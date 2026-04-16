@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import BaseModal from '../components/ui/BaseModal';
-import PageLayout from '../components/ui/PageLayout';
+import PageLayout from '../components/ui/Layout/PageLayout';
 import PageHeader from '../components/ui/PageHeader';
 import { useAccountStore } from '../stores/accountStore';
 import { useGossipSdk } from '../hooks/useGossipSdk';

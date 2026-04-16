@@ -2,7 +2,7 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { Navigation } from 'react-feather';
-import PageLayout from '../../components/ui/PageLayout';
+import PageLayout from '../../components/ui/Layout/PageLayout';
 import PageHeader from '../../components/ui/PageHeader';
 import ThemeSelect from '../../components/settings/ThemeSelect';
 import Toggle from '../../components/ui/Toggle';
