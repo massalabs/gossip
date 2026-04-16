@@ -1,16 +1,82 @@
 /**
- * Capacitor plugin interface for native secure storage.
+ * Capacitor plugin wrapper for native secure storage.
  *
- * On iOS/Android, the Rust secure-storage library is compiled natively
- * (not as WASM). This plugin bridges TypeScript to the native code via
- * Capacitor's plugin system, replacing the WASM web worker path.
+ * The underlying plugin exposes a single `call({method, args}) → {result}`
+ * method (JSON-in / JSON-out dispatcher implemented in Rust). This file
+ * wraps it in a typed facade that preserves the public API callers in
+ * `sqlite.ts` and `secure-storage-worker.ts` already use.
+ *
+ * Binary payloads (password bytes, SQL BLOB values, namespace data)
+ * cross the bridge as base64 strings rather than `number[]`, saving
+ * the ~×8 per-byte overhead of the JSON-number encoding.
  */
 
 import { registerPlugin } from '@capacitor/core';
 
+// ── Raw plugin (single method) ────────────────────────────────────
+
+interface RawPlugin {
+  call(options: { method: string; args: string }): Promise<{ result: string }>;
+}
+
+const raw = registerPlugin<RawPlugin>('SecureStorageNative');
+
+// ── base64 helpers ────────────────────────────────────────────────
+
+function u8ToBase64(bytes: Uint8Array | number[]): string {
+  const arr = bytes instanceof Uint8Array ? bytes : Uint8Array.from(bytes);
+  let binary = '';
+  for (let i = 0; i < arr.length; i++) {
+    binary += String.fromCharCode(arr[i]);
+  }
+  return btoa(binary);
+}
+
+function base64ToU8(s: string): Uint8Array {
+  const binary = atob(s);
+  const out = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
+  return out;
+}
+
+// ── Dispatcher helper ─────────────────────────────────────────────
+
+async function callNative<T = unknown>(
+  method: string,
+  args: Record<string, unknown> = {}
+): Promise<T> {
+  const { result } = await raw.call({
+    method,
+    args: JSON.stringify(args),
+  });
+  return JSON.parse(result) as T;
+}
+
+// ── SQL value encoding ────────────────────────────────────────────
+// Rust accepts raw JSON primitives (null/bool/number/string) directly
+// for SQL params. BLOBs travel as the sentinel `{blob: "<base64>"}` —
+// that's the only transform we need.
+
+function encodeSqlParam(v: unknown): unknown {
+  if (v instanceof Uint8Array) return { blob: u8ToBase64(v) };
+  // Legacy: some callers still pass number[] for blobs.
+  if (Array.isArray(v)) return { blob: u8ToBase64(v as number[]) };
+  return v;
+}
+
+function decodeSqlValue(v: unknown): unknown {
+  if (v && typeof v === 'object' && 'blob' in v) {
+    return base64ToU8((v as { blob: string }).blob);
+  }
+  return v;
+}
+
+// ── Public interface (unchanged from the previous hand-rolled plugin) ──
+
 export interface SecureStorageNativePlugin {
   initSecureStorage(options: { path: string; domain: string }): Promise<void>;
   provisionStorage(): Promise<void>;
+  hasData(): Promise<{ hasData: boolean }>;
   allocateSession(options: { slot: number; password: number[] }): Promise<void>;
   unlockSession(options: {
     password: number[];
@@ -46,6 +112,79 @@ export interface SecureStorageNativePlugin {
   clearNamespace(options: { namespace: number }): Promise<void>;
 }
 
-export const SecureStorageNative = registerPlugin<SecureStorageNativePlugin>(
-  'SecureStorageNative'
-);
+export const SecureStorageNative: SecureStorageNativePlugin = {
+  async initSecureStorage(options) {
+    await callNative('initSecureStorage', options);
+  },
+  async provisionStorage() {
+    await callNative('provisionStorage');
+  },
+  async hasData() {
+    const hasData = await callNative<boolean>('hasData');
+    return { hasData };
+  },
+  async allocateSession({ slot, password }) {
+    await callNative('allocateSession', {
+      slot,
+      password: u8ToBase64(password),
+    });
+  },
+  async unlockSession({ password }) {
+    const unlocked = await callNative<boolean>('unlockSession', {
+      password: u8ToBase64(password),
+    });
+    return { unlocked };
+  },
+  async lockSession() {
+    await callNative('lockSession');
+  },
+  async isUnlocked() {
+    const unlocked = await callNative<boolean>('isUnlocked');
+    return { unlocked };
+  },
+  async coverTrafficTick() {
+    await callNative('coverTrafficTick');
+  },
+  async execSql({ sql, params }) {
+    const result = await callNative<{
+      columns: string[];
+      rows: unknown[][];
+      lastInsertRowId: number;
+      changes: number;
+    }>('execSql', { sql, params: params.map(encodeSqlParam) });
+    return {
+      ...result,
+      rows: result.rows.map(row => row.map(decodeSqlValue)),
+    };
+  },
+  async flush() {
+    await callNative('flush');
+  },
+  async close() {
+    await callNative('close');
+  },
+  async writeNamespaceData({ namespace, offset, data }) {
+    await callNative('writeNamespaceData', {
+      namespace,
+      offset,
+      data: u8ToBase64(data),
+    });
+  },
+  async readNamespaceData({ namespace, offset, len }) {
+    const b64 = await callNative<string>('readNamespaceData', {
+      namespace,
+      offset,
+      len,
+    });
+    return { data: Array.from(base64ToU8(b64)) };
+  },
+  async namespaceDataLength({ namespace }) {
+    const length = await callNative<number>('namespaceDataLength', {
+      namespace,
+    });
+    return { length };
+  },
+  async clearNamespace({ namespace }) {
+    await callNative('clearNamespace', { namespace });
+  },
+};

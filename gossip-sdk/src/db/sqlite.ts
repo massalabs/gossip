@@ -301,6 +301,21 @@ export class DatabaseConnection {
         params: safeParams,
       });
       this.state.lastInsertRowIdCache = result.lastInsertRowId;
+      // The native VFS runs with `journal_mode=OFF`, so SQLite never
+      // calls xSync on its own. Without this, writes accumulate in the
+      // in-memory pending buffer and are only persisted on allocate /
+      // lock — a stale-state crash or a session switch in between
+      // would drop data. Mirror the web worker's flush-after-write
+      // semantics here.
+      const trimmed = sql.trimStart();
+      const isCommit = /^COMMIT\b/i.test(trimmed);
+      const isMutation =
+        /^(INSERT|UPDATE|DELETE|REPLACE|CREATE|DROP|ALTER|WITH|VACUUM|PRAGMA)\b/i.test(
+          trimmed
+        );
+      if (isCommit || (!this.state.inTransaction && isMutation)) {
+        await this.state.nativePlugin.flush();
+      }
       return result.rows;
     }
     if (this.state.secureProxy) {
@@ -450,12 +465,15 @@ export class DatabaseConnection {
             });
             this.state.nativePlugin = SecureStorageNative;
             this.state.useNativePlugin = true;
-            await SecureStorageNative.provisionStorage();
-            const { unlocked } = await SecureStorageNative.isUnlocked();
-            // TODO: native plugin should expose `hasExistingData()` so we
-            // can return 'empty' on a fresh install (currently conflated
-            // with 'locked'). The web path distinguishes correctly.
-            this.state.storageState = unlocked ? 'unlocked' : 'locked';
+            // Only provision on a fresh install - re-provisioning
+            // overwrites existing slots with random throwaway keys,
+            // wiping any previously allocated account. Mirrors the
+            // web path's `wasmIdbHasData` gate.
+            const { hasData } = await SecureStorageNative.hasData();
+            if (!hasData) {
+              await SecureStorageNative.provisionStorage();
+            }
+            this.state.storageState = hasData ? 'locked' : 'empty';
           } catch {
             // Plugin not implemented on this platform — unwind any partial
             // state and fall through to the web worker path below.

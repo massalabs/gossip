@@ -1,15 +1,21 @@
 //! UniFFI exports for native (iOS/Android) targets.
 //!
-//! Thin wrappers around [`crate::vfs::native_vfs`] functions, exposed to
-//! Swift/Kotlin via UniFFI proc macros. Each function maps 1:1 to a
-//! `SecureStoragePlugin` method on the mobile side.
+//! Single JSON-in / JSON-out dispatcher: the plugin side only knows one
+//! method name (`native_call`) and passes through `(method, args_json)`.
+//! All argument parsing and result encoding happens here in Rust via
+//! serde, which keeps the Kotlin/Swift layer trivial (~25 lines each)
+//! and means adding a new native method is a one-match-arm change.
 //!
-//! The SQL execution path uses a global `rusqlite::Connection` stored
-//! behind the same `Mutex` as the VFS state.
+//! Binary payloads (passwords, namespace blobs, SQL BLOBs) cross the
+//! bridge as base64 strings rather than `number[]`, which saved a ~×8
+//! overhead per byte on the Capacitor bridge.
 
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as B64;
+use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
 
 use crate::error::SecureStorageError;
@@ -23,33 +29,7 @@ fn db_mutex() -> &'static Mutex<Option<rusqlite::Connection>> {
     DB.get_or_init(|| Mutex::new(None))
 }
 
-// ── UniFFI type definitions ─────────────────────────────────────────
-
-#[derive(uniffi::Enum)]
-pub enum SqlParam {
-    Null,
-    Integer { value: i64 },
-    Real { value: f64 },
-    Text { value: String },
-    Blob { value: Vec<u8> },
-}
-
-#[derive(uniffi::Enum)]
-pub enum SqlValue {
-    Null,
-    Integer { value: i64 },
-    Real { value: f64 },
-    Text { value: String },
-    Blob { value: Vec<u8> },
-}
-
-#[derive(uniffi::Record)]
-pub struct QueryResult {
-    pub columns: Vec<String>,
-    pub rows: Vec<Vec<SqlValue>>,
-    pub last_insert_rowid: i64,
-    pub changes: i64,
-}
+// ── UniFFI error ────────────────────────────────────────────────────
 
 #[derive(Debug, uniffi::Error, thiserror::Error)]
 pub enum SecureStorageException {
@@ -57,178 +37,357 @@ pub enum SecureStorageException {
     Error { msg: String },
 }
 
+impl SecureStorageException {
+    fn msg(s: impl Into<String>) -> Self {
+        Self::Error { msg: s.into() }
+    }
+}
+
 impl From<SecureStorageError> for SecureStorageException {
     fn from(e: SecureStorageError) -> Self {
-        SecureStorageException::Error {
-            msg: e.to_string(),
-        }
+        Self::msg(e.to_string())
     }
 }
 
 impl From<rusqlite::Error> for SecureStorageException {
     fn from(e: rusqlite::Error) -> Self {
-        SecureStorageException::Error {
-            msg: e.to_string(),
-        }
+        Self::msg(e.to_string())
     }
 }
 
-// ── Lifecycle exports ───────────────────────────────────────────────
+impl From<serde_json::Error> for SecureStorageException {
+    fn from(e: serde_json::Error) -> Self {
+        Self::msg(format!("json: {e}"))
+    }
+}
 
-/// Validate a storage path received from the plugin layer.
-///
-/// Rejects:
-/// * interior NUL bytes (UniFFI allows them in `String`, but we pass the
-///   path to filesystem APIs that don't tolerate them),
-/// * non-absolute paths (the plugin should pass an absolute path rooted
-///   in the platform's sandboxed storage directory),
-/// * path components containing `..` (defence-in-depth against a
-///   compromised plugin callsite traversing out of the sandbox).
-fn validate_storage_path(path: &str) -> std::result::Result<(), SecureStorageException> {
+impl From<base64::DecodeError> for SecureStorageException {
+    fn from(e: base64::DecodeError) -> Self {
+        Self::msg(format!("base64: {e}"))
+    }
+}
+
+type Result<T> = std::result::Result<T, SecureStorageException>;
+
+// ── Serde types mirroring the TS wrapper ────────────────────────────
+
+#[derive(Deserialize)]
+struct InitArgs {
+    path: String,
+    domain: String,
+}
+
+#[derive(Deserialize)]
+struct AllocateArgs {
+    slot: u8,
+    /// base64-encoded password bytes
+    password: String,
+}
+
+#[derive(Deserialize)]
+struct UnlockArgs {
+    /// base64-encoded password bytes
+    password: String,
+}
+
+#[derive(Deserialize)]
+struct ExecSqlArgs {
+    sql: String,
+    #[serde(default)]
+    params: Vec<serde_json::Value>,
+}
+
+#[derive(Deserialize)]
+struct WriteNamespaceArgs {
+    namespace: u8,
+    offset: u64,
+    /// base64-encoded data bytes
+    data: String,
+}
+
+#[derive(Deserialize)]
+struct ReadNamespaceArgs {
+    namespace: u8,
+    offset: u64,
+    len: u64,
+}
+
+#[derive(Deserialize)]
+struct NamespaceArgs {
+    namespace: u8,
+}
+
+/// SQL values flow as raw JSON primitives; the one exception is BLOB,
+/// which cannot be represented as a JSON scalar and is carried as the
+/// sentinel object `{"blob": "<base64>"}` in both directions.
+#[derive(Serialize)]
+struct QueryResultJson {
+    columns: Vec<String>,
+    rows: Vec<Vec<serde_json::Value>>,
+    #[serde(rename = "lastInsertRowId")]
+    last_insert_rowid: i64,
+    changes: i64,
+}
+
+/// Decode a blob sentinel `{"blob": "<base64>"}` if `v` matches; else `None`.
+fn as_blob_sentinel(v: &serde_json::Value) -> Option<&str> {
+    v.as_object()
+        .and_then(|o| (o.len() == 1).then_some(()))
+        .and_then(|_| v.get("blob"))
+        .and_then(|b| b.as_str())
+}
+
+// ── Path validation ─────────────────────────────────────────────────
+
+fn validate_storage_path(path: &str) -> Result<()> {
     if path.bytes().any(|b| b == 0) {
-        return Err(SecureStorageException::Error {
-            msg: "path contains interior NUL".into(),
-        });
+        return Err(SecureStorageException::msg("path contains interior NUL"));
     }
     let p = Path::new(path);
     if !p.is_absolute() {
-        return Err(SecureStorageException::Error {
-            msg: "path must be absolute".into(),
-        });
+        return Err(SecureStorageException::msg("path must be absolute"));
     }
     for comp in p.components() {
         if matches!(comp, std::path::Component::ParentDir) {
-            return Err(SecureStorageException::Error {
-                msg: "path must not contain '..'".into(),
-            });
+            return Err(SecureStorageException::msg("path must not contain '..'"));
         }
     }
     Ok(())
 }
 
+// ── Dispatcher ──────────────────────────────────────────────────────
+
+/// Single UniFFI export — the plugin layer passes through a method
+/// name and a JSON args blob. All result shapes are JSON strings too.
 #[uniffi::export]
-pub fn init_secure_storage(path: String, domain: String) -> Result<(), SecureStorageException> {
-    validate_storage_path(&path)?;
-    native_vfs::init_native(&path, &domain)?;
+pub fn native_call(method: String, args_json: String) -> Result<String> {
+    dispatch(&method, &args_json)
+}
+
+fn dispatch(method: &str, args: &str) -> Result<String> {
+    // Helper: parse args as T.
+    fn parse<'a, T: Deserialize<'a>>(s: &'a str) -> Result<T> {
+        Ok(serde_json::from_str(s)?)
+    }
+
+    match method {
+        "initSecureStorage" => {
+            let a: InitArgs = parse(args)?;
+            init_secure_storage(&a.path, &a.domain)?;
+            Ok("null".into())
+        }
+        "provisionStorage" => {
+            native_vfs::provision()?;
+            Ok("null".into())
+        }
+        "hasData" => {
+            let has = native_vfs::has_data()?;
+            Ok(serde_json::to_string(&has)?)
+        }
+        "allocateSession" => {
+            let a: AllocateArgs = parse(args)?;
+            let password = Zeroizing::new(B64.decode(a.password)?);
+            allocate(a.slot, &password)?;
+            Ok("null".into())
+        }
+        "unlockSession" => {
+            let a: UnlockArgs = parse(args)?;
+            let password = Zeroizing::new(B64.decode(a.password)?);
+            let ok = unlock(&password)?;
+            Ok(serde_json::to_string(&ok)?)
+        }
+        "lockSession" => {
+            lock()?;
+            Ok("null".into())
+        }
+        "isUnlocked" => {
+            let ok = native_vfs::is_unlocked()?;
+            Ok(serde_json::to_string(&ok)?)
+        }
+        "coverTrafficTick" => {
+            native_vfs::cover_tick()?;
+            Ok("null".into())
+        }
+        "flush" => {
+            native_vfs::flush()?;
+            Ok("null".into())
+        }
+        "close" => {
+            close()?;
+            Ok("null".into())
+        }
+        "rayonThreadCount" => {
+            let n = rayon::current_num_threads() as u32;
+            Ok(serde_json::to_string(&n)?)
+        }
+        "execSql" => {
+            let a: ExecSqlArgs = parse(args)?;
+            let qr = exec_sql(&a.sql, &a.params)?;
+            Ok(serde_json::to_string(&qr)?)
+        }
+        "writeNamespaceData" => {
+            let a: WriteNamespaceArgs = parse(args)?;
+            // Session blobs may contain key material — zeroize on return.
+            let data = Zeroizing::new(B64.decode(a.data)?);
+            native_vfs::write_namespace_data(a.namespace, a.offset, &data)?;
+            Ok("null".into())
+        }
+        "readNamespaceData" => {
+            let a: ReadNamespaceArgs = parse(args)?;
+            let bytes = native_vfs::read_namespace_data(a.namespace, a.offset, a.len as usize)?;
+            Ok(serde_json::to_string(&B64.encode(bytes))?)
+        }
+        "namespaceDataLength" => {
+            let a: NamespaceArgs = parse(args)?;
+            let len = native_vfs::namespace_data_length(a.namespace)?;
+            Ok(serde_json::to_string(&len)?)
+        }
+        "clearNamespace" => {
+            let a: NamespaceArgs = parse(args)?;
+            native_vfs::clear_namespace(a.namespace)?;
+            Ok("null".into())
+        }
+        _ => Err(SecureStorageException::msg(format!(
+            "unknown method: {method}"
+        ))),
+    }
+}
+
+// ── Per-method bodies ───────────────────────────────────────────────
+
+fn init_secure_storage(path: &str, domain: &str) -> Result<()> {
+    validate_storage_path(path)?;
+    native_vfs::init_native(path, domain)?;
     native_vfs::register()?;
+    // Warm rayon's global pool so the first PQ op doesn't pay spawn cost.
+    let _ = rayon::ThreadPoolBuilder::new().build_global();
+    eprintln!(
+        "secureStorage: rayon pool = {} threads",
+        rayon::current_num_threads()
+    );
     Ok(())
 }
 
-#[uniffi::export]
-pub fn provision_storage_native() -> Result<(), SecureStorageException> {
-    native_vfs::provision()?;
-    Ok(())
-}
-
-#[uniffi::export]
-pub fn allocate_session_native(slot: u8, password: Vec<u8>) -> Result<(), SecureStorageException> {
-    // Wrap at the boundary so the password buffer is zeroized when the
-    // function returns, whether or not `allocate` succeeds.
-    let password = Zeroizing::new(password);
-    native_vfs::allocate(slot, &password)?;
-    // Auto-open the database after allocation.
+fn allocate(slot: u8, password: &[u8]) -> Result<()> {
+    // Drop the previous rusqlite connection BEFORE switching sessions.
+    // SQLite flushes dirty pages via `xWrite` during `sqlite3_close`,
+    // and that flush must land on the OLD session's slot, not the new
+    // one — otherwise the previous account's in-cache data would be
+    // re-encrypted with the new session's key and written to the new
+    // slot, corrupting both accounts.
+    {
+        let mut guard = db_mutex()
+            .lock()
+            .map_err(|_| SecureStorageError::LockPoisoned)?;
+        *guard = None;
+    }
+    native_vfs::allocate(slot, password)?;
     let conn = native_vfs::open_db()?;
-    let mut guard = db_mutex().lock().map_err(|_| SecureStorageError::LockPoisoned)?;
+    let mut guard = db_mutex()
+        .lock()
+        .map_err(|_| SecureStorageError::LockPoisoned)?;
     *guard = Some(conn);
     Ok(())
 }
 
-#[uniffi::export]
-pub fn unlock_session_native(password: Vec<u8>) -> Result<bool, SecureStorageException> {
-    let password = Zeroizing::new(password);
-    let ok = native_vfs::unlock(&password)?;
+fn unlock(password: &[u8]) -> Result<bool> {
+    let ok = native_vfs::unlock(password)?;
     if ok {
         let conn = native_vfs::open_db()?;
-        let mut guard = db_mutex().lock().map_err(|_| SecureStorageError::LockPoisoned)?;
+        let mut guard = db_mutex()
+            .lock()
+            .map_err(|_| SecureStorageError::LockPoisoned)?;
         *guard = Some(conn);
     }
     Ok(ok)
 }
 
-#[uniffi::export]
-pub fn lock_session_native() -> Result<(), SecureStorageException> {
-    // Close the DB connection first, then lock the VFS state.
-    let mut guard = db_mutex().lock().map_err(|_| SecureStorageError::LockPoisoned)?;
+fn lock() -> Result<()> {
+    let mut guard = db_mutex()
+        .lock()
+        .map_err(|_| SecureStorageError::LockPoisoned)?;
     *guard = None;
     native_vfs::lock();
     Ok(())
 }
 
-#[uniffi::export]
-pub fn is_unlocked_native() -> Result<bool, SecureStorageException> {
-    Ok(native_vfs::is_unlocked()?)
-}
-
-#[uniffi::export]
-pub fn cover_traffic_tick_native() -> Result<(), SecureStorageException> {
-    Ok(native_vfs::cover_tick()?)
-}
-
-#[uniffi::export]
-pub fn flush_native() -> Result<(), SecureStorageException> {
-    Ok(native_vfs::flush()?)
-}
-
-#[uniffi::export]
-pub fn close_native() -> Result<(), SecureStorageException> {
-    let mut guard = db_mutex().lock().map_err(|_| SecureStorageError::LockPoisoned)?;
+fn close() -> Result<()> {
+    let mut guard = db_mutex()
+        .lock()
+        .map_err(|_| SecureStorageError::LockPoisoned)?;
     *guard = None;
     native_vfs::flush().ok();
     native_vfs::lock();
     Ok(())
 }
 
-// ── SQL execution ───────────────────────────────────────────────────
+fn exec_sql(sql: &str, params: &[serde_json::Value]) -> Result<QueryResultJson> {
+    use serde_json::Value as V;
 
-#[uniffi::export]
-pub fn exec_sql_native(
-    sql: String,
-    params: Vec<SqlParam>,
-) -> Result<QueryResult, SecureStorageException> {
-    let guard = db_mutex().lock().map_err(|_| SecureStorageError::LockPoisoned)?;
+    let guard = db_mutex()
+        .lock()
+        .map_err(|_| SecureStorageError::LockPoisoned)?;
     let conn = guard
         .as_ref()
         .ok_or_else(|| SecureStorageError::Storage("database not open".into()))?;
 
-    let mut stmt = conn.prepare(&sql)?;
+    let mut stmt = conn.prepare(sql)?;
     let column_count = stmt.column_count();
     let columns: Vec<String> = (0..column_count)
         .map(|i| stmt.column_name(i).unwrap_or("?").to_string())
         .collect();
 
-    // Bind parameters.
+    // Bind parameters. SQLite distinguishes INTEGER/REAL; JS numbers don't.
+    // Convention: integers if the JSON number fits losslessly in i64, else REAL.
+    // Blobs arrive as `{"blob": "<base64>"}`.
     for (i, param) in params.iter().enumerate() {
         let idx = i + 1;
+        if let Some(b64) = as_blob_sentinel(param) {
+            stmt.raw_bind_parameter(idx, B64.decode(b64)?)?;
+            continue;
+        }
         match param {
-            SqlParam::Null => stmt.raw_bind_parameter(idx, rusqlite::types::Null)?,
-            SqlParam::Integer { value } => stmt.raw_bind_parameter(idx, value)?,
-            SqlParam::Real { value } => stmt.raw_bind_parameter(idx, value)?,
-            SqlParam::Text { value } => stmt.raw_bind_parameter(idx, value.as_str())?,
-            SqlParam::Blob { value } => stmt.raw_bind_parameter(idx, value.as_slice())?,
+            V::Null => stmt.raw_bind_parameter(idx, rusqlite::types::Null)?,
+            V::Bool(b) => stmt.raw_bind_parameter(idx, if *b { 1i64 } else { 0 })?,
+            V::Number(n) => {
+                if let Some(i) = n.as_i64() {
+                    stmt.raw_bind_parameter(idx, i)?
+                } else if let Some(f) = n.as_f64() {
+                    stmt.raw_bind_parameter(idx, f)?
+                } else {
+                    return Err(SecureStorageException::msg("unsupported number"));
+                }
+            }
+            V::String(s) => stmt.raw_bind_parameter(idx, s.as_str())?,
+            other => {
+                return Err(SecureStorageException::msg(format!(
+                    "unsupported SQL param: {other}"
+                )));
+            }
         }
     }
 
-    // Execute and collect rows.
-    let mut rows_out: Vec<Vec<SqlValue>> = Vec::new();
+    let mut rows_out: Vec<Vec<serde_json::Value>> = Vec::new();
     let mut raw_rows = stmt.raw_query();
     while let Some(row) = raw_rows.next()? {
         let mut row_out = Vec::with_capacity(column_count);
         for col in 0..column_count {
             let val = match row.get_ref(col)? {
-                rusqlite::types::ValueRef::Null => SqlValue::Null,
-                rusqlite::types::ValueRef::Integer(v) => SqlValue::Integer { value: v },
-                rusqlite::types::ValueRef::Real(v) => SqlValue::Real { value: v },
-                // A TEXT column may contain non-UTF-8 bytes if the caller
-                // wrote a raw BLOB into it. `from_utf8_lossy` would
-                // silently replace with U+FFFD; fall back to the Blob
-                // variant so callers can detect and handle the raw bytes.
+                rusqlite::types::ValueRef::Null => V::Null,
+                rusqlite::types::ValueRef::Integer(v) => V::from(v),
+                rusqlite::types::ValueRef::Real(v) => serde_json::Number::from_f64(v)
+                    .map(V::Number)
+                    .unwrap_or(V::Null),
+                // TEXT may carry non-UTF-8 if the caller bound raw bytes
+                // into a TEXT column — fall back to the blob sentinel so
+                // callers can recover the raw bytes.
                 rusqlite::types::ValueRef::Text(v) => match std::str::from_utf8(v) {
-                    Ok(s) => SqlValue::Text { value: s.to_string() },
-                    Err(_) => SqlValue::Blob { value: v.to_vec() },
+                    Ok(s) => V::from(s),
+                    Err(_) => serde_json::json!({ "blob": B64.encode(v) }),
                 },
-                rusqlite::types::ValueRef::Blob(v) => SqlValue::Blob {
-                    value: v.to_vec(),
-                },
+                rusqlite::types::ValueRef::Blob(v) => {
+                    serde_json::json!({ "blob": B64.encode(v) })
+                }
             };
             row_out.push(val);
         }
@@ -239,7 +398,7 @@ pub fn exec_sql_native(
     let last_insert_rowid = conn.last_insert_rowid();
     let changes = conn.changes() as i64;
 
-    Ok(QueryResult {
+    Ok(QueryResultJson {
         columns,
         rows: rows_out,
         last_insert_rowid,
@@ -247,38 +406,4 @@ pub fn exec_sql_native(
     })
 }
 
-// ── Namespace data (session blob persist) ───────────────────────────
-
-#[uniffi::export]
-pub fn write_namespace_data_native(
-    namespace: u8,
-    offset: u64,
-    data: Vec<u8>,
-) -> Result<(), SecureStorageException> {
-    // Session blobs and other namespace payloads may contain key
-    // material; zeroize on return.
-    let data = Zeroizing::new(data);
-    Ok(native_vfs::write_namespace_data(namespace, offset, &data)?)
-}
-
-#[uniffi::export]
-pub fn read_namespace_data_native(
-    namespace: u8,
-    offset: u64,
-    len: u64,
-) -> Result<Vec<u8>, SecureStorageException> {
-    Ok(native_vfs::read_namespace_data(namespace, offset, len as usize)?)
-}
-
-#[uniffi::export]
-pub fn namespace_data_length_native(namespace: u8) -> Result<u64, SecureStorageException> {
-    Ok(native_vfs::namespace_data_length(namespace)?)
-}
-
-#[uniffi::export]
-pub fn clear_namespace_native(namespace: u8) -> Result<(), SecureStorageException> {
-    Ok(native_vfs::clear_namespace(namespace)?)
-}
-
-// Note: `uniffi::setup_scaffolding!()` is in lib.rs (crate root),
-// not here, because UniFFI requires the scaffolding in the root module.
+// Note: `uniffi::setup_scaffolding!()` lives in lib.rs (crate root).

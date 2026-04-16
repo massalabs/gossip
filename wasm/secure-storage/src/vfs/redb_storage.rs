@@ -51,9 +51,8 @@ impl RedbStorage {
     pub fn open(base: &Path) -> Result<Self> {
         fs::create_dir_all(base)?;
         let db_path = base.join("storage.redb");
-        let db = Database::create(&db_path).map_err(|e| {
-            SecureStorageError::Storage(format!("redb open: {e}"))
-        })?;
+        let db = Database::create(&db_path)
+            .map_err(|e| SecureStorageError::Storage(format!("redb open: {e}")))?;
 
         let mut storage = Self {
             db,
@@ -66,31 +65,27 @@ impl RedbStorage {
 
     /// Scan the BLOCKS table and count entries per `(session, namespace)`.
     fn rebuild_block_counts(&mut self) -> Result<()> {
-        let txn = self.db.begin_read().map_err(|e| {
-            SecureStorageError::Storage(format!("redb read txn: {e}"))
-        })?;
+        let txn = self
+            .db
+            .begin_read()
+            .map_err(|e| SecureStorageError::Storage(format!("redb read txn: {e}")))?;
 
         let table = match txn.open_table(BLOCKS) {
             Ok(t) => t,
             Err(redb::TableError::TableDoesNotExist(_)) => return Ok(()),
-            Err(e) => {
-                return Err(SecureStorageError::Storage(format!(
-                    "redb open table: {e}"
-                )))
-            }
+            Err(e) => return Err(SecureStorageError::Storage(format!("redb open table: {e}"))),
         };
 
         for counts in &mut self.block_counts {
             counts.clear();
         }
 
-        let iter = table.iter().map_err(|e| {
-            SecureStorageError::Storage(format!("redb iter: {e}"))
-        })?;
+        let iter = table
+            .iter()
+            .map_err(|e| SecureStorageError::Storage(format!("redb iter: {e}")))?;
         for entry in iter {
-            let (key, _val) = entry.map_err(|e| {
-                SecureStorageError::Storage(format!("redb entry: {e}"))
-            })?;
+            let (key, _val) =
+                entry.map_err(|e| SecureStorageError::Storage(format!("redb entry: {e}")))?;
             let key_bytes = key.value();
             if key_bytes.len() == 10 {
                 let session = key_bytes[0] as usize;
@@ -112,31 +107,48 @@ impl RedbStorage {
         key
     }
 
+    /// Return true if the on-disk database already has any keypair
+    /// entries — used to gate `provision` at boot so we don't wipe
+    /// existing slots by re-provisioning random throwaway keys.
+    pub fn has_data(&self) -> Result<bool> {
+        let txn = self
+            .db
+            .begin_read()
+            .map_err(|e| SecureStorageError::Storage(format!("redb read txn: {e}")))?;
+        let table = match txn.open_table(KEYPAIRS) {
+            Ok(t) => t,
+            Err(redb::TableError::TableDoesNotExist(_)) => return Ok(false),
+            Err(e) => return Err(SecureStorageError::Storage(format!("redb open table: {e}"))),
+        };
+        let mut iter = table
+            .iter()
+            .map_err(|e| SecureStorageError::Storage(format!("redb iter: {e}")))?;
+        Ok(iter.next().is_some())
+    }
+
     /// Batch-insert all buffered writes in a single ACID transaction.
     pub fn commit(&mut self) -> Result<()> {
         if self.ram_buffer.is_empty() {
             return Ok(());
         }
 
-        let txn = self.db.begin_write().map_err(|e| {
-            SecureStorageError::Storage(format!("redb write txn: {e}"))
-        })?;
+        let txn = self
+            .db
+            .begin_write()
+            .map_err(|e| SecureStorageError::Storage(format!("redb write txn: {e}")))?;
         {
-            let mut table = txn.open_table(BLOCKS).map_err(|e| {
-                SecureStorageError::Storage(format!("redb open table: {e}"))
-            })?;
+            let mut table = txn
+                .open_table(BLOCKS)
+                .map_err(|e| SecureStorageError::Storage(format!("redb open table: {e}")))?;
             for bw in &self.ram_buffer {
                 let key = Self::make_block_key(bw.session, bw.namespace, bw.block_id);
                 table
                     .insert(key.as_slice(), bw.data.as_slice())
-                    .map_err(|e| {
-                        SecureStorageError::Storage(format!("redb insert: {e}"))
-                    })?;
+                    .map_err(|e| SecureStorageError::Storage(format!("redb insert: {e}")))?;
             }
         }
-        txn.commit().map_err(|e| {
-            SecureStorageError::Storage(format!("redb commit: {e}"))
-        })?;
+        txn.commit()
+            .map_err(|e| SecureStorageError::Storage(format!("redb commit: {e}")))?;
         self.ram_buffer.clear();
         Ok(())
     }
@@ -168,16 +180,17 @@ impl BlockStorage for RedbStorage {
         }
 
         // Fall back to redb.
-        let txn = self.db.begin_read().map_err(|e| {
-            SecureStorageError::Storage(format!("redb read txn: {e}"))
-        })?;
-        let table = txn.open_table(BLOCKS).map_err(|e| {
-            SecureStorageError::Storage(format!("redb open table: {e}"))
-        })?;
+        let txn = self
+            .db
+            .begin_read()
+            .map_err(|e| SecureStorageError::Storage(format!("redb read txn: {e}")))?;
+        let table = txn
+            .open_table(BLOCKS)
+            .map_err(|e| SecureStorageError::Storage(format!("redb open table: {e}")))?;
         let key = Self::make_block_key(si, namespace, block);
-        let entry = table.get(key.as_slice()).map_err(|e| {
-            SecureStorageError::Storage(format!("redb get: {e}"))
-        })?;
+        let entry = table
+            .get(key.as_slice())
+            .map_err(|e| SecureStorageError::Storage(format!("redb get: {e}")))?;
         match entry {
             Some(val) => {
                 let val_bytes = val.value();
@@ -256,21 +269,20 @@ impl BlockStorage for RedbStorage {
             .retain(|bw| !(bw.session == su8 && bw.namespace == namespace));
 
         // Delete this (session, namespace)'s blocks from redb.
-        let txn = self.db.begin_write().map_err(|e| {
-            SecureStorageError::Storage(format!("redb write txn: {e}"))
-        })?;
+        let txn = self
+            .db
+            .begin_write()
+            .map_err(|e| SecureStorageError::Storage(format!("redb write txn: {e}")))?;
         {
-            let mut table = txn.open_table(BLOCKS).map_err(|e| {
-                SecureStorageError::Storage(format!("redb open table: {e}"))
-            })?;
+            let mut table = txn
+                .open_table(BLOCKS)
+                .map_err(|e| SecureStorageError::Storage(format!("redb open table: {e}")))?;
 
             let prefix_start = Self::make_block_key(su8, namespace, 0);
             let prefix_end = Self::make_block_key(su8, namespace, u64::MAX);
             let range = table
                 .range(prefix_start.as_slice()..=prefix_end.as_slice())
-                .map_err(|e| {
-                    SecureStorageError::Storage(format!("redb range: {e}"))
-                })?;
+                .map_err(|e| SecureStorageError::Storage(format!("redb range: {e}")))?;
             let keys: Vec<[u8; 10]> = range
                 .filter_map(|entry| {
                     let (k, _) = entry.ok()?;
@@ -285,14 +297,13 @@ impl BlockStorage for RedbStorage {
                 })
                 .collect();
             for key in &keys {
-                table.remove(key.as_slice()).map_err(|e| {
-                    SecureStorageError::Storage(format!("redb remove: {e}"))
-                })?;
+                table
+                    .remove(key.as_slice())
+                    .map_err(|e| SecureStorageError::Storage(format!("redb remove: {e}")))?;
             }
         }
-        txn.commit().map_err(|e| {
-            SecureStorageError::Storage(format!("redb commit: {e}"))
-        })?;
+        txn.commit()
+            .map_err(|e| SecureStorageError::Storage(format!("redb commit: {e}")))?;
 
         self.block_counts[si].remove(&namespace);
         Ok(())
@@ -303,24 +314,23 @@ impl BlockStorage for RedbStorage {
 
 impl KeypairStorage for RedbStorage {
     fn read_keypair(&self, session: SessionIndex) -> Result<Zeroizing<Vec<u8>>> {
-        let txn = self.db.begin_read().map_err(|e| {
-            SecureStorageError::Storage(format!("redb read txn: {e}"))
-        })?;
+        let txn = self
+            .db
+            .begin_read()
+            .map_err(|e| SecureStorageError::Storage(format!("redb read txn: {e}")))?;
         let table = match txn.open_table(KEYPAIRS) {
             Ok(t) => t,
             Err(redb::TableError::TableDoesNotExist(_)) => {
                 return Err(SecureStorageError::Storage("keypair not found".into()));
             }
             Err(e) => {
-                return Err(SecureStorageError::Storage(format!(
-                    "redb open table: {e}"
-                )));
+                return Err(SecureStorageError::Storage(format!("redb open table: {e}")));
             }
         };
         let key = [session.as_u8()];
-        let entry = table.get(key.as_slice()).map_err(|e| {
-            SecureStorageError::Storage(format!("redb get: {e}"))
-        })?;
+        let entry = table
+            .get(key.as_slice())
+            .map_err(|e| SecureStorageError::Storage(format!("redb get: {e}")))?;
         match entry {
             Some(val) => Ok(Zeroizing::new(val.value().to_vec())),
             None => Err(SecureStorageError::Storage("keypair not found".into())),
@@ -328,21 +338,21 @@ impl KeypairStorage for RedbStorage {
     }
 
     fn write_keypair(&mut self, session: SessionIndex, data: &[u8]) -> Result<()> {
-        let txn = self.db.begin_write().map_err(|e| {
-            SecureStorageError::Storage(format!("redb write txn: {e}"))
-        })?;
+        let txn = self
+            .db
+            .begin_write()
+            .map_err(|e| SecureStorageError::Storage(format!("redb write txn: {e}")))?;
         {
-            let mut table = txn.open_table(KEYPAIRS).map_err(|e| {
-                SecureStorageError::Storage(format!("redb open table: {e}"))
-            })?;
+            let mut table = txn
+                .open_table(KEYPAIRS)
+                .map_err(|e| SecureStorageError::Storage(format!("redb open table: {e}")))?;
             let key = [session.as_u8()];
-            table.insert(key.as_slice(), data).map_err(|e| {
-                SecureStorageError::Storage(format!("redb insert: {e}"))
-            })?;
+            table
+                .insert(key.as_slice(), data)
+                .map_err(|e| SecureStorageError::Storage(format!("redb insert: {e}")))?;
         }
-        txn.commit().map_err(|e| {
-            SecureStorageError::Storage(format!("redb commit: {e}"))
-        })?;
+        txn.commit()
+            .map_err(|e| SecureStorageError::Storage(format!("redb commit: {e}")))?;
         Ok(())
     }
 }
