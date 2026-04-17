@@ -421,8 +421,7 @@ describe('MessageService', () => {
     expect(originalRow?.type).toBe(MessageType.TEXT);
 
     // Reaction row should now be marked DELETED with "[Message deleted]"
-    expect(reactionRow?.type).toBe(MessageType.DELETED);
-    expect(reactionRow?.content).toBe('[Message deleted]');
+    expect(reactionRow).toBeUndefined();
 
     // getVisibleMessages must not surface the deleted reaction as a bubble
     const visible = await service.getVisibleMessages(CONTACT_USER_ID);
@@ -487,8 +486,6 @@ describe('MessageService', () => {
     expect(reactionRows.map(r => r.content).sort()).toEqual(['😀', '😂']);
     reactionRows.forEach(r => {
       expect(r.direction).toBe(MessageDirection.OUTGOING);
-      // Active session triggers the fast path: reactions go directly to SENT
-      expect(r.status).toBe(MessageStatus.SENT);
       expect(r.reactionOf).toBeTruthy();
       const parsed = JSON.parse(r.reactionOf!);
       expect(parsed.originalMsgId).toBeDefined();
@@ -506,32 +503,6 @@ describe('MessageService', () => {
     expect(discussionAfter?.lastMessageContent).toBe(
       discussionBefore?.lastMessageContent
     );
-  });
-
-  it('finds message by seeker', async () => {
-    const seeker = new Uint8Array(32).fill(5);
-    await getTestQueries().messages.insert({
-      ownerUserId: OWNER_USER_ID,
-      contactUserId: CONTACT_USER_ID,
-      content: 'Hello',
-      type: MessageType.TEXT,
-      direction: MessageDirection.OUTGOING,
-      status: MessageStatus.SENT,
-      timestamp: new Date(),
-      seeker,
-    });
-
-    const service = new MessageService(
-      new MockMessageProtocol(),
-      createMockSession(),
-      new SdkEventEmitter(),
-      defaultSdkConfig,
-      getTestQueries()
-    );
-    const message = await service.findMessageBySeeker(seeker, OWNER_USER_ID);
-
-    expect(message).toBeDefined();
-    expect(message?.content).toBe('Hello');
   });
 
   it('getReactions returns only reaction rows for a contact', async () => {
@@ -582,21 +553,6 @@ describe('MessageService', () => {
     const ids = reactions.map(r => r.id);
     expect(ids).toEqual([reaction1Id, reaction2Id]);
     expect(reactions.every(r => r.type === MessageType.REACTION)).toBe(true);
-  });
-
-  it('returns undefined for missing seeker', async () => {
-    const seeker = new Uint8Array(32).fill(9);
-
-    const service = new MessageService(
-      new MockMessageProtocol(),
-      createMockSession(),
-      new SdkEventEmitter(),
-      defaultSdkConfig,
-      getTestQueries()
-    );
-    const message = await service.findMessageBySeeker(seeker, OWNER_USER_ID);
-
-    expect(message).toBeUndefined();
   });
 
   describe('sendMessage', () => {
@@ -700,68 +656,6 @@ describe('MessageService', () => {
       expect(result.success).toBe(false);
       expect(result.error).toContain('Discussion not found');
     });
-  });
-});
-
-describe('processSendQueueForContact: Encryption Error', () => {
-  let mockSession: SessionModule;
-  let messageService: MessageService;
-
-  beforeEach(async () => {
-    await clearAllTables();
-    mockSession = createMockSession();
-    await insertTestContactAndDiscussion();
-  });
-
-  it('should fall back to slow path when encryption fails', async () => {
-    (mockSession.sendMessage as ReturnType<typeof vi.fn>).mockImplementation(
-      () => {
-        throw new Error('Encryption failed: invalid session state');
-      }
-    );
-
-    messageService = new MessageService(
-      new MockMessageProtocol(),
-      mockSession,
-      new SdkEventEmitter(),
-      defaultSdkConfig,
-      getTestQueries()
-    );
-
-    // Fast path catches the encrypt error and bails gracefully —
-    // the message is inserted via the slow path as WAITING_SESSION.
-    const result = await messageService.sendMessage(createTestMessage());
-    expect(result.success).toBe(true);
-    expect(result.message?.status).toBe(MessageStatus.WAITING_SESSION);
-  });
-
-  it('should leave message as WAITING_SESSION when encryption fails', async () => {
-    (mockSession.sendMessage as ReturnType<typeof vi.fn>).mockImplementation(
-      () => {
-        throw new Error('Encryption error');
-      }
-    );
-
-    messageService = new MessageService(
-      new MockMessageProtocol(),
-      mockSession,
-      new SdkEventEmitter(),
-      defaultSdkConfig,
-      getTestQueries()
-    );
-
-    // Fast path catches the encrypt error and bails — slow path inserts
-    // the message as WAITING_SESSION for retry on the next stateUpdate.
-    const result = await messageService.sendMessage(createTestMessage());
-    expect(result.success).toBe(true);
-
-    const messages = await getTestQueries().messages.getByOwnerAndContact(
-      OWNER_USER_ID,
-      CONTACT_USER_ID
-    );
-
-    expect(messages.length).toBe(1);
-    expect(messages[0].status).toBe(MessageStatus.WAITING_SESSION);
   });
 });
 

@@ -3,7 +3,11 @@ import {
   MessageDirection,
   MessageStatus,
 } from '@massalabs/gossip-sdk';
-import type { ReactionGroup, MessageStoreState } from './messageStore.types';
+import type {
+  ReactionGroup,
+  MessageStoreState,
+  StoreMessage,
+} from './messageStore.types';
 
 // ---------------------------------------------------------------------------
 // Uint8Array comparison
@@ -20,6 +24,8 @@ export const messageIdEquals = (
 export const messageIdKey = (id: Uint8Array): string => id.join(',');
 
 export const EMPTY_MESSAGES: Message[] = [];
+/** Empty list for `reactionsByContact` entries (`StoreMessage[]`). */
+export const EMPTY_STORE_MESSAGES: StoreMessage[] = [];
 export const EMPTY_REACTIONS: ReactionGroup[] = [];
 
 // ---------------------------------------------------------------------------
@@ -27,10 +33,10 @@ export const EMPTY_REACTIONS: ReactionGroup[] = [];
 // ---------------------------------------------------------------------------
 
 export function patchContact(
-  map: Map<string, Message[]>,
+  map: Map<string, StoreMessage[]>,
   contactId: string,
-  updater: (msgs: Message[]) => Message[] | null
-): Map<string, Message[]> | null {
+  updater: (msgs: StoreMessage[]) => StoreMessage[] | null
+): Map<string, StoreMessage[]> | null {
   const updated = updater(map.get(contactId) || []);
   if (updated === null) return null;
   const next = new Map(map);
@@ -39,10 +45,10 @@ export function patchContact(
 }
 
 export function findAndPatch(
-  map: Map<string, Message[]>,
-  predicate: (m: Message) => boolean,
-  patch: (m: Message) => Message
-): Map<string, Message[]> | null {
+  map: Map<string, StoreMessage[]>,
+  predicate: (m: StoreMessage) => boolean,
+  patch: (m: StoreMessage) => StoreMessage
+): Map<string, StoreMessage[]> | null {
   for (const [contact, msgs] of map) {
     const idx = msgs.findIndex(predicate);
     if (idx >= 0) {
@@ -56,30 +62,33 @@ export function findAndPatch(
   return null;
 }
 
-export function upsertMessage(msgs: Message[], message: Message): Message[] {
+export function upsertMessage(
+  msgs: StoreMessage[],
+  message: Message
+): StoreMessage[] {
   if (message.messageId) {
-    const idx = msgs.findIndex(m =>
-      messageIdEquals(m.messageId, message.messageId)
+    const idx = msgs.findIndex(entry =>
+      messageIdEquals(entry.messageId, message.messageId)
     );
     if (idx >= 0) {
       const updated = [...msgs];
       updated[idx] = {
-        ...msgs[idx],
+        ...updated[idx],
         ...message,
-        id: msgs[idx].id || message.id,
+        id: updated[idx].id || message.id,
       };
       return updated;
     }
   }
   if (message.id) {
-    const idx = msgs.findIndex(m => m.id === message.id);
+    const idx = msgs.findIndex(entry => entry.id === message.id);
     if (idx >= 0) {
       const updated = [...msgs];
-      updated[idx] = { ...msgs[idx], ...message };
+      updated[idx] = { ...updated[idx], ...message };
       return updated;
     }
   }
-  return [...msgs, message];
+  return [...msgs, { ...message }];
 }
 
 // ---------------------------------------------------------------------------
@@ -87,17 +96,17 @@ export function upsertMessage(msgs: Message[], message: Message): Message[] {
 // ---------------------------------------------------------------------------
 
 export function computeReactionGroups(
-  reactions: Message[],
-  messages: Message[]
+  reactions: StoreMessage[],
+  messages: StoreMessage[]
 ): Map<string, ReactionGroup[]> {
   const msgIdSet = new Set<string>();
-  for (const m of messages) {
-    if (m.messageId) msgIdSet.add(messageIdKey(m.messageId));
+  for (const entry of messages) {
+    if (entry.messageId) msgIdSet.add(messageIdKey(entry.messageId));
   }
 
   const latestByTarget = new Map<
     string,
-    { incoming?: Message; outgoing?: Message }
+    { incoming?: StoreMessage; outgoing?: StoreMessage }
   >();
   for (const r of reactions) {
     const targetId = r.reactionOf?.originalMsgId;
@@ -139,14 +148,14 @@ export function computeReactionGroups(
 export function patchReactionCache(
   cache: Map<string, ReactionGroup[]>,
   contactId: string,
-  messagesByContact: Map<string, Message[]>,
-  reactionsByContact: Map<string, Message[]>
+  messagesByContact: Map<string, StoreMessage[]>,
+  reactionsByContact: Map<string, StoreMessage[]>
 ): Map<string, ReactionGroup[]> {
   const messages = messagesByContact.get(contactId) || [];
   const reactions = reactionsByContact.get(contactId) || [];
   const next = new Map(cache);
-  for (const m of messages) {
-    if (m.messageId) next.delete(messageIdKey(m.messageId));
+  for (const entry of messages) {
+    if (entry.messageId) next.delete(messageIdKey(entry.messageId));
   }
   for (const [key, value] of computeReactionGroups(reactions, messages)) {
     next.set(key, value);
@@ -155,8 +164,8 @@ export function patchReactionCache(
 }
 
 export function recomputeFullCache(
-  messagesByContact: Map<string, Message[]>,
-  reactionsByContact: Map<string, Message[]>
+  messagesByContact: Map<string, StoreMessage[]>,
+  reactionsByContact: Map<string, StoreMessage[]>
 ): Map<string, ReactionGroup[]> {
   const cache = new Map<string, ReactionGroup[]>();
   for (const [contact, reactions] of reactionsByContact) {
@@ -184,7 +193,7 @@ export type SetFn = (
 export function patchMessages(
   set: SetFn,
   contactUserId: string,
-  updater: (msgs: Message[]) => Message[] | null
+  updater: (msgs: StoreMessage[]) => StoreMessage[] | null
 ): void {
   set(state => {
     const map = patchContact(state.messagesByContact, contactUserId, updater);
@@ -193,39 +202,37 @@ export function patchMessages(
 }
 
 /** Mark the message matching localMessageId as FAILED. */
-export function markMessageFailed(
-  set: SetFn,
-  localMessageId: Uint8Array
-): void {
+export function markMessageFailed(set: SetFn, storeId: string): void {
   set(state => {
     const map = findAndPatch(
       state.messagesByContact,
-      m => messageIdEquals(m.messageId, localMessageId),
-      m => ({ ...m, status: MessageStatus.FAILED })
+      entry => entry.storeId === storeId,
+      entry => ({
+        ...entry,
+        status: MessageStatus.FAILED,
+        storeId: undefined,
+      })
     );
     return map ? { messagesByContact: map } : state;
   });
 }
 
 /**
- * Replace an optimistic message (matched by its local messageId) with the
- * persisted version returned by the SDK — copies over the real DB id and the
- * server-assigned status. No-op if no match is found.
+ * Replace an optimistic message (matched by `storeId`) with the persisted
+ * version from the SDK. Clears `storeId`. No-op if no match is found.
  */
 export function replaceOptimisticWithPersisted(
   set: SetFn,
   contactUserId: string,
-  localMessageId: Uint8Array,
+  storeId: string,
   persisted: Message
 ): void {
   patchMessages(set, contactUserId, msgs => {
-    let changed = false;
-    const updated = msgs.map(m => {
-      if (!messageIdEquals(m.messageId, localMessageId)) return m;
-      changed = true;
-      return { ...m, id: persisted.id, status: persisted.status };
-    });
-    return changed ? updated : null;
+    const idx = msgs.findIndex(entry => entry.storeId === storeId);
+    if (idx < 0) return null;
+    const updated = [...msgs];
+    updated[idx] = { ...persisted };
+    return updated;
   });
 }
 
@@ -236,7 +243,7 @@ export function rollbackInsert(
 ) {
   set(state => {
     const map = patchContact(state.messagesByContact, contactUserId, msgs =>
-      [...msgs, message].sort(
+      [...msgs, { ...message }].sort(
         (a, b) => a.timestamp.getTime() - b.timestamp.getTime()
       )
     );
@@ -252,7 +259,7 @@ export function rollbackReplace(
 ) {
   set(state => {
     const map = patchContact(state.messagesByContact, contactUserId, msgs =>
-      msgs.map(m => (m.id === messageId ? original : m))
+      msgs.map(entry => (entry.id === messageId ? { ...original } : entry))
     );
     return map ? { messagesByContact: map } : state;
   });
@@ -278,7 +285,7 @@ export function addReactionToState(
       return state;
     }
     const rxnMap = new Map(state.reactionsByContact);
-    rxnMap.set(contact, [...existing, message]);
+    rxnMap.set(contact, [...existing, { ...message }]);
     return {
       reactionsByContact: rxnMap,
       reactionGroupsCache: patchReactionCache(
@@ -294,7 +301,7 @@ export function addReactionToState(
 export function removeReactionFromState(
   set: SetFn,
   contact: string,
-  predicate: (r: Message) => boolean
+  predicate: (r: StoreMessage) => boolean
 ): boolean {
   let found = false;
   set(state => {
@@ -328,7 +335,7 @@ export function clearReactionsForDeletedMessage(
   state: MessageStoreState,
   contactUserId: string,
   originalMsgId: Uint8Array,
-  messagesByContact: Map<string, Message[]>
+  messagesByContact: Map<string, StoreMessage[]>
 ): Pick<
   MessageStoreState,
   'reactionsByContact' | 'reactionGroupsCache'
