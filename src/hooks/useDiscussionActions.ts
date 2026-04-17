@@ -41,6 +41,10 @@ export function useDiscussionActions({
     async (text: string, replyToId?: number) => {
       if (isSelecting) return;
       if (!contact?.userId) return;
+      setReplyingTo(null);
+      setEditingMessage(null);
+      clearForward();
+      setInputPrefill(undefined);
       try {
         await sendMessage(
           contact.userId,
@@ -48,10 +52,6 @@ export function useDiscussionActions({
           replyToId,
           forwardFromMessageId
         );
-        setReplyingTo(null);
-        setEditingMessage(null);
-        clearForward();
-        setInputPrefill(undefined);
       } catch (error) {
         toast.error(t('failed_to_send'));
         console.error('Failed to send message:', error);
@@ -129,14 +129,13 @@ export function useDiscussionActions({
   const handleConfirmEdit = useCallback(
     async (newContent: string, message: Message) => {
       if (!message.id || !contact?.userId) return;
+      setEditingMessage(null);
+      setInputPrefill(undefined);
       try {
         await editMessage(contact.userId, message.id, newContent);
       } catch (error) {
         toast.error(t('failed_to_edit'));
         console.error('Failed to edit message:', error);
-      } finally {
-        setEditingMessage(null);
-        setInputPrefill(undefined);
       }
     },
     [contact?.userId, editMessage, t, setEditingMessage, setInputPrefill]

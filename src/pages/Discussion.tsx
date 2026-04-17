@@ -9,7 +9,7 @@ import toast from 'react-hot-toast';
 import MessageList, {
   MessageListHandle,
 } from '../components/discussions/MessageList';
-import { Message } from '@massalabs/gossip-sdk';
+import { Message, SessionStatus } from '@massalabs/gossip-sdk';
 import { useGossipSdk } from '../hooks/useGossipSdk';
 import { useDiscussionMessageSelection } from '../hooks/useDiscussionMessageSelection';
 import { useDiscussionScrollToMessage } from '../hooks/useDiscussionScrollToMessage';
@@ -33,6 +33,7 @@ const Discussion: React.FC = () => {
   const location = useLocation();
   const contacts = useDiscussionStore(s => s.contacts);
   const patchDiscussion = useDiscussionStore(s => s.patchDiscussion);
+  const sessionsStatuses = useDiscussionStore(s => s.sessionsStatuses);
 
   const locationState = location.state as {
     prefilledMessage?: string;
@@ -54,6 +55,9 @@ const Discussion: React.FC = () => {
   const [editingMessage, setEditingMessage] = useState<Message | null>(null);
 
   const contact = userId ? contacts.find(c => c.userId === userId) : undefined;
+  const isDiscussionPending =
+    !!contact &&
+    sessionsStatuses.get(contact.userId) === SessionStatus.SelfRequested;
   const onBack = () => navigate(-1);
 
   const safeContact = contact || {
@@ -209,7 +213,7 @@ const Discussion: React.FC = () => {
     const contactUserId = contact?.userId || null;
     if (prevContactUserIdRef.current !== contactUserId) {
       prevContactUserIdRef.current = contactUserId;
-      setCurrentContact(contactUserId);
+      void setCurrentContact(contactUserId);
     }
   }, [contact?.userId, setCurrentContact]);
 
@@ -295,6 +299,12 @@ const Discussion: React.FC = () => {
 
   if (!contact) return null;
 
+  // Hide reply + edit while the session is waiting approval (SelfRequested).
+  const onReplyToMessage = isDiscussionPending
+    ? undefined
+    : handleReplyToMessage;
+  const onEditMessage = isDiscussionPending ? undefined : handleEditMessage;
+
   return (
     <DiscussionLayout
       header={
@@ -357,10 +367,10 @@ const Discussion: React.FC = () => {
           discussion={discussion}
           contact={contact}
           isLoading={isLoading || isDiscussionLoading}
-          onReplyTo={handleReplyToMessage}
+          onReplyTo={onReplyToMessage}
           onForward={handleForwardMessage}
           onDelete={handleDeleteMessage}
-          onEdit={handleEditMessage}
+          onEdit={onEditMessage}
           onReact={(message, emoji) => {
             if (!message.id) return;
             reactToMessage(contact.userId, emoji, message.id).catch(err => {

@@ -1,4 +1,4 @@
-import React, { useRef, useMemo, useCallback } from 'react';
+import React, { useRef, useMemo, useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import MessageContextMenu, {
   type ReactionGroup as ContextMenuReactionGroup,
@@ -58,10 +58,6 @@ interface MessageItemProps {
 }
 
 // ---------------------------------------------------------------------------
-// Shared link renderer (reply/forward/content all use same pattern)
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -87,10 +83,18 @@ const MessageItem: React.FC<MessageItemProps> = ({
   onToggleSelect,
 }) => {
   const { t } = useTranslation('discussions');
+
+  // -------------------------------------------------------------------------
+  // Derived flags
+  // -------------------------------------------------------------------------
   const isOutgoing = message.direction === MessageDirection.OUTGOING;
   const isDeleted = message.type === MessageType.DELETED;
-  const canReply = !!onReplyTo && !isDeleted;
-  const canForward = !!onForward && !isDeleted;
+  // DB ids are auto-increment starting at 1, so 0 / null / undefined all mean
+  // "optimistic, not yet persisted" — hide id-dependent actions in that case.
+  const hasConfirmedId = message.id != null && message.id !== 0;
+  const canReply = !!onReplyTo && !isDeleted && hasConfirmedId;
+  const canForward = !!onForward && !isDeleted && hasConfirmedId;
+  const canReact = !!onReact && !isDeleted && hasConfirmedId;
   const isSending =
     isOutgoing &&
     (message.status === MessageStatus.WAITING_SESSION ||
@@ -99,7 +103,9 @@ const MessageItem: React.FC<MessageItemProps> = ({
     !!message.metadata &&
     (message.metadata as { edited?: boolean }).edited === true;
 
+  // -------------------------------------------------------------------------
   // Refs
+  // -------------------------------------------------------------------------
   const bubbleRef = useRef<HTMLDivElement>(null);
   const markAsReadRef = useMarkMessageAsRead(message);
   const combinedBubbleRef = useCallback(
@@ -112,17 +118,21 @@ const MessageItem: React.FC<MessageItemProps> = ({
   const suppressClickRef = useRef(false);
   const suppressClicksUntilRef = useRef(0);
   const contextMenuOpenRef = useRef(false);
+  const lastLongPressAtRef = useRef(0);
 
-  // Extracted hooks
+  const [isEmojiPickerOpen, setIsEmojiPickerOpen] = useState(false);
+
+  const isAndroid = Capacitor.getPlatform() === 'android';
+
+  // -------------------------------------------------------------------------
+  // Gestures & menu
+  // -------------------------------------------------------------------------
   const textSelection = useTextSelection({
     bubbleRef,
     contextMenuOpenRef,
   });
 
-  const isAndroid = Capacitor.getPlatform() === 'android';
-  const lastLongPressAtRef = useRef(0);
-
-  const handleLongPress = useCallback(() => {
+  const handleMessageLongPress = useCallback(() => {
     if (isDeleted) return;
     const now = Date.now();
     if (now - lastLongPressAtRef.current < POST_GESTURE_SUPPRESS_MS) return;
@@ -145,40 +155,54 @@ const MessageItem: React.FC<MessageItemProps> = ({
   ]);
 
   const longPress = useLongPress({
-    onLongPress: handleLongPress,
+    onLongPress: handleMessageLongPress,
     preventDefaultOnEnd: !isAndroid,
   });
 
-  const contextMenu = useContextMenu({
+  // Shared context passed to gesture/menu hooks — avoids repeating the same
+  // five fields on every call site.
+  const messageCtx = {
     message,
     isOutgoing,
     isDeleted,
     isSelecting,
-    bubbleRef,
-    contextMenuOpenRef,
     longPress,
     onReplyTo,
+  };
+
+  const contextMenu = useContextMenu({
+    ...messageCtx,
+    bubbleRef,
+    contextMenuOpenRef,
     onForward,
     onDelete,
     onEdit,
   });
 
   const swipe = useSwipeToReply({
-    isOutgoing,
-    isDeleted,
-    isSelecting,
+    ...messageCtx,
     isTextSelectable: textSelection.isTextSelectable,
     canReply,
     canForward,
-    onReplyTo,
-    message,
-    longPress,
     suppressClickRef,
     suppressClicksUntilRef,
     longPressPosRef: textSelection.longPressPosRef,
   });
 
   const original = useOriginalMessage({ message, onScrollToMessage });
+
+  // -------------------------------------------------------------------------
+  // Render handlers
+  // -------------------------------------------------------------------------
+  const handleSelectEmoji = useCallback(
+    (emoji: string) => onReact?.(message, emoji),
+    [onReact, message]
+  );
+
+  const handleOpenEmojiPicker = useCallback(() => {
+    setIsEmojiPickerOpen(true);
+    contextMenu.closeContextMenu();
+  }, [contextMenu]);
 
   // Bubble click: on web, left-click toggles selection; on mobile, opens context menu
   const handleBubbleClick = useCallback(
@@ -224,12 +248,13 @@ const MessageItem: React.FC<MessageItemProps> = ({
     [contextMenu, isDeleted]
   );
 
-  // Spacing
+  // -------------------------------------------------------------------------
+  // Styling
+  // -------------------------------------------------------------------------
   const baseSpacingClass = isLastInGroup ? 'mb-1' : 'mb-0.5';
   const spacingClass =
     reactions.length > 0 ? (isLastInGroup ? 'mb-4' : 'mb-3') : baseSpacingClass;
 
-  // Border radius
   const borderRadiusClass = useMemo(() => {
     if (isFirstInGroup && isLastInGroup)
       return isOutgoing
@@ -248,6 +273,9 @@ const MessageItem: React.FC<MessageItemProps> = ({
       : 'rounded-tr-3xl rounded-tl-md rounded-br-3xl rounded-bl-md';
   }, [isFirstInGroup, isLastInGroup, isOutgoing]);
 
+  // -------------------------------------------------------------------------
+  // Render
+  // -------------------------------------------------------------------------
   return (
     <div
       id={id}
@@ -331,17 +359,15 @@ const MessageItem: React.FC<MessageItemProps> = ({
         isOpen={contextMenu.isContextMenuOpen}
         onClose={contextMenu.closeContextMenu}
         isOutgoing={isOutgoing}
+        canReact={canReact}
         reactions={reactions}
-        onSelectEmoji={emoji => onReact?.(message, emoji)}
-        onOpenEmojiPicker={() => {
-          contextMenu.setIsEmojiPickerOpen(true);
-          contextMenu.closeContextMenu();
-        }}
+        onSelectEmoji={handleSelectEmoji}
+        onOpenEmojiPicker={handleOpenEmojiPicker}
       />
 
       <EmojiPickerModal
-        isOpen={contextMenu.isEmojiPickerOpen}
-        onClose={() => contextMenu.setIsEmojiPickerOpen(false)}
+        isOpen={isEmojiPickerOpen}
+        onClose={() => setIsEmojiPickerOpen(false)}
         title={t('message_item.add_reaction')}
         onSelectEmoji={emoji => onReact?.(message, emoji)}
       />

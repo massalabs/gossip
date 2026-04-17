@@ -38,7 +38,6 @@ export function useContextMenu({
   const { t } = useTranslation('discussions');
 
   const [isContextMenuOpen, setIsContextMenuOpen] = useState(false);
-  const [isEmojiPickerOpen, setIsEmojiPickerOpen] = useState(false);
 
   const openContextMenu = useCallback(() => {
     if (!bubbleRef.current || contextMenuOpenRef.current || isDeleted) return;
@@ -94,14 +93,17 @@ export function useContextMenu({
   // Context menu items — depend on stable scalars, not the full message object
   const contextMenuItems = useMemo<MessageContextMenuItem[]>(() => {
     const items: MessageContextMenuItem[] = [];
-    if (onReplyTo && !isDeleted) {
+    // DB ids are auto-increment starting at 1, so 0 / null / undefined all
+    // mean "optimistic, not yet persisted".
+    const hasConfirmedId = message.id != null && message.id !== 0;
+    if (onReplyTo && !isDeleted && hasConfirmedId) {
       items.push({
         label: t('message_item.reply'),
         icon: createElement(CornerUpLeft, { className: 'w-4 h-4' }),
         onClick: () => onReplyTo(message),
       });
     }
-    if (onForward && !isDeleted) {
+    if (onForward && !isDeleted && hasConfirmedId) {
       items.push({
         label: t('message_item.forward'),
         icon: createElement(Share, { className: 'w-4 h-4' }),
@@ -129,14 +131,14 @@ export function useContextMenu({
         },
       });
     }
-    if (onEdit && isOutgoing && !isDeleted && message.id != null) {
+    if (onEdit && isOutgoing && !isDeleted && hasConfirmedId) {
       items.push({
         label: t('message_item.edit'),
         icon: createElement(Edit, { className: 'w-4 h-4' }),
         onClick: () => onEdit(message),
       });
     }
-    if (onDelete && !isDeleted && message.id != null) {
+    if (onDelete && !isDeleted && hasConfirmedId) {
       items.push({
         label: t('message_item.delete'),
         icon: createElement(Trash2, { className: 'w-4 h-4' }),
@@ -158,8 +160,6 @@ export function useContextMenu({
 
   return {
     isContextMenuOpen,
-    isEmojiPickerOpen,
-    setIsEmojiPickerOpen,
     openContextMenu,
     closeContextMenu,
     contextMenuItems,

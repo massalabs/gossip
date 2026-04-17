@@ -64,6 +64,7 @@ describe('MessageContextMenu', () => {
         isOpen={true}
         onClose={onClose}
         isOutgoing={false}
+        canReact={true}
         onSelectEmoji={onSelectEmoji}
         onOpenEmojiPicker={onOpenEmojiPicker}
       />
@@ -83,6 +84,7 @@ describe('MessageContextMenu', () => {
         isOpen={true}
         onClose={onClose}
         isOutgoing={false}
+        canReact={true}
         onSelectEmoji={onSelectEmoji}
         onOpenEmojiPicker={onOpenEmojiPicker}
       />
@@ -100,6 +102,7 @@ describe('MessageContextMenu', () => {
         isOpen={true}
         onClose={onClose}
         isOutgoing={false}
+        canReact={true}
         onSelectEmoji={onSelectEmoji}
         onOpenEmojiPicker={onOpenEmojiPicker}
       />
@@ -123,6 +126,7 @@ describe('MessageContextMenu', () => {
         isOpen={false}
         onClose={onClose}
         isOutgoing={false}
+        canReact={true}
         onSelectEmoji={onSelectEmoji}
         onOpenEmojiPicker={onOpenEmojiPicker}
       />
