@@ -572,19 +572,11 @@ export class MessageService {
           continue;
         }
 
-        if (target.type === MessageType.REACTION) {
-          // Reaction delete: hard-delete the row, not "[Message deleted]"
-          await this.queries.messages.deleteById(target.id);
-          this.eventEmitter.emit(SdkEventType.MESSAGE_DELETED, {
-            messages: [target],
-          });
-        } else {
-          const resDb = await this.PerformDeleteMessage(target);
-          if (!resDb.success) {
-            throw new Error(
-              resDb.error?.message ?? 'Failed to delete message from db'
-            );
-          }
+        const resDb = await this.PerformDeleteMessage(target);
+        if (!resDb.success) {
+          throw new Error(
+            resDb.error?.message ?? 'Failed to delete message from db'
+          );
         }
 
         continue;
@@ -681,19 +673,6 @@ export class MessageService {
           continue;
         }
 
-        // Emit before DB write so UI updates instantly
-        this.emitMessageReceived({
-          messageId: message.messageId,
-          ownerUserId,
-          contactUserId: discussion.contactUserId,
-          content: message.content,
-          type: MessageType.REACTION,
-          direction: MessageDirection.INCOMING,
-          status: MessageStatus.DELIVERED,
-          timestamp: message.sentAt,
-          reactionOf: message.reactionOf,
-        });
-
         const id = await this.queries.messages.insert({
           messageId: message.messageId,
           ownerUserId,
@@ -705,6 +684,19 @@ export class MessageService {
           timestamp: message.sentAt,
           metadata: serializeMetadata({}),
           reactionOf: serializeReactionOf(message.reactionOf),
+        });
+
+        this.emitMessageReceived({
+          id,
+          messageId: message.messageId,
+          ownerUserId,
+          contactUserId: discussion.contactUserId,
+          content: message.content,
+          type: MessageType.REACTION,
+          direction: MessageDirection.INCOMING,
+          status: MessageStatus.DELIVERED,
+          timestamp: message.sentAt,
+          reactionOf: message.reactionOf,
         });
 
         storedIds.push(id);
@@ -732,7 +724,7 @@ export class MessageService {
       );
 
       if (isDuplicate) {
-        log.info('Duplicate message received, skipping', {
+        log.info('Duplicate message received, skip  ping', {
           senderId: message.senderId,
           preview: message.content.slice(0, 30),
         });
@@ -1489,6 +1481,27 @@ export class MessageService {
     }
     const db = tx ?? this.queries.conn.db;
 
+    if (message.type === MessageType.REACTION) {
+      // Reaction delete: hard-delete the row, not "[Message deleted]"
+      try {
+        await this.queries.messages.deleteById(message.id);
+        this.eventEmitter.emit(SdkEventType.MESSAGE_DELETED, {
+          messages: [message],
+        });
+        return { success: true, data: null };
+      } catch (error) {
+        return {
+          success: false,
+          error:
+            error instanceof Error
+              ? error
+              : new Error(
+                  'Unknown error occurred while deleting reaction message'
+                ),
+        };
+      }
+    }
+
     let deletedMessages: Message[] = [];
     let updatedMessages: Message[] = [];
     let discussionId: number | undefined;
@@ -1684,7 +1697,6 @@ export class MessageService {
       reactionOf: { originalMsgId },
     };
     const result = await this.send(message);
-    await this.refreshService?.stateUpdate();
     return result;
   }
 
@@ -1837,24 +1849,33 @@ export class MessageService {
 
     const message = rowToMessage(row);
 
-    // Update message status
-    await this.queries.messages.updateById(id, { status: MessageStatus.READ });
+    // Perform message status update and unread count decrement atomically in a transaction
+    const discussionId = await this.queries.conn.db.transaction(async tx => {
+      // Update message status
+      await this.queries.messages.updateById(
+        id,
+        { status: MessageStatus.READ },
+        tx
+      );
 
-    // Atomically decrement discussion unread count
-    const discussion = await this.queries.discussions.getByOwnerAndContact(
-      message.ownerUserId,
-      message.contactUserId
-    );
+      // Atomically decrement discussion unread count
+      const discussion = await this.queries.discussions.getByOwnerAndContact(
+        message.ownerUserId,
+        message.contactUserId,
+        tx
+      );
+      if (!discussion || !discussion.id) {
+        throw new Error('Discussion not found');
+      }
 
-    if (discussion) {
-      await this.queries.discussions.decrementUnreadCount(discussion.id);
-    }
+      if (discussion) {
+        await this.queries.discussions.decrementUnreadCount(discussion.id, tx);
+      }
+      return discussion.id;
+    });
 
     this.eventEmitter.emit(SdkEventType.MESSAGE_READ, id);
-    this.eventEmitter.emit(
-      SdkEventType.DISCUSSION_UPDATED,
-      discussion?.id ?? 0
-    );
+    this.eventEmitter.emit(SdkEventType.DISCUSSION_UPDATED, discussionId);
 
     return true;
   }

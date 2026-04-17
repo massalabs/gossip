@@ -10,7 +10,7 @@ import { createSelectors } from './utils/createSelectors';
 import { useAccountStore } from './accountStore';
 import { getSdk } from './sdkStore';
 
-import type { MessageStoreState } from './messageStore.types';
+import type { MessageStoreState, StoreMessage } from './messageStore.types';
 export type { ReactionGroup } from './messageStore.types';
 
 import {
@@ -23,14 +23,23 @@ import {
   rollbackReplace,
   addReactionToState,
   clearReactionsForDeletedMessage,
-  EMPTY_MESSAGES,
   EMPTY_REACTIONS,
+  EMPTY_STORE_MESSAGES,
   recomputeFullCache,
   removeReactionFromState,
+  patchReactionCache,
 } from './messageStore.helpers';
 import { createEventHandlers } from './messageStore.events';
 
-const MESSAGE_ID_SIZE = 12;
+const createStoreId = (): string => {
+  if (
+    typeof crypto !== 'undefined' &&
+    typeof crypto.randomUUID === 'function'
+  ) {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+};
 
 /**
  * Resolve the optional replyTo / forwardOf fields for a new outgoing message.
@@ -107,8 +116,18 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
       set(state => {
         const msgMap = new Map(state.messagesByContact);
         const rxnMap = new Map(state.reactionsByContact);
-        if (messages.length > 0) msgMap.set(newContactId, messages);
-        if (reactions.length > 0) rxnMap.set(newContactId, reactions);
+        if (messages.length > 0) {
+          msgMap.set(
+            newContactId,
+            messages.map(m => ({ ...m }))
+          );
+        }
+        if (reactions.length > 0) {
+          rxnMap.set(
+            newContactId,
+            reactions.map(r => ({ ...r }))
+          );
+        }
         return {
           messagesByContact: msgMap,
           reactionsByContact: rxnMap,
@@ -130,13 +149,23 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
     if (sdk.isSessionOpen) {
       try {
         const discussions = await sdk.discussions.list();
-        const msgMap = new Map<string, Message[]>();
-        const rxnMap = new Map<string, Message[]>();
+        const msgMap = new Map<string, StoreMessage[]>();
+        const rxnMap = new Map<string, StoreMessage[]>();
         for (const d of discussions) {
           const msgs = await sdk.messages.getVisibleMessages(d.contactUserId);
           const rxns = await sdk.messages.getReactions(d.contactUserId);
-          if (msgs.length > 0) msgMap.set(d.contactUserId, msgs);
-          if (rxns.length > 0) rxnMap.set(d.contactUserId, rxns);
+          if (msgs.length > 0) {
+            msgMap.set(
+              d.contactUserId,
+              msgs.map(m => ({ ...m }))
+            );
+          }
+          if (rxns.length > 0) {
+            rxnMap.set(
+              d.contactUserId,
+              rxns.map(r => ({ ...r }))
+            );
+          }
         }
         set({
           messagesByContact: msgMap,
@@ -177,10 +206,8 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
       forwardFromMessageId
     );
 
-    // Local messageId for React key stability + matching the persisted reply.
     // No `id` yet — the UI uses `id == null` to detect unconfirmed messages
     // and hide id-dependent actions (reply/forward/edit/delete/react/swipe).
-    const messageId = crypto.getRandomValues(new Uint8Array(MESSAGE_ID_SIZE));
     const optimisticMsg: Message = {
       ownerUserId: userProfile.userId,
       contactUserId,
@@ -189,41 +216,44 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
       direction: MessageDirection.OUTGOING,
       status: MessageStatus.WAITING_SESSION,
       timestamp: new Date(),
-      messageId,
       replyTo,
       forwardOf,
     };
+    const storeId = createStoreId();
 
-    patchMessages(set, contactUserId, msgs => [...msgs, optimisticMsg]);
+    patchMessages(set, contactUserId, msgs => [
+      ...msgs,
+      { ...optimisticMsg, storeId },
+    ]);
 
     try {
       const result = await getSdk().messages.send(optimisticMsg);
       if (!result.success || !result.message) {
         console.error('Failed to send message:', result.error);
-        markMessageFailed(set, messageId);
+        markMessageFailed(set, storeId);
         return;
       }
       replaceOptimisticWithPersisted(
         set,
         contactUserId,
-        messageId,
+        storeId,
         result.message
       );
     } catch (error) {
       console.error('Failed to send message:', error);
-      markMessageFailed(set, messageId);
+      markMessageFailed(set, storeId);
     }
   },
 
   getMessagesForContact: contactUserId =>
-    get().messagesByContact.get(contactUserId) || EMPTY_MESSAGES,
+    get().messagesByContact.get(contactUserId) ?? EMPTY_STORE_MESSAGES,
 
   getReactionsForMessage: (msgId: Uint8Array) =>
     get().reactionGroupsCache.get(messageIdKey(msgId)) || EMPTY_REACTIONS,
 
   deleteMessage: async (contactUserId, messageId) => {
-    const msgs = get().messagesByContact.get(contactUserId) || EMPTY_MESSAGES;
-    const original = msgs.find(m => m.id === messageId);
+    const msgs = get().messagesByContact.get(contactUserId) || [];
+    const original = msgs.find(entry => entry.id === messageId);
     if (!original) return;
 
     // Atomic: mark as deleted AND clear its reactions in a single set() to
@@ -231,10 +261,14 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
     // reactions linger.
     set(state => {
       const msgMap = patchContact(state.messagesByContact, contactUserId, ms =>
-        ms.map(m =>
-          m.id === messageId
-            ? { ...m, type: MessageType.DELETED, content: '[Message deleted]' }
-            : m
+        ms.map(entry =>
+          entry.id === messageId
+            ? {
+                ...entry,
+                type: MessageType.DELETED,
+                content: '[Message deleted]',
+              }
+            : entry
         )
       );
       if (!msgMap) return state;
@@ -258,19 +292,19 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
   },
 
   editMessage: async (contactUserId, messageId, newContent) => {
-    const msgs = get().messagesByContact.get(contactUserId) || EMPTY_MESSAGES;
-    const original = msgs.find(m => m.id === messageId);
+    const msgs = get().messagesByContact.get(contactUserId) || [];
+    const original = msgs.find(entry => entry.id === messageId);
     if (!original) return;
 
     patchMessages(set, contactUserId, ms =>
-      ms.map(m =>
-        m.id === messageId
+      ms.map(entry =>
+        entry.id === messageId
           ? {
-              ...m,
+              ...entry,
               content: newContent,
-              metadata: { ...m.metadata, edited: true },
+              metadata: { ...(entry.metadata ?? {}), edited: true },
             }
-          : m
+          : entry
       )
     );
 
@@ -283,13 +317,13 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
   },
 
   reactToMessage: async (contactUserId, emoji, messageDbId) => {
-    const target = (
-      get().messagesByContact.get(contactUserId) || EMPTY_MESSAGES
-    ).find(m => m.id === messageDbId);
+    const target = (get().messagesByContact.get(contactUserId) || []).find(
+      entry => entry.id === messageDbId
+    );
     if (!target?.messageId) return;
 
     const existing = (
-      get().reactionsByContact.get(contactUserId) || EMPTY_MESSAGES
+      get().reactionsByContact.get(contactUserId) || EMPTY_STORE_MESSAGES
     ).find(
       r =>
         r.direction === MessageDirection.OUTGOING &&
@@ -299,13 +333,13 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
 
     if (existing) {
       if (existing.content === emoji) {
-        get().removeReaction(existing.id, existing.messageId);
+        await get().removeReaction(existing.id, existing.messageId);
         return;
       }
-      get().removeReaction(existing.id, existing.messageId);
+      await get().removeReaction(existing.id, existing.messageId);
     }
 
-    const reactionMsg: Message = {
+    const reactionMsg: StoreMessage = {
       ownerUserId: useAccountStore.getState().userProfile?.userId ?? '',
       contactUserId,
       content: emoji,
@@ -313,26 +347,50 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
       direction: MessageDirection.OUTGOING,
       status: MessageStatus.WAITING_SESSION,
       timestamp: new Date(),
-      messageId: crypto.getRandomValues(new Uint8Array(MESSAGE_ID_SIZE)),
       reactionOf: { originalMsgId: target.messageId },
+      storeId: createStoreId(),
     };
 
     // Optimistic: add reaction to store immediately
     addReactionToState(set, contactUserId, reactionMsg, false);
 
     try {
-      await getSdk().messages.send(reactionMsg);
+      const result = await getSdk().messages.send(reactionMsg);
+      if (!result.success || !result.message) {
+        throw new Error('Failed to send reaction: ' + result.error);
+      }
+      set(state => {
+        const rxns = state.reactionsByContact.get(contactUserId) || [];
+        const idx = rxns.findIndex(r => r.storeId === reactionMsg.storeId);
+        if (idx < 0) return state;
+        const updated = [...rxns];
+        updated[idx] = {
+          ...result.message!, // result.message has been checked to be not null previously
+          storeId: undefined,
+        };
+        const newMap = new Map(state.reactionsByContact);
+        newMap.set(contactUserId, updated);
+        return {
+          reactionsByContact: newMap,
+          reactionGroupsCache: patchReactionCache(
+            state.reactionGroupsCache,
+            contactUserId,
+            state.messagesByContact,
+            newMap
+          ),
+        };
+      });
     } catch (error) {
-      console.error('Failed to send reaction:', error);
+      console.error(error);
       // Remove the optimistic reaction on failure
       removeReactionFromState(set, contactUserId, r =>
-        messageIdEquals(r.messageId, reactionMsg.messageId)
+        r.storeId ? r.storeId === reactionMsg.storeId : false
       );
     }
   },
 
   removeReaction: async (reactionDbId, reactionMessageId?) => {
-    const match = (r: Message) =>
+    const match = (r: StoreMessage) =>
       reactionMessageId
         ? messageIdEquals(r.messageId, reactionMessageId)
         : r.id === reactionDbId;

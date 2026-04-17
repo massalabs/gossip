@@ -4,7 +4,7 @@ import {
   MessageType,
   SdkEventType,
 } from '@massalabs/gossip-sdk';
-import type { MessageStoreState } from './messageStore.types';
+import type { MessageStoreState, StoreMessage } from './messageStore.types';
 import type { getSdk } from './sdkStore';
 import {
   messageIdEquals,
@@ -73,12 +73,16 @@ export function createEventHandlers(
         message.contactUserId,
         msgs => {
           let changed = false;
-          const updated = msgs.map(m => {
-            if (messageIdEquals(m.messageId, message.messageId)) {
+          const updated = msgs.map(entry => {
+            if (messageIdEquals(entry.messageId, message.messageId)) {
               changed = true;
-              return { ...m, id: message.id ?? m.id, status: message.status };
+              return {
+                ...entry,
+                id: message.id ?? entry.id,
+                status: message.status,
+              };
             }
-            return m;
+            return entry;
           });
           return changed ? updated : null;
         }
@@ -121,18 +125,24 @@ export function createEventHandlers(
   }: {
     messages: Message[];
   }) => {
-    set(state => {
-      const map = new Map<string, Message[]>(state.messagesByContact);
-      let changed = false;
-      for (const msg of deletedMessages) {
-        const msgs = map.get(msg.contactUserId);
-        if (!msgs) continue;
-        const updated = msgs.filter(m => m.id !== msg.id);
-        map.set(msg.contactUserId, updated);
-        changed = true;
+    const map = new Map<string, StoreMessage[]>(get().messagesByContact);
+    let postMsgchanged = false;
+    for (const msg of deletedMessages) {
+      if (msg.type === MessageType.REACTION) {
+        removeReactionFromState(set, msg.contactUserId, r => r.id === msg.id);
+        continue;
       }
-      return changed ? { messagesByContact: map } : state;
-    });
+
+      const msgs = map.get(msg.contactUserId);
+      if (!msgs) continue;
+      const updated = msgs.filter(entry => entry.id !== msg.id);
+      map.set(msg.contactUserId, updated);
+      postMsgchanged = true;
+    }
+
+    if (postMsgchanged) {
+      set(_ => ({ messagesByContact: map }));
+    }
   };
 
   const onUpdated = ({
@@ -141,16 +151,15 @@ export function createEventHandlers(
     messages: Message[];
   }) => {
     set(state => {
-      const map = new Map<string, Message[]>(state.messagesByContact);
+      const map = new Map<string, StoreMessage[]>(state.messagesByContact);
       let changed = false;
       for (const msg of updatedMessages) {
         const msgs = map.get(msg.contactUserId);
         if (!msgs) continue;
-        const idx = msgs.findIndex(m => m.id === msg.id);
+        const idx = msgs.findIndex(entry => entry.id === msg.id);
+        if (idx < 0) continue;
         const updated = [...msgs];
-        if (idx >= 0) {
-          updated[idx] = msg;
-        }
+        updated[idx] = { ...msg };
         map.set(msg.contactUserId, updated);
         changed = true;
       }
@@ -162,8 +171,11 @@ export function createEventHandlers(
     set(state => {
       const map = findAndPatch(
         state.messagesByContact,
-        m => m.id === messageDbId,
-        m => ({ ...m, status: MessageStatus.READ })
+        entry => entry.id === messageDbId,
+        entry => ({
+          ...entry,
+          status: MessageStatus.READ,
+        })
       );
       return map ? { messagesByContact: map } : state;
     });
@@ -178,8 +190,11 @@ export function createEventHandlers(
     set(state => {
       const map = findAndPatch(
         state.messagesByContact,
-        m => m.id === messageDbId,
-        m => ({ ...m, status: MessageStatus.DELIVERED })
+        entry => entry.id === messageDbId,
+        entry => ({
+          ...entry,
+          status: MessageStatus.DELIVERED,
+        })
       );
       return map ? { messagesByContact: map } : state;
     });
@@ -207,6 +222,7 @@ export function createEventHandlers(
 
         // Keep optimistic messages not yet in DB
         const pendingOptimistic = currentMsgs.filter(m => {
+          if (!m.storeId) return false;
           if (m.status !== MessageStatus.WAITING_SESSION) return false;
           if (m.id && dbMsgDbIds.has(m.id)) return false;
           if (m.messageId && dbMsgIdKeys.has(messageIdKey(m.messageId)))
@@ -214,7 +230,10 @@ export function createEventHandlers(
           return true;
         });
 
-        const merged = [...dbMessages, ...pendingOptimistic];
+        const merged: StoreMessage[] = [
+          ...dbMessages.map(m => ({ ...m })),
+          ...pendingOptimistic,
+        ];
 
         // Same for reactions
         const currentRxns = state.reactionsByContact.get(currentContact) || [];
@@ -228,7 +247,10 @@ export function createEventHandlers(
             return false;
           return true;
         });
-        const mergedRxns = [...dbReactions, ...pendingRxns];
+        const mergedRxns: StoreMessage[] = [
+          ...dbReactions.map(r => ({ ...r })),
+          ...pendingRxns,
+        ];
 
         const msgMap = new Map(state.messagesByContact);
         const rxnMap = new Map(state.reactionsByContact);

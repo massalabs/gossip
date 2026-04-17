@@ -5,6 +5,7 @@ import { useDiscussion } from '../hooks/useDiscussion';
 import { useAppStore } from '../stores/appStore';
 import { useDiscussionStore } from '../stores/discussionStore';
 import { useMessageStore } from '../stores/messageStore';
+import { EMPTY_STORE_MESSAGES } from '../stores/messageStore.helpers';
 import toast from 'react-hot-toast';
 import MessageList, {
   MessageListHandle,
@@ -98,7 +99,7 @@ const Discussion: React.FC = () => {
 
   const setCurrentContact = useMessageStore(s => s.setCurrentContact);
   const messages = useMessageStore(s =>
-    contact ? s.getMessagesForContact(contact.userId) : []
+    contact ? s.getMessagesForContact(contact.userId) : EMPTY_STORE_MESSAGES
   );
   const reactionGroups = useMessageStore(s => s.reactionGroupsCache);
   const reactToMessage = useMessageStore(s => s.reactToMessage);

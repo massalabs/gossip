@@ -421,8 +421,7 @@ describe('MessageService', () => {
     expect(originalRow?.type).toBe(MessageType.TEXT);
 
     // Reaction row should now be marked DELETED with "[Message deleted]"
-    expect(reactionRow?.type).toBe(MessageType.DELETED);
-    expect(reactionRow?.content).toBe('[Message deleted]');
+    expect(reactionRow).toBeUndefined();
 
     // getVisibleMessages must not surface the deleted reaction as a bubble
     const visible = await service.getVisibleMessages(CONTACT_USER_ID);

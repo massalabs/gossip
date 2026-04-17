@@ -167,7 +167,6 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
     };
 
     const sdk = getSdk();
-    sdk.on(SdkEventType.MESSAGE_READ, debouncedFetch);
     sdk.on(SdkEventType.SESSION_CREATED, debouncedFetch);
     sdk.on(SdkEventType.SESSION_ACCEPTED, debouncedFetch);
     sdk.on(SdkEventType.SESSION_RENEWED, debouncedFetch);

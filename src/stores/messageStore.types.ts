@@ -7,9 +7,13 @@ export interface ReactionGroup {
   myReactionMessageId?: Uint8Array;
 }
 
+export interface StoreMessage extends Message {
+  storeId?: string;
+}
+
 export interface MessageStoreState {
-  messagesByContact: Map<string, Message[]>;
-  reactionsByContact: Map<string, Message[]>;
+  messagesByContact: Map<string, StoreMessage[]>;
+  reactionsByContact: Map<string, StoreMessage[]>;
   reactionGroupsCache: Map<string, ReactionGroup[]>;
   currentContactUserId: string | null;
   cleanupFn: (() => void) | null;
@@ -23,7 +27,8 @@ export interface MessageStoreState {
     replyToId?: number,
     forwardFromMessageId?: number
   ) => Promise<void>;
-  getMessagesForContact: (contactUserId: string) => Message[];
+  /** Same array reference until the store replaces that contact’s list (Zustand-safe). */
+  getMessagesForContact: (contactUserId: string) => StoreMessage[];
   getReactionsForMessage: (messageId: Uint8Array) => ReactionGroup[];
   deleteMessage: (contactUserId: string, messageId: number) => Promise<void>;
   editMessage: (
