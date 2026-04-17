@@ -660,68 +660,6 @@ describe('MessageService', () => {
   });
 });
 
-describe('processSendQueueForContact: Encryption Error', () => {
-  let mockSession: SessionModule;
-  let messageService: MessageService;
-
-  beforeEach(async () => {
-    await clearAllTables();
-    mockSession = createMockSession();
-    await insertTestContactAndDiscussion();
-  });
-
-  it('should fall back to slow path when encryption fails', async () => {
-    (mockSession.sendMessage as ReturnType<typeof vi.fn>).mockImplementation(
-      () => {
-        throw new Error('Encryption failed: invalid session state');
-      }
-    );
-
-    messageService = new MessageService(
-      new MockMessageProtocol(),
-      mockSession,
-      new SdkEventEmitter(),
-      defaultSdkConfig,
-      getTestQueries()
-    );
-
-    // Fast path catches the encrypt error and bails gracefully —
-    // the message is inserted via the slow path as WAITING_SESSION.
-    const result = await messageService.sendMessage(createTestMessage());
-    expect(result.success).toBe(true);
-    expect(result.message?.status).toBe(MessageStatus.WAITING_SESSION);
-  });
-
-  it('should leave message as WAITING_SESSION when encryption fails', async () => {
-    (mockSession.sendMessage as ReturnType<typeof vi.fn>).mockImplementation(
-      () => {
-        throw new Error('Encryption error');
-      }
-    );
-
-    messageService = new MessageService(
-      new MockMessageProtocol(),
-      mockSession,
-      new SdkEventEmitter(),
-      defaultSdkConfig,
-      getTestQueries()
-    );
-
-    // Fast path catches the encrypt error and bails — slow path inserts
-    // the message as WAITING_SESSION for retry on the next stateUpdate.
-    const result = await messageService.sendMessage(createTestMessage());
-    expect(result.success).toBe(true);
-
-    const messages = await getTestQueries().messages.getByOwnerAndContact(
-      OWNER_USER_ID,
-      CONTACT_USER_ID
-    );
-
-    expect(messages.length).toBe(1);
-    expect(messages[0].status).toBe(MessageStatus.WAITING_SESSION);
-  });
-});
-
 describe('deleteReactionsForMessage query', () => {
   beforeEach(clearAllTables);
 

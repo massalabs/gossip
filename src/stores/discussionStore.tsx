@@ -167,8 +167,6 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
     };
 
     const sdk = getSdk();
-    sdk.on(SdkEventType.MESSAGE_RECEIVED, onMessageEvent);
-    sdk.on(SdkEventType.MESSAGE_SENT, onMessageEvent);
     sdk.on(SdkEventType.MESSAGE_READ, debouncedFetch);
     sdk.on(SdkEventType.SESSION_CREATED, debouncedFetch);
     sdk.on(SdkEventType.SESSION_ACCEPTED, debouncedFetch);
@@ -194,8 +192,6 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
     const cleanupFn = () => {
       if (debounceTimer) clearTimeout(debounceTimer);
       try {
-        sdk.off(SdkEventType.MESSAGE_RECEIVED, onMessageEvent);
-        sdk.off(SdkEventType.MESSAGE_SENT, onMessageEvent);
         sdk.off(SdkEventType.MESSAGE_READ, debouncedFetch);
         sdk.off(SdkEventType.SESSION_CREATED, debouncedFetch);
         sdk.off(SdkEventType.SESSION_ACCEPTED, debouncedFetch);

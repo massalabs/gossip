@@ -116,6 +116,48 @@ export function createEventHandlers(
     }
   };
 
+  const onDeleted = ({
+    messages: deletedMessages,
+  }: {
+    messages: Message[];
+  }) => {
+    set(state => {
+      const map = new Map<string, Message[]>(state.messagesByContact);
+      let changed = false;
+      for (const msg of deletedMessages) {
+        const msgs = map.get(msg.contactUserId);
+        if (!msgs) continue;
+        const updated = msgs.filter(m => m.id !== msg.id);
+        map.set(msg.contactUserId, updated);
+        changed = true;
+      }
+      return changed ? { messagesByContact: map } : state;
+    });
+  };
+
+  const onUpdated = ({
+    messages: updatedMessages,
+  }: {
+    messages: Message[];
+  }) => {
+    set(state => {
+      const map = new Map<string, Message[]>(state.messagesByContact);
+      let changed = false;
+      for (const msg of updatedMessages) {
+        const msgs = map.get(msg.contactUserId);
+        if (!msgs) continue;
+        const idx = msgs.findIndex(m => m.id === msg.id);
+        const updated = [...msgs];
+        if (idx >= 0) {
+          updated[idx] = msg;
+        }
+        map.set(msg.contactUserId, updated);
+        changed = true;
+      }
+      return changed ? { messagesByContact: map } : state;
+    });
+  };
+
   const onRead = (messageDbId: number) => {
     set(state => {
       const map = findAndPatch(

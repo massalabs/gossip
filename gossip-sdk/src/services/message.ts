@@ -575,6 +575,9 @@ export class MessageService {
         if (target.type === MessageType.REACTION) {
           // Reaction delete: hard-delete the row, not "[Message deleted]"
           await this.queries.messages.deleteById(target.id);
+          this.eventEmitter.emit(SdkEventType.MESSAGE_DELETED, {
+            messages: [target],
+          });
         } else {
           const resDb = await this.PerformDeleteMessage(target);
           if (!resDb.success) {
@@ -762,9 +765,6 @@ export class MessageService {
         forwardOf: message.forwardOf,
       };
 
-      // Emit before DB write — UI shows message instantly
-      this.emitMessageReceived(incomingMsg);
-
       const id = await this.queries.messages.insert({
         messageId: message.messageId,
         ownerUserId,
@@ -794,6 +794,7 @@ export class MessageService {
 
       // Re-emit with DB id so the store patches the optimistic message
       this.emitMessageReceived({ ...incomingMsg, id });
+      this.eventEmitter.emit(SdkEventType.DISCUSSION_UPDATED, discussion.id);
     }
 
     return storedIds;
@@ -930,21 +931,23 @@ export class MessageService {
       };
     }
 
-    const queuedMessage = {
-      ...message,
-      id: messageIdDb,
-      status: MessageStatus.WAITING_SESSION,
-    };
-
     /*
-    Trigger a state update to send the new message.
-    If the stateUpdate function is already running, it will be skipped.
+    Trigger a sending queue state update for contact in order to send the new message.
+    If the processSendQueueForContact function is already running, it will be skipped.
     */
-    await this.refreshService?.stateUpdate();
+    await this.processSendQueueForContact(message.contactUserId);
+
+    const messageDb = await this.queries.messages.getById(messageIdDb);
+    if (!messageDb) {
+      return {
+        success: false,
+        error: 'Could not retrieve message after adding it to the database',
+      };
+    }
 
     return {
       success: true,
-      message: queuedMessage,
+      message: rowToMessage(messageDb),
     };
   }
 
@@ -1517,7 +1520,7 @@ export class MessageService {
           trx
         );
 
-        if (message.type === MessageType.TEXT) {
+        if (POST_MESSAGE_TYPES.includes(message.type)) {
           // If the message to delete is the last text message in the discussion, update the discussion to the previous last text message
           if (discussion.lastMessageId === message.id) {
             const lastMessage =
@@ -1628,63 +1631,41 @@ export class MessageService {
 
     const ownerUserId = this.session.userIdEncoded;
 
-    // Emit optimistic event so UI updates immediately (skip for reactions —
-    // the store handles reaction removal separately).
-    if (row.type !== MessageType.REACTION) {
-      this.eventEmitter.emit(SdkEventType.MESSAGE_DELETED_OPTIMISTIC, {
-        contactUserId: row.contactUserId,
-        messageDbId: id,
-        originalMsgId: row.messageId,
-      });
-    }
+    const callbackAfterDbCommit: (() => void) | null =
+      await this.queries.conn.db.transaction(async tx => {
+        const res = await this.PerformDeleteMessage(rowToMessage(row), tx);
+        if (!res.success) {
+          tx.rollback(); // if deleting the message from the db fails, rollback the transaction
+          throw new Error(
+            res.error?.message ?? 'Failed to delete message from db'
+          );
+        }
 
-    try {
-      const callbackAfterDbCommit: (() => void) | null =
-        await this.queries.conn.db.transaction(async tx => {
-          const res = await this.PerformDeleteMessage(rowToMessage(row), tx);
-          if (!res.success) {
-            tx.rollback(); // if deleting the message from the db fails, rollback the transaction
-            throw new Error(
-              res.error?.message ?? 'Failed to delete message from db'
-            );
-          }
-
-          // Send the delete control message to the peer
-          const controlMessage: Omit<Message, 'id'> = {
-            ownerUserId,
-            contactUserId: row.contactUserId,
-            content: '',
-            type: MessageType.DELETED,
-            direction: MessageDirection.OUTGOING,
-            status: MessageStatus.WAITING_SESSION,
-            timestamp: new Date(),
-            deleteOf: { originalMsgId: row.messageId! }, // row.messageId was previously verified to be not null
-          };
-
-          const result = await this.sendMessage(controlMessage, tx);
-          if (!result.success) {
-            tx.rollback(); // if sending the delete control message fails, rollback the transaction
-            throw new Error(result.error ?? 'Failed to enqueue delete message');
-          }
-          return res.data;
-        });
-
-      if (callbackAfterDbCommit) {
-        callbackAfterDbCommit();
-      }
-
-      return true;
-    } catch (error) {
-      // Rollback: emit failure so store can restore original
-      if (row.type !== MessageType.REACTION) {
-        this.eventEmitter.emit(SdkEventType.MESSAGE_DELETE_FAILED, {
+        // Send the delete control message to the peer
+        const controlMessage: Omit<Message, 'id'> = {
+          ownerUserId,
           contactUserId: row.contactUserId,
-          messageDbId: id,
-          original,
-        });
-      }
-      throw error;
+          content: '',
+          type: MessageType.DELETED,
+          direction: MessageDirection.OUTGOING,
+          status: MessageStatus.WAITING_SESSION,
+          timestamp: new Date(),
+          deleteOf: { originalMsgId: row.messageId! }, // row.messageId was previously verified to be not null
+        };
+
+        const result = await this.sendMessage(controlMessage, tx);
+        if (!result.success) {
+          tx.rollback(); // if sending the delete control message fails, rollback the transaction
+          throw new Error(result.error ?? 'Failed to enqueue delete message');
+        }
+        return res.data;
+      });
+
+    if (callbackAfterDbCommit) {
+      callbackAfterDbCommit();
     }
+
+    return true;
   }
 
   async sendReaction(
@@ -1787,59 +1768,43 @@ export class MessageService {
     const existingMetadata = deserializeMetadata(row.metadata) ?? {};
     const mergedMetadata = { ...existingMetadata, edited: true };
 
-    await this.queries.messages.updateById(id, {
-      content: newContent,
-      metadata: serializeMetadata(mergedMetadata),
-    });
+    const callbackAfterDbCommit: (() => void) | null =
+      await this.queries.conn.db.transaction(async tx => {
+        const res = await this.performEditMessage(
+          newContent,
+          rowToMessage(row),
+          mergedMetadata,
+          tx
+        );
+        if (!res.success) {
+          tx.rollback();
+          throw new Error(res.error?.message ?? 'Failed to edit message in db');
+        }
 
-    try {
-      const callbackAfterDbCommit: (() => void) | null =
-        await this.queries.conn.db.transaction(async tx => {
-          const res = await this.performEditMessage(
-            newContent,
-            original,
-            mergedMetadata,
-            tx
-          );
-          if (!res.success) {
-            tx.rollback();
-            throw new Error(
-              res.error?.message ?? 'Failed to edit message in db'
-            );
-          }
+        const controlMessage: Omit<Message, 'id'> = {
+          ownerUserId,
+          contactUserId: row.contactUserId,
+          content: newContent,
+          type: MessageType.TEXT,
+          direction: MessageDirection.OUTGOING,
+          status: MessageStatus.WAITING_SESSION,
+          timestamp: new Date(),
+          editOf: { originalMsgId: row.messageId! }, // row.messageId was previously verified to be not null
+          metadata: { control: 'edit' },
+        };
 
-          const controlMessage: Omit<Message, 'id'> = {
-            ownerUserId,
-            contactUserId: row.contactUserId,
-            content: newContent,
-            type: MessageType.TEXT,
-            direction: MessageDirection.OUTGOING,
-            status: MessageStatus.WAITING_SESSION,
-            timestamp: new Date(),
-            editOf: { originalMsgId: row.messageId! }, // row.messageId was previously verified to be not null
-            metadata: { control: 'edit' },
-          };
-
-          const result = await this.sendMessage(controlMessage, tx);
-          if (!result.success) {
-            tx.rollback();
-            throw new Error(result.error ?? 'Failed to enqueue edit message');
-          }
-          return res.data;
-        });
-
-      if (callbackAfterDbCommit) {
-        callbackAfterDbCommit();
-      }
-      return true;
-    } catch (error) {
-      this.eventEmitter.emit(SdkEventType.MESSAGE_EDIT_FAILED, {
-        contactUserId: row.contactUserId,
-        messageDbId: id,
-        original,
+        const result = await this.sendMessage(controlMessage, tx);
+        if (!result.success) {
+          tx.rollback();
+          throw new Error(result.error ?? 'Failed to enqueue edit message');
+        }
+        return res.data;
       });
-      throw error;
+
+    if (callbackAfterDbCommit) {
+      callbackAfterDbCommit();
     }
+    return true;
   }
 
   /**
