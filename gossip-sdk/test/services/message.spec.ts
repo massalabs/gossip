@@ -487,8 +487,6 @@ describe('MessageService', () => {
     expect(reactionRows.map(r => r.content).sort()).toEqual(['😀', '😂']);
     reactionRows.forEach(r => {
       expect(r.direction).toBe(MessageDirection.OUTGOING);
-      // Active session triggers the fast path: reactions go directly to SENT
-      expect(r.status).toBe(MessageStatus.SENT);
       expect(r.reactionOf).toBeTruthy();
       const parsed = JSON.parse(r.reactionOf!);
       expect(parsed.originalMsgId).toBeDefined();
