@@ -21,6 +21,7 @@ interface MessageContextMenuProps {
   isOpen: boolean;
   onClose: () => void;
   isOutgoing: boolean;
+  canReact?: boolean;
   reactions?: ReactionGroup[];
   onSelectEmoji?: (emoji: string) => void;
   onOpenEmojiPicker?: () => void;
@@ -30,6 +31,7 @@ const MessageContextMenu: React.FC<MessageContextMenuProps> = ({
   items,
   isOpen,
   onClose,
+  canReact = false,
   reactions,
   onSelectEmoji,
   onOpenEmojiPicker,
@@ -86,7 +88,7 @@ const MessageContextMenu: React.FC<MessageContextMenuProps> = ({
         style={{ '--menu-origin': 'center center' } as React.CSSProperties}
       >
         {/* Emoji reaction bar — wider, sits above the menu */}
-        {(reactions || onOpenEmojiPicker) && (
+        {canReact && (
           <div className="flex items-center gap-1.5 px-2 py-1.5 bg-card border border-border rounded-full shadow-xl pointer-events-auto">
             {DEFAULT_EMOJIS.map(emoji => {
               const match = reactions?.find(r => r.emoji === emoji);

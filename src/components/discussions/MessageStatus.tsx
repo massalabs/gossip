@@ -35,12 +35,12 @@ const MessageStatusIndicator: React.FC<MessageStatusProps> = React.memo(
           isOutgoing ? 'text-accent-foreground/80' : 'text-muted-foreground'
         }`}
       >
-        {isEdited && !isSending && (
+        {isEdited && (
           <span className="text-[10px] italic opacity-75">
             {t('message_item.edited')}
           </span>
         )}
-        {showTimestamp && !isSending && (
+        {showTimestamp && (
           <span className="text-[11px] font-medium">
             {formatTime(timestamp)}
           </span>

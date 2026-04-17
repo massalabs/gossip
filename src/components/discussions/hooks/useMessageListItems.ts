@@ -144,10 +144,16 @@ export function useVirtualItems(
         !prevMessage ||
         isDifferentDay(message.timestamp, prevMessage.timestamp)
       ) {
+        // Key off messageId (stable from optimistic insert) or timestamp —
+        // never `message.id`, which flips from undefined to a DB id after
+        // the SDK write and would remount the separator.
+        const stableKey = message.messageId
+          ? message.messageId.join(',')
+          : String(message.timestamp.getTime());
         items.push({
           type: 'date',
           date: message.timestamp,
-          key: `date-${message.id}`,
+          key: `date-${stableKey}`,
         });
       }
 

@@ -17,7 +17,6 @@ import {
   clearReactionsForDeletedMessage,
   patchReactionCache,
   recomputeFullCache,
-  rollbackReplace,
   type SetFn,
 } from './messageStore.helpers';
 
@@ -28,21 +27,6 @@ export function createEventHandlers(
   set: SetFn,
   get: GetFn
 ) {
-  const onOptimistic = (message: Message) => {
-    if (message.type === MessageType.REACTION) {
-      addReactionToState(set, message.contactUserId, message, false);
-      return;
-    }
-    set(state => {
-      const map = patchContact(
-        state.messagesByContact,
-        message.contactUserId,
-        msgs => [...msgs, message]
-      );
-      return map ? { messagesByContact: map } : state;
-    });
-  };
-
   const onReceived = (message: Message) => {
     if (message.type === MessageType.REACTION) {
       addReactionToState(set, message.contactUserId, message, true);
@@ -132,50 +116,6 @@ export function createEventHandlers(
     }
   };
 
-  const onWriteFailed = ({
-    messageId: failedMessageId,
-    entityType,
-  }: {
-    messageId: Uint8Array | undefined;
-    entityType: string;
-    error: Error;
-  }) => {
-    if (entityType !== 'message') return;
-    set(state => {
-      // Try messages first
-      const map = findAndPatch(
-        state.messagesByContact,
-        m => messageIdEquals(m.messageId, failedMessageId),
-        m => ({ ...m, status: MessageStatus.FAILED })
-      );
-      if (map) return { messagesByContact: map };
-
-      // Fall back to reactions — remove silently on failure
-      for (const [contact, reactions] of state.reactionsByContact) {
-        const idx = reactions.findIndex(r =>
-          messageIdEquals(r.messageId, failedMessageId)
-        );
-        if (idx >= 0) {
-          const rxnMap = new Map(state.reactionsByContact);
-          rxnMap.set(
-            contact,
-            reactions.filter((_, i) => i !== idx)
-          );
-          return {
-            reactionsByContact: rxnMap,
-            reactionGroupsCache: patchReactionCache(
-              state.reactionGroupsCache,
-              contact,
-              state.messagesByContact,
-              rxnMap
-            ),
-          };
-        }
-      }
-      return state;
-    });
-  };
-
   const onRead = (messageDbId: number) => {
     set(state => {
       const map = findAndPatch(
@@ -198,72 +138,6 @@ export function createEventHandlers(
         state.messagesByContact,
         m => m.id === messageDbId,
         m => ({ ...m, status: MessageStatus.DELIVERED })
-      );
-      return map ? { messagesByContact: map } : state;
-    });
-  };
-
-  // ── Semantic optimistic events ──────────────────────────────────
-
-  const onDeletedOptimistic = ({
-    contactUserId,
-    messageDbId,
-    originalMsgId,
-  }: {
-    contactUserId: string;
-    messageDbId: number;
-    originalMsgId: Uint8Array;
-  }) => {
-    set(state => {
-      const msgMap = patchContact(state.messagesByContact, contactUserId, ms =>
-        ms.map(m =>
-          m.id === messageDbId
-            ? { ...m, type: MessageType.DELETED, content: '[Message deleted]' }
-            : m
-        )
-      );
-      if (!msgMap) return state;
-
-      const rxnUpdate = clearReactionsForDeletedMessage(
-        state,
-        contactUserId,
-        originalMsgId,
-        msgMap
-      );
-      return rxnUpdate
-        ? { messagesByContact: msgMap, ...rxnUpdate }
-        : { messagesByContact: msgMap };
-    });
-  };
-
-  const onOptimisticFailed = ({
-    contactUserId,
-    messageDbId,
-    original,
-  }: {
-    contactUserId: string;
-    messageDbId: number;
-    original: Message;
-  }) => {
-    rollbackReplace(set, contactUserId, messageDbId, original);
-  };
-
-  const onEditedOptimistic = ({
-    contactUserId,
-    messageDbId,
-    newContent,
-    metadata,
-  }: {
-    contactUserId: string;
-    messageDbId: number;
-    newContent: string;
-    metadata: Record<string, unknown>;
-  }) => {
-    set(state => {
-      const map = patchContact(state.messagesByContact, contactUserId, ms =>
-        ms.map(m =>
-          m.id === messageDbId ? { ...m, content: newContent, metadata } : m
-        )
       );
       return map ? { messagesByContact: map } : state;
     });
@@ -332,33 +206,21 @@ export function createEventHandlers(
 
   // ── Register all handlers ───────────────────────────────────────
 
-  sdk.on(SdkEventType.MESSAGE_OPTIMISTIC, onOptimistic);
   sdk.on(SdkEventType.MESSAGE_RECEIVED, onReceived);
   sdk.on(SdkEventType.MESSAGE_SENT, onSent);
   sdk.on(SdkEventType.MESSAGE_READ, onRead);
   sdk.on(SdkEventType.MESSAGE_ACKNOWLEDGED, onAcknowledged);
-  sdk.on(SdkEventType.WRITE_FAILED, onWriteFailed);
   sdk.on(SdkEventType.SESSION_CREATED, onSessionEvent);
   sdk.on(SdkEventType.SESSION_ACCEPTED, onSessionEvent);
-  sdk.on(SdkEventType.MESSAGE_DELETED_OPTIMISTIC, onDeletedOptimistic);
-  sdk.on(SdkEventType.MESSAGE_EDITED_OPTIMISTIC, onEditedOptimistic);
-  sdk.on(SdkEventType.MESSAGE_DELETE_FAILED, onOptimisticFailed);
-  sdk.on(SdkEventType.MESSAGE_EDIT_FAILED, onOptimisticFailed);
 
   return () => {
     try {
-      sdk.off(SdkEventType.MESSAGE_OPTIMISTIC, onOptimistic);
       sdk.off(SdkEventType.MESSAGE_RECEIVED, onReceived);
       sdk.off(SdkEventType.MESSAGE_SENT, onSent);
       sdk.off(SdkEventType.MESSAGE_READ, onRead);
       sdk.off(SdkEventType.MESSAGE_ACKNOWLEDGED, onAcknowledged);
-      sdk.off(SdkEventType.WRITE_FAILED, onWriteFailed);
       sdk.off(SdkEventType.SESSION_CREATED, onSessionEvent);
       sdk.off(SdkEventType.SESSION_ACCEPTED, onSessionEvent);
-      sdk.off(SdkEventType.MESSAGE_DELETED_OPTIMISTIC, onDeletedOptimistic);
-      sdk.off(SdkEventType.MESSAGE_EDITED_OPTIMISTIC, onEditedOptimistic);
-      sdk.off(SdkEventType.MESSAGE_DELETE_FAILED, onOptimisticFailed);
-      sdk.off(SdkEventType.MESSAGE_EDIT_FAILED, onOptimisticFailed);
     } catch {
       // SDK might not be available during cleanup
     }

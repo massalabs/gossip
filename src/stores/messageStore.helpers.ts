@@ -1,4 +1,8 @@
-import { Message, MessageDirection } from '@massalabs/gossip-sdk';
+import {
+  Message,
+  MessageDirection,
+  MessageStatus,
+} from '@massalabs/gossip-sdk';
 import type { ReactionGroup, MessageStoreState } from './messageStore.types';
 
 // ---------------------------------------------------------------------------
@@ -171,6 +175,59 @@ export function recomputeFullCache(
 export type SetFn = (
   fn: (state: MessageStoreState) => Partial<MessageStoreState>
 ) => void;
+
+/**
+ * Apply an immutable update to the messages of a single contact. No-op when
+ * the updater returns null or when the contact has no prior messages entry
+ * and the updater leaves it empty.
+ */
+export function patchMessages(
+  set: SetFn,
+  contactUserId: string,
+  updater: (msgs: Message[]) => Message[] | null
+): void {
+  set(state => {
+    const map = patchContact(state.messagesByContact, contactUserId, updater);
+    return map ? { messagesByContact: map } : state;
+  });
+}
+
+/** Mark the message matching localMessageId as FAILED. */
+export function markMessageFailed(
+  set: SetFn,
+  localMessageId: Uint8Array
+): void {
+  set(state => {
+    const map = findAndPatch(
+      state.messagesByContact,
+      m => messageIdEquals(m.messageId, localMessageId),
+      m => ({ ...m, status: MessageStatus.FAILED })
+    );
+    return map ? { messagesByContact: map } : state;
+  });
+}
+
+/**
+ * Replace an optimistic message (matched by its local messageId) with the
+ * persisted version returned by the SDK — copies over the real DB id and the
+ * server-assigned status. No-op if no match is found.
+ */
+export function replaceOptimisticWithPersisted(
+  set: SetFn,
+  contactUserId: string,
+  localMessageId: Uint8Array,
+  persisted: Message
+): void {
+  patchMessages(set, contactUserId, msgs => {
+    let changed = false;
+    const updated = msgs.map(m => {
+      if (!messageIdEquals(m.messageId, localMessageId)) return m;
+      changed = true;
+      return { ...m, id: persisted.id, status: persisted.status };
+    });
+    return changed ? updated : null;
+  });
+}
 
 export function rollbackInsert(
   set: SetFn,
