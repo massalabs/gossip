@@ -54,9 +54,7 @@ const DiscussionLayout: React.FC<DiscussionLayoutProps> = ({
 
       {overlay}
 
-      <div
-        className={`${keyboardOpen ? '' : 'h-[env(safe-area-inset-bottom)]'} shrink-0`}
-      ></div>
+      <div className={`${keyboardOpen ? '' : 'h-[var(--sab)]'} shrink-0`}></div>
     </div>
   );
 };
