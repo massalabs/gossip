@@ -231,7 +231,9 @@ export function replaceOptimisticWithPersisted(
     const idx = msgs.findIndex(entry => entry.storeId === storeId);
     if (idx < 0) return null;
     const updated = [...msgs];
-    updated[idx] = { ...persisted };
+    // Preserve storeId so the React key stays stable across the
+    // optimistic → persisted transition (prevents a bubble unmount/remount).
+    updated[idx] = { ...persisted, storeId };
     return updated;
   });
 }

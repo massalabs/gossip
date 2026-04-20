@@ -44,9 +44,13 @@ const EMPTY_REACTIONS: {
   myReactionMessageId?: Uint8Array;
 }[] = [];
 
-/** Stable key for a message — uses messageId (generated before DB write) so
- *  the key never changes when the DB id is assigned later. */
+/** Stable key for a message. Prefers the local `storeId` (set on optimistic
+ *  messages and preserved through the persisted replacement), so the key
+ *  never changes across the sending → sent transition. Falls back to
+ *  messageId / db id for messages loaded from storage. */
 function getMessageKey(m: Message): string {
+  const storeId = (m as { storeId?: string }).storeId;
+  if (storeId) return `msg-store-${storeId}`;
   if (m.messageId) return `msg-${m.messageId.join(',')}`;
   if (m.id != null) return `msg-db-${m.id}`;
   return `msg-temp-${m.timestamp.getTime()}-${m.direction}-${m.content.slice(0, 16)}`;
