@@ -1,4 +1,4 @@
-import React, { Suspense, lazy } from 'react';
+import React from 'react';
 import { Route, Navigate } from 'react-router-dom';
 import Discussions from '../pages/Discussions';
 import Discussion from '../pages/Discussion';
@@ -6,43 +6,33 @@ import NewDiscussion from '../pages/NewDiscussion';
 import NewContact from '../pages/NewContact';
 import Settings from '../pages/Settings';
 import { InvitePage } from '../pages/InvitePage';
+import Contact from '../pages/Contact';
+import ContactSharePage from '../pages/ContactSharePage';
+import SelfDiscussion from '../pages/SelfDiscussion';
+import DiscussionSettings from '../pages/DiscussionSettings';
+import SecuritySettings from '../pages/settings/SecuritySettings';
+import NotificationsSettings from '../pages/settings/NotificationsSettings';
+import AppearanceSettings from '../pages/settings/AppearanceSettings';
+import LanguageSettings from '../pages/settings/LanguageSettings';
+import AboutSettings from '../pages/settings/AboutSettings';
+import DebugSettings from '../pages/settings/DebugSettings';
+import AccountBackupPage from '../pages/settings/AccountBackupPage';
+import QRCodeSwitcher from '../pages/settings/QRCodeSwitcher';
+import Web3Settings from '../pages/settings/Web3Settings';
+import PrivacySettings from '../pages/settings/PrivacySettings';
 import { usePendingDeepLink } from '../hooks/usePendingDeepLink';
 import { usePendingSharedContent } from '../hooks/usePendingSharedContent';
 import { ROUTES } from '../constants/routes';
 import MainLayout from '../components/ui/Layout/MainLayout';
 import AnimatedRoutes from '../components/ui/AnimatedRoutes';
 
-// Lazy-loaded pages (not needed on initial render)
-const Contact = lazy(() => import('../pages/Contact'));
-const ContactSharePage = lazy(() => import('../pages/ContactSharePage'));
-const SelfDiscussion = lazy(() => import('../pages/SelfDiscussion'));
-const DiscussionSettings = lazy(() => import('../pages/DiscussionSettings'));
-const SecuritySettings = lazy(
-  () => import('../pages/settings/SecuritySettings')
-);
-const NotificationsSettings = lazy(
-  () => import('../pages/settings/NotificationsSettings')
-);
-const AppearanceSettings = lazy(
-  () => import('../pages/settings/AppearanceSettings')
-);
-const LanguageSettings = lazy(
-  () => import('../pages/settings/LanguageSettings')
-);
-const AboutSettings = lazy(() => import('../pages/settings/AboutSettings'));
-const DebugSettings = lazy(() => import('../pages/settings/DebugSettings'));
-const AccountBackupPage = lazy(
-  () => import('../pages/settings/AccountBackupPage')
-);
-const QRCodeSwitcher = lazy(() => import('../pages/settings/QRCodeSwitcher'));
-const Web3Settings = lazy(() => import('../pages/settings/Web3Settings'));
-const PrivacySettings = lazy(() => import('../pages/settings/PrivacySettings'));
-
 /**
  * Routes accessible when user is authenticated.
  *
  * - AnimatedRoutes provides cross-fade transitions between pages
- * - Lazy-loaded pages reduce initial bundle size
+ * - All pages are eagerly imported: bundle is local (Capacitor), chunks are
+ *   small (~60 KB combined), and lazy loading added perceptible click-to-render
+ *   latency without a meaningful startup-size win.
  * - MainLayout handles bottom nav visibility (configured in pageConfig.ts)
  */
 export const AuthenticatedRoutes: React.FC = () => {
@@ -52,128 +42,47 @@ export const AuthenticatedRoutes: React.FC = () => {
   return (
     <MainLayout>
       <AnimatedRoutes>
-        {/* Core pages (eagerly loaded) */}
         <Route path={ROUTES.discussions()} element={<Discussions />} />
         <Route path={ROUTES.discussion()} element={<Discussion />} />
         <Route path={ROUTES.newDiscussion()} element={<NewDiscussion />} />
         <Route path={ROUTES.newContact()} element={<NewContact />} />
         <Route path={ROUTES.settings()} element={<Settings />} />
         <Route path={ROUTES.invite()} element={<InvitePage />} />
-
-        {/* Lazy-loaded pages (each wrapped in Suspense to avoid
-              blanking the entire app during chunk load) */}
-        <Route
-          path={ROUTES.contact()}
-          element={
-            <Suspense fallback={null}>
-              <Contact />
-            </Suspense>
-          }
-        />
-        <Route
-          path={ROUTES.contactShare()}
-          element={
-            <Suspense fallback={null}>
-              <ContactSharePage />
-            </Suspense>
-          }
-        />
-        <Route
-          path={ROUTES.selfDiscussion()}
-          element={
-            <Suspense fallback={null}>
-              <SelfDiscussion />
-            </Suspense>
-          }
-        />
+        <Route path={ROUTES.contact()} element={<Contact />} />
+        <Route path={ROUTES.contactShare()} element={<ContactSharePage />} />
+        <Route path={ROUTES.selfDiscussion()} element={<SelfDiscussion />} />
         <Route
           path={ROUTES.discussionSettings()}
-          element={
-            <Suspense fallback={null}>
-              <DiscussionSettings />
-            </Suspense>
-          }
+          element={<DiscussionSettings />}
         />
         <Route
           path={ROUTES.settingsSecurity()}
-          element={
-            <Suspense fallback={null}>
-              <SecuritySettings />
-            </Suspense>
-          }
+          element={<SecuritySettings />}
         />
         <Route
           path={ROUTES.settingsNotifications()}
-          element={
-            <Suspense fallback={null}>
-              <NotificationsSettings />
-            </Suspense>
-          }
+          element={<NotificationsSettings />}
         />
         <Route
           path={ROUTES.settingsAppearance()}
-          element={
-            <Suspense fallback={null}>
-              <AppearanceSettings />
-            </Suspense>
-          }
+          element={<AppearanceSettings />}
         />
         <Route
           path={ROUTES.settingsLanguage()}
-          element={
-            <Suspense fallback={null}>
-              <LanguageSettings />
-            </Suspense>
-          }
+          element={<LanguageSettings />}
         />
-        <Route
-          path={ROUTES.settingsAbout()}
-          element={
-            <Suspense fallback={null}>
-              <AboutSettings />
-            </Suspense>
-          }
-        />
-        <Route
-          path={ROUTES.settingsDebug()}
-          element={
-            <Suspense fallback={null}>
-              <DebugSettings />
-            </Suspense>
-          }
-        />
+        <Route path={ROUTES.settingsAbout()} element={<AboutSettings />} />
+        <Route path={ROUTES.settingsDebug()} element={<DebugSettings />} />
         <Route
           path={ROUTES.settingsAccountBackup()}
-          element={
-            <Suspense fallback={null}>
-              <AccountBackupPage />
-            </Suspense>
-          }
+          element={<AccountBackupPage />}
         />
         <Route
           path={ROUTES.settingsShareContact()}
-          element={
-            <Suspense fallback={null}>
-              <QRCodeSwitcher />
-            </Suspense>
-          }
+          element={<QRCodeSwitcher />}
         />
-        <Route
-          path={ROUTES.settingsWeb3()}
-          element={
-            <Suspense fallback={null}>
-              <Web3Settings />
-            </Suspense>
-          }
-        />
-        <Route
-          path={ROUTES.settingsPrivacy()}
-          element={
-            <Suspense fallback={null}>
-              <PrivacySettings />
-            </Suspense>
-          }
-        />
+        <Route path={ROUTES.settingsWeb3()} element={<Web3Settings />} />
+        <Route path={ROUTES.settingsPrivacy()} element={<PrivacySettings />} />
 
         {/* Default redirects */}
         <Route
