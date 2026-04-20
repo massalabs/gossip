@@ -147,14 +147,25 @@
     "yes": "Yes",
     "no": "No",
     "android_restriction": "Android background restriction",
+    "allow_background": "Allow background activity",
+    "allow_background_description": "If Android restricts background activity, the app stops syncing as soon as it leaves the foreground. Tap to open settings.",
     "not_restricted": "Not restricted",
     "miui_note": "(MIUI may still restrict)",
     "disable_battery": "Disable Battery Optimization",
+    "disable_battery_description": "Android's battery optimization can kill the app and delay or drop messages while it is not in the foreground. Tap to open settings and add Gossip to the exceptions.",
     "battery_settings": "Battery settings",
     "enable_autostart": "Enable AutoStart (MIUI)",
-    "learn_more": "Learn more about battery optimization for your device",
+    "learn_more": "Learn more",
     "debug_info": "Debug Info",
-    "refresh_status": "Refresh Status"
+    "refresh_status": "Refresh Status",
+    "device_warnings": {
+      "xiaomi": "Xiaomi devices have aggressive battery optimization. To receive messages reliably in the background, please disable battery optimization for Gossip and enable \"Autostart\" in the MIUI security settings.",
+      "huawei": "Huawei devices have strict battery management. To receive messages reliably in the background, please disable battery optimization for Gossip and add it to \"Protected Apps\" in the battery settings.",
+      "samsung": "Samsung devices may limit background activity. To receive messages reliably, please disable battery optimization and turn off \"Put app to sleep\" for Gossip.",
+      "oneplus": "OnePlus devices have battery optimization that may affect background sync. Please disable battery optimization for Gossip.",
+      "bbk": "This device has battery optimization that may prevent background notifications. Please disable battery optimization and allow background activity for Gossip.",
+      "generic": "This device may limit background activity. For reliable message notifications, please check your battery optimization settings and allow Gossip to run in the background."
+    }
   },
   "pwa": {
     "offline_ready": "App ready to work offline",

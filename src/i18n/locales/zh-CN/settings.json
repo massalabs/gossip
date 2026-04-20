@@ -147,14 +147,25 @@
     "yes": "是",
     "no": "否",
     "android_restriction": "Android 后台限制",
+    "allow_background": "允许后台活动",
+    "allow_background_description": "如果 Android 限制后台活动，应用一离开前台就会停止同步。点击打开设置。",
     "not_restricted": "未受限",
     "miui_note": "（MIUI 可能仍会限制）",
     "disable_battery": "禁用电池优化",
+    "disable_battery_description": "当应用不在前台时，Android 的电池优化可能会终止应用，导致消息延迟或丢失。点击打开设置，将 Gossip 加入例外。",
     "battery_settings": "电池设置",
     "enable_autostart": "启用自启动（MIUI）",
-    "learn_more": "了解更多关于您设备的电池优化设置",
+    "learn_more": "了解更多",
     "debug_info": "调试信息",
-    "refresh_status": "刷新状态"
+    "refresh_status": "刷新状态",
+    "device_warnings": {
+      "xiaomi": "小米设备的电池优化非常激进。为可靠地在后台接收消息，请关闭 Gossip 的电池优化，并在 MIUI 安全设置中启用「自启动」。",
+      "huawei": "华为设备有严格的电池管理。为可靠地在后台接收消息，请关闭 Gossip 的电池优化，并在电池设置中将其加入「受保护的应用」。",
+      "samsung": "三星设备可能限制后台活动。为可靠地接收消息，请关闭电池优化，并为 Gossip 关闭「将应用置于休眠状态」。",
+      "oneplus": "一加设备的电池优化可能影响后台同步。请关闭 Gossip 的电池优化。",
+      "bbk": "该设备的电池优化可能阻止后台通知。请关闭电池优化，并允许 Gossip 的后台活动。",
+      "generic": "该设备可能限制后台活动。为可靠地接收消息通知，请检查电池优化设置，并允许 Gossip 在后台运行。"
+    }
   },
   "pwa": {
     "offline_ready": "应用已准备好离线使用",

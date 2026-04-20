@@ -10,7 +10,6 @@ import {
   LANGUAGE_NAMES,
   type SupportedLanguage,
 } from '../../i18n';
-import { ROUTES } from '../../constants/routes';
 
 const LanguageSettings: React.FC = () => {
   const { t } = useTranslation('settings');
@@ -19,7 +18,7 @@ const LanguageSettings: React.FC = () => {
   const setLanguage = useUiStore.use.setLanguage();
 
   const handleBack = () => {
-    navigate(ROUTES.settings());
+    navigate(-1);
   };
 
   const handleLanguageChange = (lang: SupportedLanguage) => {

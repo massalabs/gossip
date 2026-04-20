@@ -80,7 +80,7 @@ const DiscussionHeader: React.FC<DiscussionHeaderProps> = ({
   const hasStatusChips = (isOnline && isPendingOutgoing) || !!retentionLabel;
 
   const headerBarClassName = isFullHeader
-    ? 'min-h-header h-auto! items-start! py-2.5 pb-3'
+    ? 'min-h-header h-auto! items-start! pt-[calc(var(--sat)+0.625rem)]! pb-3'
     : '';
 
   let content: React.ReactNode;
