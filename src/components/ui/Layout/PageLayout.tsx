@@ -89,12 +89,56 @@ const PageLayout: React.FC<PageLayoutProps> = ({
       )}
 
       {/* Scrollable content */}
-      <div
-        ref={scrollRef}
-        className={`flex-1 min-h-0 overflow-y-auto ${contentClassName}`.trim()}
-      >
-        {children}
+      <div className="flex-1 min-h-0 relative">
+        <div
+          ref={scrollRef}
+          className={`h-full overflow-y-auto ${contentClassName}`.trim()}
+        >
+          {children}
+          <div
+            aria-hidden="true"
+            style={{ height: 'calc(var(--sab) + 24px)' }}
+          />
+        </div>
+        <BottomProgressiveBlur />
       </div>
+    </div>
+  );
+};
+
+/**
+ * Progressive blur overlay sitting above the home indicator / native bottom bar.
+ * Uses 4 stacked backdrop-filter layers with overlapping gradient masks so blur
+ * intensity grows toward the bottom edge. Pure CSS, no JS.
+ */
+const BottomProgressiveBlur: React.FC = () => {
+  const layers = [
+    { blur: 2, maskStop: '100%' },
+    { blur: 6, maskStop: '75%' },
+    { blur: 12, maskStop: '50%' },
+    { blur: 24, maskStop: '25%' },
+  ];
+  return (
+    <div
+      aria-hidden="true"
+      className="pointer-events-none absolute inset-x-0 bottom-0"
+      style={{ height: 'calc(var(--sab) + 32px)' }}
+    >
+      {layers.map(({ blur, maskStop }, i) => {
+        const mask = `linear-gradient(to top, black 0%, transparent ${maskStop})`;
+        return (
+          <div
+            key={i}
+            className="absolute inset-0"
+            style={{
+              backdropFilter: `blur(${blur}px)`,
+              WebkitBackdropFilter: `blur(${blur}px)`,
+              maskImage: mask,
+              WebkitMaskImage: mask,
+            }}
+          />
+        );
+      })}
     </div>
   );
 };

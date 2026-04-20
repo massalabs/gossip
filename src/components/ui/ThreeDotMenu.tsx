@@ -153,7 +153,7 @@ const ThreeDotMenu: React.FC<ThreeDotMenuProps> = ({
                   item.onClick();
                   close();
                 }}
-                className={`hover-fill w-full flex items-center justify-between gap-3 px-4 py-3 text-sm font-medium text-left ${
+                className={`w-full flex items-center justify-between gap-3 px-4 py-3 text-sm font-medium text-left ${
                   item.danger ? 'text-destructive' : 'text-foreground'
                 }`}
               >

@@ -42,6 +42,10 @@ if command -v xcrun &>/dev/null; then
     [ -z "$line" ] && continue
     udid=$(echo "$line" | grep -oE '[0-9A-Fa-f]{8}-[0-9A-Fa-f]{16}')
     [ -z "$udid" ] && continue
+    # Skip if already seen (xctrace can list USB + Wi-Fi pairing separately)
+    if [ ${#IOS_LIST[@]} -gt 0 ] && printf '%s\n' "${IOS_LIST[@]}" | grep -qx "$udid"; then
+      continue
+    fi
     name=$(echo "$line" | sed 's/ ([^)]*) *$//' | xargs)
     echo "  iOS: ${name}  (${udid})"
     IOS_LIST+=("$udid")
@@ -55,6 +59,9 @@ if [ ${#IOS_LIST[@]} -eq 0 ]; then
     udid=$(echo "$line" | grep -oE '[0-9A-Fa-f]{8}-[0-9A-Fa-f]{16}')
     [ -z "$udid" ] && continue
     echo "$line" | grep -qi 'simulator' && continue
+    if [ ${#IOS_LIST[@]} -gt 0 ] && printf '%s\n' "${IOS_LIST[@]}" | grep -qx "$udid"; then
+      continue
+    fi
     name=$(echo "$line" | awk -F'  +' '{print $1}' | xargs)
     echo "  iOS: ${name}  (${udid})"
     IOS_LIST+=("$udid")

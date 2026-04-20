@@ -147,14 +147,25 @@
     "yes": "Oui",
     "no": "Non",
     "android_restriction": "Restriction Android en arrière-plan",
+    "allow_background": "Autoriser l'activité en arrière-plan",
+    "allow_background_description": "Si Android restreint l'arrière-plan, l'app arrête la synchro dès qu'elle quitte le premier plan. Appuie pour ouvrir les réglages.",
     "not_restricted": "Non restreint",
     "miui_note": "(MIUI peut quand même restreindre)",
     "disable_battery": "Désactiver l'optimisation de la batterie",
+    "disable_battery_description": "L'optimisation batterie d'Android peut tuer l'app et retarder ou perdre des messages quand elle n'est pas au premier plan. Appuie pour ouvrir les réglages et ajouter Gossip aux exceptions.",
     "battery_settings": "Réglages batterie",
     "enable_autostart": "Activer le démarrage automatique (MIUI)",
-    "learn_more": "En savoir plus sur l'optimisation de la batterie pour ton appareil",
+    "learn_more": "En savoir plus",
     "debug_info": "Infos de débogage",
-    "refresh_status": "Actualiser le statut"
+    "refresh_status": "Actualiser le statut",
+    "device_warnings": {
+      "xiaomi": "Les appareils Xiaomi appliquent une optimisation de batterie très agressive. Pour recevoir les messages de manière fiable en arrière-plan, désactive l'optimisation de la batterie pour Gossip et active « Démarrage automatique » dans les paramètres de sécurité MIUI.",
+      "huawei": "Les appareils Huawei ont une gestion de la batterie très stricte. Pour recevoir les messages de manière fiable en arrière-plan, désactive l'optimisation de la batterie pour Gossip et ajoute l'app aux « Applications protégées » dans les réglages batterie.",
+      "samsung": "Les appareils Samsung peuvent limiter l'activité en arrière-plan. Pour recevoir les messages de manière fiable, désactive l'optimisation de la batterie et désactive « Mettre l'appli en veille » pour Gossip.",
+      "oneplus": "Les appareils OnePlus ont une optimisation de batterie qui peut affecter la synchro en arrière-plan. Désactive l'optimisation de la batterie pour Gossip.",
+      "bbk": "Cet appareil a une optimisation de batterie qui peut bloquer les notifications en arrière-plan. Désactive l'optimisation de la batterie et autorise l'activité en arrière-plan pour Gossip.",
+      "generic": "Cet appareil peut limiter l'activité en arrière-plan. Pour recevoir les notifications de manière fiable, vérifie les paramètres d'optimisation de la batterie et autorise Gossip à fonctionner en arrière-plan."
+    }
   },
   "pwa": {
     "offline_ready": "Application prête à fonctionner hors ligne",

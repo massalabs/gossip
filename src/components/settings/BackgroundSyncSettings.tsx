@@ -130,20 +130,15 @@ const BackgroundSyncSettings: React.FC<BackgroundSyncSettingsProps> = ({
     })();
   }, [isAndroidNative]);
 
-  const handleSyncPresetChange = useCallback(async (maxReactivity: boolean) => {
-    const preset: BackgroundSyncPreset = maxReactivity ? 'max' : 'balanced';
-    try {
-      await setBackgroundSyncPreset(preset);
-      setSyncPreset(preset);
-    } catch (error) {
-      console.error('Failed to save background sync preset:', error);
-    }
-  }, []);
-
   const handleForegroundReliabilityChange = useCallback(
     async (enabled: boolean) => {
       try {
         if (enabled) {
+          // Force the sync preset to `max` whenever the foreground service is
+          // turned on — the user opted in to maximum reliability, so use the
+          // tightest tick interval.
+          await setBackgroundSyncPreset('max');
+          setSyncPreset('max');
           await ForegroundSync.start();
         } else {
           await ForegroundSync.stop();
@@ -221,9 +216,22 @@ const BackgroundSyncSettings: React.FC<BackgroundSyncSettingsProps> = ({
     };
   }, [isNative, handleRefresh]);
 
-  // Android: Open battery optimization settings
-  const handleOpenBatterySettings = useCallback(async () => {
-    await batteryOptimizationService.openBatteryOptimizationSettings();
+  // Android: toggle the battery-optimization bypass.
+  // When the bypass is NOT yet granted, fire the system prompt to grant it.
+  // When it IS granted, the prompt intent silently returns (no UI) — so we
+  // open the app info page instead, where the user can re-enable optimization.
+  const handleToggleBatteryOptBypass = useCallback(async () => {
+    if (androidStatus?.isIgnoringBatteryOptimization) {
+      await batteryOptimizationService.openAppSettings();
+    } else {
+      await batteryOptimizationService.openBatteryOptimizationSettings();
+    }
+  }, [androidStatus?.isIgnoringBatteryOptimization]);
+
+  // Android: open the app info page (used for "Allow background activity" —
+  // the background-restriction toggle lives in the app's Battery section).
+  const handleOpenAppSettings = useCallback(async () => {
+    await batteryOptimizationService.openAppSettings();
   }, []);
 
   // Android: Open Xiaomi AutoStart settings
@@ -296,240 +304,191 @@ const BackgroundSyncSettings: React.FC<BackgroundSyncSettingsProps> = ({
 
       {/* Content */}
       <div className="px-4 py-3 space-y-3">
-        {isAndroidNative && (
-          <div className="space-y-2 pb-3 border-b border-border">
-            <div className="flex items-center justify-between gap-3 py-1">
-              <span className="text-sm text-foreground flex-1">
-                {t('background_sync.preset_max')}
-              </span>
-              <Toggle
-                checked={syncPreset === 'max'}
-                onChange={handleSyncPresetChange}
-                ariaLabel={t('background_sync.preset_max')}
-              />
+        {/* ======================= INFO (top) ======================= */}
+        {isAndroidNative &&
+          androidHasIssues &&
+          deviceInfo?.isProblematic &&
+          deviceInfo.warningKey && (
+            <div className="bg-warning/10 border border-warning/20 rounded-lg p-4">
+              <div className="flex items-start gap-3">
+                <AlertTriangle
+                  className="w-5 h-5 text-warning shrink-0 mt-0.5"
+                  aria-hidden="true"
+                />
+                <div className="flex-1 min-w-0 space-y-3">
+                  <p className="text-sm text-foreground leading-relaxed">
+                    {t(
+                      `background_sync.device_warnings.${deviceInfo.warningKey}`
+                    )}
+                  </p>
+                  {deviceInfo.helpUrl && (
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        onClick={handleOpenHelp}
+                        aria-label={t('background_sync.learn_more')}
+                        className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+                      >
+                        {t('background_sync.learn_more')}
+                        <ExternalLink className="w-3 h-3" aria-hidden="true" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
-            <p className="text-xs text-muted-foreground leading-relaxed">
-              {syncPreset === 'max'
-                ? t('background_sync.preset_max_description')
-                : t('background_sync.preset_balanced_description')}
-            </p>
+          )}
+
+        {isIOSNative && iosWarningMessage && (
+          <div className="bg-warning/10 border border-warning/20 rounded-lg p-4">
+            <div className="flex items-start gap-3">
+              <AlertTriangle
+                className="w-5 h-5 text-warning shrink-0 mt-0.5"
+                aria-hidden="true"
+              />
+              <p className="flex-1 min-w-0 text-sm text-foreground leading-relaxed">
+                {iosWarningMessage}
+              </p>
+            </div>
           </div>
         )}
 
-        {isAndroidNative && (
-          <div className="space-y-2 pb-3 border-b border-border">
-            <div className="flex items-center justify-between gap-3 py-1">
-              <span className="text-sm text-foreground flex-1">
-                {t('background_sync.foreground_toggle')}
-              </span>
-              <Toggle
-                checked={foregroundHighReliability}
-                onChange={handleForegroundReliabilityChange}
-                ariaLabel={t('background_sync.foreground_toggle')}
-              />
-            </div>
-            <p className="text-xs text-muted-foreground leading-relaxed">
-              {t('background_sync.foreground_description')}
-            </p>
-          </div>
+        {isIOSNative && (
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            {t('background_sync.ios_limitation')}
+          </p>
         )}
 
-        {/* ==================== iOS SECTION ==================== */}
-        {isIOSNative && iosStatus && (
-          <>
-            {/* iOS Warning message */}
-            {iosWarningMessage && (
-              <div className="bg-warning/10 border border-warning/20 rounded-lg p-3">
-                <p className="text-sm text-foreground leading-relaxed">
-                  {iosWarningMessage}
+        {/* ===================== SWITCHES (bottom) ===================== */}
+        {isAndroidNative && androidStatus && (
+          <div
+            className={
+              androidHasIssues &&
+              deviceInfo?.isProblematic &&
+              deviceInfo.warningKey
+                ? 'space-y-3 pt-1 border-t border-border'
+                : 'space-y-3'
+            }
+          >
+            {/* PREREQUISITE — background activity allowed. If the OS restricts
+                the app in the background, nothing else can run, so hide every
+                downstream toggle until this is green. */}
+            <div className="space-y-1">
+              <div className="flex items-center justify-between gap-3 py-1">
+                <span className="text-sm text-foreground flex-1">
+                  {t('background_sync.allow_background')}
+                </span>
+                <Toggle
+                  checked={!androidStatus.isBackgroundRestricted}
+                  onChange={handleOpenAppSettings}
+                  ariaLabel={t('background_sync.allow_background')}
+                />
+              </div>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                {t('background_sync.allow_background_description')}
+              </p>
+              {isXiaomi && (
+                <p className="text-xs text-muted-foreground italic leading-relaxed">
+                  {t('background_sync.miui_note')}
+                </p>
+              )}
+            </div>
+
+            {!androidStatus.isBackgroundRestricted && (
+              <>
+                {/* Battery optimization bypass — opens system settings on tap */}
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between gap-3 py-1">
+                    <span className="text-sm text-foreground flex-1">
+                      {t('background_sync.disable_battery')}
+                    </span>
+                    <Toggle
+                      checked={androidStatus.isIgnoringBatteryOptimization}
+                      onChange={handleToggleBatteryOptBypass}
+                      ariaLabel={t('background_sync.disable_battery')}
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    {t('background_sync.disable_battery_description')}
+                  </p>
+                </div>
+
+                {/* Xiaomi AutoStart — state is not observable, tap opens settings */}
+                {isXiaomi && (
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between gap-3 py-1">
+                      <span className="text-sm text-foreground flex-1">
+                        {t('background_sync.enable_autostart')}
+                      </span>
+                      <Toggle
+                        checked={false}
+                        onChange={handleOpenAutoStartSettings}
+                        ariaLabel={t('background_sync.enable_autostart')}
+                      />
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* Foreground-sync — max-reliability option. Available as soon as
+                background activity is allowed; useful on aggressive OEMs even
+                when battery-opt is bypassed. Enabling it forces preset `max`. */}
+            {!androidStatus.isBackgroundRestricted && (
+              <div className="space-y-1">
+                <div className="flex items-center justify-between gap-3 py-1">
+                  <span className="text-sm text-foreground flex-1">
+                    {t('background_sync.foreground_toggle')}
+                  </span>
+                  <Toggle
+                    checked={foregroundHighReliability}
+                    onChange={handleForegroundReliabilityChange}
+                    ariaLabel={t('background_sync.foreground_toggle')}
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  {t('background_sync.foreground_description')}
                 </p>
               </div>
             )}
+          </div>
+        )}
 
-            {/* iOS Status indicators */}
-            <div className="space-y-2">
-              {/* Background App Refresh status */}
-              <div className="flex items-center justify-between py-1">
-                <span className="text-sm text-muted-foreground">
+        {isIOSNative && iosStatus && (
+          <div className="space-y-3 pt-1 border-t border-border">
+            {/* Background App Refresh — opens system settings on tap */}
+            <div className="space-y-1 pt-2">
+              <div className="flex items-center justify-between gap-3 py-1">
+                <span className="text-sm text-foreground flex-1">
                   {t('background_sync.background_refresh')}
                 </span>
-                {iosStatus.isBackgroundRefreshEnabled ? (
-                  <span className="text-xs font-medium text-success">
-                    {t('background_sync.enabled')}
-                  </span>
-                ) : iosStatus.backgroundRefreshStatus === 'denied' ? (
-                  <span className="text-xs font-medium text-destructive">
-                    {t('background_sync.disabled')}
-                  </span>
-                ) : iosStatus.backgroundRefreshStatus === 'restricted' ? (
-                  <span className="text-xs font-medium text-warning">
-                    {t('background_sync.restricted')}
-                  </span>
-                ) : (
-                  <span className="text-xs font-medium text-muted-foreground">
-                    {t('background_sync.unknown')}
-                  </span>
-                )}
-              </div>
-
-              {/* Low Power Mode status */}
-              <div className="flex items-center justify-between py-1">
-                <span className="text-sm text-muted-foreground flex items-center gap-1.5">
-                  <Zap className="w-3.5 h-3.5" aria-hidden="true" />
-                  {t('background_sync.low_power')}
-                </span>
-                {iosStatus.isLowPowerModeEnabled ? (
-                  <span className="text-xs font-medium text-warning">
-                    {t('background_sync.on')}
-                  </span>
-                ) : (
-                  <span className="text-xs font-medium text-success">
-                    {t('background_sync.off')}
-                  </span>
-                )}
+                <Toggle
+                  checked={iosStatus.isBackgroundRefreshEnabled}
+                  onChange={handleOpenIOSSettings}
+                  disabled={!iosStatus.userCanEnableBackgroundRefresh}
+                  ariaLabel={t('background_sync.background_refresh')}
+                />
               </div>
             </div>
 
-            {/* iOS limitation notice */}
-            <p className="text-xs text-muted-foreground leading-relaxed">
-              {t('background_sync.ios_limitation')}
-            </p>
-
-            {/* iOS Action buttons */}
-            {iosHasIssues && iosStatus.userCanEnableBackgroundRefresh && (
-              <div className="space-y-2 pt-1">
-                <Button
-                  variant="primary"
-                  size="sm"
-                  className="w-full"
-                  onClick={handleOpenIOSSettings}
-                >
-                  {t('background_sync.open_settings')}
-                </Button>
+            {/* Low Power Mode — display-only: cannot be toggled per-app */}
+            <div className="space-y-1">
+              <div className="flex items-center justify-between gap-3 py-1">
+                <span className="text-sm text-foreground flex-1 flex items-center gap-1.5">
+                  <Zap className="w-3.5 h-3.5" aria-hidden="true" />
+                  {t('background_sync.low_power')}
+                </span>
+                <Toggle
+                  checked={iosStatus.isLowPowerModeEnabled}
+                  onChange={() => {
+                    /* System-wide setting; no per-app control available. */
+                  }}
+                  disabled
+                  ariaLabel={t('background_sync.low_power')}
+                />
               </div>
-            )}
-          </>
-        )}
-
-        {/* ==================== ANDROID SECTION ==================== */}
-        {isAndroidNative && (
-          <>
-            {/* Android Device-specific warning — only when there are issues */}
-            {androidHasIssues &&
-              deviceInfo?.isProblematic &&
-              deviceInfo.warningMessage && (
-                <div className="bg-warning/10 border border-warning/20 rounded-lg p-3">
-                  <p className="text-sm text-foreground leading-relaxed">
-                    {deviceInfo.warningMessage}
-                  </p>
-                  {deviceInfo.helpUrl && (
-                    <Button
-                      variant="link"
-                      onClick={handleOpenHelp}
-                      className="mt-2 flex items-center gap-1.5 text-sm text-accent p-0 h-auto"
-                      ariaLabel={t('background_sync.learn_more')}
-                    >
-                      <ExternalLink className="w-4 h-4" aria-hidden="true" />
-                      {t('background_sync.learn_more')}
-                    </Button>
-                  )}
-                </div>
-              )}
-
-            {/* Android Status indicators — always visible */}
-            {androidStatus && (
-              <div className="space-y-2">
-                <div className="flex items-center justify-between py-1">
-                  <span className="text-sm text-muted-foreground">
-                    {t('background_sync.battery_optimization')}
-                  </span>
-                  {androidStatus.isIgnoringBatteryOptimization ? (
-                    <span className="text-xs font-medium text-success">
-                      {t('background_sync.yes')}
-                    </span>
-                  ) : (
-                    <span className="text-xs font-medium text-destructive">
-                      {t('background_sync.no')}
-                    </span>
-                  )}
-                </div>
-
-                <div className="flex items-center justify-between py-1">
-                  <span className="text-sm text-muted-foreground">
-                    {t('background_sync.android_restriction')}
-                  </span>
-                  {!androidStatus.isBackgroundRestricted ? (
-                    <div className="flex flex-col items-end gap-0.5">
-                      <span className="text-xs font-medium text-success">
-                        {t('background_sync.not_restricted')}
-                      </span>
-                      {isXiaomi && (
-                        <span className="text-xs text-muted-foreground italic">
-                          {t('background_sync.miui_note')}
-                        </span>
-                      )}
-                    </div>
-                  ) : (
-                    <span className="text-xs font-medium text-destructive">
-                      {t('background_sync.restricted')}
-                    </span>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Android Action buttons — only when there are issues */}
-            {androidHasIssues && (
-              <div className="space-y-2 pt-1">
-                {!androidStatus?.isIgnoringBatteryOptimization && (
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    className="w-full"
-                    onClick={handleOpenBatterySettings}
-                  >
-                    {t('background_sync.disable_battery')}
-                  </Button>
-                )}
-                {androidStatus?.isBackgroundRestricted && (
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    className="w-full"
-                    onClick={handleOpenBatterySettings}
-                  >
-                    {t('background_sync.open_settings')}
-                  </Button>
-                )}
-                {isXiaomi && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="w-full"
-                    onClick={handleOpenAutoStartSettings}
-                    ariaLabel={t('background_sync.enable_autostart')}
-                  >
-                    {t('background_sync.enable_autostart')}
-                  </Button>
-                )}
-              </div>
-            )}
-
-            {/* Battery settings — visible when no issues, so user can re-enable optimization */}
-            {androidStatus && !androidHasIssues && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="w-full"
-                onClick={async () => {
-                  await batteryOptimizationService.openAppSettings();
-                }}
-                ariaLabel={t('background_sync.battery_settings')}
-              >
-                {t('background_sync.battery_settings')}
-              </Button>
-            )}
-          </>
+            </div>
+          </div>
         )}
 
         {/* Debug info (both platforms) */}

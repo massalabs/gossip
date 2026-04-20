@@ -51,11 +51,19 @@ export interface DeviceInfo {
   isNative: boolean;
 }
 
+export type ManufacturerWarningKey =
+  | 'xiaomi'
+  | 'huawei'
+  | 'samsung'
+  | 'oneplus'
+  | 'bbk'
+  | 'generic';
+
 export interface DeviceReliabilityInfo {
   manufacturer: string | null;
   isProblematic: boolean;
   requiresBatteryOptimizationBypass: boolean;
-  warningMessage: string | null;
+  warningKey: ManufacturerWarningKey | null;
   helpUrl: string | null;
 }
 
@@ -196,46 +204,29 @@ export function getBatteryOptimizationHelpUrl(manufacturer: string): string {
   return 'https://dontkillmyapp.com/';
 }
 
-// Warning message constants for manufacturer groups (DRY)
-const WARNING_XIAOMI =
-  'Xiaomi devices have aggressive battery optimization. To receive messages reliably in the background, please disable battery optimization for Gossip and enable "Autostart" in the MIUI security settings.';
-const WARNING_HUAWEI =
-  'Huawei devices have strict battery management. To receive messages reliably in the background, please disable battery optimization for Gossip and add it to "Protected Apps" in the battery settings.';
-const WARNING_SAMSUNG =
-  'Samsung devices may limit background activity. To receive messages reliably, please disable battery optimization and turn off "Put app to sleep" for Gossip.';
-const WARNING_ONEPLUS =
-  'OnePlus devices have battery optimization that may affect background sync. Please disable battery optimization for Gossip.';
-const WARNING_BBK =
-  'This device has battery optimization that may prevent background notifications. Please disable battery optimization and allow background activity for Gossip.';
-const WARNING_GENERIC =
-  'This device may limit background activity. For reliable message notifications, please check your battery optimization settings and allow Gossip to run in the background.';
-
 /**
- * Get a user-friendly warning message for a specific manufacturer.
+ * Get the i18n key of the warning message to display for a specific manufacturer.
+ * The caller is responsible for translating via i18next
+ * (see `background_sync.device_warnings.<key>` in settings.json).
  */
-export function getManufacturerWarningMessage(manufacturer: string): string {
+export function getManufacturerWarningKey(
+  manufacturer: string
+): ManufacturerWarningKey {
   const normalizedManufacturer = manufacturer.toLowerCase().trim();
 
-  // Map manufacturer groups to their warning messages
-  const manufacturerGroups: Record<string, string> = {
-    // Xiaomi family (MIUI) - most aggressive
-    xiaomi: WARNING_XIAOMI,
-    redmi: WARNING_XIAOMI,
-    poco: WARNING_XIAOMI,
-    // Huawei family (EMUI)
-    huawei: WARNING_HUAWEI,
-    honor: WARNING_HUAWEI,
-    // Samsung (One UI)
-    samsung: WARNING_SAMSUNG,
-    // OnePlus (OxygenOS)
-    oneplus: WARNING_ONEPLUS,
-    // BBK Electronics family (OPPO/Realme/Vivo)
-    oppo: WARNING_BBK,
-    realme: WARNING_BBK,
-    vivo: WARNING_BBK,
+  const manufacturerGroups: Record<string, ManufacturerWarningKey> = {
+    xiaomi: 'xiaomi',
+    redmi: 'xiaomi',
+    poco: 'xiaomi',
+    huawei: 'huawei',
+    honor: 'huawei',
+    samsung: 'samsung',
+    oneplus: 'oneplus',
+    oppo: 'bbk',
+    realme: 'bbk',
+    vivo: 'bbk',
   };
 
-  // Find matching manufacturer
   const match = findManufacturerMatch(
     normalizedManufacturer,
     manufacturerGroups
@@ -244,8 +235,7 @@ export function getManufacturerWarningMessage(manufacturer: string): string {
     return manufacturerGroups[match];
   }
 
-  // Generic message for other problematic manufacturers
-  return WARNING_GENERIC;
+  return 'generic';
 }
 
 /**
@@ -260,7 +250,7 @@ export async function getDeviceReliabilityInfo(): Promise<DeviceReliabilityInfo>
       manufacturer: null,
       isProblematic: false,
       requiresBatteryOptimizationBypass: false,
-      warningMessage: null,
+      warningKey: null,
       helpUrl: null,
     };
   }
@@ -271,8 +261,8 @@ export async function getDeviceReliabilityInfo(): Promise<DeviceReliabilityInfo>
     manufacturer: deviceInfo.manufacturer,
     isProblematic,
     requiresBatteryOptimizationBypass: isProblematic,
-    warningMessage: isProblematic
-      ? getManufacturerWarningMessage(deviceInfo.manufacturer)
+    warningKey: isProblematic
+      ? getManufacturerWarningKey(deviceInfo.manufacturer)
       : null,
     helpUrl: isProblematic
       ? getBatteryOptimizationHelpUrl(deviceInfo.manufacturer)

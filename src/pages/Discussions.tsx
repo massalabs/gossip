@@ -5,7 +5,7 @@ import DiscussionFilterButtons from '../components/discussions/DiscussionFilterB
 import { useAccountStore } from '../stores/accountStore';
 import { useAppStore } from '../stores/appStore';
 import { useNavigate } from 'react-router-dom';
-import { Plus, X, Settings, Lock } from 'react-feather';
+import { Plus, X, Settings, Lock, Globe } from 'react-feather';
 import Button from '../components/ui/Button';
 import SearchBar from '../components/ui/SearchBar';
 import { useSearch } from '../hooks/useSearch';
@@ -142,6 +142,11 @@ const Discussions: React.FC = () => {
         icon: <Settings className="w-5 h-5" />,
         onClick: () => navigate(ROUTES.settings()),
       },
+      {
+        label: t('settings:menu.language'),
+        icon: <Globe className="w-5 h-5" />,
+        onClick: () => navigate(ROUTES.settingsLanguage()),
+      },
       { type: 'separator' as const },
       {
         label: t('lock_account'),
@@ -254,7 +259,7 @@ const Discussions: React.FC = () => {
         onClick={() => navigate(ROUTES.newDiscussion())}
         variant="primary"
         size="custom"
-        className="absolute bottom-3 right-4 h-14 w-14 rounded-full flex items-center gap-2 shadow-lg hover:shadow-xl transition-shadow z-50"
+        className="absolute bottom-[calc(0.75rem+var(--sab))] right-4 h-14 w-14 rounded-full flex items-center gap-2 shadow-lg hover:shadow-xl transition-shadow z-50"
         title={t('start_new')}
       >
         <Plus className="text-primary-foreground shrink-0" />

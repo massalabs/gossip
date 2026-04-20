@@ -388,8 +388,8 @@ class BatteryOptimizationService {
       issues.push(
         `${deviceInfo.manufacturer} devices have aggressive battery management`
       );
-      if (deviceInfo.warningMessage) {
-        recommendations.push(deviceInfo.warningMessage);
+      if (deviceInfo.warningKey) {
+        recommendations.push(`device_warning:${deviceInfo.warningKey}`);
       }
     }
 
