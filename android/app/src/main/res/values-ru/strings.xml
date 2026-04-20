@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="foreground_sync_channel_name">Фоновая синхронизация Gossip</string>
+    <string name="foreground_sync_channel_desc">Сохраняет синхронизацию сообщений в этом режиме</string>
+    <string name="foreground_sync_notification_title">Gossip синхронизируется</string>
+    <string name="foreground_sync_notification_body">Синхронизация в фоне для актуальности ваших сообщений</string>
+</resources>
