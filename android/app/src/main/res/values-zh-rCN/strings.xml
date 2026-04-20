@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="foreground_sync_channel_name">Gossip 后台同步</string>
+    <string name="foreground_sync_channel_desc">启用此模式时保持消息同步</string>
+    <string name="foreground_sync_notification_title">Gossip 正在同步</string>
+    <string name="foreground_sync_notification_body">在后台同步以保持消息最新</string>
+</resources>

@@ -6,6 +6,6 @@
     <string name="custom_url_scheme">net.massa.gossip</string>
     <string name="foreground_sync_channel_name">Gossip background sync</string>
     <string name="foreground_sync_channel_desc">Keeps message sync active while this mode is on</string>
-    <string name="foreground_sync_notification_title">Gossip is syncing in the background</string>
-    <string name="foreground_sync_notification_body">High reliability mode — tap to open the app</string>
+    <string name="foreground_sync_notification_title">Gossip is syncing</string>
+    <string name="foreground_sync_notification_body">Syncing in background to keep your messages up to date</string>
 </resources>
