@@ -13,8 +13,6 @@ if command -v adb &>/dev/null; then
     echo "$line" | grep -q 'device$' || continue
     id=$(echo "$line" | awk '{print $1}')
     [ -z "$id" ] && continue
-    # Skip mDNS service names — only keep ip:port or serial numbers
-    echo "$id" | grep -q '\._' && continue
     model=$(timeout 3 adb -s "$id" shell getprop ro.product.model 2>/dev/null | tr -d '\r')
     echo "  Android: ${id}  (${model:-unknown})"
     ANDROID_LIST+=("$id")
