@@ -29,9 +29,11 @@ function findScrollContainer(
 export function useHeaderScrollDetection(
   containerRef: RefObject<HTMLElement | null>,
   messagesLength: number,
-  discussionId: string | number | undefined
+  discussionId: string | number | undefined,
+  disabled?: boolean
 ) {
   useEffect(() => {
+    if (disabled) return;
     if (!containerRef.current) return;
 
     let scrollContainer: HTMLElement | null = null;
@@ -61,6 +63,9 @@ export function useHeaderScrollDetection(
       clearTimeout(timeoutId);
       scrollContainer?.removeEventListener('scroll', handleScroll);
       if (rafId !== null) cancelAnimationFrame(rafId);
+      // Reset global state on unmount so the next page's header doesn't
+      // inherit this chat's "scrolled" bg.
+      setHeaderIsScrolled(false);
     };
-  }, [containerRef, messagesLength, discussionId]);
+  }, [containerRef, messagesLength, discussionId, disabled]);
 }

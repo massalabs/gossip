@@ -485,6 +485,25 @@ export class NotificationService {
   }
 
   /**
+   * Fetch up-to-date preferences, awaiting the native permission check on
+   * native platforms. Prefer this over `getPreferences()` when the caller can
+   * wait — it avoids rendering UI with a stale default-state snapshot on iOS.
+   */
+  async fetchPreferences(): Promise<NotificationPreferences> {
+    if (this.isNativePlatform()) {
+      // Force a fresh read so the returned state reflects the real OS status.
+      this.nativePermissionInitialized = false;
+      await this.initNativePermissionStatus();
+    } else {
+      this.updatePermissionStatus();
+    }
+    return {
+      enabled: this.enabled,
+      permission: { ...this.permission },
+    };
+  }
+
+  /**
    * Check if notifications are enabled by the user
    * @returns True if user has enabled notifications
    */

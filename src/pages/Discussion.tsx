@@ -1,4 +1,10 @@
-import React, { useEffect, useCallback, useRef, useState } from 'react';
+import React, {
+  useContext,
+  useEffect,
+  useCallback,
+  useRef,
+  useState,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useDiscussion } from '../hooks/useDiscussion';
@@ -15,6 +21,7 @@ import { useGossipSdk } from '../hooks/useGossipSdk';
 import { useDiscussionMessageSelection } from '../hooks/useDiscussionMessageSelection';
 import { useDiscussionScrollToMessage } from '../hooks/useDiscussionScrollToMessage';
 import { useHeaderScrollDetection } from '../hooks/useHeaderScrollDetection';
+import { ExitAnimationContext } from '../components/ui/ExitAnimationContext';
 import { useForwardPreview } from '../hooks/useForwardPreview';
 import { useDiscussionActions } from '../hooks/useDiscussionActions';
 import { useKeyboardStore } from '../stores/keyboardStore';
@@ -191,10 +198,12 @@ const Discussion: React.FC = () => {
     locationState?.scrollToMessageId ?? null
   );
 
+  const isExiting = useContext(ExitAnimationContext);
   useHeaderScrollDetection(
     messageListContainerRef,
     messages.length,
-    discussion?.id
+    discussion?.id,
+    isExiting
   );
 
   const hasPrefilledMessage = !!locationState?.prefilledMessage;

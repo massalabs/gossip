@@ -59,7 +59,9 @@
     "blocked": "已屏蔽",
     "enable": "启用",
     "requesting": "请求中...",
-    "blocked_message": "通知已被屏蔽，请在浏览器设置中启用。"
+    "blocked_message_web": "通知已被屏蔽，请在浏览器设置中启用。",
+    "blocked_message_native": "通知已被屏蔽。请打开系统设置重新启用。",
+    "open_settings": "打开设置"
   },
   "language": {
     "title": "语言"

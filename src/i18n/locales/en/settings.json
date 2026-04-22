@@ -59,7 +59,9 @@
     "blocked": "Blocked",
     "enable": "Enable",
     "requesting": "Requesting...",
-    "blocked_message": "Notifications are blocked. Please enable them in your browser settings."
+    "blocked_message_web": "Notifications are blocked. Please enable them in your browser settings.",
+    "blocked_message_native": "Notifications are blocked. Open system settings to re-enable them.",
+    "open_settings": "Open Settings"
   },
   "language": {
     "title": "Language"

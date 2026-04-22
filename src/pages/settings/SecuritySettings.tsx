@@ -1,21 +1,16 @@
 import React, { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { Capacitor } from '@capacitor/core';
 import PageLayout from '../../components/ui/Layout/PageLayout';
 import PageHeader from '../../components/ui/PageHeader';
-import BackgroundSyncSettings from '../../components/settings/BackgroundSyncSettings';
 import { useAppStore } from '../../stores/appStore';
 import { ROUTES } from '../../constants/routes';
 
 const SecuritySettings: React.FC = () => {
   const { t } = useTranslation('settings');
   const navigate = useNavigate();
-  const showDebugOption = useAppStore(s => s.showDebugOption);
   const autoLockTimeout = useAppStore(s => s.autoLockTimeout);
   const setAutoLockTimeout = useAppStore(s => s.setAutoLockTimeout);
-  const platform = Capacitor.getPlatform();
-  const isNative = platform !== 'web';
 
   const [isTimeoutModalOpen, setIsTimeoutModalOpen] = useState(false);
 
@@ -66,9 +61,6 @@ const SecuritySettings: React.FC = () => {
           <span className="text-accent-soft-foreground">{timeoutLabel}</span>
         </button>
       </div>
-
-      {/* Background sync section (native only) */}
-      {isNative && <BackgroundSyncSettings showDebugInfo={showDebugOption} />}
 
       {isTimeoutModalOpen && (
         <div

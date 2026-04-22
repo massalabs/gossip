@@ -1,5 +1,6 @@
 import React, {
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -23,6 +24,9 @@ import { useGossipSdk } from '../hooks/useGossipSdk';
 import SelectionHeader from '../components/discussions/SelectionHeader';
 import { useRetentionPolicy } from '../hooks/useRetentionPolicy';
 import { useKeyboardStore } from '../stores/keyboardStore';
+import { useHeaderScrollDetection } from '../hooks/useHeaderScrollDetection';
+import { ExitAnimationContext } from '../components/ui/ExitAnimationContext';
+import { useUiStore } from '../stores/uiStore';
 
 // Module-level guard so a given forward id is processed once across remounts
 // (StrictMode, route animation, back/forward nav).
@@ -76,6 +80,16 @@ const SelfDiscussion: React.FC = () => {
   const [editingMessage, setEditingMessage] = useState<Message | null>(null);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const messageListRef = useRef<MessageListHandle>(null);
+  const messageListContainerRef = useRef<HTMLDivElement>(null);
+  const isExiting = useContext(ExitAnimationContext);
+
+  useHeaderScrollDetection(
+    messageListContainerRef,
+    0,
+    'self-discussion',
+    isExiting
+  );
+  const headerIsScrolled = useUiStore(s => s.headerIsScrolled);
   const atBottomRef = useRef(true);
 
   const handleAtBottomChange = useCallback((atBottom: boolean) => {
@@ -179,7 +193,18 @@ const SelfDiscussion: React.FC = () => {
       canDelete={canDeleteSelected}
     />
   ) : (
-    <div className="px-header-padding pt-safe-t h-header-safe flex items-center gap-3 shrink-0 z-10 bg-card">
+    <div
+      className={`px-header-padding pt-safe-t h-header-safe flex items-center gap-3 shrink-0 relative z-10 ${
+        headerIsScrolled ? 'bg-muted' : 'bg-card'
+      }`}
+      style={{
+        boxShadow: headerIsScrolled
+          ? '0 2px 4px -1px rgba(0, 0, 0, 0.06), 0 4px 6px -1px rgba(0, 0, 0, 0.1)'
+          : 'none',
+        transition:
+          'background-color 200ms cubic-bezier(0.4, 0, 0.2, 1), box-shadow 200ms cubic-bezier(0.4, 0, 0.2, 1)',
+      }}
+    >
       <BackButton />
       <div className="flex-1 min-w-0">
         <h1 className="text-xl font-semibold text-foreground">
@@ -266,7 +291,10 @@ const SelfDiscussion: React.FC = () => {
       }
       overlay={retentionModal}
     >
-      <div className="h-full bg-discussion-pattern">
+      <div
+        ref={messageListContainerRef}
+        className="h-full bg-discussion-pattern"
+      >
         {!isLoading && outgoingMessages.length === 0 ? (
           <div className="h-full flex items-center justify-center px-8">
             <p className="text-center text-sm text-muted-foreground">
