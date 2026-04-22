@@ -1,4 +1,10 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useCallback,
+} from 'react';
 import { useLocation, Routes } from 'react-router-dom';
 import { OverlayReadyContext } from './OverlayReadyContext';
 import { ExitAnimationContext } from './ExitAnimationContext';
@@ -35,6 +41,7 @@ const isSlideRoute = (path: string) =>
 const AnimatedRoutes: React.FC<AnimatedRoutesProps> = ({ children }) => {
   const location = useLocation();
   const prevPathRef = useRef(location.pathname);
+  const setHeaderIsScrolled = useUiStore(s => s.setHeaderIsScrolled);
 
   const isOverlay = isSlideRoute(location.pathname);
 
@@ -81,18 +88,12 @@ const AnimatedRoutes: React.FC<AnimatedRoutesProps> = ({ children }) => {
     setSlideReady(true);
   }, []);
 
-  // Reset scroll-aware header state SYNCHRONOUSLY during render on route
-  // change. Pre-paint reset is critical: useLayoutEffect runs after the first
-  // commit, so the header would briefly render with the previous page's
-  // "scrolled" bg, and the CSS bg-color transition would animate the fade
-  // (gray → transparent over 200ms) on the returning base page.
-  // Writing to an external store (zustand) during render is safe here: this
-  // component does not subscribe to headerIsScrolled, so no loop.
-  const scrollResetPathRef = useRef(location.pathname);
-  if (scrollResetPathRef.current !== location.pathname) {
-    scrollResetPathRef.current = location.pathname;
-    useUiStore.getState().setHeaderIsScrolled(false);
-  }
+  // Reset scroll-aware header state pre-paint on every route change.
+  // Combined with the "first-paint no-transition" gate in PageLayout/HeaderBar,
+  // this prevents the stale "scrolled" bg from animating away on return.
+  useLayoutEffect(() => {
+    setHeaderIsScrolled(false);
+  }, [location.pathname, setHeaderIsScrolled]);
 
   // Route change detection
   useEffect(() => {
