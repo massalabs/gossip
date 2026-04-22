@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useUiStore } from '../../stores/uiStore';
 
 interface HeaderBarProps {
@@ -24,6 +24,15 @@ const HeaderBar: React.FC<HeaderBarProps> = ({
 }) => {
   const headerIsScrolled = useUiStore(s => s.headerIsScrolled);
 
+  // Delay enabling the bg/shadow CSS transition until after first paint so
+  // resetting scroll state on remount (returning from an overlay) doesn't
+  // visibly fade gray → transparent.
+  const [enableTransition, setEnableTransition] = useState(false);
+  useEffect(() => {
+    const raf = requestAnimationFrame(() => setEnableTransition(true));
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
   const bgClass =
     scrollAware && headerIsScrolled ? 'bg-muted' : 'bg-transparent';
   const shadowStyle =
@@ -36,8 +45,9 @@ const HeaderBar: React.FC<HeaderBarProps> = ({
       className={`px-header-padding pt-safe-t h-header-safe flex items-center shrink-0 relative z-10 ${bgClass} ${className}`}
       style={{
         boxShadow: shadowStyle,
-        transition:
-          'background-color 200ms cubic-bezier(0.4, 0, 0.2, 1), box-shadow 200ms cubic-bezier(0.4, 0, 0.2, 1)',
+        transition: enableTransition
+          ? 'background-color 200ms cubic-bezier(0.4, 0, 0.2, 1), box-shadow 200ms cubic-bezier(0.4, 0, 0.2, 1)'
+          : 'none',
       }}
     >
       {children}

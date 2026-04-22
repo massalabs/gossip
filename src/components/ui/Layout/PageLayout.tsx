@@ -111,6 +111,15 @@ const PageLayout: React.FC<PageLayoutProps> = ({
     ? '0 2px 4px -1px rgba(0, 0, 0, 0.06), 0 4px 6px -1px rgba(0, 0, 0, 0.1)'
     : 'none';
 
+  // Same "delay enable" pattern as HeaderBar: avoid animating the initial
+  // false-state reset on remount after overlay exit.
+  const [enableSubHeaderTransition, setEnableSubHeaderTransition] =
+    useState(false);
+  useEffect(() => {
+    const raf = requestAnimationFrame(() => setEnableSubHeaderTransition(true));
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
   return (
     <div
       className={`h-full min-h-0 flex flex-col bg-background ${className}`.trim()}
@@ -125,8 +134,9 @@ const PageLayout: React.FC<PageLayoutProps> = ({
           className={`shrink-0 relative z-10 pb-3 ${subHeaderBg}`}
           style={{
             boxShadow: subHeaderShadow,
-            transition:
-              'background-color 200ms cubic-bezier(0.4, 0, 0.2, 1), box-shadow 200ms cubic-bezier(0.4, 0, 0.2, 1)',
+            transition: enableSubHeaderTransition
+              ? 'background-color 200ms cubic-bezier(0.4, 0, 0.2, 1), box-shadow 200ms cubic-bezier(0.4, 0, 0.2, 1)'
+              : 'none',
           }}
         >
           {subHeader}
