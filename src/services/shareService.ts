@@ -169,10 +169,15 @@ export async function shareInvitation(
   // Use native Capacitor Share plugin on native platforms
   if (Capacitor.isNativePlatform()) {
     try {
-      // Embed URL in text so apps like Telegram that ignore the separate url field still receive the link
+      // Pass both `text` (with URL embedded) AND `url` separately:
+      // - `url` is what modern Telegram/iMessage use to validate a shareable
+      //   link — without it they may gray out the Send button.
+      // - Embedding the URL in `text` covers the older apps that ignore the
+      //   separate `url` field and only paste whatever's in `text`.
       await Share.share({
         title: shareTitle,
         text: `${shareText}\n${deepLinkUrl}`,
+        url: deepLinkUrl,
         dialogTitle: shareTitle,
       });
       return;
