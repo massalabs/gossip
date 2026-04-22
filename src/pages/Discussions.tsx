@@ -1,4 +1,10 @@
-import React, { useCallback, useRef, useState, useMemo } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useMemo,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 import DiscussionListPanel from '../components/discussions/DiscussionList';
 import DiscussionFilterButtons from '../components/discussions/DiscussionFilterButtons';
@@ -21,6 +27,8 @@ import { SessionStatus, SELF_CONTACT_ID } from '@massalabs/gossip-sdk';
 import { useOnlineStore } from '../stores/useOnlineStore';
 import { useSwipeFilter } from '../hooks/useSwipeFilter';
 import { useUiStore } from '../stores/uiStore';
+import { prewarmShareQR } from '../components/settings/shareContactQrCache';
+import { generateDeepLinkUrl } from '../utils/invite';
 
 const Discussions: React.FC = () => {
   const { t } = useTranslation('discussions');
@@ -28,7 +36,16 @@ const Discussions: React.FC = () => {
   const navigate = useNavigate();
   const isLoading = useAccountStore(s => s.isLoading);
   const username = useAccountStore(s => s.userProfile?.username);
+  const userId = useAccountStore(s => s.userProfile?.userId);
   const logout = useAccountStore(s => s.logout);
+
+  // Pre-warm the share-contact QR code in the background so opening the share
+  // page from the header feels instant. Re-runs when username changes.
+  useEffect(() => {
+    if (!userId || !username) return;
+    const deepLinkUrl = generateDeepLinkUrl(userId, username);
+    void prewarmShareQR(deepLinkUrl);
+  }, [userId, username]);
   const pendingSharedContent = useAppStore(s => s.pendingSharedContent);
   const setPendingSharedContent = useAppStore(s => s.setPendingSharedContent);
   const pendingForwardMessageId = useAppStore(s => s.pendingForwardMessageId);
@@ -41,6 +58,7 @@ const Discussions: React.FC = () => {
   const sessionsStatuses = useDiscussionStore(s => s.sessionsStatuses);
   const isOnline = useOnlineStore(s => s.isOnline);
   const headerIsScrolled = useUiStore(s => s.headerIsScrolled);
+  const showBottomNav = useUiStore(s => s.showBottomNav);
   const swipeHandlers = useSwipeFilter(filter, setFilter);
   // Callback ref: triggers re-render when scroll container is mounted
   const [scrollContainer, setScrollContainer] = useState<HTMLDivElement | null>(
@@ -265,7 +283,9 @@ const Discussions: React.FC = () => {
         onClick={() => navigate(ROUTES.newDiscussion())}
         variant="soft"
         size="custom"
-        className="absolute bottom-[calc(0.75rem+var(--sab))] right-4 h-14 w-14 rounded-full flex items-center gap-2 shadow-lg hover:shadow-xl transition-shadow z-50"
+        className={`absolute right-4 h-14 w-14 rounded-full flex items-center gap-2 shadow-lg hover:shadow-xl transition-shadow z-50 ${
+          showBottomNav ? 'bottom-3' : 'bottom-[calc(0.75rem+var(--sab))]'
+        }`}
         title={t('start_new')}
       >
         <Plus className="text-accent-soft-foreground shrink-0" />
