@@ -154,16 +154,8 @@ const SelfDiscussion: React.FC = () => {
     [messages]
   );
 
-  // Scroll to bottom once messages are loaded
-  const initialScrollDone = useRef(false);
-  useEffect(() => {
-    if (initialScrollDone.current || isLoading || outgoingMessages.length === 0)
-      return;
-    initialScrollDone.current = true;
-    requestAnimationFrame(() => {
-      messageListRef.current?.scrollToBottom();
-    });
-  }, [isLoading, outgoingMessages.length]);
+  // Initial scroll-to-bottom is handled by MessageList internally based on
+  // virtualItems (same mechanism as Discussion page). No custom effect here.
 
   const {
     selectedMessageIds,
