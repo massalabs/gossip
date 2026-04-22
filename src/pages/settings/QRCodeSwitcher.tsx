@@ -80,7 +80,7 @@ const QRCodeSwitcher: React.FC = () => {
           />
         }
         className="app-max-w mx-auto"
-        contentClassName="px-6 py-4"
+        contentClassName="px-6 py-4 overscroll-none !overflow-y-hidden [@media(max-height:650px)]:!overflow-y-auto"
       >
         <ShareContact
           onBack={handleBack}

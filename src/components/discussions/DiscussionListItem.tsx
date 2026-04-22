@@ -137,7 +137,7 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
   return (
     <div
       key={discussion.contactUserId}
-      className="w-full text-left bg-card rounded-2xl shadow-sm mb-2 hover:bg-muted/60 transition-colors"
+      className="w-full text-left bg-card rounded-2xl shadow-sm dark:shadow-none dark:border dark:border-border/60 mb-2 hover:bg-muted/60 hover:shadow-md dark:hover:border-border active:scale-[0.99] transition-all"
     >
       <div
         className={`${

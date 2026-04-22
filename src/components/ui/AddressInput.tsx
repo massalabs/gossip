@@ -44,12 +44,12 @@ const AddressInput: React.FC<AddressInputProps> = ({
     [onChange]
   );
 
-  const inputClasses = `w-full px-4 py-3 bg-gray-100 dark:bg-gray-700 border rounded-xl focus:ring-2 focus:border-transparent dark:text-white placeholder-gray-500 dark:placeholder-gray-400 ${
+  const inputClasses = `w-full px-4 py-3 bg-gray-100 dark:bg-gray-700 border rounded-xl focus-visible:ring-2 focus:border-transparent dark:text-white placeholder-gray-500 dark:placeholder-gray-400 ${
     isValid === true
-      ? 'border-success focus:ring-success'
+      ? 'border-success focus-visible:ring-success'
       : isValid === false
-        ? 'border-red-500 focus:ring-red-500'
-        : 'border-gray-300 dark:border-gray-600 focus:ring-blue-500'
+        ? 'border-red-500 focus-visible:ring-red-500'
+        : 'border-gray-300 dark:border-gray-600 focus-visible:ring-blue-500'
   } ${disabled ? 'opacity-50 cursor-not-allowed' : ''} ${
     isValid !== null ? 'pr-10' : ''
   } ${className}`;

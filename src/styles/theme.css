@@ -115,7 +115,7 @@
   /* Base colors */
   --background: #18181b; /* dark background from Figma */
   --foreground: #e8e8ea; /* creamy off-white - primary text */
-  --card: #1e1e22; /* surface/cards from Figma */
+  --card: #232329; /* surface/cards - lifted for clearer elevation vs bg (+9L delta) */
   --card-foreground: var(--foreground);
 
   /* Surface colors */
@@ -123,7 +123,7 @@
 
   /* Soft pastel family - secondary emphasis (active states, soft CTAs,
      unread badges, sent bubbles). Reserves --primary for true CTAs. */
-  --accent-soft: #1f4a43; /* deep teal derived from primary */
+  --accent-soft: #2a6e64; /* deeper teal - more vibrance in dark mode */
   --accent-soft-foreground: #d4f5ec; /* mint light for legibility */
 
   /* Chat bubble tokens - alias accent-soft for sent, dedicated for received */
@@ -161,7 +161,7 @@
   ); /* dark text on accent for good contrast */
 
   /* Muted colors */
-  --muted: #252529; /* muted background */
+  --muted: #2a2a2e; /* muted background - bumped to stay above new card value */
   --muted-foreground: #a0a0a8; /* dove gray - subtle text */
   /* Header scrolled background - use muted in dark mode for contrast */
   --header-scrolled: var(

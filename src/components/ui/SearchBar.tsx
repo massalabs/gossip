@@ -90,10 +90,10 @@ const SearchBar: React.FC<SearchBarProps> = React.memo(
           placeholder={placeholder}
           disabled={disabled}
           aria-label={ariaLabel}
-          className={`w-full h-10 pl-11 pr-11 rounded-full border text-sm focus:outline-none focus:ring-2 transition text-foreground placeholder-muted-foreground ${inputBgClass} ${
+          className={`w-full h-10 pl-11 pr-11 rounded-full border text-sm focus:outline-none focus-visible:ring-2 transition text-foreground placeholder-muted-foreground ${inputBgClass} ${
             disabled
               ? 'border-transparent opacity-50 cursor-not-allowed'
-              : 'border-transparent focus:ring-primary focus:bg-background'
+              : 'border-transparent focus-visible:ring-primary focus:bg-background focus:shadow-[inset_0_1px_3px_rgba(0,0,0,0.05)] dark:focus:shadow-[inset_0_1px_2px_rgba(0,0,0,0.3)]'
           }`}
         />
 
@@ -102,7 +102,7 @@ const SearchBar: React.FC<SearchBarProps> = React.memo(
           <button
             type="button"
             onClick={handleClear}
-            className="absolute right-4 top-1/2 -translate-y-1/2 p-1 hover:bg-muted rounded-full transition-colors touch-manipulation focus:outline-none focus:ring-2 focus:ring-ring"
+            className="absolute right-4 top-1/2 -translate-y-1/2 p-1 hover:bg-muted rounded-full transition-colors touch-manipulation focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             aria-label="Clear search"
             tabIndex={0}
           >
