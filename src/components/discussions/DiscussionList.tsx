@@ -101,6 +101,7 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
   const discussions = useDiscussionStore(s => s.discussions);
   const lastMessages = useDiscussionStore(s => s.lastMessages);
   const contacts = useDiscussionStore(s => s.contacts);
+  const patchDiscussion = useDiscussionStore(s => s.patchDiscussion);
 
   // Discussion actions
   const { handleAcceptDiscussionRequest, handleRefuseDiscussionRequest } =
@@ -153,26 +154,30 @@ const DiscussionList: React.FC<DiscussionListProps> = ({
         newName || undefined
       );
       if (result.success) {
+        // Optimistic store update so the UI reflects the new name without
+        // waiting for the SDK's DISCUSSION_UPDATED event / refetch.
+        patchDiscussion(discussion.id, { customName: newName || null });
         toast.success('Name updated');
       } else {
         toast.error(result.message || 'Failed to update name');
       }
     },
-    [gossip]
+    [gossip, patchDiscussion]
   );
 
   const handleTogglePin = useCallback(
     async (discussion: Discussion) => {
       if (!discussion.id) return;
-      const result = await gossip.discussions.pin(
-        discussion.id,
-        !discussion.pinned
-      );
-      if (!result.success) {
+      const newPinned = !discussion.pinned;
+      const result = await gossip.discussions.pin(discussion.id, newPinned);
+      if (result.success) {
+        // Optimistic store update so the pin icon toggles immediately.
+        patchDiscussion(discussion.id, { pinned: newPinned });
+      } else {
         toast.error(result.message || 'Failed to pin discussion');
       }
     },
-    [gossip]
+    [gossip, patchDiscussion]
   );
 
   // Item renderer
