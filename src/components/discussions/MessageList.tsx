@@ -37,12 +37,14 @@ import {
 const MESSAGES_ABOVE_UNREAD = 3;
 const AT_BOTTOM_THRESHOLD = 50;
 
-const EMPTY_REACTIONS: {
+interface ReactionGroup {
   emoji: string;
   count: number;
   myReactionId?: number;
   myReactionMessageId?: Uint8Array;
-}[] = [];
+}
+
+const EMPTY_REACTIONS: ReactionGroup[] = [];
 
 /** Stable key for a message. Prefers the local `storeId` (set on optimistic
  *  messages and preserved through the persisted replacement), so the key
@@ -85,15 +87,12 @@ interface MessageListProps {
     myReactionId?: number,
     myReactionMessageId?: Uint8Array
   ) => void;
-  reactionGroups?: Map<
-    string,
-    {
-      emoji: string;
-      count: number;
-      myReactionId?: number;
-      myReactionMessageId?: Uint8Array;
-    }[]
-  >;
+  /**
+   * Looks up the reactions for a given message. Each page owns the indexing
+   * scheme (regular discussions key by the crypto messageId, self-discussions
+   * by DB id) — MessageList stays agnostic and just asks.
+   */
+  getReactions?: (message: Message) => ReactionGroup[];
 }
 
 export interface MessageListHandle {
@@ -143,7 +142,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
       onToggleSelect,
       onReact,
       onToggleReaction,
-      reactionGroups,
+      getReactions,
     },
     ref
   ) => {
@@ -402,12 +401,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
                   onScrollToMessage={onScrollToMessage}
                   onReact={onReact}
                   onToggleReaction={onToggleReaction}
-                  reactions={
-                    item.message.messageId && reactionGroups
-                      ? (reactionGroups.get(item.message.messageId.join(',')) ??
-                        EMPTY_REACTIONS)
-                      : EMPTY_REACTIONS
-                  }
+                  reactions={getReactions?.(item.message) ?? EMPTY_REACTIONS}
                   showTimestamp={item.showTimestamp}
                   isFirstInGroup={item.groupInfo.isFirstInGroup}
                   isLastInGroup={item.groupInfo.isLastInGroup}
@@ -439,7 +433,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
         onScrollToMessage,
         onReact,
         onToggleReaction,
-        reactionGroups,
+        getReactions,
         contact,
         highlightedMessageId,
         isSelecting,

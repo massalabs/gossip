@@ -152,20 +152,31 @@ const useSelfMessageStoreBase = create<SelfMessageStore>((set, get) => ({
     if (!sdk.isSessionOpen) return;
 
     const removed = get().messages.find(m => m.id === id);
-    set(state => ({
-      messages: state.messages.filter(m => m.id !== id),
-    }));
+    const removedReactions = get().reactions.get(id);
+    set(state => {
+      const nextReactions = new Map(state.reactions);
+      nextReactions.delete(id);
+      return {
+        messages: state.messages.filter(m => m.id !== id),
+        reactions: nextReactions,
+      };
+    });
 
     try {
       await sdk.selfMessages.deleteMessage(id);
     } catch (error) {
       console.error('Failed to delete self message', error);
       if (removed) {
-        set(state => ({
-          messages: [...state.messages, removed].sort(
-            (a, b) => a.timestamp.getTime() - b.timestamp.getTime()
-          ),
-        }));
+        set(state => {
+          const nextReactions = new Map(state.reactions);
+          if (removedReactions) nextReactions.set(id, removedReactions);
+          return {
+            messages: [...state.messages, removed].sort(
+              (a, b) => a.timestamp.getTime() - b.timestamp.getTime()
+            ),
+            reactions: nextReactions,
+          };
+        });
       }
     }
   },
