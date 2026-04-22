@@ -41,7 +41,7 @@ const ContactAvatar: React.FC<ContactAvatarProps> = ({
 
   return (
     <div
-      className={`${sizeClass} ${paddingClass} shrink-0 rounded-full ${surfaceClass} flex items-center justify-center`}
+      className={`${sizeClass} ${paddingClass} shrink-0 rounded-full border border-border ${surfaceClass} flex items-center justify-center`}
     >
       <img
         src={getProfileHead(contact.name)}

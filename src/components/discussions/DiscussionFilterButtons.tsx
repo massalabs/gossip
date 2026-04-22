@@ -56,7 +56,7 @@ const DiscussionFilterButtons: React.FC<DiscussionFilterButtonsProps> = ({
   }, [filter, ready, filterCounts]);
 
   return (
-    <div className={`px-2 mb-3 ${className}`}>
+    <div className={className}>
       <div
         ref={containerRef}
         role="group"
@@ -65,7 +65,7 @@ const DiscussionFilterButtons: React.FC<DiscussionFilterButtonsProps> = ({
       >
         {/* Sliding pill */}
         <span
-          className="absolute bg-primary rounded-full"
+          className="absolute bg-accent-soft rounded-full"
           style={{
             ...pillStyle,
             height: '100%',
@@ -87,7 +87,9 @@ const DiscussionFilterButtons: React.FC<DiscussionFilterButtonsProps> = ({
               onClick={() => onFilterChange(option.value)}
               aria-pressed={isActive}
               className={`relative z-[1] px-4 py-2 rounded-full text-sm font-medium transition-colors duration-200 ${
-                isActive ? 'text-primary-foreground' : 'text-muted-foreground'
+                isActive
+                  ? 'text-accent-soft-foreground'
+                  : 'text-muted-foreground'
               }`}
             >
               {option.label}

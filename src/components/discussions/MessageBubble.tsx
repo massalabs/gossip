@@ -155,8 +155,8 @@ const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
           ref={bubbleRef}
           className={`relative ${hasMultipleReactions ? 'min-w-[8rem]' : ''} px-3.5 py-3 font-normal text-[15px] leading-tight ${isTextSelectable ? 'select-text' : 'select-none'} ${borderRadiusClass} ${
             isOutgoing
-              ? 'bg-accent text-accent-foreground'
-              : 'bg-surface-secondary text-card-foreground'
+              ? 'bg-bubble-sent text-bubble-sent-foreground'
+              : 'bg-bubble-received text-bubble-received-foreground'
           } ${!isDeleted && canReply ? 'cursor-pointer focus:outline-none' : ''} ${
             isContextMenuOpen
               ? 'ring-2 ring-accent shadow-lg brightness-105'
@@ -181,7 +181,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
           {/* Swipe reply indicator */}
           {-swipeOffset > indicatorThreshold && canReply && (
             <div
-              className={`absolute right-0 top-0 bottom-0 flex items-center justify-center ${isOutgoing ? 'bg-accent/20' : 'bg-card/20'} rounded-r-2xl`}
+              className={`absolute right-0 top-0 bottom-0 flex items-center justify-center ${isOutgoing ? 'bg-bubble-sent/40' : 'bg-card/20'} rounded-r-2xl`}
               style={{
                 width: `${Math.min(-swipeOffset, SWIPE_INDICATOR_MAX_WIDTH)}px`,
                 opacity: Math.min(-swipeOffset / SWIPE_INDICATOR_MAX_WIDTH, 1),

@@ -63,7 +63,7 @@ const SecuritySettings: React.FC = () => {
           className="w-full flex items-center justify-between text-sm font-medium text-foreground hover:bg-muted px-4 py-3 transition-colors border-t border-border"
         >
           <span>{t('security.auto_lock_current')}</span>
-          <span className="text-primary">{timeoutLabel}</span>
+          <span className="text-accent-soft-foreground">{timeoutLabel}</span>
         </button>
       </div>
 
@@ -92,7 +92,7 @@ const SecuritySettings: React.FC = () => {
                   }}
                   className={`w-full text-left px-4 py-3 rounded-lg text-sm transition-colors ${
                     autoLockTimeout === option.value
-                      ? 'bg-primary/10 text-primary font-medium'
+                      ? 'bg-accent-soft text-accent-soft-foreground font-medium'
                       : 'hover:bg-muted text-foreground'
                   }`}
                 >

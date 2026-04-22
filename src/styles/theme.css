@@ -56,6 +56,17 @@
   /* Surface colors */
   --surface-secondary: #eef0f2; /* light gray for incoming bubbles - visible against #fafbfc background */
 
+  /* Soft pastel family - secondary emphasis (active states, soft CTAs,
+     unread badges, sent bubbles). Reserves --primary for true CTAs. */
+  --accent-soft: #7eeacb; /* tonal soft pair - +11% L, -20% S vs primary for clear hierarchy */
+  --accent-soft-foreground: #0f3d35; /* deep green for AAA text contrast */
+
+  /* Chat bubble tokens - alias accent-soft for sent, dedicated for received */
+  --bubble-sent: var(--accent-soft);
+  --bubble-sent-foreground: var(--accent-soft-foreground);
+  --bubble-received: #e8ecef; /* softer blue-gray for incoming */
+  --bubble-received-foreground: var(--foreground);
+
   /* Graphic colors */
   --graphic-accent: var(--primary); /* brand green for illustrations */
 
@@ -109,6 +120,17 @@
 
   /* Surface colors */
   --surface-secondary: #2a3638; /* secondary surface background (incoming messages, discussion items, popups) */
+
+  /* Soft pastel family - secondary emphasis (active states, soft CTAs,
+     unread badges, sent bubbles). Reserves --primary for true CTAs. */
+  --accent-soft: #1f4a43; /* deep teal derived from primary */
+  --accent-soft-foreground: #d4f5ec; /* mint light for legibility */
+
+  /* Chat bubble tokens - alias accent-soft for sent, dedicated for received */
+  --bubble-sent: var(--accent-soft);
+  --bubble-sent-foreground: var(--accent-soft-foreground);
+  --bubble-received: #2a3638; /* matches surface-secondary for consistency */
+  --bubble-received-foreground: var(--foreground);
 
   --popover: var(
     --surface-secondary

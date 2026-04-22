@@ -5,14 +5,12 @@
  */
 
 const AVATAR_SURFACE_PALETTE = [
-  'bg-primary/25 dark:bg-primary/35',
-  'bg-secondary/20 dark:bg-secondary/30',
-  'bg-chart-4/35 dark:bg-chart-4/30',
-  'bg-success/20 dark:bg-success/28',
-  'bg-warning/15 dark:bg-warning/22',
-  'bg-muted/90 dark:bg-muted',
-  'bg-surface-secondary/90 dark:bg-surface-secondary',
-  'bg-card/95 dark:bg-card/80 border border-border/50',
+  'bg-secondary/20 dark:bg-secondary/30', // coral
+  'bg-chart-4/35 dark:bg-chart-4/30', // orchid
+  'bg-warning/15 dark:bg-warning/22', // amber
+  'bg-[#d9e2f1] dark:bg-[#3a4a6b]', // periwinkle blue
+  'bg-[#f5e6d3] dark:bg-[#5a4a3a]', // peach tan
+  'bg-[#f3d9ea] dark:bg-[#5a3a4f]', // rose lavender
 ] as const;
 
 /** FNV-1a 32-bit — stable across JS engines for the same string. */

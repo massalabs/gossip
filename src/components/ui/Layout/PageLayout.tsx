@@ -6,6 +6,9 @@ import HeaderBar from '../HeaderBar';
 interface PageLayoutProps {
   /** Header content - can be a simple title string or custom JSX */
   header?: React.ReactNode;
+  /** Sticky content rendered below the header, outside the scrollable area.
+   *  Shares the header's scroll-aware background. Use for search bars, filter tabs, etc. */
+  subHeader?: React.ReactNode;
   /** Page content */
   children: React.ReactNode;
   /** Additional class for the page container */
@@ -47,6 +50,7 @@ interface PageLayoutProps {
  */
 const PageLayout: React.FC<PageLayoutProps> = ({
   header,
+  subHeader,
   children,
   className = '',
   contentClassName = '',
@@ -54,6 +58,8 @@ const PageLayout: React.FC<PageLayoutProps> = ({
   onScrollContainerRef,
 }) => {
   const setHeaderVisible = useUiStore(s => s.setHeaderVisible);
+  const headerIsScrolled = useUiStore(s => s.headerIsScrolled);
+  const showBottomNav = useUiStore(s => s.showBottomNav);
   const [scrollContainer, setScrollContainer] = useState<HTMLDivElement | null>(
     null
   );
@@ -80,12 +86,32 @@ const PageLayout: React.FC<PageLayoutProps> = ({
     scrollAwareHeader && header ? { scrollContainer } : undefined
   );
 
+  const subHeaderScrolled = scrollAwareHeader && headerIsScrolled;
+  const subHeaderBg = subHeaderScrolled ? 'bg-muted' : 'bg-transparent';
+  const subHeaderShadow = subHeaderScrolled
+    ? '0 2px 4px -1px rgba(0, 0, 0, 0.06), 0 4px 6px -1px rgba(0, 0, 0, 0.1)'
+    : 'none';
+
   return (
     <div
       className={`h-full min-h-0 flex flex-col bg-background ${className}`.trim()}
     >
       {header && (
-        <HeaderBar scrollAware={scrollAwareHeader}>{header}</HeaderBar>
+        <HeaderBar scrollAware={scrollAwareHeader} shadowBelow={!!subHeader}>
+          {header}
+        </HeaderBar>
+      )}
+      {subHeader && (
+        <div
+          className={`shrink-0 relative z-10 pb-3 ${subHeaderBg}`}
+          style={{
+            boxShadow: subHeaderShadow,
+            transition:
+              'background-color 200ms cubic-bezier(0.4, 0, 0.2, 1), box-shadow 200ms cubic-bezier(0.4, 0, 0.2, 1)',
+          }}
+        >
+          {subHeader}
+        </div>
       )}
 
       {/* Scrollable content */}
@@ -100,7 +126,7 @@ const PageLayout: React.FC<PageLayoutProps> = ({
             style={{ height: 'calc(var(--sab) + 24px)' }}
           />
         </div>
-        <BottomProgressiveBlur />
+        {!showBottomNav && <BottomProgressiveBlur />}
       </div>
     </div>
   );

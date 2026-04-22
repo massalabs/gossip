@@ -32,7 +32,9 @@ const MessageStatusIndicator: React.FC<MessageStatusProps> = React.memo(
     return (
       <span
         className={`inline-flex items-center gap-1 ml-1.5 align-bottom translate-y-[1px] ${
-          isOutgoing ? 'text-accent-foreground/80' : 'text-muted-foreground'
+          isOutgoing
+            ? 'text-bubble-sent-foreground/80'
+            : 'text-muted-foreground'
         }`}
       >
         {isEdited && (

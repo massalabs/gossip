@@ -10,6 +10,8 @@ interface SearchBarProps {
   className?: string;
   autoFocus?: boolean; // Default: false
   disabled?: boolean;
+  /** Tailwind bg class for the input (default 'bg-muted'). Use for scroll-aware contrast. */
+  inputBgClass?: string;
   'aria-label'?: string;
 }
 
@@ -28,6 +30,7 @@ const SearchBar: React.FC<SearchBarProps> = React.memo(
     className = '',
     autoFocus = false,
     disabled = false,
+    inputBgClass = 'bg-muted',
     'aria-label': ariaLabel = 'Search',
   }) => {
     const inputRef = useRef<HTMLInputElement>(null);
@@ -87,10 +90,10 @@ const SearchBar: React.FC<SearchBarProps> = React.memo(
           placeholder={placeholder}
           disabled={disabled}
           aria-label={ariaLabel}
-          className={`w-full h-12 pl-11 pr-11 rounded-full border text-sm focus:outline-none focus:ring-2 transition text-foreground bg-background placeholder-muted-foreground ${
+          className={`w-full h-10 pl-11 pr-11 rounded-full border text-sm focus:outline-none focus:ring-2 transition text-foreground placeholder-muted-foreground ${inputBgClass} ${
             disabled
-              ? 'border-border opacity-50 cursor-not-allowed'
-              : 'border-border focus:ring-primary'
+              ? 'border-transparent opacity-50 cursor-not-allowed'
+              : 'border-transparent focus:ring-primary focus:bg-background'
           }`}
         />
 

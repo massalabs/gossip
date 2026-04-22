@@ -34,6 +34,18 @@ export default {
           DEFAULT: 'var(--color-accent)',
           foreground: 'var(--color-accent-foreground)',
         },
+        'accent-soft': {
+          DEFAULT: 'var(--color-accent-soft)',
+          foreground: 'var(--color-accent-soft-foreground)',
+        },
+        'bubble-sent': {
+          DEFAULT: 'var(--color-bubble-sent)',
+          foreground: 'var(--color-bubble-sent-foreground)',
+        },
+        'bubble-received': {
+          DEFAULT: 'var(--color-bubble-received)',
+          foreground: 'var(--color-bubble-received-foreground)',
+        },
         destructive: {
           DEFAULT: 'var(--color-destructive)',
           foreground: 'var(--color-destructive-foreground)',

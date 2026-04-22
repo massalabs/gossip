@@ -34,7 +34,7 @@ const CitedMessage: React.FC<CitedMessageProps> = React.memo(
   }) => {
     const { t } = useTranslation('discussions');
     const textColor = isOutgoing
-      ? 'text-accent-foreground/80'
+      ? 'text-bubble-sent-foreground/80'
       : 'text-muted-foreground/80';
 
     const isReply = variant === 'reply';
@@ -50,7 +50,7 @@ const CitedMessage: React.FC<CitedMessageProps> = React.memo(
       <div
         className={`mb-2 pb-2 border-l-2 pl-2 ${
           isOutgoing
-            ? 'border-accent-foreground/30'
+            ? 'border-bubble-sent-foreground/30'
             : 'border-card-foreground/30'
         } ${showNotFound ? 'border-destructive/50' : ''} ${
           canNavigate

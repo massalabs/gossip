@@ -157,7 +157,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
           >
             <span className="relative">{item.label}</span>
             {item.icon && (
-              <span className="w-6 h-6 rounded-full bg-accent text-accent-foreground dark:bg-muted dark:text-accent shrink-0 flex items-center justify-center [&>svg]:w-3.5 [&>svg]:h-3.5">
+              <span className="w-6 h-6 rounded-full bg-accent-soft text-accent-soft-foreground dark:bg-muted dark:text-accent shrink-0 flex items-center justify-center [&>svg]:w-3.5 [&>svg]:h-3.5">
                 {item.icon}
               </span>
             )}

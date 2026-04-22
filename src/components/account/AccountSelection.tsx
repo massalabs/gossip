@@ -67,8 +67,8 @@ const AccountSelection: React.FC<AccountSelectionProps> = ({
     const authMethod = account.security?.authMethod;
     if (authMethod === 'capacitor' || authMethod === 'webauthn') {
       return (
-        <div className="w-10 h-10 bg-primary/10 rounded-full flex items-center justify-center shrink-0">
-          <Shield className="w-5 h-5 text-primary" />
+        <div className="w-10 h-10 bg-accent-soft rounded-full flex items-center justify-center shrink-0">
+          <Shield className="w-5 h-5 text-accent-soft-foreground" />
         </div>
       );
     } else {
@@ -150,8 +150,8 @@ const AccountSelection: React.FC<AccountSelectionProps> = ({
                 key={account.userId}
                 className={`p-4 border rounded-lg cursor-pointer transition-all duration-200 bg-card hover:shadow-sm ${
                   selectedAccount?.userId === account.userId
-                    ? 'border-primary bg-primary/10 shadow-sm'
-                    : 'border-border hover:border-primary/50'
+                    ? 'border-accent-soft-foreground/40 bg-accent-soft/60 shadow-sm'
+                    : 'border-border hover:border-accent-soft-foreground/30'
                 }`}
                 onClick={() => handleAccountSelect(account)}
               >
@@ -169,8 +169,8 @@ const AccountSelection: React.FC<AccountSelectionProps> = ({
                     </p>
                   </div>
                   {selectedAccount?.userId === account.userId && (
-                    <div className="w-5 h-5 bg-primary rounded-full flex items-center justify-center shrink-0">
-                      <CheckIcon className="w-3 h-3 text-primary-foreground" />
+                    <div className="w-5 h-5 bg-accent-soft rounded-full flex items-center justify-center shrink-0">
+                      <CheckIcon className="w-3 h-3 text-accent-soft-foreground" />
                     </div>
                   )}
                 </div>

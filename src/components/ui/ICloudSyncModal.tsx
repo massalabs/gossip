@@ -47,7 +47,10 @@ const ICloudSyncModal: React.FC<ICloudSyncModalProps> = ({
 
           <div className="bg-muted rounded-lg p-4 space-y-2">
             <h4 className="text-sm font-semibold text-foreground flex items-center gap-2">
-              <Info className="w-4 h-4 text-primary" aria-hidden="true" />
+              <Info
+                className="w-4 h-4 text-muted-foreground"
+                aria-hidden="true"
+              />
               Note
             </h4>
             <p className="text-xs text-muted-foreground">

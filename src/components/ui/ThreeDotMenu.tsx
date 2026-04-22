@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { MoreVertical } from 'react-feather';
 
 export type MenuItem =
@@ -31,9 +32,22 @@ const ThreeDotMenu: React.FC<ThreeDotMenuProps> = ({
   triggerLabel = 'More options',
 }) => {
   const [open, setOpen] = useState(false);
+  const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(
+    null
+  );
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  // Position the portal'd menu relative to the trigger
+  useEffect(() => {
+    if (!open || !triggerRef.current) return;
+    const rect = triggerRef.current.getBoundingClientRect();
+    setMenuPos({
+      top: rect.bottom + 8, // mt-2 equivalent
+      right: window.innerWidth - rect.right,
+    });
+  }, [open]);
 
   const close = useCallback(() => {
     setOpen(false);
@@ -45,10 +59,10 @@ const ThreeDotMenu: React.FC<ThreeDotMenuProps> = ({
     if (!open) return;
 
     const handleClickOutside = (e: MouseEvent | TouchEvent) => {
-      if (
-        containerRef.current &&
-        !containerRef.current.contains(e.target as Node)
-      ) {
+      const target = e.target as Node;
+      const insideContainer = containerRef.current?.contains(target);
+      const insideMenu = menuRef.current?.contains(target);
+      if (!insideContainer && !insideMenu) {
         close();
       }
     };
@@ -129,45 +143,54 @@ const ThreeDotMenu: React.FC<ThreeDotMenuProps> = ({
         <MoreVertical className="w-5 h-5 text-muted-foreground" />
       </button>
 
-      {open && (
-        <div
-          ref={menuRef}
-          role="menu"
-          aria-label={triggerLabel}
-          className="absolute right-0 top-full mt-2 min-w-[200px] max-w-[280px] bg-card border border-border rounded-2xl shadow-xl z-50 overflow-hidden animate-context-menu-in"
-          style={{ '--menu-origin': 'top right' } as React.CSSProperties}
-        >
-          {items.map((item, index) =>
-            item.type === 'separator' ? (
-              <div
-                key={index}
-                className="border-b border-border"
-                role="separator"
-              />
-            ) : (
-              <button
-                key={index}
-                role="menuitem"
-                type="button"
-                onClick={() => {
-                  item.onClick();
-                  close();
-                }}
-                className={`w-full flex items-center justify-between gap-3 px-4 py-3 text-sm font-medium text-left ${
-                  item.danger ? 'text-destructive' : 'text-foreground'
-                }`}
-              >
-                <span className="relative">{item.label}</span>
-                {item.icon && (
-                  <span className="w-6 h-6 rounded-full bg-accent text-accent-foreground dark:bg-muted dark:text-accent shrink-0 flex items-center justify-center [&>svg]:w-3.5 [&>svg]:h-3.5">
-                    {item.icon}
-                  </span>
-                )}
-              </button>
-            )
-          )}
-        </div>
-      )}
+      {open &&
+        menuPos &&
+        createPortal(
+          <div
+            ref={menuRef}
+            role="menu"
+            aria-label={triggerLabel}
+            className="fixed min-w-[200px] max-w-[280px] bg-card border border-border rounded-2xl shadow-xl z-[1000] overflow-hidden animate-context-menu-in"
+            style={
+              {
+                top: menuPos.top,
+                right: menuPos.right,
+                '--menu-origin': 'top right',
+              } as React.CSSProperties
+            }
+          >
+            {items.map((item, index) =>
+              item.type === 'separator' ? (
+                <div
+                  key={index}
+                  className="border-b border-border"
+                  role="separator"
+                />
+              ) : (
+                <button
+                  key={index}
+                  role="menuitem"
+                  type="button"
+                  onClick={() => {
+                    item.onClick();
+                    close();
+                  }}
+                  className={`w-full flex items-center justify-between gap-3 px-4 py-3 text-sm font-medium text-left ${
+                    item.danger ? 'text-destructive' : 'text-foreground'
+                  }`}
+                >
+                  <span className="relative">{item.label}</span>
+                  {item.icon && (
+                    <span className="w-6 h-6 rounded-full bg-accent-soft text-accent-soft-foreground dark:bg-muted dark:text-accent shrink-0 flex items-center justify-center [&>svg]:w-3.5 [&>svg]:h-3.5">
+                      {item.icon}
+                    </span>
+                  )}
+                </button>
+              )
+            )}
+          </div>,
+          document.body
+        )}
     </div>
   );
 };
