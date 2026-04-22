@@ -271,7 +271,11 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
                     if (discussion.id) {
                       setModalOpen(discussion.id, false);
                     }
-                    onAccept(discussion);
+                    // Pass the prefilled name (peer's shared username) so the
+                    // contact gets a proper display name even when skipping
+                    // the rename step.
+                    const fallback = proposedName.trim();
+                    onAccept(discussion, fallback || undefined);
                   }}
                 />
                 {/* Refuse confirm modal */}
