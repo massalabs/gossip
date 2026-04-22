@@ -62,19 +62,13 @@ const SelfDiscussion: React.FC = () => {
 
   const gossip = useGossipSdk();
 
-  const selfReactionGroups = useMemo(() => {
-    const map = new Map<
-      string,
-      { emoji: string; count: number; myReactionId?: number }[]
-    >();
-    for (const msg of messages) {
-      if (msg.messageId && msg.id != null) {
-        const groups = reactions.get(msg.id);
-        if (groups) map.set(msg.messageId.join(','), groups);
-      }
-    }
-    return map;
-  }, [messages, reactions]);
+  // Self-messages don't carry a crypto `messageId` after reload (the SDK
+  // doesn't persist it — there's no peer that needs it), so we look up
+  // reactions directly by DB id, which is what self-reactions are indexed on.
+  const getReactions = useCallback(
+    (msg: Message) => (msg.id != null ? (reactions.get(msg.id) ?? []) : []),
+    [reactions]
+  );
 
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
   const [editingMessage, setEditingMessage] = useState<Message | null>(null);
@@ -164,7 +158,6 @@ const SelfDiscussion: React.FC = () => {
     canDeleteSelected,
   } = useDiscussionMessageSelection({
     messages: outgoingMessages,
-    contactName: t('selfDiscussion.title'),
     gossip,
     t,
     onDeleteMessage: async (id: number) => {
@@ -311,7 +304,7 @@ const SelfDiscussion: React.FC = () => {
                 void deleteMessage(message.id);
               }
             }}
-            reactionGroups={selfReactionGroups}
+            getReactions={getReactions}
             onReact={(message, emoji) => {
               if (message.id != null) {
                 void sendReaction(emoji, message.id);

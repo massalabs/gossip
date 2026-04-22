@@ -33,6 +33,10 @@ import DiscussionLayout from '../components/ui/Layout/DiscussionLayout';
 const TEST_MESSAGE_COUNT = 50;
 const TEST_MESSAGE_BATCH_DELAY_MS = 100;
 
+// Stable empty array so MessageList sees a referentially-equal value for
+// messages without reactions instead of a fresh [] on every render.
+const EMPTY_REACTIONS: never[] = [];
+
 const Discussion: React.FC = () => {
   const { t } = useTranslation('discussions');
   const gossip = useGossipSdk();
@@ -109,6 +113,13 @@ const Discussion: React.FC = () => {
     contact ? s.getMessagesForContact(contact.userId) : EMPTY_STORE_MESSAGES
   );
   const reactionGroups = useMessageStore(s => s.reactionGroupsCache);
+  const getReactions = useCallback(
+    (msg: Message) =>
+      msg.messageId
+        ? (reactionGroups.get(msg.messageId.join(',')) ?? EMPTY_REACTIONS)
+        : EMPTY_REACTIONS,
+    [reactionGroups]
+  );
   const reactToMessage = useMessageStore(s => s.reactToMessage);
   const removeReaction = useMessageStore(s => s.removeReaction);
   const isLoading = useMessageStore(s => s.isInitializing);
@@ -385,7 +396,7 @@ const Discussion: React.FC = () => {
               console.error('Failed to send reaction', err);
             });
           }}
-          reactionGroups={reactionGroups}
+          getReactions={getReactions}
           onToggleReaction={(
             message,
             emoji,
