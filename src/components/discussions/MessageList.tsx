@@ -243,20 +243,32 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
       }
       if (virtualItems.length === 0) return;
 
-      requestAnimationFrame(() => {
-        vlistRef.current?.scrollToIndex(initialTopMostItemIndex, {
-          align: 'start',
-        });
-        initialScrollDone.current = true;
-        setAnimationsEnabled(true);
-        signalReady();
-      });
+      // Virtua measures items across frames; on cached remount scrollSize
+      // starts at 0 and grows. Retry for ~10 frames so we end at the bottom.
+      let frame = 0;
+      const tick = () => {
+        const ref = vlistRef.current;
+        if (ref) {
+          if (firstUnreadMessage) {
+            ref.scrollToIndex(initialTopMostItemIndex, { align: 'start' });
+          } else {
+            ref.scrollTo(ref.scrollSize);
+          }
+        }
+        if (frame++ < 10) requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+
+      initialScrollDone.current = true;
+      setAnimationsEnabled(true);
+      signalReady();
     }, [
       discussion?.id,
       virtualItems.length,
       initialTopMostItemIndex,
       animationsEnabled,
       signalReady,
+      firstUnreadMessage,
     ]);
 
     // Reset message count tracking when switching discussions
@@ -315,9 +327,8 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
     // Expose imperative methods
     React.useImperativeHandle(ref, () => ({
       scrollToBottom: () => {
-        vlistRef.current?.scrollToIndex(virtualItems.length - 1, {
-          align: 'end',
-        });
+        const r = vlistRef.current;
+        if (r) r.scrollTo(r.scrollSize);
       },
       scrollToIndex: (index: number) => {
         vlistRef.current?.scrollToIndex(index, {

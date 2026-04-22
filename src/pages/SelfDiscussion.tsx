@@ -154,39 +154,6 @@ const SelfDiscussion: React.FC = () => {
     [messages]
   );
 
-  // Scroll to bottom once messages are loaded. MessageList's internal scroll
-  // uses align:'start' which clamps to top when content fits — so we force
-  // scroll via DOM scrollTop = scrollHeight after layout settles. Repeats for
-  // a few frames because virtua re-layouts items asynchronously after mount.
-  const initialScrollDone = useRef(false);
-  useEffect(() => {
-    if (initialScrollDone.current || isLoading || outgoingMessages.length === 0)
-      return;
-    initialScrollDone.current = true;
-
-    const scrollToEnd = () => {
-      const root = messageListContainerRef.current;
-      if (!root) return;
-      const el = root.querySelector('.scroll-container') as HTMLElement | null;
-      if (!el) return;
-      el.scrollTop = el.scrollHeight;
-    };
-
-    // Try multiple times over the first ~250ms while virtua measures items.
-    const timers = [0, 50, 120, 220].map(delay =>
-      window.setTimeout(scrollToEnd, delay)
-    );
-    // Also explicit imperative call (align:'end') as a fallback.
-    const imperative = window.setTimeout(() => {
-      messageListRef.current?.scrollToBottom();
-    }, 60);
-
-    return () => {
-      timers.forEach(id => clearTimeout(id));
-      clearTimeout(imperative);
-    };
-  }, [isLoading, outgoingMessages.length]);
-
   const {
     selectedMessageIds,
     isSelecting,
