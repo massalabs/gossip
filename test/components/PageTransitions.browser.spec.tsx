@@ -451,13 +451,17 @@ describe('PageTransitions', () => {
     it('exit animation div is removed after animation completes', async () => {
       await renderAtRoute('/discussions');
 
+      // Capture document reference before navigating — base may unmount once
+      // the overlay is fully shown, so querying page-discussions later is
+      // unreliable.
+      const doc = page.getByTestId('page-discussions').element().ownerDocument;
+
       // Navigate to discussion, then back
       await userEvent.click(page.getByTestId('nav-to-discussion'));
       await waitForSlideReady();
       await userEvent.click(page.getByTestId('nav-to-discussions'));
 
       // Wait for the exit animation div to be removed (500ms timeout + buffer)
-      const doc = page.getByTestId('page-discussions').element().ownerDocument;
       await vi.waitFor(
         () => {
           expect(doc.querySelector('.animate-slide-exit-right')).toBeNull();
