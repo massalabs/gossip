@@ -25,14 +25,14 @@ const NavButton: React.FC<NavButtonProps> = ({
         animationVariant === 'alt' ? 'nav-button-click-alt' : 'nav-button-click'
       } ${
         isActive
-          ? 'bg-primary/10 dark:shadow-none scale-[1.02]'
+          ? 'bg-accent-soft dark:shadow-none scale-[1.02]'
           : 'hover:bg-muted'
       }`}
       title={title}
     >
       <div
         className={`w-6 h-6 transition-colors ${
-          isActive ? 'text-primary' : 'text-foreground/80'
+          isActive ? 'text-accent-soft-foreground' : 'text-foreground/80'
         }`}
       >
         {icon}

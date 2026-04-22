@@ -238,7 +238,7 @@ const NewContact: React.FC = () => {
           <>
             <button
               onClick={() => setShowScanner(true)}
-              className="w-full flex items-center gap-3 px-4 py-3 border-t border-border text-primary hover:bg-muted/50 active:bg-muted transition-colors"
+              className="w-full flex items-center gap-3 px-4 py-3 border-t border-border text-accent-soft-foreground hover:bg-muted/50 active:bg-muted transition-colors"
               aria-label={t('new_contact.scan_qr')}
             >
               <QrCodeIcon className="w-5 h-5 shrink-0" />

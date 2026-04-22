@@ -137,7 +137,7 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
   return (
     <div
       key={discussion.contactUserId}
-      className="w-full px-2 py-0.5 text-left bg-background/20 border border-border rounded-xl mb-1 hover:bg-accent/10"
+      className="w-full text-left bg-card rounded-2xl shadow-sm mb-2 hover:bg-muted/60 transition-colors"
     >
       <div
         className={`${
@@ -157,8 +157,8 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
       >
         <div className="flex items-center space-x-3">
           {discussion.contactUserId === SELF_CONTACT_ID ? (
-            <div className="w-12 h-12 rounded-full bg-accent/20 flex items-center justify-center">
-              <BookOpen className="w-6 h-6 text-accent" />
+            <div className="w-12 h-12 rounded-full bg-[#e8e3db] dark:bg-[#3d3a33] flex items-center justify-center">
+              <BookOpen className="w-6 h-6 text-foreground" />
             </div>
           ) : (
             <ContactAvatar contact={contact} size={12} />
@@ -221,7 +221,7 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
                     }}
                     variant="primary"
                     size="custom"
-                    className="px-2.5 py-1 text-xs font-medium rounded border border-primary text-primary hover:bg-primary/10"
+                    className="px-2.5 py-1 text-xs font-medium rounded border border-accent-soft-foreground/40 text-accent-soft-foreground hover:bg-accent-soft"
                   >
                     {t('list.accept')}
                   </Button>
@@ -236,7 +236,7 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
                     {t('list.refuse')}
                   </Button>
                   {discussion.unreadCount > 0 && (
-                    <span className="ml-auto inline-flex items-center justify-center px-2 py-1 text-[10px] font-bold leading-none text-primary-foreground bg-primary rounded-full">
+                    <span className="ml-auto inline-flex items-center justify-center px-2 py-1 text-[10px] font-bold leading-none text-accent-soft-foreground bg-accent-soft rounded-full">
                       {discussion.unreadCount}
                     </span>
                   )}
@@ -316,7 +316,7 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
                   </p>
                 )}
                 {discussion.unreadCount > 0 && (
-                  <span className="inline-flex items-center justify-center px-2 py-1 text-xs font-bold leading-none text-primary-foreground bg-primary rounded-full">
+                  <span className="inline-flex items-center justify-center px-2 py-1 text-xs font-bold leading-none text-accent-soft-foreground bg-accent-soft rounded-full">
                     {discussion.unreadCount}
                   </span>
                 )}

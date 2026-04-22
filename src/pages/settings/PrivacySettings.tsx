@@ -68,7 +68,7 @@ const PrivacySettings: React.FC = () => {
           className="w-full flex items-center justify-between text-sm font-medium text-foreground hover:bg-muted px-4 py-3 transition-colors border-t border-border"
         >
           <span>{t('discussions:settings.auto_delete_current')}</span>
-          <span className="text-primary">{retentionLabel}</span>
+          <span className="text-accent-soft-foreground">{retentionLabel}</span>
         </button>
       </div>
 
@@ -94,7 +94,7 @@ const PrivacySettings: React.FC = () => {
                   }}
                   className={`w-full text-left px-4 py-3 rounded-lg text-sm transition-colors ${
                     defaultRetentionDuration === option.value
-                      ? 'bg-primary/10 text-primary font-medium'
+                      ? 'bg-accent-soft text-accent-soft-foreground font-medium'
                       : 'hover:bg-muted text-foreground'
                   }`}
                 >

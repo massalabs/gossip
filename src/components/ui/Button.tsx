@@ -9,6 +9,7 @@ interface ButtonProps {
   loading?: boolean;
   variant?:
     | 'primary'
+    | 'soft'
     | 'secondary'
     | 'danger'
     | 'ghost'
@@ -51,6 +52,7 @@ const Button: React.FC<ButtonProps> = ({
   const variantClasses = {
     primary:
       'bg-primary hover:bg-primary/90 disabled:bg-muted text-primary-foreground disabled:text-muted-foreground focus:ring-ring rounded-full',
+    soft: 'bg-accent-soft hover:bg-accent-soft/80 disabled:bg-muted text-accent-soft-foreground disabled:text-muted-foreground focus:ring-ring rounded-full',
     secondary:
       'bg-secondary hover:bg-secondary/80 disabled:bg-muted text-secondary-foreground disabled:text-muted-foreground focus:ring-ring rounded-full',
     danger:

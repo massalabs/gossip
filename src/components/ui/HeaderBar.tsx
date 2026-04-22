@@ -6,6 +6,8 @@ interface HeaderBarProps {
   className?: string;
   /** Whether to show scroll-aware background changes (default: true) */
   scrollAware?: boolean;
+  /** When true, a sub-header below owns the shadow; this bar renders no shadow */
+  shadowBelow?: boolean;
 }
 
 /**
@@ -18,12 +20,14 @@ const HeaderBar: React.FC<HeaderBarProps> = ({
   children,
   className = '',
   scrollAware = true,
+  shadowBelow = false,
 }) => {
   const headerIsScrolled = useUiStore(s => s.headerIsScrolled);
 
-  const bgClass = scrollAware && headerIsScrolled ? 'bg-muted' : 'bg-card';
+  const bgClass =
+    scrollAware && headerIsScrolled ? 'bg-muted' : 'bg-transparent';
   const shadowStyle =
-    scrollAware && headerIsScrolled
+    scrollAware && headerIsScrolled && !shadowBelow
       ? '0 2px 4px -1px rgba(0, 0, 0, 0.06), 0 4px 6px -1px rgba(0, 0, 0, 0.1)'
       : 'none';
 

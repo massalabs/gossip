@@ -79,7 +79,7 @@ const UserProfileAvatar: React.FC<UserProfileAvatarProps> = ({
     <>
       <div
         onClick={interactive ? ping : undefined}
-        className={`${sizeClass} ${paddingClass} ${className} shrink-0 rounded-full bg-primary flex items-center justify-center ${
+        className={`${sizeClass} ${paddingClass} ${className} shrink-0 rounded-full border border-border bg-primary flex items-center justify-center ${
           interactive
             ? 'cursor-pointer active:opacity-80 transition-opacity'
             : ''

@@ -226,7 +226,7 @@ const SelfDiscussion: React.FC = () => {
               onClick={() => void handleSelectRetention(option.value)}
               className={`w-full text-left px-4 py-3 rounded-lg text-sm transition-colors ${
                 retentionDuration === option.value
-                  ? 'bg-primary/10 text-primary font-medium'
+                  ? 'bg-accent-soft text-accent-soft-foreground font-medium'
                   : 'hover:bg-muted text-foreground'
               }`}
             >

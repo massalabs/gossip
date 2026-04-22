@@ -111,7 +111,7 @@ const AccountImport: React.FC<AccountImportProps> = ({
   const renderMnemonicStep = () => (
     <div className={`${cardClass} p-6 space-y-6`}>
       <div>
-        <p className="text-sm text-muted-foreground leading-relaxed pl-3 border-l-4 border-primary">
+        <p className="text-sm text-muted-foreground leading-relaxed pl-3 border-l-4 border-accent-soft-foreground/40">
           {t('import.description')}
         </p>
         <div className="mt-5">

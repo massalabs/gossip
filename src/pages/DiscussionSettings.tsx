@@ -314,7 +314,9 @@ const DiscussionSettings: React.FC = () => {
             className="w-full flex items-center justify-between text-sm font-medium text-foreground hover:bg-muted rounded-lg px-2 py-2 transition-colors"
           >
             <span>{t('settings.auto_delete_current')}</span>
-            <span className="text-primary">{retentionLabel}</span>
+            <span className="text-accent-soft-foreground">
+              {retentionLabel}
+            </span>
           </button>
         </div>
       </div>
@@ -339,7 +341,7 @@ const DiscussionSettings: React.FC = () => {
                   onClick={() => handleSelectRetention(option.value)}
                   className={`w-full text-left px-4 py-3 rounded-lg text-sm transition-colors ${
                     currentRetention === option.value
-                      ? 'bg-primary/10 text-primary font-medium'
+                      ? 'bg-accent-soft text-accent-soft-foreground font-medium'
                       : 'hover:bg-muted text-foreground'
                   }`}
                 >
