@@ -127,8 +127,6 @@ const Discussion: React.FC = () => {
     handleDeleteSelected,
   } = useDiscussionMessageSelection({
     messages,
-    discussionCustomName: discussion?.customName ?? undefined,
-    contactName: contact?.name,
     gossip,
     t,
   });
