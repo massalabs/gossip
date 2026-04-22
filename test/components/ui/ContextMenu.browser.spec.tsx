@@ -64,6 +64,9 @@ describe('ContextMenu', () => {
   it('closes on backdrop click', async () => {
     const { onClose } = renderMenu();
 
+    // Wait out the 400ms iOS-ghost-click guard on the backdrop.
+    await new Promise(r => setTimeout(r, 420));
+
     const backdrop = page.getByTestId('context-menu-backdrop');
     (backdrop.element() as HTMLElement).click();
     expect(onClose).toHaveBeenCalledOnce();

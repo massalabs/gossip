@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Contact } from '@massalabs/gossip-sdk';
 import { getAvatarSurfaceClass } from './avatarIdentity';
 import { getProfileHead } from './profileHeads';
@@ -29,27 +29,30 @@ const PADDING_MAP: Record<number, string> = {
  * Contact avatar: same deterministic head illustrations as the user profile (`getProfileHead`).
  * `contact.avatar` is ignored — assets are bundled and preloaded in `profileHeads.ts`.
  */
-const ContactAvatar: React.FC<ContactAvatarProps> = ({
-  contact,
-  size = 10,
-}) => {
-  const sizeClass = SIZE_CLASS_MAP[size] ?? SIZE_CLASS_MAP[10];
-  const paddingClass = PADDING_MAP[size] ?? PADDING_MAP[10];
-  const surfaceClass = getAvatarSurfaceClass(
-    contact.userId?.trim() || contact.name
-  );
+const ContactAvatar: React.FC<ContactAvatarProps> = React.memo(
+  ({ contact, size = 10 }) => {
+    const sizeClass = SIZE_CLASS_MAP[size] ?? SIZE_CLASS_MAP[10];
+    const paddingClass = PADDING_MAP[size] ?? PADDING_MAP[10];
+    const surfaceClass = getAvatarSurfaceClass(
+      contact.userId?.trim() || contact.name
+    );
+    const headSvg = useMemo(() => getProfileHead(contact.name), [contact.name]);
 
-  return (
-    <div
-      className={`${sizeClass} ${paddingClass} shrink-0 rounded-full border border-border ${surfaceClass} flex items-center justify-center`}
-    >
-      <img
-        src={getProfileHead(contact.name)}
-        className="w-full h-full object-contain"
-        alt={contact.name}
-      />
-    </div>
-  );
-};
+    return (
+      <div
+        className={`${sizeClass} ${paddingClass} shrink-0 rounded-full border border-border ${surfaceClass} flex items-center justify-center`}
+        role="img"
+        aria-label={contact.name}
+      >
+        <div
+          className="w-full h-full [&>svg]:w-full [&>svg]:h-full"
+          dangerouslySetInnerHTML={{ __html: headSvg }}
+        />
+      </div>
+    );
+  }
+);
+
+ContactAvatar.displayName = 'ContactAvatar';
 
 export default ContactAvatar;

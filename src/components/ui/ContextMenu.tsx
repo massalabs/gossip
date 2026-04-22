@@ -23,12 +23,14 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const dragStartY = useRef<number | null>(null);
   const focusedIndex = useRef(-1);
+  const openedAtRef = useRef(0);
 
   // Save focused element when opening, reset index when closing
   useEffect(() => {
     if (isOpen) {
       previousFocusRef.current = document.activeElement as HTMLElement | null;
       focusedIndex.current = -1;
+      openedAtRef.current = Date.now();
     }
   }, [isOpen]);
 
@@ -37,6 +39,13 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
     previousFocusRef.current = null;
     onClose();
   }, [onClose]);
+
+  // iOS synthesizes a click on backdrop ~300ms after the long-press touchend.
+  // Ignore backdrop clicks arriving in that window so the menu doesn't vanish.
+  const handleBackdropClick = useCallback(() => {
+    if (Date.now() - openedAtRef.current < 400) return;
+    restoreAndClose();
+  }, [restoreAndClose]);
 
   const getMenuItems = useCallback(
     () =>
@@ -121,7 +130,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
       {/* Backdrop */}
       <div
         className="absolute inset-0 bg-black/50 dark:bg-black/60 animate-backdrop-fade-in"
-        onClick={restoreAndClose}
+        onClick={handleBackdropClick}
         data-testid="context-menu-backdrop"
       />
 
@@ -157,7 +166,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
           >
             <span className="relative">{item.label}</span>
             {item.icon && (
-              <span className="w-6 h-6 rounded-full bg-accent-soft text-accent-soft-foreground dark:bg-muted dark:text-accent shrink-0 flex items-center justify-center [&>svg]:w-3.5 [&>svg]:h-3.5">
+              <span className="w-6 h-6 rounded-full bg-accent-soft text-accent-soft-foreground dark:bg-muted dark:text-accent shrink-0 flex items-center justify-center [&>svg]:w-3 [&>svg]:h-3">
                 {item.icon}
               </span>
             )}

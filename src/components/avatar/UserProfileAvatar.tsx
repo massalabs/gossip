@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { getProfileHead } from './profileHeads';
 import BaseModal from '../ui/BaseModal';
 import Popover from '../ui/Popover';
@@ -42,6 +42,7 @@ const UserProfileAvatar: React.FC<UserProfileAvatarProps> = ({
 }) => {
   const sizeClass = SIZE_CLASS_MAP[size] ?? SIZE_CLASS_MAP[10];
   const paddingClass = PADDING_MAP[size] ?? PADDING_MAP[10];
+  const headSvg = useMemo(() => getProfileHead(name), [name]);
 
   const resetAccount = useAccountStore.use.resetAccount();
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -85,10 +86,11 @@ const UserProfileAvatar: React.FC<UserProfileAvatarProps> = ({
             : ''
         }`}
       >
-        <img
-          src={getProfileHead(name)}
-          className="w-full h-full object-contain"
-          alt="Profile"
+        <div
+          className="w-full h-full [&>svg]:w-full [&>svg]:h-full"
+          role="img"
+          aria-label="Profile"
+          dangerouslySetInnerHTML={{ __html: headSvg }}
         />
       </div>
 
