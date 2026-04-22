@@ -25,7 +25,7 @@ const AboutSettings: React.FC = () => {
 
   const handleOpenGossipWebsite = async () => {
     let url = await resolveDeweb('usegossip.massa');
-    if (url.includes('deweb_redirect?deweb_url=usegossip.massa')) {
+    if (url.includes('deweb_redirect')) {
       url = 'https://usegossip.massa.network/';
     }
     window.open(url, '_blank');
