@@ -158,9 +158,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
               ? 'bg-bubble-sent text-bubble-sent-foreground'
               : 'bg-bubble-received text-bubble-received-foreground'
           } ${!isDeleted && canReply ? 'cursor-pointer focus:outline-none' : ''} ${
-            isContextMenuOpen
-              ? 'ring-2 ring-accent shadow-lg brightness-105'
-              : ''
+            isContextMenuOpen ? 'shadow-xl brightness-[1.08]' : ''
           } ${isDeleted ? 'opacity-80' : ''}`}
           onClick={onClick}
           onKeyDown={onKeyDown}
@@ -173,9 +171,11 @@ const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
               swipeOffset !== 0
                 ? `translateX(${swipeOffset}px)`
                 : 'translateX(0)',
+            // Box-shadow/filter transitions make the "lift" when the context
+            // menu opens feel smooth instead of popping in.
             transition: isAnimatingBack
-              ? 'transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), border-radius 0.3s ease-out'
-              : 'border-radius 0.3s ease-out',
+              ? 'transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), border-radius 0.3s ease-out, box-shadow 0.2s ease, filter 0.2s ease'
+              : 'border-radius 0.3s ease-out, box-shadow 0.2s ease, filter 0.2s ease',
           }}
         >
           {/* Swipe reply indicator */}
