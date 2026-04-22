@@ -110,13 +110,11 @@ describe('DiscussionListItem — pin icon', () => {
       />
     );
 
-    // The Bookmark icon renders as an <svg> inside the <h3> heading.
-    // Use getByRole('heading') to uniquely target it.
-    const headingLocator = page.getByRole('heading', { name: 'Alice' });
-    await expect.element(headingLocator).toBeInTheDocument();
+    await expect
+      .element(page.getByRole('heading', { name: 'Alice' }))
+      .toBeInTheDocument();
 
-    const heading = headingLocator.element() as HTMLElement;
-    const pinIcon = heading.querySelector('[data-testid="pin-icon"]');
+    const pinIcon = document.querySelector('[data-testid="pin-icon"]');
     expect(pinIcon).toBeTruthy();
   });
 
@@ -135,12 +133,11 @@ describe('DiscussionListItem — pin icon', () => {
       />
     );
 
-    const headingLocator = page.getByRole('heading', { name: 'Alice' });
-    await expect.element(headingLocator).toBeInTheDocument();
+    await expect
+      .element(page.getByRole('heading', { name: 'Alice' }))
+      .toBeInTheDocument();
 
-    const heading = headingLocator.element() as HTMLElement;
-
-    const pinIcon = heading.querySelector('[data-testid="pin-icon"]');
+    const pinIcon = document.querySelector('[data-testid="pin-icon"]');
     expect(pinIcon).toBeNull();
   });
 
@@ -229,14 +226,12 @@ describe('DiscussionListItem — mute icon', () => {
       />
     );
 
-    const headingLocator = page.getByRole('heading', { name: 'Alice' });
-    await expect.element(headingLocator).toBeInTheDocument();
+    await expect
+      .element(page.getByRole('heading', { name: 'Alice' }))
+      .toBeInTheDocument();
 
-    const heading = headingLocator.element() as HTMLElement;
-    // BellOff renders as an SVG; when muted there should be 1 svg (mute icon)
-    // When also pinned there would be 2, but here pinned=false so only mute icon
-    const svgs = heading.querySelectorAll('svg');
-    expect(svgs.length).toBe(1);
+    const muteIcon = document.querySelector('[data-testid="mute-icon"]');
+    expect(muteIcon).toBeTruthy();
   });
 
   it('does not show mute icon when discussion.mutedNotifications is false', async () => {
@@ -254,12 +249,11 @@ describe('DiscussionListItem — mute icon', () => {
       />
     );
 
-    const headingLocator = page.getByRole('heading', { name: 'Alice' });
-    await expect.element(headingLocator).toBeInTheDocument();
+    await expect
+      .element(page.getByRole('heading', { name: 'Alice' }))
+      .toBeInTheDocument();
 
-    const heading = headingLocator.element() as HTMLElement;
-    // No icons should appear when neither pinned nor muted
-    const svgs = heading.querySelectorAll('svg');
-    expect(svgs.length).toBe(0);
+    const muteIcon = document.querySelector('[data-testid="mute-icon"]');
+    expect(muteIcon).toBeNull();
   });
 });

@@ -164,25 +164,25 @@ const DiscussionListItem: React.FC<DiscussionListItemProps> = ({
             <ContactAvatar contact={contact} size={12} />
           )}
           <div className="flex-1 min-w-0">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-medium text-foreground truncate flex items-center gap-1">
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-sm font-medium text-foreground truncate">
                 {discussion.contactUserId === SELF_CONTACT_ID
                   ? t('selfDiscussion.title')
                   : discussion.customName || contact.name}
-                {discussion.pinned && (
-                  <Bookmark
-                    data-testid="pin-icon"
-                    className="w-3 h-3 text-muted-foreground flex-shrink-0"
-                  />
-                )}
+              </h3>
+              <div className="flex items-center gap-1.5 shrink-0">
                 {discussion.mutedNotifications && (
                   <BellOff
                     data-testid="mute-icon"
-                    className="w-3 h-3 text-muted-foreground flex-shrink-0"
+                    className="w-3.5 h-3.5 text-muted-foreground/70"
                   />
                 )}
-              </h3>
-              <div className="flex items-center gap-2">
+                {discussion.pinned && (
+                  <Bookmark
+                    data-testid="pin-icon"
+                    className="w-3.5 h-3.5 text-muted-foreground/70 fill-muted-foreground/30"
+                  />
+                )}
                 {isPendingOutgoing && (
                   <span className="inline-flex items-center px-2 rounded-full text-[10px] font-medium bg-badge text-badge-foreground border border-badge-border">
                     {t('header.waiting_approval')}
