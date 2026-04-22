@@ -84,6 +84,18 @@
     /* Use 100vh for iOS compatibility, 100dvh for modern browsers */
     height: 100vh;
     height: 100dvh;
+    /* Disable text selection app-wide; specific elements opt in via
+       Tailwind `select-text` (e.g. message bubbles) or the rule below. */
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  /* Form fields and editable content always allow selection. */
+  input,
+  textarea,
+  [contenteditable='true'] {
+    user-select: text;
+    -webkit-user-select: text;
   }
 
   * {
