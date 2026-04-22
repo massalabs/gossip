@@ -59,7 +59,9 @@
     "blocked": "Bloquées",
     "enable": "Activer",
     "requesting": "Demande en cours...",
-    "blocked_message": "Les notifications sont bloquées. Réessaie dans les paramètres de ton navigateur."
+    "blocked_message_web": "Les notifications sont bloquées. Réessaie dans les paramètres de ton navigateur.",
+    "blocked_message_native": "Les notifications sont bloquées. Ouvre les réglages système pour les réactiver.",
+    "open_settings": "Ouvrir les réglages"
   },
   "language": {
     "title": "Langue"

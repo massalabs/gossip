@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { useLocation, Routes } from 'react-router-dom';
 import { OverlayReadyContext } from './OverlayReadyContext';
+import { ExitAnimationContext } from './ExitAnimationContext';
 import { useUiStore } from '../../stores/uiStore';
 
 // =============================================================================
@@ -34,7 +35,6 @@ const isSlideRoute = (path: string) =>
 const AnimatedRoutes: React.FC<AnimatedRoutesProps> = ({ children }) => {
   const location = useLocation();
   const prevPathRef = useRef(location.pathname);
-  const setHeaderIsScrolled = useUiStore(s => s.setHeaderIsScrolled);
 
   const isOverlay = isSlideRoute(location.pathname);
 
@@ -81,17 +81,25 @@ const AnimatedRoutes: React.FC<AnimatedRoutesProps> = ({ children }) => {
     setSlideReady(true);
   }, []);
 
+  // Reset scroll-aware header state SYNCHRONOUSLY during render on route
+  // change. Pre-paint reset is critical: useLayoutEffect runs after the first
+  // commit, so the header would briefly render with the previous page's
+  // "scrolled" bg, and the CSS bg-color transition would animate the fade
+  // (gray → transparent over 200ms) on the returning base page.
+  // Writing to an external store (zustand) during render is safe here: this
+  // component does not subscribe to headerIsScrolled, so no loop.
+  const scrollResetPathRef = useRef(location.pathname);
+  if (scrollResetPathRef.current !== location.pathname) {
+    scrollResetPathRef.current = location.pathname;
+    useUiStore.getState().setHeaderIsScrolled(false);
+  }
+
   // Route change detection
   useEffect(() => {
     const prev = prevPathRef.current;
     prevPathRef.current = location.pathname;
 
     if (location.pathname === prev) return;
-
-    // Reset scroll-aware header state on every route change. Prevents stale
-    // "scrolled" state from one page bleeding into another (overlay <-> base).
-    // The newly-active page's useHeaderScroll will set it back correctly.
-    setHeaderIsScrolled(false);
 
     const entering = isSlideRoute(location.pathname);
     const leaving = isSlideRoute(prev);
@@ -153,7 +161,7 @@ const AnimatedRoutes: React.FC<AnimatedRoutesProps> = ({ children }) => {
       setFadeIn(false);
       requestAnimationFrame(() => setFadeIn(true));
     }
-  }, [location, setHeaderIsScrolled]);
+  }, [location]);
 
   // Safety timeout: if overlay content never signals ready, slide anyway
   useEffect(() => {
@@ -232,7 +240,9 @@ const AnimatedRoutes: React.FC<AnimatedRoutesProps> = ({ children }) => {
           style={{ willChange: 'transform', zIndex: 10 }}
           onAnimationEnd={() => setExitContent(null)}
         >
-          {exitContent}
+          <ExitAnimationContext.Provider value={true}>
+            {exitContent}
+          </ExitAnimationContext.Provider>
         </div>
       )}
     </div>

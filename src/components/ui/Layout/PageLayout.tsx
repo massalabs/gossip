@@ -1,7 +1,14 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, {
+  useContext,
+  useState,
+  useEffect,
+  useLayoutEffect,
+  useCallback,
+} from 'react';
 import { useUiStore } from '../../../stores/uiStore';
 import { useHeaderScroll } from '../../../hooks/useHeaderScroll';
 import HeaderBar from '../HeaderBar';
+import { ExitAnimationContext } from '../ExitAnimationContext';
 
 interface PageLayoutProps {
   /** Header content - can be a simple title string or custom JSX */
@@ -57,9 +64,19 @@ const PageLayout: React.FC<PageLayoutProps> = ({
   scrollAwareHeader = true,
   onScrollContainerRef,
 }) => {
+  const isExiting = useContext(ExitAnimationContext);
   const setHeaderVisible = useUiStore(s => s.setHeaderVisible);
+  const setHeaderIsScrolled = useUiStore(s => s.setHeaderIsScrolled);
   const headerIsScrolled = useUiStore(s => s.headerIsScrolled);
   const showBottomNav = useUiStore(s => s.showBottomNav);
+
+  // Reset scroll-aware bg BEFORE first paint on every mount of a non-exiting
+  // PageLayout. Prevents stale "scrolled" state from a previous page bleeding
+  // into the initial render.
+  useLayoutEffect(() => {
+    if (!isExiting) setHeaderIsScrolled(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [scrollContainer, setScrollContainer] = useState<HTMLDivElement | null>(
     null
   );
@@ -81,9 +98,11 @@ const PageLayout: React.FC<PageLayoutProps> = ({
     }
   }, [header, setHeaderVisible]);
 
-  // Setup scroll detection for header background
+  // Setup scroll detection for header background. Disabled for exiting
+  // PageLayouts (slide-out animation) so a stale scrollTop on the leaving
+  // page doesn't clobber the base layer's header state.
   useHeaderScroll(
-    scrollAwareHeader && header ? { scrollContainer } : undefined
+    scrollAwareHeader && header && !isExiting ? { scrollContainer } : undefined
   );
 
   const subHeaderScrolled = scrollAwareHeader && headerIsScrolled;

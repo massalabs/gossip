@@ -455,38 +455,61 @@ const BackgroundSyncSettings: React.FC<BackgroundSyncSettingsProps> = ({
         )}
 
         {isIOSNative && iosStatus && (
-          <div className="space-y-3 pt-1 border-t border-border">
-            {/* Background App Refresh — opens system settings on tap */}
-            <div className="space-y-1 pt-2">
-              <div className="flex items-center justify-between gap-3 py-1">
-                <span className="text-sm text-foreground flex-1">
-                  {t('background_sync.background_refresh')}
-                </span>
-                <Toggle
-                  checked={iosStatus.isBackgroundRefreshEnabled}
-                  onChange={handleOpenIOSSettings}
-                  disabled={!iosStatus.userCanEnableBackgroundRefresh}
-                  ariaLabel={t('background_sync.background_refresh')}
-                />
-              </div>
+          <div className="space-y-3 pt-3 border-t border-border">
+            {/* Background App Refresh — read-only on iOS: the only thing the
+                app can do is open system Settings so the user can flip it
+                there. Show status as a chip + an action button when needed. */}
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-sm text-foreground flex-1">
+                {t('background_sync.background_refresh')}
+              </span>
+              <span
+                className={
+                  'text-xs font-medium px-2 py-0.5 rounded-full ' +
+                  (iosStatus.isBackgroundRefreshEnabled
+                    ? 'bg-accent-soft/20 text-foreground'
+                    : 'bg-warning/15 text-warning')
+                }
+              >
+                {iosStatus.backgroundRefreshStatus === 'available'
+                  ? t('background_sync.enabled')
+                  : iosStatus.backgroundRefreshStatus === 'denied'
+                    ? t('background_sync.disabled')
+                    : iosStatus.backgroundRefreshStatus === 'restricted'
+                      ? t('background_sync.restricted')
+                      : t('background_sync.unknown')}
+              </span>
             </div>
+            {!iosStatus.isBackgroundRefreshEnabled &&
+              iosStatus.userCanEnableBackgroundRefresh && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleOpenIOSSettings}
+                >
+                  <ExternalLink className="w-4 h-4 mr-2" aria-hidden="true" />
+                  {t('background_sync.open_settings')}
+                </Button>
+              )}
 
-            {/* Low Power Mode — display-only: cannot be toggled per-app */}
-            <div className="space-y-1">
-              <div className="flex items-center justify-between gap-3 py-1">
-                <span className="text-sm text-foreground flex-1 flex items-center gap-1.5">
-                  <Zap className="w-3.5 h-3.5" aria-hidden="true" />
-                  {t('background_sync.low_power')}
-                </span>
-                <Toggle
-                  checked={iosStatus.isLowPowerModeEnabled}
-                  onChange={() => {
-                    /* System-wide setting; no per-app control available. */
-                  }}
-                  disabled
-                  ariaLabel={t('background_sync.low_power')}
-                />
-              </div>
+            {/* Low Power Mode — system-wide, display-only. */}
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-sm text-foreground flex-1 flex items-center gap-1.5">
+                <Zap className="w-3.5 h-3.5" aria-hidden="true" />
+                {t('background_sync.low_power')}
+              </span>
+              <span
+                className={
+                  'text-xs font-medium px-2 py-0.5 rounded-full ' +
+                  (iosStatus.isLowPowerModeEnabled
+                    ? 'bg-warning/15 text-warning'
+                    : 'bg-muted-foreground/10 text-muted-foreground')
+                }
+              >
+                {iosStatus.isLowPowerModeEnabled
+                  ? t('background_sync.on')
+                  : t('background_sync.off')}
+              </span>
             </div>
           </div>
         )}
