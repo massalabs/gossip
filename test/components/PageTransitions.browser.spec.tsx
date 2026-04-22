@@ -233,7 +233,7 @@ describe('PageTransitions', () => {
       expect(overlayWrapper).not.toBeNull();
     });
 
-    it('keeps base layer (discussions) mounted when overlay is shown', async () => {
+    it('unmounts base layer (discussions) when overlay is fully shown', async () => {
       await renderAtRoute('/discussions');
 
       await userEvent.click(page.getByTestId('nav-to-discussion'));
@@ -244,14 +244,13 @@ describe('PageTransitions', () => {
         .element(page.getByTestId('page-discussion'))
         .toBeInTheDocument();
 
-      // The discussions page is STILL in the DOM (base layer stays mounted)
-      // AnimatedRoutes renders the base layer at z-index 1 always.
-      // Use ownerDocument from a rendered element to query the correct document.
+      // Base layer is removed from the DOM to prevent event leaks
+      // (long-press, text selection, etc.) through to the hidden list.
       const doc = page.getByTestId('page-discussion').element().ownerDocument;
       const allDiscussionPages = doc.querySelectorAll(
         '[data-testid="page-discussions"]'
       );
-      expect(allDiscussionPages.length).toBeGreaterThanOrEqual(1);
+      expect(allDiscussionPages.length).toBe(0);
     });
 
     it('adds animate-slide-exit-right class when navigating back from discussion', async () => {

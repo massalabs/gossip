@@ -200,7 +200,7 @@ const Discussions: React.FC = () => {
   );
 
   const subHeaderContent = (
-    <div className="-mt-4 pt-2 px-6 flex flex-col gap-2">
+    <div className="-mt-4 pt-2 px-6 flex flex-col gap-3">
       <SearchBar
         value={searchQuery}
         onChange={setQuery}

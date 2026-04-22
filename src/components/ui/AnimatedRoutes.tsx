@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { useLocation, Routes } from 'react-router-dom';
 import { OverlayReadyContext } from './OverlayReadyContext';
+import { useUiStore } from '../../stores/uiStore';
 
 // =============================================================================
 // Constants
@@ -33,6 +34,7 @@ const isSlideRoute = (path: string) =>
 const AnimatedRoutes: React.FC<AnimatedRoutesProps> = ({ children }) => {
   const location = useLocation();
   const prevPathRef = useRef(location.pathname);
+  const setHeaderIsScrolled = useUiStore(s => s.setHeaderIsScrolled);
 
   const isOverlay = isSlideRoute(location.pathname);
 
@@ -85,6 +87,11 @@ const AnimatedRoutes: React.FC<AnimatedRoutesProps> = ({ children }) => {
     prevPathRef.current = location.pathname;
 
     if (location.pathname === prev) return;
+
+    // Reset scroll-aware header state on every route change. Prevents stale
+    // "scrolled" state from one page bleeding into another (overlay <-> base).
+    // The newly-active page's useHeaderScroll will set it back correctly.
+    setHeaderIsScrolled(false);
 
     const entering = isSlideRoute(location.pathname);
     const leaving = isSlideRoute(prev);
@@ -146,7 +153,7 @@ const AnimatedRoutes: React.FC<AnimatedRoutesProps> = ({ children }) => {
       setFadeIn(false);
       requestAnimationFrame(() => setFadeIn(true));
     }
-  }, [location]);
+  }, [location, setHeaderIsScrolled]);
 
   // Safety timeout: if overlay content never signals ready, slide anyway
   useEffect(() => {
@@ -187,17 +194,21 @@ const AnimatedRoutes: React.FC<AnimatedRoutesProps> = ({ children }) => {
 
   return (
     <div className="h-full relative overflow-hidden bg-background">
-      {/* Base — always mounted */}
-      <div
-        className={`absolute inset-0 bg-background ${
-          !isOverlay && !exitContent
-            ? `transition-opacity duration-150 ease-in-out ${fadeIn ? 'opacity-100' : 'opacity-0'}`
-            : ''
-        }`}
-        style={{ zIndex: 1 }}
-      >
-        <Routes location={baseLocationRef.current}>{children}</Routes>
-      </div>
+      {/* Base — unmounted when a slide overlay is fully displayed.
+          Remounts during exit animation so the slide-out reveals content.
+          State kept in stores (discussionStore, etc.); scroll position resets. */}
+      {(!isOverlay || exitContent) && (
+        <div
+          className={`absolute inset-0 bg-background ${
+            !isOverlay && !exitContent
+              ? `transition-opacity duration-150 ease-in-out ${fadeIn ? 'opacity-100' : 'opacity-0'}`
+              : ''
+          }`}
+          style={{ zIndex: 1 }}
+        >
+          <Routes location={baseLocationRef.current}>{children}</Routes>
+        </div>
+      )}
 
       {/* Overlay — discussion entering */}
       {overlayContent && (
