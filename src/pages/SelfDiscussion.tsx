@@ -118,6 +118,12 @@ const SelfDiscussion: React.FC = () => {
     location.state as { forwardFromMessageId?: number } | undefined
   )?.forwardFromMessageId;
 
+  // Prefill the MessageInput with the forwarded content instead of sending
+  // immediately — user reviews/edits and hits send to confirm.
+  const [forwardDraft, setForwardDraft] = useState<string | undefined>(
+    undefined
+  );
+
   useEffect(() => {
     if (forwardFromMessageId == null) return;
     if (handledForwardIds.has(forwardFromMessageId)) return;
@@ -129,10 +135,10 @@ const SelfDiscussion: React.FC = () => {
     void (async () => {
       const msg = await getSdk().messages.get(idToForward);
       if (msg?.content) {
-        await sendMessage(msg.content);
+        setForwardDraft(msg.content);
       }
     })();
-  }, [forwardFromMessageId, navigate, sendMessage]);
+  }, [forwardFromMessageId, navigate]);
 
   useEffect(() => {
     void loadMessages();
@@ -253,10 +259,11 @@ const SelfDiscussion: React.FC = () => {
         <MessageInput
           disabled={isSelecting}
           isSelecting={isSelecting}
-          initialValue={editingMessage?.content}
+          initialValue={editingMessage?.content ?? forwardDraft}
           onSend={content => {
             void sendMessage(content);
             setReplyingTo(null);
+            setForwardDraft(undefined);
           }}
           replyingTo={replyingTo}
           onCancelReply={() => setReplyingTo(null)}
