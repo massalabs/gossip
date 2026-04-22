@@ -278,7 +278,7 @@ describe('MultiSelectMessages', () => {
         .toHaveTextContent('false');
 
       expect(writeTextSpy).toHaveBeenCalledOnce();
-      expect(writeTextSpy).toHaveBeenCalledWith('Alice\nHi there');
+      expect(writeTextSpy).toHaveBeenCalledWith('Hi there');
 
       writeTextSpy.mockRestore();
     });
@@ -305,7 +305,7 @@ describe('MultiSelectMessages', () => {
         .element(page.getByTestId('is-selecting'))
         .toHaveTextContent('false');
 
-      expect(writeTextSpy).toHaveBeenCalledWith('You\nMy message');
+      expect(writeTextSpy).toHaveBeenCalledWith('My message');
 
       writeTextSpy.mockRestore();
     });
@@ -347,8 +347,7 @@ describe('MultiSelectMessages', () => {
         .element(page.getByTestId('is-selecting'))
         .toHaveTextContent('false');
 
-      const expected =
-        'Alice\nFirst message\n\nYou\nSecond message\n\nAlice\nThird message';
+      const expected = 'First message\n\nSecond message\n\nThird message';
       expect(writeTextSpy).toHaveBeenCalledWith(expected);
 
       writeTextSpy.mockRestore();
@@ -390,13 +389,13 @@ describe('MultiSelectMessages', () => {
         .element(page.getByTestId('is-selecting'))
         .toHaveTextContent('false');
 
-      const expected = 'Alice\nFirst\n\nAlice\nThird';
+      const expected = 'First\n\nThird';
       expect(writeTextSpy).toHaveBeenCalledWith(expected);
 
       writeTextSpy.mockRestore();
     });
 
-    it('uses discussionCustomName over contactName when provided', async () => {
+    it('copies content only — sender labels removed from format', async () => {
       const writeTextSpy = vi
         .spyOn(navigator.clipboard, 'writeText')
         .mockResolvedValue();
@@ -409,13 +408,7 @@ describe('MultiSelectMessages', () => {
           timestamp: new Date('2025-01-01T12:00:00Z'),
         }),
       ];
-      render(
-        <SelectionHarness
-          messages={messages}
-          contactName="Alice"
-          discussionCustomName="Best Friend"
-        />
-      );
+      render(<SelectionHarness messages={messages} contactName="Alice" />);
 
       await userEvent.click(page.getByTestId('toggle-1'));
       await userEvent.click(page.getByTestId('copy'));
@@ -424,7 +417,7 @@ describe('MultiSelectMessages', () => {
         .element(page.getByTestId('is-selecting'))
         .toHaveTextContent('false');
 
-      expect(writeTextSpy).toHaveBeenCalledWith('Best Friend\nHi');
+      expect(writeTextSpy).toHaveBeenCalledWith('Hi');
 
       writeTextSpy.mockRestore();
     });

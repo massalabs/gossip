@@ -96,12 +96,14 @@ describe('SelfDiscussion forward to self notes', () => {
     mockSetSelfRetentionPolicy.mockResolvedValue(undefined);
   });
 
-  it('auto-sends forwarded message content', async () => {
+  it('prefills the input with the forwarded content (no auto-send)', async () => {
     render(<SelfDiscussion />);
     await act(async () => {});
 
+    // The message is fetched from the SDK but NOT auto-sent; the user reviews
+    // and hits send explicitly.
     expect(mockGetMessage).toHaveBeenCalledWith(42);
-    expect(mockSendSelfMessage).toHaveBeenCalledWith('Forwarded note content');
+    expect(mockSendSelfMessage).not.toHaveBeenCalled();
   });
 
   it('loads and updates self retention duration from settings', async () => {
