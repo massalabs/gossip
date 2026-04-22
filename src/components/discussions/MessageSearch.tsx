@@ -115,7 +115,7 @@ const MessageSearch: React.FC<MessageSearchProps> = ({
         onChange={e => setQuery(e.target.value)}
         onKeyDown={handleKeyDown}
         placeholder={t('search.placeholder')}
-        className="flex-1 min-w-0 px-3 py-1.5 text-sm bg-muted rounded-lg border border-border text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+        className="flex-1 min-w-0 px-3 py-1.5 text-sm bg-muted rounded-lg border border-border text-foreground placeholder-muted-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       />
       {query && (
         <span className="text-xs text-muted-foreground whitespace-nowrap">

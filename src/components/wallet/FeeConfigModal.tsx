@@ -158,7 +158,7 @@ const FeeConfigModal: React.FC<FeeConfigModalProps> = ({
                   onChange={() =>
                     setConfig({ type: 'preset', preset: 'standard' })
                   }
-                  className="w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500"
+                  className="w-4 h-4 text-blue-600 border-gray-300 focus-visible:ring-blue-500"
                 />
                 <span className="ml-2 text-sm font-medium text-gray-900 dark:text-white">
                   {t('fees.preset')}
@@ -208,7 +208,7 @@ const FeeConfigModal: React.FC<FeeConfigModalProps> = ({
                   name="feeType"
                   checked={config.type === 'custom'}
                   onChange={handleCustomToggle}
-                  className="w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500"
+                  className="w-4 h-4 text-blue-600 border-gray-300 focus-visible:ring-blue-500"
                 />
                 <span className="ml-2 text-sm font-medium text-gray-900 dark:text-white">
                   {t('fees.custom')}
@@ -225,7 +225,7 @@ const FeeConfigModal: React.FC<FeeConfigModalProps> = ({
                     placeholder={t('fees.custom_placeholder')}
                     step="0.001"
                     min="0"
-                    className="w-full px-4 py-3 bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:text-white placeholder-gray-500 dark:placeholder-gray-400"
+                    className="w-full px-4 py-3 bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-xl focus-visible:ring-2 focus-visible:ring-blue-500 focus:border-transparent dark:text-white placeholder-gray-500 dark:placeholder-gray-400"
                     enterKeyHint="done"
                   />
                   <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">

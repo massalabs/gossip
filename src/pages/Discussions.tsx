@@ -194,11 +194,9 @@ const Discussions: React.FC = () => {
       <div className="flex items-center gap-3">
         {isOnline && <UserProfileAvatar name={username} size={10} />}
         {isOnline ? (
-          <h1 className="text-xl font-semibold text-foreground">
-            {t('title')}
-          </h1>
+          <h1 className="text-2xl font-bold text-foreground">{t('title')}</h1>
         ) : (
-          <h1 className="text-xl font-semibold text-accent-soft-foreground">
+          <h1 className="text-2xl font-bold text-accent-soft-foreground">
             {t('waiting_connection')}
           </h1>
         )}

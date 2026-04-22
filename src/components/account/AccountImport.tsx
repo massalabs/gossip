@@ -122,7 +122,7 @@ const AccountImport: React.FC<AccountImportProps> = ({
             value={mnemonic}
             onChange={e => setMnemonic(e.target.value)}
             placeholder={t('import.mnemonic_placeholder')}
-            className="w-full h-32 px-4 py-3 rounded-lg border border-border bg-muted/40 text-foreground placeholder:text-muted-foreground text-sm resize-none shadow-inner focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent"
+            className="w-full h-32 px-4 py-3 rounded-lg border border-border bg-muted/40 text-foreground placeholder:text-muted-foreground text-sm resize-none shadow-inner focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus:border-transparent"
             disabled={isImporting}
           />
           <p className="text-xs text-muted-foreground mt-2">

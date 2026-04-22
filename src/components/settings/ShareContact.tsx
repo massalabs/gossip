@@ -1,7 +1,16 @@
 import React, { useState, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { UserPublicKeys } from '@massalabs/gossip-sdk';
-import { Check, Edit2, FileText, Image, Link2, Send } from 'react-feather';
+import {
+  Check,
+  Edit2,
+  Eye,
+  EyeOff,
+  FileText,
+  Image,
+  Link2,
+  Send,
+} from 'react-feather';
 import { useTranslation } from 'react-i18next';
 import { useFileShareContact } from '../../hooks/useFileShareContact';
 import { useLinkShare } from '../../hooks/useLinkShare';
@@ -12,7 +21,6 @@ import PageLayout from '../ui/Layout/PageLayout';
 import Button from '../ui/Button';
 import BaseModal from '../ui/BaseModal';
 import ContactNameModal from '../ui/ContactNameModal';
-import Toggle from '../ui/Toggle';
 import { generateDeepLinkUrl } from '../../utils/invite';
 import ShareContactQR from './ShareContactQR';
 import Popover from '../ui/Popover';
@@ -74,31 +82,44 @@ const ShareContact: React.FC<ShareContactProps> = ({
         onQRCodeGenerated={setQrDataUrl}
       />
 
-      {/* Include username toggle + editable name */}
+      {/* Username row: Eye toggles inclusion, pencil edits the name */}
       <div className="rounded-xl border border-border bg-card overflow-hidden">
-        <div className="flex items-center justify-between h-11 px-3">
-          <span className="text-sm text-foreground">Include username</span>
-          <Toggle
-            checked={includeUsername}
-            onChange={setIncludeUsername}
-            ariaLabel="Include username in the invite"
-          />
+        <div className="flex items-center gap-2 h-12 px-3">
+          <span
+            className={`flex-1 text-sm truncate transition-colors ${
+              includeUsername
+                ? 'text-foreground font-medium'
+                : 'text-muted-foreground/70 line-through'
+            }`}
+          >
+            {sharedUsername || userName}
+          </span>
+          <button
+            type="button"
+            onClick={() => setIncludeUsername(!includeUsername)}
+            className="p-2 rounded-full hover:bg-muted transition-colors"
+            aria-label={
+              includeUsername
+                ? 'Hide username from invite'
+                : 'Include username in invite'
+            }
+          >
+            {includeUsername ? (
+              <Eye className="w-4 h-4 text-foreground" />
+            ) : (
+              <EyeOff className="w-4 h-4 text-muted-foreground" />
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsUsernameModalOpen(true)}
+            disabled={!includeUsername}
+            className="p-2 rounded-full hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            aria-label="Edit username"
+          >
+            <Edit2 className="w-4 h-4 text-muted-foreground" />
+          </button>
         </div>
-        {includeUsername && (
-          <>
-            <div className="border-t border-border" />
-            <button
-              type="button"
-              onClick={() => setIsUsernameModalOpen(true)}
-              className="flex items-center justify-between gap-2 h-11 px-3 w-full hover:bg-accent/5 active:scale-[0.98] transition-all"
-            >
-              <span className="text-sm text-foreground truncate">
-                {sharedUsername || userName}
-              </span>
-              <Edit2 className="w-4 h-4 text-muted-foreground shrink-0" />
-            </button>
-          </>
-        )}
       </div>
 
       <ContactNameModal

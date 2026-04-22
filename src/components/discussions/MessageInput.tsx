@@ -191,7 +191,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
 
       <div className="flex items-end gap-2 md:gap-3">
         <div
-          className={`flex-1 min-w-0 flex items-center bg-muted px-4 md:px-5 py-2 md:py-2.5 transition-all duration-200 ${
+          className={`flex-1 min-w-0 flex items-center bg-muted px-4 md:px-5 py-2 md:py-2.5 transition-all duration-200 focus-within:bg-background focus-within:shadow-[inset_0_1px_3px_rgba(0,0,0,0.05)] dark:focus-within:shadow-[inset_0_1px_2px_rgba(0,0,0,0.3)] ${
             isTextareaMultiline ? 'rounded-2xl' : 'rounded-full'
           }`}
           onClick={focusTextarea}

@@ -48,12 +48,12 @@ const FormInput: React.FC<FormInputProps> = ({
         : 'text-foreground'
   }`;
 
-  const inputClassName = `w-full px-4 py-3.5 rounded-xl border bg-input text-foreground placeholder-muted-foreground focus:ring-2 focus:border-transparent ${
+  const inputClassName = `w-full px-4 py-3.5 rounded-xl border bg-input text-foreground placeholder-muted-foreground focus-visible:ring-2 focus:border-transparent ${
     error
-      ? 'border-destructive focus:ring-destructive'
+      ? 'border-destructive focus-visible:ring-destructive'
       : hasValidContent
-        ? 'border-success focus:ring-success'
-        : 'border-border focus:ring-primary'
+        ? 'border-success focus-visible:ring-success'
+        : 'border-border focus-visible:ring-primary'
   } ${className}`;
 
   return (

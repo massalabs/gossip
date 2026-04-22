@@ -46,19 +46,21 @@ const Button: React.FC<ButtonProps> = ({
 }) => {
   const baseClasses = `inline-flex items-center justify-center font-medium transition-all
     touch-manipulation focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2
-    focus-visible:ring-offset-transparent disabled:cursor-not-allowed
+    focus-visible:ring-offset-transparent
+    dark:focus-visible:shadow-[0_0_10px_rgba(58,243,209,0.35)]
+    disabled:cursor-not-allowed
     disabled:pointer-events-none disabled:touch-none `;
 
   const variantClasses = {
     primary:
-      'bg-primary hover:bg-primary/90 disabled:bg-muted text-primary-foreground disabled:text-muted-foreground focus:ring-ring rounded-full',
-    soft: 'bg-accent-soft hover:bg-accent-soft/80 disabled:bg-muted text-accent-soft-foreground disabled:text-muted-foreground focus:ring-ring rounded-full',
+      'bg-primary hover:bg-primary/90 disabled:bg-muted text-primary-foreground disabled:text-muted-foreground focus-visible:ring-ring rounded-full shadow-md hover:shadow-lg disabled:shadow-none',
+    soft: 'bg-accent-soft hover:bg-accent-soft/80 disabled:bg-muted text-accent-soft-foreground disabled:text-muted-foreground focus-visible:ring-ring rounded-full shadow-sm hover:shadow-md disabled:shadow-none',
     secondary:
-      'bg-secondary hover:bg-secondary/80 disabled:bg-muted text-secondary-foreground disabled:text-muted-foreground focus:ring-ring rounded-full',
+      'bg-secondary hover:bg-secondary/80 disabled:bg-muted text-secondary-foreground disabled:text-muted-foreground focus-visible:ring-ring rounded-full shadow-sm hover:shadow-md disabled:shadow-none',
     danger:
-      'bg-destructive hover:bg-destructive/90 disabled:bg-destructive/50 text-destructive-foreground focus:ring-ring rounded-full',
+      'bg-destructive hover:bg-destructive/90 disabled:bg-destructive/50 text-destructive-foreground focus-visible:ring-ring rounded-full shadow-md hover:shadow-lg',
     ghost:
-      'bg-transparent hover:bg-accent hover:text-accent-foreground text-foreground focus:ring-ring rounded-full',
+      'bg-transparent hover:bg-accent hover:text-accent-foreground text-foreground focus-visible:ring-ring rounded-full',
     outline: `bg-card border border-border text-foreground hover:bg-accent/50 
     hover:border-accent disabled:bg-muted disabled:text-muted-foreground disabled:border-border/50 
     disabled:opacity-60 disabled:hover:bg-muted disabled:hover:border-border/50 rounded-md`,

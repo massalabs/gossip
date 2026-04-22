@@ -81,7 +81,7 @@ const ContactNameModal: React.FC<ContactNameModalProps> = ({
             value={name}
             onChange={e => setName(e.target.value)}
             onKeyDown={handleKeyDown}
-            className="w-full h-11 px-3 rounded-lg border border-border bg-card dark:bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+            className="w-full h-11 px-3 rounded-lg border border-border bg-card dark:bg-input text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             placeholder="Enter a name"
             enterKeyHint="done"
           />
