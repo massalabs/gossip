@@ -2,6 +2,7 @@ mod block;
 mod constants;
 mod domain;
 mod error;
+pub mod js_num;
 mod kdf;
 mod keypair;
 mod lifecycle;

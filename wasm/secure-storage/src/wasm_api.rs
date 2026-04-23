@@ -55,15 +55,8 @@ fn map_err(e: SecureStorageError) -> JsValue {
     JsValue::from_str(&e.to_string())
 }
 
-/// Safe f64→u64 conversion for JS `number` offsets.
-/// Returns `None` for NaN, negative, infinity, or values beyond u64 range.
-fn safe_f64_to_u64(v: f64) -> Option<u64> {
-    if v.is_finite() && v >= 0.0 && v <= u64::MAX as f64 {
-        Some(v as u64)
-    } else {
-        None
-    }
-}
+// Re-export the shared precision-aware conversion for this module's callers.
+use crate::js_num::safe_f64_to_u64;
 
 fn not_initialized() -> JsValue {
     JsValue::from_str("secure storage not initialized")
