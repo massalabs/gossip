@@ -42,6 +42,12 @@ use crate::vfs::sqlite_vfs::{AppState, Backend, EncryptedIoMethods, EncryptedVfs
 
 // ── Global state ───────────────────────────────────────────────────
 
+// One VFS pointer and one open SQLite DB per thread. This is deliberate:
+// SQLite is compiled with SQLITE_THREADSAFE=0 and each web worker runs on
+// its own JS thread — sharing a `sqlite3*` across workers would race. The
+// registered VFS pointer itself is global (registered once per thread via
+// `initSecureStorage`); the open `SafeDb` is per-worker. A multi-worker UI
+// that wants multiple concurrent DB handles opens one per worker.
 thread_local! {
     /// Pointer to the registered VFS (set in `initSecureStorage`).
     /// `None` until init has been called.
@@ -161,6 +167,9 @@ pub fn unlock_session(password: &[u8]) -> Result<bool, JsValue> {
                     load_namespace_state(&state.backend, &domain, &session, DEFAULT_NAMESPACE)
                         .map_err(map_err)?;
                 state.session = Some(session);
+                // Clear any stale namespace state from a prior session. Only
+                // one session can be unlocked at a time (`Option<UnlockedSession>`),
+                // so there are never two concurrent namespace maps to reconcile.
                 state.namespace_states.clear();
                 state.namespace_states.insert(DEFAULT_NAMESPACE, sql_state);
                 Ok(true)
@@ -226,6 +235,9 @@ pub fn write_namespace_data(namespace: u8, offset: f64, data: &[u8]) -> Result<(
     with_app_state(|app| {
         let mut state = app.state.borrow_mut();
         ensure_namespace_state_loaded(&mut state, namespace)?;
+        // Split borrow: reborrow `state` and destructure to get &mut to each
+        // field independently. Sound because EncryptionState is NOT Copy —
+        // see the same pattern in vfs/sqlite_vfs.rs for the full argument.
         let crate::vfs::sqlite_vfs::EncryptionState {
             backend,
             session,
@@ -326,16 +338,11 @@ pub async fn flush_encrypted() -> Result<(), JsValue> {
     // that swaps backends), this code MUST be revisited.
     let idb_ptr: Option<*const IdbBlockStorage> = with_app_state(|app| {
         let state = app.state.borrow();
-        Ok(match &state.backend {
-            Backend::Idb(idb) => {
-                debug_assert!(
-                    std::ptr::eq(idb, idb),
-                    "Backend::Idb address must be stable"
-                );
-                Some(idb as *const _)
-            }
+        let out = match &state.backend {
+            Backend::Idb(idb) => Some(idb as *const _),
             Backend::Memory(_) => None,
-        })
+        };
+        Ok(out)
     })?;
 
     if let Some(ptr) = idb_ptr {
@@ -396,7 +403,9 @@ pub fn open_database() -> Result<(), JsValue> {
 #[wasm_bindgen(js_name = closeDatabase)]
 pub fn close_database() -> Result<(), JsValue> {
     DB.with(|db| {
-        // Drop the SafeDb if present; sqlite3_close runs in Drop.
+        // `.take()` replaces the slot with None and drops the old SafeDb
+        // synchronously on this line (not at the end of the closure). The
+        // Drop impl runs sqlite3_close before we return.
         db.borrow_mut().take();
         Ok(())
     })
@@ -405,6 +414,11 @@ pub fn close_database() -> Result<(), JsValue> {
 // ── SQL exec ───────────────────────────────────────────────────────
 
 /// Result of an `execSql` call.
+///
+/// `last_insert_rowid` is `f64` (not `i64`) because it crosses the JS bridge
+/// and JS has no native i64 — its `Number` type is f64. SQLite rowids are
+/// sequential and stay within JS's safe integer range (2^53) in practice,
+/// so the conversion is lossless.
 #[wasm_bindgen]
 pub struct ExecResult {
     rows: Array,
