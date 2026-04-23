@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { Keyboard, KeyboardInfo } from '@capacitor/keyboard';
 import { Capacitor } from '@capacitor/core';
+import { isTouch } from '../utils/platform';
 
 interface KeyboardState {
   isVisible: boolean;
@@ -111,11 +112,24 @@ function initKeyboardTracking() {
   const visualViewport = window.visualViewport;
   if (!visualViewport) return;
 
+  // On touch web (mobile browser or installed PWA) the on-screen keyboard shrinks
+  // visualViewport. Mirror the Android-native branch: drive --available-height
+  // from visualViewport.height so the chat container resizes instead of letting
+  // the page get pushed up by the keyboard.
+  const touchWeb = isTouch();
+
   const handleResize = () => {
     const diff = window.innerHeight - visualViewport.height;
     const visible = diff > KEYBOARD_THRESHOLD;
     updateState(visible, visible ? diff : 0);
     setCssVar('--keyboard-height', visible ? `${diff}px` : '0px');
+
+    if (touchWeb) {
+      setCssVar('--available-height', `${visualViewport.height}px`);
+      if (!visible) {
+        useKeyboardStore.setState({ viewportHeight: visualViewport.height });
+      }
+    }
   };
 
   handleResize();

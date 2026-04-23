@@ -7,6 +7,7 @@ import React, {
 } from 'react';
 import { useUiStore } from '../../../stores/uiStore';
 import { useHeaderScroll } from '../../../hooks/useHeaderScroll';
+import { useIsPWA } from '../../../hooks/usePlatform';
 import HeaderBar from '../HeaderBar';
 import { ExitAnimationContext } from '../ExitAnimationContext';
 
@@ -69,6 +70,10 @@ const PageLayout: React.FC<PageLayoutProps> = ({
   const setHeaderIsScrolled = useUiStore(s => s.setHeaderIsScrolled);
   const headerIsScrolled = useUiStore(s => s.headerIsScrolled);
   const showBottomNav = useUiStore(s => s.showBottomNav);
+  // In installed PWA mode the phone's system nav bar is fixed and there's no
+  // dynamic browser chrome above the home indicator, so the progressive blur
+  // has nothing meaningful to blur against and just darkens the edge.
+  const isPWA = useIsPWA();
 
   // Reset scroll-aware bg BEFORE first paint on every mount of a non-exiting
   // PageLayout. Prevents stale "scrolled" state from a previous page bleeding
@@ -155,7 +160,7 @@ const PageLayout: React.FC<PageLayoutProps> = ({
             style={{ height: 'calc(var(--sab) + 24px)' }}
           />
         </div>
-        {!showBottomNav && <BottomProgressiveBlur />}
+        {!showBottomNav && !isPWA && <BottomProgressiveBlur />}
       </div>
     </div>
   );

@@ -22,9 +22,9 @@ import { useContextMenu } from './hooks/useContextMenu';
 import { useTextSelection } from './hooks/useTextSelection';
 import { useOriginalMessage } from './hooks/useOriginalMessage';
 import { useLongPress } from '../../hooks/useLongPress';
+import { useIsTouch } from '../../hooks/usePlatform';
 
 const POST_GESTURE_SUPPRESS_MS = 700;
-const isWeb = !Capacitor.isNativePlatform();
 
 // ---------------------------------------------------------------------------
 // Types
@@ -83,6 +83,11 @@ const MessageItem: React.FC<MessageItemProps> = ({
   onToggleSelect,
 }) => {
   const { t } = useTranslation('discussions');
+  const touch = useIsTouch();
+  // Desktop-style click-to-select applies when the device is non-touch (mouse/
+  // trackpad). On touch devices (native mobile, mobile browser, installed PWA)
+  // short-press should open the context menu instead.
+  const desktopLike = !touch;
 
   // -------------------------------------------------------------------------
   // Derived flags
@@ -214,7 +219,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
         suppressClickRef.current = false;
         return;
       }
-      if (isWeb) {
+      if (desktopLike) {
         // Stop propagation so the outer row onClick does not double-toggle
         e.stopPropagation();
         if (message.id != null) onToggleSelect?.(message.id);
@@ -234,6 +239,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
       isDeleted,
       message.id,
       onToggleSelect,
+      desktopLike,
     ]
   );
 
@@ -279,7 +285,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
   return (
     <div
       id={id}
-      className={`flex items-end gap-1 ${isOutgoing ? 'justify-end' : 'justify-start'} group relative ${spacingClass} ${isHighlighted ? 'search-highlight' : ''} ${isSelecting || isWeb ? 'cursor-pointer' : ''} ${isSelecting ? 'pl-8' : 'pl-0'} transition-[padding-left] duration-200 ease-out`}
+      className={`flex items-end gap-1 ${isOutgoing ? 'justify-end' : 'justify-start'} group relative ${spacingClass} ${isHighlighted ? 'search-highlight' : ''} ${isSelecting || desktopLike ? 'cursor-pointer' : ''} ${isSelecting ? 'pl-8' : 'pl-0'} transition-[padding-left] duration-200 ease-out`}
       onTouchStart={swipe.handleTouchStart}
       onTouchMove={swipe.handleTouchMove}
       onTouchEnd={swipe.handleTouchEnd}
@@ -293,7 +299,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
           : t('message_item.received_message')
       }
       onClick={
-        isSelecting || isWeb
+        isSelecting || desktopLike
           ? () => {
               if (
                 !suppressClickRef.current &&
