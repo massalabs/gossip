@@ -55,8 +55,8 @@ fn map_err(e: SecureStorageError) -> JsValue {
     JsValue::from_str(&e.to_string())
 }
 
-// Re-export the shared precision-aware conversion for this module's callers.
-use crate::js_num::safe_f64_to_u64;
+// Shared precision-aware JS `number` <-> Rust integer conversions.
+use crate::js_num::{is_js_safe_integer_i64, safe_f64_to_i64, safe_f64_to_u64};
 
 fn not_initialized() -> JsValue {
     JsValue::from_str("secure storage not initialized")
@@ -489,10 +489,11 @@ fn bind_param(stmt: &SafeStmt<'_>, idx: i32, value: &JsValue) -> SqlResult<()> {
         return stmt.bind_null(idx);
     }
     if let Some(n) = value.as_f64() {
-        // JS numbers: bind as int64 if they're a whole number representable
-        // as i64, else as double.
-        if n.is_finite() && n.fract() == 0.0 && n >= i64::MIN as f64 && n < i64::MAX as f64 {
-            return stmt.bind_int64(idx, n as i64);
+        // Whole numbers within JS safe range → INTEGER. Anything else (fraction,
+        // NaN, ±Infinity, |v| ≥ 2^53) → REAL, letting SQLite preserve the f64
+        // without silent precision loss.
+        if let Some(as_i64) = safe_f64_to_i64(n) {
+            return stmt.bind_int64(idx, as_i64);
         }
         return stmt.bind_double(idx, n);
     }
@@ -527,9 +528,9 @@ fn sql_value_to_js(value: SqlValue) -> JsValue {
     match value {
         SqlValue::Null => JsValue::NULL,
         SqlValue::Integer(v) => {
-            // Numbers up to 2^53 fit in a JS Number losslessly; larger ints
-            // become BigInt to preserve precision.
-            if v.unsigned_abs() < (1u64 << 53) {
+            // Within JS safe-integer range → plain Number; otherwise BigInt to
+            // preserve the full 64-bit value without precision loss.
+            if is_js_safe_integer_i64(v) {
                 JsValue::from_f64(v as f64)
             } else {
                 JsValue::from(v)
