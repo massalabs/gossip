@@ -190,6 +190,10 @@ impl AppState {
 // outside this module cannot reach them, so the contract cannot be violated
 // from elsewhere. Override bodies and store impl methods then look like
 // ordinary safe Rust.
+//
+// Naming: the `store_*` prefix matches the rsqlite-vfs trait/helper naming
+// (`VfsStore`, `store_err`, etc.). These functions *retrieve* data from the
+// store pointer; they do not persist values themselves.
 
 /// Per-callback context: the leaked `VfsAppData<AppState>` wrapper (for
 /// `store_err`), the deref'd `AppState` (for our own logic), and the file
@@ -212,7 +216,10 @@ impl VfsCtx {
     ///   * `pAppData` is set by our `register_vfs` call to a leaked
     ///     `VfsAppData<AppState>` that lives for the program lifetime.
     fn from_file(p_file: *mut sqlite3_file) -> Self {
-        // SAFETY: documented above. Single-threaded WASM rules out tearing.
+        // SAFETY: documented above. SQLite is built with SQLITE_THREADSAFE=0
+        // and every VFS callback runs on the worker that owns the AppState via
+        // `thread_local!` — so no two threads race through the same io_methods
+        // call and no tearing is possible on the raw pointers derived here.
         unsafe {
             let vfs_file = SQLiteVfsFile::from_file(p_file);
             let wrapped = <EncryptedStore as VfsStore<SqlFile, AppState>>::app_data(vfs_file.vfs);
@@ -245,6 +252,13 @@ fn read_buffer<'a>(ptr: *mut core::ffi::c_void, len: c_int) -> &'a mut [u8] {
 ///
 /// Soundness: only ever called with the `pSize` pointer SQLite passes to
 /// `xFileSize`, which it guarantees to be a writable `sqlite3_int64*`.
+///
+/// Defaulting to `sqlite3_int64::MAX` on overflow is safer than 0/-1: SQLite
+/// interprets the returned size as the file's logical end, so a too-small
+/// value would cause `sqlite3_step` to miss pages and return `SQLITE_CORRUPT`.
+/// Returning MAX tells SQLite "at least this large" and lets the read path
+/// short-circuit with `SQLITE_IOERR_SHORT_READ` beyond the actual extent.
+/// In practice unreachable — file sizes never exceed i64::MAX in WASM.
 fn write_size(out: *mut sqlite3_int64, value: usize) {
     // SAFETY: documented above. On WASM32, usize fits in i64.
     unsafe { *out = sqlite3_int64::try_from(value).unwrap_or(sqlite3_int64::MAX) }
@@ -275,6 +289,13 @@ fn store_name(vfs_file: &SQLiteVfsFile) -> &'static str {
 }
 
 // ── VfsFile ────────────────────────────────────────────────────────
+//
+// SqlFile is dispatched two ways: temp/journal files use these default
+// handlers (plain in-memory storage); the main encrypted DB file is
+// handled by the `EncryptedIoMethods` overrides below (xRead/xWrite/
+// xSync/xTruncate/xFileSize), which have access to the encryption state.
+// Main-file cases here return an error because reaching this path means
+// the override was not wired up correctly.
 
 impl VfsFile for SqlFile {
     fn read(&self, buf: &mut [u8], offset: usize) -> VfsResult<bool> {
@@ -339,6 +360,9 @@ impl VfsFile for SqlFile {
 #[derive(Copy, Clone, Default)]
 pub struct EncryptedStore;
 
+// Signatures below (Result return types, method shapes) are dictated by the
+// `VfsStore` trait from `rsqlite-vfs`. We cannot simplify them (e.g. return
+// `bool` from `contains_file`) without changing the upstream crate.
 impl VfsStore<SqlFile, AppState> for EncryptedStore {
     fn add_file(vfs: *mut sqlite3_vfs, file: &str, flags: i32) -> VfsResult<()> {
         store_app_data(vfs)
@@ -452,6 +476,13 @@ impl SQLiteIoMethods for EncryptedIoMethods {
 }
 
 // ── Override bodies (safe Rust, no raw pointers) ───────────────────
+//
+// Return type is `VfsResult<i32>` (not `VfsResult<()>`): the `i32` is the
+// SQLite protocol code the VFS must report back (e.g. `SQLITE_OK`,
+// `SQLITE_IOERR_SHORT_READ`). `Ok(SQLITE_IOERR_SHORT_READ)` means "Rust-
+// level success, but tell SQLite the read hit EOF" — SQLite treats this as
+// a normal signal, not an application error. `Err(VfsError)` is for
+// unrecoverable Rust-level failures (poisoned state, bad session, etc.).
 
 fn read_main_or_temp(
     app_data: &AppState,
@@ -475,6 +506,11 @@ fn read_main_or_temp(
                 .session
                 .as_ref()
                 .ok_or_else(|| VfsError::new(SQLITE_IOERR, "session not unlocked".into()))?;
+            // `unwrap_or_default()` returns an empty NamespaceState
+            // (total_data_length=0) when the namespace has never been loaded.
+            // Correct for SQLite's early reads: before any write, the main DB
+            // is logically empty — reads return zeros / SHORT_READ. An error
+            // here would spuriously fail the first open on a fresh DB.
             let ns_state = state
                 .namespace_states
                 .get(&DEFAULT_NAMESPACE)
@@ -508,8 +544,13 @@ fn sync_main_or_temp(app_data: &AppState, name: &str) -> VfsResult<i32> {
         SqlFile::Temp(_) => Ok(SQLITE_OK),
         SqlFile::Main(core) => {
             let mut state = app_data.state.borrow_mut();
-            // Split borrows: we need a &mut to backend and to the SQL
-            // namespace state simultaneously, but the session is &.
+            // Split borrow: reborrow `state` and destructure to get &mut to
+            // each field independently (backend + namespace_states mutable;
+            // session read-only). Sound because `EncryptionState` is NOT Copy
+            // (contains HashMap, String, Option<UnlockedSession>), so the
+            // destructure binds &mut into the original struct — not into a
+            // temporary copy. `entry().or_default()` then returns &mut into
+            // the HashMap, so mutations propagate.
             let EncryptionState {
                 backend,
                 session,
@@ -539,6 +580,8 @@ fn truncate_main_or_temp(app_data: &AppState, name: &str, new_size: u64) -> VfsR
         }
         SqlFile::Main(core) => {
             let mut state = app_data.state.borrow_mut();
+            // Same split-borrow pattern as sync_main_or_temp — see comment
+            // there for why this is sound.
             let EncryptionState {
                 backend,
                 session,
