@@ -7,6 +7,7 @@ import type { useLongPress } from '../../../hooks/useLongPress';
 import type { MessageContextMenuItem } from '../../ui/MessageContextMenu';
 import type { Message } from '@massalabs/gossip-sdk';
 import { Capacitor } from '@capacitor/core';
+import { isTouch } from '../../../utils/platform';
 
 interface UseContextMenuOptions {
   message: Message;
@@ -62,6 +63,9 @@ export function useContextMenu({
 
   const isAndroid = Capacitor.getPlatform() === 'android';
   const isWeb = !Capacitor.isNativePlatform();
+  // Touch web (PWA / mobile browser) = web + coarse pointer. Mouse-only web
+  // stays desktop-like (right-click opens menu).
+  const isTouchWeb = isWeb && isTouch();
 
   const handleContextMenu = useCallback(
     (e: React.MouseEvent) => {
@@ -74,9 +78,14 @@ export function useContextMenu({
         return;
       }
       e.preventDefault();
-      // Web/desktop: right-click always opens context menu, regardless of selection state.
-      // On mobile (non-Android), skip if a touch long-press just ran — iOS can emit a
-      // synthetic contextmenu and we must not open the menu twice.
+      // Touch web: the browser emits a synthetic contextmenu at ~300ms on
+      // long-press, before our 500ms timer completes. Opening the menu here
+      // would race the timer and we'd end up with BOTH the context menu open
+      // and a selection toggled. Let useLongPress drive the UX; short-press
+      // opens the menu via handleBubbleClick in MessageItem.
+      if (isTouchWeb) return;
+      // Desktop web: right-click always opens the menu, regardless of
+      // selection state.
       if (isWeb && !longPress.longPressTriggered.current) {
         openContextMenu();
         return;
@@ -87,7 +96,15 @@ export function useContextMenu({
       }
       longPress.onContextMenu(e);
     },
-    [isAndroid, isWeb, longPress, isDeleted, isSelecting, openContextMenu]
+    [
+      isAndroid,
+      isWeb,
+      isTouchWeb,
+      longPress,
+      isDeleted,
+      isSelecting,
+      openContextMenu,
+    ]
   );
 
   // Context menu items — depend on stable scalars, not the full message object
