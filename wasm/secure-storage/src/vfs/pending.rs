@@ -52,32 +52,23 @@ pub(crate) fn flush_writes<S: BlockStorage + KeypairStorage>(
     } else {
         let groups = group_by_contiguous_blocks(writes);
         for &(group_off, group_end) in &groups {
-            let span = (group_end.saturating_sub(group_off)) as usize;
-
+            let span = (group_end - group_off) as usize;
             let mut buf = vec![0u8; span];
 
+            // Seed buf with persisted bytes that fall inside this group; the
+            // rest stays zero-filled and will be overwritten by apply_pending_overlay.
             if ns_state.total_data_length > group_off {
-                let readable = (ns_state.total_data_length.saturating_sub(group_off))
-                    .min(span as u64) as usize;
+                let readable = ((ns_state.total_data_length - group_off) as usize).min(span);
                 let existing = crate::read_session_data(
                     backend, domain, namespace, session, ns_state, group_off, readable,
                 )?;
                 buf[..readable].copy_from_slice(&existing);
             }
 
-            for pw in writes {
-                let pw_end = pw.offset.saturating_add(pw.data.len() as u64);
-                if pw.offset < group_end && pw_end > group_off {
-                    let src_start = group_off.saturating_sub(pw.offset) as usize;
-                    let dst_start = pw.offset.saturating_sub(group_off) as usize;
-                    let copy_len = pw_end
-                        .min(group_end)
-                        .saturating_sub(pw.offset.max(group_off))
-                        as usize;
-                    buf[dst_start..dst_start + copy_len]
-                        .copy_from_slice(&pw.data[src_start..src_start + copy_len]);
-                }
-            }
+            // Overlay pending writes in buffering order (last-write-wins) —
+            // same helper used by the read path, so read and flush agree by
+            // construction.
+            apply_pending_overlay(writes, group_off, &mut buf);
 
             crate::write_session_data(
                 backend, domain, namespace, session, ns_state, group_off, &buf,
@@ -121,19 +112,25 @@ fn group_by_contiguous_blocks(writes: &[PendingWrite]) -> Vec<(u64, u64)> {
     merged
 }
 
-/// Apply pending writes as an overlay onto a read buffer.
-///
-/// `dst` covers the byte range `[read_off, read_off + dst.len())`.
-pub(crate) fn apply_pending_overlay(pending: &[PendingWrite], read_off: u64, dst: &mut [u8]) {
-    let read_end = read_off.saturating_add(dst.len() as u64);
+/// Apply pending writes as an overlay onto `dst`, which covers the byte range
+/// `[dst_base, dst_base + dst.len())`. Later writes in `pending` overwrite
+/// earlier ones on any byte they both cover (last-write-wins).
+pub(crate) fn apply_pending_overlay(pending: &[PendingWrite], dst_base: u64, dst: &mut [u8]) {
+    let dst_end = dst_base.saturating_add(dst.len() as u64);
     for pw in pending {
         let pw_end = pw.offset.saturating_add(pw.data.len() as u64);
-        if pw.offset < read_end && pw_end > read_off {
-            let src_start = read_off.saturating_sub(pw.offset) as usize;
-            let dst_start = pw.offset.saturating_sub(read_off) as usize;
-            let len = (pw_end.min(read_end).saturating_sub(pw.offset.max(read_off))) as usize;
-            dst[dst_start..dst_start + len].copy_from_slice(&pw.data[src_start..src_start + len]);
+        // Intersect the pending write's range with the dst range.
+        let overlap_start = pw.offset.max(dst_base);
+        let overlap_end = pw_end.min(dst_end);
+        if overlap_start >= overlap_end {
+            continue;
         }
+        // Offsets into the source (pw.data) and destination (dst) buffers.
+        // Non-negative by construction: overlap_start >= both bases.
+        let src_off = (overlap_start - pw.offset) as usize;
+        let dst_off = (overlap_start - dst_base) as usize;
+        let len = (overlap_end - overlap_start) as usize;
+        dst[dst_off..dst_off + len].copy_from_slice(&pw.data[src_off..src_off + len]);
     }
 }
 
