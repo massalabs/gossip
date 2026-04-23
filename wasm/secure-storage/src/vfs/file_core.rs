@@ -12,6 +12,13 @@ use crate::vfs::pending::{PendingWrite, apply_pending_overlay, flush_writes};
 /// down to the secure-storage core.
 pub(crate) struct EncryptedFileCore {
     pending: Vec<PendingWrite>,
+    /// Logical end-of-file contributed by the in-memory layer. Combines two
+    /// roles:
+    ///   1. The high-water-mark of any pending write's end offset (`write`).
+    ///   2. The target size after a `truncate`, even if no pending writes
+    ///      reach that far (otherwise a grow-truncate could not extend
+    ///      the logical file size beyond `ns_state.total_data_length`).
+    /// Cleared on `sync` (writes drained) and `discard_pending`.
     pending_size: u64,
 }
 
@@ -23,7 +30,10 @@ impl EncryptedFileCore {
         }
     }
 
-    /// Logical file size, reflecting both persisted data and unflushed writes.
+    /// Logical file size = max of the persisted extent and the in-memory
+    /// layer's extent. Not a sum: the two views overlap in byte space; a
+    /// pending write at a low offset must not extend the file past its
+    /// persisted tail, and vice versa.
     pub fn size(&self, ns_state: &NamespaceState) -> u64 {
         self.pending_size.max(ns_state.total_data_length)
     }
@@ -49,10 +59,15 @@ impl EncryptedFileCore {
         let read_end = offset.saturating_add(n as u64);
         let is_full = read_end <= logical_size;
 
-        let persisted_avail = ns_state
-            .total_data_length
-            .saturating_sub(offset)
-            .min(n as u64) as usize;
+        // `persisted_avail` is bounded by `n` (which is `dst.len()`, a usize),
+        // so the conversion never truncates even on 32-bit targets.
+        let persisted_avail = usize::try_from(
+            ns_state
+                .total_data_length
+                .saturating_sub(offset)
+                .min(n as u64),
+        )
+        .unwrap_or(usize::MAX);
         if persisted_avail > 0 {
             let data = crate::read_session_data(
                 backend,
@@ -65,6 +80,8 @@ impl EncryptedFileCore {
             )?;
             dst[..persisted_avail].copy_from_slice(&data);
         }
+        // Zero-fill the tail beyond persisted bytes. Intentionally a no-op
+        // when `persisted_avail == dst.len()` (dst[len..] is an empty slice).
         dst[persisted_avail..].fill(0);
 
         apply_pending_overlay(&self.pending, offset, dst);
@@ -74,6 +91,9 @@ impl EncryptedFileCore {
 
     /// Buffer a write. Visible immediately to subsequent `read` calls via the
     /// pending overlay; persisted only when `sync` is called.
+    ///
+    /// Overlapping writes are allowed and resolved with last-write-wins
+    /// semantics — see `apply_pending_overlay` and its tests in `pending.rs`.
     pub fn write(&mut self, offset: u64, data: &[u8]) {
         if data.is_empty() {
             return;
@@ -127,7 +147,10 @@ impl EncryptedFileCore {
             if pw.offset >= new_size {
                 false
             } else if pw.offset.saturating_add(pw.data.len() as u64) > new_size {
-                let keep = (new_size - pw.offset) as usize;
+                // `keep` is bounded by `pw.data.len()` (since pw_end > new_size
+                // and pw.offset < new_size imply new_size - pw.offset < len),
+                // so the conversion cannot truncate even on 32-bit targets.
+                let keep = usize::try_from(new_size - pw.offset).unwrap_or(usize::MAX);
                 pw.data.truncate(keep);
                 true
             } else {
