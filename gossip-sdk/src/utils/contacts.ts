@@ -137,10 +137,9 @@ export async function deleteContact(
         ownerUserId,
         contactUserId
       );
+      // Discard peer from session manager (WASM state, outside transaction)
+      await session.peerDiscard(decodeUserId(contactUserId));
     });
-
-    // Discard peer from session manager (WASM state, outside transaction)
-    await session.peerDiscard(decodeUserId(contactUserId));
 
     return { success: true };
   } catch (e) {

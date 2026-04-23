@@ -363,7 +363,12 @@ class GossipSdk {
     };
 
     // Wire up cross-service dependencies
-    this._contact = new ContactService(session, queries, this._auth!);
+    this._contact = new ContactService(
+      session,
+      queries,
+      this._auth!,
+      this.eventEmitter
+    );
     this._message.setQueueManager(this.messageQueues);
     this._discussion.setAuthService(this._auth!);
 
