@@ -83,7 +83,7 @@ impl SafeDb {
         };
         if rc != SQLITE_OK {
             let msg = if handle.is_null() {
-                format!("sqlite3_open_v2 failed: rc={rc}")
+                format!("sqlite3_open_v2 failed with error code: {rc}")
             } else {
                 let m = errmsg(handle);
                 // SAFETY: handle was set by sqlite3_open_v2; closing it
