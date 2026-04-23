@@ -96,7 +96,8 @@ impl SafeDb {
         Ok(SafeDb { handle })
     }
 
-    /// Run one or more PRAGMA / DDL statements with no parameters and no rows.
+    /// Execute one or more SQL statements without parameter binding.
+    /// Any rows returned are discarded.
     pub fn exec(&self, sql: &CStr) -> SqlResult<()> {
         // SAFETY: self.handle is valid (invariant of SafeDb), sql is a valid
         // C string. The callback and pArg are null because we discard rows.
