@@ -11,6 +11,8 @@
 
 use std::cell::RefCell;
 
+// `IdbDatabase`, `IdbTransactionMode`, `IdbVersionChangeEvent`, and the
+// `IdbDatabaseExt`/`IdbObjectStoreExt` traits are pulled in via the prelude.
 use indexed_db_futures::prelude::*;
 use js_sys::Uint8Array;
 use wasm_bindgen::prelude::*;
@@ -59,6 +61,10 @@ async fn load_all_entries(
     let keys_req = store.get_all_keys()?;
     let vals_req = store.get_all()?;
 
+    // Per IndexedDB spec, both `getAllKeys()` and `getAll()` return items in
+    // key order within the same transaction snapshot, so the i-th key always
+    // matches the i-th value. The two requests are registered synchronously
+    // (see above) to guarantee they share one snapshot.
     let keys_js = keys_req.await?;
     let vals_js = vals_req.await?;
     tx.await.into_result()?;
@@ -115,8 +121,17 @@ pub struct IdbBlockStorage {
 impl IdbBlockStorage {
     /// Open IDB and load all entries into the in-memory state.
     ///
-    /// NOTE: loads the entire DB eagerly. Acceptable for typical DB sizes
-    /// (< 10 MB) but will need demand-paging for large databases.
+    /// NOTE: loads the entire DB eagerly into RAM (see `load_all_entries`).
+    /// This caps the practical DB size at the device's available memory —
+    /// acceptable for typical secure-storage payloads (< 10 MB) but a future
+    /// large-DB use case would need demand-paging on top of this layer.
+    /// The planned migration to JSPI removes the eager-load need entirely.
+    ///
+    /// Skipped entries (malformed keys or block data with unexpected size)
+    /// are intentionally dropped here — they represent forward-compat noise
+    /// from a future schema version, or corruption that we can't meaningfully
+    /// surface at open time. If diagnosing a lost-entry issue, check
+    /// `IdbStorageState::from_entries` for the exact rejection predicates.
     pub async fn open() -> std::result::Result<Self, JsValue> {
         let db = open_db().await?;
         let entries = load_all_entries(&db).await?;
@@ -163,6 +178,11 @@ impl IdbBlockStorage {
         // Convert the snapshot to JS-friendly types for the IDB call.
         // We do this outside the borrow so any writes that arrive
         // during the await below don't deadlock on the RefCell.
+        //
+        // Capacity = block_puts.len() + keypair_puts.len() because the two
+        // sets are disjoint (different IdbKey variants encode to distinct
+        // string prefixes) — every entry in either contributes exactly one
+        // put, so the total is the sum.
         let mut puts: Vec<(String, Uint8Array)> =
             Vec::with_capacity(snapshot.block_puts.len() + snapshot.keypair_puts.len());
         for ((session, namespace, idx), data) in &snapshot.block_puts {
