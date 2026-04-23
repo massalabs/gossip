@@ -13,13 +13,13 @@ use std::marker::PhantomData;
 use std::ptr;
 
 use sqlite_wasm_rs::{
-    SQLITE_BLOB, SQLITE_FLOAT, SQLITE_INTEGER, SQLITE_NULL, SQLITE_OK, SQLITE_OPEN_CREATE,
-    SQLITE_OPEN_READWRITE, SQLITE_TEXT, SQLITE_TRANSIENT, sqlite3, sqlite3_bind_blob,
-    sqlite3_bind_double, sqlite3_bind_int64, sqlite3_bind_null, sqlite3_bind_text, sqlite3_close,
-    sqlite3_column_blob, sqlite3_column_bytes, sqlite3_column_count, sqlite3_column_double,
-    sqlite3_column_int64, sqlite3_column_text, sqlite3_column_type, sqlite3_errmsg, sqlite3_exec,
-    sqlite3_finalize, sqlite3_last_insert_rowid, sqlite3_open_v2, sqlite3_prepare_v2, sqlite3_step,
-    sqlite3_stmt,
+    SQLITE_BLOB, SQLITE_DONE, SQLITE_FLOAT, SQLITE_INTEGER, SQLITE_NULL, SQLITE_OK,
+    SQLITE_OPEN_CREATE, SQLITE_OPEN_READWRITE, SQLITE_ROW, SQLITE_TEXT, SQLITE_TRANSIENT, sqlite3,
+    sqlite3_bind_blob, sqlite3_bind_double, sqlite3_bind_int64, sqlite3_bind_null,
+    sqlite3_bind_text, sqlite3_close, sqlite3_column_blob, sqlite3_column_bytes,
+    sqlite3_column_count, sqlite3_column_double, sqlite3_column_int64, sqlite3_column_text,
+    sqlite3_column_type, sqlite3_errmsg, sqlite3_exec, sqlite3_finalize, sqlite3_last_insert_rowid,
+    sqlite3_open_v2, sqlite3_prepare_v2, sqlite3_step, sqlite3_stmt,
 };
 
 // ── Errors ─────────────────────────────────────────────────────────
@@ -59,6 +59,12 @@ pub enum SqlValue {
     Blob(Vec<u8>),
 }
 
+/// Result of [`SafeStmt::step`]: either a new row is ready or the statement is done.
+pub enum StepStatus {
+    Row,
+    Done,
+}
+
 // ── Database handle ────────────────────────────────────────────────
 
 /// Owned SQLite database handle. Closes the underlying handle on drop.
@@ -85,11 +91,15 @@ impl SafeDb {
             let msg = if handle.is_null() {
                 format!("sqlite3_open_v2 failed with error code: {rc}")
             } else {
-                let m = errmsg(handle);
+                let open_msg = errmsg(handle);
                 // SAFETY: handle was set by sqlite3_open_v2; closing it
                 // releases the partially-initialized state.
-                unsafe { sqlite3_close(handle) };
-                m
+                let close_rc = unsafe { sqlite3_close(handle) };
+                if close_rc != SQLITE_OK {
+                    format!("{open_msg} (also sqlite3_close failed with error code: {close_rc})")
+                } else {
+                    open_msg
+                }
             };
             return Err(msg);
         }
@@ -153,11 +163,12 @@ impl SafeDb {
 impl Drop for SafeDb {
     fn drop(&mut self) {
         if !self.handle.is_null() {
-            // SAFETY: self.handle is valid (invariant of SafeDb). Drop
-            // cannot propagate errors; sqlite3_close returns SQLITE_BUSY
-            // only if statements are still open, which the lifetime of
-            // SafeStmt prevents at compile time.
-            unsafe { sqlite3_close(self.handle) };
+            // SAFETY: self.handle is valid (invariant of SafeDb).
+            // SafeStmt<'db> lifetime prevents live statements at compile time,
+            // so sqlite3_close cannot return SQLITE_BUSY here. A non-OK rc
+            // indicates a broken invariant — fail loud rather than silently leak.
+            let rc = unsafe { sqlite3_close(self.handle) };
+            assert_eq!(rc, SQLITE_OK, "sqlite3_close failed: rc={rc}");
         }
     }
 }
@@ -175,33 +186,50 @@ pub struct SafeStmt<'db> {
 }
 
 impl<'db> SafeStmt<'db> {
-    /// `sqlite3_step` returning the raw rc (SQLITE_ROW / SQLITE_DONE / err).
-    pub fn step(&self) -> c_int {
+    /// Advance the statement. `Ok(Row)` = a row is ready, `Ok(Done)` = finished.
+    pub fn step(&self) -> SqlResult<StepStatus> {
         // SAFETY: self.handle is valid (invariant of SafeStmt).
-        unsafe { sqlite3_step(self.handle) }
+        let rc = unsafe { sqlite3_step(self.handle) };
+        match rc {
+            SQLITE_ROW => Ok(StepStatus::Row),
+            SQLITE_DONE => Ok(StepStatus::Done),
+            _ => Err(format!("sqlite3_step failed with error code: {rc}")),
+        }
     }
 
-    pub fn bind_null(&self, idx: c_int) -> c_int {
+    pub fn bind_null(&self, idx: c_int) -> SqlResult<()> {
         // SAFETY: self.handle is valid; sqlite3_bind_null accepts any 1-based idx.
-        unsafe { sqlite3_bind_null(self.handle, idx) }
+        let rc = unsafe { sqlite3_bind_null(self.handle, idx) };
+        if rc != SQLITE_OK {
+            return Err(format!("sqlite3_bind_null failed with error code: {rc}"));
+        }
+        Ok(())
     }
 
-    pub fn bind_int64(&self, idx: c_int, v: i64) -> c_int {
+    pub fn bind_int64(&self, idx: c_int, v: i64) -> SqlResult<()> {
         // SAFETY: self.handle is valid.
-        unsafe { sqlite3_bind_int64(self.handle, idx, v) }
+        let rc = unsafe { sqlite3_bind_int64(self.handle, idx, v) };
+        if rc != SQLITE_OK {
+            return Err(format!("sqlite3_bind_int64 failed with error code: {rc}"));
+        }
+        Ok(())
     }
 
-    pub fn bind_double(&self, idx: c_int, v: f64) -> c_int {
+    pub fn bind_double(&self, idx: c_int, v: f64) -> SqlResult<()> {
         // SAFETY: self.handle is valid.
-        unsafe { sqlite3_bind_double(self.handle, idx, v) }
+        let rc = unsafe { sqlite3_bind_double(self.handle, idx, v) };
+        if rc != SQLITE_OK {
+            return Err(format!("sqlite3_bind_double failed with error code: {rc}"));
+        }
+        Ok(())
     }
 
     /// Bind a UTF-8 string (SQLITE_TRANSIENT — SQLite copies the buffer).
-    pub fn bind_text(&self, idx: c_int, s: &str) -> c_int {
+    pub fn bind_text(&self, idx: c_int, s: &str) -> SqlResult<()> {
         let bytes = s.as_bytes();
         // SAFETY: self.handle is valid; bytes is a valid slice of len
         // bytes; SQLITE_TRANSIENT instructs SQLite to copy before returning.
-        unsafe {
+        let rc = unsafe {
             sqlite3_bind_text(
                 self.handle,
                 idx,
@@ -209,14 +237,18 @@ impl<'db> SafeStmt<'db> {
                 bytes.len() as c_int,
                 SQLITE_TRANSIENT(),
             )
+        };
+        if rc != SQLITE_OK {
+            return Err(format!("sqlite3_bind_text failed with error code: {rc}"));
         }
+        Ok(())
     }
 
     /// Bind a blob (SQLITE_TRANSIENT — SQLite copies the buffer).
-    pub fn bind_blob(&self, idx: c_int, b: &[u8]) -> c_int {
+    pub fn bind_blob(&self, idx: c_int, b: &[u8]) -> SqlResult<()> {
         // SAFETY: self.handle is valid; b is a valid slice of len bytes;
         // SQLITE_TRANSIENT instructs SQLite to copy before returning.
-        unsafe {
+        let rc = unsafe {
             sqlite3_bind_blob(
                 self.handle,
                 idx,
@@ -224,7 +256,11 @@ impl<'db> SafeStmt<'db> {
                 b.len() as c_int,
                 SQLITE_TRANSIENT(),
             )
+        };
+        if rc != SQLITE_OK {
+            return Err(format!("sqlite3_bind_blob failed with error code: {rc}"));
         }
+        Ok(())
     }
 
     pub fn column_count(&self) -> c_int {
@@ -285,13 +321,12 @@ impl<'db> Drop for SafeStmt<'db> {
     fn drop(&mut self) {
         if !self.handle.is_null() {
             // SAFETY: self.handle is valid (invariant of SafeStmt).
-            unsafe { sqlite3_finalize(self.handle) };
+            // Per SQLite spec, sqlite3_finalize echoes the most recent
+            // sqlite3_step error. Since `step()` already surfaced that error
+            // to the caller via its Result, a non-OK rc here is a replay of
+            // an already-handled fault — intentionally swallowed to avoid
+            // double-reporting.
+            let _rc = unsafe { sqlite3_finalize(self.handle) };
         }
     }
 }
-
-// ── Step result helpers (re-exported constants for callers) ────────
-
-pub use sqlite_wasm_rs::SQLITE_DONE as DONE;
-pub use sqlite_wasm_rs::SQLITE_OK as OK;
-pub use sqlite_wasm_rs::SQLITE_ROW as ROW;

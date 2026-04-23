@@ -33,7 +33,7 @@ pub use wasm_bindgen_rayon::init_thread_pool;
 
 use crate::DEFAULT_NAMESPACE;
 use crate::error::SecureStorageError;
-use crate::sqlite_handle::{DONE, OK, ROW, SafeDb, SafeStmt, SqlValue};
+use crate::sqlite_handle::{SafeDb, SafeStmt, SqlResult, SqlValue, StepStatus};
 use crate::storage::MemoryStorage;
 use crate::types::SessionIndex;
 use crate::unlock::{NamespaceState, load_namespace_state};
@@ -462,20 +462,19 @@ fn run_statement(db: &SafeDb, sql: &str, params: &Array) -> Result<ExecResult, J
     // Bind params 1..=N
     for (i, param) in params.iter().enumerate() {
         let idx = (i + 1) as i32;
-        let rc = bind_param(&stmt, idx, &param);
-        if rc != OK {
-            return Err(JsValue::from_str(&format!("bind {idx}: rc={rc}")));
-        }
+        bind_param(&stmt, idx, &param)
+            .map_err(|e| JsValue::from_str(&format!("bind {idx}: {e}")))?;
     }
 
     // Step rows
     let rows = Array::new();
     loop {
-        let rc = stmt.step();
-        match rc {
-            ROW => rows.push(&read_row(&stmt)),
-            DONE => break,
-            _ => return Err(JsValue::from_str(&format!("step: rc={rc}"))),
+        match stmt
+            .step()
+            .map_err(|e| JsValue::from_str(&format!("step: {e}")))?
+        {
+            StepStatus::Row => rows.push(&read_row(&stmt)),
+            StepStatus::Done => break,
         };
     }
 
@@ -492,7 +491,7 @@ fn run_statement(db: &SafeDb, sql: &str, params: &Array) -> Result<ExecResult, J
     })
 }
 
-fn bind_param(stmt: &SafeStmt<'_>, idx: i32, value: &JsValue) -> i32 {
+fn bind_param(stmt: &SafeStmt<'_>, idx: i32, value: &JsValue) -> SqlResult<()> {
     if value.is_null() || value.is_undefined() {
         return stmt.bind_null(idx);
     }
@@ -519,7 +518,7 @@ fn bind_param(stmt: &SafeStmt<'_>, idx: i32, value: &JsValue) -> i32 {
     }
     // Unsupported type: return an error instead of silently binding NULL,
     // which would cause data corruption on INSERT/UPDATE.
-    21 // SQLITE_MISUSE
+    Err("unsupported JS value type for SQL bind".to_string())
 }
 
 fn read_row(stmt: &SafeStmt<'_>) -> Array {
