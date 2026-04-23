@@ -345,6 +345,83 @@ mod tests {
         });
     }
 
+    /// Two partially-overlapping writes: first covers offsets 1-4, second covers
+    /// 3-5. Last-write-wins on the intersection (3-4), first write owns 1-2,
+    /// second write owns 5.
+    #[test]
+    fn flush_partial_overlap_second_wins_on_intersection() {
+        crate::run_with_stack(|| {
+            let (mut storage, session, mut ns_state) = fresh_session();
+            let writes = vec![pw(1, &[1, 2, 3, 4]), pw(3, &[5, 6, 7])];
+            flush_writes(
+                &mut storage,
+                DOMAIN,
+                NS,
+                &session,
+                &mut ns_state,
+                &writes,
+                6,
+            )
+            .unwrap();
+
+            let read = read_session_data(&storage, DOMAIN, NS, &session, &ns_state, 0, 6).unwrap();
+            // Expected: offset 0 untouched (0), 1-2 from first write, 3-5 from second.
+            assert_eq!(&*read, &[0, 1, 2, 5, 6, 7]);
+        });
+    }
+
+    /// Two writes to the exact same offset and length: the second must fully
+    /// override the first (models SQLite rewriting the same page twice in a
+    /// transaction).
+    #[test]
+    fn flush_same_offset_second_fully_overrides() {
+        crate::run_with_stack(|| {
+            let (mut storage, session, mut ns_state) = fresh_session();
+            let writes = vec![pw(0, b"firstpass"), pw(0, b"secondpas")];
+            flush_writes(
+                &mut storage,
+                DOMAIN,
+                NS,
+                &session,
+                &mut ns_state,
+                &writes,
+                9,
+            )
+            .unwrap();
+
+            let read = read_session_data(&storage, DOMAIN, NS, &session, &ns_state, 0, 9).unwrap();
+            assert_eq!(&*read, b"secondpas");
+        });
+    }
+
+    /// Writes buffered in descending offset order still apply in buffering
+    /// order, not sorted order — the internal sort_unstable is used only for
+    /// contiguous-block grouping, not for ordering the application of writes.
+    #[test]
+    fn flush_applies_in_buffering_order_regardless_of_offset() {
+        crate::run_with_stack(|| {
+            let (mut storage, session, mut ns_state) = fresh_session();
+            // Insertion order: high offset first, then low offset. They overlap.
+            let writes = vec![pw(2, &[9, 9, 9, 9, 9]), pw(0, &[1, 1, 1, 1, 1, 1])];
+            flush_writes(
+                &mut storage,
+                DOMAIN,
+                NS,
+                &session,
+                &mut ns_state,
+                &writes,
+                7,
+            )
+            .unwrap();
+
+            let read = read_session_data(&storage, DOMAIN, NS, &session, &ns_state, 0, 7).unwrap();
+            // pw(2, [9,9,9,9,9]) fills offsets 2-6 with 9
+            // pw(0, [1,1,1,1,1,1]) fills offsets 0-5 with 1 — applied AFTER,
+            // so 0-5 become 1, and only offset 6 stays 9.
+            assert_eq!(&*read, &[1, 1, 1, 1, 1, 1, 9]);
+        });
+    }
+
     #[test]
     fn flush_far_writes_persist_independently() {
         crate::run_with_stack(|| {
