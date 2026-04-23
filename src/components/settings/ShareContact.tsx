@@ -33,6 +33,9 @@ interface ShareContactProps {
   publicKey: UserPublicKeys;
   mnsDomains?: string[];
   showPageFrame?: boolean;
+  // Whether the sharing subject is the current user's own profile.
+  // When false, the invite greeting uses the contact's name rather than "me".
+  isOwnContact?: boolean;
 }
 
 const ShareContact: React.FC<ShareContactProps> = ({
@@ -42,6 +45,7 @@ const ShareContact: React.FC<ShareContactProps> = ({
   publicKey,
   mnsDomains,
   showPageFrame = true,
+  isOwnContact = true,
 }) => {
   const { t } = useTranslation('contacts');
   // Note: we keep a single QR/file-sharing view for now, no tab switcher.
@@ -64,7 +68,7 @@ const ShareContact: React.FC<ShareContactProps> = ({
     canShareViaOtherApp,
     handleCopyLink,
     handleShareLink,
-  } = useLinkShare(deepLinkUrl);
+  } = useLinkShare(deepLinkUrl, isOwnContact ? undefined : sharedUsername);
   const isExportDisabled = !publicKey || fileState.isLoading;
 
   const handleShareFile = useCallback(() => {

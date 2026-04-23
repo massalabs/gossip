@@ -45,6 +45,7 @@ const ContactSharePage: React.FC = () => {
       userId={contact.userId}
       userName={contact.name}
       publicKey={contactPublicKeys}
+      isOwnContact={false}
     />
   );
 };

@@ -5,7 +5,10 @@ import {
   shareInvitation,
 } from '../services/shareService';
 
-export function useLinkShare(deepLinkUrl: string): {
+export function useLinkShare(
+  deepLinkUrl: string,
+  contactName?: string
+): {
   copiedLink: boolean;
   isSharingLink: boolean;
   canShareViaOtherApp: boolean;
@@ -41,14 +44,14 @@ export function useLinkShare(deepLinkUrl: string): {
   const handleShareLink = useCallback(async () => {
     try {
       setIsSharingLink(true);
-      await shareInvitation({ deepLinkUrl });
+      await shareInvitation({ deepLinkUrl, contactName });
     } catch (error) {
       console.error('Failed to share invitation link:', error);
       toast.error('Failed to share invitation link. Please try again.');
     } finally {
       setIsSharingLink(false);
     }
-  }, [deepLinkUrl]);
+  }, [deepLinkUrl, contactName]);
 
   useEffect(() => {
     setCanShareViaOtherApp(canShareInvitationViaOtherApp());
