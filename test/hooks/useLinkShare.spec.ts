@@ -45,10 +45,11 @@ interface HookResult {
 
 function createHarness(
   deepLinkUrl: string,
-  resultRef: { current: HookResult | null }
+  resultRef: { current: HookResult | null },
+  contactName?: string
 ) {
   function Harness() {
-    const result = useLinkShare(deepLinkUrl);
+    const result = useLinkShare(deepLinkUrl, contactName);
     resultRef.current = result;
     return null;
   }
@@ -91,8 +92,8 @@ describe('useLinkShare', () => {
     vi.useRealTimers();
   });
 
-  function render(url = TEST_URL) {
-    const Harness = createHarness(url, resultRef);
+  function render(url = TEST_URL, contactName?: string) {
+    const Harness = createHarness(url, resultRef, contactName);
     act(() => {
       root = createRoot(container);
       root.render(React.createElement(Harness));
@@ -193,6 +194,20 @@ describe('useLinkShare', () => {
     });
 
     expect(shareInvitation).toHaveBeenCalledWith({ deepLinkUrl: TEST_URL });
+  });
+
+  it('forwards contactName to shareInvitation when provided', async () => {
+    vi.mocked(shareInvitation).mockResolvedValue(undefined);
+    render(TEST_URL, 'Alice');
+
+    await act(async () => {
+      await resultRef.current!.handleShareLink();
+    });
+
+    expect(shareInvitation).toHaveBeenCalledWith({
+      deepLinkUrl: TEST_URL,
+      contactName: 'Alice',
+    });
   });
 
   it('sets isSharingLink=true during share and false after', async () => {

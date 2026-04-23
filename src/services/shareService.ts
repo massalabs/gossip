@@ -4,6 +4,11 @@ import { Filesystem, Directory } from '@capacitor/filesystem';
 
 export interface ShareInvitationOptions {
   deepLinkUrl: string;
+  // Name of the contact being shared. When undefined, the invite is treated
+  // as the user's own profile ("Join me on Gossip!"). When a non-empty string,
+  // the invite is introduced as "Join {contactName} on Gossip!". When empty,
+  // no greeting is prepended and only the URL is shared.
+  contactName?: string;
 }
 
 export interface ShareQRCodeOptions {
@@ -157,14 +162,24 @@ export async function shareFile(options: ShareFileOptions): Promise<void> {
 export async function shareInvitation(
   options: ShareInvitationOptions
 ): Promise<void> {
-  const { deepLinkUrl } = options;
+  const { deepLinkUrl, contactName } = options;
 
   if (!deepLinkUrl) {
     throw new Error('deepLinkUrl is required');
   }
 
-  const shareText = 'Join me on Gossip!';
-  const shareTitle = 'Join me on Gossip';
+  let shareText: string;
+  let shareTitle: string;
+  if (contactName === undefined) {
+    shareText = 'Join me on Gossip!';
+    shareTitle = 'Join me on Gossip';
+  } else if (contactName.length > 0) {
+    shareText = `Join ${contactName} on Gossip!`;
+    shareTitle = `Join ${contactName} on Gossip`;
+  } else {
+    shareText = '';
+    shareTitle = 'Gossip';
+  }
 
   // Use native Capacitor Share plugin on native platforms
   if (Capacitor.isNativePlatform()) {
@@ -176,7 +191,7 @@ export async function shareInvitation(
       //   separate `url` field and only paste whatever's in `text`.
       await Share.share({
         title: shareTitle,
-        text: `${shareText}\n${deepLinkUrl}`,
+        text: shareText ? `${shareText}\n${deepLinkUrl}` : deepLinkUrl,
         url: deepLinkUrl,
         dialogTitle: shareTitle,
       });
@@ -192,7 +207,7 @@ export async function shareInvitation(
     try {
       await navigator.share({
         title: shareTitle,
-        text: 'Join me on Gossip!',
+        text: shareText,
         url: deepLinkUrl,
       });
       return;
