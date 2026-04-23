@@ -104,7 +104,7 @@ pub async fn init_secure_storage(domain: &str, backend: &str) -> Result<(), JsVa
     } else {
         let app_state = AppState::new(backend_inst, domain.to_string());
         register_vfs::<EncryptedIoMethods, EncryptedVfs<WasmOsCallback>>(VFS_NAME, app_state, false)
-            .map_err(|e| JsValue::from_str(&format!("register_vfs: {e}")))?
+            .map_err(|e| JsValue::from_str(&format!("register_vfs failed: {e}")))?
     };
 
     VFS_PTR.with(|p| *p.borrow_mut() = Some(vfs));
@@ -384,10 +384,10 @@ pub fn open_database() -> Result<(), JsValue> {
             return Ok(());
         }
         let handle = SafeDb::open(DB_NAME, VFS_NAME_C)
-            .map_err(|e| JsValue::from_str(&format!("open: {e}")))?;
+            .map_err(|e| JsValue::from_str(&format!("SafeDb::open failed: {e}")))?;
         handle
             .exec(PRAGMAS)
-            .map_err(|e| JsValue::from_str(&format!("PRAGMAs: {e}")))?;
+            .map_err(|e| JsValue::from_str(&format!("PRAGMA exec failed: {e}")))?;
         *slot = Some(handle);
         Ok(())
     })
@@ -442,7 +442,7 @@ pub fn exec_sql(sql: &str, params: Array) -> Result<ExecResult, JsValue> {
 fn run_statement(db: &SafeDb, sql: &str, params: &Array) -> Result<ExecResult, JsValue> {
     let stmt_opt = db
         .prepare(sql)
-        .map_err(|e| JsValue::from_str(&format!("prepare ({sql}): {e}")))?;
+        .map_err(|e| JsValue::from_str(&format!("prepare failed for sql {sql:?}: {e}")))?;
 
     let Some(stmt) = stmt_opt else {
         // Empty SQL — return empty result.
@@ -456,7 +456,7 @@ fn run_statement(db: &SafeDb, sql: &str, params: &Array) -> Result<ExecResult, J
     for (i, param) in params.iter().enumerate() {
         let idx = (i + 1) as i32;
         bind_param(&stmt, idx, &param)
-            .map_err(|e| JsValue::from_str(&format!("bind {idx}: {e}")))?;
+            .map_err(|e| JsValue::from_str(&format!("bind param {idx} failed: {e}")))?;
     }
 
     // Step rows
@@ -464,7 +464,7 @@ fn run_statement(db: &SafeDb, sql: &str, params: &Array) -> Result<ExecResult, J
     loop {
         match stmt
             .step()
-            .map_err(|e| JsValue::from_str(&format!("step: {e}")))?
+            .map_err(|e| JsValue::from_str(&format!("sqlite3_step failed: {e}")))?
         {
             StepStatus::Row => rows.push(&read_row(&stmt)),
             StepStatus::Done => break,
@@ -504,6 +504,8 @@ fn bind_param(stmt: &SafeStmt<'_>, idx: i32, value: &JsValue) -> SqlResult<()> {
         if let Ok(n) = i64::try_from(value.clone()) {
             return stmt.bind_int64(idx, n);
         }
+        // Bigint outside i64 range: SQLite INTEGER columns can't hold it.
+        return Err("bigint value out of i64 range for SQL bind".to_string());
     }
     if value.is_instance_of::<Uint8Array>() {
         let arr = Uint8Array::from(value.clone());
