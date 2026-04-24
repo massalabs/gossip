@@ -63,7 +63,7 @@ pub fn encrypt_session_data_block<S: BlockStorage + KeypairStorage>(
     );
 
     // Phase 1: sequential read — collect pk + existing block per session.
-    let prep: Vec<BlockPrep> = (0..SESSION_COUNT as u8)
+    let mut prep: Vec<BlockPrep> = (0..SESSION_COUNT as u8)
         .map(|i| {
             let idx = SessionIndex::new(i).expect("i in 0..SESSION_COUNT is always a valid SessionIndex");
             let (ver, pk_bytes) = read_session_version_and_pk(storage, idx)?;
@@ -83,6 +83,10 @@ pub fn encrypt_session_data_block<S: BlockStorage + KeypairStorage>(
             })
         })
         .collect::<Result<_>>()?;
+
+    // Randomize compute order: par_iter runs sequentially on WASM single-thread,
+    // which would otherwise pin target's encrypt_block to a fixed position.
+    prep.shuffle(&mut rand::rngs::OsRng);
 
     // Phase 2: parallel compute — all sessions at once.
     let computed: Vec<(SessionIndex, Vec<u8>)> = prep
