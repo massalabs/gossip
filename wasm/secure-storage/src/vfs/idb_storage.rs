@@ -275,7 +275,6 @@ impl KeypairStorage for IdbBlockStorage {
     }
 
     fn write_keypair(&mut self, session: SessionIndex, data: &[u8]) -> Result<()> {
-        self.state.get_mut().write_keypair(session.as_u8(), data);
-        Ok(())
+        self.state.get_mut().write_keypair(session.as_u8(), data)
     }
 }

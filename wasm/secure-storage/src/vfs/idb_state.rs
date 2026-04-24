@@ -251,7 +251,13 @@ impl IdbStorageState {
     // ── Keypair ops ────────────────────────────────────────────
 
     pub fn read_keypair(&self, session: u8) -> Result<Zeroizing<Vec<u8>>> {
-        match &self.keypairs[session as usize] {
+        let slot = self.keypairs.get(session as usize).ok_or_else(|| {
+            SecureStorageError::Storage(format!(
+                "invalid session: {session} (max {})",
+                SESSION_COUNT - 1
+            ))
+        })?;
+        match slot {
             Some(data) => Ok(data.clone()),
             None => Err(SecureStorageError::Storage(format!(
                 "keypair not found: session={session}"
@@ -259,9 +265,16 @@ impl IdbStorageState {
         }
     }
 
-    pub fn write_keypair(&mut self, session: u8, data: &[u8]) {
-        self.keypairs[session as usize] = Some(Zeroizing::new(data.to_vec()));
+    pub fn write_keypair(&mut self, session: u8, data: &[u8]) -> Result<()> {
+        let slot = self.keypairs.get_mut(session as usize).ok_or_else(|| {
+            SecureStorageError::Storage(format!(
+                "invalid session: {session} (max {})",
+                SESSION_COUNT - 1
+            ))
+        })?;
+        *slot = Some(Zeroizing::new(data.to_vec()));
         self.dirty_keypairs.insert(session);
+        Ok(())
     }
 
     // ── Drain / restore for async persistence ──────────────────
@@ -553,7 +566,7 @@ mod tests {
     #[test]
     fn write_keypair_marks_dirty() {
         let mut s = IdbStorageState::new();
-        s.write_keypair(0, b"my keypair");
+        s.write_keypair(0, b"my keypair").unwrap();
         let snap = s.drain_pending();
         assert_eq!(snap.keypair_puts.len(), 1);
     }
@@ -561,7 +574,7 @@ mod tests {
     #[test]
     fn read_keypair_returns_data() {
         let mut s = IdbStorageState::new();
-        s.write_keypair(0, b"hello");
+        s.write_keypair(0, b"hello").unwrap();
         assert_eq!(&*s.read_keypair(0).unwrap(), b"hello");
     }
 
@@ -616,7 +629,7 @@ mod tests {
     fn drain_pending_clears_dirty() {
         let mut s = IdbStorageState::new();
         s.write_block(0, NS, 0, &block(1));
-        s.write_keypair(0, b"kp");
+        s.write_keypair(0, b"kp").unwrap();
         assert!(!s.is_clean());
 
         let snap = s.drain_pending();
@@ -689,7 +702,7 @@ mod tests {
         let mut s = IdbStorageState::new();
         s.write_block(0, NS, 0, &block(1));
         s.write_block(0, NS, 1, &block(2));
-        s.write_keypair(0, b"kp");
+        s.write_keypair(0, b"kp").unwrap();
 
         let snap = s.drain_pending();
         assert!(s.is_clean());
@@ -729,7 +742,7 @@ mod tests {
     #[test]
     fn restore_pending_keypair_skips_wiped() {
         let mut s = IdbStorageState::new();
-        s.write_keypair(0, b"kp");
+        s.write_keypair(0, b"kp").unwrap();
         let snap = s.drain_pending();
 
         // Manually clear the keypair (simulating a hypothetical wipe)
@@ -858,5 +871,24 @@ mod tests {
         let (s, skipped) = IdbStorageState::from_entries(entries);
         assert_eq!(skipped, 1);
         assert_eq!(s.block_count(0, NS), 0);
+    }
+
+    // ── Session range safety ──
+
+    /// Regression: raw indexing `self.keypairs[session as usize]` panics for
+    /// `session >= SESSION_COUNT`. The method must return an error instead.
+    #[test]
+    fn read_keypair_invalid_session_returns_error() {
+        let s = IdbStorageState::new();
+        assert!(s.read_keypair(SESSION_COUNT as u8).is_err());
+        assert!(s.read_keypair(u8::MAX).is_err());
+    }
+
+    /// Regression: same expectation on the write side.
+    #[test]
+    fn write_keypair_invalid_session_returns_error() {
+        let mut s = IdbStorageState::new();
+        assert!(s.write_keypair(SESSION_COUNT as u8, b"kp").is_err());
+        assert!(s.write_keypair(u8::MAX, b"kp").is_err());
     }
 }
