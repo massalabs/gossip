@@ -90,8 +90,9 @@ impl IdbKey {
 ///
 /// **Why Vec instead of HashMap for blocks**: append-dense access pattern
 /// + lower per-entry overhead (~24 bytes per HashMap bucket → 0 for Vec) +
-/// O(1) array lookup with no hash. On a 10K-block DB, saves ~240 KB of
-/// bucket overhead and a hash per read.
+/// O(1) indexed lookup (we always know the block index — no membership
+/// scan, which would be O(n)). On a 10K-block DB, saves ~240 KB of bucket
+/// overhead and one hash computation per read.
 ///
 /// **Invariants** preserved by all methods:
 ///
@@ -134,9 +135,16 @@ impl IdbStorageState {
 
     /// Reconstruct state from a list of `(key, value)` entries loaded from IDB.
     ///
-    /// Malformed keys, unknown session indices, and entries with wrong
-    /// block sizes are silently skipped — the count of skipped entries
-    /// is returned for diagnostics. Loaded entries are NOT marked dirty.
+    /// Entries are silently skipped (counted in the returned `usize`) when:
+    ///   - the key fails to parse via [`IdbKey::parse`] (malformed legacy key
+    ///     or future-version data we don't yet understand);
+    ///   - the value's length doesn't match `BLOCK_SIZE` (block entries only);
+    ///   - the block index is `>= 1_000_000` — a DoS guard against a corrupted
+    ///     or malicious IDB causing pathological `Vec::resize_with` allocations
+    ///     (1M blocks × ~16 KB = 16 GB per session, well beyond any real use).
+    ///
+    /// Skipped count is returned for diagnostics, never logged here. Loaded
+    /// entries are NOT marked dirty.
     pub fn from_entries<'a, I>(entries: I) -> (Self, usize)
     where
         I: IntoIterator<Item = (&'a str, &'a [u8])>,
@@ -152,8 +160,14 @@ impl IdbStorageState {
                 }) if val.len() == BLOCK_SIZE && idx < 1_000_000 => {
                     let mut data = Box::new([0u8; BLOCK_SIZE]);
                     data.copy_from_slice(val);
+                    // `or_default()` lazily inserts an empty Vec the first
+                    // time we see this (session, namespace) pair — expected.
                     let vec = state.blocks[session as usize].entry(namespace).or_default();
                     let i = idx as usize;
+                    // `resize_with(i + 1, ..)` makes the Vec exactly `i + 1`
+                    // long, so `vec[i]` is always valid afterwards regardless
+                    // of how far `i` exceeds the current length (not just the
+                    // `i == len` boundary).
                     if i >= vec.len() {
                         vec.resize_with(i + 1, || None);
                     }
@@ -163,6 +177,7 @@ impl IdbStorageState {
                     state.keypairs[session as usize] = Some(Zeroizing::new(val.to_vec()));
                 }
                 _ => {
+                    // Unmatched entry: see the doc above for the categories.
                     skipped += 1;
                 }
             }
@@ -202,6 +217,9 @@ impl IdbStorageState {
     pub fn write_block(&mut self, session: u8, namespace: u8, block: u64, data: &[u8; BLOCK_SIZE]) {
         let stream = self.blocks[session as usize].entry(namespace).or_default();
         let i = block as usize;
+        // `resize_with(i + 1, ..)` extends to exactly `i + 1` elements, so
+        // `stream[i]` is valid for any `i >= stream.len()` (not only the
+        // `i == len` boundary).
         if i >= stream.len() {
             stream.resize_with(i + 1, || None);
         }
@@ -219,8 +237,7 @@ impl IdbStorageState {
     pub fn block_count(&self, session: u8, namespace: u8) -> u64 {
         self.blocks[session as usize]
             .get(&namespace)
-            .map(|v| v.len() as u64)
-            .unwrap_or(0)
+            .map_or(0, |v| v.len() as u64)
     }
 
     /// Wipe all blocks of a `(session, namespace)` pair and queue them for
