@@ -432,23 +432,23 @@ export function wbg_rayon_start_worker(receiver) {
     wasm.wbg_rayon_start_worker(receiver);
 }
 
-function __wbg_adapter_10(arg0, arg1, arg2) {
+function __wbg_adapter_8(arg0, arg1, arg2) {
     wasm.closure112_externref_shim(arg0, arg1, arg2);
 }
 
-function __wbg_adapter_17(arg0, arg1) {
+function __wbg_adapter_11(arg0, arg1, arg2) {
+    wasm.closure678_externref_shim(arg0, arg1, arg2);
+}
+
+function __wbg_adapter_14(arg0, arg1) {
     wasm.wasm_bindgen_3f82e0ab9dbbc377___convert__closures_____invoke______(arg0, arg1);
 }
 
-function __wbg_adapter_22(arg0, arg1, arg2) {
-    const ret = wasm.closure52_externref_shim_multivalue_shim(arg0, arg1, arg2);
+function __wbg_adapter_21(arg0, arg1, arg2) {
+    const ret = wasm.closure72_externref_shim_multivalue_shim(arg0, arg1, arg2);
     if (ret[1]) {
         throw takeFromExternrefTable0(ret[0]);
     }
-}
-
-function __wbg_adapter_25(arg0, arg1, arg2) {
-    wasm.closure678_externref_shim(arg0, arg1, arg2);
 }
 
 function __wbg_adapter_185(arg0, arg1, arg2, arg3) {
@@ -1071,12 +1071,17 @@ function __wbg_get_imports() {
     };
     imports.wbg.__wbindgen_cast_059aacf5a239a77f = function(arg0, arg1) {
         // Cast intrinsic for `Closure(Closure { dtor_idx: 675, function: Function { arguments: [NamedExternref("Event")], shim_idx: 678, ret: Unit, inner_ret: Some(Unit) }, mutable: false }) -> Externref`.
-        const ret = makeClosure(arg0, arg1, 675, __wbg_adapter_25);
+        const ret = makeClosure(arg0, arg1, 675, __wbg_adapter_11);
+        return ret;
+    };
+    imports.wbg.__wbindgen_cast_0a24a4e16caf0da2 = function(arg0, arg1) {
+        // Cast intrinsic for `Closure(Closure { dtor_idx: 71, function: Function { arguments: [NamedExternref("IDBVersionChangeEvent")], shim_idx: 72, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+        const ret = makeMutClosure(arg0, arg1, 71, __wbg_adapter_21);
         return ret;
     };
     imports.wbg.__wbindgen_cast_146fd35f906c65cd = function(arg0, arg1) {
         // Cast intrinsic for `Closure(Closure { dtor_idx: 111, function: Function { arguments: [Externref], shim_idx: 112, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-        const ret = makeMutClosure(arg0, arg1, 111, __wbg_adapter_10);
+        const ret = makeMutClosure(arg0, arg1, 111, __wbg_adapter_8);
         return ret;
     };
     imports.wbg.__wbindgen_cast_2241b6af4c4b2941 = function(arg0, arg1) {
@@ -1089,14 +1094,9 @@ function __wbg_get_imports() {
         const ret = arg0;
         return ret;
     };
-    imports.wbg.__wbindgen_cast_9fd7597e2f319a2e = function(arg0, arg1) {
-        // Cast intrinsic for `Closure(Closure { dtor_idx: 51, function: Function { arguments: [NamedExternref("IDBVersionChangeEvent")], shim_idx: 52, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
-        const ret = makeMutClosure(arg0, arg1, 51, __wbg_adapter_22);
-        return ret;
-    };
     imports.wbg.__wbindgen_cast_a53a037200293105 = function(arg0, arg1) {
         // Cast intrinsic for `Closure(Closure { dtor_idx: 111, function: Function { arguments: [NamedExternref("MessageEvent")], shim_idx: 112, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-        const ret = makeMutClosure(arg0, arg1, 111, __wbg_adapter_10);
+        const ret = makeMutClosure(arg0, arg1, 111, __wbg_adapter_8);
         return ret;
     };
     imports.wbg.__wbindgen_cast_cb9088102bce6b30 = function(arg0, arg1) {
@@ -1111,7 +1111,7 @@ function __wbg_get_imports() {
     };
     imports.wbg.__wbindgen_cast_e55b3bcdac329b29 = function(arg0, arg1) {
         // Cast intrinsic for `Closure(Closure { dtor_idx: 675, function: Function { arguments: [], shim_idx: 676, ret: Unit, inner_ret: Some(Unit) }, mutable: false }) -> Externref`.
-        const ret = makeClosure(arg0, arg1, 675, __wbg_adapter_17);
+        const ret = makeClosure(arg0, arg1, 675, __wbg_adapter_14);
         return ret;
     };
     imports.wbg.__wbindgen_init_externref_table = function() {
