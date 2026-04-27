@@ -112,6 +112,9 @@ pub struct IdbStorageState {
     /// `(session, namespace, block)` keys whose value must be PUT to IDB
     /// on next flush.
     dirty_blocks: HashSet<(u8, u8, u64)>,
+    /// `(session, namespace, block)` keys that must be DELETEd from IDB on
+    /// next flush.
+    deleted_blocks: HashSet<(u8, u8, u64)>,
     /// Sessions whose keypair must be PUT to IDB on next flush.
     dirty_keypairs: HashSet<u8>,
 }
@@ -129,6 +132,7 @@ impl IdbStorageState {
             blocks: std::array::from_fn(|_| HashMap::new()),
             keypairs: std::array::from_fn(|_| None),
             dirty_blocks: HashSet::new(),
+            deleted_blocks: HashSet::new(),
             dirty_keypairs: HashSet::new(),
         }
     }
@@ -188,7 +192,9 @@ impl IdbStorageState {
     /// True if there is nothing to flush to IDB.
     #[cfg(test)]
     pub fn is_clean(&self) -> bool {
-        self.dirty_blocks.is_empty() && self.dirty_keypairs.is_empty()
+        self.dirty_blocks.is_empty()
+            && self.deleted_blocks.is_empty()
+            && self.dirty_keypairs.is_empty()
     }
 
     // ── Block ops ──────────────────────────────────────────────
@@ -224,6 +230,7 @@ impl IdbStorageState {
             stream.resize_with(i + 1, || None);
         }
         stream[i] = Some(Box::new(*data));
+        self.deleted_blocks.remove(&(session, namespace, block));
         self.dirty_blocks.insert((session, namespace, block));
     }
 
@@ -231,6 +238,7 @@ impl IdbStorageState {
         let stream = self.blocks[session as usize].entry(namespace).or_default();
         let block = stream.len() as u64;
         stream.push(Some(Box::new(*data)));
+        self.deleted_blocks.remove(&(session, namespace, block));
         self.dirty_blocks.insert((session, namespace, block));
     }
 
@@ -245,19 +253,21 @@ impl IdbStorageState {
     ///
     /// **Critical for plausible deniability**: leftover blocks in IDB
     /// would let an attacker observe per-slot block-count asymmetry.
-    /// This method tombstones every existing block of the namespace so
-    /// the next flush physically deletes them from IndexedDB. Other
-    /// namespaces of the same session are untouched.
+    /// This method tombstones blocks that may already exist in IndexedDB so
+    /// the next flush physically deletes them. Blocks that are only dirty
+    /// pending puts are removed from the dirty set instead: they were never
+    /// durably written, so there is nothing to delete. Other namespaces of the
+    /// same session are untouched.
     pub fn reset_blockstream(&mut self, session: u8, namespace: u8) {
         let session_streams = &mut self.blocks[session as usize];
-        // Remove old blocks from cache and dirty set. No tombstones needed:
-        // the global block count never decreases (spec §14), so every old
-        // index will be overwritten by repair_blockstream_lengths or
-        // encrypt_session_data_block before the next flush.
         let old = session_streams.remove(&namespace).unwrap_or_default();
         for (b, slot) in old.into_iter().enumerate() {
             if slot.is_some() {
-                self.dirty_blocks.remove(&(session, namespace, b as u64));
+                let key = (session, namespace, b as u64);
+                let was_dirty = self.dirty_blocks.remove(&key);
+                if !was_dirty {
+                    self.deleted_blocks.insert(key);
+                }
             }
         }
         // Re-insert an empty vector so the namespace exists with length 0
@@ -296,7 +306,7 @@ impl IdbStorageState {
 
     // ── Drain / restore for async persistence ──────────────────
 
-    /// Atomically drain all pending writes/deletes into a [`DirtySnapshot`].
+    /// Atomically drain all pending puts/deletes into a [`DirtySnapshot`].
     ///
     /// After this call, the state is "clean": dirty sets and tombstones
     /// are empty. New writes that arrive while the caller is busy
@@ -304,15 +314,16 @@ impl IdbStorageState {
     /// captured at the next drain — **no race, no data loss**.
     ///
     /// The caller MUST handle the snapshot:
-    ///   * On IDB write success: drop the snapshot. Done.
-    ///   * On IDB write failure: call [`Self::restore_pending`] to
-    ///     re-mark the entries dirty for the next retry.
+    ///   * On IDB transaction success: drop the snapshot. Done.
+    ///   * On IDB transaction failure: call [`Self::restore_pending`] to
+    ///     restore puts/deletes for the next retry.
     ///
     /// This pattern (drain + restore) replaces the older snapshot+commit
     /// pattern, which had a subtle bug where overwriting a block during
     /// the in-flight flush would silently lose the new value.
     pub fn drain_pending(&mut self) -> DirtySnapshot {
         let dirty_blocks = std::mem::take(&mut self.dirty_blocks);
+        let deleted_blocks = std::mem::take(&mut self.deleted_blocks);
         let dirty_keypairs = std::mem::take(&mut self.dirty_keypairs);
 
         // Build the snapshot by reading current cache values for each
@@ -340,16 +351,18 @@ impl IdbStorageState {
 
         DirtySnapshot {
             block_puts,
+            block_deletes: deleted_blocks.into_iter().collect(),
             keypair_puts,
         }
     }
 
-    /// Restore a drained snapshot (called only on IDB write failure).
+    /// Restore a drained snapshot (called only on IDB transaction failure).
     ///
-    /// Re-marks each entry as dirty so it will be retried at the next
-    /// drain. Entries whose cache slot has been wiped since the drain
-    /// (e.g., by [`Self::reset_blockstream`]) are silently skipped —
-    /// there is nothing to retry.
+    /// Re-marks each put/delete as dirty so it will be retried at the
+    /// next drain. Put entries whose cache slot has been wiped since the
+    /// drain (e.g., by [`Self::reset_blockstream`]) are silently
+    /// skipped — there is nothing to retry. Delete entries are restored
+    /// only if the block is still absent.
     pub fn restore_pending(&mut self, snap: DirtySnapshot) {
         for ((s, n, b), _data) in snap.block_puts {
             // Only restore if the block is still in cache.
@@ -360,6 +373,16 @@ impl IdbStorageState {
                 .is_some()
             {
                 self.dirty_blocks.insert((s, n, b));
+            }
+        }
+        for (s, n, b) in snap.block_deletes {
+            let block_present = self.blocks[s as usize]
+                .get(&n)
+                .and_then(|vec| vec.get(b as usize))
+                .and_then(|o| o.as_ref())
+                .is_some();
+            if !block_present {
+                self.deleted_blocks.insert((s, n, b));
             }
         }
         for (s, _data) in snap.keypair_puts {
@@ -373,12 +396,13 @@ impl IdbStorageState {
 /// A snapshot of pending IDB operations to be committed atomically.
 pub struct DirtySnapshot {
     pub block_puts: Vec<((u8, u8, u64), Box<[u8; BLOCK_SIZE]>)>,
+    pub block_deletes: Vec<(u8, u8, u64)>,
     pub keypair_puts: Vec<(u8, Zeroizing<Vec<u8>>)>,
 }
 
 impl DirtySnapshot {
     pub fn is_empty(&self) -> bool {
-        self.block_puts.is_empty() && self.keypair_puts.is_empty()
+        self.block_puts.is_empty() && self.block_deletes.is_empty() && self.keypair_puts.is_empty()
     }
 }
 
@@ -635,9 +659,9 @@ mod tests {
         assert!(s.read_block(0, 0, 0).is_err());
         assert!(s.read_block(0, 1, 0).is_ok());
 
-        // No tombstones — old IDB entries will be overwritten by
-        // repair_blockstream_lengths before next flush.
-        assert!(s.is_clean());
+        let snap = s.drain_pending();
+        assert!(snap.block_puts.is_empty());
+        assert_eq!(snap.block_deletes, vec![(0, 0, 0)]);
     }
 
     // ── State: drain / restore semantics ──
@@ -770,11 +794,11 @@ mod tests {
         assert!(s.dirty_keypairs.is_empty());
     }
 
-    // ── reset_blockstream without tombstones ──
+    // ── reset_blockstream tombstones ──
     //
-    // Since the global block count never decreases (spec §14), old IDB
-    // entries are always overwritten by repair_blockstream_lengths or
-    // encrypt_session_data_block before the next flush. No deletes needed.
+    // Blocks that have reached IDB must be durably deleted on reset. Clearing
+    // RAM alone is not enough: a later reload from IndexedDB would resurrect
+    // stale higher block indices.
 
     #[test]
     fn reset_blockstream_clears_ram_and_dirty() {
@@ -833,9 +857,53 @@ mod tests {
         // Session 1 untouched.
         assert!(s.read_block(1, NS, 0).is_ok());
         assert_eq!(s.block_count(1, NS), 1);
+    }
 
-        // Only session 0 was wiped, no pending ops.
-        assert!(s.is_clean());
+    #[test]
+    fn reset_blockstream_queues_deletes_for_reloaded_blocks() {
+        let b0 = block(1);
+        let b1 = block(2);
+        let b2 = block(3);
+        let k0 = IdbKey::Block {
+            session: 0,
+            namespace: NS,
+            idx: 0,
+        }
+        .encode();
+        let k1 = IdbKey::Block {
+            session: 0,
+            namespace: NS,
+            idx: 1,
+        }
+        .encode();
+        let k2 = IdbKey::Block {
+            session: 0,
+            namespace: NS,
+            idx: 2,
+        }
+        .encode();
+        let entries: Vec<(&str, &[u8])> = vec![
+            (k0.as_str(), &b0[..]),
+            (k1.as_str(), &b1[..]),
+            (k2.as_str(), &b2[..]),
+        ];
+
+        let (mut s, skipped) = IdbStorageState::from_entries(entries);
+        assert_eq!(skipped, 0);
+        assert_eq!(s.block_count(0, NS), 3);
+
+        s.reset_blockstream(0, NS);
+        assert_eq!(s.block_count(0, NS), 0);
+
+        let snap = s.drain_pending();
+        assert!(
+            !snap.is_empty(),
+            "reset of persisted IDB blocks must queue durable deletes; otherwise stale blocks reload"
+        );
+        assert!(
+            snap.block_puts.is_empty(),
+            "reset should delete old blocks, not rewrite them"
+        );
     }
 
     // ── from_entries ──

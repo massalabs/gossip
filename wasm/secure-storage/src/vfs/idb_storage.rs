@@ -91,16 +91,20 @@ async fn has_any_data(db: &IdbDatabase) -> std::result::Result<bool, JsValue> {
     Ok(n > 0)
 }
 
-/// Apply puts in a single atomic readwrite transaction.
-async fn batch_put(
+/// Apply puts and deletes in a single atomic readwrite transaction.
+async fn batch_apply(
     db: &IdbDatabase,
     puts: &[(String, Uint8Array)],
+    deletes: &[String],
 ) -> std::result::Result<(), JsValue> {
-    if puts.is_empty() {
+    if puts.is_empty() && deletes.is_empty() {
         return Ok(());
     }
     let tx = db.transaction_on_one_with_mode(STORE_NAME, IdbTransactionMode::Readwrite)?;
     let store = tx.object_store(STORE_NAME)?;
+    for k in deletes {
+        store.delete(&JsValue::from_str(k))?;
+    }
     for (k, v) in puts {
         store.put_key_val(&JsValue::from_str(k), v)?;
     }
@@ -154,11 +158,11 @@ impl IdbBlockStorage {
     /// Persist all pending puts and deletes to IDB in a single atomic
     /// transaction.
     ///
-    /// Uses the drain/restore pattern: phase 1 atomically drains the
-    /// dirty sets into a snapshot (state becomes clean).
-    /// Phase 2 commits the snapshot to IDB. On success, the snapshot
-    /// is dropped. On failure, [`IdbStorageState::restore_pending`]
-    /// puts the entries back so the next flush retries.
+    /// Uses the drain/restore pattern: phase 1 atomically drains pending puts
+    /// and deletes into a snapshot (state becomes clean). Phase 2 commits the
+    /// snapshot to IDB. On success, the snapshot is dropped. On failure,
+    /// [`IdbStorageState::restore_pending`] restores the puts/deletes so the
+    /// next flush retries.
     ///
     /// New writes that arrive while phase 2 is in flight are
     /// re-marked dirty naturally and captured at the next drain —
@@ -185,6 +189,7 @@ impl IdbBlockStorage {
         // put, so the total is the sum.
         let mut puts: Vec<(String, Uint8Array)> =
             Vec::with_capacity(snapshot.block_puts.len() + snapshot.keypair_puts.len());
+        let mut deletes: Vec<String> = Vec::with_capacity(snapshot.block_deletes.len());
         for ((session, namespace, idx), data) in &snapshot.block_puts {
             let key = IdbKey::Block {
                 session: *session,
@@ -198,10 +203,19 @@ impl IdbBlockStorage {
             let key = IdbKey::Keypair { session: *session }.encode();
             puts.push((key, Uint8Array::from(data.as_slice())));
         }
+        for (session, namespace, idx) in &snapshot.block_deletes {
+            let key = IdbKey::Block {
+                session: *session,
+                namespace: *namespace,
+                idx: *idx,
+            }
+            .encode();
+            deletes.push(key);
+        }
 
         // Phase 2: atomic commit to IDB. On failure, restore the
         // snapshot so the next flush will retry.
-        if let Err(e) = batch_put(&self.db, &puts).await {
+        if let Err(e) = batch_apply(&self.db, &puts, &deletes).await {
             self.state.borrow_mut().restore_pending(snapshot);
             return Err(e);
         }
