@@ -248,20 +248,38 @@ fn read_buffer<'a>(ptr: *mut core::ffi::c_void, len: c_int) -> &'a mut [u8] {
     unsafe { core::slice::from_raw_parts_mut(ptr.cast::<u8>(), len) }
 }
 
+/// Convert SQLite's signed offset/size input into the unsigned domain used by
+/// the encrypted file core. Negative values are invalid at this boundary; do
+/// not cast them, because `as u64` would turn them into huge positive values.
+fn nonnegative_sqlite_i64_to_u64(value: sqlite3_int64, kind: &str) -> VfsResult<u64> {
+    u64::try_from(value).map_err(|_| VfsError::new(SQLITE_IOERR, format!("negative {kind}")))
+}
+
+/// Convert a logical file size to SQLite's signed size type.
+///
+/// Do not saturate or wrap on overflow: SQLite interprets `xFileSize` as the
+/// file's logical end, so a misleading value can make SQLite miss pages or
+/// read past the true extent. Returning an IO error is the least surprising
+/// outcome for an unrepresentable size.
+fn u64_to_sqlite_i64(value: u64, kind: &str) -> VfsResult<sqlite3_int64> {
+    sqlite3_int64::try_from(value)
+        .map_err(|_| VfsError::new(SQLITE_IOERR, format!("{kind} exceeds sqlite3_int64::MAX")))
+}
+
+/// Convert encrypted-core offsets/sizes back to the upstream temp-file API.
+/// This stays checked so wasm32 cannot truncate values above `usize::MAX`.
+fn u64_to_usize(value: u64, kind: &str) -> VfsResult<usize> {
+    usize::try_from(value)
+        .map_err(|_| VfsError::new(SQLITE_IOERR, format!("{kind} exceeds usize::MAX")))
+}
+
 /// Write a 64-bit size through a SQLite-supplied output pointer.
 ///
 /// Soundness: only ever called with the `pSize` pointer SQLite passes to
 /// `xFileSize`, which it guarantees to be a writable `sqlite3_int64*`.
-///
-/// Defaulting to `sqlite3_int64::MAX` on overflow is safer than 0/-1: SQLite
-/// interprets the returned size as the file's logical end, so a too-small
-/// value would cause `sqlite3_step` to miss pages and return `SQLITE_CORRUPT`.
-/// Returning MAX tells SQLite "at least this large" and lets the read path
-/// short-circuit with `SQLITE_IOERR_SHORT_READ` beyond the actual extent.
-/// In practice unreachable — file sizes never exceed i64::MAX in WASM.
-fn write_size(out: *mut sqlite3_int64, value: usize) {
-    // SAFETY: documented above. On WASM32, usize fits in i64.
-    unsafe { *out = sqlite3_int64::try_from(value).unwrap_or(sqlite3_int64::MAX) }
+fn write_size(out: *mut sqlite3_int64, value: sqlite3_int64) {
+    // SAFETY: documented above.
+    unsafe { *out = value }
 }
 
 /// Resolve `pAppData` to our `&'static AppState` for the safe store callbacks.
@@ -433,8 +451,12 @@ impl SQLiteIoMethods for EncryptedIoMethods {
         i_ofst: sqlite3_int64,
     ) -> c_int {
         let ctx = VfsCtx::from_file(p_file);
+        if i_amt < 0 {
+            return ctx.store_err(VfsError::new(SQLITE_IOERR, "negative read length".into()));
+        }
         let buf = read_buffer(z_buf, i_amt);
-        let result = read_main_or_temp(ctx.app_data, ctx.name, i_ofst as u64, buf);
+        let result = nonnegative_sqlite_i64_to_u64(i_ofst, "read offset")
+            .and_then(|offset| read_main_or_temp(ctx.app_data, ctx.name, offset, buf));
         match result {
             Ok(code) => code,
             Err(err) => ctx.store_err(err),
@@ -454,7 +476,8 @@ impl SQLiteIoMethods for EncryptedIoMethods {
     /// Override `xTruncate`: main DB truncate may shrink encrypted blocks.
     unsafe extern "C" fn xTruncate(p_file: *mut sqlite3_file, size: sqlite3_int64) -> c_int {
         let ctx = VfsCtx::from_file(p_file);
-        let result = truncate_main_or_temp(ctx.app_data, ctx.name, size as u64);
+        let result = nonnegative_sqlite_i64_to_u64(size, "truncate size")
+            .and_then(|size| truncate_main_or_temp(ctx.app_data, ctx.name, size));
         match result {
             Ok(code) => code,
             Err(err) => ctx.store_err(err),
@@ -495,11 +518,14 @@ fn read_main_or_temp(
         .get(name)
         .ok_or_else(|| VfsError::new(SQLITE_IOERR, format!("{name} not found")))?;
     match file {
-        SqlFile::Temp(temp) => Ok(if temp.read(buf, offset as usize)? {
-            SQLITE_OK
-        } else {
-            SQLITE_IOERR_SHORT_READ
-        }),
+        SqlFile::Temp(temp) => {
+            let offset = u64_to_usize(offset, "temp read offset")?;
+            Ok(if temp.read(buf, offset)? {
+                SQLITE_OK
+            } else {
+                SQLITE_IOERR_SHORT_READ
+            })
+        }
         SqlFile::Main(core) => {
             let state = app_data.state.borrow();
             let session = state
@@ -575,7 +601,8 @@ fn truncate_main_or_temp(app_data: &AppState, name: &str, new_size: u64) -> VfsR
         .ok_or_else(|| VfsError::new(SQLITE_IOERR, format!("{name} not found")))?;
     match file {
         SqlFile::Temp(temp) => {
-            temp.truncate(new_size as usize)?;
+            let new_size = u64_to_usize(new_size, "temp truncate size")?;
+            temp.truncate(new_size)?;
             Ok(SQLITE_OK)
         }
         SqlFile::Main(core) => {
@@ -599,13 +626,16 @@ fn truncate_main_or_temp(app_data: &AppState, name: &str, new_size: u64) -> VfsR
     }
 }
 
-fn file_size_main_or_temp(app_data: &AppState, name: &str) -> VfsResult<usize> {
+fn file_size_main_or_temp(app_data: &AppState, name: &str) -> VfsResult<sqlite3_int64> {
     let files = app_data.files.borrow();
     let file = files
         .get(name)
         .ok_or_else(|| VfsError::new(SQLITE_IOERR, format!("{name} not found")))?;
     match file {
-        SqlFile::Temp(temp) => temp.size(),
+        SqlFile::Temp(temp) => {
+            let size = temp.size()?;
+            u64_to_sqlite_i64(size as u64, "temp file size")
+        }
         SqlFile::Main(core) => {
             let state = app_data.state.borrow();
             let _session = state
@@ -617,7 +647,7 @@ fn file_size_main_or_temp(app_data: &AppState, name: &str) -> VfsResult<usize> {
                 .get(&DEFAULT_NAMESPACE)
                 .copied()
                 .unwrap_or_default();
-            Ok(core.size(&ns_state) as usize)
+            u64_to_sqlite_i64(core.size(&ns_state), "main file size")
         }
     }
 }
@@ -645,3 +675,49 @@ impl<C: OsCallback> SQLiteVfs<EncryptedIoMethods> for EncryptedVfs<C> {
 
 /// VFS name registered with SQLite.
 pub const VFS_NAME: &str = "secure-storage-enc";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nonnegative_sqlite_i64_to_u64_rejects_negative_values() {
+        assert!(nonnegative_sqlite_i64_to_u64(-1, "read offset").is_err());
+    }
+
+    #[test]
+    fn nonnegative_sqlite_i64_to_u64_accepts_sqlite_max() {
+        assert_eq!(
+            nonnegative_sqlite_i64_to_u64(sqlite3_int64::MAX, "read offset").unwrap(),
+            sqlite3_int64::MAX as u64
+        );
+    }
+
+    #[test]
+    fn u64_to_sqlite_i64_rejects_values_above_sqlite_max() {
+        assert!(u64_to_sqlite_i64(sqlite3_int64::MAX as u64 + 1, "file size").is_err());
+    }
+
+    #[test]
+    fn u64_to_sqlite_i64_accepts_sqlite_max() {
+        assert_eq!(
+            u64_to_sqlite_i64(sqlite3_int64::MAX as u64, "file size").unwrap(),
+            sqlite3_int64::MAX
+        );
+    }
+
+    #[test]
+    fn u64_to_usize_rejects_values_above_usize_max() {
+        if let Some(too_large) = (usize::MAX as u64).checked_add(1) {
+            assert!(u64_to_usize(too_large, "temp offset").is_err());
+        }
+    }
+
+    #[test]
+    fn u64_to_usize_accepts_usize_max() {
+        assert_eq!(
+            u64_to_usize(usize::MAX as u64, "temp offset").unwrap(),
+            usize::MAX
+        );
+    }
+}
