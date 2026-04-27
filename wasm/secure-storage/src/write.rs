@@ -65,7 +65,8 @@ pub fn encrypt_session_data_block<S: BlockStorage + KeypairStorage>(
     // Phase 1: sequential read — collect pk + existing block per session.
     let mut prep: Vec<BlockPrep> = (0..SESSION_COUNT as u8)
         .map(|i| {
-            let idx = SessionIndex::new(i).expect("i in 0..SESSION_COUNT is always a valid SessionIndex");
+            let idx =
+                SessionIndex::new(i).expect("i in 0..SESSION_COUNT is always a valid SessionIndex");
             let (ver, pk_bytes) = read_session_version_and_pk(storage, idx)?;
             let pk = PqPublicKey::from_bytes(&pk_bytes)?;
             let mut aad = String::new();
