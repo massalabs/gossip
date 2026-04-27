@@ -156,6 +156,9 @@ impl SafeDb {
         //   - ppStmt (&mut stmt): writable out pointer; SQLite writes a stmt
         //     handle or null if the SQL was empty/whitespace.
         //   - pzTail is null (we reject multi-statement tails).
+        if sql.len() > c_int::MAX as usize {
+            return Err("sql string exceeds i32::MAX bytes".to_string());
+        }
         let rc = unsafe {
             sqlite3_prepare_v2(
                 self.handle,
