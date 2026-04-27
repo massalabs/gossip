@@ -18,7 +18,7 @@ pub(crate) struct EncryptedFileCore {
     ///   2. The target size after a `truncate`, even if no pending writes
     ///      reach that far (otherwise a grow-truncate could not extend
     ///      the logical file size beyond `ns_state.total_data_length`).
-    /// Cleared on `sync` (writes drained) and `discard_pending`.
+    /// Cleared on `sync` once writes are drained.
     pending_size: u64,
 }
 
@@ -171,12 +171,6 @@ impl EncryptedFileCore {
 
         self.pending_size = new_size;
         Ok(())
-    }
-
-    /// Drop all buffered writes without persisting.
-    pub fn discard_pending(&mut self) {
-        self.pending.clear();
-        self.pending_size = 0;
     }
 }
 
@@ -435,30 +429,6 @@ mod tests {
 
             file.write(10, b"BB"); // pending grows logical size to 12
             assert_eq!(file.size(&ns_state), 12);
-        });
-    }
-
-    #[test]
-    fn discard_pending_clears_buffer_only() {
-        crate::run_with_stack(|| {
-            let (mut storage, session, mut ns_state) = fresh_session();
-            let mut file = EncryptedFileCore::new();
-
-            file.write(0, b"persisted");
-            file.sync(&mut storage, DOMAIN, &session, &mut ns_state)
-                .unwrap();
-
-            file.write(20, b"discarded");
-            file.discard_pending();
-
-            assert!(file.pending.is_empty());
-            assert_eq!(file.pending_size, 0);
-
-            // Persisted data is untouched
-            let mut buf = vec![0u8; 9];
-            file.read(&storage, DOMAIN, &session, &ns_state, 0, &mut buf)
-                .unwrap();
-            assert_eq!(&buf, b"persisted");
         });
     }
 }

@@ -124,19 +124,22 @@ pub async fn idb_has_data() -> Result<bool, JsValue> {
 
 #[wasm_bindgen(js_name = provisionStorage)]
 pub fn provision_storage() -> Result<(), JsValue> {
+    close_database_and_clear_files()?;
     with_app_state(|app| {
         let mut state = app.state.borrow_mut();
-        crate::provision_storage(&mut state.backend)
-            .map(|_| ())
-            .map_err(map_err)
+        crate::provision_storage(&mut state.backend).map_err(map_err)?;
+        state.session = None;
+        state.namespace_states.clear();
+        Ok(())
     })
 }
 
 #[wasm_bindgen(js_name = allocateSession)]
 pub fn allocate_session(slot: u8, password: &[u8]) -> Result<(), JsValue> {
+    let idx = SessionIndex::new(slot).map_err(map_err)?;
+    close_database_and_clear_files()?;
     with_app_state(|app| {
         let mut state = app.state.borrow_mut();
-        let idx = SessionIndex::new(slot).map_err(map_err)?;
         let domain = state.domain.clone();
         let session =
             crate::allocate_session(&mut state.backend, &domain, idx, password).map_err(map_err)?;
@@ -147,15 +150,13 @@ pub fn allocate_session(slot: u8, password: &[u8]) -> Result<(), JsValue> {
             .namespace_states
             .insert(DEFAULT_NAMESPACE, NamespaceState::empty());
         Ok(())
-    })?;
-    discard_main_pending()?;
-    Ok(())
+    })
 }
 
 #[wasm_bindgen(js_name = unlockSession)]
 pub fn unlock_session(password: &[u8]) -> Result<bool, JsValue> {
-    let result = with_app_state(|app| {
-        let mut state = app.state.borrow_mut();
+    let unlock_result = with_app_state(|app| {
+        let state = app.state.borrow();
         let domain = state.domain.clone();
         match crate::unlock_session(&state.backend, &domain, password) {
             Ok(session) => {
@@ -166,27 +167,33 @@ pub fn unlock_session(password: &[u8]) -> Result<bool, JsValue> {
                 let sql_state =
                     load_namespace_state(&state.backend, &domain, &session, DEFAULT_NAMESPACE)
                         .map_err(map_err)?;
-                state.session = Some(session);
-                // Clear any stale namespace state from a prior session. Only
-                // one session can be unlocked at a time (`Option<UnlockedSession>`),
-                // so there are never two concurrent namespace maps to reconcile.
-                state.namespace_states.clear();
-                state.namespace_states.insert(DEFAULT_NAMESPACE, sql_state);
-                Ok(true)
+                Ok(Some((session, sql_state)))
             }
-            Err(SecureStorageError::InvalidPassword) => Ok(false),
+            Err(SecureStorageError::InvalidPassword) => Ok(None),
             Err(e) => Err(map_err(e)),
         }
     })?;
-    if result {
-        discard_main_pending()?;
-    }
-    Ok(result)
+    let Some((session, sql_state)) = unlock_result else {
+        return Ok(false);
+    };
+
+    close_database_and_clear_files()?;
+    with_app_state(|app| {
+        let mut state = app.state.borrow_mut();
+        state.session = Some(session);
+        // Clear any stale namespace state from a prior session. Only
+        // one session can be unlocked at a time (`Option<UnlockedSession>`),
+        // so there are never two concurrent namespace maps to reconcile.
+        state.namespace_states.clear();
+        state.namespace_states.insert(DEFAULT_NAMESPACE, sql_state);
+        Ok(())
+    })?;
+    Ok(true)
 }
 
 #[wasm_bindgen(js_name = lockSession)]
 pub fn lock_session() -> Result<(), JsValue> {
-    discard_main_pending()?;
+    close_database_and_clear_files()?;
     with_app_state(|app| {
         let mut state = app.state.borrow_mut();
         state.session = None;
@@ -352,19 +359,6 @@ pub async fn flush_encrypted() -> Result<(), JsValue> {
     Ok(())
 }
 
-/// Discard any pending writes on an open main DB file (called when switching
-/// sessions). No-op if no main file is open.
-fn discard_main_pending() -> Result<(), JsValue> {
-    with_app_state(|app| {
-        for file in app.files.borrow_mut().values_mut() {
-            if let crate::vfs::sqlite_vfs::SqlFile::Main(core) = file {
-                core.discard_pending();
-            }
-        }
-        Ok(())
-    })
-}
-
 // ── Database lifecycle ─────────────────────────────────────────────
 
 const DB_NAME: &CStr = c"secure.db";
@@ -402,11 +396,19 @@ pub fn open_database() -> Result<(), JsValue> {
 
 #[wasm_bindgen(js_name = closeDatabase)]
 pub fn close_database() -> Result<(), JsValue> {
+    close_database_and_clear_files()
+}
+
+fn close_database_and_clear_files() -> Result<(), JsValue> {
     DB.with(|db| {
         // `.take()` replaces the slot with None and drops the old SafeDb
         // synchronously on this line (not at the end of the closure). The
         // Drop impl runs sqlite3_close before we return.
         db.borrow_mut().take();
+        Ok::<(), JsValue>(())
+    })?;
+    with_app_state(|app| {
+        app.files.borrow_mut().clear();
         Ok(())
     })
 }
