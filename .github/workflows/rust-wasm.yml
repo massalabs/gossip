@@ -6,6 +6,10 @@ on:
   pull_request:
     paths:
       - 'wasm/**'
+      - 'gossip-sdk/src/assets/generated/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/rust-wasm.yml'
 
 jobs:
   build-and-test:
@@ -38,13 +42,16 @@ jobs:
           BINARYEN_CORES: 1
         run: npm run wasm:build
 
-      - name: Verify generated files are up-to-date (excluding .wasm binaries)
+      - name: Verify generated files are up-to-date
         run: |
           # wasm-bindgen generates exports in non-deterministic order, so we need to check
           # for functional differences rather than exact file matches
 
-          # Get list of changed files (excluding .wasm binaries)
-          CHANGED=$(git diff --name-only -- src/assets/generated ':!src/assets/generated/wasm/*.wasm')
+          # Get list of changed files.
+          # The main wasm binary is excluded because its exact output is not stable enough
+          # for this check. The secure-storage wasm binary must stay covered so stale
+          # runtime artifacts are caught.
+          CHANGED=$(git diff --name-only -- gossip-sdk/src/assets/generated ':!gossip-sdk/src/assets/generated/wasm/*.wasm')
 
           if [ -z "$CHANGED" ]; then
             echo "✓ Generated files are up-to-date"
@@ -77,8 +84,8 @@ jobs:
           done
 
           if [ "$HAS_REAL_CHANGES" = true ]; then
-            echo "Generated files in src/assets/generated are out of date. Run 'npm run wasm:build' locally and commit the changes." >&2
-            git --no-pager diff -- src/assets/generated ':!src/assets/generated/wasm/*.wasm'
+            echo "Generated files in gossip-sdk/src/assets/generated are out of date. Run 'npm run wasm:build' locally and commit the changes." >&2
+            git --no-pager diff -- gossip-sdk/src/assets/generated ':!gossip-sdk/src/assets/generated/wasm/*.wasm'
             exit 1
           else
             echo "✓ Only export ordering differences detected (non-deterministic wasm-bindgen). Safe to ignore."
@@ -88,3 +95,6 @@ jobs:
         env:
           RUST_MIN_STACK: 16777216
         run: npm run wasm:test
+
+      - name: Check secure-storage WASM surface
+        run: npm run wasm:check:secure-storage
