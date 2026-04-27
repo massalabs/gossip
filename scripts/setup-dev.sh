@@ -16,6 +16,10 @@ command -v rustup >/dev/null || {
 
 rustup toolchain install nightly 2>/dev/null || true
 rustup component add rust-src --toolchain nightly
+# llvm-ar (bundled here) is used as the wasm32 archiver because zig 0.16's
+# bundled ar fails to create archives, and Apple's /usr/bin/ar can't read
+# wasm object files. See scripts/build-wasm-secure.sh.
+rustup component add llvm-tools-preview --toolchain nightly
 
 RUST_TARGETS=(
     wasm32-unknown-unknown
@@ -41,6 +45,14 @@ for crate in cargo-ndk cargo-zigbuild; do
         cargo install "$crate"
     fi
 done
+
+# wasm-bindgen-cli must match the wasm-bindgen lib version pinned in
+# wasm/Cargo.lock — bump both together.
+WASM_BINDGEN_VERSION="0.2.104"
+if [ "$(wasm-bindgen --version 2>/dev/null | awk '{print $2}')" != "$WASM_BINDGEN_VERSION" ]; then
+    echo "Installing wasm-bindgen-cli $WASM_BINDGEN_VERSION..."
+    cargo install --locked wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION"
+fi
 
 # ── 3. Platform deps ────────────────────────────────────────────────
 case "$(uname -s)" in
