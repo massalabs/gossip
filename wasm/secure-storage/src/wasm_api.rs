@@ -213,10 +213,18 @@ pub fn cover_traffic_tick(namespace: u8) -> Result<(), JsValue> {
 
 // ── Generic namespace data exports ─────────────────────────────────
 //
-// These let the SDK store arbitrary blobs in any namespace ≠ DEFAULT_NAMESPACE
-// (or read what the SQLite VFS persisted). The SDK is responsible for
-// choosing namespace bytes (e.g. namespace 1 for the session blob) and
-// avoiding conflicts.
+// These let the SDK store arbitrary blobs in namespaces != DEFAULT_NAMESPACE.
+// DEFAULT_NAMESPACE is reserved for the SQLite VFS backing stream and must not
+// be accessed through these generic namespace APIs.
+
+fn reject_default_namespace(namespace: u8) -> Result<(), JsValue> {
+    if namespace == DEFAULT_NAMESPACE {
+        return Err(JsValue::from_str(
+            "DEFAULT_NAMESPACE is reserved for SQLite VFS access",
+        ));
+    }
+    Ok(())
+}
 
 fn ensure_namespace_state_loaded(
     state: &mut crate::vfs::sqlite_vfs::EncryptionState,
@@ -238,6 +246,7 @@ fn ensure_namespace_state_loaded(
 
 #[wasm_bindgen(js_name = writeNamespaceData)]
 pub fn write_namespace_data(namespace: u8, offset: f64, data: &[u8]) -> Result<(), JsValue> {
+    reject_default_namespace(namespace)?;
     let offset = safe_f64_to_u64(offset).ok_or_else(|| JsValue::from_str("invalid offset"))?;
     with_app_state(|app| {
         let mut state = app.state.borrow_mut();
@@ -262,6 +271,7 @@ pub fn write_namespace_data(namespace: u8, offset: f64, data: &[u8]) -> Result<(
 
 #[wasm_bindgen(js_name = readNamespaceData)]
 pub fn read_namespace_data(namespace: u8, offset: f64, len: usize) -> Result<Vec<u8>, JsValue> {
+    reject_default_namespace(namespace)?;
     let offset = safe_f64_to_u64(offset).ok_or_else(|| JsValue::from_str("invalid offset"))?;
     with_app_state(|app| {
         let mut state = app.state.borrow_mut();
@@ -291,6 +301,7 @@ pub fn read_namespace_data(namespace: u8, offset: f64, len: usize) -> Result<Vec
 
 #[wasm_bindgen(js_name = namespaceDataLength)]
 pub fn namespace_data_length(namespace: u8) -> Result<f64, JsValue> {
+    reject_default_namespace(namespace)?;
     with_app_state(|app| {
         let mut state = app.state.borrow_mut();
         ensure_namespace_state_loaded(&mut state, namespace)?;
@@ -305,6 +316,7 @@ pub fn namespace_data_length(namespace: u8) -> Result<f64, JsValue> {
 
 #[wasm_bindgen(js_name = clearNamespace)]
 pub fn clear_namespace(namespace: u8) -> Result<(), JsValue> {
+    reject_default_namespace(namespace)?;
     with_app_state(|app| {
         let mut state = app.state.borrow_mut();
         ensure_namespace_state_loaded(&mut state, namespace)?;
