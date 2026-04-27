@@ -136,64 +136,6 @@ function _assertClass(instance, klass) {
     }
 }
 /**
- * Decrypts data using AES-256-SIV authenticated encryption.
- *
- * # Parameters
- *
- * - `key`: The encryption key (64 bytes, must match encryption key)
- * - `nonce`: The nonce (16 bytes, must match encryption nonce)
- * - `ciphertext`: The encrypted data with authentication tag
- * - `aad`: Additional authenticated data (must match encryption AAD)
- *
- * # Returns
- *
- * The decrypted plaintext, or `null` if authentication fails.
- *
- * # Security Notes
- *
- * - Returns `null` if:
- *   - The ciphertext has been tampered with
- *   - The wrong key or nonce is used
- *   - The AAD doesn't match
- * - Never ignore a decryption failure; it indicates tampering or corruption
- *
- * # Example
- *
- * ```javascript
- * const plaintext = aead_decrypt(key, nonce, ciphertext, aad);
- * if (plaintext) {
- *     console.log("Decrypted:", new TextDecoder().decode(plaintext));
- * } else {
- *     console.error("Decryption failed - data may be corrupted or tampered");
- * }
- * ```
- * @param {EncryptionKey} key
- * @param {Nonce} nonce
- * @param {Uint8Array} ciphertext
- * @param {Uint8Array} aad
- * @returns {Uint8Array | undefined}
- */
-export function aead_decrypt(key, nonce, ciphertext, aad) {
-    _assertClass(key, EncryptionKey);
-    _assertClass(nonce, Nonce);
-    const ptr0 = passArray8ToWasm0(ciphertext, wasm.__wbindgen_malloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ptr1 = passArray8ToWasm0(aad, wasm.__wbindgen_malloc);
-    const len1 = WASM_VECTOR_LEN;
-    const ret = wasm.aead_decrypt(key.__wbg_ptr, nonce.__wbg_ptr, ptr0, len0, ptr1, len1);
-    let v3;
-    if (ret[0] !== 0) {
-        v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
-        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
-    }
-    return v3;
-}
-
-export function start() {
-    wasm.start();
-}
-
-/**
  * Encrypts data using AES-256-SIV authenticated encryption.
  *
  * # Parameters
@@ -259,6 +201,64 @@ export function generate_user_keys(passphrase) {
         throw takeFromExternrefTable0(ret[1]);
     }
     return UserKeys.__wrap(ret[0]);
+}
+
+export function start() {
+    wasm.start();
+}
+
+/**
+ * Decrypts data using AES-256-SIV authenticated encryption.
+ *
+ * # Parameters
+ *
+ * - `key`: The encryption key (64 bytes, must match encryption key)
+ * - `nonce`: The nonce (16 bytes, must match encryption nonce)
+ * - `ciphertext`: The encrypted data with authentication tag
+ * - `aad`: Additional authenticated data (must match encryption AAD)
+ *
+ * # Returns
+ *
+ * The decrypted plaintext, or `null` if authentication fails.
+ *
+ * # Security Notes
+ *
+ * - Returns `null` if:
+ *   - The ciphertext has been tampered with
+ *   - The wrong key or nonce is used
+ *   - The AAD doesn't match
+ * - Never ignore a decryption failure; it indicates tampering or corruption
+ *
+ * # Example
+ *
+ * ```javascript
+ * const plaintext = aead_decrypt(key, nonce, ciphertext, aad);
+ * if (plaintext) {
+ *     console.log("Decrypted:", new TextDecoder().decode(plaintext));
+ * } else {
+ *     console.error("Decryption failed - data may be corrupted or tampered");
+ * }
+ * ```
+ * @param {EncryptionKey} key
+ * @param {Nonce} nonce
+ * @param {Uint8Array} ciphertext
+ * @param {Uint8Array} aad
+ * @returns {Uint8Array | undefined}
+ */
+export function aead_decrypt(key, nonce, ciphertext, aad) {
+    _assertClass(key, EncryptionKey);
+    _assertClass(nonce, Nonce);
+    const ptr0 = passArray8ToWasm0(ciphertext, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(aad, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.aead_decrypt(key.__wbg_ptr, nonce.__wbg_ptr, ptr0, len0, ptr1, len1);
+    let v3;
+    if (ret[0] !== 0) {
+        v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    }
+    return v3;
 }
 
 /**
