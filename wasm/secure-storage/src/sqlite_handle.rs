@@ -26,6 +26,13 @@ use sqlite_wasm_rs::{
 
 pub type SqlResult<T> = Result<T, String>;
 
+fn len_to_c_int(len: usize, kind: &str) -> SqlResult<c_int> {
+    if len > c_int::MAX as usize {
+        return Err(format!("{kind} exceeds i32::MAX bytes"));
+    }
+    Ok(len as c_int)
+}
+
 /// Read the last error message from a database handle.
 ///
 /// Soundness: only ever called from inside [`SafeDb`] (which holds a valid
@@ -150,20 +157,16 @@ impl SafeDb {
         // contract (https://sqlite.org/c3ref/prepare.html):
         //   - zSql (sql_c.as_ptr()): read-only UTF-8, must outlive the call;
         //     sql_c lives until end of scope which is after the FFI returns.
-        //   - nByte (sql.len()): byte length of the SQL; cast to c_int is safe
-        //     because Rust &str lengths in this wrapper are bounded by usize
-        //     and real queries never exceed i32::MAX bytes.
+        //   - nByte (sql_len): byte length of the SQL, checked to fit c_int.
         //   - ppStmt (&mut stmt): writable out pointer; SQLite writes a stmt
         //     handle or null if the SQL was empty/whitespace.
         //   - pzTail is null (we reject multi-statement tails).
-        if sql.len() > c_int::MAX as usize {
-            return Err("sql string exceeds i32::MAX bytes".to_string());
-        }
+        let sql_len = len_to_c_int(sql.len(), "sql string")?;
         let rc = unsafe {
             sqlite3_prepare_v2(
                 self.handle,
                 sql_c.as_ptr(),
-                sql.len() as c_int,
+                sql_len,
                 &mut stmt,
                 ptr::null_mut(),
             )
@@ -267,16 +270,16 @@ impl<'db> SafeStmt<'db> {
         // contract (https://sqlite.org/c3ref/bind_blob.html):
         //   - zData (bytes.as_ptr()): read-only; SQLite reads n bytes and does
         //     not mutate the source.
-        //   - n (bytes.len()): byte length; cast to c_int — acceptable because
-        //     real SQL bind values don't exceed i32::MAX.
+        //   - n (text_len): byte length, checked to fit c_int.
         //   - destructor = SQLITE_TRANSIENT: SQLite copies before returning,
         //     so the source buffer (bytes) does not need to outlive the call.
+        let text_len = len_to_c_int(bytes.len(), "text bind value")?;
         let rc = unsafe {
             sqlite3_bind_text(
                 self.handle,
                 idx,
                 bytes.as_ptr() as *const c_char,
-                bytes.len() as c_int,
+                text_len,
                 SQLITE_TRANSIENT(),
             )
         };
@@ -293,12 +296,13 @@ impl<'db> SafeStmt<'db> {
         // semantics as bind_text — with SQLITE_TRANSIENT, SQLite copies the
         // bytes before returning, so the source slice does not need to outlive
         // the call.
+        let blob_len = len_to_c_int(b.len(), "blob bind value")?;
         let rc = unsafe {
             sqlite3_bind_blob(
                 self.handle,
                 idx,
                 b.as_ptr() as *const core::ffi::c_void,
-                b.len() as c_int,
+                blob_len,
                 SQLITE_TRANSIENT(),
             )
         };
@@ -381,5 +385,24 @@ impl<'db> Drop for SafeStmt<'db> {
             // to avoid double-reporting.
             let _rc = unsafe { sqlite3_finalize(self.handle) };
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn len_to_c_int_accepts_c_int_max() {
+        assert_eq!(
+            len_to_c_int(c_int::MAX as usize, "test value").unwrap(),
+            c_int::MAX
+        );
+    }
+
+    #[test]
+    fn len_to_c_int_rejects_lengths_above_c_int_max() {
+        let err = len_to_c_int(c_int::MAX as usize + 1, "test value").unwrap_err();
+        assert_eq!(err, "test value exceeds i32::MAX bytes");
     }
 }
