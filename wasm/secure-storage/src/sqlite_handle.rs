@@ -102,7 +102,7 @@ impl SafeDb {
                 // to sqlite3_close"). Closing releases that partial state.
                 let close_rc = unsafe { sqlite3_close(handle) };
                 if close_rc != SQLITE_OK {
-                    format!("{open_msg} (also sqlite3_close failed with error code: {close_rc})")
+                    format!("{open_msg}: sqlite3_close failed with error code: {close_rc}")
                 } else {
                     open_msg
                 }
