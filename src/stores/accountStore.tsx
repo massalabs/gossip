@@ -240,13 +240,29 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
     };
   };
 
-  // Helper to persist session blob to DB
+  // Helper to persist session blob.
+  //
+  // On the secureStorage backend, the blob is written directly into a
+  // dedicated namespace stream (bypassing SQLite/Drizzle/page-management),
+  // and the in-memory `userProfile.session` is updated to the new blob.
+  // The SQL `userProfile` row is NOT touched on the hot path: it now stores
+  // the session column only as a fallback for the wa-sqlite backend, where
+  // we still call `profiles.save` to persist via SQL UPDATE.
   const createOnPersist = (_userId: string) => {
     return async (blob: Uint8Array, _key: EncryptionKey) => {
+      const sdk = getSdk();
       const current = get().userProfile;
       if (!current) return;
       const updated = { ...current, session: blob, updatedAt: new Date() };
-      await getSdk().profiles.save(updated);
+
+      if (sdk.usesSessionBlobNamespace) {
+        // Fast path: write the blob to the secure-storage namespace.
+        await sdk.persistSessionBlob(blob);
+      } else {
+        // Legacy path: round-trip through the SQL profile row.
+        await sdk.profiles.save(updated);
+      }
+
       set({ userProfile: updated });
     };
   };
@@ -411,9 +427,41 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         const { account, evmAddress } =
           await deriveAccountFromMnemonic(mnemonic);
 
-        await getSdk().openSession({
+        // Prefer the secure-storage namespace blob when available; fall
+        // back to the SQL profile column on the wa-sqlite backend. When
+        // both are empty (fresh allocate pre-first-persist) leave
+        // `encryptedSession` undefined so `openSession` generates a new
+        // session instead of trying to decrypt zero bytes.
+        //
+        // Invariant (PD): when `usesSessionBlobNamespace` is true, the
+        // SQL `profile.session` fallback is read-only legacy data left
+        // over from the wa-sqlite era; writers in `createOnPersist`
+        // already gate on this flag and never persist into the SQL
+        // column. A future writer that forgets the gate would inject
+        // stale-or-stolen bytes into the namespace fallback path here.
+        // If you change `createOnPersist` to write to SQL again, you
+        // must also drop this fallback or it can resurrect the wrong
+        // session blob (regression worth a debug assertion).
+        const sdk = getSdk();
+        let encryptedSession: Uint8Array | undefined;
+        if (sdk.usesSessionBlobNamespace) {
+          const ns = await sdk.readSessionBlob();
+          encryptedSession =
+            ns && ns.length > 0
+              ? ns
+              : profile.session && profile.session.length > 0
+                ? profile.session
+                : undefined;
+        } else {
+          encryptedSession =
+            profile.session && profile.session.length > 0
+              ? profile.session
+              : undefined;
+        }
+
+        await sdk.openSession({
           mnemonic,
-          encryptedSession: profile.session,
+          encryptedSession,
           encryptionKey,
           onPersist: createOnPersist(profile.userId),
         });
@@ -465,8 +513,12 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           } else {
             await getSdk().clearAllTables();
           }
+          // The session blob lives in a secure-storage namespace outside
+          // SQL — clear it too so the next login doesn't try to decrypt
+          // stale bytes with a fresh key. No-op on non-secure-storage.
+          await getSdk().clearSessionBlob();
         } catch {
-          // SQLite might not be initialized
+          // SQLite or secure storage might not be initialized
         }
 
         set(clearAccountState());

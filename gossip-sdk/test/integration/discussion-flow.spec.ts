@@ -1644,7 +1644,10 @@ describe('session break in session manager', () => {
     await aliceSdk.updateState();
 
     const discussion = await aliceSdk.discussions.get(bobSdk.userId);
-    expect(discussion?.killedNextRetryAt?.getTime()).toBeGreaterThan(
+    // refresh.ts captures its own `now` after the test snapshot; on a
+    // fast runner both can land in the same millisecond, so the lower
+    // bound is `>= now + delay`, not strictly greater than.
+    expect(discussion?.killedNextRetryAt?.getTime()).toBeGreaterThanOrEqual(
       now + aliceSdk.config.sessionRecovery.killedRetryDelayMs
     );
     expect(establishSpy).toHaveBeenCalled();
