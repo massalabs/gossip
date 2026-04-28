@@ -5,7 +5,7 @@
 //! [version: u32 BE] [pq_pk: PK_SIZE bytes] [sk_nonce: 16 bytes] [sk_ct: remaining]
 //! ```
 
-use crate::error::{SecureStorageError, Result};
+use crate::error::{Result, SecureStorageError};
 use crate::pq::PqPublicKey;
 use crate::storage::KeypairStorage;
 use crate::types::SessionIndex;

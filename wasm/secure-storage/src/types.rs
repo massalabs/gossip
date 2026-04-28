@@ -1,7 +1,7 @@
 use zeroize::Zeroize;
 
 use crate::constants::SESSION_COUNT;
-use crate::error::{SecureStorageError, Result};
+use crate::error::{Result, SecureStorageError};
 
 const _: () = assert!(SESSION_COUNT <= u8::MAX as usize + 1);
 

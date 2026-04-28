@@ -6,15 +6,15 @@ use zeroize::Zeroizing;
 
 use crate::BLOCK_SIZE;
 use crate::block::{create_cover_block, rerandomize_block};
-use crate::constants::{LENGTH_HDR_SIZE, PLAINTEXT_SIZE, SESSION_COUNT};
+use crate::constants::{DEFAULT_NAMESPACE, LENGTH_HDR_SIZE, PLAINTEXT_SIZE, SESSION_COUNT};
 use crate::domain;
-use crate::error::{SecureStorageError, Result};
+use crate::error::{Result, SecureStorageError};
 use crate::kdf::derive_session_keys;
 use crate::keypair::{KeypairFile, read_session_version_and_pk};
 use crate::pq::{PqPublicKey, PqSecretKey, pq_keygen};
 use crate::storage::{BlockStorage, KeypairStorage};
 use crate::types::SessionIndex;
-use crate::unlock::UnlockedSession;
+use crate::unlock::{NamespaceState, UnlockedSession};
 use crate::write::{encrypt_session_data_block, ensure_block_count, repair_blockstream_lengths};
 
 /// Initialize all session slots with valid but non-unlockable keypairs.
@@ -23,8 +23,9 @@ use crate::write::{encrypt_session_data_block, ensure_block_count, repair_blocks
 /// secret key is discarded and `sk_ct` is a valid AEAD ciphertext under
 /// a random throwaway key, making the slot impossible to unlock with
 /// any password while remaining structurally indistinguishable from
-/// an allocated slot's `sk_ct`. Empty blockstreams (length 0) are
-/// created for each slot.
+/// an allocated slot's `sk_ct`. Empty default-namespace blockstreams (length 0)
+/// are created for each slot; other namespaces are created lazily on
+/// first write.
 pub fn provision_storage<S: BlockStorage + KeypairStorage>(storage: &mut S) -> Result<()> {
     for i in 0..SESSION_COUNT as u8 {
         let slot = SessionIndex::new(i).unwrap();
@@ -43,7 +44,7 @@ pub fn provision_storage<S: BlockStorage + KeypairStorage>(storage: &mut S) -> R
 
         let kf = KeypairFile::build_wrapped(0, pk.to_bytes(), &dummy_wrap_key, &dummy_sk, b"");
         storage.write_keypair(slot, &kf.serialize())?;
-        storage.init_blockstream(slot)?;
+        storage.reset_blockstream(slot, DEFAULT_NAMESPACE)?;
     }
 
     Ok(())
@@ -53,6 +54,11 @@ pub fn provision_storage<S: BlockStorage + KeypairStorage>(storage: &mut S) -> R
 ///
 /// **Not plausibly deniable**: the public key changes in the keypair file,
 /// visible when comparing two snapshots.
+///
+/// The freshly allocated session has its default-namespace block 0 written
+/// with a zero-length header so [`crate::unlock::unlock_session`] +
+/// [`crate::unlock::load_namespace_state`] can subsequently recover the
+/// `total_data_length = 0` for namespace 0.
 pub fn allocate_session<S: BlockStorage + KeypairStorage>(
     storage: &mut S,
     domain: &str,
@@ -65,7 +71,7 @@ pub fn allocate_session<S: BlockStorage + KeypairStorage>(
 
     let version: u32 = 0;
     let sk_wrap_aad = domain::sk_wrap_aad(domain, version, slot);
-    let sk_wrap_aead_key = crypto_aead::Key::from(*keys.sk_wrap_key);
+    let sk_wrap_aead_key = crypto_aead::Key::from_ref(&keys.sk_wrap_key);
     let sk_bytes = Zeroizing::new(pq_rerand_sk.to_bytes());
 
     let kf = KeypairFile::build_wrapped(
@@ -82,35 +88,38 @@ pub fn allocate_session<S: BlockStorage + KeypairStorage>(
         session_version: version,
         pq_rerand_pk,
         pq_rerand_sk,
-        root_aead_key: keys.root_aead_key,
-        total_data_length: 0,
+        root_aead_key: keys.root_aead_key.clone(),
     };
 
-    // Write a genuine block 0 with zero-length header.
+    // Write a genuine default-namespace block 0 with zero-length header.
     // ensure_block_count alone is insufficient: if another session already
     // has blocks, repair_blockstream_lengths pads this slot with cover
     // blocks and global_count >= 1 skips extend_blockstream_with_session_block.
     // Block 0 would stay a cover block, corrupting unlock_session.
-    ensure_block_count(storage, domain, &session, 1)?;
+    let ns_state = NamespaceState::empty();
+    ensure_block_count(storage, domain, DEFAULT_NAMESPACE, &session, &ns_state, 1)?;
     let mut pt = Zeroizing::new(vec![0u8; PLAINTEXT_SIZE]);
     rand::rngs::OsRng.fill_bytes(&mut pt[..]);
     pt[..LENGTH_HDR_SIZE].copy_from_slice(&0u64.to_be_bytes());
     let pt_arr: &[u8; PLAINTEXT_SIZE] = pt.as_slice().try_into().unwrap();
-    encrypt_session_data_block(storage, domain, &session, 0, pt_arr)?;
+    encrypt_session_data_block(storage, domain, DEFAULT_NAMESPACE, &session, 0, pt_arr)?;
 
     Ok(session)
 }
 
-/// Rerandomize a random block across all sessions.
+/// Rerandomize a random block across all sessions for `namespace`.
 ///
 /// Called periodically to mask activity patterns. Does not require
-/// an unlocked session — only public keys are needed.
+/// an unlocked session — only public keys are needed. Each namespace has
+/// its own independent global block count, so the SDK should call this
+/// once per namespace it wants to keep masked.
 pub fn cover_traffic_tick<S: BlockStorage + KeypairStorage>(
     storage: &mut S,
     domain: &str,
+    namespace: u8,
 ) -> Result<()> {
-    repair_blockstream_lengths(storage, domain)?;
-    let global_count = crate::write::get_global_block_count(storage)?;
+    repair_blockstream_lengths(storage, domain, namespace)?;
+    let global_count = crate::write::get_global_block_count(storage, namespace)?;
     if global_count == 0 {
         return Ok(());
     }
@@ -132,10 +141,11 @@ pub fn cover_traffic_tick<S: BlockStorage + KeypairStorage>(
             domain,
             cur_version,
             cur_session,
+            namespace,
             block_index,
         );
 
-        let new_ct = match storage.read_block(cur_session, block_index) {
+        let new_ct = match storage.read_block(cur_session, namespace, block_index) {
             Ok(cur_ct) => rerandomize_block(&cur_pk, &cur_ct),
             Err(_) => create_cover_block(&cur_pk, &cur_aad_root),
         };
@@ -143,8 +153,8 @@ pub fn cover_traffic_tick<S: BlockStorage + KeypairStorage>(
             .as_slice()
             .try_into()
             .map_err(|_| SecureStorageError::CorruptedBlock)?;
-        storage.write_block(cur_session, block_index, ct_arr)?;
-        storage.fsync(cur_session)?;
+        storage.write_block(cur_session, namespace, block_index, ct_arr)?;
+        storage.fsync(cur_session, namespace)?;
     }
 
     Ok(())
@@ -156,10 +166,11 @@ mod tests {
     use crate::read::read_session_data;
     use crate::run_with_stack;
     use crate::storage::MemoryStorage;
-    use crate::unlock::unlock_session;
+    use crate::unlock::{load_namespace_state, unlock_session};
     use crate::write::write_session_data;
 
     const DOMAIN: &str = "test";
+    const NS: u8 = DEFAULT_NAMESPACE;
 
     // --- commit 15: provisioning and allocation ---
 
@@ -259,15 +270,15 @@ mod tests {
             provision_storage(&mut storage).unwrap();
 
             let s0 = SessionIndex::new(0).unwrap();
-            let s3 = SessionIndex::new(3).unwrap();
+            let s2 = SessionIndex::new(2).unwrap();
             allocate_session(&mut storage, DOMAIN, s0, b"password-one").unwrap();
-            allocate_session(&mut storage, DOMAIN, s3, b"password-two").unwrap();
+            allocate_session(&mut storage, DOMAIN, s2, b"password-two").unwrap();
 
             let u1 = unlock_session(&storage, DOMAIN, b"password-one").unwrap();
             assert_eq!(u1.session_index, s0);
 
             let u2 = unlock_session(&storage, DOMAIN, b"password-two").unwrap();
-            assert_eq!(u2.session_index, s3);
+            assert_eq!(u2.session_index, s2);
         });
     }
 
@@ -281,7 +292,8 @@ mod tests {
             allocate_session(&mut storage, DOMAIN, slot, b"pw").unwrap();
 
             let unlocked = unlock_session(&storage, DOMAIN, b"pw").unwrap();
-            assert_eq!(unlocked.total_data_length, 0);
+            let ns_state = load_namespace_state(&storage, DOMAIN, &unlocked, NS).unwrap();
+            assert_eq!(ns_state.total_data_length, 0);
         });
     }
 
@@ -292,19 +304,23 @@ mod tests {
             provision_storage(&mut storage).unwrap();
 
             let s0 = SessionIndex::new(0).unwrap();
-            let mut sess0 = allocate_session(&mut storage, DOMAIN, s0, b"password-one").unwrap();
-            write_session_data(&mut storage, DOMAIN, &mut sess0, 0, &[0xAB; 100]).unwrap();
+            let sess0 = allocate_session(&mut storage, DOMAIN, s0, b"password-one").unwrap();
+            let mut ns0 = NamespaceState::empty();
+            write_session_data(&mut storage, DOMAIN, NS, &sess0, &mut ns0, 0, &[0xAB; 100])
+                .unwrap();
 
             let s2 = SessionIndex::new(2).unwrap();
             allocate_session(&mut storage, DOMAIN, s2, b"password-two").unwrap();
 
             let unlocked = unlock_session(&storage, DOMAIN, b"password-two").unwrap();
             assert_eq!(unlocked.session_index, s2);
-            assert_eq!(unlocked.total_data_length, 0);
+            let ns2 = load_namespace_state(&storage, DOMAIN, &unlocked, NS).unwrap();
+            assert_eq!(ns2.total_data_length, 0);
 
             let u0 = unlock_session(&storage, DOMAIN, b"password-one").unwrap();
             assert_eq!(u0.session_index, s0);
-            assert_eq!(u0.total_data_length, 100);
+            let ns0_loaded = load_namespace_state(&storage, DOMAIN, &u0, NS).unwrap();
+            assert_eq!(ns0_loaded.total_data_length, 100);
         });
     }
 
@@ -318,11 +334,12 @@ mod tests {
             allocate_session(&mut storage, DOMAIN, slot, b"pw").unwrap();
 
             for _ in 0..10 {
-                cover_traffic_tick(&mut storage, DOMAIN).unwrap();
+                cover_traffic_tick(&mut storage, DOMAIN, NS).unwrap();
             }
 
             let unlocked = unlock_session(&storage, DOMAIN, b"pw").unwrap();
-            assert_eq!(unlocked.total_data_length, 0);
+            let ns_state = load_namespace_state(&storage, DOMAIN, &unlocked, NS).unwrap();
+            assert_eq!(ns_state.total_data_length, 0);
         });
     }
 
@@ -334,7 +351,7 @@ mod tests {
             let mut storage = MemoryStorage::new();
             provision_storage(&mut storage).unwrap();
 
-            cover_traffic_tick(&mut storage, DOMAIN).unwrap();
+            cover_traffic_tick(&mut storage, DOMAIN, NS).unwrap();
         });
     }
 
@@ -345,25 +362,27 @@ mod tests {
             provision_storage(&mut storage).unwrap();
 
             let slot = SessionIndex::new(0).unwrap();
-            let mut session = allocate_session(&mut storage, DOMAIN, slot, b"pw").unwrap();
+            let session = allocate_session(&mut storage, DOMAIN, slot, b"pw").unwrap();
+            let mut ns_state = NamespaceState::empty();
 
             let data = vec![0xAB; 100];
-            write_session_data(&mut storage, DOMAIN, &mut session, 0, &data).unwrap();
+            write_session_data(&mut storage, DOMAIN, NS, &session, &mut ns_state, 0, &data)
+                .unwrap();
 
             let mut before = Vec::new();
             for i in 0..SESSION_COUNT as u8 {
                 let s = SessionIndex::new(i).unwrap();
-                before.push(storage.read_block(s, 0).unwrap());
+                before.push(storage.read_block(s, NS, 0).unwrap());
             }
 
             for _ in 0..5 {
-                cover_traffic_tick(&mut storage, DOMAIN).unwrap();
+                cover_traffic_tick(&mut storage, DOMAIN, NS).unwrap();
             }
 
             let mut changed = false;
             for i in 0..SESSION_COUNT as u8 {
                 let s = SessionIndex::new(i).unwrap();
-                let after = storage.read_block(s, 0).unwrap();
+                let after = storage.read_block(s, NS, 0).unwrap();
                 if *after != *before[i as usize] {
                     changed = true;
                 }
@@ -379,16 +398,19 @@ mod tests {
             provision_storage(&mut storage).unwrap();
 
             let slot = SessionIndex::new(0).unwrap();
-            let mut session = allocate_session(&mut storage, DOMAIN, slot, b"pw").unwrap();
+            let session = allocate_session(&mut storage, DOMAIN, slot, b"pw").unwrap();
+            let mut ns_state = NamespaceState::empty();
 
             let data = vec![0xCD; 100];
-            write_session_data(&mut storage, DOMAIN, &mut session, 0, &data).unwrap();
+            write_session_data(&mut storage, DOMAIN, NS, &session, &mut ns_state, 0, &data)
+                .unwrap();
 
             for _ in 0..10 {
-                cover_traffic_tick(&mut storage, DOMAIN).unwrap();
+                cover_traffic_tick(&mut storage, DOMAIN, NS).unwrap();
             }
 
-            let result = read_session_data(&storage, DOMAIN, &session, 0, 100).unwrap();
+            let result =
+                read_session_data(&storage, DOMAIN, NS, &session, &ns_state, 0, 100).unwrap();
             assert_eq!(&*result, &data);
         });
     }

@@ -1,12 +1,12 @@
 //! Wrapper around the `pq_rerand` library.
 //!
 //! Adapts the polynomial-based API to a byte-oriented interface suitable
-//! for secureStorage's block-level operations.
+//! for secure_storage's block-level operations.
 
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 use crate::constants::BLOCK_SIZE;
-use crate::error::{SecureStorageError, Result};
+use crate::error::{Result, SecureStorageError};
 
 /// NTT tables computed at compile time — zero runtime cost.
 const NTT_CTX: pq_rerand::poly::NttContext = pq_rerand::poly::NttContext::new();
@@ -19,7 +19,7 @@ pub const PQ_CT_SIZE: usize = pq_rerand::serialize::SLOT_CT_BYTES;
 
 const _: () = assert!(
     PQ_CT_SIZE == BLOCK_SIZE,
-    "pq-rerand ciphertext slot size must equal secureStorage block size"
+    "pq-rerand ciphertext slot size must equal secure_storage block size"
 );
 
 /// Post-quantum public key for encryption and re-randomization.
