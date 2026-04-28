@@ -259,6 +259,21 @@ export class DatabaseConnection {
     sql: string,
     params: unknown[] = []
   ): Promise<unknown[][]> {
+    // Reject `undefined` bind params explicitly. JS coerces `undefined`
+    // to SQL NULL by default, which silently masks programmer bugs:
+    // `obj.usrname` (typo for `obj.username`) yields `undefined`, which
+    // would write NULL instead of throwing. Drizzle ORM already
+    // normalizes `undefined` -> `null` at its layer, so this guard only
+    // fires for direct `execRaw` callers and forces them to pass `null`
+    // explicitly when NULL is intentional.
+    for (let i = 0; i < params.length; i++) {
+      if (params[i] === undefined) {
+        throw new Error(
+          `execRaw: bind param at index ${i} is undefined; ` +
+            `pass null explicitly if NULL is intended`
+        );
+      }
+    }
     if (this.state.inTransaction) {
       return this.execRawDirect(sql, params);
     }
