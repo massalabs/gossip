@@ -23,13 +23,15 @@ export function useProfileLoader() {
 
         // Secure-storage: the SDK has no open session at boot, so any
         // profile query would throw "SDK not initialized". We decide
-        // the initial route purely from `needsUnlock`:
-        //   - true  → existing data, go to SecureLogin.
-        //   - false → fresh install, go to onboarding (create account).
+        // the initial route purely from `storageState`:
+        //   - 'locked' → existing data, go to SecureLogin.
+        //   - 'empty'  → fresh install, go to onboarding (create account).
         // Profile hydration happens later, after login/signup.
         const sdk = getSdk();
         if (sdk.isSecureStorage) {
-          useAppStore.getState().setIsInitialized(sdk.needsUnlock);
+          useAppStore
+            .getState()
+            .setIsInitialized(sdk.storageState === 'locked');
           return;
         }
 

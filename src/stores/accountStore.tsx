@@ -243,11 +243,11 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
     if (sdk.isSessionOpen) {
       await sdk.closeSession();
     }
-    // Lock secure-storage too, otherwise `needsUnlock` stays false and
-    // the next login would skip the unlock step and read whichever
+    // Lock secure-storage too, otherwise storageState stays 'unlocked'
+    // and the next login would skip the unlock step and read whichever
     // slot was current when the session closed — leaking the wrong
     // account's data to the caller.
-    if (sdk.isSecureStorage && !sdk.needsUnlock) {
+    if (sdk.isSecureStorage && sdk.storageState === 'unlocked') {
       await sdk.secureStorageLock();
     }
   };
@@ -450,6 +450,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
     },
 
     loadAccount: async (method: LoginMethod) => {
+      let unlockedThisCall = false;
       try {
         set({ isLoading: true });
 
@@ -463,7 +464,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         // only by ClassicLogin (non-secure-storage), which can still
         // read the profile without unlocking.
         const sdk = getSdk();
-        if (sdk.needsUnlock) {
+        if (sdk.storageState === 'locked') {
           const secret =
             method.type === 'password'
               ? method.password
@@ -479,6 +480,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           if (!ok) {
             throw new Error('Secure storage unlock failed');
           }
+          unlockedThisCall = true;
         }
 
         const userId =
@@ -536,7 +538,6 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         // If you change `createOnPersist` to write to SQL again, you
         // must also drop this fallback or it can resurrect the wrong
         // session blob (regression worth a debug assertion).
-        const sdk = getSdk();
         let encryptedSession: Uint8Array | undefined;
         if (sdk.usesSessionBlobNamespace) {
           const ns = await sdk.readSessionBlob();
@@ -579,6 +580,29 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
 
         fetchMnsDomainsIfEnabled(updatedProfile, get().provider);
       } catch (error) {
+        // If we unlocked the slot during this call but failed before
+        // openSession, re-lock so the next attempt re-probes from
+        // 'locked'. Without this, an attempt that lands on a deleted
+        // slot's surviving keypair (its secret still unlocks an empty
+        // DB) leaves storageState='unlocked' and every subsequent
+        // login skips the unlock step (state-machine guard) and keeps
+        // reading the wrong slot until the app is restarted.
+        if (unlockedThisCall) {
+          const sdk = getSdk();
+          if (sdk.isSecureStorage && sdk.storageState === 'unlocked') {
+            try {
+              if (sdk.isSessionOpen) {
+                await sdk.closeSession();
+              }
+              await sdk.secureStorageLock();
+            } catch (lockErr) {
+              console.error(
+                'Failed to re-lock after loadAccount error:',
+                lockErr
+              );
+            }
+          }
+        }
         console.error('Error loading account:', error);
         set({ isLoading: false });
         throw error;
@@ -589,34 +613,52 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       try {
         set({ isLoading: true });
 
+        const sdk = getSdk();
         let accountUserId: string | undefined;
         try {
-          accountUserId = getSdk().userId;
+          accountUserId = sdk.userId;
         } catch {
           // Session may already be closed
         }
 
-        await cleanupSession();
+        // Close the session first so no async writer can race the clear,
+        // but DO NOT lock secure-storage yet: locking nulls the Drizzle
+        // handle and zeroes the Rust session, which would make every
+        // clearAccountData / clearSessionBlob / profiles.getCount call
+        // below throw "SQLite not initialized" / "no session" — silently
+        // swallowed by the catch, leaving the profile row, session blob,
+        // and slot keypair fully intact (delete-account no-op).
+        if (sdk.isSessionOpen) {
+          await sdk.closeSession();
+        }
+
         useDiscussionStore.getState().cleanup();
         useMessageStore.getState().cleanup();
         useSelfMessageStore.getState().clearMessages();
 
+        let nbAccounts = 0;
         try {
           if (accountUserId) {
-            await getSdk().clearAccountData(accountUserId);
+            await sdk.clearAccountData(accountUserId);
           } else {
-            await getSdk().clearAllTables();
+            await sdk.clearAllTables();
           }
           // The session blob lives in a secure-storage namespace outside
           // SQL — clear it too so the next login doesn't try to decrypt
           // stale bytes with a fresh key. No-op on non-secure-storage.
-          await getSdk().clearSessionBlob();
-        } catch {
-          // SQLite or secure storage might not be initialized
+          await sdk.clearSessionBlob();
+          nbAccounts = await sdk.profiles.getCount();
+        } catch (e) {
+          console.error('Error clearing account data:', e);
+        }
+
+        // Now lock. After this point Drizzle is gone and the Rust
+        // session is wiped — any further DB op would throw.
+        if (sdk.isSecureStorage && sdk.storageState === 'unlocked') {
+          await sdk.secureStorageLock();
         }
 
         set(clearAccountState());
-        const nbAccounts = await getSdk().profiles.getCount();
         useAppStore.getState().setIsInitialized(nbAccounts > 0);
       } catch (error) {
         console.error('Error resetting account:', error);
