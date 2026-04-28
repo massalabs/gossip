@@ -80,11 +80,6 @@ const AnimatedRoutes: React.FC<AnimatedRoutesProps> = ({ children }) => {
     if (readyReceivedRef.current) return;
     readyReceivedRef.current = true;
 
-    if (import.meta.env.DEV) {
-      const elapsed = performance.now() - mountTimeRef.current;
-      console.log(`[AnimatedRoutes] overlay ready in ${elapsed.toFixed(0)}ms`);
-    }
-
     setSlideReady(true);
   }, []);
 
@@ -104,16 +99,6 @@ const AnimatedRoutes: React.FC<AnimatedRoutesProps> = ({ children }) => {
 
     const entering = isSlideRoute(location.pathname);
     const leaving = isSlideRoute(prev);
-
-    if (import.meta.env.DEV) {
-      console.log('[AnimatedRoutes]', {
-        prev,
-        next: location.pathname,
-        entering,
-        leaving,
-        detour: detourFromSlideRef.current,
-      });
-    }
 
     // Was the user on a slide route before this detour?
     const returningFromDetour =
@@ -169,11 +154,6 @@ const AnimatedRoutes: React.FC<AnimatedRoutesProps> = ({ children }) => {
     if (!overlayLocation || slideReady) return;
     const timer = setTimeout(() => {
       if (!readyReceivedRef.current) {
-        if (import.meta.env.DEV) {
-          console.warn(
-            `[AnimatedRoutes] ready timeout (${READY_TIMEOUT_MS}ms) — sliding anyway`
-          );
-        }
         readyReceivedRef.current = true;
         setSlideReady(true);
       }

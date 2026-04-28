@@ -2,6 +2,9 @@
 target/
 wasm/target
 
+# wasm-bindgen / wasm-pack output that should not land in git
+gossip-sdk/src/assets/generated/**/*.map
+
 # coverage
 coverage/
 
@@ -19,6 +22,7 @@ dist
 dist-ssr
 dev-dist
 *.local
+*.local.*
 
 # Editor directories and files
 .vscode/*
