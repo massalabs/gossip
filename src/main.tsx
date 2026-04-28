@@ -4,13 +4,16 @@ import './index.css';
 import App from './App.tsx';
 import { enableDebugLogger } from './utils/logger.ts';
 import { showInitError } from './utils/initError.ts';
+import { installSafariWorkerDedup } from './utils/safariWorkerDedup';
 import { createSdk } from './sdk';
 import { useSdkStore } from './stores/sdkStore';
 import { protocolConfig } from './config/protocol';
 import { Capacitor } from '@capacitor/core';
 import waSqliteWasmUrl from 'wa-sqlite/dist/wa-sqlite.wasm?url';
 import waSqliteAsyncWasmUrl from 'wa-sqlite/dist/wa-sqlite-async.wasm?url';
-import { preloadWasmAsBlobUrl } from './utils/preloadWasm';
+
+// Must run before createSdk() so the SDK's SQLite worker is wrapped.
+installSafariWorkerDedup();
 
 // Polyfill for Buffer
 import { Buffer } from 'buffer';
@@ -99,31 +102,17 @@ enableDebugLogger();
 
 const isNative = Capacitor.isNativePlatform();
 
-// Safari (notably via DeWeb gateways) may serve .wasm with chunked
-// Transfer-Encoding, which breaks fetch().arrayBuffer() and causes the SQLite
-// worker's WebAssembly.instantiate() to fail. Pre-fetching via XHR and handing
-// the SDK a blob URL sidesteps the network layer for the subsequent fetch.
-const asyncWasmUrlPromise: Promise<string> = isNative
-  ? Promise.resolve(waSqliteAsyncWasmUrl)
-  : preloadWasmAsBlobUrl(waSqliteAsyncWasmUrl).catch(err => {
-      console.warn(
-        '[WASM] Blob-URL preload failed, falling back to direct URL:',
-        err
-      );
-      return waSqliteAsyncWasmUrl;
-    });
-
-Promise.all([asyncWasmUrlPromise, initSafeArea()])
-  .then(([asyncWasmUrl]) =>
-    createSdk({
-      protocolBaseUrl: protocolConfig.baseUrl,
-      config: { polling: { enabled: true } },
-      storage: isNative
-        ? { type: 'opfs', path: '/gossip-db', wasmUrl: waSqliteWasmUrl }
-        : { type: 'idb', name: 'gossip-db', wasmUrl: asyncWasmUrl },
-    })
-  )
-  .then(sdk => {
+Promise.all([
+  createSdk({
+    protocolBaseUrl: protocolConfig.baseUrl,
+    config: { polling: { enabled: true } },
+    storage: isNative
+      ? { type: 'opfs', path: '/gossip-db', wasmUrl: waSqliteWasmUrl }
+      : { type: 'idb', name: 'gossip-db', wasmUrl: waSqliteAsyncWasmUrl },
+  }),
+  initSafeArea(),
+])
+  .then(([sdk]) => {
     useSdkStore.getState().setSdk(sdk);
 
     createRoot(document.getElementById('root')!).render(
