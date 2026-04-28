@@ -4,9 +4,11 @@
 
 /**
  * Use the encrypted storage backend instead of classic IDB/OPFS.
- * Enabled via `VITE_SECURE_STORAGE=true` in `.env.local`. Ignored in
- * production builds (see `main.tsx` — the bootstrap refuses to run
- * with a hardcoded password outside DEV).
+ * Enabled via `VITE_SECURE_STORAGE=true` in `.env.local` / `.env`.
+ *
+ * NOTE: intentionally NOT gated on `import.meta.env.DEV`. Capacitor
+ * Android/iOS builds go through `vite build` (PROD=true, DEV=false)
+ * and still need the flag to take effect.
  */
 export const SECURE_STORAGE_ENABLED =
   import.meta.env.VITE_SECURE_STORAGE === 'true';
