@@ -289,6 +289,21 @@ export class DatabaseConnection {
     sql: string,
     params: unknown[] = []
   ): Promise<unknown[][]> {
+    // Reject `undefined` bind params explicitly. JS coerces `undefined`
+    // to SQL NULL by default, which silently masks programmer bugs:
+    // `obj.usrname` (typo for `obj.username`) yields `undefined`, which
+    // would write NULL instead of throwing. Drizzle ORM already
+    // normalizes `undefined` -> `null` at its layer, so this guard only
+    // fires for direct `execRaw` callers and forces them to pass `null`
+    // explicitly when NULL is intentional.
+    for (let i = 0; i < params.length; i++) {
+      if (params[i] === undefined) {
+        throw new Error(
+          `execRaw: bind param at index ${i} is undefined; ` +
+            `pass null explicitly if NULL is intended`
+        );
+      }
+    }
     if (this.state.txScopeGuard?.getStore()) {
       throw new Error(
         'Detected root db query inside a transaction callback. Use the provided transaction (tx) instance instead of root db.'
@@ -550,7 +565,10 @@ export class DatabaseConnection {
   private async finalize(): Promise<void> {
     await runMigrations(
       (sql, params) => this.execRaw(sql, params),
-      fn => this.withTransaction(fn)
+      fn => {
+        const txExecRaw = this.execRawDirect.bind(this);
+        return this.withRawTransaction(() => fn(txExecRaw));
+      }
     );
     this.state.drizzleDb = this.createDrizzleInstance();
   }
