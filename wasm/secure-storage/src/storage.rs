@@ -1,40 +1,64 @@
 //! Storage abstraction for secureStorage.
 
+use std::collections::HashMap;
+
 use zeroize::Zeroizing;
 
-use crate::{BLOCK_SIZE, SecureStorageError, Result, SESSION_COUNT, SessionIndex};
+use crate::{BLOCK_SIZE, Result, SESSION_COUNT, SecureStorageError, SessionIndex};
 
 /// Block-level storage for session blockstream files.
 ///
-/// Each session has a contiguous sequence of fixed-size blocks.
+/// Each session has up to 256 independent blockstreams identified by a
+/// `namespace: u8`. A `(session, namespace)` pair owns a contiguous sequence
+/// of fixed-size blocks. Block indices are local to each
+/// `(session, namespace)` pair — block 0 in `(session=0, namespace=0)` is
+/// unrelated to block 0 in `(session=0, namespace=1)`.
 pub trait BlockStorage {
-    /// Read a block at the given index from a session's blockstream.
-    fn read_block(&self, session: SessionIndex, block: u64) -> Result<Box<[u8; BLOCK_SIZE]>>;
+    /// Read a block at the given index from a session/namespace's blockstream.
+    fn read_block(
+        &self,
+        session: SessionIndex,
+        namespace: u8,
+        block: u64,
+    ) -> Result<Box<[u8; BLOCK_SIZE]>>;
 
-    /// Write a block at the given index to a session's blockstream.
+    /// Write a block at the given index to a session/namespace's blockstream.
     fn write_block(
         &mut self,
         session: SessionIndex,
+        namespace: u8,
         block: u64,
         data: &[u8; BLOCK_SIZE],
     ) -> Result<()>;
 
-    /// Append a new block at the end of a session's blockstream.
-    fn append_block(&mut self, session: SessionIndex, data: &[u8; BLOCK_SIZE]) -> Result<()>;
+    /// Append a new block at the end of a session/namespace's blockstream.
+    fn append_block(
+        &mut self,
+        session: SessionIndex,
+        namespace: u8,
+        data: &[u8; BLOCK_SIZE],
+    ) -> Result<()>;
 
-    /// Number of blocks currently in a session's blockstream.
-    fn block_count(&self, session: SessionIndex) -> Result<u64>;
+    /// Number of blocks currently in a session/namespace's blockstream.
+    fn block_count(&self, session: SessionIndex, namespace: u8) -> Result<u64>;
 
-    /// Flush writes to durable storage for a session.
-    fn fsync(&self, session: SessionIndex) -> Result<()>;
-
-    /// Create an empty blockstream for a session (length 0).
+    /// Notify the backend that a logical write batch is complete.
     ///
-    /// Called during provisioning. No-op if the blockstream already exists.
-    fn init_blockstream(&mut self, session: SessionIndex) -> Result<()>;
+    /// On filesystem backends this calls `fsync`. On IDB this is a no-op:
+    /// durability is handled by `persist_dirty` (async batch commit).
+    fn fsync(&self, session: SessionIndex, namespace: u8) -> Result<()>;
+
+    /// Reset a session/namespace blockstream to empty (length 0).
+    ///
+    /// If the blockstream already exists, all existing blocks are removed.
+    fn reset_blockstream(&mut self, session: SessionIndex, namespace: u8) -> Result<()>;
 }
 
 /// Keypair file storage for session keypair files.
+///
+/// Keypair files are session-level (one per session slot), independent of
+/// namespaces — the same root keys are shared across every namespace within
+/// a session.
 pub trait KeypairStorage {
     /// Read the raw keypair file bytes for a session.
     ///
@@ -47,8 +71,10 @@ pub trait KeypairStorage {
 }
 
 pub struct MemoryStorage {
-    keypairs: Vec<Vec<u8>>,
-    blockstreams: Vec<Vec<Box<[u8; BLOCK_SIZE]>>>,
+    keypairs: Vec<Zeroizing<Vec<u8>>>,
+    /// `blockstreams[session][namespace] = Vec<block>`. Lazy populated:
+    /// only `(session, namespace)` pairs that have been touched get an entry.
+    blockstreams: Vec<HashMap<u8, Vec<Box<[u8; BLOCK_SIZE]>>>>,
 }
 
 impl Default for MemoryStorage {
@@ -61,17 +87,27 @@ impl MemoryStorage {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            keypairs: (0..SESSION_COUNT).map(|_| Vec::new()).collect(),
-            blockstreams: (0..SESSION_COUNT).map(|_| Vec::new()).collect(),
+            keypairs: (0..SESSION_COUNT)
+                .map(|_| Zeroizing::new(Vec::new()))
+                .collect(),
+            blockstreams: (0..SESSION_COUNT).map(|_| HashMap::new()).collect(),
         }
     }
 }
 
 impl BlockStorage for MemoryStorage {
-    fn read_block(&self, session: SessionIndex, block: u64) -> Result<Box<[u8; BLOCK_SIZE]>> {
+    fn read_block(
+        &self,
+        session: SessionIndex,
+        namespace: u8,
+        block: u64,
+    ) -> Result<Box<[u8; BLOCK_SIZE]>> {
         let session_blockstreams = &self.blockstreams[session.as_usize()];
+        let stream = session_blockstreams
+            .get(&namespace)
+            .ok_or(SecureStorageError::OutOfBounds)?;
         let idx = usize::try_from(block).map_err(|_| SecureStorageError::Overflow)?;
-        session_blockstreams
+        stream
             .get(idx)
             .cloned()
             .ok_or(SecureStorageError::OutOfBounds)
@@ -80,32 +116,49 @@ impl BlockStorage for MemoryStorage {
     fn write_block(
         &mut self,
         session: SessionIndex,
+        namespace: u8,
         block: u64,
         data: &[u8; BLOCK_SIZE],
     ) -> Result<()> {
         let session_blockstreams = &mut self.blockstreams[session.as_usize()];
+        let stream = session_blockstreams
+            .get_mut(&namespace)
+            .ok_or(SecureStorageError::OutOfBounds)?;
         let idx = usize::try_from(block).map_err(|_| SecureStorageError::Overflow)?;
-        if idx >= session_blockstreams.len() {
+        if idx >= stream.len() {
             return Err(SecureStorageError::OutOfBounds);
         }
-        *session_blockstreams[idx] = *data;
+        *stream[idx] = *data;
         Ok(())
     }
 
-    fn append_block(&mut self, session: SessionIndex, data: &[u8; BLOCK_SIZE]) -> Result<()> {
-        self.blockstreams[session.as_usize()].push(Box::new(*data));
+    fn append_block(
+        &mut self,
+        session: SessionIndex,
+        namespace: u8,
+        data: &[u8; BLOCK_SIZE],
+    ) -> Result<()> {
+        self.blockstreams[session.as_usize()]
+            .entry(namespace)
+            .or_default()
+            .push(Box::new(*data));
         Ok(())
     }
 
-    fn block_count(&self, session: SessionIndex) -> Result<u64> {
-        Ok(self.blockstreams[session.as_usize()].len() as u64)
+    fn block_count(&self, session: SessionIndex, namespace: u8) -> Result<u64> {
+        Ok(self.blockstreams[session.as_usize()]
+            .get(&namespace)
+            .map(|v| v.len() as u64)
+            .unwrap_or(0))
     }
 
-    fn fsync(&self, _session: SessionIndex) -> Result<()> {
+    fn fsync(&self, _session: SessionIndex, _namespace: u8) -> Result<()> {
         Ok(())
     }
 
-    fn init_blockstream(&mut self, session: SessionIndex) -> Result<()> {
+    fn reset_blockstream(&mut self, session: SessionIndex, namespace: u8) -> Result<()> {
+        // Clear any existing blocks (matches IdbStorageState::reset_blockstream).
+        self.blockstreams[session.as_usize()].insert(namespace, Vec::new());
         Ok(())
     }
 }
@@ -116,11 +169,11 @@ impl KeypairStorage for MemoryStorage {
         if data.is_empty() {
             return Err(SecureStorageError::Storage("keypair not found".into()));
         }
-        Ok(Zeroizing::new(data.clone()))
+        Ok(Zeroizing::new((**data).clone()))
     }
 
     fn write_keypair(&mut self, session: SessionIndex, data: &[u8]) -> Result<()> {
-        self.keypairs[session.as_usize()] = data.to_vec();
+        self.keypairs[session.as_usize()] = Zeroizing::new(data.to_vec());
         Ok(())
     }
 }
@@ -141,23 +194,15 @@ mod fs_backend {
             let sessions_dir = base.join("sessions");
             fs::create_dir_all(&sessions_dir)?;
 
-            for i in 0..SESSION_COUNT as u8 {
-                let idx = SessionIndex::new(i)?;
-                let blocks_path = sessions_dir.join(format!("session_{}.blocks", idx.as_u8()));
-                if !blocks_path.exists() {
-                    File::create(&blocks_path)?;
-                }
-            }
-
             Ok(Self {
                 base: base.to_path_buf(),
             })
         }
 
-        fn blocks_path(&self, session: SessionIndex) -> PathBuf {
+        fn blocks_path(&self, session: SessionIndex, namespace: u8) -> PathBuf {
             self.base
                 .join("sessions")
-                .join(format!("session_{}.blocks", session.as_u8()))
+                .join(format!("session_{}_n_{namespace}.blocks", session.as_u8()))
         }
 
         fn keypair_path(&self, session: SessionIndex) -> PathBuf {
@@ -168,8 +213,14 @@ mod fs_backend {
     }
 
     impl BlockStorage for FsStorage {
-        fn read_block(&self, session: SessionIndex, block: u64) -> Result<Box<[u8; BLOCK_SIZE]>> {
-            let mut file = File::open(self.blocks_path(session))?;
+        fn read_block(
+            &self,
+            session: SessionIndex,
+            namespace: u8,
+            block: u64,
+        ) -> Result<Box<[u8; BLOCK_SIZE]>> {
+            let mut file = File::open(self.blocks_path(session, namespace))
+                .map_err(|_| SecureStorageError::OutOfBounds)?;
             let offset = block
                 .checked_mul(BLOCK_SIZE as u64)
                 .ok_or(SecureStorageError::Overflow)?;
@@ -184,17 +235,18 @@ mod fs_backend {
         fn write_block(
             &mut self,
             session: SessionIndex,
+            namespace: u8,
             block: u64,
             data: &[u8; BLOCK_SIZE],
         ) -> Result<()> {
-            let count = self.block_count(session)?;
+            let count = self.block_count(session, namespace)?;
             if block >= count {
                 return Err(SecureStorageError::OutOfBounds);
             }
 
             let mut file = OpenOptions::new()
                 .write(true)
-                .open(self.blocks_path(session))?;
+                .open(self.blocks_path(session, namespace))?;
 
             let offset = block
                 .checked_mul(BLOCK_SIZE as u64)
@@ -204,16 +256,24 @@ mod fs_backend {
             Ok(())
         }
 
-        fn append_block(&mut self, session: SessionIndex, data: &[u8; BLOCK_SIZE]) -> Result<()> {
-            let mut file = OpenOptions::new()
-                .append(true)
-                .open(self.blocks_path(session))?;
+        fn append_block(
+            &mut self,
+            session: SessionIndex,
+            namespace: u8,
+            data: &[u8; BLOCK_SIZE],
+        ) -> Result<()> {
+            let path = self.blocks_path(session, namespace);
+            let mut file = OpenOptions::new().create(true).append(true).open(&path)?;
             file.write_all(data)?;
             Ok(())
         }
 
-        fn block_count(&self, session: SessionIndex) -> Result<u64> {
-            let metadata = fs::metadata(self.blocks_path(session))?;
+        fn block_count(&self, session: SessionIndex, namespace: u8) -> Result<u64> {
+            let path = self.blocks_path(session, namespace);
+            if !path.exists() {
+                return Ok(0);
+            }
+            let metadata = fs::metadata(&path)?;
             let len = metadata.len();
             let block_size = BLOCK_SIZE as u64;
             if len % block_size != 0 {
@@ -222,19 +282,27 @@ mod fs_backend {
             Ok(len / block_size)
         }
 
-        fn fsync(&self, session: SessionIndex) -> Result<()> {
-            let file = File::open(self.blocks_path(session))?;
+        fn fsync(&self, session: SessionIndex, namespace: u8) -> Result<()> {
+            let path = self.blocks_path(session, namespace);
+            if !path.exists() {
+                return Ok(());
+            }
+            let file = File::open(&path)?;
             file.sync_all()?;
             Ok(())
         }
 
-        fn init_blockstream(&mut self, session: SessionIndex) -> Result<()> {
-            let path = self.blocks_path(session);
-            match OpenOptions::new().create_new(true).write(true).open(&path) {
-                Ok(_) => Ok(()),
-                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
-                Err(e) => Err(e.into()),
-            }
+        fn reset_blockstream(&mut self, session: SessionIndex, namespace: u8) -> Result<()> {
+            let path = self.blocks_path(session, namespace);
+            // Create or truncate to zero length, matching the trait contract
+            // ("reset to empty"). The old code used create_new + AlreadyExists
+            // fallback which left existing blocks intact — a data leak.
+            OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(true)
+                .open(&path)?;
+            Ok(())
         }
     }
 
@@ -264,6 +332,8 @@ pub use fs_backend::FsStorage;
 mod tests {
     use super::*;
 
+    const NS: u8 = 0;
+
     fn make_block(fill: u8) -> Box<[u8; BLOCK_SIZE]> {
         let mut block = Box::new([0u8; BLOCK_SIZE]);
         block.fill(fill);
@@ -276,9 +346,9 @@ mod tests {
         let s0 = SessionIndex::new(0).unwrap();
 
         let block = make_block(0xAB);
-        store.append_block(s0, &block).unwrap();
+        store.append_block(s0, NS, &block).unwrap();
 
-        let read_back = store.read_block(s0, 0).unwrap();
+        let read_back = store.read_block(s0, NS, 0).unwrap();
         assert_eq!(*read_back, *block);
     }
 
@@ -287,13 +357,13 @@ mod tests {
         let mut store = MemoryStorage::new();
         let s0 = SessionIndex::new(0).unwrap();
 
-        assert_eq!(store.block_count(s0).unwrap(), 0);
+        assert_eq!(store.block_count(s0, NS).unwrap(), 0);
 
-        store.append_block(s0, &make_block(1)).unwrap();
-        assert_eq!(store.block_count(s0).unwrap(), 1);
+        store.append_block(s0, NS, &make_block(1)).unwrap();
+        assert_eq!(store.block_count(s0, NS).unwrap(), 1);
 
-        store.append_block(s0, &make_block(2)).unwrap();
-        assert_eq!(store.block_count(s0).unwrap(), 2);
+        store.append_block(s0, NS, &make_block(2)).unwrap();
+        assert_eq!(store.block_count(s0, NS).unwrap(), 2);
     }
 
     #[test]
@@ -301,12 +371,12 @@ mod tests {
         let mut store = MemoryStorage::new();
         let s0 = SessionIndex::new(0).unwrap();
 
-        store.append_block(s0, &make_block(0xAA)).unwrap();
+        store.append_block(s0, NS, &make_block(0xAA)).unwrap();
 
         let new_block = make_block(0xBB);
-        store.write_block(s0, 0, &new_block).unwrap();
+        store.write_block(s0, NS, 0, &new_block).unwrap();
 
-        let read_back = store.read_block(s0, 0).unwrap();
+        let read_back = store.read_block(s0, NS, 0).unwrap();
         assert_eq!(read_back[0], 0xBB);
     }
 
@@ -315,7 +385,7 @@ mod tests {
         let store = MemoryStorage::new();
         let s0 = SessionIndex::new(0).unwrap();
 
-        let result = store.read_block(s0, 0);
+        let result = store.read_block(s0, NS, 0);
         assert!(result.is_err());
     }
 
@@ -324,7 +394,7 @@ mod tests {
         let mut store = MemoryStorage::new();
         let s0 = SessionIndex::new(0).unwrap();
 
-        let result = store.write_block(s0, 0, &make_block(0));
+        let result = store.write_block(s0, NS, 0, &make_block(0));
         assert!(result.is_err());
     }
 
@@ -334,10 +404,37 @@ mod tests {
         let s0 = SessionIndex::new(0).unwrap();
         let s1 = SessionIndex::new(1).unwrap();
 
-        store.append_block(s0, &make_block(0xAA)).unwrap();
+        store.append_block(s0, NS, &make_block(0xAA)).unwrap();
 
-        assert_eq!(store.block_count(s0).unwrap(), 1);
-        assert_eq!(store.block_count(s1).unwrap(), 0);
+        assert_eq!(store.block_count(s0, NS).unwrap(), 1);
+        assert_eq!(store.block_count(s1, NS).unwrap(), 0);
+    }
+
+    #[test]
+    fn test_memory_namespaces_independent() {
+        let mut store = MemoryStorage::new();
+        let s0 = SessionIndex::new(0).unwrap();
+
+        store.append_block(s0, 0, &make_block(0xAA)).unwrap();
+        store.append_block(s0, 1, &make_block(0xBB)).unwrap();
+        store.append_block(s0, 1, &make_block(0xCC)).unwrap();
+
+        assert_eq!(store.block_count(s0, 0).unwrap(), 1);
+        assert_eq!(store.block_count(s0, 1).unwrap(), 2);
+        assert_eq!(store.block_count(s0, 2).unwrap(), 0);
+
+        assert_eq!(store.read_block(s0, 0, 0).unwrap()[0], 0xAA);
+        assert_eq!(store.read_block(s0, 1, 0).unwrap()[0], 0xBB);
+        assert_eq!(store.read_block(s0, 1, 1).unwrap()[0], 0xCC);
+    }
+
+    #[test]
+    fn test_memory_reset_blockstream_creates_empty() {
+        let mut store = MemoryStorage::new();
+        let s0 = SessionIndex::new(0).unwrap();
+
+        store.reset_blockstream(s0, 7).unwrap();
+        assert_eq!(store.block_count(s0, 7).unwrap(), 0);
     }
 
     #[test]
@@ -365,7 +462,7 @@ mod tests {
     fn test_memory_fsync_is_noop() {
         let store = MemoryStorage::new();
         let s0 = SessionIndex::new(0).unwrap();
-        store.fsync(s0).unwrap();
+        store.fsync(s0, NS).unwrap();
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -385,9 +482,9 @@ mod tests {
             let s0 = SessionIndex::new(0).unwrap();
 
             let block = make_block(0xCD);
-            store.append_block(s0, &block).unwrap();
+            store.append_block(s0, NS, &block).unwrap();
 
-            let read_back = store.read_block(s0, 0).unwrap();
+            let read_back = store.read_block(s0, NS, 0).unwrap();
             assert_eq!(*read_back, *block);
         }
 
@@ -396,10 +493,10 @@ mod tests {
             let (mut store, _dir) = make_fs_storage();
             let s0 = SessionIndex::new(0).unwrap();
 
-            assert_eq!(store.block_count(s0).unwrap(), 0);
+            assert_eq!(store.block_count(s0, NS).unwrap(), 0);
 
-            store.append_block(s0, &make_block(1)).unwrap();
-            assert_eq!(store.block_count(s0).unwrap(), 1);
+            store.append_block(s0, NS, &make_block(1)).unwrap();
+            assert_eq!(store.block_count(s0, NS).unwrap(), 1);
         }
 
         #[test]
@@ -407,12 +504,12 @@ mod tests {
             let (mut store, _dir) = make_fs_storage();
             let s0 = SessionIndex::new(0).unwrap();
 
-            store.append_block(s0, &make_block(0xAA)).unwrap();
+            store.append_block(s0, NS, &make_block(0xAA)).unwrap();
 
             let new_block = make_block(0xBB);
-            store.write_block(s0, 0, &new_block).unwrap();
+            store.write_block(s0, NS, 0, &new_block).unwrap();
 
-            let read_back = store.read_block(s0, 0).unwrap();
+            let read_back = store.read_block(s0, NS, 0).unwrap();
             assert_eq!(read_back[0], 0xBB);
         }
 
@@ -421,8 +518,22 @@ mod tests {
             let (store, _dir) = make_fs_storage();
             let s0 = SessionIndex::new(0).unwrap();
 
-            let result = store.read_block(s0, 0);
+            let result = store.read_block(s0, NS, 0);
             assert!(result.is_err());
+        }
+
+        #[test]
+        fn test_fs_namespaces_independent() {
+            let (mut store, _dir) = make_fs_storage();
+            let s0 = SessionIndex::new(0).unwrap();
+
+            store.append_block(s0, 0, &make_block(0xAA)).unwrap();
+            store.append_block(s0, 1, &make_block(0xBB)).unwrap();
+
+            assert_eq!(store.block_count(s0, 0).unwrap(), 1);
+            assert_eq!(store.block_count(s0, 1).unwrap(), 1);
+            assert_eq!(store.read_block(s0, 0, 0).unwrap()[0], 0xAA);
+            assert_eq!(store.read_block(s0, 1, 0).unwrap()[0], 0xBB);
         }
 
         #[test]
@@ -443,10 +554,10 @@ mod tests {
             let s0 = SessionIndex::new(0).unwrap();
             let s1 = SessionIndex::new(1).unwrap();
 
-            store.append_block(s0, &make_block(0xAA)).unwrap();
+            store.append_block(s0, NS, &make_block(0xAA)).unwrap();
 
-            assert_eq!(store.block_count(s0).unwrap(), 1);
-            assert_eq!(store.block_count(s1).unwrap(), 0);
+            assert_eq!(store.block_count(s0, NS).unwrap(), 1);
+            assert_eq!(store.block_count(s1, NS).unwrap(), 0);
         }
 
         #[test]
@@ -454,7 +565,7 @@ mod tests {
             let (mut store, _dir) = make_fs_storage();
             let s0 = SessionIndex::new(0).unwrap();
 
-            let result = store.write_block(s0, 0, &make_block(0));
+            let result = store.write_block(s0, NS, 0, &make_block(0));
             assert!(result.is_err());
         }
 
@@ -472,8 +583,8 @@ mod tests {
             let (mut store, _dir) = make_fs_storage();
             let s0 = SessionIndex::new(0).unwrap();
 
-            store.append_block(s0, &make_block(0xAB)).unwrap();
-            store.fsync(s0).unwrap();
+            store.append_block(s0, NS, &make_block(0xAB)).unwrap();
+            store.fsync(s0, NS).unwrap();
         }
     }
 }

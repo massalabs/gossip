@@ -1,33 +1,44 @@
 /// Unified error type for all secureStorage operations.
 ///
-/// Error messages are deliberately generic to avoid leaking information
-/// to an adversary (e.g. no distinction between "bad nonce" and "bad tag").
+/// Display messages are deliberately generic to avoid leaking internal
+/// state (session indices, versions, block positions) to callers.
+/// Use the `Debug` representation for diagnostics.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum SecureStorageError {
     #[error("invalid password")]
     InvalidPassword,
 
-    #[error("read out of bounds")]
+    #[error("out of bounds")]
     OutOfBounds,
 
-    #[error("unsupported version: {0}")]
+    #[error("unsupported version")]
     UnsupportedVersion(u32),
 
-    #[error("corrupted block")]
+    #[error("corrupted data")]
     CorruptedBlock,
 
-    #[error("invalid session index: {0}")]
+    #[error("invalid parameter")]
     InvalidSessionIndex(u8),
 
-    #[error("arithmetic overflow")]
+    #[error("overflow")]
     Overflow,
 
-    #[error("storage error: {0}")]
+    #[error("storage error")]
     Storage(String),
 
-    #[error("io error: {0}")]
+    #[error("database error")]
+    Sqlite(String),
+
+    #[error("io error")]
     Io(#[from] std::io::Error),
+
+    // TODO: Check if this can be removed
+    #[error("lock poisoned")]
+    LockPoisoned,
+
+    #[error("internal error")]
+    ThreadPanic,
 }
 
 /// Convenience alias used throughout the crate.
