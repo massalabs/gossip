@@ -344,7 +344,6 @@ class GossipSdk {
     });
     // Now set refreshService on services (circular dependency resolved via setter)
     this._discussion.setRefreshService(this._refresh);
-    this._message.setRefreshService(this._refresh);
     this._announcement.setRefreshService(this._refresh);
 
     // Reset any messages stuck in SENDING status to WAITING_SESSION
@@ -363,7 +362,12 @@ class GossipSdk {
     };
 
     // Wire up cross-service dependencies
-    this._contact = new ContactService(session, queries, this._auth!);
+    this._contact = new ContactService(
+      session,
+      queries,
+      this._auth!,
+      this.eventEmitter
+    );
     this._message.setQueueManager(this.messageQueues);
     this._discussion.setAuthService(this._auth!);
 

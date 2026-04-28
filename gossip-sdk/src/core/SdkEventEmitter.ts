@@ -21,6 +21,7 @@ export enum SdkEventType {
   SESSION_STATUS_CHANGED = 'sessionStatusChanged',
   DISCUSSION_UPDATED = 'discussionUpdated',
   MESSAGE_ACKNOWLEDGED = 'messageAcknowledged',
+  CONTACT_DELETED = 'contactDeleted',
   ERROR = 'error',
 }
 
@@ -48,6 +49,7 @@ export type SdkEvents = {
     contactUserId: string;
     messageDbId: number;
   };
+  [SdkEventType.CONTACT_DELETED]: { contactUserId: string };
   [SdkEventType.ERROR]: { error: Error; context: string };
 };
 

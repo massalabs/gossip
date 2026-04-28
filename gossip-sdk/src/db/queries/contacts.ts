@@ -1,6 +1,6 @@
 import { eq, and, sql } from 'drizzle-orm';
 import * as schema from '../schema/index.js';
-import type { DatabaseConnection } from '../sqlite.js';
+import type { DatabaseConnection, GossipSqliteTx } from '../sqlite.js';
 import type { Contact } from '../db.js';
 
 export type ContactRow = typeof schema.contacts.$inferSelect;
@@ -61,9 +61,10 @@ export class ContactQueries {
 
   async deleteByOwnerAndUser(
     ownerUserId: string,
-    userId: string
+    userId: string,
+    tx?: GossipSqliteTx
   ): Promise<void> {
-    await this.conn.db
+    await (tx ?? this.conn.db)
       .delete(schema.contacts)
       .where(
         and(

@@ -333,10 +333,20 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
 
     if (existing) {
       if (existing.content === emoji) {
-        await get().removeReaction(existing.id, existing.messageId);
+        await get().removeReaction(
+          existing.id,
+          existing.messageId,
+          existing.storeId,
+          contactUserId
+        );
         return;
       }
-      await get().removeReaction(existing.id, existing.messageId);
+      get().removeReaction(
+        existing.id,
+        existing.messageId,
+        existing.storeId,
+        contactUserId
+      );
     }
 
     const reactionMsg: StoreMessage = {
@@ -389,17 +399,36 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
     }
   },
 
-  removeReaction: async (reactionDbId, reactionMessageId?) => {
-    const match = (r: StoreMessage) =>
-      reactionMessageId
-        ? messageIdEquals(r.messageId, reactionMessageId)
-        : r.id === reactionDbId;
+  removeReaction: async (
+    reactionDbId,
+    reactionMessageId?,
+    reactionStoreId?,
+    contactUserId?
+  ) => {
+    const match = (r: StoreMessage) => {
+      if (reactionStoreId) {
+        return r.storeId === reactionStoreId;
+      }
+      if (reactionMessageId) {
+        return messageIdEquals(r.messageId, reactionMessageId);
+      }
+      if (reactionDbId !== undefined) {
+        return r.id === reactionDbId;
+      }
+      return false;
+    };
 
     let matchedContact: string | null = null;
-    for (const [contact] of get().reactionsByContact) {
-      if (removeReactionFromState(set, contact, match)) {
-        matchedContact = contact;
-        break;
+    if (contactUserId) {
+      if (removeReactionFromState(set, contactUserId, match)) {
+        matchedContact = contactUserId;
+      }
+    } else {
+      for (const [contact] of get().reactionsByContact) {
+        if (removeReactionFromState(set, contact, match)) {
+          matchedContact = contact;
+          break;
+        }
       }
     }
 

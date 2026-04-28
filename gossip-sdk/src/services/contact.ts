@@ -18,20 +18,24 @@ import {
   type DeleteContactResult,
 } from '../utils/contacts.js';
 import { Queries } from '../db/queries/index.js';
+import { SdkEventEmitter, SdkEventType } from '../core/SdkEventEmitter.js';
 
 export class ContactService {
   private session: SessionModule;
   private queries: Queries;
   private authService: AuthService;
+  private eventEmitter: SdkEventEmitter;
 
   constructor(
     session: SessionModule,
     queries: Queries,
-    authService: AuthService
+    authService: AuthService,
+    eventEmitter: SdkEventEmitter
   ) {
     this.session = session;
     this.queries = queries;
     this.authService = authService;
+    this.eventEmitter = eventEmitter;
   }
 
   private get owner(): string {
@@ -69,6 +73,15 @@ export class ContactService {
   }
 
   async delete(contactUserId: string): Promise<DeleteContactResult> {
-    return deleteContact(this.owner, contactUserId, this.session, this.queries);
+    const result = await deleteContact(
+      this.owner,
+      contactUserId,
+      this.session,
+      this.queries
+    );
+    if (result.success) {
+      this.eventEmitter.emit(SdkEventType.CONTACT_DELETED, { contactUserId });
+    }
+    return result;
   }
 }
