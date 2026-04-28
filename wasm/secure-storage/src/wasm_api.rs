@@ -513,7 +513,18 @@ fn run_statement(db: &SafeDb, sql: &str, params: &Array) -> Result<ExecResult, J
 }
 
 fn bind_param(stmt: &SafeStmt<'_>, idx: i32, value: &JsValue) -> SqlResult<()> {
-    if value.is_null() || value.is_undefined() {
+    if value.is_undefined() {
+        // Reject `undefined` explicitly. Treating it as SQL NULL silently
+        // masks programmer typos (`obj.usrname` → undefined → NULL row
+        // instead of the intended value). Callers that want NULL must
+        // pass `null` explicitly. The SDK side (gossip-sdk/src/db/sqlite.ts
+        // execRaw) also rejects undefined at the boundary; this is the
+        // last line of defence for callers that bypass the SDK.
+        return Err(
+            "undefined is not a valid SQL bind value; pass null explicitly if NULL is intended".to_string(),
+        );
+    }
+    if value.is_null() {
         return stmt.bind_null(idx);
     }
     if let Some(n) = value.as_f64() {
