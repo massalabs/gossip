@@ -55,16 +55,19 @@ jobs:
           # wasm-bindgen generates exports in non-deterministic order, so we need to check
           # for functional differences rather than exact file matches.
           #
-          # Two known sources of nondeterminism we silence:
+          # Known sources of nondeterminism we silence:
           #   - Export ordering in .d.ts / .js  -> we sort before diffing.
           #   - wasm-bindgen-rayon closure shims `closure<N>_externref_shim`
           #     get renumbered between builds (the counter is not stable).
-          #     They are internal FFI plumbing, not part of the SDK surface,
-          #     so we strip them before diffing.
-          #   - The .wasm binaries themselves carry the same closure numbers
-          #     baked in, so they cannot be byte-compared either; both wasm
-          #     binaries are excluded from this check. The .d.ts/.js diff
-          #     above is enough to catch a real API change.
+          #   - Closure-invoke trampolines named
+          #     `wasm_bindgen_<hash>___convert__closures_____invoke______`
+          #     carry a per-build hash that also varies.
+          #   Both are internal FFI plumbing, not part of the SDK surface,
+          #   so we strip them from the .d.ts/.js comparison before diffing.
+          #   - The .wasm binaries themselves carry the same names baked in,
+          #     so they cannot be byte-compared either; both wasm binaries
+          #     are excluded from this check. The .d.ts/.js diff above is
+          #     enough to catch a real API change.
 
           # Get list of changed files (both wasm binaries excluded).
           CHANGED=$(git diff --name-only -- gossip-sdk/src/assets/generated \
@@ -83,6 +86,7 @@ jobs:
           extract_exports() {
             grep -E '^(export|export const|export function|export class|export type|export interface)' \
               | grep -vE '^export const closure[0-9]+_(externref_shim|externref_shim_multivalue_shim)\b' \
+              | grep -vE '^export const wasm_bindgen_[a-f0-9]+___convert__closures' \
               | sort
           }
 
