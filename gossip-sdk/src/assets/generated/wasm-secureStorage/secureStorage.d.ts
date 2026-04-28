@@ -4,6 +4,7 @@ export function initSecureStorage(domain: string, backend: string): Promise<void
 export function idbHasData(): Promise<boolean>;
 export function provisionStorage(): void;
 export function allocateSession(slot: number, password: Uint8Array): void;
+export function flushEncrypted(): Promise<void>;
 export function openDatabase(): void;
 export function closeDatabase(): void;
 /**
@@ -16,12 +17,26 @@ export function closeDatabase(): void;
 export function execSql(sql: string, params: Array<any>): ExecResult;
 export function unlockSession(password: Uint8Array): boolean;
 export function lockSession(): void;
+/**
+ * Permanently destroy the data of the currently unlocked slot.
+ *
+ * The actual writes (new dummy keypair + cover blocks) land in
+ * IdbBlockStorage's in-memory pending state. Durability comes from
+ * the caller's subsequent `flushEncrypted()` await — same pattern
+ * the worker uses for `lockSession`. A process crash before that
+ * flush rolls everything back: the IDB on-disk state is unchanged,
+ * the slot is left exactly as it was.
+ *
+ * **The caller must `closeDatabase()` first** so SQLite's xWrite
+ * flush on close lands in the buffer before destroy_session truncates
+ * the namespace. Mirrors `lockSession`'s contract.
+ */
+export function destroySession(namespaces: Uint8Array): void;
 export function coverTrafficTick(namespace: number): void;
 export function writeNamespaceData(namespace: number, offset: number, data: Uint8Array): void;
 export function readNamespaceData(namespace: number, offset: number, len: number): Uint8Array;
 export function namespaceDataLength(namespace: number): number;
 export function clearNamespace(namespace: number): void;
-export function flushEncrypted(): Promise<void>;
 export function initThreadPool(num_threads: number): Promise<any>;
 export function wbg_rayon_start_worker(receiver: number): void;
 /**
@@ -56,6 +71,7 @@ export interface InitOutput {
   readonly clearNamespace: (a: number) => [number, number];
   readonly closeDatabase: () => [number, number];
   readonly coverTrafficTick: (a: number) => [number, number];
+  readonly destroySession: (a: number, b: number) => [number, number];
   readonly execSql: (a: number, b: number, c: any) => [number, number, number];
   readonly execresult_lastInsertRowId: (a: number) => number;
   readonly execresult_rows: (a: number) => any;
@@ -94,11 +110,11 @@ export interface InitOutput {
   readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
   readonly __wbindgen_export_7: WebAssembly.Table;
   readonly __externref_table_dealloc: (a: number) => void;
-  readonly closure79_externref_shim_multivalue_shim: (a: number, b: number, c: any) => [number, number];
-  readonly closure678_externref_shim: (a: number, b: number, c: any) => void;
-  readonly closure112_externref_shim: (a: number, b: number, c: any) => void;
-  readonly wasm_bindgen_3f82e0ab9dbbc377___convert__closures_____invoke______: (a: number, b: number) => void;
-  readonly closure723_externref_shim: (a: number, b: number, c: any, d: any) => void;
+  readonly closure663_externref_shim: (a: number, b: number, c: any) => void;
+  readonly closure98_externref_shim: (a: number, b: number, c: any) => void;
+  readonly wasm_bindgen_b3ea05ef1784c7d3___convert__closures_____invoke______: (a: number, b: number) => void;
+  readonly closure38_externref_shim_multivalue_shim: (a: number, b: number, c: any) => [number, number];
+  readonly closure719_externref_shim: (a: number, b: number, c: any, d: any) => void;
   readonly __wbindgen_thread_destroy: (a?: number, b?: number, c?: number) => void;
   readonly __wbindgen_start: (a: number) => void;
 }

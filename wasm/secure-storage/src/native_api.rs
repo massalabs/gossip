@@ -137,6 +137,11 @@ struct NamespaceArgs {
     namespace: u8,
 }
 
+#[derive(Deserialize)]
+struct DestroySessionArgs {
+    namespaces: Vec<u8>,
+}
+
 /// SQL values flow as raw JSON primitives; the one exception is BLOB,
 /// which cannot be represented as a JSON scalar and is carried as the
 /// sentinel object `{"blob": "<base64>"}` in both directions.
@@ -304,6 +309,11 @@ fn dispatch(method: &str, args: &str) -> Result<String> {
             native_vfs::clear_namespace(a.namespace)?;
             Ok("null".into())
         }
+        "destroySession" => {
+            let a: DestroySessionArgs = parse(args)?;
+            destroy_session(&a.namespaces)?;
+            Ok("null".into())
+        }
         #[cfg(test)]
         "__panic_test" => panic!("intentional test panic"),
         _ => Err(SecureStorageException::typed(
@@ -375,6 +385,24 @@ fn close() -> Result<()> {
         .map_err(|_| SecureStorageError::LockPoisoned)?;
     *guard = None;
     native_vfs::lock()?;
+    Ok(())
+}
+
+fn destroy_session(namespaces: &[u8]) -> Result<()> {
+    // Drop the rusqlite connection FIRST. SQLite flushes dirty pages on
+    // close via xWrite — those writes need the still-valid keypair, and
+    // they must land in `ram_buffer` before destroy_session truncates the
+    // blockstream. Closing afterwards would also race the destroy: the
+    // SafeDb's Drop runs sqlite3_close which reads the (now-cover) keypair
+    // and writes garbage. Same Drop-before-switch pattern as `allocate`
+    // above (lines 271–290).
+    {
+        let mut guard = db_mutex()
+            .lock()
+            .map_err(|_| SecureStorageError::LockPoisoned)?;
+        *guard = None;
+    }
+    native_vfs::destroy_session(namespaces)?;
     Ok(())
 }
 

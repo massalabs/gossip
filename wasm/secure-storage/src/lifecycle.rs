@@ -131,6 +131,66 @@ pub fn allocate_session<S: BlockStorage + KeypairStorage>(
     Ok(session)
 }
 
+/// Permanently destroy the contents of `slot` while keeping the slot
+/// structurally indistinguishable from a never-allocated cover slot.
+///
+/// Steps:
+/// 1. Replace the keypair file with a fresh dummy one (random throwaway
+///    wrap key, exactly the pattern from [`provision_storage`]). After
+///    this, [`crate::unlock::unlock_session`] returns `InvalidPassword`
+///    for the old secret — the slot is permanently inaccessible.
+/// 2. Reset every blockstream the SDK uses on this slot (caller passes
+///    the list — no hardcoded namespace set so the canonical inventory
+///    stays on the SDK side).
+/// 3. Re-pad each blockstream up to the global maximum with cover
+///    blocks generated under the new PK (via [`repair_blockstream_lengths`]).
+///    This preserves the per-namespace block-count parity invariant
+///    (all slots equal length), so two storage snapshots taken before
+///    and after destroy look like a regular cover-traffic burst rather
+///    than a wipe-and-shrink.
+///
+/// The caller is responsible for committing the backing store: nothing
+/// is fsync'd from inside this function. Wrapping the call in a single
+/// `commit()` makes the destroy atomic: a process crash before commit
+/// rolls everything back, leaving the slot exactly as it was.
+pub fn destroy_session<S: BlockStorage + KeypairStorage>(
+    storage: &mut S,
+    domain: &str,
+    slot: SessionIndex,
+    namespaces: &[u8],
+) -> Result<()> {
+    // 1. Fresh dummy keypair — random wrap key (no password derives it),
+    //    so the slot becomes structurally valid AEAD ciphertext but
+    //    impossible to unlock. Same pattern as `provision_storage`.
+    let (pk, _sk) = pq_keygen();
+    // _sk dropped at end of statement; its Drop impl zeroizes
+    let dummy_wrap_key = crypto_aead::Key::from({
+        let mut k = Zeroizing::new([0u8; crypto_aead::KEY_SIZE]);
+        rand::rngs::OsRng.fill_bytes(k.as_mut());
+        *k
+    });
+    let mut dummy_sk = Zeroizing::new(vec![0u8; PqSecretKey::byte_size()]);
+    rand::rngs::OsRng.fill_bytes(dummy_sk.as_mut());
+    let kf = KeypairFile::build_wrapped(0, pk.to_bytes(), &dummy_wrap_key, &dummy_sk, b"");
+    storage.write_keypair(slot, &kf.serialize())?;
+
+    // 2. Truncate the slot's blockstreams. Real-account ciphertext is
+    //    gone after this; nothing references the old keys anymore.
+    for &ns in namespaces {
+        storage.reset_blockstream(slot, ns)?;
+    }
+
+    // 3. Re-pad with cover blocks under the new PK. `repair_blockstream_lengths`
+    //    reads version+PK from the keypair file we just wrote, so the
+    //    cover blocks are coherent with the new identity for any future
+    //    `cover_traffic_tick` rerandomization.
+    for &ns in namespaces {
+        repair_blockstream_lengths(storage, domain, ns)?;
+    }
+
+    Ok(())
+}
+
 /// Rerandomize a random block across all sessions for `namespace`.
 ///
 /// Called periodically to mask activity patterns. Does not require
@@ -510,6 +570,407 @@ mod tests {
                  Reading garbage from alice's cross-slot cover would corrupt \
                  his session-blob load and brick his account."
             );
+        });
+    }
+
+    // --- destroy_session ---
+
+    #[test]
+    fn destroy_makes_old_password_fail() {
+        run_with_stack(|| {
+            let mut storage = MemoryStorage::new();
+            provision_storage(&mut storage).unwrap();
+
+            let slot = SessionIndex::new(1).unwrap();
+            let session = allocate_session(&mut storage, DOMAIN, slot, b"correct").unwrap();
+            let mut ns_state = NamespaceState::empty();
+            write_session_data(
+                &mut storage,
+                DOMAIN,
+                NS,
+                &session,
+                &mut ns_state,
+                0,
+                &[0xAB; 100],
+            )
+            .unwrap();
+
+            destroy_session(&mut storage, DOMAIN, slot, &[NS]).unwrap();
+
+            // The same secret no longer unlocks anything.
+            assert!(matches!(
+                unlock_session(&storage, DOMAIN, b"correct"),
+                Err(SecureStorageError::InvalidPassword)
+            ));
+        });
+    }
+
+    #[test]
+    fn destroy_preserves_block_count_parity() {
+        run_with_stack(|| {
+            let mut storage = MemoryStorage::new();
+            provision_storage(&mut storage).unwrap();
+
+            let s0 = SessionIndex::new(0).unwrap();
+            let session = allocate_session(&mut storage, DOMAIN, s0, b"pw").unwrap();
+            let mut ns_state = NamespaceState::empty();
+            // Force the global count to grow on namespace NS.
+            write_session_data(
+                &mut storage,
+                DOMAIN,
+                NS,
+                &session,
+                &mut ns_state,
+                0,
+                &vec![0x42; 10_000],
+            )
+            .unwrap();
+
+            // Snapshot per-slot block counts before destroy.
+            let before: Vec<u64> = (0..SESSION_COUNT as u8)
+                .map(|i| {
+                    storage
+                        .block_count(SessionIndex::new(i).unwrap(), NS)
+                        .unwrap()
+                })
+                .collect();
+
+            destroy_session(&mut storage, DOMAIN, s0, &[NS]).unwrap();
+
+            let after: Vec<u64> = (0..SESSION_COUNT as u8)
+                .map(|i| {
+                    storage
+                        .block_count(SessionIndex::new(i).unwrap(), NS)
+                        .unwrap()
+                })
+                .collect();
+            assert_eq!(
+                before, after,
+                "destroy must preserve per-slot block counts (PD invariant)"
+            );
+        });
+    }
+
+    #[test]
+    fn destroy_does_not_affect_other_slots() {
+        run_with_stack(|| {
+            let mut storage = MemoryStorage::new();
+            provision_storage(&mut storage).unwrap();
+
+            let s0 = SessionIndex::new(0).unwrap();
+            let s2 = SessionIndex::new(2).unwrap();
+
+            // Both slots get real data: s0 with a payload we'll read back
+            // after destroy(s2) to prove its blockstream wasn't disturbed.
+            let session0 = allocate_session(&mut storage, DOMAIN, s0, b"keep-me").unwrap();
+            let s0_payload = vec![0x9A; 6_000];
+            let mut ns_state_0 = NamespaceState::empty();
+            write_session_data(
+                &mut storage,
+                DOMAIN,
+                NS,
+                &session0,
+                &mut ns_state_0,
+                0,
+                &s0_payload,
+            )
+            .unwrap();
+
+            let session2 = allocate_session(&mut storage, DOMAIN, s2, b"destroy-me").unwrap();
+            let mut ns_state_2 = NamespaceState::empty();
+            write_session_data(
+                &mut storage,
+                DOMAIN,
+                NS,
+                &session2,
+                &mut ns_state_2,
+                0,
+                &[0xCD; 200],
+            )
+            .unwrap();
+
+            destroy_session(&mut storage, DOMAIN, s2, &[NS]).unwrap();
+
+            // s0 still unlockable with its original password.
+            let unlocked = unlock_session(&storage, DOMAIN, b"keep-me").unwrap();
+            assert_eq!(unlocked.session_index, s0);
+            // And — the part the previous version of this test missed —
+            // s0's ciphertext blocks are still decryptable to the right
+            // plaintext. A destroy that bled into other slots' blocks
+            // would corrupt this read.
+            let s0_ns_state =
+                load_namespace_state(&storage, DOMAIN, &unlocked, NS).unwrap();
+            let s0_read = read_session_data(
+                &storage,
+                DOMAIN,
+                NS,
+                &unlocked,
+                &s0_ns_state,
+                0,
+                s0_payload.len(),
+            )
+            .unwrap();
+            assert_eq!(&*s0_read, &s0_payload);
+
+            // s2's password no longer matches anything.
+            assert!(matches!(
+                unlock_session(&storage, DOMAIN, b"destroy-me"),
+                Err(SecureStorageError::InvalidPassword)
+            ));
+        });
+    }
+
+    #[test]
+    fn cover_tick_after_destroy_stays_consistent() {
+        run_with_stack(|| {
+            let mut storage = MemoryStorage::new();
+            provision_storage(&mut storage).unwrap();
+
+            // Two real slots: s1 will be destroyed, s0 must survive
+            // intact even after cover ticks rerandomize blocks across
+            // all slots (including the destroyed one).
+            let s0 = SessionIndex::new(0).unwrap();
+            let s1 = SessionIndex::new(1).unwrap();
+            let session0 = allocate_session(&mut storage, DOMAIN, s0, b"keep").unwrap();
+            let s0_payload = vec![0x77; 4_000];
+            let mut ns_state_0 = NamespaceState::empty();
+            write_session_data(
+                &mut storage,
+                DOMAIN,
+                NS,
+                &session0,
+                &mut ns_state_0,
+                0,
+                &s0_payload,
+            )
+            .unwrap();
+
+            let session1 = allocate_session(&mut storage, DOMAIN, s1, b"destroy").unwrap();
+            let mut ns_state_1 = NamespaceState::empty();
+            write_session_data(
+                &mut storage,
+                DOMAIN,
+                NS,
+                &session1,
+                &mut ns_state_1,
+                0,
+                &[0xEE; 500],
+            )
+            .unwrap();
+
+            destroy_session(&mut storage, DOMAIN, s1, &[NS]).unwrap();
+
+            // Cover ticks read version+PK from each slot's keypair file
+            // and rerandomize blocks under that identity. After destroy
+            // the s1 keypair is dummy but still valid, so cover_traffic_tick
+            // should produce well-formed blocks for all slots.
+            for _ in 0..10 {
+                cover_traffic_tick(&mut storage, DOMAIN, NS).unwrap();
+            }
+
+            // s0 must still unlock and its real data must read back
+            // unchanged — cover ticks don't touch real ciphertext (they
+            // re-randomize, which is a no-op for the holder of the key).
+            let unlocked = unlock_session(&storage, DOMAIN, b"keep").unwrap();
+            assert_eq!(unlocked.session_index, s0);
+            let s0_ns_state =
+                load_namespace_state(&storage, DOMAIN, &unlocked, NS).unwrap();
+            let s0_read = read_session_data(
+                &storage,
+                DOMAIN,
+                NS,
+                &unlocked,
+                &s0_ns_state,
+                0,
+                s0_payload.len(),
+            )
+            .unwrap();
+            assert_eq!(&*s0_read, &s0_payload);
+
+            // s1's old secret remains dead.
+            assert!(matches!(
+                unlock_session(&storage, DOMAIN, b"destroy"),
+                Err(SecureStorageError::InvalidPassword)
+            ));
+        });
+    }
+
+    #[test]
+    fn destroy_clears_multiple_namespaces() {
+        run_with_stack(|| {
+            let mut storage = MemoryStorage::new();
+            provision_storage(&mut storage).unwrap();
+
+            const NS_A: u8 = DEFAULT_NAMESPACE;
+            const NS_B: u8 = 1;
+
+            let slot = SessionIndex::new(0).unwrap();
+            let session = allocate_session(&mut storage, DOMAIN, slot, b"pw").unwrap();
+
+            let mut ns_state_a = NamespaceState::empty();
+            write_session_data(
+                &mut storage,
+                DOMAIN,
+                NS_A,
+                &session,
+                &mut ns_state_a,
+                0,
+                &[0x11; 300],
+            )
+            .unwrap();
+            let mut ns_state_b = NamespaceState::empty();
+            write_session_data(
+                &mut storage,
+                DOMAIN,
+                NS_B,
+                &session,
+                &mut ns_state_b,
+                0,
+                &[0x22; 300],
+            )
+            .unwrap();
+
+            destroy_session(&mut storage, DOMAIN, slot, &[NS_A, NS_B]).unwrap();
+
+            // Both namespaces' real ciphertext is gone — the block-count
+            // parity is preserved across both, and the old secret is
+            // dead.
+            assert!(matches!(
+                unlock_session(&storage, DOMAIN, b"pw"),
+                Err(SecureStorageError::InvalidPassword)
+            ));
+        });
+    }
+
+    #[test]
+    fn destroy_overwrites_block_ciphertext() {
+        // Locking out the old secret is necessary but not sufficient:
+        // an attacker who held the old keys before destroy must not be
+        // able to read the same plaintext from the post-destroy blocks.
+        // We assert this at the byte level by snapshotting block 0's
+        // ciphertext before and after.
+        run_with_stack(|| {
+            let mut storage = MemoryStorage::new();
+            provision_storage(&mut storage).unwrap();
+
+            let slot = SessionIndex::new(0).unwrap();
+            let session = allocate_session(&mut storage, DOMAIN, slot, b"pw").unwrap();
+            let mut ns_state = NamespaceState::empty();
+            write_session_data(
+                &mut storage,
+                DOMAIN,
+                NS,
+                &session,
+                &mut ns_state,
+                0,
+                &[0x55; 8_000],
+            )
+            .unwrap();
+
+            let block_before = storage.read_block(slot, NS, 0).unwrap();
+
+            destroy_session(&mut storage, DOMAIN, slot, &[NS]).unwrap();
+
+            let block_after = storage.read_block(slot, NS, 0).unwrap();
+            assert_ne!(
+                *block_before, *block_after,
+                "destroy must overwrite the slot's ciphertext, not just rotate the keypair"
+            );
+        });
+    }
+
+    #[test]
+    fn destroy_then_reallocate_slot() {
+        // Multi-account use case: after a user deletes their account
+        // we must be able to onboard a fresh account on the same slot
+        // with a different password. The new session must be readable
+        // via the new password and unrelated to the old one.
+        run_with_stack(|| {
+            let mut storage = MemoryStorage::new();
+            provision_storage(&mut storage).unwrap();
+
+            let slot = SessionIndex::new(0).unwrap();
+            let session1 = allocate_session(&mut storage, DOMAIN, slot, b"first").unwrap();
+            let mut ns_state_1 = NamespaceState::empty();
+            write_session_data(
+                &mut storage,
+                DOMAIN,
+                NS,
+                &session1,
+                &mut ns_state_1,
+                0,
+                &[0xAA; 1_500],
+            )
+            .unwrap();
+
+            destroy_session(&mut storage, DOMAIN, slot, &[NS]).unwrap();
+
+            // Re-allocate the same slot with a brand-new password.
+            let session2 = allocate_session(&mut storage, DOMAIN, slot, b"second").unwrap();
+            let payload2 = vec![0xBB; 2_500];
+            let mut ns_state_2 = NamespaceState::empty();
+            write_session_data(
+                &mut storage,
+                DOMAIN,
+                NS,
+                &session2,
+                &mut ns_state_2,
+                0,
+                &payload2,
+            )
+            .unwrap();
+
+            // The new password unlocks the slot and reads back the new
+            // payload — proving the slot is fully reusable.
+            let unlocked = unlock_session(&storage, DOMAIN, b"second").unwrap();
+            assert_eq!(unlocked.session_index, slot);
+            let ns_state =
+                load_namespace_state(&storage, DOMAIN, &unlocked, NS).unwrap();
+            let read = read_session_data(
+                &storage,
+                DOMAIN,
+                NS,
+                &unlocked,
+                &ns_state,
+                0,
+                payload2.len(),
+            )
+            .unwrap();
+            assert_eq!(&*read, &payload2);
+
+            // The first password remains permanently dead.
+            assert!(matches!(
+                unlock_session(&storage, DOMAIN, b"first"),
+                Err(SecureStorageError::InvalidPassword)
+            ));
+        });
+    }
+
+    #[test]
+    fn destroy_empty_namespace_is_noop() {
+        // Calling destroy with a namespace the slot never wrote to
+        // must not error: `repair_blockstream_lengths` handles a
+        // global_count of 0 by doing nothing. This guards the SDK
+        // from having to inspect block counts before passing its
+        // canonical namespace list.
+        run_with_stack(|| {
+            let mut storage = MemoryStorage::new();
+            provision_storage(&mut storage).unwrap();
+
+            const NEVER_WRITTEN_NS: u8 = 7;
+
+            let slot = SessionIndex::new(0).unwrap();
+            allocate_session(&mut storage, DOMAIN, slot, b"pw").unwrap();
+            // No write to NEVER_WRITTEN_NS at all.
+
+            destroy_session(&mut storage, DOMAIN, slot, &[NEVER_WRITTEN_NS]).unwrap();
+
+            // Still: old secret is dead (the keypair rotation step
+            // runs unconditionally, regardless of namespace contents).
+            assert!(matches!(
+                unlock_session(&storage, DOMAIN, b"pw"),
+                Err(SecureStorageError::InvalidPassword)
+            ));
         });
     }
 }

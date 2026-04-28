@@ -72,6 +72,7 @@ import { type StorageConfig, MessageStatus } from './db/index.js';
 import {
   DatabaseConnection,
   SESSION_BLOB_NAMESPACE,
+  SQL_NAMESPACE,
   type SecureStorageState,
 } from './db/sqlite.js';
 import { Queries } from './db/queries/index.js';
@@ -738,6 +739,36 @@ class GossipSdk {
       );
     }
     await this.requireConn().secureStorageLock();
+    this._queries = null;
+    this._profile = null;
+  }
+
+  /**
+   * Permanently destroy the currently unlocked slot's data.
+   *
+   * Atomically: rotates the slot's keypair to a fresh dummy (so the
+   * old secret stops unlocking anything — the deleted-account-still-
+   * unlockable trap goes away) and overwrites the slot's data
+   * blockstreams with cover blocks under the new PK. Block-count
+   * parity across slots is preserved: snapshots before and after
+   * look like a routine cover-traffic burst.
+   *
+   * Same `closeSession()` precondition as `secureStorageLock` —
+   * destroying with an open SDK session would leave the SDK in
+   * SESSION_OPEN + 'locked', a state the data services would crash
+   * on. After this resolves, storageState is 'locked'.
+   */
+  async secureStorageDestroy(): Promise<void> {
+    if (this.state.status === SdkStatus.SESSION_OPEN) {
+      throw new Error(
+        'Cannot destroy secure storage while a session is open. ' +
+          'Call closeSession() first.'
+      );
+    }
+    await this.requireConn().secureStorageDestroy([
+      SQL_NAMESPACE,
+      SESSION_BLOB_NAMESPACE,
+    ]);
     this._queries = null;
     this._profile = null;
   }

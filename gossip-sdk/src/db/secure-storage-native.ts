@@ -138,6 +138,16 @@ export interface SecureStorageNativePlugin {
     namespace: number;
   }): Promise<{ length: number }>;
   clearNamespace(options: { namespace: number }): Promise<void>;
+
+  /**
+   * Permanently destroy the data of the currently unlocked slot.
+   * Native side drops the rusqlite connection BEFORE entering the wipe
+   * (mirrors `allocate`'s switch-with-clean-shutdown pattern), then
+   * rotates the slot's keypair to a dummy and overwrites every block
+   * of `namespaces` with cover blocks under the new PK. Single redb
+   * commit at the end — atomic against process kill.
+   */
+  destroySession(options: { namespaces: number[] }): Promise<void>;
 }
 
 export const SecureStorageNative: SecureStorageNativePlugin = {
@@ -232,5 +242,8 @@ export const SecureStorageNative: SecureStorageNativePlugin = {
   },
   async clearNamespace({ namespace }) {
     await callNative('clearNamespace', { namespace });
+  },
+  async destroySession({ namespaces }) {
+    await callNative('destroySession', { namespaces });
   },
 };

@@ -798,6 +798,29 @@ export class DatabaseConnection {
   }
 
   /**
+   * Permanently destroy the data of the currently unlocked slot.
+   *
+   * Same Drizzle-tear-down ordering as `secureStorageLock`: flip the
+   * user-visible state to 'locked' synchronously so any in-flight query
+   * sees the clean "locked storage" error rather than racing the
+   * worker-side wipe.
+   *
+   * `namespaces` is the list of secure-storage namespaces to wipe. The
+   * SDK passes its canonical `[SQL_NAMESPACE, SESSION_BLOB_NAMESPACE]`
+   * — keeping the inventory on this side avoids duplicating the list
+   * in Rust.
+   */
+  async secureStorageDestroy(namespaces: number[]): Promise<void> {
+    this.state.drizzleDb = null;
+    this.state.storageState = 'locked';
+    if (this.state.useNativePlugin) {
+      await this.requireNativePlugin().destroySession({ namespaces });
+    } else {
+      await this.requireSecureProxy().destroy(Uint8Array.from(namespaces));
+    }
+  }
+
+  /**
    * Trigger one round of cover traffic on every tracked namespace.
    *
    * Both backends (web worker and native plugin) iterate over the full

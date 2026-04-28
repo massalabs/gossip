@@ -33,6 +33,7 @@ import init, {
   readNamespaceData,
   namespaceDataLength,
   clearNamespace,
+  destroySession,
 } from '../assets/generated/wasm-secureStorage/secureStorage.js';
 
 import {
@@ -231,6 +232,30 @@ export class SecureStorageWorkerApi {
     closeDatabase();
     await flushEncrypted();
     lockSession();
+  }
+
+  /**
+   * Permanently destroy the data of the currently unlocked slot.
+   *
+   * Sequence (mirrors `lock` but with the wipe in the middle):
+   *   1. `closeDatabase()` — drops the SafeDb; SQLite's xWrite on close
+   *      flushes any dirty pages into IdbBlockStorage's pending state
+   *      under the still-current keypair.
+   *   2. `destroySession(namespaces)` — Rust writes a fresh dummy
+   *      keypair, truncates the slot's blockstreams, and re-pads them
+   *      with cover blocks under the new PK. All writes accumulate in
+   *      pending state.
+   *   3. `flushEncrypted()` — single async commit to IDB. Process
+   *      crash before this resolves rolls everything back: the slot
+   *      is left exactly as it was, the user retries.
+   *
+   * After this resolves, the old secret no longer unlocks the slot
+   * and the namespaces no longer hold the user's encrypted data.
+   */
+  async destroy(namespaces: Uint8Array): Promise<void> {
+    closeDatabase();
+    destroySession(namespaces);
+    await flushEncrypted();
   }
 
   /**

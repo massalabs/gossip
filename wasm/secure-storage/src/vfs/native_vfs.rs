@@ -287,6 +287,58 @@ pub fn unlock(password: &[u8]) -> Result<bool> {
     }
 }
 
+/// Permanently destroy the data of the currently unlocked slot.
+///
+/// Atomically:
+/// 1. Drains pending writes so [`crate::destroy_session`] sees the
+///    backing-store state, not stale RAM.
+/// 2. Replaces the slot's keypair file with a dummy one (old secret
+///    can no longer unlock anything) and overwrites every block of
+///    the supplied namespaces with cover blocks under the new PK.
+/// 3. Commits the redb transaction — anything before this point is
+///    rolled back if the process dies. Anything after is durable.
+/// 4. Zeroizes the in-memory session, matching [`lock`] semantics.
+///
+/// **SQLite must be closed before calling this.** The caller (the
+/// native plugin in `native_api.rs`) drops its rusqlite connection
+/// first, mirroring the pre-`lock` contract.
+pub fn destroy_session(namespaces: &[u8]) -> Result<()> {
+    let mutex = state_mutex();
+    let mut guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
+    let st = guard
+        .as_mut()
+        .ok_or_else(|| SecureStorageError::Storage("not initialized".into()))?;
+    let session = st
+        .session
+        .as_ref()
+        .ok_or_else(|| SecureStorageError::Storage("no session".into()))?;
+    let slot = session.session_index;
+
+    // Drain in-memory pending writes. Otherwise `discard_pending`
+    // below would silently drop bytes that haven't been flushed yet —
+    // for a destroy specifically, those bytes belong to the account
+    // we're erasing, but a flush is still cheaper than reasoning
+    // about whether each pending block is real or cover.
+    flush_pending_writes(st)?;
+
+    crate::destroy_session(&mut st.backend, &st.domain, slot, namespaces)?;
+
+    // Atomic commit. Process killed before this line: ram_buffer
+    // dropped, redb unchanged → slot intact. Killed mid-commit:
+    // redb's WAL recovers to the pre-commit state. Killed after:
+    // destroy is durable.
+    st.backend.commit()?;
+
+    // Match `lock()` post-conditions: zeroize the in-memory session
+    // and any cached namespace state. The keypair we just wrote is
+    // dummy, so there is nothing meaningful left to keep.
+    st.session = None;
+    st.namespace_states.clear();
+    st.main_file.discard_pending();
+
+    Ok(())
+}
+
 /// Zeroize session keys. SQLite must be closed before calling this.
 ///
 /// Flushes pending writes first so the caller is told if data could not be

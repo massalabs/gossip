@@ -621,13 +621,9 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           // Session may already be closed
         }
 
-        // Close the session first so no async writer can race the clear,
-        // but DO NOT lock secure-storage yet: locking nulls the Drizzle
-        // handle and zeroes the Rust session, which would make every
-        // clearAccountData / clearSessionBlob / profiles.getCount call
-        // below throw "SQLite not initialized" / "no session" — silently
-        // swallowed by the catch, leaving the profile row, session blob,
-        // and slot keypair fully intact (delete-account no-op).
+        // Close the SDK session first (Olm cleanup, drain background
+        // persists). secureStorageDestroy below has the same
+        // "no SESSION_OPEN" precondition as secureStorageLock.
         if (sdk.isSessionOpen) {
           await sdk.closeSession();
         }
@@ -636,30 +632,61 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         useMessageStore.getState().cleanup();
         useSelfMessageStore.getState().clearMessages();
 
-        let nbAccounts = 0;
-        try {
-          if (accountUserId) {
-            await sdk.clearAccountData(accountUserId);
-          } else {
-            await sdk.clearAllTables();
+        if (sdk.isSecureStorage) {
+          // Atomic destroy: rotates the slot's keypair to a dummy and
+          // overwrites every block of [SQL_NAMESPACE, SESSION_BLOB_NAMESPACE]
+          // with cover blocks under the new PK, in a single backing-store
+          // transaction. After this resolves, the old secret no longer
+          // unlocks the slot — fixing the trap where biometric login
+          // would land on the deleted slot's still-valid keypair and
+          // leave the SDK in 'unlocked' over an empty DB.
+          //
+          // Block-count parity is preserved (cover repad), so snapshots
+          // before/after look like a routine cover-traffic burst.
+          // Process killed mid-destroy: backing-store rolls back, slot
+          // intact, user retries.
+          try {
+            await sdk.secureStorageDestroy();
+          } catch (e) {
+            console.error('secureStorageDestroy failed:', e);
+            // Best-effort lock so we don't leave the storage in
+            // 'unlocked' after a partial wipe.
+            if (sdk.storageState === 'unlocked') {
+              try {
+                await sdk.secureStorageLock();
+              } catch (lockErr) {
+                console.error('Recovery lock also failed:', lockErr);
+              }
+            }
+            throw e;
           }
-          // The session blob lives in a secure-storage namespace outside
-          // SQL — clear it too so the next login doesn't try to decrypt
-          // stale bytes with a fresh key. No-op on non-secure-storage.
-          await sdk.clearSessionBlob();
-          nbAccounts = await sdk.profiles.getCount();
-        } catch (e) {
-          console.error('Error clearing account data:', e);
+        } else {
+          // wa-sqlite (non-secure-storage) path: shared SQL DB, no
+          // per-slot ciphertext to wipe. Clear rows the old way.
+          let nbAccounts = 0;
+          try {
+            if (accountUserId) {
+              await sdk.clearAccountData(accountUserId);
+            } else {
+              await sdk.clearAllTables();
+            }
+            await sdk.clearSessionBlob();
+            nbAccounts = await sdk.profiles.getCount();
+          } catch (e) {
+            console.error('Error clearing account data:', e);
+          }
+          useAppStore.getState().setIsInitialized(nbAccounts > 0);
+          set(clearAccountState());
+          return;
         }
 
-        // Now lock. After this point Drizzle is gone and the Rust
-        // session is wiped — any further DB op would throw.
-        if (sdk.isSecureStorage && sdk.storageState === 'unlocked') {
-          await sdk.secureStorageLock();
-        }
-
+        // Secure-storage post-destroy routing: storageState is 'locked'
+        // and the SDK can't tell from JS whether other slots hold real
+        // accounts (PD by design). Default to the login screen — if no
+        // slot unlocks, the user can fall through to onboarding via
+        // the import button.
         set(clearAccountState());
-        useAppStore.getState().setIsInitialized(nbAccounts > 0);
+        useAppStore.getState().setIsInitialized(true);
       } catch (error) {
         console.error('Error resetting account:', error);
         set({ isLoading: false });
