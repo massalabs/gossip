@@ -101,9 +101,10 @@ export class DiscussionQueries {
 
   async deleteByOwnerAndContact(
     ownerUserId: string,
-    contactUserId: string
+    contactUserId: string,
+    tx?: GossipSqliteTx
   ): Promise<void> {
-    await this.conn.db
+    await (tx ?? this.conn.db)
       .delete(schema.discussions)
       .where(
         and(

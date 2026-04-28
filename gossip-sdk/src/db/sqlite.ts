@@ -56,7 +56,15 @@ interface DbState {
   useWorker: boolean;
   drizzleDb: GossipDatabase | null;
   dbLock: Promise<unknown>;
-  inTransaction: boolean;
+  txScopeGuard: {
+    run<T>(inTransaction: boolean, fn: () => Promise<T>): Promise<T>;
+    getStore(): boolean;
+  } | null;
+}
+
+interface TransactionContext {
+  nextSavepointId: number;
+  isActive: boolean;
 }
 
 function createDefaultState(): DbState {
@@ -70,7 +78,7 @@ function createDefaultState(): DbState {
     useWorker: false,
     drizzleDb: null,
     dbLock: Promise.resolve(),
-    inTransaction: false,
+    txScopeGuard: null,
   };
 }
 
@@ -78,6 +86,7 @@ function createDefaultState(): DbState {
 const PRAGMAS = `
   PRAGMA journal_mode=MEMORY;
   PRAGMA temp_store=MEMORY;
+  PRAGMA busy_timeout = 10000;
 `;
 
 /** PRAGMAs for file-based persistence (Node.js). WAL gives crash recovery. */
@@ -150,10 +159,15 @@ export class DatabaseConnection {
     }
   };
 
-  private createDrizzleInstance(): GossipDatabase {
-    return drizzle(
+  private createDrizzleInstance(
+    isTx = false,
+    txContext?: TransactionContext
+  ): GossipDatabase {
+    const drizzleDb = drizzle(
       async (sql, params, method) => {
-        const rows = await this.execRaw(sql, params);
+        const rows = isTx
+          ? await this.execRawDirect(sql, params)
+          : await this.execRaw(sql, params);
         if (method === 'get') {
           return { rows: rows[0] };
         }
@@ -161,15 +175,31 @@ export class DatabaseConnection {
       },
       { schema }
     );
+
+    (
+      drizzleDb as GossipDatabase & {
+        transaction: <T>(fn: (tx: GossipSqliteTx) => Promise<T>) => Promise<T>;
+      }
+    ).transaction = async <T>(fn: (tx: GossipSqliteTx) => Promise<T>) => {
+      if (txContext?.isActive) {
+        return this.withSavepoint(txContext, fn);
+      }
+      return this.withTransaction(fn);
+    };
+
+    return drizzleDb;
   }
 
   private async execRaw(
     sql: string,
     params: unknown[] = []
   ): Promise<unknown[][]> {
-    if (this.state.inTransaction) {
-      return this.execRawDirect(sql, params);
+    if (this.state.txScopeGuard?.getStore()) {
+      throw new Error(
+        'Detected root db query inside a transaction callback. Use the provided transaction (tx) instance instead of root db.'
+      );
     }
+
     const prev = this.state.dbLock;
     let release!: () => void;
     this.state.dbLock = new Promise<void>(r => (release = r));
@@ -207,6 +237,8 @@ export class DatabaseConnection {
 
   private async init(options: InitDbOptions): Promise<void> {
     if (this.state.drizzleDb) return;
+
+    await this.initTxScopeGuard();
 
     const storage: StorageConfig = options.storage ?? { type: 'memory' };
 
@@ -299,7 +331,10 @@ export class DatabaseConnection {
 
     await runMigrations(
       (sql, params) => this.execRaw(sql, params),
-      fn => this.withTransaction(fn)
+      fn => {
+        const txExecRaw = this.execRawDirect.bind(this);
+        return this.withRawTransaction(() => fn(txExecRaw));
+      }
     );
 
     this.state.drizzleDb = this.createDrizzleInstance();
@@ -315,27 +350,101 @@ export class DatabaseConnection {
     return (rows[0] as number[])[0];
   }
 
-  async withTransaction<T>(fn: () => Promise<T>): Promise<T> {
+  async withTransaction<T>(
+    fn: (tx: GossipSqliteTx) => Promise<T>,
+    behavior: 'deferred' | 'immediate' | 'exclusive' = 'immediate'
+  ): Promise<T> {
+    const txContext: TransactionContext = {
+      nextSavepointId: 0,
+      isActive: false,
+    };
+    const tx = this.createDrizzleInstance(
+      true,
+      txContext
+    ) as unknown as GossipSqliteTx;
+    return this.withRawTransaction(async () => {
+      txContext.isActive = true;
+      try {
+        return await fn(tx);
+      } finally {
+        txContext.isActive = false;
+      }
+    }, behavior);
+  }
+
+  private async withRawTransaction<T>(
+    fn: () => Promise<T>,
+    behavior: 'deferred' | 'immediate' | 'exclusive' = 'immediate'
+  ): Promise<T> {
     const prev = this.state.dbLock;
     let release!: () => void;
     this.state.dbLock = new Promise<void>(r => (release = r));
     await prev;
 
     try {
-      await this.execRawDirect('BEGIN');
-      this.state.inTransaction = true;
+      await this.execRawDirect(`BEGIN ${behavior.toUpperCase()}`);
       try {
-        const result = await fn();
+        const result = await this.runInTxScope(fn);
         await this.execRawDirect('COMMIT');
         return result;
       } catch (e) {
         await this.execRawDirect('ROLLBACK');
         throw e;
-      } finally {
-        this.state.inTransaction = false;
       }
     } finally {
       release();
+    }
+  }
+
+  private async withSavepoint<T>(
+    txContext: TransactionContext,
+    fn: (tx: GossipSqliteTx) => Promise<T>
+  ): Promise<T> {
+    const savepointName = `sp_${txContext.nextSavepointId++}`;
+    const tx = this.createDrizzleInstance(
+      true,
+      txContext
+    ) as unknown as GossipSqliteTx;
+
+    await this.execRawDirect(`SAVEPOINT ${savepointName}`);
+    try {
+      const result = await fn(tx);
+      await this.execRawDirect(`RELEASE SAVEPOINT ${savepointName}`);
+      return result;
+    } catch (e) {
+      await this.execRawDirect(`ROLLBACK TO SAVEPOINT ${savepointName}`);
+      await this.execRawDirect(`RELEASE SAVEPOINT ${savepointName}`);
+      throw e;
+    }
+  }
+
+  private async runInTxScope<T>(fn: () => Promise<T>): Promise<T> {
+    const guard = this.state.txScopeGuard;
+    if (!guard) {
+      return fn();
+    }
+    return guard.run(true, fn);
+  }
+
+  private async initTxScopeGuard(): Promise<void> {
+    // AsyncLocalStorage is Node-only. This guard is intentionally enabled only
+    // in Node/test environments; browser/worker runtimes skip it gracefully.
+    if (
+      typeof process === 'undefined' ||
+      typeof process.versions?.node !== 'string'
+    ) {
+      return;
+    }
+
+    try {
+      const { AsyncLocalStorage } = await import('node:async_hooks');
+      const guard = new AsyncLocalStorage<boolean>();
+      this.state.txScopeGuard = {
+        run: (inTransaction, fn) => guard.run(inTransaction, fn),
+        getStore: () => guard.getStore() ?? false,
+      };
+    } catch {
+      this.state.txScopeGuard = null;
     }
   }
 
@@ -350,51 +459,51 @@ export class DatabaseConnection {
   }
 
   async clearAllTables(): Promise<void> {
-    await this.withTransaction(async () => {
-      await this.db.delete(schema.messages);
-      await this.db.delete(schema.discussions);
-      await this.db.delete(schema.contacts);
-      await this.db.delete(schema.userProfile);
-      await this.db.delete(schema.pendingEncryptedMessages);
-      await this.db.delete(schema.pendingAnnouncements);
-      await this.db.delete(schema.activeSeekers);
-      await this.db.delete(schema.announcementCursors);
+    await this.withTransaction(async tx => {
+      await tx.delete(schema.messages);
+      await tx.delete(schema.discussions);
+      await tx.delete(schema.contacts);
+      await tx.delete(schema.userProfile);
+      await tx.delete(schema.pendingEncryptedMessages);
+      await tx.delete(schema.pendingAnnouncements);
+      await tx.delete(schema.activeSeekers);
+      await tx.delete(schema.announcementCursors);
     });
   }
 
   /** Delete only the data belonging to a specific account. */
   async clearAccountData(userId: string): Promise<void> {
-    await this.withTransaction(async () => {
+    await this.withTransaction(async tx => {
       // Tables with ownerUserId
-      await this.db
+      await tx
         .delete(schema.messages)
         .where(eq(schema.messages.ownerUserId, userId));
-      await this.db
+      await tx
         .delete(schema.discussions)
         .where(eq(schema.discussions.ownerUserId, userId));
-      await this.db
+      await tx
         .delete(schema.contacts)
         .where(eq(schema.contacts.ownerUserId, userId));
       // Profile table keyed by userId
-      await this.db
+      await tx
         .delete(schema.userProfile)
         .where(eq(schema.userProfile.userId, userId));
       // Announcement cursor keyed by userId
-      await this.db
+      await tx
         .delete(schema.announcementCursors)
         .where(eq(schema.announcementCursors.userId, userId));
       // Session-specific tables (no user column — safe to clear for current session)
-      await this.db.delete(schema.pendingEncryptedMessages);
-      await this.db.delete(schema.pendingAnnouncements);
-      await this.db.delete(schema.activeSeekers);
+      await tx.delete(schema.pendingEncryptedMessages);
+      await tx.delete(schema.pendingAnnouncements);
+      await tx.delete(schema.activeSeekers);
     });
   }
 
   async clearConversationTables(): Promise<void> {
-    await this.withTransaction(async () => {
-      await this.db.delete(schema.messages);
-      await this.db.delete(schema.discussions);
-      await this.db.delete(schema.contacts);
+    await this.withTransaction(async tx => {
+      await tx.delete(schema.messages);
+      await tx.delete(schema.discussions);
+      await tx.delete(schema.contacts);
     });
   }
 }

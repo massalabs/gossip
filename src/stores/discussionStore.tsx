@@ -1,12 +1,8 @@
 import { create } from 'zustand';
-import {
-  Contact,
-  SessionStatus,
-  SdkEventType,
-  SELF_CONTACT_ID,
-} from '@massalabs/gossip-sdk';
+import { Contact, SessionStatus, SELF_CONTACT_ID } from '@massalabs/gossip-sdk';
 import type { Discussion } from '@massalabs/gossip-sdk';
 import { getSdk } from './sdkStore';
+import { createDiscussionEventHandlers } from './discussionStore.events';
 import { createSelectors } from './utils/createSelectors';
 import { useAccountStore } from './accountStore';
 
@@ -159,49 +155,8 @@ const useDiscussionStoreBase = create<DiscussionStoreState>((set, get) => ({
     // Initial fetch
     fetchData();
 
-    // Event-driven refetch (debounced to collapse rapid events)
-    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-    const debouncedFetch = () => {
-      if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(fetchData, 100);
-    };
-
     const sdk = getSdk();
-    sdk.on(SdkEventType.SESSION_CREATED, debouncedFetch);
-    sdk.on(SdkEventType.SESSION_ACCEPTED, debouncedFetch);
-    sdk.on(SdkEventType.SESSION_RENEWED, debouncedFetch);
-    sdk.on(SdkEventType.SESSION_REQUESTED, debouncedFetch);
-    sdk.on(SdkEventType.DISCUSSION_UPDATED, debouncedFetch);
-
-    const onSessionStatusChanged = ({
-      contactUserId,
-      status,
-    }: {
-      contactUserId: string;
-      status: SessionStatus;
-    }) => {
-      set(state => {
-        const next = new Map(state.sessionsStatuses);
-        next.set(contactUserId, status);
-        return { sessionsStatuses: next };
-      });
-    };
-    sdk.on(SdkEventType.SESSION_STATUS_CHANGED, onSessionStatusChanged);
-
-    const cleanupFn = () => {
-      if (debounceTimer) clearTimeout(debounceTimer);
-      try {
-        sdk.off(SdkEventType.MESSAGE_READ, debouncedFetch);
-        sdk.off(SdkEventType.SESSION_CREATED, debouncedFetch);
-        sdk.off(SdkEventType.SESSION_ACCEPTED, debouncedFetch);
-        sdk.off(SdkEventType.SESSION_RENEWED, debouncedFetch);
-        sdk.off(SdkEventType.SESSION_REQUESTED, debouncedFetch);
-        sdk.off(SdkEventType.DISCUSSION_UPDATED, debouncedFetch);
-        sdk.off(SdkEventType.SESSION_STATUS_CHANGED, onSessionStatusChanged);
-      } catch {
-        // SDK might not be available during cleanup
-      }
-    };
+    const cleanupFn = createDiscussionEventHandlers(sdk, set, fetchData);
 
     set({ cleanupFn, isInitializing: false });
   },

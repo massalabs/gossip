@@ -1993,7 +1993,6 @@ describe('Renew session — SQLite-level tests', () => {
       q
     );
     discussionService.setRefreshService(refreshService);
-    messageService.setRefreshService(refreshService);
     announcementService.setRefreshService(refreshService);
   });
 
@@ -2434,7 +2433,6 @@ describe('WAITING_SESSION messages after peer acceptance', () => {
       defaultSdkConfig
     );
     discussionService.setRefreshService(refreshService);
-    messageService.setRefreshService(refreshService);
     announcementService.setRefreshService(refreshService);
   });
 
