@@ -36,6 +36,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # `wasm/secure-storage/.cargo/config.toml` enables `[unstable]
+      # build-std = ["std", "panic_abort"]` to rebuild the standard
+      # library with atomics for rayon. That requires the `rust-src`
+      # component on the nightly toolchain; without it cargo errors
+      # with "lib/rustlib/src/rust/library/Cargo.lock does not exist".
+      - name: Install rust-src on nightly (required by build-std)
+        run: rustup component add rust-src --toolchain nightly
+
       - name: Build WASM
         env:
           SOURCE_DATE_EPOCH: 0
