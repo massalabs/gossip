@@ -206,6 +206,17 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
       forwardFromMessageId
     );
 
+    // Refuse to send a message with nothing to convey: forwarding an empty
+    // message (e.g. an empty reply that's then forwarded again) would create
+    // an optimistic ghost message the backend silently drops.
+    if (
+      !content.trim() &&
+      !replyTo &&
+      (!forwardOf || !forwardOf.originalContent.trim())
+    ) {
+      return;
+    }
+
     // No `id` yet — the UI uses `id == null` to detect unconfirmed messages
     // and hide id-dependent actions (reply/forward/edit/delete/react/swipe).
     const optimisticMsg: Message = {
