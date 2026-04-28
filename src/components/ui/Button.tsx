@@ -1,4 +1,19 @@
 import React from 'react';
+import { useIsTouch } from '../../hooks/usePlatform';
+
+// Strip Tailwind hover variants (incl. nested like `dark:hover:` or
+// `disabled:hover:`) on touch devices. Mobile browsers can leave `:hover`
+// stuck after a tap that opens a native sheet (share, file picker), so the
+// hover bg/border lingers until the next tap. There's no real hover on
+// touch anyway, so we drop these classes outright.
+const stripHoverClasses = (className: string): string =>
+  className
+    .split(/\s+/)
+    .filter(cls => {
+      const variants = cls.split(':').slice(0, -1);
+      return !variants.includes('hover');
+    })
+    .join(' ');
 
 interface ButtonProps {
   children: React.ReactNode;
@@ -44,6 +59,7 @@ const Button: React.FC<ButtonProps> = ({
   ariaLabel,
   tabIndex,
 }) => {
+  const isTouch = useIsTouch();
   const baseClasses = `inline-flex items-center justify-center font-medium transition-all
     touch-manipulation focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2
     focus-visible:ring-offset-transparent
@@ -96,9 +112,14 @@ const Button: React.FC<ButtonProps> = ({
     variantClass = variantClass.replace(/\s*\brounded(-[\w[\]]+)?\b/g, '');
   }
 
-  const combinedClasses = `${baseClasses} ${variantClass} ${
+  const finalVariantClass = isTouch
+    ? stripHoverClasses(variantClass)
+    : variantClass;
+  const finalClassName = isTouch ? stripHoverClasses(className) : className;
+
+  const combinedClasses = `${baseClasses} ${finalVariantClass} ${
     shouldApplySize ? sizeClasses[size] : ''
-  } ${widthClasses} ${className}`.trim();
+  } ${widthClasses} ${finalClassName}`.trim();
 
   return (
     <button
