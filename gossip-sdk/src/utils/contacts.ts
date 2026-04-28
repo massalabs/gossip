@@ -127,19 +127,26 @@ export async function deleteContact(
     }
 
     // Delete contact, discussions, and messages atomically
-    await queries.conn.withTransaction(async () => {
-      await queries.contacts.deleteByOwnerAndUser(ownerUserId, contactUserId);
+    await queries.conn.withTransaction(async tx => {
+      await queries.contacts.deleteByOwnerAndUser(
+        ownerUserId,
+        contactUserId,
+        tx
+      );
       await queries.discussions.deleteByOwnerAndContact(
         ownerUserId,
-        contactUserId
+        contactUserId,
+        tx
       );
       await queries.messages.deleteByOwnerAndContact(
         ownerUserId,
-        contactUserId
+        contactUserId,
+        tx
       );
-      // Discard peer from session manager (WASM state, outside transaction)
-      await session.peerDiscard(decodeUserId(contactUserId));
     });
+
+    // Discard peer from session manager (WASM state, outside transaction)
+    await session.peerDiscard(decodeUserId(contactUserId));
 
     return { success: true };
   } catch (e) {

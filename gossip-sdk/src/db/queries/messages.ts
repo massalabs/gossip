@@ -148,8 +148,15 @@ export class MessageQueries {
   }
 
   async insert(values: MessageInsert, tx?: GossipSqliteTx): Promise<number> {
-    await (tx ?? this.conn.db).insert(schema.messages).values(values);
-    return this.conn.getLastInsertRowId();
+    const inserted = await (tx ?? this.conn.db)
+      .insert(schema.messages)
+      .values(values)
+      .returning({ id: schema.messages.id })
+      .get();
+    if (!inserted?.id) {
+      throw new Error('Failed to insert message row');
+    }
+    return inserted.id;
   }
 
   async batchInsert(values: MessageInsert[]): Promise<void> {
@@ -170,9 +177,10 @@ export class MessageQueries {
 
   async deleteByOwnerAndContact(
     ownerUserId: string,
-    contactUserId: string
+    contactUserId: string,
+    tx?: GossipSqliteTx
   ): Promise<void> {
-    await this.conn.db
+    await (tx ?? this.conn.db)
       .delete(schema.messages)
       .where(
         and(
@@ -182,8 +190,8 @@ export class MessageQueries {
       );
   }
 
-  async deleteById(id: number): Promise<void> {
-    await this.conn.db
+  async deleteById(id: number, tx?: GossipSqliteTx): Promise<void> {
+    await (tx ?? this.conn.db)
       .delete(schema.messages)
       .where(eq(schema.messages.id, id));
   }
@@ -362,16 +370,12 @@ export class MessageQueries {
       .all();
   }
 
-  /**
-   * Hard-delete messages older than each discussion's retention duration.
-   * Only processes discussions that have a non-null messageRetentionDuration.
-   * Skips KEEP_ALIVE and ANNOUNCEMENT types.
-   */
-  async deleteExpiredByOwner(
+  async getExpiredByOwner(
     ownerUserId: string,
     discussions: DiscussionRow[]
-  ): Promise<void> {
+  ): Promise<MessageRow[]> {
     const now = Date.now();
+    const expiredMessages: MessageRow[] = [];
 
     for (const discussion of discussions) {
       if (
@@ -382,12 +386,13 @@ export class MessageQueries {
       }
 
       const expiryTs = now - discussion.messageRetentionDuration * 1000;
-      // Only delete messages that were sent AFTER the policy was activated.
+      // Only include messages that were sent AFTER the policy was activated.
       // Messages that existed before the policy was set are left untouched.
       const policySetAt = discussion.retentionPolicySetAt ?? 0;
 
-      await this.conn.db
-        .delete(schema.messages)
+      const rows = await this.conn.db
+        .select()
+        .from(schema.messages)
         .where(
           and(
             eq(schema.messages.ownerUserId, ownerUserId),
@@ -397,8 +402,12 @@ export class MessageQueries {
             ne(schema.messages.type, MessageType.KEEP_ALIVE),
             ne(schema.messages.type, MessageType.ANNOUNCEMENT)
           )
-        );
+        )
+        .all();
+      expiredMessages.push(...rows);
     }
+
+    return expiredMessages;
   }
 
   async findDuplicateIncoming(

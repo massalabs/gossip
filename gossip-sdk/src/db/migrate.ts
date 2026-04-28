@@ -8,8 +8,10 @@
 
 import { MIGRATIONS } from './generated-migrations.js';
 
-type ExecRaw = (sql: string, params?: unknown[]) => Promise<unknown[][]>;
-type WithTransaction = <T>(fn: () => Promise<T>) => Promise<T>;
+export type ExecRaw = (sql: string, params?: unknown[]) => Promise<unknown[][]>;
+type WithTransaction = <T>(
+  fn: (txExecRaw: ExecRaw) => Promise<T>
+) => Promise<T>;
 
 function makeCreateStatementsIdempotent(statement: string): string {
   if (/^\s*CREATE\s+TABLE\s+(?!IF\s+NOT\s+EXISTS)/i.test(statement)) {
@@ -45,11 +47,11 @@ export async function runMigrations(
   const pending = MIGRATIONS.filter(m => m.idx > (maxApplied ?? -1));
 
   for (const migration of pending) {
-    await withTransaction(async () => {
+    await withTransaction(async txExecRaw => {
       for (const stmt of migration.statements) {
-        await execRaw(makeCreateStatementsIdempotent(stmt));
+        await txExecRaw(makeCreateStatementsIdempotent(stmt));
       }
-      await execRaw(
+      await txExecRaw(
         'INSERT INTO _migrations (idx, tag, applied_at) VALUES (?, ?, ?)',
         [migration.idx, migration.tag, Date.now()]
       );

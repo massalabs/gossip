@@ -43,7 +43,9 @@ export interface MessageStoreState {
   ) => Promise<void>;
   removeReaction: (
     reactionDbId: number | undefined,
-    reactionMessageId?: Uint8Array
+    reactionMessageId?: Uint8Array,
+    reactionStoreId?: string,
+    contactUserId?: string
   ) => Promise<void>;
   clearMessages: (contactUserId: string) => void;
   cleanup: () => void;

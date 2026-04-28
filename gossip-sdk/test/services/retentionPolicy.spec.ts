@@ -4,7 +4,7 @@
  * Covers:
  * - DiscussionService.setRetentionPolicy: local DB update + control message enqueued
  * - MessageService.storeDecryptedMessages: incoming retention policy updates discussion
- * - MessageQueries.deleteExpiredByOwner: hard-deletes only messages past threshold
+ * - MessageService.deleteExpiredMessages: applies retention cleanup rules
  * - getVisibleMessages: RETENTION_POLICY control rows are hidden from the UI
  */
 
@@ -404,374 +404,8 @@ describe('retentionPolicySetAt is stored when policy changes', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// deleteExpiredByOwner
+// deleteExpiredMessages (MessageService method)
 // ─────────────────────────────────────────────────────────────────────────────
-
-describe('MessageQueries.deleteExpiredByOwner', () => {
-  beforeEach(clearAllTables);
-
-  it('hard-deletes messages older than the retention threshold', async () => {
-    const testQueries = getTestQueries();
-    const retentionSeconds = 3600; // 1 hour
-
-    await insertTestContactAndDiscussion(
-      OWNER_USER_ID,
-      CONTACT_USER_ID,
-      retentionSeconds
-    );
-
-    const oldTimestamp = new Date(Date.now() - 2 * retentionSeconds * 1000); // 2 hours ago
-    const recentTimestamp = new Date(
-      Date.now() - (retentionSeconds / 2) * 1000
-    ); // 30 min ago
-
-    const oldId = await testQueries.messages.insert({
-      ownerUserId: OWNER_USER_ID,
-      contactUserId: CONTACT_USER_ID,
-      content: 'Old message',
-      type: MessageType.TEXT,
-      direction: MessageDirection.INCOMING,
-      status: MessageStatus.DELIVERED,
-      timestamp: oldTimestamp,
-    });
-
-    const recentId = await testQueries.messages.insert({
-      ownerUserId: OWNER_USER_ID,
-      contactUserId: CONTACT_USER_ID,
-      content: 'Recent message',
-      type: MessageType.TEXT,
-      direction: MessageDirection.INCOMING,
-      status: MessageStatus.DELIVERED,
-      timestamp: recentTimestamp,
-    });
-
-    const discussionRows =
-      await testQueries.discussions.getByOwner(OWNER_USER_ID);
-    await testQueries.messages.deleteExpiredByOwner(
-      OWNER_USER_ID,
-      discussionRows
-    );
-
-    expect(await testQueries.messages.getById(oldId)).toBeUndefined();
-    expect(await testQueries.messages.getById(recentId)).toBeDefined();
-  });
-
-  it('does not delete messages from discussions without a retention policy', async () => {
-    const testQueries = getTestQueries();
-
-    // Discussion with NO retention
-    await insertTestContactAndDiscussion(OWNER_USER_ID, CONTACT_USER_ID, null);
-
-    const oldId = await testQueries.messages.insert({
-      ownerUserId: OWNER_USER_ID,
-      contactUserId: CONTACT_USER_ID,
-      content: 'Old message — should survive',
-      type: MessageType.TEXT,
-      direction: MessageDirection.INCOMING,
-      status: MessageStatus.DELIVERED,
-      timestamp: new Date(Date.now() - 30 * 24 * 3600 * 1000), // 30 days ago
-    });
-
-    const discussionRows =
-      await testQueries.discussions.getByOwner(OWNER_USER_ID);
-    await testQueries.messages.deleteExpiredByOwner(
-      OWNER_USER_ID,
-      discussionRows
-    );
-
-    expect(await testQueries.messages.getById(oldId)).toBeDefined();
-  });
-
-  it('preserves KEEP_ALIVE and ANNOUNCEMENT messages regardless of age', async () => {
-    const testQueries = getTestQueries();
-    const retentionSeconds = 60; // 1 minute
-
-    await insertTestContactAndDiscussion(
-      OWNER_USER_ID,
-      CONTACT_USER_ID,
-      retentionSeconds
-    );
-
-    const veryOld = new Date(Date.now() - 7 * 24 * 3600 * 1000); // 7 days ago
-
-    const keepAliveId = await testQueries.messages.insert({
-      ownerUserId: OWNER_USER_ID,
-      contactUserId: CONTACT_USER_ID,
-      content: '',
-      type: MessageType.KEEP_ALIVE,
-      direction: MessageDirection.OUTGOING,
-      status: MessageStatus.SENT,
-      timestamp: veryOld,
-    });
-
-    const announcementId = await testQueries.messages.insert({
-      ownerUserId: OWNER_USER_ID,
-      contactUserId: CONTACT_USER_ID,
-      content: 'announcement',
-      type: MessageType.ANNOUNCEMENT,
-      direction: MessageDirection.INCOMING,
-      status: MessageStatus.DELIVERED,
-      timestamp: veryOld,
-    });
-
-    const discussionRows =
-      await testQueries.discussions.getByOwner(OWNER_USER_ID);
-    await testQueries.messages.deleteExpiredByOwner(
-      OWNER_USER_ID,
-      discussionRows
-    );
-
-    expect(await testQueries.messages.getById(keepAliveId)).toBeDefined();
-    expect(await testQueries.messages.getById(announcementId)).toBeDefined();
-  });
-
-  it('preserves messages that were sent before retentionPolicySetAt', async () => {
-    const testQueries = getTestQueries();
-    const retentionSeconds = 3600; // 1 hour
-    const policySetAt = Date.now(); // policy set NOW
-
-    await insertTestContactAndDiscussion(
-      OWNER_USER_ID,
-      CONTACT_USER_ID,
-      retentionSeconds
-    );
-    // Mark the policy as set right now
-    await testQueries.discussions.updateByOwnerAndContact(
-      OWNER_USER_ID,
-      CONTACT_USER_ID,
-      { retentionPolicySetAt: policySetAt }
-    );
-
-    // An old message that predates the policy — must NOT be deleted even though it
-    // is past the retention window (it existed before the user turned on auto-delete)
-    const prePolicyId = await testQueries.messages.insert({
-      ownerUserId: OWNER_USER_ID,
-      contactUserId: CONTACT_USER_ID,
-      content: 'Pre-policy message',
-      type: MessageType.TEXT,
-      direction: MessageDirection.INCOMING,
-      status: MessageStatus.DELIVERED,
-      timestamp: new Date(policySetAt - 2 * retentionSeconds * 1000), // 2 hours before policy
-    });
-
-    const discussionRows =
-      await testQueries.discussions.getByOwner(OWNER_USER_ID);
-    await testQueries.messages.deleteExpiredByOwner(
-      OWNER_USER_ID,
-      discussionRows
-    );
-
-    expect(await testQueries.messages.getById(prePolicyId)).toBeDefined();
-  });
-
-  it('deletes messages sent after retentionPolicySetAt once they expire', async () => {
-    const testQueries = getTestQueries();
-    const retentionSeconds = 3600; // 1 hour
-    const policySetAt = Date.now() - 2 * retentionSeconds * 1000; // policy set 2 hours ago
-
-    await insertTestContactAndDiscussion(
-      OWNER_USER_ID,
-      CONTACT_USER_ID,
-      retentionSeconds
-    );
-    await testQueries.discussions.updateByOwnerAndContact(
-      OWNER_USER_ID,
-      CONTACT_USER_ID,
-      { retentionPolicySetAt: policySetAt }
-    );
-
-    // A message sent 90 minutes ago — after policySetAt, past the 1h retention window
-    const expiredPostPolicyId = await testQueries.messages.insert({
-      ownerUserId: OWNER_USER_ID,
-      contactUserId: CONTACT_USER_ID,
-      content: 'Post-policy expired message',
-      type: MessageType.TEXT,
-      direction: MessageDirection.INCOMING,
-      status: MessageStatus.DELIVERED,
-      timestamp: new Date(policySetAt + 30 * 60 * 1000), // 30 min after policy, now 90 min old
-    });
-
-    // A recent message — after policySetAt, within retention window (should survive)
-    const recentPostPolicyId = await testQueries.messages.insert({
-      ownerUserId: OWNER_USER_ID,
-      contactUserId: CONTACT_USER_ID,
-      content: 'Post-policy recent message',
-      type: MessageType.TEXT,
-      direction: MessageDirection.INCOMING,
-      status: MessageStatus.DELIVERED,
-      timestamp: new Date(Date.now() - 10 * 60 * 1000), // 10 min ago
-    });
-
-    const discussionRows =
-      await testQueries.discussions.getByOwner(OWNER_USER_ID);
-    await testQueries.messages.deleteExpiredByOwner(
-      OWNER_USER_ID,
-      discussionRows
-    );
-
-    expect(
-      await testQueries.messages.getById(expiredPostPolicyId)
-    ).toBeUndefined();
-    expect(
-      await testQueries.messages.getById(recentPostPolicyId)
-    ).toBeDefined();
-  });
-
-  it('only deletes messages from the correct discussion', async () => {
-    const testQueries = getTestQueries();
-    const CONTACT_USER_ID_2 = encodeUserId(new Uint8Array(32).fill(3));
-    const retentionSeconds = 3600;
-
-    // Discussion 1 — has retention
-    await insertTestContactAndDiscussion(
-      OWNER_USER_ID,
-      CONTACT_USER_ID,
-      retentionSeconds
-    );
-
-    // Discussion 2 — no retention (different contact)
-    await testQueries.contacts.insert({
-      ownerUserId: OWNER_USER_ID,
-      userId: CONTACT_USER_ID_2,
-      name: 'Second Contact',
-      publicKeys: new Uint8Array(32),
-      isOnline: false,
-      lastSeen: new Date(),
-      createdAt: new Date(),
-    });
-    await testQueries.discussions.insert({
-      ownerUserId: OWNER_USER_ID,
-      contactUserId: CONTACT_USER_ID_2,
-      direction: DiscussionDirection.INITIATED,
-      weAccepted: true,
-      unreadCount: 0,
-      messageRetentionDuration: null,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
-
-    const oldTimestamp = new Date(Date.now() - 2 * retentionSeconds * 1000);
-
-    const expiredId = await testQueries.messages.insert({
-      ownerUserId: OWNER_USER_ID,
-      contactUserId: CONTACT_USER_ID,
-      content: 'Expired in discussion 1',
-      type: MessageType.TEXT,
-      direction: MessageDirection.INCOMING,
-      status: MessageStatus.DELIVERED,
-      timestamp: oldTimestamp,
-    });
-
-    const safeId = await testQueries.messages.insert({
-      ownerUserId: OWNER_USER_ID,
-      contactUserId: CONTACT_USER_ID_2,
-      content: 'Old but safe in discussion 2',
-      type: MessageType.TEXT,
-      direction: MessageDirection.INCOMING,
-      status: MessageStatus.DELIVERED,
-      timestamp: oldTimestamp,
-    });
-
-    const discussionRows =
-      await testQueries.discussions.getByOwner(OWNER_USER_ID);
-    await testQueries.messages.deleteExpiredByOwner(
-      OWNER_USER_ID,
-      discussionRows
-    );
-
-    expect(await testQueries.messages.getById(expiredId)).toBeUndefined();
-    expect(await testQueries.messages.getById(safeId)).toBeDefined();
-  });
-
-  it('does not delete messages created before retention policy activation', async () => {
-    const testQueries = getTestQueries();
-    const retentionSeconds = 3600; // 1 hour
-
-    await insertTestContactAndDiscussion(
-      OWNER_USER_ID,
-      CONTACT_USER_ID,
-      retentionSeconds
-    );
-
-    const policySetAt = Date.now() - 30 * 60 * 1000; // 30 minutes ago
-    await testQueries.discussions.updateByOwnerAndContact(
-      OWNER_USER_ID,
-      CONTACT_USER_ID,
-      { retentionPolicySetAt: policySetAt }
-    );
-
-    const oldBeforePolicyId = await testQueries.messages.insert({
-      ownerUserId: OWNER_USER_ID,
-      contactUserId: CONTACT_USER_ID,
-      content: 'Older than retention but sent before policy activation',
-      type: MessageType.TEXT,
-      direction: MessageDirection.OUTGOING,
-      status: MessageStatus.DELIVERED,
-      timestamp: new Date(Date.now() - 2 * retentionSeconds * 1000), // 2 hours ago
-    });
-
-    const discussionRows =
-      await testQueries.discussions.getByOwner(OWNER_USER_ID);
-    await testQueries.messages.deleteExpiredByOwner(
-      OWNER_USER_ID,
-      discussionRows
-    );
-
-    expect(await testQueries.messages.getById(oldBeforePolicyId)).toBeDefined();
-  });
-
-  it('deletes edited and reaction messages when they exceed retention after policy activation', async () => {
-    const testQueries = getTestQueries();
-    const retentionSeconds = 3600; // 1 hour
-
-    await insertTestContactAndDiscussion(
-      OWNER_USER_ID,
-      CONTACT_USER_ID,
-      retentionSeconds
-    );
-
-    const policySetAt = Date.now() - 3 * 3600 * 1000; // 3 hours ago
-    await testQueries.discussions.updateByOwnerAndContact(
-      OWNER_USER_ID,
-      CONTACT_USER_ID,
-      { retentionPolicySetAt: policySetAt }
-    );
-
-    const expiredTimestamp = new Date(Date.now() - 2 * retentionSeconds * 1000); // 2 hours ago
-
-    const editedId = await testQueries.messages.insert({
-      ownerUserId: OWNER_USER_ID,
-      contactUserId: CONTACT_USER_ID,
-      content: 'Edited message content',
-      type: MessageType.TEXT,
-      direction: MessageDirection.OUTGOING,
-      status: MessageStatus.DELIVERED,
-      timestamp: expiredTimestamp,
-      metadata: JSON.stringify({ edited: true }),
-    });
-
-    const reactionId = await testQueries.messages.insert({
-      ownerUserId: OWNER_USER_ID,
-      contactUserId: CONTACT_USER_ID,
-      content: '👍',
-      type: MessageType.REACTION,
-      direction: MessageDirection.OUTGOING,
-      status: MessageStatus.DELIVERED,
-      timestamp: expiredTimestamp,
-      metadata: JSON.stringify({ originalMessageId: editedId }),
-    });
-
-    const discussionRows =
-      await testQueries.discussions.getByOwner(OWNER_USER_ID);
-    await testQueries.messages.deleteExpiredByOwner(
-      OWNER_USER_ID,
-      discussionRows
-    );
-
-    expect(await testQueries.messages.getById(editedId)).toBeUndefined();
-    expect(await testQueries.messages.getById(reactionId)).toBeUndefined();
-  });
-});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // RETENTION_POLICY messages hidden from UI
@@ -825,9 +459,27 @@ describe('getVisibleMessages filters out RETENTION_POLICY control rows', () => {
 describe('MessageService.deleteExpiredMessages', () => {
   beforeEach(clearAllTables);
 
-  it('deletes expired messages for all discussions with a retention policy', async () => {
+  const sendAndGetMessage = async (
+    messageService: MessageService,
+    message: Parameters<MessageService['sendMessage']>[0]
+  ) => {
+    const sendResult = await messageService.sendMessage(message);
+    expect(sendResult.success).toBe(true);
+    expect(sendResult.message?.id).toBeDefined();
+    return sendResult.message!;
+  };
+
+  it('deletes expired message and removes related reaction/reply references', async () => {
+    // Verify that deleting an expired parent message also cleans dependent rows.
     const testQueries = getTestQueries();
     const retentionSeconds = 3600;
+    const messageService = new MessageService(
+      new MockMessageProtocol(),
+      createMockSession(),
+      new SdkEventEmitter(),
+      defaultSdkConfig,
+      testQueries
+    );
 
     await insertTestContactAndDiscussion(
       OWNER_USER_ID,
@@ -835,45 +487,318 @@ describe('MessageService.deleteExpiredMessages', () => {
       retentionSeconds
     );
 
-    const expiredId = await testQueries.messages.insert({
+    const expiredMessage = await sendAndGetMessage(messageService, {
       ownerUserId: OWNER_USER_ID,
       contactUserId: CONTACT_USER_ID,
       content: 'Expired',
+      type: MessageType.TEXT,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.WAITING_SESSION,
+      timestamp: new Date(),
+    });
+    expect(expiredMessage.id).toBeDefined();
+    expect(expiredMessage.messageId).toBeDefined();
+
+    await testQueries.messages.updateById(expiredMessage.id!, {
+      timestamp: new Date(Date.now() - 2 * retentionSeconds * 1000),
+    });
+
+    await sendAndGetMessage(messageService, {
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: 'Future reply',
+      type: MessageType.TEXT,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.WAITING_SESSION,
+      timestamp: new Date(),
+      replyTo: { originalMsgId: expiredMessage.messageId! },
+    });
+
+    await sendAndGetMessage(messageService, {
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: '👍',
+      type: MessageType.REACTION,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.WAITING_SESSION,
+      timestamp: new Date(),
+      reactionOf: { originalMsgId: expiredMessage.messageId! },
+    });
+
+    const beforeDeleteMessages =
+      await messageService.getMessages(CONTACT_USER_ID);
+    const replyMessage = beforeDeleteMessages.find(
+      m => m.content === 'Future reply'
+    );
+    const reactionMessage = beforeDeleteMessages.find(
+      m => m.type === MessageType.REACTION
+    );
+    expect(replyMessage?.id).toBeDefined();
+    expect(reactionMessage?.id).toBeDefined();
+
+    await testQueries.messages.updateById(replyMessage!.id!, {
+      timestamp: new Date(Date.now() + 60_000),
+    });
+    await testQueries.messages.updateById(reactionMessage!.id!, {
+      timestamp: new Date(Date.now() + 60_000),
+    });
+
+    await messageService.deleteExpiredMessages(OWNER_USER_ID);
+
+    const expiredAfter = await messageService.get(expiredMessage.id!);
+    const replyAfter = await messageService.get(replyMessage!.id!);
+    const reactionAfter = await messageService.get(reactionMessage!.id!);
+    const replyAfterRaw = await testQueries.messages.getById(replyMessage!.id!);
+
+    expect(expiredAfter?.type).toBe(MessageType.DELETED);
+    expect(expiredAfter?.content).toBe('[Message deleted]');
+    expect(reactionAfter).toBeUndefined();
+    expect(replyAfter?.replyTo).toBeUndefined();
+    expect(replyAfterRaw?.replyTo).toBeNull();
+  });
+
+  it('3 discussions with retention policy: delete all expired messages', async () => {
+    // Ensure expiration is evaluated independently for each retained discussion.
+    const testQueries = getTestQueries();
+    const retentionSeconds = 3600;
+    const contactIds = [
+      CONTACT_USER_ID,
+      encodeUserId(new Uint8Array(32).fill(3)),
+      encodeUserId(new Uint8Array(32).fill(4)),
+    ];
+    const messageService = new MessageService(
+      new MockMessageProtocol(),
+      createMockSession(),
+      new SdkEventEmitter(),
+      defaultSdkConfig,
+      testQueries
+    );
+
+    for (const contactId of contactIds) {
+      await insertTestContactAndDiscussion(
+        OWNER_USER_ID,
+        contactId,
+        retentionSeconds
+      );
+    }
+
+    const expiredIds: number[] = [];
+    const freshIds: number[] = [];
+
+    for (const contactId of contactIds) {
+      const expired = await sendAndGetMessage(messageService, {
+        ownerUserId: OWNER_USER_ID,
+        contactUserId: contactId,
+        content: `Expired ${contactId}`,
+        type: MessageType.TEXT,
+        direction: MessageDirection.OUTGOING,
+        status: MessageStatus.WAITING_SESSION,
+        timestamp: new Date(),
+      });
+      const fresh = await sendAndGetMessage(messageService, {
+        ownerUserId: OWNER_USER_ID,
+        contactUserId: contactId,
+        content: `Fresh ${contactId}`,
+        type: MessageType.TEXT,
+        direction: MessageDirection.OUTGOING,
+        status: MessageStatus.WAITING_SESSION,
+        timestamp: new Date(),
+      });
+      expiredIds.push(expired.id!);
+      freshIds.push(fresh.id!);
+      await testQueries.messages.updateById(expired.id!, {
+        timestamp: new Date(Date.now() - 2 * retentionSeconds * 1000),
+      });
+    }
+
+    await messageService.deleteExpiredMessages(OWNER_USER_ID);
+
+    for (const id of expiredIds) {
+      const message = await messageService.get(id);
+      expect(message?.type).toBe(MessageType.DELETED);
+      expect(message?.content).toBe('[Message deleted]');
+    }
+
+    for (const id of freshIds) {
+      const message = await messageService.get(id);
+      expect(message?.type).toBe(MessageType.TEXT);
+    }
+  });
+
+  it('nothing happens when no message is expired yet', async () => {
+    // Guard against accidental deletion while messages are still within retention.
+    const testQueries = getTestQueries();
+    const retentionSeconds = 3600;
+    const messageService = new MessageService(
+      new MockMessageProtocol(),
+      createMockSession(),
+      new SdkEventEmitter(),
+      defaultSdkConfig,
+      testQueries
+    );
+
+    await insertTestContactAndDiscussion(
+      OWNER_USER_ID,
+      CONTACT_USER_ID,
+      retentionSeconds
+    );
+
+    const msg1 = await sendAndGetMessage(messageService, {
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: 'Not expired 1',
+      type: MessageType.TEXT,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.WAITING_SESSION,
+      timestamp: new Date(),
+    });
+    const msg2 = await sendAndGetMessage(messageService, {
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: 'Not expired 2',
+      type: MessageType.TEXT,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.WAITING_SESSION,
+      timestamp: new Date(),
+    });
+
+    await messageService.deleteExpiredMessages(OWNER_USER_ID);
+
+    const msg1After = await messageService.get(msg1.id!);
+    const msg2After = await messageService.get(msg2.id!);
+
+    expect(msg1After?.type).toBe(MessageType.TEXT);
+    expect(msg1After?.content).toBe('Not expired 1');
+    expect(msg2After?.type).toBe(MessageType.TEXT);
+    expect(msg2After?.content).toBe('Not expired 2');
+  });
+
+  it("If last message has expired, discussion's lastMessage is empty", async () => {
+    // When the only visible message expires, the discussion preview must reset.
+    const testQueries = getTestQueries();
+    const retentionSeconds = 3600;
+    const messageService = new MessageService(
+      new MockMessageProtocol(),
+      createMockSession(),
+      new SdkEventEmitter(),
+      defaultSdkConfig,
+      testQueries
+    );
+
+    await insertTestContactAndDiscussion(
+      OWNER_USER_ID,
+      CONTACT_USER_ID,
+      retentionSeconds
+    );
+
+    const onlyMessage = await sendAndGetMessage(messageService, {
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: 'Only message',
+      type: MessageType.TEXT,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.WAITING_SESSION,
+      timestamp: new Date(),
+    });
+
+    await testQueries.messages.updateById(onlyMessage.id!, {
+      timestamp: new Date(Date.now() - 2 * retentionSeconds * 1000),
+    });
+
+    await messageService.deleteExpiredMessages(OWNER_USER_ID);
+
+    const discussion = await testQueries.discussions.getByOwnerAndContact(
+      OWNER_USER_ID,
+      CONTACT_USER_ID
+    );
+    const onlyMessageAfter = await messageService.get(onlyMessage.id!);
+
+    expect(onlyMessageAfter?.type).toBe(MessageType.DELETED);
+    expect(discussion?.lastMessageId).toBeNull();
+    expect(discussion?.lastMessageContent).toBeNull();
+    expect(discussion?.lastMessageTimestamp).toBeNull();
+  });
+
+  it('is a no-op when no discussion has a retention policy', async () => {
+    const testQueries = getTestQueries();
+    const messageService = new MessageService(
+      new MockMessageProtocol(),
+      createMockSession(),
+      new SdkEventEmitter(),
+      defaultSdkConfig,
+      testQueries
+    );
+
+    await insertTestContactAndDiscussion(OWNER_USER_ID, CONTACT_USER_ID, null);
+
+    const msg = await sendAndGetMessage(messageService, {
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: 'Should survive',
+      type: MessageType.TEXT,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.WAITING_SESSION,
+      timestamp: new Date(),
+    });
+    await testQueries.messages.updateById(msg.id!, {
+      timestamp: new Date(0), // epoch — extremely old
+    });
+
+    await messageService.deleteExpiredMessages(OWNER_USER_ID);
+
+    expect(await messageService.get(msg.id!)).toBeDefined();
+  });
+
+  it('marks expired text messages as DELETED and keeps non-expired messages', async () => {
+    const testQueries = getTestQueries();
+    const retentionSeconds = 3600;
+    const messageService = new MessageService(
+      new MockMessageProtocol(),
+      createMockSession(),
+      new SdkEventEmitter(),
+      defaultSdkConfig,
+      testQueries
+    );
+
+    await insertTestContactAndDiscussion(
+      OWNER_USER_ID,
+      CONTACT_USER_ID,
+      retentionSeconds
+    );
+
+    const oldMessage = await sendAndGetMessage(messageService, {
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: 'Old message',
       type: MessageType.TEXT,
       direction: MessageDirection.INCOMING,
       status: MessageStatus.DELIVERED,
       timestamp: new Date(Date.now() - 2 * retentionSeconds * 1000),
     });
-
-    const service = new MessageService(
-      new MockMessageProtocol(),
-      createMockSession(),
-      new SdkEventEmitter(),
-      defaultSdkConfig,
-      testQueries
-    );
-
-    await service.deleteExpiredMessages(OWNER_USER_ID);
-
-    expect(await testQueries.messages.getById(expiredId)).toBeUndefined();
-  });
-
-  it('is a no-op when no discussion has a retention policy', async () => {
-    const testQueries = getTestQueries();
-
-    await insertTestContactAndDiscussion(OWNER_USER_ID, CONTACT_USER_ID, null);
-
-    const msgId = await testQueries.messages.insert({
+    const recentMessage = await sendAndGetMessage(messageService, {
       ownerUserId: OWNER_USER_ID,
       contactUserId: CONTACT_USER_ID,
-      content: 'Should survive',
+      content: 'Recent message',
       type: MessageType.TEXT,
       direction: MessageDirection.INCOMING,
       status: MessageStatus.DELIVERED,
-      timestamp: new Date(0), // epoch — extremely old
+      timestamp: new Date(Date.now() - (retentionSeconds / 2) * 1000),
     });
 
-    const service = new MessageService(
+    await messageService.deleteExpiredMessages(OWNER_USER_ID);
+
+    const oldAfter = await messageService.get(oldMessage.id!);
+    const recentAfter = await messageService.get(recentMessage.id!);
+    expect(oldAfter?.type).toBe(MessageType.DELETED);
+    expect(oldAfter?.content).toBe('[Message deleted]');
+    expect(recentAfter?.type).toBe(MessageType.TEXT);
+    expect(recentAfter?.content).toBe('Recent message');
+  });
+
+  it('preserves KEEP_ALIVE and ANNOUNCEMENT messages regardless of age', async () => {
+    const testQueries = getTestQueries();
+    const retentionSeconds = 60;
+    const messageService = new MessageService(
       new MockMessageProtocol(),
       createMockSession(),
       new SdkEventEmitter(),
@@ -881,8 +806,265 @@ describe('MessageService.deleteExpiredMessages', () => {
       testQueries
     );
 
-    await service.deleteExpiredMessages(OWNER_USER_ID);
+    await insertTestContactAndDiscussion(
+      OWNER_USER_ID,
+      CONTACT_USER_ID,
+      retentionSeconds
+    );
 
-    expect(await testQueries.messages.getById(msgId)).toBeDefined();
+    const veryOld = new Date(Date.now() - 7 * 24 * 3600 * 1000);
+    const keepAliveMessage = await sendAndGetMessage(messageService, {
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: '',
+      type: MessageType.KEEP_ALIVE,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.SENT,
+      timestamp: veryOld,
+    });
+    const announcementMessage = await sendAndGetMessage(messageService, {
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: 'announcement',
+      type: MessageType.ANNOUNCEMENT,
+      direction: MessageDirection.INCOMING,
+      status: MessageStatus.DELIVERED,
+      timestamp: veryOld,
+    });
+
+    await messageService.deleteExpiredMessages(OWNER_USER_ID);
+
+    expect(await messageService.get(keepAliveMessage.id!)).toBeDefined();
+    expect(await messageService.get(announcementMessage.id!)).toBeDefined();
+  });
+
+  it('preserves messages that were sent before retentionPolicySetAt', async () => {
+    const testQueries = getTestQueries();
+    const retentionSeconds = 3600;
+    const policySetAt = Date.now();
+    const messageService = new MessageService(
+      new MockMessageProtocol(),
+      createMockSession(),
+      new SdkEventEmitter(),
+      defaultSdkConfig,
+      testQueries
+    );
+
+    await insertTestContactAndDiscussion(
+      OWNER_USER_ID,
+      CONTACT_USER_ID,
+      retentionSeconds
+    );
+    // Mark the policy as set right now
+    await testQueries.discussions.updateByOwnerAndContact(
+      OWNER_USER_ID,
+      CONTACT_USER_ID,
+      { retentionPolicySetAt: policySetAt }
+    );
+
+    // An old message that predates the policy — must NOT be deleted even though it
+    // is past the retention window (it existed before the user turned on auto-delete)
+    const prePolicyMessage = await sendAndGetMessage(messageService, {
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: 'Pre-policy message',
+      type: MessageType.TEXT,
+      direction: MessageDirection.INCOMING,
+      status: MessageStatus.DELIVERED,
+      timestamp: new Date(policySetAt - 2 * retentionSeconds * 1000), // 2 hours before policy
+    });
+
+    await messageService.deleteExpiredMessages(OWNER_USER_ID);
+    const prePolicy = await messageService.get(prePolicyMessage.id!);
+    expect(prePolicy?.type).toBe(MessageType.TEXT);
+  });
+
+  it('deletes messages sent after retentionPolicySetAt once they expire', async () => {
+    const testQueries = getTestQueries();
+    const retentionSeconds = 3600;
+    const policySetAt = Date.now() - 2 * retentionSeconds * 1000;
+    const messageService = new MessageService(
+      new MockMessageProtocol(),
+      createMockSession(),
+      new SdkEventEmitter(),
+      defaultSdkConfig,
+      testQueries
+    );
+
+    await insertTestContactAndDiscussion(
+      OWNER_USER_ID,
+      CONTACT_USER_ID,
+      retentionSeconds
+    );
+    await testQueries.discussions.updateByOwnerAndContact(
+      OWNER_USER_ID,
+      CONTACT_USER_ID,
+      { retentionPolicySetAt: policySetAt }
+    );
+
+    // A message sent 90 minutes ago — after policySetAt, past the 1h retention window
+    const expiredPostPolicyMessage = await sendAndGetMessage(messageService, {
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: 'Post-policy expired message',
+      type: MessageType.TEXT,
+      direction: MessageDirection.INCOMING,
+      status: MessageStatus.DELIVERED,
+      timestamp: new Date(policySetAt + 30 * 60 * 1000),
+    });
+    const recentPostPolicyMessage = await sendAndGetMessage(messageService, {
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: 'Post-policy recent message',
+      type: MessageType.TEXT,
+      direction: MessageDirection.INCOMING,
+      status: MessageStatus.DELIVERED,
+      timestamp: new Date(Date.now() - 10 * 60 * 1000),
+    });
+
+    await messageService.deleteExpiredMessages(OWNER_USER_ID);
+
+    const expiredAfter = await messageService.get(expiredPostPolicyMessage.id!);
+    const recentAfter = await messageService.get(recentPostPolicyMessage.id!);
+    expect(expiredAfter?.type).toBe(MessageType.DELETED);
+    expect(expiredAfter?.content).toBe('[Message deleted]');
+    expect(recentAfter?.type).toBe(MessageType.TEXT);
+  });
+
+  it('only deletes messages from the correct discussion', async () => {
+    const testQueries = getTestQueries();
+    const contactUserId2 = encodeUserId(new Uint8Array(32).fill(9));
+    const retentionSeconds = 3600;
+    const messageService = new MessageService(
+      new MockMessageProtocol(),
+      createMockSession(),
+      new SdkEventEmitter(),
+      defaultSdkConfig,
+      testQueries
+    );
+
+    await insertTestContactAndDiscussion(
+      OWNER_USER_ID,
+      CONTACT_USER_ID,
+      retentionSeconds
+    );
+    await insertTestContactAndDiscussion(OWNER_USER_ID, contactUserId2, null);
+
+    const oldTimestamp = new Date(Date.now() - 2 * retentionSeconds * 1000);
+    const expiredMessage = await sendAndGetMessage(messageService, {
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: 'Expired in discussion 1',
+      type: MessageType.TEXT,
+      direction: MessageDirection.INCOMING,
+      status: MessageStatus.DELIVERED,
+      timestamp: oldTimestamp,
+    });
+    const safeMessage = await sendAndGetMessage(messageService, {
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: contactUserId2,
+      content: 'Old but safe in discussion 2',
+      type: MessageType.TEXT,
+      direction: MessageDirection.INCOMING,
+      status: MessageStatus.DELIVERED,
+      timestamp: oldTimestamp,
+    });
+
+    await messageService.deleteExpiredMessages(OWNER_USER_ID);
+
+    const expiredAfter = await messageService.get(expiredMessage.id!);
+    const safeAfter = await messageService.get(safeMessage.id!);
+    expect(expiredAfter?.type).toBe(MessageType.DELETED);
+    expect(safeAfter?.type).toBe(MessageType.TEXT);
+  });
+
+  it('does not delete messages created before retention policy activation', async () => {
+    const testQueries = getTestQueries();
+    const retentionSeconds = 3600;
+    const messageService = new MessageService(
+      new MockMessageProtocol(),
+      createMockSession(),
+      new SdkEventEmitter(),
+      defaultSdkConfig,
+      testQueries
+    );
+
+    await insertTestContactAndDiscussion(
+      OWNER_USER_ID,
+      CONTACT_USER_ID,
+      retentionSeconds
+    );
+    await testQueries.discussions.updateByOwnerAndContact(
+      OWNER_USER_ID,
+      CONTACT_USER_ID,
+      { retentionPolicySetAt: Date.now() - 30 * 60 * 1000 }
+    );
+
+    const oldBeforePolicyMessage = await sendAndGetMessage(messageService, {
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: 'Older than retention but sent before policy activation',
+      type: MessageType.TEXT,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.DELIVERED,
+      timestamp: new Date(Date.now() - 2 * retentionSeconds * 1000),
+    });
+
+    await messageService.deleteExpiredMessages(OWNER_USER_ID);
+    const oldBeforePolicy = await messageService.get(
+      oldBeforePolicyMessage.id!
+    );
+    expect(oldBeforePolicy?.type).toBe(MessageType.TEXT);
+  });
+
+  it('deletes edited and reaction messages when they exceed retention after policy activation', async () => {
+    const testQueries = getTestQueries();
+    const retentionSeconds = 3600;
+    const messageService = new MessageService(
+      new MockMessageProtocol(),
+      createMockSession(),
+      new SdkEventEmitter(),
+      defaultSdkConfig,
+      testQueries
+    );
+
+    await insertTestContactAndDiscussion(
+      OWNER_USER_ID,
+      CONTACT_USER_ID,
+      retentionSeconds
+    );
+    await testQueries.discussions.updateByOwnerAndContact(
+      OWNER_USER_ID,
+      CONTACT_USER_ID,
+      { retentionPolicySetAt: Date.now() - 3 * 3600 * 1000 }
+    );
+
+    const expiredTimestamp = new Date(Date.now() - 2 * retentionSeconds * 1000);
+    const editedMessage = await sendAndGetMessage(messageService, {
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: 'Edited message content',
+      type: MessageType.TEXT,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.DELIVERED,
+      timestamp: expiredTimestamp,
+      metadata: { edited: true },
+    });
+    const reactionMessage = await sendAndGetMessage(messageService, {
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: '👍',
+      type: MessageType.REACTION,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.DELIVERED,
+      timestamp: expiredTimestamp,
+      reactionOf: { originalMsgId: editedMessage.messageId! },
+    });
+
+    await messageService.deleteExpiredMessages(OWNER_USER_ID);
+    const editedAfter = await messageService.get(editedMessage.id!);
+    const reactionAfter = await messageService.get(reactionMessage.id!);
+    expect(editedAfter?.type).toBe(MessageType.DELETED);
+    expect(reactionAfter).toBeUndefined();
   });
 });
