@@ -374,12 +374,14 @@ export class DatabaseConnection {
     const kind = classifyStatement(sql);
 
     if (this.state.useNativePlugin && this.state.nativePlugin) {
-      const safeParams = params.map(p =>
-        p instanceof Uint8Array ? Array.from(p) : p
-      );
+      // No `Array.from` on Uint8Array params: encodeSqlParam in
+      // secure-storage-native.ts already accepts Uint8Array directly and
+      // base64-encodes it. The previous conversion paid two extra O(n)
+      // passes per blob bind, multiplied by however many INSERTs the
+      // message-send path issues.
       const result = await this.state.nativePlugin.execSql({
         sql,
-        params: safeParams,
+        params,
       });
       this.state.lastInsertRowIdCache = result.lastInsertRowId;
       this.advanceTxDepth(kind);
@@ -702,15 +704,10 @@ export class DatabaseConnection {
         // Native plugin contract still uses `allocateSession` (matches
         // the Rust `allocate_session` name); only the SDK-facing verb
         // was renamed for clarity (create vs allocate).
-        const nativePassword = Array.from(pwBytes);
-        try {
-          await this.requireNativePlugin().allocateSession({
-            slot,
-            password: nativePassword,
-          });
-        } finally {
-          nativePassword.fill(0);
-        }
+        await this.requireNativePlugin().allocateSession({
+          slot,
+          password: pwBytes,
+        });
       } else {
         // Transfer the buffer so no intermediate copy lingers in the
         // MessagePort queue. After transfer, pwBytes is detached.
@@ -757,15 +754,10 @@ export class DatabaseConnection {
     let ok: boolean;
     try {
       if (this.state.useNativePlugin) {
-        const nativePassword = Array.from(pwBytes);
-        try {
-          const result = await this.requireNativePlugin().unlockSession({
-            password: nativePassword,
-          });
-          ok = result.unlocked;
-        } finally {
-          nativePassword.fill(0);
-        }
+        const result = await this.requireNativePlugin().unlockSession({
+          password: pwBytes,
+        });
+        ok = result.unlocked;
       } else {
         ok = await this.requireSecureProxy().unlock(
           Comlink.transfer(pwBytes, [pwBytes.buffer])
@@ -842,7 +834,7 @@ export class DatabaseConnection {
       await this.requireNativePlugin().writeNamespaceData({
         namespace,
         offset,
-        data: Array.from(data),
+        data,
       });
       return;
     }
@@ -868,7 +860,7 @@ export class DatabaseConnection {
         offset,
         len,
       });
-      return Uint8Array.from(data);
+      return data;
     }
     return this.requireSecureProxy().readNamespaceData(namespace, offset, len);
   }
