@@ -284,7 +284,7 @@ fn dispatch(method: &str, args: &str) -> Result<String> {
         }
         "writeNamespaceData" => {
             let a: WriteNamespaceArgs = parse(args)?;
-            // Session blobs may contain key material — zeroize on return.
+            // Session blobs may contain key material - zeroize on return.
             let data = Zeroizing::new(B64.decode(a.data)?);
             native_vfs::write_namespace_data(a.namespace, a.offset, &data)?;
             Ok("null".into())
@@ -320,11 +320,9 @@ fn init_secure_storage(path: &str, domain: &str) -> Result<()> {
     native_vfs::init_native(path, domain)?;
     native_vfs::register()?;
     // Warm rayon's global pool so the first PQ op doesn't pay spawn cost.
+    // Callers wanting the pool size for telemetry can use the
+    // `rayonThreadCount` dispatch arm (Android already does so).
     let _ = rayon::ThreadPoolBuilder::new().build_global();
-    eprintln!(
-        "secureStorage: rayon pool = {} threads",
-        rayon::current_num_threads()
-    );
     Ok(())
 }
 
@@ -332,7 +330,7 @@ fn allocate(slot: u8, password: &[u8]) -> Result<()> {
     // Drop the previous rusqlite connection BEFORE switching sessions.
     // SQLite flushes dirty pages via `xWrite` during `sqlite3_close`,
     // and that flush must land on the OLD session's slot, not the new
-    // one — otherwise the previous account's in-cache data would be
+    // one - otherwise the previous account's in-cache data would be
     // re-encrypted with the new session's key and written to the new
     // slot, corrupting both accounts.
     {
@@ -490,7 +488,7 @@ fn exec_sql_one(
                     .map(V::Number)
                     .unwrap_or(V::Null),
                 // TEXT may carry non-UTF-8 if the caller bound raw bytes
-                // into a TEXT column — fall back to the blob sentinel so
+                // into a TEXT column - fall back to the blob sentinel so
                 // callers can recover the raw bytes.
                 rusqlite::types::ValueRef::Text(v) => match std::str::from_utf8(v) {
                     Ok(s) => V::from(s),
