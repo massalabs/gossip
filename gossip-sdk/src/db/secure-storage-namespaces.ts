@@ -17,6 +17,17 @@
  */
 export const SESSION_COUNT = 3;
 
+/**
+ * IndexedDB database name used by the WASM secure-storage backend.
+ * Must stay in sync with `DB_NAME` in
+ * `wasm/secure-storage/src/vfs/idb_storage.rs`. Tests use it to
+ * `indexedDB.deleteDatabase` between cases; mismatching the name
+ * silently turns the cleanup into a no-op (no error is raised when
+ * deleting a database that does not exist), leaving stale ciphertext
+ * for the next test to decrypt as garbage.
+ */
+export const SECURE_STORAGE_IDB_NAME = 'secure_storage';
+
 // Single source of truth for namespace IDs. `COVER_TRAFFIC_NAMESPACES` is
 // derived via Object.values so adding a field here automatically enrolls
 // the new namespace in cover-traffic rerandomization — forgetting to do so
