@@ -127,11 +127,14 @@ impl RedbStorage {
     }
 
     /// Batch-insert all buffered writes in a single ACID transaction.
+    ///
+    /// PD: we always run the redb write transaction, even when the in-memory
+    /// buffer is empty. Skipping the empty case would leak "no cover work
+    /// this tick" via the absence of an fsync on disk - an attacker watching
+    /// I/O timing could distinguish ticks where the scheduler had real work
+    /// to do from ticks where it did not. An empty redb txn still produces
+    /// a uniform fsync, keeping the on-disk timing pattern indistinguishable.
     pub fn commit(&mut self) -> Result<()> {
-        if self.ram_buffer.is_empty() {
-            return Ok(());
-        }
-
         let txn = self
             .db
             .begin_write()
