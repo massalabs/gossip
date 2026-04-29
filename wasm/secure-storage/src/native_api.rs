@@ -126,6 +126,13 @@ struct WriteNamespaceArgs {
 }
 
 #[derive(Deserialize)]
+struct ReplaceNamespaceArgs {
+    namespace: u8,
+    /// base64-encoded data bytes; replaces the entire namespace.
+    data: String,
+}
+
+#[derive(Deserialize)]
 struct ReadNamespaceArgs {
     namespace: u8,
     offset: u64,
@@ -292,6 +299,13 @@ fn dispatch(method: &str, args: &str) -> Result<String> {
             // Session blobs may contain key material - zeroize on return.
             let data = Zeroizing::new(B64.decode(a.data)?);
             native_vfs::write_namespace_data(a.namespace, a.offset, &data)?;
+            Ok("null".into())
+        }
+        "replaceNamespaceData" => {
+            let a: ReplaceNamespaceArgs = parse(args)?;
+            // Session blobs may contain key material — zeroize on return.
+            let data = Zeroizing::new(B64.decode(a.data)?);
+            native_vfs::replace_namespace_data(a.namespace, &data)?;
             Ok("null".into())
         }
         "readNamespaceData" => {

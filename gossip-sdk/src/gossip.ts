@@ -816,13 +816,12 @@ class GossipSdk {
   async persistSessionBlob(blob: Uint8Array): Promise<void> {
     const conn = this._conn;
     if (!conn?.isSecureStorage) return;
-    // Always clear + rewrite, regardless of previous length. Clearing
-    // only on shrink exposes a side-channel (plausible-deniability): an
-    // observer watching the namespace block count can correlate
-    // "no-clear" ticks with growth and "clear" ticks with shrink, which
-    // leaks session state dynamics.
-    await conn.secureStorageClearNamespace(SESSION_BLOB_NAMESPACE);
-    await conn.secureStorageWriteNamespaceData(SESSION_BLOB_NAMESPACE, 0, blob);
+    // The debounce + dirty-flag coalescing infrastructure already lives
+    // upstream in `handleSessionPersist` / `flushPersist` (defaults to
+    // 500ms). This method is the leaf write; running it directly is
+    // safe because by the time we get here the upstream coalescer has
+    // already collapsed any rapid-fire mutations into a single blob.
+    await conn.secureStorageReplaceNamespaceData(SESSION_BLOB_NAMESPACE, blob);
   }
 
   /**

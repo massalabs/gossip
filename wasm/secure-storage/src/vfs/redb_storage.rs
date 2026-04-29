@@ -60,6 +60,12 @@ pub struct RedbStorage {
     /// `write_block` / `append_block` updates this map; `commit` and
     /// `reset_blockstream` invalidate the affected entries.
     ram_overlay: HashMap<BlockKey, usize>,
+    /// Pending `(session, namespace)` blockstream resets. Drained at
+    /// `commit()` time, fused into the same redb txn as `ram_buffer`
+    /// inserts. Lets a "clear + write" pair finish in **one** fsync
+    /// instead of two — critical for the session-blob persist path,
+    /// where back-to-back clear+write was the hot fsync waterfall.
+    pending_deletes: Vec<(u8, u8)>,
     /// `block_counts[session][namespace] = count`. Lazy: only populated
     /// namespaces appear in the inner map.
     block_counts: Vec<HashMap<u8, u64>>,
@@ -76,6 +82,7 @@ impl RedbStorage {
             db,
             ram_buffer: Vec::new(),
             ram_overlay: HashMap::new(),
+            pending_deletes: Vec::new(),
             block_counts: (0..SESSION_COUNT).map(|_| HashMap::new()).collect(),
         };
         storage.rebuild_block_counts()?;
@@ -134,28 +141,50 @@ impl RedbStorage {
         Ok(iter.next().is_some())
     }
 
-    /// Batch-insert all buffered writes in a single ACID transaction.
+    /// Batch-flush pending deletes and inserts in a single ACID
+    /// transaction (one redb commit = one fsync). Two-phase to fuse
+    /// "clear + write" patterns (e.g. session-blob persist) into one
+    /// fsync instead of two:
     ///
-    /// PD: we always run the redb write transaction, even when the in-memory
-    /// buffer is empty. Skipping the empty case would leak "no cover work
-    /// this tick" via the absence of an fsync on disk - an attacker watching
-    /// I/O timing could distinguish ticks where the scheduler had real work
-    /// to do from ticks where it did not. An empty redb txn still produces
-    /// a uniform fsync, keeping the on-disk timing pattern indistinguishable.
+    ///   - Phase A: drain `pending_deletes` (blockstream resets staged
+    ///     by `reset_blockstream` since the last commit).
+    ///   - Phase B: insert `ram_buffer` writes, deduped via
+    ///     `ram_overlay` (a hot path can buffer multiple writes for the
+    ///     same key when the SQLite page cache flushes a page that was
+    ///     rewritten in the same txn, etc.) — only the last-written
+    ///     value per key reaches redb.
+    ///
+    /// Order matters: deletes run BEFORE inserts inside the same txn so
+    /// a "replace namespace" pattern that targets overlapping keys
+    /// keeps the new bytes — even though in practice the sets are
+    /// disjoint, since clears wipe the whole `(session, namespace)`
+    /// stream and the new writes start fresh from block 0.
+    ///
+    /// PD: we always run the redb write transaction, even when both
+    /// queues are empty. Skipping would leak "no cover work this tick"
+    /// via the absence of an fsync on disk — an attacker watching I/O
+    /// timing could distinguish ticks where the scheduler had real work
+    /// to do from ticks where it did not. An empty redb txn still
+    /// produces a uniform fsync, keeping the on-disk timing pattern
+    /// indistinguishable.
     pub fn commit(&mut self) -> Result<()> {
-        // Dedupe by key using `ram_overlay`: a hot path can buffer multiple
-        // writes for the same (session, namespace, block_id) when the SQLite
-        // page cache flushes a page that was rewritten in the same txn, when
-        // truncate-then-write resequences a block, etc. The overlay map
-        // already points each key at the index of its last buffered write,
-        // so we re-use it to skip redundant entries instead of paying for
-        // them as separate redb inserts.
         let txn = self.db.begin_write().map_err(redb_err("write txn"))?;
         {
             let mut table = txn.open_table(BLOCKS).map_err(redb_err("open table"))?;
-            // Iterate in original buffer order so on-disk write order matches
-            // the order in which the application made the writes, but using
-            // each key's last-buffered value.
+            // Phase A: drain pending blockstream deletes.
+            for (session, namespace) in &self.pending_deletes {
+                let prefix_start = Self::make_block_key(*session, *namespace, 0);
+                let prefix_end = Self::make_block_key(*session, *namespace, u64::MAX);
+                table
+                    .retain_in(prefix_start.as_slice()..=prefix_end.as_slice(), |_k, _v| {
+                        false
+                    })
+                    .map_err(redb_err("retain_in"))?;
+            }
+            // Phase B: insert ram_buffer writes, deduped via ram_overlay.
+            // Iterate in original buffer order so on-disk write order
+            // matches the order in which the application made the
+            // writes, but using each key's last-buffered value.
             for (i, bw) in self.ram_buffer.iter().enumerate() {
                 let key = Self::make_block_key(bw.session, bw.namespace, bw.block_id);
                 if self.ram_overlay.get(&key) != Some(&i) {
@@ -169,6 +198,7 @@ impl RedbStorage {
         txn.commit().map_err(redb_err("commit"))?;
         self.ram_buffer.clear();
         self.ram_overlay.clear();
+        self.pending_deletes.clear();
         Ok(())
     }
 }
@@ -297,24 +327,18 @@ impl BlockStorage for RedbStorage {
             self.ram_overlay.insert(k, i);
         }
 
-        // Delete this (session, namespace)'s blocks from redb.
-        let txn = self.db.begin_write().map_err(redb_err("write txn"))?;
+        // Stage the redb-side delete for the next `commit()` call. This
+        // lets a subsequent `write_block` + `commit` fuse the wipe and
+        // the rewrite into a single redb transaction (one fsync) — the
+        // hot path for session-blob persistence. Idempotent: enqueue
+        // only if not already pending.
+        if !self
+            .pending_deletes
+            .iter()
+            .any(|(s, n)| *s == su8 && *n == namespace)
         {
-            let mut table = txn.open_table(BLOCKS).map_err(redb_err("open table"))?;
-
-            // Delete in place via `retain_in`: skips the
-            // `Vec<BlockKey>` materialisation of every key in the range
-            // before re-walking it for `remove`. Useful for namespaces
-            // that have grown to thousands of blocks.
-            let prefix_start = Self::make_block_key(su8, namespace, 0);
-            let prefix_end = Self::make_block_key(su8, namespace, u64::MAX);
-            table
-                .retain_in(prefix_start.as_slice()..=prefix_end.as_slice(), |_k, _v| {
-                    false
-                })
-                .map_err(redb_err("retain_in"))?;
+            self.pending_deletes.push((su8, namespace));
         }
-        txn.commit().map_err(redb_err("commit"))?;
 
         self.block_counts[si].remove(&namespace);
         Ok(())

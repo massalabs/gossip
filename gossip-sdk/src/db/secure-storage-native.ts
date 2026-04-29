@@ -129,6 +129,18 @@ export interface SecureStorageNativePlugin {
     offset: number;
     data: Uint8Array;
   }): Promise<void>;
+
+  /**
+   * Atomic clear+write. Equivalent to `clearNamespace` followed by
+   * `writeNamespaceData(ns, 0, data)`, but a single redb txn (one fsync)
+   * inside a single mutex hold — used by the session-blob persist hot
+   * path where the two-step variant produced back-to-back fsyncs that
+   * blocked SQL ops on the shared state mutex.
+   */
+  replaceNamespaceData(options: {
+    namespace: number;
+    data: number[];
+  }): Promise<void>;
   readNamespaceData(options: {
     namespace: number;
     offset: number;
@@ -245,5 +257,11 @@ export const SecureStorageNative: SecureStorageNativePlugin = {
   },
   async destroySession({ namespaces }) {
     await callNative('destroySession', { namespaces });
+  },
+  async replaceNamespaceData({ namespace, data }) {
+    await callNative('replaceNamespaceData', {
+      namespace,
+      data: u8ToBase64(data),
+    });
   },
 };

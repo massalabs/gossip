@@ -643,6 +643,45 @@ pub fn read_namespace_data(namespace: u8, offset: u64, len: usize) -> Result<Vec
     Ok(data.to_vec())
 }
 
+/// Atomic clear+write for a non-SQL namespace. Equivalent semantically
+/// to `clear_namespace(ns)` followed by `write_namespace_data(ns, 0, data)`,
+/// but a single redb transaction (one fsync) and a single `state_mutex`
+/// acquisition. Used by the session-blob persist hot path, where the
+/// two-step variant produced back-to-back fsyncs that blocked SQL ops
+/// on the shared mutex.
+pub fn replace_namespace_data(namespace: u8, data: &[u8]) -> Result<()> {
+    let mutex = state_mutex();
+    let mut guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
+    let st = guard
+        .as_mut()
+        .ok_or_else(|| SecureStorageError::Storage("not initialized".into()))?;
+    let session = st
+        .session
+        .as_ref()
+        .ok_or_else(|| SecureStorageError::Storage("no session".into()))?;
+    use crate::storage::BlockStorage;
+    // Stage the blockstream wipe (no fsync - defers to the final commit).
+    st.backend.reset_blockstream(session.session_index, namespace)?;
+    // Reset in-memory namespace state. After this the namespace is
+    // logically length-0; `write_session_data` starts fresh from offset 0.
+    st.namespace_states
+        .insert(namespace, NamespaceState::empty());
+    let ns_state = st.namespace_states.get_mut(&namespace).unwrap();
+    crate::write_session_data(
+        &mut st.backend,
+        &st.domain,
+        namespace,
+        session,
+        ns_state,
+        0,
+        data,
+    )?;
+    // Single commit drains both the staged delete (`pending_deletes`)
+    // and the encrypted blocks (`ram_buffer`) in one redb txn -> one
+    // fsync, one mutex window for the whole operation.
+    st.backend.commit()
+}
+
 /// Truncate a non-SQL namespace back to empty while preserving physical
 /// blocks as covers, matching the web VFS namespace-clear contract.
 pub fn clear_namespace(namespace: u8) -> Result<()> {

@@ -914,6 +914,26 @@ export class DatabaseConnection {
     await this.requireSecureProxy().clearNamespace(namespace);
   }
 
+  /** Atomic clear+write: replace the entire namespace contents in one
+   *  txn / one fsync (native path) — see `replaceNamespaceData` on the
+   *  plugin interface for rationale. Falls back to clear-then-write on
+   *  the WASM worker path, which has no equivalent fused primitive. */
+  async secureStorageReplaceNamespaceData(
+    namespace: number,
+    data: Uint8Array
+  ): Promise<void> {
+    if (this.state.useNativePlugin) {
+      await this.requireNativePlugin().replaceNamespaceData({
+        namespace,
+        data: Array.from(data),
+      });
+      return;
+    }
+    const proxy = this.requireSecureProxy();
+    await proxy.clearNamespace(namespace);
+    await proxy.writeNamespaceData(namespace, 0, data);
+  }
+
   // ─── Public methods ────────────────────────────────────────────
 
   async getLastInsertRowId(): Promise<number> {
