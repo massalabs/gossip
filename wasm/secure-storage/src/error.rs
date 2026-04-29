@@ -27,6 +27,12 @@ pub enum SecureStorageError {
     #[error("storage error")]
     Storage(String),
 
+    #[error("not initialized")]
+    NotInitialized,
+
+    #[error("database not open")]
+    DatabaseNotOpen,
+
     #[error("database error")]
     Sqlite(String),
 
