@@ -41,6 +41,14 @@ struct BufferedWrite {
 pub struct RedbStorage {
     db: Database,
     ram_buffer: Vec<BufferedWrite>,
+    /// Overlay index: maps a (session, namespace, block_id) key to the
+    /// position in `ram_buffer` of the last buffered write at that key.
+    ///
+    /// Replaces the previous O(buffer_len) linear scan in `read_block`
+    /// with an O(1) lookup. Stays in sync with `ram_buffer`: every
+    /// `write_block` / `append_block` updates this map; `commit` and
+    /// `reset_blockstream` invalidate the affected entries.
+    ram_overlay: HashMap<[u8; 10], usize>,
     /// `block_counts[session][namespace] = count`. Lazy: only populated
     /// namespaces appear in the inner map.
     block_counts: Vec<HashMap<u8, u64>>,
@@ -57,6 +65,7 @@ impl RedbStorage {
         let mut storage = Self {
             db,
             ram_buffer: Vec::new(),
+            ram_overlay: HashMap::new(),
             block_counts: (0..SESSION_COUNT).map(|_| HashMap::new()).collect(),
         };
         storage.rebuild_block_counts()?;
@@ -135,19 +144,13 @@ impl RedbStorage {
     /// to do from ticks where it did not. An empty redb txn still produces
     /// a uniform fsync, keeping the on-disk timing pattern indistinguishable.
     pub fn commit(&mut self) -> Result<()> {
-        // Dedupe by key: a hot path can buffer multiple writes for the same
-        // (session, namespace, block_id) when the SQLite page cache flushes
-        // a page that was rewritten in the same txn, when truncate-then-write
-        // resequences a block, etc. Inserting all of them in turn does N redb
-        // writes for the same key when only the last one matters. Walk the
-        // buffer in reverse so the *last* write wins, matching the in-memory
-        // overlay semantics in `read_block`.
-        let mut last_idx: HashMap<[u8; 10], usize> = HashMap::with_capacity(self.ram_buffer.len());
-        for (i, bw) in self.ram_buffer.iter().enumerate() {
-            let key = Self::make_block_key(bw.session, bw.namespace, bw.block_id);
-            last_idx.insert(key, i);
-        }
-
+        // Dedupe by key using `ram_overlay`: a hot path can buffer multiple
+        // writes for the same (session, namespace, block_id) when the SQLite
+        // page cache flushes a page that was rewritten in the same txn, when
+        // truncate-then-write resequences a block, etc. The overlay map
+        // already points each key at the index of its last buffered write,
+        // so we re-use it to skip redundant entries instead of paying for
+        // them as separate redb inserts.
         let txn = self
             .db
             .begin_write()
@@ -156,12 +159,12 @@ impl RedbStorage {
             let mut table = txn
                 .open_table(BLOCKS)
                 .map_err(|e| SecureStorageError::Storage(format!("redb open table: {e}")))?;
-            // Iterate in original buffer order so on-disk write order
-            // matches the order in which the application made the writes,
-            // but using each key's last-buffered value.
+            // Iterate in original buffer order so on-disk write order matches
+            // the order in which the application made the writes, but using
+            // each key's last-buffered value.
             for (i, bw) in self.ram_buffer.iter().enumerate() {
                 let key = Self::make_block_key(bw.session, bw.namespace, bw.block_id);
-                if last_idx.get(&key) != Some(&i) {
+                if self.ram_overlay.get(&key) != Some(&i) {
                     continue;
                 }
                 table
@@ -172,6 +175,7 @@ impl RedbStorage {
         txn.commit()
             .map_err(|e| SecureStorageError::Storage(format!("redb commit: {e}")))?;
         self.ram_buffer.clear();
+        self.ram_overlay.clear();
         Ok(())
     }
 }
@@ -194,11 +198,10 @@ impl BlockStorage for RedbStorage {
             return Err(SecureStorageError::OutOfBounds);
         }
 
-        // Check RAM buffer first (last-write-wins).
-        for bw in self.ram_buffer.iter().rev() {
-            if bw.session == si && bw.namespace == namespace && bw.block_id == block {
-                return Ok(bw.data.clone());
-            }
+        // Check RAM buffer first (last-write-wins) via the overlay index.
+        let key = Self::make_block_key(si, namespace, block);
+        if let Some(&idx) = self.ram_overlay.get(&key) {
+            return Ok(self.ram_buffer[idx].data.clone());
         }
 
         // Fall back to redb.
@@ -209,7 +212,6 @@ impl BlockStorage for RedbStorage {
         let table = txn
             .open_table(BLOCKS)
             .map_err(|e| SecureStorageError::Storage(format!("redb open table: {e}")))?;
-        let key = Self::make_block_key(si, namespace, block);
         let entry = table
             .get(key.as_slice())
             .map_err(|e| SecureStorageError::Storage(format!("redb get: {e}")))?;
@@ -219,9 +221,16 @@ impl BlockStorage for RedbStorage {
                 if val_bytes.len() != BLOCK_SIZE {
                     return Err(SecureStorageError::CorruptedBlock);
                 }
-                let mut buf = Box::new([0u8; BLOCK_SIZE]);
-                buf.copy_from_slice(val_bytes);
-                Ok(buf)
+                // SAFETY: `Box::new_uninit` returns a `Box<MaybeUninit<[u8; N]>>`
+                // and we initialise every byte via `copy_from_slice` before
+                // calling `assume_init`. `val_bytes.len() == BLOCK_SIZE` is
+                // checked just above, so the copy fully fills the array.
+                // Skipping the `[0u8; BLOCK_SIZE]` zero-init avoids 64 KiB
+                // of useless memset per redb read on the hot path.
+                let mut buf: Box<std::mem::MaybeUninit<[u8; BLOCK_SIZE]>> = Box::new_uninit();
+                let buf_ref: &mut [u8; BLOCK_SIZE] = unsafe { &mut *buf.as_mut_ptr() };
+                buf_ref.copy_from_slice(val_bytes);
+                Ok(unsafe { buf.assume_init() })
             }
             None => Err(SecureStorageError::OutOfBounds),
         }
@@ -241,12 +250,14 @@ impl BlockStorage for RedbStorage {
         if block >= count {
             return Err(SecureStorageError::OutOfBounds);
         }
+        let key = Self::make_block_key(session.as_u8(), namespace, block);
         self.ram_buffer.push(BufferedWrite {
             session: session.as_u8(),
             namespace,
             block_id: block,
             data: Box::new(*data),
         });
+        self.ram_overlay.insert(key, self.ram_buffer.len() - 1);
         Ok(())
     }
 
@@ -260,12 +271,14 @@ impl BlockStorage for RedbStorage {
             .entry(namespace)
             .or_insert(0);
         let block_id = *count;
+        let key = Self::make_block_key(session.as_u8(), namespace, block_id);
         self.ram_buffer.push(BufferedWrite {
             session: session.as_u8(),
             namespace,
             block_id,
             data: Box::new(*data),
         });
+        self.ram_overlay.insert(key, self.ram_buffer.len() - 1);
         *count += 1;
         Ok(())
     }
@@ -286,9 +299,17 @@ impl BlockStorage for RedbStorage {
         let si = session.as_usize();
         let su8 = session.as_u8();
 
-        // Remove buffered writes for this (session, namespace).
+        // Remove buffered writes for this (session, namespace) and the
+        // matching overlay entries. The overlay's index values point into
+        // ram_buffer, so we must rebuild it after the retain rather than
+        // try to fix indices in place.
         self.ram_buffer
             .retain(|bw| !(bw.session == su8 && bw.namespace == namespace));
+        self.ram_overlay.clear();
+        for (i, bw) in self.ram_buffer.iter().enumerate() {
+            let k = Self::make_block_key(bw.session, bw.namespace, bw.block_id);
+            self.ram_overlay.insert(k, i);
+        }
 
         // Delete this (session, namespace)'s blocks from redb.
         let txn = self
