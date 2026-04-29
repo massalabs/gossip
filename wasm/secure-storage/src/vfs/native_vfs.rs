@@ -603,6 +603,10 @@ fn checked_u64_from_i64(v: i64) -> Option<u64> {
     if v < 0 { None } else { Some(v as u64) }
 }
 
+// SAFETY: SQLite guarantees `file` points to a fresh `sqlite3_file`-shaped
+// allocation of at least `vfs.szOsFile` bytes (we set this to `size_of::<EncFile>`
+// in `register`), and `out_flags`, when non-null, points to a writable c_int.
+// `_z_name` is unused. See https://www.sqlite.org/c3ref/vfs.html (xOpen).
 unsafe extern "C" fn x_open(
     _vfs: *mut sqlite3_vfs,
     _z_name: *const c_char,
@@ -636,6 +640,10 @@ unsafe extern "C" fn x_open(
     })
 }
 
+// SAFETY: SQLite guarantees `file` points to the same `EncFile`-shaped
+// allocation that was passed to `x_open` and is not concurrently accessed
+// from another thread (the VFS uses `locking_mode=EXCLUSIVE`).
+// See https://www.sqlite.org/c3ref/io_methods.html (xClose).
 unsafe extern "C" fn x_close(file: *mut sqlite3_file) -> c_int {
     vfs_call(|| unsafe {
         let f = &*(file as *const EncFile);
@@ -650,6 +658,10 @@ unsafe extern "C" fn x_close(file: *mut sqlite3_file) -> c_int {
     })
 }
 
+// SAFETY: SQLite guarantees `file` is a valid `EncFile` pointer and `buf`
+// is a writable region of at least `amt` bytes. `amt` is non-negative and
+// `offset` is non-negative (we still validate both defensively).
+// See https://www.sqlite.org/c3ref/io_methods.html (xRead).
 unsafe extern "C" fn x_read(
     file: *mut sqlite3_file,
     buf: *mut c_void,
@@ -745,6 +757,10 @@ unsafe extern "C" fn x_read(
 /// OOM-ing a mobile process.
 const AUX_FILE_MAX_BYTES: usize = 64 * 1024 * 1024;
 
+// SAFETY: SQLite guarantees `file` is a valid `EncFile` pointer and `buf`
+// is a readable region of at least `amt` bytes. `amt` is non-negative and
+// `offset` is non-negative.
+// See https://www.sqlite.org/c3ref/io_methods.html (xWrite).
 unsafe extern "C" fn x_write(
     file: *mut sqlite3_file,
     buf: *const c_void,
@@ -809,6 +825,11 @@ unsafe extern "C" fn x_write(
     })
 }
 
+// SAFETY: SQLite guarantees `file` is a valid `EncFile` pointer and `size`
+// is non-negative (we validate it). PD-H1: shrinks call into
+// `EncryptedFileCore::truncate`, which calls `shrink_session_data` so freed
+// blocks are reissued as covers.
+// See https://www.sqlite.org/c3ref/io_methods.html (xTruncate).
 unsafe extern "C" fn x_truncate(file: *mut sqlite3_file, size: i64) -> c_int {
     vfs_call(|| unsafe {
         let f = &*(file as *const EncFile);
@@ -857,6 +878,11 @@ unsafe extern "C" fn x_truncate(file: *mut sqlite3_file, size: i64) -> c_int {
     })
 }
 
+// SAFETY: `_file` and `_flags` are not dereferenced. Side-effect only:
+// flush pending writes through to the redb backend. With `journal_mode=OFF`
+// SQLite never calls this on its own; it fires through SDK-level COMMIT
+// detection (see `secure-storage-native.ts`).
+// See https://www.sqlite.org/c3ref/io_methods.html (xSync).
 unsafe extern "C" fn x_sync(_file: *mut sqlite3_file, _flags: c_int) -> c_int {
     vfs_call(|| {
         let mut guard = match lock_state() {
@@ -874,6 +900,9 @@ unsafe extern "C" fn x_sync(_file: *mut sqlite3_file, _flags: c_int) -> c_int {
     })
 }
 
+// SAFETY: SQLite guarantees `file` is a valid `EncFile` pointer and `size`
+// points to a writable `i64` slot.
+// See https://www.sqlite.org/c3ref/io_methods.html (xFileSize).
 unsafe extern "C" fn x_file_size(file: *mut sqlite3_file, size: *mut i64) -> c_int {
     vfs_call(|| unsafe {
         let f = &*(file as *const EncFile);
@@ -898,6 +927,9 @@ unsafe extern "C" fn x_file_size(file: *mut sqlite3_file, size: *mut i64) -> c_i
     })
 }
 
+// SAFETY: Pointers are never dereferenced (this VFS owns no on-disk files
+// beyond redb); xDelete is a no-op for compatibility.
+// See https://www.sqlite.org/c3ref/vfs.html (xDelete).
 unsafe extern "C" fn x_delete(
     _vfs: *mut sqlite3_vfs,
     _z_name: *const c_char,
@@ -906,6 +938,9 @@ unsafe extern "C" fn x_delete(
     SQLITE_OK as c_int
 }
 
+// SAFETY: SQLite guarantees `result` points to a writable c_int. We always
+// report "not present" (0) since this VFS's storage is in redb, not the
+// host filesystem. See https://www.sqlite.org/c3ref/vfs.html (xAccess).
 unsafe extern "C" fn x_access(
     _vfs: *mut sqlite3_vfs,
     _z_name: *const c_char,
@@ -918,6 +953,9 @@ unsafe extern "C" fn x_access(
     })
 }
 
+// SAFETY: SQLite guarantees `z_name` is a valid NUL-terminated C string
+// (or null) and `z_out` points to a buffer of at least `n_out` bytes.
+// See https://www.sqlite.org/c3ref/vfs.html (xFullPathname).
 unsafe extern "C" fn x_full_pathname(
     _vfs: *mut sqlite3_vfs,
     z_name: *const c_char,
