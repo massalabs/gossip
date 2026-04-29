@@ -23,8 +23,7 @@ use std::mem::size_of;
 use std::os::raw::{c_char, c_int, c_void};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, Once, OnceLock};
+use std::sync::{Mutex, MutexGuard, Once, OnceLock};
 use std::time::Duration;
 
 use rusqlite::ffi::{
@@ -61,7 +60,7 @@ struct VfsState {
     namespace_states: HashMap<u8, NamespaceState>,
     /// Per-file read/write/sync state for the SQLite main DB.
     ///
-    /// Shared with the web VFS via [`EncryptedFileCore`] — this is the
+    /// Shared with the web VFS via [`EncryptedFileCore`] - this is the
     /// single source of truth for pending-write handling, overlay
     /// reads, and shrink semantics. Native callbacks are thin FFI
     /// trampolines that delegate here.
@@ -79,7 +78,7 @@ impl VfsState {
 
 static STATE: OnceLock<Mutex<Option<VfsState>>> = OnceLock::new();
 
-/// Auxiliary file data (journal/temp — unencrypted, in-memory only).
+/// Auxiliary file data (journal/temp - unencrypted, in-memory only).
 static AUX: OnceLock<Mutex<Vec<Vec<u8>>>> = OnceLock::new();
 
 fn aux() -> &'static Mutex<Vec<Vec<u8>>> {
@@ -90,13 +89,21 @@ fn state_mutex() -> &'static Mutex<Option<VfsState>> {
     STATE.get_or_init(|| Mutex::new(None))
 }
 
-const KIND_MAIN: u32 = 1;
-const KIND_AUX: u32 = 2;
+/// Discriminator for `EncFile`: which SQLite file role this struct
+/// represents. `#[repr(u32)]` keeps the struct layout identical to the
+/// previous `kind: u32` field so SQLite-side `szOsFile` accounting is
+/// unchanged.
+#[repr(u32)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FileKind {
+    Main = 1,
+    Aux = 2,
+}
 
 #[repr(C)]
 struct EncFile {
     base: sqlite3_file,
-    kind: u32,
+    kind: FileKind,
     aux_id: u32,
 }
 
@@ -153,7 +160,7 @@ static REGISTER_RESULT: OnceLock<std::result::Result<(), String>> = OnceLock::ne
 /// Register the encrypted VFS with SQLite (non-default). Idempotent.
 ///
 /// Failures here propagate back to the caller via `SecureStorageError::Storage`
-/// rather than panicking — panicking across the UniFFI boundary on mobile
+/// rather than panicking - panicking across the UniFFI boundary on mobile
 /// is undefined behaviour because Rust unwinding cannot traverse
 /// Swift/Kotlin frames.
 pub fn register() -> Result<()> {
@@ -199,7 +206,7 @@ pub fn register() -> Result<()> {
     match REGISTER_RESULT.get() {
         Some(Ok(())) => Ok(()),
         Some(Err(msg)) => Err(SecureStorageError::Storage(msg.clone())),
-        // Should not happen — `call_once` always sets REGISTER_RESULT.
+        // Should not happen - `call_once` always sets REGISTER_RESULT.
         None => Err(SecureStorageError::Storage(
             "VFS registration state missing".into(),
         )),
@@ -236,7 +243,7 @@ pub fn allocate(slot: u8, password: &[u8]) -> Result<()> {
         .ok_or_else(|| SecureStorageError::NotInitialized)?;
     // Flush pending writes to the CURRENT session before switching.
     // Otherwise the `main_file` reset below would drop data that was
-    // buffered but not yet synced to redb — e.g. during multi-account
+    // buffered but not yet synced to redb - e.g. during multi-account
     // onboarding, the profile INSERT for account 1 might still sit in
     // RAM when we allocate account 2.
     if st.session.is_some() {
@@ -282,7 +289,7 @@ pub fn unlock(password: &[u8]) -> Result<bool> {
 
 /// Zeroize session keys. SQLite must be closed before calling this.
 ///
-/// Best-effort flushes pending writes first — if the caller forgot to
+/// Best-effort flushes pending writes first - if the caller forgot to
 /// flush before locking, we don't silently drop buffered data. Flush
 /// errors are ignored because locking must not fail (it's often the
 /// last thing an app calls during shutdown).
@@ -315,7 +322,7 @@ pub fn is_unlocked() -> Result<bool> {
 // Mirrors the web worker's `startCoverTraffic` (see
 // `gossip-sdk/src/db/secure-storage-worker.ts`). Without this, the
 // native build would only run cover traffic when the TS SDK explicitly
-// polls it — and on iOS/Android the WebView may be suspended (background
+// polls it - and on iOS/Android the WebView may be suspended (background
 // fetch, notification extension) while the Rust layer is still alive,
 // so relying on the JS side would create PD gaps between snapshots.
 //
@@ -326,7 +333,12 @@ pub fn is_unlocked() -> Result<bool> {
 const COVER_TRAFFIC_MIN_INTERVAL_MS: u64 = 10_000;
 const COVER_TRAFFIC_MAX_INTERVAL_MS: u64 = 30_000;
 
-static SCHEDULER: OnceLock<Arc<AtomicBool>> = OnceLock::new();
+/// Sentinel used only for `OnceLock::get_or_init` idempotency. The
+/// scheduler thread itself runs `loop { ... }` and is never asked to
+/// stop: cover traffic that goes silent on lock would itself leak the
+/// fact that the user just locked, so the thread is intentionally
+/// process-lived.
+static SCHEDULER: OnceLock<()> = OnceLock::new();
 
 fn random_cover_interval_ms() -> u64 {
     use rand::Rng;
@@ -334,21 +346,16 @@ fn random_cover_interval_ms() -> u64 {
 }
 
 /// Spawn the cover-traffic background thread if it isn't already
-/// running. Idempotent — subsequent calls are no-ops. The thread lives
+/// running. Idempotent - subsequent calls are no-ops. The thread lives
 /// for the process; stopping it on lock would itself leak activity
 /// (scheduler silence = "user just locked"), so we keep it running.
 fn ensure_cover_scheduler() {
     SCHEDULER.get_or_init(|| {
-        let running = Arc::new(AtomicBool::new(true));
-        let running_for_thread = running.clone();
         let spawn_result = std::thread::Builder::new()
             .name("secure-storage-cover".into())
-            .spawn(move || {
-                while running_for_thread.load(Ordering::Relaxed) {
+            .spawn(|| {
+                loop {
                     std::thread::sleep(Duration::from_millis(random_cover_interval_ms()));
-                    if !running_for_thread.load(Ordering::Relaxed) {
-                        break;
-                    }
                     // Best-effort: errors while the state is missing
                     // (e.g. between `init_native` and the first
                     // `provision`) are ignored and we simply keep
@@ -369,7 +376,6 @@ fn ensure_cover_scheduler() {
                 "secureStorage: PD-DEGRADED cover scheduler spawn failed: {e}"
             );
         }
-        running
     });
 }
 
@@ -589,7 +595,7 @@ fn vfs_call<F: FnOnce() -> c_int>(f: F) -> c_int {
 }
 
 /// Acquire the VFS state mutex without poisoning semantics: a previously
-/// panicking holder (caught by `vfs_call`) should not lock us out — we
+/// panicking holder (caught by `vfs_call`) should not lock us out - we
 /// recover by taking the inner value. Returns `None` if not initialised.
 fn lock_state() -> std::result::Result<MutexGuard<'static, Option<VfsState>>, ()> {
     match state_mutex().lock() {
@@ -636,10 +642,10 @@ unsafe extern "C" fn x_open(
         f.base.pMethods = io_methods();
 
         if flags & SQLITE_OPEN_MAIN_DB as c_int != 0 {
-            f.kind = KIND_MAIN;
+            f.kind = FileKind::Main;
             f.aux_id = 0;
         } else {
-            f.kind = KIND_AUX;
+            f.kind = FileKind::Aux;
             f.aux_id = match lock_aux() {
                 Ok(mut a) => {
                     let id = a.len() as u32;
@@ -664,7 +670,7 @@ unsafe extern "C" fn x_open(
 unsafe extern "C" fn x_close(file: *mut sqlite3_file) -> c_int {
     vfs_call(|| unsafe {
         let f = &*(file as *const EncFile);
-        if f.kind == KIND_AUX {
+        if f.kind == FileKind::Aux {
             if let Ok(mut a) = lock_aux() {
                 if let Some(v) = a.get_mut(f.aux_id as usize) {
                     *v = Vec::new();
@@ -697,7 +703,7 @@ unsafe extern "C" fn x_read(
         };
         let dst = std::slice::from_raw_parts_mut(buf as *mut u8, n);
 
-        if f.kind == KIND_MAIN {
+        if f.kind == FileKind::Main {
             // Pre-validate the end offset so the shared `read()`
             // implementation never sees an overflow.
             if off.checked_add(n as u64).is_none() {
@@ -718,7 +724,7 @@ unsafe extern "C" fn x_read(
                 Some(s) => s,
                 None => {
                     dst.fill(0);
-                    // No valid DB without a session — reject firmly so
+                    // No valid DB without a session - reject firmly so
                     // SQLite cannot mis-parse the zero-filled buffer as
                     // an empty-but-valid database header.
                     return SQLITE_IOERR as c_int;
@@ -792,7 +798,7 @@ unsafe extern "C" fn x_write(
         };
         let src = std::slice::from_raw_parts(buf as *const u8, n);
 
-        if f.kind == KIND_MAIN {
+        if f.kind == FileKind::Main {
             let write_off = match checked_u64_from_i64(offset) {
                 Some(o) => o,
                 None => return SQLITE_IOERR as c_int,
@@ -854,7 +860,7 @@ unsafe extern "C" fn x_truncate(file: *mut sqlite3_file, size: i64) -> c_int {
             Some(s) => s,
             None => return SQLITE_IOERR as c_int,
         };
-        if f.kind == KIND_MAIN {
+        if f.kind == FileKind::Main {
             let mut guard = match lock_state() {
                 Ok(g) => g,
                 Err(_) => return SQLITE_IOERR as c_int,
@@ -864,7 +870,7 @@ unsafe extern "C" fn x_truncate(file: *mut sqlite3_file, size: i64) -> c_int {
                 None => return SQLITE_IOERR as c_int,
             };
             // Delegate to the shared `EncryptedFileCore::truncate`
-            // (same code path as the web VFS) — it trims pending
+            // (same code path as the web VFS) - it trims pending
             // writes and calls `shrink_session_data` on shrink so
             // freed blocks become covers (PD-H1).
             let VfsState {
@@ -923,7 +929,7 @@ unsafe extern "C" fn x_sync(_file: *mut sqlite3_file, _flags: c_int) -> c_int {
 unsafe extern "C" fn x_file_size(file: *mut sqlite3_file, size: *mut i64) -> c_int {
     vfs_call(|| unsafe {
         let f = &*(file as *const EncFile);
-        if f.kind == KIND_MAIN {
+        if f.kind == FileKind::Main {
             let guard = match lock_state() {
                 Ok(g) => g,
                 Err(_) => return SQLITE_IOERR as c_int,
@@ -1139,7 +1145,7 @@ mod tests {
             flush().unwrap();
 
             // After truncate, the logical file size should drop but the
-            // physical block count must NOT decrease — freed blocks
+            // physical block count must NOT decrease - freed blocks
             // become covers (PD invariant).
             let (logical_size, post_count) = {
                 use crate::storage::BlockStorage;
@@ -1176,7 +1182,7 @@ mod tests {
     /// mobile onboarding + login flow that Swift/Kotlin drive from the
     /// Capacitor plugins. Exercises every entry point in `native_api`
     /// order and asserts cross-reopen durability, wrong-password
-    /// rejection, and namespace-data isolation — the closest we can get
+    /// rejection, and namespace-data isolation - the closest we can get
     /// to an end-to-end native run without a device/simulator.
     #[test]
     fn test_native_full_mobile_flow() {
@@ -1203,7 +1209,7 @@ mod tests {
                 )
                 .unwrap();
 
-                // Session blob (namespace 1) — the non-SQL persistence path.
+                // Session blob (namespace 1) - the non-SQL persistence path.
                 let blob_v1 = vec![0x11u8; 32 * 1024];
                 write_namespace_data(1, 0, &blob_v1).unwrap();
                 assert_eq!(namespace_data_length(1).unwrap(), 32 * 1024);
@@ -1218,7 +1224,7 @@ mod tests {
                 assert!(!is_unlocked().unwrap());
             }
 
-            // ── Phase 2: app relaunch — fresh process, wrong password ──
+            // ── Phase 2: app relaunch - fresh process, wrong password ──
             {
                 reset_state();
                 init_native(&path, "gossip").unwrap();
@@ -1228,7 +1234,7 @@ mod tests {
                 assert!(!is_unlocked().unwrap());
             }
 
-            // ── Phase 3: app relaunch — correct password, read back ──
+            // ── Phase 3: app relaunch - correct password, read back ──
             {
                 reset_state();
                 init_native(&path, "gossip").unwrap();
@@ -1265,7 +1271,7 @@ mod tests {
                 lock();
             }
 
-            // ── Phase 4: final relaunch — everything must still be there ──
+            // ── Phase 4: final relaunch - everything must still be there ──
             {
                 reset_state();
                 init_native(&path, "gossip").unwrap();
