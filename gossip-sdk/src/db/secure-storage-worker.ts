@@ -72,7 +72,7 @@ function randomCoverInterval(): number {
   return COVER_TRAFFIC_MIN_INTERVAL_MS + (u32 % range);
 }
 
-class SecureStorageWorkerApi {
+export class SecureStorageWorkerApi {
   private coverTimerId: ReturnType<typeof setTimeout> | null = null;
   private coverTickInProgress = false;
 
@@ -196,8 +196,11 @@ class SecureStorageWorkerApi {
    * underlying DB is open and durable.
    */
   async create(slot: number, password: Uint8Array): Promise<void> {
-    allocateSession(slot, password);
-    password.fill(0);
+    try {
+      allocateSession(slot, password);
+    } finally {
+      password.fill(0);
+    }
     await flushEncrypted();
     openDatabase();
   }
@@ -212,8 +215,12 @@ class SecureStorageWorkerApi {
    * resolves.
    */
   async unlock(password: Uint8Array): Promise<boolean> {
-    const ok = unlockSession(password);
-    password.fill(0);
+    let ok: boolean;
+    try {
+      ok = unlockSession(password);
+    } finally {
+      password.fill(0);
+    }
     if (ok) {
       openDatabase();
     }
