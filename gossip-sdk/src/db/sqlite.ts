@@ -95,7 +95,14 @@ interface DbState {
   storageState: SecureStorageState | null;
   drizzleDb: GossipDatabase | null;
   dbLock: Promise<unknown>;
-  inTransaction: boolean;
+  /**
+   * Open-transaction depth, maintained by inspecting the SQL stream in
+   * `execRawDirect`. Both `withTransaction` (issues BEGIN/COMMIT directly)
+   * and Drizzle's `db.transaction()` (issues BEGIN/COMMIT via the proxy
+   * callback) increment/decrement this counter, so all flush-skipping
+   * decisions can rely on a single source of truth.
+   */
+  txDepth: number;
   /** Comlink proxy for the secure-storage worker (web). */
   secureProxy: SecureStorageWorkerProxy | null;
   /** Capacitor plugin for native secure storage (iOS/Android). */
@@ -116,7 +123,7 @@ function createDefaultState(): DbState {
     storageState: null,
     drizzleDb: null,
     dbLock: Promise.resolve(),
-    inTransaction: false,
+    txDepth: 0,
     secureProxy: null,
     nativePlugin: null,
     useNativePlugin: false,
@@ -147,6 +154,39 @@ function collectTransferables(params: unknown[]): Transferable[] {
     }
   }
   return out;
+}
+
+/**
+ * Classify a SQL statement for transaction-boundary tracking.
+ *
+ * Used by both the native and web dispatch paths to maintain `txDepth`
+ * and to decide when a flush is required for durability.
+ *
+ * Mutation matchers cover schema changes (`CREATE`/`DROP`/`ALTER`),
+ * data changes via CTE (`WITH ... INSERT`), `REPLACE`, and `VACUUM`.
+ * `PRAGMA` is conservatively treated as a mutation since some pragmas
+ * change persistent state.
+ */
+export type StatementKind =
+  | 'begin'
+  | 'commit'
+  | 'rollback'
+  | 'mutation'
+  | 'other';
+
+export function classifyStatement(sql: string): StatementKind {
+  const trimmed = sql.trimStart();
+  if (/^BEGIN\b/i.test(trimmed)) return 'begin';
+  if (/^COMMIT\b/i.test(trimmed)) return 'commit';
+  if (/^ROLLBACK\b/i.test(trimmed)) return 'rollback';
+  if (
+    /^(INSERT|UPDATE|DELETE|REPLACE|CREATE|DROP|ALTER|WITH|VACUUM|PRAGMA)\b/i.test(
+      trimmed
+    )
+  ) {
+    return 'mutation';
+  }
+  return 'other';
 }
 
 async function isNativePlatform(): Promise<boolean> {
@@ -274,7 +314,7 @@ export class DatabaseConnection {
         );
       }
     }
-    if (this.state.inTransaction) {
+    if (this.state.txDepth > 0) {
       return this.execRawDirect(sql, params);
     }
     const prev = this.state.dbLock;
@@ -292,6 +332,13 @@ export class DatabaseConnection {
     sql: string,
     params: unknown[] = []
   ): Promise<unknown[][]> {
+    // Snapshot the txn depth *before* this statement runs so that flush
+    // decisions reflect the txn state the statement executes against,
+    // not the one created by the statement itself (e.g. BEGIN bumps the
+    // depth but doesn't yet have any data needing durable flush).
+    const wasInTxn = this.state.txDepth > 0;
+    const kind = classifyStatement(sql);
+
     if (this.state.useNativePlugin && this.state.nativePlugin) {
       const safeParams = params.map(p =>
         p instanceof Uint8Array ? Array.from(p) : p
@@ -301,19 +348,18 @@ export class DatabaseConnection {
         params: safeParams,
       });
       this.state.lastInsertRowIdCache = result.lastInsertRowId;
+      this.advanceTxDepth(kind);
       // The native VFS runs with `journal_mode=OFF`, so SQLite never
       // calls xSync on its own. Without this, writes accumulate in the
       // in-memory pending buffer and are only persisted on allocate /
-      // lock — a stale-state crash or a session switch in between
+      // lock - a stale-state crash or a session switch in between
       // would drop data. Mirror the web worker's flush-after-write
-      // semantics here.
-      const trimmed = sql.trimStart();
-      const isCommit = /^COMMIT\b/i.test(trimmed);
-      const isMutation =
-        /^(INSERT|UPDATE|DELETE|REPLACE|CREATE|DROP|ALTER|WITH|VACUUM|PRAGMA)\b/i.test(
-          trimmed
-        );
-      if (isCommit || (!this.state.inTransaction && isMutation)) {
+      // semantics here, but only flush at txn boundaries when we are
+      // genuinely in a txn, so a crash mid-txn cannot half-apply state
+      // to redb (the journal-less VFS has no rollback record).
+      if (kind === 'commit') {
+        await this.state.nativePlugin.flush();
+      } else if (!wasInTxn && kind === 'mutation') {
         await this.state.nativePlugin.flush();
       }
       return result.rows;
@@ -329,20 +375,33 @@ export class DatabaseConnection {
       if (transfers.length > 0) {
         Comlink.transfer(params, transfers);
       }
-      const result = await this.state.secureProxy.exec(
-        sql,
-        params,
-        this.state.inTransaction
-      );
+      const result = await this.state.secureProxy.exec(sql, params, wasInTxn);
       this.state.lastInsertRowIdCache = result.lastInsertRowId;
+      this.advanceTxDepth(kind);
       return result.rows as unknown[][];
     }
     if (this.state.useWorker) {
       const result = await this.postToWorker({ type: 'exec', sql, params });
       this.state.lastInsertRowIdCache = result.lastInsertRowId;
+      this.advanceTxDepth(kind);
       return result.rows;
     }
-    return this.execRawInProcess(sql, params);
+    const rows = await this.execRawInProcess(sql, params);
+    this.advanceTxDepth(kind);
+    return rows;
+  }
+
+  private advanceTxDepth(kind: StatementKind): void {
+    if (kind === 'begin') {
+      this.state.txDepth++;
+    } else if (kind === 'commit' || kind === 'rollback') {
+      // Defensive clamp: an unmatched COMMIT/ROLLBACK (e.g. raw SQL run
+      // outside a withTransaction wrapper) must not produce a negative
+      // depth that masks a future real txn.
+      if (this.state.txDepth > 0) {
+        this.state.txDepth--;
+      }
+    }
   }
 
   private async execRawInProcess(
@@ -804,18 +863,28 @@ export class DatabaseConnection {
     this.state.dbLock = new Promise<void>(r => (release = r));
     await prev;
 
+    // Snapshot in case BEGIN never lands - we must not corrupt the
+    // counter for whatever ran on this connection before us.
+    const depthBefore = this.state.txDepth;
     try {
+      // BEGIN/COMMIT/ROLLBACK are tracked by `advanceTxDepth` inside
+      // execRawDirect, so the depth counter is the single source of
+      // truth for both this wrapper and Drizzle's `db.transaction()`.
       await this.execRawDirect('BEGIN');
-      this.state.inTransaction = true;
       try {
         const result = await fn();
         await this.execRawDirect('COMMIT');
         return result;
       } catch (e) {
-        await this.execRawDirect('ROLLBACK');
+        try {
+          await this.execRawDirect('ROLLBACK');
+        } catch {
+          // ROLLBACK can fail (e.g. connection lost mid-txn). Force the
+          // depth back to its pre-BEGIN value so subsequent ops do not
+          // wrongly believe they are still inside a txn.
+          this.state.txDepth = depthBefore;
+        }
         throw e;
-      } finally {
-        this.state.inTransaction = false;
       }
     } finally {
       release();
