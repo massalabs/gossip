@@ -330,9 +330,24 @@ fn init_secure_storage(path: &str, domain: &str) -> Result<()> {
     native_vfs::init_native(path, domain)?;
     native_vfs::register()?;
     // Warm rayon's global pool so the first PQ op doesn't pay spawn cost.
-    // Callers wanting the pool size for telemetry can use the
-    // `rayonThreadCount` dispatch arm (Android already does so).
-    let _ = rayon::ThreadPoolBuilder::new().build_global();
+    //
+    // Pinned to exactly `SESSION_COUNT = 3` threads. Our parallel sites
+    // (encrypt_block, cover_traffic_tick) iterate the 3 slots, so 3 is
+    // the minimum pool size that still saturates the work and the
+    // maximum that can ever be useful here. The default (== num_cpus)
+    // on a big.LITTLE phone (typically 4 big + 4 LITTLE) was scheduling
+    // work on the LITTLE cores and paying work-stealing coordination
+    // between threads that had no work — both pure overhead.
+    //
+    // TODO: if a future change bumps SESSION_COUNT or adds another
+    // parallel site that wants >3-way work, raise the pool to match.
+    //
+    // Callers wanting the actual pool size for telemetry use the
+    // `rayonThreadCount` dispatch arm (Android already does so on
+    // every initSecureStorage).
+    let _ = rayon::ThreadPoolBuilder::new()
+        .num_threads(3)
+        .build_global();
     Ok(())
 }
 
