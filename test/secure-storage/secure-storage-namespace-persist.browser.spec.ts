@@ -2,7 +2,10 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { DatabaseConnection } from '@massalabs/gossip-sdk/db/sqlite';
 import { userProfile } from '@massalabs/gossip-sdk/db/schema';
-import { SESSION_BLOB_NAMESPACE } from '@massalabs/gossip-sdk/db/secure-storage-namespaces';
+import {
+  SECURE_STORAGE_IDB_NAME,
+  SESSION_BLOB_NAMESPACE,
+} from '@massalabs/gossip-sdk/db/secure-storage-namespaces';
 import secureStorageWasmUrlRaw from '@massalabs/gossip-sdk/assets/generated/wasm-secureStorage/secureStorage_bg.wasm?url';
 
 const secureStorageWasmUrl = new URL(
@@ -22,11 +25,11 @@ function config(domain: string) {
 
 async function clearSecureStorageIdb(): Promise<void> {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.deleteDatabase('secureStorage');
+    const req = indexedDB.deleteDatabase(SECURE_STORAGE_IDB_NAME);
     req.onsuccess = () => resolve();
     req.onerror = () => reject(req.error);
     req.onblocked = () =>
-      reject(new Error('IDB deletion blocked — lingering handle?'));
+      reject(new Error('IDB deletion blocked - lingering handle?'));
   });
 }
 
