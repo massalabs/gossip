@@ -157,11 +157,33 @@ fn validate_storage_path(path: &str) -> Result<()> {
 
 // ── Dispatcher ──────────────────────────────────────────────────────
 
-/// Single UniFFI export — the plugin layer passes through a method
-/// name and a JSON args blob. All result shapes are JSON strings too.
+/// Single UniFFI export. The plugin layer passes a method name and a
+/// JSON args blob; all result shapes are JSON strings.
+///
+/// A panic catcher sits between `dispatch` and the FFI boundary because
+/// UniFFI 0.x does not install one by default, and an unwind across the
+/// C ABI into Swift/Kotlin is undefined behaviour. Likely panic sources
+/// are `serde_json::from_str` (deeply nested or huge input under OOM)
+/// and any rusqlite path that aborts on contract violation.
 #[uniffi::export]
 pub fn native_call(method: String, args_json: String) -> Result<String> {
-    dispatch(&method, &args_json)
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        dispatch(&method, &args_json)
+    })) {
+        Ok(r) => r,
+        Err(panic) => {
+            let msg = if let Some(s) = panic.downcast_ref::<&'static str>() {
+                (*s).to_string()
+            } else if let Some(s) = panic.downcast_ref::<String>() {
+                s.clone()
+            } else {
+                "non-string panic payload".to_string()
+            };
+            Err(SecureStorageException::msg(format!(
+                "internal panic in `{method}`: {msg}"
+            )))
+        }
+    }
 }
 
 fn dispatch(method: &str, args: &str) -> Result<String> {
@@ -247,6 +269,8 @@ fn dispatch(method: &str, args: &str) -> Result<String> {
             native_vfs::clear_namespace(a.namespace)?;
             Ok("null".into())
         }
+        #[cfg(test)]
+        "__panic_test" => panic!("intentional test panic"),
         _ => Err(SecureStorageException::msg(format!(
             "unknown method: {method}"
         ))),
@@ -407,3 +431,31 @@ fn exec_sql(sql: &str, params: &[serde_json::Value]) -> Result<QueryResultJson> 
 }
 
 // Note: `uniffi::setup_scaffolding!()` lives in lib.rs (crate root).
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn native_call_catches_panic_and_returns_error() {
+        let r = native_call("__panic_test".into(), "{}".into());
+        let err = r.expect_err("panic should surface as an Err, not unwind");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("internal panic"),
+            "expected wrapped panic message, got: {msg}"
+        );
+        assert!(
+            msg.contains("intentional test panic"),
+            "expected payload to be preserved, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn native_call_returns_unknown_method_error_without_panic() {
+        let r = native_call("does_not_exist".into(), "{}".into());
+        let err = r.expect_err("unknown method should be Err");
+        let msg = err.to_string();
+        assert!(msg.contains("unknown method"), "got: {msg}");
+    }
+}
