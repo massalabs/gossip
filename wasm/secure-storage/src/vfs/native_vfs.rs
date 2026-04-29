@@ -170,7 +170,13 @@ pub fn register() -> Result<()> {
                         // lifetime of the process, so the `zName` pointer
                         // must remain valid forever.
                         vfs.zName = name.into_raw();
-                        vfs.szOsFile = size_of::<EncFile>() as c_int;
+                        // `EncFile` is a fixed-size struct of two pointers
+                        // and a u32, so it always fits in c_int. The cast
+                        // would be sound either way; using `try_from` keeps
+                        // the no-`as`-truncation rule from the 1a review
+                        // honoured uniformly.
+                        vfs.szOsFile = c_int::try_from(size_of::<EncFile>())
+                            .expect("EncFile is small enough to fit in c_int");
                         vfs.xOpen = Some(x_open);
                         vfs.xDelete = Some(x_delete);
                         vfs.xAccess = Some(x_access);
