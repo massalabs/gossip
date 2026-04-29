@@ -1306,14 +1306,43 @@ export class MessageService {
             continue;
           }
 
-          await this.queries.messages.updateById(msg.id, {
-            status: MessageStatus.SENT,
-            seeker,
-            encryptedMessage: null,
-            serializedContent: null,
-            whenToSend: null,
-          });
-
+          // Network success. Emit MESSAGE_SENT and bump counters
+          // BEFORE awaiting the SQL UPDATE so the UI flips to ✓ as
+          // soon as the wire write returns (saves ~150 ms of
+          // encrypted-VFS commit on the user-perceived path). The
+          // UPDATE itself fires in the background through the same
+          // runTransaction queue as everything else, so subsequent
+          // sends still see ordered persistence.
+          //
+          // TODO check: duplicate-send risk on crash.
+          //   - If the process dies between network success and the
+          //     async UPDATE landing, the row stays WAITING_SESSION.
+          //     At next boot `processSendQueueForContact` will pick
+          //     it up, re-encrypt (advancing the PQ counter) and
+          //     re-send. The peer should dedupe on `seeker` (each
+          //     message has a unique seeker bound to the original
+          //     ciphertext) — VERIFY relay/peer dedup behaviour and
+          //     decide whether the dup-window is acceptable for
+          //     the protocol's `messageId` semantics.
+          //
+          // TODO check: race against external row resetters.
+          //   - The `latestRow.status !== WAITING_SESSION` guard
+          //     above protects against another flow flipping the
+          //     row mid-send, but only at the moment of the check.
+          //     If a reset path runs AFTER we read but BEFORE the
+          //     async UPDATE lands, we'd overwrite their reset
+          //     with SENT. Today no SDK code path resets a SENT
+          //     row, so the race is theoretical — but if a future
+          //     "delete account" or "wipe history" flow targets
+          //     SENT rows, revisit this.
+          //
+          // TODO check: ordering with subsequent sends.
+          //   - The fire-and-forget UPDATE goes through the same
+          //     runTransaction queue, so a follow-up send's
+          //     addMessage waits for it implicitly. That preserves
+          //     "row exists before next op" but means the gain is
+          //     mostly in tap-to-sent perception, not raw
+          //     throughput on rapid bursts.
           sentCount++;
           log.debug('message sent (skipped READY)', {
             messageId: msg.id,
@@ -1336,6 +1365,26 @@ export class MessageService {
               });
             }
           }
+
+          // Fire-and-forget persistence. Failures are logged but
+          // never abort the send — the message is already on the
+          // relay; locally retrying the UPDATE on the next tick is
+          // safe because runTransaction serialises ordering.
+          const msgId = msg.id;
+          void this.queries.messages
+            .updateById(msgId!, {
+              status: MessageStatus.SENT,
+              seeker,
+              encryptedMessage: null,
+              serializedContent: null,
+              whenToSend: null,
+            })
+            .catch(error => {
+              log.error(
+                'background SENT-status persist failed (message is on relay; will retry on next session activation)',
+                { messageId: msgId, error }
+              );
+            });
           continue;
         }
 

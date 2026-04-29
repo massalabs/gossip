@@ -95,6 +95,7 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
   currentContactUserId: null,
   cleanupFn: null,
   isInitializing: false,
+  optimisticallySentStoreIds: new Set<string>(),
 
   setCurrentContact: async (newContactId: string | null) => {
     if (get().currentContactUserId === newContactId) return;
@@ -239,6 +240,20 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
         storeId,
         result.message
       );
+      // Mark the row as optimistically ✓ once the SDK has accepted it
+      // (post-encrypt, post-persist, post-network). The DB row may
+      // still be WAITING_SESSION until the fire-and-forget SQL UPDATE
+      // commits — the Set lets the UI render ✓ in the meantime
+      // without waiting for that final write. On reload the Set is
+      // empty and the UI tells the truth from the DB.
+      //
+      // Done AFTER the await on purpose: a synchronous mark would
+      // suppress the ⏱ "sending" feedback during the ~500 ms pipeline,
+      // which the user expects to see while the wire write is in
+      // flight (matches WhatsApp/Signal UX, not Telegram's instant ✓).
+      const optimisticAdded = new Set(get().optimisticallySentStoreIds);
+      optimisticAdded.add(storeId);
+      set({ optimisticallySentStoreIds: optimisticAdded });
     } catch (error) {
       console.error('Failed to send message:', error);
       markMessageFailed(set, storeId);
