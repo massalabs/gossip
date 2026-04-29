@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { DatabaseConnection } from '@massalabs/gossip-sdk/db/sqlite';
 import { userProfile } from '@massalabs/gossip-sdk/db/schema';
+import { SECURE_STORAGE_IDB_NAME } from '@massalabs/gossip-sdk/db/secure-storage-namespaces';
 import secureStorageWasmUrlRaw from '@massalabs/gossip-sdk/assets/generated/wasm-secureStorage/secureStorage_bg.wasm?url';
 
 // Absolute URL so the worker can resolve it regardless of its base path.
@@ -21,11 +22,11 @@ function config(domain: string) {
 }
 
 /**
- * Delete the secureStorage IndexedDB database to isolate each test.
+ * Delete the secure-storage IndexedDB database to isolate each test.
  */
 async function clearSecureStorageIdb(): Promise<void> {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.deleteDatabase('secureStorage');
+    const req = indexedDB.deleteDatabase(SECURE_STORAGE_IDB_NAME);
     req.onsuccess = () => resolve();
     req.onerror = () => reject(req.error);
     req.onblocked = () =>

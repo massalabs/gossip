@@ -21,6 +21,7 @@
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { GossipSdk, generateMnemonic } from '@massalabs/gossip-sdk';
+import { SECURE_STORAGE_IDB_NAME } from '@massalabs/gossip-sdk/db/secure-storage-namespaces';
 
 import secureStorageWasmUrlRaw from '@massalabs/gossip-sdk/assets/generated/wasm-secureStorage/secureStorage_bg.wasm?url';
 
@@ -44,7 +45,7 @@ function storageConfig() {
 
 async function clearIdb(): Promise<void> {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.deleteDatabase('secureStorage');
+    const req = indexedDB.deleteDatabase(SECURE_STORAGE_IDB_NAME);
     req.onsuccess = () => resolve();
     req.onerror = () => reject(req.error);
     // Don't reject on blocked — workers from a previous run may still be
