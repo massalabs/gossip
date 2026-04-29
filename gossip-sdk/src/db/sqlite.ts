@@ -628,10 +628,15 @@ export class DatabaseConnection {
         // Native plugin contract still uses `allocateSession` (matches
         // the Rust `allocate_session` name); only the SDK-facing verb
         // was renamed for clarity (create vs allocate).
-        await this.requireNativePlugin().allocateSession({
-          slot,
-          password: Array.from(pwBytes),
-        });
+        const nativePassword = Array.from(pwBytes);
+        try {
+          await this.requireNativePlugin().allocateSession({
+            slot,
+            password: nativePassword,
+          });
+        } finally {
+          nativePassword.fill(0);
+        }
       } else {
         // Transfer the buffer so no intermediate copy lingers in the
         // MessagePort queue. After transfer, pwBytes is detached.
@@ -678,10 +683,15 @@ export class DatabaseConnection {
     let ok: boolean;
     try {
       if (this.state.useNativePlugin) {
-        const result = await this.requireNativePlugin().unlockSession({
-          password: Array.from(pwBytes),
-        });
-        ok = result.unlocked;
+        const nativePassword = Array.from(pwBytes);
+        try {
+          const result = await this.requireNativePlugin().unlockSession({
+            password: nativePassword,
+          });
+          ok = result.unlocked;
+        } finally {
+          nativePassword.fill(0);
+        }
       } else {
         ok = await this.requireSecureProxy().unlock(
           Comlink.transfer(pwBytes, [pwBytes.buffer])
