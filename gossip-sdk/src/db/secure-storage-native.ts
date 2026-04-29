@@ -97,6 +97,27 @@ export interface SecureStorageNativePlugin {
     lastInsertRowId: number;
     changes: number;
   }>;
+  /**
+   * Run a list of statements under one mutex acquisition + one bridge
+   * round-trip. Each statement is independently prepared (cached) and
+   * executed; result order matches input order. Caller is responsible
+   * for wrapping the chain in BEGIN/COMMIT (or BEGIN/ROLLBACK) when
+   * atomicity is required - the batch itself is not transactional.
+   *
+   * Use this for known-shape sequences like sendMessage's
+   * `BEGIN; INSERT message; UPDATE discussion; COMMIT`. A typical
+   * 4-statement chain drops from 4 bridge hops to 1.
+   */
+  execSqlBatch(options: {
+    statements: { sql: string; params: unknown[] }[];
+  }): Promise<
+    {
+      columns: string[];
+      rows: unknown[][];
+      lastInsertRowId: number;
+      changes: number;
+    }[]
+  >;
   flush(): Promise<void>;
   close(): Promise<void>;
 
@@ -163,6 +184,24 @@ export const SecureStorageNative: SecureStorageNativePlugin = {
       ...result,
       rows: result.rows.map(row => row.map(decodeSqlValue)),
     };
+  },
+  async execSqlBatch({ statements }) {
+    const encoded = statements.map(s => ({
+      sql: s.sql,
+      params: s.params.map(encodeSqlParam),
+    }));
+    const results = await callNative<
+      {
+        columns: string[];
+        rows: unknown[][];
+        lastInsertRowId: number;
+        changes: number;
+      }[]
+    >('execSqlBatch', { statements: encoded });
+    return results.map(r => ({
+      ...r,
+      rows: r.rows.map(row => row.map(decodeSqlValue)),
+    }));
   },
   async flush() {
     await callNative('flush');

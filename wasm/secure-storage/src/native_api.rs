@@ -109,6 +109,15 @@ struct ExecSqlArgs {
 }
 
 #[derive(Deserialize)]
+struct ExecSqlBatchArgs {
+    /// One entry per statement. Order is preserved; the `lastInsertRowId`
+    /// and `changes` of the LAST statement are returned at the top level
+    /// (matching the typical Drizzle `BEGIN; INSERT; UPDATE; COMMIT` shape
+    /// where only the trailing op's metadata matters).
+    statements: Vec<ExecSqlArgs>,
+}
+
+#[derive(Deserialize)]
 struct WriteNamespaceArgs {
     namespace: u8,
     offset: u64,
@@ -268,6 +277,11 @@ fn dispatch(method: &str, args: &str) -> Result<String> {
             let qr = exec_sql(&a.sql, &a.params)?;
             Ok(serde_json::to_string(&qr)?)
         }
+        "execSqlBatch" => {
+            let a: ExecSqlBatchArgs = parse(args)?;
+            let qrs = exec_sql_batch(&a.statements)?;
+            Ok(serde_json::to_string(&qrs)?)
+        }
         "writeNamespaceData" => {
             let a: WriteNamespaceArgs = parse(args)?;
             // Session blobs may contain key material — zeroize on return.
@@ -368,14 +382,44 @@ fn close() -> Result<()> {
 }
 
 fn exec_sql(sql: &str, params: &[serde_json::Value]) -> Result<QueryResultJson> {
-    use serde_json::Value as V;
-
     let guard = db_mutex()
         .lock()
         .map_err(|_| SecureStorageError::LockPoisoned)?;
     let conn = guard
         .as_ref()
         .ok_or_else(|| SecureStorageError::DatabaseNotOpen)?;
+    exec_sql_one(conn, sql, params)
+}
+
+/// Run N statements under a single mutex acquisition, each via
+/// `prepare_cached` so a typical `BEGIN; INSERT; UPDATE; COMMIT` chain
+/// pays one mutex hop and one bridge round-trip instead of four.
+///
+/// Returns one `QueryResultJson` per input statement, in order. If any
+/// statement fails, the remaining ones are skipped and the error
+/// propagates - the caller is responsible for wrapping the batch in a
+/// transaction (the typical pattern is `BEGIN; ...; COMMIT` or
+/// `BEGIN; ...; ROLLBACK` issued from the caller).
+fn exec_sql_batch(stmts: &[ExecSqlArgs]) -> Result<Vec<QueryResultJson>> {
+    let guard = db_mutex()
+        .lock()
+        .map_err(|_| SecureStorageError::LockPoisoned)?;
+    let conn = guard
+        .as_ref()
+        .ok_or_else(|| SecureStorageError::DatabaseNotOpen)?;
+    let mut out = Vec::with_capacity(stmts.len());
+    for s in stmts {
+        out.push(exec_sql_one(conn, &s.sql, &s.params)?);
+    }
+    Ok(out)
+}
+
+fn exec_sql_one(
+    conn: &rusqlite::Connection,
+    sql: &str,
+    params: &[serde_json::Value],
+) -> Result<QueryResultJson> {
+    use serde_json::Value as V;
 
     // `prepare_cached` keeps a per-connection LRU of prepared statements
     // keyed by SQL text. The SDK reuses the same INSERT/UPDATE strings
