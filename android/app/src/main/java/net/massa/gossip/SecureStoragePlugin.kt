@@ -15,14 +15,18 @@ import uniffi.secureStorage.SecureStorageException
 @CapacitorPlugin(name = "SecureStorageNative")
 class SecureStoragePlugin : Plugin() {
 
-    // Two executors: SQL ops vs namespace-blob ops, so a long SQL
-    // query can't block a session-blob persist. Both use 8 MB stack
+    // Two executors: SQL ops vs namespace-blob ops, so a long namespace
+    // write can't block a foreground SQL query. Both use 8 MB stack
     // because ML-KEM PQ crypto needs ~4 MB (default JVM stack ~512 KB).
+    //
+    // Daemon threads so they don't keep the JVM alive on host-activity
+    // shutdown. Process death wipes them either way; this is hygiene
+    // for hosts that lifecycle Capacitor without process kill.
     private val sqlExecutor = Executors.newSingleThreadExecutor(ThreadFactory { r ->
-        Thread(null, r, "secure-storage-sql", 8 * 1024 * 1024)
+        Thread(null, r, "secure-storage-sql", 8 * 1024 * 1024).apply { isDaemon = true }
     })
     private val namespaceExecutor = Executors.newSingleThreadExecutor(ThreadFactory { r ->
-        Thread(null, r, "secure-storage-namespace", 8 * 1024 * 1024)
+        Thread(null, r, "secure-storage-namespace", 8 * 1024 * 1024).apply { isDaemon = true }
     })
 
     /**
@@ -36,10 +40,13 @@ class SecureStoragePlugin : Plugin() {
      */
     @PluginMethod
     fun call(call: PluginCall) {
-        val method = call.getString("method") ?: return call.reject("missing method")
+        val method = call.getString("method") ?: return call.reject("missing method", "MISSING_METHOD")
         val argsRaw = call.getString("args") ?: "{}"
         val args = if (method == "initSecureStorage") resolveInitPath(argsRaw) else argsRaw
-        val exec = if (method.contains("Namespace")) namespaceExecutor else sqlExecutor
+        // Explicit set of namespace-affined methods. The previous
+        // `method.contains("Namespace")` was fragile: a future name like
+        // `commitNamespaceTxn` would silently route here too.
+        val exec = if (method in NAMESPACE_METHODS) namespaceExecutor else sqlExecutor
         exec.execute {
             try {
                 val result = nativeCall(method, args)
@@ -51,10 +58,14 @@ class SecureStoragePlugin : Plugin() {
                         Log.i("SecureStorageNative", "rayon pool: $n threads")
                     } catch (_: Exception) { /* best-effort diag */ }
                 }
-            } catch (e: SecureStorageException) {
-                call.reject(e.message, e)
+            } catch (e: SecureStorageException.Error) {
+                // Pass code + Throwable explicitly. The previous
+                // `reject(e.message, e)` resolved to the (message, code: String)
+                // overload, dropping the throwable on the floor and stuffing
+                // a stringified Exception into the code slot.
+                call.reject(e.msg, e.code, e)
             } catch (e: Exception) {
-                call.reject(e.message ?: "secure-storage error", e)
+                call.reject(e.message ?: "secure-storage error", "INTERNAL", e)
             }
         }
     }
@@ -65,5 +76,14 @@ class SecureStoragePlugin : Plugin() {
         val rel = json.optString("path", "secure-storage")
         val abs = context.filesDir.resolve(rel).absolutePath
         return json.put("path", abs).toString()
+    }
+
+    companion object {
+        private val NAMESPACE_METHODS = setOf(
+            "writeNamespaceData",
+            "readNamespaceData",
+            "namespaceDataLength",
+            "clearNamespace",
+        )
     }
 }

@@ -32,39 +32,49 @@ fn db_mutex() -> &'static Mutex<Option<rusqlite::Connection>> {
 
 // ── UniFFI error ────────────────────────────────────────────────────
 
+/// Exception surfaced across the UniFFI boundary. The `code` field is a
+/// stable identifier (e.g. "NOT_INITIALIZED", "INVALID_PASSWORD") so the
+/// Swift / Kotlin bridges and JS callers can switch on failure mode
+/// without parsing the user-facing `msg`.
 #[derive(Debug, uniffi::Error, thiserror::Error)]
 pub enum SecureStorageException {
-    #[error("{msg}")]
-    Error { msg: String },
+    #[error("[{code}] {msg}")]
+    Error { code: String, msg: String },
 }
 
 impl SecureStorageException {
-    fn msg(s: impl Into<String>) -> Self {
-        Self::Error { msg: s.into() }
+    fn typed(code: &'static str, msg: impl Into<String>) -> Self {
+        Self::Error {
+            code: code.into(),
+            msg: msg.into(),
+        }
     }
 }
 
 impl From<SecureStorageError> for SecureStorageException {
     fn from(e: SecureStorageError) -> Self {
-        Self::msg(e.to_string())
+        Self::Error {
+            code: e.code().into(),
+            msg: e.to_string(),
+        }
     }
 }
 
 impl From<rusqlite::Error> for SecureStorageException {
     fn from(e: rusqlite::Error) -> Self {
-        Self::msg(e.to_string())
+        Self::typed("SQLITE", e.to_string())
     }
 }
 
 impl From<serde_json::Error> for SecureStorageException {
     fn from(e: serde_json::Error) -> Self {
-        Self::msg(format!("json: {e}"))
+        Self::typed("BAD_ARGS", format!("json: {e}"))
     }
 }
 
 impl From<base64::DecodeError> for SecureStorageException {
     fn from(e: base64::DecodeError) -> Self {
-        Self::msg(format!("base64: {e}"))
+        Self::typed("BAD_ARGS", format!("base64: {e}"))
     }
 }
 
@@ -142,15 +152,24 @@ fn as_blob_sentinel(v: &serde_json::Value) -> Option<&str> {
 
 fn validate_storage_path(path: &str) -> Result<()> {
     if path.bytes().any(|b| b == 0) {
-        return Err(SecureStorageException::msg("path contains interior NUL"));
+        return Err(SecureStorageException::typed(
+            "BAD_PATH",
+            "path contains interior NUL",
+        ));
     }
     let p = Path::new(path);
     if !p.is_absolute() {
-        return Err(SecureStorageException::msg("path must be absolute"));
+        return Err(SecureStorageException::typed(
+            "BAD_PATH",
+            "path must be absolute",
+        ));
     }
     for comp in p.components() {
         if matches!(comp, std::path::Component::ParentDir) {
-            return Err(SecureStorageException::msg("path must not contain '..'"));
+            return Err(SecureStorageException::typed(
+                "BAD_PATH",
+                "path must not contain '..'",
+            ));
         }
     }
     Ok(())
@@ -180,9 +199,10 @@ pub fn native_call(method: String, args_json: String) -> Result<String> {
             } else {
                 "non-string panic payload".to_string()
             };
-            Err(SecureStorageException::msg(format!(
-                "internal panic in `{method}`: {msg}"
-            )))
+            Err(SecureStorageException::typed(
+                "PANIC",
+                format!("internal panic in `{method}`: {msg}"),
+            ))
         }
     }
 }
@@ -272,9 +292,10 @@ fn dispatch(method: &str, args: &str) -> Result<String> {
         }
         #[cfg(test)]
         "__panic_test" => panic!("intentional test panic"),
-        _ => Err(SecureStorageException::msg(format!(
-            "unknown method: {method}"
-        ))),
+        _ => Err(SecureStorageException::typed(
+            "UNKNOWN_METHOD",
+            format!("unknown method: {method}"),
+        )),
     }
 }
 
@@ -380,14 +401,18 @@ fn exec_sql(sql: &str, params: &[serde_json::Value]) -> Result<QueryResultJson> 
                 } else if let Some(f) = n.as_f64() {
                     stmt.raw_bind_parameter(idx, f)?
                 } else {
-                    return Err(SecureStorageException::msg("unsupported number"));
+                    return Err(SecureStorageException::typed(
+                        "BAD_ARGS",
+                        "unsupported number",
+                    ));
                 }
             }
             V::String(s) => stmt.raw_bind_parameter(idx, s.as_str())?,
             other => {
-                return Err(SecureStorageException::msg(format!(
-                    "unsupported SQL param: {other}"
-                )));
+                return Err(SecureStorageException::typed(
+                    "BAD_ARGS",
+                    format!("unsupported SQL param: {other}"),
+                ));
             }
         }
     }
@@ -401,12 +426,15 @@ fn exec_sql(sql: &str, params: &[serde_json::Value]) -> Result<QueryResultJson> 
                 rusqlite::types::ValueRef::Null => V::Null,
                 rusqlite::types::ValueRef::Integer(v) => {
                     if !js_num::is_js_safe_integer_i64(v) {
-                        return Err(SecureStorageException::msg(format!(
-                            "INTEGER {v} exceeds JS safe integer range \
-                             (|v| < 2^53); JSON `number` cannot carry it \
-                             losslessly. Adjust the schema to use TEXT or \
-                             extend the protocol with a BigInt sentinel."
-                        )));
+                        return Err(SecureStorageException::typed(
+                            "INTEGER_OVERFLOW",
+                            format!(
+                                "INTEGER {v} exceeds JS safe integer range \
+                                 (|v| < 2^53); JSON `number` cannot carry it \
+                                 losslessly. Adjust the schema to use TEXT or \
+                                 extend the protocol with a BigInt sentinel."
+                            ),
+                        ));
                     }
                     V::from(v)
                 }
@@ -472,5 +500,17 @@ mod tests {
         let err = r.expect_err("unknown method should be Err");
         let msg = err.to_string();
         assert!(msg.contains("unknown method"), "got: {msg}");
+        assert!(
+            msg.starts_with("[UNKNOWN_METHOD]"),
+            "expected machine-readable code prefix, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn typed_error_carries_stable_code_field() {
+        let SecureStorageException::Error { code, msg } =
+            SecureStorageException::from(SecureStorageError::NotInitialized);
+        assert_eq!(code, "NOT_INITIALIZED");
+        assert_eq!(msg, "not initialized");
     }
 }
