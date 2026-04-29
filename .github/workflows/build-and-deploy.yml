@@ -366,12 +366,19 @@ jobs:
         with:
           xcode-version: '26.0'
 
-      - name: Verify iOS 26 SDK
+      - name: Install iOS 26 platform
         run: |
           echo "Selected Xcode:"
           xcode-select -p
           xcodebuild -version
-          echo "Available SDKs:"
+          echo "SDKs before install:"
+          xcodebuild -showsdks || true
+          # macos-26 image ships Xcode 26 but the iOS runtime/platform is
+          # not preinstalled — download it so xcodebuild can find a
+          # 'generic/platform=iOS' destination.
+          sudo xcodebuild -runFirstLaunch
+          sudo xcodebuild -downloadPlatform iOS
+          echo "SDKs after install:"
           xcodebuild -showsdks
 
       - name: Setup Ruby
