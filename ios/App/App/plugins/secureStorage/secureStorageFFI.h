@@ -243,75 +243,9 @@ typedef void (*UniffiForeignFutureCompleteVoid)(uint64_t, UniffiForeignFutureRes
     );
 
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_SECURE_STORAGE_FN_FUNC_ALLOCATE_SESSION_NATIVE
-#define UNIFFI_FFIDEF_UNIFFI_SECURE_STORAGE_FN_FUNC_ALLOCATE_SESSION_NATIVE
-void uniffi_secureStorage_fn_func_allocate_session_native(uint8_t slot, RustBuffer password, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_SECURE_STORAGE_FN_FUNC_CLOSE_NATIVE
-#define UNIFFI_FFIDEF_UNIFFI_SECURE_STORAGE_FN_FUNC_CLOSE_NATIVE
-void uniffi_secureStorage_fn_func_close_native(RustCallStatus *_Nonnull out_status
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_SECURE_STORAGE_FN_FUNC_COVER_TRAFFIC_TICK_NATIVE
-#define UNIFFI_FFIDEF_UNIFFI_SECURE_STORAGE_FN_FUNC_COVER_TRAFFIC_TICK_NATIVE
-void uniffi_secureStorage_fn_func_cover_traffic_tick_native(RustCallStatus *_Nonnull out_status
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_SECURE_STORAGE_FN_FUNC_EXEC_SQL_NATIVE
-#define UNIFFI_FFIDEF_UNIFFI_SECURE_STORAGE_FN_FUNC_EXEC_SQL_NATIVE
-RustBuffer uniffi_secureStorage_fn_func_exec_sql_native(RustBuffer sql, RustBuffer params, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_SECURE_STORAGE_FN_FUNC_FLUSH_NATIVE
-#define UNIFFI_FFIDEF_UNIFFI_SECURE_STORAGE_FN_FUNC_FLUSH_NATIVE
-void uniffi_secureStorage_fn_func_flush_native(RustCallStatus *_Nonnull out_status
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_SECURE_STORAGE_FN_FUNC_INIT_SECURE_STORAGE
-#define UNIFFI_FFIDEF_UNIFFI_SECURE_STORAGE_FN_FUNC_INIT_SECURE_STORAGE
-void uniffi_secureStorage_fn_func_init_secure_storage(RustBuffer path, RustBuffer domain, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_SECURE_STORAGE_FN_FUNC_IS_UNLOCKED_NATIVE
-#define UNIFFI_FFIDEF_UNIFFI_SECURE_STORAGE_FN_FUNC_IS_UNLOCKED_NATIVE
-int8_t uniffi_secureStorage_fn_func_is_unlocked_native(RustCallStatus *_Nonnull out_status
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_SECURE_STORAGE_FN_FUNC_LOCK_SESSION_NATIVE
-#define UNIFFI_FFIDEF_UNIFFI_SECURE_STORAGE_FN_FUNC_LOCK_SESSION_NATIVE
-void uniffi_secureStorage_fn_func_lock_session_native(RustCallStatus *_Nonnull out_status
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_SECURE_STORAGE_FN_FUNC_NAMESPACE_DATA_LENGTH_NATIVE
-#define UNIFFI_FFIDEF_UNIFFI_SECURE_STORAGE_FN_FUNC_NAMESPACE_DATA_LENGTH_NATIVE
-uint64_t uniffi_secureStorage_fn_func_namespace_data_length_native(uint8_t namespace, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_SECURE_STORAGE_FN_FUNC_PROVISION_STORAGE_NATIVE
-#define UNIFFI_FFIDEF_UNIFFI_SECURE_STORAGE_FN_FUNC_PROVISION_STORAGE_NATIVE
-void uniffi_secureStorage_fn_func_provision_storage_native(RustCallStatus *_Nonnull out_status
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_SECURE_STORAGE_FN_FUNC_READ_NAMESPACE_DATA_NATIVE
-#define UNIFFI_FFIDEF_UNIFFI_SECURE_STORAGE_FN_FUNC_READ_NAMESPACE_DATA_NATIVE
-RustBuffer uniffi_secureStorage_fn_func_read_namespace_data_native(uint8_t namespace, uint64_t offset, uint64_t len, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_SECURE_STORAGE_FN_FUNC_UNLOCK_SESSION_NATIVE
-#define UNIFFI_FFIDEF_UNIFFI_SECURE_STORAGE_FN_FUNC_UNLOCK_SESSION_NATIVE
-int8_t uniffi_secureStorage_fn_func_unlock_session_native(RustBuffer password, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_SECURE_STORAGE_FN_FUNC_WRITE_NAMESPACE_DATA_NATIVE
-#define UNIFFI_FFIDEF_UNIFFI_SECURE_STORAGE_FN_FUNC_WRITE_NAMESPACE_DATA_NATIVE
-void uniffi_secureStorage_fn_func_write_namespace_data_native(uint8_t namespace, uint64_t offset, RustBuffer data, RustCallStatus *_Nonnull out_status
+#ifndef UNIFFI_FFIDEF_UNIFFI_SECURE_STORAGE_FN_FUNC_NATIVE_CALL
+#define UNIFFI_FFIDEF_UNIFFI_SECURE_STORAGE_FN_FUNC_NATIVE_CALL
+RustBuffer uniffi_secureStorage_fn_func_native_call(RustBuffer method, RustBuffer args_json, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_FFI_SECURE_STORAGE_RUSTBUFFER_ALLOC
@@ -574,81 +508,9 @@ void ffi_secureStorage_rust_future_free_void(uint64_t handle
 void ffi_secureStorage_rust_future_complete_void(uint64_t handle, RustCallStatus *_Nonnull out_status
 );
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_SECURE_STORAGE_CHECKSUM_FUNC_ALLOCATE_SESSION_NATIVE
-#define UNIFFI_FFIDEF_UNIFFI_SECURE_STORAGE_CHECKSUM_FUNC_ALLOCATE_SESSION_NATIVE
-uint16_t uniffi_secureStorage_checksum_func_allocate_session_native(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_SECURE_STORAGE_CHECKSUM_FUNC_CLOSE_NATIVE
-#define UNIFFI_FFIDEF_UNIFFI_SECURE_STORAGE_CHECKSUM_FUNC_CLOSE_NATIVE
-uint16_t uniffi_secureStorage_checksum_func_close_native(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_SECURE_STORAGE_CHECKSUM_FUNC_COVER_TRAFFIC_TICK_NATIVE
-#define UNIFFI_FFIDEF_UNIFFI_SECURE_STORAGE_CHECKSUM_FUNC_COVER_TRAFFIC_TICK_NATIVE
-uint16_t uniffi_secureStorage_checksum_func_cover_traffic_tick_native(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_SECURE_STORAGE_CHECKSUM_FUNC_EXEC_SQL_NATIVE
-#define UNIFFI_FFIDEF_UNIFFI_SECURE_STORAGE_CHECKSUM_FUNC_EXEC_SQL_NATIVE
-uint16_t uniffi_secureStorage_checksum_func_exec_sql_native(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_SECURE_STORAGE_CHECKSUM_FUNC_FLUSH_NATIVE
-#define UNIFFI_FFIDEF_UNIFFI_SECURE_STORAGE_CHECKSUM_FUNC_FLUSH_NATIVE
-uint16_t uniffi_secureStorage_checksum_func_flush_native(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_SECURE_STORAGE_CHECKSUM_FUNC_INIT_SECURE_STORAGE
-#define UNIFFI_FFIDEF_UNIFFI_SECURE_STORAGE_CHECKSUM_FUNC_INIT_SECURE_STORAGE
-uint16_t uniffi_secureStorage_checksum_func_init_secure_storage(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_SECURE_STORAGE_CHECKSUM_FUNC_IS_UNLOCKED_NATIVE
-#define UNIFFI_FFIDEF_UNIFFI_SECURE_STORAGE_CHECKSUM_FUNC_IS_UNLOCKED_NATIVE
-uint16_t uniffi_secureStorage_checksum_func_is_unlocked_native(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_SECURE_STORAGE_CHECKSUM_FUNC_LOCK_SESSION_NATIVE
-#define UNIFFI_FFIDEF_UNIFFI_SECURE_STORAGE_CHECKSUM_FUNC_LOCK_SESSION_NATIVE
-uint16_t uniffi_secureStorage_checksum_func_lock_session_native(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_SECURE_STORAGE_CHECKSUM_FUNC_NAMESPACE_DATA_LENGTH_NATIVE
-#define UNIFFI_FFIDEF_UNIFFI_SECURE_STORAGE_CHECKSUM_FUNC_NAMESPACE_DATA_LENGTH_NATIVE
-uint16_t uniffi_secureStorage_checksum_func_namespace_data_length_native(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_SECURE_STORAGE_CHECKSUM_FUNC_PROVISION_STORAGE_NATIVE
-#define UNIFFI_FFIDEF_UNIFFI_SECURE_STORAGE_CHECKSUM_FUNC_PROVISION_STORAGE_NATIVE
-uint16_t uniffi_secureStorage_checksum_func_provision_storage_native(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_SECURE_STORAGE_CHECKSUM_FUNC_READ_NAMESPACE_DATA_NATIVE
-#define UNIFFI_FFIDEF_UNIFFI_SECURE_STORAGE_CHECKSUM_FUNC_READ_NAMESPACE_DATA_NATIVE
-uint16_t uniffi_secureStorage_checksum_func_read_namespace_data_native(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_SECURE_STORAGE_CHECKSUM_FUNC_UNLOCK_SESSION_NATIVE
-#define UNIFFI_FFIDEF_UNIFFI_SECURE_STORAGE_CHECKSUM_FUNC_UNLOCK_SESSION_NATIVE
-uint16_t uniffi_secureStorage_checksum_func_unlock_session_native(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_SECURE_STORAGE_CHECKSUM_FUNC_WRITE_NAMESPACE_DATA_NATIVE
-#define UNIFFI_FFIDEF_UNIFFI_SECURE_STORAGE_CHECKSUM_FUNC_WRITE_NAMESPACE_DATA_NATIVE
-uint16_t uniffi_secureStorage_checksum_func_write_namespace_data_native(void
+#ifndef UNIFFI_FFIDEF_UNIFFI_SECURE_STORAGE_CHECKSUM_FUNC_NATIVE_CALL
+#define UNIFFI_FFIDEF_UNIFFI_SECURE_STORAGE_CHECKSUM_FUNC_NATIVE_CALL
+uint16_t uniffi_secureStorage_checksum_func_native_call(void
     
 );
 #endif
