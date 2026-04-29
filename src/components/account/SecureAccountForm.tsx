@@ -11,6 +11,7 @@ import PageLayout from '../ui/Layout/PageLayout';
 import Button from '../ui/Button';
 import RoundedInput from '../ui/RoundedInput';
 import { scrollFieldIntoView } from '../../utils/scrollFieldIntoView';
+import PasswordConfirmModal from './PasswordConfirmModal';
 
 interface SecureAccountFormProps {
   onSubmit: (creds: { username: string; password: string }) => void;
@@ -32,6 +33,8 @@ const SecureAccountForm: React.FC<SecureAccountFormProps> = ({
   const [passwordError, setPasswordError] = useState<string | null>(null);
   const [showPasswords, setShowPasswords] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showPasswordConfirmModal, setShowPasswordConfirmModal] =
+    useState(false);
 
   const handleUsernameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
@@ -66,6 +69,11 @@ const SecureAccountForm: React.FC<SecureAccountFormProps> = ({
     }
 
     if (!canSubmit) return;
+    setShowPasswordConfirmModal(true);
+  };
+
+  const handlePasswordConfirm = () => {
+    setShowPasswordConfirmModal(false);
     setIsSubmitting(true);
     onSubmit({ username, password });
   };
@@ -165,6 +173,11 @@ const SecureAccountForm: React.FC<SecureAccountFormProps> = ({
           </Button>
         </form>
       </div>
+      <PasswordConfirmModal
+        isOpen={showPasswordConfirmModal}
+        onConfirm={handlePasswordConfirm}
+        onCancel={() => setShowPasswordConfirmModal(false)}
+      />
     </PageLayout>
   );
 };

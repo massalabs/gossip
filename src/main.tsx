@@ -8,10 +8,7 @@ import { installSafariWorkerDedup } from './utils/safariWorkerDedup';
 import { createSdk } from './sdk';
 import { useSdkStore } from './stores/sdkStore';
 import { protocolConfig } from './config/protocol';
-import {
-  SECURE_STORAGE_ENABLED,
-  DEV_HARDCODED_PASSWORD,
-} from './config/features';
+import { SECURE_STORAGE_ENABLED } from './config/features';
 import { Capacitor } from '@capacitor/core';
 import waSqliteWasmUrl from 'wa-sqlite/dist/wa-sqlite.wasm?url';
 import waSqliteAsyncWasmUrl from 'wa-sqlite/dist/wa-sqlite-async.wasm?url';
@@ -121,34 +118,6 @@ async function bootstrap() {
         ? { type: 'opfs', path: '/gossip-db', wasmUrl: waSqliteWasmUrl }
         : { type: 'idb', name: 'gossip-db', wasmUrl: waSqliteAsyncWasmUrl },
   });
-
-  if (SECURE_STORAGE_ENABLED) {
-    if (import.meta.env.PROD) {
-      // The hardcoded-password bootstrap wipes existing data on unlock
-      // failure and uses a known-bad password. Refuse to run in
-      // production builds - the real unlock UX lives behind the
-      // user-credential flow.
-      throw new Error(
-        'VITE_SECURE_STORAGE cannot be used in production builds yet'
-      );
-    }
-    if (sdk.storageState === 'locked') {
-      const ok = await sdk.secureStorageUnlock(DEV_HARDCODED_PASSWORD);
-      if (!ok) {
-        // Unlock failed - likely stale data from a previous dev build
-        // with a different storage format. Silently re-provision and
-        // create fresh; surfacing the reset in the console would leak
-        // to any observer that the underlying storage was reset (PD
-        // distinguisher from a fresh install).
-        await sdk.secureStorageProvision();
-        await sdk.secureStorageCreate(0, DEV_HARDCODED_PASSWORD);
-      }
-    } else {
-      // storageState === 'empty' on fresh install (decoys provisioned
-      // automatically by init(); we only need to claim slot 0).
-      await sdk.secureStorageCreate(0, DEV_HARDCODED_PASSWORD);
-    }
-  }
 
   await initSafeArea();
   return sdk;

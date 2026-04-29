@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Shield, CheckCircle, Plus, Check } from 'react-feather';
+import { Shield, AlertTriangle, CheckCircle, Plus, Check } from 'react-feather';
 import { useAccountStore } from '../../stores/accountStore';
 import { MAX_SECURE_ACCOUNTS } from '../../config/features';
 import PageHeader from '../ui/PageHeader';
@@ -15,7 +15,7 @@ interface CreatedAccount {
 
 interface SecureAccountSetupProps {
   mainUsername: string;
-  onComplete: () => void;
+  onComplete: () => void | Promise<void>;
 }
 
 const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
@@ -33,7 +33,8 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
   const [isFinalizing, setIsFinalizing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const canAddMore = createdAccounts.length < MAX_SECURE_ACCOUNTS;
+  const remainingSlots = MAX_SECURE_ACCOUNTS - createdAccounts.length;
+  const canAddMore = remainingSlots > 0;
 
   const handleAddAccount = async (creds: {
     username: string;
@@ -59,9 +60,11 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
     setError(null);
 
     try {
-      // Close the current session — user will log in fresh from SecureLogin
+      // Multi-account: close the current session so the user picks an
+      // account from SecureLogin. `finalizeOnboarding` (run in
+      // onComplete) is a no-op when no encryption key is left in state.
       await logout({ lockedByUser: false });
-      onComplete();
+      await onComplete();
     } catch (err) {
       console.error('Error finalizing setup:', err);
       setError(err instanceof Error ? err.message : t('create.failed'));
@@ -69,13 +72,25 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
     }
   };
 
-  const handleSkip = () => {
+  const handleSkip = async () => {
     if (createdAccounts.length > 1) {
       // Multiple accounts created — finalize (logout + redirect to login)
-      handleFinalize();
-    } else {
-      // Only main account — stay authenticated
-      onComplete();
+      await handleFinalize();
+      return;
+    }
+
+    // Only main account — stay authenticated. `onComplete` runs
+    // finalizeOnboarding which closes the onboarding session and
+    // re-runs the proper login path so polling, lastSeen, etc. are
+    // wired the same as a cold-start login.
+    setIsFinalizing(true);
+    setError(null);
+    try {
+      await onComplete();
+    } catch (err) {
+      console.error('Error completing setup:', err);
+      setError(err instanceof Error ? err.message : t('create.failed'));
+      setIsFinalizing(false);
     }
   };
 
@@ -111,16 +126,29 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
       className="app-max-w mx-auto"
       contentClassName="p-4"
     >
-      <div className="p-4 border rounded-lg bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800 mb-6">
-        <div className="flex items-start gap-3">
-          <div className="shrink-0 mt-0.5">
-            <Shield className="h-5 w-5 text-blue-500" />
+      {hasAdditionalAccounts ? (
+        <div className="p-4 border rounded-lg bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800 mb-6">
+          <div className="flex items-start gap-3">
+            <div className="shrink-0 mt-0.5">
+              <Shield className="h-5 w-5 text-blue-500" />
+            </div>
+            <p className="text-sm text-blue-700 dark:text-blue-300 leading-relaxed">
+              {t('secure_setup.info')}
+            </p>
           </div>
-          <p className="text-sm text-blue-700 dark:text-blue-300 leading-relaxed">
-            {t('secure_setup.info')}
-          </p>
         </div>
-      </div>
+      ) : (
+        <div className="p-4 border rounded-lg bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800 mb-6">
+          <div className="flex items-start gap-3">
+            <div className="shrink-0 mt-0.5">
+              <AlertTriangle className="h-5 w-5 text-amber-500" />
+            </div>
+            <p className="text-sm text-amber-700 dark:text-amber-300 leading-relaxed">
+              {t('secure_setup.warning_create_more')}
+            </p>
+          </div>
+        </div>
+      )}
 
       <div className="mb-6">
         {createdAccounts.map((acc, idx) => (
@@ -149,7 +177,7 @@ const SecureAccountSetup: React.FC<SecureAccountSetupProps> = ({
             className="h-12 rounded-full text-sm font-medium gap-2"
           >
             <Plus className="w-4 h-4" />
-            {t('secure_setup.add_account')}
+            {t('secure_setup.add_account', { remaining: remainingSlots })}
           </Button>
         ) : (
           <p className="text-sm text-muted-foreground text-center">

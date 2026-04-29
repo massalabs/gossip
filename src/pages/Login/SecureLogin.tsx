@@ -5,6 +5,7 @@ import {
   checkBiometricAvailability,
   hasExistingCredential,
   authenticateSecureLogin,
+  clearLoginBiometricCredentials,
 } from '../../services/biometricService';
 import Button from '../../components/ui/Button';
 import { ROUTES } from '../../constants/routes';
@@ -23,7 +24,6 @@ import { useKeyboardStore } from '../../stores/keyboardStore';
 
 export const SecureLogin: React.FC<LoginProps> = React.memo(
   ({
-    onCreateNewAccount,
     onAccountSelected,
     accountInfo,
     persistentError = null,
@@ -72,12 +72,21 @@ export const SecureLogin: React.FC<LoginProps> = React.memo(
       setBiometricLoading(true);
       onErrorChange?.(null);
 
+      // Track whether the biometric prompt itself succeeded — if it did
+      // but the subsequent unlock fails, the stored credential no longer
+      // maps to a valid slot (slot wiped/rotated by a reset or by the
+      // historical dev bootstrap) and we must purge it. Otherwise the
+      // biometric button keeps reappearing on the login screen for a
+      // dead account.
+      let biometricPromptSucceeded = false;
+
       try {
         const result = await authenticateSecureLogin(biometricMethod);
 
         if (!result.success || !result.data?.encryptionKey) {
           throw new Error(result.error || 'Biometric authentication failed');
         }
+        biometricPromptSucceeded = true;
 
         await loadAccount({
           type: 'encryptionKey',
@@ -92,6 +101,10 @@ export const SecureLogin: React.FC<LoginProps> = React.memo(
         }
       } catch (error) {
         console.error('Biometric authentication failed:', error);
+        if (biometricPromptSucceeded) {
+          await clearLoginBiometricCredentials();
+          setBiometricAvailable(false);
+        }
         onErrorChange?.(t('login.biometric_failed_use_password'));
         if (window.location.pathname !== ROUTES.welcome()) {
           navigate(ROUTES.welcome());
@@ -126,9 +139,7 @@ export const SecureLogin: React.FC<LoginProps> = React.memo(
       <LoginLayout title={t('login.welcome')} subtitle="">
         <div
           className={`overflow-hidden transition-all duration-300 ${
-            biometricAvailable && !keyboardOpen
-              ? 'max-h-40 opacity-100'
-              : 'max-h-0 opacity-0'
+            biometricAvailable ? 'max-h-40 opacity-100' : 'max-h-0 opacity-0'
           }`}
         >
           <Button

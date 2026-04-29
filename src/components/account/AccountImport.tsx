@@ -15,7 +15,7 @@ import TabSwitcher from '../ui/TabSwitcher';
 
 interface AccountImportProps {
   onBack: () => void;
-  onComplete: () => void;
+  onComplete: () => void | Promise<void>;
 }
 
 const AccountImport: React.FC<AccountImportProps> = ({
@@ -96,11 +96,10 @@ const AccountImport: React.FC<AccountImportProps> = ({
         });
       }
 
-      onComplete();
+      await onComplete();
     } catch (error) {
       console.error('Error importing account:', error);
       setError(t('import.failed'));
-    } finally {
       setIsImporting(false);
     }
   };
