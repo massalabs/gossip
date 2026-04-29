@@ -458,11 +458,17 @@ fileprivate struct FfiConverterString: FfiConverter {
 }
 
 
+/**
+ * Exception surfaced across the UniFFI boundary. The `code` field is a
+ * stable identifier (e.g. "NOT_INITIALIZED", "INVALID_PASSWORD") so the
+ * Swift / Kotlin bridges and JS callers can switch on failure mode
+ * without parsing the user-facing `msg`.
+ */
 public enum SecureStorageException: Swift.Error, Equatable, Hashable, Foundation.LocalizedError {
 
     
     
-    case Error(msg: String
+    case Error(code: String, msg: String
     )
 
     
@@ -494,6 +500,7 @@ public struct FfiConverterTypeSecureStorageException: FfiConverterRustBuffer {
 
         
         case 1: return .Error(
+            code: try FfiConverterString.read(from: &buf), 
             msg: try FfiConverterString.read(from: &buf)
             )
 
@@ -508,8 +515,9 @@ public struct FfiConverterTypeSecureStorageException: FfiConverterRustBuffer {
 
         
         
-        case let .Error(msg):
+        case let .Error(code,msg):
             writeInt(&buf, Int32(1))
+            FfiConverterString.write(code, into: &buf)
             FfiConverterString.write(msg, into: &buf)
             
         }
@@ -531,8 +539,14 @@ public func FfiConverterTypeSecureStorageException_lower(_ value: SecureStorageE
     return FfiConverterTypeSecureStorageException.lower(value)
 }
 /**
- * Single UniFFI export — the plugin layer passes through a method
- * name and a JSON args blob. All result shapes are JSON strings too.
+ * Single UniFFI export. The plugin layer passes a method name and a
+ * JSON args blob; all result shapes are JSON strings.
+ *
+ * A panic catcher sits between `dispatch` and the FFI boundary because
+ * UniFFI 0.x does not install one by default, and an unwind across the
+ * C ABI into Swift/Kotlin is undefined behaviour. Likely panic sources
+ * are `serde_json::from_str` (deeply nested or huge input under OOM)
+ * and any rusqlite path that aborts on contract violation.
  */
 public func nativeCall(method: String, argsJson: String)throws  -> String  {
     return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeSecureStorageException_lift) {
@@ -558,7 +572,7 @@ private let initializationResult: InitializationResult = {
     if bindings_contract_version != scaffolding_contract_version {
         return InitializationResult.contractVersionMismatch
     }
-    if (uniffi_secureStorage_checksum_func_native_call() != 31140) {
+    if (uniffi_secureStorage_checksum_func_native_call() != 54365) {
         return InitializationResult.apiChecksumMismatch
     }
 
