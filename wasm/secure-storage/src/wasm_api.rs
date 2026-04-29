@@ -422,7 +422,7 @@ const PRAGMAS: &CStr = c"\
     PRAGMA page_size = 4096;\
     PRAGMA journal_mode = MEMORY;\
     PRAGMA synchronous = NORMAL;\
-    PRAGMA cache_size = -8000;\
+    PRAGMA cache_size = -32000;\
     PRAGMA locking_mode = EXCLUSIVE;\
     PRAGMA trusted_schema = OFF;\
 ";

@@ -517,7 +517,22 @@ pub fn open_db() -> Result<rusqlite::Connection> {
         .map_err(|e| SecureStorageError::Sqlite(e.to_string()))?;
     conn.pragma_update(None, "synchronous", "NORMAL")
         .map_err(|e| SecureStorageError::Sqlite(e.to_string()))?;
-    conn.pragma_update(None, "cache_size", -8000)
+    // 32 MB SQLite page cache. Negative value = KiB (per SQLite docs):
+    // `-32000` ≈ 32_768 KiB, holding ~8000 4-KiB pages in RAM. Big
+    // enough that the working set of a chat (discussions, recent
+    // messages, indexes) fits without spilling to redb on every read.
+    //
+    // Cost: up to 32 MB process RSS while a session is open. On a
+    // mid-range Android with 4-6 GB RAM that's <1% of available memory
+    // and easily reclaimed at session close. The previous 8 MB was
+    // inherited from a pre-encrypted-VFS world where disk reads were
+    // cheap; here every cache miss costs an AEAD decrypt + redb read,
+    // so the trade leans much harder toward "keep more in RAM".
+    //
+    // TODO: profile actual RSS impact on a real Android session over a
+    // few thousand messages — if the cache becomes a memory pressure
+    // signal we may want to drop back toward 16 MB.
+    conn.pragma_update(None, "cache_size", -32000)
         .map_err(|e| SecureStorageError::Sqlite(e.to_string()))?;
     conn.pragma_update(None, "locking_mode", "EXCLUSIVE")
         .map_err(|e| SecureStorageError::Sqlite(e.to_string()))?;
