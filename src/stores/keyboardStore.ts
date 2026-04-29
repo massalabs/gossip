@@ -134,6 +134,25 @@ function initKeyboardTracking() {
 
   handleResize();
   visualViewport.addEventListener('resize', handleResize);
+
+  // Safari iOS web auto-scrolls the document up to bring a focused input into
+  // view, even with body overflow:hidden. Combined with the --available-height
+  // resize above, that stacks and pushes the layout too high. Reset window
+  // scroll back to 0 to neutralize Safari's auto-scroll.
+  const ua = navigator.userAgent;
+  const isIOSWeb =
+    /iPhone|iPad|iPod/.test(ua) ||
+    (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+  if (touchWeb && isIOSWeb) {
+    const resetScroll = () => {
+      if (window.scrollY !== 0 || window.scrollX !== 0) {
+        window.scrollTo(0, 0);
+      }
+    };
+    window.addEventListener('scroll', resetScroll, { passive: true });
+    document.addEventListener('focusin', resetScroll);
+    visualViewport.addEventListener('scroll', resetScroll);
+  }
 }
 
 initKeyboardTracking();
