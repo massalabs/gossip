@@ -1,3 +1,10 @@
+// The `wasm` and `native` features select mutually exclusive backends
+// (IDB-backed VFS for the browser, redb-backed VFS for iOS/Android).
+// Enabling both at once would compile the two storage layers into one
+// binary, which is never intended and produces obscure link errors.
+#[cfg(all(feature = "wasm", feature = "native"))]
+compile_error!("features `wasm` and `native` are mutually exclusive");
+
 mod block;
 mod constants;
 mod domain;
