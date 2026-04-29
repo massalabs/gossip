@@ -354,7 +354,7 @@ fn exec_sql(sql: &str, params: &[serde_json::Value]) -> Result<QueryResultJson> 
         .map_err(|_| SecureStorageError::LockPoisoned)?;
     let conn = guard
         .as_ref()
-        .ok_or_else(|| SecureStorageError::Storage("database not open".into()))?;
+        .ok_or_else(|| SecureStorageError::DatabaseNotOpen)?;
 
     let mut stmt = conn.prepare(sql)?;
     let column_count = stmt.column_count();

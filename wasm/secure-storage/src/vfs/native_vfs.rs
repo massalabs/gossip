@@ -213,7 +213,7 @@ pub fn has_data() -> Result<bool> {
     let guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
     let st = guard
         .as_ref()
-        .ok_or_else(|| SecureStorageError::Storage("not initialized".into()))?;
+        .ok_or_else(|| SecureStorageError::NotInitialized)?;
     st.backend.has_data()
 }
 
@@ -223,7 +223,7 @@ pub fn provision() -> Result<()> {
     let mut guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
     let st = guard
         .as_mut()
-        .ok_or_else(|| SecureStorageError::Storage("not initialized".into()))?;
+        .ok_or_else(|| SecureStorageError::NotInitialized)?;
     crate::provision_storage(&mut st.backend)
 }
 
@@ -233,7 +233,7 @@ pub fn allocate(slot: u8, password: &[u8]) -> Result<()> {
     let mut guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
     let st = guard
         .as_mut()
-        .ok_or_else(|| SecureStorageError::Storage("not initialized".into()))?;
+        .ok_or_else(|| SecureStorageError::NotInitialized)?;
     // Flush pending writes to the CURRENT session before switching.
     // Otherwise the `main_file` reset below would drop data that was
     // buffered but not yet synced to redb — e.g. during multi-account
@@ -263,7 +263,7 @@ pub fn unlock(password: &[u8]) -> Result<bool> {
     let mut guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
     let st = guard
         .as_mut()
-        .ok_or_else(|| SecureStorageError::Storage("not initialized".into()))?;
+        .ok_or_else(|| SecureStorageError::NotInitialized)?;
     match crate::unlock_session(&st.backend, &st.domain, password) {
         Ok(session) => {
             let sql_state =
@@ -306,7 +306,7 @@ pub fn is_unlocked() -> Result<bool> {
     let guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
     let st = guard
         .as_ref()
-        .ok_or_else(|| SecureStorageError::Storage("not initialized".into()))?;
+        .ok_or_else(|| SecureStorageError::NotInitialized)?;
     Ok(st.session.is_some())
 }
 
@@ -374,7 +374,7 @@ pub fn cover_tick() -> Result<()> {
     let mut guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
     let st = guard
         .as_mut()
-        .ok_or_else(|| SecureStorageError::Storage("not initialized".into()))?;
+        .ok_or_else(|| SecureStorageError::NotInitialized)?;
     for &ns in COVER_TRAFFIC_NAMESPACES {
         crate::cover_traffic_tick(&mut st.backend, &st.domain, ns)?;
     }
@@ -388,7 +388,7 @@ pub fn flush() -> Result<()> {
     let mut guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
     let st = guard
         .as_mut()
-        .ok_or_else(|| SecureStorageError::Storage("not initialized".into()))?;
+        .ok_or_else(|| SecureStorageError::NotInitialized)?;
     flush_pending_writes(st)
 }
 
@@ -457,7 +457,7 @@ pub fn write_namespace_data(namespace: u8, offset: u64, data: &[u8]) -> Result<(
     let mut guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
     let st = guard
         .as_mut()
-        .ok_or_else(|| SecureStorageError::Storage("not initialized".into()))?;
+        .ok_or_else(|| SecureStorageError::NotInitialized)?;
     let session = st
         .session
         .as_ref()
@@ -490,7 +490,7 @@ pub fn read_namespace_data(namespace: u8, offset: u64, len: usize) -> Result<Vec
     let mut guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
     let st = guard
         .as_mut()
-        .ok_or_else(|| SecureStorageError::Storage("not initialized".into()))?;
+        .ok_or_else(|| SecureStorageError::NotInitialized)?;
     let session = st
         .session
         .as_ref()
@@ -521,7 +521,7 @@ pub fn clear_namespace(namespace: u8) -> Result<()> {
     let mut guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
     let st = guard
         .as_mut()
-        .ok_or_else(|| SecureStorageError::Storage("not initialized".into()))?;
+        .ok_or_else(|| SecureStorageError::NotInitialized)?;
     let session = st
         .session
         .as_ref()
@@ -541,7 +541,7 @@ pub fn namespace_data_length(namespace: u8) -> Result<u64> {
     let mut guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
     let st = guard
         .as_mut()
-        .ok_or_else(|| SecureStorageError::Storage("not initialized".into()))?;
+        .ok_or_else(|| SecureStorageError::NotInitialized)?;
     let session = st
         .session
         .as_ref()
