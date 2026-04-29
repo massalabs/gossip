@@ -375,16 +375,25 @@ fn ensure_cover_scheduler() {
 
 /// Run one round of cover traffic across every namespace the scheduler
 /// tracks. Iterating the whole set on each tick keeps the snapshot
-/// invariant — "all sessions change at all block indices" — symmetric
+/// invariant - "all sessions change at all block indices" - symmetric
 /// between the web worker and the native backend.
+///
+/// Releases and re-acquires the state mutex between namespaces so a
+/// foreground SQL op can interleave with the cover scheduler instead of
+/// waiting on the entire multi-namespace tick (each namespace tick does
+/// SESSION_COUNT rounds of PQ rerandomization, which dominates wall
+/// time on slow devices). Each namespace tick is still atomic, so the
+/// per-(session,ns) count invariant is preserved within each pass.
 pub fn cover_tick() -> Result<()> {
-    let mutex = state_mutex();
-    let mut guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
-    let st = guard
-        .as_mut()
-        .ok_or_else(|| SecureStorageError::NotInitialized)?;
     for &ns in COVER_TRAFFIC_NAMESPACES {
+        let mutex = state_mutex();
+        let mut guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
+        let st = guard
+            .as_mut()
+            .ok_or_else(|| SecureStorageError::NotInitialized)?;
         crate::cover_traffic_tick(&mut st.backend, &st.domain, ns)?;
+        // `guard` drops here at the end of the loop iteration, releasing
+        // the mutex before the next namespace's tick.
     }
     Ok(())
 }
