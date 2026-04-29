@@ -611,21 +611,6 @@ fn lock_aux() -> std::result::Result<MutexGuard<'static, Vec<Vec<u8>>>, ()> {
     }
 }
 
-/// Checked `usize` conversion for SQLite's `c_int` sizes. Negative or
-/// outrageously-large values are rejected so we never allocate or index
-/// with a wrapped value.
-fn checked_usize_from_c_int(v: c_int) -> Option<usize> {
-    if v < 0 {
-        return None;
-    }
-    Some(v as usize)
-}
-
-/// Checked conversion from SQLite's signed `i64` offset to `u64`.
-fn checked_u64_from_i64(v: i64) -> Option<u64> {
-    if v < 0 { None } else { Some(v as u64) }
-}
-
 // SAFETY: SQLite guarantees `file` points to a fresh `sqlite3_file`-shaped
 // allocation of at least `vfs.szOsFile` bytes (we set this to `size_of::<EncFile>`
 // in `register`), and `out_flags`, when non-null, points to a writable c_int.
@@ -693,25 +678,33 @@ unsafe extern "C" fn x_read(
 ) -> c_int {
     vfs_call(|| unsafe {
         let f = &*(file as *const EncFile);
-        let n = match checked_usize_from_c_int(amt) {
+        let n = match usize::try_from(amt).ok() {
             Some(n) => n,
             None => return SQLITE_IOERR as c_int,
         };
-        let off = match checked_u64_from_i64(offset) {
+        let off = match u64::try_from(offset).ok() {
             Some(o) => o,
             None => return SQLITE_IOERR as c_int,
         };
         let dst = std::slice::from_raw_parts_mut(buf as *mut u8, n);
 
         if f.kind == FileKind::Main {
+            // Defense in depth: zero `dst` on every Main-kind error path
+            // so SQLite never sees stale bytes from the caller's buffer
+            // and cannot mis-parse them as a valid page (e.g. an empty
+            // header).
             // Pre-validate the end offset so the shared `read()`
             // implementation never sees an overflow.
             if off.checked_add(n as u64).is_none() {
+                dst.fill(0);
                 return SQLITE_IOERR as c_int;
             }
             let guard = match lock_state() {
                 Ok(g) => g,
-                Err(_) => return SQLITE_IOERR as c_int,
+                Err(_) => {
+                    dst.fill(0);
+                    return SQLITE_IOERR as c_int;
+                }
             };
             let st = match guard.as_ref() {
                 Some(st) => st,
@@ -792,14 +785,14 @@ unsafe extern "C" fn x_write(
 ) -> c_int {
     vfs_call(|| unsafe {
         let f = &*(file as *const EncFile);
-        let n = match checked_usize_from_c_int(amt) {
+        let n = match usize::try_from(amt).ok() {
             Some(n) => n,
             None => return SQLITE_IOERR as c_int,
         };
         let src = std::slice::from_raw_parts(buf as *const u8, n);
 
         if f.kind == FileKind::Main {
-            let write_off = match checked_u64_from_i64(offset) {
+            let write_off = match u64::try_from(offset).ok() {
                 Some(o) => o,
                 None => return SQLITE_IOERR as c_int,
             };
@@ -856,7 +849,7 @@ unsafe extern "C" fn x_write(
 unsafe extern "C" fn x_truncate(file: *mut sqlite3_file, size: i64) -> c_int {
     vfs_call(|| unsafe {
         let f = &*(file as *const EncFile);
-        let new_size = match checked_u64_from_i64(size) {
+        let new_size = match u64::try_from(size).ok() {
             Some(s) => s,
             None => return SQLITE_IOERR as c_int,
         };
@@ -988,7 +981,7 @@ unsafe extern "C" fn x_full_pathname(
     vfs_call(|| unsafe {
         if !z_name.is_null() {
             let bytes = CStr::from_ptr(z_name).to_bytes_with_nul();
-            let cap = match checked_usize_from_c_int(n_out) {
+            let cap = match usize::try_from(n_out).ok() {
                 Some(c) => c,
                 None => return SQLITE_IOERR as c_int,
             };
@@ -1174,8 +1167,8 @@ mod tests {
     /// reading/writing at a random address.
     #[test]
     fn test_checked_conversions_reject_negative() {
-        assert!(checked_u64_from_i64(-1).is_none());
-        assert!(checked_usize_from_c_int(-1).is_none());
+        assert!(u64::try_from(-1i64).is_err());
+        assert!(usize::try_from(-1i32).is_err());
     }
 
     /// Large end-to-end Rust integration test approximating the full
