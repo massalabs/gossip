@@ -135,6 +135,19 @@ impl RedbStorage {
     /// to do from ticks where it did not. An empty redb txn still produces
     /// a uniform fsync, keeping the on-disk timing pattern indistinguishable.
     pub fn commit(&mut self) -> Result<()> {
+        // Dedupe by key: a hot path can buffer multiple writes for the same
+        // (session, namespace, block_id) when the SQLite page cache flushes
+        // a page that was rewritten in the same txn, when truncate-then-write
+        // resequences a block, etc. Inserting all of them in turn does N redb
+        // writes for the same key when only the last one matters. Walk the
+        // buffer in reverse so the *last* write wins, matching the in-memory
+        // overlay semantics in `read_block`.
+        let mut last_idx: HashMap<[u8; 10], usize> = HashMap::with_capacity(self.ram_buffer.len());
+        for (i, bw) in self.ram_buffer.iter().enumerate() {
+            let key = Self::make_block_key(bw.session, bw.namespace, bw.block_id);
+            last_idx.insert(key, i);
+        }
+
         let txn = self
             .db
             .begin_write()
@@ -143,8 +156,14 @@ impl RedbStorage {
             let mut table = txn
                 .open_table(BLOCKS)
                 .map_err(|e| SecureStorageError::Storage(format!("redb open table: {e}")))?;
-            for bw in &self.ram_buffer {
+            // Iterate in original buffer order so on-disk write order
+            // matches the order in which the application made the writes,
+            // but using each key's last-buffered value.
+            for (i, bw) in self.ram_buffer.iter().enumerate() {
                 let key = Self::make_block_key(bw.session, bw.namespace, bw.block_id);
+                if last_idx.get(&key) != Some(&i) {
+                    continue;
+                }
                 table
                     .insert(key.as_slice(), bw.data.as_slice())
                     .map_err(|e| SecureStorageError::Storage(format!("redb insert: {e}")))?;
@@ -281,29 +300,18 @@ impl BlockStorage for RedbStorage {
                 .open_table(BLOCKS)
                 .map_err(|e| SecureStorageError::Storage(format!("redb open table: {e}")))?;
 
+            // Delete in place via `retain_in`: skips the
+            // `Vec<[u8; 10]>` materialisation of every key in the range
+            // before re-walking it for `remove`. Useful for namespaces
+            // that have grown to thousands of blocks.
             let prefix_start = Self::make_block_key(su8, namespace, 0);
             let prefix_end = Self::make_block_key(su8, namespace, u64::MAX);
-            let range = table
-                .range(prefix_start.as_slice()..=prefix_end.as_slice())
-                .map_err(|e| SecureStorageError::Storage(format!("redb range: {e}")))?;
-            let keys: Vec<[u8; 10]> = range
-                .filter_map(|entry| {
-                    let (k, _) = entry.ok()?;
-                    let kb = k.value();
-                    if kb.len() == 10 {
-                        let mut arr = [0u8; 10];
-                        arr.copy_from_slice(kb);
-                        Some(arr)
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-            for key in &keys {
-                table
-                    .remove(key.as_slice())
-                    .map_err(|e| SecureStorageError::Storage(format!("redb remove: {e}")))?;
-            }
+            table
+                .retain_in(
+                    prefix_start.as_slice()..=prefix_end.as_slice(),
+                    |_k, _v| false,
+                )
+                .map_err(|e| SecureStorageError::Storage(format!("redb retain_in: {e}")))?;
         }
         txn.commit()
             .map_err(|e| SecureStorageError::Storage(format!("redb commit: {e}")))?;

@@ -340,12 +340,14 @@ export class DatabaseConnection {
     const kind = classifyStatement(sql);
 
     if (this.state.useNativePlugin && this.state.nativePlugin) {
-      const safeParams = params.map(p =>
-        p instanceof Uint8Array ? Array.from(p) : p
-      );
+      // No `Array.from` on Uint8Array params: encodeSqlParam in
+      // secure-storage-native.ts already accepts Uint8Array directly and
+      // base64-encodes it. The previous conversion paid two extra O(n)
+      // passes per blob bind, multiplied by however many INSERTs the
+      // message-send path issues.
       const result = await this.state.nativePlugin.execSql({
         sql,
-        params: safeParams,
+        params,
       });
       this.state.lastInsertRowIdCache = result.lastInsertRowId;
       this.advanceTxDepth(kind);
@@ -663,7 +665,7 @@ export class DatabaseConnection {
         // was renamed for clarity (create vs allocate).
         await this.requireNativePlugin().allocateSession({
           slot,
-          password: Array.from(pwBytes),
+          password: pwBytes,
         });
       } else {
         // Transfer the buffer so no intermediate copy lingers in the
@@ -712,7 +714,7 @@ export class DatabaseConnection {
     try {
       if (this.state.useNativePlugin) {
         const result = await this.requireNativePlugin().unlockSession({
-          password: Array.from(pwBytes),
+          password: pwBytes,
         });
         ok = result.unlocked;
       } else {
@@ -791,7 +793,7 @@ export class DatabaseConnection {
       await this.requireNativePlugin().writeNamespaceData({
         namespace,
         offset,
-        data: Array.from(data),
+        data,
       });
       return;
     }
@@ -818,7 +820,7 @@ export class DatabaseConnection {
         offset,
         len,
       });
-      return Uint8Array.from(data);
+      return data;
     }
     return this.requireSecureProxy().readNamespaceData(namespace, offset, len);
   }

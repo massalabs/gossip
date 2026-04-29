@@ -77,9 +77,16 @@ export interface SecureStorageNativePlugin {
   initSecureStorage(options: { path: string; domain: string }): Promise<void>;
   provisionStorage(): Promise<void>;
   hasData(): Promise<{ hasData: boolean }>;
-  allocateSession(options: { slot: number; password: number[] }): Promise<void>;
+  // Binary payloads (passwords, namespace blobs) are typed as Uint8Array
+  // end-to-end. Going through `number[]` was an O(n) memcopy in each
+  // direction with no benefit: the plugin internally base64-encodes
+  // for the JSON bridge regardless.
+  allocateSession(options: {
+    slot: number;
+    password: Uint8Array;
+  }): Promise<void>;
   unlockSession(options: {
-    password: number[];
+    password: Uint8Array;
   }): Promise<{ unlocked: boolean }>;
   lockSession(): Promise<void>;
   isUnlocked(): Promise<{ unlocked: boolean }>;
@@ -99,13 +106,13 @@ export interface SecureStorageNativePlugin {
   writeNamespaceData(options: {
     namespace: number;
     offset: number;
-    data: number[];
+    data: Uint8Array;
   }): Promise<void>;
   readNamespaceData(options: {
     namespace: number;
     offset: number;
     len: number;
-  }): Promise<{ data: number[] }>;
+  }): Promise<{ data: Uint8Array }>;
   namespaceDataLength(options: {
     namespace: number;
   }): Promise<{ length: number }>;
@@ -176,7 +183,7 @@ export const SecureStorageNative: SecureStorageNativePlugin = {
       offset,
       len,
     });
-    return { data: Array.from(base64ToU8(b64)) };
+    return { data: base64ToU8(b64) };
   },
   async namespaceDataLength({ namespace }) {
     const length = await callNative<number>('namespaceDataLength', {

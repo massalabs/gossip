@@ -377,7 +377,11 @@ fn exec_sql(sql: &str, params: &[serde_json::Value]) -> Result<QueryResultJson> 
         .as_ref()
         .ok_or_else(|| SecureStorageError::DatabaseNotOpen)?;
 
-    let mut stmt = conn.prepare(sql)?;
+    // `prepare_cached` keeps a per-connection LRU of prepared statements
+    // keyed by SQL text. The SDK reuses the same INSERT/UPDATE strings
+    // for every message send, so the parser/planner cost is paid once per
+    // statement shape instead of every call.
+    let mut stmt = conn.prepare_cached(sql)?;
     let column_count = stmt.column_count();
     let columns: Vec<String> = (0..column_count)
         .map(|i| stmt.column_name(i).unwrap_or("?").to_string())
