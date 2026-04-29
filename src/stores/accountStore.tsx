@@ -243,27 +243,27 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
   // Helper to persist session blob.
   //
   // On the secureStorage backend, the blob is written directly into a
-  // dedicated namespace stream (bypassing SQLite/Drizzle/page-management),
-  // and the in-memory `userProfile.session` is updated to the new blob.
-  // The SQL `userProfile` row is NOT touched on the hot path: it now stores
-  // the session column only as a fallback for the wa-sqlite backend, where
-  // we still call `profiles.save` to persist via SQL UPDATE.
+  // dedicated namespace stream (bypassing SQLite/Drizzle/page-management).
+  // The SQL `userProfile.session` column and in-memory profile session
+  // are left unchanged on this path: namespace writes transfer/detach the
+  // blob, and the SQL column is only a legacy fallback for wa-sqlite data.
   const createOnPersist = (_userId: string) => {
     return async (blob: Uint8Array, _key: EncryptionKey) => {
       const sdk = getSdk();
       const current = get().userProfile;
       if (!current) return;
-      const updated = { ...current, session: blob, updatedAt: new Date() };
+      const updatedAt = new Date();
 
       if (sdk.usesSessionBlobNamespace) {
         // Fast path: write the blob to the secure-storage namespace.
         await sdk.persistSessionBlob(blob);
+        set({ userProfile: { ...current, updatedAt } });
       } else {
         // Legacy path: round-trip through the SQL profile row.
+        const updated = { ...current, session: blob, updatedAt };
         await sdk.profiles.save(updated);
+        set({ userProfile: updated });
       }
-
-      set({ userProfile: updated });
     };
   };
 
@@ -306,13 +306,19 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       onPersist: createOnPersist(userId),
     });
 
-    const session = getSdk().getEncryptedSession();
+    const sdk = getSdk();
+    const session = sdk.getEncryptedSession();
+    let profileSession = session;
+    if (sdk.usesSessionBlobNamespace) {
+      await sdk.persistSessionBlob(session);
+      profileSession = new Uint8Array(0);
+    }
 
-    const profile = await getSdk().profiles.createOrUpdate(
+    const profile = await sdk.profiles.createOrUpdate(
       username,
       encodeUserId(userIdBytes),
       security,
-      session
+      profileSession
     );
 
     if (skipHistorical) {
@@ -695,14 +701,20 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           return;
         }
 
-        const updatedProfile = {
-          ...userProfile,
-          session: sessionBlob,
-          updatedAt: new Date(),
-        };
-
-        await getSdk().profiles.save(updatedProfile);
-        set({ userProfile: updatedProfile });
+        const sdk = getSdk();
+        const updatedAt = new Date();
+        if (sdk.usesSessionBlobNamespace) {
+          await sdk.persistSessionBlob(sessionBlob);
+          set({ userProfile: { ...userProfile, updatedAt } });
+        } else {
+          const updatedProfile = {
+            ...userProfile,
+            session: sessionBlob,
+            updatedAt,
+          };
+          await sdk.profiles.save(updatedProfile);
+          set({ userProfile: updatedProfile });
+        }
       } catch (error) {
         console.error('Error persisting session:', error);
       }

@@ -344,12 +344,11 @@ export class DatabaseConnection {
       // call below stays normally typed (no `as` cast over the tuple
       // shape, which would silently rot if `exec`'s signature changes).
       const transfers = collectTransferables(params);
-      if (transfers.length > 0) {
-        Comlink.transfer(params, transfers);
-      }
+      const execParams =
+        transfers.length > 0 ? Comlink.transfer(params, transfers) : params;
       const result = await this.state.secureProxy.exec(
         sql,
-        params,
+        execParams,
         this.state.inTransaction
       );
       this.state.lastInsertRowIdCache = result.lastInsertRowId;
@@ -752,10 +751,9 @@ export class DatabaseConnection {
     // as transferable instead of the whole tuple, so the proxy call
     // stays normally typed.
     const transfers = collectTransferables([data]);
-    if (transfers.length > 0) {
-      Comlink.transfer(data, transfers);
-    }
-    await proxy.writeNamespaceData(namespace, offset, data);
+    const payload =
+      transfers.length > 0 ? Comlink.transfer(data, transfers) : data;
+    await proxy.writeNamespaceData(namespace, offset, payload);
   }
 
   /** Read `len` bytes from a namespace stream at `offset`. */

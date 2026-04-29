@@ -68,6 +68,7 @@ describe('session blob namespace persist', () => {
         0,
         blob
       );
+      expect(blob.byteLength).toBe(0);
       await conn.secureStorageFlush();
       await conn.close();
     }
@@ -121,6 +122,7 @@ describe('session blob namespace persist', () => {
 
     // Write via namespace 1 (session blob fast path).
     await conn.secureStorageWriteNamespaceData(SESSION_BLOB_NAMESPACE, 0, blob);
+    expect(blob.byteLength).toBe(0);
 
     await conn.secureStorageFlush();
 
