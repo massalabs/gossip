@@ -404,6 +404,12 @@ class GossipSdk {
       config,
       queries
     );
+    // Wire the immediate-persist callback so the send hot path can
+    // run the session-blob persist in parallel with the network write
+    // (see `MessageService.processSendQueueForContact`). Done as a
+    // setter rather than a constructor arg to avoid a circular
+    // dependency on `this` during MessageService construction.
+    this._message.setPersistFlusher(() => this.awaitPendingPersist());
 
     this._discussion.setMessageService(this._message);
 
@@ -1177,6 +1183,40 @@ class GossipSdk {
       if (this._persistDirty) {
         await this.flushPersist();
       }
+    }
+  }
+
+  /**
+   * Force-fire the pending session-blob persist immediately and await
+   * its completion. Used by the message-send hot path to durably
+   * persist the new PQ counter BEFORE we publish the encrypted message
+   * to the relay — without this, a crash window between encrypt and
+   * the next debounced flush would leave the in-RAM counter advanced
+   * past the on-disk one, and the next send would re-use a counter
+   * already on the wire.
+   *
+   * Behaviour:
+   *   - If a flush is already in-flight, returns its Promise.
+   *   - If a flush is scheduled (timer pending), cancels the timer
+   *     and runs `flushPersist` immediately.
+   *   - If state is clean (`!_persistDirty`), resolves immediately.
+   *
+   * The caller is expected to `Promise.all` this with the network
+   * call so the persist runs in parallel with the wire write — the
+   * total tap-to-sent time stays bounded by `max(network, persist)`
+   * rather than serially summed.
+   */
+  async awaitPendingPersist(): Promise<void> {
+    if (this._persistInFlightPromise) {
+      await this._persistInFlightPromise;
+      return;
+    }
+    if (this._persistDirty) {
+      if (this._persistTimer !== null) {
+        clearTimeout(this._persistTimer);
+        this._persistTimer = null;
+      }
+      await this.flushPersist();
     }
   }
 

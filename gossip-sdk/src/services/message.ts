@@ -265,6 +265,24 @@ export class MessageService {
    * and send a duplicate.
    */
   private inFlightFastPath = new Set<number>();
+  /**
+   * Force-fire the SDK's pending session-blob persist. Wired by
+   * `GossipSdk.openSession` via `setPersistFlusher`. Used by the send
+   * hot path to run persist in parallel with the network write so the
+   * PQ counter is durable on disk before the relay confirms receipt
+   * (otherwise a crash between encrypt and the next debounced flush
+   * would leak an advanced in-RAM counter, leading to a re-used
+   * counter on the next send → peer collision).
+   *
+   * No-op (`async () => {}`) until the SDK calls the setter, which
+   * keeps unit tests of MessageService that don't bring up the full
+   * SDK working without extra plumbing.
+   */
+  private persistFlusher: () => Promise<void> = async () => {};
+
+  setPersistFlusher(flusher: () => Promise<void>): void {
+    this.persistFlusher = flusher;
+  }
 
   /** Emit MESSAGE_RECEIVED with a Message that may not have a DB id yet */
   private emitMessageReceived(
@@ -1201,14 +1219,57 @@ export class MessageService {
           encryptedMessage = sendOutput.data;
           seeker = sendOutput.seeker;
 
-          // Try the network synchronously. On success, skip READY entirely
-          // and write SENT in the background. On failure, fall back to
-          // persisting READY so the next retry doesn't have to re-encrypt.
+          // Run persist and the wire write in PARALLEL.
+          //
+          // The encrypt above advanced the PQ session counter in RAM.
+          // Persist must capture that mutation durably, but it does
+          // NOT depend on the network result, and the network
+          // publish only needs the (seeker, ciphertext) pair — also
+          // independent of persist. Awaiting them sequentially
+          // (persist → network) costs `persist + network` (≈ 500 ms
+          // on Android); awaiting them in parallel costs
+          // `max(persist, network)` (≈ 350 ms — persist hides under
+          // the network round-trip).
+          //
+          // Crash-safety analysis (verified against the gossip
+          // session manager in `wasm/sessions/src/session_manager.rs`
+          // and `session.rs`):
+          //   - Window where network landed but persist did NOT:
+          //     B has advanced its peer-ratchet to the next expected
+          //     seeker. On A's restart, state is restored to the
+          //     pre-crash counter. A's send loop re-runs the row
+          //     (still WAITING_SESSION) and re-encrypts with the
+          //     OLD counter → produces a seeker B no longer expects
+          //     → B's `feed_incoming_message_board_read` finds no
+          //     matching peer and silently ignores the duplicate.
+          //     **No session kill.** The session-close branch in
+          //     `session_manager.rs:642` only fires after a peer is
+          //     matched AND `try_feed_incoming_message` returns None
+          //     (decrypt failure on a matched session) — neither
+          //     condition is met for a stale-seeker retry.
+          //   - Side-effect: A's row stays WAITING_SESSION and is
+          //     retried on every session refresh. The `acknowledged
+          //     _seekers` field of the next message B sends back
+          //     to A includes the seeker A originally published
+          //     (which B did receive successfully), and A's send
+          //     loop uses that to mark the row SENT and stop
+          //     retrying. So the "stuck retry" is self-healing as
+          //     soon as the conversation has any back-traffic.
+          //
+          // Promise.all rejects on either failure:
+          //   - Network failed → caught below, row → READY with
+          //     ciphertext kept (avoids re-encrypt on retry).
+          //   - Persist failed → bubbles up, row stays
+          //     WAITING_SESSION (no SENT update). The next session
+          //     activation re-runs the loop.
           try {
-            await this.messageProtocol.sendMessage({
-              seeker,
-              ciphertext: encryptedMessage,
-            });
+            await Promise.all([
+              this.messageProtocol.sendMessage({
+                seeker,
+                ciphertext: encryptedMessage,
+              }),
+              this.persistFlusher(),
+            ]);
           } catch (error) {
             log.error('network send failed for fresh message', {
               messageId: msg.id,
