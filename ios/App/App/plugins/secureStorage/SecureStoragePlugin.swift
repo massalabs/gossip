@@ -22,7 +22,7 @@ public class SecureStoragePlugin: CAPPlugin, CAPBridgedPlugin {
         guard let method = call.getString("method") else {
             call.reject("missing method"); return
         }
-        let rawArgs = call.getString("args") ?: "{}"
+        let rawArgs = call.getString("args") ?? "{}"
 
         let args: String
         if method == "initSecureStorage" {
