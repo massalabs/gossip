@@ -19,6 +19,7 @@ use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
 
 use crate::error::SecureStorageError;
+use crate::js_num;
 use crate::vfs::native_vfs;
 
 // ── Global DB connection ────────────────────────────────────────────
@@ -398,7 +399,17 @@ fn exec_sql(sql: &str, params: &[serde_json::Value]) -> Result<QueryResultJson> 
         for col in 0..column_count {
             let val = match row.get_ref(col)? {
                 rusqlite::types::ValueRef::Null => V::Null,
-                rusqlite::types::ValueRef::Integer(v) => V::from(v),
+                rusqlite::types::ValueRef::Integer(v) => {
+                    if !js_num::is_js_safe_integer_i64(v) {
+                        return Err(SecureStorageException::msg(format!(
+                            "INTEGER {v} exceeds JS safe integer range \
+                             (|v| < 2^53); JSON `number` cannot carry it \
+                             losslessly. Adjust the schema to use TEXT or \
+                             extend the protocol with a BigInt sentinel."
+                        )));
+                    }
+                    V::from(v)
+                }
                 rusqlite::types::ValueRef::Real(v) => serde_json::Number::from_f64(v)
                     .map(V::Number)
                     .unwrap_or(V::Null),
@@ -420,7 +431,11 @@ fn exec_sql(sql: &str, params: &[serde_json::Value]) -> Result<QueryResultJson> 
     drop(raw_rows);
 
     let last_insert_rowid = conn.last_insert_rowid();
-    let changes = conn.changes() as i64;
+    // `Connection::changes` returns u64. Reporting it as i64 to JS keeps the
+    // wire format stable; a 2^63 changes count is impossible in practice but
+    // saturating to i64::MAX still avoids any silent truncation if it ever
+    // happens (a programmer error somewhere upstream).
+    let changes = i64::try_from(conn.changes()).unwrap_or(i64::MAX);
 
     Ok(QueryResultJson {
         columns,
