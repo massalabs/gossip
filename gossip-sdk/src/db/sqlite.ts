@@ -868,13 +868,7 @@ export class DatabaseConnection {
       return;
     }
     const proxy = this.requireSecureProxy();
-    // Same pattern as `execRawDirect`: mark just the Uint8Array buffer
-    // as transferable instead of the whole tuple, so the proxy call
-    // stays normally typed.
-    const transfers = collectTransferables([data]);
-    const payload =
-      transfers.length > 0 ? Comlink.transfer(data, transfers) : data;
-    await proxy.writeNamespaceData(namespace, offset, payload);
+    await proxy.writeNamespaceData(namespace, offset, data);
   }
 
   /** Read `len` bytes from a namespace stream at `offset`. */

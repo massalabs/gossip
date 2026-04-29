@@ -612,11 +612,21 @@ impl SessionManagerWrapper {
     }
 
     /// Gets the list of message board seekers to monitor.
+    ///
+    /// Each seeker is materialised as a JS-owned Uint8Array via
+    /// `new_with_length` + `copy_from`. `Uint8Array::from(&[u8])` in older
+    /// js-sys returns an array whose buffer view sits over wasm linear
+    /// memory; subsequent wasm calls that grow the heap detach those
+    /// views, and the JS-side `SEEKERS_UPDATED` listener crashes with
+    /// "Cannot perform values on a detached ArrayBuffer". The
+    /// new-with-length path allocates a JS-side ArrayBuffer up front,
+    /// then copies — the result is decoupled from wasm memory.
     pub fn get_message_board_read_keys(&self) -> js_sys::Array {
         let seekers = self.inner.get_message_board_read_keys();
         let array = js_sys::Array::new();
         for seeker in seekers {
-            let js_seeker = js_sys::Uint8Array::from(&seeker[..]);
+            let js_seeker = js_sys::Uint8Array::new_with_length(seeker.len() as u32);
+            js_seeker.copy_from(&seeker);
             array.push(&js_seeker);
         }
         array

@@ -53,6 +53,9 @@ impl SecureStorageException {
 
 impl From<SecureStorageError> for SecureStorageException {
     fn from(e: SecureStorageError) -> Self {
+        // Display is intentionally generic for PD ("storage error",
+        // "database error", …) so an observer can't fingerprint the
+        // backing store from leaked error strings.
         Self::Error {
             code: e.code().into(),
             msg: e.to_string(),
