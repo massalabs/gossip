@@ -692,6 +692,7 @@ export class DatabaseConnection {
         // MessagePort queue. After transfer, pwBytes is detached.
         await this.requireSecureProxy().create(
           slot,
+          // eslint-disable-next-line no-restricted-syntax -- ALLOWED-TRANSFER: short-lived password buffer; caller's only post-transfer access is the `byteLength > 0` zeroize guard in the finally block, which already handles the detached state.
           Comlink.transfer(pwBytes, [pwBytes.buffer])
         );
       }
@@ -739,6 +740,7 @@ export class DatabaseConnection {
         ok = result.unlocked;
       } else {
         ok = await this.requireSecureProxy().unlock(
+          // eslint-disable-next-line no-restricted-syntax -- ALLOWED-TRANSFER: short-lived password buffer; caller's only post-transfer access is the `byteLength > 0` zeroize guard in the finally block.
           Comlink.transfer(pwBytes, [pwBytes.buffer])
         );
       }

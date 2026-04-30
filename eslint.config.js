@@ -44,6 +44,33 @@ export default tseslint.config(
           caughtErrorsIgnorePattern: '^_',
         },
       ],
+      // `Comlink.transfer` detaches the source ArrayBuffer on this side
+      // as soon as the call dispatches. That's intentional only when
+      // the caller is DONE with the bytes (e.g. zeroizing a password
+      // *after* checking byteLength === 0). For SQL bind params it's
+      // a recurring source of "Cannot perform values on a detached
+      // ArrayBuffer" because Drizzle / event listeners keep references
+      // to the params after the SQL call. Force a justification at
+      // every introduction site:
+      //
+      //   // eslint-disable-next-line no-restricted-syntax -- ALLOWED-TRANSFER: <reason>
+      //   await proxy.unlock(Comlink.transfer(pwBytes, [pwBytes.buffer]));
+      //
+      // The rule fires on `Comlink.transfer(...)` regardless of how
+      // it's imported, by matching the property access shape.
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector:
+            "CallExpression[callee.type='MemberExpression'][callee.object.name='Comlink'][callee.property.name='transfer']",
+          message:
+            "Comlink.transfer detaches the source ArrayBuffer on this side. " +
+            "Confirm the caller never reuses the buffer afterwards (Drizzle " +
+            "wraps params in error messages; event listeners may re-emit). " +
+            "Add `// eslint-disable-next-line no-restricted-syntax -- " +
+            "ALLOWED-TRANSFER: <why>` above the call to silence this rule.",
+        },
+      ],
     },
   },
   // Gossip SDK: enforce explicit .js extensions in relative imports
