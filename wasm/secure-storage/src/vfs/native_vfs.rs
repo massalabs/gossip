@@ -474,8 +474,18 @@ fn flush_pending_writes(st: &mut VfsState) -> Result<()> {
 
 // ── Namespace data (session blob, etc.) ─────────────────────────────
 
+fn reject_default_namespace(namespace: u8) -> Result<()> {
+    if namespace == DEFAULT_NAMESPACE {
+        return Err(SecureStorageError::Storage(
+            "DEFAULT_NAMESPACE is reserved for SQLite VFS access".into(),
+        ));
+    }
+    Ok(())
+}
+
 /// Write a blob to a non-SQL namespace (e.g. session blob on ns=1).
 pub fn write_namespace_data(namespace: u8, offset: u64, data: &[u8]) -> Result<()> {
+    reject_default_namespace(namespace)?;
     let mutex = state_mutex();
     let mut guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
     let st = guard
@@ -509,6 +519,7 @@ pub fn write_namespace_data(namespace: u8, offset: u64, data: &[u8]) -> Result<(
 
 /// Read from a non-SQL namespace.
 pub fn read_namespace_data(namespace: u8, offset: u64, len: usize) -> Result<Vec<u8>> {
+    reject_default_namespace(namespace)?;
     let mutex = state_mutex();
     let mut guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
     let st = guard
@@ -540,6 +551,7 @@ pub fn read_namespace_data(namespace: u8, offset: u64, len: usize) -> Result<Vec
 /// underlying block stream so a subsequent `write_session_data` starts
 /// from offset 0 with no residual bytes.
 pub fn clear_namespace(namespace: u8) -> Result<()> {
+    reject_default_namespace(namespace)?;
     let mutex = state_mutex();
     let mut guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
     let st = guard
@@ -560,6 +572,7 @@ pub fn clear_namespace(namespace: u8) -> Result<()> {
 
 /// Total bytes in a namespace.
 pub fn namespace_data_length(namespace: u8) -> Result<u64> {
+    reject_default_namespace(namespace)?;
     let mutex = state_mutex();
     let mut guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
     let st = guard
@@ -1090,6 +1103,21 @@ mod tests {
 
             clear_namespace(1).unwrap();
             assert_eq!(namespace_data_length(1).unwrap(), 0);
+            drop(conn);
+        });
+    }
+
+    #[test]
+    fn test_native_vfs_namespace_api_rejects_default_namespace() {
+        run_with_stack(|| {
+            let _guard = test_mutex().lock().unwrap();
+            let (_dir, conn) = setup_native_vfs();
+
+            assert!(write_namespace_data(DEFAULT_NAMESPACE, 0, b"bad").is_err());
+            assert!(read_namespace_data(DEFAULT_NAMESPACE, 0, 1).is_err());
+            assert!(namespace_data_length(DEFAULT_NAMESPACE).is_err());
+            assert!(clear_namespace(DEFAULT_NAMESPACE).is_err());
+
             drop(conn);
         });
     }
