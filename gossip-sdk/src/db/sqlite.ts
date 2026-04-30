@@ -138,32 +138,6 @@ function createDefaultState(): DbState {
   };
 }
 
-/**
- * Collect unique ArrayBuffers backing `Uint8Array` values inside a params
- * list so they can be transferred (not copied) across the Comlink worker
- * boundary. SharedArrayBuffer is excluded because it cannot be transferred.
- */
-function collectTransferables(params: unknown[]): Transferable[] {
-  const seen = new Set<ArrayBufferLike>();
-  const out: Transferable[] = [];
-  for (const p of params) {
-    if (p instanceof Uint8Array) {
-      const buf = p.buffer;
-      if (
-        typeof SharedArrayBuffer !== 'undefined' &&
-        buf instanceof SharedArrayBuffer
-      ) {
-        continue;
-      }
-      if (!seen.has(buf)) {
-        seen.add(buf);
-        out.push(buf as ArrayBuffer);
-      }
-    }
-  }
-  return out;
-}
-
 function assertNoUndefinedBindParams(params: unknown[]): void {
   // Reject `undefined` bind params explicitly. JS coerces `undefined`
   // to SQL NULL by default, which silently masks programmer bugs:
@@ -399,20 +373,19 @@ export class DatabaseConnection {
       return result.rows;
     }
     if (this.state.secureProxy) {
-      // Transfer Uint8Array buffers across the Comlink boundary to avoid
-      // a structured-clone copy of the whole params array on every call.
-      // Mark `params` itself as the transfer carrier rather than the
-      // whole `[sql, params, inTransaction]` tuple: that way the proxy
-      // call below stays normally typed (no `as` cast over the tuple
-      // shape, which would silently rot if `exec`'s signature changes).
-      const transfers = collectTransferables(params);
-      const execParams =
-        transfers.length > 0 ? Comlink.transfer(params, transfers) : params;
-      const result = await this.state.secureProxy.exec(
-        sql,
-        execParams,
-        wasInTxn
-      );
+      // Pass params by structured-clone (Comlink default), NOT by
+      // transfer. The earlier transfer-based optimisation detached the
+      // Uint8Array buffers on this side as soon as the call dispatched
+      // — and Drizzle keeps references to the params array for error
+      // wrapping (`_DrizzleQueryError` calls `Uint8Array.toString()`
+      // which trips on `.join()` over a detached buffer) and for
+      // re-emit on the SDK event bus (e.g. `SEEKERS_UPDATED` reads
+      // the seekers right after the SQL insert).
+      // The structured-clone copy here is per-INSERT and small in
+      // practice (a few KB of Uint8Array per row); the correctness
+      // win is large — no class of "detached buffer" bugs to chase
+      // at every call site.
+      const result = await this.state.secureProxy.exec(sql, params, wasInTxn);
       this.state.lastInsertRowIdCache = result.lastInsertRowId;
       this.advanceTxDepth(kind);
       return result.rows as unknown[][];
