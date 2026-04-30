@@ -386,8 +386,23 @@ export class MessageService {
       }
 
       try {
+        // Clone the seekers' bytes before passing them to `replaceAll`.
+        // Background: on the secure-storage WASM-worker path, SQL bind
+        // params (including these Uint8Array seekers) cross the Comlink
+        // boundary via `Comlink.transfer(params, transfers)` — that
+        // marks each underlying ArrayBuffer as transferable, which
+        // moves ownership to the worker and *detaches* the views on
+        // this side. Subsequent access (`Array.from(s)` in the
+        // SEEKERS_UPDATED listener at `services/index.ts`) throws
+        // "Cannot perform values on a detached or out-of-bounds
+        // ArrayBuffer". Cloning into fresh JS-owned buffers before the
+        // transfer keeps a usable copy here for the event emit.
+        //
+        // `new Uint8Array(srcTypedArray)` allocates a new ArrayBuffer
+        // and copies the bytes — guaranteed independent of the source.
+        const seekersForEvent = seekers.map(s => new Uint8Array(s));
         await this.queries.activeSeekers.replaceAll(seekers);
-        this.eventEmitter.emit(SdkEventType.SEEKERS_UPDATED, seekers);
+        this.eventEmitter.emit(SdkEventType.SEEKERS_UPDATED, seekersForEvent);
       } catch (error) {
         log.error('failed to update active seekers', error);
       }
