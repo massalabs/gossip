@@ -552,11 +552,25 @@ export class DatabaseConnection {
         if (await isNativePlatform()) {
           // ── Native path (iOS/Android) ──
           // Use the Capacitor plugin which calls Rust directly via UniFFI.
-          // Falls back to the web worker path if the plugin isn't available
-          // (e.g. Android before the native lib is cross-compiled).
+          // Falls back to the web worker path only if the plugin module isn't
+          // available. Native storage operation failures must surface.
+          let SecureStorageNative: SecureStorageNativePlugin | null = null;
           try {
-            const { SecureStorageNative } =
-              await import('./secure-storage-native.js');
+            ({ SecureStorageNative } =
+              await import('./secure-storage-native.js'));
+          } catch {
+            // Plugin not implemented on this platform — unwind any partial
+            // state and fall through to the web worker path below.
+            this.state.nativePlugin = null;
+            this.state.useNativePlugin = false;
+            if (import.meta.env?.DEV) {
+              console.warn(
+                '[secureStorage] native plugin unavailable, falling back to WASM worker'
+              );
+            }
+          }
+
+          if (SecureStorageNative) {
             await SecureStorageNative.initSecureStorage({
               path: 'secure-storage',
               domain: storage.domain,
@@ -572,16 +586,6 @@ export class DatabaseConnection {
               await SecureStorageNative.provisionStorage();
             }
             this.state.storageState = hasData ? 'locked' : 'empty';
-          } catch {
-            // Plugin not implemented on this platform — unwind any partial
-            // state and fall through to the web worker path below.
-            this.state.nativePlugin = null;
-            this.state.useNativePlugin = false;
-            if (import.meta.env?.DEV) {
-              console.warn(
-                '[secureStorage] native plugin unavailable, falling back to WASM worker'
-              );
-            }
           }
         }
 
