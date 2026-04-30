@@ -46,14 +46,30 @@ DEVICE_LIB="$RUST_DIR/target/aarch64-apple-ios/$PROFILE_DIR/libsecureStorage.a"
 SIM_LIB="$RUST_DIR/target/aarch64-apple-ios-sim/$PROFILE_DIR/libsecureStorage.a"
 
 # 2. Package via `xcodebuild -create-xcframework` (Apple's official tool).
-#    Handles Info.plist generation, arch validation, and atomic output —
-#    replaces the manual lipo + heredoc plist + staging we used to carry.
+#    Build into a sibling `.tmp` dir first, then copy `Info.plist` and the
+#    per-slice `.a` into the committed xcframework structure. We keep the
+#    committed `Info.plist` + `.gitkeep` stubs under `ios-arm64/` and
+#    `ios-arm64-simulator/` so that a fresh clone has the folder shape on
+#    disk before this pre-build script runs (xcodebuild resolves the
+#    xcframework path at `CreateBuildDescription`, *before* script
+#    phases - if the slice folders don't exist there it errors out with
+#    "The folder ios-arm64 doesn't exist"). Using copy-into-place rather
+#    than `rm -rf $XCFW_DIR && mv` keeps the `.gitkeep` files intact so
+#    `git status` stays clean across rebuilds.
 echo "[2/3] xcodebuild -create-xcframework..."
-rm -rf "$XCFW_DIR"
+# `xcodebuild -create-xcframework` requires the output path to end in
+# `.xcframework`; build into a sibling temp file with that suffix.
+TMP_XCFW="${IOS_DIR}/SecureStorage.tmp.$$.xcframework"
+trap 'rm -rf "$TMP_XCFW"' EXIT
 xcodebuild -create-xcframework \
     -library "$DEVICE_LIB" \
     -library "$SIM_LIB" \
-    -output "$XCFW_DIR" >/dev/null
+    -output "$TMP_XCFW" >/dev/null
+cp "$TMP_XCFW/Info.plist" "$XCFW_DIR/Info.plist"
+cp "$TMP_XCFW/ios-arm64/libsecureStorage.a" "$XCFW_DIR/ios-arm64/libsecureStorage.a"
+cp "$TMP_XCFW/ios-arm64-simulator/libsecureStorage.a" "$XCFW_DIR/ios-arm64-simulator/libsecureStorage.a"
+rm -rf "$TMP_XCFW"
+trap - EXIT
 
 # 3. UniFFI Swift bindings (version pinned centrally in
 #    wasm/Cargo.toml [workspace.dependencies]).
