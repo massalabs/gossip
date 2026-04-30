@@ -383,7 +383,6 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       autoStartPolling: false,
     });
 
-    const sdk = getSdk();
     const session = sdk.getEncryptedSession();
     let profileSession = session;
     if (sdk.usesSessionBlobNamespace) {
