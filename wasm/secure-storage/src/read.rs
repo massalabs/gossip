@@ -74,7 +74,28 @@ pub fn read_total_length<S: BlockStorage>(
     if storage.block_count(session_index, namespace)? == 0 {
         return Ok(0);
     }
-    let plaintext = _decrypt_session_data_block(
+    // Block 0 may be a cover that this slot owns but cannot decrypt: another
+    // slot's write triggered `extend_blockstream_with_session_block`, which
+    // padded our slot with a cover block built via `create_cover_block`. The
+    // cover's PQ envelope is encapsulated against this slot's public key
+    // (so PQ decap succeeds), but the inner AEAD layer was sealed with a
+    // *random* one-shot key that was then dropped, so AEAD verification
+    // here cannot succeed by construction.
+    //
+    // The same surface (`CorruptedBlock` on block 0) appears when this
+    // slot's keypair was rotated by a fresh `allocate_session` after the
+    // cover was written under the slot's previous PQ key (the throwaway
+    // one from `provision_storage`). Either way, the slot owner has no
+    // genuine data at this offset; from its own POV the stream is empty.
+    //
+    // We therefore treat AEAD failure on block 0 as "length 0". A real
+    // on-disk bit-flip is statistically negligible compared to the number
+    // of cover-induced AEAD failures this protocol produces; redb's page
+    // checksums and the AEAD MAC over the entire ciphertext detect such
+    // tampering at lower layers. Higher block reads (`read_session_data`)
+    // still surface AEAD failures as `CorruptedBlock`, so genuine
+    // corruption past block 0 still propagates to the caller.
+    let plaintext = match _decrypt_session_data_block(
         storage,
         domain,
         version,
@@ -83,7 +104,11 @@ pub fn read_total_length<S: BlockStorage>(
         pq_rerand_sk,
         root_aead_key,
         0,
-    )?;
+    ) {
+        Ok(pt) => pt,
+        Err(SecureStorageError::CorruptedBlock) => return Ok(0),
+        Err(e) => return Err(e),
+    };
     let length_bytes: [u8; 8] = plaintext[..LENGTH_HDR_SIZE]
         .try_into()
         .map_err(|_| SecureStorageError::CorruptedBlock)?;

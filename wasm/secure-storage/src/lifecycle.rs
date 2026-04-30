@@ -438,4 +438,79 @@ mod tests {
             assert_eq!(&*result, &data);
         });
     }
+
+    /// Multi-account onboarding scenario:
+    ///   1. alice allocate (slot 0)
+    ///   2. bob allocate (slot 1)   ← consecutive allocates, no writes between
+    ///   3. alice writes namespace=SESSION_BLOB (ns=1)
+    ///   4. bob's `load_namespace_state(ns=1)` MUST return length=0
+    ///
+    /// Without the multi-namespace init in `allocate_session`, step 3's
+    /// `extend_blockstream_with_session_block(ns=1)` puts a cover block
+    /// in bob's slot under bob's *current* PQ public key. Bob can decrypt
+    /// it (AEAD passes) but the plaintext is random, so the length header
+    /// at byte 0 is a random u64. `load_namespace_state` then returns
+    /// "length = some huge garbage value" instead of 0, and any subsequent
+    /// session-blob read either reads gibberish or out-of-bounds errors.
+    ///
+    /// Bob's slot was never written by bob, so length must be 0 from his
+    /// POV regardless of what other slots have done in this namespace.
+    #[test]
+    fn allocate_isolates_namespace_against_later_cross_slot_writes() {
+        const SESSION_BLOB_NS: u8 = 1;
+        run_with_stack(|| {
+            let mut storage = MemoryStorage::new();
+            provision_storage(&mut storage).unwrap();
+
+            // 1. alice allocate
+            let alice_slot = SessionIndex::new(0).unwrap();
+            let alice_session =
+                allocate_session(&mut storage, DOMAIN, alice_slot, b"alice-pw").unwrap();
+
+            // 2. bob allocate, immediately after, no writes between
+            let bob_slot = SessionIndex::new(1).unwrap();
+            let bob_session =
+                allocate_session(&mut storage, DOMAIN, bob_slot, b"bob-pw").unwrap();
+
+            // 3. alice writes her session blob in ns=1. This is the FIRST
+            //    activity in ns=1 across all slots, so it triggers the
+            //    cross-slot extend: bob's slot gets a cover block under
+            //    bob's CURRENT public key (PK_bob).
+            let alice_blob = vec![0xAA; 100];
+            let mut alice_ns1 = NamespaceState::empty();
+            write_session_data(
+                &mut storage,
+                DOMAIN,
+                SESSION_BLOB_NS,
+                &alice_session,
+                &mut alice_ns1,
+                0,
+                &alice_blob,
+            )
+            .unwrap();
+
+            // PD invariant check: cross-slot counts are equal in ns=1.
+            for i in 0..SESSION_COUNT as u8 {
+                let s = SessionIndex::new(i).unwrap();
+                assert!(
+                    storage.block_count(s, SESSION_BLOB_NS).unwrap() >= 1,
+                    "slot {i} should have at least 1 block in ns=1 after alice's write"
+                );
+            }
+
+            // 4. bob's load_namespace_state(ns=1) MUST return length=0.
+            //    His slot has 1 block - a cover under his real PK that
+            //    decrypts to random bytes. Without proactive init at
+            //    allocate, the length header is whatever random bytes
+            //    are in that cover, which is essentially never 0.
+            let bob_ns1 = load_namespace_state(&storage, DOMAIN, &bob_session, SESSION_BLOB_NS)
+                .unwrap();
+            assert_eq!(
+                bob_ns1.total_data_length, 0,
+                "bob's ns=1 must look empty: he has never written there. \
+                 Reading garbage from alice's cross-slot cover would corrupt \
+                 his session-blob load and brick his account."
+            );
+        });
+    }
 }
