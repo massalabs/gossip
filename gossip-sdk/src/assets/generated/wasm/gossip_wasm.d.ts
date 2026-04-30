@@ -326,6 +326,11 @@ export class SessionManagerWrapper {
   get_message_board_read_keys(): Array<any>;
   /**
    * Processes an incoming message from the message board.
+   *
+   * Each acknowledged seeker is materialised as a JS-owned Uint8Array
+   * (see `get_message_board_read_keys` for the rationale — same risk
+   * of detached views over wasm linear memory if the heap grows
+   * before the JS side reads the buffer).
    */
   feed_incoming_message_board_read(seeker: Uint8Array, ciphertext: Uint8Array, our_sk: UserSecretKeys): ReceiveMessageOutput | undefined;
   /**
@@ -334,10 +339,16 @@ export class SessionManagerWrapper {
   constructor(config: SessionConfig);
   /**
    * Refreshes sessions and returns peer IDs that need keep-alive messages.
+   *
+   * JS-owned Uint8Arrays — same detached-view rationale as
+   * `get_message_board_read_keys`.
    */
   refresh(): Array<any>;
   /**
    * Gets the list of all peer IDs.
+   *
+   * JS-owned Uint8Arrays — same detached-view rationale as
+   * `get_message_board_read_keys`.
    */
   peer_list(): Array<any>;
 }

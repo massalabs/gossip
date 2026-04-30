@@ -655,6 +655,11 @@ impl SessionManagerWrapper {
     }
 
     /// Processes an incoming message from the message board.
+    ///
+    /// Each acknowledged seeker is materialised as a JS-owned Uint8Array
+    /// (see `get_message_board_read_keys` for the rationale — same risk
+    /// of detached views over wasm linear memory if the heap grows
+    /// before the JS side reads the buffer).
     pub fn feed_incoming_message_board_read(
         &mut self,
         seeker: &[u8],
@@ -666,7 +671,9 @@ impl SessionManagerWrapper {
             .map(|output| {
                 let acknowledged_seekers = js_sys::Array::new();
                 for ack_seeker in &output.newly_acknowledged_self_seekers {
-                    let js_seeker = js_sys::Uint8Array::from(&ack_seeker[..]);
+                    let js_seeker =
+                        js_sys::Uint8Array::new_with_length(ack_seeker.len() as u32);
+                    js_seeker.copy_from(&ack_seeker[..]);
                     acknowledged_seekers.push(&js_seeker);
                 }
 
@@ -680,11 +687,16 @@ impl SessionManagerWrapper {
     }
 
     /// Gets the list of all peer IDs.
+    ///
+    /// JS-owned Uint8Arrays — same detached-view rationale as
+    /// `get_message_board_read_keys`.
     pub fn peer_list(&self) -> js_sys::Array {
         let peers = self.inner.peer_list();
         let array = js_sys::Array::new();
         for peer_id in peers {
-            let js_peer_id = js_sys::Uint8Array::from(peer_id.as_bytes());
+            let bytes = peer_id.as_bytes();
+            let js_peer_id = js_sys::Uint8Array::new_with_length(bytes.len() as u32);
+            js_peer_id.copy_from(bytes);
             array.push(&js_peer_id);
         }
         array
@@ -724,11 +736,16 @@ impl SessionManagerWrapper {
     }
 
     /// Refreshes sessions and returns peer IDs that need keep-alive messages.
+    ///
+    /// JS-owned Uint8Arrays — same detached-view rationale as
+    /// `get_message_board_read_keys`.
     pub fn refresh(&mut self) -> js_sys::Array {
         let peers = self.inner.refresh();
         let array = js_sys::Array::new();
         for peer_id in peers {
-            let js_peer_id = js_sys::Uint8Array::from(peer_id.as_bytes());
+            let bytes = peer_id.as_bytes();
+            let js_peer_id = js_sys::Uint8Array::new_with_length(bytes.len() as u32);
+            js_peer_id.copy_from(bytes);
             array.push(&js_peer_id);
         }
         array

@@ -868,6 +868,11 @@ export class SessionManagerWrapper {
     }
     /**
      * Processes an incoming message from the message board.
+     *
+     * Each acknowledged seeker is materialised as a JS-owned Uint8Array
+     * (see `get_message_board_read_keys` for the rationale — same risk
+     * of detached views over wasm linear memory if the heap grows
+     * before the JS side reads the buffer).
      * @param {Uint8Array} seeker
      * @param {Uint8Array} ciphertext
      * @param {UserSecretKeys} our_sk
@@ -896,6 +901,9 @@ export class SessionManagerWrapper {
     }
     /**
      * Refreshes sessions and returns peer IDs that need keep-alive messages.
+     *
+     * JS-owned Uint8Arrays — same detached-view rationale as
+     * `get_message_board_read_keys`.
      * @returns {Array<any>}
      */
     refresh() {
@@ -904,6 +912,9 @@ export class SessionManagerWrapper {
     }
     /**
      * Gets the list of all peer IDs.
+     *
+     * JS-owned Uint8Arrays — same detached-view rationale as
+     * `get_message_board_read_keys`.
      * @returns {Array<any>}
      */
     peer_list() {
@@ -1279,10 +1290,6 @@ function __wbg_get_imports() {
     };
     imports.wbg.__wbg_new_8a6f238a6ece86ea = function() {
         const ret = new Error();
-        return ret;
-    };
-    imports.wbg.__wbg_newfromslice_074c56947bd43469 = function(arg0, arg1) {
-        const ret = new Uint8Array(getArrayU8FromWasm0(arg0, arg1));
         return ret;
     };
     imports.wbg.__wbg_newnoargs_254190557c45b4ec = function(arg0, arg1) {
