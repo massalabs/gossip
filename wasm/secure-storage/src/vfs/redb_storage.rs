@@ -351,6 +351,27 @@ impl BlockStorage for RedbStorage {
         self.block_counts[si].remove(&namespace);
         Ok(())
     }
+
+    fn namespaces_with_data(&self, session: SessionIndex) -> Result<Vec<u8>> {
+        // `block_counts` is the in-memory authoritative count; entries with
+        // count == 0 (which `reset_blockstream` removes) and never-written
+        // namespaces both correctly map to "no data". Also account for
+        // un-committed writes still in `ram_buffer` for newly-written
+        // namespaces that don't yet appear in `block_counts`.
+        let si = session.as_usize();
+        let su8 = session.as_u8();
+        let mut out: Vec<u8> = self.block_counts[si]
+            .iter()
+            .filter(|(_, count)| **count > 0)
+            .map(|(ns, _)| *ns)
+            .collect();
+        for bw in &self.ram_buffer {
+            if bw.session == su8 && !out.contains(&bw.namespace) {
+                out.push(bw.namespace);
+            }
+        }
+        Ok(out)
+    }
 }
 
 // ── KeypairStorage ───────────────────────────────────────────────────

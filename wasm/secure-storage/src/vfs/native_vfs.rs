@@ -1297,6 +1297,204 @@ mod tests {
         });
     }
 
+    /// Two-account E2E mirroring the user-facing scenario:
+    ///   Alice signs up (slot 0), opens a discussion, sends messages,
+    ///   stores a session blob, locks. Bob signs up on the same device
+    ///   (slot 1), does the same with different content, locks. Cover
+    ///   traffic ticks across all sessions. Then we relogin as Alice and
+    ///   verify her SQL rows + namespace blob are byte-identical to
+    ///   what she wrote, then relogin as Bob and check the same. Several
+    ///   lock/unlock + cover-tick cycles between the two to flush out
+    ///   silent cross-slot bleed.
+    ///
+    /// If this test fails on PR 2, the corruption is in the native VFS
+    /// or cover scheduler. If it passes, the corruption is downstream
+    /// (e.g. PR 5's destroy_session, replaceNamespaceData, services-
+    /// message rewrite, or the SDK's session-blob persistence path).
+    #[test]
+    fn test_native_two_account_cover_isolation() {
+        run_with_stack(|| {
+            let _guard = test_mutex().lock().unwrap();
+            reset_state();
+            ensure_registered();
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().to_str().unwrap().to_string();
+
+            const ALICE_PW: &[u8] = b"alice-correct-horse";
+            const BOB_PW: &[u8] = b"bob-staple-battery";
+            let alice_blob = vec![0xAAu8; 32 * 1024];
+            let bob_blob = vec![0xBBu8; 48 * 1024];
+
+            // ── Phase 1: Alice signs up + writes SQL + session blob ──
+            init_native(&path, "gossip").unwrap();
+            provision().unwrap();
+            allocate(0, ALICE_PW).unwrap();
+            {
+                let conn = open_db().unwrap();
+                conn.execute_batch(
+                    "CREATE TABLE messages (id INTEGER PRIMARY KEY, body TEXT);
+                     CREATE TABLE contacts (id INTEGER PRIMARY KEY, name TEXT);
+                     INSERT INTO contacts (name) VALUES ('bob');
+                     INSERT INTO messages (body) VALUES
+                         ('hi bob, this is alice'),
+                         ('how are you?'),
+                         ('let me know');",
+                )
+                .unwrap();
+                drop(conn);
+                write_namespace_data(1, 0, &alice_blob).unwrap();
+                flush().unwrap();
+            }
+            lock();
+
+            // ── Phase 2: Bob signs up on the same device + same flow ──
+            // Bob is allocated *while Alice's blocks already exist* on
+            // disk - this is the regression mode the SDK was hitting.
+            allocate(1, BOB_PW).unwrap();
+            {
+                let conn = open_db().unwrap();
+                conn.execute_batch(
+                    "CREATE TABLE messages (id INTEGER PRIMARY KEY, body TEXT);
+                     CREATE TABLE contacts (id INTEGER PRIMARY KEY, name TEXT);
+                     INSERT INTO contacts (name) VALUES ('alice');
+                     INSERT INTO messages (body) VALUES
+                         ('hi alice, bob here'),
+                         ('all good thanks');",
+                )
+                .unwrap();
+                drop(conn);
+                write_namespace_data(1, 0, &bob_blob).unwrap();
+                flush().unwrap();
+            }
+            lock();
+
+            // ── Phase 3: cover-traffic between the two unlock cycles ──
+            // The scheduler in production runs every ~30s; we do a burst
+            // here because the test is meant to flush out single-tick
+            // silent corruption. `flush()` is gated on having an unlocked
+            // session and is the cover scheduler's own no-op while
+            // locked - the cover writes stay in `ram_buffer` and are
+            // visible to subsequent reads via the redb overlay.
+            for _ in 0..5 {
+                cover_tick().unwrap();
+            }
+
+            // ── Phase 4: relogin as Alice → her data must be intact ──
+            assert!(unlock(ALICE_PW).unwrap());
+            {
+                let conn = open_db().unwrap();
+                let msgs: Vec<String> = conn
+                    .prepare("SELECT body FROM messages ORDER BY id")
+                    .unwrap()
+                    .query_map([], |r| r.get::<_, String>(0))
+                    .unwrap()
+                    .map(|r| r.unwrap())
+                    .collect();
+                assert_eq!(
+                    msgs,
+                    vec!["hi bob, this is alice", "how are you?", "let me know"],
+                    "alice's SQL data corrupted by bob's writes or cover traffic"
+                );
+                let names: Vec<String> = conn
+                    .prepare("SELECT name FROM contacts ORDER BY id")
+                    .unwrap()
+                    .query_map([], |r| r.get::<_, String>(0))
+                    .unwrap()
+                    .map(|r| r.unwrap())
+                    .collect();
+                assert_eq!(names, vec!["bob"]);
+                drop(conn);
+
+                let got_blob = read_namespace_data(1, 0, alice_blob.len()).unwrap();
+                assert_eq!(
+                    got_blob, alice_blob,
+                    "alice's namespace blob corrupted by bob's writes or cover traffic"
+                );
+
+                // Cover ticks WHILE Alice is unlocked. PR 2's scheduler
+                // releases the state mutex between namespaces; this
+                // reproduces a foreground op interleaving with the tick.
+                for _ in 0..3 {
+                    cover_tick().unwrap();
+                }
+
+                // Re-read after cover; data must still match.
+                let got_blob_after = read_namespace_data(1, 0, alice_blob.len()).unwrap();
+                assert_eq!(
+                    got_blob_after, alice_blob,
+                    "alice's namespace blob corrupted by cover ticks during her own session"
+                );
+                let conn2 = open_db().unwrap();
+                let count: i64 = conn2
+                    .query_row("SELECT COUNT(*) FROM messages", [], |r| r.get(0))
+                    .unwrap();
+                assert_eq!(count, 3, "alice's message count drifted after cover ticks");
+                drop(conn2);
+            }
+            lock();
+
+            // ── Phase 5: relogin as Bob → his data must be intact too ──
+            assert!(unlock(BOB_PW).unwrap());
+            {
+                let conn = open_db().unwrap();
+                let msgs: Vec<String> = conn
+                    .prepare("SELECT body FROM messages ORDER BY id")
+                    .unwrap()
+                    .query_map([], |r| r.get::<_, String>(0))
+                    .unwrap()
+                    .map(|r| r.unwrap())
+                    .collect();
+                assert_eq!(
+                    msgs,
+                    vec!["hi alice, bob here", "all good thanks"],
+                    "bob's SQL data corrupted by alice's reads or cover traffic"
+                );
+                let names: Vec<String> = conn
+                    .prepare("SELECT name FROM contacts ORDER BY id")
+                    .unwrap()
+                    .query_map([], |r| r.get::<_, String>(0))
+                    .unwrap()
+                    .map(|r| r.unwrap())
+                    .collect();
+                assert_eq!(names, vec!["alice"]);
+
+                let got_blob = read_namespace_data(1, 0, bob_blob.len()).unwrap();
+                assert_eq!(
+                    got_blob, bob_blob,
+                    "bob's namespace blob corrupted by alice's session or cover traffic"
+                );
+
+                // Bob writes additional data to verify his namespace is
+                // mutable + alice's previous reads didn't poison the
+                // RAM buffer with cross-slot state.
+                conn.execute("INSERT INTO messages (body) VALUES ('one more')", [])
+                    .unwrap();
+                drop(conn);
+                flush().unwrap();
+            }
+            lock();
+
+            // ── Phase 6: alice once more, after bob's mutation ──
+            assert!(unlock(ALICE_PW).unwrap());
+            {
+                let conn = open_db().unwrap();
+                let count: i64 = conn
+                    .query_row("SELECT COUNT(*) FROM messages", [], |r| r.get(0))
+                    .unwrap();
+                assert_eq!(
+                    count, 3,
+                    "alice's message count changed after bob mutated his slot"
+                );
+                let got_blob = read_namespace_data(1, 0, alice_blob.len()).unwrap();
+                assert_eq!(
+                    got_blob, alice_blob,
+                    "alice's namespace blob mutated by bob's INSERT or namespace write"
+                );
+            }
+            lock();
+        });
+    }
+
     #[test]
     fn test_native_vfs_persistence() {
         run_with_stack(|| {

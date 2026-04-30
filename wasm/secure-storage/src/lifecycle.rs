@@ -91,18 +91,42 @@ pub fn allocate_session<S: BlockStorage + KeypairStorage>(
         root_aead_key: keys.root_aead_key.clone(),
     };
 
-    // Write a genuine default-namespace block 0 with zero-length header.
-    // ensure_block_count alone is insufficient: if another session already
-    // has blocks, repair_blockstream_lengths pads this slot with cover
-    // blocks and global_count >= 1 skips extend_blockstream_with_session_block.
-    // Block 0 would stay a cover block, corrupting unlock_session.
+    // Write a genuine block 0 with a zero-length header in every namespace
+    // this slot already has blocks for. The PQ keypair was just rotated,
+    // so any block under the slot's *previous* PK no longer decrypts under
+    // the freshly-derived session key. Three cases produce such blocks:
+    //
+    //   * `DEFAULT_NAMESPACE`: `provision_storage` reset the slot to a
+    //     length-0 stream under a throwaway PK; `repair_blockstream_lengths`
+    //     called from any other slot's first write may also have padded.
+    //
+    //   * Any other namespace another slot has written to. Cross-slot
+    //     padding from `extend_blockstream_with_session_block` populated
+    //     this slot with cover blocks built under whatever PK was then in
+    //     the keypair file (the throwaway from `provision_storage`).
+    //     Without this pass, the next `read_total_length` on this
+    //     (session, namespace) pair returns CorruptedBlock - exactly the
+    //     two-account onboarding crash the native VFS test reproduces.
+    //
+    // For each affected namespace, `ensure_block_count(.., 1)` brings
+    // global_count to at least 1 (and so does this slot's local count via
+    // repair_blockstream_lengths), then we overwrite block 0 with a
+    // genuine length-0 ciphertext under the new key. Higher block indices
+    // (1..N) keep their old cover ciphertext: we never need to read them
+    // because the length header at block 0 says the stream is empty.
     let ns_state = NamespaceState::empty();
-    ensure_block_count(storage, domain, DEFAULT_NAMESPACE, &session, &ns_state, 1)?;
+    let mut targets = storage.namespaces_with_data(slot)?;
+    if !targets.contains(&DEFAULT_NAMESPACE) {
+        targets.push(DEFAULT_NAMESPACE);
+    }
     let mut pt = Zeroizing::new(vec![0u8; PLAINTEXT_SIZE]);
-    rand::rngs::OsRng.fill_bytes(&mut pt[..]);
-    pt[..LENGTH_HDR_SIZE].copy_from_slice(&0u64.to_be_bytes());
-    let pt_arr: &[u8; PLAINTEXT_SIZE] = pt.as_slice().try_into().unwrap();
-    encrypt_session_data_block(storage, domain, DEFAULT_NAMESPACE, &session, 0, pt_arr)?;
+    for ns in targets {
+        ensure_block_count(storage, domain, ns, &session, &ns_state, 1)?;
+        rand::rngs::OsRng.fill_bytes(&mut pt[..]);
+        pt[..LENGTH_HDR_SIZE].copy_from_slice(&0u64.to_be_bytes());
+        let pt_arr: &[u8; PLAINTEXT_SIZE] = pt.as_slice().try_into().unwrap();
+        encrypt_session_data_block(storage, domain, ns, &session, 0, pt_arr)?;
+    }
 
     Ok(session)
 }
