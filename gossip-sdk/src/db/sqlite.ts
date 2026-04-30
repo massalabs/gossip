@@ -385,14 +385,12 @@ export class DatabaseConnection {
       });
       this.state.lastInsertRowIdCache = result.lastInsertRowId;
       this.advanceTxDepth(kind);
-      // The native VFS runs with `journal_mode=OFF`, so SQLite never
-      // calls xSync on its own. Without this, writes accumulate in the
-      // in-memory pending buffer and are only persisted on allocate /
-      // lock - a stale-state crash or a session switch in between
-      // would drop data. Mirror the web worker's flush-after-write
-      // semantics here, but only flush at txn boundaries when we are
-      // genuinely in a txn, so a crash mid-txn cannot half-apply state
-      // to redb (the journal-less VFS has no rollback record).
+      // The native VFS uses an in-memory rollback journal, so SQLite can
+      // still roll back failed transactions/savepoints. Durability to redb
+      // is driven explicitly by the SDK: mirror the web worker's
+      // flush-after-write semantics, but only flush at txn boundaries when
+      // we are genuinely in a txn, so a crash mid-txn cannot half-apply
+      // state to redb.
       if (kind === 'commit') {
         await this.state.nativePlugin.flush();
       } else if (!wasInTxn && kind === 'mutation') {

@@ -8,7 +8,7 @@
 //! Process safety: redb takes an exclusive OS-level file lock on
 //! `storage.redb` at `Database::create`, so a second process opening
 //! the same path fails at `init_native` rather than reaching SQLite.
-//! Combined with rusqlite's `locking_mode=EXCLUSIVE` + `journal_mode=OFF`,
+//! Combined with rusqlite's `locking_mode=EXCLUSIVE` and redb's process lock,
 //! the no-op `xLock`/`xUnlock`/`xCheckReservedLock` callbacks below are
 //! safe: concurrent access is already prevented one layer down.
 //!
@@ -432,7 +432,7 @@ pub fn open_db() -> Result<rusqlite::Connection> {
 
     conn.pragma_update(None, "page_size", 4096)
         .map_err(|e| SecureStorageError::Sqlite(e.to_string()))?;
-    conn.pragma_update(None, "journal_mode", "OFF")
+    conn.pragma_update(None, "journal_mode", "MEMORY")
         .map_err(|e| SecureStorageError::Sqlite(e.to_string()))?;
     conn.pragma_update(None, "synchronous", "NORMAL")
         .map_err(|e| SecureStorageError::Sqlite(e.to_string()))?;
@@ -908,9 +908,9 @@ unsafe extern "C" fn x_truncate(file: *mut sqlite3_file, size: i64) -> c_int {
 }
 
 // SAFETY: `_file` and `_flags` are not dereferenced. Side-effect only:
-// flush pending writes through to the redb backend. With `journal_mode=OFF`
-// SQLite never calls this on its own; it fires through SDK-level COMMIT
-// detection (see `secure-storage-native.ts`).
+// flush pending writes through to the redb backend. SQLite's in-memory journal
+// handles rollback state; durability still comes from SDK-level COMMIT
+// detection followed by explicit native `flush()` (see `sqlite.ts`).
 // See https://www.sqlite.org/c3ref/io_methods.html (xSync).
 unsafe extern "C" fn x_sync(_file: *mut sqlite3_file, _flags: c_int) -> c_int {
     vfs_call(|| {
@@ -1117,6 +1117,83 @@ mod tests {
             assert!(read_namespace_data(DEFAULT_NAMESPACE, 0, 1).is_err());
             assert!(namespace_data_length(DEFAULT_NAMESPACE).is_err());
             assert!(clear_namespace(DEFAULT_NAMESPACE).is_err());
+
+            drop(conn);
+        });
+    }
+
+    #[test]
+    fn test_native_vfs_uses_rollback_capable_journal() {
+        run_with_stack(|| {
+            let _guard = test_mutex().lock().unwrap();
+            let (_dir, conn) = setup_native_vfs();
+
+            let journal_mode: String = conn
+                .query_row("PRAGMA journal_mode", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(journal_mode.to_ascii_lowercase(), "memory");
+
+            drop(conn);
+        });
+    }
+
+    #[test]
+    fn test_native_vfs_rollback_discards_uncommitted_writes() {
+        // Expected-behavior smoke test: rollback must discard uncommitted
+        // writes, including across a close/reopen cycle. This may catch some
+        // rollback-journal misconfigurations, but it is not guaranteed to fail
+        // for every unsafe journal mode because SQLite can sometimes satisfy
+        // simple rollbacks from connection-local pager/cache state. The
+        // deterministic configuration guard is
+        // `test_native_vfs_uses_rollback_capable_journal` above.
+        run_with_stack(|| {
+            let _guard = test_mutex().lock().unwrap();
+            let (dir, conn) = setup_native_vfs();
+            let path = dir.path().to_str().unwrap().to_string();
+
+            conn.execute_batch(
+                "PRAGMA cache_size = 10;
+                 CREATE TABLE rollback_test (value TEXT);
+                 INSERT INTO rollback_test (value) VALUES ('baseline');",
+            )
+            .unwrap();
+            flush().unwrap();
+
+            conn.execute_batch("BEGIN IMMEDIATE;").unwrap();
+            for i in 0..256 {
+                conn.execute(
+                    "INSERT INTO rollback_test (value) VALUES (?)",
+                    [format!("rolled-back-{i:03}")],
+                )
+                .unwrap();
+            }
+            conn.execute_batch("ROLLBACK;").unwrap();
+
+            let values: Vec<String> = conn
+                .prepare("SELECT value FROM rollback_test ORDER BY value")
+                .unwrap()
+                .query_map([], |row| row.get::<_, String>(0))
+                .unwrap()
+                .map(|r| r.unwrap())
+                .collect();
+            assert_eq!(values, vec!["baseline"]);
+
+            drop(conn);
+            flush().unwrap();
+            lock();
+
+            reset_state();
+            init_native(&path, "test").unwrap();
+            assert!(unlock(b"password").unwrap());
+            let conn = open_db().unwrap();
+            let values: Vec<String> = conn
+                .prepare("SELECT value FROM rollback_test ORDER BY value")
+                .unwrap()
+                .query_map([], |row| row.get::<_, String>(0))
+                .unwrap()
+                .map(|r| r.unwrap())
+                .collect();
+            assert_eq!(values, vec!["baseline"]);
 
             drop(conn);
         });

@@ -6,9 +6,8 @@
  * `txDepth`, the dispatch layer only tracked the `withTransaction`
  * wrapper's own flag. Drizzle's transaction issues BEGIN/COMMIT through
  * the proxy callback without flipping that flag, so every INSERT/UPDATE
- * inside a Drizzle transaction fired an extra round-trip *and* with
- * `journal_mode=OFF` on the native VFS the partial state was pushed to
- * redb without any rollback record.
+ * inside a Drizzle transaction fired an extra round-trip and could push
+ * partial transaction state to redb before COMMIT.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -39,7 +38,7 @@ describe('classifyStatement', () => {
       'ALTER TABLE t ADD COLUMN y',
       'WITH cte AS (SELECT 1) UPDATE t SET x = (SELECT * FROM cte)',
       'VACUUM',
-      'PRAGMA journal_mode=OFF',
+      'PRAGMA journal_mode=MEMORY',
     ]) {
       expect(classifyStatement(verb)).toBe('mutation');
     }
