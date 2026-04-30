@@ -550,9 +550,8 @@ pub fn read_namespace_data(namespace: u8, offset: u64, len: usize) -> Result<Vec
     Ok(data.to_vec())
 }
 
-/// Truncate a non-SQL namespace back to empty. Re-initialises the
-/// underlying block stream so a subsequent `write_session_data` starts
-/// from offset 0 with no residual bytes.
+/// Truncate a non-SQL namespace back to empty while preserving physical
+/// blocks as covers, matching the web VFS namespace-clear contract.
 pub fn clear_namespace(namespace: u8) -> Result<()> {
     reject_default_namespace(namespace)?;
     let mutex = state_mutex();
@@ -564,10 +563,14 @@ pub fn clear_namespace(namespace: u8) -> Result<()> {
         .session
         .as_ref()
         .ok_or_else(|| SecureStorageError::Storage("no session".into()))?;
-    use crate::storage::BlockStorage;
-    st.backend
-        .reset_blockstream(session.session_index, namespace)?;
-    // Reset in-memory tracking for this namespace.
+    if !st.namespace_states.contains_key(&namespace) {
+        let ns = load_namespace_state(&st.backend, &st.domain, session, namespace)?;
+        st.namespace_states.insert(namespace, ns);
+    }
+    let ns_state = st.namespace_states.get_mut(&namespace).unwrap();
+    if ns_state.total_data_length > 0 {
+        crate::shrink_session_data(&mut st.backend, &st.domain, namespace, session, ns_state, 0)?;
+    }
     st.namespace_states
         .insert(namespace, NamespaceState::empty());
     st.backend.commit()
@@ -1106,6 +1109,45 @@ mod tests {
 
             clear_namespace(1).unwrap();
             assert_eq!(namespace_data_length(1).unwrap(), 0);
+            drop(conn);
+        });
+    }
+
+    #[test]
+    fn test_native_vfs_namespace_clear_preserves_cover_blocks() {
+        run_with_stack(|| {
+            let _guard = test_mutex().lock().unwrap();
+            let (_dir, conn) = setup_native_vfs();
+
+            let payload = vec![0x42u8; crate::PLAINTEXT_SIZE * 3];
+            write_namespace_data(1, 0, &payload).unwrap();
+
+            let pre_count = {
+                use crate::storage::BlockStorage;
+                let guard = state_mutex().lock().unwrap();
+                let st = guard.as_ref().unwrap();
+                st.backend
+                    .block_count(st.session.as_ref().unwrap().session_index, 1)
+                    .unwrap()
+            };
+            assert!(pre_count > 1, "expected multiple blocks, got {pre_count}");
+
+            clear_namespace(1).unwrap();
+            assert_eq!(namespace_data_length(1).unwrap(), 0);
+
+            let post_count = {
+                use crate::storage::BlockStorage;
+                let guard = state_mutex().lock().unwrap();
+                let st = guard.as_ref().unwrap();
+                st.backend
+                    .block_count(st.session.as_ref().unwrap().session_index, 1)
+                    .unwrap()
+            };
+            assert_eq!(
+                post_count, pre_count,
+                "clear_namespace must preserve physical blocks as covers"
+            );
+
             drop(conn);
         });
     }
