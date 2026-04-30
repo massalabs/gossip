@@ -410,7 +410,11 @@ export class DatabaseConnection {
       const transfers = collectTransferables(params);
       const execParams =
         transfers.length > 0 ? Comlink.transfer(params, transfers) : params;
-      const result = await this.state.secureProxy.exec(sql, execParams, wasInTxn);
+      const result = await this.state.secureProxy.exec(
+        sql,
+        execParams,
+        wasInTxn
+      );
       this.state.lastInsertRowIdCache = result.lastInsertRowId;
       this.advanceTxDepth(kind);
       return result.rows as unknown[][];

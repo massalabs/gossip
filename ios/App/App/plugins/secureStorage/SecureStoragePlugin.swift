@@ -19,6 +19,17 @@ public class SecureStoragePlugin: CAPPlugin, CAPBridgedPlugin {
     private static let sqlWorker: WorkerThread = WorkerThread(name: "secure-storage-sql")
     private static let namespaceWorker: WorkerThread = WorkerThread(name: "secure-storage-namespace")
 
+    /// Explicit allowlist of namespace-affined methods. Mirrors the Android
+    /// `NAMESPACE_METHODS` set. The previous `method.contains("Namespace")`
+    /// was fragile: a future name like `commitNamespaceTxn` would silently
+    /// route here too.
+    private static let namespaceMethods: Set<String> = [
+        "writeNamespaceData",
+        "readNamespaceData",
+        "namespaceDataLength",
+        "clearNamespace",
+    ]
+
     private static let log = OSLog(subsystem: "secureStorage", category: "plugin")
 
     /// Single dispatcher. Every JS call is `{method, args}` where
@@ -45,7 +56,7 @@ public class SecureStoragePlugin: CAPPlugin, CAPBridgedPlugin {
             args = rawArgs
         }
 
-        let worker = method.contains("Namespace") ? Self.namespaceWorker : Self.sqlWorker
+        let worker = Self.namespaceMethods.contains(method) ? Self.namespaceWorker : Self.sqlWorker
         worker.enqueue {
             do {
                 let result = try nativeCall(method: method, argsJson: args)
