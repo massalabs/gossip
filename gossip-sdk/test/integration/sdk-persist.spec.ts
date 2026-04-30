@@ -136,38 +136,34 @@ describe('GossipSdk session persist (regression)', () => {
 });
 
 describe('persistSessionBlob plausible-deniability (regression)', () => {
-  it('always clears before write so block count never leaks direction — PD-M2', async () => {
-    const events: string[] = [];
+  it('routes every persist through the atomic replace — PD-M2', async () => {
+    // The PD invariant (no block-count side-channel between persists) now
+    // rides on `secureStorageReplaceNamespaceData`, whose implementation
+    // always stages a wipe before the write. Asserting that every persist
+    // call hits this single fused primitive — regardless of whether the
+    // new blob is larger, smaller, or the same size as the previous one
+    // — is what guards the invariant at this layer.
+    const calls: Array<{ namespace: number; len: number }> = [];
     const fakeConn = {
       isSecureStorage: true,
-      async secureStorageNamespaceDataLength() {
-        events.push('len');
-        return 1024;
-      },
-      async secureStorageClearNamespace() {
-        events.push('clear');
-      },
-      async secureStorageWriteNamespaceData() {
-        events.push('write');
+      async secureStorageReplaceNamespaceData(
+        namespace: number,
+        data: Uint8Array
+      ) {
+        calls.push({ namespace, len: data.byteLength });
       },
     };
 
     const sdk = new GossipSdk();
     (sdk as unknown as { _conn: unknown })._conn = fakeConn;
 
-    // Larger blob (old logic would NOT clear).
     await sdk.persistSessionBlob(new Uint8Array(2048));
-    // Smaller blob.
     await sdk.persistSessionBlob(new Uint8Array(128));
 
-    const clearCount = events.filter(e => e === 'clear').length;
-    expect(clearCount).toBe(2);
-    // Clear precedes each write.
-    const writeIndexes = events
-      .map((e, i) => (e === 'write' ? i : -1))
-      .filter(i => i >= 0);
-    for (const wi of writeIndexes) {
-      expect(events[wi - 1]).toBe('clear');
-    }
+    expect(calls).toHaveLength(2);
+    expect(calls[0].len).toBe(2048);
+    expect(calls[1].len).toBe(128);
+    // Both writes target the session-blob namespace.
+    expect(new Set(calls.map(c => c.namespace)).size).toBe(1);
   });
 });
