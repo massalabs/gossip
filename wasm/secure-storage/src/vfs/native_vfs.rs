@@ -289,22 +289,25 @@ pub fn unlock(password: &[u8]) -> Result<bool> {
 
 /// Zeroize session keys. SQLite must be closed before calling this.
 ///
-/// Best-effort flushes pending writes first - if the caller forgot to
-/// flush before locking, we don't silently drop buffered data. Flush
-/// errors are ignored because locking must not fail (it's often the
-/// last thing an app calls during shutdown).
-pub fn lock() {
-    if let Ok(mut guard) = state_mutex().lock() {
-        if let Some(st) = guard.as_mut() {
-            if st.session.is_some() {
-                let _ = flush_pending_writes(st);
-            }
-            st.session = None;
-            st.namespace_states.clear();
-            // Same reset-on-switch pattern as `allocate` / `unlock` above.
-            st.main_file = EncryptedFileCore::new();
-        }
-    }
+/// Flushes pending writes first so the caller is told if data could not be
+/// made durable. Key material and pending plaintext are still cleared even
+/// when that flush fails.
+pub fn lock() -> Result<()> {
+    let mutex = state_mutex();
+    let mut guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
+    let st = guard
+        .as_mut()
+        .ok_or_else(|| SecureStorageError::NotInitialized)?;
+    let flush_result = if st.session.is_some() {
+        flush_pending_writes(st)
+    } else {
+        Ok(())
+    };
+    st.session = None;
+    st.namespace_states.clear();
+    // Same reset-on-switch pattern as `allocate` / `unlock` above.
+    st.main_file = EncryptedFileCore::new();
+    flush_result
 }
 
 /// Check whether a session is currently unlocked.
@@ -1180,7 +1183,7 @@ mod tests {
 
             drop(conn);
             flush().unwrap();
-            lock();
+            lock().unwrap();
 
             reset_state();
             init_native(&path, "test").unwrap();
@@ -1196,6 +1199,34 @@ mod tests {
             assert_eq!(values, vec!["baseline"]);
 
             drop(conn);
+        });
+    }
+
+    #[test]
+    fn test_native_vfs_lock_surfaces_flush_error_and_clears_session() {
+        run_with_stack(|| {
+            let _guard = test_mutex().lock().unwrap();
+            let (_dir, conn) = setup_native_vfs();
+            drop(conn);
+
+            {
+                let mutex = state_mutex();
+                let mut guard = mutex.lock().unwrap();
+                let st = guard.as_mut().unwrap();
+                st.main_file.write(u64::MAX, b"x");
+            }
+
+            let err = lock().expect_err("lock should surface pending flush errors");
+            assert!(
+                matches!(err, SecureStorageError::Overflow),
+                "expected overflow from pending flush, got: {err}"
+            );
+
+            assert!(!is_unlocked().unwrap());
+            let mutex = state_mutex();
+            let guard = mutex.lock().unwrap();
+            let st = guard.as_ref().unwrap();
+            assert_eq!(st.main_file.size(&NamespaceState::empty()), 0);
         });
     }
 
@@ -1318,7 +1349,7 @@ mod tests {
 
                 drop(conn);
                 flush().unwrap();
-                lock();
+                lock().unwrap();
                 assert!(!is_unlocked().unwrap());
             }
 
@@ -1366,7 +1397,7 @@ mod tests {
 
                 drop(conn);
                 flush().unwrap();
-                lock();
+                lock().unwrap();
             }
 
             // ── Phase 4: final relaunch - everything must still be there ──
@@ -1450,7 +1481,7 @@ mod tests {
                 write_namespace_data(1, 0, &alice_blob).unwrap();
                 flush().unwrap();
             }
-            lock();
+            lock().unwrap();
 
             // ── Phase 2: Bob signs up on the same device + same flow ──
             // Bob is allocated *while Alice's blocks already exist* on
@@ -1471,7 +1502,7 @@ mod tests {
                 write_namespace_data(1, 0, &bob_blob).unwrap();
                 flush().unwrap();
             }
-            lock();
+            lock().unwrap();
 
             // ── Phase 3: cover-traffic between the two unlock cycles ──
             // The scheduler in production runs every ~30s; we do a burst
@@ -1536,7 +1567,7 @@ mod tests {
                 assert_eq!(count, 3, "alice's message count drifted after cover ticks");
                 drop(conn2);
             }
-            lock();
+            lock().unwrap();
 
             // ── Phase 5: relogin as Bob → his data must be intact too ──
             assert!(unlock(BOB_PW).unwrap());
@@ -1577,7 +1608,7 @@ mod tests {
                 drop(conn);
                 flush().unwrap();
             }
-            lock();
+            lock().unwrap();
 
             // ── Phase 6: alice once more, after bob's mutation ──
             assert!(unlock(ALICE_PW).unwrap());
@@ -1596,7 +1627,7 @@ mod tests {
                     "alice's namespace blob mutated by bob's INSERT or namespace write"
                 );
             }
-            lock();
+            lock().unwrap();
         });
     }
 
@@ -1621,7 +1652,7 @@ mod tests {
                 .unwrap();
                 drop(conn);
                 flush().unwrap();
-                lock();
+                lock().unwrap();
             }
 
             {

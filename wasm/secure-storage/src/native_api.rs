@@ -365,7 +365,7 @@ fn lock() -> Result<()> {
         .lock()
         .map_err(|_| SecureStorageError::LockPoisoned)?;
     *guard = None;
-    native_vfs::lock();
+    native_vfs::lock()?;
     Ok(())
 }
 
@@ -374,8 +374,7 @@ fn close() -> Result<()> {
         .lock()
         .map_err(|_| SecureStorageError::LockPoisoned)?;
     *guard = None;
-    native_vfs::flush().ok();
-    native_vfs::lock();
+    native_vfs::lock()?;
     Ok(())
 }
 
@@ -558,5 +557,27 @@ mod tests {
             SecureStorageException::from(SecureStorageError::NotInitialized);
         assert_eq!(code, "NOT_INITIALIZED");
         assert_eq!(msg, "not initialized");
+    }
+
+    #[test]
+    fn native_lock_session_surfaces_vfs_errors() {
+        crate::vfs::native_vfs::reset_state();
+
+        let err = dispatch("lockSession", "{}").expect_err("lockSession should surface VFS errors");
+        assert!(
+            err.to_string().contains("not initialized"),
+            "expected VFS error to be propagated, got: {err}"
+        );
+    }
+
+    #[test]
+    fn native_close_surfaces_flush_errors() {
+        crate::vfs::native_vfs::reset_state();
+
+        let err = dispatch("close", "{}").expect_err("close should surface flush errors");
+        assert!(
+            err.to_string().contains("not initialized"),
+            "expected flush error to be propagated, got: {err}"
+        );
     }
 }
