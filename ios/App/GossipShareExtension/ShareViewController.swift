@@ -52,7 +52,7 @@ class ShareViewController: SLComposeServiceViewController {
 
     private func handleSharedText(_ text: String) {
         // Optional: store shared text in App Group UserDefaults
-        if let userDefaults = UserDefaults(suiteName: "group.net.massa.gossip") {
+        if let userDefaults = UserDefaults(suiteName: "group.\(Bundle.main.bundleIdentifier ?? "net.massa.gossip")") {
             userDefaults.set(text, forKey: "sharedText")
             userDefaults.synchronize()
         }
