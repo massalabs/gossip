@@ -216,7 +216,6 @@ pub fn lock_session() -> Result<(), JsValue> {
 /// the namespace. Mirrors `lockSession`'s contract.
 #[wasm_bindgen(js_name = destroySession)]
 pub fn destroy_session(namespaces: &[u8]) -> Result<(), JsValue> {
-    discard_main_pending()?;
     with_app_state(|app| {
         let mut state = app.state.borrow_mut();
         let slot = state

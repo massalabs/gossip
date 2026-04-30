@@ -64,11 +64,11 @@ export default tseslint.config(
           selector:
             "CallExpression[callee.type='MemberExpression'][callee.object.name='Comlink'][callee.property.name='transfer']",
           message:
-            "Comlink.transfer detaches the source ArrayBuffer on this side. " +
-            "Confirm the caller never reuses the buffer afterwards (Drizzle " +
-            "wraps params in error messages; event listeners may re-emit). " +
-            "Add `// eslint-disable-next-line no-restricted-syntax -- " +
-            "ALLOWED-TRANSFER: <why>` above the call to silence this rule.",
+            'Comlink.transfer detaches the source ArrayBuffer on this side. ' +
+            'Confirm the caller never reuses the buffer afterwards (Drizzle ' +
+            'wraps params in error messages; event listeners may re-emit). ' +
+            'Add `// eslint-disable-next-line no-restricted-syntax -- ' +
+            'ALLOWED-TRANSFER: <why>` above the call to silence this rule.',
         },
       ],
     },

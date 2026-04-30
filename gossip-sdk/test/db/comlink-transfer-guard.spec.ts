@@ -66,9 +66,7 @@ describe('Comlink.transfer regression guard', () => {
     // Find the `secureProxy.exec(...)` call and inspect its arguments.
     // The expected shape is `secureProxy.exec(sql, params, wasInTxn)`
     // with `params` passed directly (no transfer wrapper).
-    const execCall = source.match(
-      /secureProxy\.exec\s*\(\s*([^)]+)\)/s
-    );
+    const execCall = source.match(/secureProxy\.exec\s*\(\s*([^)]+)\)/s);
     expect(
       execCall,
       'Could not locate secureProxy.exec(...) call in sqlite.ts. ' +
