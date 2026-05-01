@@ -645,40 +645,65 @@ pub fn read_namespace_data(namespace: u8, offset: u64, len: usize) -> Result<Vec
 
 /// Atomic clear+write for a non-SQL namespace. Equivalent semantically
 /// to `clear_namespace(ns)` followed by `write_namespace_data(ns, 0, data)`,
-/// but a single redb transaction (one fsync) and a single `state_mutex`
-/// acquisition. Used by the session-blob persist hot path, where the
-/// two-step variant produced back-to-back fsyncs that blocked SQL ops
-/// on the shared mutex.
+/// but folds both into a single redb transaction so the caller pays
+/// one real fsync and holds `state_mutex` for one contiguous window.
+/// Used by the session-blob persist hot path, where the two-step
+/// variant produced back-to-back commits that blocked SQL ops on the
+/// shared mutex.
+///
+/// Preserves the cross-slot blockstream-length invariant: when the
+/// new data is shorter than the old, freed tail blocks are converted
+/// to indistinguishable cover blocks via `shrink_session_data` (same
+/// path the cover-preserving `clear_namespace` uses) rather than
+/// dropped via `reset_blockstream`. The redb backend's `fsync()` is a
+/// no-op so the per-block flushes inside `shrink_session_data` add
+/// no I/O cost; the trailing `commit()` is the only real fsync.
+///
+/// In the session-blob hot path the blob size is roughly stable, so
+/// the shrink step is a no-op and the call is one block-rewrite per
+/// occupied block + one commit.
 pub fn replace_namespace_data(namespace: u8, data: &[u8]) -> Result<()> {
+    reject_default_namespace(namespace)?;
     let mutex = state_mutex();
     let mut guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
     let st = guard
         .as_mut()
-        .ok_or_else(|| SecureStorageError::Storage("not initialized".into()))?;
+        .ok_or_else(|| SecureStorageError::NotInitialized)?;
     let session = st
         .session
         .as_ref()
         .ok_or_else(|| SecureStorageError::Storage("no session".into()))?;
-    use crate::storage::BlockStorage;
-    // Stage the blockstream wipe (no fsync - defers to the final commit).
-    st.backend.reset_blockstream(session.session_index, namespace)?;
-    // Reset in-memory namespace state. After this the namespace is
-    // logically length-0; `write_session_data` starts fresh from offset 0.
-    st.namespace_states
-        .insert(namespace, NamespaceState::empty());
+    if !st.namespace_states.contains_key(&namespace) {
+        let ns = load_namespace_state(&st.backend, &st.domain, session, namespace)?;
+        st.namespace_states.insert(namespace, ns);
+    }
     let ns_state = st.namespace_states.get_mut(&namespace).unwrap();
-    crate::write_session_data(
-        &mut st.backend,
-        &st.domain,
-        namespace,
-        session,
-        ns_state,
-        0,
-        data,
-    )?;
-    // Single commit drains both the staged delete (`pending_deletes`)
-    // and the encrypted blocks (`ram_buffer`) in one redb txn -> one
-    // fsync, one mutex window for the whole operation.
+
+    let new_len = data.len() as u64;
+
+    if new_len < ns_state.total_data_length {
+        crate::shrink_session_data(
+            &mut st.backend,
+            &st.domain,
+            namespace,
+            session,
+            ns_state,
+            new_len,
+        )?;
+    }
+
+    if !data.is_empty() {
+        crate::write_session_data(
+            &mut st.backend,
+            &st.domain,
+            namespace,
+            session,
+            ns_state,
+            0,
+            data,
+        )?;
+    }
+
     st.backend.commit()
 }
 
@@ -1294,6 +1319,66 @@ mod tests {
             assert!(read_namespace_data(DEFAULT_NAMESPACE, 0, 1).is_err());
             assert!(namespace_data_length(DEFAULT_NAMESPACE).is_err());
             assert!(clear_namespace(DEFAULT_NAMESPACE).is_err());
+            assert!(replace_namespace_data(DEFAULT_NAMESPACE, b"bad").is_err());
+
+            drop(conn);
+        });
+    }
+
+    #[test]
+    fn test_native_vfs_replace_namespace_data_preserves_cover_blocks_on_shrink() {
+        // Regression: an earlier implementation called `reset_blockstream`
+        // which discards physical blocks, breaking the cross-slot
+        // blockstream-length invariant that other slots' covers depend on.
+        run_with_stack(|| {
+            let _guard = test_mutex().lock().unwrap();
+            let (_dir, conn) = setup_native_vfs();
+
+            let big = vec![0x42u8; crate::PLAINTEXT_SIZE * 3];
+            write_namespace_data(1, 0, &big).unwrap();
+
+            let pre_count = {
+                use crate::storage::BlockStorage;
+                let guard = state_mutex().lock().unwrap();
+                let st = guard.as_ref().unwrap();
+                st.backend
+                    .block_count(st.session.as_ref().unwrap().session_index, 1)
+                    .unwrap()
+            };
+            assert!(pre_count > 1, "expected multiple blocks, got {pre_count}");
+
+            // Shrink via replace.
+            let small = vec![0x9Au8; 8];
+            replace_namespace_data(1, &small).unwrap();
+
+            let post_count = {
+                use crate::storage::BlockStorage;
+                let guard = state_mutex().lock().unwrap();
+                let st = guard.as_ref().unwrap();
+                st.backend
+                    .block_count(st.session.as_ref().unwrap().session_index, 1)
+                    .unwrap()
+            };
+            assert_eq!(
+                post_count, pre_count,
+                "replace_namespace_data must preserve physical blocks as covers"
+            );
+            assert_eq!(namespace_data_length(1).unwrap(), small.len() as u64);
+            let read_back = read_namespace_data(1, 0, small.len()).unwrap();
+            assert_eq!(read_back, small);
+
+            // Replace with empty (full logical clear) must also preserve.
+            replace_namespace_data(1, b"").unwrap();
+            let after_empty_count = {
+                use crate::storage::BlockStorage;
+                let guard = state_mutex().lock().unwrap();
+                let st = guard.as_ref().unwrap();
+                st.backend
+                    .block_count(st.session.as_ref().unwrap().session_index, 1)
+                    .unwrap()
+            };
+            assert_eq!(after_empty_count, pre_count);
+            assert_eq!(namespace_data_length(1).unwrap(), 0);
 
             drop(conn);
         });
