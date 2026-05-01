@@ -375,6 +375,14 @@ jobs:
         with:
           xcode-version: '26.0'
 
+      # The macos-26 runner image ships Xcode 26 but the iOS 26.0
+      # platform SDK is not always pre-installed. xcodebuild fails the
+      # archive with "iOS 26.0 is not installed. Please download and
+      # install the platform from Xcode > Settings > Components." when
+      # the SDK is missing. The non-interactive equivalent (Xcode 15+):
+      - name: Install iOS 26 platform SDK
+        run: sudo xcodebuild -downloadPlatform iOS
+
       - name: Verify iOS 26 SDK
         run: |
           echo "Selected Xcode:"
