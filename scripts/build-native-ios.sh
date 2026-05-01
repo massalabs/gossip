@@ -2,8 +2,10 @@
 # Build the secureStorage Rust crate for iOS (device + simulator),
 # package into an XCFramework, and regenerate UniFFI Swift bindings.
 #
-# Outputs are gitignored; regenerated on demand by the Xcode
-# "Build secure-storage (Rust)" pre-build phase.
+# All outputs land in the committed xcframework + plugin directories.
+# Files whose content is unchanged keep their existing mtime so Xcode's
+# input fingerprinting does not trigger downstream Swift recompiles
+# every build.
 #
 # Usage: bash scripts/build-native-ios.sh [--release|--debug|-h]
 
@@ -19,11 +21,17 @@ EOF
 
 PROFILE="${1:---debug}"
 case "$PROFILE" in
-    --release) CARGO_FLAGS="--release"; PROFILE_DIR="release" ;;
-    --debug)   CARGO_FLAGS="";          PROFILE_DIR="debug" ;;
+    --release) CARGO_FLAGS=("--release"); PROFILE_DIR="release" ;;
+    --debug)   CARGO_FLAGS=();            PROFILE_DIR="debug" ;;
     -h|--help) usage; exit 0 ;;
     *) echo "error: unknown profile '$PROFILE'" >&2; usage >&2; exit 2 ;;
 esac
+
+if (($# > 1)); then
+    echo "error: unexpected extra arguments: ${*:2}" >&2
+    usage >&2
+    exit 2
+fi
 
 SCRIPT_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd -P "$SCRIPT_DIR/.." && pwd)"
@@ -36,48 +44,62 @@ echo "=== Building secureStorage for iOS ($PROFILE) ==="
 
 cd "$RUST_DIR"
 
-# 1. Cross-compile for device + simulator in a single cargo invocation.
 echo "[1/3] cargo build (aarch64-apple-ios + aarch64-apple-ios-sim)..."
-cargo build -p secureStorage --features native --no-default-features $CARGO_FLAGS \
+cargo build -p secureStorage --features native --no-default-features "${CARGO_FLAGS[@]}" \
     --target aarch64-apple-ios \
     --target aarch64-apple-ios-sim
 
 DEVICE_LIB="$RUST_DIR/target/aarch64-apple-ios/$PROFILE_DIR/libsecureStorage.a"
 SIM_LIB="$RUST_DIR/target/aarch64-apple-ios-sim/$PROFILE_DIR/libsecureStorage.a"
 
-# 2. Package via `xcodebuild -create-xcframework` (Apple's official tool).
-#    Build into a sibling `.tmp` dir first, then copy `Info.plist` and the
-#    per-slice `.a` into the committed xcframework structure. We keep the
-#    committed `Info.plist` + `.gitkeep` stubs under `ios-arm64/` and
-#    `ios-arm64-simulator/` so that a fresh clone has the folder shape on
-#    disk before this pre-build script runs (xcodebuild resolves the
-#    xcframework path at `CreateBuildDescription`, *before* script
-#    phases - if the slice folders don't exist there it errors out with
-#    "The folder ios-arm64 doesn't exist"). Using copy-into-place rather
-#    than `rm -rf $XCFW_DIR && mv` keeps the `.gitkeep` files intact so
-#    `git status` stays clean across rebuilds.
-echo "[2/3] xcodebuild -create-xcframework..."
-# `xcodebuild -create-xcframework` requires the output path to end in
-# `.xcframework`; build into a sibling temp file with that suffix.
+# Belt-and-suspenders: xcodebuild -create-xcframework trusts the
+# declared platform but does not verify the actual arch of the .a, so
+# a host-build leak (e.g. stale x86_64 lib) would slip through.
+for slice_lib in "$DEVICE_LIB" "$SIM_LIB"; do
+    if ! lipo -info "$slice_lib" | grep -q 'arm64'; then
+        echo "error: $slice_lib is not arm64" >&2
+        exit 1
+    fi
+done
+
+# Stage xcframework + bindings into temp dirs, then install both into
+# the committed structure as the final step. Asymmetric staging (libs
+# in place before bindgen runs) would leave new .a alongside old Swift
+# wrappers if bindgen fails - silent ABI mismatch at first FFI call.
 TMP_XCFW="${IOS_DIR}/SecureStorage.tmp.$$.xcframework"
-trap 'rm -rf "$TMP_XCFW"' EXIT
+TMP_BINDINGS="${PLUGIN_DIR}/.tmp.$$.bindings"
+trap 'rm -rf "$TMP_XCFW" "$TMP_BINDINGS"' EXIT
+
+echo "[2/3] xcodebuild -create-xcframework..."
 xcodebuild -create-xcframework \
     -library "$DEVICE_LIB" \
     -library "$SIM_LIB" \
     -output "$TMP_XCFW" >/dev/null
-cp "$TMP_XCFW/Info.plist" "$XCFW_DIR/Info.plist"
-cp "$TMP_XCFW/ios-arm64/libsecureStorage.a" "$XCFW_DIR/ios-arm64/libsecureStorage.a"
-cp "$TMP_XCFW/ios-arm64-simulator/libsecureStorage.a" "$XCFW_DIR/ios-arm64-simulator/libsecureStorage.a"
-rm -rf "$TMP_XCFW"
-trap - EXIT
 
-# 3. UniFFI Swift bindings (version pinned centrally in
-#    wasm/Cargo.toml [workspace.dependencies]).
 echo "[3/3] UniFFI Swift bindings..."
+mkdir -p "$TMP_BINDINGS"
 cargo run -p uniffi-bindgen -- generate \
     --library "$DEVICE_LIB" \
     --language swift \
-    --out-dir "$PLUGIN_DIR" >/dev/null
+    --out-dir "$TMP_BINDINGS"
+
+install_if_changed() {
+    local src=$1 dst=$2
+    if [[ ! -e $dst ]] || ! cmp -s "$src" "$dst"; then
+        cp "$src" "$dst"
+    fi
+}
+
+# Info.plist is committed and deterministic for a stable slice set; do
+# not overwrite (avoids spurious git status diffs on toolchain bumps).
+install_if_changed "$TMP_XCFW/ios-arm64/libsecureStorage.a" \
+                   "$XCFW_DIR/ios-arm64/libsecureStorage.a"
+install_if_changed "$TMP_XCFW/ios-arm64-simulator/libsecureStorage.a" \
+                   "$XCFW_DIR/ios-arm64-simulator/libsecureStorage.a"
+
+for f in "$TMP_BINDINGS"/*; do
+    install_if_changed "$f" "$PLUGIN_DIR/$(basename "$f")"
+done
 
 DEVICE_SIZE=$(du -h "$XCFW_DIR/ios-arm64/libsecureStorage.a" | cut -f1)
 SIM_SIZE=$(du -h "$XCFW_DIR/ios-arm64-simulator/libsecureStorage.a" | cut -f1)
