@@ -126,6 +126,15 @@ jobs:
       - name: Sync Capacitor Android
         run: npm run cap:sync:android
 
+      # Required by `:app:buildRustSecureStorage` Gradle task, which
+      # invokes scripts/build-native-android.sh -> `cargo ndk`. The
+      # ubuntu-latest runner ships rustup but neither the Android
+      # targets nor the cargo-ndk subcommand.
+      - name: Setup Rust (Android targets + cargo-ndk)
+        run: |
+          rustup target add aarch64-linux-android x86_64-linux-android
+          cargo install cargo-ndk --version =4.1.2 --locked
+
       - name: Display build info
         run: |
           echo "📦 Building Android artifacts:"
@@ -389,6 +398,21 @@ jobs:
 
       - name: Sync Capacitor iOS
         run: npm run cap:sync:ios
+
+      # Pre-build the Rust XCFramework before xcodebuild runs.
+      # Xcode's ProcessXCFramework (which extracts the per-slice .a
+      # from SecureStorage.xcframework) executes during build-graph
+      # preparation, BEFORE the "Build secure-storage (Rust)" pre-build
+      # script phase. The .gitkeep stubs satisfy CreateBuildDescription
+      # at parse time but ProcessXCFramework demands real .a content,
+      # so on a cold CI clone the script phase never gets a chance to
+      # run. Pre-building here populates the xcframework so xcodebuild
+      # finds what it needs; the in-Xcode script phase then becomes a
+      # cargo cache no-op for incremental dev builds.
+      - name: Setup Rust (iOS targets) + pre-build XCFramework
+        run: |
+          rustup target add aarch64-apple-ios aarch64-apple-ios-sim
+          bash scripts/build-native-ios.sh --release
 
       - name: Configure Git for Match
         run: |
