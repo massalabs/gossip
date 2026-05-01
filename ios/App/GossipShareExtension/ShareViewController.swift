@@ -51,19 +51,11 @@ class ShareViewController: SLComposeServiceViewController {
     }
 
     private func handleSharedText(_ text: String) {
-        // Optional: store shared text in App Group UserDefaults
-        if let userDefaults = UserDefaults(suiteName: "group.\(Bundle.main.bundleIdentifier ?? "net.massa.gossip")") {
-            userDefaults.set(text, forKey: "sharedText")
-            userDefaults.synchronize()
-        }
-
-        // Open the main app with gossip:// URL scheme; JS layer handles gossip://share
         let encodedText = text.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
         let gossipUrl = "gossip://share?text=\(encodedText)"
 
         guard let url = URL(string: gossipUrl) else { return }
 
-        // Use NSExtensionContext to open the URL in the containing app
         self.extensionContext?.open(url, completionHandler: nil)
     }
 
