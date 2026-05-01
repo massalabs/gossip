@@ -411,6 +411,13 @@ class GossipSdk {
     // dependency on `this` during MessageService construction.
     this._message.setPersistFlusher(() => this.awaitPendingPersist());
 
+    // Same plumbing for the incoming-announcement path: forces the
+    // session-blob persist between the Rust state mutation and the
+    // SQL inserts so a crash in between can't leave an orphan
+    // Discussion. See `AnnouncementService._processIncomingAnnouncement`
+    // for rationale.
+    this._announcement.setPersistFlusher(() => this.awaitPendingPersist());
+
     this._discussion.setMessageService(this._message);
 
     this._refresh = new RefreshService(
