@@ -444,6 +444,7 @@
 		504EC3141FED79650016851F /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				GOSSIP_BUNDLE_ID = "net.massa.gossip";
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
@@ -505,6 +506,7 @@
 		504EC3151FED79650016851F /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				GOSSIP_BUNDLE_ID = "net.massa.gossip";
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
@@ -561,6 +563,7 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = FC68EB0AF532CFC21C3344DD /* Pods-Gossip.debug.xcconfig */;
 			buildSettings = {
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = Gossip.entitlements;
@@ -595,7 +598,6 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.0.8;
-				GOSSIP_BUNDLE_ID = "net.massa.gossip";
 				PRODUCT_BUNDLE_IDENTIFIER = "$(GOSSIP_BUNDLE_ID)";
 				PRODUCT_NAME = Gossip;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
@@ -615,6 +617,7 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = AF51FD2D460BCFE21FA515B2 /* Pods-Gossip.release.xcconfig */;
 			buildSettings = {
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = Gossip.entitlements;
@@ -649,7 +652,6 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.0.8;
-				GOSSIP_BUNDLE_ID = "net.massa.gossip";
 				PRODUCT_BUNDLE_IDENTIFIER = "$(GOSSIP_BUNDLE_ID)";
 				PRODUCT_NAME = Gossip;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "";
@@ -692,7 +694,6 @@
 				MARKETING_VERSION = 0.0.8;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
-				GOSSIP_BUNDLE_ID = "net.massa.gossip";
 				PRODUCT_BUNDLE_IDENTIFIER = "$(GOSSIP_BUNDLE_ID).GossipShareExtension";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -733,7 +734,6 @@
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MARKETING_VERSION = 0.0.8;
 				MTL_FAST_MATH = YES;
-				GOSSIP_BUNDLE_ID = "net.massa.gossip";
 				PRODUCT_BUNDLE_IDENTIFIER = "$(GOSSIP_BUNDLE_ID).GossipShareExtension";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
