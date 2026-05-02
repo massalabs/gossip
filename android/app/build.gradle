@@ -1,23 +1,35 @@
 apply plugin: 'com.android.application'
 apply plugin: 'org.jetbrains.kotlin.android'
 
+// secureStorage Rust build coordinates - source of truth lives in
+// android/gradle.properties so the Gradle side and the bash script
+// (scripts/build-native-android.sh) cannot drift.
+def gossipNdkVersion = project.findProperty('gossip.ndkVersion')
+if (!gossipNdkVersion) {
+    throw new GradleException("gossip.ndkVersion missing from gradle.properties")
+}
+def gossipAbis = (project.findProperty('gossip.abis') ?: '').split(',').findAll { it }
+if (gossipAbis.isEmpty()) {
+    throw new GradleException("gossip.abis missing from gradle.properties")
+}
+
 android {
     namespace = "net.massa.gossip"
     compileSdk = rootProject.ext.compileSdkVersion
-    // Pin the NDK version so the `.so` produced by
-    // scripts/build-native-android.sh is reproducible across dev/CI.
-    // Keep in sync with the ANDROID_NDK_VERSION constant in that script.
-    ndkVersion "26.3.11579264"
+    // Pinned to keep the .so produced by scripts/build-native-android.sh
+    // reproducible across dev/CI. Source of truth: gossip.ndkVersion in
+    // android/gradle.properties.
+    ndkVersion gossipNdkVersion
     defaultConfig {
         applicationId "net.massa.gossip"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         ndk {
             // 64-bit-only: Play Store has required 64-bit companions
-            // since 2019 and all supported devices ship 64-bit. If 32-bit
-            // markets become a target, also add `armeabi-v7a` + `x86`
-            // here AND to scripts/build-native-android.sh.
-            abiFilters "arm64-v8a", "x86_64"
+            // since 2019 and all supported devices ship 64-bit. To add
+            // 32-bit markets, append the ABI to gossip.abis in
+            // gradle.properties; the bash script reads the same key.
+            abiFilters(*gossipAbis)
         }
         // Use an auto-generated numeric versionCode so each build is unique without manual bumping.
         // We must stay within the 32-bit signed int limit required by Google Play (max 2147483647).
@@ -150,10 +162,24 @@ tasks.register('buildRustSecureStorage', Exec) {
             include '**/*.kt'
         }
     )
-    // Always re-run when the Rust source changes, even partially.
+    // Re-run when the Rust source or any path-dep crate changes.
+    // Cargo.lock catches transitive bumps from `cargo update`; the
+    // sister-crate dirs catch local edits in the secureStorage dep
+    // graph (crypto-aead/kdf/password-kdf supply primitives, and
+    // uniffi-bindgen produces the Kotlin bindings).
     inputs.dir "${rootDir}/wasm/secure-storage/src"
     inputs.file "${rootDir}/wasm/Cargo.toml"
+    inputs.file "${rootDir}/wasm/Cargo.lock"
     inputs.file "${rootDir}/wasm/secure-storage/Cargo.toml"
+    inputs.dir "${rootDir}/wasm/crypto-aead/src"
+    inputs.dir "${rootDir}/wasm/crypto-kdf/src"
+    inputs.dir "${rootDir}/wasm/crypto-password-kdf/src"
+    inputs.dir "${rootDir}/wasm/uniffi-bindgen"
+    // Pin the NDK version into the input fingerprint so switching it
+    // in gradle.properties invalidates the cached .so even when the
+    // Rust source is unchanged.
+    inputs.property 'ndkVersion', gossipNdkVersion
+    inputs.property 'abis', gossipAbis.join(',')
     // Track the profile flag as an input so switching between release
     // and debug invalidates the cached .so. Without this, Gradle sees
     // no source change and happily reuses a stale debug .so under a
@@ -170,6 +196,9 @@ try {
     if (servicesJSON.text) {
         apply plugin: 'com.google.gms.google-services'
     }
-} catch(Exception e) {
+    // Narrow catch: the only expected exception is the file being
+    // absent. Malformed-JSON or plugin-apply failures must surface so
+    // a broken google-services.json is not silently ignored.
+} catch(FileNotFoundException e) {
     logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
 }
