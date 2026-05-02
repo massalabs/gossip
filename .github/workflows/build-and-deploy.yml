@@ -126,14 +126,40 @@ jobs:
       - name: Sync Capacitor Android
         run: npm run cap:sync:android
 
+      # Cache cargo registry/git + the secureStorage build dir between
+      # runs. Mirrors the pattern from rust-wasm.yml. Saves ~1 min on
+      # cache hit by avoiding the from-scratch dependency download +
+      # compile.
+      - name: Cache cargo registry + target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            wasm/target
+          key: ${{ runner.os }}-cargo-android-${{ hashFiles('wasm/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-android-
+
+      # Cache the cargo-ndk binary itself so we skip the ~1 min source
+      # compile of `cargo install` whenever the version is unchanged.
+      - name: Cache cargo-ndk binary
+        id: cache-cargo-ndk
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-ndk
+          key: cargo-ndk-4.1.2-${{ runner.os }}
+
       # Required by `:app:buildRustSecureStorage` Gradle task, which
       # invokes scripts/build-native-android.sh -> `cargo ndk`. The
-      # ubuntu-latest runner ships rustup but neither the Android
-      # targets nor the cargo-ndk subcommand.
-      - name: Setup Rust (Android targets + cargo-ndk)
-        run: |
-          rustup target add aarch64-linux-android x86_64-linux-android
-          cargo install cargo-ndk --version =4.1.2 --locked
+      # ubuntu-latest runner ships rustup but not the Android targets
+      # nor the cargo-ndk subcommand.
+      - name: Install cargo-ndk
+        if: steps.cache-cargo-ndk.outputs.cache-hit != 'true'
+        run: cargo install cargo-ndk --version =4.1.2 --locked
+
+      - name: Setup Rust Android targets
+        run: rustup target add aarch64-linux-android x86_64-linux-android
 
       - name: Display build info
         run: |
@@ -406,6 +432,22 @@ jobs:
 
       - name: Sync Capacitor iOS
         run: npm run cap:sync:ios
+
+      # Cache cargo registry/git + the secureStorage build dir between
+      # runs (mirrors the Android job and rust-wasm.yml). Saves ~1 min
+      # of dependency download + recompile on cache hit; the iOS build
+      # otherwise runs `cargo build` for two iOS targets from scratch
+      # every CI run (~1m20s observed in CI logs).
+      - name: Cache cargo registry + target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            wasm/target
+          key: ${{ runner.os }}-cargo-ios-${{ hashFiles('wasm/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-ios-
 
       # Pre-build the Rust XCFramework before xcodebuild runs.
       # Xcode's ProcessXCFramework (which extracts the per-slice .a
