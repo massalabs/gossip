@@ -1385,6 +1385,92 @@ mod tests {
     }
 
     #[test]
+    fn test_native_vfs_replace_namespace_data_same_size_no_block_change() {
+        // Hot path the perf optimisation targets: when the new blob has
+        // the same byte length as the old one, no shrink runs and no
+        // additional blocks are allocated. The blockstream count must
+        // stay identical (no covers added, no covers removed) and the
+        // new data must round-trip.
+        run_with_stack(|| {
+            let _guard = test_mutex().lock().unwrap();
+            let (_dir, conn) = setup_native_vfs();
+
+            let initial = vec![0x42u8; crate::PLAINTEXT_SIZE * 3];
+            write_namespace_data(1, 0, &initial).unwrap();
+
+            let pre_count = {
+                use crate::storage::BlockStorage;
+                let guard = state_mutex().lock().unwrap();
+                let st = guard.as_ref().unwrap();
+                st.backend
+                    .block_count(st.session.as_ref().unwrap().session_index, 1)
+                    .unwrap()
+            };
+
+            let same_size = vec![0xC3u8; initial.len()];
+            replace_namespace_data(1, &same_size).unwrap();
+
+            let post_count = {
+                use crate::storage::BlockStorage;
+                let guard = state_mutex().lock().unwrap();
+                let st = guard.as_ref().unwrap();
+                st.backend
+                    .block_count(st.session.as_ref().unwrap().session_index, 1)
+                    .unwrap()
+            };
+            assert_eq!(post_count, pre_count);
+            assert_eq!(namespace_data_length(1).unwrap(), same_size.len() as u64);
+            let read_back = read_namespace_data(1, 0, same_size.len()).unwrap();
+            assert_eq!(read_back, same_size);
+
+            drop(conn);
+        });
+    }
+
+    #[test]
+    fn test_native_vfs_replace_namespace_data_extends_namespace() {
+        // Replacing with a larger payload must allocate the additional
+        // blocks (skipping the shrink step) and preserve the new data.
+        run_with_stack(|| {
+            let _guard = test_mutex().lock().unwrap();
+            let (_dir, conn) = setup_native_vfs();
+
+            let initial = vec![0x42u8; crate::PLAINTEXT_SIZE];
+            write_namespace_data(1, 0, &initial).unwrap();
+
+            let pre_count = {
+                use crate::storage::BlockStorage;
+                let guard = state_mutex().lock().unwrap();
+                let st = guard.as_ref().unwrap();
+                st.backend
+                    .block_count(st.session.as_ref().unwrap().session_index, 1)
+                    .unwrap()
+            };
+
+            let larger = vec![0x77u8; crate::PLAINTEXT_SIZE * 4];
+            replace_namespace_data(1, &larger).unwrap();
+
+            let post_count = {
+                use crate::storage::BlockStorage;
+                let guard = state_mutex().lock().unwrap();
+                let st = guard.as_ref().unwrap();
+                st.backend
+                    .block_count(st.session.as_ref().unwrap().session_index, 1)
+                    .unwrap()
+            };
+            assert!(
+                post_count > pre_count,
+                "extend must allocate more blocks (pre={pre_count}, post={post_count})"
+            );
+            assert_eq!(namespace_data_length(1).unwrap(), larger.len() as u64);
+            let read_back = read_namespace_data(1, 0, larger.len()).unwrap();
+            assert_eq!(read_back, larger);
+
+            drop(conn);
+        });
+    }
+
+    #[test]
     fn test_native_vfs_uses_rollback_capable_journal() {
         run_with_stack(|| {
             let _guard = test_mutex().lock().unwrap();
