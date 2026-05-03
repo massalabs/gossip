@@ -138,27 +138,31 @@ pub fn allocate_session<S: BlockStorage + KeypairStorage>(
 /// 1. Replace the keypair file with a fresh dummy one (random throwaway
 ///    wrap key, exactly the pattern from [`provision_storage`]). After
 ///    this, [`crate::unlock::unlock_session`] returns `InvalidPassword`
-///    for the old secret - the slot is permanently inaccessible.
-/// 2. Reset every blockstream the SDK uses on this slot (caller passes
-///    the list - no hardcoded namespace set so the canonical inventory
-///    stays on the SDK side).
-/// 3. Re-pad each blockstream up to the global maximum with cover
-///    blocks generated under the new PK (via [`repair_blockstream_lengths`]).
-///    This preserves the per-namespace block-count parity invariant
-///    (all slots equal length).
-/// 4. Rerandomize every block of every other slot too, so the snapshot
-///    diff straddling destroy is symmetric across all slots. Without
-///    this step, an attacker comparing pre/post snapshots would see the
-///    destroyed slot's blocks all changed while other slots' blocks
-///    sat untouched - a single-slot mutation pattern no normal
-///    cover-traffic schedule produces, fingerprinting the destroyed
-///    slot. The cost is bounded by `SESSION_COUNT * global_block_count`
-///    AEAD ops per namespace, acceptable for an explicit user action.
+///    for the old secret - the slot is permanently inaccessible. This
+///    write uses its own redb transaction and is durable as soon as it
+///    returns; everything below stages into the caller's transaction.
+/// 2. For each namespace, sweep every block index across all slots:
+///    overwrite the destroyed slot's blocks with fresh cover blocks
+///    generated under the new PK, and PQ-rerandomize every other slot's
+///    block in place under its (unchanged) PK. The snapshot diff
+///    straddling destroy is therefore symmetric across all slots
+///    (all slots change at every block index), restoring the
+///    "indistinguishable from cover-traffic activity" property a
+///    single-slot mutation would otherwise break.
+///
+/// No `reset_blockstream` is needed: by the cross-slot block-count
+/// parity invariant the destroyed slot already has the same number of
+/// blocks as everyone else, so the sweep can rewrite each one in place
+/// without first dropping it. Skipping the reset is also what makes the
+/// caller's "discard pending on error" rollback complete, since no
+/// in-memory storage counters get mutated mid-destroy.
 ///
 /// The caller is responsible for committing the backing store: nothing
-/// is fsync'd from inside this function. Wrapping the call in a single
-/// `commit()` makes the destroy atomic: a process crash before commit
-/// rolls everything back, leaving the slot exactly as it was.
+/// after step 1 is fsync'd from inside this function. Wrapping step 2
+/// in a single `commit()` makes the camouflage atomic: a process crash
+/// before commit rolls back the staged writes, leaving the (now-dead)
+/// slot's blocks intact under the old key. The slot itself is dead from
+/// step 1 either way.
 pub fn destroy_session<S: BlockStorage + KeypairStorage>(
     storage: &mut S,
     domain: &str,
@@ -180,25 +184,12 @@ pub fn destroy_session<S: BlockStorage + KeypairStorage>(
     let kf = KeypairFile::build_wrapped(0, pk.to_bytes(), &dummy_wrap_key, &dummy_sk, b"");
     storage.write_keypair(slot, &kf.serialize())?;
 
-    // 2. Truncate the slot's blockstreams. Real-account ciphertext is
-    //    gone after this; nothing references the old keys anymore.
+    // 2. Snapshot-symmetric camouflage. For each namespace, sweep every
+    //    block index across all slots; the destroyed slot is forced
+    //    through the create_cover branch because its existing blocks
+    //    are under the old PK and cannot be rerandomized under the new.
     for &ns in namespaces {
-        storage.reset_blockstream(slot, ns)?;
-    }
-
-    // 3. Re-pad with cover blocks under the new PK. `repair_blockstream_lengths`
-    //    reads version+PK from the keypair file we just wrote, so the
-    //    cover blocks are coherent with the new identity for any future
-    //    `cover_traffic_tick` rerandomization.
-    for &ns in namespaces {
-        repair_blockstream_lengths(storage, domain, ns)?;
-    }
-
-    // 4. Camouflage the snapshot diff. See [`rerandomize_all_blocks_all_slots`]
-    //    for the cost/rationale; without this step the "looks like a
-    //    cover-traffic burst" claim above is false.
-    for &ns in namespaces {
-        rerandomize_all_blocks_all_slots(storage, domain, ns)?;
+        rerandomize_all_blocks_all_slots(storage, domain, ns, Some(slot))?;
     }
 
     Ok(())
@@ -210,15 +201,22 @@ pub fn destroy_session<S: BlockStorage + KeypairStorage>(
 /// it (same plaintext, fresh ciphertext); falls back to a freshly-built
 /// cover block when the slot has no block at that index yet.
 ///
+/// `force_cover_for` skips the read+rerandomize path for the given slot
+/// and always emits a fresh cover block. Used by [`destroy_session`]:
+/// the destroyed slot's existing blocks are encrypted under its old
+/// PK, which the freshly-installed dummy PK cannot rerandomize, so they
+/// must be overwritten with covers built under the new PK instead.
+///
 /// Shared primitive used by [`cover_traffic_tick`] (one random block per
 /// call, periodic background masking) and [`rerandomize_all_blocks_all_slots`]
-/// (every block, called from [`destroy_session`] step 4 for snapshot-diff
+/// (every block, called from [`destroy_session`] for snapshot-diff
 /// symmetry).
 fn rerandomize_block_across_all_slots<S: BlockStorage + KeypairStorage>(
     storage: &mut S,
     domain: &str,
     namespace: u8,
     block_index: u64,
+    force_cover_for: Option<SessionIndex>,
 ) -> Result<()> {
     let mut indices: Vec<u8> = (0..SESSION_COUNT as u8).collect();
     indices.shuffle(&mut rand::rngs::OsRng);
@@ -239,9 +237,14 @@ fn rerandomize_block_across_all_slots<S: BlockStorage + KeypairStorage>(
             block_index,
         );
 
-        let new_ct = match storage.read_block(cur_session, namespace, block_index) {
-            Ok(cur_ct) => rerandomize_block(&cur_pk, &cur_ct),
-            Err(_) => create_cover_block(&cur_pk, &cur_aad_root),
+        let force_cover = force_cover_for == Some(cur_session);
+        let new_ct = if force_cover {
+            create_cover_block(&cur_pk, &cur_aad_root)
+        } else {
+            match storage.read_block(cur_session, namespace, block_index) {
+                Ok(cur_ct) => rerandomize_block(&cur_pk, &cur_ct),
+                Err(_) => create_cover_block(&cur_pk, &cur_aad_root),
+            }
         };
         let ct_arr: &[u8; BLOCK_SIZE] = new_ct
             .as_slice()
@@ -255,9 +258,13 @@ fn rerandomize_block_across_all_slots<S: BlockStorage + KeypairStorage>(
 }
 
 /// Rerandomize every block of every slot in `namespace`. Used by
-/// [`destroy_session`] step 4 to make the snapshot diff straddling a
-/// destroy symmetric across all slots - so an attacker comparing
-/// pre/post snapshots cannot tell which slot was the destroyed one.
+/// [`destroy_session`] to make the snapshot diff straddling a destroy
+/// symmetric across all slots, so an attacker comparing pre/post
+/// snapshots cannot single out the destroyed slot.
+///
+/// `force_cover_for` is forwarded to [`rerandomize_block_across_all_slots`]
+/// for every block index; pass `Some(slot)` from `destroy_session` and
+/// `None` otherwise.
 ///
 /// Cost is `SESSION_COUNT * global_block_count` AEAD ops, which is
 /// acceptable for an explicit user action (logout / delete account)
@@ -268,10 +275,17 @@ fn rerandomize_all_blocks_all_slots<S: BlockStorage + KeypairStorage>(
     storage: &mut S,
     domain: &str,
     namespace: u8,
+    force_cover_for: Option<SessionIndex>,
 ) -> Result<()> {
     let global_count = crate::write::get_global_block_count(storage, namespace)?;
     for block_index in 0..global_count {
-        rerandomize_block_across_all_slots(storage, domain, namespace, block_index)?;
+        rerandomize_block_across_all_slots(
+            storage,
+            domain,
+            namespace,
+            block_index,
+            force_cover_for,
+        )?;
     }
     Ok(())
 }
@@ -293,7 +307,7 @@ pub fn cover_traffic_tick<S: BlockStorage + KeypairStorage>(
         return Ok(());
     }
     let block_index = rand::Rng::gen_range(&mut rand::rngs::OsRng, 0..global_count);
-    rerandomize_block_across_all_slots(storage, domain, namespace, block_index)
+    rerandomize_block_across_all_slots(storage, domain, namespace, block_index, None)
 }
 
 #[cfg(test)]

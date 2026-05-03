@@ -201,6 +201,29 @@ impl RedbStorage {
         self.pending_deletes.clear();
         Ok(())
     }
+
+    /// Drop every staged operation that has not yet been flushed by
+    /// [`commit`], leaving the on-disk state untouched.
+    ///
+    /// Used by callers that need to roll back a multi-step operation
+    /// halfway through (for example, [`crate::destroy_session`] when one
+    /// of its block-rewriting steps errors): without this, the staged
+    /// writes would silently ride along on the next caller's `commit()`
+    /// and corrupt the on-disk state.
+    ///
+    /// **Caveat**: this clears `ram_buffer` (write-block stages),
+    /// `ram_overlay` (the write-block index), and `pending_deletes`
+    /// (reset-blockstream stages). It does NOT undo direct mutations
+    /// to `block_counts`, which `reset_blockstream` and `append_block`
+    /// apply immediately. Callers that mutate counts (i.e., call
+    /// `reset_blockstream` or `append_block`) cannot fully roll back
+    /// with this primitive alone; they must avoid those calls or do
+    /// their own count-snapshotting.
+    pub fn discard_pending(&mut self) {
+        self.ram_buffer.clear();
+        self.ram_overlay.clear();
+        self.pending_deletes.clear();
+    }
 }
 
 // ── BlockStorage ─────────────────────────────────────────────────────
@@ -597,5 +620,43 @@ mod tests {
             assert_eq!(s.read_block(si, 0, 0).unwrap()[0], 0x11);
             assert_eq!(s.read_block(si, 1, 0).unwrap()[0], 0x22);
         }
+    }
+
+    #[test]
+    fn test_discard_pending_drops_staged_writes() {
+        // Regression: a multi-step operation that stages writes via
+        // write_block must be able to roll them back without
+        // committing, otherwise the staged bytes silently ride along
+        // on the next caller's commit. See native_vfs::destroy_session
+        // for the wrapper that uses this on error.
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().to_path_buf();
+        let si = SessionIndex::new(0).unwrap();
+
+        // Establish a baseline on disk: one committed block.
+        {
+            let mut s = RedbStorage::open(&path).unwrap();
+            s.append_block(si, NS, &make_block(0xAA)).unwrap();
+            s.commit().unwrap();
+        }
+
+        // Stage an overwrite of that block in RAM, then discard.
+        // The on-disk byte must still be the baseline 0xAA.
+        let mut s = RedbStorage::open(&path).unwrap();
+        s.write_block(si, NS, 0, &make_block(0xBB)).unwrap();
+        // The in-RAM read returns the staged overwrite.
+        assert_eq!(s.read_block(si, NS, 0).unwrap()[0], 0xBB);
+
+        s.discard_pending();
+        // After discard, reads fall back to the on-disk value.
+        assert_eq!(s.read_block(si, NS, 0).unwrap()[0], 0xAA);
+
+        // A subsequent commit must NOT carry the discarded write.
+        s.commit().unwrap();
+
+        // Reopen from disk and confirm the staged byte never landed.
+        drop(s);
+        let s = RedbStorage::open(&path).unwrap();
+        assert_eq!(s.read_block(si, NS, 0).unwrap()[0], 0xAA);
     }
 }
