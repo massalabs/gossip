@@ -139,7 +139,7 @@ export interface SecureStorageNativePlugin {
    */
   replaceNamespaceData(options: {
     namespace: number;
-    data: number[];
+    data: Uint8Array;
   }): Promise<void>;
   readNamespaceData(options: {
     namespace: number;

@@ -894,7 +894,7 @@ export class DatabaseConnection {
     if (this.state.useNativePlugin) {
       await this.requireNativePlugin().replaceNamespaceData({
         namespace,
-        data: Array.from(data),
+        data,
       });
       return;
     }
