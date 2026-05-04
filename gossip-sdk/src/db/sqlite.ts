@@ -884,9 +884,12 @@ export class DatabaseConnection {
   }
 
   /** Atomic clear+write: replace the entire namespace contents in one
-   *  txn / one fsync (native path) — see `replaceNamespaceData` on the
-   *  plugin interface for rationale. Falls back to clear-then-write on
-   *  the WASM worker path, which has no equivalent fused primitive. */
+   *  IDB / fsync transaction. Both the native plugin and the WASM
+   *  worker now expose a fused primitive that batches the clear and
+   *  the write inside a single backend transaction; a process kill
+   *  before the transaction commits leaves the previous content
+   *  intact, and a kill after leaves the new content. There is no
+   *  observable "cleared but not written" state. */
   async secureStorageReplaceNamespaceData(
     namespace: number,
     data: Uint8Array
@@ -898,9 +901,7 @@ export class DatabaseConnection {
       });
       return;
     }
-    const proxy = this.requireSecureProxy();
-    await proxy.clearNamespace(namespace);
-    await proxy.writeNamespaceData(namespace, 0, data);
+    await this.requireSecureProxy().replaceNamespaceData(namespace, data);
   }
 
   // ─── Public methods ────────────────────────────────────────────

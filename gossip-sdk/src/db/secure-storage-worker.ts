@@ -348,6 +348,30 @@ export class SecureStorageWorkerApi {
     await flushEncrypted();
   }
 
+  /**
+   * Atomic clear+write equivalent of the native plugin's
+   * `replaceNamespaceData`. The two wasm calls below mutate in-memory
+   * state synchronously; only the trailing `flushEncrypted` writes
+   * to IndexedDB, batching both ops into a single IDB transaction.
+   * That preserves atomicity equivalent to the native single-fsync
+   * path: a process kill before the flush leaves IDB untouched, a
+   * crash mid-flush gets rolled back by IDB itself, and a successful
+   * flush lands the new blob with the previous content fully replaced.
+   *
+   * Without this proxy method, the caller had to chain `clearNamespace`
+   * and `writeNamespaceData` from `sqlite.ts`, each producing its own
+   * IDB transaction; a kill between them left the namespace empty and
+   * the session blob silently lost.
+   */
+  async replaceNamespaceData(
+    namespace: number,
+    data: Uint8Array
+  ): Promise<void> {
+    clearNamespace(namespace);
+    writeNamespaceData(namespace, 0, data);
+    await flushEncrypted();
+  }
+
   async flush(): Promise<void> {
     await flushEncrypted();
   }
