@@ -58,7 +58,11 @@ echo "=== Building secureStorage for iOS ($PROFILE) ==="
 cd "$RUST_DIR"
 
 echo "[1/3] cargo build (aarch64-apple-ios + aarch64-apple-ios-sim)..."
-cargo build -p secureStorage --features native --no-default-features "${CARGO_FLAGS[@]}" \
+# `${arr[@]+"${arr[@]}"}` so an empty CARGO_FLAGS does not trip
+# `set -u` on macOS bash 3.2 (older bash treats `${arr[@]}` on an
+# empty array as an unset reference).
+cargo build -p secureStorage --features native --no-default-features \
+    ${CARGO_FLAGS[@]+"${CARGO_FLAGS[@]}"} \
     --target aarch64-apple-ios \
     --target aarch64-apple-ios-sim
 
