@@ -1,7 +1,7 @@
 // Runs in BROWSER mode (real Chromium via Playwright)
 // Tests swipe-left-to-reply gesture on MessageItem.
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
 import React from 'react';
 import { render } from 'vitest-browser-react';
 import { page } from 'vitest/browser';
@@ -137,10 +137,10 @@ function simulateSwipe(
 // ---------- Tests ----------
 
 describe('SwipeReply — swipe-left to reply', () => {
-  let onReplyTo: ReturnType<typeof vi.fn>;
+  let onReplyTo: Mock<(message: Message) => void>;
 
   beforeEach(() => {
-    onReplyTo = vi.fn();
+    onReplyTo = vi.fn<(message: Message) => void>();
   });
 
   it('calls onReplyTo after a sufficient left swipe on incoming message', async () => {
