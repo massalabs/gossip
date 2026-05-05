@@ -26,7 +26,11 @@ interface SelfMessageStore {
   isSending: boolean;
   loadMessages: () => Promise<void>;
   loadReactions: () => Promise<void>;
-  sendMessage: (content: string) => Promise<void>;
+  sendMessage: (
+    content: string,
+    replyToId?: number,
+    forwardFromMessageId?: number
+  ) => Promise<void>;
   editMessage: (id: number, newContent: string) => Promise<void>;
   deleteMessage: (id: number) => Promise<void>;
   sendReaction: (emoji: string, messageDbId: number) => Promise<void>;
@@ -73,7 +77,11 @@ const useSelfMessageStoreBase = create<SelfMessageStore>((set, get) => ({
     }
   },
 
-  sendMessage: async (content: string) => {
+  sendMessage: async (
+    content: string,
+    replyToId?: number,
+    forwardFromMessageId?: number
+  ) => {
     const trimmed = content.trim();
     if (!trimmed) return;
 
@@ -82,12 +90,20 @@ const useSelfMessageStoreBase = create<SelfMessageStore>((set, get) => ({
     const userProfile = useAccountStore.getState().userProfile;
     if (!userProfile?.userId) return;
 
+    let forwardContent;
+    if (forwardFromMessageId) {
+      const forwardMessage = await sdk.messages.get(forwardFromMessageId);
+      if (!forwardMessage) {
+        console.warn('Forward target not found, sending as regular message');
+      } else if (sdk.selfMessages.isSelfMessage(forwardMessage)) {
+        replyToId = forwardMessage.id;
+      } else {
+        forwardContent = forwardMessage.content;
+      }
+    }
+
     set({ isSending: true });
 
-    // Client-generated messageId so the React key (msg-${messageId}) stays
-    // stable across the optimistic → persisted patch. The SDK itself doesn't
-    // store messageId for self-messages, so we preserve ours after the write.
-    const localMessageId = crypto.getRandomValues(new Uint8Array(12));
     const optimistic: Message = {
       ownerUserId: userProfile.userId,
       contactUserId: '__self__',
@@ -96,17 +112,18 @@ const useSelfMessageStoreBase = create<SelfMessageStore>((set, get) => ({
       direction: MessageDirection.OUTGOING,
       status: MessageStatus.SENT,
       timestamp: new Date(),
-      messageId: localMessageId,
+      forwardOf: forwardContent
+        ? { originalContent: forwardContent }
+        : undefined,
+      metadata: replyToId ? { originalMessageId: replyToId } : undefined,
     };
     set(state => ({ messages: [...state.messages, optimistic] }));
     set({ isSending: false });
 
     try {
-      const message = await sdk.selfMessages.send(trimmed);
+      const message = await sdk.selfMessages.send(optimistic);
       set(state => ({
-        messages: state.messages.map(m =>
-          m === optimistic ? { ...message, messageId: localMessageId } : m
-        ),
+        messages: state.messages.map(m => (m === optimistic ? message : m)),
       }));
     } catch (error) {
       console.error('Failed to send self message', error);

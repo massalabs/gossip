@@ -1,29 +1,18 @@
 import { Queries } from '../db/queries/index.js';
-import type { EncryptionKey } from '../wasm/encryption.js';
-import {
-  decryptAead,
-  encryptAead,
-  nonceFromBytes,
-} from '../wasm/encryption.js';
 import {
   type Message,
   MessageDirection,
   MessageStatus,
   MessageType,
 } from '../db/db.js';
-import { discussions } from '../db/schema/index.js';
-import { encodeToBase64, decodeFromBase64 } from '../utils/base64.js';
+import { discussions, messages } from '../db/schema/index.js';
 
 export const SELF_CONTACT_ID = '__self__';
-
-const AAD_EMPTY = new Uint8Array(0);
-const ZERO_NONCE_BYTES = new Uint8Array(16);
 
 export class SelfMessageService {
   constructor(
     private readonly queries: Queries,
-    private readonly ownerUserId: string,
-    private readonly encryptionKey: EncryptionKey
+    private readonly ownerUserId: string
   ) {}
 
   async ensureDiscussionExists(): Promise<void> {
@@ -60,73 +49,72 @@ export class SelfMessageService {
     } as typeof discussions.$inferInsert);
   }
 
-  private async encryptContent(plaintext: string): Promise<string> {
-    const nonce = await nonceFromBytes(ZERO_NONCE_BYTES);
-    const ciphertext = await encryptAead(
-      this.encryptionKey,
-      nonce,
-      new TextEncoder().encode(plaintext),
-      AAD_EMPTY
-    );
-
-    // Store only ciphertext; nonce is a fixed zero value for all messages.
-    return encodeToBase64(ciphertext);
+  isSelfMessage(message: Message): boolean {
+    return message.contactUserId === SELF_CONTACT_ID;
   }
 
-  private async decryptContent(content: string): Promise<string> {
-    const cipherBytes = decodeFromBase64(content);
-    const nonce = await nonceFromBytes(ZERO_NONCE_BYTES);
-    const plaintextBytes = await decryptAead(
-      this.encryptionKey,
-      nonce,
-      cipherBytes,
-      AAD_EMPTY
-    );
-
-    if (!plaintextBytes) {
-      throw new Error('Failed to decrypt self message');
+  repliedMessageId(message: Message): number | null {
+    if (!this.isSelfMessage(message)) {
+      return null;
     }
 
-    return new TextDecoder().decode(plaintextBytes);
+    const value = message.metadata?.originalMessageId;
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value;
+    }
+    if (typeof value === 'string') {
+      const parsed = Number.parseInt(value, 10);
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+    return null;
   }
 
-  async send(content: string): Promise<Message> {
-    const encryptedContent = await this.encryptContent(content);
-    const now = new Date();
-
+  async send(message: Message): Promise<Message> {
     const id = await this.queries.messages.insert({
+      ...message,
       ownerUserId: this.ownerUserId,
-      contactUserId: SELF_CONTACT_ID,
-      content: encryptedContent,
-      type: MessageType.TEXT,
-      direction: MessageDirection.OUTGOING,
-      status: MessageStatus.SENT,
-      timestamp: now,
-    });
+      forwardOf: message.forwardOf ? JSON.stringify(message.forwardOf) : null,
+      metadata: message.metadata ? JSON.stringify(message.metadata) : null,
+    } as typeof messages.$inferInsert);
 
-    const discussion = await this.queries.discussions.getByOwnerAndContact(
-      this.ownerUserId,
-      SELF_CONTACT_ID
-    );
+    const retrievedMessage = await this.get(id);
+    if (!retrievedMessage) {
+      throw new Error('Failed to send message');
+    }
+    return retrievedMessage;
+  }
 
-    if (discussion?.id != null) {
-      await this.queries.discussions.updateById(discussion.id, {
-        lastMessageId: id,
-        lastMessageContent: null,
-        lastMessageTimestamp: now,
-        updatedAt: now,
-      });
+  async get(id: number): Promise<Message | undefined> {
+    const row = await this.queries.messages.getById(id);
+    if (!row) return undefined;
+
+    let metadata: Record<string, unknown> | undefined;
+    if (row.metadata) {
+      try {
+        metadata = JSON.parse(row.metadata as string) as Record<
+          string,
+          unknown
+        >;
+      } catch {
+        metadata = undefined;
+      }
     }
 
     return {
-      id,
-      ownerUserId: this.ownerUserId,
-      contactUserId: SELF_CONTACT_ID,
-      content,
-      type: MessageType.TEXT,
+      id: row.id,
+      ownerUserId: row.ownerUserId,
+      contactUserId: row.contactUserId,
+      content: row.content,
+      type: row.type,
       direction: MessageDirection.OUTGOING,
-      status: MessageStatus.SENT,
-      timestamp: now,
+      status: row.status,
+      timestamp: row.timestamp,
+      forwardOf: row.forwardOf
+        ? JSON.parse(row.forwardOf as string)
+        : undefined,
+      deleteOf: row.deleteOf ? JSON.parse(row.deleteOf as string) : undefined,
+      editOf: row.editOf ? JSON.parse(row.editOf as string) : undefined,
+      metadata,
     };
   }
 
@@ -140,22 +128,36 @@ export class SelfMessageService {
 
     for (const row of rows) {
       try {
-        const plaintext = await this.decryptContent(row.content);
+        let metadata: Record<string, unknown> | undefined;
+        if (row.metadata) {
+          try {
+            metadata = JSON.parse(row.metadata as string) as Record<
+              string,
+              unknown
+            >;
+          } catch {
+            metadata = undefined;
+          }
+        }
+
         result.push({
           id: row.id,
           ownerUserId: row.ownerUserId,
           contactUserId: row.contactUserId,
-          content: plaintext,
+          content: row.content,
           type: row.type,
+          forwardOf: row.forwardOf
+            ? JSON.parse(row.forwardOf as string)
+            : undefined,
           direction: MessageDirection.OUTGOING,
           status: row.status,
           timestamp: row.timestamp,
+          metadata,
         });
       } catch {
         // Skip messages that cannot be decrypted
       }
     }
-
     return result;
   }
 
@@ -163,13 +165,12 @@ export class SelfMessageService {
     const row = await this.queries.messages.getById(id);
     if (!row) return;
 
-    const encryptedContent = await this.encryptContent(newContent);
     const existingMetadata = row.metadata
       ? JSON.parse(row.metadata as string)
       : {};
 
     await this.queries.messages.updateById(id, {
-      content: encryptedContent,
+      content: newContent,
       metadata: JSON.stringify({ ...existingMetadata, edited: true }),
     });
   }
@@ -202,13 +203,12 @@ export class SelfMessageService {
     emoji: string,
     originalMessageDbId: number
   ): Promise<{ id: number; emoji: string; originalMessageId: number }> {
-    const encryptedEmoji = await this.encryptContent(emoji);
     const now = new Date();
 
     const id = await this.queries.messages.insert({
       ownerUserId: this.ownerUserId,
       contactUserId: SELF_CONTACT_ID,
-      content: encryptedEmoji,
+      content: emoji,
       type: MessageType.REACTION,
       direction: MessageDirection.OUTGOING,
       status: MessageStatus.SENT,
@@ -263,11 +263,10 @@ export class SelfMessageService {
 
     for (const row of rows) {
       try {
-        const emoji = await this.decryptContent(row.content);
         const meta = row.metadata ? JSON.parse(row.metadata as string) : null;
         const originalMessageId = meta?.originalMessageId;
         if (typeof originalMessageId === 'number') {
-          result.push({ id: row.id, emoji, originalMessageId });
+          result.push({ id: row.id, emoji: row.content, originalMessageId });
         }
       } catch {
         // Skip reactions that cannot be decrypted

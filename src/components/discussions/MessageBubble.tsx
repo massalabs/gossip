@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { CornerUpLeft, ChevronDown } from 'react-feather';
 import { Message } from '@massalabs/gossip-sdk';
 import { parseLinks, openUrl } from '../../utils/linkUtils';
+import { useGossipSdk } from '../../hooks/useGossipSdk';
 import CitedMessage, { type CitedMessageOriginal } from './CitedMessage';
 import MessageStatusIndicator from './MessageStatus';
 import ReactionBar from './ReactionBar';
@@ -127,6 +128,9 @@ const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
     isSelecting,
   }) => {
     const { t } = useTranslation('discussions');
+    const sdk = useGossipSdk();
+    const repliedMessageInSelfDiscussionId =
+      sdk.selfMessages.repliedMessageId(message);
 
     const parsedLinks = useMemo(
       () => parseLinks(message.content),
@@ -205,7 +209,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
           )}
 
           {/* Reply context */}
-          {message.replyTo && (
+          {(message.replyTo || repliedMessageInSelfDiscussionId != null) && (
             <CitedMessage
               isOutgoing={isOutgoing}
               original={original}
