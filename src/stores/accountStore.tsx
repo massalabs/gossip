@@ -8,6 +8,7 @@ import {
   validateMnemonic,
   EncryptionKey,
   generateNonce,
+  encodeToBase64,
 } from '@massalabs/gossip-sdk';
 import { validateUsernameFormat } from '../utils/validation';
 import { getSdk } from './sdkStore';
@@ -15,8 +16,11 @@ import { isWebAuthnSupported } from '../crypto/webauthn';
 import {
   checkBiometricAvailability,
   createCredential,
+  clearLoginBiometricCredentials,
+  hasExistingCredential,
 } from '../services/biometricService';
 import {
+  BIOMETRIC_STORAGE_KEY,
   getBiometricSalt,
   WEBAUTHN_CREDENTIAL_ID_KEY,
 } from '../constants/biometric';
@@ -190,6 +194,7 @@ interface AccountState {
     opts: { useBiometrics: boolean; password?: string }
   ) => Promise<void>;
   logout: (options?: { lockedByUser?: boolean }) => Promise<void>;
+  finalizeOnboarding: () => Promise<void>;
   resetAccount: () => Promise<void>;
   setLoading: (loading: boolean) => void;
 
@@ -213,12 +218,42 @@ interface AccountState {
   updateUsername: (newUsername: string) => Promise<void>;
 }
 
+// Tracks which secure-storage slots have been allocated during the
+// current onboarding session. Kept in module scope (not zustand) since
+// it's pure RAM and must never hit disk — leaking the allocated slot
+// indices would break plausible deniability. Cleared on logout.
+//
+// Range matches the Rust crate's `SESSION_COUNT = 3`; each onboarding
+// allocates up to 3 accounts (main + 2 decoys), each to a distinct
+// randomly-picked free slot.
+const SECURE_SLOT_COUNT = 3;
+const onboardingAllocatedSlots = new Set<number>();
+
+function pickFreeSlot(): number {
+  const free: number[] = [];
+  for (let i = 0; i < SECURE_SLOT_COUNT; i++) {
+    if (!onboardingAllocatedSlots.has(i)) free.push(i);
+  }
+  if (free.length === 0) {
+    throw new Error('No free secure-storage slot');
+  }
+  const rand = crypto.getRandomValues(new Uint8Array(1))[0];
+  return free[rand % free.length];
+}
+
 const useAccountStoreBase = create<AccountState>((set, get) => {
   // Helper function to cleanup session
   const cleanupSession = async () => {
     const sdk = getSdk();
     if (sdk.isSessionOpen) {
       await sdk.closeSession();
+    }
+    // Lock secure-storage too, otherwise storageState stays 'unlocked'
+    // and the next login would skip the unlock step and read whichever
+    // slot was current when the session closed — leaking the wrong
+    // account's data to the caller.
+    if (sdk.isSecureStorage && sdk.storageState === 'unlocked') {
+      await sdk.secureStorageLock();
     }
   };
 
@@ -293,6 +328,20 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       await deriveAccountFromMnemonic(mnemonic);
     const userId = encodeUserId(userIdBytes);
 
+    const sdk = getSdk();
+    if (sdk.isSecureStorage && provisionOpts.useBiometrics) {
+      // SecureLogin intentionally has one fixed biometric discovery
+      // credential for PD: the login screen must not expose an account or
+      // slot inventory. A second biometric account would overwrite that
+      // singleton and make the earlier biometric slot unreachable.
+      const hasBiometricAccount = await hasExistingCredential(
+        BIOMETRIC_STORAGE_KEY
+      );
+      if (hasBiometricAccount) {
+        throw new Error('Only one biometric secure-storage account is allowed');
+      }
+    }
+
     const { encryptionKey, security } = await provisionAccount(
       username,
       mnemonic,
@@ -300,13 +349,55 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       provisionOpts
     );
 
-    await getSdk().openSession({
+    // Secure-storage mode: create the slot with the user's credential
+    // before any DB access. Queries created by openSession need the
+    // backend unlocked. In the password path we use the password
+    // directly; in the biometric path we use the biometric-derived
+    // encryption key bytes (base64'd) - deterministic, so a later
+    // unlock with the same biometric yields the same secret.
+    if (sdk.isSecureStorage) {
+      const secret = provisionOpts.useBiometrics
+        ? encodeToBase64(encryptionKey.to_bytes())
+        : (provisionOpts.password ?? '');
+      if (!secret) {
+        throw new Error('Secure storage requires a password or biometric key');
+      }
+      // Reject duplicate passwords across slots. The KDF takes only
+      // (domain, password) — no slot index — so the same password on
+      // two slots would derive the same wrap key and unlock both. The
+      // first slot in the (randomized) probe order would win and the
+      // other becomes effectively unreachable. `storageState === 'empty'`
+      // means no slot has ever been allocated, so the check is moot.
+      if (sdk.storageState === 'locked') {
+        const collides = await sdk.secureStorageUnlock(secret);
+        if (collides) {
+          await sdk.secureStorageLock();
+          throw new Error('Password already in use by another account');
+        }
+        // unlock returned false → state stays 'locked', nothing to undo.
+      }
+      // Pick a random free slot among the 3 available. `unlock`
+      // probes every slot, so we don't need to persist the choice -
+      // but within an onboarding session we must not collide with a
+      // previously-allocated slot (that would silently overwrite the
+      // earlier account). The in-memory `onboardingAllocatedSlots`
+      // set guards against that.
+      const slot = pickFreeSlot();
+      await sdk.secureStorageCreate(slot, secret);
+      onboardingAllocatedSlots.add(slot);
+    }
+
+    await sdk.openSession({
       mnemonic,
       encryptionKey,
       onPersist: createOnPersist(userId),
+      // Don't poll during onboarding — we may open the session just to
+      // write the profile and then close it again to create another
+      // account in a different slot. Polling is re-enabled on the real
+      // login (loadAccount), which defaults to `autoStartPolling: true`.
+      autoStartPolling: false,
     });
 
-    const sdk = getSdk();
     const session = sdk.getEncryptedSession();
     let profileSession = session;
     if (sdk.usesSessionBlobNamespace) {
@@ -390,8 +481,46 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
     },
 
     loadAccount: async (method: LoginMethod) => {
+      let unlockedThisCall = false;
       try {
         set({ isLoading: true });
+
+        // Defensive: in dev, HMR can hot-replace this module while the
+        // SDK keeps its session open. The fresh store has no profile so
+        // App routes to login, but `openSession` below would throw
+        // "Session already open" against the surviving SDK state. Mirror
+        // what `setupAccount` does at its entry — cleanup any leftover
+        // session before re-opening.
+        await cleanupSession();
+
+        // Secure-storage mode: unlock the slot FIRST. Profile queries
+        // fail (DB locked) until we provide the secret, so we can't
+        // fetch the profile before this. Password path uses the
+        // user-typed password; encryptionKey path uses the biometric-
+        // derived key bytes, which were computed outside of the DB
+        // (WebAuthn PRF / Capacitor Keychain) so no profile lookup is
+        // needed to get them. The legacy 'biometric' branch is used
+        // only by ClassicLogin (non-secure-storage), which can still
+        // read the profile without unlocking.
+        const sdk = getSdk();
+        if (sdk.storageState === 'locked') {
+          const secret =
+            method.type === 'password'
+              ? method.password
+              : method.type === 'encryptionKey'
+                ? encodeToBase64(method.encryptionKey.to_bytes())
+                : null;
+          if (!secret) {
+            throw new Error(
+              'Secure storage requires password or encryption-key login'
+            );
+          }
+          const ok = await sdk.secureStorageUnlock(secret);
+          if (!ok) {
+            throw new Error('Secure storage unlock failed');
+          }
+          unlockedThisCall = true;
+        }
 
         const userId =
           method.type !== 'encryptionKey' ? method.userId : undefined;
@@ -448,7 +577,6 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         // If you change `createOnPersist` to write to SQL again, you
         // must also drop this fallback or it can resurrect the wrong
         // session blob (regression worth a debug assertion).
-        const sdk = getSdk();
         let encryptedSession: Uint8Array | undefined;
         if (sdk.usesSessionBlobNamespace) {
           const ns = await sdk.readSessionBlob();
@@ -491,6 +619,29 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
 
         fetchMnsDomainsIfEnabled(updatedProfile, get().provider);
       } catch (error) {
+        // If we unlocked the slot during this call but failed before
+        // openSession, re-lock so the next attempt re-probes from
+        // 'locked'. Without this, an attempt that lands on a deleted
+        // slot's surviving keypair (its secret still unlocks an empty
+        // DB) leaves storageState='unlocked' and every subsequent
+        // login skips the unlock step (state-machine guard) and keeps
+        // reading the wrong slot until the app is restarted.
+        if (unlockedThisCall) {
+          const sdk = getSdk();
+          if (sdk.isSecureStorage && sdk.storageState === 'unlocked') {
+            try {
+              if (sdk.isSessionOpen) {
+                await sdk.closeSession();
+              }
+              await sdk.secureStorageLock();
+            } catch (lockErr) {
+              console.error(
+                'Failed to re-lock after loadAccount error:',
+                lockErr
+              );
+            }
+          }
+        }
         console.error('Error loading account:', error);
         set({ isLoading: false });
         throw error;
@@ -501,35 +652,85 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       try {
         set({ isLoading: true });
 
+        const sdk = getSdk();
         let accountUserId: string | undefined;
         try {
-          accountUserId = getSdk().userId;
+          accountUserId = sdk.userId;
         } catch {
           // Session may already be closed
         }
 
-        await cleanupSession();
+        // Close the SDK session first (Olm cleanup, drain background
+        // persists). secureStorageDestroy below has the same
+        // "no SESSION_OPEN" precondition as secureStorageLock.
+        if (sdk.isSessionOpen) {
+          await sdk.closeSession();
+        }
+
         useDiscussionStore.getState().cleanup();
         useMessageStore.getState().cleanup();
         useSelfMessageStore.getState().clearMessages();
 
-        try {
-          if (accountUserId) {
-            await getSdk().clearAccountData(accountUserId);
-          } else {
-            await getSdk().clearAllTables();
+        if (sdk.isSecureStorage) {
+          // Atomic destroy: rotates the slot's keypair to a dummy and
+          // overwrites every block of [SQL_NAMESPACE, SESSION_BLOB_NAMESPACE]
+          // with cover blocks under the new PK, in a single backing-store
+          // transaction. After this resolves, the old secret no longer
+          // unlocks the slot — fixing the trap where biometric login
+          // would land on the deleted slot's still-valid keypair and
+          // leave the SDK in 'unlocked' over an empty DB.
+          //
+          // Block-count parity is preserved (cover repad), so snapshots
+          // before/after look like a routine cover-traffic burst.
+          // Process killed mid-destroy: backing-store rolls back, slot
+          // intact, user retries.
+          try {
+            await sdk.secureStorageDestroy();
+          } catch (e) {
+            console.error('secureStorageDestroy failed:', e);
+            // Best-effort lock so we don't leave the storage in
+            // 'unlocked' after a partial wipe.
+            if (sdk.storageState === 'unlocked') {
+              try {
+                await sdk.secureStorageLock();
+              } catch (lockErr) {
+                console.error('Recovery lock also failed:', lockErr);
+              }
+            }
+            throw e;
           }
-          // The session blob lives in a secure-storage namespace outside
-          // SQL — clear it too so the next login doesn't try to decrypt
-          // stale bytes with a fresh key. No-op on non-secure-storage.
-          await getSdk().clearSessionBlob();
-        } catch {
-          // SQLite or secure storage might not be initialized
+          // Drop the SecureLogin-discovery credentials. Without this,
+          // the biometric button reappears for the deleted account but
+          // the slot's wrap key has been rotated → unlock fails and the
+          // user dead-ends on the password screen with no password.
+          await clearLoginBiometricCredentials();
+        } else {
+          // wa-sqlite (non-secure-storage) path: shared SQL DB, no
+          // per-slot ciphertext to wipe. Clear rows the old way.
+          let nbAccounts = 0;
+          try {
+            if (accountUserId) {
+              await sdk.clearAccountData(accountUserId);
+            } else {
+              await sdk.clearAllTables();
+            }
+            await sdk.clearSessionBlob();
+            nbAccounts = await sdk.profiles.getCount();
+          } catch (e) {
+            console.error('Error clearing account data:', e);
+          }
+          useAppStore.getState().setIsInitialized(nbAccounts > 0);
+          set(clearAccountState());
+          return;
         }
 
+        // Secure-storage post-destroy routing: storageState is 'locked'
+        // and the SDK can't tell from JS whether other slots hold real
+        // accounts (PD by design). Default to the login screen — if no
+        // slot unlocks, the user can fall through to onboarding via
+        // the import button.
         set(clearAccountState());
-        const nbAccounts = await getSdk().profiles.getCount();
-        useAppStore.getState().setIsInitialized(nbAccounts > 0);
+        useAppStore.getState().setIsInitialized(true);
       } catch (error) {
         console.error('Error resetting account:', error);
         set({ isLoading: false });
@@ -545,6 +746,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         useDiscussionStore.getState().cleanup();
         useMessageStore.getState().cleanup();
         useSelfMessageStore.getState().clearMessages();
+        onboardingAllocatedSlots.clear();
 
         set({
           ...clearAccountState(),
@@ -559,6 +761,31 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
 
     setLoading: (loading: boolean) => {
       set({ isLoading: loading });
+    },
+
+    finalizeOnboarding: async () => {
+      // Onboarding opens its session with `autoStartPolling: false` and
+      // skips the side-effects normally tied to login (lastSeen update).
+      // Patch those onto the existing session — we can't re-run the full
+      // `loadAccount` path because the secure-storage slot was wrapped
+      // with the user's auth credential (password or biometric-derived
+      // bytes), and `finalizeOnboarding` doesn't have access to it after
+      // setupAccount drops it from scope.
+      //
+      // Multi-account flows that already called `logout` (handleFinalize)
+      // hit the no-op branch: `userProfile` is null and the user is on
+      // the login screen path where polling will start via `loadAccount`.
+      const { userProfile } = get();
+      if (!userProfile) return;
+
+      const sdk = getSdk();
+      if (!sdk.isSessionOpen) return;
+
+      sdk.polling.start();
+
+      const updated = { ...userProfile, lastSeen: new Date() };
+      await sdk.profiles.save(updated);
+      set({ userProfile: updated });
     },
 
     initializeAccountWithBiometrics: async (
@@ -580,6 +807,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
           username,
           mnemonic,
           provisionOpts: { useBiometrics: true, iCloudSync },
+          skipHistorical: true,
           extraState: {
             platformAuthenticatorAvailable: availability.available,
           },
@@ -656,8 +884,17 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
     },
 
     hasExistingAccount: async () => {
+      // Secure-storage profile queries require an unlocked session.
+      // Before unlock we can read storageState directly: 'locked' means
+      // there is data, 'empty' means there isn't. Touching `profiles`
+      // here would throw and pollute the console on every back-button
+      // press from SecureLogin.
+      const sdk = getSdk();
+      if (sdk.isSecureStorage && sdk.storageState !== 'unlocked') {
+        return sdk.storageState === 'locked';
+      }
       try {
-        const count = await getSdk().profiles.getCount();
+        const count = await sdk.profiles.getCount();
         return count > 0;
       } catch (error) {
         console.error('Error checking for existing account:', error);
@@ -666,6 +903,10 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
     },
 
     getExistingAccountInfo: async () => {
+      const sdk = getSdk();
+      if (sdk.isSecureStorage && sdk.storageState !== 'unlocked') {
+        return null;
+      }
       try {
         return await getActiveOrFirstProfile();
       } catch (error) {
@@ -675,8 +916,12 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
     },
 
     getAllAccounts: async () => {
+      const sdk = getSdk();
+      if (sdk.isSecureStorage && sdk.storageState !== 'unlocked') {
+        return [];
+      }
       try {
-        return await getSdk().profiles.getAll();
+        return await sdk.profiles.getAll();
       } catch (error) {
         console.error('Error getting all accounts:', error);
         return [];

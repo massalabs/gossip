@@ -133,6 +133,16 @@ impl EncryptedFileCore {
         Ok(())
     }
 
+    /// Drop buffered pending writes without persisting them. Used after
+    /// `destroy_session`, where the slot's keypair has been rotated to a
+    /// dummy — any leftover bytes in the overlay can no longer be
+    /// decrypted, so keeping them would only leak the previous account's
+    /// plaintext into RAM longer than necessary.
+    pub fn discard_pending(&mut self) {
+        self.pending.clear();
+        self.pending_size = 0;
+    }
+
     /// Truncate the file to `new_size` bytes (grow or shrink).
     pub fn truncate<S: BlockStorage + KeypairStorage>(
         &mut self,

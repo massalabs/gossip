@@ -12,8 +12,16 @@ members = [
     "sessions",
     "main",
     "secure-storage",
+    "uniffi-bindgen",
 ]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
+
+# Pin UniFFI centrally so the bindgen binary and the runtime crate can
+# never drift apart — a version mismatch produces Swift/Kotlin bindings
+# that panic at load with a contract-version error. Consumers
+# (`secure-storage`, `uniffi-bindgen`) depend via `uniffi.workspace = true`.
+[workspace.dependencies]
+uniffi = { version = "=0.31.0" }

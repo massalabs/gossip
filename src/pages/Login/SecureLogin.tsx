@@ -3,18 +3,15 @@ import { useTranslation } from 'react-i18next';
 import { useAccountStore } from '../../stores/accountStore';
 import {
   checkBiometricAvailability,
-  hasExistingCredential,
   authenticateSecureLogin,
 } from '../../services/biometricService';
 import Button from '../../components/ui/Button';
 import { ROUTES } from '../../constants/routes';
-import { BIOMETRIC_STORAGE_KEY } from '../../constants/biometric';
 import { LoginProps } from './types';
 import { useLoginForm } from './useLoginForm';
 import AccountImport from '../../components/account/AccountImport';
 import { PasswordForm } from './PasswordForm';
 import { ErrorDisplay } from './ErrorDisplay';
-import { LoginActions } from './LoginActions';
 import { LoginLayout } from './LoginLayout';
 import { useKeyboardStore } from '../../stores/keyboardStore';
 
@@ -24,7 +21,6 @@ import { useKeyboardStore } from '../../stores/keyboardStore';
 
 export const SecureLogin: React.FC<LoginProps> = React.memo(
   ({
-    onCreateNewAccount,
     onAccountSelected,
     accountInfo,
     persistentError = null,
@@ -56,13 +52,19 @@ export const SecureLogin: React.FC<LoginProps> = React.memo(
     });
 
     useEffect(() => {
+      // PD: surface the biometric button whenever the device has the
+      // hardware (Touch ID / Face ID / fingerprint), regardless of
+      // whether a credential is registered. Gating on
+      // `hasExistingCredential` would leak account state via the UI:
+      // an observer (or the user looking over the shoulder) could tell
+      // "this device has a biometric account configured" vs "not".
+      // Tapping the button when no credential exists still prompts the
+      // OS biometric (uniform timing) and falls through to the
+      // "biometric_failed_use_password" error path — same UX as a
+      // wrong-account tap, by design.
       const check = async () => {
         const { available, method } = await checkBiometricAvailability();
         if (!available) return;
-
-        const exists = await hasExistingCredential(BIOMETRIC_STORAGE_KEY);
-        if (!exists) return;
-
         setBiometricAvailable(true);
         setBiometricMethod(method ?? 'none');
       };
@@ -92,6 +94,19 @@ export const SecureLogin: React.FC<LoginProps> = React.memo(
           throw new Error('Failed to load account');
         }
       } catch (error) {
+        // PD: the previous version auto-purged `BIOMETRIC_STORAGE_KEY`
+        // when the OS biometric prompt succeeded but `secureStorageUnlock`
+        // returned false, on the assumption "credential must be stale".
+        // The assumption is wrong:
+        //   1. Slot probing means a valid credential for a wiped slot
+        //      legitimately fails — purging it is permanent and breaks
+        //      the button forever, even after the user reinstalls.
+        //   2. We can't (and shouldn't, by PD) tell from the login
+        //      screen whether the selected account uses biometric — so
+        //      we can't decide on the user's behalf that the credential
+        //      is "stale". Leave it alone.
+        // If the user wants to remove a stale credential they can do so
+        // explicitly from settings; we never silently nuke it here.
         console.error('Biometric authentication failed:', error);
         onErrorChange?.(t('login.biometric_failed_use_password'));
         if (window.location.pathname !== ROUTES.welcome()) {
@@ -127,9 +142,7 @@ export const SecureLogin: React.FC<LoginProps> = React.memo(
       <LoginLayout title={t('login.welcome')} subtitle="">
         <div
           className={`overflow-hidden transition-all duration-300 ${
-            biometricAvailable && !keyboardOpen
-              ? 'max-h-40 opacity-100'
-              : 'max-h-0 opacity-0'
+            biometricAvailable ? 'max-h-40 opacity-100' : 'max-h-0 opacity-0'
           }`}
         >
           <Button
@@ -174,10 +187,15 @@ export const SecureLogin: React.FC<LoginProps> = React.memo(
             keyboardOpen ? 'max-h-0 opacity-0' : 'max-h-40 opacity-100'
           }`}
         >
-          <LoginActions
-            onCreateNewAccount={onCreateNewAccount}
-            onImport={() => setShowAccountImport(true)}
-          />
+          <Button
+            onClick={() => setShowAccountImport(true)}
+            variant="outline"
+            size="custom"
+            fullWidth
+            className="h-[51px] rounded-full text-sm"
+          >
+            {t('login.import_mnemonic')}
+          </Button>
         </div>
       </LoginLayout>
     );

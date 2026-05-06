@@ -99,10 +99,14 @@ interface DbState {
     run<T>(inTransaction: boolean, fn: () => Promise<T>): Promise<T>;
     getStore(): boolean;
   } | null;
-  // Synchronous in-tx flag forwarded to `secureProxy.exec` so the
-  // secure-storage worker can batch writes inside a tx. `txScopeGuard`
-  // is Node-only (AsyncLocalStorage); this boolean covers the browser path.
-  inTransaction: boolean;
+  /**
+   * Open-transaction depth, maintained by inspecting the SQL stream in
+   * `execRawDirect`. Both `withTransaction` (issues BEGIN/COMMIT directly)
+   * and Drizzle's `db.transaction()` (issues BEGIN/COMMIT via the proxy
+   * callback) increment/decrement this counter, so all flush-skipping
+   * decisions can rely on a single source of truth.
+   */
+  txDepth: number;
   secureProxy: SecureStorageWorkerProxy | null;
   nativePlugin: SecureStorageNativePlugin | null;
   useNativePlugin: boolean;
@@ -127,37 +131,11 @@ function createDefaultState(): DbState {
     drizzleDb: null,
     dbLock: Promise.resolve(),
     txScopeGuard: null,
-    inTransaction: false,
+    txDepth: 0,
     secureProxy: null,
     nativePlugin: null,
     useNativePlugin: false,
   };
-}
-
-/**
- * Collect unique ArrayBuffers backing `Uint8Array` values inside a params
- * list so they can be transferred (not copied) across the Comlink worker
- * boundary. SharedArrayBuffer is excluded because it cannot be transferred.
- */
-function collectTransferables(params: unknown[]): Transferable[] {
-  const seen = new Set<ArrayBufferLike>();
-  const out: Transferable[] = [];
-  for (const p of params) {
-    if (p instanceof Uint8Array) {
-      const buf = p.buffer;
-      if (
-        typeof SharedArrayBuffer !== 'undefined' &&
-        buf instanceof SharedArrayBuffer
-      ) {
-        continue;
-      }
-      if (!seen.has(buf)) {
-        seen.add(buf);
-        out.push(buf as ArrayBuffer);
-      }
-    }
-  }
-  return out;
 }
 
 function assertNoUndefinedBindParams(params: unknown[]): void {
@@ -176,6 +154,39 @@ function assertNoUndefinedBindParams(params: unknown[]): void {
       );
     }
   }
+}
+
+/**
+ * Classify a SQL statement for transaction-boundary tracking.
+ *
+ * Used by both the native and web dispatch paths to maintain `txDepth`
+ * and to decide when a flush is required for durability.
+ *
+ * Mutation matchers cover schema changes (`CREATE`/`DROP`/`ALTER`),
+ * data changes via CTE (`WITH ... INSERT`), `REPLACE`, and `VACUUM`.
+ * `PRAGMA` is conservatively treated as a mutation since some pragmas
+ * change persistent state.
+ */
+export type StatementKind =
+  | 'begin'
+  | 'commit'
+  | 'rollback'
+  | 'mutation'
+  | 'other';
+
+export function classifyStatement(sql: string): StatementKind {
+  const trimmed = sql.trimStart();
+  if (/^BEGIN\b/i.test(trimmed)) return 'begin';
+  if (/^COMMIT\b/i.test(trimmed)) return 'commit';
+  if (/^ROLLBACK\b/i.test(trimmed)) return 'rollback';
+  if (
+    /^(INSERT|UPDATE|DELETE|REPLACE|CREATE|DROP|ALTER|WITH|VACUUM|PRAGMA)\b/i.test(
+      trimmed
+    )
+  ) {
+    return 'mutation';
+  }
+  return 'other';
 }
 
 async function isNativePlatform(): Promise<boolean> {
@@ -329,41 +340,78 @@ export class DatabaseConnection {
     params: unknown[] = []
   ): Promise<unknown[][]> {
     assertNoUndefinedBindParams(params);
+    // Snapshot the txn depth *before* this statement runs so that flush
+    // decisions reflect the txn state the statement executes against,
+    // not the one created by the statement itself (e.g. BEGIN bumps the
+    // depth but doesn't yet have any data needing durable flush).
+    const wasInTxn = this.state.txDepth > 0;
+    const kind = classifyStatement(sql);
+
     if (this.state.useNativePlugin && this.state.nativePlugin) {
-      const safeParams = params.map(p =>
-        p instanceof Uint8Array ? Array.from(p) : p
-      );
+      // No `Array.from` on Uint8Array params: encodeSqlParam in
+      // secure-storage-native.ts already accepts Uint8Array directly and
+      // base64-encodes it. The previous conversion paid two extra O(n)
+      // passes per blob bind, multiplied by however many INSERTs the
+      // message-send path issues.
       const result = await this.state.nativePlugin.execSql({
         sql,
-        params: safeParams,
+        params,
       });
       this.state.lastInsertRowIdCache = result.lastInsertRowId;
+      this.advanceTxDepth(kind);
+      // The native VFS uses an in-memory rollback journal, so SQLite can
+      // still roll back failed transactions/savepoints. Durability to redb
+      // is driven explicitly by the SDK: mirror the web worker's
+      // flush-after-write semantics, but only flush at txn boundaries when
+      // we are genuinely in a txn, so a crash mid-txn cannot half-apply
+      // state to redb.
+      if (kind === 'commit') {
+        await this.state.nativePlugin.flush();
+      } else if (!wasInTxn && kind === 'mutation') {
+        await this.state.nativePlugin.flush();
+      }
       return result.rows;
     }
     if (this.state.secureProxy) {
-      // Transfer Uint8Array buffers across the Comlink boundary to avoid
-      // a structured-clone copy of the whole params array on every call.
-      // Mark `params` itself as the transfer carrier rather than the
-      // whole `[sql, params, inTransaction]` tuple: that way the proxy
-      // call below stays normally typed (no `as` cast over the tuple
-      // shape, which would silently rot if `exec`'s signature changes).
-      const transfers = collectTransferables(params);
-      const execParams =
-        transfers.length > 0 ? Comlink.transfer(params, transfers) : params;
-      const result = await this.state.secureProxy.exec(
-        sql,
-        execParams,
-        this.state.inTransaction
-      );
+      // Pass params by structured-clone (Comlink default), NOT by
+      // transfer. The earlier transfer-based optimisation detached the
+      // Uint8Array buffers on this side as soon as the call dispatched
+      // — and Drizzle keeps references to the params array for error
+      // wrapping (`_DrizzleQueryError` calls `Uint8Array.toString()`
+      // which trips on `.join()` over a detached buffer) and for
+      // re-emit on the SDK event bus (e.g. `SEEKERS_UPDATED` reads
+      // the seekers right after the SQL insert).
+      // The structured-clone copy here is per-INSERT and small in
+      // practice (a few KB of Uint8Array per row); the correctness
+      // win is large — no class of "detached buffer" bugs to chase
+      // at every call site.
+      const result = await this.state.secureProxy.exec(sql, params, wasInTxn);
       this.state.lastInsertRowIdCache = result.lastInsertRowId;
+      this.advanceTxDepth(kind);
       return result.rows as unknown[][];
     }
     if (this.state.useWorker) {
       const result = await this.postToWorker({ type: 'exec', sql, params });
       this.state.lastInsertRowIdCache = result.lastInsertRowId;
+      this.advanceTxDepth(kind);
       return result.rows;
     }
-    return this.execRawInProcess(sql, params);
+    const rows = await this.execRawInProcess(sql, params);
+    this.advanceTxDepth(kind);
+    return rows;
+  }
+
+  private advanceTxDepth(kind: StatementKind): void {
+    if (kind === 'begin') {
+      this.state.txDepth++;
+    } else if (kind === 'commit' || kind === 'rollback') {
+      // Defensive clamp: an unmatched COMMIT/ROLLBACK (e.g. raw SQL run
+      // outside a withTransaction wrapper) must not produce a negative
+      // depth that masks a future real txn.
+      if (this.state.txDepth > 0) {
+        this.state.txDepth--;
+      }
+    }
   }
 
   private async execRawInProcess(
@@ -477,23 +525,12 @@ export class DatabaseConnection {
         if (await isNativePlatform()) {
           // ── Native path (iOS/Android) ──
           // Use the Capacitor plugin which calls Rust directly via UniFFI.
-          // Falls back to the web worker path if the plugin isn't available
-          // (e.g. Android before the native lib is cross-compiled).
+          // Falls back to the web worker path only if the plugin module isn't
+          // available. Native storage operation failures must surface.
+          let SecureStorageNative: SecureStorageNativePlugin | null = null;
           try {
-            const { SecureStorageNative } =
-              await import('./secure-storage-native.js');
-            await SecureStorageNative.initSecureStorage({
-              path: 'secure-storage',
-              domain: storage.domain,
-            });
-            this.state.nativePlugin = SecureStorageNative;
-            this.state.useNativePlugin = true;
-            await SecureStorageNative.provisionStorage();
-            const { unlocked } = await SecureStorageNative.isUnlocked();
-            // TODO: native plugin should expose `hasExistingData()` so we
-            // can return 'empty' on a fresh install (currently conflated
-            // with 'locked'). The web path distinguishes correctly.
-            this.state.storageState = unlocked ? 'unlocked' : 'locked';
+            ({ SecureStorageNative } =
+              await import('./secure-storage-native.js'));
           } catch {
             // Plugin not implemented on this platform — unwind any partial
             // state and fall through to the web worker path below.
@@ -504,6 +541,24 @@ export class DatabaseConnection {
                 '[secureStorage] native plugin unavailable, falling back to WASM worker'
               );
             }
+          }
+
+          if (SecureStorageNative) {
+            await SecureStorageNative.initSecureStorage({
+              path: 'secure-storage',
+              domain: storage.domain,
+            });
+            this.state.nativePlugin = SecureStorageNative;
+            this.state.useNativePlugin = true;
+            // Only provision on a fresh install - re-provisioning
+            // overwrites existing slots with random throwaway keys,
+            // wiping any previously allocated account. Mirrors the
+            // web path's `wasmIdbHasData` gate.
+            const { hasData } = await SecureStorageNative.hasData();
+            if (!hasData) {
+              await SecureStorageNative.provisionStorage();
+            }
+            this.state.storageState = hasData ? 'locked' : 'empty';
           }
         }
 
@@ -591,6 +646,9 @@ export class DatabaseConnection {
   }
 
   async secureStorageProvision(): Promise<void> {
+    if (this.state.storageState !== 'empty') {
+      return;
+    }
     if (this.state.useNativePlugin) {
       await this.requireNativePlugin().provisionStorage();
     } else {
@@ -628,20 +686,16 @@ export class DatabaseConnection {
         // Native plugin contract still uses `allocateSession` (matches
         // the Rust `allocate_session` name); only the SDK-facing verb
         // was renamed for clarity (create vs allocate).
-        const nativePassword = Array.from(pwBytes);
-        try {
-          await this.requireNativePlugin().allocateSession({
-            slot,
-            password: nativePassword,
-          });
-        } finally {
-          nativePassword.fill(0);
-        }
+        await this.requireNativePlugin().allocateSession({
+          slot,
+          password: pwBytes,
+        });
       } else {
         // Transfer the buffer so no intermediate copy lingers in the
         // MessagePort queue. After transfer, pwBytes is detached.
         await this.requireSecureProxy().create(
           slot,
+          // eslint-disable-next-line no-restricted-syntax -- ALLOWED-TRANSFER: short-lived password buffer; caller's only post-transfer access is the `byteLength > 0` zeroize guard in the finally block, which already handles the detached state.
           Comlink.transfer(pwBytes, [pwBytes.buffer])
         );
       }
@@ -683,17 +737,13 @@ export class DatabaseConnection {
     let ok: boolean;
     try {
       if (this.state.useNativePlugin) {
-        const nativePassword = Array.from(pwBytes);
-        try {
-          const result = await this.requireNativePlugin().unlockSession({
-            password: nativePassword,
-          });
-          ok = result.unlocked;
-        } finally {
-          nativePassword.fill(0);
-        }
+        const result = await this.requireNativePlugin().unlockSession({
+          password: pwBytes,
+        });
+        ok = result.unlocked;
       } else {
         ok = await this.requireSecureProxy().unlock(
+          // eslint-disable-next-line no-restricted-syntax -- ALLOWED-TRANSFER: short-lived password buffer; caller's only post-transfer access is the `byteLength > 0` zeroize guard in the finally block.
           Comlink.transfer(pwBytes, [pwBytes.buffer])
         );
       }
@@ -725,11 +775,43 @@ export class DatabaseConnection {
     }
   }
 
-  async secureStorageCoverTick(namespace?: number): Promise<void> {
+  /**
+   * Permanently destroy the data of the currently unlocked slot.
+   *
+   * Same Drizzle-tear-down ordering as `secureStorageLock`: flip the
+   * user-visible state to 'locked' synchronously so any in-flight query
+   * sees the clean "locked storage" error rather than racing the
+   * worker-side wipe.
+   *
+   * `namespaces` is the list of secure-storage namespaces to wipe. The
+   * SDK passes its canonical `[SQL_NAMESPACE, SESSION_BLOB_NAMESPACE]`
+   * — keeping the inventory on this side avoids duplicating the list
+   * in Rust.
+   */
+  async secureStorageDestroy(namespaces: number[]): Promise<void> {
+    this.state.drizzleDb = null;
+    this.state.storageState = 'locked';
+    if (this.state.useNativePlugin) {
+      await this.requireNativePlugin().destroySession({ namespaces });
+    } else {
+      await this.requireSecureProxy().destroy(Uint8Array.from(namespaces));
+    }
+  }
+
+  /**
+   * Trigger one round of cover traffic on every tracked namespace.
+   *
+   * Both backends (web worker and native plugin) iterate over the full
+   * `COVER_TRAFFIC_NAMESPACES` set internally, so the TS wrapper takes
+   * no arguments — any asymmetry here was a PD footgun (PR 2 review).
+   * Prefer letting the platform-side scheduler run this autonomously;
+   * manual invocation is only useful for tests.
+   */
+  async secureStorageCoverTick(): Promise<void> {
     if (this.state.useNativePlugin) {
       await this.requireNativePlugin().coverTrafficTick();
     } else {
-      await this.requireSecureProxy().cover(namespace);
+      await this.requireSecureProxy().cover();
     }
   }
 
@@ -756,18 +838,15 @@ export class DatabaseConnection {
     data: Uint8Array
   ): Promise<void> {
     if (this.state.useNativePlugin) {
-      throw new Error(
-        'secureStorage namespace data API not implemented on native plugin'
-      );
+      await this.requireNativePlugin().writeNamespaceData({
+        namespace,
+        offset,
+        data,
+      });
+      return;
     }
     const proxy = this.requireSecureProxy();
-    // Same pattern as `execRawDirect`: mark just the Uint8Array buffer
-    // as transferable instead of the whole tuple, so the proxy call
-    // stays normally typed.
-    const transfers = collectTransferables([data]);
-    const payload =
-      transfers.length > 0 ? Comlink.transfer(data, transfers) : data;
-    await proxy.writeNamespaceData(namespace, offset, payload);
+    await proxy.writeNamespaceData(namespace, offset, data);
   }
 
   /** Read `len` bytes from a namespace stream at `offset`. */
@@ -777,9 +856,12 @@ export class DatabaseConnection {
     len: number
   ): Promise<Uint8Array> {
     if (this.state.useNativePlugin) {
-      throw new Error(
-        'secureStorage namespace data API not implemented on native plugin'
-      );
+      const { data } = await this.requireNativePlugin().readNamespaceData({
+        namespace,
+        offset,
+        len,
+      });
+      return data;
     }
     return this.requireSecureProxy().readNamespaceData(namespace, offset, len);
   }
@@ -787,9 +869,10 @@ export class DatabaseConnection {
   /** Total bytes currently stored in a namespace stream (0 if empty). */
   async secureStorageNamespaceDataLength(namespace: number): Promise<number> {
     if (this.state.useNativePlugin) {
-      throw new Error(
-        'secureStorage namespace data API not implemented on native plugin'
-      );
+      const { length } = await this.requireNativePlugin().namespaceDataLength({
+        namespace,
+      });
+      return length;
     }
     return this.requireSecureProxy().namespaceDataLength(namespace);
   }
@@ -797,11 +880,31 @@ export class DatabaseConnection {
   /** Truncate a namespace stream to length 0. */
   async secureStorageClearNamespace(namespace: number): Promise<void> {
     if (this.state.useNativePlugin) {
-      throw new Error(
-        'secureStorage namespace data API not implemented on native plugin'
-      );
+      await this.requireNativePlugin().clearNamespace({ namespace });
+      return;
     }
     await this.requireSecureProxy().clearNamespace(namespace);
+  }
+
+  /** Atomic clear+write: replace the entire namespace contents in one
+   *  IDB / fsync transaction. Both the native plugin and the WASM
+   *  worker now expose a fused primitive that batches the clear and
+   *  the write inside a single backend transaction; a process kill
+   *  before the transaction commits leaves the previous content
+   *  intact, and a kill after leaves the new content. There is no
+   *  observable "cleared but not written" state. */
+  async secureStorageReplaceNamespaceData(
+    namespace: number,
+    data: Uint8Array
+  ): Promise<void> {
+    if (this.state.useNativePlugin) {
+      await this.requireNativePlugin().replaceNamespaceData({
+        namespace,
+        data,
+      });
+      return;
+    }
+    await this.requireSecureProxy().replaceNamespaceData(namespace, data);
   }
 
   // ─── Public methods ────────────────────────────────────────────
@@ -849,18 +952,28 @@ export class DatabaseConnection {
     this.state.dbLock = new Promise<void>(r => (release = r));
     await prev;
 
+    // Snapshot in case BEGIN never lands - we must not corrupt the
+    // counter for whatever ran on this connection before us.
+    const depthBefore = this.state.txDepth;
     try {
+      // BEGIN/COMMIT/ROLLBACK are tracked by `advanceTxDepth` inside
+      // execRawDirect, so the depth counter is the single source of
+      // truth for both this wrapper and Drizzle's `db.transaction()`.
       await this.execRawDirect(`BEGIN ${behavior.toUpperCase()}`);
-      this.state.inTransaction = true;
       try {
         const result = await this.runInTxScope(fn);
         await this.execRawDirect('COMMIT');
         return result;
       } catch (e) {
-        await this.execRawDirect('ROLLBACK');
+        try {
+          await this.execRawDirect('ROLLBACK');
+        } catch {
+          // ROLLBACK can fail (e.g. connection lost mid-txn). Force the
+          // depth back to its pre-BEGIN value so subsequent ops do not
+          // wrongly believe they are still inside a txn.
+          this.state.txDepth = depthBefore;
+        }
         throw e;
-      } finally {
-        this.state.inTransaction = false;
       }
     } finally {
       release();

@@ -101,6 +101,12 @@ impl BlockStorage for Backend {
             Backend::Idb(s) => s.reset_blockstream(session, namespace),
         }
     }
+    fn namespaces_with_data(&self, session: SessionIndex) -> crate::error::Result<Vec<u8>> {
+        match self {
+            Backend::Memory(s) => s.namespaces_with_data(session),
+            Backend::Idb(s) => s.namespaces_with_data(session),
+        }
+    }
 }
 
 impl KeypairStorage for Backend {
