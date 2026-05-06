@@ -17,8 +17,10 @@ import {
   checkBiometricAvailability,
   createCredential,
   clearLoginBiometricCredentials,
+  hasExistingCredential,
 } from '../services/biometricService';
 import {
+  BIOMETRIC_STORAGE_KEY,
   getBiometricSalt,
   WEBAUTHN_CREDENTIAL_ID_KEY,
 } from '../constants/biometric';
@@ -326,6 +328,20 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
       await deriveAccountFromMnemonic(mnemonic);
     const userId = encodeUserId(userIdBytes);
 
+    const sdk = getSdk();
+    if (sdk.isSecureStorage && provisionOpts.useBiometrics) {
+      // SecureLogin intentionally has one fixed biometric discovery
+      // credential for PD: the login screen must not expose an account or
+      // slot inventory. A second biometric account would overwrite that
+      // singleton and make the earlier biometric slot unreachable.
+      const hasBiometricAccount = await hasExistingCredential(
+        BIOMETRIC_STORAGE_KEY
+      );
+      if (hasBiometricAccount) {
+        throw new Error('Only one biometric secure-storage account is allowed');
+      }
+    }
+
     const { encryptionKey, security } = await provisionAccount(
       username,
       mnemonic,
@@ -339,7 +355,6 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
     // directly; in the biometric path we use the biometric-derived
     // encryption key bytes (base64'd) - deterministic, so a later
     // unlock with the same biometric yields the same secret.
-    const sdk = getSdk();
     if (sdk.isSecureStorage) {
       const secret = provisionOpts.useBiometrics
         ? encodeToBase64(encryptionKey.to_bytes())
