@@ -175,6 +175,7 @@ tasks.register('buildRustSecureStorage', Exec) {
     inputs.dir "${rootDir}/wasm/crypto-kdf/src"
     inputs.dir "${rootDir}/wasm/crypto-password-kdf/src"
     inputs.dir "${rootDir}/wasm/uniffi-bindgen"
+    inputs.file "${rootDir}/scripts/build-native-android.sh"
     // Pin the NDK version into the input fingerprint so switching it
     // in gradle.properties invalidates the cached .so even when the
     // Rust source is unchanged.
