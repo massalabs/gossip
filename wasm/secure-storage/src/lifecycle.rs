@@ -138,9 +138,9 @@ pub fn allocate_session<S: BlockStorage + KeypairStorage>(
 /// 1. Replace the keypair file with a fresh dummy one (random throwaway
 ///    wrap key, exactly the pattern from [`provision_storage`]). After
 ///    this, [`crate::unlock::unlock_session`] returns `InvalidPassword`
-///    for the old secret - the slot is permanently inaccessible. This
-///    write uses its own redb transaction and is durable as soon as it
-///    returns; everything below stages into the caller's transaction.
+///    for the old secret once the caller commits the backing store. This
+///    write is staged with the block rewrites below on backends that
+///    support transactional commits.
 /// 2. For each namespace, sweep every block index across all slots:
 ///    overwrite the destroyed slot's blocks with fresh cover blocks
 ///    generated under the new PK, and PQ-rerandomize every other slot's
@@ -157,12 +157,11 @@ pub fn allocate_session<S: BlockStorage + KeypairStorage>(
 /// caller's "discard pending on error" rollback complete, since no
 /// in-memory storage counters get mutated mid-destroy.
 ///
-/// The caller is responsible for committing the backing store: nothing
-/// after step 1 is fsync'd from inside this function. Wrapping step 2
-/// in a single `commit()` makes the camouflage atomic: a process crash
-/// before commit rolls back the staged writes, leaving the (now-dead)
-/// slot's blocks intact under the old key. The slot itself is dead from
-/// step 1 either way.
+/// The caller is responsible for committing the backing store. Wrapping
+/// both the dummy keypair and block camouflage in a single `commit()`
+/// makes destroy atomic on transactional backends: a process crash before
+/// commit leaves both the old keypair and old blocks intact; a crash after
+/// commit leaves the dummy keypair and cover blocks durable together.
 pub fn destroy_session<S: BlockStorage + KeypairStorage>(
     storage: &mut S,
     domain: &str,

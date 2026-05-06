@@ -231,7 +231,15 @@ pub fn provision() -> Result<()> {
     let st = guard
         .as_mut()
         .ok_or_else(|| SecureStorageError::NotInitialized)?;
-    crate::provision_storage(&mut st.backend)
+    if let Err(e) = crate::provision_storage(&mut st.backend) {
+        st.backend.discard_pending();
+        return Err(e);
+    }
+    if let Err(e) = st.backend.commit() {
+        st.backend.discard_pending();
+        return Err(e);
+    }
+    Ok(())
 }
 
 /// Allocate a session in `slot` with `password`, auto-unlock.
@@ -321,12 +329,10 @@ pub fn destroy_session(namespaces: &[u8]) -> Result<()> {
     // about whether each pending block is real or cover.
     flush_pending_writes(st)?;
 
-    // If the destroy errors mid-sweep, drop everything it had staged
-    // in `ram_buffer` so it does not silently ride along on the next
-    // caller's `commit()`. Only the keypair write (which uses its own
-    // redb transaction inside `crate::destroy_session`) survives the
-    // discard, which is correct: the slot is dead from that point on
-    // regardless of whether we finished camouflaging the snapshot diff.
+    // If the destroy errors mid-sweep, drop everything it had staged so
+    // it does not silently ride along on the next caller's `commit()`.
+    // This includes the dummy keypair write and block rewrites, preserving
+    // destroy's all-or-nothing native transaction boundary.
     if let Err(e) = crate::destroy_session(&mut st.backend, &st.domain, slot, namespaces) {
         st.backend.discard_pending();
         return Err(e);
