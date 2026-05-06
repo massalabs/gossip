@@ -15,24 +15,23 @@ import uniffi.secureStorage.SecureStorageException
 @CapacitorPlugin(name = "SecureStorageNative")
 class SecureStoragePlugin : Plugin() {
 
-    // Two executors: SQL ops vs namespace-blob ops, so a long namespace
-    // write can't block a foreground SQL query. Both use 8 MB stack
-    // because ML-KEM PQ crypto needs ~4 MB (default JVM stack ~512 KB).
+    // One 8 MB-stack FIFO executor for every secure-storage call.
+    // ML-KEM PQ crypto needs ~4 MB (default JVM stack ~512 KB), and
+    // the native VFS owns one global unlocked session + SQLite handle
+    // set, so namespace calls must not overtake lifecycle calls such
+    // as unlockSession, lockSession, flush, or close.
     //
-    // Daemon threads so they don't keep the JVM alive on host-activity
+    // Daemon thread so it doesn't keep the JVM alive on host-activity
     // shutdown. Process death wipes them either way; this is hygiene
     // for hosts that lifecycle Capacitor without process kill.
-    private val sqlExecutor = Executors.newSingleThreadExecutor(ThreadFactory { r ->
-        Thread(null, r, "secure-storage-sql", 8 * 1024 * 1024).apply { isDaemon = true }
-    })
-    private val namespaceExecutor = Executors.newSingleThreadExecutor(ThreadFactory { r ->
-        Thread(null, r, "secure-storage-namespace", 8 * 1024 * 1024).apply { isDaemon = true }
+    private val executor = Executors.newSingleThreadExecutor(ThreadFactory { r ->
+        Thread(null, r, "secure-storage", 8 * 1024 * 1024).apply { isDaemon = true }
     })
 
     /**
      * Single dispatcher. Every call arrives as `{method, args}` where
-     * `args` is a JSON string. Rust parses/encodes; we pick the right
-     * executor and forward.
+     * `args` is a JSON string. Rust parses/encodes; we forward on the
+     * secure-storage FIFO worker.
      *
      * `initSecureStorage` is special-cased: the relative `path` from JS
      * is resolved against the app's sandboxed files dir before handing
@@ -43,11 +42,7 @@ class SecureStoragePlugin : Plugin() {
         val method = call.getString("method") ?: return call.reject("missing method", "MISSING_METHOD")
         val argsRaw = call.getString("args") ?: "{}"
         val args = if (method == "initSecureStorage") resolveInitPath(argsRaw) else argsRaw
-        // Explicit set of namespace-affined methods. The previous
-        // `method.contains("Namespace")` was fragile: a future name like
-        // `commitNamespaceTxn` would silently route here too.
-        val exec = if (method in NAMESPACE_METHODS) namespaceExecutor else sqlExecutor
-        exec.execute {
+        executor.execute {
             try {
                 val result = nativeCall(method, args)
                 call.resolve(JSObject().put("result", result))
@@ -58,7 +53,7 @@ class SecureStoragePlugin : Plugin() {
                         Log.i("SecureStorageNative", "rayon pool: $n threads")
                     } catch (_: Exception) { /* best-effort diag */ }
                 }
-            } catch (e: SecureStorageException.Error) {
+            } catch (e: SecureStorageException.Exception) {
                 // Pass code + Throwable explicitly. The previous
                 // `reject(e.message, e)` resolved to the (message, code: String)
                 // overload, dropping the throwable on the floor and stuffing
@@ -76,14 +71,5 @@ class SecureStoragePlugin : Plugin() {
         val rel = json.optString("path", "secure-storage")
         val abs = context.filesDir.resolve(rel).absolutePath
         return json.put("path", abs).toString()
-    }
-
-    companion object {
-        private val NAMESPACE_METHODS = setOf(
-            "writeNamespaceData",
-            "readNamespaceData",
-            "namespaceDataLength",
-            "clearNamespace",
-        )
     }
 }
