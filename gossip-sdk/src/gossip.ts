@@ -672,12 +672,11 @@ class GossipSdk {
   }
 
   /**
-   * Create the decoy session keypairs in storage. Idempotent: safe to
-   * call when the keypairs already exist. Normally not needed at the
-   * app level: `init()` provisions decoys automatically when the IDB
-   * is empty (`storageState === 'empty'`). Exposed for tests and for
-   * recovery flows where the decoys may need to be re-seeded after
-   * an unlock failure.
+   * Create the decoy session keypairs in storage. This is a no-op unless
+   * secure-storage is still empty; once a real slot exists, provisioning
+   * is intentionally skipped because rewriting slot keypairs would make
+   * existing accounts unreachable. Normally not needed at the app level:
+   * `init()` provisions decoys automatically when storage is empty.
    */
   async secureStorageProvision(): Promise<void> {
     await this.requireConn().secureStorageProvision();

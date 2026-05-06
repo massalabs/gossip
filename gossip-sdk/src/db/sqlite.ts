@@ -646,6 +646,9 @@ export class DatabaseConnection {
   }
 
   async secureStorageProvision(): Promise<void> {
+    if (this.state.storageState !== 'empty') {
+      return;
+    }
     if (this.state.useNativePlugin) {
       await this.requireNativePlugin().provisionStorage();
     } else {
