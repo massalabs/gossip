@@ -671,8 +671,7 @@ impl SessionManagerWrapper {
             .map(|output| {
                 let acknowledged_seekers = js_sys::Array::new();
                 for ack_seeker in &output.newly_acknowledged_self_seekers {
-                    let js_seeker =
-                        js_sys::Uint8Array::new_with_length(ack_seeker.len() as u32);
+                    let js_seeker = js_sys::Uint8Array::new_with_length(ack_seeker.len() as u32);
                     js_seeker.copy_from(&ack_seeker[..]);
                     acknowledged_seekers.push(&js_seeker);
                 }

@@ -763,8 +763,7 @@ mod tests {
             // s0's ciphertext blocks are still decryptable to the right
             // plaintext. A destroy that bled into other slots' blocks
             // would corrupt this read.
-            let s0_ns_state =
-                load_namespace_state(&storage, DOMAIN, &unlocked, NS).unwrap();
+            let s0_ns_state = load_namespace_state(&storage, DOMAIN, &unlocked, NS).unwrap();
             let s0_read = read_session_data(
                 &storage,
                 DOMAIN,
@@ -804,7 +803,13 @@ mod tests {
             let s0_payload = vec![0x42u8; crate::PLAINTEXT_SIZE * 3];
             let mut ns0 = NamespaceState::empty();
             write_session_data(
-                &mut storage, DOMAIN, NS, &session0, &mut ns0, 0, &s0_payload,
+                &mut storage,
+                DOMAIN,
+                NS,
+                &session0,
+                &mut ns0,
+                0,
+                &s0_payload,
             )
             .unwrap();
             let mut ns1 = NamespaceState::empty();
@@ -849,8 +854,7 @@ mod tests {
             // Sanity: surviving slot is still functionally intact.
             let unlocked = unlock_session(&storage, DOMAIN, b"keep").unwrap();
             assert_eq!(unlocked.session_index, s0);
-            let s0_ns_state =
-                load_namespace_state(&storage, DOMAIN, &unlocked, NS).unwrap();
+            let s0_ns_state = load_namespace_state(&storage, DOMAIN, &unlocked, NS).unwrap();
             let s0_read = read_session_data(
                 &storage,
                 DOMAIN,
@@ -918,8 +922,7 @@ mod tests {
             // re-randomize, which is a no-op for the holder of the key).
             let unlocked = unlock_session(&storage, DOMAIN, b"keep").unwrap();
             assert_eq!(unlocked.session_index, s0);
-            let s0_ns_state =
-                load_namespace_state(&storage, DOMAIN, &unlocked, NS).unwrap();
+            let s0_ns_state = load_namespace_state(&storage, DOMAIN, &unlocked, NS).unwrap();
             let s0_read = read_session_data(
                 &storage,
                 DOMAIN,
@@ -1069,8 +1072,7 @@ mod tests {
             // payload — proving the slot is fully reusable.
             let unlocked = unlock_session(&storage, DOMAIN, b"second").unwrap();
             assert_eq!(unlocked.session_index, slot);
-            let ns_state =
-                load_namespace_state(&storage, DOMAIN, &unlocked, NS).unwrap();
+            let ns_state = load_namespace_state(&storage, DOMAIN, &unlocked, NS).unwrap();
             let read = read_session_data(
                 &storage,
                 DOMAIN,
