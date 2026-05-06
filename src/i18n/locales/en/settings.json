@@ -15,9 +15,10 @@
     "web3": "Web3",
     "about": "About",
     "debug": "Debug",
-    "logout": "Logout",
+    "lock_account": "Lock",
     "privacy": "Privacy",
-    "security": "Security"
+    "security": "Security",
+    "feedback": "Send Feedback"
   },
   "delete_account": {
     "button": "Delete Account",
@@ -47,7 +48,9 @@
   "about": {
     "title": "About",
     "version": "Version",
-    "build_id": "Build ID"
+    "build_id": "Build ID",
+    "about_gossip": "About Gossip",
+    "terms_conditions": "Terms & Conditions"
   },
   "notifications": {
     "title": "Notifications",
@@ -56,7 +59,9 @@
     "blocked": "Blocked",
     "enable": "Enable",
     "requesting": "Requesting...",
-    "blocked_message": "Notifications are blocked. Please enable them in your browser settings."
+    "blocked_message_web": "Notifications are blocked. Please enable them in your browser settings.",
+    "blocked_message_native": "Notifications are blocked. Open system settings to re-enable them.",
+    "open_settings": "Open Settings"
   },
   "language": {
     "title": "Language"
@@ -114,6 +119,18 @@
     "trust_body": "Resolving MNS domains requires trusting the Massa RPC response. The RPC endpoint could potentially provide incorrect or malicious resolution data."
   },
   "background_sync": {
+    "privacy_model_title": "Privacy and background delivery",
+    "privacy_model_body": "Gossip does not use server push notifications. The app syncs in the background when the system allows it. Delivery is not real-time: it depends on your device, battery settings, and whether the app was force-stopped. On iOS, background execution is especially limited.",
+    "preset_title": "Background fetch spacing",
+    "preset_max": "Max responsiveness",
+    "preset_max_description": "Checks for new messages every minute. Uses more battery.",
+    "preset_balanced": "Balanced",
+    "preset_balanced_description": "Checks for new messages every 5 minutes. Saves battery.",
+    "foreground_title": "Android: high reliability mode",
+    "foreground_description": "Keeps sync running even when the app is in the background. Shows a persistent notification. Uses more battery.",
+    "foreground_toggle": "Keep sync active",
+    "debug_sync_preset": "Sync preset: {{preset}}",
+    "debug_foreground_sync": "Foreground sync: {{value}}",
     "title": "Background Sync",
     "checking": "Checking...",
     "optimized": "Optimized",
@@ -127,17 +144,30 @@
     "on": "On",
     "off": "Off",
     "open_settings": "Open Settings",
+    "ios_limitation": "iOS limits background execution to every 15–30 minutes at best. This cannot be changed — it is a system restriction.",
     "battery_optimization": "Battery optimization disabled",
     "yes": "Yes",
     "no": "No",
     "android_restriction": "Android background restriction",
+    "allow_background": "Allow background activity",
+    "allow_background_description": "If Android restricts background activity, the app stops syncing as soon as it leaves the foreground. Tap to open settings.",
     "not_restricted": "Not restricted",
     "miui_note": "(MIUI may still restrict)",
     "disable_battery": "Disable Battery Optimization",
+    "disable_battery_description": "Android's battery optimization can kill the app and delay or drop messages while it is not in the foreground. Tap to open settings and add Gossip to the exceptions.",
+    "battery_settings": "Battery settings",
     "enable_autostart": "Enable AutoStart (MIUI)",
-    "learn_more": "Learn more about battery optimization for your device",
+    "learn_more": "Learn more",
     "debug_info": "Debug Info",
-    "refresh_status": "Refresh Status"
+    "refresh_status": "Refresh Status",
+    "device_warnings": {
+      "xiaomi": "Xiaomi devices have aggressive battery optimization. To receive messages reliably in the background, please disable battery optimization for Gossip and enable \"Autostart\" in the MIUI security settings.",
+      "huawei": "Huawei devices have strict battery management. To receive messages reliably in the background, please disable battery optimization for Gossip and add it to \"Protected Apps\" in the battery settings.",
+      "samsung": "Samsung devices may limit background activity. To receive messages reliably, please disable battery optimization and turn off \"Put app to sleep\" for Gossip.",
+      "oneplus": "OnePlus devices have battery optimization that may affect background sync. Please disable battery optimization for Gossip.",
+      "bbk": "This device has battery optimization that may prevent background notifications. Please disable battery optimization and allow background activity for Gossip.",
+      "generic": "This device may limit background activity. For reliable message notifications, please check your battery optimization settings and allow Gossip to run in the background."
+    }
   },
   "pwa": {
     "offline_ready": "App ready to work offline",

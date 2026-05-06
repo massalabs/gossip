@@ -9,22 +9,45 @@ import {
   MessageStatus,
   MessageType,
 } from '@massalabs/gossip-sdk';
+import { recomputeFullCache } from '../../src/stores/messageStore.helpers';
 
-// Mock sdkStore so getSdk() does not throw.
+// ---------------------------------------------------------------------------
+// Mock SDK with event emitter so optimistic sends flow through the store
+// ---------------------------------------------------------------------------
+
+type EventHandler = (...args: unknown[]) => void;
+const listeners = new Map<string, Set<EventHandler>>();
+
 const mockSdk = {
   isSessionOpen: false,
   messages: {
     getVisibleMessages: vi.fn(async () => [] as Message[]),
     getReactions: vi.fn(async () => [] as Message[]),
     get: vi.fn(async () => undefined as unknown as Message | undefined),
-    sendReaction: vi.fn(async () => ({ success: true })),
+    send: vi.fn(async (message: Omit<Message, 'id'>) => ({
+      success: true,
+      message: {
+        ...message,
+        id: Math.floor(Math.random() * 10000),
+        messageId:
+          message.messageId ?? crypto.getRandomValues(new Uint8Array(12)),
+        status: MessageStatus.WAITING_SESSION,
+      },
+    })),
+    findMessageByMsgId: vi.fn(async () => undefined as Message | undefined),
     deleteMessage: vi.fn(async () => true),
+    editMessage: vi.fn(async () => true),
   },
   discussions: {
     list: vi.fn(async () => []),
   },
-  on: vi.fn(),
-  off: vi.fn(),
+  on: vi.fn((event: string, handler: EventHandler) => {
+    if (!listeners.has(event)) listeners.set(event, new Set());
+    listeners.get(event)!.add(handler);
+  }),
+  off: vi.fn((event: string, handler: EventHandler) => {
+    listeners.get(event)?.delete(handler);
+  }),
 };
 
 vi.mock('../../src/stores/sdkStore', () => ({
@@ -47,30 +70,34 @@ describe('MessageStore reactions', () => {
   const contactUserId = 'contact-1';
 
   beforeEach(() => {
+    // Clear all event listeners
+    listeners.clear();
+
     // Reset store state
     useMessageStore.setState({
       messagesByContact: new Map(),
       reactionsByContact: new Map(),
+      reactionGroupsCache: new Map(),
       currentContactUserId: null,
-      isLoading: false,
-      isSending: false,
-      pollTimer: null,
-      eventHandler: null,
-      cancelDebounce: null,
+      cleanupFn: null,
       isInitializing: false,
     } as unknown as ReturnType<(typeof useMessageStore)['getState']>);
 
     mockSdk.isSessionOpen = true;
-    mockSdk.messages.sendReaction.mockClear();
+    mockSdk.messages.send.mockClear();
     mockSdk.messages.getVisibleMessages.mockResolvedValue([]);
     mockSdk.messages.getReactions.mockResolvedValue([]);
+    mockSdk.messages.deleteMessage.mockClear();
+
+    // Initialize the store so event handlers are registered
+    useMessageStore.getState().init();
   });
 
   afterEach(() => {
     useMessageStore.getState().cleanup();
   });
 
-  it('sendReaction forwards emoji and messageId to sdk without deleting existing reactions', async () => {
+  it('reactToMessage sends a reaction via sdk.messages.send', async () => {
     const messageWithId: Message = {
       id: 1,
       messageId: new Uint8Array(12).fill(1),
@@ -90,13 +117,17 @@ describe('MessageStore reactions', () => {
 
     await useMessageStore
       .getState()
-      .sendReaction(contactUserId, '👍', messageWithId.id!);
+      .reactToMessage(contactUserId, '\u{1F44D}', messageWithId.id!);
 
-    expect(mockSdk.messages.sendReaction).toHaveBeenCalledTimes(1);
-    expect(mockSdk.messages.sendReaction).toHaveBeenCalledWith(
-      contactUserId,
-      '👍',
-      messageWithId.messageId
+    expect(mockSdk.messages.send).toHaveBeenCalledTimes(1);
+    expect(mockSdk.messages.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        contactUserId,
+        content: '\u{1F44D}',
+        type: MessageType.REACTION,
+        direction: MessageDirection.OUTGOING,
+        reactionOf: { originalMsgId: messageWithId.messageId },
+      })
     );
 
     // No deleteMessage call should be made; the latest reaction wins by ordering.
@@ -120,7 +151,7 @@ describe('MessageStore reactions', () => {
       id: 1,
       ownerUserId: 'test-user-id',
       contactUserId,
-      content: '😀',
+      content: '\u{1F600}',
       type: MessageType.REACTION,
       direction: MessageDirection.INCOMING,
       status: MessageStatus.DELIVERED,
@@ -131,7 +162,7 @@ describe('MessageStore reactions', () => {
     const laterIncoming: Message = {
       ...earlierIncoming,
       id: 2,
-      content: '😮',
+      content: '\u{1F62E}',
       timestamp: new Date('2024-01-01T10:02:00Z'),
     };
 
@@ -139,7 +170,7 @@ describe('MessageStore reactions', () => {
       id: 3,
       ownerUserId: 'test-user-id',
       contactUserId,
-      content: '❤️',
+      content: '\u{2764}\u{FE0F}',
       type: MessageType.REACTION,
       direction: MessageDirection.OUTGOING,
       status: MessageStatus.SENT,
@@ -150,7 +181,7 @@ describe('MessageStore reactions', () => {
     const laterOutgoing: Message = {
       ...earlierOutgoing,
       id: 4,
-      content: '😂',
+      content: '\u{1F602}',
       timestamp: new Date('2024-01-01T10:04:00Z'),
     };
 
@@ -165,16 +196,25 @@ describe('MessageStore reactions', () => {
       ]),
     });
 
+    // Recompute the cache after setting state manually
+    const state = useMessageStore.getState();
+    useMessageStore.setState({
+      reactionGroupsCache: recomputeFullCache(
+        state.messagesByContact,
+        state.reactionsByContact
+      ),
+    });
+
     const groups: ReactionGroup[] = useMessageStore
       .getState()
-      .getReactionsForMessage(contactUserId, baseMessage.id!);
+      .getReactionsForMessage(baseMessage.messageId!);
 
     // Only latest per user should be considered: 😮 (incoming) and 😂 (outgoing)
     const emojis = groups.map(g => g.emoji).sort();
-    expect(emojis).toEqual(['😂', '😮']);
+    expect(emojis).toEqual(['\u{1F602}', '\u{1F62E}']);
 
     const mine = groups.find(g => g.myReactionId != null);
-    expect(mine?.emoji).toBe('😂');
+    expect(mine?.emoji).toBe('\u{1F602}');
     expect(mine?.myReactionId).toBe(laterOutgoing.id);
   });
 
@@ -195,7 +235,7 @@ describe('MessageStore reactions', () => {
       id: 5,
       ownerUserId: 'peer-user-id',
       contactUserId,
-      content: '🔥',
+      content: '\u{1F525}',
       type: MessageType.REACTION,
       direction: MessageDirection.INCOMING,
       status: MessageStatus.DELIVERED,
@@ -207,7 +247,7 @@ describe('MessageStore reactions', () => {
       id: 6,
       ownerUserId: 'test-user-id',
       contactUserId,
-      content: '🔥',
+      content: '\u{1F525}',
       type: MessageType.REACTION,
       direction: MessageDirection.OUTGOING,
       status: MessageStatus.SENT,
@@ -221,17 +261,26 @@ describe('MessageStore reactions', () => {
       reactionsByContact: new Map([[contactUserId, [incoming, outgoing]]]),
     });
 
+    // Recompute the cache after setting state manually
+    const state = useMessageStore.getState();
+    useMessageStore.setState({
+      reactionGroupsCache: recomputeFullCache(
+        state.messagesByContact,
+        state.reactionsByContact
+      ),
+    });
+
     const groups: ReactionGroup[] = useMessageStore
       .getState()
-      .getReactionsForMessage(contactUserId, baseMessage.id!);
+      .getReactionsForMessage(baseMessage.messageId!);
 
     expect(groups).toHaveLength(1);
-    expect(groups[0].emoji).toBe('🔥');
+    expect(groups[0].emoji).toBe('\u{1F525}');
     expect(groups[0].count).toBe(2);
     expect(groups[0].myReactionId).toBe(outgoing.id);
   });
 
-  it('removeReaction deletes all of the user outgoing reactions for a message', async () => {
+  it('removeReaction deletes the reaction and removes it from state', async () => {
     const baseMessage: Message = {
       id: 30,
       messageId: new Uint8Array(12).fill(9),
@@ -244,11 +293,12 @@ describe('MessageStore reactions', () => {
       timestamp: new Date('2024-01-01T10:00:00Z'),
     };
 
-    const reaction1: Message = {
+    const reaction: Message = {
       id: 101,
+      messageId: new Uint8Array(12).fill(11),
       ownerUserId: 'test-user-id',
       contactUserId,
-      content: '😀',
+      content: '\u{1F600}',
       type: MessageType.REACTION,
       direction: MessageDirection.OUTGOING,
       status: MessageStatus.SENT,
@@ -256,24 +306,13 @@ describe('MessageStore reactions', () => {
       reactionOf: { originalMsgId: baseMessage.messageId! },
     };
 
-    const reaction2: Message = {
-      id: 102,
-      ownerUserId: 'test-user-id',
-      contactUserId,
-      content: '😂',
-      type: MessageType.REACTION,
-      direction: MessageDirection.OUTGOING,
-      status: MessageStatus.SENT,
-      timestamp: new Date('2024-01-01T10:02:00Z'),
-      reactionOf: { originalMsgId: baseMessage.messageId! },
-    };
-
     // Incoming reaction from peer should not be affected
     const incomingReaction: Message = {
       id: 103,
+      messageId: new Uint8Array(12).fill(12),
       ownerUserId: 'peer-user-id',
       contactUserId,
-      content: '❤️',
+      content: '\u{2764}\u{FE0F}',
       type: MessageType.REACTION,
       direction: MessageDirection.INCOMING,
       status: MessageStatus.DELIVERED,
@@ -284,24 +323,26 @@ describe('MessageStore reactions', () => {
     useMessageStore.setState({
       ...useMessageStore.getState(),
       messagesByContact: new Map([[contactUserId, [baseMessage]]]),
+      reactionsByContact: new Map([
+        [contactUserId, [reaction, incomingReaction]],
+      ]),
     });
 
-    // When removeReaction is called with the latest outgoing reaction id (tap on chip),
-    // the store should delete *all* outgoing reactions for that original message.
-    mockSdk.messages.get.mockResolvedValue(reaction2);
-    mockSdk.messages.getReactions.mockResolvedValue([
-      reaction1,
-      reaction2,
-      incomingReaction,
-    ]);
     mockSdk.messages.deleteMessage.mockClear();
 
-    await useMessageStore.getState().removeReaction(reaction2.id!);
+    // removeReaction takes (reactionDbId, reactionMessageId?)
+    await useMessageStore
+      .getState()
+      .removeReaction(reaction.id!, reaction.messageId);
 
-    expect(mockSdk.messages.get).toHaveBeenCalledWith(reaction2.id);
-    // Both outgoing reactions should be deleted, incoming left alone
-    expect(mockSdk.messages.deleteMessage).toHaveBeenCalledTimes(2);
-    expect(mockSdk.messages.deleteMessage).toHaveBeenCalledWith(reaction1.id);
-    expect(mockSdk.messages.deleteMessage).toHaveBeenCalledWith(reaction2.id);
+    // The outgoing reaction should be deleted
+    expect(mockSdk.messages.deleteMessage).toHaveBeenCalledTimes(1);
+    expect(mockSdk.messages.deleteMessage).toHaveBeenCalledWith(reaction.id);
+
+    // The incoming reaction should still be in state
+    const remainingReactions =
+      useMessageStore.getState().reactionsByContact.get(contactUserId) ?? [];
+    expect(remainingReactions).toHaveLength(1);
+    expect(remainingReactions[0].id).toBe(incomingReaction.id);
   });
 });

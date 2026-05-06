@@ -7,6 +7,7 @@ import React, {
   useState,
 } from 'react';
 import { MessageDirection, Message } from '@massalabs/gossip-sdk';
+import MessageItem from './MessageItem';
 import type { Discussion, Contact } from '@massalabs/gossip-sdk';
 import { VList, type VListHandle } from 'virtua';
 
@@ -25,7 +26,6 @@ import { findFirstUnreadMessage } from '../../utils/messages';
 import {
   AnnouncementRenderer,
   DateRenderer,
-  MessageRenderer,
   RetentionSeparatorRenderer,
   SpacerRenderer,
 } from './renderers/MessageItemRenderers';
@@ -37,9 +37,24 @@ import {
 const MESSAGES_ABOVE_UNREAD = 3;
 const AT_BOTTOM_THRESHOLD = 50;
 
-/** Stable key for a message — used for both React keys and animation tracking. */
+interface ReactionGroup {
+  emoji: string;
+  count: number;
+  myReactionId?: number;
+  myReactionMessageId?: Uint8Array;
+}
+
+const EMPTY_REACTIONS: ReactionGroup[] = [];
+
+/** Stable key for a message. Prefers the local `storeId` (set on optimistic
+ *  messages and preserved through the persisted replacement), so the key
+ *  never changes across the sending → sent transition. Falls back to
+ *  messageId / db id for messages loaded from storage. */
 function getMessageKey(m: Message): string {
-  if (m.id != null) return `msg-${m.id}`;
+  const storeId = (m as { storeId?: string }).storeId;
+  if (storeId) return `msg-store-${storeId}`;
+  if (m.messageId) return `msg-${m.messageId.join(',')}`;
+  if (m.id != null) return `msg-db-${m.id}`;
   return `msg-temp-${m.timestamp.getTime()}-${m.direction}-${m.content.slice(0, 16)}`;
 }
 
@@ -69,13 +84,15 @@ interface MessageListProps {
   onToggleReaction?: (
     message: Message,
     emoji: string,
-    myReactionId?: number
+    myReactionId?: number,
+    myReactionMessageId?: Uint8Array
   ) => void;
-  getReactionsForMessage?: (messageDbId: number) => {
-    emoji: string;
-    count: number;
-    myReactionId?: number;
-  }[];
+  /**
+   * Looks up the reactions for a given message. Each page owns the indexing
+   * scheme (regular discussions key by the crypto messageId, self-discussions
+   * by DB id) — MessageList stays agnostic and just asks.
+   */
+  getReactions?: (message: Message) => ReactionGroup[];
 }
 
 export interface MessageListHandle {
@@ -125,7 +142,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
       onToggleSelect,
       onReact,
       onToggleReaction,
-      getReactionsForMessage,
+      getReactions,
     },
     ref
   ) => {
@@ -225,20 +242,32 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
       }
       if (virtualItems.length === 0) return;
 
-      requestAnimationFrame(() => {
-        vlistRef.current?.scrollToIndex(initialTopMostItemIndex, {
-          align: 'start',
-        });
-        initialScrollDone.current = true;
-        setAnimationsEnabled(true);
-        signalReady();
-      });
+      // Virtua measures items across frames; on cached remount scrollSize
+      // starts at 0 and grows. Retry for ~10 frames so we end at the bottom.
+      let frame = 0;
+      const tick = () => {
+        const ref = vlistRef.current;
+        if (ref) {
+          if (firstUnreadMessage) {
+            ref.scrollToIndex(initialTopMostItemIndex, { align: 'start' });
+          } else {
+            ref.scrollTo(ref.scrollSize);
+          }
+        }
+        if (frame++ < 10) requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+
+      initialScrollDone.current = true;
+      setAnimationsEnabled(true);
+      signalReady();
     }, [
       discussion?.id,
       virtualItems.length,
       initialTopMostItemIndex,
       animationsEnabled,
       signalReady,
+      firstUnreadMessage,
     ]);
 
     // Reset message count tracking when switching discussions
@@ -297,9 +326,8 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
     // Expose imperative methods
     React.useImperativeHandle(ref, () => ({
       scrollToBottom: () => {
-        vlistRef.current?.scrollToIndex(virtualItems.length - 1, {
-          align: 'end',
-        });
+        const r = vlistRef.current;
+        if (r) r.scrollTo(r.scrollSize);
       },
       scrollToIndex: (index: number) => {
         vlistRef.current?.scrollToIndex(index, {
@@ -356,30 +384,43 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
                 retentionDuration={item.retentionDuration}
               />
             );
-          case 'message':
+          case 'message': {
+            const isIncoming =
+              item.message.direction === MessageDirection.INCOMING;
             return (
-              <MessageRenderer
-                message={item.message}
-                showTimestamp={item.showTimestamp}
-                groupInfo={item.groupInfo}
-                onReplyTo={onReplyTo}
-                onForward={onForward}
-                onDelete={onDelete}
-                onEdit={onEdit}
-                onScrollToMessage={onScrollToMessage}
-                onReact={onReact}
-                onToggleReaction={onToggleReaction}
-                getReactionsForMessage={getReactionsForMessage}
-                contact={contact}
-                isHighlighted={item.message.id === highlightedMessageId}
-                isSelecting={isSelecting}
-                isSelected={
-                  item.message.id != null &&
-                  selectedMessageIds?.has(item.message.id)
-                }
-                onToggleSelect={onToggleSelect}
-              />
+              <div
+                className={`px-4 md:px-6 lg:px-8 transition-colors duration-150 ${isSelecting && item.message.id != null && selectedMessageIds?.has(item.message.id) ? 'bg-accent/10' : ''}`}
+              >
+                <MessageItem
+                  id={`message-${item.message.id}`}
+                  message={item.message}
+                  onReplyTo={onReplyTo}
+                  onForward={onForward}
+                  onDelete={onDelete}
+                  onEdit={onEdit}
+                  onScrollToMessage={onScrollToMessage}
+                  onReact={onReact}
+                  onToggleReaction={onToggleReaction}
+                  reactions={getReactions?.(item.message) ?? EMPTY_REACTIONS}
+                  showTimestamp={item.showTimestamp}
+                  isFirstInGroup={item.groupInfo.isFirstInGroup}
+                  isLastInGroup={item.groupInfo.isLastInGroup}
+                  showAvatar={isIncoming && item.groupInfo.isLastInGroup}
+                  contact={isIncoming ? contact : undefined}
+                  isHighlighted={
+                    highlightedMessageId != null &&
+                    item.message.id === highlightedMessageId
+                  }
+                  isSelecting={isSelecting}
+                  isSelected={
+                    item.message.id != null &&
+                    selectedMessageIds?.has(item.message.id)
+                  }
+                  onToggleSelect={onToggleSelect}
+                />
+              </div>
             );
+          }
           default:
             return null;
         }
@@ -392,7 +433,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
         onScrollToMessage,
         onReact,
         onToggleReaction,
-        getReactionsForMessage,
+        getReactions,
         contact,
         highlightedMessageId,
         isSelecting,
@@ -404,7 +445,9 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
     if (isLoading) {
       return (
         <SignalReadyOnMount signalReady={signalReady}>
-          <LoadingState />
+          <div className="h-full bg-discussion-pattern">
+            <LoadingState />
+          </div>
         </SignalReadyOnMount>
       );
     }
@@ -412,7 +455,7 @@ const MessageList = React.forwardRef<MessageListHandle, MessageListProps>(
     if (messages.length === 0 && !discussion?.lastAnnouncementMessage) {
       return (
         <SignalReadyOnMount signalReady={signalReady}>
-          <div className="px-4 md:px-6 lg:px-8 py-6">
+          <div className="h-full bg-discussion-pattern px-4 md:px-6 lg:px-8 py-6">
             <EmptyState />
           </div>
         </SignalReadyOnMount>

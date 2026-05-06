@@ -19,7 +19,9 @@
     "cancel_forward": "取消转发",
     "cancel_edit": "取消编辑",
     "input_label": "消息输入",
-    "send": "发送消息"
+    "send": "发送消息",
+    "emoji": "表情",
+    "emoji_search": "搜索表情…"
   },
   "message": {
     "sent": "已发送",
@@ -29,6 +31,8 @@
   "list_item": {
     "set_contact_name": "设置联系人名称",
     "refuse_connection": "拒绝连接？",
+    "pin_discussion": "置顶",
+    "unpin_discussion": "取消置顶",
     "edit_name": "编辑名称",
     "edit_name_title": "编辑会话名称"
   },
@@ -121,6 +125,11 @@
     "subtitle": "正在建立端到端加密..."
   },
   "loading_messages": "正在加载消息...",
+  "selfDiscussion": {
+    "title": "我的笔记",
+    "placeholder": "写一条笔记...",
+    "emptyState": "您的私人笔记将显示在这里"
+  },
   "message_item": {
     "double_tap_reply": "双击回复",
     "sent_message": "已发送的消息",
@@ -157,5 +166,5 @@
   "filter_label": "筛选会话",
   "waiting_connection": "等待连接...",
   "announcement": "通告",
-  "lock_account": "锁定账户"
+  "lock_account": "锁定"
 }

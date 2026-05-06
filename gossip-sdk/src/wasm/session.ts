@@ -3,13 +3,18 @@
  *
  * This file contains the real WASM implementation of the SessionModule
  * using SessionManagerWrapper and related WASM classes.
+ *
+ * All Uint8Array values returned from WASM are funneled through `copyOut` /
+ * `copyOutMany` so callers always get JS-owned buffers. Without this, a
+ * subsequent WASM allocation that grows linear memory detaches the original
+ * `wasm.memory.buffer` and any Uint8Array view sitting on top of it — leading
+ * to "detached ArrayBuffer" failures on the next read.
  */
 
 import {
   SessionManagerWrapper,
   UserPublicKeys,
   UserSecretKeys,
-  ReceiveMessageOutput,
   SendMessageOutput,
   SessionStatus,
   EncryptionKey,
@@ -18,6 +23,16 @@ import {
   UserKeys,
 } from './bindings.js';
 import { encodeUserId } from '../utils/userId.js';
+
+const copyOut = (a: Uint8Array): Uint8Array => new Uint8Array(a);
+const copyOutMany = (xs: Uint8Array[]): Uint8Array[] => xs.map(copyOut);
+
+export interface ReceivedMessage {
+  message: Uint8Array;
+  user_id: Uint8Array;
+  timestamp: number;
+  acknowledged_seekers: Uint8Array[];
+}
 
 export class SessionModule {
   private sessionManager: SessionManagerWrapper | null = null;
@@ -34,7 +49,7 @@ export class SessionModule {
   ) {
     this.ourPk = userKeys.public_keys();
     this.ourSk = userKeys.secret_keys();
-    this.userId = this.ourPk.derive_id();
+    this.userId = copyOut(this.ourPk.derive_id());
     this.userIdEncoded = encodeUserId(this.userId);
 
     const sessionConfig = config ?? SessionConfig.new_default();
@@ -98,7 +113,7 @@ export class SessionModule {
       throw new Error('Session manager is not initialized');
     }
 
-    return this.sessionManager.to_encrypted_blob(key);
+    return copyOut(this.sessionManager.to_encrypted_blob(key));
   }
 
   cleanup(): void {
@@ -121,11 +136,13 @@ export class SessionModule {
     }
 
     const userDataBytes = userData ?? new Uint8Array(0);
-    const result = this.sessionManager.establish_outgoing_session(
-      peerPk,
-      this.ourPk,
-      this.ourSk,
-      userDataBytes
+    const result = copyOut(
+      this.sessionManager.establish_outgoing_session(
+        peerPk,
+        this.ourPk,
+        this.ourSk,
+        userDataBytes
+      )
     );
 
     if (result.length === 0) {
@@ -169,7 +186,7 @@ export class SessionModule {
       throw new Error('Session manager is not initialized');
     }
 
-    return this.sessionManager.get_message_board_read_keys();
+    return copyOutMany(this.sessionManager.get_message_board_read_keys());
   }
 
   /**
@@ -178,7 +195,7 @@ export class SessionModule {
   async feedIncomingMessageBoardRead(
     seeker: Uint8Array,
     ciphertext: Uint8Array
-  ): Promise<ReceiveMessageOutput | undefined> {
+  ): Promise<ReceivedMessage | undefined> {
     if (!this.sessionManager) {
       throw new Error('Session manager is not initialized');
     }
@@ -188,9 +205,24 @@ export class SessionModule {
       ciphertext,
       this.ourSk
     );
+    if (!result) {
+      return undefined;
+    }
+
+    // Snapshot before any further WASM activity (persistIfNeeded / scheduler
+    // yields) can grow linear memory and detach views.
+    const snapshot: ReceivedMessage = {
+      message: copyOut(result.message),
+      user_id: copyOut(result.user_id),
+      timestamp: result.timestamp,
+      acknowledged_seekers: copyOutMany(
+        result.acknowledged_seekers as Uint8Array[]
+      ),
+    };
+    result.free();
 
     await this.persistIfNeeded();
-    return result;
+    return snapshot;
   }
 
   /**
@@ -221,7 +253,7 @@ export class SessionModule {
       throw new Error('Session manager is not initialized');
     }
 
-    return this.sessionManager.peer_list();
+    return copyOutMany(this.sessionManager.peer_list());
   }
 
   /**
@@ -255,7 +287,7 @@ export class SessionModule {
       throw new Error('Session manager is not initialized');
     }
 
-    const result = this.sessionManager.refresh();
+    const result = copyOutMany(this.sessionManager.refresh());
     await this.persistIfNeeded();
     return result;
   }

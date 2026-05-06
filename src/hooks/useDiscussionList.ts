@@ -1,4 +1,5 @@
 import { useCallback } from 'react';
+import toast from 'react-hot-toast';
 import { useAccountStore } from '../stores/accountStore';
 import { useGossipSdk } from './useGossipSdk';
 import type { Discussion } from '@massalabs/gossip-sdk';
@@ -21,6 +22,7 @@ export const useDiscussionList = () => {
         await gossip.discussions.accept(discussion);
       } catch (error) {
         console.error('Failed to accept discussion:', error);
+        toast.error('Failed to accept contact request');
       }
     },
     [userProfile?.userId, gossip]

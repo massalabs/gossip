@@ -4,6 +4,11 @@ import { Filesystem, Directory } from '@capacitor/filesystem';
 
 export interface ShareInvitationOptions {
   deepLinkUrl: string;
+  // Name of the contact being shared. When undefined, the invite is treated
+  // as the user's own profile ("Join me on Gossip!"). When a non-empty string,
+  // the invite is introduced as "Join {contactName} on Gossip!". When empty,
+  // no greeting is prepended and only the URL is shared.
+  contactName?: string;
 }
 
 export interface ShareQRCodeOptions {
@@ -157,22 +162,41 @@ export async function shareFile(options: ShareFileOptions): Promise<void> {
 export async function shareInvitation(
   options: ShareInvitationOptions
 ): Promise<void> {
-  const { deepLinkUrl } = options;
+  const { deepLinkUrl, contactName } = options;
 
   if (!deepLinkUrl) {
     throw new Error('deepLinkUrl is required');
   }
 
-  const shareText = 'Join me on Gossip!';
-  const shareTitle = 'Join me on Gossip';
+  let shareText: string;
+  let shareTitle: string;
+  if (contactName === undefined) {
+    shareText = 'Join me on Gossip!';
+    shareTitle = 'Join me on Gossip';
+  } else if (contactName.length > 0) {
+    shareText = `Join ${contactName} on Gossip!`;
+    shareTitle = `Join ${contactName} on Gossip`;
+  } else {
+    shareText = '';
+    shareTitle = 'Gossip';
+  }
 
   // Use native Capacitor Share plugin on native platforms
   if (Capacitor.isNativePlatform()) {
     try {
+      const isAndroid = Capacitor.getPlatform() === 'android';
+      const text = shareText ? `${shareText}\n${deepLinkUrl}` : deepLinkUrl;
+      // On Android, ACTION_SEND only carries EXTRA_TEXT and the Capacitor
+      // plugin concatenates `text + " " + url`, which duplicates the URL and
+      // confuses some apps (Telegram in particular). Embed the URL in `text`
+      // and omit `url`.
+      // On iOS, UIActivityViewController exposes them as separate items;
+      // some apps use only `text`, others only `url`, so pass both (the
+      // duplicated URL is harmless because the receiving app picks one item).
       await Share.share({
         title: shareTitle,
-        text: shareText,
-        url: deepLinkUrl,
+        text,
+        ...(isAndroid ? {} : { url: deepLinkUrl }),
         dialogTitle: shareTitle,
       });
       return;
@@ -185,9 +209,12 @@ export async function shareInvitation(
   // Use Web Share API on web platforms
   if (typeof navigator !== 'undefined' && navigator.share) {
     try {
+      // Mirror the native path: embed the URL in `text` AND pass `url`
+      // separately. Telegram's web share target ignores the `url` field
+      // and only pastes `text`, so without embedding the link is lost.
       await navigator.share({
         title: shareTitle,
-        text: shareText,
+        text: shareText ? `${shareText}\n${deepLinkUrl}` : deepLinkUrl,
         url: deepLinkUrl,
       });
       return;

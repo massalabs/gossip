@@ -3,15 +3,19 @@ import { useTranslation } from 'react-i18next';
 import { Lock, Shield } from 'react-feather';
 import { useAccountStore } from '../../stores/accountStore';
 import { validateMnemonic, validatePassword } from '@massalabs/gossip-sdk';
+import {
+  validateUsernameFormat,
+  USERNAME_MAX_LENGTH,
+} from '../../utils/validation';
 import Button from '../ui/Button';
 import PageHeader from '../ui/PageHeader';
-import PageLayout from '../ui/PageLayout';
+import PageLayout from '../ui/Layout/PageLayout';
 import RoundedInput from '../ui/RoundedInput';
 import TabSwitcher from '../ui/TabSwitcher';
 
 interface AccountImportProps {
   onBack: () => void;
-  onComplete: () => void;
+  onComplete: () => void | Promise<void>;
 }
 
 const AccountImport: React.FC<AccountImportProps> = ({
@@ -56,8 +60,9 @@ const AccountImport: React.FC<AccountImportProps> = ({
         return;
       }
 
-      if (username.length < 3) {
-        setError(t('create.username_min_length'));
+      const usernameResult = validateUsernameFormat(username);
+      if (!usernameResult.valid) {
+        setError(usernameResult.error);
         return;
       }
 
@@ -91,44 +96,43 @@ const AccountImport: React.FC<AccountImportProps> = ({
         });
       }
 
-      onComplete();
+      await onComplete();
     } catch (error) {
       console.error('Error importing account:', error);
       setError(t('import.failed'));
-    } finally {
       setIsImporting(false);
     }
   };
 
+  const cardClass =
+    'bg-card text-card-foreground rounded-xl border border-border shadow-sm';
+
   const renderMnemonicStep = () => (
-    <div className=" rounded-lg p-6 space-y-6">
+    <div className={`${cardClass} p-6 space-y-6`}>
       <div>
-        <h3 className="text-xl font-semibold text-foreground mb-2">
-          {t('import.title')}
-        </h3>
-        <p className="text-sm text-muted-foreground leading-relaxed">
+        <p className="text-sm text-muted-foreground leading-relaxed pl-3 border-l-4 border-accent-soft-foreground/40">
           {t('import.description')}
         </p>
-        <div className="mt-4">
-          <label className="block text-sm font-medium text-foreground mb-2">
+        <div className="mt-5">
+          <label className="block text-sm font-semibold text-foreground mb-2">
             {t('import.mnemonic_phrase')}
           </label>
           <textarea
             value={mnemonic}
             onChange={e => setMnemonic(e.target.value)}
             placeholder={t('import.mnemonic_placeholder')}
-            className="w-full h-32 px-4 py-3 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary text-sm resize-none text-foreground bg-background placeholder-muted-foreground"
+            className="w-full h-32 px-4 py-3 rounded-lg border border-border bg-muted/40 text-foreground placeholder:text-muted-foreground text-sm resize-none shadow-inner focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus:border-transparent"
             disabled={isImporting}
           />
-          <p className="text-xs text-muted-foreground mt-1">
+          <p className="text-xs text-muted-foreground mt-2">
             {t('import.mnemonic_hint')}
           </p>
         </div>
       </div>
 
       {error && (
-        <div className="p-4 bg-destructive/10 border border-destructive rounded-lg">
-          <p className="text-destructive text-sm">{error}</p>
+        <div className="p-4 rounded-lg bg-destructive/10 border border-destructive/80 ring-1 ring-destructive/20">
+          <p className="text-destructive text-sm font-medium">{error}</p>
         </div>
       )}
 
@@ -148,8 +152,8 @@ const AccountImport: React.FC<AccountImportProps> = ({
   );
 
   const renderDetailsStep = () => (
-    <div className="bg-card rounded-lg p-6 space-y-6">
-      <div>
+    <div className={`${cardClass} p-6 space-y-6`}>
+      <div className="pb-1 border-b border-border">
         <h3 className="text-xl font-semibold text-foreground mb-2">
           {t('import.account_details')}
         </h3>
@@ -159,7 +163,7 @@ const AccountImport: React.FC<AccountImportProps> = ({
       </div>
 
       <div>
-        <label className="block text-xl font-medium text-foreground mb-3">
+        <label className="block text-base font-semibold text-foreground mb-3">
           {t('create.username')}
         </label>
         <RoundedInput
@@ -167,13 +171,14 @@ const AccountImport: React.FC<AccountImportProps> = ({
           value={username}
           onChange={e => setUsername(e.target.value)}
           placeholder={t('import.enter_username')}
+          maxLength={USERNAME_MAX_LENGTH}
           disabled={isImporting}
         />
       </div>
 
       {/* Security Method Selection */}
-      <div>
-        <p className="text-xl font-medium text-foreground mb-5">
+      <div className="rounded-lg border border-border bg-muted/35 p-4 space-y-4">
+        <p className="text-base font-semibold text-foreground">
           {t('import.security_method')}
         </p>
         <TabSwitcher
@@ -197,7 +202,7 @@ const AccountImport: React.FC<AccountImportProps> = ({
       {/* Password field - only show if not using biometrics */}
       {!useBiometrics && (
         <div>
-          <label className="block text-xl font-medium text-foreground mb-3">
+          <label className="block text-base font-semibold text-foreground mb-3">
             {t('create.password')}
           </label>
           <RoundedInput
@@ -222,7 +227,7 @@ const AccountImport: React.FC<AccountImportProps> = ({
       {/* Confirm Password field */}
       {!useBiometrics && (
         <div>
-          <label className="block text-xl font-medium text-foreground mb-3">
+          <label className="block text-base font-semibold text-foreground mb-3">
             {t('create.confirm_password_label')}
           </label>
           <RoundedInput
@@ -244,8 +249,8 @@ const AccountImport: React.FC<AccountImportProps> = ({
       )}
 
       {error && (
-        <div className="p-4 bg-destructive/10 border border-destructive rounded-lg">
-          <p className="text-destructive text-sm">{error}</p>
+        <div className="p-4 rounded-lg bg-destructive/10 border border-destructive/80 ring-1 ring-destructive/20">
+          <p className="text-destructive text-sm font-medium">{error}</p>
         </div>
       )}
 

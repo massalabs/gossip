@@ -19,13 +19,15 @@ const ACTIVE_SEEKERS_KEY = 'gossip-active-seekers';
 const API_BASE_URL_KEY = 'gossip-api-base-url';
 const LAST_SYNC_TIMESTAMP_KEY = 'gossip-last-sync-timestamp';
 const SYNC_LOCK_KEY = 'gossip-sync-lock-time';
+// Must match BACKGROUND_SYNC_PRESET_KV_KEY in src/utils/preferences.ts
+const SYNC_PRESET_KEY = 'gossip-sync-preset';
 
 // Fallback API URL if not stored in preferences
 const DEFAULT_API_BASE_URL = 'https://gossip.massa.net/api';
 
-// Minimum interval between syncs to avoid redundant work
-// If a sync was performed within this window, skip the current sync
-const MIN_SYNC_INTERVAL_MS = 1 * 60 * 1000; // 1 minute
+// Minimum interval between syncs — depends on user preset (read from KV)
+const MIN_SYNC_INTERVAL_MAX_MS = 1 * 60 * 1000; // 1 minute — max reactivity
+const MIN_SYNC_INTERVAL_BALANCED_MS = 5 * 60 * 1000; // 5 minutes — fewer redundant fetches
 
 /**
  * Retrieve active seekers from BackgroundRunner storage.
@@ -167,6 +169,25 @@ async function removeSeekersWithMessages(currentSeekers, messages) {
 }
 
 /**
+ * Minimum time between successful sync attempts (user preset in KV).
+ */
+async function getMinSyncIntervalMs() {
+  try {
+    if (typeof CapacitorKV === 'undefined' || !CapacitorKV?.get) {
+      return MIN_SYNC_INTERVAL_MAX_MS;
+    }
+    const raw = await CapacitorKV.get(SYNC_PRESET_KEY);
+    const v = extractKVValue(raw);
+    if (v === 'balanced') {
+      return MIN_SYNC_INTERVAL_BALANCED_MS;
+    }
+  } catch (err) {
+    console.log('[BackgroundSync] Preset read failed:', String(err));
+  }
+  return MIN_SYNC_INTERVAL_MAX_MS;
+}
+
+/**
  * Check if enough time has passed since the last sync.
  * Returns true if sync should proceed, false if it should be skipped.
  */
@@ -177,8 +198,9 @@ async function shouldPerformSync() {
     return true;
   }
 
+  const minMs = await getMinSyncIntervalMs();
   const timeSinceLastSync = Date.now() - lastSyncTimestamp;
-  if (timeSinceLastSync < MIN_SYNC_INTERVAL_MS) {
+  if (timeSinceLastSync < minMs) {
     return false;
   }
 
@@ -259,6 +281,7 @@ async function showNewMessageNotification(messageCount) {
         id: notificationId,
         title,
         body,
+        smallIcon: 'ic_notification',
         autoCancel: true,
         schedule: {
           allowWhileIdle: true,

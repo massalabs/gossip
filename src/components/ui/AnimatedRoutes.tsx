@@ -1,6 +1,14 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useCallback,
+} from 'react';
 import { useLocation, Routes } from 'react-router-dom';
 import { OverlayReadyContext } from './OverlayReadyContext';
+import { ExitAnimationContext } from './ExitAnimationContext';
+import { useUiStore } from '../../stores/uiStore';
 
 // =============================================================================
 // Constants
@@ -33,6 +41,7 @@ const isSlideRoute = (path: string) =>
 const AnimatedRoutes: React.FC<AnimatedRoutesProps> = ({ children }) => {
   const location = useLocation();
   const prevPathRef = useRef(location.pathname);
+  const setHeaderIsScrolled = useUiStore(s => s.setHeaderIsScrolled);
 
   const isOverlay = isSlideRoute(location.pathname);
 
@@ -71,13 +80,15 @@ const AnimatedRoutes: React.FC<AnimatedRoutesProps> = ({ children }) => {
     if (readyReceivedRef.current) return;
     readyReceivedRef.current = true;
 
-    if (import.meta.env.DEV) {
-      const elapsed = performance.now() - mountTimeRef.current;
-      console.log(`[AnimatedRoutes] overlay ready in ${elapsed.toFixed(0)}ms`);
-    }
-
     setSlideReady(true);
   }, []);
+
+  // Reset scroll-aware header state pre-paint on every route change.
+  // Combined with the "first-paint no-transition" gate in PageLayout/HeaderBar,
+  // this prevents the stale "scrolled" bg from animating away on return.
+  useLayoutEffect(() => {
+    setHeaderIsScrolled(false);
+  }, [location.pathname, setHeaderIsScrolled]);
 
   // Route change detection
   useEffect(() => {
@@ -88,16 +99,6 @@ const AnimatedRoutes: React.FC<AnimatedRoutesProps> = ({ children }) => {
 
     const entering = isSlideRoute(location.pathname);
     const leaving = isSlideRoute(prev);
-
-    if (import.meta.env.DEV) {
-      console.log('[AnimatedRoutes]', {
-        prev,
-        next: location.pathname,
-        entering,
-        leaving,
-        detour: detourFromSlideRef.current,
-      });
-    }
 
     // Was the user on a slide route before this detour?
     const returningFromDetour =
@@ -153,11 +154,6 @@ const AnimatedRoutes: React.FC<AnimatedRoutesProps> = ({ children }) => {
     if (!overlayLocation || slideReady) return;
     const timer = setTimeout(() => {
       if (!readyReceivedRef.current) {
-        if (import.meta.env.DEV) {
-          console.warn(
-            `[AnimatedRoutes] ready timeout (${READY_TIMEOUT_MS}ms) — sliding anyway`
-          );
-        }
         readyReceivedRef.current = true;
         setSlideReady(true);
       }
@@ -187,17 +183,21 @@ const AnimatedRoutes: React.FC<AnimatedRoutesProps> = ({ children }) => {
 
   return (
     <div className="h-full relative overflow-hidden bg-background">
-      {/* Base — always mounted */}
-      <div
-        className={`absolute inset-0 bg-background ${
-          !isOverlay && !exitContent
-            ? `transition-opacity duration-150 ease-in-out ${fadeIn ? 'opacity-100' : 'opacity-0'}`
-            : ''
-        }`}
-        style={{ zIndex: 1 }}
-      >
-        <Routes location={baseLocationRef.current}>{children}</Routes>
-      </div>
+      {/* Base — unmounted when a slide overlay is fully displayed.
+          Remounts during exit animation so the slide-out reveals content.
+          State kept in stores (discussionStore, etc.); scroll position resets. */}
+      {(!isOverlay || exitContent) && (
+        <div
+          className={`absolute inset-0 bg-background ${
+            !isOverlay && !exitContent
+              ? `transition-opacity duration-150 ease-in-out ${fadeIn ? 'opacity-100' : 'opacity-0'}`
+              : ''
+          }`}
+          style={{ zIndex: 1 }}
+        >
+          <Routes location={baseLocationRef.current}>{children}</Routes>
+        </div>
+      )}
 
       {/* Overlay — discussion entering */}
       {overlayContent && (
@@ -221,7 +221,9 @@ const AnimatedRoutes: React.FC<AnimatedRoutesProps> = ({ children }) => {
           style={{ willChange: 'transform', zIndex: 10 }}
           onAnimationEnd={() => setExitContent(null)}
         >
-          {exitContent}
+          <ExitAnimationContext.Provider value={true}>
+            {exitContent}
+          </ExitAnimationContext.Provider>
         </div>
       )}
     </div>

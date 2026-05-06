@@ -377,28 +377,23 @@ export class NotificationService {
   }
 
   /**
-   * Show a notification for a specific discussion (when app is open)
-   * @param contactName - Name of the contact
-   * @param messagePreview - Preview of the message (optional)
-   * @param contactUserId - User ID of the contact (optional, for navigation)
+   * Show a notification for a new incoming message (background).
+   * Never includes message text or contact-identifying text — only generic copy.
+   * @param contactUserId - Used for navigation and notification tag only (not shown in UI text)
    */
-  async showDiscussionNotification(
-    contactName: string,
-    messagePreview?: string,
-    contactUserId?: string
-  ): Promise<void> {
+  async showDiscussionNotification(contactUserId?: string): Promise<void> {
     if (!this.canShowNotification()) {
       return;
     }
 
     try {
-      const title = `New message from ${contactName}`;
-      const body = messagePreview || 'Tap to view';
+      const title = 'New message';
+      const body = 'You have a new message. Open the app to read it.';
 
       await this.sendNotification(
         title,
         body,
-        `gossip-discussion-${contactName}`,
+        `gossip-discussion-${contactUserId ?? 'unknown'}`,
         3000,
         contactUserId
           ? () => {
@@ -418,19 +413,17 @@ export class NotificationService {
   }
 
   /**
-   * Show a notification for a new discussion
-   * @param announcementMessage - Optional message about the new discussion
+   * Show a notification for a new discussion / session request.
+   * Never includes announcement or message content — only generic copy.
    */
-  async showNewDiscussionNotification(
-    announcementMessage?: string
-  ): Promise<void> {
+  async showNewDiscussionNotification(): Promise<void> {
     if (!this.canShowNotification()) {
       return;
     }
 
     try {
       const title = 'New contact request';
-      const body = announcementMessage || 'User wants to start a conversation';
+      const body = 'Someone wants to connect. Open the app to review.';
 
       await this.sendNotification(
         title,
@@ -482,6 +475,25 @@ export class NotificationService {
     if (this.isNativePlatform()) {
       // Kick off async sync with native permission state; return last known state.
       void this.initNativePermissionStatus();
+    } else {
+      this.updatePermissionStatus();
+    }
+    return {
+      enabled: this.enabled,
+      permission: { ...this.permission },
+    };
+  }
+
+  /**
+   * Fetch up-to-date preferences, awaiting the native permission check on
+   * native platforms. Prefer this over `getPreferences()` when the caller can
+   * wait — it avoids rendering UI with a stale default-state snapshot on iOS.
+   */
+  async fetchPreferences(): Promise<NotificationPreferences> {
+    if (this.isNativePlatform()) {
+      // Force a fresh read so the returned state reflects the real OS status.
+      this.nativePermissionInitialized = false;
+      await this.initNativePermissionStatus();
     } else {
       this.updatePermissionStatus();
     }

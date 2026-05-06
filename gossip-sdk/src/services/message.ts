@@ -31,15 +31,18 @@ import {
   serializeRetentionPolicyMessage,
   deserializeMessage,
 } from '../utils/messageSerialization.js';
+import * as schema from '../db/schema/index.js';
 import { encodeToBase64, decodeFromBase64 } from '../utils/base64.js';
 import { Result } from '../utils/type.js';
 import { sessionStatusToString } from '../wasm/session.js';
 import { Logger } from '../utils/logs.js';
 import { SdkConfig, defaultSdkConfig } from '../config/sdk.js';
 import { SdkEventEmitter, SdkEventType } from '../core/SdkEventEmitter.js';
-import type { RefreshService } from './refresh.js';
 import { Queries } from '../db/queries/index.js';
 import { QueueManager } from '../utils/queue.js';
+import { and, eq, sql } from 'drizzle-orm';
+import { GossipSqliteTx } from '../db/sqlite.js';
+import { POST_MESSAGE_TYPES } from '../utils/message.js';
 
 /** Options for the simplified sendText method */
 export interface SendTextOptions {
@@ -250,11 +253,43 @@ export class MessageService {
   private session: SessionModule;
   private eventEmitter: SdkEventEmitter;
   private config: SdkConfig;
-  private refreshService?: RefreshService;
   private queueManager?: QueueManager;
   private processingContacts = new Set<string>();
   private isFetchingMessages = false;
   private queries: Queries;
+  /**
+   * Message ids currently being sent via `sendMessageFastPath`. The row is
+   * WAITING_SESSION in the DB while the fast path runs INSERT + encrypt +
+   * POST in parallel. Without this guard, a concurrent `stateUpdate` could
+   * pick up the same WAITING_SESSION row via `processSendQueueForContact`
+   * and send a duplicate.
+   */
+  private inFlightFastPath = new Set<number>();
+  /**
+   * Force-fire the SDK's pending session-blob persist. Wired by
+   * `GossipSdk.openSession` via `setPersistFlusher`. Used by the send
+   * hot path to run persist in parallel with the network write so the
+   * PQ counter is durable on disk before the relay confirms receipt
+   * (otherwise a crash between encrypt and the next debounced flush
+   * would leak an advanced in-RAM counter, leading to a re-used
+   * counter on the next send → peer collision).
+   *
+   * No-op (`async () => {}`) until the SDK calls the setter, which
+   * keeps unit tests of MessageService that don't bring up the full
+   * SDK working without extra plumbing.
+   */
+  private persistFlusher: () => Promise<void> = async () => {};
+
+  setPersistFlusher(flusher: () => Promise<void>): void {
+    this.persistFlusher = flusher;
+  }
+
+  /** Emit MESSAGE_RECEIVED with a Message that may not have a DB id yet */
+  private emitMessageReceived(
+    message: Omit<Message, 'id'> & { id?: number }
+  ): void {
+    this.eventEmitter.emit(SdkEventType.MESSAGE_RECEIVED, message);
+  }
 
   constructor(
     messageProtocol: IMessageProtocol,
@@ -268,10 +303,6 @@ export class MessageService {
     this.eventEmitter = eventEmitter;
     this.config = config;
     this.queries = queries;
-  }
-
-  setRefreshService(refreshService: RefreshService): void {
-    this.refreshService = refreshService;
   }
 
   setQueueManager(queueManager: QueueManager): void {
@@ -382,53 +413,79 @@ export class MessageService {
    * Add a message to SQLite and update the corresponding discussion.
    */
   private async addMessageAndUpdateDiscussion(
-    message: Omit<Message, 'id'>
+    message: Omit<Message, 'id'>,
+    parentTx?: GossipSqliteTx
   ): Promise<number> {
-    const messageId = await this.queries.messages.insert({
-      messageId: message.messageId,
-      ownerUserId: message.ownerUserId,
-      contactUserId: message.contactUserId,
-      content: message.content,
-      serializedContent: message.serializedContent,
-      type: message.type,
-      direction: message.direction,
-      status: message.status,
-      timestamp: message.timestamp,
-      metadata: serializeMetadata(message.metadata),
-      seeker: message.seeker,
-      replyTo: serializeReplyTo(message.replyTo),
-      forwardOf: serializeForwardOf(message.forwardOf),
-      deleteOf: serializeDeleteOf(message.deleteOf),
-      editOf: serializeEditOf(message.editOf),
-      reactionOf: serializeReactionOf(message.reactionOf),
-      encryptedMessage: message.encryptedMessage,
-      whenToSend: message.whenToSend,
-    });
+    const result = await (parentTx ?? this.queries.conn.db).transaction(
+      async (tx: GossipSqliteTx) => {
+        const messageId = await this.queries.messages.insert(
+          {
+            messageId: message.messageId,
+            ownerUserId: message.ownerUserId,
+            contactUserId: message.contactUserId,
+            content: message.content,
+            serializedContent: message.serializedContent,
+            type: message.type,
+            direction: message.direction,
+            status: message.status,
+            timestamp: message.timestamp,
+            metadata: serializeMetadata(message.metadata),
+            seeker: message.seeker,
+            replyTo: serializeReplyTo(message.replyTo),
+            forwardOf: serializeForwardOf(message.forwardOf),
+            deleteOf: serializeDeleteOf(message.deleteOf),
+            editOf: serializeEditOf(message.editOf),
+            reactionOf: serializeReactionOf(message.reactionOf),
+            encryptedMessage: message.encryptedMessage,
+            whenToSend: message.whenToSend,
+          },
+          tx
+        );
 
-    const discussion = await this.queries.discussions.getByOwnerAndContact(
-      message.ownerUserId,
-      message.contactUserId
+        const discussion = await this.queries.discussions.getByOwnerAndContact(
+          message.ownerUserId,
+          message.contactUserId,
+          tx
+        );
+
+        if (
+          discussion &&
+          POST_MESSAGE_TYPES.includes(message.type) &&
+          !message.editOf
+        ) {
+          await this.queries.discussions.updateById(
+            discussion.id,
+            {
+              lastMessageId: messageId,
+              lastMessageContent: message.content,
+              lastMessageTimestamp: message.timestamp,
+              updatedAt: new Date(),
+            },
+            tx
+          );
+
+          if (message.direction === MessageDirection.INCOMING) {
+            await this.queries.discussions.incrementUnreadCount(
+              discussion.id,
+              tx
+            );
+          }
+
+          return { messageId, updatedDiscussionId: discussion?.id };
+        }
+
+        return { messageId, updatedDiscussionId: null };
+      }
     );
 
-    if (
-      discussion &&
-      message.type !== MessageType.KEEP_ALIVE &&
-      message.type !== MessageType.REACTION &&
-      message.type !== MessageType.RETENTION_POLICY
-    ) {
-      await this.queries.discussions.updateById(discussion.id, {
-        lastMessageId: messageId,
-        lastMessageContent: message.content,
-        lastMessageTimestamp: message.timestamp,
-        updatedAt: new Date(),
-      });
-
-      if (message.direction === MessageDirection.INCOMING) {
-        await this.queries.discussions.incrementUnreadCount(discussion.id);
-      }
+    if (result.updatedDiscussionId && !parentTx) {
+      this.eventEmitter.emit(
+        SdkEventType.DISCUSSION_UPDATED,
+        result.updatedDiscussionId
+      );
     }
 
-    return messageId;
+    return result.messageId;
   }
 
   private async decryptMessages(encrypted: EncryptedMessage[]): Promise<{
@@ -532,16 +589,17 @@ export class MessageService {
           continue;
         }
 
-        await this.queries.messages.updateById(target.id, {
-          content: '[Message deleted]',
-          type: MessageType.DELETED,
-        });
+        const resDb = await this.PerformDeleteMessage(target);
+        if (!resDb.success) {
+          throw new Error(
+            resDb.error?.message ?? 'Failed to delete message from db'
+          );
+        }
 
-        // Do not insert a new message row for delete control messages
         continue;
       }
 
-      // Handle edit control messages by updating the referenced message in-place
+      // Handle EDIT control messages by updating the referenced message in-place
       if (message.editOf?.originalMsgId) {
         const target = await this.findMessageByMsgId(
           message.editOf.originalMsgId,
@@ -561,10 +619,21 @@ export class MessageService {
           edited: true,
         };
 
-        await this.queries.messages.updateById(target.id, {
+        // Emit before DB write so UI updates instantly
+        this.emitMessageReceived({
+          ...target,
           content: message.content,
-          metadata: serializeMetadata(mergedMetadata),
+          metadata: mergedMetadata,
         });
+
+        const res = await this.performEditMessage(
+          message.content,
+          target,
+          mergedMetadata
+        );
+        if (!res.success) {
+          throw new Error(res.error?.message ?? 'Failed to edit message in db');
+        }
 
         // Do not insert a new message row for edit control messages
         continue;
@@ -585,10 +654,20 @@ export class MessageService {
             retentionPolicySetAt: duration ? Date.now() : null,
           }
         );
-        this.eventEmitter.emit(
-          SdkEventType.DISCUSSION_UPDATED,
+        const discussion = await this.queries.discussions.getByOwnerAndContact(
+          ownerUserId,
           message.senderId
         );
+        if (!discussion) {
+          this.eventEmitter.emit(SdkEventType.ERROR, {
+            error: new Error(
+              'could no retrieve discussion after updating retention policy'
+            ),
+            context: 'storeDecryptedMessages',
+          });
+          continue;
+        }
+        this.eventEmitter.emit(SdkEventType.DISCUSSION_UPDATED, discussion.id);
         // Do not insert a new message row for retention policy control messages
         continue;
       }
@@ -624,6 +703,19 @@ export class MessageService {
           reactionOf: serializeReactionOf(message.reactionOf),
         });
 
+        this.emitMessageReceived({
+          id,
+          messageId: message.messageId,
+          ownerUserId,
+          contactUserId: discussion.contactUserId,
+          content: message.content,
+          type: MessageType.REACTION,
+          direction: MessageDirection.INCOMING,
+          status: MessageStatus.DELIVERED,
+          timestamp: message.sentAt,
+          reactionOf: message.reactionOf,
+        });
+
         storedIds.push(id);
         // Do not update discussion lastMessageContent for reactions
         continue;
@@ -649,7 +741,7 @@ export class MessageService {
       );
 
       if (isDuplicate) {
-        log.info('Duplicate message received, skipping', {
+        log.info('Duplicate message received, skip  ping', {
           senderId: message.senderId,
           preview: message.content.slice(0, 30),
         });
@@ -668,6 +760,19 @@ export class MessageService {
           });
         }
       }
+
+      const incomingMsg: Omit<Message, 'id'> = {
+        messageId: message.messageId,
+        ownerUserId,
+        contactUserId: discussion.contactUserId,
+        content: message.content,
+        type: message.type,
+        direction: MessageDirection.INCOMING,
+        status: MessageStatus.DELIVERED,
+        timestamp: message.sentAt,
+        replyTo: message.replyTo,
+        forwardOf: message.forwardOf,
+      };
 
       const id = await this.queries.messages.insert({
         messageId: message.messageId,
@@ -696,14 +801,9 @@ export class MessageService {
 
       storedIds.push(id);
 
-      // Emit event for new message
-      const row = await this.queries.messages.getById(id);
-      if (row) {
-        this.eventEmitter.emit(
-          SdkEventType.MESSAGE_RECEIVED,
-          rowToMessage(row)
-        );
-      }
+      // Re-emit with DB id so the store patches the optimistic message
+      this.emitMessageReceived({ ...incomingMsg, id });
+      this.eventEmitter.emit(SdkEventType.DISCUSSION_UPDATED, discussion.id);
     }
 
     return storedIds;
@@ -747,17 +847,6 @@ export class MessageService {
     return row ? rowToMessage(row) : undefined;
   }
 
-  async findMessageBySeeker(
-    seeker: Uint8Array,
-    ownerUserId: string
-  ): Promise<Message | undefined> {
-    const row = await this.queries.messages.getByOwnerAndSeeker(
-      ownerUserId,
-      seeker
-    );
-    return row ? rowToMessage(row) : undefined;
-  }
-
   private async acknowledgeMessages(
     seekers: Set<string>,
     userId: string
@@ -781,6 +870,10 @@ export class MessageService {
         seeker: null,
         whenToSend: null,
       });
+      this.eventEmitter.emit(SdkEventType.MESSAGE_ACKNOWLEDGED, {
+        contactUserId: m.contactUserId,
+        messageDbId: m.id,
+      });
     }
 
     // After marking as DELIVERED, clean up DELIVERED keep-alive messages
@@ -793,7 +886,10 @@ export class MessageService {
     }
   }
 
-  async sendMessage(message: Message): Promise<SendMessageResult> {
+  async sendMessage(
+    message: Message,
+    parentTx?: GossipSqliteTx
+  ): Promise<SendMessageResult> {
     const log = logger.forMethod('sendMessage');
     log.info('queueing message', {
       messageType: message.type,
@@ -810,27 +906,33 @@ export class MessageService {
     // Look up discussion
     const discussion = await this.queries.discussions.getByOwnerAndContact(
       message.ownerUserId,
-      message.contactUserId
+      message.contactUserId,
+      parentTx
     );
     if (!discussion) {
       return { success: false, error: 'Discussion not found' };
     }
 
     // Generate a random messageId for deduplication (not for keep-alive or retention policy)
-    const randomMessageId =
-      message.type !== MessageType.KEEP_ALIVE &&
-      message.type !== MessageType.RETENTION_POLICY
-        ? crypto.getRandomValues(new Uint8Array(MESSAGE_ID_SIZE))
-        : undefined;
-    message.messageId = randomMessageId;
+    // Skip if already provided (e.g., from optimistic send)
+    if (!message.messageId) {
+      const randomMessageId =
+        message.type !== MessageType.KEEP_ALIVE &&
+        message.type !== MessageType.RETENTION_POLICY
+          ? crypto.getRandomValues(new Uint8Array(MESSAGE_ID_SIZE))
+          : undefined;
+      message.messageId = randomMessageId;
+    }
 
-    // Add message as WAITING_SESSION
-    let messageId: number;
+    let messageIdDb: number;
     try {
-      messageId = await this.addMessageAndUpdateDiscussion({
-        ...message,
-        status: MessageStatus.WAITING_SESSION,
-      });
+      messageIdDb = await this.addMessageAndUpdateDiscussion(
+        {
+          ...message,
+          status: MessageStatus.WAITING_SESSION,
+        },
+        parentTx
+      );
     } catch (error) {
       return {
         success: false,
@@ -838,21 +940,35 @@ export class MessageService {
       };
     }
 
-    const queuedMessage = {
-      ...message,
-      id: messageId,
-      status: MessageStatus.WAITING_SESSION,
-    };
+    if (parentTx) {
+      // When called inside an existing SQL transaction, avoid lock re-entry
+      // (queue processing + plain read paths run through conn.db/execRaw queue).
+      return {
+        success: true,
+        message: {
+          ...message,
+          id: messageIdDb,
+        },
+      };
+    }
 
     /*
-    Trigger a state update to send the new message.
-    If the stateUpdate function is already running, it will be skipped.
+    Trigger a sending queue state update for contact in order to send the new message.
+    If the processSendQueueForContact function is already running, it will be skipped.
     */
-    await this.refreshService?.stateUpdate();
+    await this.processSendQueueForContact(message.contactUserId);
+
+    const messageDb = await this.queries.messages.getById(messageIdDb);
+    if (!messageDb) {
+      return {
+        success: false,
+        error: 'Could not retrieve message after adding it to the database',
+      };
+    }
 
     return {
       success: true,
-      message: queuedMessage,
+      message: rowToMessage(messageDb),
     };
   }
 
@@ -981,33 +1097,6 @@ export class MessageService {
     }
   }
 
-  async resendMessages(messages: Map<string, Message[]>) {
-    const log = logger.forMethod('resendMessages');
-
-    let totalProcessed = 0;
-
-    for (const [contactId, retryMessages] of messages.entries()) {
-      totalProcessed += retryMessages.length;
-
-      for (const msg of retryMessages) {
-        if (!msg.id) continue;
-        await this.queries.messages.updateById(msg.id, {
-          status: MessageStatus.WAITING_SESSION,
-          encryptedMessage: null,
-          seeker: null,
-          whenToSend: null,
-        });
-      }
-
-      await this.processSendQueueForContact(contactId);
-    }
-
-    log.info('resend completed', {
-      contacts: messages.size,
-      messagesProcessed: totalProcessed,
-    });
-  }
-
   /**
    * Process the send queue for a single contact.
    * Handles WAITING_SESSION -> READY encryption and READY -> SENT delivery.
@@ -1082,13 +1171,18 @@ export class MessageService {
 
       for (const msg of pendingMessages) {
         if (!msg.id) continue;
+        if (this.inFlightFastPath.has(msg.id)) continue;
 
-        let currentStatus = msg.status;
+        const currentStatus = msg.status;
         let encryptedMessage = msg.encryptedMessage;
         let seeker = msg.seeker;
-        let whenToSend = msg.whenToSend;
+        const whenToSend = msg.whenToSend;
 
-        // If the sessions is saturated it can't send messages on session manager
+        // Happy path: WAITING_SESSION + Active session.
+        // Encrypt → network → SENT directly, skipping the intermediate
+        // READY SQL write. The READY block below still handles retries
+        // (delayed sends, post-failure retries), where the encrypted
+        // bytes need to survive a restart.
         if (
           currentStatus === MessageStatus.WAITING_SESSION &&
           sessionStatus === SessionStatus.Active
@@ -1124,23 +1218,174 @@ export class MessageService {
 
           encryptedMessage = sendOutput.data;
           seeker = sendOutput.seeker;
-          whenToSend = new Date();
 
-          await this.queries.messages.updateById(msg.id, {
-            status: MessageStatus.READY,
-            encryptedMessage,
-            seeker,
-            whenToSend,
-            serializedContent,
-          });
-          currentStatus = MessageStatus.READY;
-          log.debug('message updated to READY', {
+          // Run persist and the wire write in PARALLEL.
+          //
+          // The encrypt above advanced the PQ session counter in RAM.
+          // Persist must capture that mutation durably, but it does
+          // NOT depend on the network result, and the network
+          // publish only needs the (seeker, ciphertext) pair — also
+          // independent of persist. Awaiting them sequentially
+          // (persist → network) costs `persist + network` (≈ 500 ms
+          // on Android); awaiting them in parallel costs
+          // `max(persist, network)` (≈ 350 ms — persist hides under
+          // the network round-trip).
+          //
+          // Crash-safety analysis (verified against the gossip
+          // session manager in `wasm/sessions/src/session_manager.rs`
+          // and `session.rs`):
+          //   - Window where network landed but persist did NOT:
+          //     B has advanced its peer-ratchet to the next expected
+          //     seeker. On A's restart, state is restored to the
+          //     pre-crash counter. A's send loop re-runs the row
+          //     (still WAITING_SESSION) and re-encrypts with the
+          //     OLD counter → produces a seeker B no longer expects
+          //     → B's `feed_incoming_message_board_read` finds no
+          //     matching peer and silently ignores the duplicate.
+          //     **No session kill.** The session-close branch in
+          //     `session_manager.rs:642` only fires after a peer is
+          //     matched AND `try_feed_incoming_message` returns None
+          //     (decrypt failure on a matched session) — neither
+          //     condition is met for a stale-seeker retry.
+          //   - Side-effect: A's row stays WAITING_SESSION and is
+          //     retried on every session refresh. The `acknowledged
+          //     _seekers` field of the next message B sends back
+          //     to A includes the seeker A originally published
+          //     (which B did receive successfully), and A's send
+          //     loop uses that to mark the row SENT and stop
+          //     retrying. So the "stuck retry" is self-healing as
+          //     soon as the conversation has any back-traffic.
+          //
+          // Promise.all rejects on either failure:
+          //   - Network failed → caught below, row → READY with
+          //     ciphertext kept (avoids re-encrypt on retry).
+          //   - Persist failed → bubbles up, row stays
+          //     WAITING_SESSION (no SENT update). The next session
+          //     activation re-runs the loop.
+          try {
+            await Promise.all([
+              this.messageProtocol.sendMessage({
+                seeker,
+                ciphertext: encryptedMessage,
+              }),
+              this.persistFlusher(),
+            ]);
+          } catch (error) {
+            log.error('network send failed for fresh message', {
+              messageId: msg.id,
+              error,
+            });
+            await this.queries.messages.updateById(msg.id, {
+              status: MessageStatus.READY,
+              encryptedMessage,
+              seeker,
+              whenToSend: new Date(
+                Date.now() + this.config.messages.retryDelayMs
+              ),
+              serializedContent,
+            });
+            continue;
+          }
+
+          // Network success. Race-check: most resets only touch
+          // READY/SENT rows so they leave us alone, but the discussion
+          // could have been deleted while we were on the wire — bail
+          // out if the row is gone or has moved to a non-WAITING state.
+          const latestRow = await this.queries.messages.getById(msg.id);
+          if (
+            !latestRow ||
+            latestRow.status !== MessageStatus.WAITING_SESSION
+          ) {
+            log.debug(
+              'message gone or status changed during network send, skipping SENT update',
+              {
+                messageId: msg.id,
+                currentStatus: latestRow?.status,
+              }
+            );
+            continue;
+          }
+
+          // Network success. Emit MESSAGE_SENT and bump counters
+          // BEFORE awaiting the SQL UPDATE so the UI flips to ✓ as
+          // soon as the wire write returns (saves ~150 ms of
+          // encrypted-VFS commit on the user-perceived path). The
+          // UPDATE itself fires in the background through the same
+          // runTransaction queue as everything else, so subsequent
+          // sends still see ordered persistence.
+          //
+          // TODO check: duplicate-send risk on crash.
+          //   - If the process dies between network success and the
+          //     async UPDATE landing, the row stays WAITING_SESSION.
+          //     At next boot `processSendQueueForContact` will pick
+          //     it up, re-encrypt (advancing the PQ counter) and
+          //     re-send. The peer should dedupe on `seeker` (each
+          //     message has a unique seeker bound to the original
+          //     ciphertext) — VERIFY relay/peer dedup behaviour and
+          //     decide whether the dup-window is acceptable for
+          //     the protocol's `messageId` semantics.
+          //
+          // TODO check: race against external row resetters.
+          //   - The `latestRow.status !== WAITING_SESSION` guard
+          //     above protects against another flow flipping the
+          //     row mid-send, but only at the moment of the check.
+          //     If a reset path runs AFTER we read but BEFORE the
+          //     async UPDATE lands, we'd overwrite their reset
+          //     with SENT. Today no SDK code path resets a SENT
+          //     row, so the race is theoretical — but if a future
+          //     "delete account" or "wipe history" flow targets
+          //     SENT rows, revisit this.
+          //
+          // TODO check: ordering with subsequent sends.
+          //   - The fire-and-forget UPDATE goes through the same
+          //     runTransaction queue, so a follow-up send's
+          //     addMessage waits for it implicitly. That preserves
+          //     "row exists before next op" but means the gain is
+          //     mostly in tap-to-sent perception, not raw
+          //     throughput on rapid bursts.
+          sentCount++;
+          log.debug('message sent (skipped READY)', {
             messageId: msg.id,
-            status: currentStatus,
+            status: MessageStatus.SENT,
             content: msg.content,
             type: msg.type,
             direction: msg.direction,
           });
+          const isControlMessage = !!(msg.deleteOf || msg.editOf);
+          if (!isControlMessage) {
+            try {
+              this.eventEmitter.emit(SdkEventType.MESSAGE_SENT, {
+                ...msg,
+                status: MessageStatus.SENT,
+              });
+            } catch (error) {
+              log.error('failed to emit message sent event', {
+                messageId: msg.id,
+                error,
+              });
+            }
+          }
+
+          // Fire-and-forget persistence. Failures are logged but
+          // never abort the send — the message is already on the
+          // relay; locally retrying the UPDATE on the next tick is
+          // safe because runTransaction serialises ordering.
+          const msgId = msg.id;
+          void this.queries.messages
+            .updateById(msgId!, {
+              status: MessageStatus.SENT,
+              seeker,
+              encryptedMessage: null,
+              serializedContent: null,
+              whenToSend: null,
+            })
+            .catch(error => {
+              log.error(
+                'background SENT-status persist failed (message is on relay; will retry on next session activation)',
+                { messageId: msgId, error }
+              );
+            });
+          continue;
         }
 
         if (currentStatus === MessageStatus.READY) {
@@ -1213,16 +1458,22 @@ export class MessageService {
                 type: msg.type,
                 direction: msg.direction,
               });
-              try {
-                this.eventEmitter.emit(SdkEventType.MESSAGE_SENT, {
-                  ...msg,
-                  status: MessageStatus.SENT,
-                });
-              } catch (error) {
-                log.error('failed to emit message sent event', {
-                  messageId: msg.id,
-                  error,
-                });
+              // Skip emitting MESSAGE_SENT for control messages (delete/edit).
+              // These are internal transport details; the semantic optimistic
+              // events already handle UI state.
+              const isControlMessage = !!(msg.deleteOf || msg.editOf);
+              if (!isControlMessage) {
+                try {
+                  this.eventEmitter.emit(SdkEventType.MESSAGE_SENT, {
+                    ...msg,
+                    status: MessageStatus.SENT,
+                  });
+                } catch (error) {
+                  log.error('failed to emit message sent event', {
+                    messageId: msg.id,
+                    error,
+                  });
+                }
               }
             }
           } catch (error) {
@@ -1261,14 +1512,6 @@ export class MessageService {
       contactUserId
     );
     return rows.length;
-  }
-
-  /**
-   * Get count of messages waiting for session with a specific contact.
-   */
-  async getWaitingMessageCount(contactUserId: string): Promise<number> {
-    const ownerUserId = this.session.userIdEncoded;
-    return this.queries.messages.getWaitingCount(ownerUserId, contactUserId);
   }
 
   // ─────────────────────────────────────────────────────────────────
@@ -1310,7 +1553,7 @@ export class MessageService {
     return rows.map(rowToMessage);
   }
 
-  /** Send a message, queued via QueueManager if available */
+  /** Send a message and await the full DB write + queue pipeline. */
   async send(message: Omit<Message, 'id'>): Promise<SendMessageResult> {
     if (this.queueManager) {
       return this.queueManager.enqueue(message.contactUserId, () =>
@@ -1341,7 +1584,6 @@ export class MessageService {
       ...(options?.metadata && { metadata: options.metadata }),
     };
     const result = await this.send(message);
-    await this.refreshService?.stateUpdate();
     return result;
   }
 
@@ -1350,54 +1592,202 @@ export class MessageService {
     return this.fetchMessages();
   }
 
+  private async PerformDeleteMessage(
+    message: Message,
+    parentTx?: GossipSqliteTx
+  ): Promise<Result<(() => void) | null, Error>> {
+    if (!message.id) {
+      return { success: false, error: new Error('Message ID is required') };
+    }
+    if (message.type === MessageType.REACTION) {
+      // Reaction delete: hard-delete the row, not "[Message deleted]"
+      try {
+        await this.queries.messages.deleteById(message.id, parentTx);
+        return {
+          success: true,
+          data: () => {
+            this.eventEmitter.emit(SdkEventType.MESSAGE_DELETED, {
+              messages: [message],
+            });
+          },
+        };
+      } catch (error) {
+        return {
+          success: false,
+          error:
+            error instanceof Error
+              ? error
+              : new Error(
+                  'Unknown error occurred while deleting reaction message'
+                ),
+        };
+      }
+    }
+
+    let deletedMessages: Message[] = [];
+    let updatedMessages: Message[] = [];
+    let discussionUpdated = false;
+    const discussion = await this.queries.discussions.getByOwnerAndContact(
+      message.ownerUserId,
+      message.contactUserId,
+      parentTx
+    );
+    if (!discussion) {
+      return { success: false, error: new Error('Discussion not found') };
+    }
+
+    await (parentTx ?? this.queries.conn.db).transaction(
+      async (trx: GossipSqliteTx) => {
+        // delete the message : MessageType.DELETED '[Message deleted]' in  db
+        await this.queries.messages.updateById(
+          message.id!, // message.id is guaranteed to be not null because we checked it above
+          {
+            content: '[Message deleted]',
+            type: MessageType.DELETED,
+          },
+          trx
+        );
+
+        if (POST_MESSAGE_TYPES.includes(message.type)) {
+          // If the message to delete is the last text message in the discussion, update the discussion to the previous last text message
+          if (discussion.lastMessageId === message.id) {
+            const lastMessage =
+              await this.queries.discussions.getLastTextMessage(
+                message.contactUserId,
+                trx
+              );
+            await this.queries.discussions.updateById(
+              discussion.id,
+              {
+                lastMessageId: lastMessage?.id ?? null,
+                lastMessageContent: lastMessage?.content ?? null,
+                lastMessageTimestamp: lastMessage?.timestamp ?? null,
+                updatedAt: new Date(),
+              },
+              trx
+            );
+            discussionUpdated = true;
+          }
+
+          // If deleted message is not read yet, decrement the discussion unread count
+          if (
+            message.status !== MessageStatus.READ &&
+            message.direction === MessageDirection.INCOMING
+          ) {
+            await this.queries.discussions.decrementUnreadCount(
+              discussion.id,
+              trx
+            );
+            discussionUpdated = true;
+          }
+
+          // Delete all REACTION messages for this contact referencing this message
+          const deletedReactionMessages = await trx
+            .delete(schema.messages)
+            .where(
+              and(
+                eq(schema.messages.contactUserId, message.contactUserId),
+                eq(schema.messages.type, MessageType.REACTION),
+                sql`json_extract(${schema.messages.reactionOf}, '$.originalMsgId') = ${encodeToBase64(message.messageId!)}`
+              )
+            )
+            .returning();
+          deletedMessages = deletedReactionMessages.map(rowToMessage);
+
+          // Also update all messages REPLYING to this message by setting their replyTo to null
+          const updatedMessagesDb = await trx
+            .update(schema.messages)
+            .set({ replyTo: null })
+            .where(
+              and(
+                eq(schema.messages.contactUserId, message.contactUserId),
+                sql`json_extract(${schema.messages.replyTo}, '$.originalMsgId') = ${encodeToBase64(message.messageId!)}`
+              )
+            )
+            .returning();
+          updatedMessages = updatedMessagesDb.map(row =>
+            rowToMessage(row as MessageRow)
+          );
+        }
+      }
+    );
+
+    // function to be called after the db transaction is committed.
+    // Send events only when we are sure corresponding operation are saved in db
+    const postDbCommit = () => {
+      this.eventEmitter.emit(SdkEventType.MESSAGE_DELETED, {
+        messages: [message, ...deletedMessages],
+      });
+      if (updatedMessages.length > 0) {
+        this.eventEmitter.emit(SdkEventType.MESSAGE_UPDATED, {
+          messages: updatedMessages,
+        });
+      }
+      if (discussionUpdated) {
+        this.eventEmitter.emit(SdkEventType.DISCUSSION_UPDATED, discussion.id);
+      }
+    };
+
+    if (!parentTx) {
+      // if we are not in a db transaction, we can just emit the event and return
+      postDbCommit();
+      return { success: true, data: null };
+    } else {
+      // if we are in a db transaction, we need to return a function that will be called after the transaction is committed
+      return { success: true, data: postDbCommit };
+    }
+  }
+
   /**
-   * Delete an outgoing message by its database ID.
+   * Delete a message by its database ID (outgoing or incoming in 1-to-1).
    * Marks the local message as deleted and enqueues a delete control message
    * so the peer can mark their copy as deleted as well.
+   *
+   * Both sides can delete any message for plausible deniability.
    */
   async deleteMessage(id: number): Promise<boolean> {
     const row = await this.queries.messages.getById(id);
-    if (!row) {
-      return false;
-    }
-
-    // Only allow deleting our own outgoing messages
-    if (row.direction !== MessageDirection.OUTGOING) {
-      return false;
-    }
-
-    if (!row.messageId) {
+    if (!row) return false;
+    if (!row.messageId)
       throw new Error('Cannot delete a message that has no messageId');
-    }
 
     const ownerUserId = this.session.userIdEncoded;
 
-    // Mark the original message as deleted locally
-    await this.queries.messages.updateById(id, {
-      content: '[Message deleted]',
-      type: MessageType.DELETED,
-    });
+    const callbackAfterDbCommit: (() => void) | null =
+      await this.queries.conn.withTransaction(async tx => {
+        const res = await this.PerformDeleteMessage(rowToMessage(row), tx);
+        if (!res.success) {
+          tx.rollback(); // if deleting the message from the db fails, rollback the transaction
+          throw new Error(
+            res.error?.message ?? 'Failed to delete message from db'
+          );
+        }
 
-    // Enqueue a delete control message to notify the peer
-    const controlMessage: Omit<Message, 'id'> = {
-      ownerUserId,
-      contactUserId: row.contactUserId,
-      content: '',
-      type: MessageType.DELETED,
-      direction: MessageDirection.OUTGOING,
-      status: MessageStatus.WAITING_SESSION,
-      timestamp: new Date(),
-      deleteOf: {
-        originalMsgId: row.messageId,
-      },
-    };
+        // Send the delete control message to the peer
+        const controlMessage: Omit<Message, 'id'> = {
+          ownerUserId,
+          contactUserId: row.contactUserId,
+          content: '',
+          type: MessageType.DELETED,
+          direction: MessageDirection.OUTGOING,
+          status: MessageStatus.WAITING_SESSION,
+          timestamp: new Date(),
+          deleteOf: { originalMsgId: row.messageId! }, // row.messageId was previously verified to be not null
+        };
 
-    const result = await this.send(controlMessage);
-    if (!result.success) {
-      throw new Error(result.error ?? 'Failed to enqueue delete message');
+        const result = await this.sendMessage(controlMessage, tx);
+        if (!result.success) {
+          tx.rollback(); // if sending the delete control message fails, rollback the transaction
+          throw new Error(result.error ?? 'Failed to enqueue delete message');
+        }
+        return res.data;
+      }, 'immediate');
+
+    if (callbackAfterDbCommit) {
+      callbackAfterDbCommit();
     }
+    await this.processSendQueueForContact(row.contactUserId);
 
-    await this.refreshService?.stateUpdate();
     return true;
   }
 
@@ -1417,8 +1807,70 @@ export class MessageService {
       reactionOf: { originalMsgId },
     };
     const result = await this.send(message);
-    await this.refreshService?.stateUpdate();
     return result;
+  }
+
+  private async performEditMessage(
+    newContent: string,
+    originalMsg: Message,
+    metadata: Record<string, unknown>,
+    tx?: GossipSqliteTx
+  ): Promise<Result<(() => void) | null, Error>> {
+    if (!originalMsg.id) {
+      return { success: false, error: new Error('Message ID is required') };
+    }
+    const db = tx ?? this.queries.conn.db;
+    let discussionUpdatedId: number | undefined;
+    try {
+      await db
+        .update(schema.messages)
+        .set({ content: newContent, metadata: serializeMetadata(metadata) })
+        .where(eq(schema.messages.id, originalMsg.id))
+        .returning();
+
+      const discussion = await this.queries.discussions.getByOwnerAndContact(
+        originalMsg.ownerUserId,
+        originalMsg.contactUserId,
+        tx
+      );
+      if (!discussion) {
+        return { success: false, error: new Error('Discussion not found') };
+      }
+      if (discussion.lastMessageId === originalMsg.id) {
+        await this.queries.discussions.updateById(
+          discussion.id,
+          {
+            lastMessageContent: newContent,
+            updatedAt: new Date(),
+          },
+          tx
+        );
+        discussionUpdatedId = discussion.id;
+      }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error : new Error(String(error)),
+      };
+    }
+
+    const postDbCommit = () => {
+      if (discussionUpdatedId) {
+        this.eventEmitter.emit(
+          SdkEventType.DISCUSSION_UPDATED,
+          discussionUpdatedId
+        );
+      }
+    };
+
+    if (!tx) {
+      // if we are not in a db transaction, we can just emit the event and return
+      postDbCommit();
+      return { success: true, data: null };
+    } else {
+      // if we are in a db transaction, we need to return a function that will be called after the transaction is committed
+      return { success: true, data: postDbCommit };
+    }
   }
 
   /**
@@ -1428,57 +1880,53 @@ export class MessageService {
    */
   async editMessage(id: number, newContent: string): Promise<boolean> {
     const row = await this.queries.messages.getById(id);
-    if (!row) {
-      return false;
-    }
-
-    // Only allow editing our own outgoing messages
-    if (row.direction !== MessageDirection.OUTGOING) {
-      return false;
-    }
-
-    if (!row.messageId || row.messageId.length !== MESSAGE_ID_SIZE) {
+    if (!row) return false;
+    if (row.direction !== MessageDirection.OUTGOING) return false;
+    if (!row.messageId || row.messageId.length !== MESSAGE_ID_SIZE)
       throw new Error('Cannot edit a message that has no valid messageId');
-    }
 
     const ownerUserId = this.session.userIdEncoded;
 
-    // Merge existing metadata with edited flag
     const existingMetadata = deserializeMetadata(row.metadata) ?? {};
-    const mergedMetadata = {
-      ...existingMetadata,
-      edited: true,
-    };
+    const mergedMetadata = { ...existingMetadata, edited: true };
 
-    // Update the original message content locally, preserving timestamp
-    await this.queries.messages.updateById(id, {
-      content: newContent,
-      metadata: serializeMetadata(mergedMetadata),
-    });
+    const callbackAfterDbCommit: (() => void) | null =
+      await this.queries.conn.withTransaction(async tx => {
+        const res = await this.performEditMessage(
+          newContent,
+          rowToMessage(row),
+          mergedMetadata,
+          tx
+        );
+        if (!res.success) {
+          tx.rollback();
+          throw new Error(res.error?.message ?? 'Failed to edit message in db');
+        }
 
-    // Enqueue an edit control message to notify the peer
-    const controlMessage: Omit<Message, 'id'> = {
-      ownerUserId,
-      contactUserId: row.contactUserId,
-      content: newContent,
-      type: MessageType.TEXT,
-      direction: MessageDirection.OUTGOING,
-      status: MessageStatus.WAITING_SESSION,
-      timestamp: new Date(),
-      editOf: {
-        originalMsgId: row.messageId,
-      },
-      metadata: {
-        control: 'edit',
-      },
-    };
+        const controlMessage: Omit<Message, 'id'> = {
+          ownerUserId,
+          contactUserId: row.contactUserId,
+          content: newContent,
+          type: MessageType.TEXT,
+          direction: MessageDirection.OUTGOING,
+          status: MessageStatus.WAITING_SESSION,
+          timestamp: new Date(),
+          editOf: { originalMsgId: row.messageId! }, // row.messageId was previously verified to be not null
+          metadata: { control: 'edit' },
+        };
 
-    const result = await this.send(controlMessage);
-    if (!result.success) {
-      throw new Error(result.error ?? 'Failed to enqueue edit message');
+        const result = await this.sendMessage(controlMessage, tx);
+        if (!result.success) {
+          tx.rollback();
+          throw new Error(result.error ?? 'Failed to enqueue edit message');
+        }
+        return res.data;
+      }, 'immediate');
+
+    if (callbackAfterDbCommit) {
+      callbackAfterDbCommit();
     }
-
-    await this.refreshService?.stateUpdate();
+    await this.processSendQueueForContact(row.contactUserId);
     return true;
   }
 
@@ -1494,9 +1942,19 @@ export class MessageService {
     );
     if (withRetention.length === 0) return;
 
-    await this.queries.messages.deleteExpiredByOwner(
+    const expiredRows = await this.queries.messages.getExpiredByOwner(
       ownerUserId,
       withRetention
+    );
+    if (expiredRows.length === 0) return;
+
+    await Promise.all(
+      expiredRows.map(async row => {
+        const result = await this.PerformDeleteMessage(rowToMessage(row));
+        if (!result.success) {
+          throw result.error ?? new Error('Failed to delete expired message');
+        }
+      })
     );
   }
 
@@ -1512,20 +1970,33 @@ export class MessageService {
 
     const message = rowToMessage(row);
 
-    // Update message status
-    await this.queries.messages.updateById(id, { status: MessageStatus.READ });
+    // Perform message status update and unread count decrement atomically in a transaction
+    const discussionId = await this.queries.conn.withTransaction(async tx => {
+      // Update message status
+      await this.queries.messages.updateById(
+        id,
+        { status: MessageStatus.READ },
+        tx
+      );
 
-    // Atomically decrement discussion unread count
-    const discussion = await this.queries.discussions.getByOwnerAndContact(
-      message.ownerUserId,
-      message.contactUserId
-    );
+      // Atomically decrement discussion unread count
+      const discussion = await this.queries.discussions.getByOwnerAndContact(
+        message.ownerUserId,
+        message.contactUserId,
+        tx
+      );
+      if (!discussion || !discussion.id) {
+        throw new Error('Discussion not found');
+      }
 
-    if (discussion) {
-      await this.queries.discussions.decrementUnreadCount(discussion.id);
-    }
+      if (discussion) {
+        await this.queries.discussions.decrementUnreadCount(discussion.id, tx);
+      }
+      return discussion.id;
+    }, 'immediate');
 
     this.eventEmitter.emit(SdkEventType.MESSAGE_READ, id);
+    this.eventEmitter.emit(SdkEventType.DISCUSSION_UPDATED, discussionId);
 
     return true;
   }

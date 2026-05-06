@@ -159,7 +159,13 @@ describe('E2E: Discussion request (user A sends to user B)', () => {
           resolve(null);
         }, maxWaitMs);
 
-        const handler = (discussion: Discussion, contact: Contact) => {
+        const handler = ({
+          discussion,
+          contact,
+        }: {
+          discussion: Discussion;
+          contact: Contact;
+        }) => {
           if (discussion.contactUserId === userAId) {
             done = true;
             clearTimeout(timeout);

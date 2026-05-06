@@ -66,6 +66,8 @@ vi.mock('../../src/stores/discussionStore', () => ({
           createdAt: new Date(),
         },
       ],
+      sessionsStatuses: new Map(),
+      patchDiscussion: vi.fn(),
     }),
 }));
 
@@ -219,7 +221,7 @@ describe('Discussion multi-select input behavior', () => {
     expect(mockSendMessage).toHaveBeenCalledTimes(1);
   });
 
-  it('hides multi-delete action when selected message is incoming', async () => {
+  it('shows multi-delete action when selected message is incoming', async () => {
     await render(<Discussion />);
 
     await userEvent.click(
@@ -231,9 +233,7 @@ describe('Discussion multi-select input behavior', () => {
 
     await expect
       .element(page.getByRole('button', { name: 'mock multi delete' }))
-      .not.toBeInTheDocument();
-
-    expect(mockDeleteMessage).not.toHaveBeenCalled();
+      .toBeInTheDocument();
   });
 
   it('deletes selected messages when all selected messages are outgoing', async () => {

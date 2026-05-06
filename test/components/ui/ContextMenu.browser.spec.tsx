@@ -64,43 +64,64 @@ describe('ContextMenu', () => {
   it('closes on backdrop click', async () => {
     const { onClose } = renderMenu();
 
+    // Wait out the 400ms iOS-ghost-click guard on the backdrop.
+    await new Promise(r => setTimeout(r, 420));
+
     const backdrop = page.getByTestId('context-menu-backdrop');
     (backdrop.element() as HTMLElement).click();
     expect(onClose).toHaveBeenCalledOnce();
   });
 
-  it('focuses first item on open', async () => {
+  it('does not steal focus on open', async () => {
     renderMenu();
 
-    // Wait for rAF focus
     await new Promise(r => setTimeout(r, 50));
 
-    const firstItem = page.getByRole('menuitem', { name: 'Reply' });
-    await expect.element(firstItem).toBeInTheDocument();
-    // The first menuitem should be focused
-    expect(document.activeElement?.textContent).toContain('Reply');
+    await expect.element(page.getByRole('menu')).toBeInTheDocument();
+    // No menu item should be focused — focus stays on the previous element
+    const active = document.activeElement;
+    expect(active?.getAttribute('role')).not.toBe('menuitem');
   });
 
-  it('navigates items with arrow keys', async () => {
+  it('navigates items with arrow keys via data-focused', async () => {
     renderMenu();
 
     await new Promise(r => setTimeout(r, 50));
 
+    const items = document.querySelectorAll('[role="menuitem"]');
+
+    // First ArrowDown highlights the first item
     await userEvent.keyboard('{ArrowDown}');
-    expect(document.activeElement?.textContent).toContain('Forward');
+    expect(items[0].getAttribute('data-focused')).toBe('true');
 
     await userEvent.keyboard('{ArrowDown}');
-    expect(document.activeElement?.textContent).toContain('Copy');
+    expect(items[1].getAttribute('data-focused')).toBe('true');
+    expect(items[0].hasAttribute('data-focused')).toBe(false);
+
+    await userEvent.keyboard('{ArrowDown}');
+    expect(items[2].getAttribute('data-focused')).toBe('true');
 
     await userEvent.keyboard('{ArrowUp}');
-    expect(document.activeElement?.textContent).toContain('Forward');
+    expect(items[1].getAttribute('data-focused')).toBe('true');
 
     // Wrap around from top
     await userEvent.keyboard('{ArrowUp}');
-    expect(document.activeElement?.textContent).toContain('Reply');
+    expect(items[0].getAttribute('data-focused')).toBe('true');
 
     await userEvent.keyboard('{ArrowUp}');
-    expect(document.activeElement?.textContent).toContain('Copy');
+    expect(items[2].getAttribute('data-focused')).toBe('true');
+  });
+
+  it('activates highlighted item with Enter', async () => {
+    const { items, onClose } = renderMenu();
+
+    await new Promise(r => setTimeout(r, 50));
+
+    await userEvent.keyboard('{ArrowDown}');
+    await userEvent.keyboard('{Enter}');
+
+    expect(items[0].onClick).toHaveBeenCalledOnce();
+    expect(onClose).toHaveBeenCalledOnce();
   });
 
   it('applies danger styling', async () => {

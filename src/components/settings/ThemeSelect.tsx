@@ -86,7 +86,7 @@ const ThemeSelect: React.FC<ThemeSelectProps> = ({
                 onClick={() => handleThemeSelect(option.id)}
                 className={`w-full flex items-center px-4 py-4 rounded-xl border transition-colors ${
                   isSelected
-                    ? 'bg-primary/10 border-primary'
+                    ? 'bg-accent-soft/60 border-accent-soft-foreground/40'
                     : 'bg-card border-border hover:bg-muted/50'
                 }`}
               >
@@ -97,8 +97,8 @@ const ThemeSelect: React.FC<ThemeSelectProps> = ({
                   {option.label}
                 </span>
                 {isSelected && (
-                  <div className="flex items-center justify-center w-6 h-6 rounded-full bg-primary flex-shrink-0 ml-2">
-                    <Check className="text-primary-foreground" size={16} />
+                  <div className="flex items-center justify-center w-6 h-6 rounded-full bg-accent-soft flex-shrink-0 ml-2">
+                    <Check className="text-accent-soft-foreground" size={16} />
                   </div>
                 )}
               </button>

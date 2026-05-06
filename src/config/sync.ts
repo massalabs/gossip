@@ -1,11 +1,15 @@
 /**
- * Background Sync Configuration
+ * Background Sync Configuration (web / PWA service worker)
  *
- * Centralized configuration for service worker background sync intervals.
- * These values can be adjusted based on your requirements and mobile device constraints.
+ * Centralized intervals for Periodic Background Sync and related timers in
+ * `serviceWorkerSetup.ts` + `sw.ts`. These apply to **browser sessions** (desktop
+ * PWA or mobile browser), not to the Capacitor native shell — on iOS/Android
+ * apps, `@capacitor/background-runner` and `public/runners/background-sync.js`
+ * own scheduling (see `capacitor.config.ts`).
  *
- * Note: On mobile devices, browsers may throttle or delay syncs significantly.
- * Even with a 5-minute request, actual syncs may occur much less frequently.
+ * **PWA reality:** Chromium may honour `minInterval` only loosely; Safari often
+ * does not expose Periodic Background Sync; mobile WebViews may kill the service
+ * worker. Treat these numbers as *hints*, not SLAs.
  */
 
 export interface SyncConfig {
@@ -33,8 +37,8 @@ export interface SyncConfig {
 }
 
 export const defaultSyncConfig: SyncConfig = {
-  // Request 5 minutes, but browser may delay significantly on mobile
-  periodicSyncMinIntervalMs: 15 * 60 * 1000, // 15 minutes // chrome minimum
+  // Chrome enforces a minimum (~15m); actual cadence can be much slower.
+  periodicSyncMinIntervalMs: 15 * 60 * 1000,
 
   // Fallback timer interval when app is in background (5 minutes)
   // On mobile, service workers may be terminated, so this is less reliable

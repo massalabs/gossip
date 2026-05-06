@@ -1,12 +1,16 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { Capacitor } from '@capacitor/core';
-import PageLayout from '../../components/ui/PageLayout';
+import { Capacitor, type PluginListenerHandle } from '@capacitor/core';
+import { App } from '@capacitor/app';
+import PageLayout from '../../components/ui/Layout/PageLayout';
 import PageHeader from '../../components/ui/PageHeader';
 import Button from '../../components/ui/Button';
 import Toggle from '../../components/ui/Toggle';
 import BackgroundSyncSettings from '../../components/settings/BackgroundSyncSettings';
+import BackgroundSyncPrivacyNotice from '../../components/settings/BackgroundSyncPrivacyNotice';
+import { backgroundRefreshService } from '../../services/backgroundRefreshiOS';
+import { batteryOptimizationService } from '../../services/batteryOptimization';
 import {
   notificationService,
   type NotificationPreferences,
@@ -23,24 +27,69 @@ const NotificationsSettings: React.FC = () => {
     useState<NotificationPreferences>(() =>
       notificationService.getPreferences()
     );
+  // On native, the initial `getPreferences()` call returns a stale default
+  // (permission state is fetched asynchronously). Hide the permission control
+  // until the first real read resolves so we don't flash an "Enable" button
+  // for a user who already granted permission.
+  const [prefsLoaded, setPrefsLoaded] = useState(
+    () => !Capacitor.isNativePlatform()
+  );
   const [isRequestingPermission, setIsRequestingPermission] = useState(false);
 
   const handleBack = () => {
     navigate(ROUTES.settings());
   };
 
-  const handleNotificationToggle = useCallback((enabled: boolean) => {
-    notificationService.setEnabled(enabled);
-    setNotificationPrefs(notificationService.getPreferences());
+  const refreshPrefs = useCallback(async () => {
+    const prefs = await notificationService.fetchPreferences();
+    setNotificationPrefs(prefs);
+    setPrefsLoaded(true);
   }, []);
+
+  useEffect(() => {
+    void refreshPrefs();
+  }, [refreshPrefs]);
+
+  // Re-read when the user returns from the system Settings app — permission
+  // may have been granted or revoked outside our process.
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    let handle: PluginListenerHandle | null = null;
+    void (async () => {
+      handle = await App.addListener('appStateChange', state => {
+        if (state.isActive) {
+          void refreshPrefs();
+        }
+      });
+    })();
+    return () => {
+      if (handle) void handle.remove();
+    };
+  }, [refreshPrefs]);
+
+  const handleNotificationToggle = useCallback(
+    (enabled: boolean) => {
+      notificationService.setEnabled(enabled);
+      void refreshPrefs();
+    },
+    [refreshPrefs]
+  );
 
   const handleRequestNotificationPermission = useCallback(async () => {
     setIsRequestingPermission(true);
     try {
       await notificationService.requestPermission();
-      setNotificationPrefs(notificationService.getPreferences());
+      await refreshPrefs();
     } finally {
       setIsRequestingPermission(false);
+    }
+  }, [refreshPrefs]);
+
+  const handleOpenSystemSettings = useCallback(async () => {
+    if (Capacitor.getPlatform() === 'ios') {
+      await backgroundRefreshService.openSettings();
+    } else if (Capacitor.getPlatform() === 'android') {
+      await batteryOptimizationService.openAppSettings();
     }
   }, []);
 
@@ -76,7 +125,7 @@ const NotificationsSettings: React.FC = () => {
           <span className="text-base font-medium text-foreground flex-1 text-left">
             {t('notifications.title')}
           </span>
-          {notificationPrefs.permission.granted ? (
+          {!prefsLoaded ? null : notificationPrefs.permission.granted ? (
             <Toggle
               checked={notificationPrefs.enabled}
               onChange={handleNotificationToggle}
@@ -100,10 +149,21 @@ const NotificationsSettings: React.FC = () => {
           )}
         </div>
         {notificationPrefs.permission.denied && (
-          <div className="px-4 py-4">
+          <div className="px-4 py-4 space-y-3">
             <p className="text-xs text-muted-foreground">
-              {t('notifications.blocked_message')}
+              {Capacitor.isNativePlatform()
+                ? t('notifications.blocked_message_native')
+                : t('notifications.blocked_message_web')}
             </p>
+            {Capacitor.isNativePlatform() && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleOpenSystemSettings}
+              >
+                {t('notifications.open_settings')}
+              </Button>
+            )}
           </div>
         )}
         {/* Test Notification - Only show when debug mode is enabled */}
@@ -116,8 +176,6 @@ const NotificationsSettings: React.FC = () => {
               className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0 border-t border-border"
               onClick={async () => {
                 await notificationService.showDiscussionNotification(
-                  'Test User',
-                  'Test Message',
                   'test-user-id'
                 );
               }}
@@ -130,11 +188,19 @@ const NotificationsSettings: React.FC = () => {
           )}
       </div>
 
-      {/* Background Sync Settings (Battery Optimization) - Only on native platforms */}
-      {Capacitor.isNativePlatform() && (
-        <div className="mt-6">
-          <BackgroundSyncSettings showDebugInfo={showDebugOption} />
-        </div>
+      {notificationPrefs.permission.granted && notificationPrefs.enabled && (
+        <>
+          {/* Background Sync Settings (Battery Optimization) - Only on native platforms */}
+          {Capacitor.isNativePlatform() && (
+            <div className="mt-6">
+              <BackgroundSyncSettings showDebugInfo={showDebugOption} />
+            </div>
+          )}
+
+          <div className="mt-6">
+            <BackgroundSyncPrivacyNotice />
+          </div>
+        </>
       )}
     </PageLayout>
   );

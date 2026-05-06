@@ -7,6 +7,8 @@
 
     <application
         android:allowBackup="true"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:networkSecurityConfig="@xml/network_security_config"
@@ -91,6 +93,11 @@
             </intent-filter>
         </receiver>
 
+        <service
+            android:name=".GossipForegroundSyncService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
     </application>
 
     <!-- Permissions -->
@@ -108,5 +115,8 @@
     
     <!-- Network state monitoring permission -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
 </manifest>

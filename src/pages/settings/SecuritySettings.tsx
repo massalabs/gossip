@@ -1,21 +1,16 @@
 import React, { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { Capacitor } from '@capacitor/core';
-import PageLayout from '../../components/ui/PageLayout';
+import PageLayout from '../../components/ui/Layout/PageLayout';
 import PageHeader from '../../components/ui/PageHeader';
-import BackgroundSyncSettings from '../../components/settings/BackgroundSyncSettings';
 import { useAppStore } from '../../stores/appStore';
 import { ROUTES } from '../../constants/routes';
 
 const SecuritySettings: React.FC = () => {
   const { t } = useTranslation('settings');
   const navigate = useNavigate();
-  const showDebugOption = useAppStore(s => s.showDebugOption);
   const autoLockTimeout = useAppStore(s => s.autoLockTimeout);
   const setAutoLockTimeout = useAppStore(s => s.setAutoLockTimeout);
-  const platform = Capacitor.getPlatform();
-  const isNative = platform !== 'web';
 
   const [isTimeoutModalOpen, setIsTimeoutModalOpen] = useState(false);
 
@@ -63,12 +58,9 @@ const SecuritySettings: React.FC = () => {
           className="w-full flex items-center justify-between text-sm font-medium text-foreground hover:bg-muted px-4 py-3 transition-colors border-t border-border"
         >
           <span>{t('security.auto_lock_current')}</span>
-          <span className="text-primary">{timeoutLabel}</span>
+          <span className="text-accent-soft-foreground">{timeoutLabel}</span>
         </button>
       </div>
-
-      {/* Background sync section (native only) */}
-      {isNative && <BackgroundSyncSettings showDebugInfo={showDebugOption} />}
 
       {isTimeoutModalOpen && (
         <div
@@ -92,7 +84,7 @@ const SecuritySettings: React.FC = () => {
                   }}
                   className={`w-full text-left px-4 py-3 rounded-lg text-sm transition-colors ${
                     autoLockTimeout === option.value
-                      ? 'bg-primary/10 text-primary font-medium'
+                      ? 'bg-accent-soft text-accent-soft-foreground font-medium'
                       : 'hover:bg-muted text-foreground'
                   }`}
                 >

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import EmojiPicker, {
   type EmojiClickData,
@@ -7,6 +7,7 @@ import EmojiPicker, {
 } from 'emoji-picker-react';
 import { Capacitor } from '@capacitor/core';
 import { useUiStore } from '../../stores/uiStore';
+import { useTranslation } from 'react-i18next';
 
 const isAndroid = Capacitor.getPlatform() === 'android';
 
@@ -15,6 +16,7 @@ interface EmojiPickerModalProps {
   onClose: () => void;
   onSelectEmoji: (emoji: string) => void;
   title?: string;
+  height?: number;
 }
 
 const EmojiPickerModal: React.FC<EmojiPickerModalProps> = ({
@@ -22,7 +24,9 @@ const EmojiPickerModal: React.FC<EmojiPickerModalProps> = ({
   onClose,
   onSelectEmoji,
   title,
+  height = 300,
 }) => {
+  const { t } = useTranslation('discussions');
   const resolvedTheme = useUiStore(s => s.resolvedTheme);
   const [mounted, setMounted] = useState(false);
 
@@ -33,6 +37,19 @@ const EmojiPickerModal: React.FC<EmojiPickerModalProps> = ({
     }
     setMounted(false);
   }, [isOpen]);
+
+  const handleKeyDown = useCallback(
+    (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    },
+    [onClose]
+  );
+
+  useEffect(() => {
+    if (!isOpen) return;
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, handleKeyDown]);
 
   if (!isOpen) return null;
 
@@ -108,13 +125,12 @@ const EmojiPickerModal: React.FC<EmojiPickerModalProps> = ({
         <EmojiPicker
           onEmojiClick={(emojiData: EmojiClickData) => {
             onSelectEmoji(emojiData.emoji);
-            onClose();
           }}
           theme={resolvedTheme === 'dark' ? Theme.DARK : Theme.LIGHT}
           emojiStyle={EmojiStyle.NATIVE}
-          height={300}
+          height={height}
           width="100%"
-          searchPlaceholder="Search emoji…"
+          searchPlaceholder={t('message_input.emoji_search')}
           searchDisabled={isAndroid}
           autoFocusSearch={false}
           skinTonesDisabled

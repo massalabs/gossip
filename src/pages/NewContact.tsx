@@ -9,12 +9,14 @@ import ScanQRCode from '../components/settings/ScanQRCode';
 
 import { useAccountStore } from '../stores/accountStore';
 import { useAppStore } from '../stores/appStore';
-import { Upload, CheckCircle, Info } from 'react-feather';
+import { Upload, CheckCircle, Info, Loader } from 'react-feather';
 import { formatUserId } from '@massalabs/gossip-sdk';
+import { USERNAME_MAX_LENGTH } from '../utils/validation';
 import QrCodeIcon from '../components/ui/customIcons/QrCodeIcon';
-import PageLayout from '../components/ui/PageLayout';
+import PageLayout from '../components/ui/Layout/PageLayout';
 import PageHeader from '../components/ui/PageHeader';
 import ConnectionBanner from '../components/ui/ConnectionBanner';
+import Toggle from '../components/ui/Toggle';
 
 const NewContact: React.FC = () => {
   const { t } = useTranslation('contacts');
@@ -23,6 +25,7 @@ const NewContact: React.FC = () => {
   const { state } = useLocation();
   const [isDiscardModalOpen, setIsDiscardModalOpen] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
+  const [showMessage, setShowMessage] = useState(false);
   const { userProfile } = useAccountStore();
   const mnsEnabled = useAppStore(s => s.mnsEnabled);
 
@@ -34,6 +37,7 @@ const NewContact: React.FC = () => {
     mnsState,
     shareUsername,
     customUsername,
+    customUsernameError,
     isSubmitting,
     canSubmit,
     hasUnsavedChanges,
@@ -111,14 +115,18 @@ const NewContact: React.FC = () => {
       rightAction={
         <button
           onClick={handleSubmit}
-          className={`font-semibold bg-accent text-primary-foreground px-4 py-1.5 rounded-full transition-colors ${
+          className={`font-semibold bg-accent text-primary-foreground px-4 py-1.5 rounded-full transition-colors inline-flex items-center gap-1.5 ${
             isAddDisabled
               ? 'opacity-30 cursor-not-allowed'
               : 'hover:bg-accent/80 active:bg-accent/60'
           }`}
           aria-disabled={isAddDisabled}
+          aria-busy={isSubmitting}
           aria-label={t('new_contact.add_contact')}
         >
+          {isSubmitting && (
+            <Loader className="w-3.5 h-3.5 animate-spin" aria-hidden="true" />
+          )}
           {isSubmitting ? t('new_contact.adding') : t('new_contact.add')}
         </button>
       }
@@ -132,236 +140,248 @@ const NewContact: React.FC = () => {
       contentClassName="px-6 py-6 pb-safe-b"
     >
       <ConnectionBanner />
-      {/* Input Fields Container */}
-      <div className="bg-card rounded-xl border border-border overflow-hidden mb-6">
-        {/* Username Field */}
-        <div className="px-4 py-4 border-b border-border">
-          <input
-            id="contact-name"
-            type="text"
-            value={name.value}
-            onChange={e => handleNameChange(e.target.value)}
-            placeholder={t('new_contact.username_placeholder')}
-            className="w-full bg-transparent text-foreground placeholder-muted-foreground focus:outline-none"
-            aria-describedby={name.error ? 'contact-name-error' : undefined}
-          />
-          {name.error && (
-            <p
-              id="contact-name-error"
-              className="mt-1.5 text-sm text-destructive"
-              role="alert"
-            >
-              {name.error}
-            </p>
+      {/* Lock the form while a submit is in flight: visual fade +
+          per-input `disabled` attribute. The fieldset is preferred over
+          a wrapping div with `pointer-events-none` because it also
+          blocks keyboard interaction (tabbing into a disabled control
+          is a no-op in HTML), without needing per-input plumbing for
+          every native input. `disabled` on a fieldset cascades to all
+          its form descendants. We keep `border-0 p-0 m-0` so the
+          fieldset is visually transparent. */}
+      <fieldset
+        disabled={isSubmitting}
+        aria-busy={isSubmitting}
+        className={`border-0 p-0 m-0 transition-opacity duration-150 ${
+          isSubmitting ? 'opacity-60' : 'opacity-100'
+        }`}
+      >
+        {/* Input Fields Container */}
+        <div className="bg-card rounded-xl border border-border overflow-hidden mb-6">
+          {/* Username Field */}
+          <div className="px-4 py-4 border-b border-border">
+            <input
+              id="contact-name"
+              type="text"
+              value={name.value}
+              onChange={e => handleNameChange(e.target.value)}
+              placeholder={t('new_contact.username_placeholder')}
+              className="w-full bg-transparent text-foreground placeholder-muted-foreground focus:outline-none"
+              aria-describedby={name.error ? 'contact-name-error' : undefined}
+            />
+            {name.error && (
+              <p
+                id="contact-name-error"
+                className="mt-1.5 text-sm text-destructive"
+                role="alert"
+              >
+                {name.error}
+              </p>
+            )}
+          </div>
+
+          {/* Gossip Address Field */}
+          <div className="px-4 py-4">
+            <div className="relative">
+              <input
+                id="contact-user-id"
+                type="text"
+                value={userId.value}
+                onChange={e => handleUserIdChange(e.target.value)}
+                placeholder={
+                  mnsEnabled
+                    ? t('new_contact.address_mns_placeholder')
+                    : t('new_contact.address_placeholder')
+                }
+                aria-label={
+                  mnsEnabled
+                    ? t('new_contact.address_mns_label')
+                    : t('new_contact.address_label')
+                }
+                className="w-full bg-transparent text-foreground placeholder-muted-foreground focus:outline-none pr-10"
+                aria-describedby={
+                  userId.error
+                    ? 'contact-user-id-error'
+                    : mnsState.resolvedGossipId
+                      ? 'contact-user-id-mns-resolved'
+                      : undefined
+                }
+              />
+              {userId.loading && (
+                <div className="absolute right-0 top-1/2 -translate-y-1/2">
+                  <div
+                    className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin"
+                    aria-label={
+                      mnsState.isResolving
+                        ? t('new_contact.resolving_mns')
+                        : t('new_contact.loading_public_key')
+                    }
+                  />
+                </div>
+              )}
+              {!userId.loading &&
+                mnsState.resolvedGossipId &&
+                !userId.error && (
+                  <div className="absolute right-0 top-1/2 -translate-y-1/2">
+                    <CheckCircle
+                      className="w-5 h-5 text-success"
+                      aria-label={t('new_contact.mns_resolved')}
+                    />
+                  </div>
+                )}
+            </div>
+            {/* MNS Resolution Success */}
+            {!userId.error && !userId.loading && mnsState.resolvedGossipId && (
+              <div
+                id="contact-user-id-mns-resolved"
+                className="mt-1.5 text-xs text-success"
+                aria-live="polite"
+                role="status"
+              >
+                {t('new_contact.mns_resolved_to', {
+                  domain: mnsState.resolvedDomain,
+                  id: formatUserId(mnsState.resolvedGossipId, 6, 4),
+                })}
+              </div>
+            )}
+            {userId.error && (
+              <p
+                id="contact-user-id-error"
+                className="mt-1.5 text-sm text-destructive"
+                role="alert"
+              >
+                {userId.error}
+              </p>
+            )}
+          </div>
+
+          {/* Scan QR / Import — alternative ways to fill the address */}
+          {!(userId.value.trim() && !userId.error) && (
+            <>
+              <button
+                onClick={() => setShowScanner(true)}
+                className="w-full flex items-center gap-3 px-4 py-3 border-t border-border text-accent-soft-foreground hover:bg-muted/50 active:bg-muted transition-colors"
+                aria-label={t('new_contact.scan_qr')}
+              >
+                <QrCodeIcon className="w-5 h-5 shrink-0" />
+                <span className="text-sm font-medium">
+                  {t('new_contact.scan_qr')}
+                </span>
+              </button>
+
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={fileState.isLoading}
+                className="w-full flex items-center gap-3 px-4 py-3 border-t border-border text-muted-foreground hover:bg-muted/50 active:bg-muted transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                aria-label={t('new_contact.import_file')}
+              >
+                <Upload className="w-5 h-5 shrink-0" />
+                <span className="text-sm font-medium">
+                  {t('new_contact.import_file')}
+                </span>
+              </button>
+            </>
           )}
         </div>
 
-        {/* Gossip Address Field */}
-        <div className="px-4 py-4">
-          <div className="relative">
-            <input
-              id="contact-user-id"
-              type="text"
-              value={userId.value}
-              onChange={e => handleUserIdChange(e.target.value)}
-              placeholder={
-                mnsEnabled
-                  ? t('new_contact.address_mns_placeholder')
-                  : t('new_contact.address_placeholder')
-              }
-              aria-label={
-                mnsEnabled
-                  ? t('new_contact.address_mns_label')
-                  : t('new_contact.address_label')
-              }
-              className="w-full bg-transparent text-foreground placeholder-muted-foreground focus:outline-none pr-10"
-              aria-describedby={
-                userId.error
-                  ? 'contact-user-id-error'
-                  : mnsState.resolvedGossipId
-                    ? 'contact-user-id-mns-resolved'
-                    : 'contact-user-id-helper'
-              }
+        {/* Request details — share username + message */}
+        <div className="bg-card rounded-xl border border-border overflow-hidden mb-6">
+          {/* Share username */}
+          <div className="flex items-center justify-between gap-3 px-4 py-3">
+            <span className="text-sm text-foreground">
+              {t('new_contact.share_username')}
+            </span>
+            <Toggle
+              checked={shareUsername}
+              onChange={handleShareUsernameChange}
+              ariaLabel={t('new_contact.share_username')}
             />
-            {userId.loading && (
-              <div className="absolute right-0 top-1/2 -translate-y-1/2">
-                <div
-                  className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin"
-                  aria-label={
-                    mnsState.isResolving
-                      ? t('new_contact.resolving_mns')
-                      : t('new_contact.loading_public_key')
-                  }
-                />
-              </div>
-            )}
-            {!userId.loading && mnsState.resolvedGossipId && !userId.error && (
-              <div className="absolute right-0 top-1/2 -translate-y-1/2">
-                <CheckCircle
-                  className="w-5 h-5 text-success"
-                  aria-label={t('new_contact.mns_resolved')}
-                />
-              </div>
-            )}
           </div>
-          {/* MNS Resolution Success */}
-          {!userId.error && !userId.loading && mnsState.resolvedGossipId && (
-            <div
-              id="contact-user-id-mns-resolved"
-              className="mt-1.5 text-xs text-success"
-              aria-live="polite"
-              role="status"
-            >
-              {t('new_contact.mns_resolved_to', {
-                domain: mnsState.resolvedDomain,
-                id: formatUserId(mnsState.resolvedGossipId, 6, 4),
-              })}
+          {shareUsername && (
+            <div className="px-4 pb-3">
+              <input
+                type="text"
+                value={customUsername}
+                onChange={e => handleCustomUsernameChange(e.target.value)}
+                placeholder={t('new_contact.share_username_placeholder')}
+                className="w-full bg-muted/50 text-foreground placeholder-muted-foreground focus:outline-none rounded-lg px-3 py-2 text-sm"
+                aria-label={t('new_contact.share_username_aria')}
+                maxLength={USERNAME_MAX_LENGTH}
+              />
+              {customUsernameError && (
+                <p className="mt-1.5 text-sm text-destructive" role="alert">
+                  {customUsernameError}
+                </p>
+              )}
             </div>
           )}
-          {/* Default helper text */}
-          {!userId.error && !userId.loading && !mnsState.resolvedGossipId && (
-            <p
-              id="contact-user-id-helper"
-              className="mt-1.5 text-xs text-muted-foreground"
-            >
-              {mnsEnabled
-                ? t('new_contact.address_mns_helper')
-                : t('new_contact.address_helper')}
-            </p>
-          )}
-          {userId.error && (
-            <p
-              id="contact-user-id-error"
-              className="mt-1.5 text-sm text-destructive"
-              role="alert"
-            >
-              {userId.error}
-            </p>
-          )}
-        </div>
-      </div>
 
-      {/* Scan QR Code and File Options — hidden when a valid gossip ID is entered */}
-      {!(userId.value.trim() && !userId.error) && (
-        <div className="flex gap-3 mb-6">
-          <button
-            onClick={() => setShowScanner(true)}
-            className="flex-1 flex items-center justify-center gap-2 text-primary hover:text-primary/80 transition-colors py-3"
-            aria-label={t('new_contact.scan_qr')}
-          >
-            <QrCodeIcon className="w-5 h-5" />
-            <span className="text-base font-medium">
-              {t('new_contact.scan_qr')}
-            </span>
-          </button>
-
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={fileState.isLoading}
-            className="flex-1 flex items-center justify-center gap-2 text-muted-foreground hover:text-foreground transition-colors py-3 disabled:opacity-50 disabled:cursor-not-allowed"
-            aria-label={t('new_contact.import_file')}
-          >
-            <Upload className="w-5 h-5" />
-            <span className="text-base font-medium">
-              {t('new_contact.import_file')}
-            </span>
-          </button>
-        </div>
-      )}
-
-      {/* Message Field */}
-      <div className="bg-card rounded-xl border border-border p-4 mb-6">
-        <label
-          htmlFor="contact-message"
-          className="block text-sm font-medium text-foreground mb-2"
-        >
-          {t('new_contact.announcement_label')}
-        </label>
-        <textarea
-          id="contact-message"
-          value={message.value}
-          onChange={e => handleMessageChange(e.target.value)}
-          placeholder={getDefaultMessage()}
-          rows={3}
-          maxLength={500}
-          className="w-full bg-transparent text-foreground placeholder-muted-foreground focus:outline-none resize-none"
-          aria-label={t('new_contact.announcement_aria')}
-        />
-        {message.value && (
-          <div className="flex items-center justify-end mt-2">
-            <span className="text-xs text-muted-foreground">
-              {message.value.length}/500
-            </span>
-          </div>
-        )}
-      </div>
-
-      {/* Share Username Section */}
-      <div className="bg-card rounded-xl border border-border p-4 mb-6">
-        <label className="flex items-center gap-3 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={shareUsername}
-            onChange={e => handleShareUsernameChange(e.target.checked)}
-            className="w-5 h-5 rounded border-border text-primary focus:ring-primary"
-          />
-          <span className="text-sm font-medium text-foreground">
-            {t('new_contact.share_username')}
-          </span>
-        </label>
-        <p className="text-xs text-muted-foreground mt-1 ml-8">
-          {t('new_contact.share_username_hint')}
-        </p>
-        {shareUsername && (
-          <div className="mt-3">
-            <input
-              type="text"
-              value={customUsername}
-              onChange={e => handleCustomUsernameChange(e.target.value)}
-              placeholder={t('new_contact.share_username_placeholder')}
-              className="w-full bg-muted/50 text-foreground placeholder-muted-foreground focus:outline-none rounded-lg px-3 py-2 text-sm"
-              aria-label={t('new_contact.share_username_aria')}
-              maxLength={50}
-            />
-          </div>
-        )}
-      </div>
-
-      <div className="bg-muted/30 border border-border rounded-xl p-4 mb-6">
-        <div className="flex items-start gap-2">
-          <Info className="w-4 h-4 text-muted-foreground mt-0.5 shrink-0" />
-          <div className="flex-1">
-            <p className="text-xs font-medium text-foreground mb-1">
-              {t('privacy_notice.title')}
-            </p>
-            <p className="text-xs text-muted-foreground leading-relaxed">
-              <Trans
-                i18nKey="privacy_notice.body"
-                ns="contacts"
-                components={{ strong: <strong /> }}
+          {/* Custom message */}
+          <div className="border-t border-border">
+            <div className="flex items-center justify-between gap-3 px-4 py-3">
+              <span className="text-sm text-foreground">
+                {t('new_contact.announcement_label')}
+              </span>
+              <Toggle
+                checked={message.value.length > 0 || showMessage}
+                onChange={v => {
+                  setShowMessage(v);
+                  if (!v) handleMessageChange('');
+                }}
+                ariaLabel={t('new_contact.announcement_label')}
               />
-            </p>
+            </div>
+            {(showMessage || message.value.length > 0) && (
+              <div className="px-4 pb-3">
+                <textarea
+                  id="contact-message"
+                  value={message.value}
+                  onChange={e => handleMessageChange(e.target.value)}
+                  placeholder={getDefaultMessage()}
+                  rows={3}
+                  maxLength={500}
+                  className="w-full bg-muted/50 text-foreground placeholder-muted-foreground focus:outline-none resize-none text-sm rounded-lg px-3 py-2"
+                  aria-label={t('new_contact.announcement_aria')}
+                />
+                {message.value && (
+                  <div className="flex items-center justify-end mt-1">
+                    <span className="text-xs text-muted-foreground">
+                      {message.value.length}/500
+                    </span>
+                  </div>
+                )}
+                <div className="flex items-start gap-2 mt-2 bg-muted/30 rounded-lg p-2.5">
+                  <Info className="w-3.5 h-3.5 text-muted-foreground mt-0.5 shrink-0" />
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    <Trans
+                      i18nKey="privacy_notice.body"
+                      ns="contacts"
+                      components={{ strong: <strong /> }}
+                    />
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
         </div>
-      </div>
 
-      {/* Hidden file input for file import */}
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept=".yaml,.yml"
-        className="hidden"
-        onChange={handleFileImport}
-        disabled={fileState.isLoading}
-        aria-label={t('new_contact.import_file_aria')}
-      />
-      {fileState.error && (
-        <p className="text-sm text-destructive mt-2 text-center" role="alert">
-          {fileState.error}
-        </p>
-      )}
+        {/* Hidden file input for file import */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".yaml,.yml"
+          className="hidden"
+          onChange={handleFileImport}
+          disabled={fileState.isLoading}
+          aria-label={t('new_contact.import_file_aria')}
+        />
+        {fileState.error && (
+          <p className="text-sm text-destructive mt-2 text-center" role="alert">
+            {fileState.error}
+          </p>
+        )}
 
-      <ErrorDisplay error={generalError} />
+        <ErrorDisplay error={generalError} />
+      </fieldset>
 
       {/* Discard Modal */}
       <BaseModal

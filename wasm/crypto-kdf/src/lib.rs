@@ -182,6 +182,24 @@ impl Extract {
 /// ```
 pub struct Expand(Hkdf<Sha256>);
 
+impl Drop for Expand {
+    fn drop(&mut self) {
+        // Hkdf<Sha256> does not implement Zeroize, so we overwrite the PRK
+        // bytes via its raw memory representation. The struct contains a
+        // 32-byte HMAC PRK that is the root secret for all derived keys.
+        //
+        // SAFETY: we are writing zeroes over our own memory, which is about
+        // to be deallocated. The struct is repr(Rust) so we zero the full
+        // size to cover padding. This is a best-effort defense — the
+        // compiler may have already spilled copies elsewhere.
+        let ptr = &mut self.0 as *mut Hkdf<Sha256> as *mut u8;
+        let size = core::mem::size_of::<Hkdf<Sha256>>();
+        unsafe {
+            core::ptr::write_bytes(ptr, 0, size);
+        }
+    }
+}
+
 impl Expand {
     /// Expands the PRK into a derived key of the specified length.
     ///

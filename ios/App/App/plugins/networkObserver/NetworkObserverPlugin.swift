@@ -31,18 +31,21 @@ public class NetworkObserverPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "releaseWakeLock", returnType: CAPPluginReturnPromise)
     ]
     
-    private let logger = Logger(subsystem: "net.massa.gossip", category: "NetworkObserver")
-    
+    private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "net.massa.gossip", category: "NetworkObserver")
+
     // Background task identifier (must match Info.plist BGTaskSchedulerPermittedIdentifiers)
-    private static let backgroundTaskIdentifier = "net.massa.gossip.background.sync"
+    private static let backgroundTaskIdentifier = "\(Bundle.main.bundleIdentifier ?? "net.massa.gossip").background.sync"
     
     private var pathMonitor: NWPathMonitor?
     private var monitorQueue: DispatchQueue?
     private var isObserving = false
     
-    // Track previous network state to detect changes
+    // Track previous network state to detect changes. Only mutated from
+    // `monitorQueue` inside `handlePathUpdate`, so no extra synchronization
+    // is needed as long as we never read/write these from another queue.
     private var wasOnline = false
     private var previousNetworkType = "none"
+    private var hasReceivedInitialState = false
     
     // Background task management
     private var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
@@ -61,15 +64,17 @@ public class NetworkObserverPlugin: CAPPlugin, CAPBridgedPlugin {
         }
         
         pathMonitor = NWPathMonitor()
-        monitorQueue = DispatchQueue(label: "net.massa.gossip.networkMonitor", qos: .utility)
-        
-        // Get initial state
-        updateInitialState()
-        
+        monitorQueue = DispatchQueue(label: "\(Bundle.main.bundleIdentifier ?? "net.massa.gossip").networkMonitor", qos: .utility)
+
+        // Single monitor: its first callback seeds `wasOnline` /
+        // `previousNetworkType` and skips triggering sync. A previous
+        // implementation spun up a *second* `NWPathMonitor` on a separate
+        // queue to "get the initial state", which raced with this one
+        // (both wrote `wasOnline`).
         pathMonitor?.pathUpdateHandler = { [weak self] path in
             self?.handlePathUpdate(path)
         }
-        
+
         pathMonitor?.start(queue: monitorQueue!)
         isObserving = true
         
@@ -128,14 +133,25 @@ public class NetworkObserverPlugin: CAPPlugin, CAPBridgedPlugin {
     private func handlePathUpdate(_ path: NWPath) {
         let isOnline = path.status == .satisfied
         let networkType = getNetworkType(from: path)
-        
+
+        // Seed state on the very first callback without triggering sync;
+        // we don't want to spuriously kick off a background task just
+        // because the monitor is reporting the world as it already is.
+        if !hasReceivedInitialState {
+            hasReceivedInitialState = true
+            wasOnline = isOnline
+            previousNetworkType = networkType
+            logger.debug("Initial state: online=\(isOnline), type=\(networkType)")
+            return
+        }
+
         let becameOnline = isOnline && !wasOnline
-        let networkTypeChanged = isOnline && wasOnline && 
-                networkType != previousNetworkType && 
+        let networkTypeChanged = isOnline && wasOnline &&
+                networkType != previousNetworkType &&
                 previousNetworkType != "none"
-        
+
         logger.debug("Network update: online=\(isOnline), type=\(networkType), wasOnline=\(self.wasOnline), previousType=\(self.previousNetworkType)")
-        
+
         if becameOnline {
             logger.info("Network became available (\(networkType)), triggering sync")
             triggerSyncWithBackgroundTask(reason: "connected", networkType: networkType)
@@ -148,7 +164,7 @@ public class NetworkObserverPlugin: CAPPlugin, CAPBridgedPlugin {
                 self?.notifyListeners("networkLost", data: [:])
             }
         }
-        
+
         wasOnline = isOnline
         previousNetworkType = networkType
     }
@@ -165,28 +181,6 @@ public class NetworkObserverPlugin: CAPPlugin, CAPBridgedPlugin {
                 "reason": reason,
                 "networkType": networkType
             ])
-        }
-    }
-    
-    /**
-     * Update initial network state without triggering sync.
-     */
-    private func updateInitialState() {
-        let monitor = NWPathMonitor()
-        let queue = DispatchQueue(label: "net.massa.gossip.initialState")
-        
-        monitor.pathUpdateHandler = { [weak self] path in
-            monitor.cancel()
-            self?.wasOnline = path.status == .satisfied
-            self?.previousNetworkType = self?.getNetworkType(from: path) ?? "none"
-            self?.logger.debug("Initial state: online=\(self?.wasOnline ?? false), type=\(self?.previousNetworkType ?? "none")")
-        }
-        
-        monitor.start(queue: queue)
-        
-        // Add timeout to prevent indefinite monitoring if handler never fires
-        DispatchQueue.global().asyncAfter(deadline: .now() + 5.0) {
-            monitor.cancel()
         }
     }
     
@@ -214,6 +208,7 @@ public class NetworkObserverPlugin: CAPPlugin, CAPBridgedPlugin {
         pathMonitor = nil
         monitorQueue = nil
         isObserving = false
+        hasReceivedInitialState = false
         endBackgroundTask()
         
         logger.info("Stopped observing network changes")

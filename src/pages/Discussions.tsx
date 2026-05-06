@@ -1,16 +1,22 @@
-import React, { useCallback, useState, useMemo } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useMemo,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 import DiscussionListPanel from '../components/discussions/DiscussionList';
 import DiscussionFilterButtons from '../components/discussions/DiscussionFilterButtons';
 import { useAccountStore } from '../stores/accountStore';
 import { useAppStore } from '../stores/appStore';
 import { useNavigate } from 'react-router-dom';
-import { Plus, X, Settings, Lock } from 'react-feather';
+import { Plus, X, Settings, Lock, Globe } from 'react-feather';
 import Button from '../components/ui/Button';
 import SearchBar from '../components/ui/SearchBar';
 import { useSearch } from '../hooks/useSearch';
 import { PrivacyGraphic } from '../components/graphics';
-import PageLayout from '../components/ui/PageLayout';
+import PageLayout from '../components/ui/Layout/PageLayout';
 import UserProfileAvatar from '../components/avatar/UserProfileAvatar';
 import QrCodeIcon from '../components/ui/customIcons/QrCodeIcon';
 import ThreeDotMenu, { MenuItem } from '../components/ui/ThreeDotMenu';
@@ -20,6 +26,9 @@ import { useGossipSdk } from '../hooks/useGossipSdk';
 import { SessionStatus, SELF_CONTACT_ID } from '@massalabs/gossip-sdk';
 import { useOnlineStore } from '../stores/useOnlineStore';
 import { useSwipeFilter } from '../hooks/useSwipeFilter';
+import { useUiStore } from '../stores/uiStore';
+import { prewarmShareQR } from '../components/settings/shareContactQrCache';
+import { generateDeepLinkUrl } from '../utils/invite';
 
 const Discussions: React.FC = () => {
   const { t } = useTranslation('discussions');
@@ -27,7 +36,16 @@ const Discussions: React.FC = () => {
   const navigate = useNavigate();
   const isLoading = useAccountStore(s => s.isLoading);
   const username = useAccountStore(s => s.userProfile?.username);
+  const userId = useAccountStore(s => s.userProfile?.userId);
   const logout = useAccountStore(s => s.logout);
+
+  // Pre-warm the share-contact QR code in the background so opening the share
+  // page from the header feels instant. Re-runs when username changes.
+  useEffect(() => {
+    if (!userId || !username) return;
+    const deepLinkUrl = generateDeepLinkUrl(userId, username);
+    void prewarmShareQR(deepLinkUrl);
+  }, [userId, username]);
   const pendingSharedContent = useAppStore(s => s.pendingSharedContent);
   const setPendingSharedContent = useAppStore(s => s.setPendingSharedContent);
   const pendingForwardMessageId = useAppStore(s => s.pendingForwardMessageId);
@@ -39,14 +57,26 @@ const Discussions: React.FC = () => {
   const setFilter = useDiscussionStore(s => s.setFilter);
   const sessionsStatuses = useDiscussionStore(s => s.sessionsStatuses);
   const isOnline = useOnlineStore(s => s.isOnline);
+  const headerIsScrolled = useUiStore(s => s.headerIsScrolled);
+  const showBottomNav = useUiStore(s => s.showBottomNav);
   const swipeHandlers = useSwipeFilter(filter, setFilter);
   // Callback ref: triggers re-render when scroll container is mounted
   const [scrollContainer, setScrollContainer] = useState<HTMLDivElement | null>(
     null
   );
 
+  // Prevent double navigation (two discussions opening on top of each other)
+  const isNavigatingRef = useRef(false);
+
   const handleSelectDiscussion = useCallback(
     (contactUserId: string) => {
+      if (isNavigatingRef.current) return;
+      isNavigatingRef.current = true;
+      // Reset after animation completes so user can navigate again on return
+      setTimeout(() => {
+        isNavigatingRef.current = false;
+      }, 600);
+
       if (contactUserId === SELF_CONTACT_ID) {
         if (pendingForwardMessageId != null) {
           navigate(ROUTES.selfDiscussion(), {
@@ -60,22 +90,16 @@ const Discussions: React.FC = () => {
         }
         return;
       }
-      // If there's pending shared content, pass it as prefilled message
       if (pendingSharedContent) {
         const state =
           pendingForwardMessageId != null
-            ? {
-                forwardFromMessageId: pendingForwardMessageId,
-              }
-            : {
-                prefilledMessage: pendingSharedContent,
-              };
+            ? { forwardFromMessageId: pendingForwardMessageId }
+            : { prefilledMessage: pendingSharedContent };
 
         navigate(ROUTES.discussion({ userId: contactUserId }), {
           state,
           replace: false,
         });
-        // Clear pending shared content after navigation
         setPendingSharedContent(null);
         setPendingForwardMessageId(null);
       } else {
@@ -138,6 +162,11 @@ const Discussions: React.FC = () => {
         icon: <Settings className="w-5 h-5" />,
         onClick: () => navigate(ROUTES.settings()),
       },
+      {
+        label: t('settings:menu.language'),
+        icon: <Globe className="w-5 h-5" />,
+        onClick: () => navigate(ROUTES.settingsLanguage()),
+      },
       { type: 'separator' as const },
       {
         label: t('lock_account'),
@@ -165,11 +194,9 @@ const Discussions: React.FC = () => {
       <div className="flex items-center gap-3">
         {isOnline && <UserProfileAvatar name={username} size={10} />}
         {isOnline ? (
-          <h1 className="text-xl font-semibold text-foreground">
-            {t('title')}
-          </h1>
+          <h1 className="text-2xl font-bold text-foreground">{t('title')}</h1>
         ) : (
-          <h1 className="text-xl font-semibold text-accent">
+          <h1 className="text-2xl font-bold text-accent-soft-foreground">
             {t('waiting_connection')}
           </h1>
         )}
@@ -181,18 +208,38 @@ const Discussions: React.FC = () => {
           title={t('share_contact')}
           className="w-8 h-8 flex items-center justify-center rounded-full hover:opacity-70 active:opacity-50"
         >
-          <QrCodeIcon className="w-5 h-5 text-accent" />
+          <QrCodeIcon className="w-5 h-5 text-accent-soft-foreground" />
         </button>
         <ThreeDotMenu items={menuItems} />
       </div>
     </div>
   );
 
+  const subHeaderContent = (
+    <div className="-mt-4 pt-2 px-6 flex flex-col gap-3">
+      <SearchBar
+        value={searchQuery}
+        onChange={setQuery}
+        placeholder={t('common:search')}
+        aria-label={t('common:search')}
+        inputBgClass={headerIsScrolled ? 'bg-card' : 'bg-muted'}
+      />
+      {!searchQuery.trim() && (
+        <DiscussionFilterButtons
+          filter={filter}
+          onFilterChange={setFilter}
+          filterCounts={filterCounts}
+        />
+      )}
+    </div>
+  );
+
   return (
     <PageLayout
       header={headerContent}
+      subHeader={subHeaderContent}
       className="relative"
-      contentClassName="pt-2 px-2 pb-4 flex flex-col"
+      contentClassName="px-2 pb-4 flex flex-col"
       onScrollContainerRef={setScrollContainer}
     >
       {/* Show banner when there's pending shared content */}
@@ -217,24 +264,8 @@ const Discussions: React.FC = () => {
           </div>
         </div>
       )}
-      <div className="px-2 mb-3">
-        <SearchBar
-          value={searchQuery}
-          onChange={setQuery}
-          placeholder={t('common:search')}
-          aria-label={t('common:search')}
-        />
-      </div>
       {/* Swipe left/right to change filter */}
       <div className="flex-1 min-h-0" {...swipeHandlers}>
-        {/* Filter buttons - only show when not searching */}
-        {!searchQuery.trim() && (
-          <DiscussionFilterButtons
-            filter={filter}
-            onFilterChange={setFilter}
-            filterCounts={filterCounts}
-          />
-        )}
         {scrollContainer && (
           <DiscussionListPanel
             onSelect={handleSelectDiscussion}
@@ -248,12 +279,14 @@ const Discussions: React.FC = () => {
       {/* Floating button positioned above bottom nav */}
       <Button
         onClick={() => navigate(ROUTES.newDiscussion())}
-        variant="primary"
+        variant="soft"
         size="custom"
-        className="absolute bottom-3 right-4 h-14 w-14 rounded-full flex items-center gap-2 shadow-lg hover:shadow-xl transition-shadow z-50"
+        className={`absolute right-4 h-14 w-14 rounded-full flex items-center gap-2 shadow-lg hover:shadow-xl transition-shadow z-50 ${
+          showBottomNav ? 'bottom-3' : 'bottom-[calc(0.75rem+var(--sab))]'
+        }`}
         title={t('start_new')}
       >
-        <Plus className="text-primary-foreground shrink-0" />
+        <Plus className="text-accent-soft-foreground shrink-0" />
       </Button>
     </PageLayout>
   );

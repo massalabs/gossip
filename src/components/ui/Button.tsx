@@ -1,13 +1,30 @@
 import React from 'react';
+import { useIsTouch } from '../../hooks/usePlatform';
+
+// Strip Tailwind hover variants (incl. nested like `dark:hover:` or
+// `disabled:hover:`) on touch devices. Mobile browsers can leave `:hover`
+// stuck after a tap that opens a native sheet (share, file picker), so the
+// hover bg/border lingers until the next tap. There's no real hover on
+// touch anyway, so we drop these classes outright.
+const stripHoverClasses = (className: string): string =>
+  className
+    .split(/\s+/)
+    .filter(cls => {
+      const variants = cls.split(':').slice(0, -1);
+      return !variants.includes('hover');
+    })
+    .join(' ');
 
 interface ButtonProps {
   children: React.ReactNode;
   onClick?: (e: React.MouseEvent<HTMLButtonElement>) => void;
   onMouseDown?: (e: React.MouseEvent<HTMLButtonElement>) => void;
+  onPointerDown?: (e: React.PointerEvent<HTMLButtonElement>) => void;
   disabled?: boolean;
   loading?: boolean;
   variant?:
     | 'primary'
+    | 'soft'
     | 'secondary'
     | 'danger'
     | 'ghost'
@@ -29,6 +46,7 @@ const Button: React.FC<ButtonProps> = ({
   children,
   onClick,
   onMouseDown,
+  onPointerDown,
   onKeyDown,
   disabled = false,
   loading = false,
@@ -41,20 +59,24 @@ const Button: React.FC<ButtonProps> = ({
   ariaLabel,
   tabIndex,
 }) => {
+  const isTouch = useIsTouch();
   const baseClasses = `inline-flex items-center justify-center font-medium transition-all
     touch-manipulation focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2
-    focus-visible:ring-offset-transparent disabled:cursor-not-allowed
+    focus-visible:ring-offset-transparent
+    dark:focus-visible:shadow-[0_0_10px_rgba(58,243,209,0.35)]
+    disabled:cursor-not-allowed
     disabled:pointer-events-none disabled:touch-none `;
 
   const variantClasses = {
     primary:
-      'bg-primary hover:bg-primary/90 disabled:bg-muted text-primary-foreground disabled:text-muted-foreground focus:ring-ring rounded-full',
+      'bg-primary hover:bg-primary/90 disabled:bg-muted text-primary-foreground disabled:text-muted-foreground focus-visible:ring-ring rounded-full shadow-md hover:shadow-lg disabled:shadow-none',
+    soft: 'bg-accent-soft hover:bg-accent-soft/80 disabled:bg-muted text-accent-soft-foreground disabled:text-muted-foreground focus-visible:ring-ring rounded-full shadow-sm hover:shadow-md disabled:shadow-none',
     secondary:
-      'bg-secondary hover:bg-secondary/80 disabled:bg-muted text-secondary-foreground disabled:text-muted-foreground focus:ring-ring rounded-full',
+      'bg-secondary hover:bg-secondary/80 disabled:bg-muted text-secondary-foreground disabled:text-muted-foreground focus-visible:ring-ring rounded-full shadow-sm hover:shadow-md disabled:shadow-none',
     danger:
-      'bg-destructive hover:bg-destructive/90 disabled:bg-destructive/50 text-destructive-foreground focus:ring-ring rounded-full',
+      'bg-destructive hover:bg-destructive/90 disabled:bg-destructive/50 text-destructive-foreground focus-visible:ring-ring rounded-full shadow-md hover:shadow-lg',
     ghost:
-      'bg-transparent hover:bg-accent hover:text-accent-foreground text-foreground focus:ring-ring rounded-full',
+      'bg-transparent hover:bg-accent hover:text-accent-foreground text-foreground focus-visible:ring-ring rounded-full',
     outline: `bg-card border border-border text-foreground hover:bg-accent/50 
     hover:border-accent disabled:bg-muted disabled:text-muted-foreground disabled:border-border/50 
     disabled:opacity-60 disabled:hover:bg-muted disabled:hover:border-border/50 rounded-md`,
@@ -90,15 +112,21 @@ const Button: React.FC<ButtonProps> = ({
     variantClass = variantClass.replace(/\s*\brounded(-[\w[\]]+)?\b/g, '');
   }
 
-  const combinedClasses = `${baseClasses} ${variantClass} ${
+  const finalVariantClass = isTouch
+    ? stripHoverClasses(variantClass)
+    : variantClass;
+  const finalClassName = isTouch ? stripHoverClasses(className) : className;
+
+  const combinedClasses = `${baseClasses} ${finalVariantClass} ${
     shouldApplySize ? sizeClasses[size] : ''
-  } ${widthClasses} ${className}`.trim();
+  } ${widthClasses} ${finalClassName}`.trim();
 
   return (
     <button
       type={type}
       onClick={onClick}
       onMouseDown={onMouseDown}
+      onPointerDown={onPointerDown}
       onKeyDown={onKeyDown}
       disabled={disabled || loading}
       className={combinedClasses}

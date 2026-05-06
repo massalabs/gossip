@@ -1,46 +1,25 @@
-import { useEffect, useRef } from 'react';
-import { useAccountStore } from '../stores/accountStore';
 import { UserProfile } from '@massalabs/gossip-sdk';
+
+// TEMP: the dev signup/login path (auto-login + dev-account picker) is
+// disabled while it gets reworked against the secure-storage onboarding
+// flow. Both exports are kept as no-ops so call-sites (Onboarding.tsx,
+// Login/useLoginForm.ts) compile without changes — re-enable by
+// restoring the original implementations from git history (last good
+// version on `secure-storage/4-android-build`).
 
 /**
  * Dev-only hook: auto-login with VITE_DEV_PASSWORD on hot reload.
- * If no account exists but VITE_DEV_ACCOUNTS is set, triggers the dev account picker.
- * Tree-shaken out of production builds (guarded by import.meta.env.DEV).
+ * Currently a no-op. See top-of-file comment.
  */
 export function useDevAutoLogin(
-  account: UserProfile | null | undefined,
-  callbacks: {
+  _account: UserProfile | null | undefined,
+  _callbacks: {
     onSuccess: () => void;
     onError: (msg: string) => void;
     setLoading: (v: boolean) => void;
   }
-) {
-  const attempted = useRef(false);
-  const loadAccount = useAccountStore(s => s.loadAccount);
-
-  const lockedByUser = useAccountStore(s => s.lockedByUser);
-
-  useEffect(() => {
-    if (!import.meta.env.DEV) return;
-
-    const devPassword = import.meta.env.VITE_DEV_PASSWORD;
-    if (!devPassword || attempted.current || !account || lockedByUser) return;
-
-    attempted.current = true;
-    callbacks.setLoading(true);
-
-    loadAccount(devPassword, account.userId)
-      .then(() => {
-        if (useAccountStore.getState().userProfile) {
-          callbacks.onSuccess();
-        }
-      })
-      .catch(err => {
-        console.error('[dev-auto-login] failed:', err);
-        callbacks.onError('Dev auto-login failed. Check VITE_DEV_PASSWORD.');
-      })
-      .finally(() => callbacks.setLoading(false));
-  }, [account, lockedByUser, loadAccount, callbacks]);
+): void {
+  // intentionally empty
 }
 
 export interface DevAccount {
@@ -49,25 +28,10 @@ export interface DevAccount {
 }
 
 /**
- * Parse VITE_DEV_ACCOUNTS env var.
- * Format: JSON array of {name, mnemonic} objects.
+ * Parse VITE_DEV_ACCOUNTS env var. Currently returns an empty list so
+ * Onboarding falls through to the normal slideshow + secure-storage
+ * signup flow. See top-of-file comment.
  */
 export function getDevAccounts(): DevAccount[] {
-  if (!import.meta.env.DEV) return [];
-  const raw = import.meta.env.VITE_DEV_ACCOUNTS;
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter(
-      (a: unknown): a is DevAccount =>
-        typeof a === 'object' &&
-        a !== null &&
-        typeof (a as DevAccount).name === 'string' &&
-        typeof (a as DevAccount).mnemonic === 'string'
-    );
-  } catch {
-    console.error('[dev] Failed to parse VITE_DEV_ACCOUNTS');
-    return [];
-  }
+  return [];
 }

@@ -7,7 +7,7 @@ import AccountCreation from '../components/account/AccountCreation';
 import { InvitePage } from '../pages/InvitePage';
 import { UserProfile } from '@massalabs/gossip-sdk';
 import { ROUTES } from '../constants/routes';
-import MainLayout from '../components/ui/MainLayout';
+import MainLayout from '../components/ui/Layout/MainLayout';
 import AnimatedRoutes from '../components/ui/AnimatedRoutes';
 
 interface UnauthenticatedRoutesProps {
@@ -35,7 +35,7 @@ export const UnauthenticatedRoutes: React.FC<UnauthenticatedRoutesProps> = ({
 
   const handleCreateNewAccount = () => {
     onLoginErrorChange(null);
-    navigate(ROUTES.setup());
+    navigate(ROUTES.setup(), { replace: true });
   };
 
   const handleNewAccountComplete = () => {

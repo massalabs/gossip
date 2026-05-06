@@ -1,18 +1,36 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, {
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Clock, Settings } from 'react-feather';
 import { MessageDirection, Message } from '@massalabs/gossip-sdk';
 import BackButton from '../components/ui/BackButton';
-import MessageList from '../components/discussions/MessageList';
+import MessageList, {
+  MessageListHandle,
+} from '../components/discussions/MessageList';
 import MessageInput from '../components/discussions/MessageInput';
+import DiscussionLayout from '../components/ui/Layout/DiscussionLayout';
 import { useSelfMessageStore } from '../stores/selfMessageStore';
 import { getSdk } from '../stores/sdkStore';
 import { ROUTES } from '../constants/routes';
-import { useSwipeBack } from '../hooks/useSwipeBack';
 import { useDiscussionMessageSelection } from '../hooks/useDiscussionMessageSelection';
 import { useGossipSdk } from '../hooks/useGossipSdk';
 import SelectionHeader from '../components/discussions/SelectionHeader';
+import { useRetentionPolicy } from '../hooks/useRetentionPolicy';
+import { useKeyboardStore } from '../stores/keyboardStore';
+import { useHeaderScrollDetection } from '../hooks/useHeaderScrollDetection';
+import { ExitAnimationContext } from '../components/ui/ExitAnimationContext';
+import { useUiStore } from '../stores/uiStore';
+
+// Module-level guard so a given forward id is processed once across remounts
+// (StrictMode, route animation, back/forward nav).
+const handledForwardIds = new Set<number>();
 
 const RETENTION_OPTIONS: {
   labelKey: string;
@@ -26,15 +44,6 @@ const RETENTION_OPTIONS: {
   { labelKey: 'settings.auto_delete_1w', value: 604800 },
   { labelKey: 'settings.auto_delete_1mo', value: 2592000 },
 ];
-
-const RETENTION_HEADER_LABELS: Record<number, string> = {
-  300: 'settings.auto_delete_5m',
-  3600: 'settings.auto_delete_1h',
-  28800: 'settings.auto_delete_8h',
-  86400: 'settings.auto_delete_1d',
-  604800: 'settings.auto_delete_1w',
-  2592000: 'settings.auto_delete_1mo',
-};
 
 const SelfDiscussion: React.FC = () => {
   const { t } = useTranslation('discussions');
@@ -52,68 +61,89 @@ const SelfDiscussion: React.FC = () => {
   const loadReactions = useSelfMessageStore.use.loadReactions();
 
   const gossip = useGossipSdk();
-  const [replyingTo, setReplyingTo] = useState<Message | null>(null);
-  const swipeBack = useSwipeBack();
-  const [editingMessage, setEditingMessage] = useState<Message | null>(null);
-  const [forwardedContent, setForwardedContent] = useState<string | null>(null);
-  const [isRetentionModalOpen, setIsRetentionModalOpen] = useState(false);
-  const [retentionDuration, setRetentionDuration] = useState<number | null>(
-    null
+
+  // Self-messages don't carry a crypto `messageId` after reload (the SDK
+  // doesn't persist it — there's no peer that needs it), so we look up
+  // reactions directly by DB id, which is what self-reactions are indexed on.
+  const getReactions = useCallback(
+    (msg: Message) => (msg.id != null ? (reactions.get(msg.id) ?? []) : []),
+    [reactions]
   );
-  const [retentionPolicySetAt, setRetentionPolicySetAt] = useState<
-    number | null
-  >(null);
+
+  const [replyingTo, setReplyingTo] = useState<Message | null>(null);
+  const [editingMessage, setEditingMessage] = useState<Message | null>(null);
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+  const messageListRef = useRef<MessageListHandle>(null);
+  const messageListContainerRef = useRef<HTMLDivElement>(null);
+  const isExiting = useContext(ExitAnimationContext);
+
+  useHeaderScrollDetection(
+    messageListContainerRef,
+    0,
+    'self-discussion',
+    isExiting
+  );
+  const headerIsScrolled = useUiStore(s => s.headerIsScrolled);
+  const atBottomRef = useRef(true);
+
+  const handleAtBottomChange = useCallback((atBottom: boolean) => {
+    atBottomRef.current = atBottom;
+    setShowScrollToBottom(!atBottom);
+  }, []);
+
+  const scrollToBottom = useCallback(() => {
+    messageListRef.current?.scrollToBottom();
+  }, []);
+
+  // Scroll to bottom when keyboard opens so newest messages stay visible
+  const isKeyboardVisible = useKeyboardStore(s => s.isVisible);
+  useEffect(() => {
+    if (isKeyboardVisible && atBottomRef.current) {
+      requestAnimationFrame(() => {
+        messageListRef.current?.scrollToBottom();
+      });
+    }
+  }, [isKeyboardVisible]);
+
+  const {
+    retentionDuration,
+    isRetentionModalOpen,
+    setIsRetentionModalOpen,
+    handleSelectRetention,
+    retentionHeaderLabel,
+    retentionInfo,
+  } = useRetentionPolicy(t);
 
   const forwardFromMessageId = (
     location.state as { forwardFromMessageId?: number } | undefined
   )?.forwardFromMessageId;
 
+  // Prefill the MessageInput with the forwarded content instead of sending
+  // immediately — user reviews/edits and hits send to confirm.
+  const [forwardDraft, setForwardDraft] = useState<string | undefined>(
+    undefined
+  );
+
   useEffect(() => {
     if (forwardFromMessageId == null) return;
-    let cancelled = false;
-    const load = async () => {
-      const msg = await getSdk().messages.get(forwardFromMessageId);
-      if (!cancelled && msg?.content) {
-        setForwardedContent(msg.content);
+    if (handledForwardIds.has(forwardFromMessageId)) return;
+    handledForwardIds.add(forwardFromMessageId);
+
+    const idToForward = forwardFromMessageId;
+    navigate(ROUTES.selfDiscussion(), { replace: true, state: {} });
+
+    void (async () => {
+      const msg = await getSdk().messages.get(idToForward);
+      if (msg?.content) {
+        setForwardDraft(msg.content);
       }
-      if (!cancelled) {
-        navigate(ROUTES.selfDiscussion(), { replace: true, state: {} });
-      }
-    };
-    void load();
-    return () => {
-      cancelled = true;
-    };
+    })();
   }, [forwardFromMessageId, navigate]);
 
   useEffect(() => {
     void loadMessages();
     void loadReactions();
   }, [loadMessages, loadReactions]);
-
-  useEffect(() => {
-    const sdk = getSdk();
-    if (!sdk.isSessionOpen) return;
-    void sdk.selfMessages.getRetentionInfo().then(info => {
-      setRetentionDuration(info.duration);
-      setRetentionPolicySetAt(info.setAt);
-    });
-  }, []);
-
-  const handleSelectRetention = useCallback(async (value: number | null) => {
-    const sdk = getSdk();
-    if (!sdk.isSessionOpen) return;
-    await sdk.selfMessages.setRetentionPolicy(value);
-    setRetentionDuration(value);
-    setRetentionPolicySetAt(value ? Date.now() : null);
-    setIsRetentionModalOpen(false);
-  }, []);
-
-  const retentionHeaderLabel = useMemo(() => {
-    if (!retentionDuration) return null;
-    const key = RETENTION_HEADER_LABELS[retentionDuration];
-    return key ? t(key) : null;
-  }, [retentionDuration, t]);
 
   const outgoingMessages = useMemo(
     () =>
@@ -134,7 +164,6 @@ const SelfDiscussion: React.FC = () => {
     canDeleteSelected,
   } = useDiscussionMessageSelection({
     messages: outgoingMessages,
-    contactName: t('selfDiscussion.title'),
     gossip,
     t,
     onDeleteMessage: async (id: number) => {
@@ -143,106 +172,98 @@ const SelfDiscussion: React.FC = () => {
     },
   });
 
-  return (
+  const header = isSelecting ? (
+    <SelectionHeader
+      count={selectedMessageIds.size}
+      onClear={handleClearSelection}
+      onCopy={handleCopySelected}
+      onDelete={handleDeleteSelected}
+      canDelete={canDeleteSelected}
+    />
+  ) : (
     <div
-      className="h-full app-max-w mx-auto bg-discussion-pattern flex flex-col relative overflow-hidden"
-      onTouchStart={swipeBack.onTouchStart}
-      onTouchEnd={swipeBack.onTouchEnd}
+      className={`px-header-padding pt-safe-t h-header-safe flex items-center gap-3 shrink-0 relative z-10 ${
+        headerIsScrolled ? 'bg-muted' : 'bg-card'
+      }`}
+      style={{
+        boxShadow: headerIsScrolled
+          ? '0 2px 4px -1px rgba(0, 0, 0, 0.06), 0 4px 6px -1px rgba(0, 0, 0, 0.1)'
+          : 'none',
+        transition:
+          'background-color 200ms cubic-bezier(0.4, 0, 0.2, 1), box-shadow 200ms cubic-bezier(0.4, 0, 0.2, 1)',
+      }}
     >
-      {/* Header */}
-      {isSelecting ? (
-        <SelectionHeader
-          count={selectedMessageIds.size}
-          onClear={handleClearSelection}
-          onCopy={handleCopySelected}
-          onDelete={handleDeleteSelected}
-          canDelete={canDeleteSelected}
-        />
-      ) : (
-        <div className="px-header-padding pt-safe-t h-header-safe flex items-center gap-3 shrink-0 z-10 bg-card">
-          <BackButton />
-          <div className="flex-1 min-w-0">
-            <h1 className="text-xl font-semibold text-foreground">
-              {t('selfDiscussion.title')}
-            </h1>
-            {retentionHeaderLabel && (
-              <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-                <Clock className="w-3 h-3 shrink-0" />
-                {t('header.auto_delete_active', {
-                  duration: retentionHeaderLabel,
-                })}
-              </span>
-            )}
-          </div>
-          <button
-            onClick={() => setIsRetentionModalOpen(true)}
-            className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-muted transition-colors shrink-0"
-            aria-label={t('settings.auto_delete')}
-          >
-            <Settings className="w-5 h-5 text-muted-foreground" />
-          </button>
-        </div>
-      )}
+      <BackButton />
+      <div className="flex-1 min-w-0">
+        <h1 className="text-xl font-semibold text-foreground">
+          {t('selfDiscussion.title')}
+        </h1>
+        {retentionHeaderLabel && (
+          <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+            <Clock className="w-3 h-3 shrink-0" />
+            {t('header.auto_delete_active', {
+              duration: retentionHeaderLabel,
+            })}
+          </span>
+        )}
+      </div>
+      <button
+        onClick={() => setIsRetentionModalOpen(true)}
+        className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-muted transition-colors shrink-0"
+        aria-label={t('settings.auto_delete')}
+      >
+        <Settings className="w-5 h-5 text-muted-foreground" />
+      </button>
+    </div>
+  );
 
-      {/* Body */}
-      <div className="flex-1 min-h-0 flex flex-col">
-        <div className="flex-1 min-h-0 overflow-hidden">
-          {!isLoading && outgoingMessages.length === 0 ? (
-            <div className="h-full flex items-center justify-center px-8">
-              <p className="text-center text-sm text-muted-foreground">
-                {t('selfDiscussion.emptyState')}
-              </p>
-            </div>
-          ) : (
-            <MessageList
-              messages={outgoingMessages}
-              isLoading={isLoading}
-              isSelecting={isSelecting}
-              selectedMessageIds={selectedMessageIds}
-              onToggleSelect={handleToggleSelect}
-              retentionInfo={
-                retentionDuration && retentionPolicySetAt
-                  ? { setAt: retentionPolicySetAt, duration: retentionDuration }
-                  : null
-              }
-              onEdit={message => {
-                setEditingMessage(message);
-                setReplyingTo(null);
-              }}
-              onDelete={message => {
-                if (message.id != null) {
-                  void deleteMessage(message.id);
-                }
-              }}
-              getReactionsForMessage={messageId =>
-                reactions.get(messageId) ?? []
-              }
-              onReact={(message, emoji) => {
-                if (message.id != null) {
-                  void sendReaction(emoji, message.id);
-                }
-              }}
-              onToggleReaction={(message, emoji, myReactionId) => {
-                if (myReactionId) {
-                  void removeReaction(myReactionId);
-                } else if (message.id != null) {
-                  void sendReaction(emoji, message.id);
-                }
-              }}
-            />
-          )}
+  const retentionModal = isRetentionModalOpen ? (
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/50"
+      onClick={() => setIsRetentionModalOpen(false)}
+    >
+      <div
+        className="bg-background w-full max-w-md rounded-t-2xl p-6 pb-8"
+        onClick={e => e.stopPropagation()}
+      >
+        <h3 className="text-base font-semibold text-foreground mb-1">
+          {t('settings.auto_delete')}
+        </h3>
+        <p className="text-sm text-muted-foreground mb-4">
+          {t('settings.auto_delete_description')}
+        </p>
+        <div className="flex flex-col gap-1">
+          {RETENTION_OPTIONS.map(option => (
+            <button
+              key={String(option.value)}
+              onClick={() => void handleSelectRetention(option.value)}
+              className={`w-full text-left px-4 py-3 rounded-lg text-sm transition-colors ${
+                retentionDuration === option.value
+                  ? 'bg-accent-soft text-accent-soft-foreground font-medium'
+                  : 'hover:bg-muted text-foreground'
+              }`}
+            >
+              {t(option.labelKey)}
+            </button>
+          ))}
         </div>
+      </div>
+    </div>
+  ) : null;
 
+  return (
+    <DiscussionLayout
+      header={header}
+      className="bg-card"
+      footer={
         <MessageInput
           disabled={isSelecting}
           isSelecting={isSelecting}
-          initialValue={
-            editingMessage?.content ?? forwardedContent ?? undefined
-          }
+          initialValue={editingMessage?.content ?? forwardDraft}
           onSend={content => {
             void sendMessage(content);
             setReplyingTo(null);
-            setForwardedContent(null);
+            setForwardDraft(undefined);
           }}
           replyingTo={replyingTo}
           onCancelReply={() => setReplyingTo(null)}
@@ -256,43 +277,57 @@ const SelfDiscussion: React.FC = () => {
           }}
           placeholderKey="selfDiscussion.placeholder"
         />
-      </div>
-
-      {/* Retention picker modal */}
-      {isRetentionModalOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-black/50"
-          onClick={() => setIsRetentionModalOpen(false)}
-        >
-          <div
-            className="bg-background w-full max-w-md rounded-t-2xl p-6 pb-8"
-            onClick={e => e.stopPropagation()}
-          >
-            <h3 className="text-base font-semibold text-foreground mb-1">
-              {t('settings.auto_delete')}
-            </h3>
-            <p className="text-sm text-muted-foreground mb-4">
-              {t('settings.auto_delete_description')}
+      }
+      overlay={retentionModal}
+    >
+      <div
+        ref={messageListContainerRef}
+        className="h-full bg-discussion-pattern"
+      >
+        {!isLoading && outgoingMessages.length === 0 ? (
+          <div className="h-full flex items-center justify-center px-8">
+            <p className="text-center text-sm text-muted-foreground">
+              {t('selfDiscussion.emptyState')}
             </p>
-            <div className="flex flex-col gap-1">
-              {RETENTION_OPTIONS.map(option => (
-                <button
-                  key={String(option.value)}
-                  onClick={() => void handleSelectRetention(option.value)}
-                  className={`w-full text-left px-4 py-3 rounded-lg text-sm transition-colors ${
-                    retentionDuration === option.value
-                      ? 'bg-primary/10 text-primary font-medium'
-                      : 'hover:bg-muted text-foreground'
-                  }`}
-                >
-                  {t(option.labelKey)}
-                </button>
-              ))}
-            </div>
           </div>
-        </div>
-      )}
-    </div>
+        ) : (
+          <MessageList
+            ref={messageListRef}
+            messages={outgoingMessages}
+            isLoading={isLoading}
+            isSelecting={isSelecting}
+            selectedMessageIds={selectedMessageIds}
+            onToggleSelect={handleToggleSelect}
+            retentionInfo={retentionInfo}
+            onAtBottomChange={handleAtBottomChange}
+            onScrollToBottom={scrollToBottom}
+            showScrollToBottom={showScrollToBottom && !isSelecting}
+            onEdit={message => {
+              setEditingMessage(message);
+              setReplyingTo(null);
+            }}
+            onDelete={message => {
+              if (message.id != null) {
+                void deleteMessage(message.id);
+              }
+            }}
+            getReactions={getReactions}
+            onReact={(message, emoji) => {
+              if (message.id != null) {
+                void sendReaction(emoji, message.id);
+              }
+            }}
+            onToggleReaction={(message, emoji, myReactionId) => {
+              if (myReactionId) {
+                void removeReaction(myReactionId);
+              } else if (message.id != null) {
+                void sendReaction(emoji, message.id);
+              }
+            }}
+          />
+        )}
+      </div>
+    </DiscussionLayout>
   );
 };
 

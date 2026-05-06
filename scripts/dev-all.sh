@@ -2,6 +2,9 @@
 #
 # Live reload on multiple Android and iOS devices simultaneously.
 #
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export GOSSIP_REPO_ROOT="$REPO_ROOT"
+#
 # Device lists can be set via env vars (comma-separated) or CLI args.
 # Env vars take precedence over CLI args.
 #
@@ -12,6 +15,9 @@
 # Usage (CLI fallback):
 #   scripts/dev-all.sh <android-device> [ios-device]
 #
+# Optional:
+#   DEV_ALL_QUIET=1  Less Vite noise (warn+); npm build:sdk stays verbose unless you use npm -s yourself.
+#
 # Examples:
 #   # Using env vars (recommended for multi-device):
 #   ANDROID_DEVICES="10.26.239.15:5555,10.26.239.20:5555" scripts/dev-all.sh
@@ -19,6 +25,9 @@
 #   # Using CLI args (single device each, backwards-compatible):
 #   scripts/dev-all.sh 10.26.239.15:5555 "iPhone de Ben"
 #   scripts/dev-all.sh 10.26.239.15:5555   # iOS opens Xcode
+
+# Fallback iOS deploy when Capacitor/native-run does not list Wi‑Fi devices
+. "$(dirname "${BASH_SOURCE[0]}")/ios-deploy-fallback.sh"
 
 # Read a var from .env safely (handles special chars like apostrophes)
 read_env() {
@@ -56,9 +65,7 @@ for d in "${IOSES[@]}"; do [ -n "$d" ] && CLEAN_IOSES+=("$d"); done
 IOSES=("${CLEAN_IOSES[@]}")
 
 if [ ${#ANDROIDS[@]} -eq 0 ] && [ ${#IOSES[@]} -eq 0 ]; then
-  echo "Usage: $0 <android-device> [ios-device]" >&2
-  echo "" >&2
-  echo "Or set env vars (comma-separated for multiple devices):" >&2
+  echo "[dev-all] No devices configured. Set ANDROID_DEVICES and/or IOS_DEVICES env vars." >&2
   echo "  ANDROID_DEVICES=\"device1,device2\"" >&2
   echo "  IOS_DEVICES=\"device1,device2\"" >&2
   exit 1
@@ -128,7 +135,9 @@ wait
 
 # Start Vite dev server in background, wait for it to be ready
 echo "[dev-all] Starting Vite dev server..."
-npx vite --host &
+VITE_ARGS=(--host)
+[ "${DEV_ALL_QUIET:-}" = 1 ] && VITE_ARGS+=(--logLevel warn)
+npx vite "${VITE_ARGS[@]}" &
 VITE_PID=$!
 
 # Wait for Vite to be ready
@@ -166,25 +175,30 @@ deploy_android() {
 }
 
 deploy_ios() {
-  if [ ${#IOSES[@]} -gt 0 ]; then
-    for device in "${IOSES[@]}"; do
-      echo "[dev-all] Building + deploying to iOS: ${device}..."
-      npx cap run ios --target "$device" --no-sync || echo "[dev-all] WARNING: iOS deploy failed for ${device}"
-    done
-  else
-    echo "[dev-all] No iOS devices specified, opening Xcode..."
-    npx cap open ios
-  fi
+  for device in "${IOSES[@]}"; do
+    echo "[dev-all] Building + deploying to iOS: ${device}..."
+    if npx cap run ios --target "$device" --no-sync; then
+      :
+    else
+      deploy_ios_xcode_fallback "$device" || echo "[dev-all] WARNING: iOS deploy failed for ${device}"
+    fi
+  done
 }
 
-# Run Android and iOS deploys in parallel (sequential within each platform)
-deploy_android &
-ANDROID_PID=$!
-deploy_ios &
-IOS_PID=$!
+# Run deploys only for platforms that have devices
+ANDROID_PID=""
+IOS_PID=""
+if [ ${#ANDROIDS[@]} -gt 0 ]; then
+  deploy_android &
+  ANDROID_PID=$!
+fi
+if [ ${#IOSES[@]} -gt 0 ]; then
+  deploy_ios &
+  IOS_PID=$!
+fi
 
-wait $ANDROID_PID || true
-wait $IOS_PID || true
+[ -n "$ANDROID_PID" ] && wait $ANDROID_PID || true
+[ -n "$IOS_PID" ] && wait $IOS_PID || true
 
 # Vite is already running — bring it to foreground
 TOTAL=$(( ${#ANDROIDS[@]} + ${#IOSES[@]} ))

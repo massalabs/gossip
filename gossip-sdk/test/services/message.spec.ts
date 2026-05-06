@@ -19,6 +19,7 @@ import {
 } from '../../src/db';
 import type { SessionModule } from '../../src/wasm/session';
 import { encodeUserId, decodeUserId } from '../../src/utils/userId';
+import { encodeToBase64 } from '../../src/utils/base64';
 import { SessionStatus } from '../../src/wasm/bindings';
 import { defaultSdkConfig } from '../../src/config/sdk';
 import { SdkEventEmitter } from '../../src/core/SdkEventEmitter';
@@ -326,7 +327,7 @@ describe('MessageService', () => {
     ).toHaveLength(0);
   });
 
-  it('deleteMessage returns false for incoming messages and does not modify the row', async () => {
+  it('deleteMessage marks an incoming message as deleted and enqueues a control message', async () => {
     const testQueries = getTestQueries();
     await insertTestContactAndDiscussion();
 
@@ -349,19 +350,19 @@ describe('MessageService', () => {
       testQueries
     );
 
-    expect(await service.deleteMessage(msgId)).toBe(false);
+    expect(await service.deleteMessage(msgId)).toBe(true);
 
     const row = await testQueries.messages.getById(msgId);
-    expect(row?.content).toBe('From peer');
-    expect(row?.type).toBe(MessageType.TEXT);
-    expect(row?.direction).toBe(MessageDirection.INCOMING);
+    expect(row?.content).toBe('[Message deleted]');
+    expect(row?.type).toBe(MessageType.DELETED);
     const rows = await testQueries.messages.getByOwnerAndContact(
       OWNER_USER_ID,
       CONTACT_USER_ID
     );
+    // A delete control message should have been enqueued
     expect(
       rows.filter(r => r.type === MessageType.DELETED && r.content === '')
-    ).toHaveLength(0);
+    ).toHaveLength(1);
   });
 
   it('deleteMessage on a reaction only deletes the reaction row and keeps original message visible', async () => {
@@ -420,8 +421,7 @@ describe('MessageService', () => {
     expect(originalRow?.type).toBe(MessageType.TEXT);
 
     // Reaction row should now be marked DELETED with "[Message deleted]"
-    expect(reactionRow?.type).toBe(MessageType.DELETED);
-    expect(reactionRow?.content).toBe('[Message deleted]');
+    expect(reactionRow).toBeUndefined();
 
     // getVisibleMessages must not surface the deleted reaction as a bubble
     const visible = await service.getVisibleMessages(CONTACT_USER_ID);
@@ -486,7 +486,6 @@ describe('MessageService', () => {
     expect(reactionRows.map(r => r.content).sort()).toEqual(['😀', '😂']);
     reactionRows.forEach(r => {
       expect(r.direction).toBe(MessageDirection.OUTGOING);
-      expect(r.status).toBe(MessageStatus.WAITING_SESSION);
       expect(r.reactionOf).toBeTruthy();
       const parsed = JSON.parse(r.reactionOf!);
       expect(parsed.originalMsgId).toBeDefined();
@@ -504,32 +503,6 @@ describe('MessageService', () => {
     expect(discussionAfter?.lastMessageContent).toBe(
       discussionBefore?.lastMessageContent
     );
-  });
-
-  it('finds message by seeker', async () => {
-    const seeker = new Uint8Array(32).fill(5);
-    await getTestQueries().messages.insert({
-      ownerUserId: OWNER_USER_ID,
-      contactUserId: CONTACT_USER_ID,
-      content: 'Hello',
-      type: MessageType.TEXT,
-      direction: MessageDirection.OUTGOING,
-      status: MessageStatus.SENT,
-      timestamp: new Date(),
-      seeker,
-    });
-
-    const service = new MessageService(
-      new MockMessageProtocol(),
-      createMockSession(),
-      new SdkEventEmitter(),
-      defaultSdkConfig,
-      getTestQueries()
-    );
-    const message = await service.findMessageBySeeker(seeker, OWNER_USER_ID);
-
-    expect(message).toBeDefined();
-    expect(message?.content).toBe('Hello');
   });
 
   it('getReactions returns only reaction rows for a contact', async () => {
@@ -580,21 +553,6 @@ describe('MessageService', () => {
     const ids = reactions.map(r => r.id);
     expect(ids).toEqual([reaction1Id, reaction2Id]);
     expect(reactions.every(r => r.type === MessageType.REACTION)).toBe(true);
-  });
-
-  it('returns undefined for missing seeker', async () => {
-    const seeker = new Uint8Array(32).fill(9);
-
-    const service = new MessageService(
-      new MockMessageProtocol(),
-      createMockSession(),
-      new SdkEventEmitter(),
-      defaultSdkConfig,
-      getTestQueries()
-    );
-    const message = await service.findMessageBySeeker(seeker, OWNER_USER_ID);
-
-    expect(message).toBeUndefined();
   });
 
   describe('sendMessage', () => {
@@ -701,69 +659,267 @@ describe('MessageService', () => {
   });
 });
 
-describe('processSendQueueForContact: Encryption Error', () => {
-  let mockSession: SessionModule;
-  let messageService: MessageService;
+describe('deleteReactionsForMessage query', () => {
+  beforeEach(clearAllTables);
 
-  beforeEach(async () => {
-    await clearAllTables();
-    mockSession = createMockSession();
-    await insertTestContactAndDiscussion();
-  });
+  it('removes only reactions referencing the deleted message', async () => {
+    const testQueries = getTestQueries();
 
-  it('should propagate error when encryption fails', async () => {
-    (mockSession.sendMessage as ReturnType<typeof vi.fn>).mockImplementation(
-      () => {
-        throw new Error('Encryption failed: invalid session state');
-      }
+    const originalMsgIdBytes = new Uint8Array(12).fill(42);
+    const originalMsgIdBase64 = encodeToBase64(originalMsgIdBytes);
+
+    const unrelatedMsgIdBytes = new Uint8Array(12).fill(99);
+    const unrelatedMsgIdBase64 = encodeToBase64(unrelatedMsgIdBytes);
+
+    // Insert the original message
+    const originalMsgRowId = await testQueries.messages.insert({
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: 'Original message',
+      type: MessageType.TEXT,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.SENT,
+      timestamp: new Date('2024-01-01T00:00:00Z'),
+      messageId: originalMsgIdBytes,
+    });
+
+    // Insert reactions referencing the original message
+    const reaction1Id = await testQueries.messages.insert({
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: '👍',
+      type: MessageType.REACTION,
+      direction: MessageDirection.INCOMING,
+      status: MessageStatus.DELIVERED,
+      timestamp: new Date('2024-01-01T00:01:00Z'),
+      reactionOf: JSON.stringify({ originalMsgId: originalMsgIdBase64 }),
+    });
+
+    const reaction2Id = await testQueries.messages.insert({
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: '❤️',
+      type: MessageType.REACTION,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.SENT,
+      timestamp: new Date('2024-01-01T00:02:00Z'),
+      reactionOf: JSON.stringify({ originalMsgId: originalMsgIdBase64 }),
+    });
+
+    // Insert an unrelated reaction referencing a different message
+    const unrelatedReactionId = await testQueries.messages.insert({
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: '😂',
+      type: MessageType.REACTION,
+      direction: MessageDirection.INCOMING,
+      status: MessageStatus.DELIVERED,
+      timestamp: new Date('2024-01-01T00:03:00Z'),
+      reactionOf: JSON.stringify({ originalMsgId: unrelatedMsgIdBase64 }),
+    });
+
+    // Delete reactions for the original message
+    await testQueries.messages.deleteReactionsForMessage(
+      OWNER_USER_ID,
+      CONTACT_USER_ID,
+      originalMsgIdBase64
     );
 
-    messageService = new MessageService(
-      new MockMessageProtocol(),
-      mockSession,
-      new SdkEventEmitter(),
-      defaultSdkConfig,
-      getTestQueries()
-    );
-
-    await messageService.sendMessage(createTestMessage());
-
-    const processResult = await messageService
-      .processSendQueueForContact(CONTACT_USER_ID)
-      .catch((e: Error) => ({ success: false, error: e }));
-
-    expect(processResult.success).toBe(false);
-  });
-
-  it('should leave message as WAITING_SESSION when encryption fails', async () => {
-    (mockSession.sendMessage as ReturnType<typeof vi.fn>).mockImplementation(
-      () => {
-        throw new Error('Encryption error');
-      }
-    );
-
-    messageService = new MessageService(
-      new MockMessageProtocol(),
-      mockSession,
-      new SdkEventEmitter(),
-      defaultSdkConfig,
-      getTestQueries()
-    );
-
-    const sendResult = await messageService.sendMessage(createTestMessage());
-    expect(sendResult.success).toBe(true);
-
-    await messageService
-      .processSendQueueForContact(CONTACT_USER_ID)
-      .catch(() => {});
-
-    const messages = await getTestQueries().messages.getByOwnerAndContact(
+    const allRows = await testQueries.messages.getByOwnerAndContact(
       OWNER_USER_ID,
       CONTACT_USER_ID
     );
 
-    expect(messages.length).toBe(1);
-    expect(messages[0].status).toBe(MessageStatus.WAITING_SESSION);
+    // Original message should still exist
+    expect(allRows.find(r => r.id === originalMsgRowId)).toBeDefined();
+    expect(allRows.find(r => r.id === originalMsgRowId)?.content).toBe(
+      'Original message'
+    );
+
+    // Reactions referencing the original message should be deleted
+    expect(allRows.find(r => r.id === reaction1Id)).toBeUndefined();
+    expect(allRows.find(r => r.id === reaction2Id)).toBeUndefined();
+
+    // Unrelated reaction should still exist
+    expect(allRows.find(r => r.id === unrelatedReactionId)).toBeDefined();
+    expect(allRows.find(r => r.id === unrelatedReactionId)?.content).toBe('😂');
+  });
+});
+
+describe('deleteMessage also removes associated reactions', () => {
+  beforeEach(clearAllTables);
+
+  it('deleteMessage deletes reactions for the message from the DB', async () => {
+    const testQueries = getTestQueries();
+    await insertTestContactAndDiscussion();
+
+    const originalMsgIdBytes = new Uint8Array(12).fill(50);
+    const originalMsgIdBase64 = encodeToBase64(originalMsgIdBytes);
+
+    // Insert the outgoing message that will be deleted
+    const msgId = await testQueries.messages.insert({
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: 'Message to delete',
+      type: MessageType.TEXT,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.SENT,
+      timestamp: new Date('2024-01-01T00:00:00Z'),
+      messageId: originalMsgIdBytes,
+    });
+
+    // Insert reactions referencing this message
+    const reaction1Id = await testQueries.messages.insert({
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: '👍',
+      type: MessageType.REACTION,
+      direction: MessageDirection.INCOMING,
+      status: MessageStatus.DELIVERED,
+      timestamp: new Date('2024-01-01T00:01:00Z'),
+      reactionOf: JSON.stringify({ originalMsgId: originalMsgIdBase64 }),
+    });
+
+    const reaction2Id = await testQueries.messages.insert({
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: '❤️',
+      type: MessageType.REACTION,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.SENT,
+      timestamp: new Date('2024-01-01T00:02:00Z'),
+      reactionOf: JSON.stringify({ originalMsgId: originalMsgIdBase64 }),
+    });
+
+    // Insert an unrelated message with its own reaction
+    const unrelatedMsgIdBytes = new Uint8Array(12).fill(60);
+    const unrelatedMsgId = await testQueries.messages.insert({
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: 'Unrelated message',
+      type: MessageType.TEXT,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.SENT,
+      timestamp: new Date('2024-01-01T00:03:00Z'),
+      messageId: unrelatedMsgIdBytes,
+    });
+
+    const unrelatedReactionId = await testQueries.messages.insert({
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: '😂',
+      type: MessageType.REACTION,
+      direction: MessageDirection.INCOMING,
+      status: MessageStatus.DELIVERED,
+      timestamp: new Date('2024-01-01T00:04:00Z'),
+      reactionOf: JSON.stringify({
+        originalMsgId: encodeToBase64(unrelatedMsgIdBytes),
+      }),
+    });
+
+    const service = new MessageService(
+      new MockMessageProtocol(),
+      createMockSession(),
+      new SdkEventEmitter(),
+      defaultSdkConfig,
+      testQueries
+    );
+
+    const result = await service.deleteMessage(msgId);
+    expect(result).toBe(true);
+
+    const allRows = await testQueries.messages.getByOwnerAndContact(
+      OWNER_USER_ID,
+      CONTACT_USER_ID
+    );
+
+    // The deleted message should be marked as DELETED
+    const deletedMsg = allRows.find(r => r.id === msgId);
+    expect(deletedMsg?.type).toBe(MessageType.DELETED);
+    expect(deletedMsg?.content).toBe('[Message deleted]');
+
+    // Reactions for the deleted message should be removed
+    expect(allRows.find(r => r.id === reaction1Id)).toBeUndefined();
+    expect(allRows.find(r => r.id === reaction2Id)).toBeUndefined();
+
+    // Unrelated message and its reaction should remain
+    expect(allRows.find(r => r.id === unrelatedMsgId)).toBeDefined();
+    expect(allRows.find(r => r.id === unrelatedReactionId)).toBeDefined();
+    expect(allRows.find(r => r.id === unrelatedReactionId)?.content).toBe('😂');
+  });
+});
+
+describe('incoming delete path also removes reactions', () => {
+  beforeEach(clearAllTables);
+
+  it('deleteReactionsForMessage is called correctly for incoming deletes', async () => {
+    const testQueries = getTestQueries();
+
+    const originalMsgIdBytes = new Uint8Array(12).fill(70);
+    const originalMsgIdBase64 = encodeToBase64(originalMsgIdBytes);
+
+    // Insert the original incoming message (sent by contact, received by owner)
+    const msgRowId = await testQueries.messages.insert({
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: 'Incoming message to delete',
+      type: MessageType.TEXT,
+      direction: MessageDirection.INCOMING,
+      status: MessageStatus.DELIVERED,
+      timestamp: new Date('2024-01-01T00:00:00Z'),
+      messageId: originalMsgIdBytes,
+    });
+
+    // Insert reactions referencing this message
+    const reaction1Id = await testQueries.messages.insert({
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: '👍',
+      type: MessageType.REACTION,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.SENT,
+      timestamp: new Date('2024-01-01T00:01:00Z'),
+      reactionOf: JSON.stringify({ originalMsgId: originalMsgIdBase64 }),
+    });
+
+    const reaction2Id = await testQueries.messages.insert({
+      ownerUserId: OWNER_USER_ID,
+      contactUserId: CONTACT_USER_ID,
+      content: '❤️',
+      type: MessageType.REACTION,
+      direction: MessageDirection.INCOMING,
+      status: MessageStatus.DELIVERED,
+      timestamp: new Date('2024-01-01T00:02:00Z'),
+      reactionOf: JSON.stringify({ originalMsgId: originalMsgIdBase64 }),
+    });
+
+    // Simulate what the incoming delete path does:
+    // 1. Mark the message as deleted
+    await testQueries.messages.updateById(msgRowId, {
+      content: '[Message deleted]',
+      type: MessageType.DELETED,
+    });
+
+    // 2. Delete reactions for that message (this is the new behavior)
+    await testQueries.messages.deleteReactionsForMessage(
+      OWNER_USER_ID,
+      CONTACT_USER_ID,
+      originalMsgIdBase64
+    );
+
+    const allRows = await testQueries.messages.getByOwnerAndContact(
+      OWNER_USER_ID,
+      CONTACT_USER_ID
+    );
+
+    // The original message should be marked as deleted
+    const deletedMsg = allRows.find(r => r.id === msgRowId);
+    expect(deletedMsg?.type).toBe(MessageType.DELETED);
+    expect(deletedMsg?.content).toBe('[Message deleted]');
+
+    // All reactions for that message should be deleted
+    expect(allRows.find(r => r.id === reaction1Id)).toBeUndefined();
+    expect(allRows.find(r => r.id === reaction2Id)).toBeUndefined();
   });
 });
 

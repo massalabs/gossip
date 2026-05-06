@@ -181,7 +181,7 @@ function Select<T>({
                 placeholder={searchPlaceholder}
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
-                className="w-full px-3 py-2 bg-muted dark:bg-input border border-border rounded-lg focus:ring-2 focus:ring-ring focus:border-transparent text-foreground placeholder-muted-foreground"
+                className="w-full px-3 py-2 bg-muted dark:bg-input border border-border rounded-lg focus-visible:ring-2 focus-visible:ring-ring focus:border-transparent text-foreground placeholder-muted-foreground"
                 autoFocus
               />
             </div>

@@ -15,8 +15,10 @@
     "web3": "Web3",
     "about": "关于",
     "debug": "调试",
-    "logout": "退出登录",
-    "security": "安全"
+    "lock_account": "锁定",
+    "privacy": "隐私",
+    "security": "安全",
+    "feedback": "发送反馈"
   },
   "delete_account": {
     "button": "删除账户",
@@ -46,7 +48,9 @@
   "about": {
     "title": "关于",
     "version": "版本",
-    "build_id": "构建 ID"
+    "build_id": "构建 ID",
+    "about_gossip": "关于 Gossip",
+    "terms_conditions": "条款与条件"
   },
   "notifications": {
     "title": "通知",
@@ -55,7 +59,9 @@
     "blocked": "已屏蔽",
     "enable": "启用",
     "requesting": "请求中...",
-    "blocked_message": "通知已被屏蔽，请在浏览器设置中启用。"
+    "blocked_message_web": "通知已被屏蔽，请在浏览器设置中启用。",
+    "blocked_message_native": "通知已被屏蔽。请打开系统设置重新启用。",
+    "open_settings": "打开设置"
   },
   "language": {
     "title": "语言"
@@ -96,6 +102,11 @@
     "auto_lock_30m": "30 分钟",
     "auto_lock_1h": "1 小时"
   },
+  "privacy": {
+    "title": "隐私",
+    "default_retention_title": "默认消息自动删除",
+    "default_retention_description": "新会话将自动应用此保留策略。"
+  },
   "web3": {
     "title": "Web3",
     "enable_mns": "启用 MNS",
@@ -108,6 +119,18 @@
     "trust_body": "解析 MNS 域名需要信任 Massa RPC 的响应。RPC 端点可能会提供不正确或恶意的解析数据。"
   },
   "background_sync": {
+    "privacy_model_title": "隐私与后台送达",
+    "privacy_model_body": "Gossip 不使用服务器推送通知。应用仅在系统允许时在后台同步。送达并非实时：取决于设备、电池设置以及是否强制停止应用。在 iOS 上，后台运行尤其受限。",
+    "preset_title": "后台拉取间隔策略",
+    "preset_max": "最高响应",
+    "preset_max_description": "每分钟检查新消息。更耗电。",
+    "preset_balanced": "均衡",
+    "preset_balanced_description": "每 5 分钟检查新消息。更省电。",
+    "foreground_title": "Android：高可靠性模式",
+    "foreground_description": "即使应用在后台也保持同步运行。显示常驻通知。更耗电。",
+    "foreground_toggle": "保持同步活跃",
+    "debug_sync_preset": "同步预设：{{preset}}",
+    "debug_foreground_sync": "前台同步：{{value}}",
     "title": "后台同步",
     "checking": "检查中...",
     "optimized": "已优化",
@@ -121,17 +144,30 @@
     "on": "开",
     "off": "关",
     "open_settings": "打开设置",
+    "ios_limitation": "iOS 将后台执行限制为最快每 15–30 分钟一次。这是系统限制，无法更改。",
     "battery_optimization": "电池优化已禁用",
     "yes": "是",
     "no": "否",
     "android_restriction": "Android 后台限制",
+    "allow_background": "允许后台活动",
+    "allow_background_description": "如果 Android 限制后台活动，应用一离开前台就会停止同步。点击打开设置。",
     "not_restricted": "未受限",
     "miui_note": "（MIUI 可能仍会限制）",
     "disable_battery": "禁用电池优化",
+    "disable_battery_description": "当应用不在前台时，Android 的电池优化可能会终止应用，导致消息延迟或丢失。点击打开设置，将 Gossip 加入例外。",
+    "battery_settings": "电池设置",
     "enable_autostart": "启用自启动（MIUI）",
-    "learn_more": "了解更多关于您设备的电池优化设置",
+    "learn_more": "了解更多",
     "debug_info": "调试信息",
-    "refresh_status": "刷新状态"
+    "refresh_status": "刷新状态",
+    "device_warnings": {
+      "xiaomi": "小米设备的电池优化非常激进。为可靠地在后台接收消息，请关闭 Gossip 的电池优化，并在 MIUI 安全设置中启用「自启动」。",
+      "huawei": "华为设备有严格的电池管理。为可靠地在后台接收消息，请关闭 Gossip 的电池优化，并在电池设置中将其加入「受保护的应用」。",
+      "samsung": "三星设备可能限制后台活动。为可靠地接收消息，请关闭电池优化，并为 Gossip 关闭「将应用置于休眠状态」。",
+      "oneplus": "一加设备的电池优化可能影响后台同步。请关闭 Gossip 的电池优化。",
+      "bbk": "该设备的电池优化可能阻止后台通知。请关闭电池优化，并允许 Gossip 的后台活动。",
+      "generic": "该设备可能限制后台活动。为可靠地接收消息通知，请检查电池优化设置，并允许 Gossip 在后台运行。"
+    }
   },
   "pwa": {
     "offline_ready": "应用已准备好离线使用",

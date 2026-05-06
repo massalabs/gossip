@@ -1,12 +1,27 @@
 import { create } from 'zustand';
-import { Message } from '@massalabs/gossip-sdk';
+import {
+  Message,
+  MessageDirection,
+  MessageStatus,
+  MessageType,
+} from '@massalabs/gossip-sdk';
 import { createSelectors } from './utils/createSelectors';
 import { getSdk } from './sdkStore';
+import { useAccountStore } from './accountStore';
 import { ReactionGroup } from './messageStore';
+import {
+  groupReactions,
+  addOptimisticReaction,
+  replaceReactionId,
+  decrementReaction,
+  findReactionById,
+  restoreReactionGroup,
+  type ReactionsMap,
+} from './selfMessageStore.helpers';
 
 interface SelfMessageStore {
   messages: Message[];
-  reactions: Map<number, ReactionGroup[]>;
+  reactions: ReactionsMap;
   isLoading: boolean;
   isSending: boolean;
   loadMessages: () => Promise<void>;
@@ -33,7 +48,12 @@ const useSelfMessageStoreBase = create<SelfMessageStore>((set, get) => ({
     set({ isLoading: true });
     try {
       const messages = await sdk.selfMessages.getMessages();
-      set({ messages });
+      // Preserve any in-flight optimistic messages (no id yet) so a concurrent
+      // send isn't wiped by this load.
+      set(state => {
+        const optimistic = state.messages.filter(m => m.id == null);
+        return { messages: [...messages, ...optimistic] };
+      });
     } catch (error) {
       console.error('Failed to load self messages', error);
     } finally {
@@ -47,22 +67,7 @@ const useSelfMessageStoreBase = create<SelfMessageStore>((set, get) => ({
 
     try {
       const raw = await sdk.selfMessages.getReactions();
-      const map = new Map<number, ReactionGroup[]>();
-      for (const { id, emoji, originalMessageId } of raw) {
-        const existing: ReactionGroup[] = map.get(originalMessageId) ?? [];
-        const groupIndex = existing.findIndex(g => g.emoji === emoji);
-        if (groupIndex >= 0) {
-          existing[groupIndex] = {
-            ...existing[groupIndex],
-            count: existing[groupIndex].count + 1,
-            myReactionId: id,
-          };
-        } else {
-          existing.push({ emoji, count: 1, myReactionId: id });
-        }
-        map.set(originalMessageId, existing);
-      }
-      set({ reactions: map });
+      set({ reactions: groupReactions(raw) });
     } catch (error) {
       console.error('Failed to load self reactions', error);
     }
@@ -74,17 +79,40 @@ const useSelfMessageStoreBase = create<SelfMessageStore>((set, get) => ({
 
     const sdk = getSdk();
     if (!sdk.isSessionOpen) return;
+    const userProfile = useAccountStore.getState().userProfile;
+    if (!userProfile?.userId) return;
 
     set({ isSending: true });
+
+    // Client-generated messageId so the React key (msg-${messageId}) stays
+    // stable across the optimistic → persisted patch. The SDK itself doesn't
+    // store messageId for self-messages, so we preserve ours after the write.
+    const localMessageId = crypto.getRandomValues(new Uint8Array(12));
+    const optimistic: Message = {
+      ownerUserId: userProfile.userId,
+      contactUserId: '__self__',
+      content: trimmed,
+      type: MessageType.TEXT,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.SENT,
+      timestamp: new Date(),
+      messageId: localMessageId,
+    };
+    set(state => ({ messages: [...state.messages, optimistic] }));
+    set({ isSending: false });
+
     try {
       const message = await sdk.selfMessages.send(trimmed);
       set(state => ({
-        messages: [...state.messages, message],
+        messages: state.messages.map(m =>
+          m === optimistic ? { ...message, messageId: localMessageId } : m
+        ),
       }));
     } catch (error) {
       console.error('Failed to send self message', error);
-    } finally {
-      set({ isSending: false });
+      set(state => ({
+        messages: state.messages.filter(m => m !== optimistic),
+      }));
     }
   },
 
@@ -92,7 +120,9 @@ const useSelfMessageStoreBase = create<SelfMessageStore>((set, get) => ({
     const sdk = getSdk();
     if (!sdk.isSessionOpen) return;
 
-    // Optimistic update
+    const original = get().messages.find(m => m.id === id);
+    if (!original) return;
+
     set(state => ({
       messages: state.messages.map(m =>
         m.id === id
@@ -109,9 +139,11 @@ const useSelfMessageStoreBase = create<SelfMessageStore>((set, get) => ({
       await sdk.selfMessages.editMessage(id, newContent);
     } catch (error) {
       console.error('Failed to edit self message', error);
-      // Revert by reloading
-      const messages = await sdk.selfMessages.getMessages();
-      set({ messages });
+      // Revert just this message in-place so concurrent optimistic sends
+      // aren't wiped by a full reload.
+      set(state => ({
+        messages: state.messages.map(m => (m.id === id ? original : m)),
+      }));
     }
   },
 
@@ -119,13 +151,33 @@ const useSelfMessageStoreBase = create<SelfMessageStore>((set, get) => ({
     const sdk = getSdk();
     if (!sdk.isSessionOpen) return;
 
+    const removed = get().messages.find(m => m.id === id);
+    const removedReactions = get().reactions.get(id);
+    set(state => {
+      const nextReactions = new Map(state.reactions);
+      nextReactions.delete(id);
+      return {
+        messages: state.messages.filter(m => m.id !== id),
+        reactions: nextReactions,
+      };
+    });
+
     try {
       await sdk.selfMessages.deleteMessage(id);
-      set(state => ({
-        messages: state.messages.filter(m => m.id !== id),
-      }));
     } catch (error) {
       console.error('Failed to delete self message', error);
+      if (removed) {
+        set(state => {
+          const nextReactions = new Map(state.reactions);
+          if (removedReactions) nextReactions.set(id, removedReactions);
+          return {
+            messages: [...state.messages, removed].sort(
+              (a, b) => a.timestamp.getTime() - b.timestamp.getTime()
+            ),
+            reactions: nextReactions,
+          };
+        });
+      }
     }
   },
 
@@ -133,66 +185,35 @@ const useSelfMessageStoreBase = create<SelfMessageStore>((set, get) => ({
     const sdk = getSdk();
     if (!sdk.isSessionOpen) return;
 
-    // Optimistic update with a temporary negative ID
     const tempId = -Date.now();
-    set(state => {
-      const map = new Map(state.reactions);
-      const existing: ReactionGroup[] = map.get(messageDbId) ?? [];
-      const groupIndex = existing.findIndex(g => g.emoji === emoji);
-      if (groupIndex >= 0) {
-        const updated = [...existing];
-        updated[groupIndex] = {
-          ...updated[groupIndex],
-          count: updated[groupIndex].count + 1,
-          myReactionId: tempId,
-        };
-        map.set(messageDbId, updated);
-      } else {
-        map.set(messageDbId, [
-          ...existing,
-          { emoji, count: 1, myReactionId: tempId },
-        ]);
-      }
-      return { reactions: map };
-    });
+    set(state => ({
+      reactions: addOptimisticReaction(
+        state.reactions,
+        messageDbId,
+        emoji,
+        tempId
+      ),
+    }));
 
     try {
       const reaction = await sdk.selfMessages.sendReaction(emoji, messageDbId);
-      // Replace temp ID with real DB ID
-      set(state => {
-        const map = new Map(state.reactions);
-        const groups = map.get(messageDbId);
-        if (groups) {
-          map.set(
-            messageDbId,
-            groups.map(g =>
-              g.myReactionId === tempId
-                ? { ...g, myReactionId: reaction.id }
-                : g
-            )
-          );
-        }
-        return { reactions: map };
-      });
+      set(state => ({
+        reactions: replaceReactionId(
+          state.reactions,
+          messageDbId,
+          tempId,
+          reaction.id
+        ),
+      }));
     } catch (error) {
       console.error('Failed to send self reaction', error);
-      // Revert optimistic update
-      set(state => {
-        const map = new Map(state.reactions);
-        const groups = map.get(messageDbId);
-        if (groups) {
-          const updated = groups
-            .map(g =>
-              g.myReactionId === tempId
-                ? { ...g, count: g.count - 1, myReactionId: undefined }
-                : g
-            )
-            .filter(g => g.count > 0);
-          if (updated.length === 0) map.delete(messageDbId);
-          else map.set(messageDbId, updated);
-        }
-        return { reactions: map };
-      });
+      set(state => ({
+        reactions: decrementReaction(
+          state.reactions,
+          messageDbId,
+          g => g.myReactionId === tempId
+        ),
+      }));
     }
   },
 
@@ -200,42 +221,28 @@ const useSelfMessageStoreBase = create<SelfMessageStore>((set, get) => ({
     const sdk = getSdk();
     if (!sdk.isSessionOpen) return;
 
-    // Optimistic update — find and save the group for potential revert
-    let revertInfo: { msgId: number; group: ReactionGroup } | null = null;
-    set(state => {
-      const map = new Map(state.reactions);
-      map.forEach((groups, msgId) => {
-        const groupIndex = groups.findIndex(g => g.myReactionId === reactionId);
-        if (groupIndex >= 0) {
-          revertInfo = { msgId, group: groups[groupIndex] };
-          const updated = groups
-            .map(g =>
-              g.myReactionId === reactionId
-                ? { ...g, count: g.count - 1, myReactionId: undefined }
-                : g
-            )
-            .filter(g => g.count > 0);
-          if (updated.length === 0) map.delete(msgId);
-          else map.set(msgId, updated);
-        }
-      });
-      return { reactions: map };
-    });
+    const revertInfo = findReactionById(get().reactions, reactionId);
+    if (!revertInfo) return;
+
+    set(state => ({
+      reactions: decrementReaction(
+        state.reactions,
+        revertInfo.messageId,
+        g => g.myReactionId === reactionId
+      ),
+    }));
 
     try {
       await sdk.selfMessages.removeReaction(reactionId);
     } catch (error) {
       console.error('Failed to remove self reaction', error);
-      // Revert optimistic update
-      if (revertInfo) {
-        const { msgId, group } = revertInfo;
-        set(state => {
-          const map = new Map(state.reactions);
-          const existing: ReactionGroup[] = map.get(msgId) ?? [];
-          map.set(msgId, [...existing, group]);
-          return { reactions: map };
-        });
-      }
+      set(state => ({
+        reactions: restoreReactionGroup(
+          state.reactions,
+          revertInfo.messageId,
+          revertInfo.group
+        ),
+      }));
     }
   },
 

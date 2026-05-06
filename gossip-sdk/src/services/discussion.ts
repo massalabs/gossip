@@ -352,7 +352,13 @@ export class DiscussionService {
     payload?: AnnouncementPayload
   ): Promise<Result<DiscussionInitializationResult, Error>> {
     const result = await this.initialize(contact, payload);
-    if (result.success) await this.refreshService?.stateUpdate();
+    if (result.success) {
+      await this.refreshService?.stateUpdate();
+      this.eventEmitter.emit(
+        SdkEventType.DISCUSSION_UPDATED,
+        result.data.discussionId
+      );
+    }
     return result;
   }
 

@@ -3,7 +3,10 @@ import { useTranslation } from 'react-i18next';
 import BaseModal from '../ui/BaseModal';
 import Button from '../ui/Button';
 import { useKeyDown } from '../../hooks/useKeyDown';
-import { validateUsernameFormat } from '@massalabs/gossip-sdk';
+import {
+  validateUsernameFormat,
+  USERNAME_MAX_LENGTH,
+} from '../../utils/validation';
 import { useGossipSdk } from '../../hooks/useGossipSdk';
 
 interface UsernameEditModalProps {
@@ -259,8 +262,9 @@ const UsernameEditModal: React.FC<UsernameEditModalProps> = ({
             onChange={handleUsernameChange}
             onKeyDown={handleKeyDown}
             disabled={isSubmitting}
-            className="w-full h-11 px-3 rounded-lg border border-border bg-card dark:bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full h-11 px-3 rounded-lg border border-border bg-card dark:bg-input text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 disabled:cursor-not-allowed"
             placeholder={t('edit_username_modal.placeholder')}
+            maxLength={USERNAME_MAX_LENGTH}
             enterKeyHint="done"
           />
           {error && (

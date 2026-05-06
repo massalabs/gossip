@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import BaseModal from '../components/ui/BaseModal';
-import PageLayout from '../components/ui/PageLayout';
+import PageLayout from '../components/ui/Layout/PageLayout';
 import PageHeader from '../components/ui/PageHeader';
 import { useAccountStore } from '../stores/accountStore';
 import { useGossipSdk } from '../hooks/useGossipSdk';
@@ -24,6 +24,7 @@ import {
   Type,
   Shield,
   Clock,
+  MessageSquare,
 } from 'react-feather';
 import { useNavigate } from 'react-router-dom';
 
@@ -138,76 +139,65 @@ const Settings = (): React.ReactElement => {
       className="app-max-w mx-auto"
       contentClassName="px-6 py-6"
     >
-      {/* Account Profile Section */}
-      <div className="bg-card rounded-xl border border-border p-6 mb-6">
-        <div className="flex items-start gap-4">
+      {/* Account Profile Hero — pro chat-app style */}
+      <div className="bg-card rounded-2xl border border-border shadow-sm dark:shadow-none p-5 mb-6">
+        <div className="flex items-center gap-4">
           <button
             type="button"
             onClick={handleProfileImageTap}
-            className="cursor-pointer focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 rounded-full transition-opacity active:opacity-70"
+            className="shrink-0 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-full transition-opacity active:opacity-70"
             aria-label={t('profile')}
           >
             <UserProfileAvatar
               name={userProfile?.username ?? ''}
-              size={10}
+              size={16}
               interactive={false}
             />
           </button>
           <div className="flex-1 min-w-0">
-            <div className="mb-2 flex items-center gap-2">
-              <p className="text-xs text-muted-foreground shrink-0">
-                {t('name_label')}
-              </p>
-              <h3 className="text-base font-semibold text-foreground truncate">
+            <div className="flex items-center gap-1.5 mb-1">
+              <h2 className="text-xl font-bold text-foreground truncate">
                 {userProfile?.username || t('account_name')}
-              </h3>
+              </h2>
               <button
                 onClick={() => setIsUsernameModalOpen(true)}
-                className="shrink-0 p-1 rounded-lg hover:bg-muted transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                className="shrink-0 p-1 rounded-lg hover:bg-muted transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                 aria-label={t('edit_username')}
               >
                 <Edit2 className="w-3.5 h-3.5 text-muted-foreground" />
               </button>
             </div>
             {userProfile?.userId && (
-              <div className="space-y-2">
-                {mnsEnabled && mnsDomains.length > 0 ? (
-                  <div className="space-y-1.5">
-                    <p className="text-xs text-muted-foreground">MNS:</p>
-                    {mnsDomains.map(domain => (
+              <div className="space-y-0.5">
+                {mnsEnabled && mnsDomains.length > 0
+                  ? mnsDomains.map(domain => (
                       <div
                         key={domain}
-                        className="flex items-center gap-2 min-w-0"
+                        className="flex items-center gap-1.5 min-w-0"
                       >
-                        <p className="text-sm font-medium text-muted-foreground font-mono truncate flex-1 min-w-0">
+                        <p className="text-xs font-mono text-muted-foreground truncate flex-1 min-w-0">
                           {domain}
                         </p>
                         <CopyClipboard
                           text={domain}
                           title={t('copy_mns_domain')}
-                          iconSize="w-3.5 h-3.5"
+                          iconSize="w-3 h-3"
                         />
                       </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-2 min-w-0">
-                    <p className="text-xs text-muted-foreground shrink-0">
-                      {t('user_id_label')}
-                    </p>
-                    <UserIdDisplay
-                      userId={userProfile.userId}
-                      visible={showUserId}
-                      onChange={setShowUserId}
-                      textSize="sm"
-                      textClassName="text-muted-foreground"
-                      showCopy
-                      showHideToggle
-                      className="w-full"
-                      prefixChars={3}
-                      suffixChars={3}
-                    />
-                  </div>
+                    ))
+                  : null}
+                {(!mnsEnabled || mnsDomains.length === 0) && (
+                  <UserIdDisplay
+                    userId={userProfile.userId}
+                    visible={showUserId}
+                    onChange={setShowUserId}
+                    textSize="xs"
+                    textClassName="text-muted-foreground font-mono"
+                    showCopy
+                    showHideToggle
+                    prefixChars={4}
+                    suffixChars={4}
+                  />
                 )}
               </div>
             )}
@@ -218,15 +208,15 @@ const Settings = (): React.ReactElement => {
       {/* Settings Sections */}
       <div className="space-y-6">
         {/* Account Backup & Share Contact Group */}
-        <div className="bg-card rounded-xl border border-border overflow-hidden">
+        <div className="bg-card rounded-xl border border-border shadow-sm dark:shadow-none overflow-hidden">
           <Button
             variant="outline"
             size="custom"
-            className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0 border-b border-border"
+            className="w-full h-[52px] flex items-center px-4 justify-start rounded-none border-0 border-b border-border/60"
             onClick={() => setActiveView(SettingsView.ACCOUNT_BACKUP)}
           >
-            <User className="mr-4" />
-            <span className="text-base font-semibold flex-1 text-left">
+            <User className="mr-5 w-5 h-5" />
+            <span className="text-[15px] font-medium flex-1 text-left">
               {t('menu.account_backup')}
             </span>
             {mnemonicBackupInfo?.backedUp && (
@@ -236,92 +226,92 @@ const Settings = (): React.ReactElement => {
           <Button
             variant="outline"
             size="custom"
-            className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0"
+            className="w-full h-[52px] flex items-center px-4 justify-start rounded-none border-0"
             onClick={() => setActiveView(SettingsView.SHARE_CONTACT)}
           >
-            <Share2 className="mr-4" />
-            <span className="text-base font-semibold flex-1 text-left">
+            <Share2 className="mr-5 w-5 h-5" />
+            <span className="text-[15px] font-medium flex-1 text-left">
               {t('menu.share_contact')}
             </span>
           </Button>
         </div>
 
         {/* Notifications & Appearance Group */}
-        <div className="bg-card rounded-xl border border-border overflow-hidden">
+        <div className="bg-card rounded-xl border border-border shadow-sm dark:shadow-none overflow-hidden">
           <Button
             variant="outline"
             size="custom"
-            className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0 border-b border-border"
+            className="w-full h-[52px] flex items-center px-4 justify-start rounded-none border-0 border-b border-border/60"
             onClick={() => navigate(ROUTES.settingsNotifications())}
           >
-            <Bell className="mr-4" />
-            <span className="text-base font-semibold flex-1 text-left">
+            <Bell className="mr-5 w-5 h-5" />
+            <span className="text-[15px] font-medium flex-1 text-left">
               {t('menu.notifications')}
             </span>
           </Button>
           <Button
             variant="outline"
             size="custom"
-            className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0 border-b border-border"
+            className="w-full h-[52px] flex items-center px-4 justify-start rounded-none border-0 border-b border-border/60"
             onClick={() => navigate(ROUTES.settingsAppearance())}
           >
-            <Moon className="mr-4" />
-            <span className="text-base font-semibold flex-1 text-left">
+            <Moon className="mr-5 w-5 h-5" />
+            <span className="text-[15px] font-medium flex-1 text-left">
               {t('menu.appearance')}
             </span>
           </Button>
           <Button
             variant="outline"
             size="custom"
-            className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0 border-b border-border"
+            className="w-full h-[52px] flex items-center px-4 justify-start rounded-none border-0 border-b border-border/60"
             onClick={() => navigate(ROUTES.settingsLanguage())}
           >
-            <Type className="mr-4" />
-            <span className="text-base font-semibold flex-1 text-left">
+            <Type className="mr-5 w-5 h-5" />
+            <span className="text-[15px] font-medium flex-1 text-left">
               {t('menu.language')}
             </span>
           </Button>
           <Button
             variant="outline"
             size="custom"
-            className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0 border-b border-border"
+            className="w-full h-[52px] flex items-center px-4 justify-start rounded-none border-0 border-b border-border/60"
             onClick={() => navigate(ROUTES.settingsPrivacy())}
           >
-            <Shield className="mr-4" />
-            <span className="text-base font-semibold flex-1 text-left">
+            <Shield className="mr-5 w-5 h-5" />
+            <span className="text-[15px] font-medium flex-1 text-left">
               {t('menu.privacy')}
             </span>
           </Button>
           <Button
             variant="outline"
             size="custom"
-            className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0"
+            className="w-full h-[52px] flex items-center px-4 justify-start rounded-none border-0"
             onClick={() => navigate(ROUTES.settingsSecurity())}
           >
-            <Clock className="mr-4" />
-            <span className="text-base font-semibold flex-1 text-left">
+            <Clock className="mr-5 w-5 h-5" />
+            <span className="text-[15px] font-medium flex-1 text-left">
               {t('menu.security')}
             </span>
           </Button>
         </div>
 
         {/* Web 3 Group */}
-        <div className="bg-card rounded-xl border border-border overflow-hidden">
+        <div className="bg-card rounded-xl border border-border shadow-sm dark:shadow-none overflow-hidden">
           <Button
             variant="outline"
             size="custom"
-            className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0"
+            className="w-full h-[52px] flex items-center px-4 justify-start rounded-none border-0"
             onClick={() => navigate(ROUTES.settingsWeb3())}
           >
-            <Globe className="mr-4" />
-            <span className="text-base font-semibold flex-1 text-left">
+            <Globe className="mr-5 w-5 h-5" />
+            <span className="text-[15px] font-medium flex-1 text-left">
               {t('menu.web3')}
             </span>
           </Button>
         </div>
 
         {/* About & Debug Group */}
-        <div className="bg-card rounded-xl border border-border overflow-hidden">
+        <div className="bg-card rounded-xl border border-border shadow-sm dark:shadow-none overflow-hidden">
           <Button
             variant="outline"
             size="custom"
@@ -330,20 +320,38 @@ const Settings = (): React.ReactElement => {
             }`}
             onClick={() => navigate(ROUTES.settingsAbout())}
           >
-            <Info className="mr-4" />
-            <span className="text-base font-semibold flex-1 text-left">
+            <Info className="mr-5 w-5 h-5" />
+            <span className="text-[15px] font-medium flex-1 text-left">
               {t('menu.about')}
             </span>
           </Button>
+          <Button
+            variant="outline"
+            size="custom"
+            className={`w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0 border-b border-border`}
+            onClick={() =>
+              window.open(
+                'https://cryptpad.fr/form/#/2/form/view/ZzlOcdHn5aACC2omt+QoCLoDohBgdZtWSIXjxmguPDs/embed/',
+                '_blank'
+              )
+            }
+          >
+            <MessageSquare className="mr-4" />
+
+            <span className="text-base font-semibold flex-1 text-left">
+              {t('menu.feedback')}
+            </span>
+          </Button>
+
           {showDebugOption && (
             <Button
               variant="outline"
               size="custom"
-              className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0"
+              className="w-full h-[52px] flex items-center px-4 justify-start rounded-none border-0"
               onClick={() => navigate(ROUTES.settingsDebug())}
             >
-              <SettingsIconFeather className="mr-4" />
-              <span className="text-base font-semibold flex-1 text-left">
+              <SettingsIconFeather className="mr-5 w-5 h-5" />
+              <span className="text-[15px] font-medium flex-1 text-left">
                 {t('menu.debug')}
               </span>
             </Button>
@@ -351,16 +359,16 @@ const Settings = (): React.ReactElement => {
         </div>
 
         {/* Account Actions */}
-        <div className="bg-card rounded-xl border border-border overflow-hidden">
+        <div className="bg-card rounded-xl border border-border shadow-sm dark:shadow-none overflow-hidden">
           <Button
             variant="outline"
             size="custom"
             className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0 border-b border-border text-foreground"
             onClick={handleLockApp}
           >
-            <Lock className="mr-4" />
-            <span className="text-base font-semibold flex-1 text-left">
-              {t('menu.logout')}
+            <Lock className="mr-5 w-5 h-5" />
+            <span className="text-[15px] font-medium flex-1 text-left">
+              {t('menu.lock_account')}
             </span>
           </Button>
           <Button
@@ -369,8 +377,8 @@ const Settings = (): React.ReactElement => {
             className="w-full h-[54px] flex items-center px-4 justify-start rounded-none border-0 text-destructive border-destructive hover:bg-destructive/10"
             onClick={() => setIsResetModalOpen(true)}
           >
-            <Trash2 className="mr-4" />
-            <span className="text-base font-semibold flex-1 text-left">
+            <Trash2 className="mr-5 w-5 h-5" />
+            <span className="text-[15px] font-medium flex-1 text-left">
               {t('delete_account.button')}
             </span>
           </Button>
@@ -391,10 +399,10 @@ const Settings = (): React.ReactElement => {
             </div>
           </div>
           <div className="space-y-2 text-center">
-            <p className="text-sm text-foreground">
+            <p className="text-sm text-foreground leading-relaxed">
               {t('delete_account.confirm')}
             </p>
-            <p className="text-sm text-muted-foreground">
+            <p className="text-sm text-muted-foreground leading-relaxed">
               {t('delete_account.warning')}
             </p>
           </div>
@@ -407,16 +415,17 @@ const Settings = (): React.ReactElement => {
             >
               {t('common:cancel')}
             </Button>
-            <button
+            <Button
               onClick={async () => {
                 setIsResetModalOpen(false);
                 await handleResetAccount();
               }}
-              className="flex-1 h-12 rounded-full font-medium text-white hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
-              style={{ backgroundColor: 'var(--high-danger-red)' }}
+              variant="danger"
+              size="custom"
+              className="flex-1 h-12 rounded-full font-medium"
             >
               {t('common:delete')}
-            </button>
+            </Button>
           </div>
         </div>
       </BaseModal>

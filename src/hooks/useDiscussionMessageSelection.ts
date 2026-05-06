@@ -10,8 +10,6 @@ import { TFunction } from 'i18next';
 
 interface UseDiscussionMessageSelectionParams {
   messages: Message[];
-  discussionCustomName?: string;
-  contactName?: string;
   gossip: GossipSdk;
   t: TFunction;
   /** Override the default delete function (e.g. for self messages) */
@@ -32,8 +30,6 @@ interface UseDiscussionMessageSelectionResult {
 
 export const useDiscussionMessageSelection = ({
   messages,
-  discussionCustomName,
-  contactName,
   gossip,
   t,
   onDeleteMessage,
@@ -54,11 +50,7 @@ export const useDiscussionMessageSelection = ({
   );
 
   const canDeleteSelected = useMemo(
-    () =>
-      selectedMessages.length > 0 &&
-      selectedMessages.every(
-        message => message.direction === MessageDirection.OUTGOING
-      ),
+    () => selectedMessages.length > 0,
     [selectedMessages]
   );
 
@@ -94,17 +86,7 @@ export const useDiscussionMessageSelection = ({
       .filter(m => m.id != null && selectedMessageIds.has(m.id))
       .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
 
-    const resolvedContactName =
-      discussionCustomName || contactName || 'Unknown';
-    const text = selected
-      .map(m => {
-        const sender =
-          m.direction === MessageDirection.OUTGOING
-            ? t('copy_you')
-            : resolvedContactName;
-        return `${sender}\n${m.content}`;
-      })
-      .join('\n\n');
+    const text = selected.map(m => m.content).join('\n\n');
 
     try {
       await navigator.clipboard.writeText(text);
@@ -112,14 +94,7 @@ export const useDiscussionMessageSelection = ({
     } catch {
       toast.error(t('failed_to_copy_selected'));
     }
-  }, [
-    messages,
-    selectedMessageIds,
-    discussionCustomName,
-    contactName,
-    t,
-    handleClearSelection,
-  ]);
+  }, [messages, selectedMessageIds, t, handleClearSelection]);
 
   const handleDeleteSelected = useCallback(async () => {
     if (!canDeleteSelected || selectedMessages.length === 0) return;

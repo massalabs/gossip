@@ -2,7 +2,7 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { Check } from 'react-feather';
-import PageLayout from '../../components/ui/PageLayout';
+import PageLayout from '../../components/ui/Layout/PageLayout';
 import PageHeader from '../../components/ui/PageHeader';
 import { useUiStore } from '../../stores/uiStore';
 import {
@@ -10,7 +10,6 @@ import {
   LANGUAGE_NAMES,
   type SupportedLanguage,
 } from '../../i18n';
-import { ROUTES } from '../../constants/routes';
 
 const LanguageSettings: React.FC = () => {
   const { t } = useTranslation('settings');
@@ -19,7 +18,7 @@ const LanguageSettings: React.FC = () => {
   const setLanguage = useUiStore.use.setLanguage();
 
   const handleBack = () => {
-    navigate(ROUTES.settings());
+    navigate(-1);
   };
 
   const handleLanguageChange = (lang: SupportedLanguage) => {

@@ -96,11 +96,31 @@ export class RefreshService {
 
       if (previous !== status) {
         this.sessionStatusMap.set(discussion.contactUserId, status);
-        this.eventEmitter.emit(
-          SdkEventType.SESSION_STATUS_CHANGED,
-          discussion.contactUserId,
-          status
-        );
+        this.eventEmitter.emit(SdkEventType.SESSION_STATUS_CHANGED, {
+          contactUserId: discussion.contactUserId,
+          status,
+        });
+
+        // When a session we initiated finally gets accepted (SelfRequested → Active),
+        // proactively flush any messages the user queued during the waiting-approval
+        // phase instead of waiting for the next periodic stateUpdate tick.
+        if (
+          previous === SessionStatus.SelfRequested &&
+          status === SessionStatus.Active
+        ) {
+          const flushResult =
+            await this.messageService.processSendQueueForContact(
+              discussion.contactUserId
+            );
+          if (!flushResult.success) {
+            logger
+              .forMethod('refreshSessionsStatusEvent')
+              .error('failed to flush send queue on SelfRequested→Active', {
+                contactUserId: discussion.contactUserId,
+                error: flushResult.error,
+              });
+          }
+        }
       }
     }
   }
@@ -237,11 +257,10 @@ export class RefreshService {
               timestamp: new Date(),
             });
             if (!result.success) {
-              this.eventEmitter.emit(
-                SdkEventType.ERROR,
-                new Error(result.error || 'Unknown error'),
-                'keep_alive_message'
-              );
+              this.eventEmitter.emit(SdkEventType.ERROR, {
+                error: new Error(result.error || 'Unknown error'),
+                context: 'keep_alive_message',
+              });
             }
           }
         }

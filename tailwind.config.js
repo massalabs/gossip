@@ -1,3 +1,5 @@
+import { p } from '@vite-pwa/assets-generator/dist/shared/assets-generator.5e51fd40.js';
+
 /** @type {import('tailwindcss').Config} */
 export default {
   content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
@@ -31,6 +33,18 @@ export default {
         accent: {
           DEFAULT: 'var(--color-accent)',
           foreground: 'var(--color-accent-foreground)',
+        },
+        'accent-soft': {
+          DEFAULT: 'var(--color-accent-soft)',
+          foreground: 'var(--color-accent-soft-foreground)',
+        },
+        'bubble-sent': {
+          DEFAULT: 'var(--color-bubble-sent)',
+          foreground: 'var(--color-bubble-sent-foreground)',
+        },
+        'bubble-received': {
+          DEFAULT: 'var(--color-bubble-received)',
+          foreground: 'var(--color-bubble-received-foreground)',
         },
         destructive: {
           DEFAULT: 'var(--color-destructive)',
@@ -116,6 +130,12 @@ export default {
         'safe-r': 'var(--sar)',
       },
 
+      padding: {
+        'safe-t': 'var(--sat)',
+        'safe-b': 'var(--sab)',
+        'safe-l': 'var(--sal)',
+        'safe-r': 'var(--sar)',
+      },
       // Pour min-height, height
       height: {
         'safe-t': 'var(--sat)',

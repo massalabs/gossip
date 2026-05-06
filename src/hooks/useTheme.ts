@@ -1,29 +1,24 @@
 import { useCallback } from 'react';
 import { useUiStore } from '../stores/uiStore';
 import { Theme } from '../stores/uiStore';
-import { resolveTheme } from '../utils/themeUtils';
+import {
+  applyResolvedThemeToDocument,
+  resolveTheme,
+} from '../utils/themeUtils';
 import { initStatusBar } from './useCapacitorBarColors';
 
 // Store the media query listener cleanup function
 let mediaQueryListener: ((event: MediaQueryListEvent) => void) | null = null;
 let mediaQuery: MediaQueryList | null = null;
-// Store the theme subscription cleanup function
-let unsubscribeTheme: (() => void) | null = null;
 
 /**
- * Update theme and apply it to the DOM
+ * Sync resolved theme + DOM when preference is "system" (OS theme changes).
+ * User theme changes go through uiStore.setTheme (also updates DOM).
  */
-const updateTheme = (theme: Theme) => {
-  const root = document.documentElement;
+const applySystemResolvedTheme = (theme: Theme) => {
   const resolved = resolveTheme(theme);
-
   useUiStore.getState().setResolvedTheme(resolved);
-
-  if (resolved === 'dark') {
-    root.classList.add('dark');
-  } else {
-    root.classList.remove('dark');
-  }
+  applyResolvedThemeToDocument(resolved);
 };
 
 /**
@@ -33,7 +28,7 @@ const updateTheme = (theme: Theme) => {
 const handleSystemThemeChange = () => {
   const theme = useUiStore.getState().theme;
   if (theme === 'system') {
-    updateTheme(theme);
+    applySystemResolvedTheme(theme);
   }
 };
 
@@ -69,12 +64,6 @@ export function useTheme() {
     // Initialize status bar style (light/dark icons) based on theme
     await initStatusBar();
 
-    // Clean up existing subscription if it exists
-    if (unsubscribeTheme) {
-      unsubscribeTheme();
-      unsubscribeTheme = null;
-    }
-
     // Clean up existing media query listener if it exists
     if (mediaQueryListener && mediaQuery) {
       mediaQuery.removeEventListener('change', mediaQueryListener);
@@ -85,28 +74,20 @@ export function useTheme() {
     // Initialize system theme listener
     initSystemThemeListener();
 
-    // Get current theme from store (not from closure) to ensure we use the latest value
-    const currentTheme = useUiStore.getState().theme;
-    // Apply initial theme
-    updateTheme(currentTheme);
+    // First paint before persist rehydrate may still use default theme; sync DOM once.
+    applySystemResolvedTheme(useUiStore.getState().theme);
 
-    // Subscribe to theme changes from store
-    unsubscribeTheme = useUiStore.subscribe((state, prevState) => {
+    // User theme changes update DOM in uiStore.setTheme. Only re-wire OS listener here.
+    const unsubscribe = useUiStore.subscribe((state, prevState) => {
       if (state.theme !== prevState.theme) {
-        updateTheme(state.theme);
-        // Re-initialize listener when theme changes to/from system
         if (state.theme === 'system' || prevState.theme === 'system') {
           initSystemThemeListener();
         }
       }
     });
 
-    // Return cleanup function
     return () => {
-      if (unsubscribeTheme) {
-        unsubscribeTheme();
-        unsubscribeTheme = null;
-      }
+      unsubscribe();
       if (mediaQueryListener && mediaQuery) {
         mediaQuery.removeEventListener('change', mediaQueryListener);
         mediaQueryListener = null;

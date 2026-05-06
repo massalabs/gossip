@@ -3,12 +3,19 @@ import { createRoot } from 'react-dom/client';
 import './index.css';
 import App from './App.tsx';
 import { enableDebugLogger } from './utils/logger.ts';
+import { showInitError } from './utils/initError.ts';
+import { installSafariWorkerDedup } from './utils/safariWorkerDedup';
 import { createSdk } from './sdk';
 import { useSdkStore } from './stores/sdkStore';
 import { protocolConfig } from './config/protocol';
+import { SECURE_STORAGE_ENABLED } from './config/features';
 import { Capacitor } from '@capacitor/core';
 import waSqliteWasmUrl from 'wa-sqlite/dist/wa-sqlite.wasm?url';
 import waSqliteAsyncWasmUrl from 'wa-sqlite/dist/wa-sqlite-async.wasm?url';
+import secureStorageWasmUrl from '@massalabs/gossip-sdk/assets/generated/wasm-secureStorage/secureStorage_bg.wasm?url';
+
+// Must run before createSdk() so the SDK's SQLite worker is wrapped.
+installSafariWorkerDedup();
 
 // Polyfill for Buffer
 import { Buffer } from 'buffer';
@@ -97,17 +104,27 @@ enableDebugLogger();
 
 const isNative = Capacitor.isNativePlatform();
 
-Promise.all([
-  createSdk({
+async function bootstrap() {
+  const sdk = await createSdk({
     protocolBaseUrl: protocolConfig.baseUrl,
     config: { polling: { enabled: true } },
-    storage: isNative
-      ? { type: 'opfs', path: '/gossip-db', wasmUrl: waSqliteWasmUrl }
-      : { type: 'idb', name: 'gossip-db', wasmUrl: waSqliteAsyncWasmUrl },
-  }),
-  initSafeArea(),
-])
-  .then(([sdk]) => {
+    storage: SECURE_STORAGE_ENABLED
+      ? {
+          type: 'secureStorage',
+          domain: 'gossip',
+          secureStorageWasmUrl,
+        }
+      : isNative
+        ? { type: 'opfs', path: '/gossip-db', wasmUrl: waSqliteWasmUrl }
+        : { type: 'idb', name: 'gossip-db', wasmUrl: waSqliteAsyncWasmUrl },
+  });
+
+  await initSafeArea();
+  return sdk;
+}
+
+bootstrap()
+  .then(sdk => {
     useSdkStore.getState().setSdk(sdk);
 
     createRoot(document.getElementById('root')!).render(
@@ -117,12 +134,14 @@ Promise.all([
     );
   })
   .catch(error => {
-    console.error('[Gossip] Failed to initialize:', error);
-    const message =
-      typeof error?.message === 'string' &&
-      (error.message.includes('createSyncAccessHandle') ||
-        error.message.includes('another open Access Handle'))
-        ? 'Another tab may have this app open. Please close other tabs and refresh.'
-        : 'Failed to start. Please restart the app.';
-    document.getElementById('root')!.textContent = message;
+    // PD: do not log the raw error in production. The error message and
+    // stack can carry state-specific text (e.g. "namespace allocation
+    // failed: existing data") that an observer of the browser console
+    // history can use to fingerprint storage state. In DEV we keep the
+    // detail for debugging; the user-facing showInitError() renders one
+    // of two generic strings.
+    if (import.meta.env.DEV) {
+      console.error('[Gossip] Failed to initialize:', error);
+    }
+    showInitError(error);
   });

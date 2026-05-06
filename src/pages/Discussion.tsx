@@ -1,29 +1,41 @@
-import React, { useEffect, useCallback, useRef, useState } from 'react';
+import React, {
+  useContext,
+  useEffect,
+  useCallback,
+  useRef,
+  useState,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useDiscussion } from '../hooks/useDiscussion';
 import { useAppStore } from '../stores/appStore';
 import { useDiscussionStore } from '../stores/discussionStore';
 import { useMessageStore } from '../stores/messageStore';
+import { EMPTY_STORE_MESSAGES } from '../stores/messageStore.helpers';
 import toast from 'react-hot-toast';
 import MessageList, {
   MessageListHandle,
 } from '../components/discussions/MessageList';
-import { Message } from '@massalabs/gossip-sdk';
+import { Message, SessionStatus } from '@massalabs/gossip-sdk';
 import { useGossipSdk } from '../hooks/useGossipSdk';
 import { useDiscussionMessageSelection } from '../hooks/useDiscussionMessageSelection';
 import { useDiscussionScrollToMessage } from '../hooks/useDiscussionScrollToMessage';
 import { useHeaderScrollDetection } from '../hooks/useHeaderScrollDetection';
+import { ExitAnimationContext } from '../components/ui/ExitAnimationContext';
 import { useForwardPreview } from '../hooks/useForwardPreview';
 import { useDiscussionActions } from '../hooks/useDiscussionActions';
 import { useKeyboardStore } from '../stores/keyboardStore';
 import DiscussionTopSection from '../components/discussions/DiscussionTopSection';
 import DiscussionDebugButton from '../components/discussions/DiscussionDebugButton';
 import MessageInput from '../components/discussions/MessageInput';
-import { useSwipeBack } from '../hooks/useSwipeBack';
+import DiscussionLayout from '../components/ui/Layout/DiscussionLayout';
 
 const TEST_MESSAGE_COUNT = 50;
 const TEST_MESSAGE_BATCH_DELAY_MS = 100;
+
+// Stable empty array so MessageList sees a referentially-equal value for
+// messages without reactions instead of a fresh [] on every render.
+const EMPTY_REACTIONS: never[] = [];
 
 const Discussion: React.FC = () => {
   const { t } = useTranslation('discussions');
@@ -33,6 +45,7 @@ const Discussion: React.FC = () => {
   const location = useLocation();
   const contacts = useDiscussionStore(s => s.contacts);
   const patchDiscussion = useDiscussionStore(s => s.patchDiscussion);
+  const sessionsStatuses = useDiscussionStore(s => s.sessionsStatuses);
 
   const locationState = location.state as {
     prefilledMessage?: string;
@@ -41,14 +54,11 @@ const Discussion: React.FC = () => {
   } | null;
   const prefilledMessage = locationState?.prefilledMessage;
 
-  // Also check app store as fallback (in case location state is lost)
   const pendingSharedContent = useAppStore(s => s.pendingSharedContent);
   const setPendingSharedContent = useAppStore(s => s.setPendingSharedContent);
 
   const finalPrefilledMessage = prefilledMessage || pendingSharedContent;
 
-  // Local one-shot prefill state for the input. This lets us clear the input
-  // after sending (especially for forwards) without reusing location state.
   const [inputPrefill, setInputPrefill] = useState<string | undefined>(
     finalPrefilledMessage || undefined
   );
@@ -57,8 +67,10 @@ const Discussion: React.FC = () => {
   const [editingMessage, setEditingMessage] = useState<Message | null>(null);
 
   const contact = userId ? contacts.find(c => c.userId === userId) : undefined;
+  const isDiscussionPending =
+    !!contact &&
+    sessionsStatuses.get(contact.userId) === SessionStatus.SelfRequested;
   const onBack = () => navigate(-1);
-  const swipeBack = useSwipeBack();
 
   const safeContact = contact || {
     userId: '',
@@ -98,12 +110,19 @@ const Discussion: React.FC = () => {
 
   const setCurrentContact = useMessageStore(s => s.setCurrentContact);
   const messages = useMessageStore(s =>
-    contact ? s.getMessagesForContact(contact.userId) : []
+    contact ? s.getMessagesForContact(contact.userId) : EMPTY_STORE_MESSAGES
   );
-  const getReactionsForMessage = useMessageStore(s => s.getReactionsForMessage);
-  const sendReaction = useMessageStore(s => s.sendReaction);
+  const reactionGroups = useMessageStore(s => s.reactionGroupsCache);
+  const getReactions = useCallback(
+    (msg: Message) =>
+      msg.messageId
+        ? (reactionGroups.get(msg.messageId.join(',')) ?? EMPTY_REACTIONS)
+        : EMPTY_REACTIONS,
+    [reactionGroups]
+  );
+  const reactToMessage = useMessageStore(s => s.reactToMessage);
   const removeReaction = useMessageStore(s => s.removeReaction);
-  const isLoading = useMessageStore(s => s.isLoading);
+  const isLoading = useMessageStore(s => s.isInitializing);
   const sendMessage = useMessageStore(s => s.sendMessage);
 
   const prevContactUserIdRef = useRef<string | null>(null);
@@ -119,8 +138,6 @@ const Discussion: React.FC = () => {
     handleDeleteSelected,
   } = useDiscussionMessageSelection({
     messages,
-    discussionCustomName: discussion?.customName ?? undefined,
-    contactName: contact?.name,
     gossip,
     t,
   });
@@ -138,7 +155,6 @@ const Discussion: React.FC = () => {
   } = useDiscussionActions({
     contact: contact ?? undefined,
     isSelecting,
-    gossip,
     t,
     forwardFromMessageId,
     setReplyingTo,
@@ -156,7 +172,6 @@ const Discussion: React.FC = () => {
   const handleToggleSearch = useCallback(() => {
     setIsSearchOpen(prev => {
       if (prev) {
-        // Closing search — transfer focus to textarea so keyboard stays
         const textarea = inputAreaRef.current?.querySelector('textarea');
         textarea?.focus({ preventScroll: true });
       }
@@ -176,7 +191,6 @@ const Discussion: React.FC = () => {
     setShowScrollToBottom(!atBottom);
   }, []);
 
-  // Scroll to bottom when keyboard opens so newest messages stay visible
   const isKeyboardVisible = useKeyboardStore(s => s.isVisible);
   useEffect(() => {
     if (isKeyboardVisible && atBottomRef.current) {
@@ -193,14 +207,14 @@ const Discussion: React.FC = () => {
     locationState?.scrollToMessageId ?? null
   );
 
+  const isExiting = useContext(ExitAnimationContext);
   useHeaderScrollDetection(
     messageListContainerRef,
     messages.length,
-    discussion?.id
+    discussion?.id,
+    isExiting
   );
 
-  // Clear pendingSharedContent only when this discussion was opened
-  // with a prefilled message from the share/forward flow.
   const hasPrefilledMessage = !!locationState?.prefilledMessage;
   useEffect(() => {
     if (hasPrefilledMessage && pendingSharedContent) {
@@ -208,7 +222,6 @@ const Discussion: React.FC = () => {
     }
   }, [hasPrefilledMessage, pendingSharedContent, setPendingSharedContent]);
 
-  // Keep inputPrefill in sync with finalPrefilledMessage for third-party shares.
   useEffect(() => {
     if (finalPrefilledMessage) {
       setInputPrefill(finalPrefilledMessage);
@@ -219,7 +232,7 @@ const Discussion: React.FC = () => {
     const contactUserId = contact?.userId || null;
     if (prevContactUserIdRef.current !== contactUserId) {
       prevContactUserIdRef.current = contactUserId;
-      setCurrentContact(contactUserId);
+      void setCurrentContact(contactUserId);
     }
   }, [contact?.userId, setCurrentContact]);
 
@@ -227,13 +240,11 @@ const Discussion: React.FC = () => {
     handleClearSelection();
   }, [contact?.userId, handleClearSelection]);
 
-  // Apply default retention policy to new discussions that have never had one set
   const hasAppliedDefaultRetentionRef = useRef(false);
   useEffect(() => {
     if (hasAppliedDefaultRetentionRef.current) return;
     if (!userId || anyDiscussionId === null) return;
     if (defaultRetentionDuration === null) return;
-    // Only apply if no retention policy has ever been configured
     if (
       anyDiscussionRetentionDuration !== null ||
       anyDiscussionRetentionPolicySetAt !== null
@@ -307,97 +318,49 @@ const Discussion: React.FC = () => {
 
   if (!contact) return null;
 
+  // Hide reply + edit while the session is waiting approval (SelfRequested).
+  const onReplyToMessage = isDiscussionPending
+    ? undefined
+    : handleReplyToMessage;
+  const onEditMessage = isDiscussionPending ? undefined : handleEditMessage;
+
   return (
-    <div
-      className="h-full app-max-w mx-auto bg-card flex flex-col relative select-none overflow-hidden"
-      style={{ WebkitTouchCallout: 'none' }}
-      onTouchStart={swipeBack.onTouchStart}
-      onTouchEnd={swipeBack.onTouchEnd}
-      onPointerDown={e => {
-        const tag = (e.target as HTMLElement).tagName;
-        if (tag !== 'INPUT' && tag !== 'TEXTAREA') {
-          e.preventDefault();
-        }
-      }}
-    >
-      <DiscussionTopSection
-        contact={contact}
-        discussion={discussion}
-        anyDiscussionId={anyDiscussionId}
-        anyDiscussionRetentionDuration={anyDiscussionRetentionDuration}
-        onBack={onBack}
-        outgoingSentCount={outgoingSentCount}
-        selection={{
-          isSelecting,
-          selectedCount: selectedMessageIds.size,
-          canDeleteSelected,
-          onClearSelection: handleClearSelection,
-          onCopySelected: handleCopySelected,
-          onDeleteSelected: handleDeleteSelected,
-        }}
-        search={{
-          isOpen: isSearchOpen,
-          messages,
-          onToggleSearch: handleToggleSearch,
-          onScrollToMessage: handleScrollToMessage,
-          onHighlightChange: setSearchHighlightId,
-          onCloseSearch: handleCloseSearch,
-        }}
-      />
-
-      <div className="flex-1 min-h-0 flex flex-col">
-        <div
-          ref={messageListContainerRef}
-          className="flex-1 min-h-0 overflow-hidden relative"
-        >
-          <MessageList
-            ref={messageListRef}
-            messages={messages}
-            discussion={discussion}
-            contact={contact}
-            isLoading={isLoading || isDiscussionLoading}
-            onReplyTo={handleReplyToMessage}
-            onForward={handleForwardMessage}
-            onDelete={handleDeleteMessage}
-            onEdit={handleEditMessage}
-            onReact={(message, emoji) => {
-              if (!message.id) return;
-              sendReaction(contact.userId, emoji, message.id).catch(err => {
-                console.error('Failed to send reaction', err);
-              });
-            }}
-            getReactionsForMessage={messageId =>
-              getReactionsForMessage(contact.userId, messageId)
-            }
-            onToggleReaction={(message, emoji, myReactionId) => {
-              if (myReactionId) {
-                removeReaction(myReactionId).catch(err => {
-                  console.error('Failed to remove reaction', err);
-                });
-              } else if (message.id) {
-                sendReaction(contact.userId, emoji, message.id).catch(err => {
-                  console.error('Failed to send reaction', err);
-                });
-              }
-            }}
-            onScrollToMessage={handleScrollToMessage}
-            onAtBottomChange={handleAtBottomChange}
-            onScrollToBottom={scrollToBottom}
-            showScrollToBottom={showScrollToBottom && !isSelecting}
-            highlightedMessageId={searchHighlightId}
-            isSelecting={isSelecting}
-            selectedMessageIds={selectedMessageIds}
-            onToggleSelect={handleToggleSelect}
-          />
-        </div>
-
+    <DiscussionLayout
+      header={
+        <DiscussionTopSection
+          contact={contact}
+          discussion={discussion}
+          anyDiscussionId={anyDiscussionId}
+          anyDiscussionRetentionDuration={anyDiscussionRetentionDuration}
+          onBack={onBack}
+          outgoingSentCount={outgoingSentCount}
+          selection={{
+            isSelecting,
+            selectedCount: selectedMessageIds.size,
+            canDeleteSelected,
+            onClearSelection: handleClearSelection,
+            onCopySelected: handleCopySelected,
+            onDeleteSelected: handleDeleteSelected,
+          }}
+          search={{
+            isOpen: isSearchOpen,
+            messages,
+            onToggleSearch: handleToggleSearch,
+            onScrollToMessage: handleScrollToMessage,
+            onHighlightChange: setSearchHighlightId,
+            onCloseSearch: handleCloseSearch,
+          }}
+        />
+      }
+      beforeFooter={
         <DiscussionDebugButton
           show={showDebugOption}
           isSending={isSendingTestMessages}
           testMessageCount={TEST_MESSAGE_COUNT}
           onSend={handleSendTestMessages}
         />
-
+      }
+      footer={
         <MessageInput
           containerRef={inputAreaRef}
           disabled={isSelecting}
@@ -414,8 +377,53 @@ const Discussion: React.FC = () => {
           onCancelEdit={handleCancelEdit}
           onConfirmEdit={handleConfirmEdit}
         />
+      }
+    >
+      <div ref={messageListContainerRef} className="h-full">
+        <MessageList
+          ref={messageListRef}
+          messages={messages}
+          discussion={discussion}
+          contact={contact}
+          isLoading={isLoading || isDiscussionLoading}
+          onReplyTo={onReplyToMessage}
+          onForward={handleForwardMessage}
+          onDelete={handleDeleteMessage}
+          onEdit={onEditMessage}
+          onReact={(message, emoji) => {
+            if (!message.id) return;
+            reactToMessage(contact.userId, emoji, message.id).catch(err => {
+              console.error('Failed to send reaction', err);
+            });
+          }}
+          getReactions={getReactions}
+          onToggleReaction={(
+            message,
+            emoji,
+            myReactionId,
+            myReactionMessageId
+          ) => {
+            if (myReactionId || myReactionMessageId) {
+              removeReaction(myReactionId, myReactionMessageId).catch(err => {
+                console.error('Failed to remove reaction', err);
+              });
+            } else if (message.id) {
+              reactToMessage(contact.userId, emoji, message.id).catch(err => {
+                console.error('Failed to send reaction', err);
+              });
+            }
+          }}
+          onScrollToMessage={handleScrollToMessage}
+          onAtBottomChange={handleAtBottomChange}
+          onScrollToBottom={scrollToBottom}
+          showScrollToBottom={showScrollToBottom && !isSelecting}
+          highlightedMessageId={searchHighlightId}
+          isSelecting={isSelecting}
+          selectedMessageIds={selectedMessageIds}
+          onToggleSelect={handleToggleSelect}
+        />
       </div>
-    </div>
+    </DiscussionLayout>
   );
 };
 

@@ -42,7 +42,7 @@ const InputPreviewBanner: React.FC<InputPreviewBannerProps> = ({
             </div>
             {onCancel && (
               <button
-                onMouseDown={handleCancel}
+                onClick={handleCancel}
                 className="shrink-0 p-1.5 hover:bg-muted rounded-full transition-colors active:scale-90"
                 aria-label={cancelAriaLabel}
               >

@@ -1,12 +1,16 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { Capacitor } from '@capacitor/core';
-import { parseInvite } from '../utils/qrCodeParser';
+import {
+  buildInvitePath,
+  parseInvite,
+  toGossipInviteHref,
+} from '../utils/invite';
 import { useAppStore } from '../stores/appStore';
 import { LANDING_PAGE_URL } from '../constants/links';
 import Button from '../components/ui/Button';
 import PageHeader from '../components/ui/PageHeader';
-import PageLayout from '../components/ui/PageLayout';
+import PageLayout from '../components/ui/Layout/PageLayout';
 import { PrivacyGraphic } from '../components/graphics';
 
 import toast from 'react-hot-toast';
@@ -57,7 +61,7 @@ export const InvitePage: React.FC = () => {
         existingCleanups.clear();
 
         const anchor = document.createElement('a');
-        anchor.href = `gossip://${invitePath.slice(1)}`;
+        anchor.href = toGossipInviteHref(invitePath);
         anchor.style.display = 'none';
         anchor.rel = 'noopener noreferrer';
         document.body.appendChild(anchor);
@@ -131,8 +135,7 @@ export const InvitePage: React.FC = () => {
 
     setIsOpeningApp(true);
     setAppOpened(false);
-    const query = searchParams.toString();
-    const invitePath = `/invite/${userId}${query ? `?${query}` : ''}`;
+    const invitePath = buildInvitePath(userId, searchParams);
     const opened = await tryOpenNativeApp(invitePath);
 
     if (opened) {
@@ -157,10 +160,7 @@ export const InvitePage: React.FC = () => {
     if (!userId) return;
 
     try {
-      const query = searchParams.toString();
-      const inviteData = parseInvite(
-        `/invite/${userId}${query ? `?${query}` : ''}`
-      );
+      const inviteData = parseInvite(buildInvitePath(userId, searchParams));
       await setPendingDeepLinkInfo(inviteData);
       navigate('/');
     } catch (err) {

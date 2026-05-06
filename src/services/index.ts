@@ -10,7 +10,6 @@ import {
   MessageDirection,
   type Discussion,
   type Contact,
-  type Message,
   GossipSdk,
   MessageType,
 } from '@massalabs/gossip-sdk';
@@ -41,13 +40,11 @@ export function setupSdkEventHandlers(gossip: GossipSdk): void {
   // Show notification for new discussion requests when app is in background
   gossip.on(
     SdkEventType.SESSION_REQUESTED,
-    async (discussion: Discussion, contact: Contact) => {
+    async ({ contact }: { discussion: Discussion; contact: Contact }) => {
       const foreground = await isAppInForeground();
       if (!foreground) {
         try {
-          await notificationService.showNewDiscussionNotification(
-            discussion.lastAnnouncementMessage
-          );
+          await notificationService.showNewDiscussionNotification();
           console.log('[SDK Event] New discussion request notification shown', {
             contactUserId: contact.userId,
           });
@@ -59,7 +56,7 @@ export function setupSdkEventHandlers(gossip: GossipSdk): void {
   );
 
   // Show notification for incoming messages when app is in background
-  gossip.on(SdkEventType.MESSAGE_RECEIVED, async (message: Message) => {
+  gossip.on(SdkEventType.MESSAGE_RECEIVED, async message => {
     // Only notify for incoming messages
     if (message.direction !== MessageDirection.INCOMING) return;
 
@@ -73,18 +70,13 @@ export function setupSdkEventHandlers(gossip: GossipSdk): void {
     if (foreground) return;
 
     try {
-      const { contacts, discussions } = useDiscussionStore.getState();
-      const contact = contacts.find(c => c.userId === message.contactUserId);
+      const { discussions } = useDiscussionStore.getState();
       const discussion = discussions.find(
         d => d.contactUserId === message.contactUserId
       );
       if (discussion?.mutedNotifications) return;
 
-      const contactName = contact?.name || 'Someone';
-
       await notificationService.showDiscussionNotification(
-        contactName,
-        message.content,
         message.contactUserId
       );
     } catch (error) {
@@ -93,7 +85,10 @@ export function setupSdkEventHandlers(gossip: GossipSdk): void {
   });
 
   // Log errors for debugging
-  gossip.on(SdkEventType.ERROR, (error: Error, context: string) => {
-    console.error(`[SDK Error:${context}]`, error);
-  });
+  gossip.on(
+    SdkEventType.ERROR,
+    ({ error, context }: { error: Error; context: string }) => {
+      console.error(`[SDK Error:${context}]`, error);
+    }
+  );
 }

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useUiStore } from '../../stores/uiStore';
 
 interface HeaderBarProps {
@@ -6,6 +6,8 @@ interface HeaderBarProps {
   className?: string;
   /** Whether to show scroll-aware background changes (default: true) */
   scrollAware?: boolean;
+  /** When true, a sub-header below owns the shadow; this bar renders no shadow */
+  shadowBelow?: boolean;
 }
 
 /**
@@ -18,12 +20,23 @@ const HeaderBar: React.FC<HeaderBarProps> = ({
   children,
   className = '',
   scrollAware = true,
+  shadowBelow = false,
 }) => {
   const headerIsScrolled = useUiStore(s => s.headerIsScrolled);
 
-  const bgClass = scrollAware && headerIsScrolled ? 'bg-muted' : 'bg-card';
+  // Delay enabling the bg/shadow CSS transition until after first paint so
+  // resetting scroll state on remount (returning from an overlay) doesn't
+  // visibly fade gray → transparent.
+  const [enableTransition, setEnableTransition] = useState(false);
+  useEffect(() => {
+    const raf = requestAnimationFrame(() => setEnableTransition(true));
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
+  const bgClass =
+    scrollAware && headerIsScrolled ? 'bg-muted' : 'bg-transparent';
   const shadowStyle =
-    scrollAware && headerIsScrolled
+    scrollAware && headerIsScrolled && !shadowBelow
       ? '0 2px 4px -1px rgba(0, 0, 0, 0.06), 0 4px 6px -1px rgba(0, 0, 0, 0.1)'
       : 'none';
 
@@ -32,8 +45,9 @@ const HeaderBar: React.FC<HeaderBarProps> = ({
       className={`px-header-padding pt-safe-t h-header-safe flex items-center shrink-0 relative z-10 ${bgClass} ${className}`}
       style={{
         boxShadow: shadowStyle,
-        transition:
-          'background-color 200ms cubic-bezier(0.4, 0, 0.2, 1), box-shadow 200ms cubic-bezier(0.4, 0, 0.2, 1)',
+        transition: enableTransition
+          ? 'background-color 200ms cubic-bezier(0.4, 0, 0.2, 1), box-shadow 200ms cubic-bezier(0.4, 0, 0.2, 1)'
+          : 'none',
       }}
     >
       {children}

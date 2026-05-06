@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="foreground_sync_channel_name">Synchronisation Gossip</string>
+    <string name="foreground_sync_channel_desc">Maintient la synchronisation des messages quand ce mode est activé</string>
+    <string name="foreground_sync_notification_title">Gossip se synchronise</string>
+    <string name="foreground_sync_notification_body">Synchronisation en arrière-plan pour garder vos messages à jour</string>
+</resources>

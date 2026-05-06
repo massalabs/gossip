@@ -6,6 +6,10 @@ on:
   pull_request:
     paths:
       - 'wasm/**'
+      - 'gossip-sdk/src/assets/generated/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/rust-wasm.yml'
 
 jobs:
   build-and-test:
@@ -32,19 +36,43 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # `wasm/secure-storage/.cargo/config.toml` enables `[unstable]
+      # build-std = ["std", "panic_abort"]` to rebuild the standard
+      # library with atomics for rayon. That requires the `rust-src`
+      # component on the nightly toolchain; without it cargo errors
+      # with "lib/rustlib/src/rust/library/Cargo.lock does not exist".
+      - name: Install rust-src on nightly (required by build-std)
+        run: rustup component add rust-src --toolchain nightly
+
       - name: Build WASM
         env:
           SOURCE_DATE_EPOCH: 0
           BINARYEN_CORES: 1
         run: npm run wasm:build
 
-      - name: Verify generated files are up-to-date (excluding .wasm binaries)
+      - name: Verify generated files are up-to-date
         run: |
           # wasm-bindgen generates exports in non-deterministic order, so we need to check
-          # for functional differences rather than exact file matches
+          # for functional differences rather than exact file matches.
+          #
+          # Known sources of nondeterminism we silence:
+          #   - Export ordering in .d.ts / .js  -> we sort before diffing.
+          #   - wasm-bindgen-rayon closure shims `closure<N>_externref_shim`
+          #     get renumbered between builds (the counter is not stable).
+          #   - Closure-invoke trampolines named
+          #     `wasm_bindgen_<hash>___convert__closures_____invoke______`
+          #     carry a per-build hash that also varies.
+          #   Both are internal FFI plumbing, not part of the SDK surface,
+          #   so we strip them from the .d.ts/.js comparison before diffing.
+          #   - The .wasm binaries themselves carry the same names baked in,
+          #     so they cannot be byte-compared either; both wasm binaries
+          #     are excluded from this check. The .d.ts/.js diff above is
+          #     enough to catch a real API change.
 
-          # Get list of changed files (excluding .wasm binaries)
-          CHANGED=$(git diff --name-only -- src/assets/generated ':!src/assets/generated/wasm/*.wasm')
+          # Get list of changed files (both wasm binaries excluded).
+          CHANGED=$(git diff --name-only -- gossip-sdk/src/assets/generated \
+            ':!gossip-sdk/src/assets/generated/wasm/*.wasm' \
+            ':!gossip-sdk/src/assets/generated/wasm-secureStorage/*.wasm')
 
           if [ -z "$CHANGED" ]; then
             echo "✓ Generated files are up-to-date"
@@ -52,16 +80,21 @@ jobs:
           fi
 
           # For .d.ts and .js files, extract and compare sorted exports
-          # For other files, do exact comparison
+          # (with closure shims filtered out). For other files, do exact diff.
           HAS_REAL_CHANGES=false
+
+          extract_exports() {
+            grep -E '^(export|export const|export function|export class|export type|export interface)' \
+              | grep -vE '^export const closure[0-9]+_(externref_shim|externref_shim_multivalue_shim)\b' \
+              | grep -vE '^export const wasm_bindgen_[a-f0-9]+___convert__closures' \
+              | sort
+          }
 
           for file in $CHANGED; do
             if [[ "$file" == *.d.ts ]] || [[ "$file" == *.js ]]; then
-              # Extract all exports, sort them, and compare
-              # This ignores ordering differences
-              git show HEAD:"$file" 2>/dev/null | grep -E '^(export|export const|export function|export class|export type|export interface)' | sort > /tmp/old_exports.txt 2>/dev/null || true
-              cat "$file" | grep -E '^(export|export const|export function|export class|export type|export interface)' | sort > /tmp/new_exports.txt 2>/dev/null || true
-              
+              git show HEAD:"$file" 2>/dev/null | extract_exports > /tmp/old_exports.txt 2>/dev/null || true
+              extract_exports < "$file" > /tmp/new_exports.txt 2>/dev/null || true
+
               if ! diff -q /tmp/old_exports.txt /tmp/new_exports.txt >/dev/null 2>&1; then
                 echo "Functional changes detected in $file:"
                 diff /tmp/old_exports.txt /tmp/new_exports.txt || true
@@ -77,12 +110,19 @@ jobs:
           done
 
           if [ "$HAS_REAL_CHANGES" = true ]; then
-            echo "Generated files in src/assets/generated are out of date. Run 'npm run wasm:build' locally and commit the changes." >&2
-            git --no-pager diff -- src/assets/generated ':!src/assets/generated/wasm/*.wasm'
+            echo "Generated files in gossip-sdk/src/assets/generated are out of date. Run 'npm run wasm:build' locally and commit the changes." >&2
+            git --no-pager diff -- gossip-sdk/src/assets/generated \
+              ':!gossip-sdk/src/assets/generated/wasm/*.wasm' \
+              ':!gossip-sdk/src/assets/generated/wasm-secureStorage/*.wasm'
             exit 1
           else
-            echo "✓ Only export ordering differences detected (non-deterministic wasm-bindgen). Safe to ignore."
+            echo "✓ Only nondeterministic differences detected (export ordering, closure shim renumber). Safe to ignore."
           fi
 
       - name: Run Rust tests via npm
+        env:
+          RUST_MIN_STACK: 16777216
         run: npm run wasm:test
+
+      - name: Check secure-storage WASM surface
+        run: npm run wasm:check:secure-storage

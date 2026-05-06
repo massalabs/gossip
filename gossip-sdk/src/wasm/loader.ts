@@ -8,6 +8,9 @@
  */
 
 import { init } from './bindings.js';
+import gossipWasmUrl from '../assets/generated/wasm/gossip_wasm_bg.wasm?url';
+
+const WASM_PATH = '../assets/generated/wasm/gossip_wasm_bg.wasm';
 
 /**
  * WASM Initialization State
@@ -57,15 +60,15 @@ export async function initializeWasm(): Promise<void> {
         const path = await import('node:path');
 
         const currentDir = path.dirname(url.fileURLToPath(import.meta.url));
-        const wasmPath = path.resolve(
-          currentDir,
-          '../assets/generated/wasm/gossip_wasm_bg.wasm'
-        );
+        const wasmPath = path.resolve(currentDir, WASM_PATH);
         const wasmBytes = fs.readFileSync(wasmPath);
         await init(wasmBytes);
       } else {
-        // Browser: use default loading (import.meta.url + fetch internally)
-        await init();
+        // Pre-fetch as ArrayBuffer so Safari doesn't choke on
+        // chunked Transfer-Encoding during instantiateStreaming.
+        const resp = await fetch(gossipWasmUrl);
+        const wasmBytes = await resp.arrayBuffer();
+        await init(wasmBytes);
       }
 
       isInitialized = true;

@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { Keyboard, KeyboardInfo } from '@capacitor/keyboard';
 import { Capacitor } from '@capacitor/core';
+import { isTouch } from '../utils/platform';
 
 interface KeyboardState {
   isVisible: boolean;
@@ -27,9 +28,7 @@ function updateState(isVisible: boolean, height: number) {
 function initKeyboardTracking() {
   const vp = window.innerHeight;
   useKeyboardStore.setState({ viewportHeight: vp });
-  setCssVar('--viewport-height', `${vp}px`);
   setCssVar('--keyboard-height', '0px');
-  setCssVar('--keyboard-offset', '0px');
 
   const platform = Capacitor.getPlatform();
   setCssVar(
@@ -37,30 +36,74 @@ function initKeyboardTracking() {
     platform === 'android' ? '0.35s' : '0.25s'
   );
 
+  // Only set --available-height to a pixel value on native platforms where
+  // keyboard events drive the available height. On web, the CSS default
+  // of 100dvh (in :root) is correct and avoids stale pixel values that can
+  // mismatch the actual viewport on Safari desktop.
   if (Capacitor.isNativePlatform()) {
-    // Both iOS (KeyboardResize.None) and Android (adjustNothing in manifest)
-    // prevent the OS from resizing the WebView. We lock --viewport-height
-    // and use --keyboard-offset to shrink the layout ourselves.
-    // This ensures consistent behavior across all OEMs (Samsung, Xiaomi, etc.).
-    window.addEventListener('resize', () => {
-      if (useKeyboardStore.getState().height === 0) {
-        const h = window.innerHeight;
-        useKeyboardStore.setState({ viewportHeight: h });
-        setCssVar('--viewport-height', `${h}px`);
+    setCssVar('--available-height', `${vp}px`);
+  }
+
+  if (Capacitor.isNativePlatform()) {
+    if (platform === 'ios') {
+      // iOS with KeyboardResize.None: the WebView stays full-size and
+      // visualViewport doesn't change. We must compute available height
+      // from the Capacitor keyboard events directly.
+
+      Keyboard.addListener('keyboardWillShow', (info: KeyboardInfo) => {
+        updateState(true, info.keyboardHeight);
+        setCssVar('--keyboard-height', `${info.keyboardHeight}px`);
+        const { viewportHeight } = useKeyboardStore.getState();
+        setCssVar(
+          '--available-height',
+          `${viewportHeight - info.keyboardHeight}px`
+        );
+      });
+
+      Keyboard.addListener('keyboardWillHide', () => {
+        updateState(false, 0);
+        setCssVar('--keyboard-height', '0px');
+        const { viewportHeight } = useKeyboardStore.getState();
+        setCssVar('--available-height', `${viewportHeight}px`);
+      });
+    } else {
+      // Android: use visualViewport as single source of truth.
+      // Works regardless of OEM behavior (Samsung adjustResize,
+      // Xiaomi adjustNothing, etc).
+
+      Keyboard.addListener('keyboardWillShow', (info: KeyboardInfo) => {
+        updateState(true, info.keyboardHeight);
+        setCssVar('--keyboard-height', `${info.keyboardHeight}px`);
+      });
+
+      Keyboard.addListener('keyboardWillHide', () => {
+        updateState(false, 0);
+        setCssVar('--keyboard-height', '0px');
+      });
+
+      const vv = window.visualViewport;
+      if (vv) {
+        const syncHeight = () => {
+          const h = vv.height;
+          setCssVar('--available-height', `${h}px`);
+          if (!useKeyboardStore.getState().isVisible) {
+            useKeyboardStore.setState({ viewportHeight: h });
+          }
+        };
+        vv.addEventListener('resize', syncHeight);
       }
-    });
 
-    Keyboard.addListener('keyboardWillShow', (info: KeyboardInfo) => {
-      updateState(true, info.keyboardHeight);
-      setCssVar('--keyboard-height', `${info.keyboardHeight}px`);
-      setCssVar('--keyboard-offset', `${info.keyboardHeight}px`);
-    });
-
-    Keyboard.addListener('keyboardWillHide', () => {
-      updateState(false, 0);
-      setCssVar('--keyboard-height', '0px');
-      setCssVar('--keyboard-offset', '0px');
-    });
+      // Fallback for devices without visualViewport
+      window.addEventListener('resize', () => {
+        if (!window.visualViewport) {
+          const h = window.innerHeight;
+          setCssVar('--available-height', `${h}px`);
+          if (!useKeyboardStore.getState().isVisible) {
+            useKeyboardStore.setState({ viewportHeight: h });
+          }
+        }
+      });
+    }
 
     return;
   }
@@ -69,15 +112,47 @@ function initKeyboardTracking() {
   const visualViewport = window.visualViewport;
   if (!visualViewport) return;
 
+  // On touch web (mobile browser or installed PWA) the on-screen keyboard shrinks
+  // visualViewport. Mirror the Android-native branch: drive --available-height
+  // from visualViewport.height so the chat container resizes instead of letting
+  // the page get pushed up by the keyboard.
+  const touchWeb = isTouch();
+
   const handleResize = () => {
     const diff = window.innerHeight - visualViewport.height;
     const visible = diff > KEYBOARD_THRESHOLD;
     updateState(visible, visible ? diff : 0);
     setCssVar('--keyboard-height', visible ? `${diff}px` : '0px');
+
+    if (touchWeb) {
+      setCssVar('--available-height', `${visualViewport.height}px`);
+      if (!visible) {
+        useKeyboardStore.setState({ viewportHeight: visualViewport.height });
+      }
+    }
   };
 
   handleResize();
   visualViewport.addEventListener('resize', handleResize);
+
+  // Safari iOS web auto-scrolls the document up to bring a focused input into
+  // view, even with body overflow:hidden. Combined with the --available-height
+  // resize above, that stacks and pushes the layout too high. Reset window
+  // scroll back to 0 to neutralize Safari's auto-scroll.
+  const ua = navigator.userAgent;
+  const isIOSWeb =
+    /iPhone|iPad|iPod/.test(ua) ||
+    (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+  if (touchWeb && isIOSWeb) {
+    const resetScroll = () => {
+      if (window.scrollY !== 0 || window.scrollX !== 0) {
+        window.scrollTo(0, 0);
+      }
+    };
+    window.addEventListener('scroll', resetScroll, { passive: true });
+    document.addEventListener('focusin', resetScroll);
+    visualViewport.addEventListener('scroll', resetScroll);
+  }
 }
 
 initKeyboardTracking();

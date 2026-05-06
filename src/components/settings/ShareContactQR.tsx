@@ -1,12 +1,9 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import QRCodeStyling from 'qr-code-styling';
 import { Check, Copy } from 'react-feather';
 
 import { PrivacyGraphic } from '../graphics';
 import { formatUserId } from '@massalabs/gossip-sdk';
-
-/** Module-level cache so QR survives unmount/remount (slide transitions). */
-const qrCache = new Map<string, string>();
+import { qrCache, generateQRDataUrl } from './shareContactQrCache';
 
 interface ShareContactQRProps {
   deepLinkUrl: string;
@@ -132,45 +129,16 @@ const ShareContactQR: React.FC<ShareContactQRProps> = ({
 
     let isMounted = true;
 
-    const generateQR = async () => {
-      const foregroundColor = '#1a1a1d';
-      const backgroundColor = '#ffffff';
-
-      const qrCodeStyling = new QRCodeStyling({
-        width: 280,
-        height: 280,
-        data: deepLinkUrl,
-        image: '/favicon/favicon.svg',
-        dotsOptions: { type: 'extra-rounded', color: foregroundColor },
-        cornersSquareOptions: {
-          type: 'extra-rounded',
-          color: foregroundColor,
-        },
-        cornersDotOptions: { type: 'dot', color: foregroundColor },
-        backgroundOptions: { color: backgroundColor, round: 0 },
-        imageOptions: {
-          margin: 10,
-          imageSize: 0.25,
-          crossOrigin: 'anonymous',
-        },
+    generateQRDataUrl(deepLinkUrl)
+      .then(dataUrl => {
+        if (!isMounted) return;
+        qrCache.set(deepLinkUrl, dataUrl);
+        setQrDataUrl(dataUrl);
+        onQRCodeGenerated?.(dataUrl);
+      })
+      .catch(err => {
+        console.error('Failed to generate QR:', err);
       });
-
-      const svg = await qrCodeStyling.getRawData('svg');
-      if (svg && isMounted) {
-        const reader = new FileReader();
-        reader.onload = () => {
-          if (isMounted) {
-            const dataUrl = reader.result as string;
-            qrCache.set(deepLinkUrl, dataUrl);
-            setQrDataUrl(dataUrl);
-            onQRCodeGenerated?.(dataUrl);
-          }
-        };
-        reader.readAsDataURL(svg as Blob);
-      }
-    };
-
-    generateQR();
 
     return () => {
       isMounted = false;

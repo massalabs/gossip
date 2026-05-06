@@ -19,7 +19,9 @@
     "cancel_forward": "Cancel forward",
     "cancel_edit": "Cancel edit",
     "input_label": "Message input",
-    "send": "Send message"
+    "send": "Send message",
+    "emoji": "Emoji",
+    "emoji_search": "Search emoji…"
   },
   "message": {
     "sent": "Sent",
@@ -164,5 +166,5 @@
   "filter_label": "Filter discussions",
   "waiting_connection": "Waiting for connection...",
   "announcement": "Announcement",
-  "lock_account": "Lock Account"
+  "lock_account": "Lock"
 }

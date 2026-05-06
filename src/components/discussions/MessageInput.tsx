@@ -1,12 +1,15 @@
-import React, { useRef, useCallback, useEffect } from 'react';
+import React, { useRef, useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Send } from 'react-feather';
+import { Send, Smile } from 'react-feather';
 import InputPreviewBanner from './InputPreviewBanner';
+import EmojiPickerModal from '../ui/EmojiPickerModal';
 import { Capacitor } from '@capacitor/core';
 import { Message } from '@massalabs/gossip-sdk';
 import { useKeyboardStore } from '../../stores/keyboardStore';
 import { useAutoResizeTextarea } from '../../hooks/useAutoResizeTextarea';
 import { useInitialValue } from '../../hooks/useInitialValue';
+
+const isWeb = !Capacitor.isNativePlatform();
 
 interface MessageInputProps {
   onSend: (message: string, replyToId?: number) => void;
@@ -45,6 +48,7 @@ const MessageInput: React.FC<MessageInputProps> = ({
 }) => {
   const { t } = useTranslation('discussions');
   const isRefocusingRef = useRef(false);
+  const [isEmojiPickerOpen, setIsEmojiPickerOpen] = useState(false);
 
   const {
     textareaRef,
@@ -131,6 +135,25 @@ const MessageInput: React.FC<MessageInputProps> = ({
     [handleSendMessage]
   );
 
+  const handleEmojiSelect = useCallback(
+    (emoji: string) => {
+      const textarea = textareaRef.current;
+      const cursor = textarea?.selectionStart ?? newMessage.length;
+      const updated =
+        newMessage.slice(0, cursor) + emoji + newMessage.slice(cursor);
+      setNewMessage(updated);
+      requestAnimationFrame(() => {
+        autoResizeTextarea();
+        if (textarea) {
+          const pos = cursor + emoji.length;
+          textarea.focus();
+          textarea.setSelectionRange(pos, pos);
+        }
+      });
+    },
+    [newMessage, setNewMessage, autoResizeTextarea, textareaRef]
+  );
+
   return (
     <div
       ref={containerRef}
@@ -168,11 +191,28 @@ const MessageInput: React.FC<MessageInputProps> = ({
 
       <div className="flex items-end gap-2 md:gap-3">
         <div
-          className={`flex-1 min-w-0 flex items-center bg-muted px-4 md:px-5 py-2 md:py-2.5 transition-all duration-200 ${
+          className={`flex-1 min-w-0 flex items-center bg-muted px-4 md:px-5 py-2 md:py-2.5 transition-all duration-200 focus-within:bg-background focus-within:shadow-[inset_0_1px_3px_rgba(0,0,0,0.05)] dark:focus-within:shadow-[inset_0_1px_2px_rgba(0,0,0,0.3)] ${
             isTextareaMultiline ? 'rounded-2xl' : 'rounded-full'
           }`}
           onClick={focusTextarea}
         >
+          {isWeb && (
+            <button
+              type="button"
+              // onPointerDown + preventDefault keeps focus on the textarea
+              // so the emoji is inserted at the correct cursor position
+              onPointerDown={e => {
+                e.preventDefault();
+                e.stopPropagation();
+                setIsEmojiPickerOpen(true);
+              }}
+              className="shrink-0 mr-2 text-muted-foreground hover:text-foreground transition-colors duration-150"
+              title={t('message_input.emoji')}
+              aria-label={t('message_input.emoji')}
+            >
+              <Smile className="w-5 h-5" />
+            </button>
+          )}
           <textarea
             ref={textareaRef}
             value={newMessage}
@@ -202,8 +242,8 @@ const MessageInput: React.FC<MessageInputProps> = ({
             e.preventDefault(); // prevent textarea blur
             handleSendMessage(e);
           }}
-          className={`w-9 h-9 md:w-10 md:h-10 shrink-0 
-              rounded-full flex items-center justify-center 
+          className={`w-9 h-9 md:w-10 md:h-10 shrink-0
+              rounded-full flex items-center justify-center
               shadow-md hover:shadow-lg transition-all duration-200
               active:scale-90 ${sendButtonDisabled ? 'bg-muted text-muted-foreground' : 'bg-primary text-primary-foreground'}
               `}
@@ -213,6 +253,15 @@ const MessageInput: React.FC<MessageInputProps> = ({
           <Send className="w-4 h-4 md:w-5 md:h-5" />
         </button>
       </div>
+
+      {isWeb && (
+        <EmojiPickerModal
+          isOpen={isEmojiPickerOpen}
+          onClose={() => setIsEmojiPickerOpen(false)}
+          onSelectEmoji={handleEmojiSelect}
+          height={400}
+        />
+      )}
     </div>
   );
 };

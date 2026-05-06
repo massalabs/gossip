@@ -15,31 +15,32 @@
     "web3": "Web3",
     "about": "À propos",
     "debug": "Débogage",
-    "logout": "Déconnexion",
+    "lock_account": "Verrouiller",
     "privacy": "Confidentialité",
-    "security": "Sécurité"
+    "security": "Sécurité",
+    "feedback": "Envoyer des commentaires"
   },
   "delete_account": {
     "button": "Supprimer le compte",
     "title": "Supprimer le compte",
-    "confirm": "Êtes-vous sûr de vouloir supprimer ce compte ?",
+    "confirm": "Es-tu sûr de vouloir supprimer ce compte ?",
     "warning": "Cette action est irréversible"
   },
   "edit_username_modal": {
     "title": "Modifier le nom d'utilisateur",
     "placeholder": "Saisir un nom d'utilisateur",
     "username_label": "Nom d'utilisateur",
-    "username_taken": "Ce nom d'utilisateur est déjà utilisé. Veuillez en choisir un autre.",
-    "username_check_failed": "Impossible de vérifier la disponibilité du nom d'utilisateur. Veuillez réessayer.",
-    "update_failed": "Échec de la mise à jour du nom d'utilisateur. Veuillez réessayer.",
+    "username_taken": "Ce nom d'utilisateur est déjà utilisé. Réessaie avec un autre.",
+    "username_check_failed": "Impossible de vérifier la disponibilité du nom d'utilisateur. Réessaie.",
+    "update_failed": "Échec de la mise à jour du nom d'utilisateur. Réessaie.",
     "checking": "Vérification de la disponibilité...",
     "saving": "Enregistrement...",
     "test_notification": "Notification de test"
   },
   "share_contact_qr": {
-    "copy_mns": "Cliquez pour copier le domaine MNS",
-    "copy_user_id": "Cliquez pour copier l'ID utilisateur",
-    "qr_alt": "Votre QR code de contact"
+    "copy_mns": "Clique pour copier le domaine MNS",
+    "copy_user_id": "Clique pour copier l'ID utilisateur",
+    "qr_alt": "Ton QR code de contact"
   },
   "appearance": {
     "title": "Apparence"
@@ -47,7 +48,9 @@
   "about": {
     "title": "À propos",
     "version": "Version",
-    "build_id": "ID de build"
+    "build_id": "ID de build",
+    "about_gossip": "À propos de Gossip",
+    "terms_conditions": "Conditions générales"
   },
   "notifications": {
     "title": "Notifications",
@@ -56,7 +59,9 @@
     "blocked": "Bloquées",
     "enable": "Activer",
     "requesting": "Demande en cours...",
-    "blocked_message": "Les notifications sont bloquées. Veuillez les activer dans les paramètres de votre navigateur."
+    "blocked_message_web": "Les notifications sont bloquées. Réessaie dans les paramètres de ton navigateur.",
+    "blocked_message_native": "Les notifications sont bloquées. Ouvre les réglages système pour les réactiver.",
+    "open_settings": "Ouvrir les réglages"
   },
   "language": {
     "title": "Langue"
@@ -70,10 +75,10 @@
     "password_placeholder": "Saisissez votre mot de passe",
     "show_backup": "Afficher la sauvegarde",
     "mnemonic_title": "Phrase mnémonique de 24 mots",
-    "never_share": "Ne partagez jamais ces informations. Toute personne y ayant accès peut accéder à votre compte.",
-    "private_key_warning": "<strong>Attention :</strong> Cette clé privée Massa ne peut pas être utilisée pour restaurer votre compte Gossip. Utilisez-la uniquement pour la compatibilité avec des portefeuilles externes. Pour restaurer votre compte Gossip, vous devez utiliser la phrase mnémonique de 24 mots.",
+    "never_share": "Ne partage jamais ces informations. Toute personne y ayant accès peut accéder à ton compte.",
+    "private_key_warning": "<strong>Attention :</strong> Cette clé privée Massa ne peut pas être utilisée pour restaurer ton compte Gossip. Utilise-la uniquement pour la compatibilité avec des portefeuilles externes. Pour restaurer ton compte Gossip, tu dois utiliser la phrase mnémonique de 24 mots.",
     "password_required": "Le mot de passe est requis",
-    "show_failed": "Échec de l'affichage des informations de sauvegarde. Veuillez réessayer."
+    "show_failed": "Échec de l'affichage des informations de sauvegarde. Réessaie."
   },
   "debug": {
     "title": "Débogage",
@@ -106,15 +111,27 @@
     "title": "Web3",
     "enable_mns": "Activer MNS",
     "toggle_mns": "Activer/désactiver le support MNS",
-    "mns_description": "MNS (Massa Name System) est un service de nommage décentralisé qui associe des noms de domaine lisibles (comme 'alice.massa') à des données telles que les identifiants Gossip. Lorsqu'il est activé, vous pouvez utiliser des domaines MNS pour identifier et contacter d'autres utilisateurs.",
-    "mns_manage": "Créez et gérez votre MNS ici :",
+    "mns_description": "MNS (Massa Name System) est un service de nommage décentralisé qui associe des noms de domaine lisibles (comme 'alice.massa') à des données telles que les identifiants Gossip. Lorsqu'il est activé, tu peux utiliser des domaines MNS pour identifier et contacter d'autres utilisateurs.",
+    "mns_manage": "Crée et gère ton MNS ici :",
     "mns_link_label": "mns.massa (s'ouvre dans un nouvel onglet)",
     "privacy_title": "Confidentialité et considérations de confiance",
-    "privacy_body": "Les domaines MNS associent des noms à votre identifiant Gossip et donc à l'adresse Massa du propriétaire du MNS. Cela crée une association publique entre votre identité et vos adresses blockchain.",
+    "privacy_body": "Les domaines MNS associent des noms à ton identifiant Gossip et donc à l'adresse Massa du propriétaire du MNS. Cela crée une association publique entre ton identité et tes adresses blockchain.",
     "trust_body": "La résolution des domaines MNS nécessite de faire confiance à la réponse du RPC Massa. Le point d'accès RPC pourrait potentiellement fournir des données de résolution incorrectes ou malveillantes."
   },
   "background_sync": {
-    "title": "Synchronisation en arrière-plan",
+    "privacy_model_title": "Confidentialité et réception en arrière-plan",
+    "privacy_model_body": "Gossip n'utilise pas de notifications push serveur. L'application se synchronise en arrière-plan lorsque le système l'autorise. La réception n'est pas en temps réel : elle dépend de l'appareil, des réglages batterie et du fait que l'app ait été arrêtée de force. Sous iOS, l'exécution en arrière-plan est surtout limitée.",
+    "preset_title": "Espacement des synchronisations",
+    "preset_max": "Réactivité max",
+    "preset_max_description": "Vérifie les nouveaux messages toutes les minutes. Consomme plus de batterie.",
+    "preset_balanced": "Équilibré",
+    "preset_balanced_description": "Vérifie les nouveaux messages toutes les 5 minutes. Économise la batterie.",
+    "foreground_title": "Android : mode haute fiabilité",
+    "foreground_description": "Maintient la synchro active même quand l’app est en arrière-plan. Affiche une notification persistante. Consomme plus de batterie.",
+    "foreground_toggle": "Maintenir la synchro active",
+    "debug_sync_preset": "Préréglage synchro : {{preset}}",
+    "debug_foreground_sync": "Synchro premier plan : {{value}}",
+    "title": "Sync en arrière-plan",
     "checking": "Vérification...",
     "optimized": "Optimisé",
     "needs_attention": "Action requise",
@@ -127,17 +144,30 @@
     "on": "Activé",
     "off": "Désactivé",
     "open_settings": "Ouvrir les paramètres",
+    "ios_limitation": "iOS limite l'exécution en arrière-plan à toutes les 15–30 minutes au mieux. C'est une restriction système qui ne peut pas être modifiée.",
     "battery_optimization": "Optimisation de la batterie désactivée",
     "yes": "Oui",
     "no": "Non",
     "android_restriction": "Restriction Android en arrière-plan",
+    "allow_background": "Autoriser l'activité en arrière-plan",
+    "allow_background_description": "Si Android restreint l'arrière-plan, l'app arrête la synchro dès qu'elle quitte le premier plan. Appuie pour ouvrir les réglages.",
     "not_restricted": "Non restreint",
     "miui_note": "(MIUI peut quand même restreindre)",
     "disable_battery": "Désactiver l'optimisation de la batterie",
+    "disable_battery_description": "L'optimisation batterie d'Android peut tuer l'app et retarder ou perdre des messages quand elle n'est pas au premier plan. Appuie pour ouvrir les réglages et ajouter Gossip aux exceptions.",
+    "battery_settings": "Réglages batterie",
     "enable_autostart": "Activer le démarrage automatique (MIUI)",
-    "learn_more": "En savoir plus sur l'optimisation de la batterie pour votre appareil",
+    "learn_more": "En savoir plus",
     "debug_info": "Infos de débogage",
-    "refresh_status": "Actualiser le statut"
+    "refresh_status": "Actualiser le statut",
+    "device_warnings": {
+      "xiaomi": "Les appareils Xiaomi appliquent une optimisation de batterie très agressive. Pour recevoir les messages de manière fiable en arrière-plan, désactive l'optimisation de la batterie pour Gossip et active « Démarrage automatique » dans les paramètres de sécurité MIUI.",
+      "huawei": "Les appareils Huawei ont une gestion de la batterie très stricte. Pour recevoir les messages de manière fiable en arrière-plan, désactive l'optimisation de la batterie pour Gossip et ajoute l'app aux « Applications protégées » dans les réglages batterie.",
+      "samsung": "Les appareils Samsung peuvent limiter l'activité en arrière-plan. Pour recevoir les messages de manière fiable, désactive l'optimisation de la batterie et désactive « Mettre l'appli en veille » pour Gossip.",
+      "oneplus": "Les appareils OnePlus ont une optimisation de batterie qui peut affecter la synchro en arrière-plan. Désactive l'optimisation de la batterie pour Gossip.",
+      "bbk": "Cet appareil a une optimisation de batterie qui peut bloquer les notifications en arrière-plan. Désactive l'optimisation de la batterie et autorise l'activité en arrière-plan pour Gossip.",
+      "generic": "Cet appareil peut limiter l'activité en arrière-plan. Pour recevoir les notifications de manière fiable, vérifie les paramètres d'optimisation de la batterie et autorise Gossip à fonctionner en arrière-plan."
+    }
   },
   "pwa": {
     "offline_ready": "Application prête à fonctionner hors ligne",

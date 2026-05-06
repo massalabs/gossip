@@ -109,6 +109,12 @@ impl UserPublicKeys {
         self.inner.massa_public_key.to_bytes()
     }
 
+    /// Gets the EVM public key bytes (compressed, secp256k1).
+    #[wasm_bindgen(getter)]
+    pub fn evm_public_key(&self) -> Vec<u8> {
+        self.inner.evm_public_key.clone()
+    }
+
     /// Serializes the public keys to bytes.
     pub fn to_bytes(&self) -> Result<Vec<u8>, JsValue> {
         Ok(self.inner.to_bytes())
@@ -162,6 +168,12 @@ impl UserSecretKeys {
     pub fn massa_secret_key(&self) -> Vec<u8> {
         self.inner.massa_keypair.to_bytes().to_vec()
     }
+
+    /// Gets the EVM secret key bytes (raw 32-byte scalar).
+    #[wasm_bindgen(getter)]
+    pub fn evm_secret_key(&self) -> Vec<u8> {
+        self.inner.evm_secret_key.to_vec()
+    }
 }
 
 /// User keypair containing both public and secret keys.
@@ -169,6 +181,8 @@ impl UserSecretKeys {
 pub struct UserKeys {
     public_keys_bytes: Vec<u8>,
     secret_keys_bytes: Vec<u8>,
+    evm_address: String,
+    massa_address: String,
 }
 
 #[wasm_bindgen]
@@ -182,19 +196,36 @@ impl UserKeys {
     pub fn secret_keys(&self) -> Result<UserSecretKeys, JsValue> {
         UserSecretKeys::from_bytes(&self.secret_keys_bytes)
     }
+
+    /// EIP-55 checksummed EVM address (0x…) derived from the EVM public key.
+    pub fn evm_address(&self) -> String {
+        self.evm_address.clone()
+    }
+
+    /// Massa address (AU…) derived from the Massa public key.
+    pub fn massa_address(&self) -> String {
+        self.massa_address.clone()
+    }
 }
 
-/// Generates user keys from a passphrase using password-based key derivation.
+/// Generates user keys from a passphrase.
+///
+/// Derives all gossip keys (DSA, KEM, Massa, EVM) in a single WASM call so
+/// the passphrase crosses the JS boundary only once.
 #[wasm_bindgen]
 pub fn generate_user_keys(passphrase: &str) -> Result<UserKeys, JsValue> {
     let root_secret = auth::StaticRootSecret::from_passphrase(passphrase.as_bytes());
-
     let (public_keys, secret_keys) = auth::derive_keys_from_static_root_secret(&root_secret);
+
+    let evm_address = public_keys.evm_address();
+    let massa_address = public_keys.massa_address();
 
     Ok(UserKeys {
         public_keys_bytes: public_keys.to_bytes(),
         secret_keys_bytes: bincode::serde::encode_to_vec(&secret_keys, bincode::config::standard())
             .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))?,
+        evm_address,
+        massa_address,
     })
 }
 
@@ -581,11 +612,21 @@ impl SessionManagerWrapper {
     }
 
     /// Gets the list of message board seekers to monitor.
+    ///
+    /// Each seeker is materialised as a JS-owned Uint8Array via
+    /// `new_with_length` + `copy_from`. `Uint8Array::from(&[u8])` in older
+    /// js-sys returns an array whose buffer view sits over wasm linear
+    /// memory; subsequent wasm calls that grow the heap detach those
+    /// views, and the JS-side `SEEKERS_UPDATED` listener crashes with
+    /// "Cannot perform values on a detached ArrayBuffer". The
+    /// new-with-length path allocates a JS-side ArrayBuffer up front,
+    /// then copies — the result is decoupled from wasm memory.
     pub fn get_message_board_read_keys(&self) -> js_sys::Array {
         let seekers = self.inner.get_message_board_read_keys();
         let array = js_sys::Array::new();
         for seeker in seekers {
-            let js_seeker = js_sys::Uint8Array::from(&seeker[..]);
+            let js_seeker = js_sys::Uint8Array::new_with_length(seeker.len() as u32);
+            js_seeker.copy_from(&seeker);
             array.push(&js_seeker);
         }
         array
@@ -614,6 +655,11 @@ impl SessionManagerWrapper {
     }
 
     /// Processes an incoming message from the message board.
+    ///
+    /// Each acknowledged seeker is materialised as a JS-owned Uint8Array
+    /// (see `get_message_board_read_keys` for the rationale — same risk
+    /// of detached views over wasm linear memory if the heap grows
+    /// before the JS side reads the buffer).
     pub fn feed_incoming_message_board_read(
         &mut self,
         seeker: &[u8],
@@ -625,7 +671,8 @@ impl SessionManagerWrapper {
             .map(|output| {
                 let acknowledged_seekers = js_sys::Array::new();
                 for ack_seeker in &output.newly_acknowledged_self_seekers {
-                    let js_seeker = js_sys::Uint8Array::from(&ack_seeker[..]);
+                    let js_seeker = js_sys::Uint8Array::new_with_length(ack_seeker.len() as u32);
+                    js_seeker.copy_from(&ack_seeker[..]);
                     acknowledged_seekers.push(&js_seeker);
                 }
 
@@ -639,11 +686,16 @@ impl SessionManagerWrapper {
     }
 
     /// Gets the list of all peer IDs.
+    ///
+    /// JS-owned Uint8Arrays — same detached-view rationale as
+    /// `get_message_board_read_keys`.
     pub fn peer_list(&self) -> js_sys::Array {
         let peers = self.inner.peer_list();
         let array = js_sys::Array::new();
         for peer_id in peers {
-            let js_peer_id = js_sys::Uint8Array::from(peer_id.as_bytes());
+            let bytes = peer_id.as_bytes();
+            let js_peer_id = js_sys::Uint8Array::new_with_length(bytes.len() as u32);
+            js_peer_id.copy_from(bytes);
             array.push(&js_peer_id);
         }
         array
@@ -683,11 +735,16 @@ impl SessionManagerWrapper {
     }
 
     /// Refreshes sessions and returns peer IDs that need keep-alive messages.
+    ///
+    /// JS-owned Uint8Arrays — same detached-view rationale as
+    /// `get_message_board_read_keys`.
     pub fn refresh(&mut self) -> js_sys::Array {
         let peers = self.inner.refresh();
         let array = js_sys::Array::new();
         for peer_id in peers {
-            let js_peer_id = js_sys::Uint8Array::from(peer_id.as_bytes());
+            let bytes = peer_id.as_bytes();
+            let js_peer_id = js_sys::Uint8Array::new_with_length(bytes.len() as u32);
+            js_peer_id.copy_from(bytes);
             array.push(&js_peer_id);
         }
         array

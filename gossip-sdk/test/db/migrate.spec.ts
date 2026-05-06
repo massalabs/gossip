@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { runMigrations } from '../../src/db/migrate';
+import { ExecRaw, runMigrations } from '../../src/db/migrate';
 
 describe('runMigrations', () => {
   it('rewrites CREATE TABLE/INDEX statements to IF NOT EXISTS', async () => {
@@ -14,7 +14,9 @@ describe('runMigrations', () => {
         return [];
       });
 
-    const withTransaction = async <T>(fn: () => Promise<T>): Promise<T> => fn();
+    const withTransaction = async <T>(
+      fn: (txExecRaw: ExecRaw) => Promise<T>
+    ): Promise<T> => fn(execRaw);
 
     await runMigrations(execRaw, withTransaction);
 

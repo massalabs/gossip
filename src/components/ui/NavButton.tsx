@@ -21,18 +21,18 @@ const NavButton: React.FC<NavButtonProps> = ({
       onClick={onClick}
       variant="circular"
       size="custom"
-      className={`w-11 h-11 transition-all duration-200 focus:ring-0 focus:ring-offset-0 focus:outline-none outline-none ${
+      className={`w-11 h-11 transition-all duration-200 focus-visible:ring-0 focus-visible:ring-offset-0 focus:outline-none outline-none ${
         animationVariant === 'alt' ? 'nav-button-click-alt' : 'nav-button-click'
       } ${
         isActive
-          ? 'bg-primary/10 dark:shadow-none scale-[1.02]'
+          ? 'bg-accent-soft dark:shadow-none scale-[1.02]'
           : 'hover:bg-muted'
       }`}
       title={title}
     >
       <div
         className={`w-6 h-6 transition-colors ${
-          isActive ? 'text-primary' : 'text-foreground/80'
+          isActive ? 'text-accent-soft-foreground' : 'text-foreground/80'
         }`}
       >
         {icon}

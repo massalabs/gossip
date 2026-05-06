@@ -5,8 +5,6 @@ import React from 'react';
 import { render } from 'vitest-browser-react';
 import { act } from 'react';
 
-let latestInitialValue: string | undefined;
-let latestOnSend: ((text: string) => void | Promise<void>) | null = null;
 let mockLocationState: { forwardFromMessageId?: number } = {
   forwardFromMessageId: 42,
 };
@@ -78,27 +76,8 @@ vi.mock('react-i18next', () => ({
 }));
 
 vi.mock('../../src/components/discussions/MessageInput', () => ({
-  default: ({
-    initialValue,
-    onSend,
-  }: {
-    initialValue?: string;
-    onSend: (text: string) => void;
-  }) => {
-    latestInitialValue = initialValue;
-    latestOnSend = onSend;
-    return (
-      <div data-testid="mock-message-input">
-        <span data-testid="initial-value">{initialValue ?? ''}</span>
-        <button
-          type="button"
-          aria-label="mock send self"
-          onClick={() => onSend(initialValue ?? '')}
-        >
-          Send
-        </button>
-      </div>
-    );
+  default: () => {
+    return <div data-testid="mock-message-input" />;
   },
 }));
 
@@ -108,8 +87,6 @@ describe('SelfDiscussion forward to self notes', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockLocationState = { forwardFromMessageId: 42 };
-    latestInitialValue = undefined;
-    latestOnSend = null;
     mockGetMessage.mockResolvedValue({
       id: 42,
       content: 'Forwarded note content',
@@ -119,22 +96,14 @@ describe('SelfDiscussion forward to self notes', () => {
     mockSetSelfRetentionPolicy.mockResolvedValue(undefined);
   });
 
-  it('prefills the input with forwarded message content', async () => {
+  it('prefills the input with the forwarded content (no auto-send)', async () => {
     render(<SelfDiscussion />);
     await act(async () => {});
 
+    // The message is fetched from the SDK but NOT auto-sent; the user reviews
+    // and hits send explicitly.
     expect(mockGetMessage).toHaveBeenCalledWith(42);
-    expect(latestInitialValue).toBe('Forwarded note content');
-  });
-
-  it('sends the forwarded content as a self note when sending', async () => {
-    render(<SelfDiscussion />);
-    await act(async () => {});
-
-    expect(latestOnSend).toBeTruthy();
-    await latestOnSend?.('Forwarded note content');
-
-    expect(mockSendSelfMessage).toHaveBeenCalledWith('Forwarded note content');
+    expect(mockSendSelfMessage).not.toHaveBeenCalled();
   });
 
   it('loads and updates self retention duration from settings', async () => {

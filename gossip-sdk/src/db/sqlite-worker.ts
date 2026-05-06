@@ -71,9 +71,24 @@ async function handleMessage(e: MessageEvent): Promise<void> {
   try {
     switch (type) {
       case 'init': {
-        const { dbPath, wasmUrl, initSql, useOPFS } = e.data;
+        const { dbPath, wasmBinary, initSql, useOPFS } = e.data;
         const moduleArg: Record<string, unknown> = {};
-        if (wasmUrl) moduleArg.locateFile = () => wasmUrl;
+        // WASM bytes are pre-fetched in the main thread to avoid
+        // Safari's chunked Transfer-Encoding bug in Worker fetch().
+        if (wasmBinary) {
+          moduleArg.instantiateWasm = (
+            imports: WebAssembly.Imports,
+            successCallback: (
+              instance: WebAssembly.Instance,
+              module: WebAssembly.Module
+            ) => void
+          ) => {
+            WebAssembly.instantiate(wasmBinary, imports).then(result => {
+              successCallback(result.instance, result.module);
+            });
+            return {};
+          };
+        }
 
         // Load the right WASM build + VFS.
         // NOTE: import() paths must be string literals — Vite can't resolve variables.

@@ -2,7 +2,6 @@ import { useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { Message } from '@massalabs/gossip-sdk';
-import type { GossipSdk } from '@massalabs/gossip-sdk';
 import { ROUTES } from '../constants/routes';
 import { useAppStore } from '../stores/appStore';
 import { useMessageStore } from '../stores/messageStore';
@@ -11,7 +10,6 @@ import type { TFunction } from 'i18next';
 interface UseDiscussionActionsParams {
   contact: { userId: string } | undefined;
   isSelecting: boolean;
-  gossip: GossipSdk;
   t: TFunction;
   forwardFromMessageId: number | undefined;
   setReplyingTo: (msg: Message | null) => void;
@@ -23,7 +21,6 @@ interface UseDiscussionActionsParams {
 export function useDiscussionActions({
   contact,
   isSelecting,
-  gossip,
   t,
   forwardFromMessageId,
   setReplyingTo,
@@ -33,6 +30,8 @@ export function useDiscussionActions({
 }: UseDiscussionActionsParams) {
   const navigate = useNavigate();
   const sendMessage = useMessageStore(s => s.sendMessage);
+  const deleteMessage = useMessageStore(s => s.deleteMessage);
+  const editMessage = useMessageStore(s => s.editMessage);
   const setPendingSharedContent = useAppStore(s => s.setPendingSharedContent);
   const setPendingForwardMessageId = useAppStore(
     s => s.setPendingForwardMessageId
@@ -42,6 +41,10 @@ export function useDiscussionActions({
     async (text: string, replyToId?: number) => {
       if (isSelecting) return;
       if (!contact?.userId) return;
+      setReplyingTo(null);
+      setEditingMessage(null);
+      clearForward();
+      setInputPrefill(undefined);
       try {
         await sendMessage(
           contact.userId,
@@ -49,10 +52,6 @@ export function useDiscussionActions({
           replyToId,
           forwardFromMessageId
         );
-        setReplyingTo(null);
-        setEditingMessage(null);
-        clearForward();
-        setInputPrefill(undefined);
       } catch (error) {
         toast.error(t('failed_to_send'));
         console.error('Failed to send message:', error);
@@ -84,10 +83,12 @@ export function useDiscussionActions({
   const handleForwardMessage = useCallback(
     (message: Message) => {
       if (!message.id) return;
-      // Reuse the share flow: set pending content + forward id, then navigate to discussions
+      // Set pending forward state, then go to discussions list for recipient selection.
+      // replace: true avoids pushing a duplicate /discussions entry so back navigation
+      // after forwarding returns cleanly to the discussions list.
       setPendingSharedContent(message.content);
       setPendingForwardMessageId(message.id);
-      navigate(ROUTES.discussions());
+      navigate(ROUTES.discussions(), { replace: true });
     },
     [navigate, setPendingForwardMessageId, setPendingSharedContent]
   );
@@ -101,20 +102,18 @@ export function useDiscussionActions({
     [setEditingMessage, setReplyingTo, setInputPrefill]
   );
 
+  // Optimistic delete via store
   const handleDeleteMessage = useCallback(
     async (message: Message) => {
-      if (!message.id) return;
+      if (!message.id || !contact?.userId) return;
       try {
-        const deleted = await gossip.messages.deleteMessage(message.id);
-        if (!deleted) {
-          toast.error(t('unable_to_delete'));
-        }
+        await deleteMessage(contact.userId, message.id);
       } catch (error) {
         toast.error(t('failed_to_delete'));
         console.error('Failed to delete message:', error);
       }
     },
-    [gossip, t]
+    [contact?.userId, deleteMessage, t]
   );
 
   const handleCancelReply = useCallback(() => {
@@ -126,23 +125,20 @@ export function useDiscussionActions({
     setInputPrefill(undefined);
   }, [setEditingMessage, setInputPrefill]);
 
+  // Optimistic edit via store
   const handleConfirmEdit = useCallback(
     async (newContent: string, message: Message) => {
-      if (!message.id) return;
+      if (!message.id || !contact?.userId) return;
+      setEditingMessage(null);
+      setInputPrefill(undefined);
       try {
-        const ok = await gossip.messages.editMessage(message.id, newContent);
-        if (!ok) {
-          toast.error(t('unable_to_edit'));
-        }
+        await editMessage(contact.userId, message.id, newContent);
       } catch (error) {
         toast.error(t('failed_to_edit'));
         console.error('Failed to edit message:', error);
-      } finally {
-        setEditingMessage(null);
-        setInputPrefill(undefined);
       }
     },
-    [gossip, t, setEditingMessage, setInputPrefill]
+    [contact?.userId, editMessage, t, setEditingMessage, setInputPrefill]
   );
 
   const handleInputFocus = useCallback(() => {

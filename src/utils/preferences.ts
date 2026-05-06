@@ -10,11 +10,18 @@ import { Preferences } from '@capacitor/preferences';
 import { encodeToBase64 } from '@massalabs/gossip-sdk';
 import { isAppInForeground } from './appState';
 import { backgroundRunnerStorageService } from '../services/backgroundRunnerStorage';
+import { ForegroundSync } from '../services/foregroundSync';
 
 // Preferences keys
 const ACTIVE_SEEKERS_KEY = 'gossip-active-seekers';
 const API_BASE_URL_KEY = 'gossip-api-base-url';
 const LAST_SYNC_TIMESTAMP_KEY = 'gossip-last-sync-timestamp';
+const BACKGROUND_SYNC_PRESET_PREF_KEY = 'gossip-background-sync-preset';
+
+/** KV key consumed by `public/runners/background-sync.js` — keep in sync. */
+export const BACKGROUND_SYNC_PRESET_KV_KEY = 'gossip-sync-preset';
+
+export type BackgroundSyncPreset = 'balanced' | 'max';
 
 /**
  * Write a key-value pair to BackgroundRunner storage (Android).
@@ -119,5 +126,62 @@ export async function setActiveSeekersInPreferences(
       return;
     }
     await setBackgroundRunnerStorage(ACTIVE_SEEKERS_KEY, value);
+  }
+}
+
+const DEFAULT_BACKGROUND_SYNC_PRESET: BackgroundSyncPreset = 'max';
+
+/**
+ * User preference for background fetch throttling (native Background Runner).
+ * `max` = minimum delay between sync attempts (more reactive). `balanced` = longer gap (fewer redundant fetches when the OS fires often).
+ */
+export async function getBackgroundSyncPreset(): Promise<BackgroundSyncPreset> {
+  try {
+    const { value } = await Preferences.get({
+      key: BACKGROUND_SYNC_PRESET_PREF_KEY,
+    });
+    if (value === 'balanced' || value === 'max') {
+      return value;
+    }
+  } catch {
+    // ignore
+  }
+  return DEFAULT_BACKGROUND_SYNC_PRESET;
+}
+
+export async function setBackgroundSyncPreset(
+  preset: BackgroundSyncPreset
+): Promise<void> {
+  await Preferences.set({
+    key: BACKGROUND_SYNC_PRESET_PREF_KEY,
+    value: preset,
+  });
+  if (Capacitor.isNativePlatform()) {
+    await setBackgroundRunnerStorage(BACKGROUND_SYNC_PRESET_KV_KEY, preset);
+    try {
+      await ForegroundSync.setSyncPreset({ preset });
+    } catch {
+      // Native plugin missing or platform without ForegroundSync — ignore.
+    }
+  }
+}
+
+/**
+ * Copy the current preset into Background Runner storage AND the native foreground
+ * service SharedPreferences so both stay in sync with the JS-side Preferences value.
+ * Call after startup and whenever the app may have updated Preferences without going through setBackgroundSyncPreset.
+ */
+export async function syncBackgroundSyncPresetToRunner(): Promise<void> {
+  if (!Capacitor.isNativePlatform()) {
+    return;
+  }
+  const preset = await getBackgroundSyncPreset();
+  await setBackgroundRunnerStorage(BACKGROUND_SYNC_PRESET_KV_KEY, preset);
+  // Also push to the Android foreground service SharedPrefs so the native tick
+  // interval matches the JS-side preset (no-op on iOS via the web stub).
+  try {
+    await ForegroundSync.setSyncPreset({ preset });
+  } catch {
+    // Native plugin missing or platform without ForegroundSync — ignore.
   }
 }

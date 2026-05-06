@@ -1,29 +1,27 @@
-import React, {
-  useState,
-  useCallback,
-  useMemo,
-  useEffect,
-  useRef,
-} from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { UserPublicKeys } from '@massalabs/gossip-sdk';
-import { Check, Edit2, FileText, Image, Link2, Send } from 'react-feather';
-import toast from 'react-hot-toast';
+import {
+  Check,
+  Edit2,
+  Eye,
+  EyeOff,
+  FileText,
+  Image,
+  Link2,
+  Send,
+} from 'react-feather';
 import { useTranslation } from 'react-i18next';
 import { useFileShareContact } from '../../hooks/useFileShareContact';
+import { useLinkShare } from '../../hooks/useLinkShare';
+import { useQRShare } from '../../hooks/useQRShare';
 import { ROUTES } from '../../constants/routes';
-import {
-  canShareInvitationViaOtherApp,
-  shareInvitation,
-  shareQRCode,
-} from '../../services/shareService';
 import PageHeader from '../ui/PageHeader';
-import PageLayout from '../ui/PageLayout';
+import PageLayout from '../ui/Layout/PageLayout';
 import Button from '../ui/Button';
 import BaseModal from '../ui/BaseModal';
 import ContactNameModal from '../ui/ContactNameModal';
-import Toggle from '../ui/Toggle';
-import { generateDeepLinkUrl } from '../../utils/inviteUrl';
+import { generateDeepLinkUrl } from '../../utils/invite';
 import ShareContactQR from './ShareContactQR';
 import Popover from '../ui/Popover';
 import { PopoverPosition } from '../utils';
@@ -35,6 +33,9 @@ interface ShareContactProps {
   publicKey: UserPublicKeys;
   mnsDomains?: string[];
   showPageFrame?: boolean;
+  // Whether the sharing subject is the current user's own profile.
+  // When false, the invite greeting uses the contact's name rather than "me".
+  isOwnContact?: boolean;
 }
 
 const ShareContact: React.FC<ShareContactProps> = ({
@@ -44,21 +45,16 @@ const ShareContact: React.FC<ShareContactProps> = ({
   publicKey,
   mnsDomains,
   showPageFrame = true,
+  isOwnContact = true,
 }) => {
   const { t } = useTranslation('contacts');
   // Note: we keep a single QR/file-sharing view for now, no tab switcher.
-  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  const { qrDataUrl, setQrDataUrl, isSharingQR, qrShareSource, handleShareQR } =
+    useQRShare();
   const [isFilePanelOpen, setIsFilePanelOpen] = useState(false);
-  const [copiedLink, setCopiedLink] = useState(false);
-  const [isSharingLink, setIsSharingLink] = useState(false);
-  const [isSharingQR, setIsSharingQR] = useState(false);
   const [includeUsername, setIncludeUsername] = useState(true);
   const [sharedUsername, setSharedUsername] = useState(userName);
   const [isUsernameModalOpen, setIsUsernameModalOpen] = useState(false);
-  const [canShareViaOtherApp, setCanShareViaOtherApp] = useState(false);
-  const copiedLinkTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
-    null
-  );
   const { shareFileContact, fileState } = useFileShareContact();
   const navigate = useNavigate();
   const deepLinkUrl = useMemo(
@@ -66,70 +62,19 @@ const ShareContact: React.FC<ShareContactProps> = ({
       generateDeepLinkUrl(userId, includeUsername ? sharedUsername : undefined),
     [userId, includeUsername, sharedUsername]
   );
+  const {
+    copiedLink,
+    isSharingLink,
+    canShareViaOtherApp,
+    handleCopyLink,
+    handleShareLink,
+  } = useLinkShare(deepLinkUrl, isOwnContact ? undefined : sharedUsername);
   const isExportDisabled = !publicKey || fileState.isLoading;
 
   const handleShareFile = useCallback(() => {
     if (!publicKey || !userName) return;
     shareFileContact({ userPubKeys: publicKey.to_bytes(), userName });
   }, [shareFileContact, publicKey, userName]);
-
-  const handleCopyLink = useCallback(async () => {
-    try {
-      await navigator.clipboard.writeText(deepLinkUrl);
-      setCopiedLink(true);
-
-      if (copiedLinkTimeoutRef.current) {
-        clearTimeout(copiedLinkTimeoutRef.current);
-      }
-
-      copiedLinkTimeoutRef.current = setTimeout(() => {
-        setCopiedLink(false);
-        copiedLinkTimeoutRef.current = null;
-      }, 2000);
-    } catch (error) {
-      console.error('Failed to copy invitation link:', error);
-      toast.error('Failed to copy invitation link. Please try again.');
-    }
-  }, [deepLinkUrl]);
-
-  const handleShareLink = useCallback(async () => {
-    try {
-      setIsSharingLink(true);
-      await shareInvitation({ deepLinkUrl });
-    } catch (error) {
-      console.error('Failed to share invitation link:', error);
-      toast.error('Failed to share invitation link. Please try again.');
-    } finally {
-      setIsSharingLink(false);
-    }
-  }, [deepLinkUrl]);
-
-  const handleShareQR = useCallback(async () => {
-    if (!qrDataUrl) return;
-
-    try {
-      setIsSharingQR(true);
-      await shareQRCode({
-        qrDataUrl,
-        fileName: 'contact-qr-code.png',
-      });
-    } catch (error) {
-      console.error('Failed to share QR code:', error);
-      toast.error('Failed to share QR code. Please try again.');
-    } finally {
-      setIsSharingQR(false);
-    }
-  }, [qrDataUrl]);
-
-  useEffect(() => {
-    setCanShareViaOtherApp(canShareInvitationViaOtherApp());
-
-    return () => {
-      if (copiedLinkTimeoutRef.current) {
-        clearTimeout(copiedLinkTimeoutRef.current);
-      }
-    };
-  }, []);
 
   const content = (
     <div className="flex flex-col gap-4">
@@ -141,31 +86,44 @@ const ShareContact: React.FC<ShareContactProps> = ({
         onQRCodeGenerated={setQrDataUrl}
       />
 
-      {/* Include username toggle + editable name */}
+      {/* Username row: Eye toggles inclusion, pencil edits the name */}
       <div className="rounded-xl border border-border bg-card overflow-hidden">
-        <div className="flex items-center justify-between h-11 px-3">
-          <span className="text-sm text-foreground">Include username</span>
-          <Toggle
-            checked={includeUsername}
-            onChange={setIncludeUsername}
-            ariaLabel="Include username in the invite"
-          />
+        <div className="flex items-center gap-2 h-12 px-3">
+          <span
+            className={`flex-1 text-sm truncate transition-colors ${
+              includeUsername
+                ? 'text-foreground font-medium'
+                : 'text-muted-foreground/70 line-through'
+            }`}
+          >
+            {sharedUsername || userName}
+          </span>
+          <button
+            type="button"
+            onClick={() => setIncludeUsername(!includeUsername)}
+            className="p-2 rounded-full hover:bg-muted transition-colors"
+            aria-label={
+              includeUsername
+                ? 'Hide username from invite'
+                : 'Include username in invite'
+            }
+          >
+            {includeUsername ? (
+              <Eye className="w-4 h-4 text-foreground" />
+            ) : (
+              <EyeOff className="w-4 h-4 text-muted-foreground" />
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsUsernameModalOpen(true)}
+            disabled={!includeUsername}
+            className="p-2 rounded-full hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            aria-label="Edit username"
+          >
+            <Edit2 className="w-4 h-4 text-muted-foreground" />
+          </button>
         </div>
-        {includeUsername && (
-          <>
-            <div className="border-t border-border" />
-            <button
-              type="button"
-              onClick={() => setIsUsernameModalOpen(true)}
-              className="flex items-center justify-between gap-2 h-11 px-3 w-full hover:bg-accent/5 active:scale-[0.98] transition-all"
-            >
-              <span className="text-sm text-foreground truncate">
-                {sharedUsername || userName}
-              </span>
-              <Edit2 className="w-4 h-4 text-muted-foreground shrink-0" />
-            </button>
-          </>
-        )}
       </div>
 
       <ContactNameModal
@@ -205,11 +163,17 @@ const ShareContact: React.FC<ShareContactProps> = ({
             variant="outline"
             size="custom"
             className="h-11 flex items-center justify-center gap-2 rounded-xl"
-            onClick={canShareViaOtherApp ? handleShareLink : handleShareQR}
+            onClick={
+              canShareViaOtherApp
+                ? handleShareLink
+                : () => void handleShareQR('share')
+            }
             disabled={
               canShareViaOtherApp ? isSharingLink : !qrDataUrl || isSharingQR
             }
-            loading={isSharingLink || isSharingQR}
+            loading={
+              canShareViaOtherApp ? isSharingLink : qrShareSource === 'share'
+            }
           >
             <Send className="w-4 h-4" />
             <span className="text-sm font-normal">Share</span>
@@ -219,9 +183,9 @@ const ShareContact: React.FC<ShareContactProps> = ({
             variant="outline"
             size="custom"
             className="h-11 flex items-center justify-center gap-2 rounded-xl"
-            onClick={handleShareQR}
+            onClick={() => void handleShareQR('qr')}
             disabled={!qrDataUrl || isSharingQR}
-            loading={isSharingQR}
+            loading={qrShareSource === 'qr'}
           >
             <Image className="w-4 h-4" />
             <span className="text-sm font-normal">QR</span>
@@ -239,18 +203,16 @@ const ShareContact: React.FC<ShareContactProps> = ({
         </div>
       </div>
 
-      {/* Expiry hint */}
-      <p className="text-xs text-muted-foreground text-center leading-relaxed">
-        Invitations expire 2 weeks after your last connection.
-        <br />
-        File invitations don&apos;t expire.{' '}
+      {/* Expiry hint: must be div — Popover contains block nodes */}
+      <div className="text-xs text-muted-foreground text-center">
+        Invitations expire after 2 weeks. File invitations don&apos;t.{' '}
         <span className="relative inline-flex align-middle ml-0.5">
           <Popover
             position={PopoverPosition.TOP}
-            message="Each time you open the app, invitation validity is renewed if more than 24 hours have passed since the last renewal."
+            message="Invitations expire 2 weeks after your last connection. Each time you open the app, validity is renewed if more than 24 hours have passed. File invitations never expire."
           />
         </span>
-      </p>
+      </div>
 
       <BaseModal
         isOpen={isFilePanelOpen}

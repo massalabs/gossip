@@ -374,7 +374,7 @@ const SendModal: React.FC<SendModalProps> = ({
             placeholder="0.00"
             step="any"
             min="0"
-            className="flex-1 px-4 py-3 bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:text-white placeholder-gray-500 dark:placeholder-gray-400"
+            className="flex-1 px-4 py-3 bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-xl focus-visible:ring-2 focus-visible:ring-blue-500 focus:border-transparent dark:text-white placeholder-gray-500 dark:placeholder-gray-400"
             enterKeyHint="done"
           />
           <Button

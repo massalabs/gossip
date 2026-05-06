@@ -52,7 +52,7 @@ function TabSwitcher<T extends string>({
     >
       {/* Active indicator */}
       <div
-        className={`absolute top-1.5 bottom-1.5 rounded-3xl bg-primary shadow-sm transition-all duration-300 ease-out${!isMounted ? ' no-transition' : ''}`}
+        className={`absolute top-1.5 bottom-1.5 rounded-3xl bg-accent-soft shadow-sm transition-all duration-300 ease-out${!isMounted ? ' no-transition' : ''}`}
         style={getIndicatorStyle()}
         aria-hidden="true"
       />
@@ -63,7 +63,7 @@ function TabSwitcher<T extends string>({
           onClick={() => onChange(option.value)}
           className={`relative z-10 flex-1 h-11 inline-flex items-center justify-center gap-2 text-sm font-semibold rounded-xl transition-all duration-200 touch-manipulation ${
             value === option.value
-              ? 'text-primary-foreground'
+              ? 'text-accent-soft-foreground'
               : 'text-muted-foreground hover:text-foreground'
           }`}
           aria-pressed={value === option.value}
