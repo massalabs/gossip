@@ -52,6 +52,19 @@ pub trait BlockStorage {
     ///
     /// If the blockstream already exists, all existing blocks are removed.
     fn reset_blockstream(&mut self, session: SessionIndex, namespace: u8) -> Result<()>;
+
+    /// Enumerate the namespaces that currently hold one or more blocks for
+    /// the given session.
+    ///
+    /// Used by `allocate_session` to re-issue a genuine block 0 in every
+    /// non-empty namespace right after rotating the slot's keypair: cross-
+    /// slot cover-padding (driven by `repair_blockstream_lengths`) leaves
+    /// blocks under the slot's *previous* PQ public key in any namespace
+    /// another slot has written to, and those blocks no longer decrypt
+    /// under the freshly-derived session key. Returning an empty vec is
+    /// always sound; over-reporting is sound too (the caller will just
+    /// rewrite a no-op block 0).
+    fn namespaces_with_data(&self, session: SessionIndex) -> Result<Vec<u8>>;
 }
 
 /// Keypair file storage for session keypair files.
@@ -160,6 +173,14 @@ impl BlockStorage for MemoryStorage {
         // Clear any existing blocks (matches IdbStorageState::reset_blockstream).
         self.blockstreams[session.as_usize()].insert(namespace, Vec::new());
         Ok(())
+    }
+
+    fn namespaces_with_data(&self, session: SessionIndex) -> Result<Vec<u8>> {
+        Ok(self.blockstreams[session.as_usize()]
+            .iter()
+            .filter(|(_, blocks)| !blocks.is_empty())
+            .map(|(ns, _)| *ns)
+            .collect())
     }
 }
 
@@ -303,6 +324,40 @@ mod fs_backend {
                 .truncate(true)
                 .open(&path)?;
             Ok(())
+        }
+
+        fn namespaces_with_data(&self, session: SessionIndex) -> Result<Vec<u8>> {
+            let dir = self.base.join("sessions");
+            if !dir.exists() {
+                return Ok(Vec::new());
+            }
+            let prefix = format!("session_{}_n_", session.as_u8());
+            let mut out = Vec::new();
+            for entry in fs::read_dir(dir)? {
+                let entry = entry?;
+                let name = entry.file_name();
+                let s = match name.to_str() {
+                    Some(s) => s,
+                    None => continue,
+                };
+                let rest = match s.strip_prefix(&prefix) {
+                    Some(r) => r,
+                    None => continue,
+                };
+                let ns_str = match rest.strip_suffix(".blocks") {
+                    Some(r) => r,
+                    None => continue,
+                };
+                let ns: u8 = match ns_str.parse() {
+                    Ok(n) => n,
+                    Err(_) => continue,
+                };
+                let len = entry.metadata()?.len();
+                if len > 0 {
+                    out.push(ns);
+                }
+            }
+            Ok(out)
         }
     }
 

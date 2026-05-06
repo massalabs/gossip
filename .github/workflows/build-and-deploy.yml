@@ -126,6 +126,41 @@ jobs:
       - name: Sync Capacitor Android
         run: npm run cap:sync:android
 
+      # Cache cargo registry/git + the secureStorage build dir between
+      # runs. Mirrors the pattern from rust-wasm.yml. Saves ~1 min on
+      # cache hit by avoiding the from-scratch dependency download +
+      # compile.
+      - name: Cache cargo registry + target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            wasm/target
+          key: ${{ runner.os }}-cargo-android-${{ hashFiles('wasm/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-android-
+
+      # Cache the cargo-ndk binary itself so we skip the ~1 min source
+      # compile of `cargo install` whenever the version is unchanged.
+      - name: Cache cargo-ndk binary
+        id: cache-cargo-ndk
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-ndk
+          key: cargo-ndk-4.1.2-${{ runner.os }}
+
+      # Required by `:app:buildRustSecureStorage` Gradle task, which
+      # invokes scripts/build-native-android.sh -> `cargo ndk`. The
+      # ubuntu-latest runner ships rustup but not the Android targets
+      # nor the cargo-ndk subcommand.
+      - name: Install cargo-ndk
+        if: steps.cache-cargo-ndk.outputs.cache-hit != 'true'
+        run: cargo install cargo-ndk --version =4.1.2 --locked
+
+      - name: Setup Rust Android targets
+        run: rustup target add aarch64-linux-android x86_64-linux-android
+
       - name: Display build info
         run: |
           echo "📦 Building Android artifacts:"
@@ -366,16 +401,20 @@ jobs:
         with:
           xcode-version: '26.0'
 
-      - name: Install iOS 26 platform
+      # The macos-26 runner image ships Xcode 26 but the iOS 26.0
+      # platform SDK is not always pre-installed. xcodebuild fails the
+      # archive with "iOS 26.0 is not installed. Please download and
+      # install the platform from Xcode > Settings > Components." when
+      # the SDK is missing. Keep the dev-side `runFirstLaunch` plus
+      # before/after SDK listing here; it is stricter than a bare
+      # `xcodebuild -downloadPlatform iOS`.
+      - name: Install and verify iOS 26 platform SDK
         run: |
           echo "Selected Xcode:"
           xcode-select -p
           xcodebuild -version
           echo "SDKs before install:"
           xcodebuild -showsdks || true
-          # macos-26 image ships Xcode 26 but the iOS 26 runtime/platform is
-          # not preinstalled — without this download xcodebuild fails with
-          # "iOS 26.0 is not installed" on the generic/platform=iOS destination.
           sudo xcodebuild -runFirstLaunch
           sudo xcodebuild -downloadPlatform iOS
           echo "SDKs after install:"
@@ -396,6 +435,37 @@ jobs:
 
       - name: Sync Capacitor iOS
         run: npm run cap:sync:ios
+
+      # Cache cargo registry/git + the secureStorage build dir between
+      # runs (mirrors the Android job and rust-wasm.yml). Saves ~1 min
+      # of dependency download + recompile on cache hit; the iOS build
+      # otherwise runs `cargo build` for two iOS targets from scratch
+      # every CI run (~1m20s observed in CI logs).
+      - name: Cache cargo registry + target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            wasm/target
+          key: ${{ runner.os }}-cargo-ios-${{ hashFiles('wasm/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-ios-
+
+      # Pre-build the Rust XCFramework before xcodebuild runs.
+      # Xcode's ProcessXCFramework (which extracts the per-slice .a
+      # from SecureStorage.xcframework) executes during build-graph
+      # preparation, BEFORE the "Build secure-storage (Rust)" pre-build
+      # script phase. The .gitkeep stubs satisfy CreateBuildDescription
+      # at parse time but ProcessXCFramework demands real .a content,
+      # so on a cold CI clone the script phase never gets a chance to
+      # run. Pre-building here populates the xcframework so xcodebuild
+      # finds what it needs; the in-Xcode script phase then becomes a
+      # cargo cache no-op for incremental dev builds.
+      - name: Setup Rust (iOS targets) + pre-build XCFramework
+        run: |
+          rustup target add aarch64-apple-ios aarch64-apple-ios-sim
+          bash scripts/build-native-ios.sh --release
 
       - name: Configure Git for Match
         run: |

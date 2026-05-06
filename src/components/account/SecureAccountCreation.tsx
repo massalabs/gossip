@@ -12,7 +12,7 @@ import SecureAccountSetup from './SecureAccountSetup';
 type Step = 'form' | 'creating' | 'setup';
 
 interface SecureAccountCreationProps {
-  onComplete: () => void;
+  onComplete: () => void | Promise<void>;
   onBack: () => void;
 }
 

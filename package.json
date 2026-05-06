@@ -7,6 +7,7 @@
     "gossip-sdk"
   ],
   "scripts": {
+    "setup": "bash scripts/setup-dev.sh",
     "dev": "vite",
     "dev:host": "vite --host",
     "build:sdk": "cd gossip-sdk && npm run build",
@@ -32,6 +33,11 @@
     "wasm:build:main": "wasm-pack build --out-dir ../../gossip-sdk/src/assets/generated/wasm --target web wasm/main && rm -f gossip-sdk/src/assets/generated/wasm/.gitignore",
     "wasm:build:secure-storage": "RUSTUP_TOOLCHAIN=nightly wasm-pack build --out-dir ../../gossip-sdk/src/assets/generated/wasm-secureStorage --out-name secureStorage --target web wasm/secure-storage --features wasm && rm -f gossip-sdk/src/assets/generated/wasm-secureStorage/.gitignore gossip-sdk/src/assets/generated/wasm-secureStorage/package.json && printf 'export * from \"./secureStorage.js\";\\nexport { default } from \"./secureStorage.js\";\\n' > gossip-sdk/src/assets/generated/wasm-secureStorage/index.js",
     "wasm:check:secure-storage": "cd wasm/secure-storage && cargo +nightly check --target wasm32-unknown-unknown --features wasm",
+    "native:build:ios": "bash scripts/build-native-ios.sh --release",
+    "native:build:ios:debug": "bash scripts/build-native-ios.sh --debug",
+    "native:build:android": "bash scripts/build-native-android.sh --release",
+    "native:build:android:debug": "bash scripts/build-native-android.sh --debug",
+    "build:all": "bash scripts/build-all.sh",
     "wasm:test": "cargo test --workspace --manifest-path wasm/Cargo.toml --all-targets --verbose",
     "wasm:clean": "rm -rf gossip-sdk/src/assets/generated/wasm gossip-sdk/src/assets/generated/wasm-secureStorage",
     "cap:sync": "cap sync",
@@ -137,6 +143,7 @@
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.20.0",
     "vite": "^6.0.11",
+    "vite-plugin-cross-origin-isolation": "^0.1.6",
     "vite-plugin-image-optimizer": "^2.0.2",
     "vite-plugin-mkcert": "^1.17.9",
     "vite-plugin-node-polyfills": "^0.24.0",

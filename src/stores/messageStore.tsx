@@ -95,6 +95,7 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
   currentContactUserId: null,
   cleanupFn: null,
   isInitializing: false,
+  optimisticallySentStoreIds: new Set<string>(),
 
   setCurrentContact: async (newContactId: string | null) => {
     if (get().currentContactUserId === newContactId) return;
@@ -239,6 +240,16 @@ const useMessageStoreBase = create<MessageStoreState>((set, get) => ({
         storeId,
         result.message
       );
+      // The optimistic ✓ is set on the MESSAGE_SENT event (see
+      // `messageStore.events.ts:onSent`), NOT here. `sdk.messages.send`
+      // returns `success: true` as soon as the row is queued in
+      // WAITING_SESSION — that does not mean the network publish
+      // happened. If the peer has no session yet (e.g. invite still
+      // pending), the inner send loop's `session.sendMessage` returns
+      // null and the row stays WAITING_SESSION; we must NOT pretend
+      // it was delivered. MESSAGE_SENT only fires when the row
+      // genuinely flips to SENT, so the listener path is the
+      // truth-aligned signal.
     } catch (error) {
       console.error('Failed to send message:', error);
       markMessageFailed(set, storeId);

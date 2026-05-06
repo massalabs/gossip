@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<data-extraction-rules>
+    <cloud-backup>
+        <!-- The native secure-storage redb file must not be copied to Android backup. -->
+        <exclude domain="file" path="secure-storage" />
+    </cloud-backup>
+    <device-transfer>
+        <!-- Keep device-to-device transfer behavior aligned with cloud backup. -->
+        <exclude domain="file" path="secure-storage" />
+    </device-transfer>
+</data-extraction-rules>

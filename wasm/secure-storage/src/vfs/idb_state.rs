@@ -248,6 +248,14 @@ impl IdbStorageState {
             .map_or(0, |v| v.len() as u64)
     }
 
+    pub fn namespaces_with_data(&self, session: u8) -> Vec<u8> {
+        self.blocks[session as usize]
+            .iter()
+            .filter(|(_, blocks)| !blocks.is_empty())
+            .map(|(ns, _)| *ns)
+            .collect()
+    }
+
     /// Wipe all blocks of a `(session, namespace)` pair and queue them for
     /// IDB deletion.
     ///

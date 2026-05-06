@@ -21,7 +21,7 @@ public class BackgroundRunnerStoragePlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "set", returnType: CAPPluginReturnPromise)
     ]
     
-    private let logger = Logger(subsystem: "net.massa.gossip", category: "BackgroundRunnerStorage")
+    private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "net.massa.gossip", category: "BackgroundRunnerStorage")
     
     /**
      * Write a key-value pair to the BackgroundRunner's storage.
