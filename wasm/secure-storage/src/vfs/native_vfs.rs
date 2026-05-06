@@ -363,8 +363,7 @@ fn ensure_cover_scheduler() {
                     // (e.g. between `init_native` and the first
                     // `provision`) are ignored and we simply keep
                     // ticking at the next interval.
-                    let _ = cover_tick();
-                    let _ = flush();
+                    let _ = run_cover_scheduler_tick();
                 }
             });
         // Spawn failure is deliberately not surfaced across the FFI
@@ -375,9 +374,7 @@ fn ensure_cover_scheduler() {
         // Print to stderr so the failure is at least visible in
         // os_log / logcat for diagnostics.
         if let Err(e) = spawn_result {
-            eprintln!(
-                "secureStorage: PD-DEGRADED cover scheduler spawn failed: {e}"
-            );
+            eprintln!("secureStorage: PD-DEGRADED cover scheduler spawn failed: {e}");
         }
     });
 }
@@ -407,6 +404,20 @@ pub fn cover_tick() -> Result<()> {
     Ok(())
 }
 
+/// Run the scheduler's durable cover path.
+///
+/// Today the native background scheduler has no access to an unlocked
+/// session after `lock()`, so it cannot safely drain SQLite's
+/// `main_file` state. It still must persist cover traffic while locked:
+/// otherwise a native process restart would roll back the cover blocks
+/// and create visible snapshot gaps. If native background work later
+/// gains session access, revisit this split so unlocked/background ticks
+/// can also drain foreground SQLite writes before committing.
+fn run_cover_scheduler_tick() -> Result<()> {
+    cover_tick()?;
+    commit_pending_backend_writes()
+}
+
 /// Flush pending plaintext writes + encrypted blocks + rerand pool to
 /// backing store. Also commits the redb transaction.
 pub fn flush() -> Result<()> {
@@ -416,6 +427,21 @@ pub fn flush() -> Result<()> {
         .as_mut()
         .ok_or_else(|| SecureStorageError::NotInitialized)?;
     flush_pending_writes(st)
+}
+
+/// Commit writes that are already staged in the native backend.
+///
+/// This deliberately does not drain SQLite's pending plaintext writes:
+/// the cover scheduler also runs while locked, when no session is
+/// available to sync `main_file`, but its cover blocks still need to be
+/// durable before the next process snapshot.
+fn commit_pending_backend_writes() -> Result<()> {
+    let mutex = state_mutex();
+    let mut guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
+    let st = guard
+        .as_mut()
+        .ok_or_else(|| SecureStorageError::NotInitialized)?;
+    st.backend.commit()
 }
 
 /// Open a rusqlite connection using the registered encrypted VFS.
@@ -1549,10 +1575,8 @@ mod tests {
             // ── Phase 3: cover-traffic between the two unlock cycles ──
             // The scheduler in production runs every ~30s; we do a burst
             // here because the test is meant to flush out single-tick
-            // silent corruption. `flush()` is gated on having an unlocked
-            // session and is the cover scheduler's own no-op while
-            // locked - the cover writes stay in `ram_buffer` and are
-            // visible to subsequent reads via the redb overlay.
+            // silent corruption. The scheduler commits the encrypted
+            // cover blocks while locked without draining SQLite state.
             for _ in 0..5 {
                 cover_tick().unwrap();
             }
@@ -1670,6 +1694,49 @@ mod tests {
                 );
             }
             lock().unwrap();
+        });
+    }
+
+    #[test]
+    fn test_native_locked_cover_tick_is_durable_across_restart() {
+        run_with_stack(|| {
+            let _guard = test_mutex().lock().unwrap();
+            reset_state();
+            ensure_registered();
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().to_str().unwrap().to_string();
+
+            init_native(&path, "gossip").unwrap();
+            provision().unwrap();
+            allocate(0, b"alice").unwrap();
+            write_namespace_data(1, 0, &[0xAA; 4096]).unwrap();
+            let before = {
+                use crate::storage::BlockStorage;
+                let guard = state_mutex().lock().unwrap();
+                let st = guard.as_ref().unwrap();
+                st.backend
+                    .read_block(SessionIndex::new(1).unwrap(), 1, 0)
+                    .unwrap()
+            };
+            lock().unwrap();
+
+            run_cover_scheduler_tick().unwrap();
+            reset_state();
+            init_native(&path, "gossip").unwrap();
+
+            let after = {
+                use crate::storage::BlockStorage;
+                let guard = state_mutex().lock().unwrap();
+                let st = guard.as_ref().unwrap();
+                st.backend
+                    .read_block(SessionIndex::new(1).unwrap(), 1, 0)
+                    .unwrap()
+            };
+            let cover_was_committed = before.as_ref() != after.as_ref();
+            assert!(
+                cover_was_committed,
+                "locked cover tick should be committed to redb before restart"
+            );
         });
     }
 
