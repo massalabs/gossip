@@ -11,6 +11,7 @@ import PageLayout from '../ui/Layout/PageLayout';
 import Button from '../ui/Button';
 import RoundedInput from '../ui/RoundedInput';
 import { scrollFieldIntoView } from '../../utils/scrollFieldIntoView';
+import PasswordConfirmModal from './PasswordConfirmModal';
 
 interface SecureAccountFormProps {
   onSubmit: (creds: { username: string; password: string }) => void;
@@ -32,6 +33,8 @@ const SecureAccountForm: React.FC<SecureAccountFormProps> = ({
   const [passwordError, setPasswordError] = useState<string | null>(null);
   const [showPasswords, setShowPasswords] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showPasswordConfirmModal, setShowPasswordConfirmModal] =
+    useState(false);
 
   const handleUsernameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
@@ -66,6 +69,11 @@ const SecureAccountForm: React.FC<SecureAccountFormProps> = ({
     }
 
     if (!canSubmit) return;
+    setShowPasswordConfirmModal(true);
+  };
+
+  const handlePasswordConfirm = () => {
+    setShowPasswordConfirmModal(false);
     setIsSubmitting(true);
     onSubmit({ username, password });
   };
@@ -81,8 +89,8 @@ const SecureAccountForm: React.FC<SecureAccountFormProps> = ({
       className="app-max-w mx-auto"
       contentClassName="p-4"
     >
-      <div className="bg-background rounded-lg p-6 space-y-6">
-        <form onSubmit={handleFormSubmit} className="space-y-6">
+      <div className="bg-background rounded-lg p-6 space-y-4">
+        <form onSubmit={handleFormSubmit} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-foreground mb-1.5">
               {t('create.username')}
@@ -102,49 +110,48 @@ const SecureAccountForm: React.FC<SecureAccountFormProps> = ({
             </p>
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-foreground mb-1.5">
-              {t('create.password')}
-            </label>
-            <RoundedInput
-              type="password"
-              value={password}
-              onChange={handlePasswordChange}
-              onFocus={scrollFieldIntoView}
-              placeholder={t('create.enter_password')}
-              error={!!passwordError}
-              showPasswordToggle={true}
-              showPassword={showPasswords}
-              onShowPasswordChange={setShowPasswords}
-            />
-            <p
-              className={`text-xs mt-1 h-4 ${passwordError ? 'text-red-500 dark:text-red-400' : 'invisible'}`}
-            >
-              {passwordError || '\u00A0'}
-            </p>
-          </div>
+          <div className="space-y-2">
+            <div>
+              <label className="block text-sm font-medium text-foreground mb-1.5">
+                {t('create.password')}
+              </label>
+              <RoundedInput
+                type="password"
+                value={password}
+                onChange={handlePasswordChange}
+                onFocus={scrollFieldIntoView}
+                placeholder={t('create.enter_password')}
+                error={!!passwordError}
+                showPasswordToggle={true}
+                showPassword={showPasswords}
+                onShowPasswordChange={setShowPasswords}
+              />
+              <p
+                className={`text-xs mt-1 h-4 ${passwordError ? 'text-red-500 dark:text-red-400' : 'invisible'}`}
+              >
+                {passwordError || '\u00A0'}
+              </p>
+            </div>
 
-          <div>
-            <label className="block text-sm font-medium text-foreground mb-1.5">
-              {t('create.confirm_password_label')}
-            </label>
-            <RoundedInput
-              type="password"
-              value={confirmPassword}
-              onChange={e => setConfirmPassword(e.target.value)}
-              onFocus={scrollFieldIntoView}
-              placeholder={t('create.confirm_password')}
-              error={confirmPassword.length > 0 && !passwordsMatch}
-              showPasswordToggle={false}
-              showPassword={showPasswords}
-            />
-            <p
-              className={`text-xs mt-1 h-4 ${confirmPassword.length > 0 && !passwordsMatch ? 'text-red-500 dark:text-red-400' : 'invisible'}`}
-            >
-              {confirmPassword.length > 0 && !passwordsMatch
-                ? t('create.passwords_do_not_match')
-                : '\u00A0'}
-            </p>
+            <div>
+              <RoundedInput
+                type="password"
+                value={confirmPassword}
+                onChange={e => setConfirmPassword(e.target.value)}
+                onFocus={scrollFieldIntoView}
+                placeholder={t('create.confirm_password')}
+                error={confirmPassword.length > 0 && !passwordsMatch}
+                showPasswordToggle={false}
+                showPassword={showPasswords}
+              />
+              <p
+                className={`text-xs mt-1 h-4 ${confirmPassword.length > 0 && !passwordsMatch ? 'text-red-500 dark:text-red-400' : 'invisible'}`}
+              >
+                {confirmPassword.length > 0 && !passwordsMatch
+                  ? t('create.passwords_do_not_match')
+                  : '\u00A0'}
+              </p>
+            </div>
           </div>
 
           <Button
@@ -165,6 +172,11 @@ const SecureAccountForm: React.FC<SecureAccountFormProps> = ({
           </Button>
         </form>
       </div>
+      <PasswordConfirmModal
+        isOpen={showPasswordConfirmModal}
+        onConfirm={handlePasswordConfirm}
+        onCancel={() => setShowPasswordConfirmModal(false)}
+      />
     </PageLayout>
   );
 };

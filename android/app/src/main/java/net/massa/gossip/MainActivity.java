@@ -30,6 +30,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(NetworkObserverPlugin.class);
         registerPlugin(BackgroundRunnerStoragePlugin.class);
         registerPlugin(ForegroundSyncPlugin.class);
+        registerPlugin(SecureStoragePlugin.class);
         
         super.onCreate(savedInstanceState);
 

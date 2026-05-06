@@ -2,6 +2,9 @@
 target/
 wasm/target
 
+# wasm-bindgen / wasm-pack output that should not land in git
+gossip-sdk/src/assets/generated/**/*.map
+
 # coverage
 coverage/
 
@@ -19,6 +22,7 @@ dist
 dist-ssr
 dev-dist
 *.local
+*.local.*
 
 # Editor directories and files
 .vscode/*
@@ -49,6 +53,28 @@ ios/App/fastlane/Preview.html
 ios/App/fastlane/test_output/
 ios/App/Gemfile.lock
 ios/App/plugins/App/public/assets
+
+# secure-storage native artifacts - rebuilt from Rust on demand via the
+# "Build secure-storage (Rust)" Xcode pre-build phase (see
+# scripts/build-native-ios.sh). Keeping the .a slices and the Swift
+# wrapper out of git prevents ~34 MB of static libs from accumulating
+# in history on every rebuild. The C-side modulemap+header are tracked
+# because Xcode 26 explicit-modules resolves the `-fmodule-map-file=`
+# path during CreateBuildDescription, before the pre-build phase
+# regenerates them. Combined with the cmp -s no-op overwrite in
+# build-native-ios.sh, regen does not touch them when content is stable.
+ios/App/SecureStorage.xcframework/**/*.a
+ios/App/App/plugins/secureStorage/secureStorage.swift
+
+# Android secure-storage native artifacts — rebuilt from Rust on
+# demand via the `:app:buildRustSecureStorage` Gradle task wired
+# before `:app:preBuild` (see scripts/build-native-android.sh +
+# android/app/build.gradle). Keeping these out of git prevents
+# ~8 MB of .so + 1.8k lines of generated Kotlin from accumulating in
+# history on every rebuild and guarantees the binary always matches
+# the committed Rust source.
+android/app/src/main/jniLibs/*/*.so
+android/app/src/main/java/uniffi/
 
 # Android build artifacts
 android/.gradle/

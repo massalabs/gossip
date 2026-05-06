@@ -27,6 +27,12 @@ pub enum SecureStorageError {
     #[error("storage error")]
     Storage(String),
 
+    #[error("not initialized")]
+    NotInitialized,
+
+    #[error("database not open")]
+    DatabaseNotOpen,
+
     #[error("database error")]
     Sqlite(String),
 
@@ -39,6 +45,30 @@ pub enum SecureStorageError {
 
     #[error("internal error")]
     ThreadPanic,
+}
+
+impl SecureStorageError {
+    /// Stable, machine-discriminable code for this error variant. Used at
+    /// the FFI boundary so JS / Swift / Kotlin callers can switch on the
+    /// failure mode without parsing user-facing strings (whose wording is
+    /// allowed to drift).
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::InvalidPassword => "INVALID_PASSWORD",
+            Self::OutOfBounds => "OUT_OF_BOUNDS",
+            Self::UnsupportedVersion(_) => "UNSUPPORTED_VERSION",
+            Self::CorruptedBlock => "CORRUPTED_DATA",
+            Self::InvalidSessionIndex(_) => "INVALID_SESSION_INDEX",
+            Self::Overflow => "OVERFLOW",
+            Self::Storage(_) => "STORAGE",
+            Self::NotInitialized => "NOT_INITIALIZED",
+            Self::DatabaseNotOpen => "DATABASE_NOT_OPEN",
+            Self::Sqlite(_) => "SQLITE",
+            Self::Io(_) => "IO",
+            Self::LockPoisoned => "LOCK_POISONED",
+            Self::ThreadPanic => "THREAD_PANIC",
+        }
+    }
 }
 
 /// Convenience alias used throughout the crate.

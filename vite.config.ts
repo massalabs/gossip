@@ -6,6 +6,8 @@ import tailwindcss from '@tailwindcss/vite';
 import { ViteImageOptimizer } from 'vite-plugin-image-optimizer';
 import { nodePolyfills } from 'vite-plugin-node-polyfills';
 import mkcert from 'vite-plugin-mkcert';
+// @ts-expect-error — vite-plugin-cross-origin-isolation has no .d.ts
+import crossOriginIsolation from 'vite-plugin-cross-origin-isolation';
 
 // https://vitejs.dev/config/
 export default defineConfig({
@@ -13,6 +15,7 @@ export default defineConfig({
     react(),
     tailwindcss(),
     mkcert(), // ← Enables HTTPS locally
+    crossOriginIsolation(), // ← Sets COOP/COEP for SharedArrayBuffer (rayon WASM)
     nodePolyfills({
       // Whether to polyfill `node:` protocol imports.
       protocolImports: true,
@@ -126,6 +129,19 @@ export default defineConfig({
   server: {
     fs: {
       allow: ['..'],
+    },
+    // Required for SharedArrayBuffer (used by wasm-bindgen-rayon to spawn
+    // rayon thread pool from Web Workers). Without these headers, the
+    // browser refuses to instantiate the WASM module with shared memory.
+    headers: {
+      'Cross-Origin-Opener-Policy': 'same-origin',
+      'Cross-Origin-Embedder-Policy': 'require-corp',
+    },
+  },
+  preview: {
+    headers: {
+      'Cross-Origin-Opener-Policy': 'same-origin',
+      'Cross-Origin-Embedder-Policy': 'require-corp',
     },
   },
   build: {

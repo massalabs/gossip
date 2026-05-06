@@ -279,6 +279,10 @@ impl BlockStorage for IdbBlockStorage {
             .reset_blockstream(session.as_u8(), namespace);
         Ok(())
     }
+
+    fn namespaces_with_data(&self, session: SessionIndex) -> Result<Vec<u8>> {
+        Ok(self.state.borrow().namespaces_with_data(session.as_u8()))
+    }
 }
 
 // ── KeypairStorage ──────────────────────────────────────────────────

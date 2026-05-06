@@ -1,0 +1,643 @@
+//! UniFFI exports for native (iOS/Android) targets.
+//!
+//! Single JSON-in / JSON-out dispatcher: the plugin side only knows one
+//! method name (`native_call`) and passes through `(method, args_json)`.
+//! All argument parsing and result encoding happens here in Rust via
+//! serde, which keeps the Kotlin/Swift layer trivial (~25 lines each)
+//! and means adding a new native method is a one-match-arm change.
+//!
+//! Binary payloads (passwords, namespace blobs, SQL BLOBs) cross the
+//! bridge as base64 strings rather than `number[]`, which saved a ~×8
+//! overhead per byte on the Capacitor bridge.
+
+use std::path::Path;
+use std::sync::{Mutex, OnceLock};
+
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as B64;
+use serde::{Deserialize, Serialize};
+use zeroize::Zeroizing;
+
+use crate::error::SecureStorageError;
+use crate::js_num;
+use crate::vfs::native_vfs;
+
+// ── Global DB connection ────────────────────────────────────────────
+
+static DB: OnceLock<Mutex<Option<rusqlite::Connection>>> = OnceLock::new();
+
+fn db_mutex() -> &'static Mutex<Option<rusqlite::Connection>> {
+    DB.get_or_init(|| Mutex::new(None))
+}
+
+// ── UniFFI error ────────────────────────────────────────────────────
+
+/// Exception surfaced across the UniFFI boundary. The `code` field is a
+/// stable identifier (e.g. "NOT_INITIALIZED", "INVALID_PASSWORD") so the
+/// Swift / Kotlin bridges and JS callers can switch on failure mode
+/// without parsing the user-facing `msg`.
+#[derive(Debug, uniffi::Error, thiserror::Error)]
+pub enum SecureStorageException {
+    #[error("[{code}] {msg}")]
+    Error { code: String, msg: String },
+}
+
+impl SecureStorageException {
+    fn typed(code: &'static str, msg: impl Into<String>) -> Self {
+        Self::Error {
+            code: code.into(),
+            msg: msg.into(),
+        }
+    }
+}
+
+impl From<SecureStorageError> for SecureStorageException {
+    fn from(e: SecureStorageError) -> Self {
+        // Display is intentionally generic for PD ("storage error",
+        // "database error", …) so an observer can't fingerprint the
+        // backing store from leaked error strings.
+        Self::Error {
+            code: e.code().into(),
+            msg: e.to_string(),
+        }
+    }
+}
+
+impl From<rusqlite::Error> for SecureStorageException {
+    fn from(e: rusqlite::Error) -> Self {
+        Self::typed("SQLITE", e.to_string())
+    }
+}
+
+impl From<serde_json::Error> for SecureStorageException {
+    fn from(e: serde_json::Error) -> Self {
+        Self::typed("BAD_ARGS", format!("json: {e}"))
+    }
+}
+
+impl From<base64::DecodeError> for SecureStorageException {
+    fn from(e: base64::DecodeError) -> Self {
+        Self::typed("BAD_ARGS", format!("base64: {e}"))
+    }
+}
+
+type Result<T> = std::result::Result<T, SecureStorageException>;
+
+// ── Serde types mirroring the TS wrapper ────────────────────────────
+
+#[derive(Deserialize)]
+struct InitArgs {
+    path: String,
+    domain: String,
+}
+
+#[derive(Deserialize)]
+struct AllocateArgs {
+    slot: u8,
+    /// base64-encoded password bytes
+    password: String,
+}
+
+#[derive(Deserialize)]
+struct UnlockArgs {
+    /// base64-encoded password bytes
+    password: String,
+}
+
+#[derive(Deserialize)]
+struct ExecSqlArgs {
+    sql: String,
+    #[serde(default)]
+    params: Vec<serde_json::Value>,
+}
+
+#[derive(Deserialize)]
+struct ExecSqlBatchArgs {
+    /// One entry per statement. Order is preserved; the `lastInsertRowId`
+    /// and `changes` of the LAST statement are returned at the top level
+    /// (matching the typical Drizzle `BEGIN; INSERT; UPDATE; COMMIT` shape
+    /// where only the trailing op's metadata matters).
+    statements: Vec<ExecSqlArgs>,
+}
+
+#[derive(Deserialize)]
+struct WriteNamespaceArgs {
+    namespace: u8,
+    offset: u64,
+    /// base64-encoded data bytes
+    data: String,
+}
+
+#[derive(Deserialize)]
+struct ReplaceNamespaceArgs {
+    namespace: u8,
+    /// base64-encoded data bytes; replaces the entire namespace.
+    data: String,
+}
+
+#[derive(Deserialize)]
+struct ReadNamespaceArgs {
+    namespace: u8,
+    offset: u64,
+    len: u64,
+}
+
+#[derive(Deserialize)]
+struct NamespaceArgs {
+    namespace: u8,
+}
+
+#[derive(Deserialize)]
+struct DestroySessionArgs {
+    namespaces: Vec<u8>,
+}
+
+/// SQL values flow as raw JSON primitives; the one exception is BLOB,
+/// which cannot be represented as a JSON scalar and is carried as the
+/// sentinel object `{"blob": "<base64>"}` in both directions.
+#[derive(Serialize)]
+struct QueryResultJson {
+    columns: Vec<String>,
+    rows: Vec<Vec<serde_json::Value>>,
+    #[serde(rename = "lastInsertRowId")]
+    last_insert_rowid: i64,
+    changes: i64,
+}
+
+/// Decode a blob sentinel `{"blob": "<base64>"}` if `v` matches; else `None`.
+fn as_blob_sentinel(v: &serde_json::Value) -> Option<&str> {
+    v.as_object()
+        .and_then(|o| (o.len() == 1).then_some(()))
+        .and_then(|_| v.get("blob"))
+        .and_then(|b| b.as_str())
+}
+
+// ── Path validation ─────────────────────────────────────────────────
+
+fn validate_storage_path(path: &str) -> Result<()> {
+    if path.bytes().any(|b| b == 0) {
+        return Err(SecureStorageException::typed(
+            "BAD_PATH",
+            "path contains interior NUL",
+        ));
+    }
+    let p = Path::new(path);
+    if !p.is_absolute() {
+        return Err(SecureStorageException::typed(
+            "BAD_PATH",
+            "path must be absolute",
+        ));
+    }
+    for comp in p.components() {
+        if matches!(comp, std::path::Component::ParentDir) {
+            return Err(SecureStorageException::typed(
+                "BAD_PATH",
+                "path must not contain '..'",
+            ));
+        }
+    }
+    Ok(())
+}
+
+// ── Dispatcher ──────────────────────────────────────────────────────
+
+/// Single UniFFI export. The plugin layer passes a method name and a
+/// JSON args blob; all result shapes are JSON strings.
+///
+/// A panic catcher sits between `dispatch` and the FFI boundary because
+/// UniFFI 0.x does not install one by default, and an unwind across the
+/// C ABI into Swift/Kotlin is undefined behaviour. Likely panic sources
+/// are `serde_json::from_str` (deeply nested or huge input under OOM)
+/// and any rusqlite path that aborts on contract violation.
+#[uniffi::export]
+pub fn native_call(method: String, args_json: String) -> Result<String> {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        dispatch(&method, &args_json)
+    })) {
+        Ok(r) => r,
+        Err(panic) => {
+            let msg = if let Some(s) = panic.downcast_ref::<&'static str>() {
+                (*s).to_string()
+            } else if let Some(s) = panic.downcast_ref::<String>() {
+                s.clone()
+            } else {
+                "non-string panic payload".to_string()
+            };
+            Err(SecureStorageException::typed(
+                "PANIC",
+                format!("internal panic in `{method}`: {msg}"),
+            ))
+        }
+    }
+}
+
+fn dispatch(method: &str, args: &str) -> Result<String> {
+    // Helper: parse args as T.
+    fn parse<'a, T: Deserialize<'a>>(s: &'a str) -> Result<T> {
+        Ok(serde_json::from_str(s)?)
+    }
+
+    match method {
+        "initSecureStorage" => {
+            let a: InitArgs = parse(args)?;
+            init_secure_storage(&a.path, &a.domain)?;
+            Ok("null".into())
+        }
+        "provisionStorage" => {
+            native_vfs::provision()?;
+            Ok("null".into())
+        }
+        "hasData" => {
+            let has = native_vfs::has_data()?;
+            Ok(serde_json::to_string(&has)?)
+        }
+        "allocateSession" => {
+            let a: AllocateArgs = parse(args)?;
+            let password = Zeroizing::new(B64.decode(a.password)?);
+            allocate(a.slot, &password)?;
+            Ok("null".into())
+        }
+        "unlockSession" => {
+            let a: UnlockArgs = parse(args)?;
+            let password = Zeroizing::new(B64.decode(a.password)?);
+            let ok = unlock(&password)?;
+            Ok(serde_json::to_string(&ok)?)
+        }
+        "lockSession" => {
+            lock()?;
+            Ok("null".into())
+        }
+        "isUnlocked" => {
+            let ok = native_vfs::is_unlocked()?;
+            Ok(serde_json::to_string(&ok)?)
+        }
+        "coverTrafficTick" => {
+            native_vfs::cover_tick()?;
+            Ok("null".into())
+        }
+        "flush" => {
+            native_vfs::flush()?;
+            Ok("null".into())
+        }
+        "close" => {
+            close()?;
+            Ok("null".into())
+        }
+        "rayonThreadCount" => {
+            let n = rayon::current_num_threads() as u32;
+            Ok(serde_json::to_string(&n)?)
+        }
+        "execSql" => {
+            let a: ExecSqlArgs = parse(args)?;
+            let qr = exec_sql(&a.sql, &a.params)?;
+            Ok(serde_json::to_string(&qr)?)
+        }
+        "execSqlBatch" => {
+            let a: ExecSqlBatchArgs = parse(args)?;
+            let qrs = exec_sql_batch(&a.statements)?;
+            Ok(serde_json::to_string(&qrs)?)
+        }
+        "writeNamespaceData" => {
+            let a: WriteNamespaceArgs = parse(args)?;
+            // Session blobs may contain key material - zeroize on return.
+            let data = Zeroizing::new(B64.decode(a.data)?);
+            native_vfs::write_namespace_data(a.namespace, a.offset, &data)?;
+            Ok("null".into())
+        }
+        "replaceNamespaceData" => {
+            let a: ReplaceNamespaceArgs = parse(args)?;
+            // Session blobs may contain key material — zeroize on return.
+            let data = Zeroizing::new(B64.decode(a.data)?);
+            native_vfs::replace_namespace_data(a.namespace, &data)?;
+            Ok("null".into())
+        }
+        "readNamespaceData" => {
+            let a: ReadNamespaceArgs = parse(args)?;
+            let bytes = native_vfs::read_namespace_data(a.namespace, a.offset, a.len as usize)?;
+            Ok(serde_json::to_string(&B64.encode(bytes))?)
+        }
+        "namespaceDataLength" => {
+            let a: NamespaceArgs = parse(args)?;
+            let len = native_vfs::namespace_data_length(a.namespace)?;
+            Ok(serde_json::to_string(&len)?)
+        }
+        "clearNamespace" => {
+            let a: NamespaceArgs = parse(args)?;
+            native_vfs::clear_namespace(a.namespace)?;
+            Ok("null".into())
+        }
+        "destroySession" => {
+            let a: DestroySessionArgs = parse(args)?;
+            destroy_session(&a.namespaces)?;
+            Ok("null".into())
+        }
+        #[cfg(test)]
+        "__panic_test" => panic!("intentional test panic"),
+        _ => Err(SecureStorageException::typed(
+            "UNKNOWN_METHOD",
+            format!("unknown method: {method}"),
+        )),
+    }
+}
+
+// ── Per-method bodies ───────────────────────────────────────────────
+
+fn init_secure_storage(path: &str, domain: &str) -> Result<()> {
+    validate_storage_path(path)?;
+    native_vfs::init_native(path, domain)?;
+    native_vfs::register()?;
+    // Warm rayon's global pool so the first PQ op doesn't pay spawn cost.
+    //
+    // Pinned to exactly `SESSION_COUNT = 3` threads. Our parallel sites
+    // (encrypt_block, cover_traffic_tick) iterate the 3 slots, so 3 is
+    // the minimum pool size that still saturates the work and the
+    // maximum that can ever be useful here. The default (== num_cpus)
+    // on a big.LITTLE phone (typically 4 big + 4 LITTLE) was scheduling
+    // work on the LITTLE cores and paying work-stealing coordination
+    // between threads that had no work — both pure overhead.
+    //
+    // TODO: if a future change bumps SESSION_COUNT or adds another
+    // parallel site that wants >3-way work, raise the pool to match.
+    //
+    // Callers wanting the actual pool size for telemetry use the
+    // `rayonThreadCount` dispatch arm (Android already does so on
+    // every initSecureStorage).
+    let _ = rayon::ThreadPoolBuilder::new()
+        .num_threads(3)
+        .build_global();
+    Ok(())
+}
+
+fn allocate(slot: u8, password: &[u8]) -> Result<()> {
+    // Drop the previous rusqlite connection BEFORE switching sessions.
+    // SQLite flushes dirty pages via `xWrite` during `sqlite3_close`,
+    // and that flush must land on the OLD session's slot, not the new
+    // one - otherwise the previous account's in-cache data would be
+    // re-encrypted with the new session's key and written to the new
+    // slot, corrupting both accounts.
+    {
+        let mut guard = db_mutex()
+            .lock()
+            .map_err(|_| SecureStorageError::LockPoisoned)?;
+        *guard = None;
+    }
+    native_vfs::allocate(slot, password)?;
+    let conn = native_vfs::open_db()?;
+    let mut guard = db_mutex()
+        .lock()
+        .map_err(|_| SecureStorageError::LockPoisoned)?;
+    *guard = Some(conn);
+    Ok(())
+}
+
+fn unlock(password: &[u8]) -> Result<bool> {
+    let ok = native_vfs::unlock(password)?;
+    if ok {
+        let conn = native_vfs::open_db()?;
+        let mut guard = db_mutex()
+            .lock()
+            .map_err(|_| SecureStorageError::LockPoisoned)?;
+        *guard = Some(conn);
+    }
+    Ok(ok)
+}
+
+fn lock() -> Result<()> {
+    let mut guard = db_mutex()
+        .lock()
+        .map_err(|_| SecureStorageError::LockPoisoned)?;
+    *guard = None;
+    native_vfs::lock()?;
+    Ok(())
+}
+
+fn close() -> Result<()> {
+    let mut guard = db_mutex()
+        .lock()
+        .map_err(|_| SecureStorageError::LockPoisoned)?;
+    *guard = None;
+    native_vfs::lock()?;
+    Ok(())
+}
+
+fn destroy_session(namespaces: &[u8]) -> Result<()> {
+    // Drop the rusqlite connection FIRST. SQLite flushes dirty pages on
+    // close via xWrite — those writes need the still-valid keypair, and
+    // they must land in `ram_buffer` before destroy_session truncates the
+    // blockstream. Closing afterwards would also race the destroy: the
+    // SafeDb's Drop runs sqlite3_close which reads the (now-cover) keypair
+    // and writes garbage. Same Drop-before-switch pattern as `allocate`
+    // above (lines 271–290).
+    {
+        let mut guard = db_mutex()
+            .lock()
+            .map_err(|_| SecureStorageError::LockPoisoned)?;
+        *guard = None;
+    }
+    native_vfs::destroy_session(namespaces)?;
+    Ok(())
+}
+
+fn exec_sql(sql: &str, params: &[serde_json::Value]) -> Result<QueryResultJson> {
+    let guard = db_mutex()
+        .lock()
+        .map_err(|_| SecureStorageError::LockPoisoned)?;
+    let conn = guard
+        .as_ref()
+        .ok_or_else(|| SecureStorageError::DatabaseNotOpen)?;
+    exec_sql_one(conn, sql, params)
+}
+
+/// Run N statements under a single mutex acquisition, each via
+/// `prepare_cached` so a typical `BEGIN; INSERT; UPDATE; COMMIT` chain
+/// pays one mutex hop and one bridge round-trip instead of four.
+///
+/// Returns one `QueryResultJson` per input statement, in order. If any
+/// statement fails, the remaining ones are skipped and the error
+/// propagates - the caller is responsible for wrapping the batch in a
+/// transaction (the typical pattern is `BEGIN; ...; COMMIT` or
+/// `BEGIN; ...; ROLLBACK` issued from the caller).
+fn exec_sql_batch(stmts: &[ExecSqlArgs]) -> Result<Vec<QueryResultJson>> {
+    let guard = db_mutex()
+        .lock()
+        .map_err(|_| SecureStorageError::LockPoisoned)?;
+    let conn = guard
+        .as_ref()
+        .ok_or_else(|| SecureStorageError::DatabaseNotOpen)?;
+    let mut out = Vec::with_capacity(stmts.len());
+    for s in stmts {
+        out.push(exec_sql_one(conn, &s.sql, &s.params)?);
+    }
+    Ok(out)
+}
+
+fn exec_sql_one(
+    conn: &rusqlite::Connection,
+    sql: &str,
+    params: &[serde_json::Value],
+) -> Result<QueryResultJson> {
+    use serde_json::Value as V;
+
+    // `prepare_cached` keeps a per-connection LRU of prepared statements
+    // keyed by SQL text. The SDK reuses the same INSERT/UPDATE strings
+    // for every message send, so the parser/planner cost is paid once per
+    // statement shape instead of every call.
+    let mut stmt = conn.prepare_cached(sql)?;
+    let column_count = stmt.column_count();
+    let columns: Vec<String> = (0..column_count)
+        .map(|i| stmt.column_name(i).unwrap_or("?").to_string())
+        .collect();
+
+    // Bind parameters. SQLite distinguishes INTEGER/REAL; JS numbers don't.
+    // Convention: integers if the JSON number fits losslessly in i64, else REAL.
+    // Blobs arrive as `{"blob": "<base64>"}`.
+    for (i, param) in params.iter().enumerate() {
+        let idx = i + 1;
+        if let Some(b64) = as_blob_sentinel(param) {
+            stmt.raw_bind_parameter(idx, B64.decode(b64)?)?;
+            continue;
+        }
+        match param {
+            V::Null => stmt.raw_bind_parameter(idx, rusqlite::types::Null)?,
+            V::Bool(b) => stmt.raw_bind_parameter(idx, if *b { 1i64 } else { 0 })?,
+            V::Number(n) => {
+                if let Some(i) = n.as_i64() {
+                    stmt.raw_bind_parameter(idx, i)?
+                } else if let Some(f) = n.as_f64() {
+                    stmt.raw_bind_parameter(idx, f)?
+                } else {
+                    return Err(SecureStorageException::typed(
+                        "BAD_ARGS",
+                        "unsupported number",
+                    ));
+                }
+            }
+            V::String(s) => stmt.raw_bind_parameter(idx, s.as_str())?,
+            other => {
+                return Err(SecureStorageException::typed(
+                    "BAD_ARGS",
+                    format!("unsupported SQL param: {other}"),
+                ));
+            }
+        }
+    }
+
+    let mut rows_out: Vec<Vec<serde_json::Value>> = Vec::new();
+    let mut raw_rows = stmt.raw_query();
+    while let Some(row) = raw_rows.next()? {
+        let mut row_out = Vec::with_capacity(column_count);
+        for col in 0..column_count {
+            let val = match row.get_ref(col)? {
+                rusqlite::types::ValueRef::Null => V::Null,
+                rusqlite::types::ValueRef::Integer(v) => {
+                    if !js_num::is_js_safe_integer_i64(v) {
+                        return Err(SecureStorageException::typed(
+                            "INTEGER_OVERFLOW",
+                            format!(
+                                "INTEGER {v} exceeds JS safe integer range \
+                                 (|v| < 2^53); JSON `number` cannot carry it \
+                                 losslessly. Adjust the schema to use TEXT or \
+                                 extend the protocol with a BigInt sentinel."
+                            ),
+                        ));
+                    }
+                    V::from(v)
+                }
+                rusqlite::types::ValueRef::Real(v) => serde_json::Number::from_f64(v)
+                    .map(V::Number)
+                    .unwrap_or(V::Null),
+                // TEXT may carry non-UTF-8 if the caller bound raw bytes
+                // into a TEXT column - fall back to the blob sentinel so
+                // callers can recover the raw bytes.
+                rusqlite::types::ValueRef::Text(v) => match std::str::from_utf8(v) {
+                    Ok(s) => V::from(s),
+                    Err(_) => serde_json::json!({ "blob": B64.encode(v) }),
+                },
+                rusqlite::types::ValueRef::Blob(v) => {
+                    serde_json::json!({ "blob": B64.encode(v) })
+                }
+            };
+            row_out.push(val);
+        }
+        rows_out.push(row_out);
+    }
+    drop(raw_rows);
+
+    let last_insert_rowid = conn.last_insert_rowid();
+    // `Connection::changes` returns u64. Reporting it as i64 to JS keeps the
+    // wire format stable; a 2^63 changes count is impossible in practice but
+    // saturating to i64::MAX still avoids any silent truncation if it ever
+    // happens (a programmer error somewhere upstream).
+    let changes = i64::try_from(conn.changes()).unwrap_or(i64::MAX);
+
+    Ok(QueryResultJson {
+        columns,
+        rows: rows_out,
+        last_insert_rowid,
+        changes,
+    })
+}
+
+// Note: `uniffi::setup_scaffolding!()` lives in lib.rs (crate root).
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn native_call_catches_panic_and_returns_error() {
+        let r = native_call("__panic_test".into(), "{}".into());
+        let err = r.expect_err("panic should surface as an Err, not unwind");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("internal panic"),
+            "expected wrapped panic message, got: {msg}"
+        );
+        assert!(
+            msg.contains("intentional test panic"),
+            "expected payload to be preserved, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn native_call_returns_unknown_method_error_without_panic() {
+        let r = native_call("does_not_exist".into(), "{}".into());
+        let err = r.expect_err("unknown method should be Err");
+        let msg = err.to_string();
+        assert!(msg.contains("unknown method"), "got: {msg}");
+        assert!(
+            msg.starts_with("[UNKNOWN_METHOD]"),
+            "expected machine-readable code prefix, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn typed_error_carries_stable_code_field() {
+        let SecureStorageException::Error { code, msg } =
+            SecureStorageException::from(SecureStorageError::NotInitialized);
+        assert_eq!(code, "NOT_INITIALIZED");
+        assert_eq!(msg, "not initialized");
+    }
+
+    #[test]
+    fn native_lock_session_surfaces_vfs_errors() {
+        crate::vfs::native_vfs::reset_state();
+
+        let err = dispatch("lockSession", "{}").expect_err("lockSession should surface VFS errors");
+        assert!(
+            err.to_string().contains("not initialized"),
+            "expected VFS error to be propagated, got: {err}"
+        );
+    }
+
+    #[test]
+    fn native_close_surfaces_flush_errors() {
+        crate::vfs::native_vfs::reset_state();
+
+        let err = dispatch("close", "{}").expect_err("close should surface flush errors");
+        assert!(
+            err.to_string().contains("not initialized"),
+            "expected flush error to be propagated, got: {err}"
+        );
+    }
+}

@@ -1,6 +1,41 @@
 /* tslint:disable */
 /* eslint-disable */
 /**
+ * Decrypts data using AES-256-SIV authenticated encryption.
+ *
+ * # Parameters
+ *
+ * - `key`: The encryption key (64 bytes, must match encryption key)
+ * - `nonce`: The nonce (16 bytes, must match encryption nonce)
+ * - `ciphertext`: The encrypted data with authentication tag
+ * - `aad`: Additional authenticated data (must match encryption AAD)
+ *
+ * # Returns
+ *
+ * The decrypted plaintext, or `null` if authentication fails.
+ *
+ * # Security Notes
+ *
+ * - Returns `null` if:
+ *   - The ciphertext has been tampered with
+ *   - The wrong key or nonce is used
+ *   - The AAD doesn't match
+ * - Never ignore a decryption failure; it indicates tampering or corruption
+ *
+ * # Example
+ *
+ * ```javascript
+ * const plaintext = aead_decrypt(key, nonce, ciphertext, aad);
+ * if (plaintext) {
+ *     console.log("Decrypted:", new TextDecoder().decode(plaintext));
+ * } else {
+ *     console.error("Decryption failed - data may be corrupted or tampered");
+ * }
+ * ```
+ */
+export function aead_decrypt(key: EncryptionKey, nonce: Nonce, ciphertext: Uint8Array, aad: Uint8Array): Uint8Array | undefined;
+export function start(): void;
+/**
  * Encrypts data using AES-256-SIV authenticated encryption.
  *
  * # Parameters
@@ -40,41 +75,6 @@ export function aead_encrypt(key: EncryptionKey, nonce: Nonce, plaintext: Uint8A
  * the passphrase crosses the JS boundary only once.
  */
 export function generate_user_keys(passphrase: string): UserKeys;
-export function start(): void;
-/**
- * Decrypts data using AES-256-SIV authenticated encryption.
- *
- * # Parameters
- *
- * - `key`: The encryption key (64 bytes, must match encryption key)
- * - `nonce`: The nonce (16 bytes, must match encryption nonce)
- * - `ciphertext`: The encrypted data with authentication tag
- * - `aad`: Additional authenticated data (must match encryption AAD)
- *
- * # Returns
- *
- * The decrypted plaintext, or `null` if authentication fails.
- *
- * # Security Notes
- *
- * - Returns `null` if:
- *   - The ciphertext has been tampered with
- *   - The wrong key or nonce is used
- *   - The AAD doesn't match
- * - Never ignore a decryption failure; it indicates tampering or corruption
- *
- * # Example
- *
- * ```javascript
- * const plaintext = aead_decrypt(key, nonce, ciphertext, aad);
- * if (plaintext) {
- *     console.log("Decrypted:", new TextDecoder().decode(plaintext));
- * } else {
- *     console.error("Decryption failed - data may be corrupted or tampered");
- * }
- * ```
- */
-export function aead_decrypt(key: EncryptionKey, nonce: Nonce, ciphertext: Uint8Array, aad: Uint8Array): Uint8Array | undefined;
 /**
  * Session status indicating the state of a peer session.
  */
@@ -313,10 +313,24 @@ export class SessionManagerWrapper {
   feed_incoming_announcement(announcement_bytes: Uint8Array, our_pk: UserPublicKeys, our_sk: UserSecretKeys): AnnouncementResult | undefined;
   /**
    * Gets the list of message board seekers to monitor.
+   *
+   * Each seeker is materialised as a JS-owned Uint8Array via
+   * `new_with_length` + `copy_from`. `Uint8Array::from(&[u8])` in older
+   * js-sys returns an array whose buffer view sits over wasm linear
+   * memory; subsequent wasm calls that grow the heap detach those
+   * views, and the JS-side `SEEKERS_UPDATED` listener crashes with
+   * "Cannot perform values on a detached ArrayBuffer". The
+   * new-with-length path allocates a JS-side ArrayBuffer up front,
+   * then copies — the result is decoupled from wasm memory.
    */
   get_message_board_read_keys(): Array<any>;
   /**
    * Processes an incoming message from the message board.
+   *
+   * Each acknowledged seeker is materialised as a JS-owned Uint8Array
+   * (see `get_message_board_read_keys` for the rationale — same risk
+   * of detached views over wasm linear memory if the heap grows
+   * before the JS side reads the buffer).
    */
   feed_incoming_message_board_read(seeker: Uint8Array, ciphertext: Uint8Array, our_sk: UserSecretKeys): ReceiveMessageOutput | undefined;
   /**
@@ -325,10 +339,16 @@ export class SessionManagerWrapper {
   constructor(config: SessionConfig);
   /**
    * Refreshes sessions and returns peer IDs that need keep-alive messages.
+   *
+   * JS-owned Uint8Arrays — same detached-view rationale as
+   * `get_message_board_read_keys`.
    */
   refresh(): Array<any>;
   /**
    * Gets the list of all peer IDs.
+   *
+   * JS-owned Uint8Arrays — same detached-view rationale as
+   * `get_message_board_read_keys`.
    */
   peer_list(): Array<any>;
 }

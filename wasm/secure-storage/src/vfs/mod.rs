@@ -10,3 +10,9 @@ pub mod idb_storage;
 
 #[cfg(all(target_arch = "wasm32", feature = "wasm"))]
 pub mod sqlite_vfs;
+
+#[cfg(feature = "native")]
+pub mod redb_storage;
+
+#[cfg(feature = "native")]
+pub mod native_vfs;

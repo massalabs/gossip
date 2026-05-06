@@ -1,0 +1,14 @@
+[package]
+name = "uniffi-bindgen"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "main.rs"
+
+[dependencies]
+# The CLI must run against the exact same uniffi version as the runtime
+# library linked into `secureStorage` to avoid silent schema drift between
+# the generated bindings and the FFI surface they wrap.
+uniffi = { workspace = true, features = ["cli"] }

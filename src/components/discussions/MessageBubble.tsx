@@ -65,6 +65,8 @@ interface MessageBubbleProps {
   isDeleted: boolean;
   isEdited: boolean;
   isSending: boolean;
+  /** See `MessageStatusIndicator.isOptimisticallySent` for semantics. */
+  isOptimisticallySent: boolean;
   showTimestamp: boolean;
   isTextSelectable: boolean;
   isContextMenuOpen: boolean;
@@ -105,6 +107,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
     isDeleted,
     isEdited,
     isSending,
+    isOptimisticallySent,
     showTimestamp,
     isTextSelectable,
     isContextMenuOpen,
@@ -235,6 +238,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
                 isDeleted={isDeleted}
                 isEdited={isEdited}
                 isSending={isSending}
+                isOptimisticallySent={isOptimisticallySent}
                 showTimestamp={showTimestamp}
               />
             </p>
@@ -252,6 +256,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
                 isDeleted={isDeleted}
                 isEdited={isEdited}
                 isSending={isSending}
+                isOptimisticallySent={isOptimisticallySent}
                 showTimestamp={showTimestamp}
               />
             </p>

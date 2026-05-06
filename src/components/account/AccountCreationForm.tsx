@@ -13,6 +13,7 @@ import TabSwitcher from '../ui/TabSwitcher';
 import Button from '../ui/Button';
 import RoundedInput from '../ui/RoundedInput';
 import ICloudSyncModal from '../ui/ICloudSyncModal';
+import PasswordConfirmModal from './PasswordConfirmModal';
 import { checkBiometricAvailability } from '../../services/biometricService';
 import { scrollFieldIntoView } from '../../utils/scrollFieldIntoView';
 import { WEBAUTHN_PRF_UNSUPPORTED_ERROR_CODE } from '../../crypto/webauthn';
@@ -94,6 +95,8 @@ const AccountCreationForm: React.FC<AccountCreationFormProps> = ({
     'password'
   );
   const [showICloudModal, setShowICloudModal] = useState(false);
+  const [showPasswordConfirmModal, setShowPasswordConfirmModal] =
+    useState(false);
   const [showPasswords, setShowPasswords] = useState(false);
 
   const isIOS = Capacitor.getPlatform() === 'ios';
@@ -200,9 +203,16 @@ const AccountCreationForm: React.FC<AccountCreationFormProps> = ({
 
     if (!usePassword && isIOS) {
       setShowICloudModal(true);
+    } else if (usePassword) {
+      setShowPasswordConfirmModal(true);
     } else {
       await doSubmit(false);
     }
+  };
+
+  const handlePasswordConfirm = async () => {
+    setShowPasswordConfirmModal(false);
+    await doSubmit(false);
   };
 
   const formContent = (
@@ -327,6 +337,11 @@ const AccountCreationForm: React.FC<AccountCreationFormProps> = ({
         isOpen={showICloudModal}
         onClose={() => setShowICloudModal(false)}
         onConfirm={(enableSync: boolean) => doSubmit(enableSync)}
+      />
+      <PasswordConfirmModal
+        isOpen={showPasswordConfirmModal}
+        onConfirm={handlePasswordConfirm}
+        onCancel={() => setShowPasswordConfirmModal(false)}
       />
     </>
   );

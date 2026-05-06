@@ -263,15 +263,17 @@ describe('PageTransitions', () => {
         .element(page.getByTestId('page-discussion'))
         .toBeInTheDocument();
 
+      // Capture document before navigating back. During the first frames after
+      // the click, the base page may not be remounted yet, so querying
+      // page-discussions immediately is order/timing-sensitive.
+      const doc = page.getByTestId('page-discussion').element().ownerDocument;
+
       // Navigate back to discussions via the button inside the overlay
       await userEvent.click(
         page.getByTestId('page-discussion').getByTestId('nav-to-discussions')
       );
 
       // The exit animation wrapper should appear with animate-slide-exit-right
-      // Use ownerDocument from a rendered element to query the correct document
-      const rootEl = page.getByTestId('page-discussions').element();
-      const doc = rootEl.ownerDocument;
       await vi.waitFor(() => {
         expect(doc.querySelector('.animate-slide-exit-right')).not.toBeNull();
       });

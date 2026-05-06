@@ -2,6 +2,7 @@ import { defineConfig } from 'vitest/config';
 import { fileURLToPath } from 'url';
 import { dirname, resolve } from 'path';
 import { playwright } from '@vitest/browser-playwright';
+import crossOriginIsolation from 'vite-plugin-cross-origin-isolation';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -26,6 +27,11 @@ export default defineConfig({
       // Project 1: Browser mode for component tests
       {
         extends: true,
+        // COOP/COEP headers required to enable SharedArrayBuffer (used by
+        // wasm-bindgen-rayon to transfer the WASM Memory to rayon Web
+        // Worker threads). The plugin sets the headers on every response
+        // and on the worker scripts spawned by Vite.
+        plugins: [crossOriginIsolation()],
         optimizeDeps: {
           include: [
             'react',

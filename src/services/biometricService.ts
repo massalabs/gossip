@@ -133,6 +133,30 @@ export async function removeEncryptionKey(
   }
 }
 
+/**
+ * Remove the SecureLogin-discovery credentials (Capacitor secure-storage
+ * blob and the WebAuthn credential id) that surface the biometric button
+ * on the login screen. Call this when the credential is known to no
+ * longer map to a valid secure-storage slot — otherwise the biometric
+ * button keeps appearing for an account whose slot was already rotated
+ * out (resetAccount, slot wipe, etc.) and login attempts dead-end on
+ * "Secure storage unlock failed".
+ */
+export async function clearLoginBiometricCredentials(): Promise<void> {
+  if (isCapacitorAvailable()) {
+    try {
+      await SecureStorage.remove(BIOMETRIC_STORAGE_KEY);
+    } catch (error) {
+      console.error('Failed to remove biometric storage key:', error);
+    }
+  }
+  try {
+    localStorage.removeItem(WEBAUTHN_CREDENTIAL_ID_KEY);
+  } catch (error) {
+    console.error('Failed to remove webauthn credential id:', error);
+  }
+}
+
 export async function checkBiometricAvailability(): Promise<BiometricAvailability> {
   if (isCapacitorAvailable()) {
     try {
