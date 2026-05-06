@@ -55,6 +55,7 @@ jobs:
           VITE_GOSSIP_API_URL: ${{ vars.GOSSIP_API_URL }}
           VITE_INVITE_DOMAIN: ${{ matrix.branch == 'dev' && vars.INVITE_DOMAIN_DEV || vars.INVITE_DOMAIN_MAIN }}
           VITE_APP_BUILD_ID: ${{ steps.vars.outputs.commit_hash }}
+          VITE_SECURE_STORAGE: 'true'
         run: npm run build
 
       - name: Deploy ${{ matrix.branch }} → ${{ matrix.network }}
