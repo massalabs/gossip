@@ -25,39 +25,45 @@ Gossip is a privacy-first, secure messaging application built with React, TypeSc
 
 ### Prerequisites
 
-- Node.js (version specified in `.nvmrc`)
-- npm or yarn
+Required for any build:
+
+- [`rustup`](https://rustup.rs) (the setup script bails if missing)
+- Node.js — version specified in `.nvmrc` (use [`fnm`](https://github.com/Schniz/fnm) or `nvm`)
+- macOS: [Homebrew](https://brew.sh) (used to install `zig`)
+
+Required only for native builds:
+
+- **iOS**: Xcode (from the App Store)
+- **Android**: [Android Studio](https://developer.android.com/studio), then add to `~/.zshrc`:
+  ```sh
+  export ANDROID_HOME="$HOME/Library/Android/sdk"
+  export ANDROID_SDK_ROOT="$ANDROID_HOME"
+  export PATH="$PATH:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator"
+  ```
+- JDK 17 (e.g. `brew install --cask temurin@17`, or Android Studio's bundled JBR)
 
 ### Installation
 
-1. Clone the repository:
-
 ```bash
 git clone <repository-url>
-cd gossip
+cd gossip-app
+npm run setup       # installs rust toolchain, cargo subcommands, zig, wasm-bindgen-cli, npm deps
+npm run dev         # web dev server at http://localhost:5173
 ```
 
-2. Install dependencies:
-
-```bash
-npm install
-```
-
-3. Start the development server:
-
-```bash
-npm run dev
-```
-
-4. Open your browser and navigate to `http://localhost:5173`
+`npm run setup` is idempotent — re-run it after pulling, after installing
+Android Studio, or whenever a tool is missing. See `scripts/setup-dev.sh`
+for the full list.
 
 ### Building for Production
 
 ```bash
-npm run build
+npm run build               # web bundle (dist/)
+npm run build:all ios       # web + iOS native (Rust → XCFramework)
+npm run build:all android   # web + Android native (Rust → JNI .so)
 ```
 
-The built files will be in the `dist` directory, ready for deployment.
+The web build outputs to `dist/`, ready for deployment.
 
 ### SDK Integration
 
@@ -67,15 +73,16 @@ sets the protocol base URL via `setProtocolBaseUrl`.
 
 ### WASM Bindings
 
-WASM bindings are generated via the root script:
+Two separate WASM modules are built into `gossip-sdk/src/assets/generated/`:
 
 ```bash
-npm run wasm:build
+npm run wasm:build           # main crate → wasm/
+npm run wasm:build:secure    # secure-storage crate → wasm-secureStorage/
 ```
 
-Output is written to `gossip-sdk/src/assets/generated/wasm` and consumed by
-both the SDK and the React app. The React app now imports WASM wrappers from
-`gossip-sdk/src/wasm`.
+`wasm:build:secure` cross-compiles SQLite to wasm32 via `cargo-zigbuild`
+and uses Rust's bundled `llvm-ar` (installed by `npm run setup`) as the
+archiver — see `scripts/build-wasm-secure.sh` for the why.
 
 ### Message Transfer Protocol
 

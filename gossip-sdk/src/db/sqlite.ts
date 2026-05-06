@@ -138,32 +138,6 @@ function createDefaultState(): DbState {
   };
 }
 
-/**
- * Collect unique ArrayBuffers backing `Uint8Array` values inside a params
- * list so they can be transferred (not copied) across the Comlink worker
- * boundary. SharedArrayBuffer is excluded because it cannot be transferred.
- */
-function collectTransferables(params: unknown[]): Transferable[] {
-  const seen = new Set<ArrayBufferLike>();
-  const out: Transferable[] = [];
-  for (const p of params) {
-    if (p instanceof Uint8Array) {
-      const buf = p.buffer;
-      if (
-        typeof SharedArrayBuffer !== 'undefined' &&
-        buf instanceof SharedArrayBuffer
-      ) {
-        continue;
-      }
-      if (!seen.has(buf)) {
-        seen.add(buf);
-        out.push(buf as ArrayBuffer);
-      }
-    }
-  }
-  return out;
-}
-
 function assertNoUndefinedBindParams(params: unknown[]): void {
   // Reject `undefined` bind params explicitly. JS coerces `undefined`
   // to SQL NULL by default, which silently masks programmer bugs:
@@ -399,20 +373,19 @@ export class DatabaseConnection {
       return result.rows;
     }
     if (this.state.secureProxy) {
-      // Transfer Uint8Array buffers across the Comlink boundary to avoid
-      // a structured-clone copy of the whole params array on every call.
-      // Mark `params` itself as the transfer carrier rather than the
-      // whole `[sql, params, inTransaction]` tuple: that way the proxy
-      // call below stays normally typed (no `as` cast over the tuple
-      // shape, which would silently rot if `exec`'s signature changes).
-      const transfers = collectTransferables(params);
-      const execParams =
-        transfers.length > 0 ? Comlink.transfer(params, transfers) : params;
-      const result = await this.state.secureProxy.exec(
-        sql,
-        execParams,
-        wasInTxn
-      );
+      // Pass params by structured-clone (Comlink default), NOT by
+      // transfer. The earlier transfer-based optimisation detached the
+      // Uint8Array buffers on this side as soon as the call dispatched
+      // — and Drizzle keeps references to the params array for error
+      // wrapping (`_DrizzleQueryError` calls `Uint8Array.toString()`
+      // which trips on `.join()` over a detached buffer) and for
+      // re-emit on the SDK event bus (e.g. `SEEKERS_UPDATED` reads
+      // the seekers right after the SQL insert).
+      // The structured-clone copy here is per-INSERT and small in
+      // practice (a few KB of Uint8Array per row); the correctness
+      // win is large — no class of "detached buffer" bugs to chase
+      // at every call site.
+      const result = await this.state.secureProxy.exec(sql, params, wasInTxn);
       this.state.lastInsertRowIdCache = result.lastInsertRowId;
       this.advanceTxDepth(kind);
       return result.rows as unknown[][];
@@ -673,6 +646,9 @@ export class DatabaseConnection {
   }
 
   async secureStorageProvision(): Promise<void> {
+    if (this.state.storageState !== 'empty') {
+      return;
+    }
     if (this.state.useNativePlugin) {
       await this.requireNativePlugin().provisionStorage();
     } else {
@@ -719,6 +695,7 @@ export class DatabaseConnection {
         // MessagePort queue. After transfer, pwBytes is detached.
         await this.requireSecureProxy().create(
           slot,
+          // eslint-disable-next-line no-restricted-syntax -- ALLOWED-TRANSFER: short-lived password buffer; caller's only post-transfer access is the `byteLength > 0` zeroize guard in the finally block, which already handles the detached state.
           Comlink.transfer(pwBytes, [pwBytes.buffer])
         );
       }
@@ -766,6 +743,7 @@ export class DatabaseConnection {
         ok = result.unlocked;
       } else {
         ok = await this.requireSecureProxy().unlock(
+          // eslint-disable-next-line no-restricted-syntax -- ALLOWED-TRANSFER: short-lived password buffer; caller's only post-transfer access is the `byteLength > 0` zeroize guard in the finally block.
           Comlink.transfer(pwBytes, [pwBytes.buffer])
         );
       }
@@ -794,6 +772,29 @@ export class DatabaseConnection {
       await this.requireNativePlugin().lockSession();
     } else {
       await this.requireSecureProxy().lock();
+    }
+  }
+
+  /**
+   * Permanently destroy the data of the currently unlocked slot.
+   *
+   * Same Drizzle-tear-down ordering as `secureStorageLock`: flip the
+   * user-visible state to 'locked' synchronously so any in-flight query
+   * sees the clean "locked storage" error rather than racing the
+   * worker-side wipe.
+   *
+   * `namespaces` is the list of secure-storage namespaces to wipe. The
+   * SDK passes its canonical `[SQL_NAMESPACE, SESSION_BLOB_NAMESPACE]`
+   * — keeping the inventory on this side avoids duplicating the list
+   * in Rust.
+   */
+  async secureStorageDestroy(namespaces: number[]): Promise<void> {
+    this.state.drizzleDb = null;
+    this.state.storageState = 'locked';
+    if (this.state.useNativePlugin) {
+      await this.requireNativePlugin().destroySession({ namespaces });
+    } else {
+      await this.requireSecureProxy().destroy(Uint8Array.from(namespaces));
     }
   }
 
@@ -845,13 +846,7 @@ export class DatabaseConnection {
       return;
     }
     const proxy = this.requireSecureProxy();
-    // Same pattern as `execRawDirect`: mark just the Uint8Array buffer
-    // as transferable instead of the whole tuple, so the proxy call
-    // stays normally typed.
-    const transfers = collectTransferables([data]);
-    const payload =
-      transfers.length > 0 ? Comlink.transfer(data, transfers) : data;
-    await proxy.writeNamespaceData(namespace, offset, payload);
+    await proxy.writeNamespaceData(namespace, offset, data);
   }
 
   /** Read `len` bytes from a namespace stream at `offset`. */
@@ -889,6 +884,27 @@ export class DatabaseConnection {
       return;
     }
     await this.requireSecureProxy().clearNamespace(namespace);
+  }
+
+  /** Atomic clear+write: replace the entire namespace contents in one
+   *  IDB / fsync transaction. Both the native plugin and the WASM
+   *  worker now expose a fused primitive that batches the clear and
+   *  the write inside a single backend transaction; a process kill
+   *  before the transaction commits leaves the previous content
+   *  intact, and a kill after leaves the new content. There is no
+   *  observable "cleared but not written" state. */
+  async secureStorageReplaceNamespaceData(
+    namespace: number,
+    data: Uint8Array
+  ): Promise<void> {
+    if (this.state.useNativePlugin) {
+      await this.requireNativePlugin().replaceNamespaceData({
+        namespace,
+        data,
+      });
+      return;
+    }
+    await this.requireSecureProxy().replaceNamespaceData(namespace, data);
   }
 
   // ─── Public methods ────────────────────────────────────────────

@@ -383,7 +383,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/bash;
-			shellScript = "set -euo pipefail\n# Rebuild the secureStorage Rust crate + XCFramework + UniFFI\n# Swift bindings before compiling the iOS app. The .a files and\n# generated Swift bindings are gitignored (see .gitignore + PR 3\n# review H2) — this phase is what makes a fresh clone buildable.\n# cargo's own caching keeps the no-op case fast.\ncd \"${SRCROOT}/../..\"\nif [ \"${CONFIGURATION}\" = \"Release\" ]; then\n    PROFILE=--release\nelse\n    PROFILE=--debug\nfi\nbash scripts/build-native-ios.sh \"$PROFILE\"\n";
+			shellScript = "set -euo pipefail\n# Rebuild the secureStorage Rust crate + XCFramework + UniFFI\n# Swift bindings before compiling the iOS app. The .a files and\n# generated Swift bindings are gitignored (see .gitignore + PR 3\n# review H2) — this phase is what makes a fresh clone buildable.\n# cargo's own caching keeps the no-op case fast.\n#\n# Always build Rust in --release, even under Xcode's \"Debug\"\n# configuration. The PQ crypto (ML-KEM rerand) is ~10-50x slower\n# in a debug Rust build — cover_traffic_tick and every session-blob\n# persist become seconds-long. Line-tables are kept via Cargo.toml\n# profile settings so crash frames still symbolicate.\n#\n# Override with SECURE_STORAGE_RUST_PROFILE=debug in your scheme\n# env vars if you actually need to step-debug into the Rust code.\n# Mirrors the Android Gradle task.\ncd \"${SRCROOT}/../..\"\nRUST_PROFILE_ENV=\"${SECURE_STORAGE_RUST_PROFILE:-release}\"\nif [ \"$RUST_PROFILE_ENV\" = \"debug\" ]; then\n    PROFILE=--debug\nelse\n    PROFILE=--release\nfi\nbash scripts/build-native-ios.sh \"$PROFILE\"\n";
 			showEnvVarsInLog = 0;
 		};
 /* End PBXShellScriptBuildPhase section */
@@ -444,7 +444,6 @@
 		504EC3141FED79650016851F /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				GOSSIP_BUNDLE_ID = "net.massa.gossip";
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
@@ -494,6 +493,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
+				GOSSIP_BUNDLE_ID = net.massa.gossip;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				MTL_ENABLE_DEBUG_INFO = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -506,7 +506,6 @@
 		504EC3151FED79650016851F /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				GOSSIP_BUNDLE_ID = "net.massa.gossip";
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
@@ -550,6 +549,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
+				GOSSIP_BUNDLE_ID = net.massa.gossip;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				SDKROOT = iphoneos;
@@ -563,12 +563,17 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = FC68EB0AF532CFC21C3344DD /* Pods-Gossip.debug.xcconfig */;
 			buildSettings = {
-				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = Gossip.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 2;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SRCROOT)",
+				);
+				GOSSIP_BUNDLE_ID = net.ben.gossip;
 				HEADER_SEARCH_PATHS = (
 					"$(inherited)",
 					"\"${PODS_CONFIGURATION_BUILD_DIR}/AparajitaCapacitorBiometricAuth/AparajitaCapacitorBiometricAuth.framework/Headers\"",
@@ -598,15 +603,12 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.0.8;
+				OTHER_SWIFT_FLAGS = "$(inherited) \"-D\" \"COCOAPODS\" \"-DDEBUG\" -Xcc -fmodule-map-file=$(SRCROOT)/App/plugins/secureStorage/secureStorageFFI.modulemap";
 				PRODUCT_BUNDLE_IDENTIFIER = "$(GOSSIP_BUNDLE_ID)";
+				"PRODUCT_BUNDLE_IDENTIFIER[sdk=iphoneos*]" = net.ben.gossip;
 				PRODUCT_NAME = Gossip;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
-				FRAMEWORK_SEARCH_PATHS = (
-					"$(inherited)",
-					"$(SRCROOT)",
-				);
 				SWIFT_INCLUDE_PATHS = "$(SRCROOT)/App/plugins/secureStorage";
-				OTHER_SWIFT_FLAGS = "$(inherited) \"-D\" \"COCOAPODS\" \"-DDEBUG\" -Xcc -fmodule-map-file=$(SRCROOT)/App/plugins/secureStorage/secureStorageFFI.modulemap";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -617,12 +619,17 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = AF51FD2D460BCFE21FA515B2 /* Pods-Gossip.release.xcconfig */;
 			buildSettings = {
-				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = Gossip.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 2;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SRCROOT)",
+				);
+				GOSSIP_BUNDLE_ID = net.ben.gossip;
 				HEADER_SEARCH_PATHS = (
 					"$(inherited)",
 					"\"${PODS_CONFIGURATION_BUILD_DIR}/AparajitaCapacitorBiometricAuth/AparajitaCapacitorBiometricAuth.framework/Headers\"",
@@ -652,15 +659,12 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.0.8;
+				OTHER_SWIFT_FLAGS = "$(inherited) -Xcc -fmodule-map-file=$(SRCROOT)/App/plugins/secureStorage/secureStorageFFI.modulemap";
 				PRODUCT_BUNDLE_IDENTIFIER = "$(GOSSIP_BUNDLE_ID)";
+				"PRODUCT_BUNDLE_IDENTIFIER[sdk=iphoneos*]" = net.ben.gossip;
 				PRODUCT_NAME = Gossip;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "";
-				FRAMEWORK_SEARCH_PATHS = (
-					"$(inherited)",
-					"$(SRCROOT)",
-				);
 				SWIFT_INCLUDE_PATHS = "$(SRCROOT)/App/plugins/secureStorage";
-				OTHER_SWIFT_FLAGS = "$(inherited) -Xcc -fmodule-map-file=$(SRCROOT)/App/plugins/secureStorage/secureStorageFFI.modulemap";
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
@@ -695,6 +699,7 @@
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				PRODUCT_BUNDLE_IDENTIFIER = "$(GOSSIP_BUNDLE_ID).GossipShareExtension";
+				"PRODUCT_BUNDLE_IDENTIFIER[sdk=iphoneos*]" = net.ben.gossip.GossipShareExtension;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -735,6 +740,7 @@
 				MARKETING_VERSION = 0.0.8;
 				MTL_FAST_MATH = YES;
 				PRODUCT_BUNDLE_IDENTIFIER = "$(GOSSIP_BUNDLE_ID).GossipShareExtension";
+				"PRODUCT_BUNDLE_IDENTIFIER[sdk=iphoneos*]" = net.ben.gossip.GossipShareExtension;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;

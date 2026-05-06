@@ -55,8 +55,6 @@ describe('session blob namespace persist', () => {
     const password = 'roundtrip-pw';
     const domain = 'vitest-ns-roundtrip';
     const blob = randomBlob(BLOB_SIZE);
-    // Snapshot expectations before the write: writeNamespaceData
-    // transfers the buffer, so `blob` is detached after the call.
     const expectedLength = blob.length;
     const expectedBytes = Array.from(blob);
 
@@ -68,7 +66,6 @@ describe('session blob namespace persist', () => {
         0,
         blob
       );
-      expect(blob.byteLength).toBe(0);
       await conn.secureStorageFlush();
       await conn.close();
     }
@@ -100,8 +97,6 @@ describe('session blob namespace persist', () => {
     const domain = 'vitest-ns-isolation';
     const now = new Date();
     const blob = randomBlob(BLOB_SIZE);
-    // Snapshot expectations before the write: writeNamespaceData
-    // transfers the buffer, so `blob` is detached after the call.
     const expectedLength = blob.length;
     const expectedBytes = Array.from(blob);
 
@@ -122,7 +117,6 @@ describe('session blob namespace persist', () => {
 
     // Write via namespace 1 (session blob fast path).
     await conn.secureStorageWriteNamespaceData(SESSION_BLOB_NAMESPACE, 0, blob);
-    expect(blob.byteLength).toBe(0);
 
     await conn.secureStorageFlush();
 

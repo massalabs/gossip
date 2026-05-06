@@ -231,7 +231,15 @@ pub fn provision() -> Result<()> {
     let st = guard
         .as_mut()
         .ok_or_else(|| SecureStorageError::NotInitialized)?;
-    crate::provision_storage(&mut st.backend)
+    if let Err(e) = crate::provision_storage(&mut st.backend) {
+        st.backend.discard_pending();
+        return Err(e);
+    }
+    if let Err(e) = st.backend.commit() {
+        st.backend.discard_pending();
+        return Err(e);
+    }
+    Ok(())
 }
 
 /// Allocate a session in `slot` with `password`, auto-unlock.
@@ -285,6 +293,68 @@ pub fn unlock(password: &[u8]) -> Result<bool> {
         Err(crate::SecureStorageError::InvalidPassword) => Ok(false),
         Err(e) => Err(e),
     }
+}
+
+/// Permanently destroy the data of the currently unlocked slot.
+///
+/// Atomically:
+/// 1. Drains pending writes so [`crate::destroy_session`] sees the
+///    backing-store state, not stale RAM.
+/// 2. Replaces the slot's keypair file with a dummy one (old secret
+///    can no longer unlock anything) and overwrites every block of
+///    the supplied namespaces with cover blocks under the new PK.
+/// 3. Commits the redb transaction — anything before this point is
+///    rolled back if the process dies. Anything after is durable.
+/// 4. Zeroizes the in-memory session, matching [`lock`] semantics.
+///
+/// **SQLite must be closed before calling this.** The caller (the
+/// native plugin in `native_api.rs`) drops its rusqlite connection
+/// first, mirroring the pre-`lock` contract.
+pub fn destroy_session(namespaces: &[u8]) -> Result<()> {
+    let mutex = state_mutex();
+    let mut guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
+    let st = guard
+        .as_mut()
+        .ok_or_else(|| SecureStorageError::Storage("not initialized".into()))?;
+    let session = st
+        .session
+        .as_ref()
+        .ok_or_else(|| SecureStorageError::Storage("no session".into()))?;
+    let slot = session.session_index;
+
+    // Drain in-memory pending writes. Otherwise `discard_pending`
+    // below would silently drop bytes that haven't been flushed yet —
+    // for a destroy specifically, those bytes belong to the account
+    // we're erasing, but a flush is still cheaper than reasoning
+    // about whether each pending block is real or cover.
+    flush_pending_writes(st)?;
+
+    // If the destroy errors mid-sweep, drop everything it had staged so
+    // it does not silently ride along on the next caller's `commit()`.
+    // This includes the dummy keypair write and block rewrites, preserving
+    // destroy's all-or-nothing native transaction boundary.
+    if let Err(e) = crate::destroy_session(&mut st.backend, &st.domain, slot, namespaces) {
+        st.backend.discard_pending();
+        return Err(e);
+    }
+
+    // Atomic commit. Process killed before this line: ram_buffer
+    // dropped, redb unchanged → slot intact. Killed mid-commit:
+    // redb's WAL recovers to the pre-commit state. Killed after:
+    // destroy is durable.
+    if let Err(e) = st.backend.commit() {
+        st.backend.discard_pending();
+        return Err(e);
+    }
+
+    // Match `lock()` post-conditions: zeroize the in-memory session
+    // and any cached namespace state. The keypair we just wrote is
+    // dummy, so there is nothing meaningful left to keep.
+    st.session = None;
+    st.namespace_states.clear();
+    st.main_file.discard_pending();
+
+    Ok(())
 }
 
 /// Zeroize session keys. SQLite must be closed before calling this.
@@ -465,7 +535,22 @@ pub fn open_db() -> Result<rusqlite::Connection> {
         .map_err(|e| SecureStorageError::Sqlite(e.to_string()))?;
     conn.pragma_update(None, "synchronous", "NORMAL")
         .map_err(|e| SecureStorageError::Sqlite(e.to_string()))?;
-    conn.pragma_update(None, "cache_size", -8000)
+    // 32 MB SQLite page cache. Negative value = KiB (per SQLite docs):
+    // `-32000` ≈ 32_768 KiB, holding ~8000 4-KiB pages in RAM. Big
+    // enough that the working set of a chat (discussions, recent
+    // messages, indexes) fits without spilling to redb on every read.
+    //
+    // Cost: up to 32 MB process RSS while a session is open. On a
+    // mid-range Android with 4-6 GB RAM that's <1% of available memory
+    // and easily reclaimed at session close. The previous 8 MB was
+    // inherited from a pre-encrypted-VFS world where disk reads were
+    // cheap; here every cache miss costs an AEAD decrypt + redb read,
+    // so the trade leans much harder toward "keep more in RAM".
+    //
+    // TODO: profile actual RSS impact on a real Android session over a
+    // few thousand messages — if the cache becomes a memory pressure
+    // signal we may want to drop back toward 16 MB.
+    conn.pragma_update(None, "cache_size", -32000)
         .map_err(|e| SecureStorageError::Sqlite(e.to_string()))?;
     conn.pragma_update(None, "locking_mode", "EXCLUSIVE")
         .map_err(|e| SecureStorageError::Sqlite(e.to_string()))?;
@@ -574,6 +659,70 @@ pub fn read_namespace_data(namespace: u8, offset: u64, len: usize) -> Result<Vec
         len,
     )?;
     Ok(data.to_vec())
+}
+
+/// Atomic clear+write for a non-SQL namespace. Equivalent semantically
+/// to `clear_namespace(ns)` followed by `write_namespace_data(ns, 0, data)`,
+/// but folds both into a single redb transaction so the caller pays
+/// one real fsync and holds `state_mutex` for one contiguous window.
+/// Used by the session-blob persist hot path, where the two-step
+/// variant produced back-to-back commits that blocked SQL ops on the
+/// shared mutex.
+///
+/// Preserves the cross-slot blockstream-length invariant: when the
+/// new data is shorter than the old, freed tail blocks are converted
+/// to indistinguishable cover blocks via `shrink_session_data` (same
+/// path the cover-preserving `clear_namespace` uses) rather than
+/// dropped via `reset_blockstream`. The redb backend's `fsync()` is a
+/// no-op so the per-block flushes inside `shrink_session_data` add
+/// no I/O cost; the trailing `commit()` is the only real fsync.
+///
+/// In the session-blob hot path the blob size is roughly stable, so
+/// the shrink step is a no-op and the call is one block-rewrite per
+/// occupied block + one commit.
+pub fn replace_namespace_data(namespace: u8, data: &[u8]) -> Result<()> {
+    reject_default_namespace(namespace)?;
+    let mutex = state_mutex();
+    let mut guard = mutex.lock().map_err(|_| SecureStorageError::LockPoisoned)?;
+    let st = guard
+        .as_mut()
+        .ok_or_else(|| SecureStorageError::NotInitialized)?;
+    let session = st
+        .session
+        .as_ref()
+        .ok_or_else(|| SecureStorageError::Storage("no session".into()))?;
+    if !st.namespace_states.contains_key(&namespace) {
+        let ns = load_namespace_state(&st.backend, &st.domain, session, namespace)?;
+        st.namespace_states.insert(namespace, ns);
+    }
+    let ns_state = st.namespace_states.get_mut(&namespace).unwrap();
+
+    let new_len = data.len() as u64;
+
+    if new_len < ns_state.total_data_length {
+        crate::shrink_session_data(
+            &mut st.backend,
+            &st.domain,
+            namespace,
+            session,
+            ns_state,
+            new_len,
+        )?;
+    }
+
+    if !data.is_empty() {
+        crate::write_session_data(
+            &mut st.backend,
+            &st.domain,
+            namespace,
+            session,
+            ns_state,
+            0,
+            data,
+        )?;
+    }
+
+    st.backend.commit()
 }
 
 /// Truncate a non-SQL namespace back to empty while preserving physical
@@ -1188,6 +1337,152 @@ mod tests {
             assert!(read_namespace_data(DEFAULT_NAMESPACE, 0, 1).is_err());
             assert!(namespace_data_length(DEFAULT_NAMESPACE).is_err());
             assert!(clear_namespace(DEFAULT_NAMESPACE).is_err());
+            assert!(replace_namespace_data(DEFAULT_NAMESPACE, b"bad").is_err());
+
+            drop(conn);
+        });
+    }
+
+    #[test]
+    fn test_native_vfs_replace_namespace_data_preserves_cover_blocks_on_shrink() {
+        // Regression: an earlier implementation called `reset_blockstream`
+        // which discards physical blocks, breaking the cross-slot
+        // blockstream-length invariant that other slots' covers depend on.
+        run_with_stack(|| {
+            let _guard = test_mutex().lock().unwrap();
+            let (_dir, conn) = setup_native_vfs();
+
+            let big = vec![0x42u8; crate::PLAINTEXT_SIZE * 3];
+            write_namespace_data(1, 0, &big).unwrap();
+
+            let pre_count = {
+                use crate::storage::BlockStorage;
+                let guard = state_mutex().lock().unwrap();
+                let st = guard.as_ref().unwrap();
+                st.backend
+                    .block_count(st.session.as_ref().unwrap().session_index, 1)
+                    .unwrap()
+            };
+            assert!(pre_count > 1, "expected multiple blocks, got {pre_count}");
+
+            // Shrink via replace.
+            let small = vec![0x9Au8; 8];
+            replace_namespace_data(1, &small).unwrap();
+
+            let post_count = {
+                use crate::storage::BlockStorage;
+                let guard = state_mutex().lock().unwrap();
+                let st = guard.as_ref().unwrap();
+                st.backend
+                    .block_count(st.session.as_ref().unwrap().session_index, 1)
+                    .unwrap()
+            };
+            assert_eq!(
+                post_count, pre_count,
+                "replace_namespace_data must preserve physical blocks as covers"
+            );
+            assert_eq!(namespace_data_length(1).unwrap(), small.len() as u64);
+            let read_back = read_namespace_data(1, 0, small.len()).unwrap();
+            assert_eq!(read_back, small);
+
+            // Replace with empty (full logical clear) must also preserve.
+            replace_namespace_data(1, b"").unwrap();
+            let after_empty_count = {
+                use crate::storage::BlockStorage;
+                let guard = state_mutex().lock().unwrap();
+                let st = guard.as_ref().unwrap();
+                st.backend
+                    .block_count(st.session.as_ref().unwrap().session_index, 1)
+                    .unwrap()
+            };
+            assert_eq!(after_empty_count, pre_count);
+            assert_eq!(namespace_data_length(1).unwrap(), 0);
+
+            drop(conn);
+        });
+    }
+
+    #[test]
+    fn test_native_vfs_replace_namespace_data_same_size_no_block_change() {
+        // Hot path the perf optimisation targets: when the new blob has
+        // the same byte length as the old one, no shrink runs and no
+        // additional blocks are allocated. The blockstream count must
+        // stay identical (no covers added, no covers removed) and the
+        // new data must round-trip.
+        run_with_stack(|| {
+            let _guard = test_mutex().lock().unwrap();
+            let (_dir, conn) = setup_native_vfs();
+
+            let initial = vec![0x42u8; crate::PLAINTEXT_SIZE * 3];
+            write_namespace_data(1, 0, &initial).unwrap();
+
+            let pre_count = {
+                use crate::storage::BlockStorage;
+                let guard = state_mutex().lock().unwrap();
+                let st = guard.as_ref().unwrap();
+                st.backend
+                    .block_count(st.session.as_ref().unwrap().session_index, 1)
+                    .unwrap()
+            };
+
+            let same_size = vec![0xC3u8; initial.len()];
+            replace_namespace_data(1, &same_size).unwrap();
+
+            let post_count = {
+                use crate::storage::BlockStorage;
+                let guard = state_mutex().lock().unwrap();
+                let st = guard.as_ref().unwrap();
+                st.backend
+                    .block_count(st.session.as_ref().unwrap().session_index, 1)
+                    .unwrap()
+            };
+            assert_eq!(post_count, pre_count);
+            assert_eq!(namespace_data_length(1).unwrap(), same_size.len() as u64);
+            let read_back = read_namespace_data(1, 0, same_size.len()).unwrap();
+            assert_eq!(read_back, same_size);
+
+            drop(conn);
+        });
+    }
+
+    #[test]
+    fn test_native_vfs_replace_namespace_data_extends_namespace() {
+        // Replacing with a larger payload must allocate the additional
+        // blocks (skipping the shrink step) and preserve the new data.
+        run_with_stack(|| {
+            let _guard = test_mutex().lock().unwrap();
+            let (_dir, conn) = setup_native_vfs();
+
+            let initial = vec![0x42u8; crate::PLAINTEXT_SIZE];
+            write_namespace_data(1, 0, &initial).unwrap();
+
+            let pre_count = {
+                use crate::storage::BlockStorage;
+                let guard = state_mutex().lock().unwrap();
+                let st = guard.as_ref().unwrap();
+                st.backend
+                    .block_count(st.session.as_ref().unwrap().session_index, 1)
+                    .unwrap()
+            };
+
+            let larger = vec![0x77u8; crate::PLAINTEXT_SIZE * 4];
+            replace_namespace_data(1, &larger).unwrap();
+
+            let post_count = {
+                use crate::storage::BlockStorage;
+                let guard = state_mutex().lock().unwrap();
+                let st = guard.as_ref().unwrap();
+                st.backend
+                    .block_count(st.session.as_ref().unwrap().session_index, 1)
+                    .unwrap()
+            };
+            assert!(
+                post_count > pre_count,
+                "extend must allocate more blocks (pre={pre_count}, post={post_count})"
+            );
+            assert_eq!(namespace_data_length(1).unwrap(), larger.len() as u64);
+            let read_back = read_namespace_data(1, 0, larger.len()).unwrap();
+            assert_eq!(read_back, larger);
 
             drop(conn);
         });

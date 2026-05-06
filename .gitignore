@@ -73,7 +73,7 @@ ios/App/App/plugins/secureStorage/secureStorage.swift
 # ~8 MB of .so + 1.8k lines of generated Kotlin from accumulating in
 # history on every rebuild and guarantees the binary always matches
 # the committed Rust source.
-android/app/src/main/jniLibs/*/libsecureStorage.so
+android/app/src/main/jniLibs/*/*.so
 android/app/src/main/java/uniffi/
 
 # Android build artifacts

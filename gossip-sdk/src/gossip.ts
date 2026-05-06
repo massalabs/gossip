@@ -72,6 +72,7 @@ import { type StorageConfig, MessageStatus } from './db/index.js';
 import {
   DatabaseConnection,
   SESSION_BLOB_NAMESPACE,
+  SQL_NAMESPACE,
   type SecureStorageState,
 } from './db/sqlite.js';
 import { Queries } from './db/queries/index.js';
@@ -403,6 +404,19 @@ class GossipSdk {
       config,
       queries
     );
+    // Wire the immediate-persist callback so the send hot path can
+    // run the session-blob persist in parallel with the network write
+    // (see `MessageService.processSendQueueForContact`). Done as a
+    // setter rather than a constructor arg to avoid a circular
+    // dependency on `this` during MessageService construction.
+    this._message.setPersistFlusher(() => this.awaitPendingPersist());
+
+    // Same plumbing for the incoming-announcement path: forces the
+    // session-blob persist between the Rust state mutation and the
+    // SQL inserts so a crash in between can't leave an orphan
+    // Discussion. See `AnnouncementService._processIncomingAnnouncement`
+    // for rationale.
+    this._announcement.setPersistFlusher(() => this.awaitPendingPersist());
 
     this._discussion.setMessageService(this._message);
 
@@ -658,12 +672,11 @@ class GossipSdk {
   }
 
   /**
-   * Create the decoy session keypairs in storage. Idempotent: safe to
-   * call when the keypairs already exist. Normally not needed at the
-   * app level: `init()` provisions decoys automatically when the IDB
-   * is empty (`storageState === 'empty'`). Exposed for tests and for
-   * recovery flows where the decoys may need to be re-seeded after
-   * an unlock failure.
+   * Create the decoy session keypairs in storage. This is a no-op unless
+   * secure-storage is still empty; once a real slot exists, provisioning
+   * is intentionally skipped because rewriting slot keypairs would make
+   * existing accounts unreachable. Normally not needed at the app level:
+   * `init()` provisions decoys automatically when storage is empty.
    */
   async secureStorageProvision(): Promise<void> {
     await this.requireConn().secureStorageProvision();
@@ -742,6 +755,36 @@ class GossipSdk {
     this._profile = null;
   }
 
+  /**
+   * Permanently destroy the currently unlocked slot's data.
+   *
+   * Atomically: rotates the slot's keypair to a fresh dummy (so the
+   * old secret stops unlocking anything — the deleted-account-still-
+   * unlockable trap goes away) and overwrites the slot's data
+   * blockstreams with cover blocks under the new PK. Block-count
+   * parity across slots is preserved: snapshots before and after
+   * look like a routine cover-traffic burst.
+   *
+   * Same `closeSession()` precondition as `secureStorageLock` —
+   * destroying with an open SDK session would leave the SDK in
+   * SESSION_OPEN + 'locked', a state the data services would crash
+   * on. After this resolves, storageState is 'locked'.
+   */
+  async secureStorageDestroy(): Promise<void> {
+    if (this.state.status === SdkStatus.SESSION_OPEN) {
+      throw new Error(
+        'Cannot destroy secure storage while a session is open. ' +
+          'Call closeSession() first.'
+      );
+    }
+    await this.requireConn().secureStorageDestroy([
+      SQL_NAMESPACE,
+      SESSION_BLOB_NAMESPACE,
+    ]);
+    this._queries = null;
+    this._profile = null;
+  }
+
   /** Force-flush dirty encrypted blocks to the backing store. */
   async flush(): Promise<void> {
     if (this._conn?.isSecureStorage) {
@@ -785,13 +828,12 @@ class GossipSdk {
   async persistSessionBlob(blob: Uint8Array): Promise<void> {
     const conn = this._conn;
     if (!conn?.isSecureStorage) return;
-    // Always clear + rewrite, regardless of previous length. Clearing
-    // only on shrink exposes a side-channel (plausible-deniability): an
-    // observer watching the namespace block count can correlate
-    // "no-clear" ticks with growth and "clear" ticks with shrink, which
-    // leaks session state dynamics.
-    await conn.secureStorageClearNamespace(SESSION_BLOB_NAMESPACE);
-    await conn.secureStorageWriteNamespaceData(SESSION_BLOB_NAMESPACE, 0, blob);
+    // The debounce + dirty-flag coalescing infrastructure already lives
+    // upstream in `handleSessionPersist` / `flushPersist` (defaults to
+    // 500ms). This method is the leaf write; running it directly is
+    // safe because by the time we get here the upstream coalescer has
+    // already collapsed any rapid-fire mutations into a single blob.
+    await conn.secureStorageReplaceNamespaceData(SESSION_BLOB_NAMESPACE, blob);
   }
 
   /**
@@ -1147,6 +1189,40 @@ class GossipSdk {
       if (this._persistDirty) {
         await this.flushPersist();
       }
+    }
+  }
+
+  /**
+   * Force-fire the pending session-blob persist immediately and await
+   * its completion. Used by the message-send hot path to durably
+   * persist the new PQ counter BEFORE we publish the encrypted message
+   * to the relay — without this, a crash window between encrypt and
+   * the next debounced flush would leave the in-RAM counter advanced
+   * past the on-disk one, and the next send would re-use a counter
+   * already on the wire.
+   *
+   * Behaviour:
+   *   - If a flush is already in-flight, returns its Promise.
+   *   - If a flush is scheduled (timer pending), cancels the timer
+   *     and runs `flushPersist` immediately.
+   *   - If state is clean (`!_persistDirty`), resolves immediately.
+   *
+   * The caller is expected to `Promise.all` this with the network
+   * call so the persist runs in parallel with the wire write — the
+   * total tap-to-sent time stays bounded by `max(network, persist)`
+   * rather than serially summed.
+   */
+  async awaitPendingPersist(): Promise<void> {
+    if (this._persistInFlightPromise) {
+      await this._persistInFlightPromise;
+      return;
+    }
+    if (this._persistDirty) {
+      if (this._persistTimer !== null) {
+        clearTimeout(this._persistTimer);
+        this._persistTimer = null;
+      }
+      await this.flushPersist();
     }
   }
 

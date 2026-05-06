@@ -202,6 +202,43 @@ pub fn lock_session() -> Result<(), JsValue> {
     })
 }
 
+/// Permanently destroy the data of the currently unlocked slot.
+///
+/// The actual writes (new dummy keypair + cover blocks) land in
+/// IdbBlockStorage's in-memory pending state. Durability comes from
+/// the caller's subsequent `flushEncrypted()` await — same pattern
+/// the worker uses for `lockSession`. A process crash before that
+/// flush rolls everything back: the IDB on-disk state is unchanged,
+/// the slot is left exactly as it was.
+///
+/// **The caller must `closeDatabase()` first** so SQLite's xWrite
+/// flush on close lands in the buffer before destroy_session truncates
+/// the namespace. Mirrors `lockSession`'s contract.
+#[wasm_bindgen(js_name = destroySession)]
+pub fn destroy_session(namespaces: &[u8]) -> Result<(), JsValue> {
+    with_app_state(|app| {
+        let mut state = app.state.borrow_mut();
+        let slot = state
+            .session
+            .as_ref()
+            .ok_or_else(|| {
+                JsValue::from_str(
+                    "destroySession: secure storage is locked — no session to destroy. \
+                     Call unlockSession first.",
+                )
+            })?
+            .session_index;
+        let domain = state.domain.clone();
+        crate::destroy_session(&mut state.backend, &domain, slot, namespaces).map_err(map_err)?;
+        // Match lockSession post-conditions: zeroize the in-memory
+        // session. The new dummy keypair has no recoverable secret
+        // so there is nothing meaningful to keep.
+        state.session = None;
+        state.namespace_states.clear();
+        Ok(())
+    })
+}
+
 #[wasm_bindgen(js_name = coverTrafficTick)]
 pub fn cover_traffic_tick(namespace: u8) -> Result<(), JsValue> {
     with_app_state(|app| {
@@ -384,7 +421,7 @@ const PRAGMAS: &CStr = c"\
     PRAGMA page_size = 4096;\
     PRAGMA journal_mode = MEMORY;\
     PRAGMA synchronous = NORMAL;\
-    PRAGMA cache_size = -8000;\
+    PRAGMA cache_size = -32000;\
     PRAGMA locking_mode = EXCLUSIVE;\
     PRAGMA trusted_schema = OFF;\
 ";

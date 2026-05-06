@@ -112,10 +112,14 @@ TMP_BINDINGS="$JAVA_DIR/uniffi.tmp.$$"
 trap 'rm -rf "$TMP_JNILIBS" "$TMP_BINDINGS"' EXIT
 
 echo "[1/2] cargo ndk build ($ANDROID_ABIS)..."
+# `${arr[@]+"${arr[@]}"}` so an empty CARGO_FLAGS does not trip
+# `set -u` on macOS bash 3.2 (older bash treats `${arr[@]}` on an
+# empty array as an unset reference).
 cargo ndk \
     "${NDK_TARGET_ARGS[@]}" \
     -o "$TMP_JNILIBS" \
-    build -p secureStorage --features native --no-default-features "${CARGO_FLAGS[@]}"
+    build -p secureStorage --features native --no-default-features \
+    ${CARGO_FLAGS[@]+"${CARGO_FLAGS[@]}"}
 
 # Belt-and-suspenders: cargo-ndk trusts the toolchain it picks up, so
 # a host-build leak would slip through. file(1) string per Android

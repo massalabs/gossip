@@ -1,9 +1,10 @@
 //! redb-backed block & keypair storage for native targets (iOS/Android).
 //!
 //! All blocks and keypairs are stored in a single `storage.redb` file.
-//! Writes are buffered in a RAM buffer. On `commit()` the entire buffer
-//! is flushed as a single ACID transaction; redb handles crash safety
-//! internally, so no custom WAL is needed.
+//! Writes are buffered in RAM. On `commit()` every pending keypair,
+//! blockstream reset, and block write is flushed as a single ACID
+//! transaction; redb handles crash safety internally, so no custom WAL
+//! is needed.
 //!
 //! Block keys are 10-byte composites: `[session, namespace, block_id(8)]`.
 //! This maps directly to the `(SessionIndex, namespace: u8, block: u64)`
@@ -51,6 +52,10 @@ struct BufferedWrite {
 /// Single-file storage backend using redb.
 pub struct RedbStorage {
     db: Database,
+    /// Pending keypair writes, drained at `commit()` time so keypair
+    /// rotations can be atomic with the block rewrites that depend on
+    /// them (notably `destroy_session`).
+    pending_keypairs: HashMap<u8, Zeroizing<Vec<u8>>>,
     ram_buffer: Vec<BufferedWrite>,
     /// Overlay index: maps a (session, namespace, block_id) key to the
     /// position in `ram_buffer` of the last buffered write at that key.
@@ -60,6 +65,12 @@ pub struct RedbStorage {
     /// `write_block` / `append_block` updates this map; `commit` and
     /// `reset_blockstream` invalidate the affected entries.
     ram_overlay: HashMap<BlockKey, usize>,
+    /// Pending `(session, namespace)` blockstream resets. Drained at
+    /// `commit()` time, fused into the same redb txn as `ram_buffer`
+    /// inserts. Lets a "clear + write" pair finish in **one** fsync
+    /// instead of two — critical for the session-blob persist path,
+    /// where back-to-back clear+write was the hot fsync waterfall.
+    pending_deletes: Vec<(u8, u8)>,
     /// `block_counts[session][namespace] = count`. Lazy: only populated
     /// namespaces appear in the inner map.
     block_counts: Vec<HashMap<u8, u64>>,
@@ -74,8 +85,10 @@ impl RedbStorage {
 
         let mut storage = Self {
             db,
+            pending_keypairs: HashMap::new(),
             ram_buffer: Vec::new(),
             ram_overlay: HashMap::new(),
+            pending_deletes: Vec::new(),
             block_counts: (0..SESSION_COUNT).map(|_| HashMap::new()).collect(),
         };
         storage.rebuild_block_counts()?;
@@ -134,28 +147,62 @@ impl RedbStorage {
         Ok(iter.next().is_some())
     }
 
-    /// Batch-insert all buffered writes in a single ACID transaction.
+    /// Batch-flush pending keypairs, deletes, and inserts in a single
+    /// ACID transaction (one redb commit = one fsync). Multi-phase to fuse
+    /// "clear + write" patterns (e.g. session-blob persist) into one
+    /// fsync instead of two:
     ///
-    /// PD: we always run the redb write transaction, even when the in-memory
-    /// buffer is empty. Skipping the empty case would leak "no cover work
-    /// this tick" via the absence of an fsync on disk - an attacker watching
-    /// I/O timing could distinguish ticks where the scheduler had real work
-    /// to do from ticks where it did not. An empty redb txn still produces
-    /// a uniform fsync, keeping the on-disk timing pattern indistinguishable.
+    ///   - Phase A: write `pending_keypairs` (session keypair rotations
+    ///     staged by `write_keypair` since the last commit).
+    ///   - Phase B: drain `pending_deletes` (blockstream resets staged
+    ///     by `reset_blockstream` since the last commit).
+    ///   - Phase C: insert `ram_buffer` writes, deduped via
+    ///     `ram_overlay` (a hot path can buffer multiple writes for the
+    ///     same key when the SQLite page cache flushes a page that was
+    ///     rewritten in the same txn, etc.) — only the last-written
+    ///     value per key reaches redb.
+    ///
+    /// Order matters: deletes run BEFORE inserts inside the same txn so
+    /// a "replace namespace" pattern that targets overlapping keys
+    /// keeps the new bytes — even though in practice the sets are
+    /// disjoint, since clears wipe the whole `(session, namespace)`
+    /// stream and the new writes start fresh from block 0.
+    ///
+    /// PD: we always run the redb write transaction, even when all
+    /// queues are empty. Skipping would leak "no cover work this tick"
+    /// via the absence of an fsync on disk — an attacker watching I/O
+    /// timing could distinguish ticks where the scheduler had real work
+    /// to do from ticks where it did not. An empty redb txn still
+    /// produces a uniform fsync, keeping the on-disk timing pattern
+    /// indistinguishable.
     pub fn commit(&mut self) -> Result<()> {
-        // Dedupe by key using `ram_overlay`: a hot path can buffer multiple
-        // writes for the same (session, namespace, block_id) when the SQLite
-        // page cache flushes a page that was rewritten in the same txn, when
-        // truncate-then-write resequences a block, etc. The overlay map
-        // already points each key at the index of its last buffered write,
-        // so we re-use it to skip redundant entries instead of paying for
-        // them as separate redb inserts.
         let txn = self.db.begin_write().map_err(redb_err("write txn"))?;
         {
+            let mut table = txn.open_table(KEYPAIRS).map_err(redb_err("open table"))?;
+            // Phase A: drain pending keypair writes.
+            for (session, data) in &self.pending_keypairs {
+                let key = [*session];
+                table
+                    .insert(key.as_slice(), data.as_slice())
+                    .map_err(redb_err("insert"))?;
+            }
+        }
+        {
             let mut table = txn.open_table(BLOCKS).map_err(redb_err("open table"))?;
-            // Iterate in original buffer order so on-disk write order matches
-            // the order in which the application made the writes, but using
-            // each key's last-buffered value.
+            // Phase B: drain pending blockstream deletes.
+            for (session, namespace) in &self.pending_deletes {
+                let prefix_start = Self::make_block_key(*session, *namespace, 0);
+                let prefix_end = Self::make_block_key(*session, *namespace, u64::MAX);
+                table
+                    .retain_in(prefix_start.as_slice()..=prefix_end.as_slice(), |_k, _v| {
+                        false
+                    })
+                    .map_err(redb_err("retain_in"))?;
+            }
+            // Phase C: insert ram_buffer writes, deduped via ram_overlay.
+            // Iterate in original buffer order so on-disk write order
+            // matches the order in which the application made the
+            // writes, but using each key's last-buffered value.
             for (i, bw) in self.ram_buffer.iter().enumerate() {
                 let key = Self::make_block_key(bw.session, bw.namespace, bw.block_id);
                 if self.ram_overlay.get(&key) != Some(&i) {
@@ -167,9 +214,35 @@ impl RedbStorage {
             }
         }
         txn.commit().map_err(redb_err("commit"))?;
+        self.pending_keypairs.clear();
         self.ram_buffer.clear();
         self.ram_overlay.clear();
+        self.pending_deletes.clear();
         Ok(())
+    }
+
+    /// Drop every staged operation that has not yet been flushed by
+    /// [`commit`], leaving the on-disk state untouched.
+    ///
+    /// Used by callers that need to roll back a multi-step operation
+    /// halfway through (for example, [`crate::destroy_session`] when one
+    /// of its block-rewriting steps errors): without this, the staged
+    /// writes would silently ride along on the next caller's `commit()`
+    /// and corrupt the on-disk state.
+    ///
+    /// **Caveat**: this clears `pending_keypairs` (keypair stages),
+    /// `ram_buffer` (write-block stages), `ram_overlay` (the write-block
+    /// index), and `pending_deletes` (reset-blockstream stages). It does
+    /// NOT undo direct mutations to `block_counts`, which
+    /// `reset_blockstream` and `append_block` apply immediately. Callers
+    /// that mutate counts (i.e., call `reset_blockstream` or
+    /// `append_block`) cannot fully roll back with this primitive alone;
+    /// they must avoid those calls or do their own count-snapshotting.
+    pub fn discard_pending(&mut self) {
+        self.pending_keypairs.clear();
+        self.ram_buffer.clear();
+        self.ram_overlay.clear();
+        self.pending_deletes.clear();
     }
 }
 
@@ -297,24 +370,18 @@ impl BlockStorage for RedbStorage {
             self.ram_overlay.insert(k, i);
         }
 
-        // Delete this (session, namespace)'s blocks from redb.
-        let txn = self.db.begin_write().map_err(redb_err("write txn"))?;
+        // Stage the redb-side delete for the next `commit()` call. This
+        // lets a subsequent `write_block` + `commit` fuse the wipe and
+        // the rewrite into a single redb transaction (one fsync) — the
+        // hot path for session-blob persistence. Idempotent: enqueue
+        // only if not already pending.
+        if !self
+            .pending_deletes
+            .iter()
+            .any(|(s, n)| *s == su8 && *n == namespace)
         {
-            let mut table = txn.open_table(BLOCKS).map_err(redb_err("open table"))?;
-
-            // Delete in place via `retain_in`: skips the
-            // `Vec<BlockKey>` materialisation of every key in the range
-            // before re-walking it for `remove`. Useful for namespaces
-            // that have grown to thousands of blocks.
-            let prefix_start = Self::make_block_key(su8, namespace, 0);
-            let prefix_end = Self::make_block_key(su8, namespace, u64::MAX);
-            table
-                .retain_in(prefix_start.as_slice()..=prefix_end.as_slice(), |_k, _v| {
-                    false
-                })
-                .map_err(redb_err("retain_in"))?;
+            self.pending_deletes.push((su8, namespace));
         }
-        txn.commit().map_err(redb_err("commit"))?;
 
         self.block_counts[si].remove(&namespace);
         Ok(())
@@ -346,6 +413,10 @@ impl BlockStorage for RedbStorage {
 
 impl KeypairStorage for RedbStorage {
     fn read_keypair(&self, session: SessionIndex) -> Result<Zeroizing<Vec<u8>>> {
+        if let Some(data) = self.pending_keypairs.get(&session.as_u8()) {
+            return Ok(Zeroizing::new((**data).clone()));
+        }
+
         let txn = self.db.begin_read().map_err(redb_err("read txn"))?;
         let table = match txn.open_table(KEYPAIRS) {
             Ok(t) => t,
@@ -365,15 +436,8 @@ impl KeypairStorage for RedbStorage {
     }
 
     fn write_keypair(&mut self, session: SessionIndex, data: &[u8]) -> Result<()> {
-        let txn = self.db.begin_write().map_err(redb_err("write txn"))?;
-        {
-            let mut table = txn.open_table(KEYPAIRS).map_err(redb_err("open table"))?;
-            let key = [session.as_u8()];
-            table
-                .insert(key.as_slice(), data)
-                .map_err(redb_err("insert"))?;
-        }
-        txn.commit().map_err(redb_err("commit"))?;
+        self.pending_keypairs
+            .insert(session.as_u8(), Zeroizing::new(data.to_vec()));
         Ok(())
     }
 }
@@ -497,6 +561,55 @@ mod tests {
     }
 
     #[test]
+    fn test_keypair_write_is_pending_until_commit() {
+        // Keypair writes must share commit() atomicity with staged block
+        // rewrites. destroy_session relies on this so a process kill
+        // before commit leaves both the old keypair and old blocks on disk.
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().to_path_buf();
+        let si = SessionIndex::new(0).unwrap();
+
+        let mut s = RedbStorage::open(&path).unwrap();
+        s.write_keypair(si, b"pending-keypair").unwrap();
+        assert_eq!(&*s.read_keypair(si).unwrap(), b"pending-keypair");
+
+        drop(s);
+        let s = RedbStorage::open(&path).unwrap();
+        assert!(
+            s.read_keypair(si).is_err(),
+            "uncommitted keypair write must not survive reopen"
+        );
+    }
+
+    #[test]
+    fn test_discard_pending_drops_staged_keypair_writes() {
+        // A failed multi-step destroy must be able to discard the dummy
+        // keypair together with any staged block rewrites.
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().to_path_buf();
+        let si = SessionIndex::new(0).unwrap();
+
+        {
+            let mut s = RedbStorage::open(&path).unwrap();
+            s.write_keypair(si, b"committed-keypair").unwrap();
+            s.commit().unwrap();
+        }
+
+        let mut s = RedbStorage::open(&path).unwrap();
+        s.write_keypair(si, b"discarded-keypair").unwrap();
+        assert_eq!(&*s.read_keypair(si).unwrap(), b"discarded-keypair");
+
+        s.discard_pending();
+        assert_eq!(&*s.read_keypair(si).unwrap(), b"committed-keypair");
+
+        s.commit().unwrap();
+        drop(s);
+
+        let s = RedbStorage::open(&path).unwrap();
+        assert_eq!(&*s.read_keypair(si).unwrap(), b"committed-keypair");
+    }
+
+    #[test]
     fn test_keypair_not_found() {
         let (s, _dir) = make_storage();
         let si = SessionIndex::new(0).unwrap();
@@ -573,5 +686,43 @@ mod tests {
             assert_eq!(s.read_block(si, 0, 0).unwrap()[0], 0x11);
             assert_eq!(s.read_block(si, 1, 0).unwrap()[0], 0x22);
         }
+    }
+
+    #[test]
+    fn test_discard_pending_drops_staged_writes() {
+        // Regression: a multi-step operation that stages writes via
+        // write_block must be able to roll them back without
+        // committing, otherwise the staged bytes silently ride along
+        // on the next caller's commit. See native_vfs::destroy_session
+        // for the wrapper that uses this on error.
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().to_path_buf();
+        let si = SessionIndex::new(0).unwrap();
+
+        // Establish a baseline on disk: one committed block.
+        {
+            let mut s = RedbStorage::open(&path).unwrap();
+            s.append_block(si, NS, &make_block(0xAA)).unwrap();
+            s.commit().unwrap();
+        }
+
+        // Stage an overwrite of that block in RAM, then discard.
+        // The on-disk byte must still be the baseline 0xAA.
+        let mut s = RedbStorage::open(&path).unwrap();
+        s.write_block(si, NS, 0, &make_block(0xBB)).unwrap();
+        // The in-RAM read returns the staged overwrite.
+        assert_eq!(s.read_block(si, NS, 0).unwrap()[0], 0xBB);
+
+        s.discard_pending();
+        // After discard, reads fall back to the on-disk value.
+        assert_eq!(s.read_block(si, NS, 0).unwrap()[0], 0xAA);
+
+        // A subsequent commit must NOT carry the discarded write.
+        s.commit().unwrap();
+
+        // Reopen from disk and confirm the staged byte never landed.
+        drop(s);
+        let s = RedbStorage::open(&path).unwrap();
+        assert_eq!(s.read_block(si, NS, 0).unwrap()[0], 0xAA);
     }
 }

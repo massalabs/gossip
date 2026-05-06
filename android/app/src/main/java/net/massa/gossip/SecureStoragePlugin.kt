@@ -54,10 +54,13 @@ class SecureStoragePlugin : Plugin() {
                     } catch (_: Exception) { /* best-effort diag */ }
                 }
             } catch (e: SecureStorageException.Exception) {
-                // Pass code + Throwable explicitly. The previous
-                // `reject(e.message, e)` resolved to the (message, code: String)
-                // overload, dropping the throwable on the floor and stuffing
-                // a stringified Exception into the code slot.
+                // UniFFI flattens the Rust enum's `Error` variant into
+                // the Kotlin nested class `Exception` because the outer
+                // sealed class is already named `…Exception`. Pass code
+                // + Throwable explicitly: the previous `reject(e.message, e)`
+                // resolved to the (message, code: String) overload,
+                // dropping the throwable on the floor and stuffing a
+                // stringified Exception into the code slot.
                 call.reject(e.msg, e.code, e)
             } catch (e: Exception) {
                 call.reject(e.message ?: "secure-storage error", "INTERNAL", e)
