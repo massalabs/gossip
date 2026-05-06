@@ -129,6 +129,18 @@ export interface SecureStorageNativePlugin {
     offset: number;
     data: Uint8Array;
   }): Promise<void>;
+
+  /**
+   * Atomic clear+write. Equivalent to `clearNamespace` followed by
+   * `writeNamespaceData(ns, 0, data)`, but a single redb txn (one fsync)
+   * inside a single mutex hold — used by the session-blob persist hot
+   * path where the two-step variant produced back-to-back fsyncs that
+   * blocked SQL ops on the shared state mutex.
+   */
+  replaceNamespaceData(options: {
+    namespace: number;
+    data: Uint8Array;
+  }): Promise<void>;
   readNamespaceData(options: {
     namespace: number;
     offset: number;
@@ -138,6 +150,16 @@ export interface SecureStorageNativePlugin {
     namespace: number;
   }): Promise<{ length: number }>;
   clearNamespace(options: { namespace: number }): Promise<void>;
+
+  /**
+   * Permanently destroy the data of the currently unlocked slot.
+   * Native side drops the rusqlite connection BEFORE entering the wipe
+   * (mirrors `allocate`'s switch-with-clean-shutdown pattern), then
+   * rotates the slot's keypair to a dummy and overwrites every block
+   * of `namespaces` with cover blocks under the new PK. Single redb
+   * commit at the end — atomic against process kill.
+   */
+  destroySession(options: { namespaces: number[] }): Promise<void>;
 }
 
 export const SecureStorageNative: SecureStorageNativePlugin = {
@@ -232,5 +254,14 @@ export const SecureStorageNative: SecureStorageNativePlugin = {
   },
   async clearNamespace({ namespace }) {
     await callNative('clearNamespace', { namespace });
+  },
+  async destroySession({ namespaces }) {
+    await callNative('destroySession', { namespaces });
+  },
+  async replaceNamespaceData({ namespace, data }) {
+    await callNative('replaceNamespaceData', {
+      namespace,
+      data: u8ToBase64(data),
+    });
   },
 };

@@ -68,6 +68,27 @@ export class AnnouncementService {
     this.messageProtocol = messageProtocol;
   }
 
+  /**
+   * Force-fire the SDK's pending session-blob persist. Wired by
+   * `GossipSdk.openSession` via `setPersistFlusher`. Used by the
+   * incoming-announcement path to commit the mutated Rust session
+   * state to disk BEFORE we commit the SQL row that depends on it
+   * — without this, a crash between the SQL inserts and the next
+   * debounced flush leaves an orphan Discussion in SQLite whose peer
+   * is missing from the session manager, surfacing as
+   * `peerSessionStatus = UnknownPeer/NoSession` that survives reboot
+   * (and the "TOUTES" badge counts a discussion that never appears
+   * in the list).
+   *
+   * No-op until the SDK calls the setter, so unit tests that
+   * instantiate AnnouncementService in isolation keep working.
+   */
+  private persistFlusher: () => Promise<void> = async () => {};
+
+  setPersistFlusher(flusher: () => Promise<void>): void {
+    this.persistFlusher = flusher;
+  }
+
   async sendAnnouncement(announcement: Uint8Array): Promise<{
     success: boolean;
     counter?: string;
@@ -429,6 +450,17 @@ export class AnnouncementService {
     if (!result) {
       return { success: true };
     }
+
+    // Persist the mutated Rust session state to the blob NOW, before any
+    // SQL row that derives from it (contact + discussion below) is
+    // committed. The invariant we want is "blob ahead of SQL, never the
+    // reverse" — that way a crash between here and the next refresh
+    // either leaves both stores empty (clean) or leaves a peer in the
+    // session manager without a Discussion (already swept by
+    // `RefreshService.stateUpdate`'s orphan-peer cleanup). The reverse
+    // ordering — SQL ahead of blob — produced the
+    // "discussion-without-peer" orphan that survived reboot.
+    await this.persistFlusher();
 
     log.info('announcement intended for us — decrypting');
 

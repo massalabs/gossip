@@ -53,6 +53,9 @@ impl SecureStorageException {
 
 impl From<SecureStorageError> for SecureStorageException {
     fn from(e: SecureStorageError) -> Self {
+        // Display is intentionally generic for PD ("storage error",
+        // "database error", …) so an observer can't fingerprint the
+        // backing store from leaked error strings.
         Self::Error {
             code: e.code().into(),
             msg: e.to_string(),
@@ -126,6 +129,13 @@ struct WriteNamespaceArgs {
 }
 
 #[derive(Deserialize)]
+struct ReplaceNamespaceArgs {
+    namespace: u8,
+    /// base64-encoded data bytes; replaces the entire namespace.
+    data: String,
+}
+
+#[derive(Deserialize)]
 struct ReadNamespaceArgs {
     namespace: u8,
     offset: u64,
@@ -135,6 +145,11 @@ struct ReadNamespaceArgs {
 #[derive(Deserialize)]
 struct NamespaceArgs {
     namespace: u8,
+}
+
+#[derive(Deserialize)]
+struct DestroySessionArgs {
+    namespaces: Vec<u8>,
 }
 
 /// SQL values flow as raw JSON primitives; the one exception is BLOB,
@@ -289,6 +304,13 @@ fn dispatch(method: &str, args: &str) -> Result<String> {
             native_vfs::write_namespace_data(a.namespace, a.offset, &data)?;
             Ok("null".into())
         }
+        "replaceNamespaceData" => {
+            let a: ReplaceNamespaceArgs = parse(args)?;
+            // Session blobs may contain key material — zeroize on return.
+            let data = Zeroizing::new(B64.decode(a.data)?);
+            native_vfs::replace_namespace_data(a.namespace, &data)?;
+            Ok("null".into())
+        }
         "readNamespaceData" => {
             let a: ReadNamespaceArgs = parse(args)?;
             let bytes = native_vfs::read_namespace_data(a.namespace, a.offset, a.len as usize)?;
@@ -302,6 +324,11 @@ fn dispatch(method: &str, args: &str) -> Result<String> {
         "clearNamespace" => {
             let a: NamespaceArgs = parse(args)?;
             native_vfs::clear_namespace(a.namespace)?;
+            Ok("null".into())
+        }
+        "destroySession" => {
+            let a: DestroySessionArgs = parse(args)?;
+            destroy_session(&a.namespaces)?;
             Ok("null".into())
         }
         #[cfg(test)]
@@ -320,9 +347,24 @@ fn init_secure_storage(path: &str, domain: &str) -> Result<()> {
     native_vfs::init_native(path, domain)?;
     native_vfs::register()?;
     // Warm rayon's global pool so the first PQ op doesn't pay spawn cost.
-    // Callers wanting the pool size for telemetry can use the
-    // `rayonThreadCount` dispatch arm (Android already does so).
-    let _ = rayon::ThreadPoolBuilder::new().build_global();
+    //
+    // Pinned to exactly `SESSION_COUNT = 3` threads. Our parallel sites
+    // (encrypt_block, cover_traffic_tick) iterate the 3 slots, so 3 is
+    // the minimum pool size that still saturates the work and the
+    // maximum that can ever be useful here. The default (== num_cpus)
+    // on a big.LITTLE phone (typically 4 big + 4 LITTLE) was scheduling
+    // work on the LITTLE cores and paying work-stealing coordination
+    // between threads that had no work — both pure overhead.
+    //
+    // TODO: if a future change bumps SESSION_COUNT or adds another
+    // parallel site that wants >3-way work, raise the pool to match.
+    //
+    // Callers wanting the actual pool size for telemetry use the
+    // `rayonThreadCount` dispatch arm (Android already does so on
+    // every initSecureStorage).
+    let _ = rayon::ThreadPoolBuilder::new()
+        .num_threads(3)
+        .build_global();
     Ok(())
 }
 
@@ -375,6 +417,24 @@ fn close() -> Result<()> {
         .map_err(|_| SecureStorageError::LockPoisoned)?;
     *guard = None;
     native_vfs::lock()?;
+    Ok(())
+}
+
+fn destroy_session(namespaces: &[u8]) -> Result<()> {
+    // Drop the rusqlite connection FIRST. SQLite flushes dirty pages on
+    // close via xWrite — those writes need the still-valid keypair, and
+    // they must land in `ram_buffer` before destroy_session truncates the
+    // blockstream. Closing afterwards would also race the destroy: the
+    // SafeDb's Drop runs sqlite3_close which reads the (now-cover) keypair
+    // and writes garbage. Same Drop-before-switch pattern as `allocate`
+    // above (lines 271–290).
+    {
+        let mut guard = db_mutex()
+            .lock()
+            .map_err(|_| SecureStorageError::LockPoisoned)?;
+        *guard = None;
+    }
+    native_vfs::destroy_session(namespaces)?;
     Ok(())
 }
 

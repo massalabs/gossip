@@ -67,6 +67,14 @@ export function createEventHandlers(
   };
 
   const onSent = (message: Message) => {
+    // Capture the storeId of the row that just flipped to SENT — this
+    // is the moment we promote it to optimistically ✓ in the UI. Done
+    // here (not after `sdk.messages.send` in the store) because the
+    // SDK's send-promise resolves on queue, not on wire ack: a peer
+    // without an active session leaves the row in WAITING_SESSION
+    // and MESSAGE_SENT is never emitted, so this listener is the
+    // only truth-aligned signal we have.
+    let sentStoreId: string | undefined;
     set(state => {
       const map = patchContact(
         state.messagesByContact,
@@ -76,6 +84,7 @@ export function createEventHandlers(
           const updated = msgs.map(entry => {
             if (messageIdEquals(entry.messageId, message.messageId)) {
               changed = true;
+              if (entry.storeId) sentStoreId = entry.storeId;
               return {
                 ...entry,
                 id: message.id ?? entry.id,
@@ -89,6 +98,14 @@ export function createEventHandlers(
       );
       return map ? { messagesByContact: map } : state;
     });
+    if (sentStoreId !== undefined) {
+      set(state => {
+        if (state.optimisticallySentStoreIds.has(sentStoreId!)) return state;
+        const next = new Set(state.optimisticallySentStoreIds);
+        next.add(sentStoreId!);
+        return { optimisticallySentStoreIds: next };
+      });
+    }
 
     // Also reconcile optimistic reactions — they live in reactionsByContact
     // and won't be found by the messagesByContact scan above.

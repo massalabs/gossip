@@ -11,6 +11,19 @@
 
 set -Eeuo pipefail
 
+# Xcode build phases run with a sanitized PATH that excludes
+# `~/.cargo/bin`, so `cargo` is unresolved when this script is
+# triggered from the "Build secure-storage (Rust)" pre-build phase.
+# Source the cargo env if available, then add the canonical install
+# locations to PATH as a belt-and-suspenders fallback. No effect when
+# the script is run from a normal interactive shell that already has
+# cargo on PATH.
+if [ -f "$HOME/.cargo/env" ]; then
+    # shellcheck disable=SC1091
+    . "$HOME/.cargo/env"
+fi
+export PATH="$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+
 usage() {
     cat <<'EOF'
 Usage: build-native-ios.sh [--release|--debug] [-h|--help]
@@ -45,7 +58,11 @@ echo "=== Building secureStorage for iOS ($PROFILE) ==="
 cd "$RUST_DIR"
 
 echo "[1/3] cargo build (aarch64-apple-ios + aarch64-apple-ios-sim)..."
-cargo build -p secureStorage --features native --no-default-features "${CARGO_FLAGS[@]}" \
+# `${arr[@]+"${arr[@]}"}` so an empty CARGO_FLAGS does not trip
+# `set -u` on macOS bash 3.2 (older bash treats `${arr[@]}` on an
+# empty array as an unset reference).
+cargo build -p secureStorage --features native --no-default-features \
+    ${CARGO_FLAGS[@]+"${CARGO_FLAGS[@]}"} \
     --target aarch64-apple-ios \
     --target aarch64-apple-ios-sim
 

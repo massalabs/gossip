@@ -15,8 +15,15 @@ export async function getBiometricSalt(): Promise<Uint8Array> {
   return _biometricSalt;
 }
 
-/** Fixed Secure Storage key for Capacitor biometric key (not userId-indexed for PD). */
+/**
+ * Fixed Secure Storage key for Capacitor biometric secure-login discovery.
+ * Intentionally singleton for PD: secure login must not expose account or
+ * slot inventory, so only one secure-storage account may use biometrics.
+ */
 export const BIOMETRIC_STORAGE_KEY = 'gossip-biometric';
 
-/** localStorage key for the WebAuthn credential ID (not secret, just an identifier). */
+/**
+ * Fixed localStorage key for the WebAuthn secure-login credential ID.
+ * Singleton for the same PD reason as BIOMETRIC_STORAGE_KEY.
+ */
 export const WEBAUTHN_CREDENTIAL_ID_KEY = 'gossip-webauthn-credential-id';
