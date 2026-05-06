@@ -184,15 +184,19 @@ export async function shareInvitation(
   // Use native Capacitor Share plugin on native platforms
   if (Capacitor.isNativePlatform()) {
     try {
-      // Pass both `text` (with URL embedded) AND `url` separately:
-      // - `url` is what modern Telegram/iMessage use to validate a shareable
-      //   link — without it they may gray out the Send button.
-      // - Embedding the URL in `text` covers the older apps that ignore the
-      //   separate `url` field and only paste whatever's in `text`.
+      const isAndroid = Capacitor.getPlatform() === 'android';
+      const text = shareText ? `${shareText}\n${deepLinkUrl}` : deepLinkUrl;
+      // On Android, ACTION_SEND only carries EXTRA_TEXT and the Capacitor
+      // plugin concatenates `text + " " + url`, which duplicates the URL and
+      // confuses some apps (Telegram in particular). Embed the URL in `text`
+      // and omit `url`.
+      // On iOS, UIActivityViewController exposes them as separate items;
+      // some apps use only `text`, others only `url`, so pass both (the
+      // duplicated URL is harmless because the receiving app picks one item).
       await Share.share({
         title: shareTitle,
-        text: shareText ? `${shareText}\n${deepLinkUrl}` : deepLinkUrl,
-        url: deepLinkUrl,
+        text,
+        ...(isAndroid ? {} : { url: deepLinkUrl }),
         dialogTitle: shareTitle,
       });
       return;
@@ -205,9 +209,12 @@ export async function shareInvitation(
   // Use Web Share API on web platforms
   if (typeof navigator !== 'undefined' && navigator.share) {
     try {
+      // Mirror the native path: embed the URL in `text` AND pass `url`
+      // separately. Telegram's web share target ignores the `url` field
+      // and only pastes `text`, so without embedding the link is lost.
       await navigator.share({
         title: shareTitle,
-        text: shareText,
+        text: shareText ? `${shareText}\n${deepLinkUrl}` : deepLinkUrl,
         url: deepLinkUrl,
       });
       return;
