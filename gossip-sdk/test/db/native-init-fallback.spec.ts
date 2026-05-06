@@ -35,4 +35,30 @@ describe('DatabaseConnection native secure-storage init', () => {
       })
     ).rejects.toThrow('native secure storage open failed');
   });
+
+  it('does not re-provision native secure storage when data already exists', async () => {
+    vi.resetModules();
+    vi.doMock('@capacitor/core', () => ({
+      Capacitor: {
+        isNativePlatform: () => true,
+      },
+    }));
+    const provisionStorage = vi.fn();
+    vi.doMock('../../src/db/secure-storage-native.js', () => ({
+      SecureStorageNative: {
+        initSecureStorage: vi.fn(),
+        hasData: vi.fn(async () => ({ hasData: true })),
+        provisionStorage,
+      },
+    }));
+
+    const { DatabaseConnection } = await import('../../src/db/sqlite');
+    const conn = await DatabaseConnection.create({
+      storage: { type: 'secureStorage', domain: 'native-provision-test' },
+    });
+
+    await conn.secureStorageProvision();
+
+    expect(provisionStorage).not.toHaveBeenCalled();
+  });
 });

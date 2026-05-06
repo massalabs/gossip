@@ -12,6 +12,14 @@ interface MessageStatusProps {
   isEdited: boolean;
   isSending: boolean;
   showTimestamp: boolean;
+  /**
+   * The user submitted this row in the current app session and the SDK
+   * has accepted it. Forces the ✓ rendering even if the DB status is
+   * still WAITING_SESSION / READY (the SDK keeps that for correctness;
+   * the UI commits early — see `optimisticallySentIds` in the message
+   * store for rationale and lifecycle).
+   */
+  isOptimisticallySent?: boolean;
 }
 
 const MessageStatusIndicator: React.FC<MessageStatusProps> = React.memo(
@@ -23,6 +31,7 @@ const MessageStatusIndicator: React.FC<MessageStatusProps> = React.memo(
     isEdited,
     isSending,
     showTimestamp,
+    isOptimisticallySent,
   }) => {
     const { t } = useTranslation('discussions');
 
@@ -58,7 +67,7 @@ const MessageStatusIndicator: React.FC<MessageStatusProps> = React.memo(
                 aria-label={t('message_item.sending')}
               />
             )}
-            {status === MessageStatusEnum.SENT && (
+            {(status === MessageStatusEnum.SENT || isOptimisticallySent) && (
               <CheckIcon
                 className="w-3.5 h-3.5"
                 aria-label={t('message_item.sent')}

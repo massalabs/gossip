@@ -3,13 +3,19 @@ import { useAccountStore } from '../../src/stores/accountStore';
 
 // Shared spy so individual test suites can assert on it
 const skipHistoricalSpy = vi.fn();
+const hasExistingCredentialSpy = vi.hoisted(() => vi.fn(async () => false));
 
 // Shared SDK mock factory — returns a superset used by all test suites
 const makeSdkMock = () => ({
   isSessionOpen: false,
+  isSecureStorage: false,
+  storageState: 'locked',
   usesSessionBlobNamespace: false,
   closeSession: vi.fn(),
   clearAllTables: vi.fn(),
+  secureStorageUnlock: vi.fn(async () => false),
+  secureStorageLock: vi.fn(async () => {}),
+  secureStorageCreate: vi.fn(async () => {}),
   openSession: vi.fn(async () => {}),
   getEncryptedSession: vi.fn(() => new Uint8Array(0)),
   persistSessionBlob: vi.fn(async () => {}),
@@ -156,10 +162,14 @@ vi.mock('../../src/services/biometricService', () => ({
     success: true,
     data: {
       credentialId: 'mock-cred-id',
-      encryptionKey: { type: 'mock-key' },
+      encryptionKey: {
+        type: 'mock-key',
+        to_bytes: vi.fn(() => new Uint8Array([1, 2, 3])),
+      },
       authMethod: 'webauthn',
     },
   })),
+  hasExistingCredential: hasExistingCredentialSpy,
 }));
 
 vi.mock('../../src/stores/appStore', () => ({
@@ -255,12 +265,39 @@ describe('AccountStore skipHistorical behavior', () => {
     expect(skipHistoricalSpy).not.toHaveBeenCalled();
   });
 
-  it('initializeAccountWithBiometrics does NOT call skipHistorical()', async () => {
+  it('initializeAccountWithBiometrics calls skipHistorical()', async () => {
     await useAccountStore
       .getState()
       .initializeAccountWithBiometrics('testuser');
 
-    expect(skipHistoricalSpy).not.toHaveBeenCalled();
+    expect(skipHistoricalSpy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('AccountStore secure-storage biometric singleton', () => {
+  beforeEach(() => {
+    hasExistingCredentialSpy.mockReset();
+    hasExistingCredentialSpy.mockResolvedValue(false);
+    getSdkMock.mockImplementation(makeSdkMock);
+    useAccountStore.setState({
+      userProfile: null,
+      encryptionKey: null,
+      isLoading: false,
+    });
+  });
+
+  it('rejects a second biometric secure-storage account', async () => {
+    const sdk = makeSdkMock();
+    sdk.isSecureStorage = true;
+    sdk.storageState = 'locked';
+    getSdkMock.mockReturnValue(sdk);
+    hasExistingCredentialSpy.mockResolvedValue(true);
+
+    await expect(
+      useAccountStore.getState().initializeAccountWithBiometrics('testuser')
+    ).rejects.toThrow('Only one biometric secure-storage account is allowed');
+
+    expect(sdk.secureStorageCreate).not.toHaveBeenCalled();
   });
 });
 

@@ -336,9 +336,9 @@ const Settings = (): React.ReactElement => {
               )
             }
           >
-            <MessageSquare className="mr-5 w-5 h-5" />
+            <MessageSquare className="mr-4" />
 
-            <span className="text-[15px] font-medium flex-1 text-left">
+            <span className="text-base font-semibold flex-1 text-left">
               {t('menu.feedback')}
             </span>
           </Button>

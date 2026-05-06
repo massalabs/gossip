@@ -5,7 +5,7 @@ import AccountCreationForm, {
 } from './AccountCreationForm';
 
 interface ClassicAccountCreationProps {
-  onComplete: () => void;
+  onComplete: () => void | Promise<void>;
   onBack: () => void;
 }
 
@@ -22,7 +22,7 @@ const ClassicAccountCreation: React.FC<ClassicAccountCreationProps> = ({
     } else {
       await initializeAccount(result.username, result.password!);
     }
-    onComplete();
+    await onComplete();
   };
 
   return (

@@ -31,10 +31,10 @@ public class NetworkObserverPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "releaseWakeLock", returnType: CAPPluginReturnPromise)
     ]
     
-    private let logger = Logger(subsystem: "net.massa.gossip", category: "NetworkObserver")
-    
+    private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "net.massa.gossip", category: "NetworkObserver")
+
     // Background task identifier (must match Info.plist BGTaskSchedulerPermittedIdentifiers)
-    private static let backgroundTaskIdentifier = "net.massa.gossip.background.sync"
+    private static let backgroundTaskIdentifier = "\(Bundle.main.bundleIdentifier ?? "net.massa.gossip").background.sync"
     
     private var pathMonitor: NWPathMonitor?
     private var monitorQueue: DispatchQueue?
@@ -64,7 +64,7 @@ public class NetworkObserverPlugin: CAPPlugin, CAPBridgedPlugin {
         }
         
         pathMonitor = NWPathMonitor()
-        monitorQueue = DispatchQueue(label: "net.massa.gossip.networkMonitor", qos: .utility)
+        monitorQueue = DispatchQueue(label: "\(Bundle.main.bundleIdentifier ?? "net.massa.gossip").networkMonitor", qos: .utility)
 
         // Single monitor: its first callback seeds `wasOnline` /
         // `previousNetworkType` and skips triggering sync. A previous

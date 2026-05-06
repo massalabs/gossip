@@ -23,6 +23,7 @@ import { useTextSelection } from './hooks/useTextSelection';
 import { useOriginalMessage } from './hooks/useOriginalMessage';
 import { useLongPress } from '../../hooks/useLongPress';
 import { useIsTouch } from '../../hooks/usePlatform';
+import { useMessageStore } from '../../stores/messageStore';
 
 const POST_GESTURE_SUPPRESS_MS = 700;
 
@@ -100,8 +101,27 @@ const MessageItem: React.FC<MessageItemProps> = ({
   const canReply = !!onReplyTo && !isDeleted && hasConfirmedId;
   const canForward = !!onForward && !isDeleted && hasConfirmedId;
   const canReact = !!onReact && !isDeleted && hasConfirmedId;
+  // Telegram-pattern optimistic ✓: an outgoing message that the SDK
+  // is still tracking as WAITING_SESSION / READY is reported as
+  // "sending" UNLESS the user submitted it during this app session,
+  // in which case the UI commits to ✓ as soon as the row exists.
+  //
+  // Keyed by `storeId`, set synchronously at submit (see
+  // `messageStore.sendMessage` — the mark happens before any await,
+  // so the very first paint after tap shows ✓). `storeId` survives
+  // the optimistic→persisted swap, so the lookup stays valid for the
+  // whole lifetime of this row in the session. On reload the set is
+  // empty, so a genuinely-pending row re-renders as ⏳ until the
+  // SDK send loop drains it.
+  const messageStoreId = (message as { storeId?: string }).storeId;
+  const optimisticallySent = useMessageStore(state =>
+    messageStoreId
+      ? state.optimisticallySentStoreIds.has(messageStoreId)
+      : false
+  );
   const isSending =
     isOutgoing &&
+    !optimisticallySent &&
     (message.status === MessageStatus.WAITING_SESSION ||
       message.status === MessageStatus.READY);
   const isEdited =
@@ -341,6 +361,7 @@ const MessageItem: React.FC<MessageItemProps> = ({
         isDeleted={isDeleted}
         isEdited={isEdited}
         isSending={isSending}
+        isOptimisticallySent={optimisticallySent}
         showTimestamp={showTimestamp}
         isTextSelectable={textSelection.isTextSelectable}
         isContextMenuOpen={contextMenu.isContextMenuOpen}

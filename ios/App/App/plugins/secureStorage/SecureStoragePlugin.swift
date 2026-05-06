@@ -9,26 +9,15 @@ public class SecureStoragePlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "call", returnType: CAPPluginReturnPromise),
     ]
 
-    /// Two dedicated 8 MB-stack worker threads, each draining its own
-    /// FIFO queue. PQ (ML-KEM) crypto needs ~4 MB of stack; iOS's default
+    /// Dedicated 8 MB-stack worker thread draining a single FIFO queue.
+    /// PQ (ML-KEM) crypto needs ~4 MB of stack; iOS's default
     /// `DispatchQueue` stack is only 512 KB.
     ///
-    /// We split SQL ops from namespace-blob ops so a long blob persist
-    /// (potentially MBs of session data) can never head-of-line block a
-    /// foreground SQL query. Mirrors Android's two-executor split.
-    private static let sqlWorker: WorkerThread = WorkerThread(name: "secure-storage-sql")
-    private static let namespaceWorker: WorkerThread = WorkerThread(name: "secure-storage-namespace")
-
-    /// Explicit allowlist of namespace-affined methods. Mirrors the Android
-    /// `NAMESPACE_METHODS` set. The previous `method.contains("Namespace")`
-    /// was fragile: a future name like `commitNamespaceTxn` would silently
-    /// route here too.
-    private static let namespaceMethods: Set<String> = [
-        "writeNamespaceData",
-        "readNamespaceData",
-        "namespaceDataLength",
-        "clearNamespace",
-    ]
+    /// Keep every secure-storage call on one queue. The native VFS owns
+    /// one global unlocked session and one SQLite handle set, so
+    /// namespace calls must not overtake lifecycle calls such as
+    /// `unlockSession`, `lockSession`, `flush`, or `close`.
+    private static let worker: WorkerThread = WorkerThread(name: "secure-storage")
 
     private static let log = OSLog(subsystem: "secureStorage", category: "plugin")
 
@@ -56,8 +45,7 @@ public class SecureStoragePlugin: CAPPlugin, CAPBridgedPlugin {
             args = rawArgs
         }
 
-        let worker = Self.namespaceMethods.contains(method) ? Self.namespaceWorker : Self.sqlWorker
-        worker.enqueue {
+        Self.worker.enqueue {
             do {
                 let result = try nativeCall(method: method, argsJson: args)
                 call.resolve(["result": result])
@@ -70,8 +58,11 @@ public class SecureStoragePlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     /// Resolve the relative path to an absolute path rooted in the
-    /// sandboxed Application Support directory and mark it
-    /// `completeUntilFirstUserAuthentication` + excluded from backup.
+    /// sandboxed Application Support directory and mark it excluded
+    /// from backup. The directory uses
+    /// `completeUntilFirstUserAuthentication`, meaning iOS blocks access
+    /// before the first device unlock after boot, then allows later
+    /// background access even while the device is locked.
     ///
     /// Both attribute applications are best-effort but logged on failure.
     /// If the backup exclusion specifically fails, that is fatal: a
@@ -95,7 +86,8 @@ public class SecureStoragePlugin: CAPPlugin, CAPBridgedPlugin {
         try FileManager.default.createDirectory(
             atPath: fullPath, withIntermediateDirectories: true)
 
-        // Data protection: keep storage encrypted while the device is locked.
+        // Keep storage unavailable before first unlock after boot, while
+        // still permitting native background work after that first unlock.
         do {
             try FileManager.default.setAttributes(
                 [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],

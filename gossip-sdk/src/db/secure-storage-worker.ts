@@ -33,6 +33,7 @@ import init, {
   readNamespaceData,
   namespaceDataLength,
   clearNamespace,
+  destroySession,
 } from '../assets/generated/wasm-secureStorage/secureStorage.js';
 
 import {
@@ -234,6 +235,30 @@ export class SecureStorageWorkerApi {
   }
 
   /**
+   * Permanently destroy the data of the currently unlocked slot.
+   *
+   * Sequence (mirrors `lock` but with the wipe in the middle):
+   *   1. `closeDatabase()` — drops the SafeDb; SQLite's xWrite on close
+   *      flushes any dirty pages into IdbBlockStorage's pending state
+   *      under the still-current keypair.
+   *   2. `destroySession(namespaces)` — Rust writes a fresh dummy
+   *      keypair, truncates the slot's blockstreams, and re-pads them
+   *      with cover blocks under the new PK. All writes accumulate in
+   *      pending state.
+   *   3. `flushEncrypted()` — single async commit to IDB. Process
+   *      crash before this resolves rolls everything back: the slot
+   *      is left exactly as it was, the user retries.
+   *
+   * After this resolves, the old secret no longer unlocks the slot
+   * and the namespaces no longer hold the user's encrypted data.
+   */
+  async destroy(namespaces: Uint8Array): Promise<void> {
+    closeDatabase();
+    destroySession(namespaces);
+    await flushEncrypted();
+  }
+
+  /**
    * Execute a statement. Durability semantics:
    *   * When `inTransaction` is true, skip the flush on every inner
    *     statement. The caller is responsible for flushing once on COMMIT
@@ -320,6 +345,30 @@ export class SecureStorageWorkerApi {
 
   async clearNamespace(namespace: number): Promise<void> {
     clearNamespace(namespace);
+    await flushEncrypted();
+  }
+
+  /**
+   * Atomic clear+write equivalent of the native plugin's
+   * `replaceNamespaceData`. The two wasm calls below mutate in-memory
+   * state synchronously; only the trailing `flushEncrypted` writes
+   * to IndexedDB, batching both ops into a single IDB transaction.
+   * That preserves atomicity equivalent to the native single-fsync
+   * path: a process kill before the flush leaves IDB untouched, a
+   * crash mid-flush gets rolled back by IDB itself, and a successful
+   * flush lands the new blob with the previous content fully replaced.
+   *
+   * Without this proxy method, the caller had to chain `clearNamespace`
+   * and `writeNamespaceData` from `sqlite.ts`, each producing its own
+   * IDB transaction; a kill between them left the namespace empty and
+   * the session blob silently lost.
+   */
+  async replaceNamespaceData(
+    namespace: number,
+    data: Uint8Array
+  ): Promise<void> {
+    clearNamespace(namespace);
+    writeNamespaceData(namespace, 0, data);
     await flushEncrypted();
   }
 
