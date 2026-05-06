@@ -58,8 +58,11 @@ public class SecureStoragePlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     /// Resolve the relative path to an absolute path rooted in the
-    /// sandboxed Application Support directory and mark it
-    /// `completeUntilFirstUserAuthentication` + excluded from backup.
+    /// sandboxed Application Support directory and mark it excluded
+    /// from backup. The directory uses
+    /// `completeUntilFirstUserAuthentication`, meaning iOS blocks access
+    /// before the first device unlock after boot, then allows later
+    /// background access even while the device is locked.
     ///
     /// Both attribute applications are best-effort but logged on failure.
     /// If the backup exclusion specifically fails, that is fatal: a
@@ -83,7 +86,8 @@ public class SecureStoragePlugin: CAPPlugin, CAPBridgedPlugin {
         try FileManager.default.createDirectory(
             atPath: fullPath, withIntermediateDirectories: true)
 
-        // Data protection: keep storage encrypted while the device is locked.
+        // Keep storage unavailable before first unlock after boot, while
+        // still permitting native background work after that first unlock.
         do {
             try FileManager.default.setAttributes(
                 [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
