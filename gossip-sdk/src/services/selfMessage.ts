@@ -6,6 +6,7 @@ import {
   MessageType,
 } from '../db/db.js';
 import { discussions, messages } from '../db/schema/index.js';
+import { or, eq, sql, and } from 'drizzle-orm';
 
 export const SELF_CONTACT_ID = '__self__';
 
@@ -176,27 +177,43 @@ export class SelfMessageService {
   }
 
   async deleteMessage(id: number): Promise<void> {
-    // Delete any reactions that reference this message via metadata.originalMessageId
-    const reactions = await this.queries.messages.getReactionsByOwnerAndContact(
-      this.ownerUserId,
-      SELF_CONTACT_ID
-    );
+    await this.queries.conn.db
+      .delete(messages)
+      .where(
+        or(
+          eq(messages.id, id),
+          and(
+            eq(messages.type, MessageType.REACTION),
+            sql`json_extract(${messages.metadata}, '$.originalMessageId') = ${id}`
+          )
+        )
+      );
 
-    const toDelete = reactions.filter(row => {
-      if (!row.metadata) return false;
-      try {
-        const meta = JSON.parse(row.metadata as string);
-        return meta?.originalMessageId === id;
-      } catch {
-        return false;
-      }
-    });
+    // Remove $.originalMessageId from metadata of any message that references the deleted message
+    await this.queries.conn.db
+      .update(messages)
+      .set({
+        metadata: sql`json_remove(${messages.metadata}, '$.originalMessageId')`,
+      })
+      .where(
+        sql`json_extract(${messages.metadata}, '$.originalMessageId') = ${id}`
+      );
 
-    for (const reaction of toDelete) {
-      await this.queries.messages.deleteById(reaction.id);
-    }
+    // const toDelete = reactions.filter(row => {
+    //   if (!row.metadata) return false;
+    //   try {
+    //     const meta = JSON.parse(row.metadata as string);
+    //     return meta?.originalMessageId === id;
+    //   } catch {
+    //     return false;
+    //   }
+    // });
 
-    await this.queries.messages.deleteById(id);
+    // for (const reaction of toDelete) {
+    //   await this.queries.messages.deleteById(reaction.id);
+    // }
+
+    // await this.queries.messages.deleteById(id);
   }
 
   async sendReaction(

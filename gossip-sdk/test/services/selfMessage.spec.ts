@@ -129,7 +129,7 @@ describe('SelfMessageService', () => {
     expect(meta.edited).toBe(true);
   });
 
-  it('deleteMessage removes the row and cascades reactions', async () => {
+  it('deleteMessage removes the row and cascades reactions and replies', async () => {
     const queries = getTestQueries();
     const ownerUserId = 'owner-self-del';
     const service = new SelfMessageService(queries, ownerUserId);
@@ -157,6 +157,28 @@ describe('SelfMessageService', () => {
       metadata: JSON.stringify({ originalMessageId: sent.id }),
     });
 
+    const replyId = await queries.messages.insert({
+      ownerUserId,
+      contactUserId: SELF_CONTACT_ID,
+      content: 'reply to the message',
+      type: MessageType.TEXT,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.SENT,
+      timestamp: new Date(),
+      metadata: JSON.stringify({ originalMessageId: sent.id }),
+    });
+
+    const replyToReplyId = await queries.messages.insert({
+      ownerUserId,
+      contactUserId: SELF_CONTACT_ID,
+      content: 'reply to the reply',
+      type: MessageType.TEXT,
+      direction: MessageDirection.OUTGOING,
+      status: MessageStatus.SENT,
+      timestamp: new Date(),
+      metadata: JSON.stringify({ originalMessageId: replyId }),
+    });
+
     await service.deleteMessage(sent.id!);
 
     rows = await queries.messages.getByOwnerAndContact(
@@ -169,7 +191,17 @@ describe('SelfMessageService', () => {
       ownerUserId,
       SELF_CONTACT_ID
     );
+    const reply = rows.find(r => r.id === replyId);
+    expect(reply).toBeDefined();
+
+    const replyToReply = rows.find(r => r.id === replyToReplyId);
+    expect(replyToReply).toBeDefined();
+    const replyToReplyMetadata = JSON.parse(replyToReply?.metadata as string);
+    expect(replyToReplyMetadata.originalMessageId).toBe(replyId);
+
+    const replyMetadata = JSON.parse(reply?.metadata as string);
     expect(reactions.find(r => r.id === reactionId)).toBeUndefined();
+    expect(replyMetadata.originalMessageId).toBeUndefined();
   });
 
   it('getMessages returns every readable row for self chat', async () => {
