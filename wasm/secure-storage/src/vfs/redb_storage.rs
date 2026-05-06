@@ -70,8 +70,7 @@ impl RedbStorage {
     pub fn open(base: &Path) -> Result<Self> {
         fs::create_dir_all(base)?;
         let db_path = base.join("storage.redb");
-        let db = Database::create(&db_path)
-            .map_err(redb_err("open"))?;
+        let db = Database::create(&db_path).map_err(redb_err("open"))?;
 
         let mut storage = Self {
             db,
@@ -85,10 +84,7 @@ impl RedbStorage {
 
     /// Scan the BLOCKS table and count entries per `(session, namespace)`.
     fn rebuild_block_counts(&mut self) -> Result<()> {
-        let txn = self
-            .db
-            .begin_read()
-            .map_err(redb_err("read txn"))?;
+        let txn = self.db.begin_read().map_err(redb_err("read txn"))?;
 
         let table = match txn.open_table(BLOCKS) {
             Ok(t) => t,
@@ -100,12 +96,9 @@ impl RedbStorage {
             counts.clear();
         }
 
-        let iter = table
-            .iter()
-            .map_err(redb_err("iter"))?;
+        let iter = table.iter().map_err(redb_err("iter"))?;
         for entry in iter {
-            let (key, _val) =
-                entry.map_err(redb_err("entry"))?;
+            let (key, _val) = entry.map_err(redb_err("entry"))?;
             let key_bytes = key.value();
             if key_bytes.len() == BLOCK_KEY_LEN {
                 let session = key_bytes[0] as usize;
@@ -131,18 +124,13 @@ impl RedbStorage {
     /// entries; used to gate `provision` at boot so we don't wipe
     /// existing slots by re-provisioning random throwaway keys.
     pub fn has_data(&self) -> Result<bool> {
-        let txn = self
-            .db
-            .begin_read()
-            .map_err(redb_err("read txn"))?;
+        let txn = self.db.begin_read().map_err(redb_err("read txn"))?;
         let table = match txn.open_table(KEYPAIRS) {
             Ok(t) => t,
             Err(redb::TableError::TableDoesNotExist(_)) => return Ok(false),
             Err(e) => return Err(SecureStorageError::Storage(format!("redb open table: {e}"))),
         };
-        let mut iter = table
-            .iter()
-            .map_err(redb_err("iter"))?;
+        let mut iter = table.iter().map_err(redb_err("iter"))?;
         Ok(iter.next().is_some())
     }
 
@@ -162,14 +150,9 @@ impl RedbStorage {
         // already points each key at the index of its last buffered write,
         // so we re-use it to skip redundant entries instead of paying for
         // them as separate redb inserts.
-        let txn = self
-            .db
-            .begin_write()
-            .map_err(redb_err("write txn"))?;
+        let txn = self.db.begin_write().map_err(redb_err("write txn"))?;
         {
-            let mut table = txn
-                .open_table(BLOCKS)
-                .map_err(redb_err("open table"))?;
+            let mut table = txn.open_table(BLOCKS).map_err(redb_err("open table"))?;
             // Iterate in original buffer order so on-disk write order matches
             // the order in which the application made the writes, but using
             // each key's last-buffered value.
@@ -183,8 +166,7 @@ impl RedbStorage {
                     .map_err(redb_err("insert"))?;
             }
         }
-        txn.commit()
-            .map_err(redb_err("commit"))?;
+        txn.commit().map_err(redb_err("commit"))?;
         self.ram_buffer.clear();
         self.ram_overlay.clear();
         Ok(())
@@ -216,16 +198,9 @@ impl BlockStorage for RedbStorage {
         }
 
         // Fall back to redb.
-        let txn = self
-            .db
-            .begin_read()
-            .map_err(redb_err("read txn"))?;
-        let table = txn
-            .open_table(BLOCKS)
-            .map_err(redb_err("open table"))?;
-        let entry = table
-            .get(key.as_slice())
-            .map_err(redb_err("get"))?;
+        let txn = self.db.begin_read().map_err(redb_err("read txn"))?;
+        let table = txn.open_table(BLOCKS).map_err(redb_err("open table"))?;
+        let entry = table.get(key.as_slice()).map_err(redb_err("get"))?;
         match entry {
             Some(val) => {
                 let val_bytes = val.value();
@@ -323,14 +298,9 @@ impl BlockStorage for RedbStorage {
         }
 
         // Delete this (session, namespace)'s blocks from redb.
-        let txn = self
-            .db
-            .begin_write()
-            .map_err(redb_err("write txn"))?;
+        let txn = self.db.begin_write().map_err(redb_err("write txn"))?;
         {
-            let mut table = txn
-                .open_table(BLOCKS)
-                .map_err(redb_err("open table"))?;
+            let mut table = txn.open_table(BLOCKS).map_err(redb_err("open table"))?;
 
             // Delete in place via `retain_in`: skips the
             // `Vec<BlockKey>` materialisation of every key in the range
@@ -339,14 +309,12 @@ impl BlockStorage for RedbStorage {
             let prefix_start = Self::make_block_key(su8, namespace, 0);
             let prefix_end = Self::make_block_key(su8, namespace, u64::MAX);
             table
-                .retain_in(
-                    prefix_start.as_slice()..=prefix_end.as_slice(),
-                    |_k, _v| false,
-                )
+                .retain_in(prefix_start.as_slice()..=prefix_end.as_slice(), |_k, _v| {
+                    false
+                })
                 .map_err(redb_err("retain_in"))?;
         }
-        txn.commit()
-            .map_err(redb_err("commit"))?;
+        txn.commit().map_err(redb_err("commit"))?;
 
         self.block_counts[si].remove(&namespace);
         Ok(())
@@ -378,10 +346,7 @@ impl BlockStorage for RedbStorage {
 
 impl KeypairStorage for RedbStorage {
     fn read_keypair(&self, session: SessionIndex) -> Result<Zeroizing<Vec<u8>>> {
-        let txn = self
-            .db
-            .begin_read()
-            .map_err(redb_err("read txn"))?;
+        let txn = self.db.begin_read().map_err(redb_err("read txn"))?;
         let table = match txn.open_table(KEYPAIRS) {
             Ok(t) => t,
             Err(redb::TableError::TableDoesNotExist(_)) => {
@@ -392,9 +357,7 @@ impl KeypairStorage for RedbStorage {
             }
         };
         let key = [session.as_u8()];
-        let entry = table
-            .get(key.as_slice())
-            .map_err(redb_err("get"))?;
+        let entry = table.get(key.as_slice()).map_err(redb_err("get"))?;
         match entry {
             Some(val) => Ok(Zeroizing::new(val.value().to_vec())),
             None => Err(SecureStorageError::Storage("keypair not found".into())),
@@ -402,21 +365,15 @@ impl KeypairStorage for RedbStorage {
     }
 
     fn write_keypair(&mut self, session: SessionIndex, data: &[u8]) -> Result<()> {
-        let txn = self
-            .db
-            .begin_write()
-            .map_err(redb_err("write txn"))?;
+        let txn = self.db.begin_write().map_err(redb_err("write txn"))?;
         {
-            let mut table = txn
-                .open_table(KEYPAIRS)
-                .map_err(redb_err("open table"))?;
+            let mut table = txn.open_table(KEYPAIRS).map_err(redb_err("open table"))?;
             let key = [session.as_u8()];
             table
                 .insert(key.as_slice(), data)
                 .map_err(redb_err("insert"))?;
         }
-        txn.commit()
-            .map_err(redb_err("commit"))?;
+        txn.commit().map_err(redb_err("commit"))?;
         Ok(())
     }
 }

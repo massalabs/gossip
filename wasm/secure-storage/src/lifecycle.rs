@@ -469,8 +469,7 @@ mod tests {
 
             // 2. bob allocate, immediately after, no writes between
             let bob_slot = SessionIndex::new(1).unwrap();
-            let bob_session =
-                allocate_session(&mut storage, DOMAIN, bob_slot, b"bob-pw").unwrap();
+            let bob_session = allocate_session(&mut storage, DOMAIN, bob_slot, b"bob-pw").unwrap();
 
             // 3. alice writes her session blob in ns=1. This is the FIRST
             //    activity in ns=1 across all slots, so it triggers the
@@ -503,8 +502,8 @@ mod tests {
             //    decrypts to random bytes. Without proactive init at
             //    allocate, the length header is whatever random bytes
             //    are in that cover, which is essentially never 0.
-            let bob_ns1 = load_namespace_state(&storage, DOMAIN, &bob_session, SESSION_BLOB_NS)
-                .unwrap();
+            let bob_ns1 =
+                load_namespace_state(&storage, DOMAIN, &bob_session, SESSION_BLOB_NS).unwrap();
             assert_eq!(
                 bob_ns1.total_data_length, 0,
                 "bob's ns=1 must look empty: he has never written there. \

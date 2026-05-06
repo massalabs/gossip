@@ -521,7 +521,8 @@ fn bind_param(stmt: &SafeStmt<'_>, idx: i32, value: &JsValue) -> SqlResult<()> {
         // execRaw) also rejects undefined at the boundary; this is the
         // last line of defence for callers that bypass the SDK.
         return Err(
-            "undefined is not a valid SQL bind value; pass null explicitly if NULL is intended".to_string(),
+            "undefined is not a valid SQL bind value; pass null explicitly if NULL is intended"
+                .to_string(),
         );
     }
     if value.is_null() {
