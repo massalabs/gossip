@@ -10,7 +10,6 @@ import {
   MessageType,
 } from '@massalabs/gossip-sdk';
 import type { Message } from '@massalabs/gossip-sdk';
-import { mockSelfMessagesService } from '../../mocks/mockSelfMessagesService';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -21,10 +20,7 @@ vi.mock('react-i18next', () => ({
 }));
 
 vi.mock('../../../src/hooks/useGossipSdk', () => ({
-  useGossipSdk: () => ({
-    isSessionOpen: false,
-    selfMessages: mockSelfMessagesService,
-  }),
+  useGossipSdk: () => ({ isSessionOpen: false }),
 }));
 
 import {
