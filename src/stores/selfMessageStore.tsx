@@ -4,6 +4,7 @@ import {
   MessageDirection,
   MessageStatus,
   MessageType,
+  SdkEventType,
 } from '@massalabs/gossip-sdk';
 import { createSelectors } from './utils/createSelectors';
 import { getSdk } from './sdkStore';
@@ -24,15 +25,21 @@ interface SelfMessageStore {
   reactions: ReactionsMap;
   isLoading: boolean;
   isSending: boolean;
+  cleanupFn: (() => void) | null;
   loadMessages: () => Promise<void>;
   loadReactions: () => Promise<void>;
-  sendMessage: (content: string) => Promise<void>;
+  init: () => void;
+  sendMessage: (
+    content: string,
+    replyToId?: number,
+    forwardFromMessageId?: number
+  ) => Promise<void>;
   editMessage: (id: number, newContent: string) => Promise<void>;
   deleteMessage: (id: number) => Promise<void>;
   sendReaction: (emoji: string, messageDbId: number) => Promise<void>;
   removeReaction: (reactionId: number) => Promise<void>;
   getReactionsForMessage: (messageDbId: number) => ReactionGroup[];
-  clearMessages: () => void;
+  cleanup: () => void;
 }
 
 const useSelfMessageStoreBase = create<SelfMessageStore>((set, get) => ({
@@ -40,6 +47,38 @@ const useSelfMessageStoreBase = create<SelfMessageStore>((set, get) => ({
   reactions: new Map(),
   isLoading: false,
   isSending: false,
+  cleanupFn: null,
+
+  init: () => {
+    if (get().cleanupFn) return;
+    const sdk = getSdk();
+    if (!sdk.isSessionOpen) return;
+
+    const onSelfMessageUpdated = ({
+      messages: updatedMessages,
+    }: {
+      messages: Message[];
+    }) => {
+      set(state => {
+        let changed = false;
+        const next = [...state.messages];
+        for (const msg of updatedMessages) {
+          const idx = next.findIndex(m => m.id === msg.id);
+          if (idx < 0) continue;
+          next[idx] = { ...msg };
+          changed = true;
+        }
+        return changed ? { messages: next } : state;
+      });
+    };
+
+    sdk.on(SdkEventType.SELF_MESSAGE_UPDATED, onSelfMessageUpdated);
+    set({
+      cleanupFn: () => {
+        sdk.off(SdkEventType.SELF_MESSAGE_UPDATED, onSelfMessageUpdated);
+      },
+    });
+  },
 
   loadMessages: async () => {
     const sdk = getSdk();
@@ -73,7 +112,11 @@ const useSelfMessageStoreBase = create<SelfMessageStore>((set, get) => ({
     }
   },
 
-  sendMessage: async (content: string) => {
+  sendMessage: async (
+    content: string,
+    replyToId?: number,
+    forwardFromMessageId?: number
+  ) => {
     const trimmed = content.trim();
     if (!trimmed) return;
 
@@ -82,12 +125,22 @@ const useSelfMessageStoreBase = create<SelfMessageStore>((set, get) => ({
     const userProfile = useAccountStore.getState().userProfile;
     if (!userProfile?.userId) return;
 
+    let forwardContent;
+    if (forwardFromMessageId) {
+      const forwardMessage = await sdk.messages.get(forwardFromMessageId);
+      if (!forwardMessage) {
+        console.warn('Forward target not found, sending as regular message');
+        /* if the message we forward in self discussion is also part of the self discussion, 
+      the forward is converted to a reply to it */
+      } else if (sdk.selfMessages.isSelfMessage(forwardMessage)) {
+        replyToId = forwardMessage.id;
+      } else {
+        forwardContent = forwardMessage.content;
+      }
+    }
+
     set({ isSending: true });
 
-    // Client-generated messageId so the React key (msg-${messageId}) stays
-    // stable across the optimistic → persisted patch. The SDK itself doesn't
-    // store messageId for self-messages, so we preserve ours after the write.
-    const localMessageId = crypto.getRandomValues(new Uint8Array(12));
     const optimistic: Message = {
       ownerUserId: userProfile.userId,
       contactUserId: '__self__',
@@ -96,23 +149,25 @@ const useSelfMessageStoreBase = create<SelfMessageStore>((set, get) => ({
       direction: MessageDirection.OUTGOING,
       status: MessageStatus.SENT,
       timestamp: new Date(),
-      messageId: localMessageId,
+      forwardOf: forwardContent
+        ? { originalContent: forwardContent }
+        : undefined,
+      metadata: replyToId ? { originalMessageId: replyToId } : undefined,
     };
     set(state => ({ messages: [...state.messages, optimistic] }));
-    set({ isSending: false });
 
     try {
-      const message = await sdk.selfMessages.send(trimmed);
+      const message = await sdk.selfMessages.send(optimistic);
       set(state => ({
-        messages: state.messages.map(m =>
-          m === optimistic ? { ...message, messageId: localMessageId } : m
-        ),
+        messages: state.messages.map(m => (m === optimistic ? message : m)),
       }));
     } catch (error) {
       console.error('Failed to send self message', error);
       set(state => ({
         messages: state.messages.filter(m => m !== optimistic),
       }));
+    } finally {
+      set({ isSending: false });
     }
   },
 
@@ -250,8 +305,15 @@ const useSelfMessageStoreBase = create<SelfMessageStore>((set, get) => ({
     return get().reactions.get(messageDbId) ?? [];
   },
 
-  clearMessages: () => {
-    set({ messages: [], reactions: new Map() });
+  cleanup: () => {
+    get().cleanupFn?.();
+    set({
+      cleanupFn: null,
+      messages: [],
+      reactions: new Map(),
+      isLoading: false,
+      isSending: false,
+    });
   },
 }));
 

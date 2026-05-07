@@ -5,6 +5,7 @@ import React from 'react';
 import { render } from 'vitest-browser-react';
 import { page, userEvent } from 'vitest/browser';
 import { MessageDirection, MessageStatus } from '@massalabs/gossip-sdk';
+import { mockSelfMessagesService } from '../mocks/mockSelfMessagesService';
 
 const mockNavigate = vi.fn();
 const mockDeleteMessage = vi.fn().mockResolvedValue(undefined);
@@ -36,6 +37,7 @@ vi.mock('../../src/stores/sdkStore', () => ({
     isSessionOpen: true,
     messages: { get: vi.fn().mockResolvedValue(null) },
     selfMessages: {
+      ...mockSelfMessagesService,
       getRetentionInfo: vi
         .fn()
         .mockResolvedValue({ duration: null, setAt: null }),
@@ -50,6 +52,7 @@ vi.mock('../../src/hooks/useGossipSdk', () => ({
       get: vi.fn().mockResolvedValue(null),
       deleteMessage: vi.fn().mockResolvedValue(true),
     },
+    selfMessages: mockSelfMessagesService,
   }),
 }));
 

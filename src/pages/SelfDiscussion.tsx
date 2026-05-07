@@ -17,20 +17,17 @@ import MessageList, {
 import MessageInput from '../components/discussions/MessageInput';
 import DiscussionLayout from '../components/ui/Layout/DiscussionLayout';
 import { useSelfMessageStore } from '../stores/selfMessageStore';
-import { getSdk } from '../stores/sdkStore';
 import { ROUTES } from '../constants/routes';
 import { useDiscussionMessageSelection } from '../hooks/useDiscussionMessageSelection';
 import { useGossipSdk } from '../hooks/useGossipSdk';
 import SelectionHeader from '../components/discussions/SelectionHeader';
 import { useRetentionPolicy } from '../hooks/useRetentionPolicy';
+import { useForwardPreview } from '../hooks/useForwardPreview';
 import { useKeyboardStore } from '../stores/keyboardStore';
 import { useHeaderScrollDetection } from '../hooks/useHeaderScrollDetection';
 import { ExitAnimationContext } from '../components/ui/ExitAnimationContext';
 import { useUiStore } from '../stores/uiStore';
-
-// Module-level guard so a given forward id is processed once across remounts
-// (StrictMode, route animation, back/forward nav).
-const handledForwardIds = new Set<number>();
+import { useAppStore } from '../stores/appStore';
 
 const RETENTION_OPTIONS: {
   labelKey: string;
@@ -61,6 +58,10 @@ const SelfDiscussion: React.FC = () => {
   const loadReactions = useSelfMessageStore.use.loadReactions();
 
   const gossip = useGossipSdk();
+  const setPendingSharedContent = useAppStore(s => s.setPendingSharedContent);
+  const setPendingForwardMessageId = useAppStore(
+    s => s.setPendingForwardMessageId
+  );
 
   // Self-messages don't carry a crypto `messageId` after reload (the SDK
   // doesn't persist it — there's no peer that needs it), so we look up
@@ -114,31 +115,30 @@ const SelfDiscussion: React.FC = () => {
     retentionInfo,
   } = useRetentionPolicy(t);
 
-  const forwardFromMessageId = (
-    location.state as { forwardFromMessageId?: number } | undefined
-  )?.forwardFromMessageId;
+  const locationState = location.state as {
+    forwardFromMessageId?: number;
+  } | null;
+  const {
+    forwardFromMessageId,
+    forwardPreviewText,
+    forwardPreviewMode,
+    clearForward,
+  } = useForwardPreview({
+    gossip,
+    contact: undefined,
+    initialForwardFromMessageId: locationState?.forwardFromMessageId,
+    setReplyingTo,
+  });
 
-  // Prefill the MessageInput with the forwarded content instead of sending
-  // immediately — user reviews/edits and hits send to confirm.
-  const [forwardDraft, setForwardDraft] = useState<string | undefined>(
-    undefined
+  const handleForwardMessage = useCallback(
+    (message: Message) => {
+      if (!message.id) return;
+      setPendingSharedContent(message.content);
+      setPendingForwardMessageId(message.id);
+      navigate(ROUTES.discussions(), { replace: true });
+    },
+    [navigate, setPendingForwardMessageId, setPendingSharedContent]
   );
-
-  useEffect(() => {
-    if (forwardFromMessageId == null) return;
-    if (handledForwardIds.has(forwardFromMessageId)) return;
-    handledForwardIds.add(forwardFromMessageId);
-
-    const idToForward = forwardFromMessageId;
-    navigate(ROUTES.selfDiscussion(), { replace: true, state: {} });
-
-    void (async () => {
-      const msg = await getSdk().messages.get(idToForward);
-      if (msg?.content) {
-        setForwardDraft(msg.content);
-      }
-    })();
-  }, [forwardFromMessageId, navigate]);
 
   useEffect(() => {
     void loadMessages();
@@ -259,11 +259,14 @@ const SelfDiscussion: React.FC = () => {
         <MessageInput
           disabled={isSelecting}
           isSelecting={isSelecting}
-          initialValue={editingMessage?.content ?? forwardDraft}
-          onSend={content => {
-            void sendMessage(content);
+          initialValue={editingMessage?.content ?? undefined}
+          forwardPreview={forwardFromMessageId ? forwardPreviewText : null}
+          forwardMode={forwardPreviewMode}
+          onCancelForward={clearForward}
+          onSend={(content, replyToId) => {
+            void sendMessage(content, replyToId, forwardFromMessageId);
             setReplyingTo(null);
-            setForwardDraft(undefined);
+            clearForward();
           }}
           replyingTo={replyingTo}
           onCancelReply={() => setReplyingTo(null)}
@@ -311,6 +314,11 @@ const SelfDiscussion: React.FC = () => {
                 void deleteMessage(message.id);
               }
             }}
+            onReplyTo={message => {
+              setReplyingTo(message);
+              setEditingMessage(null);
+            }}
+            onForward={handleForwardMessage}
             getReactions={getReactions}
             onReact={(message, emoji) => {
               if (message.id != null) {
