@@ -93,7 +93,7 @@ vi.mock('../../src/stores/messageStore', () => ({
 vi.mock('../../src/stores/selfMessageStore', () => ({
   useSelfMessageStore: {
     getState: () => ({
-      clearMessages: selfClearMessages,
+      cleanup: selfClearMessages,
     }),
   },
 }));

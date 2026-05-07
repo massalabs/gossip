@@ -43,6 +43,7 @@ import { QueueManager } from '../utils/queue.js';
 import { and, eq, sql } from 'drizzle-orm';
 import { GossipSqliteTx } from '../db/sqlite.js';
 import { POST_MESSAGE_TYPES } from '../utils/message.js';
+import { SELF_CONTACT_ID } from './selfMessage.js';
 
 /** Options for the simplified sendText method */
 export interface SendTextOptions {
@@ -895,12 +896,14 @@ export class MessageService {
       messageType: message.type,
     });
 
-    const peerId = decodeUserId(message.contactUserId);
-    if (peerId.length !== 32) {
-      return {
-        success: false,
-        error: 'Invalid contact userId (must be 32 bytes)',
-      };
+    if (message.contactUserId !== SELF_CONTACT_ID) {
+      const peerId = decodeUserId(message.contactUserId);
+      if (peerId.length !== 32) {
+        return {
+          success: false,
+          error: 'Invalid contact userId (must be 32 bytes)',
+        };
+      }
     }
 
     // Look up discussion
