@@ -23,6 +23,8 @@ export interface ShareFileOptions {
   mimeType?: string;
 }
 
+const NATIVE_SHARE_FILE_CLEANUP_DELAY_MS = 60_000;
+
 function isShareCancellation(error: unknown): boolean {
   return (
     error instanceof Error &&
@@ -53,19 +55,34 @@ function blobToBase64(blob: Blob): Promise<string> {
   });
 }
 
+function uniqueNativeShareFileName(fileName: string): string {
+  const dotIndex = fileName.lastIndexOf('.');
+  const base = dotIndex > 0 ? fileName.slice(0, dotIndex) : fileName;
+  const extension = dotIndex > 0 ? fileName.slice(dotIndex) : '';
+  const suffix =
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+  return `${base}-${suffix}${extension}`;
+}
+
 async function shareFileViaNative(
   blob: Blob,
   fileName: string,
   title: string
 ): Promise<void> {
   const base64Data = await blobToBase64(blob);
+  const cacheFileName = uniqueNativeShareFileName(fileName);
 
+  let shouldCleanup = false;
   try {
     const { uri } = await Filesystem.writeFile({
-      path: fileName,
+      path: cacheFileName,
       data: base64Data,
       directory: Directory.Cache,
     });
+    shouldCleanup = true;
 
     await Share.share({
       title,
@@ -73,13 +90,17 @@ async function shareFileViaNative(
       dialogTitle: title,
     });
   } finally {
-    try {
-      await Filesystem.deleteFile({
-        path: fileName,
-        directory: Directory.Cache,
-      });
-    } catch {
-      // File cleanup is best effort
+    if (shouldCleanup) {
+      setTimeout(async () => {
+        try {
+          await Filesystem.deleteFile({
+            path: cacheFileName,
+            directory: Directory.Cache,
+          });
+        } catch {
+          // File cleanup is best effort
+        }
+      }, NATIVE_SHARE_FILE_CLEANUP_DELAY_MS);
     }
   }
 }
