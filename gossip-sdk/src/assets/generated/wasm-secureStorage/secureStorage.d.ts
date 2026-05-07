@@ -110,11 +110,11 @@ export interface InitOutput {
   readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
   readonly __wbindgen_export_7: WebAssembly.Table;
   readonly __externref_table_dealloc: (a: number) => void;
-  readonly closure97_externref_shim: (a: number, b: number, c: any) => void;
-  readonly wasm_bindgen_b3ea05ef1784c7d3___convert__closures_____invoke______: (a: number, b: number) => void;
-  readonly closure662_externref_shim: (a: number, b: number, c: any) => void;
-  readonly closure89_externref_shim_multivalue_shim: (a: number, b: number, c: any) => [number, number];
-  readonly closure718_externref_shim: (a: number, b: number, c: any, d: any) => void;
+  readonly closure112_externref_shim: (a: number, b: number, c: any) => void;
+  readonly wasm_bindgen_3f82e0ab9dbbc377___convert__closures_____invoke______: (a: number, b: number) => void;
+  readonly closure678_externref_shim: (a: number, b: number, c: any) => void;
+  readonly closure56_externref_shim_multivalue_shim: (a: number, b: number, c: any) => [number, number];
+  readonly closure723_externref_shim: (a: number, b: number, c: any, d: any) => void;
   readonly __wbindgen_thread_destroy: (a?: number, b?: number, c?: number) => void;
   readonly __wbindgen_start: (a: number) => void;
 }
