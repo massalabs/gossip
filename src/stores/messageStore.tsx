@@ -69,17 +69,14 @@ async function resolveReplyAndForward(
     const orig = await getSdk().messages.get(forwardFromMessageId);
     if (!orig) {
       console.warn('Forward target not found, sending as regular message');
+    } else if (!orig.messageId) {
+      throw new Error('Cannot forward a message that has no messageId');
     } else if (orig.contactUserId === contactUserId) {
-      if (!orig.messageId) {
-        throw new Error('Cannot reply to a message that has no messageId');
-      }
       replyTo = { originalMsgId: orig.messageId };
     } else {
       forwardOf = {
         originalContent: orig.content,
-        originalContactId: !getSdk().selfMessages.isSelfMessage(orig)
-          ? decodeUserId(orig.contactUserId)
-          : undefined,
+        originalContactId: decodeUserId(orig.contactUserId),
       };
     }
   }

@@ -669,7 +669,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
 
         useDiscussionStore.getState().cleanup();
         useMessageStore.getState().cleanup();
-        useSelfMessageStore.getState().cleanup();
+        useSelfMessageStore.getState().clearMessages();
 
         if (sdk.isSecureStorage) {
           // Atomic destroy: rotates the slot's keypair to a dummy and
@@ -745,7 +745,7 @@ const useAccountStoreBase = create<AccountState>((set, get) => {
         await cleanupSession();
         useDiscussionStore.getState().cleanup();
         useMessageStore.getState().cleanup();
-        useSelfMessageStore.getState().cleanup();
+        useSelfMessageStore.getState().clearMessages();
         onboardingAllocatedSlots.clear();
 
         set({

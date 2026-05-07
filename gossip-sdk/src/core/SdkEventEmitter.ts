@@ -13,7 +13,6 @@ export enum SdkEventType {
   MESSAGE_FAILED = 'messageFailed',
   MESSAGE_DELETED = 'messageDeleted',
   MESSAGE_UPDATED = 'messageUpdated',
-  SELF_MESSAGE_UPDATED = 'selfMessageUpdated',
   SESSION_REQUESTED = 'sessionRequested',
   SESSION_CREATED = 'sessionCreated',
   SESSION_RENEWED = 'sessionRenewed',
@@ -33,7 +32,6 @@ export type SdkEvents = {
   [SdkEventType.MESSAGE_FAILED]: { message: Message; error: Error };
   [SdkEventType.MESSAGE_DELETED]: { messages: Message[] };
   [SdkEventType.MESSAGE_UPDATED]: { messages: Message[] };
-  [SdkEventType.SELF_MESSAGE_UPDATED]: { messages: Message[] };
   [SdkEventType.SESSION_REQUESTED]: {
     discussion: Discussion;
     contact: Contact;
