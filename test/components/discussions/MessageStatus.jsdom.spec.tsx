@@ -1,6 +1,6 @@
 import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { act } from 'react';
+import { act } from 'react-dom/test-utils';
 import { createRoot, type Root } from 'react-dom/client';
 import { MessageStatus as MessageStatusEnum } from '@massalabs/gossip-sdk';
 import MessageStatusIndicator from '../../../src/components/discussions/MessageStatus';
