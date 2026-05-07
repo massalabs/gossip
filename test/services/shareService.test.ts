@@ -54,7 +54,9 @@ beforeEach(() => {
   vi.unstubAllGlobals();
   vi.useRealTimers();
   mockIsNative.mockReturnValue(false);
-  mockWriteFile.mockResolvedValue({ uri: 'file:///cache/contact-qr-code.png' });
+  mockWriteFile.mockImplementation(async ({ path }) => ({
+    uri: `file:///cache/${path}`,
+  }));
   mockDeleteFile.mockResolvedValue(undefined);
   setNavigatorShare(undefined);
   setClipboard(vi.fn().mockResolvedValue(undefined));
@@ -171,14 +173,15 @@ describe('shareFile', () => {
         title: 'Gossip QR Code',
       });
 
+      const cacheFileName = mockWriteFile.mock.calls[0][0].path;
       expect(mockWriteFile).toHaveBeenCalledWith({
-        path: 'contact-qr-code.png',
+        path: cacheFileName,
         data: expect.any(String),
         directory: Directory.Cache,
       });
       expect(mockShare).toHaveBeenCalledWith({
         title: 'Gossip QR Code',
-        files: ['file:///cache/contact-qr-code.png'],
+        files: [`file:///cache/${cacheFileName}`],
         dialogTitle: 'Gossip QR Code',
       });
       expect(mockDeleteFile).not.toHaveBeenCalled();
@@ -186,7 +189,7 @@ describe('shareFile', () => {
       await vi.runAllTimersAsync();
 
       expect(mockDeleteFile).toHaveBeenCalledWith({
-        path: 'contact-qr-code.png',
+        path: cacheFileName,
         directory: Directory.Cache,
       });
     });
