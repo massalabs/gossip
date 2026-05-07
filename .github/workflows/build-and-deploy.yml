@@ -42,7 +42,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       VITE_GOSSIP_API_URL: ${{ vars.GOSSIP_API_URL }}
-      VITE_INVITE_DOMAIN: ${{ github.ref_name == 'main' && vars.INVITE_DOMAIN_MAIN || vars.INVITE_DOMAIN_DEV }}
+      VITE_INVITE_DOMAIN: ${{ (github.ref_name == 'main' || github.ref_type == 'tag') && vars.INVITE_DOMAIN_MAIN || vars.INVITE_DOMAIN_DEV }}
       VITE_SECURE_STORAGE: 'true'
     steps:
       - name: Checkout repository
