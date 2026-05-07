@@ -3,7 +3,7 @@
 [target.wasm32-unknown-unknown]
 rustflags = [
     "-C", "target-feature=+atomics,+bulk-memory",
-    "-C", "link-args=-z stack-size=4194304 --shared-memory --import-memory --max-memory=4294967296 --export=__wasm_init_tls --export=__tls_size --export=__tls_align --export=__tls_base",
+    "-C", "link-args=-z stack-size=4194304 --shared-memory --import-memory --max-memory=4294967296 --export=__heap_base --export=__wasm_init_tls --export=__tls_size --export=__tls_align --export=__tls_base",
 ]
 
 [env]

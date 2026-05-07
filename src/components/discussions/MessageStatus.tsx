@@ -38,6 +38,14 @@ const MessageStatusIndicator: React.FC<MessageStatusProps> = React.memo(
     if (!showTimestamp && !(!isDeleted && (isOutgoing || isEdited)))
       return null;
 
+    const isDeliveredOrRead =
+      status === MessageStatusEnum.DELIVERED ||
+      status === MessageStatusEnum.READ;
+    const showSent =
+      !isDeliveredOrRead &&
+      (status === MessageStatusEnum.SENT || isOptimisticallySent);
+    const showSending = !isDeliveredOrRead && !showSent && isSending;
+
     return (
       <span
         className={`inline-flex items-center gap-1 ml-1.5 align-bottom translate-y-[1px] ${
@@ -61,20 +69,19 @@ const MessageStatusIndicator: React.FC<MessageStatusProps> = React.memo(
             className="inline-flex items-center w-4 h-3.5 transition-opacity duration-200"
             aria-label={t('message_item.status', { status })}
           >
-            {isSending && (
+            {showSending && (
               <Clock
                 className="w-3 h-3"
                 aria-label={t('message_item.sending')}
               />
             )}
-            {(status === MessageStatusEnum.SENT || isOptimisticallySent) && (
+            {showSent && (
               <CheckIcon
                 className="w-3.5 h-3.5"
                 aria-label={t('message_item.sent')}
               />
             )}
-            {(status === MessageStatusEnum.DELIVERED ||
-              status === MessageStatusEnum.READ) && (
+            {isDeliveredOrRead && (
               <span
                 className="relative inline-flex items-center w-4 h-3.5"
                 aria-label={t('message_item.delivered')}
