@@ -2,7 +2,6 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { Message, encodeUserId } from '@massalabs/gossip-sdk';
 import { useGossipSdk } from '../../../hooks/useGossipSdk';
 import { useMessageStore } from '../../../stores/messageStore';
-import { useSelfMessageStore } from '../../../stores/selfMessageStore';
 import { messageIdEquals } from '../../../stores/messageStore.helpers';
 import { parseLinks } from '../../../utils/linkUtils';
 
@@ -21,8 +20,6 @@ export function useOriginalMessage({
   const [originalNotFound, setOriginalNotFound] = useState(false);
 
   const citedMsgId = message.replyTo?.originalMsgId;
-  const repliedMessageInSelfDiscussionId =
-    sdk.selfMessages.repliedMessageId(message);
   const citedContactId = message.forwardOf?.originalContactId;
 
   let originalContactUserId = message.contactUserId;
@@ -35,24 +32,13 @@ export function useOriginalMessage({
   }
 
   // Reactive lookup in the store — picks up optimistic updates (e.g. delete)
-  const storeSelfMessages = useSelfMessageStore(state => state.messages);
   const storeMessages = useMessageStore(state =>
     state.messagesByContact.get(originalContactUserId)
   );
   const storeMatch = useMemo(() => {
-    if (repliedMessageInSelfDiscussionId != null && storeSelfMessages) {
-      return storeSelfMessages.find(
-        m => m.id === repliedMessageInSelfDiscussionId
-      );
-    }
     if (!citedMsgId || !storeMessages) return undefined;
     return storeMessages.find(m => messageIdEquals(m.messageId, citedMsgId));
-  }, [
-    repliedMessageInSelfDiscussionId,
-    citedMsgId,
-    storeMessages,
-    storeSelfMessages,
-  ]);
+  }, [citedMsgId, storeMessages]);
 
   // Fall back to DB for messages not in the store (e.g. older messages not loaded)
   useEffect(() => {
@@ -63,23 +49,17 @@ export function useOriginalMessage({
       return;
     }
 
-    if (
-      sdk.isSessionOpen &&
-      (repliedMessageInSelfDiscussionId != null || citedMsgId)
-    ) {
+    if (citedMsgId && sdk.isSessionOpen) {
       setIsLoadingOriginal(true);
       setOriginalNotFound(false);
 
       const findMessage = async () => {
         try {
-          const msg =
-            repliedMessageInSelfDiscussionId != null
-              ? await sdk.messages.get(repliedMessageInSelfDiscussionId)
-              : await sdk.messages.findMessageByMsgId(
-                  citedMsgId as Uint8Array,
-                  message.ownerUserId,
-                  originalContactUserId
-                );
+          const msg = await sdk.messages.findMessageByMsgId(
+            citedMsgId,
+            message.ownerUserId,
+            originalContactUserId
+          );
 
           if (msg) {
             setDbOriginal(msg);
@@ -98,11 +78,7 @@ export function useOriginalMessage({
       };
 
       findMessage();
-    } else if (
-      message.replyTo ||
-      message.forwardOf ||
-      repliedMessageInSelfDiscussionId != null
-    ) {
+    } else if (message.replyTo || message.forwardOf) {
       setDbOriginal(null);
       setOriginalNotFound(true);
       setIsLoadingOriginal(false);
@@ -113,7 +89,6 @@ export function useOriginalMessage({
     }
   }, [
     citedMsgId,
-    repliedMessageInSelfDiscussionId,
     storeMatch,
     message.replyTo,
     message.forwardOf,

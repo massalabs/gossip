@@ -5,7 +5,6 @@ import React from 'react';
 import { render } from 'vitest-browser-react';
 import { page, userEvent } from 'vitest/browser';
 import { MessageDirection, MessageStatus } from '@massalabs/gossip-sdk';
-import { mockSelfMessagesService } from '../mocks/mockSelfMessagesService';
 
 const mockNavigate = vi.fn();
 const mockSendMessage = vi.fn().mockResolvedValue(undefined);
@@ -50,7 +49,6 @@ vi.mock('../../src/hooks/useGossipSdk', () => ({
       get: vi.fn().mockResolvedValue(null),
       deleteMessage: mockDeleteMessage,
     },
-    selfMessages: mockSelfMessagesService,
   }),
 }));
 

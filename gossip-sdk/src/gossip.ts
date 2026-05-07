@@ -433,7 +433,7 @@ class GossipSdk {
     this._selfMessage = new SelfMessageService(
       queries,
       session.userIdEncoded,
-      this.eventEmitter
+      encryptionKey
     );
     await this._selfMessage.ensureDiscussionExists();
 
