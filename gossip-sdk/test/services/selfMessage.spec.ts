@@ -3,6 +3,7 @@ import {
   SelfMessageService,
   SELF_CONTACT_ID,
 } from '../../src/services/selfMessage';
+import { SdkEventEmitter } from '../../src/core/SdkEventEmitter';
 import {
   getTestQueries,
   clearAllTables,
@@ -40,7 +41,11 @@ describe('SelfMessageService', () => {
   it('ensureDiscussionExists creates a self discussion once and is idempotent', async () => {
     const queries = getTestQueries();
     const ownerUserId = 'owner-self-1';
-    const service = new SelfMessageService(queries, ownerUserId);
+    const service = new SelfMessageService(
+      queries,
+      ownerUserId,
+      new SdkEventEmitter()
+    );
 
     // First call should insert a discussion row
     await service.ensureDiscussionExists();
@@ -66,7 +71,11 @@ describe('SelfMessageService', () => {
   it('send stores plaintext and getMessages returns it', async () => {
     const queries = getTestQueries();
     const ownerUserId = 'owner-self-enc';
-    const service = new SelfMessageService(queries, ownerUserId);
+    const service = new SelfMessageService(
+      queries,
+      ownerUserId,
+      new SdkEventEmitter()
+    );
 
     await service.ensureDiscussionExists();
 
@@ -107,7 +116,11 @@ describe('SelfMessageService', () => {
   it('editMessage updates content and sets edited metadata', async () => {
     const queries = getTestQueries();
     const ownerUserId = 'owner-self-edit';
-    const service = new SelfMessageService(queries, ownerUserId);
+    const service = new SelfMessageService(
+      queries,
+      ownerUserId,
+      new SdkEventEmitter()
+    );
 
     await service.ensureDiscussionExists();
     const sent = await service.send(
@@ -132,7 +145,11 @@ describe('SelfMessageService', () => {
   it('deleteMessage removes the row and cascades reactions and replies', async () => {
     const queries = getTestQueries();
     const ownerUserId = 'owner-self-del';
-    const service = new SelfMessageService(queries, ownerUserId);
+    const service = new SelfMessageService(
+      queries,
+      ownerUserId,
+      new SdkEventEmitter()
+    );
 
     await service.ensureDiscussionExists();
     const sent = await service.send(
@@ -208,7 +225,11 @@ describe('SelfMessageService', () => {
     const queries = getTestQueries();
     const ownerUserId = 'owner-self-bad';
 
-    const writer = new SelfMessageService(queries, ownerUserId);
+    const writer = new SelfMessageService(
+      queries,
+      ownerUserId,
+      new SdkEventEmitter()
+    );
     await writer.ensureDiscussionExists();
     await writer.send(selfTextMessage(ownerUserId, 'ok-one'));
     await writer.send(selfTextMessage(ownerUserId, 'ok-two'));
@@ -223,7 +244,11 @@ describe('SelfMessageService', () => {
       timestamp: new Date(),
     });
 
-    const reader = new SelfMessageService(queries, ownerUserId);
+    const reader = new SelfMessageService(
+      queries,
+      ownerUserId,
+      new SdkEventEmitter()
+    );
     const messages = await reader.getMessages();
 
     const contents = messages.map(m => m.content).sort();

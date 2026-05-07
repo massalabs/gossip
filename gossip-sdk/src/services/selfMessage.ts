@@ -7,13 +7,16 @@ import {
 } from '../db/db.js';
 import { discussions, messages } from '../db/schema/index.js';
 import { or, eq, sql, and } from 'drizzle-orm';
+import { SdkEventEmitter, SdkEventType } from '../core/SdkEventEmitter.js';
+import { rowToMessage } from './message.js';
 
 export const SELF_CONTACT_ID = '__self__';
 
 export class SelfMessageService {
   constructor(
     private readonly queries: Queries,
-    private readonly ownerUserId: string
+    private readonly ownerUserId: string,
+    private readonly eventEmitter: SdkEventEmitter
   ) {}
 
   async ensureDiscussionExists(): Promise<void> {
@@ -190,30 +193,23 @@ export class SelfMessageService {
       );
 
     // Remove $.originalMessageId from metadata of any message that references the deleted message
-    await this.queries.conn.db
+    const updatedRows = await this.queries.conn.db
       .update(messages)
       .set({
         metadata: sql`json_remove(${messages.metadata}, '$.originalMessageId')`,
       })
       .where(
         sql`json_extract(${messages.metadata}, '$.originalMessageId') = ${id}`
-      );
+      )
+      .returning();
 
-    // const toDelete = reactions.filter(row => {
-    //   if (!row.metadata) return false;
-    //   try {
-    //     const meta = JSON.parse(row.metadata as string);
-    //     return meta?.originalMessageId === id;
-    //   } catch {
-    //     return false;
-    //   }
-    // });
+    const updatedMessages = updatedRows.map(rowToMessage);
 
-    // for (const reaction of toDelete) {
-    //   await this.queries.messages.deleteById(reaction.id);
-    // }
-
-    // await this.queries.messages.deleteById(id);
+    if (updatedMessages.length > 0) {
+      this.eventEmitter.emit(SdkEventType.SELF_MESSAGE_UPDATED, {
+        messages: updatedMessages,
+      });
+    }
   }
 
   async sendReaction(

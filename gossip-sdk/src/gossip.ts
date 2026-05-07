@@ -430,7 +430,11 @@ class GossipSdk {
       this.config
     );
 
-    this._selfMessage = new SelfMessageService(queries, session.userIdEncoded);
+    this._selfMessage = new SelfMessageService(
+      queries,
+      session.userIdEncoded,
+      this.eventEmitter
+    );
     await this._selfMessage.ensureDiscussionExists();
 
     // Publish gossip ID (public key) on messageProtocol so the user is discoverable.

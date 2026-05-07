@@ -4,6 +4,7 @@ import {
   MessageDirection,
   MessageStatus,
   MessageType,
+  SdkEventType,
 } from '@massalabs/gossip-sdk';
 import { createSelectors } from './utils/createSelectors';
 import { getSdk } from './sdkStore';
@@ -24,8 +25,10 @@ interface SelfMessageStore {
   reactions: ReactionsMap;
   isLoading: boolean;
   isSending: boolean;
+  cleanupFn: (() => void) | null;
   loadMessages: () => Promise<void>;
   loadReactions: () => Promise<void>;
+  init: () => void;
   sendMessage: (
     content: string,
     replyToId?: number,
@@ -36,7 +39,7 @@ interface SelfMessageStore {
   sendReaction: (emoji: string, messageDbId: number) => Promise<void>;
   removeReaction: (reactionId: number) => Promise<void>;
   getReactionsForMessage: (messageDbId: number) => ReactionGroup[];
-  clearMessages: () => void;
+  cleanup: () => void;
 }
 
 const useSelfMessageStoreBase = create<SelfMessageStore>((set, get) => ({
@@ -44,6 +47,38 @@ const useSelfMessageStoreBase = create<SelfMessageStore>((set, get) => ({
   reactions: new Map(),
   isLoading: false,
   isSending: false,
+  cleanupFn: null,
+
+  init: () => {
+    if (get().cleanupFn) return;
+    const sdk = getSdk();
+    if (!sdk.isSessionOpen) return;
+
+    const onSelfMessageUpdated = ({
+      messages: updatedMessages,
+    }: {
+      messages: Message[];
+    }) => {
+      set(state => {
+        let changed = false;
+        const next = [...state.messages];
+        for (const msg of updatedMessages) {
+          const idx = next.findIndex(m => m.id === msg.id);
+          if (idx < 0) continue;
+          next[idx] = { ...msg };
+          changed = true;
+        }
+        return changed ? { messages: next } : state;
+      });
+    };
+
+    sdk.on(SdkEventType.SELF_MESSAGE_UPDATED, onSelfMessageUpdated);
+    set({
+      cleanupFn: () => {
+        sdk.off(SdkEventType.SELF_MESSAGE_UPDATED, onSelfMessageUpdated);
+      },
+    });
+  },
 
   loadMessages: async () => {
     const sdk = getSdk();
@@ -95,6 +130,8 @@ const useSelfMessageStoreBase = create<SelfMessageStore>((set, get) => ({
       const forwardMessage = await sdk.messages.get(forwardFromMessageId);
       if (!forwardMessage) {
         console.warn('Forward target not found, sending as regular message');
+        /* if the message we forward in self discussion is also part of the self discussion, 
+      the forward is converted to a reply to it */
       } else if (sdk.selfMessages.isSelfMessage(forwardMessage)) {
         replyToId = forwardMessage.id;
       } else {
@@ -118,7 +155,6 @@ const useSelfMessageStoreBase = create<SelfMessageStore>((set, get) => ({
       metadata: replyToId ? { originalMessageId: replyToId } : undefined,
     };
     set(state => ({ messages: [...state.messages, optimistic] }));
-    set({ isSending: false });
 
     try {
       const message = await sdk.selfMessages.send(optimistic);
@@ -130,6 +166,8 @@ const useSelfMessageStoreBase = create<SelfMessageStore>((set, get) => ({
       set(state => ({
         messages: state.messages.filter(m => m !== optimistic),
       }));
+    } finally {
+      set({ isSending: false });
     }
   },
 
@@ -267,8 +305,15 @@ const useSelfMessageStoreBase = create<SelfMessageStore>((set, get) => ({
     return get().reactions.get(messageDbId) ?? [];
   },
 
-  clearMessages: () => {
-    set({ messages: [], reactions: new Map() });
+  cleanup: () => {
+    get().cleanupFn?.();
+    set({
+      cleanupFn: null,
+      messages: [],
+      reactions: new Map(),
+      isLoading: false,
+      isSending: false,
+    });
   },
 }));
 
