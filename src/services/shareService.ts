@@ -23,6 +23,8 @@ export interface ShareFileOptions {
   mimeType?: string;
 }
 
+const NATIVE_SHARE_FILE_CLEANUP_DELAY_MS = 60_000;
+
 function isShareCancellation(error: unknown): boolean {
   return (
     error instanceof Error &&
@@ -60,12 +62,14 @@ async function shareFileViaNative(
 ): Promise<void> {
   const base64Data = await blobToBase64(blob);
 
+  let shouldCleanup = false;
   try {
     const { uri } = await Filesystem.writeFile({
       path: fileName,
       data: base64Data,
       directory: Directory.Cache,
     });
+    shouldCleanup = true;
 
     await Share.share({
       title,
@@ -73,13 +77,17 @@ async function shareFileViaNative(
       dialogTitle: title,
     });
   } finally {
-    try {
-      await Filesystem.deleteFile({
-        path: fileName,
-        directory: Directory.Cache,
-      });
-    } catch {
-      // File cleanup is best effort
+    if (shouldCleanup) {
+      setTimeout(async () => {
+        try {
+          await Filesystem.deleteFile({
+            path: fileName,
+            directory: Directory.Cache,
+          });
+        } catch {
+          // File cleanup is best effort
+        }
+      }, NATIVE_SHARE_FILE_CLEANUP_DELAY_MS);
     }
   }
 }
