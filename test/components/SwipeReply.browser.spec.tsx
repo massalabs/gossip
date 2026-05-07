@@ -1,7 +1,7 @@
 // Runs in BROWSER mode (real Chromium via Playwright)
 // Tests swipe-left-to-reply gesture on MessageItem.
 
-import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import React from 'react';
 import { render } from 'vitest-browser-react';
 import { page } from 'vitest/browser';
@@ -10,7 +10,6 @@ import {
   MessageStatus,
   type Message,
 } from '@massalabs/gossip-sdk';
-import { mockSelfMessagesService } from '../mocks/mockSelfMessagesService';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -36,10 +35,7 @@ vi.mock('react-i18next', () => ({
 }));
 
 vi.mock('../../src/hooks/useGossipSdk', () => ({
-  useGossipSdk: () => ({
-    isSessionOpen: false,
-    selfMessages: mockSelfMessagesService,
-  }),
+  useGossipSdk: () => ({ isSessionOpen: false }),
 }));
 
 vi.mock('../../src/hooks/useMarkMessageAsRead', () => ({
@@ -137,10 +133,10 @@ function simulateSwipe(
 // ---------- Tests ----------
 
 describe('SwipeReply — swipe-left to reply', () => {
-  let onReplyTo: Mock<(message: Message) => void>;
+  let onReplyTo: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
-    onReplyTo = vi.fn<(message: Message) => void>();
+    onReplyTo = vi.fn();
   });
 
   it('calls onReplyTo after a sufficient left swipe on incoming message', async () => {

@@ -2,7 +2,6 @@ import { useEffect } from 'react';
 import { useAccountStore } from '../stores/accountStore';
 import { useDiscussionStore } from '../stores/discussionStore';
 import { useMessageStore } from '../stores/messageStore';
-import { useSelfMessageStore } from '../stores/selfMessageStore';
 import { getSdk } from '../stores/sdkStore';
 
 /**
@@ -12,7 +11,6 @@ export function useStoreInit() {
   const userProfile = useAccountStore(s => s.userProfile);
   const initDiscussionStore = useDiscussionStore(s => s.init);
   const initMessageStore = useMessageStore(s => s.init);
-  const initSelfMessageStore = useSelfMessageStore(s => s.init);
 
   useEffect(() => {
     // Only initialize when:
@@ -25,14 +23,8 @@ export function useStoreInit() {
       initMessageStore().catch(error => {
         console.error('Failed to initialize message store:', error);
       });
-      initSelfMessageStore();
     }
     // Note: getSdk().isSessionOpen is not reactive, but by the time userProfile
     // is available, the session should already be open
-  }, [
-    userProfile?.userId,
-    initDiscussionStore,
-    initMessageStore,
-    initSelfMessageStore,
-  ]);
+  }, [userProfile?.userId, initDiscussionStore, initMessageStore]);
 }
