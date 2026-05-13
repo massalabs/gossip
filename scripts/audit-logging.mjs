@@ -5,7 +5,7 @@ const mode = process.argv[2] ?? 'source';
 const root = process.cwd();
 
 const sourceRoots = ['src', 'gossip-sdk/src', 'public/runners'];
-const sourceAllowConsole = new Set(['src/utils/logger.ts']);
+const sourceAllowConsole = new Set(['src/utils/logger.ts', 'src/sw.ts']);
 const sourceIgnoredPathParts = [
   'node_modules',
   '.git',

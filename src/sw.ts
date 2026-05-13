@@ -1,5 +1,10 @@
 /// <reference lib="webworker" />
-import { logger } from '@massalabs/gossip-sdk/utils/logs.js';
+import {
+  configureLogging,
+  logger,
+  setLogSinks,
+  type LogSink,
+} from '@massalabs/gossip-sdk/utils/logs.js';
 import {
   cleanupOutdatedCaches,
   createHandlerBoundToURL,
@@ -14,6 +19,34 @@ import { bridgeGet, bridgeSet } from './sw-bridge';
 import { APP_BUILD_ID } from './config/version';
 
 declare let self: ServiceWorkerGlobalScope;
+
+const isServiceWorkerDebugLoggingEnabled =
+  import.meta.env.DEV || import.meta.env.VITE_DEBUG_LOGS === 'true';
+
+const serviceWorkerConsoleSink: LogSink = (level, _message, args) => {
+  if (level === 'debug') {
+    console.debug(...args);
+  } else if (level === 'info') {
+    console.info(...args);
+  } else if (level === 'warn') {
+    console.warn(...args);
+  } else {
+    console.error(...args);
+  }
+};
+
+// Service workers run in a separate global scope, so the app logger wiring
+// cannot configure their sinks. Debug builds get a local console sink; release
+// builds keep the shared logger disabled and emit nothing.
+configureLogging({
+  enabled: isServiceWorkerDebugLoggingEnabled,
+  minLevel: 'debug',
+  persist: false,
+});
+
+setLogSinks(
+  isServiceWorkerDebugLoggingEnabled ? [serviceWorkerConsoleSink] : []
+);
 
 // Service Worker configuration constants
 // Import from centralized config for easy adjustment
