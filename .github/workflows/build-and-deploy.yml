@@ -406,7 +406,7 @@ jobs:
       # vary between images. Do first-launch setup here and print SDKs for
       # diagnostics; the real archive-destination check runs after pods and
       # Capacitor sync, when the workspace is ready.
-      - name: Install and verify iOS 26 platform SDK
+      - name: Initialize Xcode and list SDKs
         run: |
           set -euo pipefail
 
